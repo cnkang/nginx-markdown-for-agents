@@ -263,6 +263,19 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   local-spec validators that require user-local Kiro/spec directories unless
   those inputs are checked into the repository or explicitly downloaded first
   [13]
+- When newer release gates reuse prior-version validators, assertions about
+  the active project version, package version, or release line must be
+  parameterized by the caller. Prior-version validators may keep their
+  standalone defaults, but they must not fail a newer release gate solely
+  because `Cargo.toml`, package metadata, or chart metadata has advanced to the
+  newer release version [13]
+- Workflows, release gates, and documentation renderers that consume
+  `tools/release-matrix.json` must use the repository's current checked-in
+  schema. If the matrix schema changes, update all active consumers in the same
+  change set; release workflows must not keep reading stale aliases such as
+  `matrix`, `nginx`, `os_type`, or `support_tier: full` after the source of
+  truth has moved to `entries`, `nginx_version`, `libc`, and
+  `support_tier: supported` [13]
 - Release package build environments must not require a newer glibc than any
   supported smoke-test/runtime distro for the same artifact family; build Linux
   module artifacts on the oldest supported glibc baseline or split artifacts by
@@ -440,3 +453,4 @@ remediation:
 | 0.7.16 | 2026-06-03 | Codex | Strengthened Rule 13 for tag release gates avoiding user-local spec dependencies in clean CI checkouts |
 | 0.7.17 | 2026-06-04 | Codex | Strengthened Rule 6 for streaming code-block fence state across split text events |
 | 0.8.0 | 2026-06-04 | Kang | 0.8.0 release gate target (release-gates-check-080) with streaming, coverage, matrix, and clean-checkout gates |
+| 0.8.1 | 2026-06-10 | Codex | Strengthened Rule 13 for newer release gates that reuse prior-version validators with caller-parameterized active version assertions and current release-matrix schema consumers |

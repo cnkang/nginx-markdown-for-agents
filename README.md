@@ -454,6 +454,8 @@ v0.8.0 introduces true streaming conversion — bounded-memory HTML-to-Markdown 
 - **`auto` mode (default)** — When set to `auto`, the module automatically routes eligible large or chunked responses to the streaming engine while keeping full-buffer for everything else. No configuration change required for most deployments.
 - **Bounded-memory conversion** — The streaming engine flushes converted Markdown in chunks based on `markdown_stream_flush_min` (size threshold), keeping memory usage bounded regardless of response size.
 - **Pre-commit safety** — If a conversion error occurs before the streaming engine has committed output to the client, it falls back to serving the original HTML response. This preserves fail-open semantics during streaming.
+- **New streaming controls** — `markdown_stream_threshold`, `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`, and `markdown_stream_excluded_types` make thresholding, replay buffering, flushing, and content-type exclusions explicit.
+- **Legacy threshold compatibility** — Existing `markdown_streaming_auto_threshold` configurations still parse in 0.8.0 and are bridged into `markdown_stream_threshold`; new configs should use `markdown_stream_threshold` directly.
 
 For upgrade guidance from 0.7.x, see the [Migration Guide](docs/guides/MIGRATION-0.8.md).
 For production rollout steps, see the [Streaming Rollout Cookbook](docs/guides/streaming-rollout-cookbook.md).
@@ -487,6 +489,7 @@ Current release (0.8.0):
 - `auto` mode as the default `markdown_streaming_engine` setting
 - Bounded-memory streaming conversion with size-based flush (`markdown_stream_flush_min`)
 - Pre-commit safety: fallback to HTML if conversion error occurs before output is committed
+- Streaming release gate: `make release-gates-check-080` validates the 0.8.0 release contract
 - Migration guide and rollout cookbook for production adoption
 
 Previous release (0.7.0):
@@ -528,7 +531,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.8.0 | 2026-06-04 | Kang | v0.8.0 streaming: dual-engine model, auto mode default, bounded-memory conversion, pre-commit safety, migration guide and rollout cookbook links |
+| 0.8.0 | 2026-06-10 | Kang | v0.8.0 streaming release readiness: dual-engine model, auto mode default, bounded-memory conversion, pre-commit safety, legacy threshold compatibility, release-gates-check-080, migration guide, and rollout cookbook links |
 | 0.7.0 | 2026-06-03 | Kang | P0 correctness, Rust-first architecture, independent decompression budget, Accept negotiation, parse timeout/budget, DEB/RPM packaging, K8s examples, runtime diagnostics, dynconf dry-run/rollback |
 | 0.6.3 | 2026-05-14 | Kang | Version bump to 0.6.3, release-matrix refresh, and final hardening notes |
 | 0.6.2 | 2026-05-08 | Kang | Version bump to 0.6.2 for release |

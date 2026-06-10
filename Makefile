@@ -558,7 +558,7 @@ release-gates-check-080:
 	@echo "  [13/15] validate_naming.py (artifact naming)"
 	python3 tools/release/gates/validate_naming.py
 	@echo "  [14/15] v0.7.0 gate validators (repo-owned, prior-version gates)"
-	python3 tools/release/gates/validate_release_gates_070.py --mode strict
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_release_gates_070.py --mode strict
 	python3 tools/release/gates/validate_config_directives_070.py
 	python3 tools/release/gates/validate_metrics_070.py
 	python3 tools/release/gates/validate_reason_codes_070.py

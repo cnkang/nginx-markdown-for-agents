@@ -16,15 +16,15 @@
 #   - workflow_dispatch input is validated before use (Req 9.7)
 #
 # Matrix generation:
-#   The prepare job reads tools/release-matrix.json and extracts all NGINX
-#   versions with support_tier=="full" and os_type=="glibc" (DEB/RPM targets).
+#   The prepare job reads tools/release-matrix.json and extracts release-
+#   blocking glibc NGINX versions owned by this workflow (DEB/RPM targets).
 #   This ensures the release workflow always builds packages for every version
 #   declared in the release matrix, preventing matrix/workflow drift.
 #
 # Extension points (see also packaging/matrix.yaml for authoritative matrix reference):
-#   - Add new NGINX versions: update tools/release-matrix.json with the new
-#     version entry (support_tier: "full", os_type: "glibc") and add its
-#     SHA256 checksum to packaging/checksums.sha256. No workflow changes needed.
+#   - Add new NGINX versions: update tools/release-matrix.json with a
+#     release_blocking glibc entry owned by this workflow and add its SHA256
+#     checksum to packaging/checksums.sha256. No workflow changes needed.
 #   - Add new target platforms: add entries to the smoke-test matrix include list
 #     with the appropriate container image and format, then update
 #     packaging/matrix.yaml smoke_test_containers accordingly.
@@ -117,20 +117,25 @@ jobs:
           with open("tools/release-matrix.json", "r") as f:
               data = json.load(f)
 
-          # Extract unique NGINX versions with full support and glibc os_type
-          # (DEB/RPM packages target glibc-based distros)
+          # Extract unique NGINX versions for this workflow's release-blocking
+          # glibc entries. The release matrix schema uses entries/libc/
+          # nginx_version fields.
+          owner = ".github/workflows/release-packages.yml"
           glibc_full = [
-              e for e in data.get("matrix", [])
-              if e.get("support_tier") == "full" and e.get("os_type") == "glibc"
+              e for e in data.get("entries", [])
+              if e.get("owner_workflow") == owner
+              and e.get("support_tier") == "supported"
+              and e.get("libc") == "glibc"
+              and e.get("release_blocking") is True
           ]
 
           versions = sorted(
-              set(e["nginx"] for e in glibc_full),
+              set(e["nginx_version"] for e in glibc_full),
               key=lambda v: tuple(int(p) for p in v.split("."))
           )
 
           if len(versions) == 0:
-              print("ERROR: No NGINX versions with support_tier=full and os_type=glibc found in tools/release-matrix.json")
+              print("ERROR: No release-blocking glibc NGINX versions owned by release-packages.yml found in tools/release-matrix.json")
               raise SystemExit(1)
 
           # Build smoke-test matrix: each version × representative distros × archs

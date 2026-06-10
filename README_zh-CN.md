@@ -448,7 +448,7 @@ v0.8.0 引入**真正的流式转换合约**——模块现在能以有界内存
 - **提交前安全回退** — 流式转换过程中，若在提交点之前遇到错误，可透明回退到原始 HTML（`markdown_streaming_on_error`）
 - **新流式指令** — `markdown_stream_threshold`（默认 1m）、`markdown_stream_precommit_buffer`（默认 256k）、`markdown_stream_flush_min`（默认 16k）、`markdown_stream_excluded_types`
 - **流式指标与 reason code** — 完整的 streaming 可观测性：引擎选择、fallback 事件、post-commit 失败等 Prometheus 计数器和结构化 reason code
-- **已移除/废弃旧指令** — `markdown_streaming_auto_threshold` 已移除（`nginx -t` 会拒绝）；`markdown_max_size` 仍可用但会输出废弃警告；`markdown_streaming_budget` 仍可作为流式路径的显式预算覆盖
+- **旧阈值指令兼容** — `markdown_streaming_auto_threshold` 在 0.8.0 中仍会被解析并桥接到 `markdown_stream_threshold`，但新配置应直接使用 `markdown_stream_threshold`；`markdown_max_size` 仍可用但会输出废弃警告；`markdown_streaming_budget` 仍可作为流式路径的显式预算覆盖
 
 **兼容性保证**：`markdown_streaming_engine off` 可回退到与 0.7.x 完全一致的全缓冲行为。
 
@@ -482,7 +482,8 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - 提交前安全回退：pre-commit 阶段出错可透明回退到原始 HTML
 - 新流式指令：`markdown_stream_threshold`、`markdown_stream_precommit_buffer`、`markdown_stream_flush_min`、`markdown_stream_excluded_types`
 - 流式可观测性：引擎选择、fallback、post-commit 失败等 Prometheus 指标和结构化 reason code
-- 移除旧指令：`markdown_streaming_auto_threshold`（已移除）；`markdown_max_size`（废弃但仍可用）；`markdown_streaming_budget`（仍可用作流式路径覆盖）
+- 旧指令兼容策略：`markdown_streaming_auto_threshold`（废弃但兼容桥接）；`markdown_max_size`（废弃但仍可用）；`markdown_streaming_budget`（仍可用作流式路径覆盖）
+- 0.8.0 发布门禁：`make release-gates-check-080`
 
 0.7.0：
 
@@ -522,7 +523,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.8.0 | 2026-06-04 | Kang | 双引擎流式转换（auto 默认）、有界内存增量处理、提交前安全回退、新流式指令与可观测性 |
+| 0.8.0 | 2026-06-10 | Kang | 0.8.0 正式发布文档就绪：双引擎流式转换（auto 默认）、有界内存增量处理、提交前安全回退、旧阈值指令兼容、新流式指令、可观测性与 release-gates-check-080 |
 | 0.7.0 | 2026-06-03 | Kang | P0 正确性修复、Rust-first 架构、独立解压预算、Accept 协商、解析超时/预算、DEB/RPM 包分发、K8s 示例、运行时诊断、dynconf dry-run/回滚 |
 | 0.6.3 | 2026-05-14 | Kang | 版本号更新至 0.6.3，并补充 release matrix 与发布前最终加固说明 |
 | 0.6.2 | 2026-05-08 | Kang | 版本号更新至 0.6.2 以配合发布 |

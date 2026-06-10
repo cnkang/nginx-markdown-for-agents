@@ -101,10 +101,12 @@ have changed status in 0.8.0:
 |-----------|-----------------|-------------|
 | `markdown_max_size` | Deprecated (accepted with info-level warning) | `markdown_memory_budget` |
 | `markdown_streaming_budget` | Still available as path-specific override | `markdown_memory_budget` (unified) |
-| `markdown_streaming_auto_threshold` | Removed — `nginx -t` rejects | `markdown_stream_threshold` |
+| `markdown_streaming_auto_threshold` | Deprecated compatibility directive; accepted and bridged when explicitly configured | `markdown_stream_threshold` |
 
 If your configuration still uses `markdown_streaming_auto_threshold`,
-`nginx -t` will reject the configuration. Migrate before upgrading:
+0.8.0 will continue to parse it and map the explicit value to
+`markdown_stream_threshold` unless the new directive is also explicitly set.
+Migrate anyway so future removal is a no-op for your configuration:
 
 ```nginx
 # Before (0.7.x)
@@ -113,6 +115,9 @@ markdown_streaming_auto_threshold 64k;
 # After (0.8.0)
 markdown_stream_threshold 64k;
 ```
+
+If both directives are configured at the same level, `markdown_stream_threshold`
+wins.
 
 **Note**: `markdown_max_size` still works but emits a deprecation warning.
 Migrate to `markdown_memory_budget` at your convenience.
