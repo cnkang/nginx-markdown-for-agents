@@ -35,7 +35,7 @@ The configuration uses template variables injected by the CI matrix:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `PKG_VERSION` | Project version (from tag or workflow input) | `0.7.0` |
+| `PKG_VERSION` | Project version (from tag or workflow input) | `0.8.0` |
 | `NGINX_VERSION` | Target NGINX version from build matrix | `1.26.3` |
 | `NFPM_ARCH` | Target architecture | `amd64`, `arm64` |
 
@@ -43,7 +43,7 @@ The configuration uses template variables injected by the CI matrix:
 
 ```bash
 # Set required environment variables
-export PKG_VERSION="0.7.0"
+export PKG_VERSION="0.8.0"
 export NGINX_VERSION="1.26.3"
 export NFPM_ARCH="amd64"
 
@@ -72,8 +72,8 @@ Validates that a package installs correctly and the module loads in NGINX.
 packaging/scripts/smoke-test-basic.sh PACKAGE_FILE NGINX_VERSION
 
 # Examples
-packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_amd64.deb 1.26.3
-packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents-0.7.0-nginx1.26.3-1.x86_64.rpm 1.26.3
+packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents_0.8.0_nginx-1.26.3_amd64.deb 1.26.3
+packaging/scripts/smoke-test-basic.sh dist/nginx-module-markdown-for-agents-0.8.0-nginx1.26.3-1.x86_64.rpm 1.26.3
 ```
 
 The script:

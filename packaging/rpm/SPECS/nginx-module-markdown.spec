@@ -88,6 +88,11 @@ EOF
 %license /usr/share/licenses/nginx-markdown-for-agents/LICENSE
 
 %changelog
+* Tue Jun 10 2026 cnkang <liukang@noreply.github.com> - 0.8.0-nginx1.26.3.1
+- v0.8.0: True streaming contract, fallback state machine, streaming
+  observability, streaming security enforcement, release matrix source of
+  truth, streaming configuration directives
+
 * Sat May 18 2026 cnkang <liukang@noreply.github.com> - 0.7.0-nginx1.26.3.1
 - v0.7.0: Package redesign per spec 31 — correct naming, nginx version
   binding in Release tag, minimum version constraint, safe %post script

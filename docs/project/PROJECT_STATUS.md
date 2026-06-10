@@ -11,7 +11,7 @@ steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.7.0)**, the project includes a dual-engine
+As of the **current release line (0.8.0)**, the project includes a dual-engine
 conversion model (streaming default with full-buffer fallback), Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
 logic, and header plan application, independent decompression budget with parse
@@ -24,13 +24,13 @@ fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,
 operations, architecture, and contributor-facing harness maintenance.
 
-### Release 0.8.0 (In Development)
+### Release 0.8.0 (Current)
 
-**Status:** In development
+**Status:** Current release
 
-Version 0.8.0 targets the formalization of true streaming semantics as a
-first-class, verifiable contract. See the [Target Release 0.8.0](#target-release-080-in-development)
-section below for detailed goals, non-goals, and the implementation caveat.
+Version 0.8.0 formalizes true streaming semantics as a first-class, verifiable
+contract. See the [Current Release 0.8.0](#current-release-080) section below
+for detailed goals, non-goals, and implementation status.
 
 ### Release 0.7.0 Updates
 
@@ -372,7 +372,24 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release (0.7.0)
+### Current Release (0.8.0)
+- True streaming contract: formalized incremental input processing, incremental
+  output emission, and bounded memory as a single verifiable contract
+  (RFC 0008, ADR-0011)
+- Streaming fallback state machine: pre-commit/post-commit two-phase error
+  handling with deterministic recovery semantics (ADR-0012)
+- Default-auto engine: aligned auto-mode streaming policy with the true
+  streaming contract definition (ADR-0013)
+- Support matrix source of truth: consolidated platform, version, and package
+  support declarations into a single machine-readable matrix consumed by CI,
+  docs, and packaging (ADR-0014)
+- Streaming observability: engine selection counters, fallback/failure counters,
+  streaming reason codes (spec-39)
+- Streaming security enforcement: hard-excluded content types with security
+  test suite (spec-41)
+- Streaming configuration directives: `markdown_stream_threshold`,
+  `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`,
+  `markdown_stream_excluded_types` (#137)
 - Dual-engine conversion architecture: streaming default with full-buffer
   fallback
 - Rust-first architecture: Accept negotiation, conditional requests, decision
@@ -398,9 +415,9 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 - Rollout and rollback guides with executable operator procedures
 - Performance baseline gating system and hardened CI/CD validation
 
-### Target Release 0.8.0 (In Development)
+### Current Release 0.8.0
 
-**Goals:**
+**Goals (implemented):**
 - True streaming contract: formalize incremental input processing, incremental
   output emission, and bounded memory as a single verifiable contract
   (RFC 0008, ADR-0011)
@@ -416,11 +433,6 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 - SSE/NDJSON conversion (out of scope for this release)
 - Full parser rewrite (incremental improvements only)
 - Edge-CDN deployment model (origin-near architecture retained)
-
-> Note: 0.8.0 features are in development. No streaming contract, fallback
-> state machine, default-auto engine policy alignment, or release matrix
-> changes are implemented until the corresponding specs are executed and
-> verified.
 
 ### Near-Term
 - Expand streaming rollout samples across mixed traffic profiles
@@ -568,21 +580,21 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.7.0. The project provides
+**NGINX Markdown for Agents** is at version 0.8.0. The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 dual-engine model, with bounded-memory streaming as the default path and
-full-buffer conversion as the fallback. Version 0.7.0 introduces Rust-first
-architecture modules (Accept negotiation, conditional requests, decision
-engine, header plan), independent decompression budget with parse timeout and
-parser budget directives, a runtime diagnostics endpoint, dynconf dry-run with
-last-known-good rollback, DEB/RPM packaging, Kubernetes deployment examples,
-FFI ABI layout verification, and CI supply-chain hardening. It also includes
-Prometheus-compatible metrics, decision reason codes, rollout and rollback
-guides, parity and evidence workflows for streaming rollout safety, dynamic
-configuration hot-reload, OpenTelemetry tracing, per-path metrics, OS package
-distribution, release automation, performance baseline gating, runtime
-validation reuse, fuzzing workflows, and shared metrics aggregation for
-observability.
+full-buffer conversion as the fallback. Version 0.8.0 formalizes the true
+streaming contract (RFC 0008, ADR-0011), introduces the streaming fallback
+state machine (ADR-0012), aligns the auto-mode streaming policy with the true
+streaming contract definition (ADR-0013), and consolidates platform and
+version support declarations into a release matrix source of truth (ADR-0014).
+It also includes streaming observability (spec-39), streaming security
+enforcement (spec-41), streaming configuration directives, Prometheus-compatible
+metrics, decision reason codes, rollout and rollback guides, parity and
+evidence workflows for streaming rollout safety, dynamic configuration
+hot-reload, OpenTelemetry tracing, per-path metrics, OS package distribution,
+release automation, performance baseline gating, runtime validation reuse,
+fuzzing workflows, and shared metrics aggregation for observability.
 
 ### Key Components
 - Core feature implementation
@@ -612,4 +624,4 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |
 | 0.7.0 | 2026-06-03 | Kang | Version bump to 0.7.0; add Rust-first architecture, decompression budget, diagnostics, dynconf dry-run, DEB/RPM, K8s, FFI ABI verification, CI supply-chain hardening |
-| 0.8.0 | 2026-06-04 | Kang | Added 0.8.0 target section with streaming contract goals, non-goals, and ADR-0011–0014 references |
+| 0.8.0 | 2026-06-10 | Kang | Version bump to 0.8.0; true streaming contract, fallback state machine, streaming observability, streaming security enforcement, release matrix source of truth, streaming config directives |
