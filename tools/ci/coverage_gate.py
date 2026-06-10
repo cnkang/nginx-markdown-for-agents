@@ -331,6 +331,8 @@ def main() -> int:
         print(f"ERROR: {err}", file=sys.stderr)
 
     print(format_results(all_results))
+    print("\n  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (advisory)")
+    print("  Critical paths: auth, error handling, FFI boundary, conditional requests")
 
     if errors:
         return 2

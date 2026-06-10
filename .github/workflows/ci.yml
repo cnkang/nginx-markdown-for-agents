@@ -47,6 +47,33 @@ concurrency:
 
 permissions: {}
 
+# =============================================================================
+# CI Job Classification (Spec 43 — Requirement 6)
+# =============================================================================
+#
+# BLOCKING (release-gate equivalent — must pass for merge/release):
+#   - docs-check             — Documentation consistency (make docs-check)
+#                              Includes: validate_workflow_matrix_consumers.py (Req 5)
+#   - rust-quality           — Rust formatting, clippy, unit tests (make test-rust)
+#                              Includes: streaming tests via --all-features (Req 1)
+#   - nginx-c-tests          — C unit + integration tests (make test-nginx-unit)
+#   - coverage-gate          — C + Rust coverage (make coverage-c, coverage-rust)
+#   - runtime-regressions    — IMS + chunked streaming native E2E + large response
+#                              Includes: verify-chunked-native-e2e-smoke (Req 1.2)
+#   - header-sync            — FFI header generation drift check
+#   - nginx-c-clang-smoke    — Clang cross-compiler smoke
+#   - nginx-c-sanitizers     — ASan/UBSan sanitizer smoke
+#   - matrix-release-tests   — Release-matrix Python test suite (Req 5)
+#
+# EXPERIMENTAL (non-blocking — informational, continue-on-error or nightly):
+#   - perf-artifacts         — Performance baseline collection (continue-on-error: true)
+#   - perf-smoke             — Performance threshold gate (informational)
+#   - corpus-benchmark       — Corpus quality benchmark (informational)
+#
+# Note: Nightly fuzz (nightly-fuzz.yml) and Docker integration
+# (official-nginx-docker.yml) run on separate schedules and are non-blocking.
+# =============================================================================
+
 jobs:
   changes:
     name: Detect Changed Areas
@@ -207,6 +234,8 @@ jobs:
         run: cargo clippy --manifest-path tools/corpus/test-corpus-conversion/Cargo.toml --all-targets -- -D warnings
 
       - name: Run Rust unit tests
+        # Streaming tests are included: make test-rust uses --all-features,
+        # which enables the 'streaming' feature gate (Spec 43, Req 1).
         run: make test-rust
 
       - name: Run Rust doctests
@@ -344,6 +373,9 @@ jobs:
           echo "nginx_bin=${nginx_bin}" >> "${GITHUB_OUTPUT}"
 
       - name: Run chunked streaming native smoke validation
+        # Covers Spec 43 Req 1.2: native NGINX chunked/no-Content-Length E2E
+        # proving output is emitted before full upstream body is buffered.
+        # CI-equivalent of: make verify-chunked-native-e2e-smoke
         env:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
         run: ./tools/e2e/verify_chunked_streaming_native_e2e.sh --profile smoke
@@ -492,6 +524,9 @@ jobs:
 
   matrix-release-tests:
     name: Matrix Release Tests
+    # Covers Spec 43 Req 5: matrix schema valid, supported entries have CI,
+    # no artifact exceeds scope. Also runs as part of docs-check via make docs-check.
+    # validate_workflow_matrix_consumers.py consumes only repo-owned sources.
     needs: changes
     if: needs.changes.outputs.matrix_release == 'true' || needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
