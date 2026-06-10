@@ -5,7 +5,7 @@
  * streaming_config and streaming_metrics sections with the correct
  * field names when MARKDOWN_STREAMING_ENABLED is defined.
  *
- * Corresponds to spec 39, task 6.2.
+ * Corresponds to streaming observability, task 6.2.
  *
  * Rules: 8 (metric names match emitted keys), 9 (field names match).
  */
@@ -130,7 +130,7 @@ build_diagnostics_json_with_streaming(output_ctx_t *out,
     output_append(out, "  },\n");
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-    /* streaming_metrics section (spec-39) */
+    /* streaming_metrics section (streaming observability) */
     output_append(out, "  \"streaming_metrics\": {\n");
     output_append(out, "    \"requests_total\": %lu,\n",
         stream_metrics->requests_total);
@@ -155,7 +155,7 @@ build_diagnostics_json_with_streaming(output_ctx_t *out,
     output_append(out, "    \"lkg_valid\": false\n");
     output_append(out, "  },\n");
 
-    /* streaming_config section (spec-39) */
+    /* streaming_config section (streaming observability) */
     output_append(out, "  \"streaming_config\": {\n");
     output_append(out, "    \"engine\": \"%s\",\n",
         stream_config->engine);

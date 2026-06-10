@@ -1,7 +1,7 @@
 /*
  * Test: stream_error
  *
- * Validates the streaming error handler integration module (spec 37,
+ * Validates the streaming error handler integration module (streaming fallback state machine,
  * tasks 6.1-6.4):
  *
  * 6.1: Pre-commit + on_error=pass  -> PASS_HTML (replay)

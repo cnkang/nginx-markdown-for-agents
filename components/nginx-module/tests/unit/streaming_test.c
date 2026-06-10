@@ -150,7 +150,7 @@ static void test_decomp_incomplete_inflate_error(void);
 static void test_finalize_tail_feed_error(void);
 static void test_config_invalid_static_value(void);
 
-/* Streaming headers policy test prototypes (spec 15, task 6) */
+/* Streaming headers policy test prototypes (streaming headers policy, task 6) */
 static void test_commit_boundary_removes_content_length(void);
 static void test_commit_boundary_removes_content_encoding(void);
 static void test_commit_boundary_skips_content_encoding_no_decomp(void);

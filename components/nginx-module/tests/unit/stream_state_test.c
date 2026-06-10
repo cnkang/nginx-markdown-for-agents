@@ -2,7 +2,7 @@
  * Test: stream_state
  *
  * Validates all state transitions in the streaming fallback decision
- * engine (spec 37, task 7.1).
+ * engine (streaming fallback state machine, task 7.1).
  *
  * Exercises every valid state transition path through the pure-function
  * decision engine ngx_http_markdown_stream_decide().

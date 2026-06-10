@@ -2,7 +2,7 @@
  * Test: stream_e2e
  *
  * E2E-style integration tests for the streaming fallback state machine
- * (spec 37, tasks 8.1-8.6).  Unlike the unit tests in stream_error_test.c
+ * (streaming fallback state machine, tasks 8.1-8.6).  Unlike the unit tests in stream_error_test.c
  * which test individual functions, these tests exercise the COMPLETE flow
  * from context initialization through the error handler to final outcome.
  *
