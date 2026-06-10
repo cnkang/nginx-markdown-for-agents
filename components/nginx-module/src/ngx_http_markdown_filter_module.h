@@ -472,6 +472,7 @@ typedef struct {
     ngx_uint_t                 on_error;        /* markdown_streaming_on_error pass|reject */
     ngx_flag_t                 shadow;          /* markdown_streaming_shadow on|off */
     size_t                     auto_threshold;  /* markdown_streaming_auto_threshold (default: 32k) */
+    ngx_flag_t                 auto_threshold_explicit; /* 1 if operator set markdown_streaming_auto_threshold */
 } ngx_http_markdown_streaming_cfg_t;
 #endif
 
