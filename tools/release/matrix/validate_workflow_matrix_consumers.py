@@ -16,7 +16,7 @@ Exit code 0 = consistent, exit code 1 = inconsistencies found.
 Usage:
     python3 tools/release/matrix/validate_workflow_matrix_consumers.py
 
-Part of spec 40: Release Matrix Source of Truth (Requirement 5).
+Part of release matrix source of truth (Requirement 5).
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ def load_matrix_versions(path: Path) -> set[str]:
 
     versions: set[str] = set()
 
-    # Support both canonical 'entries' (spec-40) and legacy 'matrix' arrays
+    # Support both canonical 'entries' (release matrix canonical format) and legacy 'matrix' arrays
     entries = data.get("entries", []) or data.get("matrix", [])
     for entry in entries:
         if v := entry.get("nginx"):
@@ -248,7 +248,7 @@ def validate_owner_workflow_refs(matrix_path: Path) -> list[str]:
     with open(validated, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # Support both canonical 'entries' (spec-40) and legacy 'matrix' + 'additional_artifacts'
+    # Support both canonical 'entries' (release matrix canonical format) and legacy 'matrix' + 'additional_artifacts'
     all_entries = data.get("entries", []) or (
         data.get("matrix", []) + data.get("additional_artifacts", [])
     )

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/cnkang/nginx-markdown-for-agents/tools/release-matrix.schema.json",
   "title": "Release Matrix",
-  "description": "Schema for the authoritative release support matrix (spec 40).",
+  "description": "Schema for the authoritative release support matrix.",
   "type": "object",
   "required": ["schema_version", "entries"],
   "additionalProperties": false,

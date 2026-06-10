@@ -28,7 +28,7 @@
 #   0 — advisory mode (always), or strict mode with no candidates
 #   1 — strict mode (--check) with one or more candidates, or usage error
 #
-# Corresponds to task B01.5 in spec 27-v070_prod.
+# Corresponds to task B01.5 in v0.7.0 production readiness harness.
 #
 
 set -euo pipefail

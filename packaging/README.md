@@ -56,7 +56,7 @@ nfpm package --packager rpm --target "dist/nginx-module-markdown-for-agents-${PK
 
 ### Extending the Configuration
 
-The nFPM config consumes the installation layout from spec 31. To add new
+The nFPM config consumes the installation layout from 0.7.0 release package naming and layout. To add new
 files to the package, append entries to the `contents` list in `nfpm.yaml`.
 No structural changes are needed when the build matrix is extended — the
 environment variables handle parameterization.
