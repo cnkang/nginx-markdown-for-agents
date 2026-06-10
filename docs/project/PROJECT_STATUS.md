@@ -384,9 +384,9 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
   support declarations into a single machine-readable matrix consumed by CI,
   docs, and packaging (ADR-0014)
 - Streaming observability: engine selection counters, fallback/failure counters,
-  streaming reason codes (spec-39)
+  streaming reason codes (streaming observability)
 - Streaming security enforcement: hard-excluded content types with security
-  test suite (spec-41)
+  test suite (streaming security enforcement)
 - Streaming configuration directives: `markdown_stream_threshold`,
   `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`,
   `markdown_stream_excluded_types` (#137)
@@ -588,8 +588,8 @@ streaming contract (RFC 0008, ADR-0011), introduces the streaming fallback
 state machine (ADR-0012), aligns the auto-mode streaming policy with the true
 streaming contract definition (ADR-0013), and consolidates platform and
 version support declarations into a release matrix source of truth (ADR-0014).
-It also includes streaming observability (spec-39), streaming security
-enforcement (spec-41), streaming configuration directives, Prometheus-compatible
+It also includes streaming observability (streaming observability), streaming security
+enforcement (streaming security enforcement), streaming configuration directives, Prometheus-compatible
 metrics, decision reason codes, rollout and rollback guides, parity and
 evidence workflows for streaming rollout safety, dynamic configuration
 hot-reload, OpenTelemetry tracing, per-path metrics, OS package distribution,

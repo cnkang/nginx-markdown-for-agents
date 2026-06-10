@@ -16,20 +16,20 @@ configuration directives.
 - **True streaming contract** (RFC 0008, ADR-0011): formalize incremental
   input processing, incremental output emission, and bounded memory as a
   verifiable contract for the streaming engine.
-- **Streaming fallback state machine** (spec-37, ADR-0012): pre-commit/post-commit
+- **Streaming fallback state machine** (streaming fallback state machine, ADR-0012): pre-commit/post-commit
   two-phase error handling with deterministic recovery semantics.
-- **Body filter streaming integration** (spec-38): wire the streaming converter
+- **Body filter streaming integration** (streaming converter FFI and body filter integration): wire the streaming converter
   into the NGINX body filter chain with chunked transfer encoding output.
-- **Streaming converter FFI** (spec-38): Rust streaming converter ABI and C
+- **Streaming converter FFI** (streaming converter FFI and body filter integration): Rust streaming converter ABI and C
   headers for incremental conversion across chunk boundaries.
 - **Streaming configuration directives** (#137, ADR-0013):
   `markdown_stream_threshold`, `markdown_stream_precommit_buffer`,
   `markdown_stream_flush_min`, `markdown_stream_excluded_types`.
-- **Streaming observability** (spec-39): engine selection counters, fallback
+- **Streaming observability** (streaming observability): engine selection counters, fallback
   and failure counters, streaming reason codes for diagnostics.
-- **Streaming security enforcement** (spec-41): hard-excluded content types
+- **Streaming security enforcement** (streaming security enforcement): hard-excluded content types
   that bypass streaming regardless of configuration, with security test suite.
-- **Release matrix source of truth** (spec-40, ADR-0014): `tools/release-matrix.json`,
+- **Release matrix source of truth** (release matrix source of truth, ADR-0014): `tools/release-matrix.json`,
   JSON schema, validation tooling, and documentation rendering script.
 - **v0.8.0 release gate**: `make release-gates-check-080` for pre-release
   validation.
