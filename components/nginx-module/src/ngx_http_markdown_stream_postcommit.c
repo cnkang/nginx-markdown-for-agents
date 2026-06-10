@@ -534,9 +534,7 @@ static ngx_flag_t
 ngx_http_markdown_stream_postcommit_casecmp(
     const u_char *s1, const u_char *s2, size_t n)
 {
-    size_t  i;
-
-    for (i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
         if (ngx_tolower(s1[i]) != ngx_tolower(s2[i])) {
             return 0;
         }
