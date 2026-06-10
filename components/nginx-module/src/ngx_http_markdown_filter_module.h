@@ -103,11 +103,14 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
     (2 * 1024 * 1024)
 
 /*
- * Default auto-mode threshold: 32 KiB
+ * Legacy auto-mode threshold field default: 32 KiB
  *
- * When streaming_engine is auto, responses with
- * Content-Length >= this threshold use streaming;
- * smaller responses use full-buffer.
+ * This is the internal default for the v0.6.0 streaming.auto_threshold
+ * field.  In v0.8.0, the effective runtime threshold is controlled by
+ * stream.threshold (default: 1 MiB via NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT).
+ * This legacy default only takes effect when the operator explicitly sets
+ * the old markdown_streaming_auto_threshold directive, triggering the
+ * compatibility bridge to map the value into stream.threshold.
  */
 #define NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT \
     (32 * 1024)
@@ -429,6 +432,8 @@ typedef enum {
  * - streaming_on_error: NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS
  * - streaming_shadow: 0 (off by default)
  * - streaming_auto_threshold: NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT
+ *     (legacy field default 32k; does NOT affect runtime unless explicitly set;
+ *      v0.8.0 effective threshold is stream.threshold default 1m)
  *
  * v0.8.0 streaming config defaults (streaming configuration directives):
  * - stream.engine: auto (1)
@@ -471,7 +476,7 @@ typedef struct {
     ngx_flag_t                 budget_explicit; /* 1 if operator set markdown_streaming_budget */
     ngx_uint_t                 on_error;        /* markdown_streaming_on_error pass|reject */
     ngx_flag_t                 shadow;          /* markdown_streaming_shadow on|off */
-    size_t                     auto_threshold;  /* markdown_streaming_auto_threshold (default: 32k) */
+    size_t                     auto_threshold;  /* markdown_streaming_auto_threshold (legacy field default: 32k; v0.8.0 effective default is stream.threshold 1m unless this directive is explicitly set) */
     ngx_flag_t                 auto_threshold_explicit; /* 1 if operator set markdown_streaming_auto_threshold */
 } ngx_http_markdown_streaming_cfg_t;
 #endif

@@ -572,6 +572,105 @@ test_06x_defaults_unchanged(void)
     free(child);
 }
 
+
+/*
+ * Test: v0.8.0 compatibility bridge default threshold regression guard.
+ *
+ * Confirms that after full merge_conf() with no directives configured,
+ * stream.threshold retains its 0.8.0 default of 1m and is NOT overwritten
+ * by the legacy streaming.auto_threshold default of 32k.
+ *
+ * Also confirms that when the legacy directive IS explicitly set,
+ * the bridge maps it correctly.
+ */
+static void
+test_080_threshold_bridge_full_merge(void)
+{
+    ngx_conf_t cf;
+    ngx_http_markdown_conf_t *parent;
+    ngx_http_markdown_conf_t *child;
+    const char *rc;
+
+    TEST_SUBSECTION("v0.8.0 threshold bridge via full merge_conf");
+
+    /*
+     * Case 1: No threshold directives set (neither old nor new).
+     * stream.threshold must remain at 0.8.0 default (1m).
+     */
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+
+    parent = ngx_http_markdown_create_conf(&cf);
+    child = ngx_http_markdown_create_conf(&cf);
+
+    TEST_ASSERT(parent != NULL, "parent conf allocation");
+    TEST_ASSERT(child != NULL, "child conf allocation");
+
+    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
+    TEST_ASSERT(rc == NGX_CONF_OK, "merge_conf should succeed");
+
+    TEST_ASSERT(child->stream.threshold
+        == NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT,
+        "stream.threshold must be 1m (1048576) when no "
+        "directive was explicitly set");
+    TEST_ASSERT(child->stream.threshold_explicit == 0,
+        "threshold_explicit must be 0 when unset");
+    TEST_ASSERT(child->streaming.auto_threshold_explicit == 0,
+        "auto_threshold_explicit must be 0 when unset");
+
+    free(parent);
+    free(child);
+
+    /*
+     * Case 2: Legacy markdown_streaming_auto_threshold 64k is explicitly set.
+     * The bridge should map it into stream.threshold.
+     *
+     * In real NGINX, the parent would first be merged against its own
+     * parent (grandparent), which sets auto_threshold_explicit = 1.
+     * Then the child merges against the parent and inherits the flag.
+     */
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+
+    {
+        ngx_http_markdown_conf_t *grandparent;
+
+        grandparent = ngx_http_markdown_create_conf(&cf);
+        parent = ngx_http_markdown_create_conf(&cf);
+        child = ngx_http_markdown_create_conf(&cf);
+
+        TEST_ASSERT(grandparent != NULL, "grandparent conf allocation");
+        TEST_ASSERT(parent != NULL, "parent conf allocation (case 2)");
+        TEST_ASSERT(child != NULL, "child conf allocation (case 2)");
+
+        /* Simulate: operator set markdown_streaming_auto_threshold 64k at parent level */
+        parent->streaming.auto_threshold = 64 * 1024;
+
+        /* Merge parent against grandparent (sets auto_threshold_explicit=1) */
+        rc = ngx_http_markdown_merge_conf(&cf, grandparent, parent);
+        TEST_ASSERT(rc == NGX_CONF_OK, "merge parent should succeed");
+
+        TEST_ASSERT(parent->streaming.auto_threshold_explicit == 1,
+            "parent auto_threshold_explicit must be 1 after merge");
+
+        /* Merge child against parent */
+        rc = ngx_http_markdown_merge_conf(&cf, parent, child);
+        TEST_ASSERT(rc == NGX_CONF_OK, "merge child should succeed");
+
+        TEST_ASSERT(child->streaming.auto_threshold_explicit == 1,
+            "auto_threshold_explicit must be 1 when parent set it");
+        TEST_ASSERT(child->stream.threshold == 64 * 1024,
+            "stream.threshold must be 64k when legacy directive "
+            "was explicitly set");
+
+        free(grandparent);
+        free(parent);
+        free(child);
+    }
+
+    TEST_PASS("v0.8.0 threshold bridge: full merge_conf regression guard");
+}
+
 /* ── Main ─────────────────────────────────────────────────────────── */
 
 int
@@ -598,6 +697,7 @@ main(void)
     test_v070_directives_inherit_from_parent();
     test_v070_directives_child_override();
     test_06x_defaults_unchanged();
+    test_080_threshold_bridge_full_merge();
 
     printf("\n========================================\n");
     printf("All v0.7.0 default value tests passed!\n");

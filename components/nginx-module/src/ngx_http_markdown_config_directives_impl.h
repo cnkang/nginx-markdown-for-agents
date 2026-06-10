@@ -715,13 +715,15 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_streaming_auto_threshold <size>
      *
-     * Content-Length threshold for auto mode engine selection.
-     * When markdown_streaming_engine is auto, responses with
-     * Content-Length >= this value use streaming; smaller
-     * responses use full-buffer. Chunked responses always
-     * use streaming in auto mode.
+     * LEGACY (v0.6.0): Content-Length threshold for auto mode engine selection.
+     * In v0.8.0, use markdown_stream_threshold instead.
      *
-     * Default: 32k
+     * When explicitly set, this value is mapped into the v0.8.0
+     * stream.threshold via the compatibility bridge.  If not set,
+     * the v0.8.0 default of 1m (markdown_stream_threshold) applies.
+     *
+     * Legacy field default: 32k (only used when this directive is explicitly set)
+     * Effective v0.8.0 runtime default: stream.threshold = 1m
      * Context: http, server, location
      *
      * Example:
