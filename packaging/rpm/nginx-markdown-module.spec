@@ -1,5 +1,5 @@
 Name:           nginx-module-markdown-for-agents
-Version:        0.7.0
+Version:        0.8.0
 Release:        1%{?dist}
 Summary:        NGINX module for HTML-to-Markdown conversion
 
