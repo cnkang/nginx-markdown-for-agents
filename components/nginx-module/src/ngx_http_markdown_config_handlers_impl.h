@@ -982,7 +982,7 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 /*
- * v0.8.0 streaming directive handlers (spec 36).
+ * v0.8.0 streaming directive handlers (streaming configuration directives).
  *
  * These handlers parse the new streaming configuration directives
  * defined in RFC 0008 section 2.  They validate values at config-parse

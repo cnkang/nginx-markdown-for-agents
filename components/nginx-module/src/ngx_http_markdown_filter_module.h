@@ -122,7 +122,7 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
 #define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT  1
 
 /*
- * Streaming engine reason codes (spec-39).
+ * Streaming engine reason codes (streaming observability).
  *
  * Stable identifiers explaining why a particular engine path was chosen.
  * Additive only — removal requires major version bump.
@@ -230,7 +230,7 @@ ngx_http_markdown_path_selection(ngx_uint_t path,
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 /*
- * Streaming fallback state machine types (spec 37).
+ * Streaming fallback state machine types (v0.8.0 streaming fallback state machine).
  *
  * These types implement the pure-function decision engine defined in
  * RFC 0008 section 3.  The state machine governs runtime transitions
@@ -430,7 +430,7 @@ typedef enum {
  * - streaming_shadow: 0 (off by default)
  * - streaming_auto_threshold: NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT
  *
- * v0.8.0 streaming config defaults (spec 36):
+ * v0.8.0 streaming config defaults (streaming configuration directives):
  * - stream.engine: auto (1)
  * - stream.threshold: NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT (1m)
  * - stream.precommit_buffer: 262144 (256k)
@@ -535,7 +535,7 @@ typedef struct {
 #endif
 
     /*
-     * v0.8.0 unified streaming configuration (spec 36).
+     * v0.8.0 unified streaming configuration (streaming configuration directives).
      *
      * This is the runtime source-of-truth for all streaming directives.
      * The v0.6.0 `streaming.*` fields (under MARKDOWN_STREAMING_ENABLED)
@@ -781,7 +781,7 @@ typedef struct {
     ngx_http_markdown_otel_span_t        *otel_span;
 
     /*
-     * v0.8.0 streaming state machine context (spec 37).
+     * v0.8.0 streaming state machine context (streaming fallback state machine).
      *
      * Unconditional (not feature-gated) because the state machine
      * governs all requests regardless of the streaming converter
@@ -810,7 +810,7 @@ typedef struct {
         /* Commit state: PRE or POST */
         ngx_uint_t                        commit_state;
 
-        /* Engine choice reason code (spec-39 observability) */
+        /* Engine choice reason code (streaming observability) */
         ngx_http_markdown_stream_reason_e reason;
 
         /* Pending output chain for backpressure */
@@ -1222,7 +1222,7 @@ ngx_http_markdown_eligibility_t ngx_http_markdown_check_eligibility(
 const ngx_str_t *ngx_http_markdown_eligibility_string(
     ngx_http_markdown_eligibility_t eligibility);
 
-/* Check whether a content type is excluded from streaming (spec 36) */
+/* Check whether a content type is excluded from streaming (streaming configuration directives) */
 ngx_int_t ngx_http_markdown_stream_type_excluded(
     const ngx_str_t *content_type,
     const ngx_http_markdown_conf_t *conf);

@@ -295,7 +295,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->streaming.auto_threshold_explicit = 0;
 #endif
 
-    /* v0.8.0 streaming config (spec 36) */
+    /* v0.8.0 streaming config (streaming configuration directives) */
     conf->stream.engine = NGX_CONF_UNSET_UINT;
     conf->stream.threshold = NGX_CONF_UNSET_SIZE;
     conf->stream.threshold_explicit = -1;
@@ -594,7 +594,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                                              streaming_auto_threshold_set);
 #endif
 
-    /* v0.8.0 streaming config (spec 36) */
+    /* v0.8.0 streaming config (streaming configuration directives) */
 #ifdef MARKDOWN_STREAMING_ENABLED
     conf->stream.on_error_explicit = stream_on_error_set;
     conf->stream.shadow_explicit = stream_shadow_set;
