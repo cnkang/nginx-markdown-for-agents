@@ -710,7 +710,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ctx->streaming.reason = selection.reason;
 
     /*
-     * Compression guard (Requirement 3 AC 1, spec 41):
+     * Compression guard (Requirement 3 AC 1, streaming security enforcement):
      *
      * Compressed responses MUST NOT enter the streaming parser
      * directly.  When Content-Encoding is detected, override the
@@ -764,7 +764,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         ctx->streaming.reason =
             NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE;
 
-        /* Sync spec37 stream_sm: header selected streaming → STREAMING_CANDIDATE */
+        /* Sync streaming fallback state machine: header selected streaming → STREAMING_CANDIDATE */
         ctx->stream_sm.state = NGX_HTTP_MD_STATE_STREAMING_CANDIDATE;
 
         NGX_HTTP_MARKDOWN_METRIC_INC(

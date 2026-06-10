@@ -31,7 +31,7 @@ static ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
  * changes (for example fields appended at the tail), this version suffix
  * prevents attaching an incompatible old allocation after hot reload.
  *
- * v6: spec-39 streaming observability fields added to metrics struct.
+ * v6: streaming observability fields added to metrics struct.
  */
 static ngx_str_t ngx_http_markdown_metrics_shm_name =
     ngx_string("nginx_markdown_metrics_v6");

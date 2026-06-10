@@ -2,7 +2,7 @@
  * Streaming Fallback State Machine — Post-commit Error Handler
  *
  * Implements the post-commit error handling paths for the streaming
- * state machine (Component 5 of spec 37 design).
+ * state machine (Component 5 of streaming fallback state machine design).
  *
  * Critical safety property (Requirement 5):
  *   After headers or Markdown bytes are sent (COMMITTED state),

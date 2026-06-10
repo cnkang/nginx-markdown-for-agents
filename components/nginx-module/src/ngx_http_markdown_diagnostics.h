@@ -274,7 +274,7 @@ typedef struct {
     ngx_atomic_uint_t  requests_total;
     ngx_atomic_uint_t  failopen_total;
 #ifdef MARKDOWN_STREAMING_ENABLED
-    /* Streaming metrics (spec-39) */
+    /* Streaming metrics (streaming observability) */
     ngx_atomic_uint_t  streaming_requests_total;
     ngx_atomic_uint_t  streaming_succeeded_total;
     ngx_atomic_uint_t  streaming_failed_total;

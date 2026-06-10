@@ -1731,7 +1731,7 @@ ngx_http_markdown_streaming_precommit_error(
      *
      * For resource-limit errors, also increment
      * failures_resource_limit for the global failure-reason
-     * breakdown (spec-41 eligibility audit §3.1).
+     * breakdown (streaming security enforcement eligibility audit §3.1).
      */
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
 
@@ -1828,7 +1828,7 @@ ngx_http_markdown_streaming_commit(
         NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx->headers_forwarded = 1;
 
-    /* Sync spec37 stream_sm state machine with runtime commit */
+    /* Sync streaming fallback state machine with runtime commit */
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx->stream_sm.headers_committed = 1;
 
@@ -2866,7 +2866,7 @@ ngx_http_markdown_streaming_init_handle(
         }
     }
 
-    /* Sync spec37 stream_sm state machine: handle initialized → PRE_COMMIT */
+    /* Sync streaming fallback state machine: handle initialized → PRE_COMMIT */
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP,

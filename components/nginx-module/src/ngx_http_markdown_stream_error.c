@@ -2,7 +2,7 @@
  * Streaming Fallback State Machine — Error Handler Integration
  *
  * Wires the markdown_on_error configuration directive into the
- * streaming state machine (spec 37, tasks 6.1–6.4).
+ * streaming state machine (streaming fallback state machine, tasks 6.1–6.4).
  *
  * This module is the main entry point called by the body filter when
  * a streaming error occurs.  It populates the decision context from
