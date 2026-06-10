@@ -2498,4 +2498,4 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.0 | 2026-05-17 | Kang | Added `markdown_dynconf_dry_run` directive documentation |
 | 0.7.0 | 2026-05-18 | Kang | Added `markdown_diagnostics` directive documentation |
-| 0.8.0 | 2026-06-04 | spec-42 | Cross-reference audit: fixed stale `markdown_streaming_auto_threshold` reference in streaming section intro to use `markdown_stream_threshold` |
+| 0.8.0 | 2026-06-10 | Kang | Cross-reference audit: fixed stale `markdown_streaming_auto_threshold` reference in streaming section intro to use `markdown_stream_threshold` |

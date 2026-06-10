@@ -119,4 +119,4 @@ properties.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.8.0 | 2026-06-04 | Kang | Initial document for v0.8.0 streaming compression strategy (spec-41 task 3.3) |
+| 0.8.0 | 2026-06-10 | Kang | Initial document for v0.8.0 streaming compression strategy (streaming security enforcement task 3.3) |

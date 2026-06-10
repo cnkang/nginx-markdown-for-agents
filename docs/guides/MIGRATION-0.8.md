@@ -292,4 +292,4 @@ output parity before enabling streaming for live traffic.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.8.0 | 2026-06-04 | spec-42 | Initial migration guide |
+| 0.8.0 | 2026-06-10 | Kang | Initial migration guide |

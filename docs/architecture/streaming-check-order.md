@@ -200,7 +200,7 @@ No gaps found. No remediation needed for this property.
 |-------|-------|
 | Date | 2026-06-05 |
 | Result | **No code changes needed** |
-| Reviewer | Agent (spec-41 task 1.3) |
+| Reviewer | Agent (streaming security enforcement task 1.3) |
 
 ### Function: `ngx_http_markdown_stream_type_excluded()`
 
