@@ -395,9 +395,11 @@ ngx_http_markdown_stream_postcommit_send_terminal(
         return NGX_ERROR;
     }
 
+#ifdef MARKDOWN_STREAMING_ENABLED
     if (r == r->main && ctx->streaming.main_terminal_sent) {
         return NGX_OK;
     }
+#endif
 
     b = ngx_calloc_buf(r->pool);
     if (b == NULL) {
@@ -414,7 +416,9 @@ ngx_http_markdown_stream_postcommit_send_terminal(
     rc = ngx_http_output_filter(r, &out);
 
     if (b->last_buf && (rc == NGX_OK || rc == NGX_DONE || rc == NGX_AGAIN)) {
+#ifdef MARKDOWN_STREAMING_ENABLED
         ctx->streaming.main_terminal_sent = 1;
+#endif
     }
 
     return rc;
@@ -436,9 +440,11 @@ ngx_http_markdown_stream_postcommit_send_closing(
     ngx_chain_t  *out;
     ngx_int_t     rc;
 
+#ifdef MARKDOWN_STREAMING_ENABLED
     if (r == r->main && ctx->streaming.main_terminal_sent) {
         return NGX_OK;
     }
+#endif
 
     b = ngx_calloc_buf(r->pool);
     if (b == NULL) {
@@ -467,6 +473,7 @@ ngx_http_markdown_stream_postcommit_send_closing(
     rc = ngx_http_output_filter(r, out);
 
     if (rc == NGX_AGAIN) {
+#ifdef MARKDOWN_STREAMING_ENABLED
         if (ctx->streaming.pending_output != NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                           "markdown postcommit safe_finish: "
@@ -478,10 +485,13 @@ ngx_http_markdown_stream_postcommit_send_closing(
         ctx->streaming.pending_has_data = 1;
         ctx->streaming.pending_output_bytes = len;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+#endif
     }
 
     if (b->last_buf && (rc == NGX_OK || rc == NGX_DONE || rc == NGX_AGAIN)) {
+#ifdef MARKDOWN_STREAMING_ENABLED
         ctx->streaming.main_terminal_sent = 1;
+#endif
     }
 
     return rc;
