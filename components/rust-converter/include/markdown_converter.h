@@ -411,6 +411,14 @@ typedef struct MarkdownOptions {
    * Populated from the `markdown_parser_budget` NGINX directive.
    */
   uint64_t parser_memory_budget;
+  /**
+   * Streaming flush threshold in bytes (0 = flush immediately).
+   *
+   * Controls the minimum number of accumulated output bytes before
+   * the streaming emitter returns non-empty output to the C caller.
+   * Populated from the `markdown_stream_flush_min` NGINX directive.
+   */
+  uint32_t flush_threshold;
 } MarkdownOptions;
 
 /**
@@ -1077,6 +1085,7 @@ void markdown_decomp_result_init(struct FFIDecompResult *result);
  *     chars_per_token_fixed: 0,
  *     parse_timeout_ms: 0,
  *     parser_memory_budget: 0,
+ *     flush_threshold: 0,
  * };
  * let handle = unsafe { markdown_incremental_new(&opts) };
  * assert!(!handle.is_null());

@@ -72,6 +72,16 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
 #define NGX_HTTP_MARKDOWN_PATH_INCREMENTAL  1  /* Incremental path */
 #define NGX_HTTP_MARKDOWN_PATH_STREAMING    2  /* Streaming path */
 
+/*
+ * Request-level buffered flag for this module while it is accumulating or
+ * preserving output for a later retry.
+ *
+ * Low bits 0x01/0x02/0x04 are used by core modules (SSI/SUB/COPY). 0x08 is
+ * available for request-level buffering (image filter uses 0x08 on
+ * connection->buffered, not r->buffered).
+ */
+#define NGX_HTTP_MARKDOWN_BUFFERED  0x08
+
 #ifdef MARKDOWN_STREAMING_ENABLED
 /*
  * Streaming engine mode constants
@@ -306,6 +316,14 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1  /* fail-closed: return 502 error */
 
 /*
+ * Default streaming budget for v0.8.0 stream.budget field.
+ * Same value as NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT (2 MiB),
+ * but available without MARKDOWN_STREAMING_ENABLED.
+ */
+#define NGX_HTTP_MARKDOWN_STREAM_BUDGET_DEFAULT \
+    (2 * 1024 * 1024)
+
+/*
  * Configuration constants for flavor directive
  */
 #define NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK  0  /* CommonMark flavor */
@@ -509,11 +527,16 @@ typedef struct {
 #endif
 
     /*
-     * v0.8.0 streaming configuration directives (spec 36).
+     * v0.8.0 unified streaming configuration (spec 36).
      *
-     * These fields implement the RFC 0008 section 2 streaming control
-     * directives.  They are parsed but not acted upon until specs 37-38
-     * implement runtime streaming logic.
+     * This is the runtime source-of-truth for all streaming directives.
+     * The v0.6.0 `streaming.*` fields (under MARKDOWN_STREAMING_ENABLED)
+     * serve as a compatibility layer: during merge, their values are
+     * mapped into `stream.*` when the operator uses the old directive
+     * names.  Runtime code MUST read from `stream.*` exclusively.
+     *
+     * Migration priority during merge:
+     *   stream.* explicit  >  streaming.* mapped  >  defaults
      */
     struct {
         ngx_uint_t    engine;              /* markdown_streaming_engine off|auto|on */
@@ -521,6 +544,12 @@ typedef struct {
         size_t        precommit_buffer;    /* markdown_stream_precommit_buffer (default: 256k) */
         size_t        flush_min;           /* markdown_stream_flush_min (default: 16k) */
         ngx_array_t  *excluded_types;      /* markdown_stream_excluded_types (default: NULL) */
+        ngx_uint_t    on_error;            /* markdown_streaming_on_error pass|reject */
+        ngx_flag_t    on_error_explicit;   /* 1 if operator set streaming_on_error */
+        size_t        budget;              /* markdown_streaming_budget (default: 2m) */
+        ngx_flag_t    budget_explicit;     /* 1 if operator set streaming_budget */
+        ngx_flag_t    shadow;              /* markdown_streaming_shadow on|off */
+        ngx_flag_t    shadow_explicit;     /* 1 if operator set streaming_shadow */
     } stream;
 
     /*
@@ -563,6 +592,41 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
             (prev->stream.excluded_types == (ngx_array_t *) -1)
                 ? NULL
                 : prev->stream.excluded_types;
+    }
+
+    if (conf->stream.on_error == (ngx_uint_t) -1) {
+        conf->stream.on_error = (prev->stream.on_error == (ngx_uint_t) -1)
+            ? NGX_HTTP_MARKDOWN_ON_ERROR_PASS
+            : prev->stream.on_error;
+    }
+
+    if (conf->stream.on_error_explicit == (ngx_flag_t) -1) {
+        conf->stream.on_error_explicit =
+            (prev->stream.on_error_explicit == (ngx_flag_t) -1)
+                ? 0 : prev->stream.on_error_explicit;
+    }
+
+    if (conf->stream.budget == (size_t) -1) {
+        conf->stream.budget = (prev->stream.budget == (size_t) -1)
+            ? NGX_HTTP_MARKDOWN_STREAM_BUDGET_DEFAULT
+            : prev->stream.budget;
+    }
+
+    if (conf->stream.budget_explicit == (ngx_flag_t) -1) {
+        conf->stream.budget_explicit =
+            (prev->stream.budget_explicit == (ngx_flag_t) -1)
+                ? 0 : prev->stream.budget_explicit;
+    }
+
+    if (conf->stream.shadow == (ngx_flag_t) -1) {
+        conf->stream.shadow = (prev->stream.shadow == (ngx_flag_t) -1)
+            ? 0 : prev->stream.shadow;
+    }
+
+    if (conf->stream.shadow_explicit == (ngx_flag_t) -1) {
+        conf->stream.shadow_explicit =
+            (prev->stream.shadow_explicit == (ngx_flag_t) -1)
+                ? 0 : prev->stream.shadow_explicit;
     }
 }
 

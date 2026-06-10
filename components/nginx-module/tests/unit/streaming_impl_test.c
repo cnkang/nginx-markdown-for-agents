@@ -1153,6 +1153,17 @@ ngx_http_markdown_record_per_path_metrics(
  */
 #include "../../src/ngx_http_markdown_streaming_impl.h"
 
+/* Stub: ngx_http_markdown_stream_postcommit_safe_finish */
+ngx_int_t
+ngx_http_markdown_stream_postcommit_safe_finish(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
+{
+    if (r == NULL || ctx == NULL) {
+        return NGX_ERROR;
+    }
+    return NGX_ERROR;
+}
+
 /*
  * Reset all global stub control variables to their default (success)
  * state.  Must be called at the start of every test function to ensure
@@ -1359,9 +1370,10 @@ test_select_processing_path(void)
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
 
     conf.streaming.engine = (ngx_http_complex_value_t *) (uintptr_t) 0x1;
+    conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
+    conf.stream.threshold = 1024;
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     conf.large_body_threshold = 1024;
-    conf.streaming.auto_threshold = 1024;
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
     r.headers_out.content_length_n = 2048;
 
@@ -1470,7 +1482,7 @@ test_select_processing_path(void)
      * routes to streaming.
      */
     conf.streaming.engine = NULL;
-    conf.streaming.auto_threshold = 1024;
+    conf.stream.threshold = 1024;
     r.headers_out.content_length_n = 10;
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
@@ -1488,6 +1500,7 @@ test_select_processing_path(void)
 
     /* Restore streaming_engine for subsequent tests */
     conf.streaming.engine = (ngx_http_complex_value_t *) (uintptr_t) 0x1;
+    conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
 
     TEST_PASS("path-selection branches covered");
 }
@@ -1827,14 +1840,14 @@ test_postcommit_and_precommit_error_paths(void)
 
     ctx.streaming.completion.failure_recorded = 0;
     ctx.streaming.handle = (struct StreamingConverterHandle *) (uintptr_t) 0x4;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     rc = ngx_http_markdown_streaming_precommit_error(
         &r, &ctx, &conf, ERROR_INTERNAL);
     TEST_ASSERT(rc == NGX_ERROR, "precommit reject policy should fail-closed");
     TEST_ASSERT(metrics.streaming.precommit_reject_total == 1,
         "precommit reject metric should increment");
 
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     ctx.eligible = 1;
     rc = ngx_http_markdown_streaming_precommit_error(
         &r, &ctx, &conf, ERROR_MEMORY_LIMIT);
@@ -1990,6 +2003,7 @@ test_null_input_tracking_and_body_filter_entry(void)
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
     conf.streaming.engine = (ngx_http_complex_value_t *) (uintptr_t) 0x1;
+    conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
 
     ngx_memzero(&c1, sizeof(c1));
     ngx_memzero(&b1, sizeof(b1));
@@ -2114,7 +2128,7 @@ test_init_handle_and_chunk_result_helpers(void)
     ngx_http_markdown_metrics = &metrics;
 
     conf.streaming.budget = 256;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK, "init_handle should succeed on happy path");
     TEST_ASSERT(ctx.streaming.handle != NULL,
@@ -2214,7 +2228,7 @@ test_init_handle_and_chunk_result_helpers(void)
     ctx.streaming.failopen_replay_initialized = 0;
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
     ctx.conversion.attempted = 0;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     g_buffer_init_fail_after = 1;
     g_buffer_init_call_count = 0;
     rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
@@ -2230,7 +2244,7 @@ test_init_handle_and_chunk_result_helpers(void)
     ctx.streaming.failopen_replay_initialized = 0;
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
     ctx.conversion.attempted = 0;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     g_buffer_init_fail_after = 1;
     g_buffer_init_call_count = 0;
     rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
@@ -2240,7 +2254,7 @@ test_init_handle_and_chunk_result_helpers(void)
         "replay buffer init failure with pass policy should set eligible=0");
     g_buffer_init_fail_after = 0;
     g_buffer_init_call_count = 0;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     TEST_PASS("init_handle/chunk_result branches covered");
 }
@@ -2290,7 +2304,7 @@ test_commit_feed_and_finalize_core_paths(void)
     ngx_http_markdown_metrics = &metrics;
 
     conf.max_size = 64;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     ctx.streaming.prebuffer_initialized = 1;
     ctx.streaming.prebuffer.data = prebuf_data;
     ctx.streaming.prebuffer.capacity = sizeof(prebuf_data);
@@ -2527,7 +2541,7 @@ test_process_chain_and_body_filter_deep_paths(void)
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
     conf.max_size = 0;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     ngx_memzero(&in, sizeof(in));
     ngx_memzero(&in_buf, sizeof(in_buf));
@@ -2570,7 +2584,7 @@ test_process_chain_and_body_filter_deep_paths(void)
 
     ctx.streaming.failopen_replay_initialized = 0;
     ctx.eligible = 0;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     g_streaming_feed_rc = ERROR_SUCCESS;
     g_streaming_feed_out_data = NULL;
     g_streaming_feed_out_len = 0;
@@ -2582,7 +2596,7 @@ test_process_chain_and_body_filter_deep_paths(void)
         "precommit_error decision point)");
     ctx.eligible = 1;
 
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x22;
@@ -2626,7 +2640,7 @@ test_process_chain_and_body_filter_deep_paths(void)
     g_streaming_feed_rc = ERROR_SUCCESS;
     g_streaming_feed_out_data = NULL;
     g_streaming_feed_out_len = 0;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     g_next_body_filter_rc = NGX_OK;
     g_next_body_filter_calls = 0;
     g_buffer_append_fail_after = 1;
@@ -2681,7 +2695,7 @@ test_process_chain_and_body_filter_deep_paths(void)
     g_streaming_feed_rc = ERROR_SUCCESS;
     g_streaming_feed_out_data = NULL;
     g_streaming_feed_out_len = 0;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     g_buffer_append_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_process_chain(
         &r, &ctx, &conf, &in, &last_buf, &fallback_cl);
@@ -2712,7 +2726,7 @@ test_process_chain_and_body_filter_deep_paths(void)
     g_streaming_feed_rc = ERROR_SUCCESS;
     g_streaming_feed_out_data = NULL;
     g_streaming_feed_out_len = 0;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     g_next_body_filter_rc = NGX_OK;
     g_buffer_append_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_process_chain(
@@ -2726,7 +2740,7 @@ test_process_chain_and_body_filter_deep_paths(void)
         "replay append failure with pass policy should set "
         "ctx.failopen_completed=1");
     g_buffer_append_rc = NGX_OK;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     /*
      * Precise test: prebuffer append succeeds, replay append fails,
@@ -2763,7 +2777,7 @@ test_process_chain_and_body_filter_deep_paths(void)
     g_streaming_feed_rc = ERROR_SUCCESS;
     g_streaming_feed_out_data = NULL;
     g_streaming_feed_out_len = 0;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     g_next_body_filter_rc = NGX_OK;
     g_next_body_filter_calls = 0;
     g_buffer_append_fail_after = 1;
@@ -2781,7 +2795,7 @@ test_process_chain_and_body_filter_deep_paths(void)
     g_buffer_append_fail_after = 0;
     g_buffer_append_call_count = 0;
     g_buffer_append_rc = NGX_OK;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     TEST_PASS("process-chain/failopen/body-filter deep branches covered");
 }
@@ -2846,7 +2860,7 @@ test_streaming_gap_branches(void)
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
 
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     conf.max_size = 64;
 
     selection = ngx_http_markdown_select_processing_path(&r, NULL, NULL);
@@ -3114,7 +3128,7 @@ test_failopen_passthrough_again_pending(void)
     ngx_memzero(&metrics, sizeof(metrics));
     ngx_http_markdown_metrics = &metrics;
     conf.max_size = 0;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     ngx_memzero(&in, sizeof(in));
     ngx_memzero(&in_buf, sizeof(in_buf));

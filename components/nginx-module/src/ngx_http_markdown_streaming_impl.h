@@ -16,6 +16,7 @@
 #ifdef MARKDOWN_STREAMING_ENABLED
 
 #include "ngx_http_markdown_streaming_decomp_impl.h"
+#include "ngx_http_markdown_stream_postcommit.h"
 
 /* Forward declarations */
 static ngx_http_markdown_otel_span_t *ngx_http_markdown_otel_span_start(
@@ -560,17 +561,23 @@ ngx_http_markdown_select_processing_path(
     }
 
     /*
-     * v0.6.0 default: when no markdown_streaming_engine directive
-     * is set (streaming_engine == NULL), use auto mode.
-     * Operators who need 0.5.x behavior set
-     * markdown_streaming_engine off explicitly.
+     * v0.8.0 source-of-truth: read engine from conf->stream.engine
+     * first.  If the v0.8.0 directive was explicitly set (not at the
+     * compiled-in AUTO default), use it directly.  Otherwise fall back
+     * to the v0.6.0 complex-value streaming.engine for compatibility.
+     *
+     * When falling back to streaming.engine, the evaluated string is
+     * mapped to the v0.8.0 engine constants (STREAM_ENGINE_*) for
+     * uniform downstream comparison.
      */
-    if (conf->streaming.engine == NULL) {
-        engine_mode = NGX_HTTP_MARKDOWN_STREAMING_ENGINE_AUTO;
+    if (conf->stream.engine != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO
+        || conf->streaming.engine == NULL)
+    {
+        engine_mode = conf->stream.engine;
         goto common_checks;
     }
 
-    /* Evaluate the complex value */
+    /* v0.6.0 fallback: evaluate the complex value */
     if (ngx_http_complex_value(r, conf->streaming.engine,
                                &val) != NGX_OK)
     {
@@ -583,7 +590,7 @@ ngx_http_markdown_select_processing_path(
             NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
     }
 
-    /* Parse the evaluated string */
+    /* Parse the evaluated string and map to v0.8.0 constants */
     {
         static u_char  str_off[]  = "off";
         static u_char  str_on[]   = "on";
@@ -603,7 +610,7 @@ ngx_http_markdown_select_processing_path(
                                2) == 0)
         {
             engine_mode =
-                NGX_HTTP_MARKDOWN_STREAMING_ENGINE_ON;
+                NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
 
         } else if (val.len == 4
                    && ngx_strncasecmp(val.data,
@@ -611,7 +618,7 @@ ngx_http_markdown_select_processing_path(
                                       4) == 0)
         {
             engine_mode =
-                NGX_HTTP_MARKDOWN_STREAMING_ENGINE_AUTO;
+                NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
 
         } else {
             ngx_log_error(NGX_LOG_WARN,
@@ -696,7 +703,7 @@ common_checks:
 
     /* Rule 8: engine == on */
     if (engine_mode
-        == NGX_HTTP_MARKDOWN_STREAMING_ENGINE_ON)
+        == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON)
     {
         return ngx_http_markdown_path_selection(
             NGX_HTTP_MARKDOWN_PATH_STREAMING,
@@ -706,7 +713,7 @@ common_checks:
     /* Rules 9-11: engine == auto */
     if (r->headers_out.content_length_n >= 0
         && (size_t) r->headers_out.content_length_n
-           < conf->streaming.auto_threshold)
+           < conf->stream.threshold)
     {
         /* CL < auto_threshold: use full-buffer */
         ngx_http_markdown_log_decision(r, conf, eff,
@@ -1112,8 +1119,8 @@ ngx_http_markdown_streaming_record_postcommit_failure(
             &r->headers_out.content_type,
             (r->headers_out.content_length_n >= 0) ? 1 : 0,
             (r->headers_out.content_length_n < 0) ? 1 : 0,
-            (conf->streaming.on_error
-             == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT)
+             (conf->stream.on_error
+              == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
                 ? "reject" : "pass");
 
         ctx->streaming.completion.failure_recorded = 1;
@@ -1507,16 +1514,12 @@ ngx_http_markdown_streaming_handle_postcommit_error(
     const ngx_http_markdown_conf_t *conf,
     uint32_t error_code)
 {
+    ngx_int_t  rc;
+
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
         "markdown: Post-Commit error, "
-        "code=%ui, terminating response",
+        "code=%ui, attempting safe_finish",
         (ngx_uint_t) error_code);
-
-    /* Abort the Rust handle */
-    if (ctx->streaming.handle != NULL) {
-        markdown_streaming_abort(ctx->streaming.handle);
-        ctx->streaming.handle = NULL;
-    }
 
     /* Track budget exceeded as auxiliary classification */
     if (!ctx->streaming.completion.failure_recorded
@@ -1554,7 +1557,22 @@ ngx_http_markdown_streaming_handle_postcommit_error(
         (ngx_uint_t) error_code,
         ctx->streaming.chunks_processed);
 
-    /* Send empty last_buf to terminate the response */
+    /*
+     * Attempt safe_finish first: ask the Rust converter to
+     * emit closing markers for open Markdown structures.
+     * If safe_finish fails, fall through to abort.
+     */
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(r, ctx);
+    if (rc == NGX_OK) {
+        return NGX_OK;
+    }
+
+    /* Safe-finish failed: abort the Rust handle and send terminal */
+    if (ctx->streaming.handle != NULL) {
+        markdown_streaming_abort(ctx->streaming.handle);
+        ctx->streaming.handle = NULL;
+    }
+
     return ngx_http_markdown_streaming_send_output(
         r, ctx, NULL, 0, /* last_buf */ 1);
 }
@@ -1694,8 +1712,8 @@ ngx_http_markdown_streaming_precommit_error(
         NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
     }
 
-    if (conf->streaming.on_error
-        == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT)
+    if (conf->stream.on_error
+        == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
     {
         /* Fail-closed: record reject metrics and reason */
         ctx->streaming.reason = mapped_reason;
@@ -2272,6 +2290,8 @@ ngx_http_markdown_streaming_finalize_decomp(
             ctx->streaming.handle,
             decomp_data, decomp_len,
             &out_data, &out_len);
+
+        ctx->streaming.chunks_processed++;
 
         feed_result =
             ngx_http_markdown_streaming_handle_feed_result(
@@ -2904,6 +2924,19 @@ ngx_http_markdown_streaming_send_failopen_chain(
     rc = ngx_http_next_body_filter(r, out);
 
     if (rc == NGX_AGAIN) {
+        if (ctx->streaming.pending_output != NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "markdown: fail-open pending output "
+                "re-entry detected, refusing to overwrite "
+                "existing pending chain (Rule 1)");
+
+            ngx_http_markdown_streaming_free_pending_chain(
+                ctx->streaming.pending_output);
+            ctx->streaming.pending_output = NULL;
+
+            return NGX_ERROR;
+        }
+
         ctx->streaming.pending_output = out;
         ctx->streaming.pending_has_data = 1;
         ctx->streaming.pending_failopen_delivery = (!ctx->eligible) ? 1 : 0;

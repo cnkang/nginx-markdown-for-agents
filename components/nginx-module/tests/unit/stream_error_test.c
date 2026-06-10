@@ -100,6 +100,7 @@ struct ngx_http_request_s {
     ngx_pool_t             *pool;
     ngx_http_headers_out_t  headers_out;
     struct ngx_http_request_s *main;
+    ngx_uint_t              buffered;
 };
 
 /* Include the module header for types */
@@ -114,6 +115,11 @@ struct ngx_http_request_s {
  * safe_finish/abort functions instead of mocking them.
  */
 #include "../../src/ngx_http_markdown_stream_postcommit.h"
+#include "../../src/markdown_converter.h"
+
+#ifndef ngx_memcpy
+#define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
+#endif
 
 /*
  * Test state: track calls to mocked functions.
@@ -127,6 +133,10 @@ static ngx_chain_t *test_replay_chain_result;
 static int test_calloc_buf_called;
 static ngx_buf_t *test_calloc_buf_result;
 static ngx_buf_t  test_calloc_buf_storage;
+static ngx_chain_t test_chain_link_storage;
+static u_char test_palloc_storage[256];
+static int test_palloc_called;
+static int test_palloc_fail;
 
 /* Mocked request infrastructure */
 static ngx_log_t             test_log;
@@ -182,12 +192,55 @@ ngx_calloc_buf(ngx_pool_t *pool)
     return &test_calloc_buf_storage;
 }
 
+void *
+ngx_palloc(ngx_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    test_palloc_called++;
+
+    if (test_palloc_fail || size > sizeof(test_palloc_storage)) {
+        return NULL;
+    }
+
+    memset(test_palloc_storage, 0, sizeof(test_palloc_storage));
+    return test_palloc_storage;
+}
+
+ngx_chain_t *
+ngx_alloc_chain_link(ngx_pool_t *pool)
+{
+    UNUSED(pool);
+    memset(&test_chain_link_storage, 0, sizeof(test_chain_link_storage));
+    return &test_chain_link_storage;
+}
+
 /* Stub: ngx_log_error_core */
 void
 ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
                    ngx_err_t err, const char *fmt, ...)
 {
     UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);
+}
+
+uint32_t
+markdown_streaming_safe_finish(struct StreamingConverterHandle *handle,
+    u_char **out_data, uintptr_t *out_len)
+{
+    UNUSED(handle);
+    if (out_data != NULL) {
+        *out_data = NULL;
+    }
+    if (out_len != NULL) {
+        *out_len = 0;
+    }
+    return POST_COMMIT_ABORT;
+}
+
+void
+markdown_streaming_output_free(u_char *data, uintptr_t len)
+{
+    UNUSED(data);
+    UNUSED(len);
 }
 
 /* Include the postcommit source (for safe_finish, abort, guard, log) */
@@ -206,6 +259,10 @@ static void test_setup(void)
     test_calloc_buf_called = 0;
     test_calloc_buf_result = NULL;
     memset(&test_calloc_buf_storage, 0, sizeof(test_calloc_buf_storage));
+    memset(&test_chain_link_storage, 0, sizeof(test_chain_link_storage));
+    memset(test_palloc_storage, 0, sizeof(test_palloc_storage));
+    test_palloc_called = 0;
+    test_palloc_fail = 0;
     memset(&test_log, 0, sizeof(test_log));
     memset(&test_pool, 0, sizeof(test_pool));
     memset(&test_connection, 0, sizeof(test_connection));

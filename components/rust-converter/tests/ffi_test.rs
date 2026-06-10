@@ -79,6 +79,7 @@ fn ffi_test_default_options() -> MarkdownOptions {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     }
 }
 
@@ -163,6 +164,7 @@ fn test_basic_conversion() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     // Perform conversion
@@ -465,6 +467,7 @@ fn test_null_pointer_handling() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {
@@ -572,6 +575,7 @@ fn test_multiple_conversions() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     // Perform multiple conversions
@@ -632,6 +636,7 @@ fn test_idempotent_free() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {
@@ -689,6 +694,7 @@ fn test_content_type_charset_detection() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {
@@ -747,6 +753,7 @@ fn test_gfm_flavor() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {
@@ -930,6 +937,7 @@ fn test_null_result_pointer() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     // Call with NULL result pointer - should not crash
@@ -1012,6 +1020,7 @@ fn test_memory_cleanup_with_all_fields() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1078,6 +1087,7 @@ fn test_memory_cleanup_error_case() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1145,6 +1155,7 @@ fn test_panic_catching_invalid_utf8() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1215,6 +1226,7 @@ fn test_zero_length_html() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1268,6 +1280,7 @@ fn test_zero_length_html_with_null_pointer() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = ffi_test_empty_result();
@@ -1315,6 +1328,7 @@ fn test_null_content_type_with_zero_length() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {
@@ -1375,6 +1389,7 @@ fn test_error_state_consistency() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {

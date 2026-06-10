@@ -1240,7 +1240,7 @@ location /markdown-metrics {
 - `requests_entered`: Requests that reached the module decision chain
 - `conversions_attempted`: Total conversion attempts
 - `conversions_succeeded`: Successful conversions
-- `conversions_failed`: Failed conversions
+- `conversions_failed`: Engine-level failures (includes fail-open errors; for response-level failure count, subtract `precommit_failopen_total` or use `failures_conversion` + `failures_resource_limit` + `failures_system`)
 - `conversions_bypassed`: Requests bypassed (ineligible/passthrough)
 - `conversion_completed`: Completed conversions (`conversions_succeeded + conversions_failed`)
 - `failures_conversion`: Conversion failures

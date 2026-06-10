@@ -14,15 +14,6 @@
 #ifndef NGX_HTTP_MARKDOWN_MODULE_STATE_IMPL_H
 #define NGX_HTTP_MARKDOWN_MODULE_STATE_IMPL_H
 
-/*
- * Request-level buffered flag for this module while it is accumulating the
- * full response body before conversion.
- *
- * Low bits 0x01/0x02/0x04 are used by core modules (SSI/SUB/COPY). 0x08 is
- * available for request-level buffering (image filter uses 0x08 on
- * connection->buffered, not r->buffered).
- */
-#define NGX_HTTP_MARKDOWN_BUFFERED  0x08
 /* Bound eager reservation to avoid huge one-shot allocations on giant responses. */
 #define NGX_HTTP_MARKDOWN_PRERESERVE_LIMIT (16 * 1024 * 1024)
 

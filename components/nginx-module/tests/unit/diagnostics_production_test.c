@@ -126,6 +126,17 @@ typedef struct ngx_http_markdown_conf_s {
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_http_markdown_streaming_cfg_t streaming;
 #endif
+    struct {
+        ngx_uint_t    engine;
+        size_t        threshold;
+        size_t        precommit_buffer;
+        size_t        flush_min;
+        ngx_array_t  *excluded_types;
+        ngx_uint_t    on_error;
+        size_t        budget;
+        ngx_flag_t    budget_explicit;
+        ngx_flag_t    shadow;
+    } stream;
 } ngx_http_markdown_conf_t;
 
 typedef struct ngx_http_markdown_effective_conf_s {
@@ -285,6 +296,9 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     *out_len = sizeof(snapshot) - 1;
     return NGX_OK;
 }
+
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO  1
+#define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1
 
 #define NGX_HTTP_MARKDOWN_FILTER_MODULE_H
 #include "../src/ngx_http_markdown_diagnostics.c"

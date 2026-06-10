@@ -131,6 +131,7 @@ fn convert_with_feature_toggles(
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = empty_result();
@@ -206,6 +207,7 @@ fn test_both_features_enabled() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {
@@ -295,6 +297,7 @@ fn test_token_estimation_only() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {
@@ -381,6 +384,7 @@ fn test_front_matter_only() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {
@@ -467,6 +471,7 @@ fn test_both_features_disabled() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {
@@ -568,6 +573,7 @@ fn test_feature_independence_comprehensive() {
             chars_per_token_fixed: 0,
             parse_timeout_ms: 0,
             parser_memory_budget: 0,
+            flush_threshold: 0,
         };
 
         let mut result = empty_result();
@@ -667,6 +673,7 @@ fn test_no_hidden_dependencies() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result1 = empty_result();
@@ -714,6 +721,7 @@ fn test_no_hidden_dependencies() {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result2 = empty_result();
