@@ -486,6 +486,9 @@ release-gates-check-070:
 #                                           cargo +nightly is unavailable
 #   RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 - skip native E2E when NGINX_BIN
 #                                           is not set
+#   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - skip coverage-c/coverage-rust
+#                                           when NGINX source or lcov/cargo-llvm-cov
+#                                           is unavailable
 
 release-gates-check-080:
 	@echo "=== v0.8.0 Release Gate: Starting ==="
@@ -520,10 +523,26 @@ release-gates-check-080:
 	$(MAKE) test-e2e-rust
 	@echo "  [7/15] coverage-c (C coverage gate — Req 4)"
 	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (advisory)"
-	$(MAKE) coverage-c
+	@if command -v lcov >/dev/null 2>&1 && [ -d "$(NGINX_TEST_DIR)" ]; then \
+	$(MAKE) coverage-c; \
+	else \
+	if [ "$${RELEASE_GATE_ALLOW_SKIP_COVERAGE:-0}" = "1" ]; then \
+	echo "  ==> SKIP (non-release): coverage-c (lcov or NGINX test dir not available; RELEASE_GATE_ALLOW_SKIP_COVERAGE=1)"; \
+	else \
+	echo "FAIL: coverage-c requires lcov and NGINX test dir; set RELEASE_GATE_ALLOW_SKIP_COVERAGE=1 to skip for non-release validation" >&2; exit 1; \
+	fi; \
+	fi
 	@echo "  [8/15] coverage-rust (Rust coverage gate — Req 4)"
 	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (advisory)"
-	$(MAKE) coverage-rust
+	@if cargo llvm-cov --version >/dev/null 2>&1; then \
+	$(MAKE) coverage-rust; \
+	else \
+	if [ "$${RELEASE_GATE_ALLOW_SKIP_COVERAGE:-0}" = "1" ]; then \
+	echo "  ==> SKIP (non-release): coverage-rust (cargo-llvm-cov not available; RELEASE_GATE_ALLOW_SKIP_COVERAGE=1)"; \
+	else \
+	echo "FAIL: coverage-rust requires cargo-llvm-cov; set RELEASE_GATE_ALLOW_SKIP_COVERAGE=1 to skip for non-release validation" >&2; exit 1; \
+	fi; \
+	fi
 	@echo "  [coverage-policy] Thresholds: C line=$(COVERAGE_C_MIN_LINE)% func=$(COVERAGE_C_MIN_FUNC)% | Rust line=$(COVERAGE_RUST_MIN_LINE)% func=$(COVERAGE_RUST_MIN_FUNC)%"
 	@echo "  [critical-path-coverage] 90% target for auth, error handling, FFI boundary, conditional requests"
 	@echo "  [critical-path-coverage] NOTE: 90% critical-path coverage is advisory per AGENTS.md Rule 25;"
