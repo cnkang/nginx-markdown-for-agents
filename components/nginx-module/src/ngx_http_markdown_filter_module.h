@@ -562,72 +562,41 @@ static ngx_inline void
 ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev)
 {
-    if (conf->stream.engine == (ngx_uint_t) -1) {
-        conf->stream.engine = (prev->stream.engine == (ngx_uint_t) -1)
-            ? NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO
-            : prev->stream.engine;
-    }
+/*
+ * Helper macro: merge a single stream configuration field.
+ * If the current value equals the unset sentinel, inherit from
+ * the previous level or fall back to the compile-time default.
+ */
+#define NGX_MD_MERGE_STREAM(field, type, unset, dflt)                        \
+    do {                                                                      \
+        if (conf->stream.field == (type) (unset)) {                          \
+            conf->stream.field = (prev->stream.field != (type) (unset))      \
+                ? prev->stream.field : (dflt);                               \
+        }                                                                    \
+    } while (0)
 
-    if (conf->stream.threshold == (size_t) -1) {
-        conf->stream.threshold = (prev->stream.threshold == (size_t) -1)
-            ? 1048576
-            : prev->stream.threshold;
-    }
-
-    if (conf->stream.precommit_buffer == (size_t) -1) {
-        conf->stream.precommit_buffer =
-            (prev->stream.precommit_buffer == (size_t) -1)
-                ? 262144
-                : prev->stream.precommit_buffer;
-    }
-
-    if (conf->stream.flush_min == (size_t) -1) {
-        conf->stream.flush_min = (prev->stream.flush_min == (size_t) -1)
-            ? 16384
-            : prev->stream.flush_min;
-    }
+    NGX_MD_MERGE_STREAM(engine, ngx_uint_t, -1,
+                        NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO);
+    NGX_MD_MERGE_STREAM(threshold, size_t, -1, 1048576);
+    NGX_MD_MERGE_STREAM(precommit_buffer, size_t, -1, 262144);
+    NGX_MD_MERGE_STREAM(flush_min, size_t, -1, 16384);
 
     if (conf->stream.excluded_types == (ngx_array_t *) -1) {
         conf->stream.excluded_types =
-            (prev->stream.excluded_types == (ngx_array_t *) -1)
-                ? NULL
-                : prev->stream.excluded_types;
+            (prev->stream.excluded_types != (ngx_array_t *) -1)
+                ? prev->stream.excluded_types : NULL;
     }
 
-    if (conf->stream.on_error == (ngx_uint_t) -1) {
-        conf->stream.on_error = (prev->stream.on_error == (ngx_uint_t) -1)
-            ? NGX_HTTP_MARKDOWN_ON_ERROR_PASS
-            : prev->stream.on_error;
-    }
+    NGX_MD_MERGE_STREAM(on_error, ngx_uint_t, -1,
+                        NGX_HTTP_MARKDOWN_ON_ERROR_PASS);
+    NGX_MD_MERGE_STREAM(on_error_explicit, ngx_flag_t, -1, 0);
+    NGX_MD_MERGE_STREAM(budget, size_t, -1,
+                        NGX_HTTP_MARKDOWN_STREAM_BUDGET_DEFAULT);
+    NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0);
+    NGX_MD_MERGE_STREAM(shadow, ngx_flag_t, -1, 0);
+    NGX_MD_MERGE_STREAM(shadow_explicit, ngx_flag_t, -1, 0);
 
-    if (conf->stream.on_error_explicit == (ngx_flag_t) -1) {
-        conf->stream.on_error_explicit =
-            (prev->stream.on_error_explicit == (ngx_flag_t) -1)
-                ? 0 : prev->stream.on_error_explicit;
-    }
-
-    if (conf->stream.budget == (size_t) -1) {
-        conf->stream.budget = (prev->stream.budget == (size_t) -1)
-            ? NGX_HTTP_MARKDOWN_STREAM_BUDGET_DEFAULT
-            : prev->stream.budget;
-    }
-
-    if (conf->stream.budget_explicit == (ngx_flag_t) -1) {
-        conf->stream.budget_explicit =
-            (prev->stream.budget_explicit == (ngx_flag_t) -1)
-                ? 0 : prev->stream.budget_explicit;
-    }
-
-    if (conf->stream.shadow == (ngx_flag_t) -1) {
-        conf->stream.shadow = (prev->stream.shadow == (ngx_flag_t) -1)
-            ? 0 : prev->stream.shadow;
-    }
-
-    if (conf->stream.shadow_explicit == (ngx_flag_t) -1) {
-        conf->stream.shadow_explicit =
-            (prev->stream.shadow_explicit == (ngx_flag_t) -1)
-                ? 0 : prev->stream.shadow_explicit;
-    }
+#undef NGX_MD_MERGE_STREAM
 }
 
 /*
