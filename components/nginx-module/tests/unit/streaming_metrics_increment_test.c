@@ -1,7 +1,7 @@
 /*
  * Test: streaming_metrics_increment
  *
- * Validates streaming observability metric counters (spec-39 task 6.1):
+ * Validates streaming observability metric counters (streaming observability task 6.1):
  *   1. Snapshot struct correctly mirrors the new streaming fields.
  *   2. Reason code enum has the expected count (14).
  *   3. String mapping function returns valid strings for all enum values.

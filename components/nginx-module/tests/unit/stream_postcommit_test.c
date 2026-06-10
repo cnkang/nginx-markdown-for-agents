@@ -2,7 +2,7 @@
  * Test: stream_postcommit
  *
  * Validates the post-commit safety property for the streaming
- * fallback state machine (spec 37, task 7.4).
+ * fallback state machine (streaming fallback state machine, task 7.4).
  *
  * Property test: exercises the decision engine from COMMITTED state
  * with every possible event and verifies:

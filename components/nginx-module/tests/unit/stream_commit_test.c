@@ -2,7 +2,7 @@
  * Test: stream_commit
  *
  * Validates the header commit sequence for the streaming fallback
- * state machine (spec 37, task 7.3).
+ * state machine (streaming fallback state machine, task 7.3).
  *
  * Tests successful commit, double commit, wrong-state commit,
  * NULL parameters, and header mutation correctness.

@@ -1,7 +1,7 @@
 /*
  * Test: streaming_config_contract
  *
- * Validates the v0.8.0 streaming configuration directives (spec 36):
+ * Validates the v0.8.0 streaming configuration directives (streaming configuration directives):
  * - Valid values for each directive (5.1)
  * - v0.8.0 stream_engine_handler direct tests (5.1b)
  * - Invalid values rejected (5.2)

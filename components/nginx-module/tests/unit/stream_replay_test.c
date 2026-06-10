@@ -2,7 +2,7 @@
  * Test: stream_replay
  *
  * Validates the replay buffer tracking for the streaming fallback
- * state machine (spec 37, task 7.2).
+ * state machine (streaming fallback state machine, task 7.2).
  *
  * Tests init, append, overflow, available, and chain operations
  * of ngx_http_markdown_stream_replay_*() functions.
