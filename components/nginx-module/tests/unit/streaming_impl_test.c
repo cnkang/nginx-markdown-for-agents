@@ -960,6 +960,21 @@ ngx_http_markdown_effective_streaming_budget(
 #endif
 
 /*
+ * Stub for ngx_http_markdown_stream_type_excluded.
+ * The v0.8.0 excluded_types check is tested in
+ * hard_excluded_types_security_test and streaming_config_contract_test.
+ * Here we return 0 (not excluded) to let the path selection proceed.
+ */
+ngx_int_t
+ngx_http_markdown_stream_type_excluded(const ngx_str_t *content_type,
+    const ngx_http_markdown_conf_t *conf)
+{
+    UNUSED(content_type);
+    UNUSED(conf);
+    return 0;
+}
+
+/*
  * Reason-code accessor stubs.  Each returns a static ngx_str_t containing
  * the corresponding decision-reason literal.  These mirror the production
  * accessors used by ngx_http_markdown_log_decision.

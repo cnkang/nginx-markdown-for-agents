@@ -297,6 +297,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     /* v0.8.0 streaming config (spec 36) */
     conf->stream.engine = NGX_CONF_UNSET_UINT;
     conf->stream.threshold = NGX_CONF_UNSET_SIZE;
+    conf->stream.threshold_explicit = -1;
     conf->stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
     conf->stream.flush_min = NGX_CONF_UNSET_SIZE;
     conf->stream.excluded_types = NGX_CONF_UNSET_PTR;
@@ -576,6 +577,8 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         (conf->stream.on_error != NGX_CONF_UNSET_UINT);
     ngx_flag_t  stream_shadow_set =
         (conf->stream.shadow != NGX_CONF_UNSET);
+    ngx_flag_t  stream_threshold_set =
+        (conf->stream.threshold != NGX_CONF_UNSET_SIZE);
 #endif
 
     ngx_http_markdown_merge_core_values(conf, prev);
@@ -590,6 +593,21 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     conf->stream.shadow_explicit = stream_shadow_set;
 #endif
     ngx_http_markdown_merge_stream_values(conf, prev);
+
+    /*
+     * Set threshold_explicit AFTER the merge so that:
+     * - If this level explicitly set threshold, mark it explicit (1).
+     * - If this level did NOT set it, inherit the parent's
+     *   threshold_explicit flag via the merge macro — so a parent's
+     *   explicit setting propagates to children.
+     * This prevents the compatibility bridge from overwriting a
+     * value explicitly set at any ancestor level.
+     */
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (stream_threshold_set) {
+        conf->stream.threshold_explicit = 1;
+    }
+#endif
 
     /*
      * Compatibility bridge: map v0.6.0 streaming.* values into stream.*
@@ -625,6 +643,26 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         && !conf->stream.shadow_explicit)
     {
         conf->stream.shadow = conf->streaming.shadow;
+    }
+
+    /*
+     * Compatibility bridge: map v0.6.0 streaming.auto_threshold
+     * into stream.threshold when the v0.8.0 directive was not
+     * explicitly set.  Without this, operators using the old
+     * markdown_streaming_auto_threshold 64k directive would see
+     * their setting ignored — runtime reads conf->stream.threshold
+     * which defaults to 1m, causing a compatibility regression.
+     *
+     * Condition: stream.threshold was not explicitly set at this
+     * level (nor inherited from a parent that explicitly set it)
+     * AND streaming.auto_threshold was configured.
+     *
+     * Priority: stream.threshold explicit > streaming.auto_threshold > default
+     */
+    if (conf->streaming.auto_threshold != NGX_CONF_UNSET_SIZE
+        && !conf->stream.threshold_explicit)
+    {
+        conf->stream.threshold = conf->streaming.auto_threshold;
     }
 #endif
 

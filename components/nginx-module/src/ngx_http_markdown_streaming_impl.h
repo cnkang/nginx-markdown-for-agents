@@ -688,9 +688,12 @@ common_checks:
             NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE);
     }
 
-    /* Rule 7: stream_types exclusion list */
+    /* Rule 7: stream_types exclusion list (legacy conf->stream_types)
+     * and v0.8.0 conf->stream.excluded_types + built-in hard exclusions */
     if (ngx_http_markdown_is_excluded_stream_type(
-            r, conf))
+            r, conf)
+        || ngx_http_markdown_stream_type_excluded(
+               &r->headers_out.content_type, conf))
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.selection.excluded_content_type_total);
@@ -1227,6 +1230,7 @@ ngx_http_markdown_streaming_resume_pending(
 {
     ngx_chain_t  *out;
     ngx_int_t     rc;
+    ngx_flag_t    pending_last_buf;
 
     out = ctx->streaming.pending_output;
     if (out == NULL) {
@@ -1246,6 +1250,13 @@ ngx_http_markdown_streaming_resume_pending(
     }
 
     ctx->streaming.pending_output = NULL;
+    /*
+     * Capture last_buf before calling the downstream filter: once
+     * the chain is consumed the buf metadata may be modified by
+     * downstream filters (defensive, per Rule 2/38).
+     */
+    pending_last_buf = (out->buf != NULL && out->buf->last_buf
+                        && r == r->main) ? 1 : 0;
     /*
      * Retry the exact buffered chain first; only after it drains do we
      * allow finalize() to emit a terminal empty last_buf.
@@ -1312,6 +1323,17 @@ ngx_http_markdown_streaming_resume_pending(
             (ngx_atomic_int_t) ctx->streaming.pending_output_bytes);
     }
     ctx->streaming.pending_output_bytes = 0;
+
+    /*
+     * If the drained pending chain carried a last_buf (closing
+     * bytes from safe_finish), mark main_terminal_sent now that
+     * delivery is confirmed.  This complements the fix in
+     * send_closing()/send_terminal() which defers the latch
+     * on NGX_AGAIN.
+     */
+    if ((rc == NGX_OK || rc == NGX_DONE) && pending_last_buf) {
+        ctx->streaming.main_terminal_sent = 1;
+    }
 
     /*
      * Pending output drained. Check if resume failed before
@@ -1561,10 +1583,22 @@ ngx_http_markdown_streaming_handle_postcommit_error(
      * Attempt safe_finish first: ask the Rust converter to
      * emit closing markers for open Markdown structures.
      * If safe_finish fails, fall through to abort.
+     *
+     * NGX_AGAIN is a legitimate pending state: closing bytes
+     * are saved to pending_output and will be drained by
+     * resume_pending(). Do NOT fall through to abort/terminal.
      */
     rc = ngx_http_markdown_stream_postcommit_safe_finish(r, ctx);
     if (rc == NGX_OK) {
         return NGX_OK;
+    }
+
+    if (rc == NGX_AGAIN) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown: post-commit safe_finish "
+            "returned NGX_AGAIN, closing bytes pending");
+        return NGX_AGAIN;
     }
 
     /* Safe-finish failed: abort the Rust handle and send terminal */
@@ -1793,6 +1827,10 @@ ngx_http_markdown_streaming_commit(
     ctx->streaming.commit_state =
         NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx->headers_forwarded = 1;
+
+    /* Sync spec37 stream_sm state machine with runtime commit */
+    ctx->stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx->stream_sm.headers_committed = 1;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
@@ -2709,10 +2747,13 @@ ngx_http_markdown_streaming_init_handle(
         }
     }
 
-    /* Initialize prebuffer for fallback */
+    /* Initialize prebuffer for fallback.
+     * Use conf->stream.precommit_buffer (not streaming budget):
+     * the two budgets have different semantics — precommit_buffer
+     * controls pre-commit buffering and fail-open replay, while
+     * budget controls the Rust streaming converter memory. */
     ctx->streaming.prebuffer_limit =
-        ngx_http_markdown_effective_streaming_budget(
-            ctx->effective_conf, conf);
+        conf->stream.precommit_buffer;
     rc = ngx_http_markdown_buffer_init(
         &ctx->streaming.prebuffer,
         ctx->streaming.prebuffer_limit,
@@ -2824,6 +2865,9 @@ ngx_http_markdown_streaming_init_handle(
             }
         }
     }
+
+    /* Sync spec37 stream_sm state machine: handle initialized → PRE_COMMIT */
+    ctx->stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,

@@ -316,6 +316,13 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1  /* fail-closed: return 502 error */
 
 /*
+ * Default streaming threshold for v0.8.0 stream.threshold field (1 MiB).
+ * Responses with Content-Length >= this threshold use streaming mode.
+ */
+#define NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT \
+    (1024 * 1024)
+
+/*
  * Default streaming budget for v0.8.0 stream.budget field.
  * Same value as NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT (2 MiB),
  * but available without MARKDOWN_STREAMING_ENABLED.
@@ -425,7 +432,7 @@ typedef enum {
  *
  * v0.8.0 streaming config defaults (spec 36):
  * - stream.engine: auto (1)
- * - stream.threshold: 1048576 (1m)
+ * - stream.threshold: NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT (1m)
  * - stream.precommit_buffer: 262144 (256k)
  * - stream.flush_min: 16384 (16k)
  * - stream.excluded_types: NULL
@@ -541,6 +548,7 @@ typedef struct {
     struct {
         ngx_uint_t    engine;              /* markdown_streaming_engine off|auto|on */
         size_t        threshold;           /* markdown_stream_threshold (default: 1m) */
+        ngx_flag_t    threshold_explicit;  /* 1 if operator set markdown_stream_threshold */
         size_t        precommit_buffer;    /* markdown_stream_precommit_buffer (default: 256k) */
         size_t        flush_min;           /* markdown_stream_flush_min (default: 16k) */
         ngx_array_t  *excluded_types;      /* markdown_stream_excluded_types (default: NULL) */
@@ -577,7 +585,9 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
 
     NGX_MD_MERGE_STREAM(engine, ngx_uint_t, -1,
                         NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO);
-    NGX_MD_MERGE_STREAM(threshold, size_t, -1, 1048576);
+    NGX_MD_MERGE_STREAM(threshold, size_t, -1,
+                        NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT);
+    NGX_MD_MERGE_STREAM(threshold_explicit, ngx_flag_t, -1, 0);
     NGX_MD_MERGE_STREAM(precommit_buffer, size_t, -1, 262144);
     NGX_MD_MERGE_STREAM(flush_min, size_t, -1, 16384);
 
