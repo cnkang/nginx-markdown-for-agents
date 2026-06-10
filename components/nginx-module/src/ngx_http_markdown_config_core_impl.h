@@ -292,6 +292,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->streaming.on_error = NGX_CONF_UNSET_UINT;
     conf->streaming.shadow = NGX_CONF_UNSET;
     conf->streaming.auto_threshold = NGX_CONF_UNSET_SIZE;
+    conf->streaming.auto_threshold_explicit = 0;
 #endif
 
     /* v0.8.0 streaming config (spec 36) */
@@ -501,7 +502,8 @@ ngx_http_markdown_merge_core_values(ngx_http_markdown_conf_t *conf,
  */
 static void
 ngx_http_markdown_merge_streaming_values(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev, ngx_flag_t streaming_budget_set)
+    const ngx_http_markdown_conf_t *prev, ngx_flag_t streaming_budget_set,
+    ngx_flag_t streaming_auto_threshold_set)
 {
     if (conf->streaming.engine == NULL) {
         conf->streaming.engine = prev->streaming.engine;
@@ -518,6 +520,8 @@ ngx_http_markdown_merge_streaming_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_size_value(conf->streaming.auto_threshold,
                               prev->streaming.auto_threshold,
                               NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT);
+    conf->streaming.auto_threshold_explicit = streaming_auto_threshold_set
+        || prev->streaming.auto_threshold_explicit;
 }
 #endif
 
@@ -573,6 +577,8 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 #ifdef MARKDOWN_STREAMING_ENABLED
     ngx_flag_t  streaming_budget_set =
         (conf->streaming.budget != NGX_CONF_UNSET_SIZE);
+    ngx_flag_t  streaming_auto_threshold_set =
+        (conf->streaming.auto_threshold != NGX_CONF_UNSET_SIZE);
     ngx_flag_t  stream_on_error_set =
         (conf->stream.on_error != NGX_CONF_UNSET_UINT);
     ngx_flag_t  stream_shadow_set =
@@ -584,7 +590,8 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_markdown_merge_core_values(conf, prev);
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-    ngx_http_markdown_merge_streaming_values(conf, prev, streaming_budget_set);
+    ngx_http_markdown_merge_streaming_values(conf, prev, streaming_budget_set,
+                                             streaming_auto_threshold_set);
 #endif
 
     /* v0.8.0 streaming config (spec 36) */
@@ -655,11 +662,12 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      *
      * Condition: stream.threshold was not explicitly set at this
      * level (nor inherited from a parent that explicitly set it)
-     * AND streaming.auto_threshold was configured.
+     * AND streaming.auto_threshold was EXPLICITLY configured by the
+     * operator (not just resolved to its legacy 32k default).
      *
-     * Priority: stream.threshold explicit > streaming.auto_threshold > default
+     * Priority: stream.threshold explicit > streaming.auto_threshold explicit > defaults
      */
-    if (conf->streaming.auto_threshold != NGX_CONF_UNSET_SIZE
+    if (conf->streaming.auto_threshold_explicit
         && !conf->stream.threshold_explicit)
     {
         conf->stream.threshold = conf->streaming.auto_threshold;

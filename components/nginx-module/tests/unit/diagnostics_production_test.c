@@ -43,6 +43,7 @@ typedef struct {
     ngx_uint_t                 on_error;
     ngx_flag_t                 shadow;
     size_t                     auto_threshold;
+    ngx_flag_t                 auto_threshold_explicit;
 } ngx_http_markdown_streaming_cfg_t;
 #endif
 

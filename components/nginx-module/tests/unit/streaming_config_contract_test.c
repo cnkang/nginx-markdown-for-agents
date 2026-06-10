@@ -1180,6 +1180,115 @@ test_hard_exclusions_with_parameters(void)
     TEST_PASS("5.7 Hard exclusions match with parameters and case");
 }
 
+
+/* ================================================================
+ * 5.8 Compatibility bridge: auto_threshold mapping
+ *
+ * Tests that the v0.6.0→v0.8.0 auto_threshold bridge only fires
+ * when the old directive was explicitly set, and does NOT overwrite
+ * the 0.8.0 default when nobody configured either directive.
+ * ================================================================ */
+static void
+test_auto_threshold_compatibility_bridge(void)
+{
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+
+    TEST_SUBSECTION("5.8 auto_threshold compatibility bridge");
+
+    /*
+     * Test 1: No directives set at all.
+     * stream.threshold must remain at the 0.8.0 default (1m).
+     * The legacy auto_threshold defaults to 32k via merge, but the
+     * bridge must NOT map it because auto_threshold_explicit is false.
+     */
+    init_conf(&parent);
+    init_conf(&child);
+
+    /* Simulate merge_streaming_values: auto_threshold resolves to default */
+    parent.streaming.auto_threshold =
+        NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT;
+    parent.streaming.auto_threshold_explicit = 0;
+    child.streaming.auto_threshold =
+        NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT;
+    child.streaming.auto_threshold_explicit = 0;
+
+    /* Simulate merge_stream_values: stream.threshold resolves to 1m default */
+    merge_stream_config(&child, &parent);
+
+    /* Bridge condition: auto_threshold_explicit is false → no mapping */
+    TEST_ASSERT(child.streaming.auto_threshold_explicit == 0,
+        "auto_threshold_explicit should be 0 when no one set it");
+    if (child.streaming.auto_threshold_explicit
+        && !child.stream.threshold_explicit)
+    {
+        child.stream.threshold = child.streaming.auto_threshold;
+    }
+
+    TEST_ASSERT(child.stream.threshold
+        == NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT,
+        "default threshold must remain 1m (1048576) when no "
+        "directive was explicitly set");
+
+    /*
+     * Test 2: Operator explicitly sets markdown_streaming_auto_threshold 64k.
+     * The bridge must map it to stream.threshold because the old
+     * directive was explicitly configured and no v0.8.0 directive
+     * overrides it.
+     */
+    init_conf(&parent);
+    init_conf(&child);
+
+    /* Simulate: operator set markdown_streaming_auto_threshold 64k */
+    parent.streaming.auto_threshold = 64 * 1024;
+    parent.streaming.auto_threshold_explicit = 1;
+    child.streaming.auto_threshold = 64 * 1024;
+    child.streaming.auto_threshold_explicit = 1;
+
+    /* stream.threshold not explicitly set → resolves to 1m default */
+    merge_stream_config(&child, &parent);
+
+    /* Bridge condition: auto_threshold_explicit is true → map */
+    if (child.streaming.auto_threshold_explicit
+        && !child.stream.threshold_explicit)
+    {
+        child.stream.threshold = child.streaming.auto_threshold;
+    }
+
+    TEST_ASSERT(child.stream.threshold == 64 * 1024,
+        "explicit streaming.auto_threshold 64k must map "
+        "to stream.threshold 64k");
+
+    /*
+     * Test 3: Both old and new directive set — new directive wins.
+     * Operator sets markdown_streaming_auto_threshold 64k AND
+     * markdown_stream_threshold 512k. The v0.8.0 directive wins.
+     */
+    init_conf(&parent);
+    init_conf(&child);
+
+    child.streaming.auto_threshold = 64 * 1024;
+    child.streaming.auto_threshold_explicit = 1;
+    child.stream.threshold = 512 * 1024;
+    child.stream.threshold_explicit = 1;
+
+    merge_stream_config(&child, &parent);
+
+    /* Bridge condition: threshold_explicit is true → no mapping */
+    if (child.streaming.auto_threshold_explicit
+        && !child.stream.threshold_explicit)
+    {
+        child.stream.threshold = child.streaming.auto_threshold;
+    }
+
+    TEST_ASSERT(child.stream.threshold == 512 * 1024,
+        "explicit stream.threshold must win over "
+        "streaming.auto_threshold");
+
+    TEST_PASS("5.8 auto_threshold compatibility bridge correct");
+}
+
+
 int
 main(void)
 {
@@ -1200,6 +1309,7 @@ main(void)
     test_hard_exclusions_always_present();
     test_reserved_directive_absent_from_inventory();
     test_hard_exclusions_with_parameters();
+    test_auto_threshold_compatibility_bridge();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
