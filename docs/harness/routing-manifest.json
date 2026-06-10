@@ -107,6 +107,12 @@
         "make check-headers"
       ]
     },
+    "v080-gates": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-gates-check-080"
+      ]
+    },
     "release-governance": {
       "phase": "focused-semantic",
       "commands": [
@@ -288,6 +294,7 @@
         "harness-sync",
         "docs-tooling",
         "v070-gates",
+        "v080-gates",
         "release-quality"
       ]
     },
@@ -361,6 +368,7 @@
         "tools/harness/detect_ffi_struct_init.sh",
         "tools/harness/detect_c_pure_logic.sh",
         "tools/harness/detect_volatile_atomic.sh",
+        "tools/harness/tests/**",
         "skills/nginx-markdown-harness-maintenance/scripts/**"
       ],
       "keywords": [
@@ -428,6 +436,7 @@
         "harness-sync",
         "docs-tooling",
         "release-governance",
+        "v080-gates",
         "release-quality"
       ]
     },
