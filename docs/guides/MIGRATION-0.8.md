@@ -120,6 +120,16 @@ Migrate to `markdown_memory_budget` at your convenience.
 the streaming path budget (see
 [CONFIGURATION.md](CONFIGURATION.md#markdown_streaming_budget)).
 
+### 6. FFI `MarkdownOptions` layout changed
+
+The Rust/C FFI `MarkdownOptions` struct now includes `flush_threshold`, which
+is populated from `markdown_stream_flush_min`.
+
+**Impact**: NGINX configuration compatibility is unchanged, but integrations
+that construct `MarkdownOptions` directly must rebuild against the 0.8.0
+headers and initialize `flush_threshold` explicitly. Use `0` to preserve the
+default immediate-flush behavior.
+
 ---
 
 ## New Directives

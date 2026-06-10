@@ -80,6 +80,10 @@ configuration directives.
   `markdown_streaming_auto_threshold` will be rejected by `nginx -t`.
 - **BREAKING**: Streaming engine now produces `Transfer-Encoding: chunked`
   output instead of `Content-Length` for streaming responses.
+- **BREAKING**: `MarkdownOptions` FFI layout now includes
+  `flush_threshold` for `markdown_stream_flush_min`. C and Rust integrations
+  that construct `MarkdownOptions` directly must rebuild against the 0.8.0
+  headers and initialize the new field.
 - Auto-mode streaming threshold default changed from 32 KB to 1 MB to align
   with the true streaming contract definition (ADR-0013).
 - `markdown_max_size` directive now emits an info-level deprecation warning
