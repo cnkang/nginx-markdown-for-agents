@@ -13,7 +13,7 @@ Exit codes:
     0  Validation passed or packaging/matrix.yaml absent (skipped)
     1  Validation failure (inconsistency detected)
 
-Part of spec 40: Release Matrix Source of Truth.
+Part of release matrix source of truth.
 """
 
 from __future__ import annotations

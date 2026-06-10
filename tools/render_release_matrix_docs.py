@@ -24,7 +24,7 @@ Exit codes:
 The authoritative matrix source is tools/release-matrix.json.
 Schema: tools/release-matrix.schema.json.
 
-Part of spec 40: Release Matrix Source of Truth.
+Part of release matrix source of truth.
 """
 
 
@@ -136,7 +136,7 @@ def normalize_entry(raw: dict[str, Any]) -> dict[str, Any]:
 def get_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Extract and normalize entries from the matrix data.
 
-    Reads from 'entries' array if present (spec-40 canonical format),
+    Reads from 'entries' array if present (release matrix canonical format),
     otherwise falls back to legacy 'matrix' array.
     """
     raw_entries: list[dict[str, Any]]
@@ -1270,7 +1270,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
         description="Generate/validate documentation sections from release-matrix.json.",
-        epilog="Part of spec 40: Release Matrix Source of Truth.",
+        epilog="Part of release matrix source of truth.",
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
