@@ -515,6 +515,7 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     /* v0.8.0 stream config fields */
     mcf->stream.engine = NGX_CONF_UNSET_UINT;
     mcf->stream.threshold = NGX_CONF_UNSET_SIZE;
+    mcf->stream.threshold_explicit = -1;
     mcf->stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
     mcf->stream.flush_min = NGX_CONF_UNSET_SIZE;
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;

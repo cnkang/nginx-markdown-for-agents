@@ -105,10 +105,38 @@ ngx_http_markdown_stream_postcommit_safe_finish(
     if (ctx->streaming.handle != NULL) {
         return ngx_http_markdown_stream_postcommit_finish_via_rust(r, ctx);
     }
+
+    /*
+     * No Rust handle: distinguish legitimate vs anomalous absence.
+     * Legitimate: handle was consumed by a prior finalize/safe_finish.
+     * Anomalous: headers committed but handle never created or already
+     * aborted — this suggests a logic error in the streaming path.
+     */
+    if (ctx->stream_sm.headers_committed
+        && !ctx->streaming.completion.failure_recorded)
+    {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown postcommit safe_finish: "
+                      "no Rust handle in COMMITTED state "
+                      "(possible logic error), "
+                      "falling back to empty terminal");
+    } else {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "markdown postcommit safe_finish: "
+                       "no Rust handle (legitimate, "
+                       "handle already consumed), "
+                       "sending empty terminal");
+    }
 #endif
 
     /* No Rust handle: send terminal chain (empty last_buf) */
     rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
+    if (rc == NGX_AGAIN) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "markdown postcommit safe_finish: "
+                       "terminal chain pending (NGX_AGAIN)");
+        return NGX_AGAIN;
+    }
     if (rc != NGX_OK && rc != NGX_DONE) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown postcommit safe_finish: "
@@ -415,7 +443,7 @@ ngx_http_markdown_stream_postcommit_send_terminal(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
 {
     ngx_buf_t    *b;
-    ngx_chain_t   out;
+    ngx_chain_t  *out;
     ngx_int_t     rc;
 
     if (ctx == NULL) {
@@ -437,12 +465,33 @@ ngx_http_markdown_stream_postcommit_send_terminal(
     b->last_in_chain = 1;
     b->sync = 1;
 
-    out.buf = b;
-    out.next = NULL;
+    out = ngx_alloc_chain_link(r->pool);
+    if (out == NULL) {
+        return NGX_ERROR;
+    }
 
-    rc = ngx_http_output_filter(r, &out);
+    out->buf = b;
+    out->next = NULL;
 
-    if (b->last_buf && (rc == NGX_OK || rc == NGX_DONE || rc == NGX_AGAIN)) {
+    rc = ngx_http_output_filter(r, out);
+
+    if (rc == NGX_AGAIN) {
+#ifdef MARKDOWN_STREAMING_ENABLED
+        if (ctx->streaming.pending_output != NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "markdown postcommit send_terminal: "
+                          "pending output re-entry detected");
+            return NGX_ERROR;
+        }
+
+        ctx->streaming.pending_output = out;
+        ctx->streaming.pending_has_data = 0;
+        ctx->streaming.pending_output_bytes = 0;
+        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+#endif
+    }
+
+    if (b->last_buf && (rc == NGX_OK || rc == NGX_DONE)) {
 #ifdef MARKDOWN_STREAMING_ENABLED
         ctx->streaming.main_terminal_sent = 1;
 #endif
@@ -515,7 +564,7 @@ ngx_http_markdown_stream_postcommit_send_closing(
 #endif
     }
 
-    if (b->last_buf && (rc == NGX_OK || rc == NGX_DONE || rc == NGX_AGAIN)) {
+    if (b->last_buf && (rc == NGX_OK || rc == NGX_DONE)) {
 #ifdef MARKDOWN_STREAMING_ENABLED
         ctx->streaming.main_terminal_sent = 1;
 #endif

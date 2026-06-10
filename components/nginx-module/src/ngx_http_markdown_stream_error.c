@@ -121,8 +121,15 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
          * Task 6.3: Post-commit + pass = safe_finish.
          * Attempt graceful Markdown closure via Rust finish-mode.
          * If safe_finish fails, fall back to abort.
+         *
+         * NGX_AGAIN is a legitimate pending state: closing bytes
+         * are saved to pending_output and will be drained by
+         * resume_pending(). Do NOT fall through to abort.
          */
         rc = ngx_http_markdown_stream_postcommit_safe_finish(r, ctx);
+        if (rc == NGX_AGAIN) {
+            return NGX_AGAIN;
+        }
         if (rc != NGX_OK) {
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                           "markdown stream on_error: "
