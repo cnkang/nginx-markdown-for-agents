@@ -747,8 +747,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             &r->headers_out.content_type,
             (r->headers_out.content_length_n >= 0) ? 1 : 0,
             (r->headers_out.content_length_n < 0) ? 1 : 0,
-            (conf->streaming.on_error
-             == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS)
+            (conf->stream.on_error
+             == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
                 ? "pass" : "reject");
 
         ngx_http_markdown_log_decision(
@@ -782,8 +782,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             &r->headers_out.content_type,
             (r->headers_out.content_length_n >= 0) ? 1 : 0,
             (r->headers_out.content_length_n < 0) ? 1 : 0,
-            (conf->streaming.on_error
-             == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS)
+            (conf->stream.on_error
+             == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
                 ? "pass" : "reject");
 
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
@@ -812,8 +812,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         &r->headers_out.content_type,
         (r->headers_out.content_length_n >= 0) ? 1 : 0,
         (r->headers_out.content_length_n < 0) ? 1 : 0,
-        (conf->streaming.on_error
-         == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS)
+        (conf->stream.on_error
+         == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
             ? "pass" : "reject");
 #endif /* MARKDOWN_STREAMING_ENABLED */
 

@@ -282,10 +282,10 @@ test_default_config_all_keys_present(void)
     conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
     conf.ops.trust_forwarded_headers = 0;
     conf.streaming.engine = NULL;
-    conf.streaming.budget = 2 * 1024 * 1024;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS;
-    conf.streaming.shadow = 0;
-    conf.streaming.auto_threshold = 32 * 1024;
+    conf.stream.budget = 2 * 1024 * 1024;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.stream.shadow = 0;
+    conf.stream.threshold = 32 * 1024;
 
     rc = ngx_http_markdown_dynconf_snapshot_to_json(&pool, &conf,
         &out_buf, &out_len);
@@ -447,10 +447,10 @@ test_custom_config_values_reflected(void)
     conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
     conf.ops.trust_forwarded_headers = 1;
     conf.streaming.engine = NULL;
-    conf.streaming.budget = 4 * 1024 * 1024;
-    conf.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
-    conf.streaming.shadow = 1;
-    conf.streaming.auto_threshold = 64 * 1024;
+    conf.stream.budget = 4 * 1024 * 1024;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.stream.shadow = 1;
+    conf.stream.threshold = 64 * 1024;
 
     rc = ngx_http_markdown_dynconf_snapshot_to_json(&pool, &conf,
         &out_buf, &out_len);

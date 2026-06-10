@@ -56,6 +56,7 @@ struct MarkdownOptions {
     uint8_t        chars_per_token_fixed;
     uint32_t       parse_timeout_ms;
     uint64_t       parser_memory_budget;
+    uint32_t       flush_threshold;
 };
 
 struct MarkdownResult {

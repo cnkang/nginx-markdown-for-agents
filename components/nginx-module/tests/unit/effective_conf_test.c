@@ -236,7 +236,7 @@ test_build_effective_conf_from_valid_snapshot(void)
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     conf.advanced.memory_budget = 4 * 1024 * 1024;
-    conf.streaming.budget = 2 * 1024 * 1024;
+    conf.stream.budget = 2 * 1024 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap, &conf);
 
@@ -275,7 +275,7 @@ test_build_effective_conf_null_snapshot_falls_back_to_conf(void)
     conf.advanced.prune_noise = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
     conf.advanced.memory_budget = 8 * 1024 * 1024;
-    conf.streaming.budget = 4 * 1024 * 1024;
+    conf.stream.budget = 4 * 1024 * 1024;
 
     ngx_http_markdown_build_effective_conf(&eff, NULL, &conf);
 
@@ -312,7 +312,7 @@ test_build_effective_conf_invalid_snapshot_falls_back(void)
     conf.enabled = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
     conf.advanced.memory_budget = 16 * 1024 * 1024;
-    conf.streaming.budget = 8 * 1024 * 1024;
+    conf.stream.budget = 8 * 1024 * 1024;
 
     snap.valid = 0;
 
@@ -343,7 +343,7 @@ test_effective_helpers_read_from_eff_when_present(void)
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
     conf.advanced.prune_noise = 0;
     conf.advanced.memory_budget = 1024;
-    conf.streaming.budget = 512;
+    conf.stream.budget = 512;
 
     eff.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     eff.prune_noise = 1;
@@ -389,7 +389,7 @@ test_effective_helpers_fall_back_when_eff_null(void)
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
     conf.advanced.prune_noise = 1;
     conf.advanced.memory_budget = 4096;
-    conf.streaming.budget = 2048;
+    conf.stream.budget = 2048;
 
     TEST_ASSERT(
         ngx_http_markdown_effective_log_verbosity(NULL, &conf)
@@ -432,7 +432,7 @@ test_request_snapshot_consistency_after_conf_change(void)
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     conf.advanced.memory_budget = 4 * 1024 * 1024;
-    conf.streaming.budget = 2 * 1024 * 1024;
+    conf.stream.budget = 2 * 1024 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap_at_request_start, &conf);
 
@@ -451,7 +451,7 @@ test_request_snapshot_consistency_after_conf_change(void)
     conf.advanced.prune_noise = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
     conf.advanced.memory_budget = 16 * 1024 * 1024;
-    conf.streaming.budget = 8 * 1024 * 1024;
+    conf.stream.budget = 8 * 1024 * 1024;
 
     TEST_ASSERT(eff.prune_noise == 1,
                 "after conf change: effective prune_noise still 1");
@@ -501,7 +501,7 @@ test_request_snapshot_consistency_with_dynconf_apply_snapshot(void)
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
     conf.advanced.memory_budget = 4 * 1024 * 1024;
-    conf.streaming.budget = 2 * 1024 * 1024;
+    conf.stream.budget = 2 * 1024 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap_at_request_start, &conf);
 
@@ -576,7 +576,7 @@ test_effective_helpers_edge_values(void)
 
     conf.policy.log_verbosity = 0;
     conf.advanced.memory_budget = 0;
-    conf.streaming.budget = 0;
+    conf.stream.budget = 0;
 
     eff.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     eff.memory_budget = SIZE_MAX;
@@ -700,7 +700,7 @@ test_bind_request_snapshot_preserves_captured_snapshot(void)
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
     conf.advanced.memory_budget = 4 * 1024 * 1024;
-    conf.streaming.budget = 2 * 1024 * 1024;
+    conf.stream.budget = 2 * 1024 * 1024;
     conf.advanced.dynconf_enabled = 1;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snap_a, &conf);
@@ -795,7 +795,7 @@ test_dynconf_snapshot_not_consumed_when_dynconf_disabled(void)
     conf.advanced.prune_noise = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_ERROR;
     conf.advanced.memory_budget = 1 * 1024 * 1024;
-    conf.streaming.budget = 512 * 1024;
+    conf.stream.budget = 512 * 1024;
     conf.advanced.dynconf_enabled = 0;
 
     /* Global snapshot has DIFFERENT values (from another location's reload) */

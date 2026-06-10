@@ -721,13 +721,15 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
     size_t       auto_threshold;
 
     engine_str = (conf != NULL && conf->streaming.engine != NULL)
-        ? "configured" : "auto";
+        ? "configured"
+        : ((conf != NULL && conf->stream.engine != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO)
+            ? "static" : "auto");
     on_error_str = (conf != NULL
-         && conf->streaming.on_error
-            == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT)
+         && conf->stream.on_error
+            == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
         ? "reject" : "pass";
     auto_threshold = (conf != NULL)
-        ? conf->streaming.auto_threshold : 0;
+        ? conf->stream.threshold : 0;
 
     p = ngx_slprintf(p, last,
         "  \"streaming_config\": {\n"

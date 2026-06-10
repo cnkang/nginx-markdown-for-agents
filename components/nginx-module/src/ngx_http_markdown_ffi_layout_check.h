@@ -37,7 +37,7 @@ _Static_assert(sizeof(size_t) == 8,
     "FFI layout checks require 64-bit size_t (LP64)");
 
 /* ----------------------------------------------------------------
- * MarkdownOptions layout (120 bytes on LP64).
+ * MarkdownOptions layout (128 bytes on LP64).
  *
  * Fields:
  *   flavor                         : u32           offset   0
@@ -63,10 +63,12 @@ _Static_assert(sizeof(size_t) == 8,
  *   (padding)                                      offset 106..107
  *   parse_timeout_ms               : u32           offset 108
  *   parser_memory_budget           : u64           offset 112
- * Total: 120 bytes, align 8
+ *   flush_threshold                 : u32           offset 120
+ *   (padding)                                      offset 124..127
+ * Total: 128 bytes, align 8
  * ---------------------------------------------------------------- */
-_Static_assert(sizeof(MarkdownOptions) == 120,
-    "MarkdownOptions size must match Rust (120 bytes on 64-bit)");
+_Static_assert(sizeof(MarkdownOptions) == 128,
+    "MarkdownOptions size must match Rust (128 bytes on 64-bit)");
 _Static_assert(offsetof(MarkdownOptions, flavor) == 0,
     "MarkdownOptions.flavor offset must be 0");
 _Static_assert(offsetof(MarkdownOptions, timeout_ms) == 4,
@@ -107,6 +109,8 @@ _Static_assert(offsetof(MarkdownOptions, parse_timeout_ms) == 108,
     "MarkdownOptions.parse_timeout_ms offset must be 108");
 _Static_assert(offsetof(MarkdownOptions, parser_memory_budget) == 112,
     "MarkdownOptions.parser_memory_budget offset must be 112");
+_Static_assert(offsetof(MarkdownOptions, flush_threshold) == 120,
+    "MarkdownOptions.flush_threshold offset must be 120");
 
 /* ----------------------------------------------------------------
  * MarkdownResult layout (64 bytes on LP64).

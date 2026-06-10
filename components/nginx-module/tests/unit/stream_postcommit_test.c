@@ -31,6 +31,17 @@
 #define ngx_log_debug0(level, log, err, fmt) \
     do { (void)(level); (void)(log); (void)(err); (void)(fmt); } while (0)
 
+#define ngx_log_debug1(level, log, err, fmt, a1) \
+    do { (void)(level); (void)(log); (void)(err); (void)(fmt); (void)(a1); } while (0)
+
+#ifndef POST_COMMIT_SAFE_FINISH
+#define POST_COMMIT_SAFE_FINISH 3
+#endif
+
+#ifndef POST_COMMIT_ABORT
+#define POST_COMMIT_ABORT 4
+#endif
+
 #ifndef NGX_CONF_UNSET
 #define NGX_CONF_UNSET (-1)
 #endif
@@ -57,6 +68,14 @@
 #ifndef ngx_strncasecmp
 #define ngx_strncasecmp(s1, s2, n) \
     strncasecmp((const char *) (s1), (const char *) (s2), (n))
+#endif
+
+#ifndef ngx_memcpy
+#define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
+#endif
+
+#ifndef NGX_HTTP_MARKDOWN_BUFFERED
+#define NGX_HTTP_MARKDOWN_BUFFERED 0x08
 #endif
 
 typedef intptr_t ngx_err_t;
@@ -95,6 +114,7 @@ struct ngx_http_request_s {
     ngx_pool_t             *pool;
     ngx_http_headers_out_t  headers_out;
     struct ngx_http_request_s *main;
+    ngx_uint_t              buffered;
 };
 
 /* Include the module header for types */
@@ -116,13 +136,17 @@ static ngx_http_request_t    test_request;
 /* Track output_filter calls */
 static int test_output_filter_called;
 static int test_output_filter_rc;
+static ngx_chain_t *test_output_filter_chain;
+static ngx_buf_t *test_output_filter_buf;
 
 /* Mock: ngx_http_output_filter (needed by postcommit) */
 ngx_int_t
 ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
-    UNUSED(r); UNUSED(in);
+    UNUSED(r);
     test_output_filter_called++;
+    test_output_filter_chain = in;
+    test_output_filter_buf = (in != NULL) ? in->buf : NULL;
     return test_output_filter_rc;
 }
 
@@ -130,6 +154,11 @@ ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
 static int test_calloc_buf_called;
 static ngx_buf_t *test_calloc_buf_result;
 static ngx_buf_t  test_calloc_buf_storage;
+static ngx_chain_t test_chain_link_storage;
+static u_char test_palloc_storage[256];
+static int test_palloc_called;
+static int test_palloc_fail;
+static size_t test_palloc_size;
 
 /* Mock: ngx_calloc_buf */
 ngx_buf_t *
@@ -144,12 +173,63 @@ ngx_calloc_buf(ngx_pool_t *pool)
     return &test_calloc_buf_storage;
 }
 
+void *
+ngx_palloc(ngx_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    test_palloc_called++;
+    test_palloc_size = size;
+    if (test_palloc_fail || size > sizeof(test_palloc_storage)) {
+        return NULL;
+    }
+    memset(test_palloc_storage, 0, sizeof(test_palloc_storage));
+    return test_palloc_storage;
+}
+
+ngx_chain_t *
+ngx_alloc_chain_link(ngx_pool_t *pool)
+{
+    UNUSED(pool);
+    memset(&test_chain_link_storage, 0, sizeof(test_chain_link_storage));
+    return &test_chain_link_storage;
+}
+
 /* Stub: ngx_log_error_core */
 void
 ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
                    ngx_err_t err, const char *fmt, ...)
 {
     UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);
+}
+
+/* Include markdown_converter.h first for FFI type declarations */
+#include "../../src/markdown_converter.h"
+
+static uint32_t test_safe_finish_rc;
+static u_char *test_safe_finish_data;
+static uintptr_t test_safe_finish_len;
+static int test_output_free_called;
+static u_char *test_output_free_data;
+static uintptr_t test_output_free_len;
+
+/* Stub: markdown_streaming_safe_finish */
+uint32_t
+markdown_streaming_safe_finish(struct StreamingConverterHandle *handle,
+    u_char **out_data, uintptr_t *out_len)
+{
+    UNUSED(handle);
+    if (out_data != NULL) *out_data = test_safe_finish_data;
+    if (out_len != NULL) *out_len = test_safe_finish_len;
+    return test_safe_finish_rc;
+}
+
+/* Stub: markdown_streaming_output_free */
+void
+markdown_streaming_output_free(u_char *data, uintptr_t len)
+{
+    test_output_free_called++;
+    test_output_free_data = data;
+    test_output_free_len = len;
 }
 
 /* Include the postcommit source (for guard function) */
@@ -169,9 +249,22 @@ static void test_setup(void)
     test_request.main = &test_request;
     test_output_filter_called = 0;
     test_output_filter_rc = NGX_OK;
+    test_output_filter_chain = NULL;
+    test_output_filter_buf = NULL;
     test_calloc_buf_called = 0;
     test_calloc_buf_result = NULL;
     memset(&test_calloc_buf_storage, 0, sizeof(test_calloc_buf_storage));
+    memset(&test_chain_link_storage, 0, sizeof(test_chain_link_storage));
+    memset(test_palloc_storage, 0, sizeof(test_palloc_storage));
+    test_palloc_called = 0;
+    test_palloc_fail = 0;
+    test_palloc_size = 0;
+    test_safe_finish_rc = POST_COMMIT_ABORT;
+    test_safe_finish_data = NULL;
+    test_safe_finish_len = 0;
+    test_output_free_called = 0;
+    test_output_free_data = NULL;
+    test_output_free_len = 0;
 }
 
 
@@ -384,6 +477,87 @@ static void test_guard_fails_html_tag(void)
     TEST_PASS("Guard fails for content starting with <html");
 }
 
+static void test_guard_fails_leading_whitespace_doctype(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_buf_t buf;
+    ngx_chain_t chain;
+    ngx_int_t rc;
+    u_char data[] = " \r\n\t<!doctype html><html></html>";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    memset(&buf, 0, sizeof(buf));
+    buf.pos = data;
+    buf.last = data + sizeof(data) - 1;
+    buf.memory = 1;
+    chain.buf = &buf;
+    chain.next = NULL;
+
+    rc = ngx_http_markdown_stream_postcommit_guard(
+        &test_request, &ctx, &chain);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "guard fails for whitespace-prefixed doctype");
+    TEST_PASS("Guard detects whitespace-prefixed doctype");
+}
+
+static void test_guard_fails_bom_prefixed_html(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_buf_t buf;
+    ngx_chain_t chain;
+    ngx_int_t rc;
+    u_char data[] = "\xef\xbb\xbf<html><body>Hi</body></html>";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    memset(&buf, 0, sizeof(buf));
+    buf.pos = data;
+    buf.last = data + sizeof(data) - 1;
+    buf.memory = 1;
+    chain.buf = &buf;
+    chain.next = NULL;
+
+    rc = ngx_http_markdown_stream_postcommit_guard(
+        &test_request, &ctx, &chain);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "guard fails for BOM-prefixed html tag");
+    TEST_PASS("Guard detects BOM-prefixed html");
+}
+
+static void test_guard_fails_meta_prefix(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_buf_t buf;
+    ngx_chain_t chain;
+    ngx_int_t rc;
+    u_char data[] = "<meta charset=\"utf-8\"><html></html>";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    memset(&buf, 0, sizeof(buf));
+    buf.pos = data;
+    buf.last = data + sizeof(data) - 1;
+    buf.memory = 1;
+    chain.buf = &buf;
+    chain.next = NULL;
+
+    rc = ngx_http_markdown_stream_postcommit_guard(
+        &test_request, &ctx, &chain);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "guard fails for meta-prefixed HTML");
+    TEST_PASS("Guard detects meta-prefixed HTML");
+}
+
 static void test_guard_passes_non_committed_state(void)
 {
     ngx_http_markdown_ctx_t ctx;
@@ -455,6 +629,109 @@ static void test_safe_finish_happy_path(void)
     TEST_PASS("safe_finish happy path");
 }
 
+static void test_safe_finish_empty_rust_output_sends_terminal(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0x1;
+    test_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "empty Rust safe_finish output should succeed");
+    TEST_ASSERT(test_output_filter_called == 1,
+                "empty safe_finish should send terminal chain");
+    TEST_ASSERT(test_output_filter_buf != NULL
+                && test_output_filter_buf->last_buf == 1,
+                "empty safe_finish terminal should set last_buf");
+    TEST_ASSERT(test_output_free_called == 0,
+                "empty safe_finish should not free a NULL output");
+    TEST_ASSERT(ctx.streaming.handle == NULL,
+                "safe_finish consumes the streaming handle");
+    TEST_PASS("safe_finish empty Rust output sends terminal");
+}
+
+static void test_safe_finish_copies_rust_output_before_free(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+    u_char closing[] = "\n```";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0x1;
+    test_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
+    test_safe_finish_data = closing;
+    test_safe_finish_len = sizeof(closing) - 1;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "non-empty Rust safe_finish output should succeed");
+    TEST_ASSERT(test_output_filter_buf != NULL,
+                "closing bytes should be sent");
+    TEST_ASSERT(test_output_filter_buf->pos != closing,
+                "closing bytes should be copied to pool memory");
+    TEST_ASSERT(test_palloc_called == 1,
+                "pool allocation should be used for closing bytes");
+    TEST_ASSERT(test_palloc_size == sizeof(closing) - 1,
+                "pool allocation size should match closing length");
+    TEST_ASSERT(memcmp(test_output_filter_buf->pos, closing,
+                       sizeof(closing) - 1) == 0,
+                "pool copy should preserve closing bytes");
+    TEST_ASSERT(test_output_free_called == 1,
+                "Rust output should be freed exactly once");
+    TEST_ASSERT(test_output_free_data == closing,
+                "Rust free should use original output pointer");
+    TEST_ASSERT(test_output_free_len == sizeof(closing) - 1,
+                "Rust free should use original output length");
+    TEST_PASS("safe_finish copies Rust output before free");
+}
+
+static void test_safe_finish_backpressure_preserves_pending_chain(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+    u_char closing[] = "\n```";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0x1;
+    test_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
+    test_safe_finish_data = closing;
+    test_safe_finish_len = sizeof(closing) - 1;
+    test_output_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "closing-byte backpressure should return NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_output == test_output_filter_chain,
+                "pending chain should be the pool-owned output chain");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 1,
+                "pending chain should be marked as data-bearing");
+    TEST_ASSERT(ctx.streaming.pending_output_bytes == sizeof(closing) - 1,
+                "pending byte count should match closing length");
+    TEST_ASSERT((test_request.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
+                "request should be marked buffered on backpressure");
+    TEST_ASSERT(test_output_free_called == 1,
+                "Rust output should still be freed after pool copy");
+    TEST_PASS("safe_finish backpressure preserves pending chain");
+}
+
 static void test_safe_finish_idempotent_reentry(void)
 {
     ngx_http_markdown_ctx_t ctx;
@@ -473,6 +750,28 @@ static void test_safe_finish_idempotent_reentry(void)
                 == NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH,
                 "state stays POST_COMMIT_SAFE_FINISH");
     TEST_PASS("safe_finish idempotent re-entry");
+}
+
+static void test_safe_finish_then_abort_does_not_double_send(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+    TEST_ASSERT(rc == NGX_OK, "safe_finish should succeed");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
+                "safe_finish should latch terminal send");
+
+    rc = ngx_http_markdown_stream_postcommit_abort(&test_request, &ctx);
+    TEST_ASSERT(rc == NGX_OK, "abort after safe_finish should be OK");
+    TEST_ASSERT(test_output_filter_called == 1,
+                "abort after safe_finish should not send second terminal");
+    TEST_PASS("safe_finish followed by abort is terminal-idempotent");
 }
 
 static void test_safe_finish_invalid_state(void)
@@ -839,6 +1138,9 @@ int main(void)
     test_guard_passes_non_html();
     test_guard_fails_doctype();
     test_guard_fails_html_tag();
+    test_guard_fails_leading_whitespace_doctype();
+    test_guard_fails_bom_prefixed_html();
+    test_guard_fails_meta_prefix();
     test_guard_passes_non_committed_state();
     test_guard_null_params();
     test_guard_multi_buffer_chain();
@@ -848,7 +1150,11 @@ int main(void)
 
     TEST_SECTION("Post-commit safe_finish (Task 5.1)");
     test_safe_finish_happy_path();
+    test_safe_finish_empty_rust_output_sends_terminal();
+    test_safe_finish_copies_rust_output_before_free();
+    test_safe_finish_backpressure_preserves_pending_chain();
     test_safe_finish_idempotent_reentry();
+    test_safe_finish_then_abort_does_not_double_send();
     test_safe_finish_invalid_state();
     test_safe_finish_null_params();
     test_safe_finish_send_terminal_fails();

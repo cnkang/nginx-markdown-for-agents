@@ -12,39 +12,50 @@
  * Design constraint (Component 5):
  *   C must NOT synthesize Markdown closure for Rust-owned
  *   parser/emitter state.  Safe-finish delegates to the Rust
- *   converter finish-mode API (stubbed until spec 38).
+ *   converter finish-mode API (markdown_streaming_safe_finish).
  */
 
 #include "ngx_http_markdown_stream_postcommit.h"
+#ifdef MARKDOWN_STREAMING_ENABLED
+#include "markdown_converter.h"
+#endif
 
 
 /* Function prototypes */
 
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_send_terminal(
-    ngx_http_request_t *r);
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
+
+static ngx_int_t
+ngx_http_markdown_stream_postcommit_send_closing(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const u_char *data, size_t len);
+
+static ngx_flag_t
+ngx_http_markdown_stream_postcommit_has_html_signature(
+    const u_char *data, size_t len);
+
+static ngx_flag_t
+ngx_http_markdown_stream_postcommit_tag_boundary(u_char ch);
+
+static ngx_flag_t
+ngx_http_markdown_stream_postcommit_space(u_char ch);
 
 
 /*
  * Task 5.1: Request Rust finish-mode API to close known Markdown
  * structures.
  *
- * Current implementation is a stub because the Rust streaming
- * converter (spec 38) does not exist yet.  The function:
- *   1. Validates that state is COMMITTED or POST_COMMIT_SAFE_FINISH
- *   2. Logs intent at debug level
- *   3. Transitions state to POST_COMMIT_SAFE_FINISH
- *   4. Sends a last_buf=1 terminal chain to close the response
- *   5. Logs the event with phase=postcommit
- *
- * When spec 38 wires the Rust API, this stub will call the Rust
- * finish-mode function before sending the terminal chain.  If
- * Rust returns an error, this function returns NGX_ERROR and the
- * caller follows the abort path.
+ * Calls markdown_streaming_safe_finish to emit closing markers for
+ * any open Markdown structures (lists, blockquotes, code blocks, etc.).
+ * If safe_finish succeeds, the closing bytes are sent downstream
+ * before the terminal chain.  If safe_finish fails (or the handle
+ * is NULL), returns NGX_ERROR so the caller follows the abort path.
  *
  * Returns:
- *   NGX_OK    - Safe-finish completed, response closed
- *   NGX_ERROR - Precondition failure or send error
+ *   NGX_OK    - Safe-finish completed, response closed gracefully
+ *   NGX_ERROR - Precondition failure, safe-finish failed, or send error
  */
 ngx_int_t
 ngx_http_markdown_stream_postcommit_safe_finish(
@@ -80,18 +91,84 @@ ngx_http_markdown_stream_postcommit_safe_finish(
     /* Transition to POST_COMMIT_SAFE_FINISH */
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH;
 
+#ifdef MARKDOWN_STREAMING_ENABLED
     /*
-     * Spec 38 follow-up: call the Rust finish-mode API here to
-     * emit closing markers for open Markdown structures.  If the
-     * Rust converter handle is NULL or returns error, return
-     * NGX_ERROR so the caller falls through to abort.
-     *
-     * For now, just send the terminal chain (empty last_buf).
+     * Call the Rust finish-mode API to emit closing markers for
+     * open Markdown structures.  If the Rust converter handle is
+     * NULL or returns POST_COMMIT_ABORT, return NGX_ERROR so
+     * the caller follows the abort path.
      */
+    if (ctx->streaming.handle != NULL) {
+        u_char    *close_data = NULL;
+        size_t     close_len = 0;
+        uint32_t   finish_rc;
 
-    /* Send terminal chain to close the response */
-    rc = ngx_http_markdown_stream_postcommit_send_terminal(r);
-    if (rc != NGX_OK) {
+        finish_rc = markdown_streaming_safe_finish(
+            ctx->streaming.handle,
+            &close_data, &close_len);
+
+        /* Handle is consumed by safe_finish regardless of outcome */
+        ctx->streaming.handle = NULL;
+
+        if (finish_rc == POST_COMMIT_SAFE_FINISH) {
+            if (close_data != NULL && close_len > 0) {
+                rc = ngx_http_markdown_stream_postcommit_send_closing(
+                    r, ctx, close_data, close_len);
+
+                markdown_streaming_output_free(close_data, close_len);
+
+                if (rc == NGX_AGAIN) {
+                    return NGX_AGAIN;
+                }
+
+                if (rc != NGX_OK && rc != NGX_DONE) {
+                    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                                  "markdown postcommit safe_finish: "
+                                  "failed to send closing bytes (rc=%i)",
+                                  rc);
+                    return NGX_ERROR;
+                }
+
+                ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                               "markdown postcommit safe_finish: "
+                               "sent %uz closing bytes", close_len);
+                return NGX_OK;
+            }
+
+            rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
+            if (rc != NGX_OK && rc != NGX_DONE) {
+                ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                              "markdown postcommit safe_finish: "
+                              "failed to send terminal chain");
+                return NGX_ERROR;
+            }
+
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                           "markdown postcommit safe_finish: "
+                           "no closing bytes required");
+            return NGX_OK;
+        }
+
+        if (finish_rc == POST_COMMIT_ABORT) {
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                          "markdown postcommit safe_finish: "
+                          "Rust could not safely close structures, "
+                          "falling through to abort");
+            return NGX_ERROR;
+        }
+
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "markdown postcommit safe_finish: "
+                      "unexpected return code %ui from Rust, "
+                      "falling through to abort",
+                      (ngx_uint_t) finish_rc);
+        return NGX_ERROR;
+    }
+#endif
+
+    /* No Rust handle: send terminal chain (empty last_buf) */
+    rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
+    if (rc != NGX_OK && rc != NGX_DONE) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown postcommit safe_finish: "
                       "failed to send terminal chain");
@@ -168,8 +245,8 @@ ngx_http_markdown_stream_postcommit_abort(
      * Send terminal chain to close the response.
      * No content bytes are sent — just the empty last_buf marker.
      */
-    rc = ngx_http_markdown_stream_postcommit_send_terminal(r);
-    if (rc != NGX_OK) {
+    rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
+    if (rc != NGX_OK && rc != NGX_DONE) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown postcommit abort: "
                       "failed to send terminal chain");
@@ -210,9 +287,6 @@ ngx_http_markdown_stream_postcommit_guard(
 {
     ngx_buf_t    *buf;
     size_t        len;
-    u_char       *p;
-    u_char        doctype[] = "DOCTYPE";
-    u_char        html_tag[] = "html";
 
     if (r == NULL || ctx == NULL) {
         return NGX_ERROR;
@@ -235,13 +309,11 @@ ngx_http_markdown_stream_postcommit_guard(
     /*
      * Scan chain buffers for HTML signatures.
      *
-     * We look for common HTML indicators at the start of buffer
-     * content:
+     * We look for common HTML indicators in the leading prefix of each
+     * buffer after skipping an optional UTF-8 BOM and whitespace:
      *   - "<!DOCTYPE" (case-insensitive start)
      *   - "<html" tag
-     *
-     * This is a lightweight heuristic.  The full body filter
-     * integration (spec 38+) will provide complete detection.
+     *   - "<meta" tag
      */
     for (ngx_chain_t *cl = chain; cl != NULL; cl = cl->next) {
         buf = cl->buf;
@@ -255,31 +327,12 @@ ngx_http_markdown_stream_postcommit_guard(
             continue;
         }
 
-        p = buf->pos;
-
-        /*
-         * Check for HTML signatures.  Only inspect first bytes
-         * of each buffer for performance (HTML content typically
-         * starts at the beginning of a response or chunk).
-         */
-        if (len >= 9
-            && p[0] == '<'
-            && (p[1] == '!' || p[1] == '?')
-            && ngx_strncasecmp(p + 2, doctype, 7) == 0)
+        if (ngx_http_markdown_stream_postcommit_has_html_signature(
+                buf->pos, len))
         {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                           "markdown postcommit guard: "
-                          "HTML DOCTYPE detected post-commit");
-            return NGX_ERROR;
-        }
-
-        if (len >= 5
-            && p[0] == '<'
-            && ngx_strncasecmp(p + 1, html_tag, 4) == 0)
-        {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                          "markdown postcommit guard: "
-                          "HTML tag detected post-commit");
+                          "HTML signature detected post-commit");
             return NGX_ERROR;
         }
     }
@@ -332,10 +385,19 @@ ngx_http_markdown_stream_postcommit_log(
  */
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_send_terminal(
-    ngx_http_request_t *r)
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
 {
     ngx_buf_t    *b;
     ngx_chain_t   out;
+    ngx_int_t     rc;
+
+    if (ctx == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (r == r->main && ctx->streaming.main_terminal_sent) {
+        return NGX_OK;
+    }
 
     b = ngx_calloc_buf(r->pool);
     if (b == NULL) {
@@ -349,5 +411,156 @@ ngx_http_markdown_stream_postcommit_send_terminal(
     out.buf = b;
     out.next = NULL;
 
-    return ngx_http_output_filter(r, &out);
+    rc = ngx_http_output_filter(r, &out);
+
+    if (b->last_buf && (rc == NGX_OK || rc == NGX_DONE || rc == NGX_AGAIN)) {
+        ctx->streaming.main_terminal_sent = 1;
+    }
+
+    return rc;
+}
+
+
+/*
+ * Send Rust safe-finish closing bytes as a pool-owned terminal chain.
+ *
+ * Rust owns `data`; this helper copies it before sending so NGINX can retain
+ * the output chain after the FFI buffer is released.
+ */
+static ngx_int_t
+ngx_http_markdown_stream_postcommit_send_closing(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const u_char *data, size_t len)
+{
+    ngx_buf_t    *b;
+    ngx_chain_t  *out;
+    ngx_int_t     rc;
+
+    if (r == r->main && ctx->streaming.main_terminal_sent) {
+        return NGX_OK;
+    }
+
+    b = ngx_calloc_buf(r->pool);
+    if (b == NULL) {
+        return NGX_ERROR;
+    }
+
+    b->pos = ngx_palloc(r->pool, len);
+    if (b->pos == NULL) {
+        return NGX_ERROR;
+    }
+
+    ngx_memcpy(b->pos, data, len);
+    b->last = b->pos + len;
+    b->memory = 1;
+    b->last_buf = (r == r->main) ? 1 : 0;
+    b->last_in_chain = 1;
+
+    out = ngx_alloc_chain_link(r->pool);
+    if (out == NULL) {
+        return NGX_ERROR;
+    }
+
+    out->buf = b;
+    out->next = NULL;
+
+    rc = ngx_http_output_filter(r, out);
+
+    if (rc == NGX_AGAIN) {
+        if (ctx->streaming.pending_output != NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "markdown postcommit safe_finish: "
+                          "pending output re-entry detected");
+            return NGX_ERROR;
+        }
+
+        ctx->streaming.pending_output = out;
+        ctx->streaming.pending_has_data = 1;
+        ctx->streaming.pending_output_bytes = len;
+        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+    }
+
+    if (b->last_buf && (rc == NGX_OK || rc == NGX_DONE || rc == NGX_AGAIN)) {
+        ctx->streaming.main_terminal_sent = 1;
+    }
+
+    return rc;
+}
+
+
+static ngx_flag_t
+ngx_http_markdown_stream_postcommit_has_html_signature(
+    const u_char *data, size_t len)
+{
+    const u_char  *p;
+    const u_char  *last;
+    const u_char  *scan_last;
+    static u_char  doctype[] = { 'D', 'O', 'C', 'T', 'Y', 'P', 'E' };
+    static u_char  html_tag[] = { 'h', 't', 'm', 'l' };
+    static u_char  meta_tag[] = { 'm', 'e', 't', 'a' };
+
+    if (data == NULL || len == 0) {
+        return 0;
+    }
+
+    p = data;
+    last = data + len;
+    scan_last = data + ((len < 256) ? len : 256);
+
+    if ((size_t) (last - p) >= 3
+        && p[0] == 0xef && p[1] == 0xbb && p[2] == 0xbf)
+    {
+        p += 3;
+    }
+
+    while (p < scan_last && ngx_http_markdown_stream_postcommit_space(*p)) {
+        p++;
+    }
+
+    for ( ; p < scan_last; p++) {
+        if (*p != '<') {
+            continue;
+        }
+
+        if ((size_t) (last - p) >= 9
+            && p[1] == '!'
+            && ngx_strncasecmp((u_char *) p + 2, doctype, 7) == 0)
+        {
+            return 1;
+        }
+
+        if ((size_t) (last - p) >= 5
+            && ngx_strncasecmp((u_char *) p + 1, html_tag, 4) == 0
+            && ((size_t) (last - p) == 5
+                || ngx_http_markdown_stream_postcommit_tag_boundary(p[5])))
+        {
+            return 1;
+        }
+
+        if ((size_t) (last - p) >= 5
+            && ngx_strncasecmp((u_char *) p + 1, meta_tag, 4) == 0
+            && ((size_t) (last - p) == 5
+                || ngx_http_markdown_stream_postcommit_tag_boundary(p[5])))
+        {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+
+static ngx_flag_t
+ngx_http_markdown_stream_postcommit_tag_boundary(u_char ch)
+{
+    return ch == '>' || ch == '/'
+           || ngx_http_markdown_stream_postcommit_space(ch);
+}
+
+
+static ngx_flag_t
+ngx_http_markdown_stream_postcommit_space(u_char ch)
+{
+    return ch == ' ' || ch == '\t' || ch == '\n'
+           || ch == '\r' || ch == '\f';
 }

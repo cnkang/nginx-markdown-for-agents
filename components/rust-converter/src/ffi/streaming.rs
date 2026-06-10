@@ -304,6 +304,9 @@ fn markdown_streaming_new_impl(
     if decoded.parser_memory_budget > 0 {
         converter.set_parser_budget(decoded.parser_memory_budget);
     }
+    if opts_ref.flush_threshold > 0 {
+        converter.set_flush_threshold(opts_ref.flush_threshold as usize);
+    }
 
     Ok(Box::into_raw(Box::new(StreamingConverterHandle {
         inner: converter,
@@ -922,6 +925,7 @@ mod tests {
             chars_per_token_fixed: 0,
             parse_timeout_ms: 0,
             parser_memory_budget: 0,
+            flush_threshold: 0,
         }
     }
 

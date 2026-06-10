@@ -223,6 +223,12 @@ pub struct MarkdownOptions {
     /// `ERROR_PARSE_BUDGET_EXCEEDED`.
     /// Populated from the `markdown_parser_budget` NGINX directive.
     pub parser_memory_budget: u64,
+    /// Streaming flush threshold in bytes (0 = flush immediately).
+    ///
+    /// Controls the minimum number of accumulated output bytes before
+    /// the streaming emitter returns non-empty output to the C caller.
+    /// Populated from the `markdown_stream_flush_min` NGINX directive.
+    pub flush_threshold: u32,
 }
 
 /// Conversion result returned from Rust to C.
@@ -464,7 +470,7 @@ mod layout_tests {
     fn test_markdown_options_layout() {
         use std::mem::{align_of, offset_of, size_of};
 
-        assert_eq!(size_of::<MarkdownOptions>(), 120);
+        assert_eq!(size_of::<MarkdownOptions>(), 128);
         assert_eq!(align_of::<MarkdownOptions>(), 8);
 
         assert_eq!(offset_of!(MarkdownOptions, flavor), 0);
@@ -490,6 +496,7 @@ mod layout_tests {
         assert_eq!(offset_of!(MarkdownOptions, chars_per_token_fixed), 105);
         assert_eq!(offset_of!(MarkdownOptions, parse_timeout_ms), 108);
         assert_eq!(offset_of!(MarkdownOptions, parser_memory_budget), 112);
+        assert_eq!(offset_of!(MarkdownOptions, flush_threshold), 120);
     }
 
     #[test]
