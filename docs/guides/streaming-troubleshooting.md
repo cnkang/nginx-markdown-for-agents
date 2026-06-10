@@ -300,7 +300,7 @@ Markdown now get HTTP 500 (or 502/503) error responses.  The
 The streaming engine encountered a pre-commit error, but the error policy is
 set to `reject` instead of the default `pass`:
 
-```
+```text
 markdown_streaming_on_error reject;
 ```
 
@@ -359,7 +359,7 @@ grep -E 'reason="?precommit.*action="?reject' /var/log/nginx/error.log | tail -2
 
 Example log line:
 
-```
+```text
 2026/06/04 14:32:17 [error] 1234#0: *567 markdown streaming: pre-commit error,
   reason="precommit_html_error", action="reject", uri="/api/docs/complex-page",
   category="STREAMING_PRECOMMIT_REJECT", client: 10.0.1.50, server: api.example.com
@@ -444,7 +444,7 @@ curl -s -H 'Accept: application/json' http://localhost/markdown-metrics > /tmp/m
 Use this tree when streaming errors occur in production.  Follow the first
 matching branch.
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    STREAMING ERROR DETECTED                          │
 └────────────────────────────────┬────────────────────────────────────┘

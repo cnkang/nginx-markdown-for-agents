@@ -935,7 +935,7 @@ in the current release. They are **not registered** in the module command table.
 > **RESERVED — Not implemented in v0.8.0**
 >
 > Using this directive in any configuration context will cause:
-> ```
+> ```text
 > nginx: [emerg] unknown directive "markdown_stream_flush_interval"
 > nginx -t: configuration file test failed
 > ```
