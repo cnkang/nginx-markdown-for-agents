@@ -1126,10 +1126,25 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     ngx_uint_t auth_cookie_count = (conf->policy.auth_cookies != NULL) ? conf->policy.auth_cookies->nelts : 0;
     ngx_uint_t stream_type_count = (conf->stream_types != NULL) ? conf->stream_types->nelts : 0;
     ngx_uint_t content_type_count = (conf->content_types != NULL) ? conf->content_types->nelts : 0;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    const char *streaming_engine_str;
+#endif
 
     if (cf == NULL) {
         return;
     }
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (conf->streaming.engine != NULL) {
+        streaming_engine_str = "configured (v0.6 compat)";
+    } else if (conf->stream.engine
+               != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO)
+    {
+        streaming_engine_str = "static (v0.8)";
+    } else {
+        streaming_engine_str = "auto (default)";
+    }
+#endif
 
     log_level = ngx_http_markdown_log_verbosity_to_ngx_level(conf->policy.log_verbosity);
 
@@ -1179,10 +1194,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                         , (ngx_int_t) conf->ops.metrics_per_path
                         , (ngx_int_t) conf->ops.otel_enabled
 #ifdef MARKDOWN_STREAMING_ENABLED
-                        , conf->streaming.engine != NULL
-                            ? "configured (v0.6 compat)"
-                            : (conf->stream.engine != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO
-                               ? "static (v0.8)" : "auto (default)")
+                        , streaming_engine_str
                         , conf->stream.budget
                         , ngx_http_markdown_on_error_name(
                               conf->stream.on_error)
