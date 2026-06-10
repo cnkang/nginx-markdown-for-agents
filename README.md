@@ -345,7 +345,7 @@ make test-e2e
 make test-rust-fuzz-smoke
 ```
 
-`make test-nginx-integration` and `make test-e2e` require a real `nginx` runtime. If `nginx` is not on `PATH`, use `NGINX_BIN=/absolute/path/to/nginx`.
+`make test-nginx-integration`, `make test-e2e`, and `make verify-chunked-native-e2e-smoke` require a real `nginx` runtime. If `nginx` is not on `PATH`, set `NGINX_BIN=/absolute/path/to/nginx` so that these commands can find the nginx binary.
 
 See [docs/testing/README.md](docs/testing/README.md) and [docs/testing/E2E_TESTS.md](docs/testing/E2E_TESTS.md) for integration, E2E, and performance-oriented test references.
 
