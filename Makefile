@@ -562,6 +562,9 @@ release-gates-check-080:
 	python3 tools/release/gates/validate_config_directives_070.py
 	python3 tools/release/gates/validate_metrics_070.py
 	python3 tools/release/gates/validate_reason_codes_070.py
+	python3 tools/release/gates/validate_package_metadata_070.py
+	python3 tools/release/gates/validate_k8s_manifests_070.py
+	python3 tools/release/gates/validate_fuzz_packaging_070.py
 	@echo "  [15/15] harness boundary: routing-manifest.json + risk-packs (Req 9)"
 	@test -f docs/harness/routing-manifest.json || { echo "FAIL: docs/harness/routing-manifest.json not found — release gates require repo-owned harness sources" >&2; exit 1; }
 	@test -d docs/harness/risk-packs || { echo "FAIL: docs/harness/risk-packs/ not found — release gates require repo-owned risk-pack inputs" >&2; exit 1; }
