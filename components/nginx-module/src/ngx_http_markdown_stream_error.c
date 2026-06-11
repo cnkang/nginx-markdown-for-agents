@@ -68,8 +68,11 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
 
     /*
      * Derive within_resource_limits from actual replay buffer state.
-     * If the replay buffer has overflowed (size > capacity) or was
-     * never initialized when expected, resource limits are exceeded.
+     * If the replay buffer has overflowed (size > capacity), resource
+     * limits are exceeded.  When replay is disabled (capacity == 0,
+     * replay_initialized == 0), the buffer intentionally remains
+     * uninitialized and is not an error condition -- the replay
+     * module sets replay_initialized = 0 for this case.
      * This ensures the decision engine receives truthful context if
      * resource-limit-sensitive events are ever routed through this
      * handler in the future.
