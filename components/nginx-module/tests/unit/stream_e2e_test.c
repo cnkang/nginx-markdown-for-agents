@@ -204,9 +204,15 @@ ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
     mock_output_filter_chain = in;
 
     /* Capture the data content for post-commit HTML detection */
-    if (in != NULL && in->buf != NULL) {
+    if (in != NULL && in->buf != NULL
+        && in->buf->pos != NULL && in->buf->last != NULL
+        && in->buf->pos <= in->buf->last)
+    {
         mock_output_data = in->buf->pos;
         mock_output_data_len = (size_t)(in->buf->last - in->buf->pos);
+    } else {
+        mock_output_data = NULL;
+        mock_output_data_len = 0;
     }
 
     return mock_output_filter_rc;
@@ -304,6 +310,9 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
 static uint32_t e2e_safe_finish_rc;
 static u_char  *e2e_safe_finish_data;
 static uintptr_t e2e_safe_finish_len;
+
+/* Dummy opaque handle for postcommit tests (struct is Rust-side opaque) */
+static char e2e_dummy_handle_storage[64];
 
 uint32_t
 markdown_streaming_safe_finish(struct StreamingConverterHandle *handle,
@@ -423,6 +432,10 @@ e2e_init_context_committed(ngx_http_markdown_ctx_t *ctx,
 
     /* Configuration: streaming on_error policy (0.8.0 model) */
     conf->stream.on_error = on_error_policy;
+
+    /* Assign non-NULL dummy handle so the FFI finish path is exercised */
+    ctx->streaming.handle =
+        (struct StreamingConverterHandle *) e2e_dummy_handle_storage;
 }
 
 
