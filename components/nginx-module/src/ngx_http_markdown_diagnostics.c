@@ -717,19 +717,42 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
 {
 #ifdef MARKDOWN_STREAMING_ENABLED
     const char  *engine_str;
+    const char  *engine_source_str;
     const char  *on_error_str;
     size_t       threshold;
     size_t       precommit_buffer;
     size_t       flush_min;
 
+    /*
+     * engine: the actual resolved engine mode (off/auto/on).
+     * engine_source: how the engine value was determined
+     *   (default/configured/dynamic).
+     */
     if (conf != NULL && conf->streaming.engine != NULL) {
-        engine_str = "configured";
+        engine_source_str = "dynamic";
+        /* Dynamic engine: resolve from complex value at runtime;
+         * report the static fallback here since we lack request context */
+        if (conf->stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF) {
+            engine_str = "off";
+        } else if (conf->stream.engine
+                   == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON)
+        {
+            engine_str = "on";
+        } else {
+            engine_str = "auto";
+        }
     } else if (conf != NULL
                && conf->stream.engine
                   != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO)
     {
-        engine_str = "static";
+        engine_source_str = "configured";
+        if (conf->stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF) {
+            engine_str = "off";
+        } else {
+            engine_str = "on";
+        }
     } else {
+        engine_source_str = "default";
         engine_str = "auto";
     }
 
@@ -747,13 +770,14 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
     p = ngx_slprintf(p, last,
         "  \"streaming_config\": {\n"
         "    \"engine\": \"%s\",\n"
+        "    \"engine_source\": \"%s\",\n"
         "    \"on_error\": \"%s\",\n"
         "    \"threshold\": %uz,\n"
         "    \"precommit_buffer\": %uz,\n"
         "    \"flush_min\": %uz,\n"
         "    \"auto_threshold\": %uz\n"
         "  }\n",
-        engine_str, on_error_str, threshold,
+        engine_str, engine_source_str, on_error_str, threshold,
         precommit_buffer, flush_min,
         threshold);
 #else

@@ -1,11 +1,16 @@
 /*
  * Streaming Fallback State Machine — Error Handler Integration
  *
- * Wires the markdown_on_error configuration directive into the
+ * Wires the markdown_streaming_on_error configuration directive into the
  * streaming state machine.  This is the main entry point called by
  * the body filter when a streaming error occurs.  It uses the
  * decision engine to determine the correct action, then executes
  * that action using the replay, commit, and post-commit modules.
+ *
+ * Policy distinction (0.8.0+):
+ *   markdown_on_error        — controls legacy/full-buffer fallback
+ *   markdown_streaming_on_error — controls streaming pre-commit fallback
+ *   post-commit fallback never returns HTML (safe_finish or abort only)
  *
  * Task 6.1: Pre-commit + pass = replay HTML
  * Task 6.2: Pre-commit + reject = 502
