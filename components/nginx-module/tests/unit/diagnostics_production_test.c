@@ -298,7 +298,9 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     return NGX_OK;
 }
 
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF   0
 #define NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO  1
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON    2
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1
 
 #define NGX_HTTP_MARKDOWN_FILTER_MODULE_H
@@ -516,6 +518,9 @@ test_access_and_json_builder(void)
                 "JSON should include metrics");
     TEST_ASSERT(strstr(json, "\"dynconf_state\"") != NULL,
                 "JSON should include dynconf state");
+    TEST_ASSERT(strstr(json,
+                "\"legacy_auto_threshold_explicit\": false") != NULL,
+                "JSON should expose legacy threshold bridge state");
     TEST_ASSERT(strstr(json, "\"reason_code\": 11") != NULL,
                 "JSON should include recorded reason");
 

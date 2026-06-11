@@ -112,12 +112,16 @@ endpoint includes streaming sections:
     "threshold": 1048576,
     "precommit_buffer": 262144,
     "flush_min": 16384,
-    "auto_threshold": 1048576
+    "auto_threshold": 1048576,
+    "legacy_auto_threshold_explicit": false
   }
 }
 ```
 
-`auto_threshold` is a deprecated alias for `threshold`, included for backward compatibility.
+`auto_threshold` is a deprecated alias for `threshold`, included for backward
+compatibility. `legacy_auto_threshold_explicit: false` means the threshold came
+from the v0.8 `markdown_stream_threshold` default, not from the legacy
+`markdown_streaming_auto_threshold` bridge.
 
 ### streaming_metrics
 
