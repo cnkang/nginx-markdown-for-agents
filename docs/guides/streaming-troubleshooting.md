@@ -107,8 +107,8 @@ Look for the `streaming` section showing current configuration state.
 
 ### Symptom
 
-Streaming is engaged (candidates incrementing) but
-`streaming_fallback_total` is growing.  Clients still get correct Markdown
+Streaming is engaged but JSON `streaming.fallback_total` or Prometheus
+`nginx_markdown_streaming_fallback_total` is growing.  Clients still get correct Markdown
 (no truncation), but via the full-buffer path instead of streaming.
 
 ### Likely Cause
@@ -180,7 +180,8 @@ the parser cannot handle in the bounded pre-commit window.
 
 ### Symptom
 
-`streaming_failure_total` is incrementing.  Clients may report incomplete
+JSON `streaming.postcommit_error_total` or Prometheus
+`nginx_markdown_streaming_failure_total` is incrementing.  Clients may report incomplete
 Markdown responses.  Logs show `postcommit_*` reason codes.
 
 ### What Happened
@@ -228,8 +229,9 @@ curl -s -H 'Accept: application/json' http://localhost/markdown-metrics | \
   python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-selected = d.get('true_streaming_selected_total', 0)
-failed = d.get('streaming_failure_total', 0)
+streaming = d.get('streaming', {})
+selected = streaming.get('requests_total', 0)
+failed = streaming.get('postcommit_error_total', 0)
 rate = (failed / selected * 100) if selected > 0 else 0
 print(f'Post-commit failure rate: {rate:.4f}% ({failed}/{selected})')
 if rate > 0.01:
@@ -283,7 +285,7 @@ for the full disable procedure.
 > - Testing in staging with realistic HTML before enabling streaming in production
 > - Using `auto` mode with a conservative `markdown_stream_threshold` (e.g., `2m`)
 > - Setting `markdown_parser_budget` high enough for your largest known documents
-> - Monitoring `streaming_failure_total` with a zero-tolerance alert (any non-zero → page)
+> - Monitoring `nginx_markdown_streaming_failure_total` with a zero-tolerance alert (any non-zero → page)
 
 ---
 
@@ -293,7 +295,9 @@ for the full disable procedure.
 
 After enabling streaming, clients that previously received HTML or full-buffer
 Markdown now get HTTP 500 (or 502/503) error responses.  The
-`streaming_precommit_reject_total` metric is incrementing.
+JSON `streaming.precommit_reject_total` or Prometheus
+`nginx_markdown_streaming_fallback_total{phase="precommit",action="reject"}`
+metric is incrementing.
 
 ### What Happened
 
@@ -344,8 +348,9 @@ for code in ['precommit_html_error', 'precommit_budget', 'precommit_timeout']:
     fallback_key = f'streaming_reason_{code}'
     val = d.get(reject_key, d.get(fallback_key, 'not found'))
     print(f'{code}: {val}')
-total_reject = d.get('streaming_precommit_reject_total', 0)
-total_fallback = d.get('streaming_fallback_total', 0)
+streaming = d.get('streaming', {})
+total_reject = streaming.get('precommit_reject_total', 0)
+total_fallback = streaming.get('fallback_total', 0)
 print(f'\\nTotal pre-commit rejects: {total_reject}')
 print(f'Total pre-commit fallbacks: {total_fallback}')
 "
@@ -400,7 +405,7 @@ curl -s -H 'Accept: application/json' http://localhost/markdown-metrics | \
   python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-print(f'Reject count: {d.get(\"streaming_precommit_reject_total\", 0)}')
+print(f'Reject count: {d.get(\"streaming\", {}).get(\"precommit_reject_total\", 0)}')
 "
 # Value should stop incrementing
 ```
@@ -417,11 +422,12 @@ Escalate if **any** of the following are true:
    ```bash
    curl -s -H 'Accept: application/json' http://localhost/markdown-metrics | \
      python3 -c "
-   import sys, json
-   d = json.load(sys.stdin)
-   print(f'Full-buffer failures: {d.get(\"conversion_failed_total\", 0)}')
-   print(f'Streaming failures:   {d.get(\"streaming_failure_total\", 0)}')
-   "
+    import sys, json
+    d = json.load(sys.stdin)
+    streaming = d.get(\"streaming\", {})
+    print(f'Full-buffer failures: {d.get(\"conversions_failed\", 0)}')
+    print(f'Streaming failures:   {streaming.get(\"postcommit_error_total\", 0)}')
+    "
    ```
    If both are incrementing, the issue is broader than the streaming engine.
 
@@ -510,7 +516,7 @@ curl -s -H 'Accept: application/json' http://localhost/markdown-metrics | \
   python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-failures = d.get('streaming_failure_total', 0)
+failures = d.get('streaming', {}).get('postcommit_error_total', 0)
 print(f'Post-commit failures (should stop growing): {failures}')
 "
 ```
@@ -572,17 +578,16 @@ curl -s -H 'Accept: application/json' http://localhost/markdown-metrics | \
   python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-print(f'Candidates evaluated:  {d.get(\"streaming_candidate_total\", 0)}')
-print(f'Streaming selected:    {d.get(\"true_streaming_selected_total\", 0)}')
-print(f'Full-buffer selected:  {d.get(\"engine_choice_full_buffer\", 0)}')
-print(f'Streaming succeeded:   {d.get(\"streaming_succeeded_total\", 0)}')
-print(f'Streaming fallbacks:   {d.get(\"streaming_fallback_total\", 0)}')
-print(f'Streaming failures:    {d.get(\"streaming_failure_total\", 0)}')
-print(f'Output bytes (stream): {d.get(\"streaming_output_bytes_total\", 0)}')
+streaming = d.get(\"streaming\", {})
+print(f'Streaming path hits:   {d.get(\"streaming_path_hits\", 0)}')
+print(f'Streaming selected:    {streaming.get(\"requests_total\", 0)}')
+print(f'Streaming succeeded:   {streaming.get(\"succeeded_total\", 0)}')
+print(f'Streaming fallbacks:   {streaming.get(\"fallback_total\", 0)}')
+print(f'Streaming failures:    {streaming.get(\"postcommit_error_total\", 0)}')
 "
 ```
 
-If `true_streaming_selected_total` > 0 and growing, streaming is engaged.
+If JSON `streaming.requests_total` > 0 and growing, streaming is engaged.
 
 **Step 2 — Inspect logs for streaming decisions:**
 
@@ -622,12 +627,12 @@ curl -s -H 'Accept: text/plain; version=0.0.4' \
 
 ### What "Working" Looks Like
 
-- `streaming_candidate_total` incrementing with eligible traffic
-- `true_streaming_selected_total` > 0 and growing
-- `streaming_succeeded_total` growing (requests completing via streaming)
-- `streaming_fallback_total` low (< 5% of candidates)
-- `streaming_failure_total` zero or near-zero
-- `streaming_output_bytes_total` growing (streaming is producing output)
+- JSON `streaming.requests_total` > 0 and growing
+- JSON `streaming.succeeded_total` growing (requests completing via streaming)
+- JSON `streaming.fallback_total` low (< 5% of streaming requests)
+- JSON `streaming.postcommit_error_total` zero or near-zero
+- diagnostics `streaming_metrics.output_bytes_total` growing when inspecting
+  `/nginx-markdown/diagnostics`
 
 ---
 
@@ -667,13 +672,13 @@ nginx -t && nginx -s reload
 ```bash
 # Record current value
 curl -s -H 'Accept: application/json' http://localhost/markdown-metrics | \
-  python3 -c "import sys,json; print(json.load(sys.stdin).get('true_streaming_selected_total', 0))"
+  python3 -c "import sys,json; print(json.load(sys.stdin).get('streaming', {}).get('requests_total', 0))"
 
 # Wait 30 seconds, then check again — value should not increase
 sleep 30
 
 curl -s -H 'Accept: application/json' http://localhost/markdown-metrics | \
-  python3 -c "import sys,json; print(json.load(sys.stdin).get('true_streaming_selected_total', 0))"
+  python3 -c "import sys,json; print(json.load(sys.stdin).get('streaming', {}).get('requests_total', 0))"
 ```
 
 ### Additional Options
@@ -841,26 +846,26 @@ curl -s -H 'Accept: application/json' http://localhost/markdown-metrics
 
 ```json
 {
-  "requests_total": 45230,
-  "conversions_total": 38150,
-  "passthrough_total": 7080,
+  "conversions_attempted": 38150,
+  "conversions_succeeded": 38147,
+  "conversions_failed": 0,
+  "conversions_bypassed": 7080,
   "failopen_total": 3,
-  "input_bytes_total": 1547832000,
-  "output_bytes_total": 489210000,
+  "input_bytes": 1547832000,
+  "output_bytes": 489210000,
   "streaming": {
-    "candidate_total": 12450,
-    "true_streaming_selected_total": 11200,
+    "requests_total": 11200,
+    "fallback_total": 250,
     "succeeded_total": 11195,
     "failed_total": 0,
-    "fallback_total": 250,
-    "output_bytes_total": 312500000,
-    "engine_choice_streaming": 11200,
-    "engine_choice_full_buffer": 1250,
-    "engine_choice_passthrough": 0,
-    "fallback_precommit_pass": 250,
-    "fallback_precommit_reject": 0,
-    "failure_postcommit_abort": 0,
-    "failure_postcommit_safe_finish": 0
+    "postcommit_error_total": 0,
+    "precommit_failopen_total": 250,
+    "precommit_reject_total": 0,
+    "budget_exceeded_total": 0,
+    "shadow_total": 0,
+    "shadow_diff_total": 0,
+    "last_ttfb_ms": 45,
+    "last_peak_memory_bytes": 524288
   },
   "delivery_total": 38147,
   "decision_total": 45230
@@ -871,9 +876,9 @@ curl -s -H 'Accept: application/json' http://localhost/markdown-metrics
 
 | Metric | Value | Assessment |
 |--------|-------|------------|
-| `streaming.failed_total` | 0 | No post-commit failures |
-| `streaming.fallback_total` / `streaming.candidate_total` | 250 / 12450 = 2.0% | Below 5% threshold — healthy |
-| `streaming.succeeded_total` / `streaming.true_streaming_selected_total` | 11195 / 11200 = 99.96% | Excellent success rate |
+| `streaming.postcommit_error_total` | 0 | No post-commit failures |
+| `streaming.fallback_total` / `streaming.requests_total` | 250 / 11200 = 2.2% | Below 5% threshold — healthy |
+| `streaming.succeeded_total` / `streaming.requests_total` | 11195 / 11200 = 99.96% | Excellent success rate |
 | `delivery_total` ≈ `conversions_total` | 38147 ≈ 38150 | Deliveries match decisions (no backpressure gap) |
 | `failopen_total` | 3 | Near-zero fail-opens |
 
@@ -887,26 +892,26 @@ This shows what an unhealthy streaming deployment looks like.
 
 ```json
 {
-  "requests_total": 45230,
-  "conversions_total": 38150,
-  "passthrough_total": 7080,
+  "conversions_attempted": 38150,
+  "conversions_succeeded": 38100,
+  "conversions_failed": 50,
+  "conversions_bypassed": 7080,
   "failopen_total": 47,
-  "input_bytes_total": 1547832000,
-  "output_bytes_total": 489210000,
+  "input_bytes": 1547832000,
+  "output_bytes": 489210000,
   "streaming": {
-    "candidate_total": 12450,
-    "true_streaming_selected_total": 8100,
+    "requests_total": 8100,
+    "fallback_total": 4350,
     "succeeded_total": 8050,
     "failed_total": 12,
-    "fallback_total": 4350,
-    "output_bytes_total": 198000000,
-    "engine_choice_streaming": 8100,
-    "engine_choice_full_buffer": 4350,
-    "engine_choice_passthrough": 0,
-    "fallback_precommit_pass": 4320,
-    "fallback_precommit_reject": 30,
-    "failure_postcommit_abort": 10,
-    "failure_postcommit_safe_finish": 2
+    "postcommit_error_total": 12,
+    "precommit_failopen_total": 4320,
+    "precommit_reject_total": 30,
+    "budget_exceeded_total": 75,
+    "shadow_total": 0,
+    "shadow_diff_total": 0,
+    "last_ttfb_ms": 80,
+    "last_peak_memory_bytes": 1048576
   },
   "delivery_total": 38100,
   "decision_total": 45230
@@ -917,9 +922,9 @@ This shows what an unhealthy streaming deployment looks like.
 
 | Metric | Value | Assessment |
 |--------|-------|------------|
-| `streaming.fallback_total` / `streaming.candidate_total` | 4350 / 12450 = **34.9%** | Far above 5% threshold — streaming ineffective |
+| `streaming.fallback_total` / `streaming.requests_total` | 4350 / 8100 = **53.7%** | Far above 5% threshold — streaming ineffective |
 | `streaming.failed_total` | **12** | Post-commit failures occurring — clients see truncation |
-| `streaming.failure_postcommit_abort` | **10** | 10 aborted connections |
+| `streaming.postcommit_error_total` | **12** | Post-commit failures occurring |
 | `streaming.fallback_precommit_reject` | **30** | 30 clients received error responses |
 | `delivery_total` vs `conversions_total` | 38100 vs 38150 | 50 delivery gaps (possible backpressure) |
 
@@ -1024,6 +1029,7 @@ Example output (streaming-relevant sections):
   "streaming_config": {
     "engine": "auto",
     "on_error": "pass",
+    "threshold": 1048576,
     "auto_threshold": 1048576,
     "precommit_buffer": 262144,
     "flush_min": 4096,
@@ -1031,7 +1037,6 @@ Example output (streaming-relevant sections):
   },
   "streaming_metrics": {
     "candidate_total": 12450,
-    "true_streaming_selected_total": 11200,
     "succeeded_total": 11195,
     "failed_total": 0,
     "fallback_total": 250,
@@ -1085,7 +1090,8 @@ Example output (streaming-relevant sections):
 | Section | What It Tells You |
 |---------|-------------------|
 | `streaming_config` | Current runtime configuration (engine mode, thresholds, excluded types) |
-| `streaming_config.auto_threshold` | Responses must exceed this size (bytes) for streaming in `auto` mode |
+| `streaming_config.threshold` | Responses must exceed this size (bytes) for streaming in `auto` mode |
+| `streaming_config.auto_threshold` | Legacy alias for `streaming_config.threshold` |
 | `streaming_config.on_error` | What happens on errors: `pass` (serve HTML) or `reject` (return error) |
 | `streaming_metrics` | Cumulative counters since last NGINX start |
 | `streaming_metrics.ttfb_last_seconds` | Time-to-first-byte of the most recent streaming request |

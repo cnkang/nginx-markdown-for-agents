@@ -116,14 +116,15 @@ location / {
 curl -s -H 'Accept: application/json' \
   http://localhost/markdown-metrics | \
   python3 -c "import sys,json; d=json.load(sys.stdin); \
-  print(f\"candidates={d.get('streaming_candidate_total',0)}\"); \
-  print(f\"selected={d.get('true_streaming_selected_total',0)}\")"
+  s=d.get('streaming',{}); \
+  print(f\"requests={s.get('requests_total',0)}\"); \
+  print(f\"succeeded={s.get('succeeded_total',0)}\")"
 
 # Check for fallbacks
 curl -s -H 'Accept: application/json' \
   http://localhost/markdown-metrics | \
   python3 -c "import sys,json; d=json.load(sys.stdin); \
-  print(f\"fallback={d.get('streaming_fallback_total',0)}\")"
+  print(f\"fallback={d.get('streaming',{}).get('fallback_total',0)}\")"
 ```
 
 **Decision thresholds**:
@@ -320,7 +321,7 @@ groups:
           summary: "Streaming fallback rate exceeds 5%"
           description: >-
             Check reason codes in info-level logs.
-            Consider adjusting auto_threshold or investigating HTML issues.
+            Consider adjusting markdown_stream_threshold or investigating HTML issues.
 
       - alert: StreamingPostCommitFailures
         expr: |
@@ -420,7 +421,7 @@ requests are not streaming or why fallbacks occur.
 ### What "Healthy" Looks Like Per Rollout Phase
 
 **Phase 0 (Shadow Mode)**:
-- `streaming_candidate_total` incrementing steadily
+- `nginx_markdown_streaming_candidate_total` incrementing steadily
 - Shadow diff rate ≤ 0.1%
 - No error-level streaming log entries
 - Engine choice metrics show candidates being evaluated
@@ -486,7 +487,7 @@ http {
 sleep 30
 curl -s -H 'Accept: application/json' http://localhost/markdown-metrics | \
   python3 -c "import sys,json; d=json.load(sys.stdin); \
-  print(f\"selected={d.get('true_streaming_selected_total',0)}\")"
+  print(f\"selected={d.get('streaming',{}).get('requests_total',0)}\")"
 
 # Run again after another 30 seconds — value should not increase
 ```
@@ -511,8 +512,8 @@ the appropriate operator action.
 
 | Observed Signal | Severity | Operator Action |
 |----------------|----------|-----------------|
-| `streaming_fallback_total` rising, `streaming_failure_total` stable | Low | Monitor; fallbacks are safe |
-| `streaming_failure_total` rising | High | `markdown_streaming_engine off` for affected locations |
+| `nginx_markdown_streaming_fallback_total` rising, `nginx_markdown_streaming_failure_total` stable | Low | Monitor; fallbacks are safe |
+| `nginx_markdown_streaming_failure_total` rising | High | `markdown_streaming_engine off` for affected locations |
 | Post-commit failures in logs (`postcommit_parse_error`, `postcommit_budget_exceeded`, `postcommit_io_error`) | Critical | `markdown_streaming_engine off` globally |
 | `excluded_content_type_total` unexpectedly high | Info | Review `markdown_stream_excluded_types` configuration |
 | Memory usage exceeds expectations | Medium | Reduce `markdown_stream_threshold` or lower budget |
@@ -554,9 +555,9 @@ the appropriate operator action.
 ## Safety Guarantees
 
 - **No silent fallback**: Every streaming-to-fullbuffer fallback is recorded in
-  the decision log and metrics (`streaming_fallback_total`).
+  the decision log and metrics (`nginx_markdown_streaming_fallback_total`).
 - **No silent truncation**: Every post-commit error increments
-  `streaming_failure_total` and logs a reason code.
+  `nginx_markdown_streaming_failure_total` and logs a reason code.
 - **Bounded memory**: The streaming engine enforces memory budgets at every
   phase.  Budget exhaustion triggers the configured error policy.
 - **Graceful degradation**: Setting `markdown_streaming_engine off` instantly

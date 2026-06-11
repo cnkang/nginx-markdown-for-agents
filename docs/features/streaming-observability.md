@@ -56,7 +56,7 @@ versions; removal requires a major version bump.
 |------|--------|-------------|-------------|
 | 0 | `eligible` | streaming | Request eligible for true streaming |
 | 1 | `content_length_known` | full_buffer | Content-Length present, below threshold |
-| 2 | `below_threshold` | full_buffer | Response size below auto_threshold |
+| 2 | `below_threshold` | full_buffer | Response size below `markdown_stream_threshold` |
 | 3 | `config_disabled` | full_buffer | Streaming disabled by configuration |
 | 4 | `excluded_content_type` | passthrough | Excluded by stream_types list |
 | 5 | `not_html` | passthrough | Response is not HTML |
@@ -109,6 +109,7 @@ endpoint includes streaming sections:
   "streaming_config": {
     "engine": "auto",
     "on_error": "pass",
+    "threshold": 65536,
     "auto_threshold": 65536
   }
 }
@@ -137,7 +138,8 @@ endpoint includes streaming sections:
 
 ### High fallback rate
 
-If `streaming_fallback_total` is high relative to `streaming_candidate_total`:
+If `nginx_markdown_streaming_fallback_total` is high relative to
+`nginx_markdown_streaming_candidate_total`:
 
 1. Check `reason` field in info-level logs for common patterns.
 2. Common causes: malformed HTML, exceeded budgets, excluded content types.
@@ -146,7 +148,7 @@ If `streaming_fallback_total` is high relative to `streaming_candidate_total`:
 
 ### Post-commit failures
 
-If `streaming_failure_total{phase="postcommit"}` is non-zero:
+If `nginx_markdown_streaming_failure_total{phase="postcommit"}` is non-zero:
 
 1. These are non-recoverable — headers were already sent.
 2. Check error-level logs for `reason` field.
@@ -155,8 +157,9 @@ If `streaming_failure_total{phase="postcommit"}` is non-zero:
 
 ### No streaming selections
 
-If `engine_choice_streaming` is 0 while `streaming_candidate_total` > 0:
+If `nginx_markdown_streaming_engine_choice_total{engine="streaming"}` is 0
+while `nginx_markdown_streaming_candidate_total` > 0:
 
 1. Check if `markdown_streaming_engine` is set to `on` or `auto`.
-2. Verify `auto_threshold` is smaller than typical response sizes.
+2. Verify `markdown_stream_threshold` is smaller than typical response sizes.
 3. Check for Content-Encoding headers (compressed responses force full-buffer).
