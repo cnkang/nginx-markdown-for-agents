@@ -171,27 +171,40 @@ ngx_http_markdown_check_size_limit(const ngx_http_request_t *r,
 {
     off_t  content_length;
     size_t body_limit;
-    
+
     content_length = r->headers_out.content_length_n;
-    
+
     if (content_length < 0) {
+        return 1;
+    }
+
+    /*
+     * markdown_max_size 0 means unlimited — preserve backward-compatible
+     * semantics where a zero value disables the size check entirely.
+     */
+    if (conf->max_size == 0) {
         return 1;
     }
 
     body_limit = conf->max_size;
 
+    /*
+     * If the effective memory budget is set (non-zero, non-sentinel)
+     * and is stricter than max_size, use it as the body limit.
+     * A zero memory_budget also means unlimited (no constraint).
+     */
     if (eff != NULL
         && eff->memory_budget != 0
         && eff->memory_budget != (size_t) -1
-        && eff->memory_budget < conf->max_size)
+        && eff->memory_budget < body_limit)
     {
         body_limit = eff->memory_budget;
     }
-    
-    if ((size_t)content_length > body_limit) {
+
+    if ((size_t) content_length > body_limit) {
         return 0;
     }
-    
+
     return 1;
 }
 

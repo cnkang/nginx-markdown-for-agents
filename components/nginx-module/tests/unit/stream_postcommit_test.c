@@ -1129,6 +1129,146 @@ static void test_guard_case_insensitive_doctype(void)
 }
 
 
+/*
+ * Regression test: safe_finish success + close_len == 0 +
+ * send_terminal returns NGX_AGAIN.
+ *
+ * Validates that the terminal-only branch in finish_via_rust()
+ * preserves NGX_AGAIN (backpressure) instead of converting it
+ * to NGX_ERROR.  Without this fix, downstream backpressure on
+ * the terminal buffer would incorrectly trigger the abort path.
+ */
+static void test_safe_finish_no_closing_bytes_backpressure(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0x1;
+
+    /* Rust safe_finish succeeds with no closing bytes */
+    test_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
+    test_safe_finish_data = NULL;
+    test_safe_finish_len = 0;
+
+    /* Downstream returns NGX_AGAIN on terminal chain */
+    test_output_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "no-closing-bytes + terminal NGX_AGAIN "
+                "should propagate NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_output != NULL,
+                "pending_output should be set on backpressure");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+                "pending_has_data should be 0 (terminal only)");
+    TEST_ASSERT(
+        (test_request.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
+        "request should be marked buffered");
+    TEST_ASSERT(ctx.streaming.handle == NULL,
+                "handle should be consumed regardless");
+    TEST_PASS("safe_finish no-closing-bytes backpressure preserved");
+}
+
+
+/*
+ * Guard test: detect <body tag (extended signatures in 0.8.0+).
+ */
+static void test_guard_fails_body_tag(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_buf_t buf;
+    ngx_chain_t chain;
+    ngx_int_t rc;
+    u_char data[] = "<body class=\"main\">Content</body>";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    memset(&buf, 0, sizeof(buf));
+    buf.pos = data;
+    buf.last = data + sizeof(data) - 1;
+    buf.memory = 1;
+    chain.buf = &buf;
+    chain.next = NULL;
+
+    rc = ngx_http_markdown_stream_postcommit_guard(
+        &test_request, &ctx, &chain);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "guard detects <body tag");
+    TEST_PASS("Guard detects <body> tag");
+}
+
+
+/*
+ * Guard test: detect <script tag (extended signatures in 0.8.0+).
+ */
+static void test_guard_fails_script_tag(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_buf_t buf;
+    ngx_chain_t chain;
+    ngx_int_t rc;
+    u_char data[] = "<script>alert('xss')</script>";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    memset(&buf, 0, sizeof(buf));
+    buf.pos = data;
+    buf.last = data + sizeof(data) - 1;
+    buf.memory = 1;
+    chain.buf = &buf;
+    chain.next = NULL;
+
+    rc = ngx_http_markdown_stream_postcommit_guard(
+        &test_request, &ctx, &chain);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "guard detects <script tag");
+    TEST_PASS("Guard detects <script> tag");
+}
+
+
+/*
+ * Guard test: detect <!-- HTML comment (extended signatures in 0.8.0+).
+ */
+static void test_guard_fails_html_comment(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_buf_t buf;
+    ngx_chain_t chain;
+    ngx_int_t rc;
+    u_char data[] = "<!-- This is a comment --><div>test</div>";
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    memset(&buf, 0, sizeof(buf));
+    buf.pos = data;
+    buf.last = data + sizeof(data) - 1;
+    buf.memory = 1;
+    chain.buf = &buf;
+    chain.next = NULL;
+
+    rc = ngx_http_markdown_stream_postcommit_guard(
+        &test_request, &ctx, &chain);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "guard detects <!-- comment");
+    TEST_PASS("Guard detects <!-- HTML comment");
+}
+
+
 int main(void)
 {
     TEST_SECTION("Post-commit Safety Property (Spec 37, Task 7.4)");
@@ -1147,12 +1287,16 @@ int main(void)
     test_guard_short_buffer();
     test_guard_null_buf_in_chain();
     test_guard_case_insensitive_doctype();
+    test_guard_fails_body_tag();
+    test_guard_fails_script_tag();
+    test_guard_fails_html_comment();
 
     TEST_SECTION("Post-commit safe_finish (Task 5.1)");
     test_safe_finish_happy_path();
     test_safe_finish_empty_rust_output_sends_terminal();
     test_safe_finish_copies_rust_output_before_free();
     test_safe_finish_backpressure_preserves_pending_chain();
+    test_safe_finish_no_closing_bytes_backpressure();
     test_safe_finish_idempotent_reentry();
     test_safe_finish_then_abort_does_not_double_send();
     test_safe_finish_invalid_state();

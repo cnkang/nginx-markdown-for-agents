@@ -380,6 +380,18 @@ test_check_size_limit_boundary(void)
         ngx_http_markdown_check_size_limit(&r, &conf, NULL) == 1,
         "missing Content-Length (-1) should pass");
 
+    /* max_size=0 means unlimited — any content length should pass */
+    conf.max_size = 0;
+    r.headers_out.content_length_n = 1;
+    TEST_ASSERT(
+        ngx_http_markdown_check_size_limit(&r, &conf, NULL) == 1,
+        "max_size=0 (unlimited) + CL=1 should pass");
+
+    r.headers_out.content_length_n = 100 * 1024 * 1024;
+    TEST_ASSERT(
+        ngx_http_markdown_check_size_limit(&r, &conf, NULL) == 1,
+        "max_size=0 (unlimited) + large CL should pass");
+
     TEST_PASS("Size limit boundary cases correct");
 }
 
