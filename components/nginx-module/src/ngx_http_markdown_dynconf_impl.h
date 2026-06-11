@@ -362,36 +362,6 @@ ngx_http_markdown_effective_memory_budget(
 }
 
 
-/**
- * Compute the effective body buffer limit for a request.
- *
- * The C-side full-buffer body filter must respect both the static
- * markdown_max_size and the effective (dynconf-aware) memory_budget.
- * When memory_budget is set and smaller than max_size, it constrains
- * the inbound buffer -- otherwise a dynconf memory_budget reduction
- * would not take effect until the Rust conversion stage, allowing
- * the C side to buffer beyond the operator's intended limit.
- *
- * Returns the lesser of effective_memory_budget and conf->max_size,
- * falling back to conf->max_size when memory_budget is unset or zero.
- */
-static size_t
-ngx_http_markdown_effective_body_buffer_limit(
-    const ngx_http_markdown_effective_conf_t *eff,
-    const ngx_http_markdown_conf_t *conf)
-{
-    size_t  budget;
-
-    budget = ngx_http_markdown_effective_memory_budget(eff, conf);
-
-    if (budget == 0 || budget == (size_t) -1) {
-        return conf->max_size;
-    }
-
-    return (budget < conf->max_size) ? budget : conf->max_size;
-}
-
-
 #ifdef MARKDOWN_STREAMING_ENABLED
 /**
  * Read effective streaming_budget for a request.

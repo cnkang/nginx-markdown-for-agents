@@ -572,6 +572,28 @@ typedef struct {
     ngx_http_markdown_advanced_cfg_t advanced;
 } ngx_http_markdown_conf_t;
 
+
+static ngx_inline size_t
+ngx_http_markdown_effective_body_buffer_limit(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    size_t  budget;
+
+    if (eff != NULL) {
+        budget = eff->memory_budget;
+    } else {
+        budget = conf->advanced.memory_budget;
+    }
+
+    if (budget == 0 || budget == (size_t) -1) {
+        return conf->max_size;
+    }
+
+    return (budget < conf->max_size) ? budget : conf->max_size;
+}
+
+
 static ngx_inline void
 ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev)
