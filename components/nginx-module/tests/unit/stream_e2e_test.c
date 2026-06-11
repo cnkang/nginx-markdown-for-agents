@@ -278,12 +278,12 @@ e2e_stream_on_error(ngx_http_request_t *r,
     dctx.replay_available = ngx_http_markdown_stream_replay_available(ctx);
     dctx.headers_committed = ctx->stream_sm.headers_committed;
     dctx.within_resource_limits = 1;
-    dctx.on_error_policy = conf->on_error;
+    dctx.on_error_policy = conf->stream.on_error;
 
     /* Step 2: Choose event based on committed state and policy */
     if (ctx->stream_sm.headers_committed) {
         event = NGX_HTTP_MD_EVENT_ERROR;
-    } else if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
+    } else if (conf->stream.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
         event = NGX_HTTP_MD_EVENT_ON_ERROR_PASS;
     } else {
         event = NGX_HTTP_MD_EVENT_ON_ERROR_REJECT;
@@ -320,6 +320,9 @@ e2e_stream_on_error(ngx_http_request_t *r,
 
     case NGX_HTTP_MD_ACTION_SAFE_FINISH:
         rc = ngx_http_markdown_stream_postcommit_safe_finish(r, ctx);
+        if (rc == NGX_AGAIN) {
+            return NGX_AGAIN;
+        }
         if (rc != NGX_OK) {
             ngx_http_markdown_stream_postcommit_abort(r, ctx);
         }
@@ -393,8 +396,8 @@ e2e_init_context_precommit(ngx_http_markdown_ctx_t *ctx,
     ctx->stream_sm.replay_buf.capacity = 4096;
     ctx->stream_sm.replay_capacity = 4096;
 
-    /* Configuration: on_error policy */
-    conf->on_error = on_error_policy;
+    /* Configuration: streaming on_error policy (0.8.0 model) */
+    conf->stream.on_error = on_error_policy;
 }
 
 
@@ -421,8 +424,8 @@ e2e_init_context_committed(ngx_http_markdown_ctx_t *ctx,
     /* No replay buffer needed post-commit */
     ctx->stream_sm.replay_initialized = 0;
 
-    /* Configuration: on_error policy */
-    conf->on_error = on_error_policy;
+    /* Configuration: streaming on_error policy (0.8.0 model) */
+    conf->stream.on_error = on_error_policy;
 }
 
 
