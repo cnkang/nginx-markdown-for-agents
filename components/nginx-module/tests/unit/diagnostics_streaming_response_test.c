@@ -79,6 +79,7 @@ typedef struct {
 typedef struct {
     const char  *engine;
     const char  *on_error;
+    size_t       threshold;
     size_t       auto_threshold;
     size_t       precommit_buffer;
     size_t       flush_min;
@@ -165,7 +166,7 @@ build_diagnostics_json_with_streaming(output_ctx_t *out,
     output_append(out, "    \"on_error\": \"%s\",\n",
         stream_config->on_error);
     output_append(out, "    \"threshold\": %zu,\n",
-        stream_config->auto_threshold);
+        stream_config->threshold);
     output_append(out, "    \"precommit_buffer\": %zu,\n",
         stream_config->precommit_buffer);
     output_append(out, "    \"flush_min\": %zu,\n",
@@ -235,6 +236,7 @@ test_streaming_metrics_section_present(void)
 
     stream_config.engine = "auto";
     stream_config.on_error = "pass";
+    stream_config.threshold = 1048576;
     stream_config.auto_threshold = 65536;
     stream_config.precommit_buffer = 262144;
     stream_config.flush_min = 16384;
@@ -279,6 +281,7 @@ test_streaming_metrics_field_names(void)
 
     stream_config.engine = "auto";
     stream_config.on_error = "pass";
+    stream_config.threshold = 0;
     stream_config.auto_threshold = 0;
     stream_config.precommit_buffer = 0;
     stream_config.flush_min = 0;
@@ -340,6 +343,7 @@ test_streaming_metrics_values(void)
 
     stream_config.engine = "configured";
     stream_config.on_error = "reject";
+    stream_config.threshold = 1048576;
     stream_config.auto_threshold = 131072;
     stream_config.precommit_buffer = 262144;
     stream_config.flush_min = 16384;
@@ -390,6 +394,7 @@ test_streaming_config_section_present(void)
 
     stream_config.engine = "auto";
     stream_config.on_error = "pass";
+    stream_config.threshold = 65536;
     stream_config.auto_threshold = 65536;
     stream_config.precommit_buffer = 262144;
     stream_config.flush_min = 16384;
@@ -426,6 +431,7 @@ test_streaming_config_field_names(void)
 
     stream_config.engine = "auto";
     stream_config.on_error = "pass";
+    stream_config.threshold = 32768;
     stream_config.auto_threshold = 32768;
     stream_config.precommit_buffer = 262144;
     stream_config.flush_min = 16384;
@@ -476,6 +482,7 @@ test_streaming_config_values(void)
 
     stream_config.engine = "configured";
     stream_config.on_error = "reject";
+    stream_config.threshold = 1048576;
     stream_config.auto_threshold = 131072;
     stream_config.precommit_buffer = 262144;
     stream_config.flush_min = 16384;
@@ -490,8 +497,8 @@ test_streaming_config_values(void)
         "engine value is configured");
     TEST_ASSERT(json_contains(buf, "\"on_error\": \"reject\""),
         "on_error value is reject");
-    TEST_ASSERT(json_contains(buf, "\"threshold\": 131072"),
-        "threshold value is 131072");
+    TEST_ASSERT(json_contains(buf, "\"threshold\": 1048576"),
+        "threshold value is 1048576");
     TEST_ASSERT(json_contains(buf, "\"precommit_buffer\": 262144"),
         "precommit_buffer value is 262144");
     TEST_ASSERT(json_contains(buf, "\"flush_min\": 16384"),
@@ -525,6 +532,7 @@ test_streaming_config_auto_engine(void)
 
     stream_config.engine = "auto";
     stream_config.on_error = "pass";
+    stream_config.threshold = 0;
     stream_config.auto_threshold = 0;
     stream_config.precommit_buffer = 0;
     stream_config.flush_min = 0;
@@ -574,6 +582,7 @@ test_streaming_metrics_all_zero(void)
 
     stream_config.engine = "auto";
     stream_config.on_error = "pass";
+    stream_config.threshold = 65536;
     stream_config.auto_threshold = 65536;
     stream_config.precommit_buffer = 262144;
     stream_config.flush_min = 16384;
