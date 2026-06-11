@@ -192,13 +192,26 @@ ngx_http_markdown_check_size_limit(const ngx_http_request_t *r,
      * If the effective memory budget is set (non-zero, non-sentinel)
      * and is stricter than max_size, use it as the body limit.
      * A zero memory_budget also means unlimited (no constraint).
+     *
+     * Mirror ngx_http_markdown_effective_body_buffer_limit(): when
+     * eff is NULL fall back to conf->advanced.memory_budget so the
+     * eligibility gate agrees with the buffering path.
      */
-    if (eff != NULL
-        && eff->memory_budget != 0
-        && eff->memory_budget != (size_t) -1
-        && eff->memory_budget < body_limit)
     {
-        body_limit = eff->memory_budget;
+        size_t  budget;
+
+        if (eff != NULL) {
+            budget = eff->memory_budget;
+        } else {
+            budget = conf->advanced.memory_budget;
+        }
+
+        if (budget != 0
+            && budget != (size_t) -1
+            && budget < body_limit)
+        {
+            body_limit = budget;
+        }
     }
 
     if ((size_t) content_length > body_limit) {
