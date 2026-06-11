@@ -1047,7 +1047,8 @@ Example output (streaming-relevant sections):
     "precommit_buffer": 262144,
     "flush_min": 4096,
     "excluded_types": ["text/event-stream", "application/x-ndjson"],
-    "auto_threshold": 1048576
+    "auto_threshold": 1048576,
+    "legacy_auto_threshold_explicit": false
   },
   "streaming_metrics": {
     "candidate_total": 12450,
@@ -1108,6 +1109,7 @@ Example output (streaming-relevant sections):
 | `streaming_config.precommit_buffer` | Pre-commit replay buffer size (bytes) for fail-open recovery |
 | `streaming_config.flush_min` | Minimum output batch size (bytes) before flushing downstream |
 | `streaming_config.auto_threshold` | Deprecated alias for `streaming_config.threshold` |
+| `streaming_config.legacy_auto_threshold_explicit` | Whether legacy `markdown_streaming_auto_threshold` supplied the threshold |
 | `streaming_config.on_error` | What happens on errors: `pass` (serve HTML) or `reject` (return error) |
 | `streaming_metrics` | Cumulative counters since last NGINX start |
 | `streaming_metrics.ttfb_last_seconds` | Time-to-first-byte of the most recent streaming request |
