@@ -155,11 +155,16 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
 /*
  * Post-Commit error handler for streaming conversion.
  *
- * After headers have been sent downstream, the response cannot
- * be reverted to HTML or an HTTP error status. Aborts the Rust
- * streaming handle and sends an empty last_buf to terminate
- * the truncated Markdown response. Records failure metrics
- * and budget-exceeded classification when applicable.
+ * After headers or Markdown bytes have been sent downstream, the
+ * response cannot revert to HTML or return 502. The handler delegates
+ * to the streaming fallback state machine:
+ *   - on_error=pass   -> Rust safe_finish, fallback to abort on failure
+ *   - on_error=reject -> protocol-safe abort
+ *
+ * NGX_AGAIN from safe_finish/abort is a legitimate pending state:
+ * pending output is preserved and drained by resume_pending().
+ *
+ * No post-commit path may emit HTML or change the HTTP status.
  *
  * r          - current HTTP request
  * ctx        - per-request module context
@@ -167,8 +172,8 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
  * error_code - FFI error code from the Rust streaming engine
  *
  * Returns:
- *   NGX_OK    on successful terminal send
- *   NGX_AGAIN on downstream backpressure
+ *   NGX_OK    on successful safe-finish or terminal send
+ *   NGX_AGAIN on downstream backpressure (pending output preserved)
  *   NGX_ERROR on send failure
  */
 static ngx_int_t
@@ -1526,9 +1531,10 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
 /*
  * Post-Commit error handler.
  *
- * After headers have been sent, we cannot switch back to HTML
- * or send an HTTP error status. We abort the Rust handle and
- * send an empty last_buf to terminate the response.
+ * After headers or Markdown bytes have been sent, the response
+ * cannot revert to HTML or send an HTTP error status.  Attempts
+ * Rust safe_finish first; falls back to abort + empty last_buf
+ * only if safe_finish fails.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_handle_postcommit_error(
