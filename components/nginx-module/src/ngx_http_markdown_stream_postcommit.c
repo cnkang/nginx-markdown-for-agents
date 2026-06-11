@@ -228,6 +228,13 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
     }
 
     rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
+    if (rc == NGX_AGAIN) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "markdown postcommit safe_finish: "
+                       "terminal chain pending (NGX_AGAIN), "
+                       "no closing bytes path");
+        return NGX_AGAIN;
+    }
     if (rc != NGX_OK && rc != NGX_DONE) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown postcommit safe_finish: "
@@ -367,13 +374,24 @@ ngx_http_markdown_stream_postcommit_guard(
     }
 
     /*
-     * Scan chain buffers for HTML signatures.
+     * Scan chain buffers for HTML signatures (best-effort guard).
+     *
+     * This is a defense-in-depth heuristic, NOT a strong security
+     * mechanism.  The primary safety guarantee comes from the state
+     * machine preventing HTML from reaching post-commit paths.  This
+     * guard catches accidental leaks from upstream bugs.
      *
      * We look for common HTML indicators in the leading prefix of each
      * buffer after skipping an optional UTF-8 BOM and whitespace:
      *   - "<!DOCTYPE" (case-insensitive start)
+     *   - "<!--" (HTML comment)
      *   - "<html" tag
+     *   - "<head" tag
+     *   - "<body" tag
      *   - "<meta" tag
+     *   - "<div" tag
+     *   - "<script" tag
+     *   - "<style" tag
      */
     for (ngx_chain_t *cl = chain; cl != NULL; cl = cl->next) {
         buf = cl->buf;
@@ -607,7 +625,12 @@ ngx_http_markdown_stream_postcommit_has_html_signature(
     const u_char  *scan_last;
     static u_char  doctype[] = { 'D', 'O', 'C', 'T', 'Y', 'P', 'E' };
     static u_char  html_tag[] = { 'h', 't', 'm', 'l' };
+    static u_char  head_tag[] = { 'h', 'e', 'a', 'd' };
+    static u_char  body_tag[] = { 'b', 'o', 'd', 'y' };
     static u_char  meta_tag[] = { 'm', 'e', 't', 'a' };
+    static u_char  div_tag[] = { 'd', 'i', 'v' };
+    static u_char  script_tag[] = { 's', 'c', 'r', 'i', 'p', 't' };
+    static u_char  style_tag[] = { 's', 't', 'y', 'l', 'e' };
 
     if (data == NULL || len == 0) {
         return 0;
@@ -632,6 +655,7 @@ ngx_http_markdown_stream_postcommit_has_html_signature(
             continue;
         }
 
+        /* <!DOCTYPE ... > */
         if ((size_t) (last - p) >= 9
             && p[1] == '!'
             && ngx_http_markdown_stream_postcommit_casecmp(
@@ -640,6 +664,14 @@ ngx_http_markdown_stream_postcommit_has_html_signature(
             return 1;
         }
 
+        /* <!-- HTML comment */
+        if ((size_t) (last - p) >= 4
+            && p[1] == '!' && p[2] == '-' && p[3] == '-')
+        {
+            return 1;
+        }
+
+        /* <html */
         if ((size_t) (last - p) >= 5
             && ngx_http_markdown_stream_postcommit_casecmp(
                    p + 1, html_tag, 4)
@@ -649,11 +681,62 @@ ngx_http_markdown_stream_postcommit_has_html_signature(
             return 1;
         }
 
+        /* <head */
+        if ((size_t) (last - p) >= 5
+            && ngx_http_markdown_stream_postcommit_casecmp(
+                   p + 1, head_tag, 4)
+            && ((size_t) (last - p) == 5
+                || ngx_http_markdown_stream_postcommit_tag_boundary(p[5])))
+        {
+            return 1;
+        }
+
+        /* <body */
+        if ((size_t) (last - p) >= 5
+            && ngx_http_markdown_stream_postcommit_casecmp(
+                   p + 1, body_tag, 4)
+            && ((size_t) (last - p) == 5
+                || ngx_http_markdown_stream_postcommit_tag_boundary(p[5])))
+        {
+            return 1;
+        }
+
+        /* <meta */
         if ((size_t) (last - p) >= 5
             && ngx_http_markdown_stream_postcommit_casecmp(
                    p + 1, meta_tag, 4)
             && ((size_t) (last - p) == 5
                 || ngx_http_markdown_stream_postcommit_tag_boundary(p[5])))
+        {
+            return 1;
+        }
+
+        /* <div */
+        if ((size_t) (last - p) >= 4
+            && ngx_http_markdown_stream_postcommit_casecmp(
+                   p + 1, div_tag, 3)
+            && ((size_t) (last - p) == 4
+                || ngx_http_markdown_stream_postcommit_tag_boundary(p[4])))
+        {
+            return 1;
+        }
+
+        /* <script */
+        if ((size_t) (last - p) >= 7
+            && ngx_http_markdown_stream_postcommit_casecmp(
+                   p + 1, script_tag, 6)
+            && ((size_t) (last - p) == 7
+                || ngx_http_markdown_stream_postcommit_tag_boundary(p[7])))
+        {
+            return 1;
+        }
+
+        /* <style */
+        if ((size_t) (last - p) >= 6
+            && ngx_http_markdown_stream_postcommit_casecmp(
+                   p + 1, style_tag, 5)
+            && ((size_t) (last - p) == 6
+                || ngx_http_markdown_stream_postcommit_tag_boundary(p[6])))
         {
             return 1;
         }
