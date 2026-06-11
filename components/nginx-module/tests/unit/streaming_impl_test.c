@@ -1306,6 +1306,7 @@ init_request_ctx_conf(ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
 
     ctx->request = r;
     ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
+    conf->stream.precommit_buffer = 256 * 1024;
 }
 
 /*
@@ -3042,6 +3043,26 @@ test_streaming_gap_branches(void)
     rc = ngx_http_markdown_streaming_ensure_handle(&r, &ctx, &conf, &in);
     TEST_ASSERT(rc == NGX_OK,
         "ensure_handle should return NGX_OK when init succeeds");
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&in, sizeof(in));
+    in.buf = &in_buf;
+    in.next = NULL;
+    ctx.eligible = 1;
+    conf.stream.precommit_buffer = 0;
+    g_prepare_options_rc = NGX_OK;
+    g_new_with_code_rc = ERROR_SUCCESS;
+    g_new_with_code_null_handle = 0;
+    rc = ngx_http_markdown_streaming_ensure_handle(&r, &ctx, &conf, &in);
+    TEST_ASSERT(rc == NGX_OK,
+        "ensure_handle should accept precommit_buffer 0");
+    TEST_ASSERT(ctx.streaming.prebuffer_initialized == 0,
+        "precommit_buffer 0 should leave prebuffer disabled");
+    TEST_ASSERT(ctx.streaming.failopen_replay_initialized == 0,
+        "precommit_buffer 0 should leave replay buffer disabled");
+    TEST_ASSERT(g_buffer_init_call_count == 0,
+        "precommit_buffer 0 should not call buffer init");
 
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x35;

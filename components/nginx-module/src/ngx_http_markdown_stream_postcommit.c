@@ -65,6 +65,7 @@ ngx_http_markdown_stream_postcommit_space(u_char ch);
  *
  * Returns:
  *   NGX_OK    - Safe-finish completed, response closed gracefully
+ *   NGX_AGAIN - Downstream backpressure; pending output was preserved
  *   NGX_ERROR - Precondition failure, safe-finish failed, or send error
  */
 ngx_int_t
@@ -258,6 +259,7 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
  *
  * Returns:
  *   NGX_OK    - Abort completed, response terminated
+ *   NGX_AGAIN - Downstream backpressure; terminal output was preserved
  *   NGX_ERROR - Precondition failure or terminal send failed
  */
 ngx_int_t
@@ -301,6 +303,9 @@ ngx_http_markdown_stream_postcommit_abort(
      * No content bytes are sent — just the empty last_buf marker.
      */
     rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
+    if (rc == NGX_AGAIN) {
+        return NGX_AGAIN;
+    }
     if (rc != NGX_OK && rc != NGX_DONE) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown postcommit abort: "
