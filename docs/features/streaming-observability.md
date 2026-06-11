@@ -109,8 +109,8 @@ endpoint includes streaming sections:
   "streaming_config": {
     "engine": "auto",
     "on_error": "pass",
-    "threshold": 65536,
-    "auto_threshold": 65536
+    "threshold": 1048576,
+    "auto_threshold": 1048576
   }
 }
 ```
