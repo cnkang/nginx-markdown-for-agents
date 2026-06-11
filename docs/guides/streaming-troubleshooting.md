@@ -24,8 +24,9 @@ or does not increment for the path in question.
 
 ### Likely Cause
 
-One of: engine disabled, response below threshold, Content-Length present and
-below threshold, content type excluded.
+One of: engine disabled, `conditional_requests full_support` (default) blocking
+streaming, response below threshold, Content-Length present and below threshold,
+content type excluded.
 
 ### Diagnosis Steps
 
@@ -37,6 +38,18 @@ nginx -T 2>/dev/null | grep -i markdown_streaming_engine
 
 Expected: `markdown_streaming_engine auto;` or `on;` for the target location.
 If you see `off`, streaming is explicitly disabled.
+
+**Step 1b — Check conditional_requests setting:**
+
+```bash
+nginx -T 2>/dev/null | grep -i markdown_conditional_requests
+```
+
+Default is `full_support`. When `markdown_conditional_requests` is
+`full_support`, the streaming selector always selects full-buffer because
+full ETag support requires the complete converted output before headers.
+To activate streaming in `auto` mode, set
+`markdown_conditional_requests if_modified_since_only` or `disabled`.
 
 **Step 2 — Check threshold vs response size:**
 
@@ -97,6 +110,7 @@ Look for the `streaming` section showing current configuration state.
 | Finding | Fix |
 |---------|-----|
 | Engine is `off` | Set `markdown_streaming_engine auto;` and reload |
+| `conditional_requests` is `full_support` (default) | Set `markdown_conditional_requests if_modified_since_only;` or `disabled;` to allow streaming |
 | Response below threshold | Lower `markdown_stream_threshold` or accept full-buffer for small responses |
 | Content-Length below threshold | Expected behavior in `auto` mode; use `on` to force streaming regardless |
 | Content type excluded | Remove type from `markdown_stream_excluded_types` if streaming is desired |
@@ -1030,10 +1044,10 @@ Example output (streaming-relevant sections):
     "engine": "auto",
     "on_error": "pass",
     "threshold": 1048576,
-    "auto_threshold": 1048576,
     "precommit_buffer": 262144,
     "flush_min": 4096,
-    "excluded_types": ["text/event-stream", "application/x-ndjson"]
+    "excluded_types": ["text/event-stream", "application/x-ndjson"],
+    "auto_threshold": 1048576
   },
   "streaming_metrics": {
     "candidate_total": 12450,
@@ -1091,7 +1105,9 @@ Example output (streaming-relevant sections):
 |---------|-------------------|
 | `streaming_config` | Current runtime configuration (engine mode, thresholds, excluded types) |
 | `streaming_config.threshold` | Responses must exceed this size (bytes) for streaming in `auto` mode |
-| `streaming_config.auto_threshold` | Legacy alias for `streaming_config.threshold` |
+| `streaming_config.precommit_buffer` | Pre-commit replay buffer size (bytes) for fail-open recovery |
+| `streaming_config.flush_min` | Minimum output batch size (bytes) before flushing downstream |
+| `streaming_config.auto_threshold` | Deprecated alias for `streaming_config.threshold` |
 | `streaming_config.on_error` | What happens on errors: `pass` (serve HTML) or `reject` (return error) |
 | `streaming_metrics` | Cumulative counters since last NGINX start |
 | `streaming_metrics.ttfb_last_seconds` | Time-to-first-byte of the most recent streaming request |
