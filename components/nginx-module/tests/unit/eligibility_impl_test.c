@@ -467,6 +467,52 @@ test_eligibility_string_all_values(void)
 }
 
 
+static void
+test_check_size_limit_with_eff(void)
+{
+    ngx_http_request_t                  r;
+    ngx_http_markdown_conf_t            conf;
+    ngx_http_markdown_effective_conf_t  eff;
+
+    TEST_SUBSECTION("check_size_limit: non-NULL eff memory_budget path");
+
+    memset(&r, 0, sizeof(r));
+    memset(&eff, 0, sizeof(eff));
+    init_conf(&conf);
+
+    r.method = NGX_HTTP_GET;
+    r.headers_out.status = NGX_HTTP_OK;
+    set_str(&r.headers_out.content_type, "text/html");
+
+    /* eff->memory_budget stricter than conf.max_size -> INELIGIBLE_SIZE */
+    conf.max_size = 10 * 1024 * 1024;
+    eff.memory_budget = 512;
+    r.headers_out.content_length_n = 1024;
+    TEST_ASSERT(
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, &eff)
+            == NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,
+        "eff.memory_budget < max_size and CL > budget -> INELIGIBLE_SIZE");
+
+    /* eff->memory_budget = unlimited sentinel -> max_size governs */
+    eff.memory_budget = (size_t) -1;
+    r.headers_out.content_length_n = 1024;
+    TEST_ASSERT(
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, &eff)
+            == NGX_HTTP_MARKDOWN_ELIGIBLE,
+        "eff.memory_budget=unlimited + CL within max_size -> ELIGIBLE");
+
+    /* eff->memory_budget = 0 (unlimited) -> max_size governs */
+    eff.memory_budget = 0;
+    r.headers_out.content_length_n = 1024;
+    TEST_ASSERT(
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, &eff)
+            == NGX_HTTP_MARKDOWN_ELIGIBLE,
+        "eff.memory_budget=0 + CL within max_size -> ELIGIBLE");
+
+    TEST_PASS("Size limit with non-NULL eff correct");
+}
+
+
 int
 main(void)
 {
@@ -480,6 +526,7 @@ main(void)
     test_is_streaming_configured_types();
     test_check_eligibility_full_chain();
     test_check_size_limit_boundary();
+    test_check_size_limit_with_eff();
     test_check_content_type_custom_boundary_char_space();
     test_eligibility_string_all_values();
 
