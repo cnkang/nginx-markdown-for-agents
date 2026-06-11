@@ -161,6 +161,8 @@ build_diagnostics_json_with_streaming(output_ctx_t *out,
         stream_config->engine);
     output_append(out, "    \"on_error\": \"%s\",\n",
         stream_config->on_error);
+    output_append(out, "    \"threshold\": %zu,\n",
+        stream_config->auto_threshold);
     output_append(out, "    \"auto_threshold\": %zu\n",
         stream_config->auto_threshold);
     output_append(out, "  }\n");
@@ -416,6 +418,8 @@ test_streaming_config_field_names(void)
         "engine field present");
     TEST_ASSERT(json_contains(buf, "\"on_error\":"),
         "on_error field present");
+    TEST_ASSERT(json_contains(buf, "\"threshold\":"),
+        "threshold field present");
     TEST_ASSERT(json_contains(buf, "\"auto_threshold\":"),
         "auto_threshold field present");
 
@@ -453,6 +457,8 @@ test_streaming_config_values(void)
         "engine value is configured");
     TEST_ASSERT(json_contains(buf, "\"on_error\": \"reject\""),
         "on_error value is reject");
+    TEST_ASSERT(json_contains(buf, "\"threshold\": 131072"),
+        "threshold value is 131072");
     TEST_ASSERT(json_contains(buf, "\"auto_threshold\": 131072"),
         "auto_threshold value is 131072");
 
@@ -490,6 +496,8 @@ test_streaming_config_auto_engine(void)
         "engine value is auto");
     TEST_ASSERT(json_contains(buf, "\"on_error\": \"pass\""),
         "on_error value is pass");
+    TEST_ASSERT(json_contains(buf, "\"threshold\": 0"),
+        "threshold value is 0");
     TEST_ASSERT(json_contains(buf, "\"auto_threshold\": 0"),
         "auto_threshold value is 0");
 

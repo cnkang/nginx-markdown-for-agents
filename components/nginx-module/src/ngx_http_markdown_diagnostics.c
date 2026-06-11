@@ -718,7 +718,7 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
 #ifdef MARKDOWN_STREAMING_ENABLED
     const char  *engine_str;
     const char  *on_error_str;
-    size_t       auto_threshold;
+    size_t       threshold;
 
     if (conf != NULL && conf->streaming.engine != NULL) {
         engine_str = "configured";
@@ -735,16 +735,17 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
          && conf->stream.on_error
             == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
         ? "reject" : "pass";
-    auto_threshold = (conf != NULL)
+    threshold = (conf != NULL)
         ? conf->stream.threshold : 0;
 
     p = ngx_slprintf(p, last,
         "  \"streaming_config\": {\n"
         "    \"engine\": \"%s\",\n"
         "    \"on_error\": \"%s\",\n"
+        "    \"threshold\": %uz,\n"
         "    \"auto_threshold\": %uz\n"
         "  }\n",
-        engine_str, on_error_str, auto_threshold);
+        engine_str, on_error_str, threshold, threshold);
 #else
     p = ngx_slprintf(p, last,
         "  \"streaming_config\": null\n");
