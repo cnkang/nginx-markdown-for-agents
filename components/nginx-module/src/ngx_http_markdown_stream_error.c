@@ -65,7 +65,23 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
     dctx.replay_available =
         ngx_http_markdown_stream_replay_available(ctx);
     dctx.headers_committed = ctx->stream_sm.headers_committed;
-    dctx.within_resource_limits = 1;
+
+    /*
+     * Derive within_resource_limits from actual replay buffer state.
+     * If the replay buffer has overflowed (size > capacity) or was
+     * never initialized when expected, resource limits are exceeded.
+     * This ensures the decision engine receives truthful context if
+     * resource-limit-sensitive events are ever routed through this
+     * handler in the future.
+     */
+    if (ctx->stream_sm.replay_initialized
+        && ctx->stream_sm.replay_buf.size > ctx->stream_sm.replay_capacity)
+    {
+        dctx.within_resource_limits = 0;
+    } else {
+        dctx.within_resource_limits = 1;
+    }
+
     dctx.on_error_policy = conf->stream.on_error;
 
     /* 2. Choose event based on committed state and on_error policy */
