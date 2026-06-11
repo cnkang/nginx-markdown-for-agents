@@ -2,14 +2,19 @@
  * Test: stream_e2e
  *
  * E2E-style integration tests for the streaming fallback state machine
- * (streaming fallback state machine, tasks 8.1-8.6).  Unlike the unit tests in stream_error_test.c
- * which test individual functions, these tests exercise the COMPLETE flow
- * from context initialization through the error handler to final outcome.
+ * (streaming fallback state machine, tasks 8.1-8.6).  These tests exercise
+ * the COMPLETE flow from context initialization through the PRODUCTION
+ * error handler (ngx_http_markdown_stream_on_error) to final outcome.
+ *
+ * Unlike stream_error_test.c which tests individual function contracts,
+ * these tests simulate full E2E scenarios with replay buffer population
+ * and verify end-to-end invariants (no mixed HTML/Markdown, correct
+ * state transitions, correct return codes).
  *
  * Each test simulates:
  *   1. Context initialization (stream_sm state, replay buffer)
  *   2. Replay buffer init + append (populating data)
- *   3. Error handler invocation (ngx_http_markdown_stream_on_error)
+ *   3. Error handler invocation (production ngx_http_markdown_stream_on_error)
  *   4. Verification of final outcome (return code, state, side effects)
  *
  * Validates: Requirements 8.1-8.6
@@ -59,6 +64,21 @@
     strncasecmp((const char *) (s1), (const char *) (s2), (n))
 #endif
 
+#ifndef ngx_memcpy
+#define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
+#endif
+
+#ifndef NGX_HTTP_MARKDOWN_BUFFERED
+#define NGX_HTTP_MARKDOWN_BUFFERED 0x08
+#endif
+
+#define ngx_log_debug0(level, log, err, fmt) \
+    do { (void)(level); (void)(log); (void)(err); (void)(fmt); } while (0)
+#define ngx_log_debug1(level, log, err, fmt, a1) \
+    do { (void)(level); (void)(log); (void)(err); (void)(fmt); (void)(a1); } while (0)
+#define ngx_log_debug3(level, log, err, fmt, a1, a2, a3) \
+    do { (void)(level); (void)(log); (void)(err); (void)(fmt); (void)(a1); (void)(a2); (void)(a3); } while (0)
+
 typedef intptr_t ngx_err_t;
 
 /* Define structs that the stubs only forward-declare */
@@ -95,6 +115,7 @@ struct ngx_http_request_s {
     ngx_pool_t             *pool;
     ngx_http_headers_out_t  headers_out;
     struct ngx_http_request_s *main;
+    ngx_uint_t              buffered;
 };
 
 /* Include the module header for types */
@@ -105,16 +126,26 @@ struct ngx_http_request_s {
 #include "../../src/ngx_http_markdown_stream_state.c"
 
 /*
- * Test state: track calls to mocked functions and their behaviour.
+ * Include the postcommit source directly for production safe_finish/abort.
+ * This replaces the old mirror-copy approach.
+ */
+#include "../../src/ngx_http_markdown_stream_postcommit.h"
+#include "../../src/markdown_converter.h"
+
+#ifndef POST_COMMIT_SAFE_FINISH
+#define POST_COMMIT_SAFE_FINISH 3
+#endif
+
+#ifndef POST_COMMIT_ABORT
+#define POST_COMMIT_ABORT 4
+#endif
+
+/*
+ * Test state: track calls to mocked output filter and related behaviour.
  */
 static int mock_output_filter_called;
 static int mock_output_filter_rc;
 static ngx_chain_t *mock_output_filter_chain;
-
-static int mock_safe_finish_called;
-static int mock_safe_finish_rc;
-
-static int mock_abort_called;
 
 static int mock_replay_chain_called;
 static ngx_chain_t *mock_replay_chain_result;
@@ -123,8 +154,18 @@ static ngx_chain_t *mock_replay_chain_result;
 static u_char *mock_output_data;
 static size_t  mock_output_data_len;
 
+/* Track ngx_calloc_buf / ngx_palloc / ngx_alloc_chain_link for send_terminal */
+static int mock_calloc_buf_called;
+static ngx_buf_t *mock_calloc_buf_result;
+static ngx_buf_t  mock_calloc_buf_storage;
+static ngx_chain_t mock_chain_link_storage;
+static u_char mock_palloc_storage[256];
+static int mock_palloc_called;
+static int mock_palloc_fail;
+
 /* Mocked request infrastructure */
 static ngx_log_t             e2e_log;
+static struct ngx_pool_s     e2e_pool;
 static ngx_connection_impl_t e2e_connection;
 static ngx_http_request_t    e2e_request;
 
@@ -141,9 +182,6 @@ static void e2e_init_context_precommit(ngx_http_markdown_ctx_t *ctx,
 static void e2e_init_context_committed(ngx_http_markdown_ctx_t *ctx,
                                         ngx_http_markdown_conf_t *conf,
                                         ngx_uint_t on_error_policy);
-static ngx_int_t e2e_stream_on_error(ngx_http_request_t *r,
-                                      ngx_http_markdown_ctx_t *ctx,
-                                      ngx_http_markdown_conf_t *conf);
 static int e2e_data_contains_html(const u_char *data, size_t len);
 static void test_8_1_precommit_fallback_html(void);
 static void test_8_2_precommit_reject_502(void);
@@ -172,35 +210,6 @@ ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
     }
 
     return mock_output_filter_rc;
-}
-
-/*
- * Mock: ngx_http_markdown_stream_postcommit_safe_finish
- *
- * Records the call and returns the configured return code.
- * Critically: does NOT output any HTML content.
- */
-ngx_int_t
-ngx_http_markdown_stream_postcommit_safe_finish(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
-{
-    UNUSED(r); UNUSED(ctx);
-    mock_safe_finish_called = 1;
-    return mock_safe_finish_rc;
-}
-
-/*
- * Mock: ngx_http_markdown_stream_postcommit_abort
- *
- * Records the call.  Does NOT produce any content output.
- */
-ngx_int_t
-ngx_http_markdown_stream_postcommit_abort(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
-{
-    UNUSED(r); UNUSED(ctx);
-    mock_abort_called = 1;
-    return NGX_OK;
 }
 
 /*
@@ -244,6 +253,41 @@ ngx_http_markdown_stream_replay_available(
     return 1;
 }
 
+/* Mock: ngx_calloc_buf (for send_terminal) */
+ngx_buf_t *
+ngx_calloc_buf(ngx_pool_t *pool)
+{
+    UNUSED(pool);
+    mock_calloc_buf_called++;
+    if (mock_calloc_buf_result != NULL) {
+        return mock_calloc_buf_result;
+    }
+    memset(&mock_calloc_buf_storage, 0, sizeof(mock_calloc_buf_storage));
+    return &mock_calloc_buf_storage;
+}
+
+/* Mock: ngx_palloc */
+void *
+ngx_palloc(ngx_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    mock_palloc_called++;
+    if (mock_palloc_fail || size > sizeof(mock_palloc_storage)) {
+        return NULL;
+    }
+    memset(mock_palloc_storage, 0, sizeof(mock_palloc_storage));
+    return mock_palloc_storage;
+}
+
+/* Mock: ngx_alloc_chain_link */
+ngx_chain_t *
+ngx_alloc_chain_link(ngx_pool_t *pool)
+{
+    UNUSED(pool);
+    memset(&mock_chain_link_storage, 0, sizeof(mock_chain_link_storage));
+    return &mock_chain_link_storage;
+}
+
 /* Stub: ngx_log_error_core */
 void
 ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
@@ -252,93 +296,37 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
     UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);
 }
 
-
 /*
- * The full on_error flow -- mirrors the production implementation in
- * ngx_http_markdown_stream_error.c but uses our mocked dependencies.
+ * Stub: markdown_streaming_safe_finish
  *
- * This is the function under test for the E2E integration tests.
+ * Returns configurable result for postcommit tests.
  */
-static ngx_int_t
-e2e_stream_on_error(ngx_http_request_t *r,
-                    ngx_http_markdown_ctx_t *ctx,
-                    ngx_http_markdown_conf_t *conf)
+static uint32_t e2e_safe_finish_rc;
+static u_char  *e2e_safe_finish_data;
+static uintptr_t e2e_safe_finish_len;
+
+uint32_t
+markdown_streaming_safe_finish(struct StreamingConverterHandle *handle,
+    u_char **out_data, uintptr_t *out_len)
 {
-    ngx_http_markdown_stream_ctx_t    dctx;
-    ngx_http_markdown_stream_event_e  event;
-    ngx_http_markdown_decision_t      decision;
-    ngx_int_t                         rc;
-
-    if (r == NULL || ctx == NULL || conf == NULL) {
-        return NGX_ERROR;
-    }
-
-    /* Step 1: Populate decision context from request state */
-    dctx.current_state = ctx->stream_sm.state;
-    dctx.replay_available = ngx_http_markdown_stream_replay_available(ctx);
-    dctx.headers_committed = ctx->stream_sm.headers_committed;
-    dctx.within_resource_limits = 1;
-    dctx.on_error_policy = conf->stream.on_error;
-
-    /* Step 2: Choose event based on committed state and policy */
-    if (ctx->stream_sm.headers_committed) {
-        event = NGX_HTTP_MD_EVENT_ERROR;
-    } else if (conf->stream.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
-        event = NGX_HTTP_MD_EVENT_ON_ERROR_PASS;
-    } else {
-        event = NGX_HTTP_MD_EVENT_ON_ERROR_REJECT;
-    }
-
-    /* Step 3: Call decision engine */
-    decision = ngx_http_markdown_stream_decide(&dctx, event);
-
-    /* Step 4: Update state machine */
-    ctx->stream_sm.state = decision.new_state;
-
-    /* Step 5: Execute action */
-    switch (decision.action) {
-
-    case NGX_HTTP_MD_ACTION_PASS_HTML:
-        {
-            ngx_chain_t *chain;
-            chain = ngx_http_markdown_stream_replay_chain(ctx, r->pool);
-            if (chain == NULL) {
-                return NGX_ERROR;
-            }
-            r->headers_out.content_type_len = sizeof("text/html") - 1;
-            ngx_str_set(&r->headers_out.content_type, "text/html");
-            r->headers_out.content_type_lowcase = NULL;
-            rc = ngx_http_output_filter(r, chain);
-            if (rc == NGX_ERROR) {
-                return NGX_ERROR;
-            }
-            return NGX_OK;
-        }
-
-    case NGX_HTTP_MD_ACTION_REJECT_502:
-        return NGX_HTTP_BAD_GATEWAY;
-
-    case NGX_HTTP_MD_ACTION_SAFE_FINISH:
-        rc = ngx_http_markdown_stream_postcommit_safe_finish(r, ctx);
-        if (rc == NGX_AGAIN) {
-            return NGX_AGAIN;
-        }
-        if (rc != NGX_OK) {
-            ngx_http_markdown_stream_postcommit_abort(r, ctx);
-        }
-        return NGX_OK;
-
-    case NGX_HTTP_MD_ACTION_ABORT:
-        ngx_http_markdown_stream_postcommit_abort(r, ctx);
-        return NGX_OK;
-
-    case NGX_HTTP_MD_ACTION_PASSTHROUGH:
-        return NGX_OK;
-
-    default:
-        return NGX_OK;
-    }
+    UNUSED(handle);
+    if (out_data != NULL) *out_data = e2e_safe_finish_data;
+    if (out_len != NULL) *out_len = e2e_safe_finish_len;
+    return e2e_safe_finish_rc;
 }
+
+/* Stub: markdown_streaming_output_free */
+void
+markdown_streaming_output_free(u_char *data, uintptr_t len)
+{
+    UNUSED(data); UNUSED(len);
+}
+
+/* Include the postcommit source (for safe_finish, abort, guard, log) */
+#include "../../src/ngx_http_markdown_stream_postcommit.c"
+
+/* Include the PRODUCTION error handler source directly */
+#include "../../src/ngx_http_markdown_stream_error.c"
 
 
 /*
@@ -350,21 +338,30 @@ e2e_setup(void)
     mock_output_filter_called = 0;
     mock_output_filter_rc = NGX_OK;
     mock_output_filter_chain = NULL;
-    mock_safe_finish_called = 0;
-    mock_safe_finish_rc = NGX_OK;
-    mock_abort_called = 0;
     mock_replay_chain_called = 0;
     mock_replay_chain_result = NULL;
     mock_output_data = NULL;
     mock_output_data_len = 0;
+    mock_calloc_buf_called = 0;
+    mock_calloc_buf_result = NULL;
+    memset(&mock_calloc_buf_storage, 0, sizeof(mock_calloc_buf_storage));
+    memset(&mock_chain_link_storage, 0, sizeof(mock_chain_link_storage));
+    memset(mock_palloc_storage, 0, sizeof(mock_palloc_storage));
+    mock_palloc_called = 0;
+    mock_palloc_fail = 0;
+    e2e_safe_finish_rc = POST_COMMIT_ABORT;
+    e2e_safe_finish_data = NULL;
+    e2e_safe_finish_len = 0;
 
     memset(&e2e_log, 0, sizeof(e2e_log));
+    memset(&e2e_pool, 0, sizeof(e2e_pool));
     memset(&e2e_connection, 0, sizeof(e2e_connection));
     memset(&e2e_request, 0, sizeof(e2e_request));
+    e2e_pool.log = &e2e_log;
     e2e_connection.log = &e2e_log;
     e2e_request.connection = &e2e_connection;
     e2e_request.main = &e2e_request;
-    e2e_request.pool = NULL;
+    e2e_request.pool = &e2e_pool;
 }
 
 
@@ -469,7 +466,7 @@ e2e_data_contains_html(const u_char *data, size_t len)
  * Full E2E flow:
  *   Setup: PRE_COMMIT state, replay_initialized=1,
  *          buffer has HTML data, on_error=pass
- *   Action: Call stream_on_error
+ *   Action: Call production stream_on_error
  *   Verify: Returns NGX_OK, content type restored to text/html,
  *           replay data sent, state=PASSTHROUGH
  *
@@ -503,8 +500,8 @@ test_8_1_precommit_fallback_html(void)
     replay_chain.next = NULL;
     mock_replay_chain_result = &replay_chain;
 
-    /* Step 3: Invoke the full error handler flow */
-    rc = e2e_stream_on_error(&e2e_request, &ctx, &conf);
+    /* Step 3: Invoke the PRODUCTION error handler */
+    rc = ngx_http_markdown_stream_on_error(&e2e_request, &ctx, &conf);
 
     /* Step 4: Verify final outcome */
     TEST_ASSERT(rc == NGX_OK,
@@ -520,10 +517,6 @@ test_8_1_precommit_fallback_html(void)
                 "8.1: output filter called to send replay data");
     TEST_ASSERT(mock_output_filter_chain == &replay_chain,
                 "8.1: correct replay chain sent downstream");
-    TEST_ASSERT(mock_safe_finish_called == 0,
-                "8.1: no post-commit safe_finish");
-    TEST_ASSERT(mock_abort_called == 0,
-                "8.1: no post-commit abort");
 
     TEST_PASS("Task 8.1: Pre-commit fallback returns HTML (on_error=pass)");
 }
@@ -535,7 +528,7 @@ test_8_1_precommit_fallback_html(void)
  * Full E2E flow:
  *   Setup: PRE_COMMIT state, replay_initialized=1,
  *          buffer has data, on_error=reject
- *   Action: Call stream_on_error
+ *   Action: Call production stream_on_error
  *   Verify: Returns NGX_HTTP_BAD_GATEWAY (502), state=PASSTHROUGH
  *
  * Validates: Requirements 8.2
@@ -552,8 +545,8 @@ test_8_2_precommit_reject_502(void)
     /* Step 1: Initialize context -- PRE_COMMIT with replay, on_error=reject */
     e2e_init_context_precommit(&ctx, &conf, NGX_HTTP_MARKDOWN_ON_ERROR_REJECT);
 
-    /* Step 2: Invoke the full error handler flow */
-    rc = e2e_stream_on_error(&e2e_request, &ctx, &conf);
+    /* Step 2: Invoke the PRODUCTION error handler */
+    rc = ngx_http_markdown_stream_on_error(&e2e_request, &ctx, &conf);
 
     /* Step 3: Verify final outcome */
     TEST_ASSERT(rc == NGX_HTTP_BAD_GATEWAY,
@@ -564,10 +557,6 @@ test_8_2_precommit_reject_502(void)
                 "8.2: no replay chain built (rejected)");
     TEST_ASSERT(mock_output_filter_called == 0,
                 "8.2: no output sent downstream");
-    TEST_ASSERT(mock_safe_finish_called == 0,
-                "8.2: no post-commit safe_finish");
-    TEST_ASSERT(mock_abort_called == 0,
-                "8.2: no post-commit abort");
 
     TEST_PASS("Task 8.2: Pre-commit reject returns 502");
 }
@@ -649,10 +638,11 @@ test_8_3_replay_buffer_overflow(void)
 /*
  * Task 8.4: Post-commit safe-finish (no HTML mixed)
  *
- * Full E2E flow:
- *   Setup: COMMITTED state, headers_committed=1, on_error=pass
- *   Action: Call stream_on_error
- *   Verify: Returns NGX_OK, safe_finish executed,
+ * Full E2E flow using PRODUCTION error handler:
+ *   Setup: COMMITTED state, headers_committed=1, on_error=pass,
+ *          Rust safe_finish stub returns POST_COMMIT_SAFE_FINISH
+ *   Action: Call production stream_on_error
+ *   Verify: Returns NGX_OK, send_terminal executed via output_filter,
  *           NO HTML in output, state=POST_COMMIT_SAFE_FINISH
  *
  * The critical safety property: after commit, the response MUST
@@ -671,24 +661,26 @@ test_8_4_postcommit_safe_finish(void)
 
     /* Step 1: Initialize context -- COMMITTED, on_error=pass */
     e2e_init_context_committed(&ctx, &conf, NGX_HTTP_MARKDOWN_ON_ERROR_PASS);
-    mock_safe_finish_rc = NGX_OK;
 
-    /* Step 2: Invoke the full error handler flow */
-    rc = e2e_stream_on_error(&e2e_request, &ctx, &conf);
+    /* Configure Rust stub: safe_finish succeeds with no closing bytes */
+    e2e_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
+    e2e_safe_finish_data = NULL;
+    e2e_safe_finish_len = 0;
+
+    /* Step 2: Invoke the PRODUCTION error handler */
+    rc = ngx_http_markdown_stream_on_error(&e2e_request, &ctx, &conf);
 
     /* Step 3: Verify final outcome */
     TEST_ASSERT(rc == NGX_OK,
                 "8.4: returns NGX_OK (not 502)");
     TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH,
                 "8.4: final state is POST_COMMIT_SAFE_FINISH");
-    TEST_ASSERT(mock_safe_finish_called == 1,
-                "8.4: safe_finish was called");
-    TEST_ASSERT(mock_abort_called == 0,
-                "8.4: no abort (safe_finish succeeded)");
+    TEST_ASSERT(mock_output_filter_called == 1,
+                "8.4: send_terminal called output_filter");
+    TEST_ASSERT(mock_calloc_buf_called >= 1,
+                "8.4: send_terminal allocated terminal buffer");
 
     /* Critical safety: no HTML was sent post-commit */
-    TEST_ASSERT(mock_output_filter_called == 0,
-                "8.4: no raw output filter call (no HTML replay)");
     TEST_ASSERT(mock_replay_chain_called == 0,
                 "8.4: no replay chain built (post-commit)");
 
@@ -703,10 +695,10 @@ test_8_4_postcommit_safe_finish(void)
 /*
  * Task 8.5: Post-commit abort (no HTML mixed)
  *
- * Full E2E flow:
+ * Full E2E flow using PRODUCTION error handler:
  *   Setup: COMMITTED state, headers_committed=1, on_error=reject
- *   Action: Call stream_on_error
- *   Verify: Returns NGX_OK (NOT 502!), abort executed,
+ *   Action: Call production stream_on_error
+ *   Verify: Returns NGX_OK (NOT 502!), abort executed via send_terminal,
  *           NO HTML in output, state=POST_COMMIT_ABORT
  *
  * Critical: even with on_error=reject, post-commit NEVER returns 502.
@@ -726,8 +718,8 @@ test_8_5_postcommit_abort(void)
     /* Step 1: Initialize context -- COMMITTED, on_error=reject */
     e2e_init_context_committed(&ctx, &conf, NGX_HTTP_MARKDOWN_ON_ERROR_REJECT);
 
-    /* Step 2: Invoke the full error handler flow */
-    rc = e2e_stream_on_error(&e2e_request, &ctx, &conf);
+    /* Step 2: Invoke the PRODUCTION error handler */
+    rc = ngx_http_markdown_stream_on_error(&e2e_request, &ctx, &conf);
 
     /* Step 3: Verify final outcome */
     TEST_ASSERT(rc == NGX_OK,
@@ -736,14 +728,12 @@ test_8_5_postcommit_abort(void)
                 "8.5: explicitly NOT 502");
     TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_POST_COMMIT_ABORT,
                 "8.5: final state is POST_COMMIT_ABORT");
-    TEST_ASSERT(mock_abort_called == 1,
-                "8.5: abort was called");
-    TEST_ASSERT(mock_safe_finish_called == 0,
-                "8.5: no safe_finish (on_error=reject goes direct abort)");
+    TEST_ASSERT(mock_output_filter_called == 1,
+                "8.5: send_terminal called output_filter");
+    TEST_ASSERT(mock_calloc_buf_called >= 1,
+                "8.5: send_terminal allocated terminal buffer");
 
     /* Critical safety: no HTML was sent post-commit */
-    TEST_ASSERT(mock_output_filter_called == 0,
-                "8.5: no raw output filter call (no HTML replay)");
     TEST_ASSERT(mock_replay_chain_called == 0,
                 "8.5: no replay chain built (post-commit)");
 
@@ -770,6 +760,9 @@ test_8_5_postcommit_abort(void)
  * For each combination that produces a post-commit state, we verify
  * the action is either SAFE_FINISH or ABORT (never PASS_HTML or
  * any action that would produce HTML output).
+ *
+ * Also includes E2E flow tests that exercise the PRODUCTION
+ * error handler to verify no HTML leaks post-commit.
  *
  * Validates: Requirements 8.6
  */
@@ -887,18 +880,18 @@ test_8_6_no_mixed_markdown_html(void)
         }
     }
 
-    /* Also test via E2E flow: post-commit on_error never sends HTML */
+    /* Also test via PRODUCTION E2E flow: post-commit never sends HTML */
     {
         ngx_http_markdown_ctx_t   ctx;
         ngx_http_markdown_conf_t  conf;
         ngx_int_t                 rc;
 
-        /* on_error=pass post-commit */
+        /* on_error=pass post-commit via production handler */
         e2e_setup();
         e2e_init_context_committed(
             &ctx, &conf, NGX_HTTP_MARKDOWN_ON_ERROR_PASS);
-        mock_safe_finish_rc = NGX_OK;
-        rc = e2e_stream_on_error(&e2e_request, &ctx, &conf);
+        e2e_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
+        rc = ngx_http_markdown_stream_on_error(&e2e_request, &ctx, &conf);
         TEST_ASSERT(rc == NGX_OK, "8.6 E2E pass: returns NGX_OK");
         TEST_ASSERT(
             mock_output_data == NULL
@@ -907,11 +900,11 @@ test_8_6_no_mixed_markdown_html(void)
             "8.6 E2E pass: no HTML in output data");
         total_checks++;
 
-        /* on_error=reject post-commit */
+        /* on_error=reject post-commit via production handler */
         e2e_setup();
         e2e_init_context_committed(
             &ctx, &conf, NGX_HTTP_MARKDOWN_ON_ERROR_REJECT);
-        rc = e2e_stream_on_error(&e2e_request, &ctx, &conf);
+        rc = ngx_http_markdown_stream_on_error(&e2e_request, &ctx, &conf);
         TEST_ASSERT(rc == NGX_OK, "8.6 E2E reject: returns NGX_OK (not 502)");
         TEST_ASSERT(
             mock_output_data == NULL
