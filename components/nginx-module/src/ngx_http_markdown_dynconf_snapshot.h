@@ -28,7 +28,7 @@
  * Sized to accommodate all configuration items with generous
  * padding for key names, values, and JSON formatting.
  */
-#define NGX_HTTP_MARKDOWN_SNAPSHOT_BUF_SIZE  4096
+#define NGX_HTTP_MARKDOWN_SNAPSHOT_BUF_SIZE  6144
 
 
 /*

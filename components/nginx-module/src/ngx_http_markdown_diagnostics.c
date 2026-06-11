@@ -719,6 +719,8 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
     const char  *engine_str;
     const char  *on_error_str;
     size_t       threshold;
+    size_t       precommit_buffer;
+    size_t       flush_min;
 
     if (conf != NULL && conf->streaming.engine != NULL) {
         engine_str = "configured";
@@ -737,15 +739,23 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
         ? "reject" : "pass";
     threshold = (conf != NULL)
         ? conf->stream.threshold : 0;
+    precommit_buffer = (conf != NULL)
+        ? conf->stream.precommit_buffer : 0;
+    flush_min = (conf != NULL)
+        ? conf->stream.flush_min : 0;
 
     p = ngx_slprintf(p, last,
         "  \"streaming_config\": {\n"
         "    \"engine\": \"%s\",\n"
         "    \"on_error\": \"%s\",\n"
         "    \"threshold\": %uz,\n"
+        "    \"precommit_buffer\": %uz,\n"
+        "    \"flush_min\": %uz,\n"
         "    \"auto_threshold\": %uz\n"
         "  }\n",
-        engine_str, on_error_str, threshold, threshold);
+        engine_str, on_error_str, threshold,
+        precommit_buffer, flush_min,
+        threshold);
 #else
     p = ngx_slprintf(p, last,
         "  \"streaming_config\": null\n");

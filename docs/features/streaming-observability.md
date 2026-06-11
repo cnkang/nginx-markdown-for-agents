@@ -110,10 +110,14 @@ endpoint includes streaming sections:
     "engine": "auto",
     "on_error": "pass",
     "threshold": 1048576,
+    "precommit_buffer": 262144,
+    "flush_min": 16384,
     "auto_threshold": 1048576
   }
 }
 ```
+
+`auto_threshold` is a deprecated alias for `threshold`, included for backward compatibility.
 
 ### streaming_metrics
 
