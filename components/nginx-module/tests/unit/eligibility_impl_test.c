@@ -292,60 +292,60 @@ test_check_eligibility_full_chain(void)
     r.headers_in.range = NULL;
 
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_ELIGIBLE,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_ELIGIBLE,
         "valid GET/200/text-html should be ELIGIBLE");
 
     r.method = NGX_HTTP_HEAD;
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_ELIGIBLE,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_ELIGIBLE,
         "HEAD method should be ELIGIBLE");
 
     r.method = 2;
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD,
         "POST method -> INELIGIBLE_METHOD");
 
     r.method = NGX_HTTP_GET;
     r.headers_out.status = 404;
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,
         "404 status -> INELIGIBLE_STATUS");
 
     r.headers_out.status = NGX_HTTP_PARTIAL_CONTENT;
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,
         "206 status -> INELIGIBLE_RANGE (not INELIGIBLE_STATUS)");
 
     r.headers_out.status = NGX_HTTP_OK;
     r.headers_in.range = &range_hdr;
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,
         "Range header present -> INELIGIBLE_RANGE");
 
     r.headers_in.range = NULL;
     set_str(&r.headers_out.content_type, "text/event-stream");
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,
         "SSE content type -> INELIGIBLE_STREAMING");
 
     set_str(&r.headers_out.content_type, "application/json");
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE,
         "application/json -> INELIGIBLE_CONTENT_TYPE");
 
     set_str(&r.headers_out.content_type, "text/html");
     r.headers_out.content_length_n = 100 * 1024 * 1024;
     conf.max_size = 10 * 1024 * 1024;
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,
         "oversized response -> INELIGIBLE_SIZE");
 
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 0) == NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
+        ngx_http_markdown_check_eligibility(&r, &conf, 0, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
         "filter_enabled=0 -> INELIGIBLE_CONFIG");
 
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, NULL, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
+        ngx_http_markdown_check_eligibility(&r, NULL, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
         "NULL conf -> INELIGIBLE_CONFIG");
 
     TEST_PASS("Full eligibility decision chain correct");
@@ -367,17 +367,17 @@ test_check_size_limit_boundary(void)
 
     r.headers_out.content_length_n = 1024;
     TEST_ASSERT(
-        ngx_http_markdown_check_size_limit(&r, &conf) == 1,
+        ngx_http_markdown_check_size_limit(&r, &conf, NULL) == 1,
         "exactly max_size should pass");
 
     r.headers_out.content_length_n = 1025;
     TEST_ASSERT(
-        ngx_http_markdown_check_size_limit(&r, &conf) == 0,
+        ngx_http_markdown_check_size_limit(&r, &conf, NULL) == 0,
         "max_size+1 should fail");
 
     r.headers_out.content_length_n = -1;
     TEST_ASSERT(
-        ngx_http_markdown_check_size_limit(&r, &conf) == 1,
+        ngx_http_markdown_check_size_limit(&r, &conf, NULL) == 1,
         "missing Content-Length (-1) should pass");
 
     TEST_PASS("Size limit boundary cases correct");

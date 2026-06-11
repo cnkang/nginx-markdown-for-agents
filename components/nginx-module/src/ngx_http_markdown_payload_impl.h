@@ -515,15 +515,19 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
 {
     ngx_int_t  rc;
     size_t     attempted_size;
+    size_t     body_limit;
 
     attempted_size = (((size_t) -1) - ctx->buffer.size < chunk_size)
         ? (size_t) -1
         : ctx->buffer.size + chunk_size;
 
+    body_limit = ngx_http_markdown_effective_body_buffer_limit(
+        ctx->effective_conf, conf);
+
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                  "markdown: response size exceeds limit, "
                  "size=%uz bytes, max=%uz bytes, category=resource_limit",
-                 attempted_size, conf->max_size);
+                 attempted_size, body_limit);
 
     ctx->error.last_category = NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT;
     ctx->error.has_category = 1;
@@ -607,16 +611,20 @@ ngx_http_markdown_body_filter_buffer_input(ngx_http_request_t *r,
     ngx_flag_t    last_buf;
     size_t        reserve_hint;
     off_t         content_length_n;
+    size_t        body_limit;
+
+    body_limit = ngx_http_markdown_effective_body_buffer_limit(
+        ctx->effective_conf, conf);
 
     if (!ctx->buffer_initialized) {
-        rc = ngx_http_markdown_buffer_init(&ctx->buffer, conf->max_size, r->pool);
+        rc = ngx_http_markdown_buffer_init(&ctx->buffer, body_limit, r->pool);
         if (rc != NGX_OK) {
             return ngx_http_markdown_handle_buffer_init_failure(r, ctx, conf, in);
         }
         ctx->buffer_initialized = 1;
 
         content_length_n = r->headers_out.content_length_n;
-        if (content_length_n > 0 && content_length_n <= (off_t) conf->max_size) {
+        if (content_length_n > 0 && content_length_n <= (off_t) body_limit) {
             reserve_hint = (size_t) content_length_n;
             if (reserve_hint > NGX_HTTP_MARKDOWN_PRERESERVE_LIMIT) {
                 reserve_hint = NGX_HTTP_MARKDOWN_PRERESERVE_LIMIT;

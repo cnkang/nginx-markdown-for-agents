@@ -1493,10 +1493,13 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
         && ctx->streaming.prebuffer.size > 0)
     {
         ngx_int_t  rc;
+        size_t     body_limit;
 
         if (!ctx->buffer_initialized) {
+            body_limit = ngx_http_markdown_effective_body_buffer_limit(
+                ctx->effective_conf, conf);
             rc = ngx_http_markdown_buffer_init(
-                &ctx->buffer, conf->max_size, r->pool);
+                &ctx->buffer, body_limit, r->pool);
             if (rc != NGX_OK) {
                 return NGX_ERROR;
             }
@@ -2034,26 +2037,33 @@ ngx_http_markdown_streaming_track_feed_budget(
     }
 
     ctx->streaming.total_input_bytes += feed_len;
-    if (conf->max_size > 0
-        && ctx->streaming.total_input_bytes > conf->max_size)
     {
-        ngx_log_error(NGX_LOG_WARN,
-            r->connection->log, 0,
-            "markdown: size limit "
-            "exceeded, total=%uz, max=%uz",
-            ctx->streaming.total_input_bytes,
-            conf->max_size);
+        size_t  body_limit;
 
-        if (ctx->streaming.commit_state
-            == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+        body_limit = ngx_http_markdown_effective_body_buffer_limit(
+            ctx->effective_conf, conf);
+
+        if (body_limit > 0
+            && ctx->streaming.total_input_bytes > body_limit)
         {
-            return
-                ngx_http_markdown_streaming_handle_postcommit_error(
-                    r, ctx, conf, ERROR_MEMORY_LIMIT);
-        }
+            ngx_log_error(NGX_LOG_WARN,
+                r->connection->log, 0,
+                "markdown: size limit "
+                "exceeded, total=%uz, max=%uz",
+                ctx->streaming.total_input_bytes,
+                body_limit);
 
-        return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, ERROR_MEMORY_LIMIT);
+            if (ctx->streaming.commit_state
+                == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+            {
+                return
+                    ngx_http_markdown_streaming_handle_postcommit_error(
+                        r, ctx, conf, ERROR_MEMORY_LIMIT);
+            }
+
+            return ngx_http_markdown_streaming_precommit_error(
+                r, ctx, conf, ERROR_MEMORY_LIMIT);
+        }
     }
 
     /*

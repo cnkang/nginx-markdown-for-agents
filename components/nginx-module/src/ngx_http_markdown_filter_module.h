@@ -1268,7 +1268,8 @@ const ngx_str_t *ngx_http_markdown_error_category_string(
 /* Check if response is eligible for conversion */
 ngx_http_markdown_eligibility_t ngx_http_markdown_check_eligibility(
     const ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
-    ngx_flag_t filter_enabled);
+    ngx_flag_t filter_enabled,
+    const ngx_http_markdown_effective_conf_t *eff);
 
 /* Get human-readable string for eligibility result */
 const ngx_str_t *ngx_http_markdown_eligibility_string(

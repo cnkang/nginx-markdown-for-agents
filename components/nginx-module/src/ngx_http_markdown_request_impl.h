@@ -517,7 +517,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * Accept must be last before conversion attempt.
      */
     eligibility = ngx_http_markdown_check_eligibility(
-        r, conf, filter_enabled);
+        r, conf, filter_enabled, &early_eff);
     if (eligibility != NGX_HTTP_MARKDOWN_ELIGIBLE) {
         /* Not eligible, pass through */
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
