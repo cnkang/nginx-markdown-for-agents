@@ -352,6 +352,41 @@ static void test_precommit_uses_stream_on_error_policy(void)
     TEST_PASS("Pre-commit error uses stream.on_error policy");
 }
 
+static void test_precommit_reject_uses_stream_on_error_policy(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_chain_t fc;
+    ngx_buf_t fb;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&fc, 0, sizeof(fc));
+    memset(&fb, 0, sizeof(fb));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+    ctx.stream_sm.replay_initialized = 1;
+    ctx.stream_sm.replay_buf.size = 100;
+    ctx.stream_sm.replay_capacity = 1024;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+
+    fc.buf = &fb;
+    fc.next = NULL;
+    test_replay_chain_result = &fc;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_HTTP_BAD_GATEWAY,
+        "stream.on_error reject should reject even if top-level passes");
+    TEST_ASSERT(test_output_filter_called == 0,
+        "stream.on_error reject should not replay HTML");
+    TEST_PASS("Pre-commit reject uses stream.on_error policy");
+}
+
 static void test_precommit_pass_replay_html_backpressure(void)
 {
     ngx_http_markdown_ctx_t ctx;
@@ -516,9 +551,35 @@ static void test_task_6_3_postcommit_pass_safe_finish_fails(void)
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
-    /* safe_finish fails -> abort is called -> returns NGX_OK */
-    TEST_ASSERT(rc == NGX_OK, "6.3f: returns NGX_OK");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "6.3f: returns abort failure instead of swallowing it");
     TEST_PASS("Task 6.3: safe_finish fails -> abort fallback");
+}
+
+static void test_task_6_3_abort_fallback_returns_again(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    ctx.streaming.handle = (struct StreamingConverterHandle *) 0x1;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    test_output_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "safe_finish fallback abort should propagate NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_output != NULL,
+        "abort fallback should preserve pending terminal output");
+    TEST_PASS("Task 6.3: abort fallback propagates NGX_AGAIN");
 }
 
 /* --- Task 6.4: Post-commit + reject = abort --- */
@@ -545,6 +606,30 @@ static void test_task_6_4_postcommit_reject_abort(void)
     TEST_ASSERT(test_replay_chain_called == 0, "6.4: no replay");
     TEST_ASSERT(test_calloc_buf_called >= 1, "6.4: send_terminal called");
     TEST_PASS("Task 6.4: post-commit + reject = abort");
+}
+
+static void test_task_6_4_postcommit_abort_returns_again(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    test_output_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "6.4: abort should propagate NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_output != NULL,
+        "6.4: abort should preserve pending terminal output");
+    TEST_PASS("Task 6.4: abort propagates NGX_AGAIN");
 }
 
 /* --- NULL parameters --- */
@@ -698,12 +783,15 @@ int main(void)
     TEST_SECTION("Stream Error Handler (Spec 37, Tasks 6.1-6.4)");
     test_task_6_1_precommit_pass_replay_html();
     test_precommit_uses_stream_on_error_policy();
+    test_precommit_reject_uses_stream_on_error_policy();
     test_precommit_pass_replay_html_backpressure();
     test_precommit_pass_replay_preserves_existing_pending();
     test_task_6_2_precommit_reject_502();
     test_task_6_3_postcommit_pass_safe_finish();
     test_task_6_3_postcommit_pass_safe_finish_fails();
+    test_task_6_3_abort_fallback_returns_again();
     test_task_6_4_postcommit_reject_abort();
+    test_task_6_4_postcommit_abort_returns_again();
     test_null_parameters();
     test_passthrough_state();
     test_replay_chain_null();

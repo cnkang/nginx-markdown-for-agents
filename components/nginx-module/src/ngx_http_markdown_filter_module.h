@@ -842,12 +842,15 @@ typedef struct {
         ngx_flag_t                        headers_committed; /* Headers sent downstream */
     } stream_sm;
 
-#ifdef MARKDOWN_STREAMING_ENABLED
     /*
      * Streaming state sub-struct.
      *
-     * Grouped to comply with SonarCloud c:S1820
-     * 20-field limit.
+     * This is unconditional because request-level pending output,
+     * terminal-send latches, and post-commit completion state are NGINX
+     * filter/backpressure concerns even when the Rust streaming FFI symbols
+     * are not available in the linked static library.
+     *
+     * Grouped to comply with SonarCloud c:S1820 20-field limit.
      */
     struct {
         /* Streaming converter handle (Rust opaque pointer) */
@@ -857,7 +860,11 @@ typedef struct {
         ngx_uint_t                        commit_state;
 
         /* Engine choice reason code (streaming observability) */
+#ifdef MARKDOWN_STREAMING_ENABLED
         ngx_http_markdown_stream_reason_e reason;
+#else
+        ngx_uint_t                        reason;
+#endif
 
         /* Pending output chain for backpressure */
         ngx_chain_t                      *pending_output;
@@ -927,7 +934,6 @@ typedef struct {
             ngx_flag_t                    finalize_after_pending;
         } completion;
     } streaming;
-#endif
 } ngx_http_markdown_ctx_t;
 
 /*

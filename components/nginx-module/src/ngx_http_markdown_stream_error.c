@@ -135,7 +135,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
                           "markdown stream on_error: "
                           "safe_finish failed, falling back "
                           "to abort");
-            ngx_http_markdown_stream_postcommit_abort(r, ctx);
+            return ngx_http_markdown_stream_postcommit_abort(r, ctx);
         }
         return NGX_OK;
 
@@ -144,8 +144,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
          * Task 6.4: Post-commit + reject = abort.
          * Protocol-safe disconnect (no HTML, no 502).
          */
-        ngx_http_markdown_stream_postcommit_abort(r, ctx);
-        return NGX_OK;
+        return ngx_http_markdown_stream_postcommit_abort(r, ctx);
 
     case NGX_HTTP_MD_ACTION_PASSTHROUGH:
         /*

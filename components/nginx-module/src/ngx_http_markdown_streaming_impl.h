@@ -2754,32 +2754,35 @@ ngx_http_markdown_streaming_init_handle(
      * budget controls the Rust streaming converter memory. */
     ctx->streaming.prebuffer_limit =
         conf->stream.precommit_buffer;
-    rc = ngx_http_markdown_buffer_init(
-        &ctx->streaming.prebuffer,
-        ctx->streaming.prebuffer_limit,
-        r->pool);
-    if (rc == NGX_OK) {
-        ctx->streaming.prebuffer_initialized = 1;
+    if (ctx->streaming.prebuffer_limit > 0) {
+        rc = ngx_http_markdown_buffer_init(
+            &ctx->streaming.prebuffer,
+            ctx->streaming.prebuffer_limit,
+            r->pool);
+        if (rc == NGX_OK) {
+            ctx->streaming.prebuffer_initialized = 1;
+        } else {
+            /*
+             * Prebuffer initialization failed due to pool exhaustion.
+             * Without a working prebuffer, the streaming
+             * fallback-to-fullbuffer path cannot recover already-processed
+             * prefix data, so continuing streaming would silently lose data
+             * on fallback.  Treat this as a pre-commit error: fail-open
+             * (pass) or reject per the configured streaming_on_error policy.
+             */
+            ngx_log_error(NGX_LOG_ERR,
+                r->connection->log, 0,
+                "markdown: prebuffer init "
+                "failed (pool exhaustion), "
+                "cannot guarantee fallback data integrity");
+            markdown_streaming_abort(
+                ctx->streaming.handle);
+            ctx->streaming.handle = NULL;
+            return ngx_http_markdown_streaming_precommit_error(
+                r, ctx, conf, ERROR_MEMORY_LIMIT);
+        }
     } else {
-        /*
-         * Prebuffer initialization failed (pool exhaustion or
-         * zero budget).  Without a working prebuffer, the
-         * streaming fallback-to-fullbuffer path cannot recover
-         * already-processed prefix data, so continuing streaming
-         * would silently lose data on fallback.  Treat this as
-         * a pre-commit error: fail-open (pass) or reject per
-         * the configured streaming_on_error policy.
-         */
-        ngx_log_error(NGX_LOG_ERR,
-            r->connection->log, 0,
-            "markdown: prebuffer init "
-            "failed (pool exhaustion or zero budget), "
-            "cannot guarantee fallback data integrity");
-        markdown_streaming_abort(
-            ctx->streaming.handle);
-        ctx->streaming.handle = NULL;
-        return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, ERROR_MEMORY_LIMIT);
+        ctx->streaming.prebuffer_initialized = 0;
     }
 
     ctx->streaming.commit_state =
@@ -2792,36 +2795,37 @@ ngx_http_markdown_streaming_init_handle(
      * module-owned memory, rather than relying on upstream ngx_buf_t*
      * pointer stability across filter chain invocations.
      */
-     ctx->streaming.failopen_replay_initialized = 0;
-    rc = ngx_http_markdown_buffer_init(
-        &ctx->streaming.failopen_replay_buf,
-        ctx->streaming.prebuffer_limit,
-        r->pool);
-    if (rc != NGX_OK) {
-        /*
-         * Replay buffer initialization failed (pool exhaustion or
-         * zero budget).  Without a working replay buffer, fail-open
-         * cannot reconstruct the original upstream prefix data on
-         * pre-commit error, so continuing streaming would silently
-         * lose data.  Treat this identically to prebuffer init
-         * failure: abort the handle and apply the configured
-         * streaming_on_error policy.
-         */
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            results.replay_buffer_errors_total);
-        ngx_log_error(NGX_LOG_ERR,
-            r->connection->log, 0,
-            "markdown: replay buffer init "
-            "failed (pool exhaustion or zero budget), "
-            "cannot guarantee fail-open data integrity");
-        markdown_streaming_abort(
-            ctx->streaming.handle);
-        ctx->streaming.handle = NULL;
-        return ngx_http_markdown_streaming_precommit_error(
-            r, ctx, conf, ERROR_MEMORY_LIMIT);
-    }
+    ctx->streaming.failopen_replay_initialized = 0;
+    if (ctx->streaming.prebuffer_limit > 0) {
+        rc = ngx_http_markdown_buffer_init(
+            &ctx->streaming.failopen_replay_buf,
+            ctx->streaming.prebuffer_limit,
+            r->pool);
+        if (rc != NGX_OK) {
+            /*
+             * Replay buffer initialization failed due to pool exhaustion.
+             * Without a working replay buffer, fail-open cannot reconstruct
+             * the original upstream prefix data on pre-commit error, so
+             * continuing streaming would silently lose data.  Treat this
+             * identically to prebuffer init failure: abort the handle and
+             * apply the configured streaming_on_error policy.
+             */
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                results.replay_buffer_errors_total);
+            ngx_log_error(NGX_LOG_ERR,
+                r->connection->log, 0,
+                "markdown: replay buffer init "
+                "failed (pool exhaustion), "
+                "cannot guarantee fail-open data integrity");
+            markdown_streaming_abort(
+                ctx->streaming.handle);
+            ctx->streaming.handle = NULL;
+            return ngx_http_markdown_streaming_precommit_error(
+                r, ctx, conf, ERROR_MEMORY_LIMIT);
+        }
 
-    ctx->streaming.failopen_replay_initialized = 1;
+        ctx->streaming.failopen_replay_initialized = 1;
+    }
 
     ctx->conversion.attempted = 1;
     NGX_HTTP_MARKDOWN_METRIC_INC(
