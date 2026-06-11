@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -611,6 +612,43 @@ def _extract_yaml_array_versions(value: str) -> set[str]:
     return versions
 
 
+def _current_matrix_entry_version(entry: dict[str, object]) -> str | None:
+    """Return the NGINX version for a current-schema release package entry."""
+    if entry.get("support_tier") != "supported":
+        return None
+    if entry.get("libc") != "glibc":
+        return None
+    if entry.get("release_blocking") is not True:
+        return None
+
+    version = entry.get("nginx_version")
+    return version if isinstance(version, str) and _is_nginx_version(version) else None
+
+
+def _legacy_matrix_entry_version(entry: dict[str, object]) -> str | None:
+    """Return the NGINX version for a legacy-schema release package entry."""
+    if entry.get("support_tier") != "full":
+        return None
+    if entry.get("os_type") != "glibc":
+        return None
+
+    version = entry.get("nginx")
+    return version if isinstance(version, str) and _is_nginx_version(version) else None
+
+
+def _extract_matrix_entry_versions(
+    entries: Iterable[dict[str, object]],
+    version_from_entry: Callable[[dict[str, object]], str | None],
+) -> set[str]:
+    """Extract valid NGINX versions from release matrix entries."""
+    versions: set[str] = set()
+    for entry in entries:
+        version = version_from_entry(entry)
+        if version is not None:
+            versions.add(version)
+    return versions
+
+
 def _extract_matrix_versions() -> set[str]:
     """Extract NGINX versions from the release matrix JSON file."""
     versions: set[str] = set()
@@ -622,24 +660,18 @@ def _extract_matrix_versions() -> set[str]:
         raise RuntimeError(
             f"Malformed release matrix at {RELEASE_MATRIX}: {exc}"
         ) from exc
-    for entry in data.get("entries", []):
-        if (
-            entry.get("support_tier") == "supported"
-            and entry.get("libc") == "glibc"
-            and entry.get("release_blocking") is True
-        ):
-            version = entry.get("nginx_version")
-            if isinstance(version, str) and _is_nginx_version(version):
-                versions.add(version)
-
-    for entry in data.get("matrix", []):
-        if (
-            entry.get("support_tier") == "full"
-            and entry.get("os_type") == "glibc"
-        ):
-            version = entry.get("nginx")
-            if isinstance(version, str) and _is_nginx_version(version):
-                versions.add(version)
+    versions.update(
+        _extract_matrix_entry_versions(
+            data.get("entries", []),
+            _current_matrix_entry_version,
+        )
+    )
+    versions.update(
+        _extract_matrix_entry_versions(
+            data.get("matrix", []),
+            _legacy_matrix_entry_version,
+        )
+    )
     return versions
 
 

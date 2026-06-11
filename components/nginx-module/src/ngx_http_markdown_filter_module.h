@@ -615,6 +615,47 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
 #undef NGX_MD_MERGE_STREAM
 }
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+/*
+ * Map legacy v0.6.0 streaming.* fields into the v0.8.0 stream.* runtime
+ * source of truth after both structures have been merged.
+ *
+ * Sentinel casts intentionally avoid NGX_CONF_UNSET_* macros here because
+ * standalone unit harnesses include this header before defining those macros.
+ */
+static ngx_inline void
+ngx_http_markdown_bridge_legacy_stream_values(
+    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
+    if (conf->streaming.on_error != (ngx_uint_t) -1
+        && !conf->stream.on_error_explicit)
+    {
+        conf->stream.on_error = conf->streaming.on_error;
+    }
+
+    if (conf->streaming.budget != (size_t) -1
+        && conf->stream.budget == NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT)
+    {
+        conf->stream.budget = conf->streaming.budget;
+        conf->stream.budget_explicit = conf->streaming.budget_explicit
+            || prev->stream.budget_explicit;
+    }
+
+    if (conf->streaming.shadow != (ngx_flag_t) -1
+        && !conf->stream.shadow_explicit)
+    {
+        conf->stream.shadow = conf->streaming.shadow;
+    }
+
+    if (conf->streaming.auto_threshold_explicit
+        && !conf->stream.threshold_explicit)
+    {
+        conf->stream.threshold = conf->streaming.auto_threshold;
+    }
+}
+#endif
+
 /*
  * Main configuration structure
  *

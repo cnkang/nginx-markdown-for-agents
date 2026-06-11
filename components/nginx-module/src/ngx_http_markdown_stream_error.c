@@ -1,8 +1,8 @@
 /*
  * Streaming Fallback State Machine — Error Handler Integration
  *
- * Wires the markdown_on_error configuration directive into the
- * streaming state machine (streaming fallback state machine, tasks 6.1–6.4).
+ * Wires the streaming on_error configuration into the streaming state
+ * machine (streaming fallback state machine, tasks 6.1–6.4).
  *
  * This module is the main entry point called by the body filter when
  * a streaming error occurs.  It populates the decision context from
@@ -66,7 +66,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
         ngx_http_markdown_stream_replay_available(ctx);
     dctx.headers_committed = ctx->stream_sm.headers_committed;
     dctx.within_resource_limits = 1;
-    dctx.on_error_policy = conf->on_error;
+    dctx.on_error_policy = conf->stream.on_error;
 
     /* 2. Choose event based on committed state and on_error policy */
     if (ctx->stream_sm.headers_committed) {
@@ -76,7 +76,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
          * to choose safe_finish vs abort.
          */
         event = NGX_HTTP_MD_EVENT_ERROR;
-    } else if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
+    } else if (conf->stream.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
         event = NGX_HTTP_MD_EVENT_ON_ERROR_PASS;
     } else {
         event = NGX_HTTP_MD_EVENT_ON_ERROR_REJECT;
@@ -173,7 +173,9 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
  *
  * Returns:
  *   NGX_OK    - HTML replayed successfully
+ *   NGX_AGAIN - Downstream backpressure; chain saved for resume
  *   NGX_ERROR - Replay chain build or send failed
+ *   other     - Downstream filter status propagated
  */
 static ngx_int_t
 ngx_http_markdown_stream_error_pass_html(ngx_http_request_t *r,
@@ -212,6 +214,24 @@ ngx_http_markdown_stream_error_pass_html(ngx_http_request_t *r,
 
     /* Send the replayed HTML downstream */
     rc = ngx_http_output_filter(r, chain);
+    if (rc == NGX_AGAIN) {
+        if (ctx->streaming.pending_output != NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "markdown stream on_error: "
+                          "pending output already exists during "
+                          "HTML replay backpressure");
+            return NGX_ERROR;
+        }
+
+        ctx->streaming.pending_output = chain;
+        ctx->streaming.pending_has_data =
+            (ctx->stream_sm.replay_buf.size > 0) ? 1 : 0;
+        ctx->streaming.pending_output_bytes = ctx->stream_sm.replay_buf.size;
+        ctx->streaming.pending_failopen_delivery = 1;
+        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+        return NGX_AGAIN;
+    }
+
     if (rc == NGX_ERROR) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown stream on_error: "
@@ -219,5 +239,5 @@ ngx_http_markdown_stream_error_pass_html(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    return NGX_OK;
+    return rc;
 }

@@ -126,6 +126,7 @@ struct ngx_http_request_s {
  */
 static int test_output_filter_called;
 static int test_output_filter_rc;
+static ngx_chain_t *test_output_filter_chain;
 static int test_replay_chain_called;
 static ngx_chain_t *test_replay_chain_result;
 
@@ -151,8 +152,9 @@ static void test_setup(void);
 ngx_int_t
 ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
-    UNUSED(r); UNUSED(in);
+    UNUSED(r);
     test_output_filter_called++;
+    test_output_filter_chain = in;
     return test_output_filter_rc;
 }
 
@@ -254,6 +256,7 @@ static void test_setup(void)
 {
     test_output_filter_called = 0;
     test_output_filter_rc = NGX_OK;
+    test_output_filter_chain = NULL;
     test_replay_chain_called = 0;
     test_replay_chain_result = NULL;
     test_calloc_buf_called = 0;
@@ -296,7 +299,7 @@ static void test_task_6_1_precommit_pass_replay_html(void)
     ctx.stream_sm.replay_initialized = 1;
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
-    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     fc.buf = &fb;
     fc.next = NULL;
@@ -312,6 +315,123 @@ static void test_task_6_1_precommit_pass_replay_html(void)
     TEST_ASSERT(test_request.headers_out.content_type_len
                 == sizeof("text/html") - 1, "6.1: CT=text/html");
     TEST_PASS("Task 6.1: pre-commit + pass = replay HTML");
+}
+
+static void test_precommit_uses_stream_on_error_policy(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_chain_t fc;
+    ngx_buf_t fb;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&fc, 0, sizeof(fc));
+    memset(&fb, 0, sizeof(fb));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+    ctx.stream_sm.replay_initialized = 1;
+    ctx.stream_sm.replay_buf.size = 100;
+    ctx.stream_sm.replay_capacity = 1024;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    fc.buf = &fb;
+    fc.next = NULL;
+    test_replay_chain_result = &fc;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_OK,
+        "stream.on_error pass should replay even if top-level rejects");
+    TEST_ASSERT(test_output_filter_called == 1,
+        "stream.on_error pass should call output filter");
+    TEST_PASS("Pre-commit error uses stream.on_error policy");
+}
+
+static void test_precommit_pass_replay_html_backpressure(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_chain_t fc;
+    ngx_buf_t fb;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&fc, 0, sizeof(fc));
+    memset(&fb, 0, sizeof(fb));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+    ctx.stream_sm.replay_initialized = 1;
+    ctx.stream_sm.replay_buf.size = 100;
+    ctx.stream_sm.replay_capacity = 1024;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    fc.buf = &fb;
+    fc.next = NULL;
+    test_replay_chain_result = &fc;
+    test_output_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_AGAIN, "replay backpressure -> NGX_AGAIN");
+    TEST_ASSERT(test_output_filter_chain == &fc,
+        "output filter should receive replay chain");
+    TEST_ASSERT(ctx.streaming.pending_output == &fc,
+        "replay chain saved as pending output");
+    TEST_ASSERT(ctx.streaming.pending_has_data == 1,
+        "replay pending chain records data");
+    TEST_ASSERT(ctx.streaming.pending_output_bytes == 100,
+        "replay pending byte count preserved");
+    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 1,
+        "fail-open delivery latch set for replay pending chain");
+    TEST_ASSERT((test_request.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
+        "request buffered flag set on replay backpressure");
+    TEST_PASS("Pre-commit pass replay preserves NGX_AGAIN pending chain");
+}
+
+static void test_precommit_pass_replay_preserves_existing_pending(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_chain_t existing;
+    ngx_chain_t fc;
+    ngx_buf_t fb;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&existing, 0, sizeof(existing));
+    memset(&fc, 0, sizeof(fc));
+    memset(&fb, 0, sizeof(fb));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+    ctx.stream_sm.replay_initialized = 1;
+    ctx.stream_sm.replay_buf.size = 100;
+    ctx.stream_sm.replay_capacity = 1024;
+    ctx.streaming.pending_output = &existing;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    fc.buf = &fb;
+    fc.next = NULL;
+    test_replay_chain_result = &fc;
+    test_output_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+        "existing pending chain should reject replay overwrite");
+    TEST_ASSERT(ctx.streaming.pending_output == &existing,
+        "existing pending chain should be preserved");
+    TEST_PASS("Pre-commit replay backpressure preserves existing pending");
 }
 
 /* --- Task 6.2: Pre-commit + reject = 502 --- */
@@ -331,7 +451,7 @@ static void test_task_6_2_precommit_reject_502(void)
     ctx.stream_sm.replay_initialized = 1;
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
-    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
@@ -357,7 +477,7 @@ static void test_task_6_3_postcommit_pass_safe_finish(void)
 
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
-    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
@@ -384,7 +504,7 @@ static void test_task_6_3_postcommit_pass_safe_finish_fails(void)
 
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
-    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     /* Make send_terminal fail (calloc_buf returns NULL) */
     test_calloc_buf_result = NULL;
@@ -415,7 +535,7 @@ static void test_task_6_4_postcommit_reject_abort(void)
 
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
-    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
@@ -460,7 +580,7 @@ static void test_passthrough_state(void)
     memset(&conf, 0, sizeof(conf));
 
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_PASSTHROUGH;
-    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
@@ -487,7 +607,7 @@ static void test_replay_chain_null(void)
     ctx.stream_sm.replay_initialized = 1;
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
-    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     /* replay_chain returns NULL */
     test_replay_chain_result = NULL;
@@ -519,7 +639,7 @@ static void test_output_filter_failure(void)
     ctx.stream_sm.replay_initialized = 1;
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
-    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     fc.buf = &fb;
     fc.next = NULL;
@@ -552,7 +672,7 @@ static void test_content_type_restored(void)
     ctx.stream_sm.replay_initialized = 1;
     ctx.stream_sm.replay_buf.size = 50;
     ctx.stream_sm.replay_capacity = 1024;
-    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     /* Set a different Content-Type before the call */
     test_request.headers_out.content_type_len = 30;
@@ -577,6 +697,9 @@ int main(void)
 {
     TEST_SECTION("Stream Error Handler (Spec 37, Tasks 6.1-6.4)");
     test_task_6_1_precommit_pass_replay_html();
+    test_precommit_uses_stream_on_error_policy();
+    test_precommit_pass_replay_html_backpressure();
+    test_precommit_pass_replay_preserves_existing_pending();
     test_task_6_2_precommit_reject_502();
     test_task_6_3_postcommit_pass_safe_finish();
     test_task_6_3_postcommit_pass_safe_finish_fails();

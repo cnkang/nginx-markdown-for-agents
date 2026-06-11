@@ -894,7 +894,14 @@ static void
 merge_stream_config(ngx_http_markdown_conf_t *child,
     const ngx_http_markdown_conf_t *parent)
 {
+    ngx_flag_t stream_threshold_set;
+
+    stream_threshold_set = (child->stream.threshold != NGX_CONF_UNSET_SIZE);
     ngx_http_markdown_merge_stream_values(child, parent);
+    if (stream_threshold_set) {
+        child->stream.threshold_explicit = 1;
+    }
+    ngx_http_markdown_bridge_legacy_stream_values(child, parent);
 }
 
 static int
@@ -1213,17 +1220,10 @@ test_auto_threshold_compatibility_bridge(void)
         NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT;
     child.streaming.auto_threshold_explicit = 0;
 
-    /* Simulate merge_stream_values: stream.threshold resolves to 1m default */
     merge_stream_config(&child, &parent);
 
-    /* Bridge condition: auto_threshold_explicit is false → no mapping */
     TEST_ASSERT(child.streaming.auto_threshold_explicit == 0,
         "auto_threshold_explicit should be 0 when no one set it");
-    if (child.streaming.auto_threshold_explicit
-        && !child.stream.threshold_explicit)
-    {
-        child.stream.threshold = child.streaming.auto_threshold;
-    }
 
     TEST_ASSERT(child.stream.threshold
         == NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT,
@@ -1245,15 +1245,7 @@ test_auto_threshold_compatibility_bridge(void)
     child.streaming.auto_threshold = 64 * 1024;
     child.streaming.auto_threshold_explicit = 1;
 
-    /* stream.threshold not explicitly set → resolves to 1m default */
     merge_stream_config(&child, &parent);
-
-    /* Bridge condition: auto_threshold_explicit is true → map */
-    if (child.streaming.auto_threshold_explicit
-        && !child.stream.threshold_explicit)
-    {
-        child.stream.threshold = child.streaming.auto_threshold;
-    }
 
     TEST_ASSERT(child.stream.threshold == 64 * 1024,
         "explicit streaming.auto_threshold 64k must map "
@@ -1273,13 +1265,6 @@ test_auto_threshold_compatibility_bridge(void)
     child.stream.threshold_explicit = 1;
 
     merge_stream_config(&child, &parent);
-
-    /* Bridge condition: threshold_explicit is true → no mapping */
-    if (child.streaming.auto_threshold_explicit
-        && !child.stream.threshold_explicit)
-    {
-        child.stream.threshold = child.streaming.auto_threshold;
-    }
 
     TEST_ASSERT(child.stream.threshold == 512 * 1024,
         "explicit stream.threshold must win over "

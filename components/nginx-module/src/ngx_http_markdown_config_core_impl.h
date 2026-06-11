@@ -632,46 +632,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * Priority: stream.* explicit  >  streaming.* mapped  >  defaults
      */
 #ifdef MARKDOWN_STREAMING_ENABLED
-    if (conf->streaming.on_error != NGX_CONF_UNSET_UINT
-        && !conf->stream.on_error_explicit)
-    {
-        conf->stream.on_error = conf->streaming.on_error;
-    }
-
-    if (conf->streaming.budget != NGX_CONF_UNSET_SIZE
-        && conf->stream.budget == NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT)
-    {
-        conf->stream.budget = conf->streaming.budget;
-        conf->stream.budget_explicit = conf->streaming.budget_explicit
-            || prev->stream.budget_explicit;
-    }
-
-    if (conf->streaming.shadow != NGX_CONF_UNSET
-        && !conf->stream.shadow_explicit)
-    {
-        conf->stream.shadow = conf->streaming.shadow;
-    }
-
-    /*
-     * Compatibility bridge: map v0.6.0 streaming.auto_threshold
-     * into stream.threshold when the v0.8.0 directive was not
-     * explicitly set.  Without this, operators using the old
-     * markdown_streaming_auto_threshold 64k directive would see
-     * their setting ignored — runtime reads conf->stream.threshold
-     * which defaults to 1m, causing a compatibility regression.
-     *
-     * Condition: stream.threshold was not explicitly set at this
-     * level (nor inherited from a parent that explicitly set it)
-     * AND streaming.auto_threshold was EXPLICITLY configured by the
-     * operator (not just resolved to its legacy 32k default).
-     *
-     * Priority: stream.threshold explicit > streaming.auto_threshold explicit > defaults
-     */
-    if (conf->streaming.auto_threshold_explicit
-        && !conf->stream.threshold_explicit)
-    {
-        conf->stream.threshold = conf->streaming.auto_threshold;
-    }
+    ngx_http_markdown_bridge_legacy_stream_values(conf, prev);
 #endif
 
     ngx_http_markdown_merge_v060_values(conf, prev);
