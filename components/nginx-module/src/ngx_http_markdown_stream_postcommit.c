@@ -664,8 +664,8 @@ ngx_http_markdown_stream_postcommit_has_html_signature(
     static u_char       doctype[] = {
         'D', 'O', 'C', 'T', 'Y', 'P', 'E'
     };
-    static const u_char tag_names[] = "html" "head" "body" "meta"
-                                     "div" "script" "style";
+    static const u_char tag_names[] =
+        "htmlheadbodymetadivscriptstyle";
 
     static const struct {
         const u_char  *name;
@@ -679,8 +679,6 @@ ngx_http_markdown_stream_postcommit_has_html_signature(
         { tag_names + 19, 6 },   /* script */
         { tag_names + 25, 5 },   /* style */
     };
-
-    size_t  i;
 
     if (data == NULL || len == 0) {
         return 0;
@@ -723,7 +721,9 @@ ngx_http_markdown_stream_postcommit_has_html_signature(
             return 1;
         }
 
-        for (i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) {
+        for (size_t i = 0;
+             i < sizeof(tags) / sizeof(tags[0]); i++)
+        {
             if (ngx_http_markdown_stream_postcommit_match_tag(
                     p, last, tags[i].name, tags[i].len))
             {
