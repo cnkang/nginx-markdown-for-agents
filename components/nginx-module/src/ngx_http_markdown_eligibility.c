@@ -166,20 +166,29 @@ ngx_http_markdown_check_content_type(const ngx_http_request_t *r,
  */
 static ngx_int_t
 ngx_http_markdown_check_size_limit(const ngx_http_request_t *r,
-                                   const ngx_http_markdown_conf_t *conf)
+                                   const ngx_http_markdown_conf_t *conf,
+                                   const ngx_http_markdown_effective_conf_t *eff)
 {
-    off_t content_length;
+    off_t  content_length;
+    size_t body_limit;
     
-    /* Get Content-Length if present */
     content_length = r->headers_out.content_length_n;
     
-    /* If Content-Length not present, pass check (will enforce during buffering) */
     if (content_length < 0) {
         return 1;
     }
+
+    body_limit = conf->max_size;
+
+    if (eff != NULL
+        && eff->memory_budget != 0
+        && eff->memory_budget != (size_t) -1
+        && eff->memory_budget < conf->max_size)
+    {
+        body_limit = eff->memory_budget;
+    }
     
-    /* Check if size exceeds configured limit */
-    if ((size_t)content_length > conf->max_size) {
+    if ((size_t)content_length > body_limit) {
         return 0;
     }
     
@@ -283,7 +292,8 @@ ngx_http_markdown_is_streaming(const ngx_http_request_t *r,
 ngx_http_markdown_eligibility_t
 ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
                                     const ngx_http_markdown_conf_t *conf,
-                                    ngx_flag_t filter_enabled)
+                                    ngx_flag_t filter_enabled,
+                                    const ngx_http_markdown_effective_conf_t *eff)
 {
     /*
      * markdown_filter enablement is resolved once by header filter to avoid
@@ -331,7 +341,7 @@ ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
     }
     
     /* Check response size limit (FR-10.1) */
-    if (!ngx_http_markdown_check_size_limit(r, conf)) {
+    if (!ngx_http_markdown_check_size_limit(r, conf, eff)) {
         return NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE;
     }
     
