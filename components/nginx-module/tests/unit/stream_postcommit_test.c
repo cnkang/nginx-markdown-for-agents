@@ -34,6 +34,13 @@
 #define ngx_log_debug1(level, log, err, fmt, a1) \
     do { (void)(level); (void)(log); (void)(err); (void)(fmt); (void)(a1); } while (0)
 
+#define ngx_log_debug3(level, log, err, fmt, a1, a2, a3) \
+    do { (void)(level); (void)(log); (void)(err); (void)(fmt); (void)(a1); (void)(a2); (void)(a3); } while (0)
+
+#ifndef NGX_HTTP_BAD_GATEWAY
+#define NGX_HTTP_BAD_GATEWAY  502
+#endif
+
 #ifndef POST_COMMIT_SAFE_FINISH
 #define POST_COMMIT_SAFE_FINISH 3
 #endif
@@ -234,6 +241,35 @@ markdown_streaming_output_free(u_char *data, uintptr_t len)
 
 /* Include the postcommit source (for guard function) */
 #include "../../src/ngx_http_markdown_stream_postcommit.c"
+
+/*
+ * Include the error handler source for on_error-level regression tests.
+ * The postcommit test file provides all required stubs (output_filter,
+ * calloc_buf, palloc, chain_link, safe_finish, output_free).
+ */
+#include "../../src/ngx_http_markdown_stream_replay.h"
+
+ngx_chain_t *
+ngx_http_markdown_stream_replay_chain(ngx_http_markdown_ctx_t *ctx,
+                                       ngx_pool_t *pool)
+{
+    UNUSED(ctx); UNUSED(pool);
+    return NULL;
+}
+
+ngx_flag_t
+ngx_http_markdown_stream_replay_available(
+    const ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx == NULL) { return 0; }
+    if (!ctx->stream_sm.replay_initialized) { return 0; }
+    if (ctx->stream_sm.replay_buf.size > ctx->stream_sm.replay_capacity) {
+        return 0;
+    }
+    return 1;
+}
+
+#include "../../src/ngx_http_markdown_stream_error.c"
 
 
 static void test_setup(void)
@@ -1177,6 +1213,56 @@ static void test_safe_finish_no_closing_bytes_backpressure(void)
 
 
 /*
+ * Regression test: post-commit terminal-only NGX_AGAIN through on_error.
+ *
+ * Scenario (exact P0 regression shape from 0.8.0 code review):
+ *   - COMMITTED state, on_error=pass
+ *   - Rust safe_finish returns POST_COMMIT_SAFE_FINISH
+ *   - close_data == NULL, close_len == 0 (no closing Markdown bytes)
+ *   - send_terminal / output_filter returns NGX_AGAIN (downstream backpressure)
+ *
+ * Expected: on_error returns NGX_AGAIN and does NOT fall through to abort.
+ * This is critical because terminal-only backpressure is a legitimate
+ * pending state that resume_pending() will drain.
+ */
+static void test_on_error_terminal_only_again_no_abort(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    /* Rust safe_finish succeeds with no closing bytes */
+    test_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
+    test_safe_finish_data = NULL;
+    test_safe_finish_len = 0;
+
+    /* Downstream returns NGX_AGAIN on terminal chain */
+    test_output_filter_rc = NGX_AGAIN;
+
+    /* Include the production error handler to test the full path */
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "terminal-only NGX_AGAIN must propagate, not abort");
+    TEST_ASSERT(ctx.stream_sm.state
+                == NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH,
+        "state must remain POST_COMMIT_SAFE_FINISH");
+    TEST_ASSERT(test_output_filter_called == 1,
+        "send_terminal should be called exactly once");
+    TEST_ASSERT(ctx.streaming.pending_output != NULL,
+        "pending_output should be set for resume_pending");
+    TEST_PASS("on_error terminal-only NGX_AGAIN preserved (no abort)");
+}
+
+/*
  * Guard test: detect <body tag (extended signatures in 0.8.0+).
  */
 static void test_guard_fails_body_tag(void)
@@ -1315,6 +1401,9 @@ int main(void)
     test_postcommit_log_null_params();
     test_postcommit_log_happy_path();
     test_send_terminal_subrequest();
+
+    TEST_SECTION("Post-commit on_error terminal-only NGX_AGAIN regression");
+    test_on_error_terminal_only_again_no_abort();
 
     printf("\n  All post-commit safety tests passed\n\n");
     return 0;
