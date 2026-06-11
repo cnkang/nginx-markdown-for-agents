@@ -419,7 +419,22 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     p = ngx_http_markdown_snapshot_flag(p, last,
         "markdown_streaming_shadow", conf->stream.shadow, 1);
 
-    /* markdown_streaming_auto_threshold (last field) */
+    /* markdown_stream_threshold (v0.8.0 directive name) */
+    p = ngx_http_markdown_snapshot_size(p, last,
+        "markdown_stream_threshold",
+        conf->stream.threshold, 1);
+
+    /* markdown_stream_precommit_buffer */
+    p = ngx_http_markdown_snapshot_size(p, last,
+        "markdown_stream_precommit_buffer",
+        conf->stream.precommit_buffer, 1);
+
+    /* markdown_stream_flush_min */
+    p = ngx_http_markdown_snapshot_size(p, last,
+        "markdown_stream_flush_min",
+        conf->stream.flush_min, 1);
+
+    /* markdown_streaming_auto_threshold (deprecated alias for markdown_stream_threshold) */
     p = ngx_http_markdown_snapshot_size(p, last,
         "markdown_streaming_auto_threshold",
         conf->stream.threshold, 0);
