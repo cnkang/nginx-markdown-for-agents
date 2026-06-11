@@ -617,20 +617,70 @@ ngx_http_markdown_stream_postcommit_casecmp(
 
 
 static ngx_flag_t
+ngx_http_markdown_stream_postcommit_tag_boundary(u_char ch);
+
+
+/*
+ * Table-driven tag match: case-insensitive compare of tag name at p[1..]
+ * followed by a boundary character (>, /, space, or end-of-buffer).
+ * Reduces cognitive complexity of has_html_signature by replacing
+ * per-tag if-blocks with a single loop over a tag table.
+ */
+static ngx_flag_t
+ngx_http_markdown_stream_postcommit_match_tag(
+    const u_char *p, const u_char *last, const u_char *tag,
+    size_t tag_len)
+{
+    size_t  remaining;
+
+    remaining = (size_t) (last - p);
+
+    if (remaining < tag_len + 1) {
+        return 0;
+    }
+
+    if (!ngx_http_markdown_stream_postcommit_casecmp(
+            p + 1, tag, tag_len))
+    {
+        return 0;
+    }
+
+    if (remaining == tag_len + 1) {
+        return 1;
+    }
+
+    return ngx_http_markdown_stream_postcommit_tag_boundary(
+        p[tag_len + 1]);
+}
+
+
+static ngx_flag_t
 ngx_http_markdown_stream_postcommit_has_html_signature(
     const u_char *data, size_t len)
 {
-    const u_char  *p;
-    const u_char  *last;
-    const u_char  *scan_last;
-    static u_char  doctype[] = { 'D', 'O', 'C', 'T', 'Y', 'P', 'E' };
-    static u_char  html_tag[] = { 'h', 't', 'm', 'l' };
-    static u_char  head_tag[] = { 'h', 'e', 'a', 'd' };
-    static u_char  body_tag[] = { 'b', 'o', 'd', 'y' };
-    static u_char  meta_tag[] = { 'm', 'e', 't', 'a' };
-    static u_char  div_tag[] = { 'd', 'i', 'v' };
-    static u_char  script_tag[] = { 's', 'c', 'r', 'i', 'p', 't' };
-    static u_char  style_tag[] = { 's', 't', 'y', 'l', 'e' };
+    const u_char       *p;
+    const u_char       *last;
+    const u_char       *scan_last;
+    static u_char       doctype[] = {
+        'D', 'O', 'C', 'T', 'Y', 'P', 'E'
+    };
+    static const u_char tag_names[] = "html" "head" "body" "meta"
+                                     "div" "script" "style";
+
+    static const struct {
+        const u_char  *name;
+        size_t         len;
+    } tags[] = {
+        { tag_names + 0,  4 },   /* html */
+        { tag_names + 4,  4 },   /* head */
+        { tag_names + 8,  4 },   /* body */
+        { tag_names + 12, 4 },   /* meta */
+        { tag_names + 16, 3 },   /* div */
+        { tag_names + 19, 6 },   /* script */
+        { tag_names + 25, 5 },   /* style */
+    };
+
+    size_t  i;
 
     if (data == NULL || len == 0) {
         return 0;
@@ -646,7 +696,9 @@ ngx_http_markdown_stream_postcommit_has_html_signature(
         p += 3;
     }
 
-    while (p < scan_last && ngx_http_markdown_stream_postcommit_space(*p)) {
+    while (p < scan_last
+           && ngx_http_markdown_stream_postcommit_space(*p))
+    {
         p++;
     }
 
@@ -671,74 +723,12 @@ ngx_http_markdown_stream_postcommit_has_html_signature(
             return 1;
         }
 
-        /* <html */
-        if ((size_t) (last - p) >= 5
-            && ngx_http_markdown_stream_postcommit_casecmp(
-                   p + 1, html_tag, 4)
-            && ((size_t) (last - p) == 5
-                || ngx_http_markdown_stream_postcommit_tag_boundary(p[5])))
-        {
-            return 1;
-        }
-
-        /* <head */
-        if ((size_t) (last - p) >= 5
-            && ngx_http_markdown_stream_postcommit_casecmp(
-                   p + 1, head_tag, 4)
-            && ((size_t) (last - p) == 5
-                || ngx_http_markdown_stream_postcommit_tag_boundary(p[5])))
-        {
-            return 1;
-        }
-
-        /* <body */
-        if ((size_t) (last - p) >= 5
-            && ngx_http_markdown_stream_postcommit_casecmp(
-                   p + 1, body_tag, 4)
-            && ((size_t) (last - p) == 5
-                || ngx_http_markdown_stream_postcommit_tag_boundary(p[5])))
-        {
-            return 1;
-        }
-
-        /* <meta */
-        if ((size_t) (last - p) >= 5
-            && ngx_http_markdown_stream_postcommit_casecmp(
-                   p + 1, meta_tag, 4)
-            && ((size_t) (last - p) == 5
-                || ngx_http_markdown_stream_postcommit_tag_boundary(p[5])))
-        {
-            return 1;
-        }
-
-        /* <div */
-        if ((size_t) (last - p) >= 4
-            && ngx_http_markdown_stream_postcommit_casecmp(
-                   p + 1, div_tag, 3)
-            && ((size_t) (last - p) == 4
-                || ngx_http_markdown_stream_postcommit_tag_boundary(p[4])))
-        {
-            return 1;
-        }
-
-        /* <script */
-        if ((size_t) (last - p) >= 7
-            && ngx_http_markdown_stream_postcommit_casecmp(
-                   p + 1, script_tag, 6)
-            && ((size_t) (last - p) == 7
-                || ngx_http_markdown_stream_postcommit_tag_boundary(p[7])))
-        {
-            return 1;
-        }
-
-        /* <style */
-        if ((size_t) (last - p) >= 6
-            && ngx_http_markdown_stream_postcommit_casecmp(
-                   p + 1, style_tag, 5)
-            && ((size_t) (last - p) == 6
-                || ngx_http_markdown_stream_postcommit_tag_boundary(p[6])))
-        {
-            return 1;
+        for (i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) {
+            if (ngx_http_markdown_stream_postcommit_match_tag(
+                    p, last, tags[i].name, tags[i].len))
+            {
+                return 1;
+            }
         }
     }
 
