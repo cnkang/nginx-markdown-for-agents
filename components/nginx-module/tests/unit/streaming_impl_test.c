@@ -1734,8 +1734,9 @@ test_send_output_error_and_deferred_paths(void)
         &r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_AGAIN,
         "deferred last_buf should propagate backpressure");
-    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
-        "deferred last_buf backpressure should latch terminal sent");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
+        "deferred last_buf backpressure must not latch terminal sent "
+        "until pending drain confirms delivery");
     TEST_ASSERT(ctx.streaming.completion.pending_terminal_metrics == 1,
         "deferred last_buf backpressure should latch terminal metrics");
 

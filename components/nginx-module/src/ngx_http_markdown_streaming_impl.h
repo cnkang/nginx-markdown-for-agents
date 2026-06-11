@@ -1007,9 +1007,7 @@ ngx_http_markdown_streaming_send_output(
 
     rc = ngx_http_next_body_filter(r, out);
 
-    if (terminal_last_buf
-        && (rc == NGX_OK || rc == NGX_DONE || rc == NGX_AGAIN))
-    {
+    if (terminal_last_buf && (rc == NGX_OK || rc == NGX_DONE)) {
         ctx->streaming.main_terminal_sent = 1;
     }
 
