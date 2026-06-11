@@ -979,7 +979,7 @@ configured together.
 | `markdown_streaming_engine` + `markdown_memory_budget` | The unified `markdown_memory_budget` sets the ceiling for both engines unless a path-specific directive overrides it. For streaming, `markdown_streaming_budget` takes precedence when explicitly set; otherwise the unified budget applies. |
 | `markdown_streaming_engine` + `markdown_on_error` | These error policies are **independent**. `markdown_on_error` governs full-buffer failures; `markdown_streaming_on_error` governs streaming pre-commit failures. Changing one never affects the other. See the [error policy table](#relationship-between-markdown_on_error-and-markdown_streaming_on_error) above. |
 | `markdown_streaming_engine` + `markdown_etag` | ETags are generated from converted output. For full-buffer responses, the complete Markdown is available before headers are sent, so ETag generation works normally. For streaming responses that have crossed the commit boundary, response headers (including `Content-Type: text/markdown`) are already sent — ETag cannot be retroactively added. Streaming responses do **not** carry an ETag header. |
-| `markdown_streaming_engine` + `markdown_conditional_requests` | Conditional request handling (`If-None-Match` / 304) works for full-buffer responses where an ETag is available. Streaming responses bypass 304 logic because no ETag is produced. If `markdown_streaming_engine auto` routes a response to full-buffer (e.g., below threshold), conditional requests still work for that response. |
+| `markdown_streaming_engine` + `markdown_conditional_requests` | Conditional request handling (`If-None-Match` / 304) works for full-buffer responses where an ETag is available. Streaming responses bypass 304 logic because no ETag is produced. **Important:** when `markdown_conditional_requests` is `full_support` (the default), the streaming selector always selects full-buffer because full ETag support requires the complete converted output before headers. To actually activate streaming in `auto` mode, set `markdown_conditional_requests if_modified_since_only` or `disabled`. |
 | `markdown_stream_threshold` + `Content-Length` | When the upstream response includes a `Content-Length` header and the value is below `markdown_stream_threshold`, the response always uses the full-buffer path regardless of `markdown_streaming_engine on`. This is a size-based eligibility gate, not an error. |
 | `markdown_stream_excluded_types` + `markdown_content_types` | Both must permit the content type for streaming conversion. `markdown_content_types` controls whether the module processes a response at all (any path). `markdown_stream_excluded_types` is an additional filter that prevents specific types from entering the streaming path. A type excluded from streaming may still be converted via full-buffer if it passes the general eligibility checks. |
 | `markdown_stream_precommit_buffer` + `markdown_streaming_on_error` | The pre-commit buffer enables fail-open replay: if an error occurs before the commit boundary, the buffered original HTML is replayed to the client. When `markdown_stream_precommit_buffer 0` (replay disabled), any pre-commit error immediately triggers the `markdown_streaming_on_error` policy without replay capability. |
@@ -1011,6 +1011,13 @@ configured together.
    itself is resolved per-request in the innermost matching context. Override with
    an explicit value (`off`, `on`, `auto`) in specific locations to exclude them
    from variable-driven rollout.
+
+6. **Default `auto` mode does not activate streaming.** When `markdown_conditional_requests`
+   is `full_support` (the default), the streaming selector always routes to full-buffer
+   because full ETag support requires the complete output before sending headers. This
+   means the default 0.8.0 configuration (`streaming_engine auto` + `conditional_requests
+   full_support`) never selects streaming. To activate streaming for large responses, set
+   `markdown_conditional_requests if_modified_since_only` or `disabled`.
 
 **Example — interactions in practice:**
 
