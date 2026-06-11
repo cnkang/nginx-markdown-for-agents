@@ -384,7 +384,7 @@ ngx_http_markdown_effective_body_buffer_limit(
 
     budget = ngx_http_markdown_effective_memory_budget(eff, conf);
 
-    if (budget == 0 || budget == NGX_CONF_UNSET_SIZE) {
+    if (budget == 0 || budget == (size_t) -1) {
         return conf->max_size;
     }
 
