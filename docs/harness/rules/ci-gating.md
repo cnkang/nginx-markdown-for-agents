@@ -9,8 +9,8 @@ paths:
 ## CI Gating
 
 ### 13. CI gating blind spots and supply chain integrity
-Historical issues: `7bf22a0`, `090c5a5`, `034e42f`, `7018a3c`, `08f18fa`,
-`c79b17c9`, `0d26e510`.
+Histor issues: `7bf22a0`, `090c5a5`, `034e42f`, `7018a3c`, `08f18fa`,
+`c79b17c9`, `0d26e510`, `62ff8b8a`, `dc15987f`.
 
 Required:
 - Update workflow path filters whenever checks depend on new file paths.
@@ -36,6 +36,13 @@ Required:
     as separate steps.
   - When a new version of an external dependency is adopted, update the
     checksum file in the same change set.
+  - **Verified toolchain installers**: When a release workflow installs
+    Rust toolchain via `rustup`, it must use a verified installer script
+    (for example `tools/install-verified-rustup.sh`) that validates the
+    downloaded `rustup-init` checksum before execution.  The installer
+    must be invoked with an explicit `bash` invocation (not `sh`) to
+    ensure bash-only syntax is supported.  Release-gate validators must
+    verify the installer script exists and is referenced in the workflow.
 - **Validator/gate regex synchronization**:
   - When refactoring C struct layout (flat fields → nested sub-structs,
     field renames), update all validator scripts and release-gate regex

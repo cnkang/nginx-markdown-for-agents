@@ -189,7 +189,10 @@
         "last_buf",
         "replay buffer",
         "failopen_completed",
-        "precommit_error"
+        "precommit_error",
+        "terminal_sent",
+        "raw deflate",
+        "truncated stream"
       ],
       "verification_families": [
         "harness-sync",
@@ -222,7 +225,10 @@
         "markdown_converter.h",
         "repr(C)",
         "error code",
-        "struct field"
+        "struct field",
+        "NULL key",
+        "empty key",
+        "boundary guard"
       ],
       "verification_families": [
         "harness-sync",
