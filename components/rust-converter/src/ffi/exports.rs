@@ -474,6 +474,20 @@ pub unsafe extern "C" fn markdown_build_header_plan(
                         value_len: 0,
                     });
                 }
+                HeaderOp::DeleteAll { name } => {
+                    let mut key_vec = name.as_bytes().to_vec();
+                    key_vec.push(0); /* NUL-terminate per FFI contract */
+                    let key_len = key_vec.len() - 1;
+                    owned.key_storage.push(key_vec.into_boxed_slice());
+                    let key = &owned.key_storage[owned.key_storage.len() - 1];
+                    owned.entries.push(FFIHeaderEntry {
+                        op_type: 3,
+                        key: key.as_ptr(),
+                        key_len,
+                        value: std::ptr::null(),
+                        value_len: 0,
+                    });
+                }
                 HeaderOp::SetEtagPlaceholder => {
                     owned.entries.push(FFIHeaderEntry {
                         op_type: 2,
