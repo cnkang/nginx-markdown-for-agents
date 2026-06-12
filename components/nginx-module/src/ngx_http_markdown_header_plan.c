@@ -673,6 +673,11 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
                 &undo[i]);
             break;
 
+        case NGX_HTTP_MARKDOWN_PLAN_OP_DELETE_ALL:
+            rc = ngx_http_markdown_plan_delete_all_headers(r, entry,
+                &undo[i]);
+            break;
+
         case NGX_HTTP_MARKDOWN_PLAN_OP_MODIFY:
             if (entry->key == NULL && entry->key_len == 0
                 && entry->value == NULL && entry->value_len == 0)
