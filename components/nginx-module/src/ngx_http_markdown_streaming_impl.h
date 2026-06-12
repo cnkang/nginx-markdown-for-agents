@@ -3312,7 +3312,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_handle_null_input(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t  rc;
 
