@@ -2,9 +2,10 @@
 # install-verified-rustup.sh -- Install rustup-init after checksum verification.
 #
 # Usage:
-#   install-verified-rustup.sh --arch ARCH --toolchain TOOLCHAIN
+#   install-verified-rustup.sh --arch ARCH --toolchain TOOLCHAIN [--checksums FILE] [--version VER]
 #
-# ARCH accepts the package workflow architecture names amd64 and arm64.
+# ARCH accepts the package workflow architecture names amd64 and arm64
+# (mapped to x86_64-unknown-linux-gnu and aarch64-unknown-linux-gnu).
 
 set -euo pipefail
 

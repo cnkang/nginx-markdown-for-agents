@@ -41,6 +41,8 @@ jobs:
 
       - name: Checkout source repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - name: Validate release tag
         shell: bash
@@ -125,6 +127,7 @@ jobs:
           ref: ${{ env.TAP_BRANCH }}
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
+          persist-credentials: false
 
       - name: Update tap formula
         shell: bash
