@@ -100,6 +100,9 @@ readonly WARNING_ALLOWLIST=(
     # ── tools/release/gates/gate4_local_k8s_smoke.sh ──
     # die() calls exit 1 — never actually returns; implicit return is unreachable
     "tools/release/gates/gate4_local_k8s_smoke.sh:return:die:function calls exit 1; return is unreachable"
+    # ── tools/harness/detect_ci_supply_chain.sh ──
+    # awk-based scanner; awk exit code is the meaningful return
+    "tools/harness/detect_ci_supply_chain.sh:return:check_network_to_shell:awk-based scanner; awk exit code is the meaningful return"
 )
 
 # Files where specific violations are known and accepted.
