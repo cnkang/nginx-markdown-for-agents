@@ -1,6 +1,6 @@
 //! Response header mutation plan for Markdown conversion.
 //!
-//! Defines a declarative plan of header operations (set, delete, modify)
+//! Defines a declarative plan of header operations (set, delete, delete-all)
 //! that must be applied atomically after conversion succeeds. This
 //! prevents partial header state when conversion fails mid-way.
 
@@ -11,6 +11,8 @@ pub enum HeaderOp {
     Set { name: String, value: String },
     /// Delete a header by name.
     Delete { name: String },
+    /// Delete every active header with this name.
+    DeleteAll { name: String },
     /// Set ETag to a value provided by the C caller at apply time.
     ///
     /// This avoids the fragile empty-string placeholder contract:
@@ -48,12 +50,19 @@ impl HeaderPlan {
         });
     }
 
+    /// Add a "delete all headers with this name" operation.
+    pub fn delete_all(&mut self, name: &str) {
+        self.ops.push(HeaderOp::DeleteAll {
+            name: name.to_string(),
+        });
+    }
+
     /// Build the standard header plan for a successful Markdown conversion.
     ///
     /// Operations included:
     /// - Set Content-Type to the Markdown content type
-    /// - Delete Content-Encoding (response is no longer compressed)
-    /// - Delete Content-Length (original length is invalid after conversion;
+    /// - Delete all Content-Encoding entries (response is no longer compressed)
+    /// - Delete all Content-Length entries (original length is invalid after conversion;
     ///   the C caller sets the new Content-Length after atomic plan application)
     /// - Optionally set ETag placeholder (resolved by C caller)
     ///
@@ -69,8 +78,8 @@ impl HeaderPlan {
     pub fn for_markdown_conversion(content_type: &str, has_etag: bool) -> Self {
         let mut plan = Self::new();
         plan.set("Content-Type", content_type);
-        plan.delete("Content-Encoding");
-        plan.delete("Content-Length");
+        plan.delete_all("Content-Encoding");
+        plan.delete_all("Content-Length");
 
         if has_etag {
             plan.ops.push(HeaderOp::SetEtagPlaceholder);
@@ -112,7 +121,8 @@ mod tests {
         let mut plan = HeaderPlan::new();
         plan.set("Content-Type", "text/markdown");
         plan.delete("Content-Encoding");
-        assert_eq!(plan.len(), 2);
+        plan.delete_all("Content-Length");
+        assert_eq!(plan.len(), 3);
         assert_eq!(
             plan.ops[0],
             HeaderOp::Set {
@@ -126,12 +136,30 @@ mod tests {
                 name: "Content-Encoding".to_string(),
             }
         );
+        assert_eq!(
+            plan.ops[2],
+            HeaderOp::DeleteAll {
+                name: "Content-Length".to_string(),
+            }
+        );
     }
 
     #[test]
     fn test_for_markdown_conversion() {
         let plan = HeaderPlan::for_markdown_conversion("text/markdown; charset=utf-8", true);
         assert_eq!(plan.len(), 4);
+        assert_eq!(
+            plan.ops[1],
+            HeaderOp::DeleteAll {
+                name: "Content-Encoding".to_string(),
+            }
+        );
+        assert_eq!(
+            plan.ops[2],
+            HeaderOp::DeleteAll {
+                name: "Content-Length".to_string(),
+            }
+        );
         assert_eq!(plan.ops[3], HeaderOp::SetEtagPlaceholder);
     }
 

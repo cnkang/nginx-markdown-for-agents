@@ -260,8 +260,9 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-            | sh -s -- -y --profile minimal --default-toolchain "${RUST_TOOLCHAIN}"
+          bash ./packaging/scripts/install-verified-rustup.sh \
+            --arch "${{ matrix.arch }}" \
+            --toolchain "${RUST_TOOLCHAIN}"
           echo "${HOME}/.cargo/bin" >> "$GITHUB_PATH"
           "${HOME}/.cargo/bin/rustc" --version
           "${HOME}/.cargo/bin/cargo" --version
@@ -696,6 +697,8 @@ jobs:
           merge-multiple: true
 
       - name: Run tag release gates
+        env:
+          RELEASE_GATE_EXPECTED_CARGO_VERSION: "0.8.0"
         run: |
           # Run the v0.8.0 release gate validators that are not already covered
           # by the build/package/smoke-test jobs above. The full

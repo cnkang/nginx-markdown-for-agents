@@ -474,6 +474,20 @@ pub unsafe extern "C" fn markdown_build_header_plan(
                         value_len: 0,
                     });
                 }
+                HeaderOp::DeleteAll { name } => {
+                    let mut key_vec = name.as_bytes().to_vec();
+                    key_vec.push(0); /* NUL-terminate per FFI contract */
+                    let key_len = key_vec.len() - 1;
+                    owned.key_storage.push(key_vec.into_boxed_slice());
+                    let key = &owned.key_storage[owned.key_storage.len() - 1];
+                    owned.entries.push(FFIHeaderEntry {
+                        op_type: 3,
+                        key: key.as_ptr(),
+                        key_len,
+                        value: std::ptr::null(),
+                        value_len: 0,
+                    });
+                }
                 HeaderOp::SetEtagPlaceholder => {
                     owned.entries.push(FFIHeaderEntry {
                         op_type: 2,
@@ -999,6 +1013,45 @@ mod tests {
         let first = unsafe { &*plan.entries };
         assert!(first.key_len > 0);
         assert!(!first.key.is_null());
+        unsafe { markdown_header_plan_free(&mut plan) };
+    }
+
+    #[test]
+    fn header_plan_delete_all_entry_shape() {
+        let ct = b"text/markdown; charset=utf-8";
+        let mut plan: FFIHeaderPlan = unsafe { std::mem::zeroed() };
+        unsafe {
+            markdown_build_header_plan(ct.as_ptr(), ct.len(), 1, &mut plan);
+        }
+        assert!(
+            plan.count >= 3,
+            "plan should have Content-Type + delete-all entries"
+        );
+
+        let entries = unsafe { std::slice::from_raw_parts(plan.entries, plan.count) };
+
+        let delete_all_entries: Vec<&FFIHeaderEntry> =
+            entries.iter().filter(|e| e.op_type == 3).collect();
+        assert!(
+            !delete_all_entries.is_empty(),
+            "plan must contain at least one delete-all (op_type==3) entry"
+        );
+
+        for entry in &delete_all_entries {
+            assert!(!entry.key.is_null(), "delete-all key must not be NULL");
+            assert!(entry.key_len > 0, "delete-all key_len must be > 0");
+            let name = unsafe { std::slice::from_raw_parts(entry.key, entry.key_len) };
+            let name_str = std::str::from_utf8(name).unwrap();
+            assert!(
+                name_str == "Content-Encoding" || name_str == "Content-Length",
+                "unexpected delete-all header: {name_str}"
+            );
+            let nul = unsafe { *entry.key.add(entry.key_len) };
+            assert_eq!(nul, 0, "delete-all key must be NUL-terminated");
+            assert!(entry.value.is_null(), "delete-all value must be NULL");
+            assert_eq!(entry.value_len, 0, "delete-all value_len must be 0");
+        }
+
         unsafe { markdown_header_plan_free(&mut plan) };
     }
 

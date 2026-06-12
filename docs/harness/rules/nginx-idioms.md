@@ -62,7 +62,7 @@ Verification:
 ---
 
 ### 30. NUL-termination of ngx_str_t before C API calls and EOF boundary handling
-Historical issues: `8b3d1a5`, `a2c6e90`.
+Historical issues: `8b3d1a5`, `a2c6e90`, `327bfe99`, `4b97d0a7`.
 
 Required:
 - `ngx_str_t` values are **not** NUL-terminated.  Before passing an
@@ -81,6 +81,20 @@ Required:
 - When comparing `ngx_str_t` values for directive matching, require exact
   length equality first and use `ngx_strncasecmp(..., expected_len)` to
   prevent out-of-bounds reads on short or truncated inputs.
+- **Cross-translation-unit visibility**: When a configuration-derived field
+  (for example `effective_body_buffer_limit`) is consumed in multiple
+  source files, its declaration and accessor function must be in a shared
+  header file (for example `filter_module.h`), not declared `static` in
+  one `.c` file.  A `static` declaration in a source file is invisible to
+  other translation units, causing them to use stale defaults or
+  `NGX_CONF_UNSET_SIZE` sentinels.  When moving a declaration from a
+  source file to a header, update all consumers in the same change set.
+- **Sentinel consistency**: When using `NGX_CONF_UNSET_SIZE` as the
+  "unset" sentinel for `size_t` fields, use it consistently throughout
+  the accessor chain.  Do not mix `NGX_CONF_UNSET_SIZE` and literal
+  `(size_t)-1` in different accessors for the same field — they are the
+  same value but mixing forms obscures intent and can mask bugs if
+  `NGX_CONF_UNSET_SIZE` changes in a future NGINX version.
 
 Verification:
 - `grep -rn 'ngx_strcasecmp\|ngx_file_info\|stat(' components/nginx-module/src/`

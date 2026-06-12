@@ -105,7 +105,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 27 | html-sanitizer | Escape link labels/destinations; reject control chars in URLs; validate forwarded headers |
 | 28 | nginx-idioms | Full ngx_list_part_t chain iteration; aggregate before branching |
 | 29 | nginx-idioms | Clear flags after gated op succeeds, not before |
-| 30 | nginx-idioms | NUL-terminate ngx_str_t before C API calls; EOF last-line handling |
+| 30 | nginx-idioms | NUL-terminate ngx_str_t before C API calls; EOF last-line handling; cross-TU visibility; sentinel consistency |
 | 31 | nginx-idioms | After merge: verify compile, diff --check, function count, no duplicates |
 | 32 | security-cwe | ssize_t→size_t needs non-negative check; overflow guard on addition |
 | 33 | security-cwe | Python open() needs validate_read_path(); resolve before mkdir |
@@ -119,6 +119,10 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 41 | shell | Shell harness detect_*.sh scripts must use POSIX ERE ([[:space:]] not \s); grep -E for extended patterns |
 | 42 | c-safety | volatile only for single-threaded compiler barriers; direct aggregate __atomic_* usage is forbidden |
 | 43 | memory-budget | Resizable buffer backing store (ctx->buffer.data) uses ngx_alloc/ngx_free exclusively; never pool-allocate |
+| 44 | encoding-charset | Streaming decompression uses raw deflate; truncated streams must be rejected; test payloads must match production format |
+| 45 | dynconf-snapshot | effective_conf NULL-safe access; cross-TU field visibility in shared headers; sentinel value consistency |
+| 46 | ffi-crosslang | FFI operations must validate NULL/empty key inputs; guards on both sides of FFI boundary; NULL/empty-input test coverage |
+| 47 | streaming-backpressure | Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return |
 
 ## Required Agent Workflow
 
@@ -143,6 +147,8 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Fail-open return codes correct; replay buffer init/append failure → precommit_error [2,38]
 - failopen_completed prevents duplicate finalize; failopen_count after downstream OK [38]
 - UTF-8 tails preserved across chunk boundaries; flush at EOF [4]
+- Streaming decompression uses raw deflate; truncated streams rejected; test payloads match production format [44]
+- Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return [47]
 
 **Memory & Budget** (C, R)
 - All budgets enforced; auxiliary buffers freed on all exits [3]
@@ -162,6 +168,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Prefer helper functions over literal FFI struct init [15]
 - Read foreign-owned struct fields BEFORE free/release [15]
 - FFI error code classification covers all header-defined codes [15]
+- FFI operations validate NULL/empty key inputs; guards on both sides of FFI boundary; NULL/empty-input test coverage [46]
 
 **C Safety** (C)
 - No implicit declarations; narrowing cast needs bounds check + overflow path [24]
@@ -173,7 +180,9 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Full ngx_list_part_t chain iteration (part→next) [28]
 - Flag clearing after gated op succeeds [29]
 - NUL-terminate ngx_str_t before C API calls; length-bounded matching [30]
+- Cross-TU field visibility: shared headers for multi-file consumers; sentinel consistency [30]
 - Snapshot race: read active_snapshot once at header_filter entry; bind via helper [34]
+- effective_conf NULL-safe access; cross-TU field visibility; sentinel consistency [45]
 - NGX_DONE terminal: return immediately after finalize_request; callers check NGX_DONE [39]
 - Multi-step header modification atomic: abort on first failure, no partial apply [39]
 - Header lookup/iteration filters hash==0 (invalidated) entries [40]
@@ -454,3 +463,4 @@ remediation:
 | 0.7.17 | 2026-06-04 | Codex | Strengthened Rule 6 for streaming code-block fence state across split text events |
 | 0.8.0 | 2026-06-04 | Kang | 0.8.0 release gate target (release-gates-check-080) with streaming, coverage, matrix, and clean-checkout gates |
 | 0.8.1 | 2026-06-10 | Codex | Strengthened Rule 13 for newer release gates that reuse prior-version validators with caller-parameterized active version assertions and current release-matrix schema consumers |
+| 0.8.2 | 2026-06-12 | Kang | Added Rules 44–47: streaming deflate semantics (44), effective_conf NULL-safe access (45), FFI NULL/empty boundary guards (46), terminal-sent latch NGX_AGAIN semantics (47); strengthened Rules 13 (verified-rustup), 30 (cross-TU visibility, sentinel consistency) |
