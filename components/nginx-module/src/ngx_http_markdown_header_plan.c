@@ -231,6 +231,12 @@ ngx_http_markdown_plan_delete_all_headers(ngx_http_request_t *r,
     ngx_uint_t                              count;
     ngx_uint_t                              saved_count;
 
+    if (entry->key == NULL || entry->key_len == 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: DELETE_ALL entry has NULL/empty key");
+        return NGX_ERROR;
+    }
+
     undo->op_type = NGX_HTTP_MARKDOWN_PLAN_OP_DELETE_ALL;
     undo->header = NULL;
     undo->orig_hash = 0;
