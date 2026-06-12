@@ -20,6 +20,8 @@ WORKFLOWS_DIR = PROJECT_ROOT / ".github" / "workflows"
 RELEASE_PACKAGES_WORKFLOW = WORKFLOWS_DIR / "release-packages.yml"
 RELEASE_DEB_WORKFLOW = WORKFLOWS_DIR / "release-deb.yml"
 RELEASE_RPM_WORKFLOW = WORKFLOWS_DIR / "release-rpm.yml"
+RUSTUP_INSTALL_SCRIPT = PROJECT_ROOT / "packaging" / "scripts" / "install-verified-rustup.sh"
+CHECKSUMS_PATH = PROJECT_ROOT / "packaging" / "checksums.sha256"
 CONFIG_DIRECTIVES_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_config_directives_impl.h"
 ERROR_RS = PROJECT_ROOT / "components" / "rust-converter" / "src" / "error.rs"
 ABI_RS = PROJECT_ROOT / "components" / "rust-converter" / "src" / "ffi" / "abi.rs"
@@ -117,10 +119,23 @@ def _workflow_uses_pinned_toolchain(workflow: str) -> bool:
     # (RUST_TOOLCHAIN: "1.91.1") YAML value forms.
     env_unquoted = f"RUST_TOOLCHAIN: {channel}"
     env_quoted = f'RUST_TOOLCHAIN: "{channel}"'
+    script = read(RUSTUP_INSTALL_SCRIPT)
+    checksums = read(CHECKSUMS_PATH)
+    verified_rustup_installer = (
+        'RUSTUP_VERSION="1.28.2"' in script
+        and "static.rust-lang.org/rustup/archive" in script
+        and "verify-checksum.sh" in script
+        and '--default-toolchain "$RUST_TOOLCHAIN"' in script
+        and "rustup-init-1.28.2-x86_64-unknown-linux-gnu" in checksums
+        and "rustup-init-1.28.2-aarch64-unknown-linux-gnu" in checksums
+    )
     return (
         (env_unquoted in workflow or env_quoted in workflow)
-        and "--default-toolchain \"${RUST_TOOLCHAIN}\"" in workflow
+        and "./packaging/scripts/install-verified-rustup.sh" in workflow
+        and '--toolchain "${RUST_TOOLCHAIN}"' in workflow
+        and verified_rustup_installer
         and "--default-toolchain stable" not in workflow
+        and "https://sh.rustup.rs" not in workflow
     )
 
 
