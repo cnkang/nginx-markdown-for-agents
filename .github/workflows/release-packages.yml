@@ -260,7 +260,7 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          ./packaging/scripts/install-verified-rustup.sh \
+          bash ./packaging/scripts/install-verified-rustup.sh \
             --arch "${{ matrix.arch }}" \
             --toolchain "${RUST_TOOLCHAIN}"
           echo "${HOME}/.cargo/bin" >> "$GITHUB_PATH"
