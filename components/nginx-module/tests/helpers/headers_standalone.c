@@ -13,7 +13,9 @@
  * unit testing without linking the Rust library.  The stub
  * plan always produces a minimal set of entries matching the
  * production behavior (Content-Type set, Content-Encoding
- * delete, Vary set).
+ * delete-all, Content-Length delete-all, optional ETag
+ * placeholder).  Vary is handled post-plan by
+ * ngx_http_markdown_add_vary_accept().
  */
 
 static struct FFIHeaderEntry g_stub_entries[5];
@@ -57,16 +59,16 @@ markdown_build_header_plan(const uint8_t *content_type,
     g_stub_entries[0].value_len = sizeof(stub_ct_val) - 1;
     g_stub_entry_count++;
 
-    /* Entry 1: DELETE Content-Encoding */
-    g_stub_entries[1].op_type = 1;
+    /* Entry 1: DELETE_ALL Content-Encoding */
+    g_stub_entries[1].op_type = 3;
     g_stub_entries[1].key = stub_ce_key;
     g_stub_entries[1].key_len = sizeof(stub_ce_key) - 1;
     g_stub_entries[1].value = NULL;
     g_stub_entries[1].value_len = 0;
     g_stub_entry_count++;
 
-    /* Entry 2: DELETE Content-Length */
-    g_stub_entries[2].op_type = 1;
+    /* Entry 2: DELETE_ALL Content-Length */
+    g_stub_entries[2].op_type = 3;
     g_stub_entries[2].key = stub_cl_key;
     g_stub_entries[2].key_len = sizeof(stub_cl_key) - 1;
     g_stub_entries[2].value = NULL;
@@ -207,6 +209,37 @@ ngx_http_markdown_apply_header_plan(ngx_http_request_t *r,
                 r->headers_out.content_encoding = NULL;
             }
             break;
+
+        case 3: {
+            ngx_list_part_t *part = &r->headers_out.headers.part;
+
+            while (part != NULL) {
+                ngx_table_elt_t *headers = (ngx_table_elt_t *) part->elts;
+
+                for (ngx_uint_t j = 0; j < part->nelts; j++) {
+                    if (headers[j].hash == 0 || headers[j].key.data == NULL) {
+                        continue;
+                    }
+
+                    if (headers[j].key.len == entry->key_len
+                        && ngx_strncasecmp(headers[j].key.data,
+                            (u_char *) entry->key, entry->key_len) == 0)
+                    {
+                        headers[j].hash = 0;
+                    }
+                }
+
+                part = part->next;
+            }
+
+            if (entry->key_len == sizeof("Content-Encoding") - 1
+                && ngx_strncasecmp((u_char *) entry->key,
+                    (u_char *) "Content-Encoding", entry->key_len) == 0)
+            {
+                r->headers_out.content_encoding = NULL;
+            }
+            break;
+        }
 
         case 2:
             /* MODIFY/ETag placeholder: no-op in stub */

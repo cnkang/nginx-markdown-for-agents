@@ -683,6 +683,92 @@ test_unknown_op_type_rollback(void)
 }
 
 static void
+test_delete_all_removes_duplicate_headers(void)
+{
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_DELETE_ALL,
+        (const uint8_t *)"Content-Encoding", 16, NULL, 0 };
+
+    TEST_SUBSECTION("DELETE_ALL removes duplicate headers");
+
+    setup_request();
+    add_existing_header("Content-Encoding", "gzip");
+    add_existing_header("Content-Encoding", "br");
+
+    plan.handle = &handle;
+    plan.entries = &entry;
+    plan.count = 1;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_OK,
+                "DELETE_ALL should succeed");
+    TEST_ASSERT(count_active_headers((const u_char *)"Content-Encoding",
+                                     16) == 0,
+                "all Content-Encoding headers must be invalidated");
+    TEST_ASSERT(g_plan_freed == 1, "plan should be freed after success");
+
+    TEST_PASS("DELETE_ALL removes duplicate headers");
+}
+
+
+static void
+test_delete_all_rollback_restores_duplicate_headers(void)
+{
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entries[2] = {
+        { NGX_HTTP_MARKDOWN_PLAN_OP_DELETE_ALL,
+          (const uint8_t *)"Content-Encoding", 16, NULL, 0 },
+        { 99, (const uint8_t *)"X-Bad", 5, NULL, 0 }
+    };
+
+    TEST_SUBSECTION("DELETE_ALL rollback restores duplicate headers");
+
+    setup_request();
+    add_existing_header("Content-Encoding", "gzip");
+    add_existing_header("Content-Encoding", "br");
+
+    plan.handle = &handle;
+    plan.entries = entries;
+    plan.count = 2;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_ERROR,
+                "unknown later op should fail the plan");
+    TEST_ASSERT(count_active_headers((const u_char *)"Content-Encoding",
+                                     16) == 2,
+                "rollback must restore all Content-Encoding entries");
+    TEST_ASSERT(g_plan_freed == 1, "plan should be freed after rollback");
+
+    TEST_PASS("DELETE_ALL rollback restores duplicate headers");
+}
+
+
+static void
+test_delete_all_null_key_returns_error(void)
+{
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_DELETE_ALL,
+        NULL, 5, NULL, 0 };
+
+    TEST_SUBSECTION("DELETE_ALL NULL key returns NGX_ERROR");
+
+    setup_request();
+    add_existing_header("Content-Encoding", "gzip");
+
+    plan.handle = &handle;
+    plan.entries = &entry;
+    plan.count = 1;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_ERROR,
+                "DELETE_ALL with NULL key must return NGX_ERROR");
+    TEST_ASSERT(g_plan_freed == 1, "plan should be freed on error");
+
+    TEST_PASS("DELETE_ALL NULL key returns NGX_ERROR");
+}
+
+
+static void
 test_multi_op_plan(void)
 {
     FFIHeaderPlan plan;
@@ -750,6 +836,9 @@ main(void)
     test_modify_nonexistent();
     test_set_etag_placeholder_noop();
     test_unknown_op_type_rollback();
+    test_delete_all_removes_duplicate_headers();
+    test_delete_all_rollback_restores_duplicate_headers();
+    test_delete_all_null_key_returns_error();
     test_multi_op_plan();
 
     printf("\n========================================\n");

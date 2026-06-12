@@ -120,6 +120,11 @@ ngx_http_markdown_find_header_in_part(ngx_list_part_t *part,
         headers = part->elts;
         i = 0;
         while (i < part->nelts) {
+            if (headers[i].hash == 0) {
+                i++;
+                continue;
+            }
+
             if (headers[i].key.len == name_len
                 && ngx_http_markdown_strncasecmp_const(headers[i].key.data,
                                                        name,
@@ -481,7 +486,7 @@ ngx_http_markdown_add_token_header(ngx_http_request_t *r, uint32_t token_count)
  * Remove the Content-Encoding response header.
  *
  * Clears r->headers_out.content_encoding and invalidates the
- * first Content-Encoding entry in the output header list.
+ * matching Content-Encoding entries in the output header list.
  * Called after decompression so the downstream response does
  * not claim a transfer encoding that no longer applies.
  *
@@ -495,7 +500,7 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
     ngx_http_markdown_invalidate_headers(r,
                                          ngx_http_markdown_hdr_content_encoding,
                                          sizeof(ngx_http_markdown_hdr_content_encoding) - 1,
-                                         1,
+                                         0,
                                          "markdown: removed Content-Encoding header");
 }
 
@@ -538,9 +543,8 @@ ngx_http_markdown_remove_accept_ranges(ngx_http_request_t *r)
  *   succeed or all are rolled back.  The plan includes:
  *
  *   - Content-Type (set to text/markdown; charset=utf-8)
- *   - Content-Encoding (delete)
- *   - Content-Length (delete — invalidates the stale original)
- *   - Vary (set to Accept)
+ *   - Content-Encoding (delete-all)
+ *   - Content-Length (delete-all — invalidates stale originals)
  *   - ETag (set-etag-placeholder, if configured)
  *
  *   After successful atomic plan application, the C side sets:
@@ -591,9 +595,8 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     /*
      * Build header plan from Rust FFI.
      *
-     * The plan covers: Content-Type (set), Content-Encoding (delete),
-     * Content-Length (delete), Vary (set), and ETag (set-etag-placeholder
-     * or omit).
+     * The plan covers: Content-Type (set), Content-Encoding (delete-all),
+     * Content-Length (delete-all), and ETag (set-etag-placeholder or omit).
      *
      * Content-Length deletion invalidates the stale original value.
      * The correct post-conversion length is set below after the plan
@@ -621,6 +624,8 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
             "failed; all changes rolled back");
         return NGX_ERROR;
     }
+
+    r->headers_out.content_encoding = NULL;
 
     /*
      * Post-plan operations.  These execute only after the atomic

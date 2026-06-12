@@ -78,17 +78,20 @@ jobs:
               gzip
           fi
 
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
       - name: Install Rust toolchain
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-            | sh -s -- -y --profile minimal --default-toolchain "${RUST_TOOLCHAIN}"
+          bash ./packaging/scripts/install-verified-rustup.sh \
+            --arch "${{ matrix.arch }}" \
+            --toolchain "${RUST_TOOLCHAIN}"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           . "$HOME/.cargo/env"
           rustc --version
           cargo --version
-
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Validate package version
         run: |
