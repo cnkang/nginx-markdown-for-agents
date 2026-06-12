@@ -27,19 +27,40 @@ jobs:
       RELEASE_REPO: ${{ github.event.repository.name }}
     steps:
       - name: Validate required config
+        shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${TAP_REPO}" ]; then
+          if [[ -z "${TAP_REPO}" ]]; then
             echo "::error::Repository variable HOMEBREW_TAP_REPO is required (format: owner/repo)." >&2
             exit 1
           fi
-          if [ -z "${RELEASE_TAG}" ]; then
+          if [[ -z "${RELEASE_TAG}" ]]; then
             echo "::error::Release tag is required." >&2
             exit 1
           fi
 
       - name: Checkout source repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Validate release tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid release tag: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+
+          version="${RELEASE_TAG#v}"
+          ./packaging/scripts/validate-version.sh "${version}" >/dev/null
+
+          git fetch --force --depth=1 origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}" >/dev/null
+
+          gh release view "${RELEASE_TAG}" --repo "${RELEASE_OWNER}/${RELEASE_REPO}" >/dev/null
 
       - name: Prepare formula for tagged artifact
         shell: bash
@@ -49,13 +70,50 @@ jobs:
           artifact_url="https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
           sha256="$(curl -fsSL "${artifact_url}" | sha256sum | awk '{print $1}')"
 
-          if [ ! -f "${FORMULA_SOURCE}" ]; then
+          if [[ ! -f "${FORMULA_SOURCE}" ]]; then
             echo "::error::Formula source not found: ${FORMULA_SOURCE}" >&2
             exit 1
           fi
 
-          sed -i "s|^  url \".*\"$|  url \"${artifact_url}\"|" "${FORMULA_SOURCE}"
-          sed -i "s|^  sha256 \".*\"$|  sha256 \"${sha256}\"|" "${FORMULA_SOURCE}"
+          FORMULA_SOURCE="${FORMULA_SOURCE}" \
+          ARTIFACT_URL="${artifact_url}" \
+          FORMULA_SHA256="${sha256}" \
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          path = Path(os.environ["FORMULA_SOURCE"])
+          artifact_url = os.environ["ARTIFACT_URL"]
+          sha256 = os.environ["FORMULA_SHA256"]
+
+          text = path.read_text(encoding="utf-8")
+          text, url_count = re.subn(
+              r'^  url ".*"$',
+              f'  url "{artifact_url}"',
+              text,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          text, sha_count = re.subn(
+              r'^  sha256 ".*"$',
+              f'  sha256 "{sha256}"',
+              text,
+              count=1,
+              flags=re.MULTILINE,
+          )
+
+          if url_count != 1 or sha_count != 1:
+              print(
+                  f"::error::Formula replacement count mismatch: "
+                  f"url={url_count}, sha256={sha_count}",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
 
           echo "Computed SHA256: ${sha256}"
 
