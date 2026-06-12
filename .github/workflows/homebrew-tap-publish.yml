@@ -49,8 +49,9 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Homebrew formulae only publish stable releases; reject pre-release/build metadata.
           if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Invalid release tag: ${RELEASE_TAG}" >&2
+            echo "::error::Invalid release tag: ${RELEASE_TAG}. Only stable vX.Y.Z tags are accepted for Homebrew releases." >&2
             exit 1
           fi
 

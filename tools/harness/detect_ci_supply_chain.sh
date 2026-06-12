@@ -102,7 +102,10 @@ while IFS= read -r line; do
                 ;;
         esac
     fi
-done < <(grep -rn 'uses:.*@' "$WORKFLOW_DIR" 2>/dev/null | grep -v '^[[:space:]]*#' || true)
+done < <(awk '
+    /^[[:space:]]*#/ { next }
+    /uses:.*@/ { printf "%s:%d:%s\n", FILENAME, FNR, $0 }
+' "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml 2>/dev/null || true)
 
 while IFS= read -r workflow_file; do
     check_network_to_shell "$workflow_file"
