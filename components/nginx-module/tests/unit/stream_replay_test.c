@@ -129,6 +129,14 @@ ngx_alloc(size_t size, ngx_log_t *log)
     return malloc(size);
 }
 
+/* Mock: ngx_palloc */
+void *
+ngx_palloc(ngx_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    return malloc(size);
+}
+
 /* Mock: ngx_free */
 #define ngx_free free
 
@@ -348,14 +356,17 @@ static void test_chain_builds_correctly(void)
 
     TEST_ASSERT(chain != NULL, "chain not NULL");
     TEST_ASSERT(chain->buf != NULL, "buf not NULL");
-    TEST_ASSERT(chain->buf->pos == ctx.stream_sm.replay_buf.data,
-                "pos points to replay data");
+    TEST_ASSERT(chain->buf->pos != ctx.stream_sm.replay_buf.data,
+                "pos points to pool-owned replay copy");
+    TEST_ASSERT(memcmp(chain->buf->pos, ctx.stream_sm.replay_buf.data, 9) == 0,
+                "pool-owned replay copy matches data");
     TEST_ASSERT((size_t)(chain->buf->last - chain->buf->pos) == 9,
                 "buf length matches");
     TEST_ASSERT(chain->buf->last_buf == 1, "last_buf set");
     TEST_ASSERT(chain->buf->memory == 1, "memory flag set");
     TEST_ASSERT(chain->next == NULL, "no next link");
 
+    free(chain->buf->pos);
     free(chain->buf);
     free(chain);
     free(ctx.stream_sm.replay_buf.data);

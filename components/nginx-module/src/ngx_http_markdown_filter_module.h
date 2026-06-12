@@ -15,6 +15,17 @@
 struct MarkdownOptions;
 
 /*
+ * NGINX represents unset size values as (size_t) -1.  Use the public macro
+ * when the including translation unit exposes it; standalone unit tests may
+ * include this header through minimal stubs that do not.
+ */
+#ifdef NGX_CONF_UNSET_SIZE
+#define NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE NGX_CONF_UNSET_SIZE
+#else
+#define NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE ((size_t) -1)
+#endif
+
+/*
  * Forward declaration for dynconf snapshot type.
  * Full definition is in ngx_http_markdown_dynconf_impl.h.
  */
@@ -205,6 +216,11 @@ ngx_http_markdown_stream_reason_str(
         /* NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_IO_ERROR */
         "postcommit_io_error"
     };
+
+    _Static_assert(
+        sizeof(reason_strings) / sizeof(reason_strings[0])
+        == NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT,
+        "stream reason strings must match reason enum");
 
     if ((unsigned) reason >= NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT) {
         return "unknown";
@@ -586,7 +602,7 @@ ngx_http_markdown_effective_body_buffer_limit(
         budget = conf->advanced.memory_budget;
     }
 
-    if (budget == 0 || budget == (size_t) -1) {
+    if (budget == 0 || budget == NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE) {
         return conf->max_size;
     }
 
@@ -648,7 +664,9 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
 static ngx_inline void
 ngx_http_markdown_bridge_legacy_stream_values(
     ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev)
+    const ngx_http_markdown_conf_t *prev,
+    ngx_flag_t streaming_budget_set,
+    ngx_flag_t stream_budget_set)
 {
     if (conf->streaming.on_error != (ngx_uint_t) -1
         && !conf->stream.on_error_explicit)
@@ -656,8 +674,9 @@ ngx_http_markdown_bridge_legacy_stream_values(
         conf->stream.on_error = conf->streaming.on_error;
     }
 
-    if (conf->streaming.budget != (size_t) -1
-        && conf->stream.budget == NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT)
+    if (conf->streaming.budget != NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE
+        && streaming_budget_set
+        && !stream_budget_set)
     {
         conf->stream.budget = conf->streaming.budget;
         conf->stream.budget_explicit = conf->streaming.budget_explicit

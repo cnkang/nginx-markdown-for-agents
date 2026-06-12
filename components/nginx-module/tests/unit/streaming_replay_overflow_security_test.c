@@ -140,6 +140,14 @@ ngx_alloc(size_t size, ngx_log_t *log)
     return malloc(size);
 }
 
+/* Mock: ngx_palloc */
+void *
+ngx_palloc(ngx_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    return malloc(size);
+}
+
 /* Mock: ngx_free */
 #define ngx_free free
 

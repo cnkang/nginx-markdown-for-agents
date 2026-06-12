@@ -895,13 +895,19 @@ merge_stream_config(ngx_http_markdown_conf_t *child,
     const ngx_http_markdown_conf_t *parent)
 {
     ngx_flag_t stream_threshold_set;
+    ngx_flag_t streaming_budget_set;
+    ngx_flag_t stream_budget_set;
 
     stream_threshold_set = (child->stream.threshold != NGX_CONF_UNSET_SIZE);
+    streaming_budget_set = (child->streaming.budget != NGX_CONF_UNSET_SIZE);
+    stream_budget_set = (child->stream.budget != NGX_CONF_UNSET_SIZE);
     ngx_http_markdown_merge_stream_values(child, parent);
     if (stream_threshold_set) {
         child->stream.threshold_explicit = 1;
     }
-    ngx_http_markdown_bridge_legacy_stream_values(child, parent);
+    ngx_http_markdown_bridge_legacy_stream_values(child, parent,
+                                                 streaming_budget_set,
+                                                 stream_budget_set);
 }
 
 static int

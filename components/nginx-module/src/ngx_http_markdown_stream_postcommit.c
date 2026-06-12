@@ -616,10 +616,6 @@ ngx_http_markdown_stream_postcommit_casecmp(
 }
 
 
-static ngx_flag_t
-ngx_http_markdown_stream_postcommit_tag_boundary(u_char ch);
-
-
 /*
  * Table-driven tag match: case-insensitive compare of tag name at p[1..]
  * followed by a boundary character (>, /, space, or end-of-buffer).
@@ -686,7 +682,7 @@ ngx_http_markdown_stream_postcommit_has_html_signature(
 
     p = data;
     last = data + len;
-    scan_last = data + ((len < 256) ? len : 256);
+    scan_last = data + ((len < 1024) ? len : 1024);
 
     if ((size_t) (last - p) >= 3
         && p[0] == 0xef && p[1] == 0xbb && p[2] == 0xbf)

@@ -359,6 +359,12 @@ static void test_commit_vary_failure_aborts(void)
                 "state stays PRE_COMMIT on failure");
     TEST_ASSERT(test_set_etag_called == 0,
                 "ETag mutation NOT executed after vary failure");
+    TEST_ASSERT(test_request.headers_out.content_length_n == 12345,
+                "Content-Length value preserved after vary failure");
+    TEST_ASSERT(test_request.headers_out.content_length == &test_content_length_elt,
+                "Content-Length pointer preserved after vary failure");
+    TEST_ASSERT(test_content_length_elt.hash == 1,
+                "Content-Length header still valid after vary failure");
     TEST_PASS("Commit atomicity: vary failure aborts before ETag");
 }
 
@@ -385,6 +391,12 @@ static void test_commit_etag_failure_aborts(void)
                 "headers_committed stays 0 on failure");
     TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PRE_COMMIT,
                 "state stays PRE_COMMIT on failure");
+    TEST_ASSERT(test_request.headers_out.content_length_n == 12345,
+                "Content-Length value preserved after etag failure");
+    TEST_ASSERT(test_request.headers_out.content_length == &test_content_length_elt,
+                "Content-Length pointer preserved after etag failure");
+    TEST_ASSERT(test_content_length_elt.hash == 1,
+                "Content-Length header still valid after etag failure");
     TEST_PASS("Commit atomicity: etag failure aborts commit");
 }
 

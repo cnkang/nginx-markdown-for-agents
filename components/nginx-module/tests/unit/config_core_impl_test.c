@@ -1058,6 +1058,8 @@ test_streaming_compat_budget_explicit_maps_to_stream(void)
     ngx_conf_t cf;
     ngx_http_markdown_conf_t *parent;
     ngx_http_markdown_conf_t *child;
+    ngx_http_markdown_conf_t *inherited_parent;
+    ngx_http_markdown_conf_t *legacy_child;
     char *rc;
 
     TEST_SUBSECTION("streaming compatibility budget explicit mapping");
@@ -1081,6 +1083,24 @@ test_streaming_compat_budget_explicit_maps_to_stream(void)
                 "legacy streaming budget should map into stream budget");
     TEST_ASSERT(child->stream.budget_explicit == 1,
                 "mapped stream budget should stay explicit");
+
+    inherited_parent = ngx_http_markdown_create_conf(&cf);
+    legacy_child = ngx_http_markdown_create_conf(&cf);
+    TEST_ASSERT(inherited_parent != NULL && legacy_child != NULL,
+                "create_conf should allocate inherited budget fixtures");
+
+    inherited_parent->stream.budget = 8 * 1024 * 1024;
+    inherited_parent->stream.budget_explicit = 1;
+    legacy_child->streaming.budget = 4 * 1024 * 1024;
+
+    rc = ngx_http_markdown_merge_conf(&cf, inherited_parent, legacy_child);
+
+    TEST_ASSERT(rc == NGX_CONF_OK,
+                "merge_conf should accept child legacy budget override");
+    TEST_ASSERT(legacy_child->stream.budget == 4 * 1024 * 1024,
+                "child legacy budget should override inherited stream budget");
+    TEST_ASSERT(legacy_child->stream.budget_explicit == 1,
+                "child legacy budget override should mark stream explicit");
     TEST_PASS("streaming compatibility budget explicit mapping");
 }
 

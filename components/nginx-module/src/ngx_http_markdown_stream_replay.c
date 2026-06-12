@@ -160,8 +160,8 @@ ngx_http_markdown_stream_replay_append(ngx_http_markdown_ctx_t *ctx,
      * the caller without modifying the buffer.  Use overflow-safe
      * comparison (Rule 32).
      */
-    if (buf->size > ctx->stream_sm.replay_capacity
-        || len > (ctx->stream_sm.replay_capacity - buf->size))
+    if (buf->size > buf->max_size
+        || len > (buf->max_size - buf->size))
     {
         return NGX_DECLINED;
     }
@@ -171,7 +171,7 @@ ngx_http_markdown_stream_replay_append(ngx_http_markdown_ctx_t *ctx,
     /* Ensure backing store has room */
     if (required > buf->capacity) {
         new_capacity = ngx_http_markdown_stream_replay_grow(
-            buf->capacity, required, ctx->stream_sm.replay_capacity);
+            buf->capacity, required, buf->max_size);
 
         if (new_capacity < required) {
             return NGX_DECLINED;
@@ -220,7 +220,7 @@ ngx_http_markdown_stream_replay_available(const ngx_http_markdown_ctx_t *ctx)
         return 0;
     }
 
-    if (ctx->stream_sm.replay_buf.size > ctx->stream_sm.replay_capacity) {
+    if (ctx->stream_sm.replay_buf.size > ctx->stream_sm.replay_buf.max_size) {
         return 0;
     }
 
@@ -246,6 +246,7 @@ ngx_http_markdown_stream_replay_chain(ngx_http_markdown_ctx_t *ctx,
 {
     ngx_chain_t  *cl;
     ngx_buf_t    *b;
+    u_char       *data;
 
     if (ctx == NULL || pool == NULL) {
         return NULL;
@@ -272,8 +273,17 @@ ngx_http_markdown_stream_replay_chain(ngx_http_markdown_ctx_t *ctx,
         return NULL;
     }
 
-    b->pos = ctx->stream_sm.replay_buf.data;
-    b->last = ctx->stream_sm.replay_buf.data + ctx->stream_sm.replay_buf.size;
+    data = ngx_palloc(pool, ctx->stream_sm.replay_buf.size);
+    if (data == NULL) {
+        ngx_free_chain(pool, cl);
+        return NULL;
+    }
+
+    ngx_memcpy(data, ctx->stream_sm.replay_buf.data,
+               ctx->stream_sm.replay_buf.size);
+
+    b->pos = data;
+    b->last = data + ctx->stream_sm.replay_buf.size;
     b->memory = 1;
     b->last_buf = 1;
 
