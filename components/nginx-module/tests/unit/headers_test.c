@@ -530,6 +530,114 @@ test_update_headers_token_zero(void)
     TEST_PASS("Zero token count handling works");
 }
 
+static void
+test_update_headers_ignores_invalidated_vary(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    static uint8_t etag_value[] = "\"abc123\"";
+    ngx_table_elt_t *invalid_vary;
+    ngx_table_elt_t *valid_vary;
+
+    TEST_SUBSECTION("Update headers ignores invalidated Vary entries");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = etag_value;
+    result.etag_len = sizeof(etag_value) - 1;
+
+    invalid_vary = push_header(&r, "Vary", "Accept");
+    invalid_vary->hash = 0;
+    valid_vary = push_header(&r, "Vary", "User-Agent");
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers should skip invalidated Vary entries");
+    TEST_ASSERT(invalid_vary->hash == 0, "Invalidated Vary should stay inactive");
+    TEST_ASSERT(valid_vary->hash != 0, "Valid Vary should stay active");
+    TEST_ASSERT(count_active_headers(&r, "Vary") == 1,
+                "Only the valid Vary header should remain active");
+    TEST_ASSERT(strstr((char *) valid_vary->value.data, "Accept") != NULL,
+                "Valid Vary should be updated with Accept");
+
+    free_request(&r);
+    TEST_PASS("Invalidated Vary entries are ignored");
+}
+
+static void
+test_update_headers_creates_vary_after_invalidated_only(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    static uint8_t etag_value[] = "\"abc123\"";
+    ngx_table_elt_t *invalid_vary;
+    ngx_table_elt_t *vary;
+
+    TEST_SUBSECTION("Update headers creates Vary after invalidated-only match");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.generate_etag = 1;
+
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+    result.etag = etag_value;
+    result.etag_len = sizeof(etag_value) - 1;
+
+    invalid_vary = push_header(&r, "Vary", "Accept");
+    invalid_vary->hash = 0;
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers should create a fresh active Vary header");
+
+    TEST_ASSERT(invalid_vary->hash == 0, "Invalidated Vary should stay inactive");
+    TEST_ASSERT(count_active_headers(&r, "Vary") == 1,
+                "Exactly one active Vary should be created");
+    vary = find_header(&r, "Vary");
+    TEST_ASSERT(vary != NULL, "Active Vary header should exist");
+    TEST_ASSERT(vary != invalid_vary, "Active Vary should not reuse inactive entry");
+    TEST_ASSERT(strstr((char *) vary->value.data, "Accept") != NULL,
+                "Created Vary should include Accept");
+
+    free_request(&r);
+    TEST_PASS("Invalidated-only Vary path creates a new header");
+}
+
+static void
+test_update_headers_removes_duplicate_content_encoding(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    ngx_table_elt_t *gzip;
+    ngx_table_elt_t *br;
+
+    TEST_SUBSECTION("Update headers removes duplicate Content-Encoding entries");
+
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+
+    gzip = push_header(&r, "Content-Encoding", "gzip");
+    br = push_header(&r, "Content-Encoding", "br");
+    r.headers_out.content_encoding = gzip;
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers should remove duplicate Content-Encoding");
+    TEST_ASSERT(r.headers_out.content_encoding == NULL,
+                "Content-Encoding pointer should be cleared");
+    TEST_ASSERT(gzip->hash == 0, "First Content-Encoding should be inactive");
+    TEST_ASSERT(br->hash == 0, "Second Content-Encoding should be inactive");
+    TEST_ASSERT(count_active_headers(&r, "Content-Encoding") == 0,
+                "No active Content-Encoding headers should remain");
+
+    free_request(&r);
+    TEST_PASS("Duplicate Content-Encoding headers are removed");
+}
+
 int
 main(void)
 {
@@ -543,6 +651,9 @@ main(void)
     test_update_headers_etag_no_existing();
     test_update_headers_etag_existing_vary_accept();
     test_update_headers_token_zero();
+    test_update_headers_ignores_invalidated_vary();
+    test_update_headers_creates_vary_after_invalidated_only();
+    test_update_headers_removes_duplicate_content_encoding();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
