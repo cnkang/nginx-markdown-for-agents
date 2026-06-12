@@ -3466,7 +3466,7 @@ ngx_http_markdown_streaming_body_filter(
     ngx_http_request_t *r, ngx_chain_t *in)
 {
     ngx_http_markdown_ctx_t   *ctx;
-    ngx_http_markdown_conf_t  *conf;
+    const ngx_http_markdown_conf_t  *conf;
     ngx_chain_t               *fallback_cl;
     ngx_int_t                  rc;
     ngx_flag_t                 last_buf;
