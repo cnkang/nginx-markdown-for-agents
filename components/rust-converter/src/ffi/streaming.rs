@@ -90,6 +90,16 @@ use super::abi::{
 use super::memory::{free_buffer, reset_result, set_error_result};
 use super::options::decode_options;
 
+const DEFAULT_FLUSH_THRESHOLD: usize = 16 * 1024;
+
+fn effective_flush_threshold(raw: u32) -> usize {
+    if raw == 0 {
+        DEFAULT_FLUSH_THRESHOLD
+    } else {
+        raw as usize
+    }
+}
+
 /// Configuration options for the streaming converter, passed from C to Rust.
 ///
 /// This `#[repr(C)]` struct is the purpose-built configuration interface for
@@ -107,9 +117,10 @@ use super::options::decode_options;
 /// # Flush Behaviour
 ///
 /// `flush_threshold` controls the minimum number of accumulated Markdown bytes
-/// before the converter flushes output. A threshold of 0 means "flush as soon
-/// as any complete element is emitted" (lowest latency). Larger values reduce
-/// per-chunk FFI call overhead at the cost of slightly delayed output.
+/// before the converter flushes output. A threshold of 0 means "use the
+/// default threshold" so zero-initialized FFI callers keep stable batching
+/// semantics. Larger values reduce per-chunk FFI call overhead at the cost of
+/// slightly delayed output.
 ///
 /// # Pointer Fields
 ///
@@ -153,12 +164,12 @@ pub struct StreamingOptions {
     /// Populated from the `markdown_streaming_budget` NGINX directive.
     pub streaming_budget: u64,
 
-    /// Flush threshold in bytes (0 = flush immediately on element completion).
+    /// Flush threshold in bytes (0 = use default threshold).
     ///
     /// Controls the minimum number of accumulated output bytes before
     /// `feed` returns non-empty output to the caller. A value of 0 means
-    /// "flush as soon as any complete Markdown element is emitted" — this
-    /// provides lowest latency but may increase per-chunk overhead.
+    /// "use the default threshold" so zero-initialized callers do not
+    /// accidentally opt into lowest-latency flushing.
     ///
     /// Larger values allow the emitter to batch output across multiple
     /// elements, reducing FFI round-trip frequency at the cost of slightly
@@ -304,9 +315,7 @@ fn markdown_streaming_new_impl(
     if decoded.parser_memory_budget > 0 {
         converter.set_parser_budget(decoded.parser_memory_budget);
     }
-    if opts_ref.flush_threshold > 0 {
-        converter.set_flush_threshold(opts_ref.flush_threshold as usize);
-    }
+    converter.set_flush_threshold(effective_flush_threshold(opts_ref.flush_threshold));
 
     Ok(Box::into_raw(Box::new(StreamingConverterHandle {
         inner: converter,
@@ -1445,7 +1454,7 @@ mod tests {
         assert_eq!(opts.flavor, 0); /* CommonMark */
         assert_eq!(opts.timeout_ms, 0); /* no timeout */
         assert_eq!(opts.streaming_budget, 0); /* use default */
-        assert_eq!(opts.flush_threshold, 0); /* immediate flush */
+        assert_eq!(opts.flush_threshold, 0); /* use default */
         assert_eq!(opts.generate_etag, 0); /* disabled */
         assert_eq!(opts.estimate_tokens, 0); /* disabled */
         assert_eq!(opts.front_matter, 0); /* disabled */
@@ -1460,6 +1469,12 @@ mod tests {
         assert_eq!(opts.prune_protection_selector_len, 0);
         assert_eq!(opts.llm_provider, 0); /* default */
         assert_eq!(opts.chars_per_token_fixed, 0); /* use default */
+    }
+
+    #[test]
+    fn test_effective_flush_threshold_uses_default_for_zero() {
+        assert_eq!(effective_flush_threshold(0), DEFAULT_FLUSH_THRESHOLD);
+        assert_eq!(effective_flush_threshold(512), 512);
     }
 
     // ================================================================

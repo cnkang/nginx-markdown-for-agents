@@ -412,7 +412,7 @@ typedef struct MarkdownOptions {
    */
   uint64_t parser_memory_budget;
   /**
-   * Streaming flush threshold in bytes (0 = flush immediately).
+   * Streaming flush threshold in bytes (0 = use default threshold).
    *
    * Controls the minimum number of accumulated output bytes before
    * the streaming emitter returns non-empty output to the C caller.
