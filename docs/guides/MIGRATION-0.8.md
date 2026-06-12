@@ -85,6 +85,10 @@ New reason codes (see [streaming-observability](../features/streaming-observabil
 | `below_threshold` | Response size below auto threshold |
 | `config_disabled` | Streaming disabled by configuration |
 | `excluded_content_type` | Excluded by stream type list |
+| `not_html` | Response is not HTML (passthrough) |
+| `compressed` | Response is compressed (forces full-buffer) |
+| `not_candidate` | Not a streaming candidate |
+| `accept_mismatch` | Accept header does not prefer text/markdown |
 | `precommit_html_error` | HTML parse error in pre-commit |
 | `precommit_budget` | Memory budget exceeded in pre-commit |
 | `precommit_timeout` | Parse timeout in pre-commit |
@@ -298,3 +302,4 @@ output parity before enabling streaming for live traffic.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.8.0 | 2026-06-10 | Kang | Initial migration guide |
+| 0.8.0 | 2026-06-12 | Codex | Added missing streaming reason codes: `not_html`, `compressed`, `not_candidate`, `accept_mismatch` |
