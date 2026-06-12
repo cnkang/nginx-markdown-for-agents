@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Validate required config
         shell: bash
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -z "${TAP_REPO}" ]]; then
@@ -36,6 +38,10 @@ jobs:
           fi
           if [[ -z "${RELEASE_TAG}" ]]; then
             echo "::error::Release tag is required." >&2
+            exit 1
+          fi
+          if [[ -z "${HOMEBREW_TAP_TOKEN}" ]]; then
+            echo "::error::Secret HOMEBREW_TAP_TOKEN is required for pushing to the tap repository." >&2
             exit 1
           fi
 
@@ -127,7 +133,7 @@ jobs:
           ref: ${{ env.TAP_BRANCH }}
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
-          persist-credentials: false
+          persist-credentials: true
 
       - name: Update tap formula
         shell: bash
