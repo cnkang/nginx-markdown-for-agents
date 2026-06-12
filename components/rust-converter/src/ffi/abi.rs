@@ -386,7 +386,7 @@ pub struct FFIDecisionResult {
 /// A single header operation in a header plan.
 ///
 /// Fields:
-/// - `op_type`: 0 = set, 1 = delete, 2 = set-etag-placeholder
+/// - `op_type`: 0 = set, 1 = delete, 2 = set-etag-placeholder, 3 = delete-all
 /// - `key`: Pointer to header name (NUL-terminated, borrowed from plan; NULL for set-etag-placeholder)
 /// - `key_len`: Length of header name
 /// - `value`: Pointer to header value (NUL-terminated, borrowed from plan; NULL for delete and set-etag-placeholder)
@@ -398,7 +398,7 @@ pub struct FFIDecisionResult {
 /// placeholder contract.
 #[repr(C)]
 pub struct FFIHeaderEntry {
-    /// 0 = set, 1 = delete, 2 = set-etag-placeholder
+    /// 0 = set, 1 = delete, 2 = set-etag-placeholder, 3 = delete-all
     pub op_type: u8,
     /// Pointer to header name (borrowed).
     pub key: *const u8,
