@@ -11,7 +11,7 @@ steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.7.0)**, the project includes a dual-engine
+As of the **current release line (0.8.0)**, the project includes a dual-engine
 conversion model (streaming default with full-buffer fallback), Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
 logic, and header plan application, independent decompression budget with parse
@@ -23,6 +23,14 @@ implemented and tested. The codebase includes unit, integration, E2E,
 fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,
 operations, architecture, and contributor-facing harness maintenance.
+
+### Release 0.8.0 (Current)
+
+**Status:** Current release
+
+Version 0.8.0 formalizes true streaming semantics as a first-class, verifiable
+contract. See the [Current Release 0.8.0](#current-release-080) section below
+for detailed goals, non-goals, and implementation status.
 
 ### Release 0.7.0 Updates
 
@@ -364,7 +372,24 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release (0.7.0)
+### Current Release (0.8.0)
+- True streaming contract: formalized incremental input processing, incremental
+  output emission, and bounded memory as a single verifiable contract
+  (RFC 0008, ADR-0011)
+- Streaming fallback state machine: pre-commit/post-commit two-phase error
+  handling with deterministic recovery semantics (ADR-0012)
+- Default-auto engine: aligned auto-mode streaming policy with the true
+  streaming contract definition (ADR-0013)
+- Support matrix source of truth: consolidated platform, version, and package
+  support declarations into a single machine-readable matrix consumed by CI,
+  docs, and packaging (ADR-0014)
+- Streaming observability: engine selection counters, fallback/failure counters,
+  streaming reason codes (streaming observability)
+- Streaming security enforcement: hard-excluded content types with security
+  test suite (streaming security enforcement)
+- Streaming configuration directives: `markdown_stream_threshold`,
+  `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`,
+  `markdown_stream_excluded_types` (#137)
 - Dual-engine conversion architecture: streaming default with full-buffer
   fallback
 - Rust-first architecture: Accept negotiation, conditional requests, decision
@@ -389,6 +414,25 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 - OS package manager distribution (APT, YUM/DNF, Homebrew)
 - Rollout and rollback guides with executable operator procedures
 - Performance baseline gating system and hardened CI/CD validation
+
+### Current Release 0.8.0
+
+**Goals (implemented):**
+- True streaming contract: formalize incremental input processing, incremental
+  output emission, and bounded memory as a single verifiable contract
+  (RFC 0008, ADR-0011)
+- Fallback state machine: implement pre-commit/post-commit two-phase error
+  handling with deterministic recovery semantics (ADR-0012)
+- Default-auto engine: align the auto-mode streaming policy with the true
+  streaming contract definition (ADR-0013)
+- Support matrix source of truth: consolidate platform, version, and package
+  support declarations into a single machine-readable matrix consumed by CI,
+  docs, and packaging (ADR-0014)
+
+**Non-goals for 0.8.0:**
+- SSE/NDJSON conversion (out of scope for this release)
+- Full parser rewrite (incremental improvements only)
+- Edge-CDN deployment model (origin-near architecture retained)
 
 ### Near-Term
 - Expand streaming rollout samples across mixed traffic profiles
@@ -494,23 +538,63 @@ View the latest CI status: [GitHub Actions](https://github.com/cnkang/nginx-mark
 
 See `examples/docker/` for Docker build examples.
 
+<!-- BEGIN:release-matrix:status-matrix -->
+
+## Release Matrix Summary
+
+### Tier Distribution
+
+| Tier | Count |
+|------|-------|
+| supported | 32 |
+| experimental | 1 |
+| best-effort | 1 |
+
+### Release-Blocking Entries
+
+| Entry | Workflow |
+|-------|----------|
+| 1.24.0 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.24.0 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.26.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.26.3 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.28.3 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.28.3 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.2 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.30.2 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.1 linux glibc amd64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.31.1 linux glibc arm64 dynamic-module | `.github/workflows/release-packages.yml` |
+| 1.26.3 debian12 glibc amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 debian12 glibc arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 alpine3.20 musl amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 alpine3.20 musl arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.1 debian12 glibc amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.1 debian12 glibc arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.1 alpine3.20 musl amd64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.1 alpine3.20 musl arm64 docker-image | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 debian12 glibc amd64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.26.3 debian12 glibc arm64 deb-package | `.github/workflows/release-packages.yml` |
+| 1.26.3 almalinux9 glibc amd64 rpm-package | `.github/workflows/release-packages.yml` |
+| 1.26.3 almalinux9 glibc arm64 rpm-package | `.github/workflows/release-packages.yml` |
+<!-- END:release-matrix:status-matrix -->
+
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.7.0. The project provides
+**NGINX Markdown for Agents** is at version 0.8.0. The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 dual-engine model, with bounded-memory streaming as the default path and
-full-buffer conversion as the fallback. Version 0.7.0 introduces Rust-first
-architecture modules (Accept negotiation, conditional requests, decision
-engine, header plan), independent decompression budget with parse timeout and
-parser budget directives, a runtime diagnostics endpoint, dynconf dry-run with
-last-known-good rollback, DEB/RPM packaging, Kubernetes deployment examples,
-FFI ABI layout verification, and CI supply-chain hardening. It also includes
-Prometheus-compatible metrics, decision reason codes, rollout and rollback
-guides, parity and evidence workflows for streaming rollout safety, dynamic
-configuration hot-reload, OpenTelemetry tracing, per-path metrics, OS package
-distribution, release automation, performance baseline gating, runtime
-validation reuse, fuzzing workflows, and shared metrics aggregation for
-observability.
+full-buffer conversion as the fallback. Version 0.8.0 formalizes the true
+streaming contract (RFC 0008, ADR-0011), introduces the streaming fallback
+state machine (ADR-0012), aligns the auto-mode streaming policy with the true
+streaming contract definition (ADR-0013), and consolidates platform and
+version support declarations into a release matrix source of truth (ADR-0014).
+It also includes streaming observability (streaming observability), streaming security
+enforcement (streaming security enforcement), streaming configuration directives, Prometheus-compatible
+metrics, decision reason codes, rollout and rollback guides, parity and
+evidence workflows for streaming rollout safety, dynamic configuration
+hot-reload, OpenTelemetry tracing, per-path metrics, OS package distribution,
+release automation, performance baseline gating, runtime validation reuse,
+fuzzing workflows, and shared metrics aggregation for observability.
 
 ### Key Components
 - Core feature implementation
@@ -540,3 +624,4 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |
 | 0.7.0 | 2026-06-03 | Kang | Version bump to 0.7.0; add Rust-first architecture, decompression budget, diagnostics, dynconf dry-run, DEB/RPM, K8s, FFI ABI verification, CI supply-chain hardening |
+| 0.8.0 | 2026-06-10 | Kang | Version bump to 0.8.0; true streaming contract, fallback state machine, streaming observability, streaming security enforcement, release matrix source of truth, streaming config directives |

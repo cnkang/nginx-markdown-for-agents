@@ -104,6 +104,19 @@ Required:
     local-spec validators that require user-local Kiro/spec directories must not
     run in tag release CI unless those inputs are checked into the repository or
     explicitly downloaded first.
+  - When a newer release gate reuses prior-version validators, any assertion
+    about the active project version, package version, or release line must be
+    parameterized by the caller.  A prior-version validator may keep its
+    standalone default, but it must not hard-fail a newer release gate solely
+    because `Cargo.toml`, package metadata, or chart metadata has advanced to
+    the newer release version.
+  - Workflows, release gates, and documentation renderers that consume
+    `tools/release-matrix.json` must use the repository's current checked-in
+    schema.  If the matrix schema changes, update all active consumers in the
+    same change set; a release workflow must not keep reading stale aliases
+    such as `matrix`, `nginx`, `os_type`, or `support_tier: full` after the
+    source of truth has moved to `entries`, `nginx_version`, `libc`, and
+    `support_tier: supported`.
   - Package smoke tests must select external package repositories from
     `/etc/os-release` or equivalent target-distro evidence.  Do not route
     Amazon Linux through CentOS repository paths.

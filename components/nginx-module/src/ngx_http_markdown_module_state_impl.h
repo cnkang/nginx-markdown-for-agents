@@ -14,15 +14,6 @@
 #ifndef NGX_HTTP_MARKDOWN_MODULE_STATE_IMPL_H
 #define NGX_HTTP_MARKDOWN_MODULE_STATE_IMPL_H
 
-/*
- * Request-level buffered flag for this module while it is accumulating the
- * full response body before conversion.
- *
- * Low bits 0x01/0x02/0x04 are used by core modules (SSI/SUB/COPY). 0x08 is
- * available for request-level buffering (image filter uses 0x08 on
- * connection->buffered, not r->buffered).
- */
-#define NGX_HTTP_MARKDOWN_BUFFERED  0x08
 /* Bound eager reservation to avoid huge one-shot allocations on giant responses. */
 #define NGX_HTTP_MARKDOWN_PRERESERVE_LIMIT (16 * 1024 * 1024)
 
@@ -39,9 +30,11 @@ static ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
  * data directly from shpool->data. When ngx_http_markdown_metrics_t layout
  * changes (for example fields appended at the tail), this version suffix
  * prevents attaching an incompatible old allocation after hot reload.
+ *
+ * v6: streaming observability fields added to metrics struct.
  */
 static ngx_str_t ngx_http_markdown_metrics_shm_name =
-    ngx_string("nginx_markdown_metrics_v5");
+    ngx_string("nginx_markdown_metrics_v6");
 static u_char ngx_http_markdown_empty_string[] = "";
 
 /* Global dynamic config watcher for this worker process.

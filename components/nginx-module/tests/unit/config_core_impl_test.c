@@ -1052,6 +1052,95 @@ test_merge_conf_double_unset(void)
     TEST_PASS("merge_conf double-UNSET path covered");
 }
 
+static void
+test_streaming_compat_budget_explicit_maps_to_stream(void)
+{
+    ngx_conf_t cf;
+    ngx_http_markdown_conf_t *parent;
+    ngx_http_markdown_conf_t *child;
+    ngx_http_markdown_conf_t *inherited_parent;
+    ngx_http_markdown_conf_t *legacy_child;
+    char *rc;
+
+    TEST_SUBSECTION("streaming compatibility budget explicit mapping");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    parent = ngx_http_markdown_create_conf(&cf);
+    child = ngx_http_markdown_create_conf(&cf);
+    TEST_ASSERT(parent != NULL && child != NULL,
+                "create_conf should allocate parent and child");
+
+    child->streaming.budget = 4 * 1024 * 1024;
+
+    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
+
+    TEST_ASSERT(rc == NGX_CONF_OK,
+                "merge_conf should accept legacy streaming budget");
+    TEST_ASSERT(child->streaming.budget_explicit == 1,
+                "legacy streaming budget should stay explicit");
+    TEST_ASSERT(child->stream.budget == 4 * 1024 * 1024,
+                "legacy streaming budget should map into stream budget");
+    TEST_ASSERT(child->stream.budget_explicit == 1,
+                "mapped stream budget should stay explicit");
+
+    inherited_parent = ngx_http_markdown_create_conf(&cf);
+    legacy_child = ngx_http_markdown_create_conf(&cf);
+    TEST_ASSERT(inherited_parent != NULL && legacy_child != NULL,
+                "create_conf should allocate inherited budget fixtures");
+
+    inherited_parent->stream.budget = 8 * 1024 * 1024;
+    inherited_parent->stream.budget_explicit = 1;
+    legacy_child->streaming.budget = 4 * 1024 * 1024;
+
+    rc = ngx_http_markdown_merge_conf(&cf, inherited_parent, legacy_child);
+
+    TEST_ASSERT(rc == NGX_CONF_OK,
+                "merge_conf should accept child legacy budget override");
+    TEST_ASSERT(legacy_child->stream.budget == 4 * 1024 * 1024,
+                "child legacy budget should override inherited stream budget");
+    TEST_ASSERT(legacy_child->stream.budget_explicit == 1,
+                "child legacy budget override should mark stream explicit");
+    TEST_PASS("streaming compatibility budget explicit mapping");
+}
+
+static void
+test_streaming_compat_preserves_explicit_new_defaults(void)
+{
+    ngx_conf_t cf;
+    ngx_http_markdown_conf_t *parent;
+    ngx_http_markdown_conf_t *child;
+    char *rc;
+
+    TEST_SUBSECTION("streaming compatibility explicit defaults");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    parent = ngx_http_markdown_create_conf(&cf);
+    child = ngx_http_markdown_create_conf(&cf);
+    TEST_ASSERT(parent != NULL && child != NULL,
+                "create_conf should allocate parent and child");
+
+    child->stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    child->stream.shadow = 0;
+    child->streaming.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    child->streaming.shadow = 1;
+
+    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
+
+    TEST_ASSERT(rc == NGX_CONF_OK,
+                "merge_conf should accept mixed old/new stream settings");
+    TEST_ASSERT(child->stream.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
+                "explicit new on_error=pass should not be overwritten");
+    TEST_ASSERT(child->stream.on_error_explicit == 1,
+                "explicit new on_error should be tracked");
+    TEST_ASSERT(child->stream.shadow == 0,
+                "explicit new shadow=off should not be overwritten");
+    TEST_ASSERT(child->stream.shadow_explicit == 1,
+                "explicit new shadow should be tracked");
+    TEST_PASS("streaming compatibility preserves explicit defaults");
+}
+
 /*
  * Entry point: run all config_core_impl unit tests.
  * Returns 0 on success; aborts via TEST_ASSERT on failure.
@@ -1291,6 +1380,8 @@ main(void)
     test_create_conf_defaults();
     test_merge_conf();
     test_merge_conf_double_unset();
+    test_streaming_compat_budget_explicit_maps_to_stream();
+    test_streaming_compat_preserves_explicit_new_defaults();
     test_name_helpers_and_levels();
     test_name_helpers_unknown_branches();
     test_filter_flag_and_is_enabled();

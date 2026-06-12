@@ -473,6 +473,77 @@ markdown_stream_types text/event-stream application/x-ndjson;
 
 ---
 
+#### markdown_content_types
+
+**Syntax:** `markdown_content_types <type> [<type> ...];`
+**Default:** `text/html`
+**Context:** http, server, location
+
+Content types eligible for Markdown conversion (positive allowlist). Uses prefix + boundary-char matching: `text/html` matches `text/html` and `text/html; charset=utf-8` but not `text/htmlx`.
+
+**Example:**
+```nginx
+# Convert both HTML and XHTML responses
+markdown_content_types text/html application/xhtml+xml;
+```
+
+**Notes:**
+- This directive controls whether the module processes a response at all (any path: full-buffer, incremental, or streaming).
+- `markdown_stream_types` and `markdown_stream_excluded_types` are additional filters that prevent specific types from entering the streaming path.
+- A type excluded from streaming may still be converted via full-buffer if it passes the general eligibility checks.
+
+---
+
+### Content Pruning
+
+#### markdown_prune_noise
+
+**Syntax:** `markdown_prune_noise on | off;`
+**Default:** `on`
+**Context:** http, server, location
+
+Enable or disable noise region pruning at runtime. When enabled, structural HTML regions matching the prune selectors (nav, footer, aside, etc.) are excluded from Markdown output, reducing noise for AI agents.
+
+**Example:**
+```nginx
+# Disable noise pruning (include all content)
+markdown_prune_noise off;
+```
+
+---
+
+#### markdown_prune_selectors
+
+**Syntax:** `markdown_prune_selectors "<tag> [<tag> ...]";`
+**Default:** `"nav footer aside"` (built-in)
+**Context:** http, server, location
+
+Space-separated HTML tag names for regions to prune from the output. Replaces the built-in defaults when set.
+
+**Example:**
+```nginx
+# Prune navigation, footer, aside, and sidebar elements
+markdown_prune_selectors "nav footer aside sidebar";
+```
+
+---
+
+#### markdown_prune_protection_selectors
+
+**Syntax:** `markdown_prune_protection_selectors "<tag> [<tag> ...]";`
+**Default:** empty (no protection)
+**Context:** http, server, location
+
+Space-separated HTML tag names for regions to protect from pruning. Protection wins over prune: an element matching both prune and protection selectors is kept in the output.
+
+**Example:**
+```nginx
+# Protect nav elements from being pruned
+markdown_prune_protection_selectors "nav";
+```
+
+---
+
 ### Security Directives
 
 #### markdown_trust_forwarded_headers
@@ -508,7 +579,7 @@ markdown_trust_forwarded_headers on;
 These directives control the streaming conversion path introduced in 0.5.0.
 In v0.6.0, the default changed from `off` to `auto`: responses are
 automatically routed to streaming or full-buffer based on Content-Length
-and `markdown_streaming_auto_threshold`. Set `markdown_streaming_engine off`
+and `markdown_stream_threshold`. Set `markdown_streaming_engine off`
 explicitly to restore 0.5.x behavior.
 
 
@@ -741,6 +812,319 @@ markdown_streaming_shadow on;
 markdown_streaming_shadow off;
 ```
 
+#### Streaming Candidacy Directives (v0.8.0)
+
+The following directives were introduced in v0.8.0 to give operators fine-grained
+control over which responses enter the streaming conversion path and how the
+streaming engine batches output. They complement `markdown_streaming_engine` and
+`markdown_streaming_budget` defined above.
+
+##### markdown_stream_threshold
+
+**Syntax:** `markdown_stream_threshold <size>;`
+**Default:** `1m`
+**Context:** http, server, location
+
+Minimum response size for streaming candidacy. Only responses whose body size
+meets or exceeds this threshold are considered for streaming conversion. Responses
+below the threshold always use the full-buffer path.
+
+The value must be greater than zero; `0` is rejected by `nginx -t`.
+
+Compatibility: legacy `markdown_streaming_auto_threshold` remains accepted in
+v0.8.0. When it is explicitly configured and `markdown_stream_threshold` is
+not, the module maps the legacy value into `markdown_stream_threshold`. If both
+directives are configured, `markdown_stream_threshold` wins. New
+configurations should use `markdown_stream_threshold` directly.
+
+**Valid Units:** `k` (kilobytes), `m` (megabytes)
+
+**Example:**
+```nginx
+# Default: 1 megabyte threshold
+markdown_stream_threshold 1m;
+
+# Lower threshold for faster streaming engagement
+markdown_stream_threshold 512k;
+
+# Higher threshold — only very large responses stream
+markdown_stream_threshold 5m;
+```
+
+##### markdown_stream_precommit_buffer
+
+**Syntax:** `markdown_stream_precommit_buffer <size>;`
+**Default:** `256k`
+**Context:** http, server, location
+
+Size of the pre-commit replay buffer. During the streaming pre-commit phase, the
+module buffers converted output up to this size. If an error occurs before the
+commit boundary is crossed, the buffered content is discarded and the original
+HTML is replayed to the client (fail-open behavior controlled by
+`markdown_streaming_on_error`).
+
+Setting this to `0` disables the pre-commit HTML fallback capability — errors
+during the pre-commit phase immediately trigger the configured error policy
+without replay.
+
+**Valid Units:** `k` (kilobytes), `m` (megabytes)
+
+**Example:**
+```nginx
+# Default: 256 KB replay buffer
+markdown_stream_precommit_buffer 256k;
+
+# Larger buffer for more replay safety margin
+markdown_stream_precommit_buffer 512k;
+
+# Disable pre-commit replay (zero allowed)
+markdown_stream_precommit_buffer 0;
+```
+
+##### markdown_stream_flush_min
+
+**Syntax:** `markdown_stream_flush_min <size>;`
+**Default:** `16k`
+**Context:** http, server, location
+
+Minimum Markdown output batch size before the streaming engine flushes data
+downstream. The engine accumulates converted output until at least this many
+bytes are ready, then flushes the batch. This reduces per-byte overhead and
+backpressure amplification from many small writes.
+
+The value must be greater than zero; `0` is rejected by `nginx -t` to prevent
+pathological per-byte flushing.
+
+**Valid Units:** `k` (kilobytes), `m` (megabytes)
+
+**Example:**
+```nginx
+# Default: 16 KB flush minimum
+markdown_stream_flush_min 16k;
+
+# Smaller batches for lower latency
+markdown_stream_flush_min 4k;
+
+# Larger batches for higher throughput
+markdown_stream_flush_min 64k;
+```
+
+##### markdown_stream_excluded_types
+
+**Syntax:** `markdown_stream_excluded_types <type> [<type> ...];`
+**Default:** none (only built-in hard exclusions apply)
+**Context:** http, server, location
+
+Space-separated list of MIME types to exclude from streaming conversion. These
+types are added to the built-in hard exclusions and never enter the streaming
+path, regardless of `markdown_streaming_engine` setting.
+
+User-configured exclusions are **additive** to the built-in hard exclusions:
+
+- `text/event-stream`
+- `application/x-ndjson`
+- `application/stream+json`
+
+The built-in hard exclusions cannot be removed by user configuration. Matching
+is case-insensitive and ignores Content-Type parameters (e.g.,
+`text/event-stream; charset=utf-8` remains excluded).
+
+**Example:**
+```nginx
+# Exclude additional types from streaming
+markdown_stream_excluded_types text/csv application/xml;
+
+# Multiple custom exclusions
+markdown_stream_excluded_types text/csv application/xml application/rss+xml;
+```
+
+##### Configuration Examples (v0.8.0 Streaming)
+
+**Basic streaming enablement:**
+```nginx
+http {
+    markdown_filter on;
+    markdown_streaming_engine on;
+    markdown_stream_threshold 1m;
+
+    server {
+        listen 80;
+        server_name docs.example.com;
+
+        location / {
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+**Threshold tuning for large responses:**
+```nginx
+location /large-docs {
+    # Only stream responses >= 2 MB
+    markdown_streaming_engine auto;
+    markdown_stream_threshold 2m;
+
+    # Larger pre-commit buffer for complex pages
+    markdown_stream_precommit_buffer 512k;
+
+    # Bigger flush batches for throughput
+    markdown_stream_flush_min 32k;
+
+    proxy_pass http://backend;
+}
+```
+
+**Adding custom excluded types:**
+```nginx
+location /api {
+    markdown_streaming_engine auto;
+
+    # Exclude CSV and XML feeds from streaming
+    markdown_stream_excluded_types text/csv application/atom+xml;
+
+    proxy_pass http://backend;
+}
+```
+
+**Disabling streaming for a specific location:**
+```nginx
+location /legacy {
+    # Force full-buffer path regardless of response size
+    markdown_streaming_engine off;
+    proxy_pass http://backend;
+}
+```
+
+##### Reserved Directives (NOT Implemented)
+
+The following directives are defined in design RFCs but are **not implemented**
+in the current release. They are **not registered** in the module command table.
+
+> ⚠️ **Do NOT use any reserved directive in your configuration.** Adding a
+> reserved directive causes `nginx -t` to fail, preventing NGINX from
+> starting or reloading.
+
+---
+
+###### `markdown_stream_flush_interval`
+
+> **RESERVED — Not implemented in v0.8.0**
+>
+> Using this directive in any configuration context will cause:
+> ```text
+> nginx: [emerg] unknown directive "markdown_stream_flush_interval"
+> nginx -t: configuration file test failed
+> ```
+
+| Field | Value |
+|-------|-------|
+| **Status** | Reserved — not available |
+| **Intended purpose** | Time-based flush control for streaming output (flush after N milliseconds even if `markdown_stream_flush_min` bytes have not accumulated) |
+| **Planned version** | Future 0.8.x release (pending finalization of time-based flush semantics) |
+| **Defined in** | RFC 0008 |
+| **Current behavior** | Not registered; NGINX rejects the directive at configuration parse time |
+
+**What operators should know:**
+
+- This directive does **not exist** in the v0.8.0 module binary.
+- There is no workaround or feature flag to enable it.
+- Size-based flushing (`markdown_stream_flush_min`) is the only flush control
+  available in v0.8.0.
+- Do not include `markdown_stream_flush_interval` in configuration files,
+  templates, or automation scripts targeting v0.8.0 deployments.
+- When this directive becomes available in a future release, it will be
+  documented in the implemented streaming directives section above and
+  removed from this reserved section.
+
+##### Directive Interactions
+
+Streaming directives interact with other module directives in ways that may
+not be immediately obvious. This section documents the key interactions to
+help operators understand the full picture when multiple directives are
+configured together.
+
+| Directive Pair | Interaction Summary |
+|----------------|---------------------|
+| `markdown_streaming_engine` + `markdown_filter` | Streaming only applies when `markdown_filter` is `on` (or resolves to a truthy value). If the filter is disabled, the streaming engine setting is irrelevant — no conversion of any kind occurs. |
+| `markdown_streaming_engine` + `markdown_memory_budget` | The unified `markdown_memory_budget` sets the ceiling for both engines unless a path-specific directive overrides it. For streaming, `markdown_streaming_budget` takes precedence when explicitly set; otherwise the unified budget applies. |
+| `markdown_streaming_engine` + `markdown_on_error` | These error policies are **independent**. `markdown_on_error` governs full-buffer failures; `markdown_streaming_on_error` governs streaming pre-commit failures. Changing one never affects the other. See the [error policy table](#relationship-between-markdown_on_error-and-markdown_streaming_on_error) above. |
+| `markdown_streaming_engine` + `markdown_etag` | ETags are generated from converted output. For full-buffer responses, the complete Markdown is available before headers are sent, so ETag generation works normally. For streaming responses that have crossed the commit boundary, response headers (including `Content-Type: text/markdown`) are already sent — ETag cannot be retroactively added. Streaming responses do **not** carry an ETag header. |
+| `markdown_streaming_engine` + `markdown_conditional_requests` | Conditional request handling (`If-None-Match` / 304) works for full-buffer responses where an ETag is available. Streaming responses bypass 304 logic because no ETag is produced. **Important:** when `markdown_conditional_requests` is `full_support` (the default), the streaming selector always selects full-buffer because full ETag support requires the complete converted output before headers. To actually activate streaming in `auto` mode, set `markdown_conditional_requests if_modified_since_only` or `disabled`. |
+| `markdown_stream_threshold` + `Content-Length` | When the upstream response includes a `Content-Length` header and the value is below `markdown_stream_threshold`, the response always uses the full-buffer path regardless of `markdown_streaming_engine on`. This is a size-based eligibility gate, not an error. |
+| `markdown_stream_excluded_types` + `markdown_content_types` | Both must permit the content type for streaming conversion. `markdown_content_types` controls whether the module processes a response at all (any path). `markdown_stream_excluded_types` is an additional filter that prevents specific types from entering the streaming path. A type excluded from streaming may still be converted via full-buffer if it passes the general eligibility checks. |
+| `markdown_stream_precommit_buffer` + `markdown_streaming_on_error` | The pre-commit buffer enables fail-open replay: if an error occurs before the commit boundary, the buffered original HTML is replayed to the client. When `markdown_stream_precommit_buffer 0` (replay disabled), any pre-commit error immediately triggers the `markdown_streaming_on_error` policy without replay capability. |
+| `markdown_streaming_engine auto` + variable usage | When `markdown_streaming_engine` is set to a variable (`$variable`), the variable is resolved at request time. The resolved value (`on`, `off`, or `auto`) applies for the entire request lifecycle. Combine with `map` directives for percentage-based rollout or per-path control. |
+
+**Non-obvious behaviors to watch for:**
+
+1. **No ETag on streaming responses.** If your caching layer depends on ETags
+   for revalidation, streaming responses will not benefit from 304 short-circuits.
+   Consider setting `markdown_stream_threshold` high enough that commonly cached
+   small responses stay on the full-buffer path.
+
+2. **Unified budget resolution order.** The effective streaming budget is:
+   `markdown_streaming_budget` (if set) → `markdown_memory_budget` (if set) →
+   built-in default (`2m`). An operator who sets only `markdown_memory_budget 1m`
+   may inadvertently lower the streaming budget below the `2m` default.
+
+3. **Excluded types are additive.** `markdown_stream_excluded_types` adds to
+   the built-in hard exclusions (`text/event-stream`, `application/x-ndjson`,
+   `application/stream+json`). You cannot remove the built-in exclusions.
+
+4. **Pre-commit buffer size vs. streaming budget.** The pre-commit buffer is
+   drawn from the overall streaming budget. Setting `markdown_stream_precommit_buffer`
+   close to `markdown_streaming_budget` leaves little room for converter working
+   memory and may trigger budget-exceeded errors.
+
+5. **Variable-driven streaming + inheritance.** A `markdown_streaming_engine $var`
+   at the `http` level is inherited by all `server`/`location` blocks. The variable
+   itself is resolved per-request in the innermost matching context. Override with
+   an explicit value (`off`, `on`, `auto`) in specific locations to exclude them
+   from variable-driven rollout.
+
+6. **Default `auto` mode does not activate streaming.** When `markdown_conditional_requests`
+   is `full_support` (the default), the streaming selector always routes to full-buffer
+   because full ETag support requires the complete output before sending headers. This
+   means the default 0.8.0 configuration (`streaming_engine auto` + `conditional_requests
+   full_support`) never selects streaming. To activate streaming for large responses, set
+   `markdown_conditional_requests if_modified_since_only` or `disabled`.
+
+**Example — interactions in practice:**
+
+```nginx
+http {
+    markdown_filter on;
+    markdown_memory_budget 4m;           # Applies to both paths
+    markdown_streaming_engine auto;
+    markdown_stream_threshold 1m;
+    markdown_etag on;                    # Works for full-buffer only
+
+    server {
+        listen 80;
+
+        location /docs {
+            # Responses < 1m: full-buffer path, ETag generated, 304 works
+            # Responses >= 1m: streaming path, no ETag, no 304
+            markdown_streaming_budget 3m;   # Overrides unified budget for streaming
+            markdown_streaming_on_error pass;
+            proxy_pass http://backend;
+        }
+
+        location /api-reference {
+            # Exclude XML from streaming but still convert via full-buffer
+            markdown_stream_excluded_types application/xml;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+> **Inheritance note:** All streaming directives follow standard NGINX inheritance:
+> `http` → `server` → `location`. A value set at the `http` level applies to all
+> enclosed contexts unless explicitly overridden. When troubleshooting unexpected
+> streaming behavior, check for inherited values from outer scopes.
+
 ---
 
 ### Dynamic Configuration (0.6.1+)
@@ -864,6 +1248,152 @@ markdown_dynconf_dry_run on;
 
 ---
 
+### LLM Token Estimation
+
+#### markdown_llm_provider
+
+**Syntax:** `markdown_llm_provider default | openai-gpt | anthropic-claude | google-gemini | meta-llama;`
+**Default:** `default`
+**Context:** http, server, location
+
+LLM provider for token estimation. Each provider has a characteristic chars-per-token ratio that improves estimate accuracy for that provider's tokenizer family.
+
+| Provider | Chars/Token | Context Window |
+|----------|-------------|----------------|
+| `default` | 4.0 | not enforced |
+| `openai-gpt` | 3.8 | 128,000 |
+| `anthropic-claude` | 3.6 | 200,000 |
+| `google-gemini` | 4.2 | 1,000,000 |
+| `meta-llama` | 3.8 | 128,000 |
+
+Requires `markdown_token_estimate on;` to have any effect.
+
+**Example:**
+```nginx
+markdown_token_estimate on;
+markdown_llm_provider openai-gpt;
+```
+
+---
+
+#### markdown_chars_per_token
+
+**Syntax:** `markdown_chars_per_token <number>;`
+**Default:** `0` (use provider default)
+**Context:** http, server, location
+
+Explicit chars-per-token ratio for token estimation, stored as fixed-point * 10 (e.g., `38` = 3.8 chars/token). Overrides both the default (4.0) and the provider-specific ratio. Set to `0` to use the provider's default.
+
+**Range:** 0–255 (0.0–25.5 chars/token). Practical range: 20–60.
+
+**Example:**
+```nginx
+markdown_token_estimate on;
+markdown_chars_per_token 38;
+```
+
+---
+
+### OpenTelemetry Integration
+
+#### markdown_otel
+
+**Syntax:** `markdown_otel on | off;`
+**Default:** `off`
+**Context:** http, server, location
+
+Enable OpenTelemetry span creation for conversion requests. When enabled, each conversion creates a span with attributes for flavor, engine, content_type, input/output bytes, and reason code.
+
+**Example:**
+```nginx
+markdown_otel on;
+markdown_otel_endpoint /_otel_export;
+```
+
+---
+
+#### markdown_otel_endpoint
+
+**Syntax:** `markdown_otel_endpoint <uri>;`
+**Default:** empty (no endpoint configured)
+**Context:** http, server, location
+
+Internal NGINX URI for OTel span export via subrequest. The module issues an HTTP POST to this URI using `ngx_http_subrequest()`, sending the OTLP JSON payload as the request body.
+
+This URI must map to an `internal` location block in `nginx.conf` that proxy_passes to the OTel collector:
+
+```nginx
+location = /_otel_export {
+    internal;
+    proxy_pass http://collector:4318/v1/traces;
+}
+
+markdown_otel on;
+markdown_otel_endpoint /_otel_export;
+```
+
+---
+
+#### markdown_otel_tracing
+
+**Syntax:** `markdown_otel_tracing on | off;`
+**Default:** `off`
+**Context:** http, server, location
+
+Enable OTel span creation for conversion request tracing. When enabled, each conversion creates a span with trace context propagation and conversion attributes.
+
+---
+
+#### markdown_otel_metrics
+
+**Syntax:** `markdown_otel_metrics on | off;`
+**Default:** `off`
+**Context:** http, server, location
+
+Enable OTel metrics export via OTLP protocol.
+
+---
+
+#### markdown_otel_service_name
+
+**Syntax:** `markdown_otel_service_name <name>;`
+**Default:** `nginx-markdown`
+**Context:** http, server, location
+
+Service name label for OTel resource attributes.
+
+**Example:**
+```nginx
+markdown_otel_service_name my-nginx-markdown;
+```
+
+---
+
+#### markdown_otel_span_buffer_size
+
+**Syntax:** `markdown_otel_span_buffer_size <number>;`
+**Default:** `1024`
+**Context:** http, server, location
+
+Buffer size for spans when the collector is unreachable. Buffered spans are retried on the next export window.
+
+---
+
+#### markdown_otel_export_timeout
+
+**Syntax:** `markdown_otel_export_timeout <time>;`
+**Default:** `5s`
+**Context:** http, server, location
+
+Timeout for OTLP HTTP export requests.
+
+**Example:**
+```nginx
+markdown_otel_export_timeout 10s;
+```
+
+---
+
 ### Large Response Processing
 
 #### markdown_large_body_threshold
@@ -940,7 +1470,7 @@ location /markdown-metrics {
 - `requests_entered`: Requests that reached the module decision chain
 - `conversions_attempted`: Total conversion attempts
 - `conversions_succeeded`: Successful conversions
-- `conversions_failed`: Failed conversions
+- `conversions_failed`: Engine-level failures (includes fail-open errors; for response-level failure count, subtract `precommit_failopen_total` or use `failures_conversion` + `failures_resource_limit` + `failures_system`)
 - `conversions_bypassed`: Requests bypassed (ineligible/passthrough)
 - `conversion_completed`: Completed conversions (`conversions_succeeded + conversions_failed`)
 - `failures_conversion`: Conversion failures
@@ -1027,6 +1557,42 @@ http {
   bumps the SHM zone name to prevent hot-reload layout mismatch. A full restart
   is recommended after upgrading.
 
+#### markdown_metrics_per_path
+
+**Syntax:** `markdown_metrics_per_path on | off;`
+**Default:** `off`
+**Context:** http, server, location
+
+Enable per-URL-path metrics tracking. When enabled, the top-N most-hit URI paths are tracked individually alongside global aggregates. Per-path data is exposed in the metrics endpoint under the `per_path` key.
+
+**Example:**
+```nginx
+markdown_metrics_per_path on;
+markdown_metrics_per_path_cardinality 200;
+```
+
+---
+
+#### markdown_metrics_per_path_cardinality
+
+**Syntax:** `markdown_metrics_per_path_cardinality <number>;`
+**Default:** `100`
+**Context:** http only
+
+Maximum number of distinct URI paths tracked individually in the per-path RB-tree. When this limit is reached, further unique paths are counted in the overflow aggregate and appear under the `__other__` pseudo-path in output.
+
+This is a global (http-level) setting because the per-path limit is stored in shared memory and applies across all server and location blocks.
+
+**Example:**
+```nginx
+http {
+    markdown_metrics_per_path on;
+    markdown_metrics_per_path_cardinality 200;
+}
+```
+
+---
+
 #### markdown_diagnostics
 
 **Syntax:** `markdown_diagnostics on | off;`
@@ -1079,6 +1645,52 @@ location /nginx-markdown/diagnostics {
   can be used alongside `markdown_diagnostics_allow`.
 - Disable in production if the endpoint is not needed to avoid exposing
   internal state.
+
+---
+
+### Deprecated Directives
+
+The following directives are deprecated and will be removed in a future major release. They are still accepted with info-level warnings to allow gradual migration.
+
+#### markdown_max_size
+
+**Syntax:** `markdown_max_size <size>;`
+**Default:** `10m`
+**Context:** http, server, location
+**Status:** Deprecated since 0.8.0 — use `markdown_memory_budget`
+
+Maximum response size to attempt conversion. Responses larger than this will not be converted.
+
+**Migration:**
+```nginx
+# Before (deprecated)
+markdown_max_size 5m;
+
+# After (recommended)
+markdown_memory_budget 5m;
+```
+
+---
+
+#### markdown_streaming_auto_threshold
+
+**Syntax:** `markdown_streaming_auto_threshold <size>;`
+**Default:** `32k` (legacy field; effective v0.8.0 runtime default is `1m` via `markdown_stream_threshold`)
+**Context:** http, server, location
+**Status:** Deprecated since 0.8.0 — use `markdown_stream_threshold`
+
+Content-Length threshold for auto-mode engine selection. In v0.8.0, `markdown_stream_threshold` replaces it with a default of `1m`.
+
+When explicitly set, this value is mapped into the v0.8.0 `stream.threshold` via the compatibility bridge. If both directives are configured at the same level, `markdown_stream_threshold` wins.
+
+**Migration:**
+```nginx
+# Before (deprecated)
+markdown_streaming_auto_threshold 64k;
+
+# After (recommended)
+markdown_stream_threshold 64k;
+```
 
 ---
 
@@ -2198,3 +2810,5 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.0 | 2026-05-17 | Kang | Added `markdown_dynconf_dry_run` directive documentation |
 | 0.7.0 | 2026-05-18 | Kang | Added `markdown_diagnostics` directive documentation |
+| 0.8.0 | 2026-06-10 | Kang | Cross-reference audit: fixed stale `markdown_streaming_auto_threshold` reference in streaming section intro to use `markdown_stream_threshold` |
+| 0.8.0 | 2026-06-12 | Codex | Added missing directive documentation: `markdown_content_types`, `markdown_prune_noise`, `markdown_prune_selectors`, `markdown_prune_protection_selectors`, `markdown_llm_provider`, `markdown_chars_per_token`, OpenTelemetry family (`markdown_otel`, `markdown_otel_endpoint`, `markdown_otel_tracing`, `markdown_otel_metrics`, `markdown_otel_service_name`, `markdown_otel_span_buffer_size`, `markdown_otel_export_timeout`), `markdown_metrics_per_path`, `markdown_metrics_per_path_cardinality`; added deprecated directives section for `markdown_max_size` and `markdown_streaming_auto_threshold` |

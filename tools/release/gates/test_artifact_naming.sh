@@ -5,7 +5,7 @@
 # PURPOSE:
 #   Validates that the artifact naming checker correctly accepts valid
 #   filenames and rejects invalid ones per the naming convention defined
-#   in spec 31 (0.7.0 Release Package Compatibility).
+#   in 0.7.0 release package naming and layout (0.7.0 Release Package Compatibility).
 #
 # Validates: Requirements 4.5, 11.4
 #

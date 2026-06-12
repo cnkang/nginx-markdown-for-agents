@@ -46,6 +46,7 @@ jobs:
         run: |
           python3 tools/release/matrix/validate_doc_matrix_sync.py
           python3 tools/release/matrix/validate_matrix_install_consistency.py
+          python3 tools/release/matrix/validate_workflow_matrix_consumers.py
 
       - name: Extract build matrix from release-matrix.json
         id: resolve

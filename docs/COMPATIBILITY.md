@@ -15,8 +15,8 @@ specified in the build matrix and is not a universal shared library.
 
 Key points:
 
-- Only nginx.org stable branch releases are supported in the initial scope.
-- nginx.org mainline support is reserved for future extension.
+- Both nginx.org stable and selected mainline releases are supported as shown
+  in the build matrix below.
 - Each prebuilt package targets a specific NGINX version and CPU architecture.
 - Users with unsupported NGINX versions must build from source (see below).
 
@@ -25,9 +25,9 @@ Key points:
 The package manager dependency `nginx (>= ${NGINX_VERSION})` allows
 installation alongside any NGINX version at or above the build target.
 However, **runtime compatibility is only verified for the exact NGINX
-version in the build matrix** (currently 1.26.3). Loading the module on a
-different NGINX version will likely fail with a binary compatibility
-signature mismatch (see "Version Mismatch Error Troubleshooting" below).
+versions listed in the build matrix below**. Loading the module on any other
+NGINX version will likely fail with a binary compatibility signature mismatch
+(see "Version Mismatch Error Troubleshooting" below).
 Install the package only on the NGINX version matching the artifact
 filename.
 
@@ -91,10 +91,10 @@ prevent accidental use of an incompatible package:
 Examples:
 
 ```
-nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_amd64.deb
-nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_arm64.deb
-nginx-module-markdown-for-agents-0.7.0-nginx1.26.3-1.x86_64.rpm
-nginx-module-markdown-for-agents-0.7.0-nginx1.26.3-1.aarch64.rpm
+nginx-module-markdown-for-agents_0.8.0_nginx-1.26.3_amd64.deb
+nginx-module-markdown-for-agents_0.8.0_nginx-1.26.3_arm64.deb
+nginx-module-markdown-for-agents-0.8.0-nginx1.26.3-1.x86_64.rpm
+nginx-module-markdown-for-agents-0.8.0-nginx1.26.3-1.aarch64.rpm
 ```
 
 Always select the package that matches both your NGINX version and CPU
@@ -293,6 +293,55 @@ the module from source against your local NGINX installation.
 - [Installation Guide](guides/INSTALLATION.md)
 
 ---
+
+<!-- BEGIN:release-matrix:compatibility-matrix -->
+
+## Platform Compatibility Matrix
+
+| NGINX Version | Channel | OS | libc | Arch | Artifact | Test Level | Tier | Blocking | Workflow |
+|---------------|---------|-----|------|------|----------|------------|------|----------|----------|
+| 1.31.1 | mainline | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.31.1 | mainline | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.31.1 | mainline | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.31.1 | mainline | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.31.1 | mainline | debian12 | glibc | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.1 | mainline | debian12 | glibc | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.1 | mainline | alpine3.20 | musl | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.1 | mainline | alpine3.20 | musl | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.30.2 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.2 | stable | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.30.2 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.2 | stable | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | formula-gate | experimental | No | `.github/workflows/homebrew-formula-gate.yml` |
+| 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.26.3 | stable | any | n/a | any | source | ci-only | best-effort | No | `.github/workflows/ci.yml` |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.24.0 | oldstable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.24.0 | oldstable | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.24.0 | oldstable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.24.0 | oldstable | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+
+### Tier Definitions
+
+- **supported**: CI passes, artifact produced, install verified, release gate blocks.
+- **experimental**: Available, not guaranteed, CI non-blocking, noted in release notes.
+- **best-effort**: Source only, docs only, not a gate.
+- **unsupported**: No artifacts, no commitment.
+<!-- END:release-matrix:compatibility-matrix -->
 
 ## Document Updates
 

@@ -178,6 +178,10 @@ These metrics are only emitted when the module is compiled with `MARKDOWN_STREAM
 | `nginx_markdown_streaming_budget_exceeded_total` | counter | Streaming memory budget exceeded count (auxiliary classification; terminal state depends on `markdown_streaming_on_error`). |
 | `nginx_markdown_streaming_shadow_total` | counter | Shadow mode comparison attempts (incremented unconditionally at entry, including init/feed/finalize failures). |
 | `nginx_markdown_streaming_shadow_diff_total` | counter | Shadow mode comparisons where outputs differed. |
+| `nginx_markdown_streaming_candidate_total` | counter | Requests evaluated as true-streaming candidates. |
+| `nginx_markdown_true_streaming_selected_total` | counter | Requests that selected the true-streaming engine. |
+| `nginx_markdown_streaming_output_bytes_total` | counter | Markdown bytes emitted by true streaming. |
+| `nginx_markdown_excluded_content_type_total` | counter | Requests excluded by configured streaming content-type rules. |
 
 #### Streaming Counter Metrics (with labels)
 
@@ -185,6 +189,9 @@ These metrics are only emitted when the module is compiled with `MARKDOWN_STREAM
 |---|---|---|---|---|
 | `nginx_markdown_streaming_total` | counter | `result` | `success`, `failed`, `fallback` | Streaming conversion outcomes by result (mutually exclusive). |
 | `nginx_markdown_streaming_failures_total` | counter | `stage` | `precommit_failopen`, `precommit_reject`, `postcommit_error` | Detailed streaming failures by stage. |
+| `nginx_markdown_streaming_engine_choice_total` | counter | `engine` | `streaming`, `full_buffer`, `passthrough`, `not_eligible` | Engine selected by the streaming router. |
+| `nginx_markdown_streaming_fallback_total` | counter | `phase`, `action` | `phase="precommit"` with `action="pass"` or `action="reject"` | Pre-commit fallback decisions. |
+| `nginx_markdown_streaming_failure_total` | counter | `phase`, `action` | `phase="postcommit"` with `action="abort"` or `action="safe_finish"` | Post-commit failure handling decisions. |
 
 #### Streaming Gauge Metrics
 
@@ -223,16 +230,23 @@ The endpoint produces exactly 28 base time series (always present):
 - 3 decompression format labels
 - 4 latency bucket labels
 
-When `MARKDOWN_STREAMING_ENABLED` is compiled in, an additional 12 streaming time series are emitted:
+When `MARKDOWN_STREAMING_ENABLED` is compiled in, an additional 24 streaming time series are emitted:
 
 - 1 streaming path counter
-- 4 streaming outcome labels (`result`)
-- 2 streaming failure stage labels (`stage`)
+- 3 streaming outcome labels (`result`)
+- 3 streaming failure stage labels (`stage`)
 - 1 budget exceeded counter
 - 1 shadow total counter
 - 1 shadow diff counter
 - 1 TTFB gauge
 - 1 peak memory gauge
+- 4 engine choice labels (`engine`)
+- 2 fallback labels (`phase`, `action`)
+- 2 post-commit failure labels (`phase`, `action`)
+- 1 candidate counter
+- 1 true-streaming selection counter
+- 1 streaming output byte counter
+- 1 excluded content-type counter
 
 v0.7.0 adds 9 runtime correctness counters:
 
@@ -246,7 +260,7 @@ v0.7.0 adds 9 runtime correctness counters:
 - 1 parse timeouts counter
 - 1 parse budget exceeded counter
 
-**Total with streaming + v0.7.0: 49 time series.** This count is deterministic and bounded. No request-specific or high-cardinality labels are used.
+**Total with streaming + v0.8.0: 61 time series.** This count is deterministic and bounded. No request-specific or high-cardinality labels are used.
 
 ---
 
@@ -532,6 +546,13 @@ These metrics are added in 0.5.0 and are only emitted when `MARKDOWN_STREAMING_E
 | `nginx_markdown_streaming_shadow_diff_total` | counter | — | Stable |
 | `nginx_markdown_streaming_ttfb_seconds` | gauge | — | Stable |
 | `nginx_markdown_streaming_peak_memory_bytes` | gauge | — | Stable |
+| `nginx_markdown_streaming_engine_choice_total` | counter | `engine` | Stable |
+| `nginx_markdown_streaming_fallback_total` | counter | `phase`, `action` | Stable |
+| `nginx_markdown_streaming_failure_total` | counter | `phase`, `action` | Stable |
+| `nginx_markdown_streaming_candidate_total` | counter | — | Stable |
+| `nginx_markdown_true_streaming_selected_total` | counter | — | Stable |
+| `nginx_markdown_streaming_output_bytes_total` | counter | — | Stable |
+| `nginx_markdown_excluded_content_type_total` | counter | — | Stable |
 
 ### Published Metrics (0.7.0, Runtime Correctness)
 

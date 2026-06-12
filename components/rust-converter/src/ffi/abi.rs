@@ -52,6 +52,29 @@ pub const ERROR_STREAMING_FALLBACK: u32 = 7;
 /// Error after the streaming engine has already emitted partial output (Post-Commit).
 #[cfg(feature = "streaming")]
 pub const ERROR_POST_COMMIT: u32 = 8;
+
+/// Post-commit safe finish: return code from `markdown_streaming_safe_finish`.
+///
+/// Indicates that all open Markdown structures were successfully closed.
+/// The output buffer contains the closing Markdown text (fences, newlines, etc.)
+/// that the C caller should append after the already-committed output.
+///
+/// Corresponds to design doc FFI Return Code 3 (Post-commit safe finish required
+/// was handled successfully).
+#[cfg(feature = "streaming")]
+pub const POST_COMMIT_SAFE_FINISH: u32 = 3;
+
+/// Post-commit abort required: return code from `markdown_streaming_safe_finish`.
+///
+/// Indicates that the open Markdown structures could NOT be safely closed
+/// (e.g., emitter budget exceeded during closure attempt). The C caller must
+/// abort and discard or truncate the partial output. C MUST NOT infer or
+/// synthesize Markdown closure for Rust-owned parser/emitter state.
+///
+/// Corresponds to design doc FFI Return Code 4 (Post-commit abort required).
+#[cfg(feature = "streaming")]
+pub const POST_COMMIT_ABORT: u32 = 4;
+
 /// Decompression budget exceeded (decompressed output exceeds decompress_max_size).
 pub const ERROR_DECOMPRESSION_BUDGET_EXCEEDED: u32 = 9;
 /// Parse timeout: HTML parsing exceeded the configured deadline.
@@ -200,6 +223,12 @@ pub struct MarkdownOptions {
     /// `ERROR_PARSE_BUDGET_EXCEEDED`.
     /// Populated from the `markdown_parser_budget` NGINX directive.
     pub parser_memory_budget: u64,
+    /// Streaming flush threshold in bytes (0 = use default threshold).
+    ///
+    /// Controls the minimum number of accumulated output bytes before
+    /// the streaming emitter returns non-empty output to the C caller.
+    /// Populated from the `markdown_stream_flush_min` NGINX directive.
+    pub flush_threshold: u32,
 }
 
 /// Conversion result returned from Rust to C.
@@ -441,7 +470,7 @@ mod layout_tests {
     fn test_markdown_options_layout() {
         use std::mem::{align_of, offset_of, size_of};
 
-        assert_eq!(size_of::<MarkdownOptions>(), 120);
+        assert_eq!(size_of::<MarkdownOptions>(), 128);
         assert_eq!(align_of::<MarkdownOptions>(), 8);
 
         assert_eq!(offset_of!(MarkdownOptions, flavor), 0);
@@ -467,6 +496,7 @@ mod layout_tests {
         assert_eq!(offset_of!(MarkdownOptions, chars_per_token_fixed), 105);
         assert_eq!(offset_of!(MarkdownOptions, parse_timeout_ms), 108);
         assert_eq!(offset_of!(MarkdownOptions, parser_memory_budget), 112);
+        assert_eq!(offset_of!(MarkdownOptions, flush_threshold), 120);
     }
 
     #[test]

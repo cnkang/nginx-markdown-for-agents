@@ -24,7 +24,7 @@
  * Required so call sites in this header see proper prototypes.
  */
 #ifdef MARKDOWN_STREAMING_ENABLED
-static ngx_uint_t
+static ngx_http_markdown_path_selection_t
 ngx_http_markdown_select_processing_path(
     ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
@@ -69,6 +69,7 @@ const ngx_str_t *ngx_http_markdown_reason_failed_open(void);
 const ngx_str_t *ngx_http_markdown_reason_from_error_category(
     ngx_http_markdown_error_category_t category, ngx_log_t *log);
 const ngx_str_t *ngx_http_markdown_reason_converted(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
 const ngx_str_t *ngx_http_markdown_eligibility_string(
     ngx_http_markdown_eligibility_t eligibility);
 
@@ -338,6 +339,47 @@ ngx_http_markdown_init_ctx(ngx_http_request_t *r,
 }
 
 
+static void
+ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    ngx_uint_t accept_reason)
+{
+    ngx_http_markdown_decision_path_t  dp;
+
+    dp.conditional_result = NGX_HTTP_MARKDOWN_COND_SKIPPED;
+    dp.conversion_status = NGX_HTTP_MARKDOWN_CONV_SKIPPED;
+    dp.duration_ms = 0;
+
+    switch (accept_reason) {
+
+    case NEGOTIATE_REASON_NO_ACCEPT:
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.no_accept);
+        ngx_http_markdown_log_decision(r, conf, eff,
+            ngx_http_markdown_reason_skip_no_accept());
+        dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_NONE;
+        dp.reason_code = "SKIPPED_NO_ACCEPT";
+        break;
+
+    case NEGOTIATE_REASON_EXPLICIT_REJECT:
+        ngx_http_markdown_log_decision(r, conf, eff,
+            ngx_http_markdown_reason_skip_accept_reject());
+        dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_REJECT;
+        dp.reason_code = "SKIPPED_ACCEPT_REJECT";
+        break;
+
+    default:
+        ngx_http_markdown_log_decision(r, conf, eff,
+            ngx_http_markdown_reason_skip_accept());
+        dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_SKIP;
+        dp.reason_code = "SKIPPED_ACCEPT";
+        break;
+    }
+
+    ngx_http_markdown_log_decision_path(r, conf, eff, &dp);
+}
+
+
 /**
  * Determine whether the response should be converted and, if eligible,
  * initialize a per-request Markdown conversion context for body buffering.
@@ -475,7 +517,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * Accept must be last before conversion attempt.
      */
     eligibility = ngx_http_markdown_check_eligibility(
-        r, conf, filter_enabled);
+        r, conf, filter_enabled, &early_eff);
     if (eligibility != NGX_HTTP_MARKDOWN_ELIGIBLE) {
         /* Not eligible, pass through */
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
@@ -524,67 +566,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
          * NEGOTIATE_REASON_EXPLICIT_REJECT (3) → SKIPPED_ACCEPT_REJECT, REJECT
          * NEGOTIATE_REASON_MALFORMED (4) → SKIPPED_ACCEPT, SKIP
          */
-        switch (accept_reason) {
-
-        case NEGOTIATE_REASON_NO_ACCEPT:
-            NGX_HTTP_MARKDOWN_METRIC_INC(skips.no_accept);
-            ngx_http_markdown_log_decision(r, conf, &early_eff,
-                ngx_http_markdown_reason_skip_no_accept());
-            {
-                ngx_http_markdown_decision_path_t  dp;
-
-                dp.accept_result =
-                    NGX_HTTP_MARKDOWN_ACCEPT_NONE;
-                dp.conditional_result =
-                    NGX_HTTP_MARKDOWN_COND_SKIPPED;
-                dp.conversion_status =
-                    NGX_HTTP_MARKDOWN_CONV_SKIPPED;
-                dp.reason_code = "SKIPPED_NO_ACCEPT";
-                dp.duration_ms = 0;
-                ngx_http_markdown_log_decision_path(
-                    r, conf, &early_eff, &dp);
-            }
-            break;
-
-        case NEGOTIATE_REASON_EXPLICIT_REJECT:
-            ngx_http_markdown_log_decision(r, conf, &early_eff,
-                ngx_http_markdown_reason_skip_accept_reject());
-            {
-                ngx_http_markdown_decision_path_t  dp;
-
-                dp.accept_result =
-                    NGX_HTTP_MARKDOWN_ACCEPT_REJECT;
-                dp.conditional_result =
-                    NGX_HTTP_MARKDOWN_COND_SKIPPED;
-                dp.conversion_status =
-                    NGX_HTTP_MARKDOWN_CONV_SKIPPED;
-                dp.reason_code = "SKIPPED_ACCEPT_REJECT";
-                dp.duration_ms = 0;
-                ngx_http_markdown_log_decision_path(
-                    r, conf, &early_eff, &dp);
-            }
-            break;
-
-        default:
-            /* NEGOTIATE_REASON_LOWER_Q or MALFORMED */
-            ngx_http_markdown_log_decision(r, conf, &early_eff,
-                ngx_http_markdown_reason_skip_accept());
-            {
-                ngx_http_markdown_decision_path_t  dp;
-
-                dp.accept_result =
-                    NGX_HTTP_MARKDOWN_ACCEPT_SKIP;
-                dp.conditional_result =
-                    NGX_HTTP_MARKDOWN_COND_SKIPPED;
-                dp.conversion_status =
-                    NGX_HTTP_MARKDOWN_CONV_SKIPPED;
-                dp.reason_code = "SKIPPED_ACCEPT";
-                dp.duration_ms = 0;
-                ngx_http_markdown_log_decision_path(
-                    r, conf, &early_eff, &dp);
-            }
-            break;
-        }
+        ngx_http_markdown_log_accept_skip(r, conf, &early_eff,
+            accept_reason);
 
         return ngx_http_next_header_filter(r);
     }
@@ -622,18 +605,48 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
 
     /*
-     * Detect compression type if auto_decompress is enabled (Task 2.1, 4.2)
-     * 
-     * Fast path: If compression_type == NONE, decompression_needed stays 0
-     * Slow path: If compression detected, decompression_needed is set to 1
-     * Special case: If compression_type == UNKNOWN, trigger fail-open immediately
-     * 
+     * Detect Content-Encoding ALWAYS, before streaming candidate
+     * evaluation (Spec 41, Requirement 3 AC 1).
+     *
+     * Compressed responses MUST NOT enter the streaming parser
+     * directly.  Detection runs unconditionally so that:
+     *
+     *  - auto_decompress ON + known format: decompress via
+     *    full-buffer or streaming decompression path.
+     *  - auto_decompress ON + unknown format: passthrough or
+     *    reject per on_error policy.
+     *  - auto_decompress OFF + any encoding present: passthrough
+     *    (compressed data must not enter parser).
+     *
      * Requirements: 1.1, 1.6, 4.2, 8.1, 10.3, 11.1, 11.5
+     * Spec 41 Req 3 AC 1, AC 4, AC 5
      */
-    if (conf->decompress.auto_decompress) {
-        ctx->decompression.type = ngx_http_markdown_detect_compression(r);
-        
-        if (ctx->decompression.type == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
+    ctx->decompression.type = ngx_http_markdown_detect_compression(r);
+
+    if (ctx->decompression.type != NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
+        if (!conf->decompress.auto_decompress) {
+            /*
+             * auto_decompress is OFF but Content-Encoding is present.
+             * Cannot safely parse compressed content — passthrough.
+             * (Spec 41 Requirement 3 AC 5)
+             */
+            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                         "markdown: Content-Encoding present "
+                         "(type=%d) but auto_decompress is off, "
+                         "passing through original content",
+                         ctx->decompression.type);
+            ctx->eligible = 0;
+            ctx->headers_forwarded = 1;
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                skips.compression_passthrough);
+            ngx_http_markdown_log_decision(r, conf,
+                ctx->effective_conf,
+                ngx_http_markdown_reason_streaming_skip_compressed());
+            return ngx_http_next_header_filter(r);
+
+        } else if (ctx->decompression.type
+                   == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN)
+        {
             /*
              * Unsupported compression format detected (Task 4.2)
              *
@@ -650,12 +663,13 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             return ngx_http_markdown_handle_unsupported_compression(
                 r, ctx, conf);
 
-        } else if (ctx->decompression.type != NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
+        } else {
             /* Supported compression format - set flag for decompression */
             ctx->decompression.needed = 1;
-            
+
             ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                          "markdown: decompression detected compression type: %d",
+                          "markdown: decompression detected "
+                          "compression type: %d",
                           ctx->decompression.type);
         }
     }
@@ -687,23 +701,123 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * once and cache the result. If streaming is selected,
      * skip the threshold router entirely.
      */
-    ctx->processing_path =
+    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.selection.candidate_total);
+
+    ngx_http_markdown_path_selection_t selection =
         ngx_http_markdown_select_processing_path(
             r, conf, ctx->effective_conf);
+    ctx->processing_path = selection.path;
+    ctx->streaming.reason = selection.reason;
+
+    /*
+     * Compression guard (Requirement 3 AC 1, streaming security enforcement):
+     *
+     * Compressed responses MUST NOT enter the streaming parser
+     * directly.  When Content-Encoding is detected, override the
+     * engine selector result and force full-buffer path.  The
+     * full-buffer path has existing safe decompression support
+     * with budget enforcement (markdown_decompress_max_size).
+     *
+     * This check runs after select_processing_path() so that
+     * compression routing is enforced regardless of engine mode
+     * (on, auto, or variable-evaluated).
+     */
+    if (ctx->decompression.needed
+        && ctx->processing_path
+           == NGX_HTTP_MARKDOWN_PATH_STREAMING)
+    {
+        ctx->processing_path =
+            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+        ctx->streaming.reason =
+            NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED;
+
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.engine_choice.full_buffer);
+
+        ngx_log_debug5(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown: streaming decision: "
+            "engine=full_buffer phase=header_filter "
+            "committed=0 fallback_available=1 "
+            "reason=%s content_type=%V "
+            "content_length_known=%d chunked=%d "
+            "markdown_on_error=%s",
+            ngx_http_markdown_stream_reason_str(
+                ctx->streaming.reason),
+            &r->headers_out.content_type,
+            (r->headers_out.content_length_n >= 0) ? 1 : 0,
+            (r->headers_out.content_length_n < 0) ? 1 : 0,
+            (conf->stream.on_error
+             == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
+                ? "pass" : "reject");
+
+        ngx_http_markdown_log_decision(
+            r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_streaming_skip_compressed());
+
+        goto path_selected;
+    }
 
     if (ctx->processing_path
         == NGX_HTTP_MARKDOWN_PATH_STREAMING)
     {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
+        ctx->streaming.reason =
+            NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE;
+
+        /* Sync streaming fallback state machine: header selected streaming → STREAMING_CANDIDATE */
+        ctx->stream_sm.state = NGX_HTTP_MD_STATE_STREAMING_CANDIDATE;
+
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.engine_choice.streaming);
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.selection.true_streaming_selected_total);
+
+        ngx_log_debug5(NGX_LOG_DEBUG_HTTP,
             r->connection->log, 0,
-            "markdown: streaming path "
-            "selected by engine selector");
+            "markdown: streaming decision: "
+            "engine=streaming phase=header_filter "
+            "committed=0 fallback_available=1 "
+            "reason=%s content_type=%V "
+            "content_length_known=%d chunked=%d "
+            "markdown_on_error=%s",
+            ngx_http_markdown_stream_reason_str(
+                ctx->streaming.reason),
+            &r->headers_out.content_type,
+            (r->headers_out.content_length_n >= 0) ? 1 : 0,
+            (r->headers_out.content_length_n < 0) ? 1 : 0,
+            (conf->stream.on_error
+             == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
+                ? "pass" : "reject");
 
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_engine_streaming());
 
         goto path_selected;
     }
+
+    /*
+     * select_processing_path() returned FULLBUFFER without
+     * compression override — record engine choice here.
+     */
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        streaming.engine_choice.full_buffer);
+
+    ngx_log_debug5(NGX_LOG_DEBUG_HTTP,
+        r->connection->log, 0,
+        "markdown: streaming decision: "
+        "engine=full_buffer phase=header_filter "
+        "committed=0 fallback_available=1 "
+        "reason=%s content_type=%V "
+        "content_length_known=%d chunked=%d "
+        "markdown_on_error=%s",
+        ngx_http_markdown_stream_reason_str(
+            ctx->streaming.reason),
+        &r->headers_out.content_type,
+        (r->headers_out.content_length_n >= 0) ? 1 : 0,
+        (r->headers_out.content_length_n < 0) ? 1 : 0,
+        (conf->stream.on_error
+         == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
+            ? "pass" : "reject");
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 #ifdef MARKDOWN_INCREMENTAL_ENABLED
@@ -993,6 +1107,24 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
  * @return    NGX_OK on success, NGX_ERROR on error
  */
 static ngx_int_t
+ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_next_body_filter(r, ctx->fullbuffer.pending_output);
+    if (rc == NGX_AGAIN) {
+        return NGX_AGAIN;
+    }
+
+    ctx->fullbuffer.pending_output = NULL;
+    ctx->fullbuffer.pending_has_data = 0;
+    r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+
+    return rc;
+}
+
+static ngx_int_t
 ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
     ngx_http_markdown_ctx_t   *ctx;
@@ -1034,30 +1166,7 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
      * after the downstream filter becomes writable again.
      */
     if (ctx->fullbuffer.pending_has_data) {
-        rc = ngx_http_next_body_filter(r, ctx->fullbuffer.pending_output);
-        if (rc == NGX_AGAIN) {
-            /* Still backpressured, keep pending chain */
-            return NGX_AGAIN;
-        }
-        /* Downstream consumed the pending output */
-        ctx->fullbuffer.pending_output = NULL;
-        ctx->fullbuffer.pending_has_data = 0;
-        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-
-        if (rc != NGX_OK && rc != NGX_DONE) {
-            return rc;
-        }
-
-        if (rc == NGX_DONE) {
-            return NGX_DONE;
-        }
-
-        /*
-         * Pending converted output drained successfully.  The original input
-         * chain was already consumed when conversion_attempted was set, so do
-         * not forward a re-delivered input chain after the converted response.
-         */
-        return NGX_OK;
+        return ngx_http_markdown_body_filter_resume_pending(r, ctx);
     }
 
     /* If not eligible for conversion, pass through */

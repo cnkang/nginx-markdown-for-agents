@@ -189,6 +189,21 @@ fn classify_io_error(e: std::io::Error) -> DecompError {
     }
 }
 
+/// Classify a flate2 in-memory decompression error into the FFI categories.
+fn classify_deflate_error(e: flate2::DecompressError) -> DecompError {
+    let msg = e.to_string();
+    let lower = msg.to_lowercase();
+    if lower.contains("truncat")
+        || lower.contains("unexpected eof")
+        || lower.contains("premature")
+        || lower.contains("corrupt deflate stream")
+    {
+        DecompError::TruncatedInput(msg)
+    } else {
+        DecompError::FormatError(msg)
+    }
+}
+
 /// Decompress gzip data with budget enforcement.
 fn decompress_gzip(input: &[u8], budget: usize) -> Result<DecompResult, DecompError> {
     use flate2::read::GzDecoder;
@@ -206,7 +221,7 @@ fn decompress_gzip(input: &[u8], budget: usize) -> Result<DecompResult, DecompEr
 
 /// Decompress raw deflate data with budget enforcement.
 fn decompress_deflate(input: &[u8], budget: usize) -> Result<DecompResult, DecompError> {
-    use flate2::read::DeflateDecoder;
+    use flate2::{Decompress, FlushDecompress, Status};
 
     if input.is_empty() {
         return Err(DecompError::TruncatedInput(
@@ -214,9 +229,61 @@ fn decompress_deflate(input: &[u8], budget: usize) -> Result<DecompResult, Decom
         ));
     }
 
-    let decoder = DeflateDecoder::new(input);
-    let output = read_bounded(decoder, budget)?;
-    Ok(DecompResult { output })
+    let mut decoder = Decompress::new(false);
+    let mut output = Vec::new();
+    let chunk_size = 8192.min(budget.saturating_add(1)).max(1);
+    let mut buf = vec![0u8; chunk_size];
+
+    loop {
+        let consumed = usize::try_from(decoder.total_in())
+            .map_err(|_| DecompError::IoError("deflate input byte counter overflow".to_string()))?;
+        if consumed > input.len() {
+            return Err(DecompError::IoError(
+                "deflate decoder consumed beyond input length".to_string(),
+            ));
+        }
+
+        let before_in = decoder.total_in();
+        let before_out = decoder.total_out();
+        let flush = if consumed == input.len() {
+            FlushDecompress::Finish
+        } else {
+            FlushDecompress::None
+        };
+        let status = decoder
+            .decompress(&input[consumed..], &mut buf, flush)
+            .map_err(classify_deflate_error)?;
+        let consumed_now = decoder.total_in().saturating_sub(before_in);
+        let produced_now = usize::try_from(decoder.total_out().saturating_sub(before_out))
+            .map_err(|_| DecompError::BudgetExceeded)?;
+
+        if produced_now > 0 {
+            let needed = output
+                .len()
+                .checked_add(produced_now)
+                .ok_or(DecompError::BudgetExceeded)?;
+            if needed > budget {
+                return Err(DecompError::BudgetExceeded);
+            }
+            if output.capacity() < needed {
+                output
+                    .try_reserve_exact(needed - output.len())
+                    .map_err(|_| DecompError::BudgetExceeded)?;
+            }
+            output.extend_from_slice(&buf[..produced_now]);
+        }
+
+        match status {
+            Status::StreamEnd => return Ok(DecompResult { output }),
+            Status::Ok | Status::BufError => {
+                if consumed_now == 0 && produced_now == 0 {
+                    return Err(DecompError::TruncatedInput(
+                        "deflate stream ended before final block".to_string(),
+                    ));
+                }
+            }
+        }
+    }
 }
 
 /// Decompress brotli data with budget enforcement.
@@ -280,6 +347,14 @@ mod tests {
         let original = b"Deflate test data for bounded decompression.";
         let compressed = deflate_compress(original);
         let result = decompress_bounded(&compressed, Format::Deflate, 1024).unwrap();
+        assert_eq!(result.output, original);
+    }
+
+    #[test]
+    fn deflate_large_output_decompresses_across_internal_chunks() {
+        let original = vec![b'D'; 65_536];
+        let compressed = deflate_compress(&original);
+        let result = decompress_bounded(&compressed, Format::Deflate, original.len()).unwrap();
         assert_eq!(result.output, original);
     }
 
@@ -375,6 +450,22 @@ mod tests {
         assert!(
             err.error_category() == 102 || err.error_category() == 103,
             "Expected format_error(102) or truncated(103), got {}",
+            err.error_category()
+        );
+    }
+
+    #[test]
+    fn deflate_truncated_input() {
+        let original = vec![b'D'; 10_000];
+        let compressed = deflate_compress(&original);
+        let truncated = &compressed[..compressed.len() / 2];
+        let result = decompress_bounded(truncated, Format::Deflate, 20_000);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.error_category(),
+            103,
+            "Expected truncated(103), got {}",
             err.error_category()
         );
     }

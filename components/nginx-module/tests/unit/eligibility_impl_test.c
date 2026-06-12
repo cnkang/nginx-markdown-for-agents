@@ -79,6 +79,19 @@ ngx_strncasecmp(const u_char *s1, const u_char *s2, size_t n)
     return 0;
 }
 
+static u_char *
+ngx_strlchr(u_char *p, u_char *last, u_char c)
+{
+    while (p < last) {
+        if (*p == c) {
+            return p;
+        }
+        p++;
+    }
+
+    return NULL;
+}
+
 #include "../../src/ngx_http_markdown_eligibility.c"
 
 
@@ -279,60 +292,60 @@ test_check_eligibility_full_chain(void)
     r.headers_in.range = NULL;
 
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_ELIGIBLE,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_ELIGIBLE,
         "valid GET/200/text-html should be ELIGIBLE");
 
     r.method = NGX_HTTP_HEAD;
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_ELIGIBLE,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_ELIGIBLE,
         "HEAD method should be ELIGIBLE");
 
     r.method = 2;
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD,
         "POST method -> INELIGIBLE_METHOD");
 
     r.method = NGX_HTTP_GET;
     r.headers_out.status = 404;
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,
         "404 status -> INELIGIBLE_STATUS");
 
     r.headers_out.status = NGX_HTTP_PARTIAL_CONTENT;
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,
         "206 status -> INELIGIBLE_RANGE (not INELIGIBLE_STATUS)");
 
     r.headers_out.status = NGX_HTTP_OK;
     r.headers_in.range = &range_hdr;
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,
         "Range header present -> INELIGIBLE_RANGE");
 
     r.headers_in.range = NULL;
     set_str(&r.headers_out.content_type, "text/event-stream");
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING,
         "SSE content type -> INELIGIBLE_STREAMING");
 
     set_str(&r.headers_out.content_type, "application/json");
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE,
         "application/json -> INELIGIBLE_CONTENT_TYPE");
 
     set_str(&r.headers_out.content_type, "text/html");
     r.headers_out.content_length_n = 100 * 1024 * 1024;
     conf.max_size = 10 * 1024 * 1024;
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,
         "oversized response -> INELIGIBLE_SIZE");
 
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, &conf, 0) == NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
+        ngx_http_markdown_check_eligibility(&r, &conf, 0, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
         "filter_enabled=0 -> INELIGIBLE_CONFIG");
 
     TEST_ASSERT(
-        ngx_http_markdown_check_eligibility(&r, NULL, 1) == NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
+        ngx_http_markdown_check_eligibility(&r, NULL, 1, NULL) == NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
         "NULL conf -> INELIGIBLE_CONFIG");
 
     TEST_PASS("Full eligibility decision chain correct");
@@ -354,18 +367,30 @@ test_check_size_limit_boundary(void)
 
     r.headers_out.content_length_n = 1024;
     TEST_ASSERT(
-        ngx_http_markdown_check_size_limit(&r, &conf) == 1,
+        ngx_http_markdown_check_size_limit(&r, &conf, NULL) == 1,
         "exactly max_size should pass");
 
     r.headers_out.content_length_n = 1025;
     TEST_ASSERT(
-        ngx_http_markdown_check_size_limit(&r, &conf) == 0,
+        ngx_http_markdown_check_size_limit(&r, &conf, NULL) == 0,
         "max_size+1 should fail");
 
     r.headers_out.content_length_n = -1;
     TEST_ASSERT(
-        ngx_http_markdown_check_size_limit(&r, &conf) == 1,
+        ngx_http_markdown_check_size_limit(&r, &conf, NULL) == 1,
         "missing Content-Length (-1) should pass");
+
+    /* max_size=0 means unlimited — any content length should pass */
+    conf.max_size = 0;
+    r.headers_out.content_length_n = 1;
+    TEST_ASSERT(
+        ngx_http_markdown_check_size_limit(&r, &conf, NULL) == 1,
+        "max_size=0 (unlimited) + CL=1 should pass");
+
+    r.headers_out.content_length_n = 100 * 1024 * 1024;
+    TEST_ASSERT(
+        ngx_http_markdown_check_size_limit(&r, &conf, NULL) == 1,
+        "max_size=0 (unlimited) + large CL should pass");
 
     TEST_PASS("Size limit boundary cases correct");
 }
@@ -442,6 +467,52 @@ test_eligibility_string_all_values(void)
 }
 
 
+static void
+test_check_size_limit_with_eff(void)
+{
+    ngx_http_request_t                  r;
+    ngx_http_markdown_conf_t            conf;
+    ngx_http_markdown_effective_conf_t  eff;
+
+    TEST_SUBSECTION("check_size_limit: non-NULL eff memory_budget path");
+
+    memset(&r, 0, sizeof(r));
+    memset(&eff, 0, sizeof(eff));
+    init_conf(&conf);
+
+    r.method = NGX_HTTP_GET;
+    r.headers_out.status = NGX_HTTP_OK;
+    set_str(&r.headers_out.content_type, "text/html");
+
+    /* eff->memory_budget stricter than conf.max_size -> INELIGIBLE_SIZE */
+    conf.max_size = 10 * 1024 * 1024;
+    eff.memory_budget = 512;
+    r.headers_out.content_length_n = 1024;
+    TEST_ASSERT(
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, &eff)
+            == NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE,
+        "eff.memory_budget < max_size and CL > budget -> INELIGIBLE_SIZE");
+
+    /* eff->memory_budget = unlimited sentinel -> max_size governs */
+    eff.memory_budget = (size_t) -1;
+    r.headers_out.content_length_n = 1024;
+    TEST_ASSERT(
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, &eff)
+            == NGX_HTTP_MARKDOWN_ELIGIBLE,
+        "eff.memory_budget=unlimited + CL within max_size -> ELIGIBLE");
+
+    /* eff->memory_budget = 0 (unlimited) -> max_size governs */
+    eff.memory_budget = 0;
+    r.headers_out.content_length_n = 1024;
+    TEST_ASSERT(
+        ngx_http_markdown_check_eligibility(&r, &conf, 1, &eff)
+            == NGX_HTTP_MARKDOWN_ELIGIBLE,
+        "eff.memory_budget=0 + CL within max_size -> ELIGIBLE");
+
+    TEST_PASS("Size limit with non-NULL eff correct");
+}
+
+
 int
 main(void)
 {
@@ -455,6 +526,7 @@ main(void)
     test_is_streaming_configured_types();
     test_check_eligibility_full_chain();
     test_check_size_limit_boundary();
+    test_check_size_limit_with_eff();
     test_check_content_type_custom_boundary_char_space();
     test_eligibility_string_all_values();
 

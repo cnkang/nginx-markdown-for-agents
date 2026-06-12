@@ -88,6 +88,22 @@ typedef struct { /* SONAR_NOTE */
         ngx_atomic_t  shadow_diff_total;
         ngx_atomic_t  last_ttfb_ms;
         ngx_atomic_t  last_peak_memory_bytes;
+        ngx_atomic_t  streaming_fallback_precommit_pass;
+        ngx_atomic_t  streaming_fallback_precommit_reject;
+        ngx_atomic_t  streaming_failure_postcommit_abort;
+        ngx_atomic_t  streaming_failure_postcommit_safe_finish;
+        struct {
+            ngx_atomic_t  streaming;
+            ngx_atomic_t  full_buffer;
+            ngx_atomic_t  passthrough;
+            ngx_atomic_t  not_eligible;
+        } engine_choice;
+        struct {
+            ngx_atomic_t  candidate_total;
+            ngx_atomic_t  true_streaming_selected_total;
+            ngx_atomic_t  output_bytes_total;
+            ngx_atomic_t  excluded_content_type_total;
+        } selection;
     } streaming;
     struct {
         ngx_atomic_t  config;
@@ -101,6 +117,7 @@ typedef struct { /* SONAR_NOTE */
         ngx_atomic_t  accept;
         ngx_atomic_t  no_accept;
         ngx_atomic_t  conditional;
+        ngx_atomic_t  compression_passthrough;
     } skips;
     struct {
         ngx_atomic_t  failopen_count;

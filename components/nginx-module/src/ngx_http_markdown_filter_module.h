@@ -15,6 +15,17 @@
 struct MarkdownOptions;
 
 /*
+ * NGINX represents unset size values as (size_t) -1.  Use the public macro
+ * when the including translation unit exposes it; standalone unit tests may
+ * include this header through minimal stubs that do not.
+ */
+#ifdef NGX_CONF_UNSET_SIZE
+#define NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE NGX_CONF_UNSET_SIZE
+#else
+#define NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE ((size_t) -1)
+#endif
+
+/*
  * Forward declaration for dynconf snapshot type.
  * Full definition is in ngx_http_markdown_dynconf_impl.h.
  */
@@ -72,6 +83,16 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
 #define NGX_HTTP_MARKDOWN_PATH_INCREMENTAL  1  /* Incremental path */
 #define NGX_HTTP_MARKDOWN_PATH_STREAMING    2  /* Streaming path */
 
+/*
+ * Request-level buffered flag for this module while it is accumulating or
+ * preserving output for a later retry.
+ *
+ * Low bits 0x01/0x02/0x04 are used by core modules (SSI/SUB/COPY). 0x08 is
+ * available for request-level buffering (image filter uses 0x08 on
+ * connection->buffered, not r->buffered).
+ */
+#define NGX_HTTP_MARKDOWN_BUFFERED  0x08
+
 #ifdef MARKDOWN_STREAMING_ENABLED
 /*
  * Streaming engine mode constants
@@ -93,11 +114,14 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
     (2 * 1024 * 1024)
 
 /*
- * Default auto-mode threshold: 32 KiB
+ * Legacy auto-mode threshold field default: 32 KiB
  *
- * When streaming_engine is auto, responses with
- * Content-Length >= this threshold use streaming;
- * smaller responses use full-buffer.
+ * This is the internal default for the v0.6.0 streaming.auto_threshold
+ * field.  In v0.8.0, the effective runtime threshold is controlled by
+ * stream.threshold (default: 1 MiB via NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT).
+ * This legacy default only takes effect when the operator explicitly sets
+ * the old markdown_streaming_auto_threshold directive, triggering the
+ * compatibility bridge to map the value into stream.threshold.
  */
 #define NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT \
     (32 * 1024)
@@ -110,7 +134,194 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
  */
 #define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS    0
 #define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT  1
+
+/*
+ * Streaming engine reason codes (streaming observability).
+ *
+ * Stable identifiers explaining why a particular engine path was chosen.
+ * Additive only — removal requires major version bump.
+ */
+typedef enum {
+    /* Engine choice: true streaming */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE = 0,
+
+    /* Engine choice: full buffer */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_CONTENT_LENGTH_KNOWN,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED,
+
+    /* Engine choice: passthrough */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_HTML,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED,
+
+    /* Engine choice: not eligible */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_ACCEPT_MISMATCH,
+
+    /* Fallback reasons */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_BUDGET,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_TIMEOUT,
+
+    /* Post-commit failure reasons */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_BUDGET_EXCEEDED,
+    NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_IO_ERROR,
+
+    /* Sentinel — must be last */
+    NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT
+} ngx_http_markdown_stream_reason_e;
+
+/*
+ * Map streaming reason code to its stable string identifier.
+ *
+ * Returns a static NUL-terminated string suitable for logs,
+ * JSON output, and Prometheus labels.  Unknown values return
+ * "unknown".
+ */
+static ngx_inline const char *
+ngx_http_markdown_stream_reason_str(
+    ngx_http_markdown_stream_reason_e reason)
+{
+    static const char *reason_strings[] = {
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE */
+        "eligible",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_CONTENT_LENGTH_KNOWN */
+        "content_length_known",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD */
+        "below_threshold",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED */
+        "config_disabled",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE */
+        "excluded_content_type",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_HTML */
+        "not_html",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED */
+        "compressed",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE */
+        "not_candidate",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_ACCEPT_MISMATCH */
+        "accept_mismatch",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR */
+        "precommit_html_error",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_BUDGET */
+        "precommit_budget",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_TIMEOUT */
+        "precommit_timeout",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR */
+        "postcommit_parse_error",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_BUDGET_EXCEEDED */
+        "postcommit_budget_exceeded",
+        /* NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_IO_ERROR */
+        "postcommit_io_error"
+    };
+
+    _Static_assert(
+        sizeof(reason_strings) / sizeof(reason_strings[0])
+        == NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT,
+        "stream reason strings must match reason enum");
+
+    if ((unsigned) reason >= NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT) {
+        return "unknown";
+    }
+
+    return reason_strings[(unsigned) reason];
+}
+
+typedef struct {
+    ngx_uint_t                         path;
+    ngx_http_markdown_stream_reason_e  reason;
+} ngx_http_markdown_path_selection_t;
+
+static ngx_inline ngx_http_markdown_path_selection_t
+ngx_http_markdown_path_selection(ngx_uint_t path,
+    ngx_http_markdown_stream_reason_e reason)
+{
+    ngx_http_markdown_path_selection_t selection;
+
+    selection.path = path;
+    selection.reason = reason;
+
+    return selection;
+}
+
 #endif /* MARKDOWN_STREAMING_ENABLED */
+
+/*
+ * Streaming fallback state machine types (v0.8.0 streaming fallback state machine).
+ *
+ * These types implement the pure-function decision engine defined in
+ * RFC 0008 section 3.  The state machine governs runtime transitions
+ * between streaming, full-buffer, passthrough, and failure modes.
+ *
+ * Placement: unconditionally available (not gated by
+ * MARKDOWN_STREAMING_ENABLED) because the v0.8.0 streaming architecture
+ * uses these types regardless of the legacy compile-time feature flag.
+ */
+
+/* State enum: every request follows exactly one deterministic path */
+typedef enum {
+    NGX_HTTP_MD_STATE_NOT_ELIGIBLE = 0,
+    NGX_HTTP_MD_STATE_STREAMING_CANDIDATE,
+    NGX_HTTP_MD_STATE_PRE_COMMIT,
+    NGX_HTTP_MD_STATE_PRE_COMMIT_REPLAY_UNAVAILABLE,
+    NGX_HTTP_MD_STATE_FULL_BUFFER_FALLBACK,
+    NGX_HTTP_MD_STATE_PASSTHROUGH,
+    NGX_HTTP_MD_STATE_COMMITTED,
+    NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH,
+    NGX_HTTP_MD_STATE_POST_COMMIT_ABORT
+} ngx_http_markdown_stream_state_e;
+
+/* Action enum: what the module does on each state transition */
+typedef enum {
+    NGX_HTTP_MD_ACTION_NONE = 0,
+    NGX_HTTP_MD_ACTION_PASS_HTML,
+    NGX_HTTP_MD_ACTION_REJECT_502,
+    NGX_HTTP_MD_ACTION_COMMIT_HEADERS,
+    NGX_HTTP_MD_ACTION_CONTINUE_STREAMING,
+    NGX_HTTP_MD_ACTION_SWITCH_FULL_BUFFER,
+    NGX_HTTP_MD_ACTION_SAFE_FINISH,
+    NGX_HTTP_MD_ACTION_ABORT,
+    NGX_HTTP_MD_ACTION_PASSTHROUGH
+} ngx_http_markdown_action_e;
+
+/* Reason code enum: why the transition occurred (metrics/logging) */
+typedef enum {
+    NGX_HTTP_MD_REASON_ELIGIBLE = 0,
+    NGX_HTTP_MD_REASON_NOT_ELIGIBLE,
+    NGX_HTTP_MD_REASON_PARSER_UNSUITABLE,
+    NGX_HTTP_MD_REASON_HARD_EXCLUDED,
+    NGX_HTTP_MD_REASON_FULL_DOC_FEATURE,
+    NGX_HTTP_MD_REASON_BUDGET_INIT_FAILURE,
+    NGX_HTTP_MD_REASON_REPLAY_OVERFLOW,
+    NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED,
+    NGX_HTTP_MD_REASON_STRICT_ETAG,
+    NGX_HTTP_MD_REASON_LOOK_BEHIND_OVERFLOW,
+    NGX_HTTP_MD_REASON_AUTO_RISK,
+    NGX_HTTP_MD_REASON_COMMIT_SUCCESS,
+    NGX_HTTP_MD_REASON_POST_COMMIT_ERROR,
+    NGX_HTTP_MD_REASON_ON_ERROR_PASS,
+    NGX_HTTP_MD_REASON_ON_ERROR_REJECT
+} ngx_http_markdown_reason_code_e;
+
+/* Decision struct: output of the pure decision engine */
+typedef struct {
+    ngx_http_markdown_stream_state_e  new_state;
+    ngx_http_markdown_action_e        action;
+    ngx_http_markdown_reason_code_e   reason;
+} ngx_http_markdown_decision_t;
+
+/*
+ * v0.8.0 streaming engine mode constants (markdown_streaming_engine directive).
+ *
+ * These are distinct from the v0.6.0 MARKDOWN_STREAMING_ENABLED constants
+ * above.  The 0.8.0 directive uses a simple enum stored as ngx_uint_t
+ * rather than a complex value.
+ */
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF   0
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO  1
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON    2
 
 /*
  * Threshold off sentinel — used in merge and path selection logic.
@@ -122,6 +333,21 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
  */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_PASS    0  /* fail-open: return original HTML */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1  /* fail-closed: return 502 error */
+
+/*
+ * Default streaming threshold for v0.8.0 stream.threshold field (1 MiB).
+ * Responses with Content-Length >= this threshold use streaming mode.
+ */
+#define NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT \
+    (1024 * 1024)
+
+/*
+ * Default streaming budget for v0.8.0 stream.budget field.
+ * Same value as NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT (2 MiB),
+ * but available without MARKDOWN_STREAMING_ENABLED.
+ */
+#define NGX_HTTP_MARKDOWN_STREAM_BUDGET_DEFAULT \
+    (2 * 1024 * 1024)
 
 /*
  * Configuration constants for flavor directive
@@ -222,6 +448,15 @@ typedef enum {
  * - streaming_on_error: NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS
  * - streaming_shadow: 0 (off by default)
  * - streaming_auto_threshold: NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT
+ *     (legacy field default 32k; does NOT affect runtime unless explicitly set;
+ *      v0.8.0 effective threshold is stream.threshold default 1m)
+ *
+ * v0.8.0 streaming config defaults (streaming configuration directives):
+ * - stream.engine: auto (1)
+ * - stream.threshold: NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT (1m)
+ * - stream.precommit_buffer: 262144 (256k)
+ * - stream.flush_min: 16384 (16k)
+ * - stream.excluded_types: NULL
  */
 /* sonarcloud-c:S1820: intentionally exceeded; fields are already logically
  * grouped via the ops sub-struct and #ifdef-gated streaming section.  Further
@@ -257,7 +492,8 @@ typedef struct {
     ngx_flag_t                 budget_explicit; /* 1 if operator set markdown_streaming_budget */
     ngx_uint_t                 on_error;        /* markdown_streaming_on_error pass|reject */
     ngx_flag_t                 shadow;          /* markdown_streaming_shadow on|off */
-    size_t                     auto_threshold;  /* markdown_streaming_auto_threshold (default: 32k) */
+    size_t                     auto_threshold;  /* markdown_streaming_auto_threshold (legacy field default: 32k; v0.8.0 effective default is stream.threshold 1m unless this directive is explicitly set) */
+    ngx_flag_t                 auto_threshold_explicit; /* 1 if operator set markdown_streaming_auto_threshold */
 } ngx_http_markdown_streaming_cfg_t;
 #endif
 
@@ -266,7 +502,6 @@ typedef struct {
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
     ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable/complex expression */
     size_t       max_size;             /* markdown_max_size (default: 10MB) */
-    ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_max_size at this or parent level */
     ngx_msec_t   timeout;              /* markdown_timeout (default: 5000ms) */
     ngx_uint_t   on_error;             /* markdown_on_error pass|reject (default: pass) */
     ngx_uint_t   flavor;               /* markdown_flavor commonmark|gfm (default: commonmark) */
@@ -291,6 +526,7 @@ typedef struct {
         size_t       max_size;             /* markdown_decompress_max_size (default: same as max_size) */
         ngx_msec_t   parse_timeout;        /* markdown_parse_timeout (default: 30000ms) */
         size_t       parser_budget;        /* markdown_parser_budget (default: 64MB) */
+        ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_max_size at this or parent level */
     } decompress;
 
     /*
@@ -320,10 +556,146 @@ typedef struct {
 #endif
 
     /*
+     * v0.8.0 unified streaming configuration (streaming configuration directives).
+     *
+     * This is the runtime source-of-truth for all streaming directives.
+     * The v0.6.0 `streaming.*` fields (under MARKDOWN_STREAMING_ENABLED)
+     * serve as a compatibility layer: during merge, their values are
+     * mapped into `stream.*` when the operator uses the old directive
+     * names.  Runtime code MUST read from `stream.*` exclusively.
+     *
+     * Migration priority during merge:
+     *   stream.* explicit  >  streaming.* mapped  >  defaults
+     */
+    struct {
+        ngx_uint_t    engine;              /* markdown_streaming_engine off|auto|on */
+        size_t        threshold;           /* markdown_stream_threshold (default: 1m) */
+        ngx_flag_t    threshold_explicit;  /* 1 if operator set markdown_stream_threshold */
+        size_t        precommit_buffer;    /* markdown_stream_precommit_buffer (default: 256k) */
+        size_t        flush_min;           /* markdown_stream_flush_min (default: 16k) */
+        ngx_array_t  *excluded_types;      /* markdown_stream_excluded_types (default: NULL) */
+        ngx_uint_t    on_error;            /* markdown_streaming_on_error pass|reject */
+        ngx_flag_t    on_error_explicit;   /* 1 if operator set streaming_on_error */
+        size_t        budget;              /* markdown_streaming_budget (default: 2m) */
+        ngx_flag_t    budget_explicit;     /* 1 if operator set streaming_budget */
+        ngx_flag_t    shadow;              /* markdown_streaming_shadow on|off */
+        ngx_flag_t    shadow_explicit;     /* 1 if operator set streaming_shadow */
+    } stream;
+
+    /*
      * Noise pruning configuration (v0.6.0).
      */
     ngx_http_markdown_advanced_cfg_t advanced;
 } ngx_http_markdown_conf_t;
+
+
+static ngx_inline size_t
+ngx_http_markdown_effective_body_buffer_limit(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    size_t  budget;
+
+    if (eff != NULL) {
+        budget = eff->memory_budget;
+    } else {
+        budget = conf->advanced.memory_budget;
+    }
+
+    if (budget == 0 || budget == NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE) {
+        return conf->max_size;
+    }
+
+    return (budget < conf->max_size) ? budget : conf->max_size;
+}
+
+
+static ngx_inline void
+ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev)
+{
+/*
+ * Helper macro: merge a single stream configuration field.
+ * If the current value equals the unset sentinel, inherit from
+ * the previous level or fall back to the compile-time default.
+ */
+#define NGX_MD_MERGE_STREAM(field, type, unset, dflt)                        \
+    do {                                                                      \
+        if (conf->stream.field == (type) (unset)) {                          \
+            conf->stream.field = (prev->stream.field != (type) (unset))      \
+                ? prev->stream.field : (dflt);                               \
+        }                                                                    \
+    } while (0)
+
+    NGX_MD_MERGE_STREAM(engine, ngx_uint_t, -1,
+                        NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO);
+    NGX_MD_MERGE_STREAM(threshold, size_t, -1,
+                        NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT);
+    NGX_MD_MERGE_STREAM(threshold_explicit, ngx_flag_t, -1, 0);
+    NGX_MD_MERGE_STREAM(precommit_buffer, size_t, -1, 262144);
+    NGX_MD_MERGE_STREAM(flush_min, size_t, -1, 16384);
+
+    if (conf->stream.excluded_types == (ngx_array_t *) -1) {
+        conf->stream.excluded_types =
+            (prev->stream.excluded_types != (ngx_array_t *) -1)
+                ? prev->stream.excluded_types : NULL;
+    }
+
+    NGX_MD_MERGE_STREAM(on_error, ngx_uint_t, -1,
+                        NGX_HTTP_MARKDOWN_ON_ERROR_PASS);
+    NGX_MD_MERGE_STREAM(on_error_explicit, ngx_flag_t, -1, 0);
+    NGX_MD_MERGE_STREAM(budget, size_t, -1,
+                        NGX_HTTP_MARKDOWN_STREAM_BUDGET_DEFAULT);
+    NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0);
+    NGX_MD_MERGE_STREAM(shadow, ngx_flag_t, -1, 0);
+    NGX_MD_MERGE_STREAM(shadow_explicit, ngx_flag_t, -1, 0);
+
+#undef NGX_MD_MERGE_STREAM
+}
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+/*
+ * Map legacy v0.6.0 streaming.* fields into the v0.8.0 stream.* runtime
+ * source of truth after both structures have been merged.
+ *
+ * Sentinel casts intentionally avoid NGX_CONF_UNSET_* macros here because
+ * standalone unit harnesses include this header before defining those macros.
+ */
+static ngx_inline void
+ngx_http_markdown_bridge_legacy_stream_values(
+    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *prev,
+    ngx_flag_t streaming_budget_set,
+    ngx_flag_t stream_budget_set)
+{
+    if (conf->streaming.on_error != (ngx_uint_t) -1
+        && !conf->stream.on_error_explicit)
+    {
+        conf->stream.on_error = conf->streaming.on_error;
+    }
+
+    if (conf->streaming.budget != NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE
+        && streaming_budget_set
+        && !stream_budget_set)
+    {
+        conf->stream.budget = conf->streaming.budget;
+        conf->stream.budget_explicit = conf->streaming.budget_explicit
+            || prev->stream.budget_explicit;
+    }
+
+    if (conf->streaming.shadow != (ngx_flag_t) -1
+        && !conf->stream.shadow_explicit)
+    {
+        conf->stream.shadow = conf->streaming.shadow;
+    }
+
+    if (conf->streaming.auto_threshold_explicit
+        && !conf->stream.threshold_explicit)
+    {
+        conf->stream.threshold = conf->streaming.auto_threshold;
+    }
+}
+#endif
 
 /*
  * Main configuration structure
@@ -495,12 +867,31 @@ typedef struct {
     /* OpenTelemetry span for per-request conversion tracing */
     ngx_http_markdown_otel_span_t        *otel_span;
 
-#ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * v0.8.0 streaming state machine context (streaming fallback state machine).
+     *
+     * Unconditional (not feature-gated) because the state machine
+     * governs all requests regardless of the streaming converter
+     * feature flag.  Grouped into a sub-struct for SonarCloud
+     * c:S1820 compliance.
+     */
+    struct {
+        ngx_http_markdown_stream_state_e  state;           /* Current state machine state */
+        ngx_http_markdown_buffer_t        replay_buf;      /* Replay buffer for pre-commit fallback */
+        size_t                            replay_capacity; /* Max replay buffer size (from config) */
+        ngx_flag_t                        replay_initialized;
+        ngx_flag_t                        headers_committed; /* Headers sent downstream */
+    } stream_sm;
+
     /*
      * Streaming state sub-struct.
      *
-     * Grouped to comply with SonarCloud c:S1820
-     * 20-field limit.
+     * This is unconditional because request-level pending output,
+     * terminal-send latches, and post-commit completion state are NGINX
+     * filter/backpressure concerns even when the Rust streaming FFI symbols
+     * are not available in the linked static library.
+     *
+     * Grouped to comply with SonarCloud c:S1820 20-field limit.
      */
     struct {
         /* Streaming converter handle (Rust opaque pointer) */
@@ -508,6 +899,13 @@ typedef struct {
 
         /* Commit state: PRE or POST */
         ngx_uint_t                        commit_state;
+
+        /* Engine choice reason code (streaming observability) */
+#ifdef MARKDOWN_STREAMING_ENABLED
+        ngx_http_markdown_stream_reason_e reason;
+#else
+        ngx_uint_t                        reason;
+#endif
 
         /* Pending output chain for backpressure */
         ngx_chain_t                      *pending_output;
@@ -524,11 +922,16 @@ typedef struct {
         unsigned                          main_terminal_sent:1;
 
         /* TTFB tracking (from first feed to first non-empty output) */
-        ngx_msec_t                        feed_start_ms;
-        ngx_flag_t                        ttfb_recorded;
+        struct {
+            ngx_msec_t                        feed_start_ms;
+            ngx_flag_t                        recorded;
+        } ttfb;
 
         /* Pending output chain has non-empty data (for TTFB resume path) */
         ngx_flag_t                        pending_has_data;
+
+        /* Pending output byte count (for deferred metric accounting) */
+        size_t                            pending_output_bytes;
 
         /* Pending output is a fail-open delivery; resume_pending should
            increment results.failopen_count on downstream success. */
@@ -572,7 +975,6 @@ typedef struct {
             ngx_flag_t                    finalize_after_pending;
         } completion;
     } streaming;
-#endif
 } ngx_http_markdown_ctx_t;
 
 /*
@@ -728,6 +1130,28 @@ typedef struct {
         ngx_atomic_t  shadow_diff_total;         /* Shadow output diffs */
         ngx_atomic_t  last_ttfb_ms;              /* Last streaming TTFB (milliseconds) */
         ngx_atomic_t  last_peak_memory_bytes;    /* Last streaming peak estimate (bytes; not RSS) */
+
+        /* Fallback/failure counters */
+        ngx_atomic_t  streaming_fallback_precommit_pass;  /* Pre-commit HTML pass-through */
+        ngx_atomic_t  streaming_fallback_precommit_reject; /* Pre-commit rejection */
+        ngx_atomic_t  streaming_failure_postcommit_abort;  /* Post-commit abort */
+        ngx_atomic_t  streaming_failure_postcommit_safe_finish; /* Post-commit safe finish */
+
+        /* Engine choice counters (v0.8.0 observability) */
+        struct {
+            ngx_atomic_t  streaming;   /* Chose true streaming engine */
+            ngx_atomic_t  full_buffer; /* Chose full-buffer engine */
+            ngx_atomic_t  passthrough; /* Marked passthrough */
+            ngx_atomic_t  not_eligible; /* Not eligible for streaming */
+        } engine_choice;
+
+        /* Candidate and selection counters */
+        struct {
+            ngx_atomic_t  candidate_total;       /* Total candidates evaluated */
+            ngx_atomic_t  true_streaming_selected_total;   /* Final true streaming selections */
+            ngx_atomic_t  output_bytes_total;    /* Total Markdown bytes via streaming */
+            ngx_atomic_t  excluded_content_type_total;     /* Excluded due to content type */
+        } selection;
     } streaming;
 #endif
 
@@ -752,6 +1176,7 @@ typedef struct {
         ngx_atomic_t  accept;        /* SKIP_ACCEPT */
         ngx_atomic_t  no_accept;     /* SKIPPED_NO_ACCEPT */
         ngx_atomic_t  conditional;   /* SKIPPED_CONDITIONAL */
+        ngx_atomic_t  compression_passthrough; /* SKIP_COMPRESSION_PASSTHROUGH */
     } skips;
 
     /*
@@ -884,11 +1309,17 @@ const ngx_str_t *ngx_http_markdown_error_category_string(
 /* Check if response is eligible for conversion */
 ngx_http_markdown_eligibility_t ngx_http_markdown_check_eligibility(
     const ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf,
-    ngx_flag_t filter_enabled);
+    ngx_flag_t filter_enabled,
+    const ngx_http_markdown_effective_conf_t *eff);
 
 /* Get human-readable string for eligibility result */
 const ngx_str_t *ngx_http_markdown_eligibility_string(
     ngx_http_markdown_eligibility_t eligibility);
+
+/* Check whether a content type is excluded from streaming (streaming configuration directives) */
+ngx_int_t ngx_http_markdown_stream_type_excluded(
+    const ngx_str_t *content_type,
+    const ngx_http_markdown_conf_t *conf);
 
 /*
  * Reason code lookup functions
@@ -936,6 +1367,7 @@ const ngx_str_t *ngx_http_markdown_reason_streaming_convert(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_fallback(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_fail_postcommit(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_skip_unsupported(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_budget_exceeded(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_failopen(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_reject(void);

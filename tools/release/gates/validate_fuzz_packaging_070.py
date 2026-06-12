@@ -2,7 +2,7 @@
 """
 Fuzz and packaging infrastructure validator for v0.7.0 release gates.
 
-Validates the 12-item checklist from spec 33 requirements (Requirement 2):
+Validates the 12-item checklist from v0.7.0 fuzz and packaging infrastructure requirements (Requirement 2):
 
 1. Fuzz targets exist (fuzz/Cargo.toml lists targets)
 2. ClusterFuzzLite PR workflow exists

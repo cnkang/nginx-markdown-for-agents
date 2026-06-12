@@ -49,17 +49,19 @@ gpg --edit-key <KEY_ID>
 # > addkey → select signing-only → save
 ```
 
-<!-- TODO: Replace with actual values when GPG key is generated -->
+### Future Repository Signing Key Template
 
-### Key Details (Placeholder)
+The current 0.8.0 public package channel uses GitHub Release artifacts plus
+`SHA256SUMS`. Fill this table only when a public repository signing key is
+generated for a future APT/YUM repository channel.
 
 | Field | Value |
 |-------|-------|
-| Key ID | <!-- TODO: Replace with actual key ID --> `XXXXXXXXXXXXXXXX` |
-| Fingerprint | <!-- TODO: Replace with actual fingerprint --> `XXXX XXXX XXXX XXXX XXXX  XXXX XXXX XXXX XXXX XXXX` |
-| UID | <!-- TODO: Replace with actual UID --> `NGINX Markdown Module <maintainer@example.com>` |
-| Created | <!-- TODO: Replace with actual date --> `YYYY-MM-DD` |
-| Expires | <!-- TODO: Replace with actual expiry --> `Never` or `YYYY-MM-DD` |
+| Key ID | `<KEY_ID>` |
+| Fingerprint | `<FINGERPRINT>` |
+| UID | `NGINX Markdown Module <maintainer@example.com>` |
+| Created | `<YYYY-MM-DD>` |
+| Expires | `Never` or `<YYYY-MM-DD>` |
 
 ---
 
@@ -72,7 +74,7 @@ and verifiability.
 
 | Channel | URL / Location | Priority |
 |---------|---------------|----------|
-| HTTPS (primary) | <!-- TODO: Replace with actual URL --> `https://pkg.example.com/nginx-markdown/gpg.key` | Primary |
+| HTTPS (primary) | Future repository URL, for example `https://pkg.example.com/nginx-markdown/gpg.key` | Primary |
 | GitHub Releases | Attached to each release as `gpg.key` | Secondary |
 | Key server (optional) | `keys.openpgp.org` or `keyserver.ubuntu.com` | Optional |
 
@@ -85,8 +87,6 @@ gpg --armor --export <KEY_ID> > gpg.key
 # Verify export
 gpg --show-keys gpg.key
 ```
-
-<!-- TODO: Replace <KEY_ID> with actual key ID when GPG key is generated -->
 
 ### Publish to Key Server (Optional)
 
@@ -117,7 +117,8 @@ echo "deb [signed-by=/usr/share/keyrings/nginx-markdown.gpg] \
   | sudo tee /etc/apt/sources.list.d/nginx-markdown.list
 ```
 
-<!-- TODO: Replace https://pkg.example.com/nginx-markdown/ with actual URL when available -->
+Replace `https://pkg.example.com/nginx-markdown/` only after the public
+repository URL exists and has passed release validation.
 
 ### Future YUM/DNF Repository Users (RHEL, AlmaLinux, Amazon Linux)
 
@@ -136,7 +137,8 @@ gpgkey=https://pkg.example.com/nginx-markdown/gpg.key
 EOF
 ```
 
-<!-- TODO: Replace https://pkg.example.com/nginx-markdown/ with actual URL when available -->
+Replace `https://pkg.example.com/nginx-markdown/` only after the public
+repository URL exists and has passed release validation.
 
 ### Verify Key Fingerprint
 
@@ -154,9 +156,8 @@ rpm -qa gpg-pubkey* --qf '%{NAME}-%{VERSION}-%{RELEASE}\t%{SUMMARY}\n' \
 ```
 
 Expected fingerprint:
-<!-- TODO: Replace with actual fingerprint when GPG key is generated -->
 ```
-XXXX XXXX XXXX XXXX XXXX  XXXX XXXX XXXX XXXX XXXX
+<FINGERPRINT>
 ```
 
 ---
@@ -187,8 +188,6 @@ gpg --armor --export <OLD_KEY_ID> <NEW_KEY_ID> > gpg.key
 # Or publish separately
 gpg --armor --export <NEW_KEY_ID> > gpg-new.key
 ```
-
-<!-- TODO: Replace <OLD_KEY_ID> and <NEW_KEY_ID> with actual values during rotation -->
 
 Update the HTTPS distribution endpoint to serve the combined key file.
 
@@ -267,8 +266,6 @@ signing during the release workflow.
 | `GPG_PRIVATE_KEY` | Armored private key (including subkeys) | ASCII-armored PEM |
 | `GPG_PASSPHRASE` | Key passphrase | Plain text |
 | `GPG_KEY_ID` | Key ID used for signing | 16-character hex ID |
-
-<!-- TODO: Replace with actual key ID format when GPG key is generated -->
 
 ### Setting Up Secrets
 
