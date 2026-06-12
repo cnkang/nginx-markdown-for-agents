@@ -222,6 +222,8 @@ Neither approach is universally better. Edge-layer conversion is a good fit when
 | Performance baseline gating | Automated regression detection with dual-threshold system (warning / blocking) for PR and nightly CI |
 | Matrix-driven release automation | Automated release pipeline with platform matrix management and artifact completeness verification |
 
+## Platform Support
+
 <!-- BEGIN:release-matrix:support-matrix -->
 
 | NGINX | Channel | OS | libc | Arch | Artifact | Tier | Blocking |
@@ -531,6 +533,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.8.0 | 2026-06-12 | Codex | Synchronized English and Chinese README structure, Quick Start examples, local test commands, platform support heading, and v0.8.0 roadmap wording |
 | 0.8.0 | 2026-06-10 | Kang | v0.8.0 streaming release readiness: dual-engine model, auto mode default, bounded-memory conversion, pre-commit safety, legacy threshold compatibility, release-gates-check-080, migration guide, and rollout cookbook links |
 | 0.7.0 | 2026-06-03 | Kang | P0 correctness, Rust-first architecture, independent decompression budget, Accept negotiation, parse timeout/budget, DEB/RPM packaging, K8s examples, runtime diagnostics, dynconf dry-run/rollback |
 | 0.6.3 | 2026-05-14 | Kang | Version bump to 0.6.3, release-matrix refresh, and final hardening notes |

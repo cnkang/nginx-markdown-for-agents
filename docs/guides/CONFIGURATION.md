@@ -473,6 +473,77 @@ markdown_stream_types text/event-stream application/x-ndjson;
 
 ---
 
+#### markdown_content_types
+
+**Syntax:** `markdown_content_types <type> [<type> ...];`
+**Default:** `text/html`
+**Context:** http, server, location
+
+Content types eligible for Markdown conversion (positive allowlist). Uses prefix + boundary-char matching: `text/html` matches `text/html` and `text/html; charset=utf-8` but not `text/htmlx`.
+
+**Example:**
+```nginx
+# Convert both HTML and XHTML responses
+markdown_content_types text/html application/xhtml+xml;
+```
+
+**Notes:**
+- This directive controls whether the module processes a response at all (any path: full-buffer, incremental, or streaming).
+- `markdown_stream_types` and `markdown_stream_excluded_types` are additional filters that prevent specific types from entering the streaming path.
+- A type excluded from streaming may still be converted via full-buffer if it passes the general eligibility checks.
+
+---
+
+### Content Pruning
+
+#### markdown_prune_noise
+
+**Syntax:** `markdown_prune_noise on | off;`
+**Default:** `on`
+**Context:** http, server, location
+
+Enable or disable noise region pruning at runtime. When enabled, structural HTML regions matching the prune selectors (nav, footer, aside, etc.) are excluded from Markdown output, reducing noise for AI agents.
+
+**Example:**
+```nginx
+# Disable noise pruning (include all content)
+markdown_prune_noise off;
+```
+
+---
+
+#### markdown_prune_selectors
+
+**Syntax:** `markdown_prune_selectors "<tag> [<tag> ...]";`
+**Default:** `"nav footer aside"` (built-in)
+**Context:** http, server, location
+
+Space-separated HTML tag names for regions to prune from the output. Replaces the built-in defaults when set.
+
+**Example:**
+```nginx
+# Prune navigation, footer, aside, and sidebar elements
+markdown_prune_selectors "nav footer aside sidebar";
+```
+
+---
+
+#### markdown_prune_protection_selectors
+
+**Syntax:** `markdown_prune_protection_selectors "<tag> [<tag> ...]";`
+**Default:** empty (no protection)
+**Context:** http, server, location
+
+Space-separated HTML tag names for regions to protect from pruning. Protection wins over prune: an element matching both prune and protection selectors is kept in the output.
+
+**Example:**
+```nginx
+# Protect nav elements from being pruned
+markdown_prune_protection_selectors "nav";
+```
+
+---
+
 ### Security Directives
 
 #### markdown_trust_forwarded_headers
@@ -1177,6 +1248,152 @@ markdown_dynconf_dry_run on;
 
 ---
 
+### LLM Token Estimation
+
+#### markdown_llm_provider
+
+**Syntax:** `markdown_llm_provider default | openai-gpt | anthropic-claude | google-gemini | meta-llama;`
+**Default:** `default`
+**Context:** http, server, location
+
+LLM provider for token estimation. Each provider has a characteristic chars-per-token ratio that improves estimate accuracy for that provider's tokenizer family.
+
+| Provider | Chars/Token | Context Window |
+|----------|-------------|----------------|
+| `default` | 4.0 | not enforced |
+| `openai-gpt` | 3.8 | 128,000 |
+| `anthropic-claude` | 3.6 | 200,000 |
+| `google-gemini` | 4.2 | 1,000,000 |
+| `meta-llama` | 3.8 | 128,000 |
+
+Requires `markdown_token_estimate on;` to have any effect.
+
+**Example:**
+```nginx
+markdown_token_estimate on;
+markdown_llm_provider openai-gpt;
+```
+
+---
+
+#### markdown_chars_per_token
+
+**Syntax:** `markdown_chars_per_token <number>;`
+**Default:** `0` (use provider default)
+**Context:** http, server, location
+
+Explicit chars-per-token ratio for token estimation, stored as fixed-point * 10 (e.g., `38` = 3.8 chars/token). Overrides both the default (4.0) and the provider-specific ratio. Set to `0` to use the provider's default.
+
+**Range:** 0–255 (0.0–25.5 chars/token). Practical range: 20–60.
+
+**Example:**
+```nginx
+markdown_token_estimate on;
+markdown_chars_per_token 38;
+```
+
+---
+
+### OpenTelemetry Integration
+
+#### markdown_otel
+
+**Syntax:** `markdown_otel on | off;`
+**Default:** `off`
+**Context:** http, server, location
+
+Enable OpenTelemetry span creation for conversion requests. When enabled, each conversion creates a span with attributes for flavor, engine, content_type, input/output bytes, and reason code.
+
+**Example:**
+```nginx
+markdown_otel on;
+markdown_otel_endpoint /_otel_export;
+```
+
+---
+
+#### markdown_otel_endpoint
+
+**Syntax:** `markdown_otel_endpoint <uri>;`
+**Default:** empty (no endpoint configured)
+**Context:** http, server, location
+
+Internal NGINX URI for OTel span export via subrequest. The module issues an HTTP POST to this URI using `ngx_http_subrequest()`, sending the OTLP JSON payload as the request body.
+
+This URI must map to an `internal` location block in `nginx.conf` that proxy_passes to the OTel collector:
+
+```nginx
+location = /_otel_export {
+    internal;
+    proxy_pass http://collector:4318/v1/traces;
+}
+
+markdown_otel on;
+markdown_otel_endpoint /_otel_export;
+```
+
+---
+
+#### markdown_otel_tracing
+
+**Syntax:** `markdown_otel_tracing on | off;`
+**Default:** `off`
+**Context:** http, server, location
+
+Enable OTel span creation for conversion request tracing. When enabled, each conversion creates a span with trace context propagation and conversion attributes.
+
+---
+
+#### markdown_otel_metrics
+
+**Syntax:** `markdown_otel_metrics on | off;`
+**Default:** `off`
+**Context:** http, server, location
+
+Enable OTel metrics export via OTLP protocol.
+
+---
+
+#### markdown_otel_service_name
+
+**Syntax:** `markdown_otel_service_name <name>;`
+**Default:** `nginx-markdown`
+**Context:** http, server, location
+
+Service name label for OTel resource attributes.
+
+**Example:**
+```nginx
+markdown_otel_service_name my-nginx-markdown;
+```
+
+---
+
+#### markdown_otel_span_buffer_size
+
+**Syntax:** `markdown_otel_span_buffer_size <number>;`
+**Default:** `1024`
+**Context:** http, server, location
+
+Buffer size for spans when the collector is unreachable. Buffered spans are retried on the next export window.
+
+---
+
+#### markdown_otel_export_timeout
+
+**Syntax:** `markdown_otel_export_timeout <time>;`
+**Default:** `5s`
+**Context:** http, server, location
+
+Timeout for OTLP HTTP export requests.
+
+**Example:**
+```nginx
+markdown_otel_export_timeout 10s;
+```
+
+---
+
 ### Large Response Processing
 
 #### markdown_large_body_threshold
@@ -1340,6 +1557,42 @@ http {
   bumps the SHM zone name to prevent hot-reload layout mismatch. A full restart
   is recommended after upgrading.
 
+#### markdown_metrics_per_path
+
+**Syntax:** `markdown_metrics_per_path on | off;`
+**Default:** `off`
+**Context:** http, server, location
+
+Enable per-URL-path metrics tracking. When enabled, the top-N most-hit URI paths are tracked individually alongside global aggregates. Per-path data is exposed in the metrics endpoint under the `per_path` key.
+
+**Example:**
+```nginx
+markdown_metrics_per_path on;
+markdown_metrics_per_path_cardinality 200;
+```
+
+---
+
+#### markdown_metrics_per_path_cardinality
+
+**Syntax:** `markdown_metrics_per_path_cardinality <number>;`
+**Default:** `100`
+**Context:** http only
+
+Maximum number of distinct URI paths tracked individually in the per-path RB-tree. When this limit is reached, further unique paths are counted in the overflow aggregate and appear under the `__other__` pseudo-path in output.
+
+This is a global (http-level) setting because the per-path limit is stored in shared memory and applies across all server and location blocks.
+
+**Example:**
+```nginx
+http {
+    markdown_metrics_per_path on;
+    markdown_metrics_per_path_cardinality 200;
+}
+```
+
+---
+
 #### markdown_diagnostics
 
 **Syntax:** `markdown_diagnostics on | off;`
@@ -1392,6 +1645,52 @@ location /nginx-markdown/diagnostics {
   can be used alongside `markdown_diagnostics_allow`.
 - Disable in production if the endpoint is not needed to avoid exposing
   internal state.
+
+---
+
+### Deprecated Directives
+
+The following directives are deprecated and will be removed in a future major release. They are still accepted with info-level warnings to allow gradual migration.
+
+#### markdown_max_size
+
+**Syntax:** `markdown_max_size <size>;`
+**Default:** `10m`
+**Context:** http, server, location
+**Status:** Deprecated since 0.8.0 — use `markdown_memory_budget`
+
+Maximum response size to attempt conversion. Responses larger than this will not be converted.
+
+**Migration:**
+```nginx
+# Before (deprecated)
+markdown_max_size 5m;
+
+# After (recommended)
+markdown_memory_budget 5m;
+```
+
+---
+
+#### markdown_streaming_auto_threshold
+
+**Syntax:** `markdown_streaming_auto_threshold <size>;`
+**Default:** `32k` (legacy field; effective v0.8.0 runtime default is `1m` via `markdown_stream_threshold`)
+**Context:** http, server, location
+**Status:** Deprecated since 0.8.0 — use `markdown_stream_threshold`
+
+Content-Length threshold for auto-mode engine selection. In v0.8.0, `markdown_stream_threshold` replaces it with a default of `1m`.
+
+When explicitly set, this value is mapped into the v0.8.0 `stream.threshold` via the compatibility bridge. If both directives are configured at the same level, `markdown_stream_threshold` wins.
+
+**Migration:**
+```nginx
+# Before (deprecated)
+markdown_streaming_auto_threshold 64k;
+
+# After (recommended)
+markdown_stream_threshold 64k;
+```
 
 ---
 
@@ -2512,3 +2811,4 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 | 0.7.0 | 2026-05-17 | Kang | Added `markdown_dynconf_dry_run` directive documentation |
 | 0.7.0 | 2026-05-18 | Kang | Added `markdown_diagnostics` directive documentation |
 | 0.8.0 | 2026-06-10 | Kang | Cross-reference audit: fixed stale `markdown_streaming_auto_threshold` reference in streaming section intro to use `markdown_stream_threshold` |
+| 0.8.0 | 2026-06-12 | Codex | Added missing directive documentation: `markdown_content_types`, `markdown_prune_noise`, `markdown_prune_selectors`, `markdown_prune_protection_selectors`, `markdown_llm_provider`, `markdown_chars_per_token`, OpenTelemetry family (`markdown_otel`, `markdown_otel_endpoint`, `markdown_otel_tracing`, `markdown_otel_metrics`, `markdown_otel_service_name`, `markdown_otel_span_buffer_size`, `markdown_otel_export_timeout`), `markdown_metrics_per_path`, `markdown_metrics_per_path_cardinality`; added deprecated directives section for `markdown_max_size` and `markdown_streaming_auto_threshold` |

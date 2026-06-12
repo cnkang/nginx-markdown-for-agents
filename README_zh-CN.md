@@ -68,11 +68,10 @@ curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/mai
 sudo nginx -t && sudo nginx -s reload
 ```
 
-安装脚本会识别本机 NGINX 版本，下载匹配的模块制品，并为常见官方 NGINX 构建完成基础 `load_module` 集成。
-默认会强制进行 SHA-256 完整性校验（无摘要时拒绝安装）。
+安装脚本会识别本机 NGINX 版本，下载匹配的模块制品，并自动接入 `load_module` 与 `markdown_filter on`，无需手动编辑配置。
+默认会强制进行 SHA-256 制品完整性校验。
 
-如果你使用自编译 NGINX 或希望从源码构建，请从 [安装指南](docs/guides/INSTALLATION.md) 开始。
-如果你希望基于官方 NGINX Docker 镜像进行源码构建，请参考 `examples/docker/Dockerfile.official-nginx-source-build` 以及 [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md) 里的 Docker 小节。
+其他安装方式（源码构建、Docker、自定义 NGINX 构建）、故障排查和详细说明见 [安装指南](docs/guides/INSTALLATION.md)。
 
 如果你在 macOS 上通过项目 Homebrew tap 安装（基于 release tag 制品）：
 
@@ -96,7 +95,7 @@ http {
     server {
         listen 80;
 
-        location /docs/ {
+        location / {
             markdown_filter on;
             proxy_set_header Accept-Encoding "";
             proxy_pass http://backend;
@@ -111,10 +110,10 @@ http {
 
 ```bash
 # Markdown 变体
-curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/docs/
+curl -sD - -o /dev/null -H "Accept: text/markdown" http://localhost/
 
 # HTML 保持原样
-curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
+curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 ```
 
 预期结果：
@@ -122,7 +121,7 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 - `Accept: text/markdown` 返回 `Content-Type: text/markdown; charset=utf-8`
 - `Accept: text/html` 仍返回原始 HTML
 
-如果你想直接看更贴近生产环境的配置模式，下一步可以看 [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md)。
+如果行为不符合预期，请查看安装指南里的 [Troubleshooting](docs/guides/INSTALLATION.md#10-troubleshooting) 小节。
 
 ## 针对特定 Bot 返回 Markdown
 
@@ -212,14 +211,13 @@ Cloudflare 的 [Markdown for Agents](https://blog.cloudflare.com/markdown-for-ag
 | 缓存友好变体 | 支持 ETag 与条件请求 |
 | 失败策略可控 | 可选失败透传或失败拦截 |
 | 资源限制 | 可配置大小与超时上限 |
-| 安全清洗 | 在转换器中处理 XSS、XXE、SSRF 相关风险 |
+| 安全加固 | 校验输出链接和 base URL，默认拒绝不安全的 forwarded-host 输入，限制解析/解压资源，并避免执行外部内容 |
 | 可选元数据 | 支持 token 估算与 YAML front matter |
 | 指标端点 | 提供转换计数等运行指标 |
 | 变量驱动配置 | 使用 NGINX 变量实现按请求的转换控制 |
 | 认证感知 | 可配置的认证请求策略与缓存控制 |
-| 双引擎模型（全缓冲 + 流式转换） | 默认 `auto` 模式：小响应走全缓冲，大响应走有界内存流式转换，无需手动切换 |
-| 有界内存流式转换 | 大响应增量转换为 Markdown，内存用量有显式上限，不再需要缓冲整个响应体 |
-| 提交前安全回退 | 流式转换出错时，若尚未向下游发送 Markdown 字节，可透明回退到原始 HTML |
+| 双引擎转换 | 典型响应走全缓冲（默认），大响应或 chunked 响应走流式引擎，并可通过 `auto` 模式自动选择 |
+| 有界内存流式转换 | 流式引擎以有界内存转换，并按 `markdown_stream_flush_min` 做基于大小的 flush；提交前错误可回退到 HTML |
 | 性能基线门禁 | 自动化回归检测，采用双阈值体系（警告/阻断），覆盖 PR 和 Nightly CI |
 | 矩阵驱动的发布自动化 | 自动化发布流水线，支持平台矩阵管理与制品完整性验证 |
 
@@ -337,14 +335,18 @@ make test-rust
 # 完整 NGINX 模块单元测试
 make test-nginx-unit
 
-# 运行时集成、canonical E2E 与 fuzz 冒烟
+# 流式专项测试
+make test-rust-streaming
+make verify-chunked-native-e2e-smoke
+
+# 运行时集成与 canonical E2E 检查
 make test-nginx-integration
 make test-e2e-rust
 make test-e2e
 make test-rust-fuzz-smoke
 ```
 
-`make test-nginx-integration` 与 `make test-e2e` 需要真实 `nginx` 运行时；如果 `PATH` 中没有 `nginx`，请使用 `NGINX_BIN=/absolute/path/to/nginx`。
+`make test-nginx-integration`、`make test-e2e` 和 `make verify-chunked-native-e2e-smoke` 需要真实 `nginx` 运行时；如果 `PATH` 中没有 `nginx`，请设置 `NGINX_BIN=/absolute/path/to/nginx`，让这些命令能找到 nginx 二进制。
 
 更完整的集成测试、E2E 与性能基线说明见 [docs/testing/README.md](docs/testing/README.md) 与 [docs/testing/E2E_TESTS.md](docs/testing/E2E_TESTS.md)。
 
@@ -357,8 +359,6 @@ make harness-check
 # 包含文档与 release-gate 的完整 harness 校验
 make harness-check-full
 ```
-
-对于本地 spec 导向的工作，harness 也可以根据提示词或可选的本地指针文件解析最可能的 spec：
 
 把 harness 检查当作仓库 contract 和 release-gate 变更的主入口：
 
@@ -441,16 +441,17 @@ Makefile               顶层构建与测试入口
 
 ## v0.8.0 新特性
 
-v0.8.0 引入**真正的流式转换合约**——模块现在能以有界内存增量地将 HTML 转换为 Markdown，无需缓冲整个上游响应体。
+v0.8.0 引入真正的流式转换——面向大响应和 chunked 响应的有界内存 HTML-to-Markdown 处理：
 
-- **双引擎模型** — 全缓冲和流式转换两条路径；`markdown_streaming_engine auto`（新默认值）根据响应大小自动选路
-- **有界内存流式转换** — 大响应增量处理，内存用量有显式上限（`markdown_memory_budget`），输出以 chunked transfer encoding 递交
-- **提交前安全回退** — 流式转换过程中，若在提交点之前遇到错误，可透明回退到原始 HTML（`markdown_streaming_on_error`）
-- **新流式指令** — `markdown_stream_threshold`（默认 1m）、`markdown_stream_precommit_buffer`（默认 256k）、`markdown_stream_flush_min`（默认 16k）、`markdown_stream_excluded_types`
-- **流式指标与 reason code** — 完整的 streaming 可观测性：引擎选择、fallback 事件、post-commit 失败等 Prometheus 计数器和结构化 reason code
-- **旧阈值指令兼容** — `markdown_streaming_auto_threshold` 在 0.8.0 中仍会被解析并桥接到 `markdown_stream_threshold`，但新配置应直接使用 `markdown_stream_threshold`；`markdown_max_size` 仍可用但会输出废弃警告；`markdown_streaming_budget` 仍可作为流式路径的显式预算覆盖
+- **双引擎模型** — 自 v0.5.0 起默认的全缓冲转换仍用于典型响应。新的流式引擎以有界内存处理大响应或 chunked 响应。`markdown_streaming_engine` 指令控制使用 `off`、`on` 还是 `auto`。
+- **`auto` 模式（默认）** — 设置为 `auto` 时，模块会自动把符合条件的大响应或 chunked 响应路由到流式引擎，其余响应保持全缓冲。**注意：**默认的 `markdown_conditional_requests full_support` 会阻止流式激活，因为完整 ETag 支持需要全缓冲路径。要在 `auto` 模式启用流式，请设置 `markdown_conditional_requests if_modified_since_only` 或 `disabled`。
+- **有界内存转换** — 流式引擎根据 `markdown_stream_flush_min`（大小阈值）分块 flush 已转换的 Markdown，无论响应多大都保持有界内存。
+- **提交前安全回退** — 如果转换错误发生在流式引擎向客户端提交输出之前，会回退为返回原始 HTML 响应，从而保持流式路径的 fail-open 语义。
+- **新流式控制项** — `markdown_stream_threshold`、`markdown_stream_precommit_buffer`、`markdown_stream_flush_min` 和 `markdown_stream_excluded_types` 让阈值选择、replay buffering、flush 和 content-type 排除规则显式化。
+- **旧阈值兼容** — 现有 `markdown_streaming_auto_threshold` 配置在 0.8.0 中仍会解析并桥接到 `markdown_stream_threshold`；新配置应直接使用 `markdown_stream_threshold`。
 
-**兼容性保证**：`markdown_streaming_engine off` 可回退到与 0.7.x 完全一致的全缓冲行为。
+0.7.x 升级指引见 [迁移指南](docs/guides/MIGRATION-0.8.md)。
+生产 rollout 步骤见 [Streaming Rollout Cookbook](docs/guides/streaming-rollout-cookbook.md)。
 
 ## v0.7.0 新特性
 
@@ -477,15 +478,14 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 
 当前版本 (0.8.0)：
 
-- 真正的流式转换合约：有界内存增量转换，`markdown_streaming_engine auto` 为默认模式
-- 双引擎模型：全缓冲（小响应）+ 流式转换（大响应），根据 `markdown_stream_threshold` 自动选路
-- 提交前安全回退：pre-commit 阶段出错可透明回退到原始 HTML
-- 新流式指令：`markdown_stream_threshold`、`markdown_stream_precommit_buffer`、`markdown_stream_flush_min`、`markdown_stream_excluded_types`
-- 流式可观测性：引擎选择、fallback、post-commit 失败等 Prometheus 指标和结构化 reason code
-- 旧指令兼容策略：`markdown_streaming_auto_threshold`（废弃但兼容桥接）；`markdown_max_size`（废弃但仍可用）；`markdown_streaming_budget`（仍可用作流式路径覆盖）
-- 0.8.0 发布门禁：`make release-gates-check-080`
+- 双引擎流式模型：全缓冲默认路径 + 面向大响应/chunked 响应的流式引擎
+- `auto` 模式作为默认 `markdown_streaming_engine` 设置
+- 基于 `markdown_stream_flush_min` 的有界内存流式转换与按大小 flush
+- 提交前安全回退：输出提交前发生转换错误时回退到 HTML
+- 流式发布门禁：`make release-gates-check-080` 验证 0.8.0 发布合约
+- 面向生产采用的迁移指南和 rollout cookbook
 
-0.7.0：
+上一版本（0.7.0）：
 
 - P0 运行时正确性：NGX_AGAIN pending chain、fail-open 去重、安全输出排序
 - 独立解压预算（`markdown_decompress_max_size`）
@@ -502,18 +502,19 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - Kubernetes 部署示例与默认适配 stock NGINX、显式支持模块启用配置的 Helm chart
 - 运行时诊断端点
 - Dynconf dry-run 验证与 last-known-good 回滚
+- 安装与发布文档已对齐 Rust 1.91.0+ 和当前 CI 预期
 
 近期重点：
 
-- 扩展 streaming 在混合流量场景下的 rollout 示例
 - 强化 release gate 的跨环境证据自动化
 - 持续增强 conversion drift/degradation 的运维诊断能力
+- 扩展流式 telemetry 和可观测性
 
 后续探索：
 
 - OpenTelemetry tracing 集成
 - 更多 Markdown 风格与输出格式
-- 扩展分发形态（APT/YUM 仓库、Homebrew 及 ingress 侧交付）
+- 扩展分发形态（apt/yum/brew 与 ingress-oriented bundles）
 
 ## 许可证
 
@@ -523,6 +524,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.8.0 | 2026-06-12 | Codex | 同步中英文 README 结构、Quick Start 示例、本地测试命令、平台支持标题和 v0.8.0 路线说明 |
 | 0.8.0 | 2026-06-10 | Kang | 0.8.0 正式发布文档就绪：双引擎流式转换（auto 默认）、有界内存增量处理、提交前安全回退、旧阈值指令兼容、新流式指令、可观测性与 release-gates-check-080 |
 | 0.7.0 | 2026-06-03 | Kang | P0 正确性修复、Rust-first 架构、独立解压预算、Accept 协商、解析超时/预算、DEB/RPM 包分发、K8s 示例、运行时诊断、dynconf dry-run/回滚 |
 | 0.6.3 | 2026-05-14 | Kang | 版本号更新至 0.6.3，并补充 release matrix 与发布前最终加固说明 |
