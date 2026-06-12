@@ -13,7 +13,9 @@
  * unit testing without linking the Rust library.  The stub
  * plan always produces a minimal set of entries matching the
  * production behavior (Content-Type set, Content-Encoding
- * delete, Vary set).
+ * delete-all, Content-Length delete-all, optional ETag
+ * placeholder).  Vary is handled post-plan by
+ * ngx_http_markdown_add_vary_accept().
  */
 
 static struct FFIHeaderEntry g_stub_entries[5];
