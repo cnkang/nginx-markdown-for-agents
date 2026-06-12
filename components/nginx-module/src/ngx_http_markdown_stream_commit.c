@@ -105,6 +105,27 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
      * Each step returns NGX_OK or NGX_ERROR.
      */
 
+    /*
+     * Prepare fallible header work before changing response framing.  If a
+     * helper fails, fallback paths must still see the upstream
+     * Content-Length/Content-Type.
+     */
+    rc = ngx_http_markdown_stream_commit_set_vary(r);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown stream commit: "
+                      "failed to set Vary header");
+        return NGX_ERROR;
+    }
+
+    rc = ngx_http_markdown_stream_commit_remove_etag(r);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown stream commit: "
+                      "failed to remove ETag");
+        return NGX_ERROR;
+    }
+
     /* Task 4.2: Remove Content-Length */
     rc = ngx_http_markdown_stream_commit_remove_content_length(r);
     if (rc != NGX_OK) {
@@ -120,24 +141,6 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown stream commit: "
                       "failed to set Content-Type");
-        return NGX_ERROR;
-    }
-
-    /* Task 4.4: Set Vary: Accept */
-    rc = ngx_http_markdown_stream_commit_set_vary(r);
-    if (rc != NGX_OK) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
-                      "failed to set Vary header");
-        return NGX_ERROR;
-    }
-
-    /* Task 4.5: Remove upstream ETag */
-    rc = ngx_http_markdown_stream_commit_remove_etag(r);
-    if (rc != NGX_OK) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
-                      "failed to remove ETag");
         return NGX_ERROR;
     }
 

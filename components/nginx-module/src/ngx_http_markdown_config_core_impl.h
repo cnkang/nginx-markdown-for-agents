@@ -585,6 +585,8 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         (conf->stream.shadow != NGX_CONF_UNSET);
     ngx_flag_t  stream_threshold_set =
         (conf->stream.threshold != NGX_CONF_UNSET_SIZE);
+    ngx_flag_t  stream_budget_set =
+        (conf->stream.budget != NGX_CONF_UNSET_SIZE);
 #endif
 
     ngx_http_markdown_merge_core_values(conf, prev);
@@ -632,7 +634,9 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * Priority: stream.* explicit  >  streaming.* mapped  >  defaults
      */
 #ifdef MARKDOWN_STREAMING_ENABLED
-    ngx_http_markdown_bridge_legacy_stream_values(conf, prev);
+    ngx_http_markdown_bridge_legacy_stream_values(conf, prev,
+                                                 streaming_budget_set,
+                                                 stream_budget_set);
 #endif
 
     ngx_http_markdown_merge_v060_values(conf, prev);
