@@ -63,7 +63,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         harness-check harness-check-full harness-security-checks test-harness \
-	docs-check license-check release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-legacy release-gates-check-strict \
+	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-legacy release-gates-check-strict \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         verify-streaming-failure-cache-e2e \
@@ -212,9 +212,15 @@ docs-check-base:
 	python3 tools/docs/check_docs.py
 	python3 tools/docs/check_packaging_docs.py
 	python3 tools/docs/check_packaging_consistency.py
+	python3 tools/docs/validate_packaging_matrix.py
+	python3 tools/render_release_matrix_docs.py --check
+	python3 tools/release/matrix/validate_workflow_matrix_consumers.py
 
 docs-check: docs-check-base
 	python3 tools/harness/check_harness_sync.py
+
+release-notes:
+	python3 tools/render_release_matrix_docs.py --release-notes
 
 harness-check:
 	python3 tools/harness/check_harness_sync.py
@@ -430,6 +436,150 @@ release-gates-check-070:
 	@$(MAKE) harness-check
 	@echo "  Harness Rule Coverage Gate: ALL PASSED"
 
+# release-gates-check-080: comprehensive v0.8.0 release readiness gate.
+#
+# Coverage policy source: AGENTS.md Rule 25
+#   - 80% aggregate line+function coverage (programmatic gate via coverage_gate.py)
+#   - 90% for critical paths: auth, error handling, FFI boundary, conditional
+#     requests (advisory — not programmatically enforced; logged at gate runtime)
+#
+# Clean-checkout boundary (Req 9):
+#   This gate runs from a clean git checkout without requiring:
+#   - .kiro/ directories (user-local Kiro/spec state)
+#   - .codeartsdoer/ directories (adapter caches)
+#   - Any generated files outside the repository checkout
+#   All Python scripts called by this gate consume only repo-owned inputs:
+#   tools/, docs/, components/, AGENTS.md, .github/workflows/
+#
+# CI coverage (Spec 43):
+#   - Streaming tests: covered by rust-quality job (make test-rust --all-features)
+#   - Chunked native E2E: covered by runtime-regressions job
+#   - Matrix validation: covered by docs-check job (make docs-check) and
+#     matrix-release-tests job
+#
+# Classification (Req 6):
+#   BLOCKING: All 15 sub-checks below are release-blocking.
+#   EXPERIMENTAL (non-blocking, not in this gate):
+#     - Performance benchmarks (perf-artifacts, perf-smoke in CI)
+#     - Nightly fuzz beyond smoke (nightly-fuzz.yml)
+#     - Docker integration tests (official-nginx-docker.yml)
+#
+# Sub-checks (all blocking):
+#   1. make build + make check-headers        — Rust lib builds, header in sync
+#   2. make test-rust                         — Rust unit + doctests + streaming tests (Req 1)
+#   3. make test-nginx-unit                   — C state machine + config parsing tests (Req 1, 2)
+#   4. make test-rust-fuzz-smoke              — Fuzz smoke (skippable, see env var below)
+#   5. verify-chunked-native-e2e-smoke        — Native NGINX chunked/no-CL E2E (Req 1.2)
+#   6. make test-e2e-rust                     — Rust E2E harness scenarios (Req 1)
+#   7. make coverage-c                        — C coverage gate per AGENTS.md (Req 4)
+#   8. make coverage-rust                     — Rust coverage gate per AGENTS.md (Req 4)
+#   9. make docs-check                        — Documentation consistency (Req 3)
+#  10. matrix validate_workflow_matrix_consumers — Matrix schema + CI coverage (Req 5)
+#  11. make harness-check                     — Harness truth surface validation (Req 9)
+#  12. validate_release_gates.py              — Release gate framework
+#  13. validate_naming.py                     — Artifact naming consistency
+#  14. v0.7.0 gate validators (repo-owned)    — Prior-version gates remain active
+#  15. Harness boundary: routing-manifest.json + risk-packs + core.md + README.md exist (Req 9)
+#
+# Environment variables:
+#   RELEASE_GATE_ALLOW_SKIP_FUZZ=1       - skip fuzz smoke when
+#                                           cargo +nightly is unavailable
+#   RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 - skip native E2E when NGINX_BIN
+#                                           is not set
+#   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - skip coverage-c/coverage-rust
+#                                           when NGINX source or lcov/cargo-llvm-cov
+#                                           is unavailable
+
+release-gates-check-080:
+	@echo "=== v0.8.0 Release Gate: Starting ==="
+	@echo "  [1/15] build + check-headers"
+	$(MAKE) build
+	$(MAKE) check-headers
+	@echo "  [2/15] test-rust (includes streaming tests — Req 1)"
+	$(MAKE) test-rust
+	@echo "  [3/15] test-nginx-unit (state machine + config parsing — Req 1, 2)"
+	$(MAKE) test-nginx-unit
+	@echo "  [4/15] test-rust-fuzz-smoke"
+	@if cargo +nightly --version >/dev/null 2>&1; then \
+	$(MAKE) test-rust-fuzz-smoke; \
+	else \
+	if [ "$${RELEASE_GATE_ALLOW_SKIP_FUZZ:-0}" = "1" ]; then \
+	echo "  ==> SKIP (non-release): test-rust-fuzz-smoke (cargo nightly not available; RELEASE_GATE_ALLOW_SKIP_FUZZ=1)"; \
+	else \
+	echo "FAIL: test-rust-fuzz-smoke requires cargo +nightly; set RELEASE_GATE_ALLOW_SKIP_FUZZ=1 to skip for non-release validation" >&2; exit 1; \
+	fi; \
+	fi
+	@echo "  [5/15] verify-chunked-native-e2e-smoke (native NGINX chunked/no-CL — Req 1.2)"
+	@if [ -n "$$NGINX_BIN" ]; then \
+	$(MAKE) verify-chunked-native-e2e-smoke; \
+	else \
+	if [ "$${RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E:-0}" = "1" ]; then \
+	echo "  ==> SKIP (non-release): verify-chunked-native-e2e-smoke (NGINX_BIN not set; RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1)"; \
+	else \
+	echo "FAIL: verify-chunked-native-e2e-smoke requires NGINX_BIN; set RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 to skip for non-release validation" >&2; exit 1; \
+	fi; \
+	fi
+	@echo "  [6/15] test-e2e-rust (Rust E2E harness — Req 1)"
+	$(MAKE) test-e2e-rust
+	@echo "  [7/15] coverage-c (C coverage gate — Req 4)"
+	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (advisory)"
+	@if command -v lcov >/dev/null 2>&1 && [ -d "$(NGINX_TEST_DIR)" ]; then \
+	$(MAKE) coverage-c; \
+	else \
+	if [ "$${RELEASE_GATE_ALLOW_SKIP_COVERAGE:-0}" = "1" ]; then \
+	echo "  ==> SKIP (non-release): coverage-c (lcov or NGINX test dir not available; RELEASE_GATE_ALLOW_SKIP_COVERAGE=1)"; \
+	else \
+	echo "FAIL: coverage-c requires lcov and NGINX test dir; set RELEASE_GATE_ALLOW_SKIP_COVERAGE=1 to skip for non-release validation" >&2; exit 1; \
+	fi; \
+	fi
+	@echo "  [8/15] coverage-rust (Rust coverage gate — Req 4)"
+	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (advisory)"
+	@if cargo llvm-cov --version >/dev/null 2>&1; then \
+	$(MAKE) coverage-rust; \
+	else \
+	if [ "$${RELEASE_GATE_ALLOW_SKIP_COVERAGE:-0}" = "1" ]; then \
+	echo "  ==> SKIP (non-release): coverage-rust (cargo-llvm-cov not available; RELEASE_GATE_ALLOW_SKIP_COVERAGE=1)"; \
+	else \
+	echo "FAIL: coverage-rust requires cargo-llvm-cov; set RELEASE_GATE_ALLOW_SKIP_COVERAGE=1 to skip for non-release validation" >&2; exit 1; \
+	fi; \
+	fi
+	@echo "  [coverage-policy] Thresholds: C line=$(COVERAGE_C_MIN_LINE)% func=$(COVERAGE_C_MIN_FUNC)% | Rust line=$(COVERAGE_RUST_MIN_LINE)% func=$(COVERAGE_RUST_MIN_FUNC)%"
+	@echo "  [critical-path-coverage] 90% target for auth, error handling, FFI boundary, conditional requests"
+	@echo "  [critical-path-coverage] NOTE: 90% critical-path coverage is advisory per AGENTS.md Rule 25;"
+	@echo "  [critical-path-coverage]       80% aggregate is the programmatic enforcement gate."
+	@echo "  [9/15] docs-check (documentation consistency — Req 3)"
+	$(MAKE) docs-check
+	@echo "  [10/15] matrix validate_workflow_matrix_consumers (Req 5)"
+	python3 tools/release/matrix/validate_workflow_matrix_consumers.py
+	@echo "  [11/15] harness-check (harness truth surface — Req 9)"
+	$(MAKE) harness-check
+	@echo "  [12/15] validate_release_gates.py (release gate framework)"
+	python3 tools/release/gates/validate_release_gates.py
+	@echo "  [13/15] validate_naming.py (artifact naming)"
+	python3 tools/release/gates/validate_naming.py
+	@echo "  [14/15] v0.7.0 gate validators (repo-owned, prior-version gates)"
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_release_gates_070.py --mode strict
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_config_directives_070.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_metrics_070.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_reason_codes_070.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_package_metadata_070.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_k8s_manifests_070.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_fuzz_packaging_070.py
+	@echo "  [15/15] harness boundary: routing-manifest.json + risk-packs (Req 9)"
+	@test -f docs/harness/routing-manifest.json || { echo "FAIL: docs/harness/routing-manifest.json not found — release gates require repo-owned harness sources" >&2; exit 1; }
+	@test -d docs/harness/risk-packs || { echo "FAIL: docs/harness/risk-packs/ not found — release gates require repo-owned risk-pack inputs" >&2; exit 1; }
+	@test -f docs/harness/core.md || { echo "FAIL: docs/harness/core.md not found — release gates require repo-owned harness sources (Req 9.3)" >&2; exit 1; }
+	@test -f docs/harness/README.md || { echo "FAIL: docs/harness/README.md not found — release gates require repo-owned harness sources (Req 9.3)" >&2; exit 1; }
+	@echo ""
+	@echo "  [clean-checkout] Boundary verification (Req 9):"
+	@echo "  All validators use only repo-owned sources (no .kiro/, no .codeartsdoer/, no adapter caches)."
+	@echo "  Inputs: tools/, docs/, components/, AGENTS.md, Makefile, .github/workflows/"
+	@echo "  This gate is reproducible from a clean 'git clone' without user-local state."
+	@if [ -d ".kiro/specs" ] && grep -r "\.kiro/" tools/release/ tools/harness/ 2>/dev/null | grep -v "\.kiro/steering" | grep -qv "^$$"; then \
+		echo "WARNING: potential .kiro/ reference found in gate validators (review needed)" >&2; \
+	fi
+	@echo "=== v0.8.0 Release Gate: ALL PASSED ==="
+
 release-gates-check-legacy:
 	python3 tools/release/legacy/validate_release_gates.py
 
@@ -603,8 +753,10 @@ help:
 	@echo "  release-gates-check-055  - Validate 0.5.5 release gates (evidence, known-diffs, docs)"
 	@echo "  release-gates-check-060  - Validate 0.6.0 release gates (streaming default, pruning, budget)"
 	@echo "  release-gates-check-070  - Validate 0.7.0 release gates (runtime correctness, package compat, fuzz)"
+	@echo "  release-gates-check-080  - Validate 0.8.0 release gates (streaming, coverage, matrix, harness boundary)"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
+	@echo "  release-notes            - Generate release notes from release-matrix.json"
 	@echo "  coverage-c               - Generate C module e2e coverage (builds NGINX with --coverage)"
 	@echo "  coverage-rust            - Generate Rust test coverage (llvm-cov lcov)"
 	@echo "  coverage-all             - Generate all coverage reports"

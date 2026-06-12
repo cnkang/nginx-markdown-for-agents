@@ -16,6 +16,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `ffi-boundary` | focused semantic | `make build`, `make test-rust` |
 | `observability-metrics` | focused semantic | `make docs-check`, `make release-gates-check` |
 | `v070-gates` | focused semantic | `make release-gates-check-070`, `make test-rust`, `make check-headers` |
+| `v080-gates` | focused semantic | `make release-gates-check-080` |
 | `release-governance` | focused semantic | `make release-gates-check`, `make release-gates-check-strict`, `make release-gates-check-055` |
 | `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e` |
 | `release-quality` | umbrella | `make harness-check-full` |
@@ -93,3 +94,4 @@ Safety/engineering invariants always win; user-task controls scope and approach.
 | 0.6.3 | 2026-05-14 | Kang | Added shell-hygiene (S7682/S1066/Rule 18) and const-correctness detection scripts; extended tooling-path-security pack paths and keywords; updated harness-security family description |
 | 0.6.6 | 2026-05-16 | Kang | Added replay buffer keywords (replay buffer, failopen_completed, precommit_error) to runtime-streaming risk pack; updated primary surfaces to include replay buffer integrity; introduced Spec Resolver Priority section (priority-ordered resolution: agents-baseline > user-task > active-spec-pointer > agents-workflow > harness-core > replay-calibration) ensuring safety/engineering invariants always win over user-task scope |
 | 0.7.0 | 2026-05-31 | Kiro | Added v070-gates verification family (release-gates-check-070, test-rust, check-headers) to sync with JSON manifest |
+| 0.8.0 | 2026-06-04 | Codex | Added v080-gates verification family for release-gates-check-080; added tools/harness/tests/ to tooling-path-security risk pack paths |

@@ -79,7 +79,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 3 | memory-budget | Enforce all budgets; free auxiliary buffers on all exits; track peak memory |
 | 4 | encoding-charset | Preserve incomplete UTF-8 tails across chunks; flush decoders at EOF |
 | 5 | html-sanitizer | Void elements self-closing; skip-mode name-aware; nesting-depth saturation-safe |
-| 6 | html-sanitizer | In-link markers accumulated; code-block raw preserved; blockquote consistent; URL extraction includes media elements |
+| 6 | html-sanitizer | In-link markers accumulated; code-block raw/fence state preserved across text-event boundaries; blockquote consistent; URL extraction includes media elements |
 | 7 | observability-metrics | Explicit skip-reason mapping; reason-code tests aligned; new reason codes need log_decision() callsite |
 | 8 | observability-metrics | Fail on truncation; SHM layout version; non-overlapping Prometheus families; every metric has runtime write; delivery counters after success; format string argument matching |
 | 8b | observability-metrics | Config nesting matches code; consumer accepts both key names; combined report reads streaming_metrics first |
@@ -180,7 +180,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 
 **HTML Sanitizer & Output Safety** (C, R, D)
 - Void elements self-closing; skip-mode name-aware [5]
-- In-link markers accumulated; code-block raw preserved; media URL extraction [6]
+- In-link markers accumulated; code-block raw/fence state preserved across text-event boundaries; media URL extraction [6]
 - Link/URL escaping at every emission site; reject control chars [27]
 
 **Testing & Coverage** (C, T, R)
@@ -263,6 +263,19 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   local-spec validators that require user-local Kiro/spec directories unless
   those inputs are checked into the repository or explicitly downloaded first
   [13]
+- When newer release gates reuse prior-version validators, assertions about
+  the active project version, package version, or release line must be
+  parameterized by the caller. Prior-version validators may keep their
+  standalone defaults, but they must not fail a newer release gate solely
+  because `Cargo.toml`, package metadata, or chart metadata has advanced to the
+  newer release version [13]
+- Workflows, release gates, and documentation renderers that consume
+  `tools/release-matrix.json` must use the repository's current checked-in
+  schema. If the matrix schema changes, update all active consumers in the same
+  change set; release workflows must not keep reading stale aliases such as
+  `matrix`, `nginx`, `os_type`, or `support_tier: full` after the source of
+  truth has moved to `entries`, `nginx_version`, `libc`, and
+  `support_tier: supported` [13]
 - Release package build environments must not require a newer glibc than any
   supported smoke-test/runtime distro for the same artifact family; build Linux
   module artifacts on the oldest supported glibc baseline or split artifacts by
@@ -309,6 +322,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 Follow evidence-first verification (no completion claim without fresh command output):
 - Docs/tools changes: `make docs-check`
 - Release-gate tooling: `make release-gates-check`
+- Release gates 0.8.0: `make release-gates-check-080` (comprehensive v0.8.0 release readiness gate)
 - Rust converter/streaming changes: `make test-rust`
 - Rust example/benchmark changes: `cargo check --all-targets` in the crate
   directory to catch edition-specific errors (examples are only compiled
@@ -317,7 +331,7 @@ Follow evidence-first verification (no completion claim without fresh command ou
 - NGINX C module changes: `make test-nginx-unit`
 - C module production source changes: `make coverage-c` (verify coverage bar)
 - Rust converter production source changes: `make coverage-rust` (verify coverage bar)
-- Streaming runtime/e2e changes: `make verify-chunked-native-e2e-smoke` (or stronger profile when required)
+- Streaming runtime/e2e changes: `make verify-chunked-native-e2e-smoke` (or stronger profile when required; requires `NGINX_BIN` pointing to a locally-compiled NGINX binary with the module loaded)
 - C module volatile/atomic usage changes: `bash tools/harness/detect_volatile_atomic.sh` (Rule 42)
 - New `#[ignore]` tests introduced in this change: run targeted
   `cargo test ... -- --ignored` at least once and report result.
@@ -437,3 +451,6 @@ remediation:
 | 0.7.14 | 2026-06-03 | Codex | Strengthened Rule 13 for nginx.org RPM epoch-aware dependency floors plus preinstall ABI branch guards |
 | 0.7.15 | 2026-06-03 | Codex | Strengthened Rule 13 for package smoke job-container checkout prerequisites |
 | 0.7.16 | 2026-06-03 | Codex | Strengthened Rule 13 for tag release gates avoiding user-local spec dependencies in clean CI checkouts |
+| 0.7.17 | 2026-06-04 | Codex | Strengthened Rule 6 for streaming code-block fence state across split text events |
+| 0.8.0 | 2026-06-04 | Kang | 0.8.0 release gate target (release-gates-check-080) with streaming, coverage, matrix, and clean-checkout gates |
+| 0.8.1 | 2026-06-10 | Codex | Strengthened Rule 13 for newer release gates that reuse prior-version validators with caller-parameterized active version assertions and current release-matrix schema consumers |

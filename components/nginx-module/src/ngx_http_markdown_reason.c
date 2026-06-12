@@ -317,6 +317,8 @@ static ngx_str_t ngx_http_markdown_reason_streaming_fail_postcommit_str =
     ngx_string("STREAMING_FAIL_POSTCOMMIT");
 static ngx_str_t ngx_http_markdown_reason_streaming_skip_str =
     ngx_string("STREAMING_SKIP_UNSUPPORTED");
+static ngx_str_t ngx_http_markdown_reason_streaming_skip_compressed_str =
+    ngx_string("STREAMING_SKIP_COMPRESSED");
 static ngx_str_t ngx_http_markdown_reason_streaming_budget_str =
     ngx_string("STREAMING_BUDGET_EXCEEDED");
 static ngx_str_t ngx_http_markdown_reason_streaming_precommit_failopen_str =
@@ -408,6 +410,24 @@ const ngx_str_t *
 ngx_http_markdown_reason_streaming_skip_unsupported(void)
 {
     return &ngx_http_markdown_reason_streaming_skip_str;
+}
+
+
+/*
+ * Return the STREAMING_SKIP_COMPRESSED reason code.
+ *
+ * Logged when the path selector forces full-buffer because
+ * the response has Content-Encoding (compressed).  Compressed
+ * responses MUST NOT enter the streaming parser directly
+ * (Requirement 3 AC 1).
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "STREAMING_SKIP_COMPRESSED"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_streaming_skip_compressed(void)
+{
+    return &ngx_http_markdown_reason_streaming_skip_compressed_str;
 }
 
 

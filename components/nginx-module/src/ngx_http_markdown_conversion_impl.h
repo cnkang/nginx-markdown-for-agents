@@ -760,6 +760,11 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
         options->memory_budget = 0;
     }
 
+    options->flush_threshold =
+        (conf->stream.flush_min > UINT32_MAX)
+            ? UINT32_MAX
+            : (uint32_t) conf->stream.flush_min;
+
     if (conf->advanced.llm_provider > UINT8_MAX) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown: llm_provider=%ui exceeds uint8 range",
@@ -1729,7 +1734,7 @@ ngx_http_markdown_execute_conversion(ngx_http_request_t *r,
      * conversions use a different pipeline and should not
      * be compared against the streaming engine.
      */
-    if (conf->streaming.shadow
+    if (conf->stream.shadow
         && ctx->processing_path != NGX_HTTP_MARKDOWN_PATH_INCREMENTAL)
     {
         ngx_http_markdown_shadow_compare(

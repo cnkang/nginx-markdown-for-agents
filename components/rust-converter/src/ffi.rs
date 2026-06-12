@@ -93,7 +93,10 @@ pub use abi::{
 };
 
 #[cfg(feature = "streaming")]
-pub use abi::{ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_STREAMING_FALLBACK};
+pub use abi::{
+    ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_STREAMING_FALLBACK, POST_COMMIT_ABORT,
+    POST_COMMIT_SAFE_FINISH,
+};
 pub use exports::{
     markdown_check_conditional, markdown_convert, markdown_converter_free, markdown_converter_new,
     markdown_decomp_result_init, markdown_decompress_bounded, markdown_decompress_free,
@@ -108,7 +111,7 @@ pub use incremental::{
 
 #[cfg(feature = "streaming")]
 pub use streaming::{
-    StreamingConverterHandle, markdown_streaming_abort, markdown_streaming_feed,
-    markdown_streaming_finalize, markdown_streaming_free, markdown_streaming_new,
-    markdown_streaming_output_free,
+    StreamingConverterHandle, StreamingOptions, markdown_streaming_abort, markdown_streaming_feed,
+    markdown_streaming_finalize, markdown_streaming_finish, markdown_streaming_free,
+    markdown_streaming_new, markdown_streaming_output_free, markdown_streaming_safe_finish,
 };

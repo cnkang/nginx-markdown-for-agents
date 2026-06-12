@@ -625,7 +625,9 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Streaming engine selection mode.
      * Supports per-request variable-driven rollout.
      * Default: auto (per-request selection based on
-     *          markdown_streaming_auto_threshold)
+     *          markdown_stream_threshold in v0.8.0; explicit legacy
+     *          markdown_streaming_auto_threshold values are bridged
+     *          only when the new directive is not set)
      * Context: http, server, location
      *
      * Example:
@@ -715,13 +717,15 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_streaming_auto_threshold <size>
      *
-     * Content-Length threshold for auto mode engine selection.
-     * When markdown_streaming_engine is auto, responses with
-     * Content-Length >= this value use streaming; smaller
-     * responses use full-buffer. Chunked responses always
-     * use streaming in auto mode.
+     * LEGACY (v0.6.0): Content-Length threshold for auto mode engine selection.
+     * In v0.8.0, use markdown_stream_threshold instead.
      *
-     * Default: 32k
+     * When explicitly set, this value is mapped into the v0.8.0
+     * stream.threshold via the compatibility bridge.  If not set,
+     * the v0.8.0 default of 1m (markdown_stream_threshold) applies.
+     *
+     * Legacy field default: 32k (only used when this directive is explicitly set)
+     * Effective v0.8.0 runtime default: stream.threshold = 1m
      * Context: http, server, location
      *
      * Example:
@@ -1219,6 +1223,129 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF
             |NGX_CONF_TAKE1,
         ngx_http_markdown_diagnostics_allow,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
+     * markdown_streaming_engine off|auto|on
+     *
+     * v0.8.0 core engine switch for true streaming availability.
+     * - off: streaming disabled
+     * - auto: automatic selection based on threshold (default)
+     * - on: streaming always enabled for eligible responses
+     *
+     * When MARKDOWN_STREAMING_ENABLED is compiled in, the v0.6.0
+     * complex-value handler above takes precedence for this
+     * directive name (supports $variable per-request rollout).
+     *
+     * Default: auto
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_streaming_engine on;
+     */
+#ifndef MARKDOWN_STREAMING_ENABLED
+    {
+        ngx_string("markdown_streaming_engine"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_markdown_stream_engine_handler,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+#endif
+
+    /*
+     * markdown_stream_threshold <size>
+     *
+     * Minimum response size for streaming candidacy.
+     * Responses with Content-Length below this value use
+     * full-buffer conversion.  Zero is rejected.
+     *
+     * Default: 1m (1048576 bytes)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_stream_threshold 512k;
+     */
+    {
+        ngx_string("markdown_stream_threshold"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_markdown_stream_threshold_handler,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
+     * markdown_stream_precommit_buffer <size>
+     *
+     * Size of the pre-commit replay buffer for streaming fallback.
+     * Zero is allowed (disables pre-commit HTML fallback capability).
+     *
+     * Default: 256k (262144 bytes)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_stream_precommit_buffer 128k;
+     *   markdown_stream_precommit_buffer 0;
+     */
+    {
+        ngx_string("markdown_stream_precommit_buffer"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_size_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, stream.precommit_buffer),
+        NULL
+    },
+
+    /*
+     * markdown_stream_flush_min <size>
+     *
+     * Minimum Markdown output batch size before flushing
+     * downstream.  Must be greater than zero to avoid
+     * pathological per-byte flushing.
+     *
+     * Default: 16k (16384 bytes)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_stream_flush_min 32k;
+     */
+    {
+        ngx_string("markdown_stream_flush_min"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_markdown_stream_flush_min_handler,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
+     * markdown_stream_excluded_types <type> [<type> ...]
+     *
+     * Content types that should never enter streaming conversion.
+     * User-configured types are additive to built-in hard
+     * exclusions (text/event-stream, application/x-ndjson,
+     * application/stream+json).
+     *
+     * Default: none (only built-in hard exclusions apply)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_stream_excluded_types text/csv application/xml;
+     */
+    {
+        ngx_string("markdown_stream_excluded_types"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+        ngx_http_markdown_stream_excluded_types_handler,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
         NULL

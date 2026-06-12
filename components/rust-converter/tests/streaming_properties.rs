@@ -660,6 +660,38 @@ fn test_cross_boundary_attribute_value_split() {
     assert_split_invariant(html, offset + 3); // split inside "example"
 }
 
+/// Link text split across chunks: `<a href="url">Lin` | `k text</a>`
+/// produces correct `[Link text](url)` Markdown output.
+/// Validates: Requirements 2.1, 2.2
+#[test]
+fn test_cross_boundary_link_text_split() {
+    let html = b"<html><body><p><a href=\"https://example.com\">Link text</a></p></body></html>";
+    // Split inside the link text "Link text" — between "Lin" and "k text"
+    let offset = html.windows(9).position(|w| w == b"Link text").unwrap();
+    assert_split_invariant(html, offset + 3); // split: "Lin" | "k text"
+}
+
+/// Link href split across chunks: `<a href="https://exa` | `mple.com">Link text</a>`
+/// produces correct `[Link text](https://example.com)` Markdown output.
+/// Validates: Requirements 2.1, 2.2
+#[test]
+fn test_cross_boundary_link_href_split() {
+    let html = b"<html><body><p><a href=\"https://example.com\">Link text</a></p></body></html>";
+    // Split inside the href URL — between "https://exa" and "mple.com"
+    let offset = html.windows(11).position(|w| w == b"example.com").unwrap();
+    assert_split_invariant(html, offset + 3); // split: "exa" | "mple.com"
+}
+
+/// Link split at boundary between closing quote and ">": `<a href="url"` | `>text</a>`
+/// Validates: Requirements 2.1, 2.2
+#[test]
+fn test_cross_boundary_link_between_attr_and_content() {
+    let html = b"<html><body><p><a href=\"https://example.com\">Link text</a></p></body></html>";
+    // Split right after the closing quote of href, before the ">"
+    let offset = html.windows(6).position(|w| w == b".com\">").unwrap();
+    assert_split_invariant(html, offset + 5); // split: `.com"` | `>Link text</a>`
+}
+
 /// Verifies that splitting an input inside an HTML entity (the `&amp;` in this case)
 /// does not change the streaming converter's output.
 ///
@@ -712,6 +744,70 @@ fn test_cross_boundary_code_language_split() {
         b"<html><body><pre><code class=\"language-rust\">fn main() {}</code></pre></body></html>";
     let offset = html.windows(9).position(|w| w == b"language-").unwrap();
     assert_split_invariant(html, offset + 5); // split inside "language-rust"
+}
+
+/// Text content split across chunks: `<p>Hello wo` | `rld</p>` produces
+/// the same Markdown as unsplit.
+/// Validates: Requirements 2.1, 2.2
+#[test]
+fn test_cross_boundary_text_content_split() {
+    let html = b"<html><body><p>Hello world, this is a paragraph.</p></body></html>";
+    // Split inside the text content "Hello wo" | "rld..."
+    let offset = html.windows(5).position(|w| w == b"world").unwrap();
+    assert_split_invariant(html, offset + 2); // split between "wo" and "rld"
+}
+
+/// Text content with multiple text nodes split: verify all text is preserved.
+/// Validates: Requirements 2.1, 2.2
+#[test]
+fn test_cross_boundary_text_multinode_split() {
+    let html =
+        b"<html><body><p>First sentence. Second sentence.</p><p>Third paragraph.</p></body></html>";
+    // Split inside the first text content
+    let offset = html.windows(8).position(|w| w == b"sentence").unwrap();
+    assert_split_invariant(html, offset + 4); // split inside "sentence"
+}
+
+/// List items split across chunks: `<ul><li>Ite` | `m one</li>...</ul>`
+/// produces correct Markdown list output.
+/// Validates: Requirements 2.1, 2.2
+#[test]
+fn test_cross_boundary_list_item_text_split() {
+    let html =
+        b"<html><body><ul><li>Item one</li><li>Item two</li><li>Item three</li></ul></body></html>";
+    // Split inside "Item one" text — find the 'o' of "one"
+    let offset = html.windows(8).position(|w| w == b"Item one").unwrap();
+    assert_split_invariant(html, offset + 5); // split inside "Item one" → "Item " | "one..."
+}
+
+/// List boundary split: chunk boundary falls between `</li>` and `<li>`.
+/// Validates: Requirements 2.1, 2.2
+#[test]
+fn test_cross_boundary_list_between_items() {
+    let html = b"<html><body><ul><li>First</li><li>Second</li><li>Third</li></ul></body></html>";
+    // Split between </li> and <li>
+    let offset = html.windows(10).position(|w| w == b"</li><li>S").unwrap();
+    assert_split_invariant(html, offset + 5); // split: "</li>" | "<li>Second..."
+}
+
+/// Ordered list split across chunks produces correct numbered output.
+/// Validates: Requirements 2.1, 2.2
+#[test]
+fn test_cross_boundary_ordered_list_split() {
+    let html = b"<html><body><ol><li>Alpha</li><li>Beta</li><li>Gamma</li></ol></body></html>";
+    // Split inside the second list item's text "Beta"
+    let offset = html.windows(4).position(|w| w == b"Beta").unwrap();
+    assert_split_invariant(html, offset + 2); // split inside "Beta" → "Be" | "ta..."
+}
+
+/// Nested list split: chunk boundary inside a nested list structure.
+/// Validates: Requirements 2.1, 2.2
+#[test]
+fn test_cross_boundary_nested_list_split() {
+    let html = b"<html><body><ul><li>Outer<ul><li>Inner one</li><li>Inner two</li></ul></li><li>Next outer</li></ul></body></html>";
+    // Split inside the nested list text "Inner one"
+    let offset = html.windows(9).position(|w| w == b"Inner one").unwrap();
+    assert_split_invariant(html, offset + 5); // split inside "Inner one" → "Inner" | " one..."
 }
 
 /// Every single byte position: exhaustive split test for a small document.

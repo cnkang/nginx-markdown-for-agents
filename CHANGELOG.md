@@ -5,6 +5,134 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-06-10
+
+True streaming contract, fallback state machine, streaming observability,
+streaming security enforcement, release matrix source of truth, and streaming
+configuration directives.
+
+### Added
+
+- **True streaming contract** (RFC 0008, ADR-0011): formalize incremental
+  input processing, incremental output emission, and bounded memory as a
+  verifiable contract for the streaming engine.
+- **Streaming fallback state machine** (ADR-0012): pre-commit/post-commit
+  two-phase error handling with deterministic recovery semantics.
+- **Body filter streaming integration**: wire the streaming converter
+  into the NGINX body filter chain with chunked transfer encoding output.
+- **Streaming converter FFI**: Rust streaming converter ABI and C
+  headers for incremental conversion across chunk boundaries.
+- **Streaming configuration directives** (#137, ADR-0013):
+  `markdown_stream_threshold`, `markdown_stream_precommit_buffer`,
+  `markdown_stream_flush_min`, `markdown_stream_excluded_types`.
+- **Streaming observability**: engine selection counters, fallback
+  and failure counters, streaming reason codes for diagnostics.
+- **Streaming security enforcement**: hard-excluded content types
+  that bypass streaming regardless of configuration, with security test suite.
+- **Release matrix source of truth** (ADR-0014): `tools/release-matrix.json`,
+  JSON schema, validation tooling, and documentation rendering script.
+- **v0.8.0 release gate**: `make release-gates-check-080` for pre-release
+  validation.
+- **Streaming troubleshooting guide**: complete operator-facing diagnostic
+  procedures for streaming issues.
+- **Migration guide (0.7.x → 0.8.0)**: `docs/guides/MIGRATION-0.8.md` covering
+  breaking changes and upgrade steps.
+- **Streaming compatibility matrix**: `docs/features/STREAMING_COMPATIBILITY.md`
+  documenting feature support across engine modes.
+- **Streaming rollout cookbook**: step-by-step rollout and rollback procedures
+  for streaming deployment.
+- **Streaming compression strategy**: documentation of compression handling
+  in the streaming pipeline.
+- **Streaming eligibility audit**: security-focused audit of streaming
+  eligibility decisions.
+- **Bounded-memory streaming engine core**: Rust streaming converter with
+  memory-bounded operation.
+- **Content-type routing**: configurable allowlist, boundary fix, and reason
+  codes for content-type selection.
+- **MDX flavor**: `MarkdownFlavor::Mdx` variant, C directive, and FFI mapping.
+- **Org-mode flavor**: `MarkdownFlavor::OrgMode` variant, directive, and FFI.
+- **LLM adapter**: provider abstraction, `chars_per_token` config, and FFI
+  fields.
+- **Per-path metrics**: SHM struct fields, directive, snapshot and rendering,
+  version bump to v4.
+- **Prometheus text exposition format** for the metrics endpoint.
+- **OTel tracing integration**: self-implemented OTLP HTTP/protobuf with span
+  helpers wired into production conversion paths.
+- **Dynamic configuration hot-reload**: watcher wired into worker lifecycle
+  with dry-run validation and last-known-good rollback.
+- **Effective config**: build effective configuration at header filter phase
+  and propagate to all call sites.
+- **Header plan ownership model**: opaque handle replaces borrowed pointers
+  for safer FFI boundary.
+- **Transactional multi-value header deletion and rollback** in header plan.
+- **Cargo-fuzz targets** and foundation infrastructure for continuous fuzz
+  testing.
+- **Benchmark corpus pipeline** with quality gating and evidence tooling.
+- **Streaming evidence generation** and schema targets.
+- **Homebrew tap installation** for macOS.
+- **Unified DEB/RPM release workflow** with nFPM.
+- **Helm chart** and Kubernetes deployment examples.
+
+### Changed
+
+- `markdown_streaming_auto_threshold` is now a deprecated compatibility
+  directive. Existing configurations still parse, and explicit values are
+  bridged to `markdown_stream_threshold` unless the new directive is also
+  explicitly configured.
+- **BREAKING**: Streaming engine now produces `Transfer-Encoding: chunked`
+  output instead of `Content-Length` for streaming responses.
+- **BREAKING**: `MarkdownOptions` FFI layout now includes
+  `flush_threshold` for `markdown_stream_flush_min`. C and Rust integrations
+  that construct `MarkdownOptions` directly must rebuild against the 0.8.0
+  headers and initialize the new field.
+- Auto-mode streaming threshold default changed from 32 KB to 1 MB to align
+  with the true streaming contract definition (ADR-0013).
+- `markdown_max_size` directive now emits an info-level deprecation warning
+  at startup. It remains functional but may be removed in a future release.
+- Diagnostics endpoint resets on configuration reload cycles.
+- Release gate validation strengthened with Rust build invariant assertions
+  and deeper 0.7.0 validation checks.
+
+### Deprecated
+
+- `markdown_max_size`: emits info-level deprecation warning; use
+  `markdown_stream_threshold` and `markdown_stream_precommit_buffer` instead.
+  Scheduled for removal in a future release.
+- `markdown_streaming_auto_threshold`: accepted for compatibility and mapped
+  to `markdown_stream_threshold` when explicitly configured. New
+  configurations should use `markdown_stream_threshold` directly.
+
+### Removed
+
+- None. The legacy `markdown_streaming_auto_threshold` directive remains
+  registered for compatibility in 0.8.0.
+
+### Fixed
+
+- Streaming postcommit reason codes now preserved correctly across flush
+  threshold boundaries.
+- Truncated raw deflate streams are now rejected with proper error handling
+  instead of producing corrupt output.
+- Code-block fence state preserved across text-event boundaries in the
+  streaming converter.
+- Release matrix doc path safety validation hardened against directory
+  traversal.
+- Use-after-free in `prepare_body_output_buffer` (C-01) eliminated.
+- UB in buffer arithmetic, output ordering, and zlib field access corrected.
+- Deflate semantics unified, dynamic config allocation bounded, and NULL
+  guards added.
+- Header plan ETag placeholder resume output handled correctly.
+- Malformed q-values in Accept headers now return -1.0f sentinel to
+  distinguish from explicit `q=0`.
+- Duplicate `last_buf` on terminal replay append failure prevented.
+- Various SonarCloud and CodeQL findings resolved (path injection, type
+  limits, const qualifiers, unused variables).
+- Snyk code findings cleared across multiple components.
+- FFI contract hardened with host validation and token estimation fixes.
+- Shell hygiene and macOS bash 3.2 compatibility in harness scripts.
+- Docker build reliability: CA certificate installation, Cargo.lock handling,
+  and Alpine package retry logic.
+
 ## [0.7.0] - 2026-06-03
 
 P0 runtime correctness fixes, Rust-first architecture modules, independent

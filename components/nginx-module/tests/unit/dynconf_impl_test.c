@@ -244,7 +244,7 @@ test_effective_conf_helpers_smoke(void)
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
     conf.advanced.memory_budget = 8 * 1024 * 1024;
 #ifdef MARKDOWN_STREAMING_ENABLED
-    conf.streaming.budget = 4 * 1024 * 1024;
+    conf.stream.budget = 4 * 1024 * 1024;
 #endif
 
     snap.valid = 1;
@@ -1567,7 +1567,7 @@ test_reload_all_keys(void)
     TEST_ASSERT(conf.advanced.prune_noise == 1, "prune_noise=on applied");
     TEST_ASSERT(conf.policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_ERROR,
                 "log_verbosity=error applied");
-    TEST_ASSERT(conf.streaming.budget == 8 * 1024 * 1024,
+    TEST_ASSERT(conf.stream.budget == 8 * 1024 * 1024,
                 "streaming_budget=8m applied");
     TEST_ASSERT(conf.advanced.memory_budget == 256 * 1024,
                 "memory_budget=256k applied");
@@ -1698,7 +1698,7 @@ test_snapshot_from_conf_and_apply(void)
     conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
     conf.advanced.prune_noise = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_WARN;
-    conf.streaming.budget = 4 * 1024 * 1024;
+    conf.stream.budget = 4 * 1024 * 1024;
     conf.advanced.memory_budget = 128 * 1024;
 
     ngx_http_markdown_dynconf_snapshot_from_conf(&snapshot, &conf);
@@ -1718,7 +1718,7 @@ test_snapshot_from_conf_and_apply(void)
     TEST_ASSERT(conf.advanced.prune_noise == 1, "apply snapshot: prune_noise=1");
     TEST_ASSERT(conf.policy.log_verbosity == NGX_HTTP_MARKDOWN_LOG_WARN,
                 "apply snapshot: log_verbosity=WARN");
-    TEST_ASSERT(conf.streaming.budget == 4 * 1024 * 1024,
+    TEST_ASSERT(conf.stream.budget == 4 * 1024 * 1024,
                 "apply snapshot: streaming_budget=4MiB");
     TEST_ASSERT(conf.advanced.memory_budget == 128 * 1024,
                 "apply snapshot: memory_budget=128KiB");

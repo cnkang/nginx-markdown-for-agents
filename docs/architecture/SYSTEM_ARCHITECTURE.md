@@ -191,9 +191,55 @@ This decision is documented in [ADR-0003](ADR/0003-inline-origin-near-conversion
 - Rust-selection decision: [ADR/0001-use-rust-for-conversion.md](ADR/0001-use-rust-for-conversion.md)
 - Buffering decision: [ADR/0002-full-buffering-approach.md](ADR/0002-full-buffering-approach.md)
 - Origin-near positioning decision: [ADR/0003-inline-origin-near-conversion.md](ADR/0003-inline-origin-near-conversion.md)
+- True streaming support contract: [RFC-0008-streaming-conversion-support-contract.md](RFC-0008-streaming-conversion-support-contract.md)
+- Streaming fallback state machine: [ADR/0012-fallback-state-machine.md](ADR/0012-fallback-state-machine.md)
+- Streaming default policy: [ADR/0013-streaming-default-policy.md](ADR/0013-streaming-default-policy.md)
+- Release matrix source of truth: [ADR/0014-release-matrix-source-of-truth.md](ADR/0014-release-matrix-source-of-truth.md)
 - Repository layout: [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md)
 - Operator-facing behavior: [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md)
 
+
+## v0.8.0 Streaming Architecture
+
+v0.8.0 adds a true streaming path alongside the existing full-buffer path.
+The NGINX module still owns request lifecycle, header ordering, policy gates,
+and backpressure handling. Rust owns conversion logic and exposes both
+full-buffer and incremental streaming FFI entrypoints.
+
+### Engine Selection and Defaults
+
+`markdown_streaming_engine` defaults to `auto`. In auto mode, known small
+responses remain on the full-buffer path while large or chunked responses can
+enter the streaming path. The 0.8.0 threshold is
+`markdown_stream_threshold` (default `1m`). The legacy
+`markdown_streaming_auto_threshold` directive remains registered only as a
+compatibility bridge: when explicitly configured and the new threshold is not,
+its value is mapped into `markdown_stream_threshold`.
+
+### Streaming Body Filter
+
+The streaming body filter consumes upstream buffers incrementally and emits
+Markdown chunks without making the complete response body the default working
+set. Before any Markdown output is committed, the module can replay the
+original HTML from `markdown_stream_precommit_buffer` if conversion fails.
+After commit, failures are terminal because the response representation has
+already changed.
+
+### Streaming FFI Contract
+
+The C side passes incremental chunks, EOF state, flush thresholds, and budget
+limits through the streaming converter ABI. Rust reports structured streaming
+events and errors back to C so the module can preserve NGINX return-code
+semantics, apply fallback policy before commit, and update metrics only on the
+correct success or failure path.
+
+### Observability and Release Gate
+
+Streaming decisions, fallbacks, and post-commit failures are exposed through
+Prometheus metrics and diagnostics reason codes. The 0.8.0 release contract is
+validated by `make release-gates-check-080`, which layers streaming,
+documentation, release-matrix, and clean-checkout checks on top of the earlier
+0.7.0 gates.
 
 ## v0.7.0 Subsystems
 
@@ -290,3 +336,4 @@ the operation list and applies changes to `r->headers_out`.
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 subsystems section (negotiator, conditional, decision, header_plan, security extensions, bounded decompression, parser timeout/budget, diagnostics endpoint, dynconf dry-run/LKG, reason code FFI accessor, header plan atomic application) |
+| 0.8.0 | 2026-06-10 | Kang | Added true streaming architecture, engine-selection compatibility notes, streaming FFI/fallback boundaries, observability, and release-gates-check-080 references |

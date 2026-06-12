@@ -89,6 +89,7 @@ typedef struct {
         ngx_atomic_uint_t accept;
         ngx_atomic_uint_t no_accept;
         ngx_atomic_uint_t conditional;
+        ngx_atomic_uint_t compression_passthrough;
     } skips;
 
     /* Conversion result counters */
@@ -121,6 +122,28 @@ typedef struct {
         ngx_atomic_uint_t shadow_diff_total;
         ngx_atomic_uint_t last_ttfb_ms;
         ngx_atomic_uint_t last_peak_memory_bytes;
+
+        /* Fallback/failure counters */
+        ngx_atomic_uint_t streaming_fallback_precommit_pass;
+        ngx_atomic_uint_t streaming_fallback_precommit_reject;
+        ngx_atomic_uint_t streaming_failure_postcommit_abort;
+        ngx_atomic_uint_t streaming_failure_postcommit_safe_finish;
+
+        /* Engine choice counters (v0.8.0 observability) */
+        struct {
+            ngx_atomic_uint_t streaming;
+            ngx_atomic_uint_t full_buffer;
+            ngx_atomic_uint_t passthrough;
+            ngx_atomic_uint_t not_eligible;
+        } engine_choice;
+
+        /* Candidate and selection counters */
+        struct {
+            ngx_atomic_uint_t candidate_total;
+            ngx_atomic_uint_t true_streaming_selected_total;
+            ngx_atomic_uint_t output_bytes_total;
+            ngx_atomic_uint_t excluded_content_type_total;
+        } selection;
     } streaming;
 #endif
 
@@ -271,6 +294,8 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
     snapshot->skips.accept = metrics->skips.accept;
     snapshot->skips.no_accept = metrics->skips.no_accept;
     snapshot->skips.conditional = metrics->skips.conditional;
+    snapshot->skips.compression_passthrough =
+        metrics->skips.compression_passthrough;
     snapshot->results.failopen_count = metrics->results.failopen_count;
     snapshot->results.delivery_count = metrics->results.delivery_count;
     snapshot->results.decision_count = metrics->results.decision_count;
@@ -299,6 +324,30 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->streaming.last_ttfb_ms;
     snapshot->streaming.last_peak_memory_bytes =
         metrics->streaming.last_peak_memory_bytes;
+    snapshot->streaming.engine_choice.streaming =
+        metrics->streaming.engine_choice.streaming;
+    snapshot->streaming.engine_choice.full_buffer =
+        metrics->streaming.engine_choice.full_buffer;
+    snapshot->streaming.engine_choice.passthrough =
+        metrics->streaming.engine_choice.passthrough;
+    snapshot->streaming.engine_choice.not_eligible =
+        metrics->streaming.engine_choice.not_eligible;
+    snapshot->streaming.streaming_fallback_precommit_pass =
+        metrics->streaming.streaming_fallback_precommit_pass;
+    snapshot->streaming.streaming_fallback_precommit_reject =
+        metrics->streaming.streaming_fallback_precommit_reject;
+    snapshot->streaming.streaming_failure_postcommit_abort =
+        metrics->streaming.streaming_failure_postcommit_abort;
+    snapshot->streaming.streaming_failure_postcommit_safe_finish =
+        metrics->streaming.streaming_failure_postcommit_safe_finish;
+    snapshot->streaming.selection.candidate_total =
+        metrics->streaming.selection.candidate_total;
+    snapshot->streaming.selection.true_streaming_selected_total =
+        metrics->streaming.selection.true_streaming_selected_total;
+    snapshot->streaming.selection.output_bytes_total =
+        metrics->streaming.selection.output_bytes_total;
+    snapshot->streaming.selection.excluded_content_type_total =
+        metrics->streaming.selection.excluded_content_type_total;
 #endif
     snapshot->results.estimated_token_savings = metrics->results.estimated_token_savings;
 
@@ -750,7 +799,8 @@ ngx_http_markdown_metrics_write_json(
         "    \"range\": %uA,\n"
         "    \"accept\": %uA,\n"
         "    \"no_accept\": %uA,\n"
-        "    \"conditional\": %uA\n"
+        "    \"conditional\": %uA,\n"
+        "    \"compression_passthrough\": %uA\n"
         "  },\n"
 
         /* Operational totals and per-path aggregate counters */
@@ -840,6 +890,7 @@ ngx_http_markdown_metrics_write_json(
         snapshot->skips.accept,
         snapshot->skips.no_accept,
         snapshot->skips.conditional,
+        snapshot->skips.compression_passthrough,
         snapshot->results.failopen_count,
         snapshot->results.delivery_count,
         snapshot->results.decision_count,
@@ -1054,6 +1105,7 @@ ngx_http_markdown_metrics_write_text(
         "- Skips (Accept): %uA\n"
         "- Skips (No Accept): %uA\n"
         "- Skips (Conditional): %uA\n"
+        "- Skips (Compression Passthrough): %uA\n"
         "- Fail-Open Count: %uA\n"
         "- Delivery Count: %uA\n"
         "- Decision Count: %uA\n"
@@ -1138,6 +1190,7 @@ ngx_http_markdown_metrics_write_text(
         snapshot->skips.accept,
         snapshot->skips.no_accept,
         snapshot->skips.conditional,
+        snapshot->skips.compression_passthrough,
         snapshot->results.failopen_count,
         snapshot->results.delivery_count,
         snapshot->results.decision_count,

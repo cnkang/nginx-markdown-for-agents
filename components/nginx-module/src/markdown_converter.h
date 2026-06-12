@@ -72,6 +72,34 @@
 #define ERROR_POST_COMMIT 8
 #endif
 
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Post-commit safe finish: return code from `markdown_streaming_safe_finish`.
+ *
+ * Indicates that all open Markdown structures were successfully closed.
+ * The output buffer contains the closing Markdown text (fences, newlines, etc.)
+ * that the C caller should append after the already-committed output.
+ *
+ * Corresponds to design doc FFI Return Code 3 (Post-commit safe finish required
+ * was handled successfully).
+ */
+#define POST_COMMIT_SAFE_FINISH 3
+#endif
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Post-commit abort required: return code from `markdown_streaming_safe_finish`.
+ *
+ * Indicates that the open Markdown structures could NOT be safely closed
+ * (e.g., emitter budget exceeded during closure attempt). The C caller must
+ * abort and discard or truncate the partial output. C MUST NOT infer or
+ * synthesize Markdown closure for Rust-owned parser/emitter state.
+ *
+ * Corresponds to design doc FFI Return Code 4 (Post-commit abort required).
+ */
+#define POST_COMMIT_ABORT 4
+#endif
+
 /**
  * Decompression budget exceeded (decompressed output exceeds decompress_max_size).
  */
@@ -383,6 +411,14 @@ typedef struct MarkdownOptions {
    * Populated from the `markdown_parser_budget` NGINX directive.
    */
   uint64_t parser_memory_budget;
+  /**
+   * Streaming flush threshold in bytes (0 = use default threshold).
+   *
+   * Controls the minimum number of accumulated output bytes before
+   * the streaming emitter returns non-empty output to the C caller.
+   * Populated from the `markdown_stream_flush_min` NGINX directive.
+   */
+  uint32_t flush_threshold;
 } MarkdownOptions;
 
 /**
@@ -1049,6 +1085,7 @@ void markdown_decomp_result_init(struct FFIDecompResult *result);
  *     chars_per_token_fixed: 0,
  *     parse_timeout_ms: 0,
  *     parser_memory_budget: 0,
+ *     flush_threshold: 0,
  * };
  * let handle = unsafe { markdown_incremental_new(&opts) };
  * assert!(!handle.is_null());
@@ -1275,11 +1312,59 @@ uint32_t markdown_streaming_feed(struct StreamingConverterHandle *handle,
 
 #if defined(MARKDOWN_STREAMING_ENABLED)
 /**
+ * Signal end-of-input to the streaming converter, flush remaining output,
+ * and consume the handle.
+ *
+ * This is a lightweight finish path for C callers that only need the final
+ * flushed Markdown bytes and a status code — without the full
+ * [`MarkdownResult`] metadata (ETag, token estimate, peak memory) that
+ * [`markdown_streaming_finalize`] provides.
+ *
+ * On success (`ERROR_SUCCESS`), `*out_data` and `*out_len` are set to the
+ * final Markdown output buffer allocated by Rust. The caller must free this
+ * buffer via [`markdown_streaming_output_free`]. If the final flush produces
+ * no additional output, `*out_data` is NULL and `*out_len` is 0.
+ *
+ * This call always consumes the provided `handle` when validation passes
+ * (handle is non-NULL and output pointers are non-NULL); after this function
+ * returns successfully the handle is invalid and must not be passed to any
+ * other `markdown_streaming_*` function. If validation fails (NULL handle or
+ * NULL output pointers), `ERROR_INVALID_INPUT` is returned and the handle is
+ * NOT consumed — the caller remains responsible for freeing or aborting it.
+ * Violating this rule causes a double-free (CWE-415).
+ *
+ * # Safety
+ *
+ * - `handle` must be a live pointer returned by [`markdown_streaming_new`]
+ *   that has not already been finalized, aborted, freed, or finished.
+ * - `out_data` must be a valid, writable pointer to `*mut u8`.
+ * - `out_len` must be a valid, writable pointer to `usize`.
+ *
+ * # Returns
+ *
+ * - `ERROR_SUCCESS` (0) — conversion completed normally, output available
+ * - `ERROR_STREAMING_FALLBACK` (7) — unsupported content detected (pre-commit)
+ * - `ERROR_POST_COMMIT` (8) — error after partial output committed
+ * - `ERROR_TIMEOUT` (3) — cooperative timeout exceeded during flush
+ * - `ERROR_BUDGET_EXCEEDED` (6) — memory budget exceeded during flush
+ * - `ERROR_INVALID_INPUT` (5) — NULL handle or output pointers
+ * - `ERROR_INTERNAL` (99) — caught panic
+ */
+uint32_t markdown_streaming_finish(struct StreamingConverterHandle *handle,
+                                   uint8_t **out_data,
+                                   uintptr_t *out_len);
+#endif
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
  * Finalize a streaming conversion, consume the handle, and write the result.
  *
- * This call always consumes the provided `handle`; after this function
- * returns (whether success, failure, or internal panic) the handle is
- * invalid and must not be used again or freed by the caller.
+ * This call consumes the provided `handle` when validation passes (both
+ * `handle` and `result` are non-NULL); after successful consumption the
+ * handle is invalid and must not be used again or freed by the caller.
+ * If validation fails (NULL `handle` or NULL `result`), `ERROR_INVALID_INPUT`
+ * is returned and the handle is NOT consumed — the caller remains responsible
+ * for freeing or aborting it.
  *
  * # Safety
  *
@@ -1319,6 +1404,52 @@ void markdown_streaming_abort(struct StreamingConverterHandle *handle);
 
 #if defined(MARKDOWN_STREAMING_ENABLED)
 /**
+ * Attempt a post-commit safe finish: close all open Markdown structures
+ * without emitting raw HTML, then consume the handle.
+ *
+ * This function is designed to be called after `markdown_streaming_feed`
+ * returns `ERROR_POST_COMMIT` (8). It attempts to gracefully close all
+ * open Markdown constructs (headings, paragraphs, lists, code blocks,
+ * blockquotes, inline formatting) so that the already-emitted output
+ * forms valid Markdown.
+ *
+ * On success (`POST_COMMIT_SAFE_FINISH` = 3), `*out_data` and `*out_len`
+ * are set to the Markdown closure bytes (e.g., closing fences, trailing
+ * newlines). The caller must free this buffer via
+ * [`markdown_streaming_output_free`]. The caller should append these
+ * bytes after the already-committed output.
+ *
+ * On failure (`POST_COMMIT_ABORT` = 4), structures could not be safely
+ * closed. The output buffer is set to NULL/0. The caller must abort and
+ * discard or truncate the partial output. **C MUST NOT infer or synthesize
+ * Markdown closure for Rust-owned parser/emitter state** (Requirement 1.8).
+ *
+ * This call always consumes the handle; after this function returns the
+ * handle is invalid and must not be passed to any other function.
+ *
+ * # Safety
+ *
+ * - `handle` must be a live pointer returned by [`markdown_streaming_new`]
+ *   that has not already been finalized, aborted, freed, or finished.
+ * - `out_data` must be a valid, writable pointer to `*mut u8`.
+ * - `out_len` must be a valid, writable pointer to `usize`.
+ *
+ * # Returns
+ *
+ * - `POST_COMMIT_SAFE_FINISH` (3) — all open structures were closed
+ *   successfully; output buffer contains closure Markdown.
+ * - `POST_COMMIT_ABORT` (4) — safe finish failed; output is NULL/0.
+ *   Caller must abort (discard partial output).
+ * - `ERROR_INVALID_INPUT` (5) — NULL handle or output pointers.
+ * - `ERROR_INTERNAL` (99) — caught panic.
+ */
+uint32_t markdown_streaming_safe_finish(struct StreamingConverterHandle *handle,
+                                        uint8_t **out_data,
+                                        uintptr_t *out_len);
+#endif
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
  * Free a streaming converter handle without finalizing.
  *
  * Use this function to release resources when the conversion is being
@@ -1342,20 +1473,65 @@ void markdown_streaming_free(struct StreamingConverterHandle *handle);
 
 #if defined(MARKDOWN_STREAMING_ENABLED)
 /**
- * Free a Markdown output buffer returned by [`markdown_streaming_feed`].
+ * Free a Markdown output buffer returned by [`markdown_streaming_feed`]
+ * or [`markdown_streaming_finish`].
+ *
+ * This is the **only** valid way to release output buffers produced by the
+ * streaming FFI. The buffer is allocated by the Rust global allocator; C
+ * callers MUST NOT free it with `free()`, `ngx_pfree()`, or any other
+ * deallocator — doing so is undefined behaviour due to allocator mismatch.
  *
  * The `data` pointer and `len` must be exactly the values written to
- * `out_data` and `out_len` by a previous `feed` call. Passing NULL/0
- * is a safe no-op.
+ * `out_data` and `out_len` by a previous `feed` or `finish` call.
+ * Passing `(NULL, 0)` is a safe no-op, which simplifies error-path cleanup.
+ *
+ * # Typical usage pattern (NGINX integration)
+ *
+ * ```text
+ * // C pseudo-code: copy into NGINX chain, then free Rust buffer
+ * rc = markdown_streaming_feed(handle, chunk, len, &out_data, &out_len);
+ * if (rc == 0 && out_data != NULL) {
+ *     ngx_memcpy(pool_buf->last, out_data, out_len);
+ *     pool_buf->last += out_len;
+ *     markdown_streaming_output_free(out_data, out_len);
+ * }
+ * ```
  *
  * # Safety
  *
  * - `data` must be NULL or a pointer previously returned via
- *   `markdown_streaming_feed`'s `out_data` parameter.
- * - `len` must be the corresponding `out_len` value.
- * - Each (data, len) pair must be freed exactly once.
+ *   `markdown_streaming_feed`'s or `markdown_streaming_finish`'s
+ *   `out_data` parameter.
+ * - `len` must be the corresponding `out_len` value from the same call.
+ * - Each `(data, len)` pair must be freed exactly once. Double-free is
+ *   undefined behaviour (CWE-415).
+ * - After this call, `data` is a dangling pointer and must not be
+ *   dereferenced.
  */
 void markdown_streaming_output_free(uint8_t *data, uintptr_t len);
+#endif
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+/**
+ * Return the NUL-terminated reason string from the last `feed` or `finish`
+ * call that signalled fallback or error.
+ *
+ * The returned pointer is owned by Rust and valid until the converter handle
+ * is freed or the next `feed`/`finish` call (whichever comes first). The C
+ * caller must not free or modify the returned pointer.
+ *
+ * Returns NULL when no reason is available (i.e. the last call returned
+ * `ERROR_SUCCESS` or the handle is NULL).
+ *
+ * # Safety
+ *
+ * - `handle` must be NULL or a live pointer returned by
+ *   [`markdown_streaming_new`] that has not been finalized, aborted,
+ *   or freed.
+ * - The returned `*const c_char` must not be used after the next `feed`,
+ *   `finish`, `abort`, or `free` call on the same handle.
+ */
+const char *markdown_streaming_reason(const struct StreamingConverterHandle *handle);
 #endif
 
 #endif  /* NGINX_MARKDOWN_CONVERTER_H */

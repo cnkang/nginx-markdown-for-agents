@@ -188,7 +188,6 @@ This project is a strong fit if you:
 It is a weaker fit if you:
 
 - already have a purpose-built Markdown or JSON content API
-- require streaming to be always-on and cannot use the auto threshold model
 - want transformation logic completely outside the request path
 
 ## How This Compares to Edge-Layer Conversion
@@ -218,9 +217,52 @@ Neither approach is universally better. Edge-layer conversion is a good fit when
 | Metrics endpoint | Exposes module conversion counters for operations |
 | Variable-driven config | Use NGINX variables for per-request conversion control |
 | Authentication-aware | Configurable policies for authenticated requests with cache control |
-| Incremental large-response processing | Threshold-based routing to a separate incremental conversion path for large HTML responses; current implementation still buffers before conversion |
+| Dual-engine conversion | Full-buffer (default) for typical responses plus a streaming engine for large or chunked responses, selected automatically via `auto` mode |
+| Bounded-memory streaming | Streaming engine converts in bounded memory with size-based flush (`markdown_stream_flush_min`); pre-commit safety falls back to HTML on conversion error |
 | Performance baseline gating | Automated regression detection with dual-threshold system (warning / blocking) for PR and nightly CI |
 | Matrix-driven release automation | Automated release pipeline with platform matrix management and artifact completeness verification |
+
+## Platform Support
+
+<!-- BEGIN:release-matrix:support-matrix -->
+
+| NGINX | Channel | OS | libc | Arch | Artifact | Tier | Blocking |
+|-------|---------|-----|------|------|----------|------|----------|
+| 1.31.1 | mainline | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.31.1 | mainline | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.31.1 | mainline | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.31.1 | mainline | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.31.1 | mainline | debian12 | glibc | arm64 | docker-image | supported | Yes |
+| 1.31.1 | mainline | debian12 | glibc | amd64 | docker-image | supported | Yes |
+| 1.31.1 | mainline | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
+| 1.31.1 | mainline | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
+| 1.30.2 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.30.2 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.30.2 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.30.2 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.28.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.26.3 | stable | macos | darwin | arm64 | homebrew-formula | experimental | No |
+| 1.26.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.26.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.26.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.26.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.26.3 | stable | debian12 | glibc | arm64 | docker-image | supported | Yes |
+| 1.26.3 | stable | debian12 | glibc | arm64 | deb-package | supported | Yes |
+| 1.26.3 | stable | debian12 | glibc | amd64 | docker-image | supported | Yes |
+| 1.26.3 | stable | debian12 | glibc | amd64 | deb-package | supported | Yes |
+| 1.26.3 | stable | any | n/a | any | source | best-effort | No |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
+| 1.26.3 | stable | almalinux9 | glibc | arm64 | rpm-package | supported | Yes |
+| 1.26.3 | stable | almalinux9 | glibc | amd64 | rpm-package | supported | Yes |
+| 1.24.0 | oldstable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.24.0 | oldstable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.24.0 | oldstable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.24.0 | oldstable | linux | musl | amd64 | dynamic-module | supported | No |
+<!-- END:release-matrix:support-matrix -->
 
 ## How It Works
 
@@ -294,6 +336,10 @@ make test-rust
 # Full NGINX module unit suite
 make test-nginx-unit
 
+# Streaming-specific tests
+make test-rust-streaming
+make verify-chunked-native-e2e-smoke
+
 # Runtime integration and canonical E2E checks
 make test-nginx-integration
 make test-e2e-rust
@@ -301,7 +347,7 @@ make test-e2e
 make test-rust-fuzz-smoke
 ```
 
-`make test-nginx-integration` and `make test-e2e` require a real `nginx` runtime. If `nginx` is not on `PATH`, use `NGINX_BIN=/absolute/path/to/nginx`.
+`make test-nginx-integration`, `make test-e2e`, and `make verify-chunked-native-e2e-smoke` require a real `nginx` runtime. If `nginx` is not on `PATH`, set `NGINX_BIN=/absolute/path/to/nginx` so that these commands can find the nginx binary.
 
 See [docs/testing/README.md](docs/testing/README.md) and [docs/testing/E2E_TESTS.md](docs/testing/E2E_TESTS.md) for integration, E2E, and performance-oriented test references.
 
@@ -326,6 +372,8 @@ changes:
 | Install the module | [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md) |
 | Build from source | [docs/guides/BUILD_INSTRUCTIONS.md](docs/guides/BUILD_INSTRUCTIONS.md) |
 | Configure directives | [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
+| Upgrade from 0.7.x to 0.8.0 | [docs/guides/MIGRATION-0.8.md](docs/guides/MIGRATION-0.8.md) |
+| Roll out streaming safely | [docs/guides/streaming-rollout-cookbook.md](docs/guides/streaming-rollout-cookbook.md) |
 | Start from deployment examples | [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md) |
 | Operate and troubleshoot | [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md) |
 | Report a vulnerability or review security support | [SECURITY.md](SECURITY.md) |
@@ -337,6 +385,7 @@ changes:
 | Explore implementation details | [docs/features/README.md](docs/features/README.md) |
 | Review testing references | [docs/testing/README.md](docs/testing/README.md) |
 | Check NGINX version compatibility | [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) |
+| Review streaming feature compatibility | [docs/features/STREAMING_COMPATIBILITY.md](docs/features/STREAMING_COMPATIBILITY.md) |
 | Configure dynamic reloading | [docs/guides/DYNAMIC_CONFIG.md](docs/guides/DYNAMIC_CONFIG.md) |
 | Read FAQ | [docs/FAQ.md](docs/FAQ.md) |
 | Look up terminology | [docs/glossary.md](docs/glossary.md) |
@@ -348,6 +397,8 @@ changes:
 - Evaluating the idea: start here, then read [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md)
 - Installing in a real environment: go to [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md)
 - Tuning behavior or policy: use [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md)
+- Upgrading from 0.7.x: use [docs/guides/MIGRATION-0.8.md](docs/guides/MIGRATION-0.8.md)
+- Rolling out streaming in production: use [docs/guides/streaming-rollout-cookbook.md](docs/guides/streaming-rollout-cookbook.md)
 - Operating in production: use [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md)
 - Reporting a vulnerability: use [SECURITY.md](SECURITY.md)
 - Understanding system design: use [docs/architecture/README.md](docs/architecture/README.md)
@@ -397,6 +448,20 @@ add the harness workflow to your default path:
 2. Run `make harness-check`
 3. Run `make harness-check-full` before closing broader docs or release-gate work
 
+## What's New in v0.8.0
+
+v0.8.0 introduces true streaming conversion — bounded-memory HTML-to-Markdown processing for large and chunked responses:
+
+- **Dual-engine model** — Full-buffer conversion (the default since v0.5.0) remains for typical responses. A new streaming engine handles large or chunked responses with bounded memory. The `markdown_streaming_engine` directive controls which engine is used (`off`, `on`, or `auto`).
+- **`auto` mode (default)** — When set to `auto`, the module automatically routes eligible large or chunked responses to the streaming engine while keeping full-buffer for everything else. **Note:** the default `markdown_conditional_requests full_support` setting prevents streaming from activating because full ETag support requires the full-buffer path. To enable streaming in `auto` mode, set `markdown_conditional_requests if_modified_since_only` or `disabled`.
+- **Bounded-memory conversion** — The streaming engine flushes converted Markdown in chunks based on `markdown_stream_flush_min` (size threshold), keeping memory usage bounded regardless of response size.
+- **Pre-commit safety** — If a conversion error occurs before the streaming engine has committed output to the client, it falls back to serving the original HTML response. This preserves fail-open semantics during streaming.
+- **New streaming controls** — `markdown_stream_threshold`, `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`, and `markdown_stream_excluded_types` make thresholding, replay buffering, flushing, and content-type exclusions explicit.
+- **Legacy threshold compatibility** — Existing `markdown_streaming_auto_threshold` configurations still parse in 0.8.0 and are bridged into `markdown_stream_threshold`; new configs should use `markdown_stream_threshold` directly.
+
+For upgrade guidance from 0.7.x, see the [Migration Guide](docs/guides/MIGRATION-0.8.md).
+For production rollout steps, see the [Streaming Rollout Cookbook](docs/guides/streaming-rollout-cookbook.md).
+
 ## What's New in v0.7.0
 
 v0.7.0 is a correctness, distribution, and operability release:
@@ -420,7 +485,16 @@ Additional changes:
 
 ## Roadmap
 
-Current release (0.7.0):
+Current release (0.8.0):
+
+- Dual-engine streaming model: full-buffer default + streaming engine for large/chunked responses
+- `auto` mode as the default `markdown_streaming_engine` setting
+- Bounded-memory streaming conversion with size-based flush (`markdown_stream_flush_min`)
+- Pre-commit safety: fallback to HTML if conversion error occurs before output is committed
+- Streaming release gate: `make release-gates-check-080` validates the 0.8.0 release contract
+- Migration guide and rollout cookbook for production adoption
+
+Previous release (0.7.0):
 
 - P0 runtime correctness: pending chain on NGX_AGAIN, fail-open dedup, safe output ordering
 - Independent decompression budget (`markdown_decompress_max_size`)
@@ -441,11 +515,11 @@ Current release (0.7.0):
 
 Near-term focus:
 
-- Expand streaming rollout examples across mixed traffic profiles
 - Strengthen cross-environment evidence automation for release gates
 - Continue tightening operator diagnostics for conversion drifts and degradations
+- Expand streaming telemetry and observability
 
-Post-0.7.0 exploration:
+Post-0.8.0 exploration:
 
 - OpenTelemetry tracing integration
 - Additional Markdown flavors and output formats
@@ -459,6 +533,8 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.8.0 | 2026-06-12 | Codex | Synchronized English and Chinese README structure, Quick Start examples, local test commands, platform support heading, and v0.8.0 roadmap wording |
+| 0.8.0 | 2026-06-10 | Kang | v0.8.0 streaming release readiness: dual-engine model, auto mode default, bounded-memory conversion, pre-commit safety, legacy threshold compatibility, release-gates-check-080, migration guide, and rollout cookbook links |
 | 0.7.0 | 2026-06-03 | Kang | P0 correctness, Rust-first architecture, independent decompression budget, Accept negotiation, parse timeout/budget, DEB/RPM packaging, K8s examples, runtime diagnostics, dynconf dry-run/rollback |
 | 0.6.3 | 2026-05-14 | Kang | Version bump to 0.6.3, release-matrix refresh, and final hardening notes |
 | 0.6.2 | 2026-05-08 | Kang | Version bump to 0.6.2 for release |

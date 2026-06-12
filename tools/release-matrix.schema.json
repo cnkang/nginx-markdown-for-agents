@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cnkang/nginx-markdown-for-agents/tools/release-matrix.schema.json",
+  "title": "Release Matrix",
+  "description": "Schema for the authoritative release support matrix.",
+  "type": "object",
+  "required": ["schema_version", "entries"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Schema version for forward compatibility.",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "entries": {
+      "type": "array",
+      "description": "All supported platform/artifact combinations.",
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "description": "A single release matrix entry describing one platform/artifact combination.",
+      "required": [
+        "nginx_version",
+        "nginx_channel",
+        "os",
+        "libc",
+        "arch",
+        "artifact_type",
+        "test_level",
+        "support_tier",
+        "release_blocking",
+        "owner_workflow"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "nginx_version": {
+          "type": "string",
+          "description": "NGINX version string (e.g. \"1.26.3\").",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+        },
+        "nginx_channel": {
+          "type": "string",
+          "description": "NGINX release channel.",
+          "enum": ["stable", "mainline", "oldstable"]
+        },
+        "os": {
+          "type": "string",
+          "description": "Operating system or distribution (e.g. \"debian12\", \"alpine3.20\", \"amazonlinux2023\")."
+        },
+        "libc": {
+          "type": "string",
+          "description": "C library variant (use \"n/a\" for platform-independent artifacts like source, \"darwin\" for macOS).",
+          "enum": ["glibc", "musl", "darwin", "n/a"]
+        },
+        "arch": {
+          "type": "string",
+          "description": "CPU architecture (use \"any\" for platform-independent artifacts like source).",
+          "enum": ["amd64", "arm64", "any"]
+        },
+        "artifact_type": {
+          "type": "string",
+          "description": "Build artifact type (e.g. \"deb\", \"rpm\", \"docker\", \"binary\", \"source\")."
+        },
+        "test_level": {
+          "type": "string",
+          "description": "Verification level applied to this combination (e.g. \"full\", \"smoke\", \"none\")."
+        },
+        "support_tier": {
+          "type": "string",
+          "description": "Support classification per requirement 3.",
+          "enum": ["supported", "experimental", "best-effort", "unsupported"]
+        },
+        "release_blocking": {
+          "type": "boolean",
+          "description": "Whether a failure for this entry blocks a release."
+        },
+        "owner_workflow": {
+          "type": "string",
+          "description": "GitHub Actions workflow file responsible for this entry (e.g. \"release-deb.yml\")."
+        }
+      }
+    }
+  }
+}

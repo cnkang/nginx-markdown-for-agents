@@ -32,6 +32,21 @@
 #define NGX_HTTP_MARKDOWN_LOG_INFO   2
 #define NGX_HTTP_MARKDOWN_LOG_DEBUG  3
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS    0
+#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT  1
+
+typedef struct {
+    ngx_http_complex_value_t  *engine;
+    size_t                     budget;
+    ngx_flag_t                 budget_explicit;
+    ngx_uint_t                 on_error;
+    ngx_flag_t                 shadow;
+    size_t                     auto_threshold;
+    ngx_flag_t                 auto_threshold_explicit;
+} ngx_http_markdown_streaming_cfg_t;
+#endif
+
 #define ngx_memcpy(dst, src, n)      memcpy(dst, src, n)
 #define ngx_strcmp(s1, s2)           strcmp((const char *) (s1), (const char *) (s2))
 
@@ -109,6 +124,20 @@ typedef struct {
 typedef struct ngx_http_markdown_conf_s {
     ngx_http_markdown_ops_cfg_t     ops;
     ngx_http_markdown_policy_cfg_t  policy;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    ngx_http_markdown_streaming_cfg_t streaming;
+#endif
+    struct {
+        ngx_uint_t    engine;
+        size_t        threshold;
+        size_t        precommit_buffer;
+        size_t        flush_min;
+        ngx_array_t  *excluded_types;
+        ngx_uint_t    on_error;
+        size_t        budget;
+        ngx_flag_t    budget_explicit;
+        ngx_flag_t    shadow;
+    } stream;
 } ngx_http_markdown_conf_t;
 
 typedef struct ngx_http_markdown_effective_conf_s {
@@ -268,6 +297,11 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     *out_len = sizeof(snapshot) - 1;
     return NGX_OK;
 }
+
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF   0
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO  1
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON    2
+#define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1
 
 #define NGX_HTTP_MARKDOWN_FILTER_MODULE_H
 #include "../src/ngx_http_markdown_diagnostics.c"
@@ -484,6 +518,9 @@ test_access_and_json_builder(void)
                 "JSON should include metrics");
     TEST_ASSERT(strstr(json, "\"dynconf_state\"") != NULL,
                 "JSON should include dynconf state");
+    TEST_ASSERT(strstr(json,
+                "\"legacy_auto_threshold_explicit\": false") != NULL,
+                "JSON should expose legacy threshold bridge state");
     TEST_ASSERT(strstr(json, "\"reason_code\": 11") != NULL,
                 "JSON should include recorded reason");
 

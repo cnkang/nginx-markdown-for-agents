@@ -16,23 +16,25 @@
 #   - workflow_dispatch input is validated before use (Req 9.7)
 #
 # Matrix generation:
-#   The prepare job reads tools/release-matrix.json and extracts all NGINX
-#   versions with support_tier=="full" and os_type=="glibc" (DEB/RPM targets).
+#   The prepare job reads tools/release-matrix.json and extracts release-
+#   blocking glibc NGINX versions owned by this workflow (DEB/RPM targets).
 #   This ensures the release workflow always builds packages for every version
 #   declared in the release matrix, preventing matrix/workflow drift.
 #
-# Extension points (see also packaging/matrix.yaml for authoritative matrix reference):
-#   - Add new NGINX versions: update tools/release-matrix.json with the new
-#     version entry (support_tier: "full", os_type: "glibc") and add its
-#     SHA256 checksum to packaging/checksums.sha256. No workflow changes needed.
-#   - Add new target platforms: add entries to the smoke-test matrix include list
-#     with the appropriate container image and format, then update
-#     packaging/matrix.yaml smoke_test_containers accordingly.
+# Extension points:
+#   - Add new NGINX versions: update tools/release-matrix.json with a
+#     release_blocking glibc entry owned by this workflow for each supported
+#     architecture and add the NGINX source SHA256 checksum to
+#     packaging/checksums.sha256. No workflow changes needed for versions or
+#     architectures represented in the release matrix.
+#   - Add new smoke-test distro images: update the representative container
+#     list in the prepare job. The release matrix currently owns versions and
+#     architectures, not container image names.
 #   - Enable GPG signing: configure GPG_PRIVATE_KEY, GPG_PASSPHRASE, GPG_KEY_ID secrets
 #     in the Protected Environment "release-signing" with required reviewers.
 #     Tag releases ALWAYS run the signing job; no repository variable needed.
 #
-# GPG Signing Policy (v0.7.0):
+# GPG Signing Policy (v0.8.0):
 #   Tag releases: signing is MANDATORY. The integrity-signing job always runs
 #   for tag pushes and the publish job requires signing to succeed. If GPG
 #   secrets are missing, the pipeline fails early with a clear preflight error.
@@ -101,6 +103,7 @@ jobs:
       contents: read
     outputs:
       nginx_versions: ${{ steps.resolve.outputs.nginx_versions }}
+      package_matrix: ${{ steps.resolve.outputs.package_matrix }}
       smoke_matrix: ${{ steps.resolve.outputs.smoke_matrix }}
     steps:
       - name: Checkout
@@ -117,20 +120,40 @@ jobs:
           with open("tools/release-matrix.json", "r") as f:
               data = json.load(f)
 
-          # Extract unique NGINX versions with full support and glibc os_type
-          # (DEB/RPM packages target glibc-based distros)
+          # Extract unique NGINX versions for this workflow's release-blocking
+          # glibc entries. The release matrix schema uses entries/libc/
+          # nginx_version fields.
+          owner = ".github/workflows/release-packages.yml"
           glibc_full = [
-              e for e in data.get("matrix", [])
-              if e.get("support_tier") == "full" and e.get("os_type") == "glibc"
+              e for e in data.get("entries", [])
+              if e.get("owner_workflow") == owner
+              and e.get("support_tier") == "supported"
+              and e.get("libc") == "glibc"
+              and e.get("release_blocking") is True
           ]
 
           versions = sorted(
-              set(e["nginx"] for e in glibc_full),
+              set(e["nginx_version"] for e in glibc_full),
               key=lambda v: tuple(int(p) for p in v.split("."))
+          )
+          package_matrix = sorted(
+              [
+                  {"nginx_version": version, "arch": arch}
+                  for version, arch in {
+                      (e["nginx_version"], e["arch"]) for e in glibc_full
+                  }
+              ],
+              key=lambda e: (
+                  tuple(int(p) for p in e["nginx_version"].split(".")),
+                  e["arch"],
+              ),
           )
 
           if len(versions) == 0:
-              print("ERROR: No NGINX versions with support_tier=full and os_type=glibc found in tools/release-matrix.json")
+              print("ERROR: No release-blocking glibc NGINX versions owned by release-packages.yml found in tools/release-matrix.json")
+              raise SystemExit(1)
+          if len(package_matrix) == 0:
+              print("ERROR: No release package matrix entries resolved from tools/release-matrix.json")
               raise SystemExit(1)
 
           # Build smoke-test matrix: each version × representative distros × archs
@@ -148,21 +171,27 @@ jobs:
           }
 
           smoke_matrix = []
-          for version in versions:
+          for package_entry in package_matrix:
+              version = package_entry["nginx_version"]
+              arch = package_entry["arch"]
               for fmt, containers in smoke_containers.items():
                   for entry in containers:
+                      if entry["arch"] != arch:
+                          continue
                       smoke_matrix.append({
                           "container": entry["container"],
                           "format": fmt,
                           "nginx_version": version,
-                          "arch": entry["arch"],
+                          "arch": arch,
                       })
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
               out.write(f"nginx_versions={json.dumps(versions)}\n")
+              out.write(f"package_matrix={json.dumps(package_matrix)}\n")
               out.write(f"smoke_matrix={json.dumps(smoke_matrix)}\n")
 
           print(f"Resolved {len(versions)} NGINX versions: {versions}")
+          print(f"Package matrix: {len(package_matrix)} entries")
           print(f"Smoke test matrix: {len(smoke_matrix)} entries")
           PY
         shell: bash
@@ -177,8 +206,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        nginx_version: ${{ fromJson(needs.prepare.outputs.nginx_versions) }}
-        arch: [amd64, arm64]
+        include: ${{ fromJson(needs.prepare.outputs.package_matrix) }}
 
     steps:
       - name: Install build dependencies
@@ -395,7 +423,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # Package Job: Generate .deb/.rpm via nFPM (matrix)
   # Consumes the compiled .so from the build job and produces distribution
-  # packages following spec 31 naming conventions.
+  # packages following 0.8.0 release package naming and layout conventions.
   # ─────────────────────────────────────────────────────────────────────────────
   package:
     name: Package - nginx-${{ matrix.nginx_version }} - ${{ matrix.arch }}
@@ -406,8 +434,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        nginx_version: ${{ fromJson(needs.prepare.outputs.nginx_versions) }}
-        arch: [amd64, arm64]
+        include: ${{ fromJson(needs.prepare.outputs.package_matrix) }}
 
     steps:
       - name: Checkout
@@ -474,7 +501,7 @@ jobs:
               ;;
           esac
 
-          # Artifact filenames per spec 31 naming conventions
+          # Artifact filenames per 0.8.0 release package naming and layout conventions
           DEB_FILENAME="nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
           RPM_FILENAME="nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
 
@@ -670,12 +697,12 @@ jobs:
 
       - name: Run tag release gates
         run: |
-          # Run the full 0.7.0 gate validators that are not already covered
+          # Run the v0.8.0 release gate validators that are not already covered
           # by the build/package/smoke-test jobs above. The full
-          # release-gates-check-070 target includes build/test/fuzz which are
+          # release-gates-check-080 target includes build/test/fuzz which are
           # redundant here (the build and smoke-test jobs already verified
           # those), but we must run the Python gate validators and package
-          # layout checks to ensure complete 0.7.0 gate coverage. Do not run
+          # layout checks to ensure complete v0.8.0 gate coverage. Do not run
           # legacy local-spec validators here; tag release CI checkouts do not
           # include user-local Kiro spec directories.
           python3 tools/release/gates/validate_naming.py

@@ -6,12 +6,14 @@ Run:
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 # Ensure the tools package is importable.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
+import tools.release.gates.validate_package_metadata_070 as validator  # noqa: E402
 from tools.release.gates.validate_package_metadata_070 import (  # noqa: E402
     FORBIDDEN_NAKED_EXACT_NGINX_DEPS,
     GATE3_LOCAL_ARCH_SNIPPETS,
@@ -260,6 +262,39 @@ ARG NGINX_VERSION=1.25.5
         content = 'NGINX_VERSION="1.25.5" # pinned to stable'
         assert extract_nginx_versions(content) == {"1.25.5"}
 
+    def test_current_release_matrix_schema(self, monkeypatch) -> None:
+        """Extract release-blocking glibc versions from the current matrix schema."""
+        matrix_json = json.dumps(
+            {
+                "schema_version": "1.0",
+                "entries": [
+                    {
+                        "nginx_version": "1.30.2",
+                        "support_tier": "supported",
+                        "libc": "glibc",
+                        "release_blocking": True,
+                    },
+                    {
+                        "nginx_version": "1.30.2",
+                        "support_tier": "supported",
+                        "libc": "musl",
+                        "release_blocking": False,
+                    },
+                    {
+                        "nginx_version": "1.31.1",
+                        "support_tier": "experimental",
+                        "libc": "glibc",
+                        "release_blocking": False,
+                    },
+                ],
+            }
+        )
+        monkeypatch.setattr(validator, "read_safe", lambda _path: matrix_json)
+
+        content = "matrix source: tools/release-matrix.json"
+
+        assert extract_nginx_versions(content) == {"1.30.2"}
+
 
 # ---------------------------------------------------------------------------
 # Large adversarial input
@@ -376,8 +411,7 @@ class TestReleaseGateSnippetExpectations:
 
     def test_rpm_spec_dependency_uses_non_exact_floor(self) -> None:
         """Ensure RPM spec uses non-exact floor dependency and correct module path."""
-        assert "Requires:       nginx >= %{nginx_version_floor}" in STANDALONE_RPM_SPEC_SNIPPETS
-        assert "Requires:       nginx < %{nginx_version_ceil}" in STANDALONE_RPM_SPEC_SNIPPETS
+        assert "Requires:       nginx >= 1:%{nginx_version_floor}" in STANDALONE_RPM_SPEC_SNIPPETS
         assert "Requires:       nginx = %{nginx_version}" in FORBIDDEN_NAKED_EXACT_NGINX_DEPS
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in STANDALONE_RPM_SPEC_SNIPPETS
 

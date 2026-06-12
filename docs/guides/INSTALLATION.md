@@ -180,7 +180,7 @@ operate your own package repository.
 ### DEB Artifacts (Ubuntu / Debian)
 
 ```bash
-VERSION=0.7.0
+VERSION=0.8.0
 NGINX_VERSION=1.26.3
 ARCH=amd64
 
@@ -193,7 +193,7 @@ sudo apt install "./nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VE
 ### RPM Artifacts (AlmaLinux / Amazon Linux / RHEL)
 
 ```bash
-VERSION=0.7.0
+VERSION=0.8.0
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 
@@ -687,6 +687,75 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.31.1 | musl | x86_64 | Full |
 <!-- END AUTO-GENERATED MATRIX -->
 
+<!-- BEGIN:release-matrix:installation-matrix -->
+
+## Available Packages by Platform
+
+### deb-package
+
+| NGINX | Channel | OS | libc | Arch | Tier |
+|-------|---------|-----|------|------|------|
+| 1.26.3 | stable | debian12 | glibc | arm64 | supported |
+| 1.26.3 | stable | debian12 | glibc | amd64 | supported |
+
+### docker-image
+
+| NGINX | Channel | OS | libc | Arch | Tier |
+|-------|---------|-----|------|------|------|
+| 1.31.1 | mainline | debian12 | glibc | arm64 | supported |
+| 1.31.1 | mainline | debian12 | glibc | amd64 | supported |
+| 1.31.1 | mainline | alpine3.20 | musl | arm64 | supported |
+| 1.31.1 | mainline | alpine3.20 | musl | amd64 | supported |
+| 1.26.3 | stable | debian12 | glibc | arm64 | supported |
+| 1.26.3 | stable | debian12 | glibc | amd64 | supported |
+| 1.26.3 | stable | alpine3.20 | musl | arm64 | supported |
+| 1.26.3 | stable | alpine3.20 | musl | amd64 | supported |
+
+### dynamic-module
+
+| NGINX | Channel | OS | libc | Arch | Tier |
+|-------|---------|-----|------|------|------|
+| 1.31.1 | mainline | linux | glibc | arm64 | supported |
+| 1.31.1 | mainline | linux | musl | arm64 | supported |
+| 1.31.1 | mainline | linux | glibc | amd64 | supported |
+| 1.31.1 | mainline | linux | musl | amd64 | supported |
+| 1.30.2 | stable | linux | glibc | arm64 | supported |
+| 1.30.2 | stable | linux | musl | arm64 | supported |
+| 1.30.2 | stable | linux | glibc | amd64 | supported |
+| 1.30.2 | stable | linux | musl | amd64 | supported |
+| 1.28.3 | stable | linux | glibc | arm64 | supported |
+| 1.28.3 | stable | linux | musl | arm64 | supported |
+| 1.28.3 | stable | linux | glibc | amd64 | supported |
+| 1.28.3 | stable | linux | musl | amd64 | supported |
+| 1.26.3 | stable | linux | glibc | arm64 | supported |
+| 1.26.3 | stable | linux | musl | arm64 | supported |
+| 1.26.3 | stable | linux | glibc | amd64 | supported |
+| 1.26.3 | stable | linux | musl | amd64 | supported |
+| 1.24.0 | oldstable | linux | glibc | arm64 | supported |
+| 1.24.0 | oldstable | linux | musl | arm64 | supported |
+| 1.24.0 | oldstable | linux | glibc | amd64 | supported |
+| 1.24.0 | oldstable | linux | musl | amd64 | supported |
+
+### homebrew-formula
+
+| NGINX | Channel | OS | libc | Arch | Tier |
+|-------|---------|-----|------|------|------|
+| 1.26.3 | stable | macos | darwin | arm64 | experimental |
+
+### rpm-package
+
+| NGINX | Channel | OS | libc | Arch | Tier |
+|-------|---------|-----|------|------|------|
+| 1.26.3 | stable | almalinux9 | glibc | arm64 | supported |
+| 1.26.3 | stable | almalinux9 | glibc | amd64 | supported |
+
+### source
+
+| NGINX | Channel | OS | libc | Arch | Tier |
+|-------|---------|-----|------|------|------|
+| 1.26.3 | stable | any | n/a | any | best-effort |
+<!-- END:release-matrix:installation-matrix -->
+
 ---
 
 ## 8. Release Artifact Naming
@@ -1091,7 +1160,7 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    Manual download is intended only for air-gapped or troubleshooting scenarios — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # On a connected machine — substitute <release_tag>, <nginx_version>, <os_type>, and <arch>
-   # <release_tag> must match the current release (e.g. v0.7.0)
+   # <release_tag> must match the current release (e.g. v0.8.0)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
    ```
@@ -1129,7 +1198,7 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    Manual download is intended only for troubleshooting — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Download the binary and checksum file — substitute <release_tag>, <nginx_version>, <os_type>, <arch>
-   # <release_tag> must match the current release (e.g. v0.7.0)
+   # <release_tag> must match the current release (e.g. v0.8.0)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
 

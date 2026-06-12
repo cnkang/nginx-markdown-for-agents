@@ -68,6 +68,7 @@ fuzz_target!(|data: &[u8]| {
         chars_per_token_fixed: 0,
         parse_timeout_ms: 0,
         parser_memory_budget: 0,
+        flush_threshold: 0,
     };
 
     let mut result = MarkdownResult {

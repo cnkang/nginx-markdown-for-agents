@@ -125,6 +125,14 @@ pub struct StreamingConverter {
     /// sequence. Prepended to the next chunk before `String::from_utf8_lossy`
     /// so multibyte characters split across chunk boundaries are preserved.
     utf8_tail: Vec<u8>,
+    /// Parser memory budget in bytes (0 = unlimited).
+    /// Tracks cumulative input bytes fed to the converter and rejects when
+    /// the total exceeds this limit. Uses input size as a proxy for parser
+    /// memory pressure (matching the full-buffer path). Populated from the
+    /// `markdown_parser_budget` NGINX directive via FFI.
+    parser_budget: u64,
+    /// Cumulative input bytes fed to the converter (for parser budget enforcement).
+    cumulative_input_bytes: u64,
 }
 
 impl StreamingConverter {
@@ -225,6 +233,8 @@ impl StreamingConverter {
             canonical_found: false,
             head_bytes_seen: 0,
             utf8_tail: Vec::new(),
+            parser_budget: 0,
+            cumulative_input_bytes: 0,
         }
     }
 
@@ -274,6 +284,56 @@ impl StreamingConverter {
         self.deadline = Instant::now().checked_add(timeout);
     }
 
+    /// Set the flush threshold for the emitter.
+    ///
+    /// Controls the minimum number of accumulated Markdown bytes before the
+    /// emitter flushes output at block boundaries. A threshold of 0 (the
+    /// default) means "flush immediately at every block boundary" — lowest
+    /// latency. Larger values batch output to reduce FFI round-trip overhead.
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold` - Minimum pending bytes before flushing. 0 = immediate.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::StreamingConverter;
+    ///
+    /// let mut conv = StreamingConverter::new(Default::default(), Default::default());
+    /// conv.set_flush_threshold(512); // batch until at least 512 bytes accumulated
+    /// ```
+    pub fn set_flush_threshold(&mut self, threshold: usize) {
+        self.emitter.set_flush_threshold(threshold);
+    }
+
+    /// Set the parser memory budget (cumulative input byte ceiling).
+    ///
+    /// When non-zero, the converter tracks cumulative input bytes across all
+    /// `feed_chunk` calls. If the total exceeds this budget, `feed_chunk`
+    /// returns [`ConversionError::ParseBudgetExceeded`]. A value of 0 (the
+    /// default) disables this enforcement.
+    ///
+    /// This mirrors the full-buffer path's pre-check where input size is used
+    /// as a proxy for parser memory pressure (html5ever does not expose
+    /// internal memory tracking).
+    ///
+    /// # Arguments
+    ///
+    /// * `budget` - Maximum cumulative input bytes allowed, or 0 for unlimited.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use nginx_markdown_converter::streaming::StreamingConverter;
+    ///
+    /// let mut conv = StreamingConverter::new(Default::default(), Default::default());
+    /// conv.set_parser_budget(64 * 1024 * 1024); // 64 MiB parser budget
+    /// ```
+    pub fn set_parser_budget(&mut self, budget: u64) {
+        self.parser_budget = budget;
+    }
+
     /// Process an incoming chunk of HTML bytes and return any ready Markdown output.
     ///
     /// This incrementally feeds the pipeline (charset detection/transcoding, tokenization,
@@ -306,6 +366,23 @@ impl StreamingConverter {
     pub fn feed_chunk(&mut self, data: &[u8]) -> Result<ChunkOutput, ConversionError> {
         // 1. Check cooperative timeout
         self.check_timeout()?;
+
+        // 1b. Parser budget enforcement (Requirement 1 AC 1).
+        // Track cumulative input bytes and reject when the total exceeds
+        // the configured parser_budget. Uses input size as a proxy for
+        // parser memory pressure (matching the full-buffer path).
+        if self.parser_budget > 0 {
+            self.cumulative_input_bytes = self
+                .cumulative_input_bytes
+                .saturating_add(data.len() as u64);
+            if self.cumulative_input_bytes > self.parser_budget {
+                let err = ConversionError::ParseBudgetExceeded {
+                    used: self.cumulative_input_bytes as usize,
+                    limit: self.parser_budget as usize,
+                };
+                return Err(self.wrap_error(err));
+            }
+        }
 
         // v0.6.0: noise-region pruning is now supported at the
         // streaming tokenizer level via should_prune_with_config().
@@ -509,6 +586,63 @@ impl StreamingConverter {
         })
     }
 
+    /// Attempt a post-commit safe finish: close all open Markdown structures
+    /// without emitting raw HTML.
+    ///
+    /// This method is intended for use after `feed_chunk` returns a
+    /// `PostCommitError`. It attempts to gracefully close all open Markdown
+    /// constructs (headings, paragraphs, lists, code blocks, blockquotes,
+    /// inline formatting) so that the already-emitted output forms valid
+    /// Markdown, even though the conversion could not complete normally.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(closing_bytes)` — all open structures were successfully closed.
+    ///   The returned bytes are the Markdown closure text (e.g., closing
+    ///   fences, trailing newlines). The caller should append these after
+    ///   the already-committed output.
+    /// - `Err(ConversionError)` — structures could not be safely closed
+    ///   (e.g., emitter budget exceeded during closure). The caller must
+    ///   abort and discard or truncate the partial output.
+    ///
+    /// # Ownership
+    ///
+    /// This method consumes `self`. After calling, the converter is dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // After feed_chunk returns PostCommitError:
+    /// match converter.safe_finish() {
+    ///     Ok(closing) => { /* append `closing` to committed output */ }
+    ///     Err(_) => { /* abort: discard partial output */ }
+    /// }
+    /// ```
+    pub fn safe_finish(mut self) -> Result<Vec<u8>, ConversionError> {
+        // Use the state machine to identify all unclosed structural contexts,
+        // then ask the emitter to close each one in reverse order (inner-most
+        // first). This mirrors the `finalize` path but without processing any
+        // remaining input — we only close what is already open.
+        self.emitter.discard_uncommitted_output();
+
+        // 1. Finalize state machine: pops all contexts from the stack.
+        let unclosed = self.state_machine.finalize();
+
+        // 2. Ask the emitter to close each open context.
+        for ctx in &unclosed {
+            let action = StateMachineAction::Exit(ctx.clone());
+            self.emitter
+                .process_action(&action, &mut self.state_machine)?;
+        }
+
+        // 3. Return only closure bytes produced after uncommitted output was
+        //    discarded. Do not call finalize(), which flushes all pending
+        //    content and can leak bytes from the failed feed call.
+        let closing_bytes = self.emitter.take_closure_output()?;
+
+        Ok(closing_bytes)
+    }
+
     // ── Internal helpers ────────────────────────────────────────────
 
     /// Processes a single `StreamEvent` through the sanitizer, state machine, and emitter.
@@ -552,6 +686,33 @@ impl StreamingConverter {
             }
         }
 
+        // Check for unsupported structures BEFORE sanitization.
+        // The sanitizer strips elements like <form>, <iframe> (converting them
+        // to text or extracting URLs). Those are adequately handled by stripping.
+        // However, SVG, MathML, and canvas elements represent content that cannot
+        // be meaningfully converted to Markdown by the streaming path — they
+        // require full-buffer conversion.
+        if let StreamEvent::StartTag { ref name, .. } = event {
+            let fallback_structure = match name.as_str() {
+                "svg" => Some("svg".to_string()),
+                "math" => Some("math".to_string()),
+                "canvas" => Some("canvas".to_string()),
+                _ => None,
+            };
+            if let Some(structure) = fallback_structure {
+                let reason = FallbackReason::UnsupportedStructure(structure.clone());
+                if matches!(self.commit_state, CommitState::PreCommit) {
+                    return Err(ConversionError::StreamingFallback { reason });
+                } else {
+                    return Err(ConversionError::PostCommitError {
+                        reason: format!("{} detected after commit", structure),
+                        bytes_emitted: self.bytes_emitted,
+                        original_code: 99,
+                    });
+                }
+            }
+        }
+
         // Sanitize
         let decision = self.sanitizer.process_event(event);
 
@@ -571,15 +732,18 @@ impl StreamingConverter {
             .process_event(&sanitized_event)
             .map_err(|e| self.wrap_error(e))?;
 
-        // Check for table fallback
-        if matches!(action, StateMachineAction::FallbackRequired) {
+        // Check for unsupported structure fallback
+        if let StateMachineAction::FallbackRequired(ref structure) = action {
+            let reason = if structure == "table" {
+                FallbackReason::TableDetected
+            } else {
+                FallbackReason::UnsupportedStructure(structure.clone())
+            };
             if matches!(self.commit_state, CommitState::PreCommit) {
-                return Err(ConversionError::StreamingFallback {
-                    reason: FallbackReason::TableDetected,
-                });
+                return Err(ConversionError::StreamingFallback { reason });
             } else {
                 return Err(ConversionError::PostCommitError {
-                    reason: "table detected after commit".to_string(),
+                    reason: format!("{} detected after commit", structure),
                     bytes_emitted: self.bytes_emitted,
                     original_code: 99, /* internal: no pre-existing error */
                 });
@@ -1138,41 +1302,38 @@ fn split_utf8_tail(bytes: &[u8]) -> (&[u8], &[u8]) {
         return (bytes, &[]);
     }
 
-    // Walk backwards (at most 3 bytes) to find the start of an incomplete
-    // multibyte sequence at the end.
+    fn utf8_sequence_len(lead: u8) -> Option<usize> {
+        match lead {
+            0xC2..=0xDF => Some(2),
+            0xE0..=0xEF => Some(3),
+            0xF0..=0xF4 => Some(4),
+            _ => None,
+        }
+    }
+
+    fn is_continuation(byte: u8) -> bool {
+        (byte & 0xC0) == 0x80
+    }
+
+    // Walk backwards (at most 3 bytes) to find the start of a repairable
+    // incomplete multibyte sequence at the end. Invalid byte regions are not
+    // deferred: they must be converted lossy in the current tokenizer state so
+    // chunked conversion remains confluent with single-pass conversion.
     let len = bytes.len();
     let check_from = len.saturating_sub(3);
     for i in (check_from..len).rev() {
         let b = bytes[i];
-        // Leading byte of a multibyte sequence?
-        if b >= 0xC0 {
-            let expected_len = if b < 0xE0 {
-                2
-            } else if b < 0xF0 {
-                3
-            } else {
-                4
-            };
+        if let Some(expected_len) = utf8_sequence_len(b) {
             let available = len - i;
-            if available < expected_len {
+            if available < expected_len && bytes[i + 1..].iter().all(|&c| is_continuation(c)) {
                 // Incomplete sequence — split here
                 return (&bytes[..i], &bytes[i..]);
             }
-            // Sequence is complete; check if it's valid
-            if std::str::from_utf8(&bytes[i..i + expected_len]).is_ok() {
-                // The incomplete part must be after this sequence
-                break;
-            }
-            // Invalid complete sequence. If it starts at offset 0, it cannot
-            // be repaired by appending future bytes; keep it in `valid` so the
-            // caller can recover via lossy conversion now instead of carrying
-            // an ever-growing deferred tail across chunks.
-            if i == 0 {
-                return (bytes, &[]);
-            }
-            // Otherwise split before the invalid region so the valid prefix can
-            // still be emitted immediately.
-            return (&bytes[..i], &bytes[i..]);
+            break;
+        }
+
+        if !is_continuation(b) {
+            break;
         }
     }
 
@@ -1206,6 +1367,31 @@ mod tests {
         // without waiting for the 1024-byte sniff buffer to fill.
         conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
         conv
+    }
+
+    fn convert_with_splits(html: &[u8], split_sizes: &[usize]) -> Vec<u8> {
+        let mut conv = make_converter();
+        let mut out = Vec::new();
+        let mut cursor = 0;
+
+        for &size in split_sizes {
+            if cursor >= html.len() {
+                break;
+            }
+            let end = cursor.saturating_add(size).min(html.len());
+            let chunk = conv.feed_chunk(&html[cursor..end]).unwrap();
+            out.extend_from_slice(&chunk.markdown);
+            cursor = end;
+        }
+
+        if cursor < html.len() {
+            let chunk = conv.feed_chunk(&html[cursor..]).unwrap();
+            out.extend_from_slice(&chunk.markdown);
+        }
+
+        let result = conv.finalize().unwrap();
+        out.extend_from_slice(&result.final_markdown);
+        out
     }
 
     #[test]
@@ -1468,6 +1654,291 @@ mod tests {
             }
             other => panic!("Expected StreamingFallback, got: {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_svg_triggers_fallback_precommit() {
+        let mut conv = make_converter();
+        let result = conv.feed_chunk(b"<svg><circle cx='50' cy='50' r='40'/></svg>");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ConversionError::StreamingFallback { reason } => {
+                assert_eq!(
+                    reason,
+                    FallbackReason::UnsupportedStructure("svg".to_string())
+                );
+            }
+            other => panic!("Expected StreamingFallback(svg), got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_form_handled_by_stripping() {
+        // Forms are handled by the streaming sanitizer (stripped) rather
+        // than triggering full-buffer fallback. This verifies no error is
+        // returned — the form tags are stripped and content is preserved.
+        let mut conv = make_converter();
+        let result = conv.feed_chunk(b"<form action='/submit'><input type='text'/></form>");
+        assert!(
+            result.is_ok(),
+            "Form should be handled by stripping, not fallback"
+        );
+    }
+
+    #[test]
+    fn test_iframe_handled_by_stripping() {
+        // Iframes are handled by the streaming sanitizer (URL extracted,
+        // tags stripped) rather than triggering full-buffer fallback.
+        let mut conv = make_converter();
+        let result = conv.feed_chunk(b"<iframe src='https://example.com'></iframe>");
+        assert!(
+            result.is_ok(),
+            "Iframe should be handled by stripping, not fallback"
+        );
+    }
+
+    #[test]
+    fn test_math_triggers_fallback_precommit() {
+        let mut conv = make_converter();
+        let result = conv.feed_chunk(b"<math><mi>x</mi></math>");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ConversionError::StreamingFallback { reason } => {
+                assert_eq!(
+                    reason,
+                    FallbackReason::UnsupportedStructure("math".to_string())
+                );
+            }
+            other => panic!("Expected StreamingFallback(math), got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_canvas_triggers_fallback_precommit() {
+        let mut conv = make_converter();
+        let result = conv.feed_chunk(b"<canvas id='myCanvas'></canvas>");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ConversionError::StreamingFallback { reason } => {
+                assert_eq!(
+                    reason,
+                    FallbackReason::UnsupportedStructure("canvas".to_string())
+                );
+            }
+            other => panic!("Expected StreamingFallback(canvas), got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_unsupported_structure_postcommit() {
+        let mut conv = make_converter();
+        // Feed content to transition to PostCommit
+        let output = conv.feed_chunk(b"<h1>Title</h1>").unwrap();
+        assert!(!output.markdown.is_empty());
+        // Now feed a table after commit
+        let result = conv.feed_chunk(b"<table><tr><td>Cell</td></tr></table>");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ConversionError::PostCommitError {
+                reason,
+                bytes_emitted,
+                ..
+            } => {
+                assert!(reason.contains("table"));
+                assert!(bytes_emitted > 0);
+            }
+            other => panic!("Expected PostCommitError, got: {:?}", other),
+        }
+    }
+
+    /// Validates: Requirements 3.2, 4.5 — SVG detected after commit returns
+    /// ERROR_POST_COMMIT (8), not fallback (7).
+    #[test]
+    fn test_svg_postcommit_returns_error_code_8() {
+        let mut conv = make_converter();
+        // Emit enough content to transition to PostCommit
+        let output = conv.feed_chunk(b"<h1>Title</h1><p>Body text</p>").unwrap();
+        assert!(!output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PostCommit);
+
+        // Now feed SVG — must return PostCommitError (code 8), not fallback (7)
+        let result = conv.feed_chunk(b"<svg><circle cx='50' cy='50' r='40'/></svg>");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.code(),
+            8,
+            "SVG after commit must return code 8 (PostCommitError), got {}",
+            err.code()
+        );
+        match err {
+            ConversionError::PostCommitError {
+                reason,
+                bytes_emitted,
+                ..
+            } => {
+                assert!(
+                    reason.contains("svg"),
+                    "reason should mention svg: {}",
+                    reason
+                );
+                assert!(bytes_emitted > 0, "bytes_emitted should be > 0");
+            }
+            other => panic!("Expected PostCommitError, got: {:?}", other),
+        }
+    }
+
+    /// Validates: Requirements 3.2, 4.5 — Math element detected after commit returns
+    /// ERROR_POST_COMMIT (8), not fallback (7).
+    #[test]
+    fn test_math_postcommit_returns_error_code_8() {
+        let mut conv = make_converter();
+        let output = conv.feed_chunk(b"<h1>Title</h1><p>Body text</p>").unwrap();
+        assert!(!output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PostCommit);
+
+        let result = conv.feed_chunk(b"<math><mi>x</mi><mo>=</mo><mn>2</mn></math>");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.code(),
+            8,
+            "Math after commit must return code 8, got {}",
+            err.code()
+        );
+        match err {
+            ConversionError::PostCommitError {
+                reason,
+                bytes_emitted,
+                ..
+            } => {
+                assert!(
+                    reason.contains("math"),
+                    "reason should mention math: {}",
+                    reason
+                );
+                assert!(bytes_emitted > 0);
+            }
+            other => panic!("Expected PostCommitError, got: {:?}", other),
+        }
+    }
+
+    /// Validates: Requirements 3.2, 4.5 — Canvas element detected after commit returns
+    /// ERROR_POST_COMMIT (8), not fallback (7).
+    #[test]
+    fn test_canvas_postcommit_returns_error_code_8() {
+        let mut conv = make_converter();
+        let output = conv.feed_chunk(b"<h1>Title</h1><p>Body text</p>").unwrap();
+        assert!(!output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PostCommit);
+
+        let result = conv.feed_chunk(b"<canvas id='myCanvas' width='200' height='100'></canvas>");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.code(),
+            8,
+            "Canvas after commit must return code 8, got {}",
+            err.code()
+        );
+        match err {
+            ConversionError::PostCommitError {
+                reason,
+                bytes_emitted,
+                ..
+            } => {
+                assert!(
+                    reason.contains("canvas"),
+                    "reason should mention canvas: {}",
+                    reason
+                );
+                assert!(bytes_emitted > 0);
+            }
+            other => panic!("Expected PostCommitError, got: {:?}", other),
+        }
+    }
+
+    /// Validates: Requirements 3.2, 4.5 — After post-commit error, safe_finish
+    /// gracefully closes open structures, producing valid closing Markdown.
+    #[test]
+    fn test_safe_finish_after_postcommit_unsupported_content() {
+        let mut conv = make_converter();
+        // Emit content and open structures to reach PostCommit
+        let output = conv
+            .feed_chunk(b"<h1>Title</h1><p>First paragraph</p>")
+            .unwrap();
+        assert!(!output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PostCommit);
+
+        // Trigger post-commit error with SVG
+        let result = conv.feed_chunk(b"<svg><rect/></svg>");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code(), 8);
+
+        // Call safe_finish — should succeed, closing any open structures
+        let closing = conv.safe_finish();
+        assert!(
+            closing.is_ok(),
+            "safe_finish should succeed after post-commit error"
+        );
+        // Closing bytes may be empty or contain closing markup; either is valid
+    }
+
+    #[test]
+    fn test_safe_finish_discards_ready_unreturned_output() {
+        let mut conv = make_converter();
+        let output = conv.feed_chunk(b"<h1>Title</h1>").unwrap();
+        assert!(!output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PostCommit);
+
+        let result = conv.feed_chunk(b"<p>uncommitted ready</p><svg></svg>");
+        assert!(result.is_err());
+
+        let closing = conv.safe_finish().expect("safe_finish should succeed");
+        let closing_text = String::from_utf8(closing).expect("valid utf8");
+        assert!(
+            !closing_text.contains("uncommitted ready"),
+            "safe_finish leaked ready-but-unreturned output: {closing_text:?}"
+        );
+    }
+
+    #[test]
+    fn test_safe_finish_discards_pending_unreturned_output() {
+        let mut conv = make_converter();
+        let output = conv.feed_chunk(b"<h1>Title</h1>").unwrap();
+        assert!(!output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PostCommit);
+
+        conv.set_flush_threshold(1024);
+        let result = conv.feed_chunk(b"<p>uncommitted pending</p><svg></svg>");
+        assert!(result.is_err());
+
+        let closing = conv.safe_finish().expect("safe_finish should succeed");
+        let closing_text = String::from_utf8(closing).expect("valid utf8");
+        assert!(
+            !closing_text.contains("uncommitted pending"),
+            "safe_finish leaked pending output: {closing_text:?}"
+        );
+    }
+
+    /// Validates: Requirements 3.2, 4.5 — Commit state transition only happens
+    /// once non-empty output is produced. Empty output does NOT trigger PostCommit.
+    #[test]
+    fn test_commit_state_stays_precommit_on_empty_output() {
+        let mut conv = make_converter();
+        // Feed only a comment — should not produce output
+        let output = conv.feed_chunk(b"<!-- comment -->").unwrap();
+        assert!(output.markdown.is_empty());
+        assert_eq!(conv.commit_state, CommitState::PreCommit);
+
+        // Now feed unsupported content — should return fallback (code 7), not post-commit (8)
+        let result = conv.feed_chunk(b"<table><tr><td>Cell</td></tr></table>");
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().code(),
+            7,
+            "Should be fallback (7) in PreCommit state"
+        );
     }
 
     #[test]
@@ -2393,11 +2864,12 @@ mod tests {
 
     #[test]
     fn test_split_utf8_tail_invalid_interior_fallback() {
-        // Interior invalid byte can be isolated: split occurs before it.
+        // Invalid bytes are not repairable by future chunks, so they must be
+        // handled by lossy conversion in the current tokenizer state.
         let bytes = [0x48, 0x65, 0xFF, 0x6C, 0x6F];
         let (valid, tail) = split_utf8_tail(&bytes);
-        assert_eq!(valid, b"He");
-        assert_eq!(tail, &[0xFF, 0x6C, 0x6F]);
+        assert_eq!(valid, &bytes);
+        assert!(tail.is_empty());
 
         // No lead byte candidate near the tail: fallback returns the full slice.
         let continuation_only = [0x80, 0x80];
@@ -2435,5 +2907,133 @@ mod tests {
 
         assert_eq!(valid, &bytes);
         assert!(tail.is_empty());
+    }
+
+    #[test]
+    fn test_streaming_invalid_utf8_tail_matches_single_pass() {
+        let html = &[
+            0x50, 0x3C, 0x7E, 0x32, 0x7C, 0x00, 0x2D, 0xCF, 0x37, 0x7C, 0x20, 0x2D, 0x2D, 0x20,
+            0x7C, 0x5E, 0x5E, 0x45, 0x05, 0x45, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00,
+            0x00, 0x01, 0x45, 0x7C, 0x00, 0x2D, 0xCF, 0x37, 0x7C, 0x20, 0x2D, 0x7C, 0x20, 0x7C,
+            0x7C, 0x0A, 0x20, 0x2D, 0x2F, 0x20, 0x61, 0x20, 0x74, 0x20, 0x5D, 0x3F, 0x3C, 0x70,
+            0x72, 0x65, 0x20, 0x7C, 0x20, 0x32, 0x3E, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60,
+            0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60,
+            0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60,
+            0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x45, 0x45, 0x45, 0x00,
+            0x00, 0x00, 0x34, 0x45, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x60,
+            0x60, 0x60, 0x60, 0x00, 0x00, 0x00, 0x42, 0x00, 0x50, 0x60, 0x60, 0x60, 0x3E, 0x3E,
+            0x3E, 0x3E, 0x3E, 0x81, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0xA5, 0x7B,
+            0x7B, 0x7B, 0x7B,
+        ];
+        let single = convert_with_splits(html, &[html.len()]);
+        let chunked = convert_with_splits(html, &[1, 24, 28, 5, 5, 1, 1, 5, 88]);
+
+        if single != chunked {
+            let first_diff = single
+                .iter()
+                .zip(chunked.iter())
+                .position(|(left, right)| left != right)
+                .unwrap_or_else(|| single.len().min(chunked.len()));
+            let start = first_diff.saturating_sub(16);
+            let single_end = first_diff.saturating_add(48).min(single.len());
+            let chunked_end = first_diff.saturating_add(48).min(chunked.len());
+            panic!(
+                "first_diff={first_diff}, single_len={}, chunked_len={}, single={:?}, chunked={:?}",
+                single.len(),
+                chunked.len(),
+                String::from_utf8_lossy(&single[start..single_end]),
+                String::from_utf8_lossy(&chunked[start..chunked_end])
+            );
+        }
+    }
+
+    /// Parser budget enforcement: when the cumulative input bytes exceed
+    /// parser_budget, feed_chunk must return ParseBudgetExceeded (code 11).
+    #[test]
+    fn test_parser_budget_exceeded() {
+        let mut conv = make_converter();
+        conv.set_parser_budget(50); // very small budget
+
+        // Feed more than 50 bytes total
+        let chunk = b"<p>Hello world, this is a paragraph that exceeds the parser budget.</p>";
+        let result = conv.feed_chunk(chunk);
+        assert!(
+            result.is_err(),
+            "feed_chunk should fail when parser budget exceeded"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.code(),
+            11,
+            "Error code should be ERROR_PARSE_BUDGET_EXCEEDED (11)"
+        );
+    }
+
+    /// Parser budget enforcement: when parser_budget is 0, enforcement is
+    /// disabled and arbitrarily large inputs are accepted.
+    #[test]
+    fn test_parser_budget_zero_means_unlimited() {
+        let mut conv = make_converter();
+        conv.set_parser_budget(0); // disabled
+
+        let chunk = b"<p>Hello world, this is a paragraph.</p>";
+        let result = conv.feed_chunk(chunk);
+        assert!(result.is_ok(), "parser_budget=0 should not limit input");
+    }
+
+    /// Parser budget enforcement: cumulative tracking across multiple
+    /// feed_chunk calls.
+    #[test]
+    fn test_parser_budget_cumulative_across_chunks() {
+        let mut conv = make_converter();
+        conv.set_parser_budget(100); // 100 byte budget
+
+        // First chunk: within budget (must not produce output to stay pre-commit)
+        let chunk1 = b"<head><title>Small</title></head>";
+        let r1 = conv.feed_chunk(chunk1);
+        assert!(r1.is_ok(), "First chunk within budget should succeed");
+
+        // Second chunk: pushes total over 100 bytes (still pre-commit)
+        let chunk2 =
+            b"<body><p>Second chunk of data that exceeds the cumulative budget limit here.</p>";
+        let r2 = conv.feed_chunk(chunk2);
+        assert!(
+            r2.is_err(),
+            "Second chunk should exceed cumulative parser budget"
+        );
+        let err = r2.unwrap_err();
+        // In pre-commit state, the raw ParseBudgetExceeded error is returned
+        assert_eq!(err.code(), 11);
+    }
+
+    /// Parser budget enforcement: when exceeded post-commit, the error is
+    /// wrapped as PostCommitError with original_code == 11.
+    #[test]
+    fn test_parser_budget_exceeded_post_commit() {
+        let mut conv = make_converter();
+        conv.set_parser_budget(200); // budget large enough for first chunks
+
+        // Feed enough to produce output (transition to post-commit)
+        let chunk1 = b"<h1>Title</h1><p>Paragraph one.</p>";
+        let r1 = conv.feed_chunk(chunk1);
+        assert!(r1.is_ok(), "First chunk should succeed");
+
+        // Feed more to push past budget in post-commit state
+        let chunk2_data = vec![b'x'; 200];
+        let mut chunk2 = b"<p>".to_vec();
+        chunk2.extend_from_slice(&chunk2_data);
+        chunk2.extend_from_slice(b"</p>");
+        let r2 = conv.feed_chunk(&chunk2);
+        assert!(
+            r2.is_err(),
+            "Should fail after exceeding parser budget post-commit"
+        );
+        let err = r2.unwrap_err();
+        // Post-commit errors are wrapped as ERROR_POST_COMMIT (8)
+        assert_eq!(
+            err.code(),
+            8,
+            "Post-commit parser budget error should be code 8"
+        );
     }
 }

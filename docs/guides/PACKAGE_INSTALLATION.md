@@ -7,9 +7,9 @@ official NGINX repository packages.
 ## Repository Publishing Status
 
 GitHub Releases are the current distribution channel for DEB and RPM package
-artifacts, including the 0.7.0 GA channel.
+artifacts, including the 0.8.0 GA channel.
 Public APT/YUM repositories are planned but not available yet.
-They are not part of the 0.7.0 GA channel.
+They are not part of the 0.8.0 GA channel.
 
 Bare package-manager installation commands only work after an operator
 publishes and configures a real APT or YUM repository. Until then, download the
@@ -55,7 +55,7 @@ Architecture mapping:
 ## DEB Artifacts (Ubuntu, Debian)
 
 ```bash
-VERSION=0.7.0
+VERSION=0.8.0
 NGINX_VERSION=1.26.3
 ARCH=amd64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
@@ -70,7 +70,7 @@ sudo apt install "./${PKG}"
 ## RPM Artifacts (AlmaLinux, Amazon Linux, RHEL)
 
 ```bash
-VERSION=0.7.0
+VERSION=0.8.0
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
