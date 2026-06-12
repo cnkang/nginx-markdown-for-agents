@@ -1,6 +1,6 @@
 ---
 domain: ffi-crosslang
-rules: [15]
+rules: [15, 46]
 paths:
   - "components/rust-converter/src/**"
   - "components/rust-converter/include/**"
@@ -37,3 +37,36 @@ Required:
   branch, grep the FFI header for all related `#define` constants and
   confirm the branch covers the full set.  This applies equally to error
   codes, feature flags, and enum values that cross the FFI boundary.
+
+---
+
+### 46. FFI operation NULL and empty-input boundary guards
+Historical issues: 0f2247a7.
+
+Required:
+- Every FFI operation that accepts a key, name, or identifier parameter
+  must validate that the parameter is not NULL and not zero-length before
+  processing.  This applies to all operation types including collection
+  mutation operations (for example delete-all, clear, reset) where a NULL
+  or empty key would be ambiguous or cause undefined behavior on the other
+  side of the FFI boundary.
+- When adding a new FFI operation (for example `DeleteAll`, `Clear`,
+  `Reset`), verify the C-side handler explicitly checks for NULL data
+  pointer and zero length on all string/buffer inputs before passing them
+  to Rust.  A NULL `ngx_str_t.data` with non-zero `len` is undefined
+  behavior; a zero `len` with non-NULL `data` is semantically empty.
+- On the Rust side, FFI entry points that receive raw pointers must
+  validate them before dereferencing.  Use `if key.is_null() || key_len
+  == 0` guard patterns.  Do not rely on the caller to have already
+  validated — the FFI boundary is the trust boundary.
+- When a new FFI operation is added, the test suite must include at least
+  one test for the NULL/empty input case on each side of the boundary.
+  This prevents regressions if a later refactor removes the guard.
+
+Verification:
+- `grep -rn 'op_type\|operation_type' components/rust-converter/src/ffi/`
+  — verify each FFI entry point validates key/name inputs.
+- `grep -rn 'key\.data.*==.*NULL\|key_len.*==.*0\|\.is_null()' components/nginx-module/src/ components/rust-converter/src/`
+  — verify guards exist on both sides of the FFI boundary.
+- `make test-rust` and `make test-nginx-unit` — NULL/empty-input FFI
+  tests must pass.

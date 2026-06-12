@@ -1,9 +1,10 @@
 ---
 domain: dynconf-snapshot
-rules: [34, 35]
+rules: [34, 35, 45]
 paths:
   - "components/nginx-module/src/dynconf/**"
   - "components/nginx-module/src/config/**"
+  - "components/nginx-module/src/ngx_http_markdown_filter_module.h"
 ---
 
 ## Dynconf Snapshot Isolation
@@ -108,3 +109,40 @@ Verification:
   test_start_applies_existing_file_on_startup and
   test_start_invalid_file_leaves_applied_mtime_zero.
 - `make harness-check-full` — now includes harness-security-checks.
+
+---
+
+### 45. Effective configuration NULL-safe access and cross-TU visibility
+Historical issues: d91dd419, 7e1227a9, 31e017d9, 327bfe99, 4b97d0a7.
+
+Required:
+- When request-path code reads `ctx->effective_conf` fields (for example
+  `memory_budget`, `streaming_budget`), the code must handle the case where
+  `effective_conf` is NULL.  This can occur in early header_filter paths
+  before snapshot binding, or after allocation failure.  A NULL `effective_conf`
+  must fall back to `conf->` with an explicit comment documenting why `eff` is
+  unavailable, consistent with Rule 34's fallback allowance.
+- When a configuration field is consumed across multiple translation units
+  (for example `effective_body_buffer_limit` used in both `filter_module.c`
+  and `streaming_impl.h`), the field declaration and accessor must be in a
+  shared header (`filter_module.h`), not in a source file.  A field declared
+  `static` in one `.c` file is invisible to other translation units, causing
+  either link errors or silent use of stale/zero defaults.
+- When using `NGX_CONF_UNSET_SIZE` as a sentinel for "use default", ensure
+  the sentinel value `(size_t)-1` is used consistently.  Do not mix
+  `NGX_CONF_UNSET_SIZE` (which is `(size_t)-1` for size fields) with literal
+  `(size_t)-1` in some places and `NGX_CONF_UNSET_SIZE` in others — pick one
+  form and use it uniformly within the effective_conf helper chain.
+- The eligibility check for streaming must guard against `effective_conf`
+  being NULL before dereferencing its `memory_budget` or `streaming_budget`
+  fields.  When `eff` is NULL, the eligibility function must return the
+  non-streaming (full-buffer) path, not dereference NULL.
+
+Verification:
+- `grep -rn 'effective_conf\|eff->' components/nginx-module/src/ | grep -v '/\*'`
+  — verify no effective_conf dereference without NULL guard in paths that
+  can be called before snapshot binding.
+- `grep -rn 'effective_body_buffer_limit' components/nginx-module/src/`
+  — verify declaration is in a shared header, not a source file.
+- `make test-nginx-unit` — eligibility tests cover non-NULL eff memory_budget
+  path and NULL-eff fallback.

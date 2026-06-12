@@ -1,6 +1,6 @@
 ---
 domain: streaming-backpressure
-rules: [1, 2, 38]
+rules: [1, 2, 38, 47]
 paths:
   - "components/nginx-module/src/**"
   - "components/rust-converter/src/streaming/**"
@@ -71,6 +71,46 @@ Verification:
 - `grep -rn 'results\.failopen_count' components/nginx-module/src/`
 - Verify the increment is in `failopen_passthrough` after downstream
   success, not in `precommit_error`.
+
+---
+
+### 47. Terminal-sent latch must not be set on NGX_AGAIN
+Historical issues: 56edddf7.
+
+Required:
+- When a send/output function returns `NGX_AGAIN`, the caller must not
+  latch terminal-sent flags (for example `main_terminal_sent`,
+  `terminal_buf_sent`).  `NGX_AGAIN` means the downstream filter has
+  suspended processing — the output was **not** accepted, and the
+  current buffer is still pending.  Latching a terminal flag on
+  `NGX_AGAIN` causes the resume path to skip the buffered output,
+  silently dropping the terminal buffer and leaving the client with an
+  incomplete response.
+- The correct pattern is:
+  ```c
+  rc = ngx_http_output_filter(r, out);
+  if (rc == NGX_AGAIN) {
+      /* save pending chain, do NOT set terminal flags */
+      return NGX_AGAIN;
+  }
+  if (rc == NGX_OK && out && out->buf && out->buf->last_buf) {
+      ctx->main_terminal_sent = 1;
+  }
+  ```
+- This rule applies to all output paths in body_filter and streaming
+  that set terminal flags.  When adding a new terminal-sent latch,
+  verify the latch is set only after a successful (non-NGX_AGAIN)
+  downstream filter return on a terminal buffer.
+- This rule generalizes Rule 1's "never overwrite pending with terminal
+  last_buf" to cover the symmetric case: do not mark terminal as sent
+  when the terminal buffer is still pending in the downstream queue.
+
+Verification:
+- `grep -rn 'terminal_sent\|terminal_buf_sent\|main_terminal' components/nginx-module/src/`
+- For each flag set, verify it is not inside a code path reachable on
+  `NGX_AGAIN` return from `ngx_http_output_filter`.
+- `make test-nginx-unit` — stream-postcommit tests include
+  terminal-only NGX_AGAIN regression test.
 
 ## Required Agent Workflow
 
