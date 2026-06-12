@@ -563,8 +563,8 @@ typedef struct FFIHeaderPlanHandle {
  * - `op_type`: 0 = set, 1 = delete, 2 = set-etag-placeholder, 3 = delete-all
  * - `key`: Pointer to header name (NUL-terminated, borrowed from plan; NULL for set-etag-placeholder)
  * - `key_len`: Length of header name
- * - `value`: Pointer to header value (NUL-terminated, borrowed from plan; NULL for delete and set-etag-placeholder)
- * - `value_len`: Length of header value
+ * - `value`: Pointer to header value (NUL-terminated, borrowed from plan; NULL for delete, delete-all, and set-etag-placeholder)
+ * - `value_len`: Length of header value (0 for delete, delete-all, and set-etag-placeholder)
  *
  * For op_type == 2 (set-etag-placeholder), the C caller must substitute
  * the actual ETag value from MarkdownResult.etag instead of reading
