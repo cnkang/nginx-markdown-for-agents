@@ -241,8 +241,8 @@ ngx_http_markdown_stream_replay_available(const ngx_http_markdown_ctx_t *ctx)
  *   NULL if allocation fails or replay buffer is empty
  */
 ngx_chain_t *
-ngx_http_markdown_stream_replay_chain(ngx_http_markdown_ctx_t *ctx,
-                                       ngx_pool_t *pool)
+ngx_http_markdown_stream_replay_chain(
+    const ngx_http_markdown_ctx_t *ctx, ngx_pool_t *pool)
 {
     ngx_chain_t  *cl;
     ngx_buf_t    *b;

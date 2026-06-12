@@ -88,8 +88,8 @@ ngx_http_markdown_stream_replay_available(const ngx_http_markdown_ctx_t *ctx);
  *   NULL on allocation failure or empty replay buffer
  */
 ngx_chain_t *
-ngx_http_markdown_stream_replay_chain(ngx_http_markdown_ctx_t *ctx,
-                                       ngx_pool_t *pool);
+ngx_http_markdown_stream_replay_chain(
+    const ngx_http_markdown_ctx_t *ctx, ngx_pool_t *pool);
 
 
 #endif /* NGX_HTTP_MARKDOWN_STREAM_REPLAY_H_INCLUDED_ */
