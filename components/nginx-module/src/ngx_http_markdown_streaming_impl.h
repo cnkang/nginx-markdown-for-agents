@@ -127,7 +127,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_finalize_request(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf);
 
 /*
  * Pre-Commit fallback from streaming to full-buffer path.
@@ -2467,7 +2467,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_finalize_request(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     struct MarkdownResult  result;
     uint32_t               rc_ffi;
@@ -3402,7 +3402,7 @@ static ngx_int_t
 ngx_http_markdown_streaming_process_chain(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
-    ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_conf_t *conf,
     ngx_chain_t *in,
     ngx_flag_t *last_buf,
     ngx_chain_t **fallback_cl)
