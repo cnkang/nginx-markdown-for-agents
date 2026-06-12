@@ -250,7 +250,7 @@ markdown_streaming_output_free(u_char *data, uintptr_t len)
 #include "../../src/ngx_http_markdown_stream_replay.h"
 
 ngx_chain_t *
-ngx_http_markdown_stream_replay_chain(ngx_http_markdown_ctx_t *ctx,
+ngx_http_markdown_stream_replay_chain(const ngx_http_markdown_ctx_t *ctx,
                                        ngx_pool_t *pool)
 {
     UNUSED(ctx); UNUSED(pool);

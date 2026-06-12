@@ -223,7 +223,7 @@ pub struct MarkdownOptions {
     /// `ERROR_PARSE_BUDGET_EXCEEDED`.
     /// Populated from the `markdown_parser_budget` NGINX directive.
     pub parser_memory_budget: u64,
-    /// Streaming flush threshold in bytes (0 = flush immediately).
+    /// Streaming flush threshold in bytes (0 = use default threshold).
     ///
     /// Controls the minimum number of accumulated output bytes before
     /// the streaming emitter returns non-empty output to the C caller.
