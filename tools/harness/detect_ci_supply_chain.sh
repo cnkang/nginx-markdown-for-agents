@@ -107,9 +107,9 @@ done < <(awk '
     /uses:.*@/ { printf "%s:%d:%s\n", FILENAME, FNR, $0 }
 ' "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml 2>/dev/null || true)
 
-while IFS= read -r workflow_file; do
+while IFS= read -r -d '' workflow_file; do
     check_network_to_shell "$workflow_file"
-done < <(find "$WORKFLOW_DIR" -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort)
+done < <(find "$WORKFLOW_DIR" -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 | sort -z)
 
 if [[ "$VIOLATIONS" -gt 0 ]]; then
     echo "  [supply-chain] $VIOLATIONS supply-chain violation(s) found" >&2

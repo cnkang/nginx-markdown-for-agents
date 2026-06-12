@@ -121,13 +121,24 @@ def _workflow_uses_pinned_toolchain(workflow: str) -> bool:
     env_quoted = f'RUST_TOOLCHAIN: "{channel}"'
     script = read(RUSTUP_INSTALL_SCRIPT)
     checksums = read(CHECKSUMS_PATH)
+    expected_artifacts = {
+        "rustup-init-1.28.2-x86_64-unknown-linux-gnu",
+        "rustup-init-1.28.2-aarch64-unknown-linux-gnu",
+    }
+    found_artifacts: set[str] = set()
+    for line in checksums.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(None, 1)
+        if len(parts) == 2 and re.fullmatch(r"[0-9a-fA-F]{64}", parts[0]):
+            found_artifacts.add(parts[1])
     verified_rustup_installer = (
         'RUSTUP_VERSION="1.28.2"' in script
         and "static.rust-lang.org/rustup/archive" in script
         and "verify-checksum.sh" in script
         and '--default-toolchain "$RUST_TOOLCHAIN"' in script
-        and "rustup-init-1.28.2-x86_64-unknown-linux-gnu" in checksums
-        and "rustup-init-1.28.2-aarch64-unknown-linux-gnu" in checksums
+        and expected_artifacts.issubset(found_artifacts)
     )
     return (
         (env_unquoted in workflow or env_quoted in workflow)
