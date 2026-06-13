@@ -292,7 +292,7 @@ security-semgrep:
 
 security-cargo-deny:
 	@command -v cargo-deny >/dev/null 2>&1 || { echo "ERROR: cargo-deny not found. Install with: cargo install cargo-deny --version 0.19.8 --locked" >&2; exit 127; }
-	@for manifest in components/rust-converter/Cargo.toml tools/corpus/test-corpus-conversion/Cargo.toml; do \
+	@for manifest in components/rust-converter/Cargo.toml components/rust-converter/fuzz/Cargo.toml tools/corpus/test-corpus-conversion/Cargo.toml tools/e2e-harness/Cargo.toml; do \
 		cargo deny --manifest-path "$$manifest" check --config deny.toml advisories licenses bans sources || exit $$?; \
 	done
 

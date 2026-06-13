@@ -3,6 +3,7 @@ name = "nginx-markdown-converter-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2024"
+license = "BSD-2-Clause"
 
 [package.metadata]
 cargo-fuzz = true
@@ -11,7 +12,7 @@ cargo-fuzz = true
 flate2 = "1.0"
 libfuzzer-sys = "0.4"
 markup5ever_rcdom = "0.38"
-nginx-markdown-converter = { path = "..", features = ["streaming"] }
+nginx-markdown-converter = { version = "0.8.0", path = "..", features = ["streaming"] }
 
 [[bin]]
 name = "parser_html"

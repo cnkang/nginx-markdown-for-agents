@@ -36,8 +36,8 @@ Required:
 - Semgrep CE rules must stay high-confidence and repo-specific. Avoid broad
   noisy packs as PR-blocking checks until findings are triaged and documented.
 - `cargo-deny` must check Rust advisories, license policy, bans, and sources for
-  the Rust converter and the corpus-conversion helper crate. Do not allow GPL,
-  AGPL, LGPL, SSPL, Commons Clause, or unknown licenses by default.
+  every checked-in Rust manifest. Do not allow GPL, AGPL, LGPL, SSPL, Commons
+  Clause, or unknown licenses by default.
 - `supply-chain.yml` is a scheduled/manual visibility workflow for Trivy
   filesystem/IaC scans, SPDX SBOM generation, and OpenSSF Scorecard. Keep heavy
   supply-chain scans out of every PR unless the project adopts an explicit
