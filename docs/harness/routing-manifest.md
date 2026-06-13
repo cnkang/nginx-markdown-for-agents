@@ -10,6 +10,8 @@ This page is the readable overlay, not the machine-owned truth.
 | `harness-sync` | cheap blocker | `make harness-check` |
 | `docs-tooling` | cheap blocker | `make docs-check` |
 | `harness-security` | focused semantic | `make harness-security-checks` (CWE-190, CWE-22, live-conf, shell-hygiene, const-correctness), `PYTHONPATH=. pytest -q tools/perf/tests` |
+| `security-static` | cheap blocker | `make security-static` |
+| `supply-chain` | scheduled visibility | `make supply-chain` |
 | `rust-streaming` | focused semantic | `make test-rust-streaming` |
 | `nginx-streaming` | focused semantic | `make test-nginx-unit-streaming` |
 | `nginx-protocol` | focused semantic | `make test-nginx-unit`, `make test-nginx-integration` |
@@ -38,6 +40,7 @@ Plan-only targets (for example `*-plan`) are documentation aids, not evidence.
 | `docs-tooling-drift` | docs, validators, CI path filters, operator commands | observability | [risk-packs/docs-tooling-drift.md](risk-packs/docs-tooling-drift.md) |
 | `nginx-protocol-safety` | auth/cache-control, conditional requests, status and header semantics | observability, docs-tooling | [risk-packs/nginx-protocol-safety.md](risk-packs/nginx-protocol-safety.md) |
 | `tooling-path-security` | tooling path validation, safe path I/O, subprocess argument safety, shell hygiene, const correctness | docs-tooling, release-governance | [risk-packs/tooling-path-security.md](risk-packs/tooling-path-security.md) |
+| `security-static-supply-chain` | workflow static security, secret scanning, Rust dependency policy, supply-chain visibility | ci-gating, docs-tooling | [risk-packs/security-static-supply-chain.md](risk-packs/security-static-supply-chain.md) |
 | `release-governance` | release gates, scope governance, source-build CI | docs-tooling, harness-remediation | [risk-packs/release-governance.md](risk-packs/release-governance.md) |
 | `harness-remediation` | harness rules, steering adapters, post-analysis closeout | docs-tooling, observability | [risk-packs/harness-remediation.md](risk-packs/harness-remediation.md) |
 | `otel-integration` | OTel tracing, OTel metrics, OTLP export, span attributes | observability, nginx-protocol | [risk-packs/otel-integration.md](risk-packs/otel-integration.md) |
@@ -95,3 +98,4 @@ Safety/engineering invariants always win; user-task controls scope and approach.
 | 0.6.6 | 2026-05-16 | Kang | Added replay buffer keywords (replay buffer, failopen_completed, precommit_error) to runtime-streaming risk pack; updated primary surfaces to include replay buffer integrity; introduced Spec Resolver Priority section (priority-ordered resolution: agents-baseline > user-task > active-spec-pointer > agents-workflow > harness-core > replay-calibration) ensuring safety/engineering invariants always win over user-task scope |
 | 0.7.0 | 2026-05-31 | Kiro | Added v070-gates verification family (release-gates-check-070, test-rust, check-headers) to sync with JSON manifest |
 | 0.8.0 | 2026-06-04 | Codex | Added v080-gates verification family for release-gates-check-080; added tools/harness/tests/ to tooling-path-security risk pack paths |
+| 0.8.2 | 2026-06-13 | Codex | Added security-static and supply-chain verification families plus the security-static-supply-chain risk pack |
