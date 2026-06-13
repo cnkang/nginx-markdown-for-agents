@@ -419,7 +419,40 @@ if __name__ == "__main__":
 PY
 
 chmod +x "${UPSTREAM_SCRIPT}"
-eval "$(python3 "${UPSTREAM_SCRIPT}" --print-metrics)"
+
+load_upstream_metrics() {
+  local key
+  local value
+
+  while IFS='=' read -r key value; do
+    case "${key}" in
+      GZIP_SOURCE_LEN|GZIP_COMPRESSED_LEN|DEFLATE_SOURCE_LEN|DEFLATE_COMPRESSED_LEN|TRUNCATED_GZIP_COMPRESSED_LEN|TRUNCATED_DEFLATE_COMPRESSED_LEN)
+        [[ "${value}" =~ ^[0-9]+$ ]] || {
+          echo "invalid numeric upstream metric: ${key}=${value}" >&2
+          return 1
+        }
+        ;;
+      SMALL_END_TOKEN|OVERSIZE_END_TOKEN|GZIP_END_TOKEN|DEFLATE_END_TOKEN)
+        [[ "${value}" =~ ^[A-Z0-9_]+$ ]] || {
+          echo "invalid upstream token metric: ${key}=${value}" >&2
+          return 1
+        }
+        ;;
+      "")
+        continue
+        ;;
+      *)
+        echo "unexpected upstream metric key: ${key}" >&2
+        return 1
+        ;;
+    esac
+    printf -v "${key}" '%s' "${value}"
+  done < <(python3 "${UPSTREAM_SCRIPT}" --print-metrics)
+
+  return 0
+}
+
+load_upstream_metrics
 
 echo "==> Host architecture: $(uname -m)"
 if [[ -n "${NGINX_BIN}" ]]; then

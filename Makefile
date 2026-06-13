@@ -63,6 +63,8 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
         harness-check harness-check-full harness-security-checks test-harness \
+        security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
+        supply-chain supply-chain-trivy supply-chain-sbom \
 	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-legacy release-gates-check-strict \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
@@ -257,6 +259,53 @@ license-check:
 	python3 tools/ci/check_c_licenses.py
 	python3 tools/ci/check_rust_licenses.py
 	python3 tools/ci/check_third_party_notices.py
+
+security-static: security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny
+
+security-actionlint:
+	@command -v actionlint >/dev/null 2>&1 || { echo "ERROR: actionlint not found. Install with: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12" >&2; exit 127; }
+	@workflow_files=$$(find .github/workflows -maxdepth 1 -type f \( -name "*.yml" -o -name "*.yaml" \) | sort); \
+	if [ -z "$$workflow_files" ]; then \
+		echo "ERROR: no workflow files found under .github/workflows" >&2; \
+		exit 1; \
+	fi; \
+	actionlint -color -shellcheck= $$workflow_files
+
+security-shellcheck:
+	@command -v shellcheck >/dev/null 2>&1 || { echo "ERROR: shellcheck not found. Install from https://www.shellcheck.net/ or your package manager." >&2; exit 127; }
+	@tmp_files=$$(mktemp); \
+	trap 'rm -f "$$tmp_files"' EXIT; \
+	git ls-files -z -- "*.sh" "tools/**/*.sh" "packaging/**/*.sh" ".clusterfuzzlite/*.sh" "examples/**/*.sh" > "$$tmp_files"; \
+	if [ ! -s "$$tmp_files" ]; then \
+		echo "No tracked shell scripts matched the security-static scope."; \
+	else \
+		xargs -0 shellcheck --severity=error -x -P tools/e2e -P tools/lib < "$$tmp_files"; \
+	fi
+
+security-gitleaks:
+	@command -v gitleaks >/dev/null 2>&1 || { echo "ERROR: gitleaks not found. Install with: go install github.com/zricethezav/gitleaks/v8@v8.30.1" >&2; exit 127; }
+	gitleaks detect --source . --no-git --redact --config .gitleaks.toml --verbose
+
+security-semgrep:
+	@command -v semgrep >/dev/null 2>&1 || { echo "ERROR: semgrep not found. Install with: python3 -m pip install --user semgrep==1.166.0" >&2; exit 127; }
+	semgrep --config .semgrep.yml --error --metrics=off
+
+security-cargo-deny:
+	@command -v cargo-deny >/dev/null 2>&1 || { echo "ERROR: cargo-deny not found. Install with: cargo install cargo-deny --version 0.19.8 --locked" >&2; exit 127; }
+	@for manifest in components/rust-converter/Cargo.toml tools/corpus/test-corpus-conversion/Cargo.toml; do \
+		cargo deny --manifest-path "$$manifest" check --config deny.toml advisories licenses bans sources; \
+	done
+
+supply-chain: supply-chain-trivy supply-chain-sbom
+
+supply-chain-trivy:
+	@command -v trivy >/dev/null 2>&1 || { echo "ERROR: trivy not found. Install from https://aquasecurity.github.io/trivy/latest/getting-started/installation/." >&2; exit 127; }
+	trivy fs --scanners vuln,misconfig,secret --ignore-unfixed --severity HIGH,CRITICAL .
+
+supply-chain-sbom:
+	@command -v syft >/dev/null 2>&1 || { echo "ERROR: syft not found. Install from https://github.com/anchore/syft#installation." >&2; exit 127; }
+	mkdir -p build/reports
+	syft dir:. -o spdx-json=build/reports/sbom.spdx.json
 
 release-gates-check:
 	python3 tools/release/gates/validate_release_gates.py
@@ -746,6 +795,8 @@ help:
 	@echo "  harness-check            - Validate harness truth surfaces and optional local adapters"
 	@echo "  harness-check-full       - Run full harness validation plus docs/release checks"
 	@echo "  harness-security-checks  - Run CWE-190/CWE-22/effective-conf/shell-hygiene/const-correctness detection"
+	@echo "  security-static          - Run actionlint, shellcheck, gitleaks, Semgrep, and cargo-deny"
+	@echo "  supply-chain             - Run Trivy filesystem/IaC scan and generate a Syft SPDX SBOM"
 	@echo "  test-harness             - Run unit tests for harness detector scripts"
 	@echo "  docs-check               - Validate documentation links/style"
 	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"

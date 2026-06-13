@@ -1,0 +1,41 @@
+title = "nginx-markdown-for-agents gitleaks policy"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Non-secret placeholders used in documentation and examples"
+regexes = [
+  '''(?i)(example|dummy|fake|placeholder|changeme|your-[a-z0-9-]+-here)''',
+]
+
+[[allowlists]]
+description = "Checksum fixtures and expected hash literals"
+paths = [
+  '''(^|/)SHA256SUMS$''',
+  '''^docs/.*checksum.*\.md$''',
+  '''^tools/.*/tests?/fixtures/.*$''',
+]
+regexes = [
+  '''\b[A-Fa-f0-9]{64}\b''',
+]
+
+[[allowlists]]
+description = "Ignored local generated analysis/build artifacts"
+paths = [
+  '''^\.sonar/''',
+  '''(^|/)target/''',
+  '''^build/''',
+  '''^dist/''',
+  '''^out/''',
+  '''^coverage/''',
+]
+
+[[allowlists]]
+description = "Legacy naming tests use token benchmark field names, not credentials"
+paths = [
+  '''^tools/release/legacy/tests/test_naming_conventions\.py$''',
+]
+regexes = [
+  '''(?i)token-reduction''',
+]
