@@ -20,6 +20,7 @@ Start here, then branch out:
 | Recent Git analysis and remediation closeout | [risk-packs/harness-remediation.md](risk-packs/harness-remediation.md) |
 | NGINX protocol/auth/cache/conditional safety | [risk-packs/nginx-protocol-safety.md](risk-packs/nginx-protocol-safety.md) |
 | Release gate and source-build governance | [risk-packs/release-governance.md](risk-packs/release-governance.md) |
+| Static security and supply-chain gates | [risk-packs/security-static-supply-chain.md](risk-packs/security-static-supply-chain.md) |
 | System design and rationale for the harness itself | [../architecture/HARNESS_ARCHITECTURE.md](../architecture/HARNESS_ARCHITECTURE.md) |
 | Contributor maintenance workflow for evolving harness rules | [../guides/HARNESS_MAINTENANCE.md](../guides/HARNESS_MAINTENANCE.md) |
 
@@ -93,3 +94,4 @@ repo-owned truth surfaces (`AGENTS.md`, `docs/harness/`, `tools/harness/`,
 | 0.5.5 | 2026-04-24 | Codex | Added harness-remediation entrypoint |
 | 0.5.5 | 2026-04-24 | Codex | Added nginx-protocol-safety (auth/cache/conditional safety) and release-governance entrypoints |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.8.2 | 2026-06-13 | Codex | Added static security and supply-chain gate entrypoint |

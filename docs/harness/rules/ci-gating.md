@@ -1,6 +1,6 @@
 ---
 domain: ci-gating
-rules: [13]
+rules: [13, 48]
 paths:
   - ".github/workflows/**"
   - "Makefile"
@@ -27,6 +27,10 @@ Required:
     together.  Never leave a stale version comment.
   - First-party actions (`actions/checkout`, `actions/upload-artifact`) are
     not exempt — pin them to SHA as well.
+  - Workflow changes must pass `actionlint` and the focused supplemental
+    static security gate in `security-static.yml`. CodeQL remains the primary
+    C/C++ and Rust SAST workflow; supplemental Semgrep rules should cover
+    workflow/script/release/config risks, not duplicate CodeQL language scans.
 - **Supply chain hardening (binary downloads)**:
   - Downloaded binaries and source tarballs in CI workflows and Dockerfiles
     must be verified against a known-good checksum (SHA256 minimum).
@@ -158,6 +162,7 @@ Required:
 
 Verification:
 - `bash tools/harness/detect_ci_supply_chain.sh`
+- `make security-static`
 - `grep -rn 'uses:' .github/workflows/ | grep -v '@[0-9a-f]\{40\}'` — should
   return no results (all actions pinned to SHA).
 - `python3 tools/release/gates/validate_package_metadata_070.py`
