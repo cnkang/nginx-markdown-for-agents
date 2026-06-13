@@ -426,7 +426,7 @@ load_upstream_metrics() {
 
   while IFS='=' read -r key value; do
     case "${key}" in
-      GZIP_SOURCE_LEN|GZIP_COMPRESSED_LEN|DEFLATE_SOURCE_LEN|DEFLATE_COMPRESSED_LEN|TRUNCATED_GZIP_COMPRESSED_LEN|TRUNCATED_DEFLATE_COMPRESSED_LEN)
+      SMALL_LEN|OVERSIZE_LEN|GZIP_SOURCE_LEN|GZIP_COMPRESSED_LEN|DEFLATE_SOURCE_LEN|DEFLATE_COMPRESSED_LEN|TRUNCATED_GZIP_COMPRESSED_LEN|TRUNCATED_DEFLATE_COMPRESSED_LEN)
         [[ "${value}" =~ ^[0-9]+$ ]] || {
           echo "invalid numeric upstream metric: ${key}=${value}" >&2
           return 1

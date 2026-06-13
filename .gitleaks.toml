@@ -5,6 +5,12 @@ useDefault = true
 
 [[allowlists]]
 description = "Non-secret placeholders used in documentation and examples"
+condition = "AND"
+paths = [
+  '''^README(_zh-CN)?\.md$''',
+  '''^docs/''',
+  '''^examples/''',
+]
 regexes = [
   '''(?i)(example|dummy|fake|placeholder|changeme|your-[a-z0-9-]+-here)''',
 ]
