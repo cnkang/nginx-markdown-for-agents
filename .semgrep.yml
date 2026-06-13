@@ -1,0 +1,74 @@
+rules:
+  - id: github-actions-unpinned-action
+    languages:
+      - generic
+    severity: ERROR
+    message: Third-party GitHub Actions must be pinned to immutable commit SHAs.
+    paths:
+      include:
+        - /.github/workflows/*.yml
+        - /.github/workflows/*.yaml
+    pattern-regex: 'uses:\s*(?!\./|docker://|[^@\s]+@[0-9a-f]{40}\b)[^\s#]+'
+
+  - id: github-actions-pull-request-target
+    languages:
+      - generic
+    severity: ERROR
+    message: Do not use pull_request_target without a dedicated threat model and harness rule.
+    paths:
+      include:
+        - /.github/workflows/*.yml
+        - /.github/workflows/*.yaml
+    pattern-regex: '^\s*pull_request_target\s*:'
+
+  - id: github-actions-pr-controlled-shell-expansion
+    languages:
+      - generic
+    severity: ERROR
+    message: Do not interpolate PR-controlled GitHub event fields directly into shell commands.
+    paths:
+      include:
+        - /.github/workflows/*.yml
+        - /.github/workflows/*.yaml
+    pattern-regex: '\$\{\{\s*github\.event\.pull_request\.(title|body|head\.ref|head\.label|head\.repo\.full_name)\s*\}\}'
+
+  - id: shell-download-piped-to-shell
+    languages:
+      - generic
+    severity: ERROR
+    message: Do not pipe downloaded content directly into a shell interpreter.
+    paths:
+      include:
+        - /*.sh
+        - /tools/**/*.sh
+        - /packaging/**/*.sh
+        - /.clusterfuzzlite/*.sh
+        - /examples/**/*.sh
+        - /.github/workflows/*.yml
+        - /.github/workflows/*.yaml
+    pattern-regex: '\b(curl|wget)\b[^\n|;]*\|\s*(sudo\s+)?(sh|bash)\b'
+
+  - id: shell-eval-untrusted-expansion
+    languages:
+      - generic
+    severity: ERROR
+    message: Avoid eval on expanded variables in shell and release scripts.
+    paths:
+      include:
+        - /*.sh
+        - /tools/**/*.sh
+        - /packaging/**/*.sh
+        - /.clusterfuzzlite/*.sh
+        - /examples/**/*.sh
+    pattern-regex: '\beval\s+["'']?\$[{(]?[A-Za-z_][A-Za-z0-9_]*'
+
+  - id: dockerfile-remote-add
+    languages:
+      - generic
+    severity: ERROR
+    message: Use curl or wget with checksum verification instead of Dockerfile ADD from remote URLs.
+    paths:
+      include:
+        - /**/Dockerfile
+        - /**/Dockerfile.*
+    pattern-regex: '^\s*ADD\s+https?://'

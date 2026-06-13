@@ -31,7 +31,7 @@ readonly PATTERN_CT_MARKDOWN='^Content-Type: text/markdown'
 
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
-# shellcheck disable=SC1090
+# shellcheck source=tools/e2e/e2e_common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/e2e_common.sh"
 
 # usage — Print command-line help text to stderr.
