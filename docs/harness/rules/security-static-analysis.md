@@ -55,4 +55,3 @@ Verification:
 - `make security-semgrep`
 - `make security-cargo-deny`
 - `make supply-chain` when Trivy and Syft are locally available
-- `make docs-check`
