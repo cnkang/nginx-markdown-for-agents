@@ -72,6 +72,11 @@ configuration directives.
 - **Homebrew tap installation** for macOS.
 - **Unified DEB/RPM release workflow** with nFPM.
 - **Helm chart** and Kubernetes deployment examples.
+- **Supplemental static security gates**: `security-static.yml` adds
+  actionlint, shellcheck, gitleaks, focused Semgrep, and cargo-deny checks
+  around the existing CodeQL workflow.
+- **Supply-chain visibility workflow**: `supply-chain.yml` adds scheduled/manual
+  Trivy filesystem/IaC scanning, SPDX SBOM generation, and OpenSSF Scorecard.
 
 ### Changed
 
