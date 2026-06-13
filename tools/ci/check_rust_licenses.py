@@ -34,6 +34,10 @@ RUST_MANIFEST_RELS = (
 )
 
 
+class ManifestPathError(Exception):
+    """Raised when a configured Cargo manifest path is invalid."""
+
+
 @dataclass
 class Token:
     """A single SPDX expression token with kind and text value."""
@@ -199,40 +203,60 @@ def parse_locked_flag(argv: list[str]) -> bool:
     return "--locked" in argv
 
 
+def validate_manifest_path(manifest_rel: str) -> Path:
+    """Resolve and validate a configured manifest path inside the repository."""
+    manifest_path = (REPO_ROOT / manifest_rel).resolve()
+    if REPO_ROOT not in manifest_path.parents and manifest_path != REPO_ROOT:
+        raise ManifestPathError(f"Refusing manifest path outside repository: {manifest_path}")
+    if not manifest_path.is_file():
+        raise ManifestPathError(f"Manifest path does not exist: {manifest_path}")
+    return manifest_path
+
+
+def package_license_violation(manifest_rel: str, pkg: dict) -> str | None:
+    """Return a policy violation for one package, or None when it is allowed."""
+    name = pkg.get("name", "<unknown>")
+    version = pkg.get("version", "<unknown>")
+    license_expr = pkg.get("license")
+
+    if not license_expr:
+        return f"{manifest_rel}: {name} {version}: missing SPDX license expression"
+
+    try:
+        if requires_strong_copyleft(license_expr):
+            return f"{manifest_rel}: {name} {version}: {license_expr}"
+    except ValueError as exc:
+        return (
+            f"{manifest_rel}: {name} {version}: unparsable license expression "
+            f"'{license_expr}' ({exc})"
+        )
+    return None
+
+
+def collect_manifest_violations(manifest_rel: str, locked: bool) -> list[str]:
+    """Collect license policy violations for a configured Cargo manifest."""
+    validate_manifest_path(manifest_rel)
+    metadata = run_metadata(manifest_rel=manifest_rel, locked=locked)
+    return [
+        violation
+        for pkg in metadata.get("packages", [])
+        if (violation := package_license_violation(manifest_rel, pkg)) is not None
+    ]
+
+
 def main() -> int:
     """Run Rust license policy check and report results."""
     locked = parse_locked_flag(sys.argv[1:])
 
-    violations: list[str] = []
-    for manifest_rel in RUST_MANIFEST_RELS:
-        manifest_path = (REPO_ROOT / manifest_rel).resolve()
-        if REPO_ROOT not in manifest_path.parents and manifest_path != REPO_ROOT:
-            print(f"Refusing manifest path outside repository: {manifest_path}", file=sys.stderr)
-            return 2
-        if not manifest_path.is_file():
-            print(f"Manifest path does not exist: {manifest_path}", file=sys.stderr)
-            return 2
-
-        metadata = run_metadata(manifest_rel=manifest_rel, locked=locked)
-        for pkg in metadata.get("packages", []):
-            name = pkg.get("name", "<unknown>")
-            version = pkg.get("version", "<unknown>")
-            license_expr = pkg.get("license")
-
-            if not license_expr:
-                violations.append(
-                    f"{manifest_rel}: {name} {version}: missing SPDX license expression"
-                )
-                continue
-
-            try:
-                if requires_strong_copyleft(license_expr):
-                    violations.append(f"{manifest_rel}: {name} {version}: {license_expr}")
-            except ValueError as exc:
-                violations.append(
-                    f"{manifest_rel}: {name} {version}: unparsable license expression "
-                    f"'{license_expr}' ({exc})"
-                )
+    try:
+        violations = [
+            violation
+            for manifest_rel in RUST_MANIFEST_RELS
+            for violation in collect_manifest_violations(manifest_rel, locked=locked)
+        ]
+    except ManifestPathError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     if violations:
         return report_violations_and_fail(violations)
