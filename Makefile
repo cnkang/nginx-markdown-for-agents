@@ -275,7 +275,7 @@ security-shellcheck:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "ERROR: shellcheck not found. Install from https://www.shellcheck.net/ or your package manager." >&2; exit 127; }
 	@tmp_files=$$(mktemp); \
 	trap 'rm -f "$$tmp_files"' EXIT; \
-	git ls-files -z -- "*.sh" "tools/**/*.sh" "packaging/**/*.sh" ".clusterfuzzlite/*.sh" "examples/**/*.sh" > "$$tmp_files"; \
+	git ls-files -z -- ":(glob)*.sh" ":(glob)tools/**/*.sh" ":(glob)packaging/**/*.sh" ":(glob).clusterfuzzlite/*.sh" ":(glob)examples/**/*.sh" > "$$tmp_files"; \
 	if [ ! -s "$$tmp_files" ]; then \
 		echo "No tracked shell scripts matched the security-static scope."; \
 	else \
