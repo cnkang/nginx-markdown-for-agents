@@ -362,6 +362,14 @@ make harness-check-full
 
 把 harness 检查当作仓库 contract 和 release-gate 变更的主入口：
 
+```bash
+# workflow、shell、secret、Semgrep 与 Rust 依赖策略的静态安全检查
+make security-static
+
+# 面向发布辅助的供应链可见性检查
+make supply-chain
+```
+
 ## 文档导航
 
 | 目标 | 文档 |
@@ -483,6 +491,11 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - 基于 `markdown_stream_flush_min` 的有界内存流式转换与按大小 flush
 - 提交前安全回退：输出提交前发生转换错误时回退到 HTML
 - 流式发布门禁：`make release-gates-check-080` 验证 0.8.0 发布合约
+- 静态安全门禁：`.github/workflows/security-static.yml` 针对 workflow、脚本、
+  secret、Semgrep 规则与 Rust 依赖策略运行 actionlint、shellcheck、
+  gitleaks、聚焦 Semgrep 和 cargo-deny
+- 供应链可见性：`.github/workflows/supply-chain.yml` 定期运行 Trivy
+  filesystem/IaC 扫描、SPDX SBOM 生成与 OpenSSF Scorecard
 - 面向生产采用的迁移指南和 rollout cookbook
 
 上一版本（0.7.0）：

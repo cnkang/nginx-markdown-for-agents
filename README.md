@@ -365,6 +365,14 @@ make harness-check-full
 Use harness checks as the primary guardrail for repo contract and release-gate
 changes:
 
+```bash
+# Static security checks for workflow, shell, secret, Semgrep, and Rust policy changes
+make security-static
+
+# Release-supporting supply-chain visibility checks
+make supply-chain
+```
+
 ## Documentation Map
 
 | Goal | Document |
@@ -492,6 +500,11 @@ Current release (0.8.0):
 - Bounded-memory streaming conversion with size-based flush (`markdown_stream_flush_min`)
 - Pre-commit safety: fallback to HTML if conversion error occurs before output is committed
 - Streaming release gate: `make release-gates-check-080` validates the 0.8.0 release contract
+- Static security gate: `.github/workflows/security-static.yml` runs actionlint,
+  shellcheck, gitleaks, focused Semgrep, and cargo-deny for workflow, script,
+  secret, and Rust dependency policy changes
+- Supply-chain visibility: `.github/workflows/supply-chain.yml` runs scheduled
+  Trivy filesystem/IaC scans, SPDX SBOM generation, and OpenSSF Scorecard
 - Migration guide and rollout cookbook for production adoption
 
 Previous release (0.7.0):
