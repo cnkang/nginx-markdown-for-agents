@@ -4,12 +4,14 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "17 3 * * 1"
-  push:
+  pull_request:
     branches:
       - main
       - master
+      - "dev/*"
     paths:
       - ".github/workflows/supply-chain.yml"
+      - ".github/workflows/security-static.yml"
       - "components/**"
       - "tools/**"
       - "packaging/**"
@@ -19,6 +21,27 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - "deny.toml"
+      - ".gitleaks.toml"
+      - ".semgrep.yml"
+  push:
+    branches:
+      - main
+      - master
+      - "dev/*"
+    paths:
+      - ".github/workflows/supply-chain.yml"
+      - ".github/workflows/security-static.yml"
+      - "components/**"
+      - "tools/**"
+      - "packaging/**"
+      - "examples/**"
+      - "charts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "deny.toml"
+      - ".gitleaks.toml"
+      - ".semgrep.yml"
 
 permissions: {}
 
