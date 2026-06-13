@@ -226,10 +226,8 @@ def package_license_violation(manifest_rel: str, pkg: dict) -> str | None:
         if requires_strong_copyleft(license_expr):
             return f"{manifest_rel}: {name} {version}: {license_expr}"
     except ValueError as exc:
-        return (
-            f"{manifest_rel}: {name} {version}: unparsable license expression "
-            f"'{license_expr}' ({exc})"
-        )
+        prefix = f"{manifest_rel}: {name} {version}: unparsable license expression"
+        return f"{prefix} '{license_expr}' ({exc})"
     return None
 
 
@@ -237,23 +235,22 @@ def collect_manifest_violations(manifest_rel: str, locked: bool) -> list[str]:
     """Collect license policy violations for a configured Cargo manifest."""
     validate_manifest_path(manifest_rel)
     metadata = run_metadata(manifest_rel=manifest_rel, locked=locked)
-    return [
-        violation
-        for pkg in metadata.get("packages", [])
-        if (violation := package_license_violation(manifest_rel, pkg)) is not None
-    ]
+    violations: list[str] = []
+    for pkg in metadata.get("packages", []):
+        violation = package_license_violation(manifest_rel, pkg)
+        if violation is not None:
+            violations.append(violation)
+    return violations
 
 
 def main() -> int:
     """Run Rust license policy check and report results."""
     locked = parse_locked_flag(sys.argv[1:])
 
+    violations: list[str] = []
     try:
-        violations = [
-            violation
-            for manifest_rel in RUST_MANIFEST_RELS
-            for violation in collect_manifest_violations(manifest_rel, locked=locked)
-        ]
+        for manifest_rel in RUST_MANIFEST_RELS:
+            violations.extend(collect_manifest_violations(manifest_rel, locked=locked))
     except ManifestPathError as exc:
         print(str(exc), file=sys.stderr)
         return 2
