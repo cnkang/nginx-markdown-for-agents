@@ -85,6 +85,9 @@ configuration directives.
   directive. Existing configurations still parse, and explicit values are
   bridged to `markdown_stream_threshold` unless the new directive is also
   explicitly configured.
+- Clarified FFI token-ratio fixed-point boundaries, documented streaming
+  reason pointer lifetime, and kept security/supply-chain gate guidance aligned
+  with the PR/push/scheduled/manual reporting workflow semantics.
 - **BREAKING**: Streaming engine now produces `Transfer-Encoding: chunked`
   output instead of `Content-Length` for streaming responses.
 - **BREAKING**: `MarkdownOptions` FFI layout now includes
