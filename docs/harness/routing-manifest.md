@@ -11,7 +11,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `docs-tooling` | cheap blocker | `make docs-check` |
 | `harness-security` | focused semantic | `make harness-security-checks` (CWE-190, CWE-22, live-conf, shell-hygiene, const-correctness), `PYTHONPATH=. pytest -q tools/perf/tests` |
 | `security-static` | cheap blocker | `make security-static` |
-| `supply-chain` | scheduled visibility | `make supply-chain` |
+| `supply-chain` | report-oriented PR/push/scheduled/manual visibility | `make supply-chain` |
 | `rust-streaming` | focused semantic | `make test-rust-streaming` |
 | `nginx-streaming` | focused semantic | `make test-nginx-unit-streaming` |
 | `nginx-protocol` | focused semantic | `make test-nginx-unit`, `make test-nginx-integration` |

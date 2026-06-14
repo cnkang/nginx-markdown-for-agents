@@ -22,8 +22,9 @@ Scorecard.
 - Semgrep stays focused on workflow/script/release/config risks.
 - actionlint, shellcheck, gitleaks, and cargo-deny are PR-blocking security
   static checks.
-- Trivy, SBOM generation, and Scorecard are scheduled/manual visibility checks
-  until a blocking threshold is explicitly adopted.
+- Trivy, SBOM generation, and Scorecard are report-oriented visibility checks
+  on PR, push, scheduled, and manual triggers until a blocking threshold is
+  explicitly adopted.
 - Third-party Actions remain pinned to immutable SHAs with version comments.
 - Generated scan outputs, SBOMs, and tool caches stay out of git.
 

@@ -494,8 +494,9 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - 静态安全门禁：`.github/workflows/security-static.yml` 针对 workflow、脚本、
   secret、Semgrep 规则与 Rust 依赖策略运行 actionlint、shellcheck、
   gitleaks、聚焦 Semgrep 和 cargo-deny
-- 供应链可见性：`.github/workflows/supply-chain.yml` 定期运行 Trivy
-  filesystem/IaC 扫描、SPDX SBOM 生成与 OpenSSF Scorecard
+- 供应链可见性：`.github/workflows/supply-chain.yml` 在 PR、push、定时与
+  手动触发时运行报告型 Trivy filesystem/IaC 扫描、SPDX SBOM 生成与
+  OpenSSF Scorecard
 - 面向生产采用的迁移指南和 rollout cookbook
 
 上一版本（0.7.0）：

@@ -38,10 +38,10 @@ Required:
 - `cargo-deny` must check Rust advisories, license policy, bans, and sources for
   every checked-in Rust manifest. Do not allow GPL, AGPL, LGPL, SSPL, Commons
   Clause, or unknown licenses by default.
-- `supply-chain.yml` is a scheduled/manual visibility workflow for Trivy
-  filesystem/IaC scans, SPDX SBOM generation, and OpenSSF Scorecard. Keep heavy
-  supply-chain scans out of every PR unless the project adopts an explicit
-  blocking threshold.
+- `supply-chain.yml` is a report-oriented visibility workflow for Trivy
+  filesystem/IaC scans, SPDX SBOM generation, and OpenSSF Scorecard on PR,
+  push, scheduled, and manual triggers. Do not describe it as a hard blocking
+  gate unless the project adopts explicit threshold semantics.
 - Third-party actions in these workflows must be pinned to immutable commit
   SHAs with human-readable version comments.
 - Generated scan output, SBOM files, tool caches, and vulnerability databases

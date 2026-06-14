@@ -75,8 +75,9 @@ configuration directives.
 - **Supplemental static security gates**: `security-static.yml` adds
   actionlint, shellcheck, gitleaks, focused Semgrep, and cargo-deny checks
   around the existing CodeQL workflow.
-- **Supply-chain visibility workflow**: `supply-chain.yml` adds scheduled/manual
-  Trivy filesystem/IaC scanning, SPDX SBOM generation, and OpenSSF Scorecard.
+- **Supply-chain visibility workflow**: `supply-chain.yml` adds report-oriented
+  Trivy filesystem/IaC scanning, SPDX SBOM generation, and OpenSSF Scorecard
+  for PR, push, scheduled, and manual triggers.
 
 ### Changed
 

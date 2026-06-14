@@ -73,11 +73,11 @@
       ]
     },
     "supply-chain": {
-      "phase": "scheduled-visibility",
+      "phase": "report-oriented-visibility",
       "commands": [
         "make supply-chain"
       ],
-      "notes": "local command requires trivy and syft; GitHub workflow runs scheduled/manual visibility checks"
+      "notes": "local command requires trivy and syft; GitHub workflow runs PR/push/scheduled/manual report-oriented visibility checks"
     },
     "rust-streaming": {
       "phase": "focused-semantic",
