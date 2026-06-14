@@ -113,6 +113,13 @@ pub const DECOMP_CATEGORY_IO_ERROR: u32 = 104;
 pub const DECOMP_CATEGORY_INVALID_ARGS: u32 = 105;
 
 /// Conversion options passed from C to Rust.
+///
+/// This full-buffer ABI keeps its own explicit `#[repr(C)]` layout instead of
+/// sharing fields with `StreamingOptions`. The duplicate option fields are an
+/// intentional FFI stability tradeoff: full-buffer and streaming callers each
+/// get a clear, independently versioned C contract. Any shared semantic change
+/// must update both structs, generated headers, layout tests, and docs in the
+/// same change set; structural reuse belongs in a future breaking ABI version.
 #[repr(C)]
 pub struct MarkdownOptions {
     /// Markdown flavor selector.
