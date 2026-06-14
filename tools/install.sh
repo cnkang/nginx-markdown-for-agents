@@ -2,13 +2,15 @@
 set -euo pipefail
 
 # NGINX Markdown for Agents Install Script
-# Usage: curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+# Usage:
+#   curl -fsSLo /tmp/nginx-markdown-install.sh https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh
+#   sudo bash /tmp/nginx-markdown-install.sh
 # OR (if using specific release version):
-# VERSION=v0.1.0 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+#   VERSION=v0.1.0 sudo -E bash /tmp/nginx-markdown-install.sh
 # OR (in Docker, skip root check):
 # SKIP_ROOT_CHECK=1 bash /path/to/install.sh
 # OR (auto-disable stale load_module snippets on ABI mismatch):
-# AUTO_DISABLE_STALE_MODULE=1 curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/main/tools/install.sh | sudo bash
+#   AUTO_DISABLE_STALE_MODULE=1 sudo -E bash /tmp/nginx-markdown-install.sh
 
 REPO="cnkang/nginx-markdown-for-agents"
 RELEASE_VERSION="${VERSION:-}"

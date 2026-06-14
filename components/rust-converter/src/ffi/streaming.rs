@@ -131,6 +131,13 @@ fn effective_flush_threshold(raw: u32) -> usize {
 ///
 /// # ABI Stability
 ///
+/// This streaming ABI intentionally keeps its own `#[repr(C)]` layout instead
+/// of embedding or aliasing `MarkdownOptions`. Repeated fields are kept so the
+/// streaming and full-buffer FFI contracts remain independently clear and
+/// stable for C callers. When adding shared semantics, update both structs,
+/// generated headers, layout tests, and docs together; save structural reuse
+/// for a future breaking ABI version.
+///
 /// Adding fields to this struct is a breaking ABI change. Both copies of
 /// `markdown_converter.h` (in `components/rust-converter/include/` and
 /// `components/nginx-module/src/`) must be updated in the same change set.
@@ -259,10 +266,11 @@ pub struct StreamingOptions {
     /// Overridden by `chars_per_token_fixed` when that field is non-zero.
     pub llm_provider: u8,
 
-    /// Explicit chars-per-token ratio (fixed-point: actual = value / 10.0).
+    /// Explicit chars-per-token ratio (fixed-point: raw = value / 10.0).
     ///
     /// When non-zero, overrides both the default 4.0 and the provider-specific
-    /// ratio. Valid range: 1–255, representing ratios 0.1–25.5 chars/token.
+    /// ratio. Non-zero `u8` values represent raw ratios 0.1-25.5 chars/token;
+    /// decoded values below 1.0 are clamped to the effective minimum 1.0.
     /// Value `0` means "use default or provider ratio".
     pub chars_per_token_fixed: u8,
 }
@@ -273,8 +281,9 @@ pub struct StreamingConverterHandle {
     generate_etag: bool,
     estimate_tokens: bool,
     /// NUL-terminated reason string from the last `feed` or `finish` call
-    /// that returned a fallback or error code. Valid until the handle is
-    /// freed or the next `feed`/`finish` call.
+    /// that returned a fallback or error code. Rust owns the buffer. The
+    /// pointer returned by `markdown_streaming_reason` is valid only until the
+    /// next `feed`, `finish`, `abort`, or handle-free operation.
     last_reason: Option<CString>,
 }
 
@@ -870,9 +879,12 @@ pub unsafe extern "C" fn markdown_streaming_output_free(data: *mut u8, len: usiz
 /// Return the NUL-terminated reason string from the last `feed` or `finish`
 /// call that signalled fallback or error.
 ///
-/// The returned pointer is owned by Rust and valid until the converter handle
-/// is freed or the next `feed`/`finish` call (whichever comes first). The C
-/// caller must not free or modify the returned pointer.
+/// `handle` must be a live streaming handle. The returned pointer is owned by
+/// Rust and valid only until the next `feed`, `finish`, `abort`, or handle-free
+/// call on the same handle (whichever comes first). The C caller must not free
+/// or modify the returned pointer. If C needs to preserve the reason across
+/// calls, it must copy the string immediately into an NGINX pool or another
+/// caller-owned buffer. Using a reason pointer after handle release is invalid.
 ///
 /// Returns NULL when no reason is available (i.e. the last call returned
 /// `ERROR_SUCCESS` or the handle is NULL).

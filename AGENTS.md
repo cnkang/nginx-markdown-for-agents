@@ -123,6 +123,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 45 | dynconf-snapshot | effective_conf NULL-safe access; cross-TU field visibility in shared headers; sentinel value consistency |
 | 46 | ffi-crosslang | FFI operations must validate NULL/empty key inputs; guards on both sides of FFI boundary; NULL/empty-input test coverage |
 | 47 | streaming-backpressure | Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return |
+| 48 | security-static-analysis | CodeQL remains primary SAST; supplemental static security and supply-chain gates must stay focused, pinned, low-noise, and locally runnable |
 
 ## Required Agent Workflow
 
@@ -307,6 +308,16 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   module path when any module directive family is enabled (including metrics),
   and must not derive implicit `hostPath` mounts from module paths. Use explicit
   opt-in extra volume values for custom mounts instead [13]
+- Static security workflows must not duplicate CodeQL's C/C++ and Rust SAST
+  coverage. Use focused supplemental gates for workflow linting, shell safety,
+  secret scanning, high-confidence Semgrep rules, and Rust dependency/license
+  policy; keep third-party actions pinned to immutable SHAs and keep PR checks
+  lightweight [48]
+- Supply-chain visibility workflows such as Trivy, SBOM generation, and
+  OpenSSF Scorecard may run on PR, push, schedule, and manual triggers, but
+  remain report-oriented unless a specific blocking threshold is adopted. Do
+  not describe them as hard blocking gates without documenting the
+  runtime/noise tradeoff and enforcing threshold semantics [48]
 
 **Python** (P)
 - Binary prerequisites validate executability [19]
@@ -317,6 +328,9 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Metric names match emitted keys; Accept header in verification commands [9]
 - No regex with overlapping quantifiers [10]
 - C examples use C99+; markdown escaping in examples [27]
+- Workflow/script/dependency security docs must mention the matching local
+  targets (`make security-static`, `make supply-chain`) and whether the gate is
+  PR-blocking or report-oriented visibility [48]
 
 **If any item would be violated, redesign the change before writing it.**
 
@@ -342,6 +356,11 @@ Follow evidence-first verification (no completion claim without fresh command ou
 - Rust converter production source changes: `make coverage-rust` (verify coverage bar)
 - Streaming runtime/e2e changes: `make verify-chunked-native-e2e-smoke` (or stronger profile when required; requires `NGINX_BIN` pointing to a locally-compiled NGINX binary with the module loaded)
 - C module volatile/atomic usage changes: `bash tools/harness/detect_volatile_atomic.sh` (Rule 42)
+- Workflow, shell, secret-scan, Semgrep, or Rust dependency policy changes:
+  `make security-static` (Rule 48)
+- Supply-chain workflow, SBOM, Trivy, or Scorecard changes: `make supply-chain`
+  when local tools are available; otherwise run the feasible subtargets and
+  report missing tools exactly (Rule 48)
 - New `#[ignore]` tests introduced in this change: run targeted
   `cargo test ... -- --ignored` at least once and report result.
 - If warnings were part of the task or findings, include the exact warning
@@ -464,3 +483,4 @@ remediation:
 | 0.8.0 | 2026-06-04 | Kang | 0.8.0 release gate target (release-gates-check-080) with streaming, coverage, matrix, and clean-checkout gates |
 | 0.8.1 | 2026-06-10 | Codex | Strengthened Rule 13 for newer release gates that reuse prior-version validators with caller-parameterized active version assertions and current release-matrix schema consumers |
 | 0.8.2 | 2026-06-12 | Kang | Added Rules 44–47: streaming deflate semantics (44), effective_conf NULL-safe access (45), FFI NULL/empty boundary guards (46), terminal-sent latch NGX_AGAIN semantics (47); strengthened Rules 13 (verified-rustup), 30 (cross-TU visibility, sentinel consistency) |
+| 0.8.3 | 2026-06-13 | Codex | Added Rule 48 for supplemental static security and supply-chain gates with focused Semgrep, secret scanning, cargo-deny, Trivy/SBOM/Scorecard, and local Make targets |

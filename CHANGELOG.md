@@ -72,6 +72,12 @@ configuration directives.
 - **Homebrew tap installation** for macOS.
 - **Unified DEB/RPM release workflow** with nFPM.
 - **Helm chart** and Kubernetes deployment examples.
+- **Supplemental static security gates**: `security-static.yml` adds
+  actionlint, shellcheck, gitleaks, focused Semgrep, and cargo-deny checks
+  around the existing CodeQL workflow.
+- **Supply-chain visibility workflow**: `supply-chain.yml` adds report-oriented
+  Trivy filesystem/IaC scanning, SPDX SBOM generation, and OpenSSF Scorecard
+  for PR, push, scheduled, and manual triggers.
 
 ### Changed
 
@@ -79,6 +85,9 @@ configuration directives.
   directive. Existing configurations still parse, and explicit values are
   bridged to `markdown_stream_threshold` unless the new directive is also
   explicitly configured.
+- Clarified FFI token-ratio fixed-point boundaries, documented streaming
+  reason pointer lifetime, and kept security/supply-chain gate guidance aligned
+  with the PR/push/scheduled/manual reporting workflow semantics.
 - **BREAKING**: Streaming engine now produces `Transfer-Encoding: chunked`
   output instead of `Content-Length` for streaming responses.
 - **BREAKING**: `MarkdownOptions` FFI layout now includes

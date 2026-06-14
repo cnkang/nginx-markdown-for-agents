@@ -261,6 +261,13 @@ typedef struct StreamingConverterHandle StreamingConverterHandle;
 
 /**
  * Conversion options passed from C to Rust.
+ *
+ * This full-buffer ABI keeps its own explicit `#[repr(C)]` layout instead of
+ * sharing fields with `StreamingOptions`. The duplicate option fields are an
+ * intentional FFI stability tradeoff: full-buffer and streaming callers each
+ * get a clear, independently versioned C contract. Any shared semantic change
+ * must update both structs, generated headers, layout tests, and docs in the
+ * same change set; structural reuse belongs in a future breaking ABI version.
  */
 typedef struct MarkdownOptions {
   /**
@@ -1061,7 +1068,7 @@ void markdown_decomp_result_init(struct FFIDecompResult *result);
  *
  * # Examples
  *
- * ```ignore
+ * ```no_run
  * use nginx_markdown_converter::ffi::{MarkdownOptions, markdown_incremental_new, markdown_incremental_free};
  * // Construct and fully initialize MarkdownOptions for your environment.
  * let opts = MarkdownOptions {
@@ -1152,7 +1159,7 @@ struct IncrementalConverterHandle *markdown_incremental_new(const struct Markdow
  *
  * # Examples
  *
- * ```ignore
+ * ```no_run
  * use std::ptr;
  * use nginx_markdown_converter::ffi::{markdown_incremental_new, markdown_incremental_feed, markdown_incremental_free};
  * unsafe {
@@ -1193,7 +1200,7 @@ uint32_t markdown_incremental_feed(struct IncrementalConverterHandle *handle,
  *
  * # Examples
  *
- * ```ignore
+ * ```no_run
  * use std::ptr::null_mut;
  * use nginx_markdown_converter::ffi::{markdown_incremental_finalize, ERROR_INVALID_INPUT};
  *
@@ -1516,9 +1523,12 @@ void markdown_streaming_output_free(uint8_t *data, uintptr_t len);
  * Return the NUL-terminated reason string from the last `feed` or `finish`
  * call that signalled fallback or error.
  *
- * The returned pointer is owned by Rust and valid until the converter handle
- * is freed or the next `feed`/`finish` call (whichever comes first). The C
- * caller must not free or modify the returned pointer.
+ * `handle` must be a live streaming handle. The returned pointer is owned by
+ * Rust and valid only until the next `feed`, `finish`, `abort`, or handle-free
+ * call on the same handle (whichever comes first). The C caller must not free
+ * or modify the returned pointer. If C needs to preserve the reason across
+ * calls, it must copy the string immediately into an NGINX pool or another
+ * caller-owned buffer. Using a reason pointer after handle release is invalid.
  *
  * Returns NULL when no reason is available (i.e. the last call returned
  * `ERROR_SUCCESS` or the handle is NULL).

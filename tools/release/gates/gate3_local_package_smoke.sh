@@ -241,8 +241,20 @@ RUN dnf install -y \\
     tar gzip findutils which \\
     && dnf clean all
 
-# Install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+# Install Rust without piping downloaded content into a shell.
+RUN set -eu; \\
+    case "\$(uname -m)" in \\
+        x86_64) rustup_arch="x86_64-unknown-linux-gnu" ;; \\
+        aarch64|arm64) rustup_arch="aarch64-unknown-linux-gnu" ;; \\
+        *) echo "unsupported rustup architecture: \$(uname -m)" >&2; exit 1 ;; \\
+    esac; \\
+    rustup_base="https://static.rust-lang.org/rustup/dist/\${rustup_arch}"; \\
+    curl --proto '=https' --tlsv1.2 -fsSLo /tmp/rustup-init "\${rustup_base}/rustup-init"; \\
+    curl --proto '=https' --tlsv1.2 -fsSLo /tmp/rustup-init.sha256 "\${rustup_base}/rustup-init.sha256"; \\
+    (cd /tmp && sha256sum -c rustup-init.sha256); \\
+    chmod +x /tmp/rustup-init; \\
+    /tmp/rustup-init -y --no-modify-path; \\
+    rm -f /tmp/rustup-init /tmp/rustup-init.sha256
 ENV PATH="/root/.cargo/bin:\${PATH}"
 
 # Detect native target triple for Rust build

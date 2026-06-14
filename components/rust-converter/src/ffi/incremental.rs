@@ -93,7 +93,7 @@ pub struct IncrementalConverterHandle {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
 /// use nginx_markdown_converter::ffi::{MarkdownOptions, markdown_incremental_new, markdown_incremental_free};
 /// // Construct and fully initialize MarkdownOptions for your environment.
 /// let opts = MarkdownOptions {
@@ -223,7 +223,7 @@ pub unsafe extern "C" fn markdown_incremental_new(
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
 /// use std::ptr;
 /// use nginx_markdown_converter::ffi::{markdown_incremental_new, markdown_incremental_feed, markdown_incremental_free};
 /// unsafe {
@@ -287,7 +287,7 @@ pub unsafe extern "C" fn markdown_incremental_feed(
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
 /// use std::ptr::null_mut;
 /// use nginx_markdown_converter::ffi::{markdown_incremental_finalize, ERROR_INVALID_INPUT};
 ///
