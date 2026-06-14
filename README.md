@@ -503,8 +503,9 @@ Current release (0.8.0):
 - Static security gate: `.github/workflows/security-static.yml` runs actionlint,
   shellcheck, gitleaks, focused Semgrep, and cargo-deny for workflow, script,
   secret, and Rust dependency policy changes
-- Supply-chain visibility: `.github/workflows/supply-chain.yml` runs scheduled
-  Trivy filesystem/IaC scans, SPDX SBOM generation, and OpenSSF Scorecard
+- Supply-chain visibility: `.github/workflows/supply-chain.yml` runs
+  report-oriented Trivy filesystem/IaC scans, SPDX SBOM generation, and OpenSSF
+  Scorecard on PR, push, scheduled, and manual triggers
 - Migration guide and rollout cookbook for production adoption
 
 Previous release (0.7.0):

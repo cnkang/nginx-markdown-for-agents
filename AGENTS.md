@@ -314,9 +314,10 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   policy; keep third-party actions pinned to immutable SHAs and keep PR checks
   lightweight [48]
 - Supply-chain visibility workflows such as Trivy, SBOM generation, and
-  OpenSSF Scorecard should start as scheduled/manual or non-blocking release
-  support unless a specific threshold is adopted. Do not make heavy scans
-  mandatory on every PR without documenting the runtime/noise tradeoff [48]
+  OpenSSF Scorecard may run on PR, push, schedule, and manual triggers, but
+  remain report-oriented unless a specific blocking threshold is adopted. Do
+  not describe them as hard blocking gates without documenting the
+  runtime/noise tradeoff and enforcing threshold semantics [48]
 
 **Python** (P)
 - Binary prerequisites validate executability [19]
@@ -329,7 +330,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - C examples use C99+; markdown escaping in examples [27]
 - Workflow/script/dependency security docs must mention the matching local
   targets (`make security-static`, `make supply-chain`) and whether the gate is
-  PR-blocking or scheduled/manual visibility [48]
+  PR-blocking or report-oriented visibility [48]
 
 **If any item would be violated, redesign the change before writing it.**
 
