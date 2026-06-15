@@ -7,8 +7,10 @@
  *
  * Two-phase design (Rule 39):
  *   Phase 1 (fallible): Vary: Accept, ETag removal, auth Cache-Control.
- *     If any step fails, no header mutations have been applied and the
- *     caller can safely fall back to the upstream HTML response.
+ *     If any step fails, NGX_ERROR is returned before headers are sent
+ *     downstream.  Earlier Phase 1 mutations may be present in
+ *     headers_out but are invisible because the caller's fallback sends
+ *     the original upstream headers.
  *   Phase 2 (infallible): Content-Type, Content-Length, Content-Encoding.
  *     These are pointer/integer writes that cannot fail.
  *   Only after both phases complete are headers_committed and state set.
@@ -101,7 +103,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
      *
      * These operations may fail (e.g. allocation failure in Vary).
      * Order: Vary -> ETag -> auth Cache-Control.
-     * If any fails, no header mutations are visible to downstream.
+     * If any fails, headers have not been sent downstream.
      *
      * Note: Vary and ETag removal are ordered before Content-Type
      * and Content-Length because they can fail.  Content-Type
