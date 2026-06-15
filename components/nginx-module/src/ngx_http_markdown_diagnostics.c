@@ -732,8 +732,12 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
         engine_source_str = "configured";
         if (conf->stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF) {
             engine_str = "off";
-        } else {
+        } else if (conf->stream.engine
+                   == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON)
+        {
             engine_str = "on";
+        } else {
+            engine_str = "unknown";
         }
     } else {
         engine_source_str = "default";

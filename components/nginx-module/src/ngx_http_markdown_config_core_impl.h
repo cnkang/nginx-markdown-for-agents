@@ -536,22 +536,25 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         (conf->stream.on_error != NGX_CONF_UNSET_UINT);
     ngx_flag_t  stream_shadow_set =
         (conf->stream.shadow != NGX_CONF_UNSET);
+#endif
     ngx_flag_t  stream_threshold_set =
         (conf->stream.threshold != NGX_CONF_UNSET_SIZE);
+#ifdef MARKDOWN_STREAMING_ENABLED
     ngx_flag_t  stream_budget_set =
         (conf->stream.budget != NGX_CONF_UNSET_SIZE);
 #endif
 
     ngx_http_markdown_merge_core_values(conf, prev);
 
-    /* v0.8.0 streaming config */
-#ifdef MARKDOWN_STREAMING_ENABLED
-    conf->stream.on_error_explicit = stream_on_error_set;
-    conf->stream.shadow_explicit = stream_shadow_set;
-#endif
     ngx_http_markdown_merge_stream_values(conf, prev);
 
 #ifdef MARKDOWN_STREAMING_ENABLED
+    if (stream_on_error_set) {
+        conf->stream.on_error_explicit = 1;
+    }
+    if (stream_shadow_set) {
+        conf->stream.shadow_explicit = 1;
+    }
     if (stream_budget_set) {
         conf->stream.budget_explicit = 1;
     }
@@ -563,11 +566,9 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * - If this level did NOT set it, inherit the parent's
      *   threshold_explicit flag via the merge macro.
      */
-#ifdef MARKDOWN_STREAMING_ENABLED
     if (stream_threshold_set) {
         conf->stream.threshold_explicit = 1;
     }
-#endif
 
     ngx_http_markdown_merge_v060_values(conf, prev);
 
@@ -1106,7 +1107,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                         " streaming_budget=%uz"
                         " streaming_on_error=%V"
                         " streaming_shadow=%i"
-                        " streaming_auto_threshold=%uz"
+                        " streaming_threshold=%uz"
 #endif
                        ,
                        (ngx_uint_t) conf->enabled,

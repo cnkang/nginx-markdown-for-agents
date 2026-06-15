@@ -429,10 +429,32 @@ ngx_conf_set_num_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 static char *
 ngx_conf_set_enum_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-    UNUSED(cf);
-    UNUSED(cmd);
-    UNUSED(conf);
-    return NGX_CONF_OK;
+    char            *p;
+    ngx_uint_t      *np;
+    ngx_str_t       *value;
+    ngx_conf_enum_t *e;
+
+    p = conf;
+    np = (ngx_uint_t *) (p + cmd->offset);
+
+    if (*np != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    value = cf->args->elts;
+    e = cmd->post;
+
+    for (; e->name.len != 0; e++) {
+        if (e->name.len == value[1].len
+            && ngx_strncasecmp(e->name.data, value[1].data,
+                               value[1].len) == 0)
+        {
+            *np = e->value;
+            return NGX_CONF_OK;
+        }
+    }
+
+    return NGX_CONF_ERROR;
 }
 
 static char *
@@ -441,40 +463,6 @@ ngx_conf_set_str_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     UNUSED(cf);
     UNUSED(cmd);
     UNUSED(conf);
-    return NGX_CONF_OK;
-}
-
-static char *
-ngx_http_markdown_stream_engine_handler(ngx_conf_t *cf,
-    ngx_command_t *cmd, void *conf)
-{
-    ngx_http_markdown_conf_t *mcf = conf;
-    ngx_str_t                *value;
-
-    (void) cmd;
-
-    value = cf->args->elts;
-
-    if (mcf->stream.engine != NGX_CONF_UNSET_UINT) {
-        return "is duplicate";
-    }
-
-    if (value[1].len == 3
-        && ngx_strncasecmp(value[1].data, (u_char *) "off", 3) == 0)
-    {
-        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF;
-    } else if (value[1].len == 4
-               && ngx_strncasecmp(value[1].data, (u_char *) "auto", 4) == 0)
-    {
-        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
-    } else if (value[1].len == 2
-               && ngx_strncasecmp(value[1].data, (u_char *) "on", 2) == 0)
-    {
-        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
-    } else {
-        return NGX_CONF_ERROR;
-    }
-
     return NGX_CONF_OK;
 }
 
@@ -505,6 +493,44 @@ ngx_http_conf_get_module_main_conf(ngx_conf_t *cf, ngx_module_t module)
 #include "../../src/ngx_http_markdown_eligibility.c"
 
 static ngx_pool_t g_pool;
+
+static ngx_command_t *
+find_directive(const char *name)
+{
+    ngx_command_t *cmd;
+    size_t         len;
+
+    len = strlen(name);
+
+    for (cmd = ngx_http_markdown_filter_commands; cmd->name.len != 0; cmd++) {
+        if (cmd->name.len == len
+            && ngx_strncmp(cmd->name.data, name, len) == 0)
+        {
+            return cmd;
+        }
+    }
+
+    return NULL;
+}
+
+static ngx_command_t *
+stream_engine_directive(void)
+{
+    ngx_command_t *cmd;
+
+    cmd = find_directive("markdown_streaming_engine");
+    TEST_ASSERT(cmd != NULL,
+        "markdown_streaming_engine directive should be registered");
+    TEST_ASSERT(cmd->set != NULL,
+        "markdown_streaming_engine directive should have setter");
+    TEST_ASSERT(cmd->offset
+            == offsetof(ngx_http_markdown_conf_t, stream.engine),
+        "markdown_streaming_engine offset should target stream.engine");
+    TEST_ASSERT(cmd->post == ngx_http_markdown_streaming_engine_enum,
+        "markdown_streaming_engine post should use production enum table");
+
+    return cmd;
+}
 
 static void
 set_arg(ngx_str_t *arg, const char *s)
@@ -562,7 +588,8 @@ test_valid_values(void)
     ngx_conf_t               cf;
     ngx_array_t              args;
     ngx_str_t                values[4];
-    ngx_command_t            cmd;
+    ngx_command_t             cmd;
+    ngx_command_t            *engine_cmd;
     ngx_http_markdown_conf_t mcf;
     const char              *rc;
 
@@ -573,10 +600,10 @@ test_valid_values(void)
 
     /* markdown_streaming_engine: off */
     init_conf(&mcf);
-    set_arg(&cmd.name, "markdown_streaming_engine");
+    engine_cmd = stream_engine_directive();
     set_arg(&values[0], "markdown_streaming_engine");
     set_arg(&values[1], "off");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    rc = engine_cmd->set(&cf, engine_cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK,
         "stream_engine_handler 'off' should be accepted");
     TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF,
@@ -585,14 +612,14 @@ test_valid_values(void)
     /* markdown_streaming_engine: auto */
     init_conf(&mcf);
     set_arg(&values[1], "auto");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    rc = engine_cmd->set(&cf, engine_cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK,
         "stream_engine_handler 'auto' should be accepted");
 
     /* markdown_streaming_engine: on */
     init_conf(&mcf);
     set_arg(&values[1], "on");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    rc = engine_cmd->set(&cf, engine_cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK,
         "stream_engine_handler 'on' should be accepted");
 
@@ -684,20 +711,20 @@ test_stream_engine_handler_valid(void)
     ngx_conf_t               cf;
     ngx_array_t              args;
     ngx_str_t                values[2];
-    ngx_command_t            cmd;
+    ngx_command_t            *cmd;
     ngx_http_markdown_conf_t mcf;
     char                    *rc;
 
     TEST_SUBSECTION("v0.8.0 stream_engine_handler direct");
 
     setup_cf(&cf, &args, values, 2);
-    set_arg(&cmd.name, "markdown_streaming_engine");
+    cmd = stream_engine_directive();
     set_arg(&values[0], "markdown_streaming_engine");
 
     /* off -> STREAM_ENGINE_OFF */
     init_conf(&mcf);
     set_arg(&values[1], "off");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    rc = cmd->set(&cf, cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK,
         "stream_engine_handler 'off' should return NGX_CONF_OK");
     TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF,
@@ -706,7 +733,7 @@ test_stream_engine_handler_valid(void)
     /* auto -> STREAM_ENGINE_AUTO */
     init_conf(&mcf);
     set_arg(&values[1], "auto");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    rc = cmd->set(&cf, cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK,
         "stream_engine_handler 'auto' should return NGX_CONF_OK");
     TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO,
@@ -715,7 +742,7 @@ test_stream_engine_handler_valid(void)
     /* on -> STREAM_ENGINE_ON */
     init_conf(&mcf);
     set_arg(&values[1], "on");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    rc = cmd->set(&cf, cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK,
         "stream_engine_handler 'on' should return NGX_CONF_OK");
     TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
@@ -733,7 +760,8 @@ test_invalid_values(void)
     ngx_conf_t               cf;
     ngx_array_t              args;
     ngx_str_t                values[2];
-    ngx_command_t            cmd;
+    ngx_command_t             cmd;
+    ngx_command_t            *engine_cmd;
     ngx_http_markdown_conf_t mcf;
     const char              *rc;
 
@@ -744,17 +772,17 @@ test_invalid_values(void)
 
     /* markdown_streaming_engine: invalid_value */
     init_conf(&mcf);
-    set_arg(&cmd.name, "markdown_streaming_engine");
+    engine_cmd = stream_engine_directive();
     set_arg(&values[0], "markdown_streaming_engine");
     set_arg(&values[1], "invalid_value");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    rc = engine_cmd->set(&cf, engine_cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
         "stream_engine_handler 'invalid_value' should be rejected");
 
     /* markdown_streaming_engine: yes */
     init_conf(&mcf);
     set_arg(&values[1], "yes");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    rc = engine_cmd->set(&cf, engine_cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
         "stream_engine_handler 'yes' should be rejected");
 
@@ -832,20 +860,20 @@ test_stream_engine_handler_rejection(void)
     ngx_conf_t               cf;
     ngx_array_t              args;
     ngx_str_t                values[2];
-    ngx_command_t            cmd;
+    ngx_command_t            *cmd;
     ngx_http_markdown_conf_t mcf;
     char                    *rc;
 
     TEST_SUBSECTION("v0.8.0 stream_engine_handler rejection");
 
     setup_cf(&cf, &args, values, 2);
-    set_arg(&cmd.name, "markdown_streaming_engine");
+    cmd = stream_engine_directive();
     set_arg(&values[0], "markdown_streaming_engine");
 
     /* Invalid value: "yes" */
     init_conf(&mcf);
     set_arg(&values[1], "yes");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    rc = cmd->set(&cf, cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
         "stream_engine_handler 'yes' should return NGX_CONF_ERROR");
     TEST_ASSERT(mcf.stream.engine == NGX_CONF_UNSET_UINT,
@@ -854,21 +882,21 @@ test_stream_engine_handler_rejection(void)
     /* Invalid value: "always" */
     init_conf(&mcf);
     set_arg(&values[1], "always");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    rc = cmd->set(&cf, cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
         "stream_engine_handler 'always' should return NGX_CONF_ERROR");
 
     /* Invalid value: empty string */
     init_conf(&mcf);
     set_arg(&values[1], "");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    rc = cmd->set(&cf, cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
         "stream_engine_handler '' should return NGX_CONF_ERROR");
 
     /* Duplicate detection: call twice, second should return "is duplicate" */
     init_conf(&mcf);
     set_arg(&values[1], "on");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    rc = cmd->set(&cf, cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK,
         "stream_engine_handler first call should succeed");
     TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
@@ -876,7 +904,7 @@ test_stream_engine_handler_rejection(void)
 
     /* Second call with engine already set -> "is duplicate" */
     set_arg(&values[1], "off");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    rc = cmd->set(&cf, cmd, &mcf);
     TEST_ASSERT(rc != NGX_CONF_OK && rc != NGX_CONF_ERROR,
         "stream_engine_handler duplicate should return error string");
     TEST_ASSERT(strcmp(rc, "is duplicate") == 0,
@@ -894,7 +922,7 @@ test_allocation_failure(void)
     ngx_conf_t               cf;
     ngx_array_t              args;
     ngx_str_t                values[2];
-    ngx_command_t            cmd;
+    ngx_command_t             cmd;
     ngx_http_markdown_conf_t mcf;
     char                    *rc;
 
