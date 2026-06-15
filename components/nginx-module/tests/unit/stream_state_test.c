@@ -2,7 +2,7 @@
  * Test: stream_state
  *
  * Validates all state transitions in the streaming fallback decision
- * engine (streaming fallback state machine, task 7.1).
+ * engine (streaming fallback state machine, decision engine).
  *
  * Exercises every valid state transition path through the pure-function
  * decision engine ngx_http_markdown_stream_decide().
@@ -824,9 +824,30 @@ static void test_pre_commit_replay_unavail_default_event(void)
 
     TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "REPLAY_UNAVAIL + default -> PASSTHROUGH");
-    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_REJECT_502,
-                "action = REJECT_502");
-    TEST_PASS("REPLAY_UNAVAILABLE + default -> REJECT_502");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
+                "action = PASSTHROUGH (safe, not REJECT_502)");
+    TEST_PASS("REPLAY_UNAVAILABLE + default -> safe PASSTHROUGH");
+}
+
+static void test_pre_commit_replay_unavail_unknown_event(void)
+{
+    ngx_http_markdown_stream_ctx_t ctx;
+    ngx_http_markdown_decision_t   d;
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT_REPLAY_UNAVAILABLE;
+    ctx.replay_available = 0;
+    ctx.headers_committed = 0;
+
+    d = ngx_http_markdown_stream_decide(&ctx, 9999);
+
+    TEST_ASSERT(d.new_state == NGX_HTTP_MD_STATE_PASSTHROUGH,
+                "REPLAY_UNAVAIL + unknown event -> PASSTHROUGH");
+    TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
+                "unknown event action = PASSTHROUGH (safe)");
+    TEST_ASSERT(d.reason == NGX_HTTP_MD_REASON_NOT_ELIGIBLE,
+                "unknown event reason = NOT_ELIGIBLE");
+    TEST_PASS("REPLAY_UNAVAILABLE + unknown event -> safe PASSTHROUGH");
 }
 
 /* --- FULL_BUFFER transitions --- */
@@ -890,7 +911,7 @@ static void test_unknown_state_passthrough(void)
 
 int main(void)
 {
-    TEST_SECTION("Stream State Transitions (Spec 37, Task 7.1)");
+    TEST_SECTION("Stream State Transitions (streaming fallback state machine, decision engine)");
 
     test_not_eligible_to_streaming_candidate();
     test_not_eligible_to_passthrough();
@@ -921,6 +942,7 @@ int main(void)
     test_pre_commit_replay_unavail_overflow_no_limits();
     test_pre_commit_replay_unavail_resource_limit();
     test_pre_commit_replay_unavail_default_event();
+    test_pre_commit_replay_unavail_unknown_event();
     test_committed_error_pass_to_safe_finish();
     test_committed_error_reject_to_abort();
     test_committed_non_error_stays();

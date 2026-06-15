@@ -4,16 +4,16 @@
  * Comprehensive protocol correctness tests for HTTP metadata handling
  * in the NGINX Markdown filter module. Covers:
  *
- * - ETag generation and upstream replacement/removal (Spec 21, Tasks 2, 9)
- * - If-None-Match parsing and weak comparison (Task 3)
- * - 304 Not Modified response construction (Task 4)
- * - Vary header management (Task 5)
- * - HEAD request routing and header parity (Task 6)
- * - Content-Type and Content-Length consistency (Task 7)
- * - Streaming path protocol metadata (Task 8)
- * - Configuration mode behavior (Task 10)
- * - Request/response matrix verification (Task 11)
- * - Full-buffer / streaming parity checks (Task 12)
+ * - ETag generation and upstream replacement/removal
+ * - If-None-Match parsing and weak comparison
+ * - 304 Not Modified response construction
+ * - Vary header management
+ * - HEAD request routing and header parity
+ * - Content-Type and Content-Length consistency
+ * - Streaming path protocol metadata
+ * - Configuration mode behavior
+ * - Request/response matrix verification
+ * - Full-buffer / streaming parity checks
  *
  * DIVERGENCE RISK: This test reimplements minimal NGINX types and stubs
  * to exercise the production headers_impl.h inline functions directly.
@@ -763,7 +763,7 @@ simulate_select_path(ngx_uint_t method, ngx_uint_t status,
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * Task 2: ETag Generation Correctness
+ * ETag generation correctness
  * ══════════════════════════════════════════════════════════════════ */
 
 static void
@@ -774,7 +774,7 @@ test_upstream_etag_replaced_when_enabled(void)
     MarkdownResult result;
     static uint8_t etag_val[] = "W/\"md-abc123\"";
 
-    TEST_SUBSECTION("Task 2.5: Upstream ETag replaced when ETag generation enabled");
+    TEST_SUBSECTION("Upstream ETag replaced when ETag generation enabled");
 
     memset(&conf, 0, sizeof(conf));
     conf.policy.generate_etag = 1;
@@ -802,7 +802,7 @@ test_upstream_etag_removed_when_disabled(void)
     ngx_http_markdown_conf_t conf;
     MarkdownResult result;
 
-    TEST_SUBSECTION("Task 2.6: Upstream ETag removed when ETag generation disabled");
+    TEST_SUBSECTION("Upstream ETag removed when ETag generation disabled");
 
     memset(&conf, 0, sizeof(conf));
     conf.policy.generate_etag = 0;
@@ -823,7 +823,7 @@ test_upstream_etag_removed_when_disabled(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * Task 3: If-None-Match Parsing and Comparison
+ * If-None-Match parsing and comparison
  * ══════════════════════════════════════════════════════════════════ */
 
 static void
@@ -832,7 +832,7 @@ test_inm_parsing_cases(void)
     char tokens[16][128];
     size_t count;
 
-    TEST_SUBSECTION("Task 3.5: If-None-Match parsing cases");
+    TEST_SUBSECTION("If-None-Match parsing cases");
 
     count = parse_if_none_match("\"abc\"", tokens, 16);
     TEST_ASSERT(count == 1, "Single quoted ETag: 1 token");
@@ -863,7 +863,7 @@ test_inm_parsing_cases(void)
 static void
 test_weak_comparison(void)
 {
-    TEST_SUBSECTION("Task 3.6: Weak comparison normalization");
+    TEST_SUBSECTION("Weak comparison normalization");
 
     TEST_ASSERT(etag_matches("W/\"abc\"", "\"abc\"") == RC_MATCH,
                 "W/\"abc\" matches \"abc\"");
@@ -880,7 +880,7 @@ test_weak_comparison(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * Task 4: 304 Not Modified Response
+ * 304 Not Modified response construction
  * ══════════════════════════════════════════════════════════════════ */
 
 static void
@@ -891,7 +891,7 @@ test_304_response_properties(void)
     MarkdownResult result;
     static uint8_t etag_val[] = "\"md-304\"";
 
-    TEST_SUBSECTION("Task 4.4-4.6: 304 response properties");
+    TEST_SUBSECTION("304 response properties");
 
     memset(&conf, 0, sizeof(conf));
     conf.policy.generate_etag = 1;
@@ -936,7 +936,7 @@ test_304_response_properties(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * Task 5: Vary Header Management
+ * Vary header management
  * ══════════════════════════════════════════════════════════════════ */
 
 static void
@@ -947,7 +947,7 @@ test_vary_no_existing(void)
     MarkdownResult result;
     ngx_table_elt_t *vary;
 
-    TEST_SUBSECTION("Task 5.5a: Vary: Accept added when no existing Vary");
+    TEST_SUBSECTION("Vary: Accept added when no existing Vary");
 
     memset(&conf, 0, sizeof(conf));
     memset(&result, 0, sizeof(result));
@@ -972,7 +972,7 @@ test_vary_existing_without_accept(void)
     MarkdownResult result;
     ngx_table_elt_t *vary;
 
-    TEST_SUBSECTION("Task 5.5b: Accept appended to existing Vary");
+    TEST_SUBSECTION("Accept appended to existing Vary");
 
     memset(&conf, 0, sizeof(conf));
     memset(&result, 0, sizeof(result));
@@ -998,7 +998,7 @@ test_vary_existing_with_accept(void)
     ngx_http_markdown_conf_t conf;
     MarkdownResult result;
 
-    TEST_SUBSECTION("Task 5.5c: Accept not duplicated");
+    TEST_SUBSECTION("Accept not duplicated when already in Vary");
 
     memset(&conf, 0, sizeof(conf));
     memset(&result, 0, sizeof(result));
@@ -1023,7 +1023,7 @@ test_vary_multiple_tokens(void)
     MarkdownResult result;
     ngx_table_elt_t *vary;
 
-    TEST_SUBSECTION("Task 5.5d: Vary with multiple tokens");
+    TEST_SUBSECTION("Vary with multiple tokens");
 
     memset(&conf, 0, sizeof(conf));
     memset(&result, 0, sizeof(result));
@@ -1043,13 +1043,13 @@ test_vary_multiple_tokens(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * Task 6: HEAD Request Handling
+ * HEAD request handling
  * ══════════════════════════════════════════════════════════════════ */
 
 static void
 test_head_routes_to_fullbuffer(void)
 {
-    TEST_SUBSECTION("Task 6.6: HEAD request routes to full-buffer path");
+    TEST_SUBSECTION("HEAD request routes to full-buffer path");
 
     TEST_ASSERT(simulate_select_path(NGX_HTTP_HEAD, 200, MODE_DISABLED, ENGINE_ON)
                 == PATH_FULLBUFFER,
@@ -1072,7 +1072,7 @@ test_head_response_parity(void)
     MarkdownResult result;
     static uint8_t etag_val[] = "\"md-head\"";
 
-    TEST_SUBSECTION("Task 6.7: HEAD response header parity with GET");
+    TEST_SUBSECTION("HEAD response header parity with GET");
 
     memset(&conf, 0, sizeof(conf));
     conf.policy.generate_etag = 1;
@@ -1102,7 +1102,7 @@ test_head_response_parity(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * Task 7: Content-Type and Content-Length Consistency
+ * Content-Type and Content-Length consistency
  * ══════════════════════════════════════════════════════════════════ */
 
 static void
@@ -1112,7 +1112,7 @@ test_content_type_and_length(void)
     ngx_http_markdown_conf_t conf;
     MarkdownResult result;
 
-    TEST_SUBSECTION("Task 7.6: Content-Type and Content-Length in full-buffer");
+    TEST_SUBSECTION("Content-Type and Content-Length in full-buffer");
 
     memset(&conf, 0, sizeof(conf));
     memset(&result, 0, sizeof(result));
@@ -1137,7 +1137,7 @@ test_encoding_and_ranges_removal(void)
     ngx_http_markdown_conf_t conf;
     MarkdownResult result;
 
-    TEST_SUBSECTION("Task 7.7: Content-Encoding and Accept-Ranges removal");
+    TEST_SUBSECTION("Content-Encoding and Accept-Ranges removal");
 
     memset(&conf, 0, sizeof(conf));
     memset(&result, 0, sizeof(result));
@@ -1158,7 +1158,7 @@ test_encoding_and_ranges_removal(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * Task 8: Streaming Path Protocol Metadata
+ * Streaming path protocol metadata
  * ══════════════════════════════════════════════════════════════════ */
 
 static void
@@ -1167,7 +1167,7 @@ test_streaming_etag_clearing(void)
     ngx_http_request_t r = new_request();
     ngx_table_elt_t *vary;
 
-    TEST_SUBSECTION("Task 8.5: Streaming path clears upstream ETag");
+    TEST_SUBSECTION("Streaming path clears upstream ETag");
 
     /* Seed request with upstream ETag to simulate pre-streaming state */
     push_header(&r, "ETag", "\"upstream-html\"");
@@ -1201,7 +1201,7 @@ test_streaming_etag_clearing(void)
 static void
 test_engine_forces_fullbuffer_for_full_support(void)
 {
-    TEST_SUBSECTION("Task 8.6: Engine forces full-buffer for full_support");
+    TEST_SUBSECTION("Engine forces full-buffer when conditional requests fully supported");
 
     TEST_ASSERT(simulate_select_path(NGX_HTTP_GET, 200, MODE_FULL_SUPPORT, ENGINE_ON)
                 == PATH_FULLBUFFER,
@@ -1220,7 +1220,7 @@ test_engine_forces_fullbuffer_for_full_support(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * Task 9: Upstream ETag Handling
+ * Upstream ETag handling
  * ══════════════════════════════════════════════════════════════════ */
 
 static void
@@ -1231,7 +1231,7 @@ test_upstream_etag_all_invalidated(void)
     MarkdownResult result;
     static uint8_t etag_val[] = "\"md-new\"";
 
-    TEST_SUBSECTION("Task 9.1/9.3: All upstream ETags invalidated on replacement");
+    TEST_SUBSECTION("All upstream ETags invalidated on replacement");
 
     memset(&conf, 0, sizeof(conf));
     conf.policy.generate_etag = 1;
@@ -1263,7 +1263,7 @@ test_upstream_etag_preserved_failopen(void)
     MarkdownResult result;
     static uint8_t md_etag[] = "\"md-etag\"";
 
-    TEST_SUBSECTION("Task 9.5: Upstream ETag preserved on fail-open");
+    TEST_SUBSECTION("Upstream ETag preserved on fail-open");
 
     /* Seed request with upstream ETag via push_header/new_request */
     etag_h = push_header(&r, "ETag", "\"upstream-html\"");
@@ -1318,13 +1318,13 @@ test_upstream_etag_preserved_failopen(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * Task 10: Configuration Mode Behavior
+ * Configuration mode behavior
  * ══════════════════════════════════════════════════════════════════ */
 
 static void
 test_config_modes(void)
 {
-    TEST_SUBSECTION("Task 10.4: Configuration mode handling");
+    TEST_SUBSECTION("Configuration mode handling");
 
     TEST_ASSERT(handle_if_none_match(MODE_FULL_SUPPORT, "\"abc\"", "\"abc\"", 1)
                 == RC_MATCH,
@@ -1342,7 +1342,7 @@ test_config_modes(void)
 static void
 test_full_support_etag_off(void)
 {
-    TEST_SUBSECTION("Task 10.5: full_support with generate_etag off");
+    TEST_SUBSECTION("full_support mode with generate_etag off");
 
     TEST_ASSERT(handle_if_none_match(MODE_FULL_SUPPORT, "\"abc\"", "\"abc\"", 0)
                 == RC_MATCH_DECLINED,
@@ -1352,13 +1352,13 @@ test_full_support_etag_off(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * Task 11: Request/Response Matrix Verification
+ * Request/response matrix verification
  * ══════════════════════════════════════════════════════════════════ */
 
 static void
 test_matrix_get_absent_inm(void)
 {
-    TEST_SUBSECTION("Task 11.1: GET absent INM");
+    TEST_SUBSECTION("GET absent If-None-Match");
 
     TEST_ASSERT(handle_if_none_match(MODE_FULL_SUPPORT, NULL, "W/\"md\"", 1)
                 == RC_MATCH_DECLINED, "absent/full_support/on -> 200");
@@ -1375,7 +1375,7 @@ test_matrix_get_absent_inm(void)
 static void
 test_matrix_get_match_inm(void)
 {
-    TEST_SUBSECTION("Task 11.2: GET match INM");
+    TEST_SUBSECTION("GET matching If-None-Match");
 
     TEST_ASSERT(handle_if_none_match(MODE_FULL_SUPPORT, "W/\"md\"", "W/\"md\"", 1)
                 == RC_MATCH, "match/full_support/on -> 304");
@@ -1388,7 +1388,7 @@ test_matrix_get_match_inm(void)
 static void
 test_matrix_get_mismatch_inm(void)
 {
-    TEST_SUBSECTION("Task 11.3: GET mismatch INM");
+    TEST_SUBSECTION("GET mismatching If-None-Match");
 
     TEST_ASSERT(handle_if_none_match(MODE_FULL_SUPPORT, "\"other\"", "W/\"md\"", 1)
                 == RC_MATCH_DECLINED, "mismatch/full_support/on -> 200");
@@ -1399,7 +1399,7 @@ test_matrix_get_mismatch_inm(void)
 static void
 test_matrix_get_wildcard_inm(void)
 {
-    TEST_SUBSECTION("Task 11.4: GET wildcard INM");
+    TEST_SUBSECTION("GET wildcard If-None-Match");
 
     TEST_ASSERT(handle_if_none_match(MODE_FULL_SUPPORT, "*", "W/\"md\"", 1)
                 == RC_MATCH, "wildcard/full_support/on -> 304");
@@ -1412,7 +1412,7 @@ test_matrix_get_wildcard_inm(void)
 static void
 test_matrix_get_malformed_inm(void)
 {
-    TEST_SUBSECTION("Task 11.5: GET malformed INM");
+    TEST_SUBSECTION("GET malformed If-None-Match");
 
     TEST_ASSERT(handle_if_none_match(MODE_FULL_SUPPORT, "\"abc", "W/\"md\"", 1)
                 == RC_MATCH_DECLINED, "malformed/full_support/on -> 200");
@@ -1425,7 +1425,7 @@ test_matrix_get_malformed_inm(void)
 static void
 test_matrix_head_rows(void)
 {
-    TEST_SUBSECTION("Task 11.6: HEAD request matrix rows");
+    TEST_SUBSECTION("HEAD request matrix rows");
 
     TEST_ASSERT(simulate_select_path(NGX_HTTP_HEAD, 200, MODE_FULL_SUPPORT, ENGINE_ON)
                 == PATH_FULLBUFFER, "HEAD always full-buffer");
@@ -1444,7 +1444,7 @@ test_matrix_head_rows(void)
 static void
 test_matrix_streaming_exceptions(void)
 {
-    TEST_SUBSECTION("Task 11.7: Streaming path protocol exceptions");
+    TEST_SUBSECTION("Streaming path protocol exceptions");
 
     /* Streaming: ETag absent, Content-Length absent, INM not evaluated */
     TEST_ASSERT(simulate_select_path(NGX_HTTP_GET, 200, MODE_FULL_SUPPORT, ENGINE_ON)
@@ -1455,7 +1455,7 @@ test_matrix_streaming_exceptions(void)
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * Task 12: Full-Buffer / Streaming Parity Checks
+ * Full-buffer/streaming parity checks
  * ══════════════════════════════════════════════════════════════════ */
 
 /*
@@ -1494,7 +1494,7 @@ test_parity_content_type(void)
     const ngx_table_elt_t *vary_fb;
     const ngx_table_elt_t *vary_st;
 
-    TEST_SUBSECTION("Task 12.1/12.4: Content-Type parity");
+    TEST_SUBSECTION("Content-Type parity between full-buffer and streaming");
 
     memset(&conf, 0, sizeof(conf));
     memset(&result, 0, sizeof(result));
@@ -1535,7 +1535,7 @@ test_parity_exceptions(void)
     MarkdownResult result;
     static uint8_t etag_val[] = "\"md-parity\"";
 
-    TEST_SUBSECTION("Task 12.2: Parity exceptions documented");
+    TEST_SUBSECTION("Parity exceptions: ETag, Content-Length, X-Markdown-Tokens differ");
 
     memset(&conf, 0, sizeof(conf));
     conf.policy.generate_etag = 1;
@@ -1593,44 +1593,44 @@ main(void)
     printf("protocol_correctness Tests\n");
     printf("========================================\n");
 
-    /* Task 2: ETag Generation Correctness */
+    /* ETag generation correctness */
     test_upstream_etag_replaced_when_enabled();
     test_upstream_etag_removed_when_disabled();
 
-    /* Task 3: If-None-Match Parsing and Comparison */
+    /* If-None-Match parsing and comparison */
     test_inm_parsing_cases();
     test_weak_comparison();
 
-    /* Task 4: 304 Not Modified Response */
+    /* 304 Not Modified response construction */
     test_304_response_properties();
 
-    /* Task 5: Vary Header Management */
+    /* Vary header management */
     test_vary_no_existing();
     test_vary_existing_without_accept();
     test_vary_existing_with_accept();
     test_vary_multiple_tokens();
 
-    /* Task 6: HEAD Request Handling */
+    /* HEAD request handling */
     test_head_routes_to_fullbuffer();
     test_head_response_parity();
 
-    /* Task 7: Content-Type and Content-Length Consistency */
+    /* Content-Type and Content-Length consistency */
     test_content_type_and_length();
     test_encoding_and_ranges_removal();
 
-    /* Task 8: Streaming Path Protocol Metadata */
+    /* Streaming path protocol metadata */
     test_streaming_etag_clearing();
     test_engine_forces_fullbuffer_for_full_support();
 
-    /* Task 9: Upstream ETag Handling */
+    /* Upstream ETag handling */
     test_upstream_etag_all_invalidated();
     test_upstream_etag_preserved_failopen();
 
-    /* Task 10: Configuration Mode Behavior */
+    /* Configuration mode behavior */
     test_config_modes();
     test_full_support_etag_off();
 
-    /* Task 11: Request/Response Matrix Verification */
+    /* Request/response matrix verification */
     test_matrix_get_absent_inm();
     test_matrix_get_match_inm();
     test_matrix_get_mismatch_inm();
@@ -1639,7 +1639,7 @@ main(void)
     test_matrix_head_rows();
     test_matrix_streaming_exceptions();
 
-    /* Task 12: Full-Buffer / Streaming Parity Checks */
+    /* Full-buffer/streaming parity checks */
     test_parity_content_type();
     test_parity_exceptions();
 

@@ -8,11 +8,11 @@
  * without conversion — even if the streaming engine would otherwise
  * be selected.
  *
- * Spec 41: Streaming Security, Resource Limits, and Compression
+ * streaming security and resource limits: Streaming Security, Resource Limits, and Compression
  * Validates:
- *   Requirement 2 AC 1: auth_policy checked before streaming candidate
- *   Requirement 2 AC 2: None bypassed by streaming path
- *   Requirement 6 AC 1: Auth deny test
+ *   auth/status checked before streaming candidate
+ *   None bypassed by streaming path
+ *   oversized body / replay overflow handling: Auth deny test
  *
  * AGENTS.md compliance:
  *   Rule 14: security regression test
@@ -273,7 +273,7 @@ model_streaming_auth_gate(ngx_http_request_t *r,
  * conversion MUST NOT proceed.  The streaming engine must not be
  * selected because the auth gate fires first.
  *
- * Validates: Requirement 2 AC 1, Requirement 6 AC 1
+ * Validates: auth/status checked before streaming candidate, oversized body / replay overflow handling
  * ================================================================ */
 static void
 test_auth_deny_with_authorization_header(void)
@@ -319,7 +319,7 @@ test_auth_deny_with_authorization_header(void)
  * When auth_policy is deny and a configured auth cookie pattern
  * matches a request cookie, conversion MUST NOT proceed.
  *
- * Validates: Requirement 2 AC 1, Requirement 6 AC 1
+ * Validates: auth/status checked before streaming candidate, oversized body / replay overflow handling
  * ================================================================ */
 static void
 test_auth_deny_with_auth_cookie(void)
@@ -367,7 +367,7 @@ test_auth_deny_with_auth_cookie(void)
  * present, conversion SHOULD proceed normally (streaming or
  * full-buffer as selected by the engine).
  *
- * Validates: Requirement 2 AC 1 (non-authenticated proceeds)
+ * Validates: auth/status checked before streaming candidate (non-authenticated proceeds)
  * ================================================================ */
 static void
 test_auth_deny_no_credentials(void)
@@ -408,7 +408,7 @@ test_auth_deny_no_credentials(void)
  * ARE eligible for conversion.  The streaming engine selection
  * proceeds normally.
  *
- * Validates: Requirement 2 AC 1 (allow policy)
+ * Validates: auth/status checked before streaming candidate (allow policy)
  * ================================================================ */
 static void
 test_auth_allow_with_auth_present(void)
@@ -455,7 +455,7 @@ test_auth_allow_with_auth_present(void)
  * do NOT match auth patterns (e.g., tracking cookies), conversion
  * should proceed.
  *
- * Validates: Requirement 2 AC 1 (only auth cookies block)
+ * Validates: auth/status checked before streaming candidate (only auth cookies block)
  * ================================================================ */
 static void
 test_auth_deny_with_non_auth_cookie(void)
@@ -508,7 +508,7 @@ test_auth_deny_with_non_auth_cookie(void)
  * mutate any input state.  This proves it can run before any
  * streaming resource allocation without side effects.
  *
- * Validates: Requirement 2 AC 1, Requirement 2 AC 2
+ * Validates: auth/status checked before streaming candidate, none bypassed by streaming path
  * ================================================================ */
 static void
 test_auth_check_runs_before_streaming(void)
@@ -566,7 +566,7 @@ test_auth_check_runs_before_streaming(void)
  * When operator configures custom auth cookie patterns, those
  * patterns must also be respected by the deny gate.
  *
- * Validates: Requirement 2 AC 2 (none bypassed)
+ * Validates: none bypassed by streaming path
  * ================================================================ */
 static void
 test_auth_deny_custom_cookie_patterns(void)
@@ -628,8 +628,8 @@ int
 main(void)
 {
     printf("\n========================================\n");
-    printf("Auth Deny Security Tests (Spec 41)\n");
-    printf("Requirement 2 AC 1-2, Requirement 6 AC 1\n");
+    printf("Auth Deny Security Tests (streaming security and resource limits)\n");
+    printf("auth/status checked before streaming candidate, oversized body / replay overflow handling\n");
     printf("========================================\n");
 
     TEST_SECTION("auth_policy=deny streaming bypass prevention");
