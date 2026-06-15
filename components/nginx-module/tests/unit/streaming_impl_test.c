@@ -1161,6 +1161,20 @@ ngx_http_markdown_record_per_path_metrics(
     (void) elapsed_ms;
 }
 
+static ngx_int_t g_stream_commit_headers_rc = NGX_OK;
+static int g_stream_commit_headers_called;
+
+/* Stub: ngx_http_markdown_stream_commit_headers */
+ngx_int_t
+ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    (void) r; (void) ctx; (void) conf;
+    g_stream_commit_headers_called++;
+    return g_stream_commit_headers_rc;
+}
+
 /*
  * Include the streaming implementation header after all stubs are defined.
  * This pulls in the inline/static helper functions that are the actual
@@ -1195,6 +1209,8 @@ reset_globals(void)
     g_complex_value_rc = NGX_OK;
     g_add_vary_rc = NGX_OK;
     g_set_etag_rc = NGX_OK;
+    g_stream_commit_headers_rc = NGX_OK;
+    g_stream_commit_headers_called = 0;
     g_buffer_init_rc = NGX_OK;
     g_buffer_init_fail_after = 0;
     g_buffer_init_call_count = 0;
@@ -1523,10 +1539,8 @@ test_select_processing_path(void)
 
 /*
  * Test streaming_update_headers success and failure branches.  Verifies:
- * - successful header update sets markdown content-type, clears
- *   content-length, and removes content-encoding when decompression needed
- * - vary-accept add failure returns NGX_ERROR
- * - etag clear failure returns NGX_ERROR
+ * - update_headers delegates to stream_commit_headers on success
+ * - update_headers returns NGX_ERROR when stream_commit_headers fails
  * Covers: ngx_http_markdown_streaming_update_headers
  */
 static void
@@ -1546,23 +1560,17 @@ test_update_headers_paths(void)
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
 
     ctx.decompression.needed = 1;
+    g_stream_commit_headers_called = 0;
     rc = ngx_http_markdown_streaming_update_headers(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK, "update_headers should succeed");
-    TEST_ASSERT(r.headers_out.content_type.len == NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN,
-        "content-type should be markdown");
-    TEST_ASSERT(r.headers_out.content_length_n == -1,
-        "content-length should be cleared");
-    TEST_ASSERT(g_remove_content_encoding_calls == 1,
-        "decompression path should remove content-encoding");
+    TEST_ASSERT(g_stream_commit_headers_called == 1,
+        "update_headers delegates to stream_commit_headers");
 
-    g_add_vary_rc = NGX_ERROR;
+    g_stream_commit_headers_rc = NGX_ERROR;
+    g_stream_commit_headers_called = 0;
     rc = ngx_http_markdown_streaming_update_headers(&r, &ctx, &conf);
-    TEST_ASSERT(rc == NGX_ERROR, "vary add failure should return error");
-    g_add_vary_rc = NGX_OK;
-
-    g_set_etag_rc = NGX_ERROR;
-    rc = ngx_http_markdown_streaming_update_headers(&r, &ctx, &conf);
-    TEST_ASSERT(rc == NGX_ERROR, "etag clear failure should return error");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "stream_commit_headers failure propagated");
 
     TEST_PASS("update_headers branches covered");
 }
@@ -2331,11 +2339,11 @@ test_commit_feed_and_finalize_core_paths(void)
         (uintptr_t) 0x11;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
 
-    g_add_vary_rc = NGX_ERROR;
+    g_stream_commit_headers_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
-    TEST_ASSERT(rc == NGX_ERROR,
-        "commit should fail when header update fails");
-    g_add_vary_rc = NGX_OK;
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "header update failure triggers full-buffer fallback");
+    g_stream_commit_headers_rc = NGX_OK;
 
     g_next_header_filter_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_commit(&r, &ctx, &conf);
@@ -2938,15 +2946,15 @@ test_streaming_gap_branches(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x32;
-    g_add_vary_rc = NGX_ERROR;
+    g_stream_commit_headers_rc = NGX_ERROR;
     free_before = g_output_free_calls;
     rc = ngx_http_markdown_streaming_handle_feed_result(
         &r, &ctx, &conf, ERROR_SUCCESS, out_data, 2);
-    TEST_ASSERT(rc == NGX_ERROR,
-        "feed success should propagate commit failure");
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "feed success triggers full-buffer fallback on commit failure");
     TEST_ASSERT(g_output_free_calls == free_before + 1,
         "commit failure should still free feed output");
-    g_add_vary_rc = NGX_OK;
+    g_stream_commit_headers_rc = NGX_OK;
 
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x33;
@@ -2975,11 +2983,11 @@ test_streaming_gap_branches(void)
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
     g_streaming_finalize_result.markdown_len = 2;
-    g_add_vary_rc = NGX_ERROR;
+    g_stream_commit_headers_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_finalize_request(&r, &ctx, &conf);
-    TEST_ASSERT(rc == NGX_ERROR,
-        "finalize pre-commit should surface commit errors");
-    g_add_vary_rc = NGX_OK;
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "finalize pre-commit triggers fallback on commit errors");
+    g_stream_commit_headers_rc = NGX_OK;
 
     rc = ngx_http_markdown_streaming_process_chunk(
         &r, &ctx, &conf, NULL);

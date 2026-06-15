@@ -514,6 +514,12 @@ static void test_commit_vary_failure_no_content_type_leak(void)
                 "headers_committed stays 0");
     TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PRE_COMMIT,
                 "state stays PRE_COMMIT");
+    TEST_ASSERT(test_request.headers_out.content_type.data == NULL,
+                "content_type not modified on vary failure");
+    TEST_ASSERT(test_request.headers_out.content_type.len == 0,
+                "content_type_len not modified on vary failure");
+    TEST_ASSERT(test_request.headers_out.content_length_n == 12345,
+                "content_length_n not modified on vary failure");
 
     TEST_PASS("Vary failure does not leak content-type mutation");
 }
