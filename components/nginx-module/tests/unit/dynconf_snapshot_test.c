@@ -519,6 +519,27 @@ test_custom_config_values_reflected(void)
 /* ── Test 3: NULL pool returns NGX_ERROR ─────────────────────────── */
 
 static void
+test_streaming_engine_enum_names(void)
+{
+    TEST_SUBSECTION("Streaming engine enum names");
+
+    TEST_ASSERT(strcmp(ngx_http_markdown_streaming_engine_str(
+        NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF), "off") == 0,
+        "stream engine off should render as off");
+    TEST_ASSERT(strcmp(ngx_http_markdown_streaming_engine_str(
+        NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO), "auto") == 0,
+        "stream engine auto should render as auto");
+    TEST_ASSERT(strcmp(ngx_http_markdown_streaming_engine_str(
+        NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON), "on") == 0,
+        "stream engine on should render as on");
+    TEST_ASSERT(strcmp(ngx_http_markdown_streaming_engine_str(
+        NGX_CONF_UNSET_UINT), "unknown") == 0,
+        "unknown stream engine enum should render as unknown");
+
+    TEST_PASS("Streaming engine enum names covered");
+}
+
+static void
 test_null_pool_returns_error(void)
 {
     ngx_http_markdown_conf_t conf;
@@ -577,6 +598,7 @@ main(void)
 
     test_default_config_all_keys_present();
     test_custom_config_values_reflected();
+    test_streaming_engine_enum_names();
     test_null_pool_returns_error();
     test_null_conf_returns_error();
 

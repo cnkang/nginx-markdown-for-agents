@@ -482,6 +482,8 @@ test_access_and_json_builder(void)
 
     reset_test_state();
     init_request(&r, &c, &conf, &addr);
+    conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
+    conf.stream.threshold_explicit = 1;
 
     rc = ngx_http_markdown_diagnostics_init(
         &ngx_http_markdown_g_diag_state, r.pool, 2);
@@ -512,8 +514,12 @@ test_access_and_json_builder(void)
                 "JSON should include metrics");
     TEST_ASSERT(strstr(json, "\"dynconf_state\"") != NULL,
                 "JSON should include dynconf state");
+    TEST_ASSERT(strstr(json, "\"engine\": \"on\"") != NULL,
+                "JSON should expose configured streaming engine");
+    TEST_ASSERT(strstr(json, "\"engine_source\": \"configured\"") != NULL,
+                "JSON should expose configured engine source");
     TEST_ASSERT(strstr(json,
-                "\"threshold_explicit\": false") != NULL,
+                "\"threshold_explicit\": true") != NULL,
                 "JSON should expose threshold explicit state");
     TEST_ASSERT(strstr(json, "\"reason_code\": 11") != NULL,
                 "JSON should include recorded reason");
