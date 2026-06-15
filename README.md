@@ -405,7 +405,7 @@ make supply-chain
 - Evaluating the idea: start here, then read [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md)
 - Installing in a real environment: go to [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md)
 - Tuning behavior or policy: use [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md)
-- Upgrading from 0.7.x: use [docs/guides/MIGRATION-0.8.md](docs/guides/MIGRATION-0.8.md)
+- Upgrading from 0.7.x: use [docs/guides/MIGRATION-0.8.md](docs/guides/MIGRATION-0.8.md) — **0.8.0 is a breaking FFI/ABI change; Rust converter and C module must be upgraded together**
 - Rolling out streaming in production: use [docs/guides/streaming-rollout-cookbook.md](docs/guides/streaming-rollout-cookbook.md)
 - Operating in production: use [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md)
 - Reporting a vulnerability: use [SECURITY.md](SECURITY.md)

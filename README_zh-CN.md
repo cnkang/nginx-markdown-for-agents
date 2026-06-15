@@ -396,7 +396,7 @@ make supply-chain
 
 - 想快速判断是否适合接入：先看本页，再看 [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md)
 - 准备落地安装：看 [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md)
-- 从 0.7.x 升级到 0.8.0：看 [docs/guides/MIGRATION-0.8.md](docs/guides/MIGRATION-0.8.md)
+- 从 0.7.x 升级到 0.8.0：看 [docs/guides/MIGRATION-0.8.md](docs/guides/MIGRATION-0.8.md) — **0.8.0 是 FFI/ABI 破坏性变更；Rust 转换器和 C 模块必须一起升级**
 - 安全启用流式转换：看 [docs/guides/streaming-rollout-cookbook.md](docs/guides/streaming-rollout-cookbook.md)
 - 需要配置和策略细节：看 [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md)
 - 准备上线运维：看 [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md)
