@@ -2,7 +2,7 @@
  * Test: stream_e2e
  *
  * E2E-style integration tests for the streaming fallback state machine
- * (streaming fallback state machine, tasks 8.1-8.6).  These tests exercise
+ * (streaming end-to-end integration).  These tests exercise
  * the COMPLETE flow from context initialization through the PRODUCTION
  * error handler (ngx_http_markdown_stream_on_error) to final outcome.
  *
@@ -17,7 +17,7 @@
  *   3. Error handler invocation (production ngx_http_markdown_stream_on_error)
  *   4. Verification of final outcome (return code, state, side effects)
  *
- * Validates: Requirements 8.1-8.6
+ * Validates: streaming end-to-end integration
  */
 
 #include "../include/test_common.h"
@@ -474,7 +474,7 @@ e2e_data_contains_html(const u_char *data, size_t len)
 
 
 /*
- * Task 8.1: Pre-commit fallback returns HTML (on_error=pass)
+ * pre-commit fallback returns HTML (on_error=pass)
  *
  * Full E2E flow:
  *   Setup: PRE_COMMIT state, replay_initialized=1,
@@ -531,12 +531,12 @@ test_8_1_precommit_fallback_html(void)
     TEST_ASSERT(mock_output_filter_chain == &replay_chain,
                 "8.1: correct replay chain sent downstream");
 
-    TEST_PASS("Task 8.1: Pre-commit fallback returns HTML (on_error=pass)");
+    TEST_PASS("pre-commit fallback returns HTML (on_error=pass)");
 }
 
 
 /*
- * Task 8.2: Pre-commit reject returns 502
+ * pre-commit reject returns 502
  *
  * Full E2E flow:
  *   Setup: PRE_COMMIT state, replay_initialized=1,
@@ -571,12 +571,12 @@ test_8_2_precommit_reject_502(void)
     TEST_ASSERT(mock_output_filter_called == 0,
                 "8.2: no output sent downstream");
 
-    TEST_PASS("Task 8.2: Pre-commit reject returns 502");
+    TEST_PASS("pre-commit reject returns 502");
 }
 
 
 /*
- * Task 8.3: Replay buffer overflow forces decision
+ * replay buffer overflow forces decision
  *
  * When the replay buffer overflows (size > capacity) in PRE_COMMIT
  * state, the decision engine enters PRE_COMMIT_REPLAY_UNAVAILABLE
@@ -618,7 +618,7 @@ test_8_3_replay_buffer_overflow(void)
             decision.reason == NGX_HTTP_MD_REASON_REPLAY_OVERFLOW,
             "8.3a: reason is REPLAY_OVERFLOW");
 
-        TEST_PASS("Task 8.3a: Overflow + resource limits = FULL_BUFFER_FALLBACK");
+        TEST_PASS("overflow + resource limits = FULL_BUFFER_FALLBACK");
     }
 
     TEST_SUBSECTION("8.3b: Overflow without resource limits");
@@ -643,13 +643,13 @@ test_8_3_replay_buffer_overflow(void)
             decision.reason == NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED,
             "8.3b: reason is RESOURCE_LIMIT_EXCEEDED");
 
-        TEST_PASS("Task 8.3b: Overflow + no resource limits = REJECT_502");
+        TEST_PASS("overflow + no resource limits = REJECT_502");
     }
 }
 
 
 /*
- * Task 8.4: Post-commit safe-finish (no HTML mixed)
+ * post-commit safe-finish (no HTML mixed)
  *
  * Full E2E flow using PRODUCTION error handler:
  *   Setup: COMMITTED state, headers_committed=1, on_error=pass,
@@ -701,12 +701,12 @@ test_8_4_postcommit_safe_finish(void)
     TEST_ASSERT(e2e_request.headers_out.content_type_len == 0,
                 "8.4: Content-Type not set to HTML");
 
-    TEST_PASS("Task 8.4: Post-commit safe-finish (no HTML mixed)");
+    TEST_PASS("post-commit safe-finish (no HTML mixed)");
 }
 
 
 /*
- * Task 8.5: Post-commit abort (no HTML mixed)
+ * post-commit abort (no HTML mixed)
  *
  * Full E2E flow using PRODUCTION error handler:
  *   Setup: COMMITTED state, headers_committed=1, on_error=reject
@@ -754,12 +754,12 @@ test_8_5_postcommit_abort(void)
     TEST_ASSERT(e2e_request.headers_out.content_type_len == 0,
                 "8.5: Content-Type not set to HTML");
 
-    TEST_PASS("Task 8.5: Post-commit abort (no HTML mixed)");
+    TEST_PASS("post-commit abort (no HTML mixed)");
 }
 
 
 /*
- * Task 8.6: No response contains mixed Markdown and HTML
+ * no response contains mixed Markdown and HTML
  *
  * Property test: For all state/event/policy combinations where the
  * decision engine transitions to a post-commit state, verify that
@@ -929,14 +929,14 @@ test_8_6_no_mixed_markdown_html(void)
 
     printf("    (%d state/event/policy combinations verified)\n",
            total_checks);
-    TEST_PASS("Task 8.6: No response contains mixed Markdown and HTML");
+    TEST_PASS("no response contains mixed Markdown and HTML");
 }
 
 
 int
 main(void)
 {
-    TEST_SECTION("Stream E2E Integration Tests (Spec 37, Tasks 8.1-8.6)");
+    TEST_SECTION("Stream E2E Integration Tests (streaming end-to-end integration)");
 
     test_8_1_precommit_fallback_html();
     test_8_2_precommit_reject_502();

@@ -1,14 +1,14 @@
 //! Bounded memory and streaming incrementality tests.
 //!
-//! **Task 6.1**: Verify that peak memory does NOT grow linearly with input size.
+//! **Bounded memory verification**: Verify that peak memory does NOT grow linearly with input size.
 //! Feed a large input (1 MB) through the streaming converter in small chunks and
 //! assert that `peak_memory_estimate` stays bounded (within budget, not O(input_size)).
 //!
-//! **Task 6.2**: Verify true streaming — output appears before all input is consumed.
+//! **True streaming output verification**: Verify true streaming — output appears before all input is consumed.
 //! Feed HTML in multiple chunks and assert that non-empty output is produced after
 //! the first few chunks, before the final chunk/finalize.
 //!
-//! **Validates: Requirements 5.1, 5.2, 6.1, 6.2**
+//! **Validates: bounded memory, streaming incrementality**
 
 #![cfg(feature = "streaming")]
 
@@ -21,8 +21,8 @@ use streaming_test_support::{
 };
 
 // ════════════════════════════════════════════════════════════════════
-// Task 6.1: Large input bounded memory
-// Validates: Requirements 5.1, 5.2
+// Bounded memory verification: Large input bounded memory
+// Validates: bounded memory
 // ════════════════════════════════════════════════════════════════════
 
 /// Generate HTML of approximately `target_bytes` using repeated paragraphs.
@@ -45,7 +45,7 @@ fn make_html_of_size(target_bytes: usize) -> Vec<u8> {
 /// would grow ~16x with ~16x input growth. We assert that peak memory growth
 /// is less than 25% of input growth — proving bounded behavior.
 ///
-/// **Validates: Requirements 5.1, 5.2**
+/// **Validates: bounded memory**
 #[test]
 fn large_input_bounded_memory() {
     let small_size = 64 * 1024; // 64 KB
@@ -135,7 +135,7 @@ fn large_input_bounded_memory() {
 /// Feed 1 MB of HTML in small chunks using the default (2 MiB) budget.
 /// Verify peak_memory_estimate stays within budget.total.
 ///
-/// **Validates: Requirements 5.1, 5.2**
+/// **Validates: bounded memory**
 #[test]
 fn large_input_within_default_budget() {
     let html = make_html_of_size(1024 * 1024); // 1 MB
@@ -170,8 +170,8 @@ fn large_input_within_default_budget() {
 }
 
 // ════════════════════════════════════════════════════════════════════
-// Task 6.2: Output before input complete
-// Validates: Requirements 6.1, 6.2
+// True streaming output verification: Output before input complete
+// Validates: streaming incrementality
 // ════════════════════════════════════════════════════════════════════
 
 /// Verify that non-empty output is produced before all input is consumed.
@@ -181,7 +181,7 @@ fn large_input_within_default_budget() {
 /// output appears well before the final chunk, distinguishing true streaming
 /// from buffered-then-convert.
 ///
-/// **Validates: Requirements 6.1, 6.2**
+/// **Validates: streaming incrementality**
 #[test]
 fn output_before_input_complete() {
     // Generate HTML with many paragraphs — enough to guarantee early output
@@ -275,7 +275,7 @@ fn output_before_input_complete() {
 /// first_non_empty_at should be Some (not None), proving output appeared
 /// during chunk feeding rather than only at finalize time.
 ///
-/// **Validates: Requirements 6.1, 6.2**
+/// **Validates: streaming incrementality**
 #[test]
 fn first_output_during_feed_not_finalize() {
     let mut html = String::new();

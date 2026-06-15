@@ -12,10 +12,10 @@
  *   markdown_streaming_on_error — controls streaming pre-commit fallback
  *   post-commit fallback never returns HTML (safe_finish or abort only)
  *
- * Task 6.1: Pre-commit + pass = replay HTML
- * Task 6.2: Pre-commit + reject = 502
- * Task 6.3: Post-commit + pass = safe_finish/abort
- * Task 6.4: Post-commit + reject = safe_finish/abort
+ * Pre-commit with pass policy: replay original HTML
+ * Pre-commit with reject policy: return 502
+ * Post-commit with pass policy: safe_finish/abort
+ * Post-commit with reject policy: safe_finish/abort
  */
 
 #ifndef NGX_HTTP_MARKDOWN_STREAM_ERROR_H_INCLUDED_
@@ -40,7 +40,7 @@
  *
  * Returns:
  *   NGX_OK             - Error handled (fallback or finish executed)
- *   NGX_HTTP_BAD_GATEWAY - 502 reject (task 6.2)
+ *   NGX_HTTP_BAD_GATEWAY - 502 reject (pre-commit with reject policy)
  *   NGX_ERROR          - Unrecoverable error
  */
 ngx_int_t

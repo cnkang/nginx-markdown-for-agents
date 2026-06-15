@@ -139,6 +139,74 @@ that construct `MarkdownOptions` directly must rebuild against the 0.8.0
 headers and initialize `flush_threshold` explicitly. Use `0` to preserve the
 default immediate-flush behavior.
 
+### 7. FFI `FFIHeaderEntry.op_type` new delete-all operation
+
+The `FFIHeaderEntry` struct's `op_type` field now supports value `3`
+(delete-all entries matching the header name). Old binaries that only
+recognize `op_type` values 0–2 must not be mixed with 0.8.0 shared
+libraries.
+
+**Impact**: Third-party code that consumes `FFIHeaderEntry` arrays from the
+header plan must handle `op_type = 3`. Ignoring it causes incomplete header
+mutation.
+
+### 8. `ngx_http_markdown_check_eligibility()` API signature changed
+
+The C function `ngx_http_markdown_check_eligibility()` now requires a
+`const ngx_http_markdown_effective_conf_t *eff` parameter (4th argument)
+for dynconf-safe eligibility evaluation. All call sites must pass the
+effective config; `NULL` is accepted but falls back to live conf (weaker
+consistency guarantee per Rule 34).
+
+**Impact**: Any code calling this function must be updated. The function
+cannot be called with the old 3-argument signature.
+
+### 9. Streaming context layout changes
+
+The `ngx_http_markdown_ctx_t` struct has changed in 0.8.0:
+
+- `ctx->stream_sm` is now unconditional (not gated by
+  `MARKDOWN_STREAMING_ENABLED`) and includes the full state machine context.
+- `ctx->streaming` sub-struct has new fields for the v0.8.0 streaming
+  architecture (completion latches, failopen_replay_buf, pending output
+  bytes tracking, etc.).
+- `ctx->streaming.commit_state` field semantics changed from the v0.6.x
+  meaning.
+
+**Impact**: Third-party NGINX modules that directly reference
+`ctx->stream_sm` or `ctx->streaming` fields must rebuild against the 0.8.0
+header. The layout is not binary-compatible with 0.7.x.
+
+### 10. 0.6.x streaming compatibility not preserved
+
+v0.8.0 **does not preserve** 0.6.x streaming compatibility:
+
+- `NGX_HTTP_MARKDOWN_STREAMING_ENGINE_*` constants (OFF=0, ON=1, AUTO=2)
+  have been removed. Use `NGX_HTTP_MARKDOWN_STREAM_ENGINE_*` (OFF=0,
+  AUTO=1, ON=2) instead. Note the different AUTO/ON values.
+- The `streaming.auto_threshold` directive is bridged to
+  `stream.threshold` during configuration merge but the old naming and
+  default (32k) are not retained as runtime semantics.
+- The `streaming.*` configuration sub-struct serves only as a compatibility
+  bridge; runtime code reads from `stream.*` exclusively.
+
+**Impact**: Configurations that relied on the exact values of
+`NGX_HTTP_MARKDOWN_STREAMING_ENGINE_AUTO` (was 2, now 1) or
+`NGX_HTTP_MARKDOWN_STREAMING_ENGINE_ON` (was 1, now 2) must be audited.
+This only affects code that compared against raw integer values rather than
+using the symbolic constants.
+
+### 11. Rust converter and C module must be upgraded together
+
+The Rust converter shared library and the NGINX C module must always be
+deployed as a matched pair. Mixing a 0.8.0 Rust library with a 0.7.x C
+module (or vice versa) will result in FFI layout mismatches, incorrect
+`FFIHeaderEntry` processing, and potential memory corruption.
+
+**Impact**: Package deployment workflows must ensure both components are
+upgraded atomically. The RPM/DEB package dependencies enforce this via the
+NGINX module ABI range constraint.
+
 ---
 
 ## New Directives
@@ -303,3 +371,4 @@ output parity before enabling streaming for live traffic.
 |---------|------|--------|---------|
 | 0.8.0 | 2026-06-10 | Kang | Initial migration guide |
 | 0.8.0 | 2026-06-12 | Codex | Added missing streaming reason codes: `not_html`, `compressed`, `not_candidate`, `accept_mismatch` |
+| 0.8.0 | 2026-06-15 | Kang | Document FFIHeaderEntry.op_type=3, check_eligibility API change, ctx layout change, 0.6.x incompatibility, paired deployment requirement |

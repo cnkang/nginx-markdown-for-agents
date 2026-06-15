@@ -1,0 +1,148 @@
+name: Supply Chain Visibility
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+  pull_request:
+    branches:
+      - main
+      - master
+      - "dev/*"
+    paths:
+      - ".github/workflows/supply-chain.yml"
+      - ".github/workflows/security-static.yml"
+      - "components/**"
+      - "tools/**"
+      - "packaging/**"
+      - "examples/**"
+      - "charts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "deny.toml"
+      - ".gitleaks.toml"
+      - ".semgrep.yml"
+  push:
+    branches:
+      - main
+      - master
+      - "dev/*"
+    paths:
+      - ".github/workflows/supply-chain.yml"
+      - ".github/workflows/security-static.yml"
+      - "components/**"
+      - "tools/**"
+      - "packaging/**"
+      - "examples/**"
+      - "charts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "deny.toml"
+      - ".gitleaks.toml"
+      - ".semgrep.yml"
+
+permissions: {}
+
+concurrency:
+  group: supply-chain-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trivy:
+    name: Trivy filesystem and IaC scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run Trivy repository scan
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          format: table
+          output: trivy-results.txt
+          exit-code: "0"
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Add Trivy summary
+        if: always()
+        run: |
+          {
+            echo "## Trivy filesystem/IaC scan"
+            echo
+            echo '```text'
+            sed -n '1,200p' trivy-results.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Trivy results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-results
+          path: trivy-results.txt
+          if-no-files-found: error
+
+  sbom:
+    name: SPDX SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+
+      - name: Upload SPDX SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-spdx-json
+          path: sbom.spdx.json
+          if-no-files-found: error
+
+  scorecard:
+    name: OpenSSF Scorecard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run OpenSSF Scorecard
+        id: scorecard
+        continue-on-error: true
+        uses: ossf/scorecard-action@99c09fe975337306107572b4fdf4db224cf8e2f2 # v2.4.3
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          results_file: scorecard-results.json
+          results_format: json
+          publish_results: false
+
+      - name: Upload Scorecard results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scorecard-results
+          path: scorecard-results.json
+          if-no-files-found: warn

@@ -1,14 +1,14 @@
 /*
  * Test: threshold_router
  *
- * Validates: Requirements 16.3, 16.4, 16.6
+ * Validates: threshold-based path selection and special request routing
  *
- * Property 6: Threshold router path selection correctness
+ * Threshold router path selection correctness
  *   - threshold=off (0): always full-buffer
  *   - CL < threshold: full-buffer
  *   - CL >= threshold: incremental
  *
- * Property 7: Special request path semantics preserved
+ * Special request path semantics preserved
  *   - HEAD requests always full-buffer regardless of threshold
  *   - 304 responses always full-buffer regardless of threshold
  *   - fail-open replay always full-buffer
@@ -215,8 +215,7 @@ fresh_metrics(void)
 }
 
 /* ================================================================
- * Property 6: Threshold router path selection correctness
- * Validates: Requirements 16.3, 16.4
+ * Threshold router path selection correctness
  * ================================================================ */
 
 static void
@@ -365,8 +364,7 @@ test_deferred_no_upgrade_when_below(void)
 }
 
 /* ================================================================
- * Property 7: Special request path semantics preserved
- * Validates: Requirement 16.6
+ * Special request path semantics preserved
  * ================================================================ */
 
 static void
@@ -639,7 +637,7 @@ main(void)
     printf("threshold_router Tests\n");
     printf("========================================\n");
 
-    TEST_SECTION("Property 6: Threshold router path selection");
+    TEST_SECTION("Threshold router path selection");
     test_threshold_off_always_fullbuffer();
     test_cl_below_threshold_fullbuffer();
     test_cl_equal_threshold_incremental();
@@ -648,7 +646,7 @@ main(void)
     test_deferred_upgrade_when_buffered_exceeds();
     test_deferred_no_upgrade_when_below();
 
-    TEST_SECTION("Property 7: Special request path semantics");
+    TEST_SECTION("Special request path semantics");
     test_head_always_fullbuffer();
     test_head_deferred_no_upgrade();
     test_304_always_fullbuffer();

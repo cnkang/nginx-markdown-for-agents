@@ -6,7 +6,7 @@
  * are ALWAYS rejected from streaming conversion, regardless of
  * user configuration or streaming engine mode.
  *
- * Requirements: Spec 41, Requirement 4 (Hard Exclusions)
+ * Requirements: streaming security and resource limits, hard-excluded content types always passthrough
  *   AC 1: text/event-stream, application/x-ndjson,
  *          application/stream+json always passthrough
  *   AC 2: Cannot be removed by user config
@@ -195,7 +195,7 @@ set_ct(ngx_str_t *s, const char *val)
 /* ================================================================
  * Security Test 1: Hard-excluded types always passthrough
  *
- * Validates: Requirement 4 AC 1
+ * Validates: hard-excluded types always passthrough (AC 1)
  *
  * These types represent streaming protocols (SSE, NDJSON, streaming
  * JSON) that must NEVER enter the Markdown converter, whether
@@ -243,7 +243,7 @@ test_hard_excluded_types_always_passthrough(void)
 /* ================================================================
  * Security Test 2: Cannot be overridden by user configuration
  *
- * Validates: Requirement 4 AC 2
+ * Validates: hard-excluded types cannot be overridden by user config (AC 2)
  *
  * Even when an operator configures markdown_stream_excluded_types
  * with their own list, the built-in hard exclusions remain active.
@@ -316,7 +316,7 @@ test_hard_exclusions_cannot_be_overridden(void)
 /* ================================================================
  * Security Test 3: Exclusion checked BEFORE any conversion attempt
  *
- * Validates: Requirement 4 AC 3
+ * Validates: exclusion checked before any conversion attempt (AC 3)
  *
  * stream_type_excluded() is a pure predicate that does not allocate
  * memory, does not modify state, and returns immediately. In the
@@ -393,7 +393,7 @@ test_exclusion_before_conversion(void)
 /* ================================================================
  * Security Test 4: Parameter injection cannot bypass exclusion
  *
- * Validates: Requirement 4 AC 4
+ * Validates: parameter/case matching cannot bypass exclusion (AC 4)
  *
  * An attacker or misconfigured upstream might send Content-Type
  * headers with extra parameters to try to bypass the exclusion.
@@ -450,7 +450,7 @@ test_parameter_injection_bypass(void)
 /* ================================================================
  * Security Test 5: Case variation cannot bypass exclusion
  *
- * Validates: Requirement 4 AC 4
+ * Validates: parameter/case matching cannot bypass exclusion (AC 4)
  *
  * Content-Type matching must be case-insensitive per RFC 9110.
  * ================================================================ */
@@ -519,7 +519,7 @@ test_case_variation_bypass(void)
 /* ================================================================
  * Security Test 6: Exclusion applies in the streaming path
  *
- * Validates: Requirement 4 AC 3 + integration verification
+ * Validates: exclusion applies in streaming path (AC 3) + integration verification
  *
  * In production, select_processing_path checks:
  *   Rule 6: text/event-stream (direct check)
@@ -599,7 +599,7 @@ int
 main(void)
 {
     printf("\n========================================\n");
-    printf("Hard-Excluded Types Security Tests (Spec 41)\n");
+    printf("Hard-Excluded Types Security Tests (streaming security and resource limits)\n");
     printf("========================================\n");
 
     test_hard_excluded_types_always_passthrough();

@@ -43,6 +43,8 @@ const CHARS_PER_TOKEN_MAX: f32 = 100.0;
 ///
 /// Non-positive inputs default to 4.0 (English text heuristic).
 /// Positive inputs are clamped to [CHARS_PER_TOKEN_MIN, CHARS_PER_TOKEN_MAX].
+/// FFI `u8` fixed-point callers can express raw non-zero values from 0.1 to
+/// 25.5; the wider clamp still protects internal Rust callers.
 pub(crate) fn clamp_chars_per_token(raw: f32) -> f32 {
     if raw <= 0.0 {
         4.0
@@ -176,6 +178,9 @@ fn optional_utf8<'a>(
 ///
 /// # Examples
 ///
+/// FFI pointer lifecycle example; kept ignored because this helper is private
+/// and requires crate-internal option decoding context.
+///
 /// ```ignore
 /// use std::ptr;
 ///
@@ -295,4 +300,75 @@ pub(crate) fn decode_options(
             ),
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ptr;
+
+    use super::*;
+    use crate::ffi::abi::MarkdownOptions;
+
+    fn test_options(chars_per_token_fixed: u8, llm_provider: u8) -> MarkdownOptions {
+        MarkdownOptions {
+            flavor: 0,
+            timeout_ms: 0,
+            generate_etag: 0,
+            estimate_tokens: 1,
+            front_matter: 0,
+            content_type: ptr::null(),
+            content_type_len: 0,
+            base_url: ptr::null(),
+            base_url_len: 0,
+            streaming_budget: 0,
+            prune_noise: 0,
+            prune_selectors: ptr::null(),
+            prune_selector_len: 0,
+            prune_protection_selectors: ptr::null(),
+            prune_protection_selector_len: 0,
+            memory_budget: 0,
+            llm_provider,
+            chars_per_token_fixed,
+            parse_timeout_ms: 0,
+            parser_memory_budget: 0,
+            flush_threshold: 0,
+        }
+    }
+
+    fn assert_f32_eq(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < f32::EPSILON,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn test_chars_per_token_fixed_decoding_boundaries() {
+        let provider_options = test_options(0, 1);
+        let provider_default = decode_options(&provider_options).unwrap();
+        assert_f32_eq(provider_default.chars_per_token, 3.8);
+        assert_f32_eq(provider_default.effective_chars_per_token, 3.8);
+
+        let min_options = test_options(1, 1);
+        let min_non_zero = decode_options(&min_options).unwrap();
+        assert_f32_eq(min_non_zero.chars_per_token, 0.1);
+        assert_f32_eq(min_non_zero.effective_chars_per_token, 1.0);
+
+        let typical_options = test_options(38, 1);
+        let typical_override = decode_options(&typical_options).unwrap();
+        assert_f32_eq(typical_override.chars_per_token, 3.8);
+        assert_f32_eq(typical_override.effective_chars_per_token, 3.8);
+
+        let max_options = test_options(u8::MAX, 1);
+        let max_u8 = decode_options(&max_options).unwrap();
+        assert_f32_eq(max_u8.chars_per_token, 25.5);
+        assert_f32_eq(max_u8.effective_chars_per_token, 25.5);
+    }
+
+    #[test]
+    fn test_chars_per_token_clamp_protects_internal_callers() {
+        assert_eq!(clamp_chars_per_token(0.0), 4.0);
+        assert_eq!(clamp_chars_per_token(0.1), 1.0);
+        assert_eq!(clamp_chars_per_token(150.0), 100.0);
+    }
 }

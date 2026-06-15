@@ -25,6 +25,10 @@ BACKEND_PORT=18200
 
 # ── Repeated curl header constants (shelldre:S1192) ─────────────────
 readonly ACCEPT_MARKDOWN='Accept: text/markdown'
+readonly AUTH_BEARER_HEADER_NAME='Authorization'
+readonly AUTH_BEARER_SCHEME='Bearer'
+readonly AUTH_BEARER_VALUE='coverage-fixture'
+readonly AUTH_BEARER_HEADER="${AUTH_BEARER_HEADER_NAME}: ${AUTH_BEARER_SCHEME} ${AUTH_BEARER_VALUE}"
 readonly AUTH_COOKIE_SESSION='Cookie: session_id=abc123'
 readonly HDR_X_FORWARDED_PROTO_HTTPS='X-Forwarded-Proto: https'
 readonly HDR_IF_MODIFIED_SINCE_FUTURE='If-Modified-Since: Thu, 01 Jan 2099 00:00:00 GMT'
@@ -876,8 +880,8 @@ curl -sS -H "${ACCEPT_MARKDOWN}" "http://127.0.0.1:${PORT}/index.html" -o /dev/n
 
 # ── Auth detection scenarios (Req 2) ────────────────────────────────
 
-# Bearer token auth (dummy placeholder — exercises auth detection code path)
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Authorization: Bearer DUMMY_TEST_TOKEN' \
+# Bearer token auth (dummy placeholder; exercises auth detection code path)
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_BEARER_HEADER}" \
   "http://127.0.0.1:${PORT}/auth/index.html" -o /dev/null -w "  auth bearer: HTTP %{http_code}\n"
 
 # Cookie prefix match (session*)
@@ -913,7 +917,7 @@ curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_COOKIE_SESSION}" \
   "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth-allow add-private: HTTP %{http_code}\n"
 
 # Auth-allow with bearer (exercises is_authenticated + CC modification)
-curl -sS -H "${ACCEPT_MARKDOWN}" -H 'Authorization: Bearer DUMMY_TEST_TOKEN' \
+curl -sS -H "${ACCEPT_MARKDOWN}" -H "${AUTH_BEARER_HEADER}" \
   "http://127.0.0.1:${PORT}/auth-allow/index.html" -o /dev/null -w "  auth-allow bearer: HTTP %{http_code}\n"
 
 # Auth-allow with CC expires (exercises append-private to existing CC)

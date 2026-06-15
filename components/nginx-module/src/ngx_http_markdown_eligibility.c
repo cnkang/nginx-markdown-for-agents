@@ -8,6 +8,7 @@
  */
 
 #include "ngx_http_markdown_filter_module.h"
+#include <strings.h>
 
 static ngx_str_t ngx_http_markdown_eligible_str = ngx_string("eligible");
 static ngx_str_t ngx_http_markdown_ineligible_method_str =
@@ -386,7 +387,8 @@ ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
  * (anything after the first ';').  NULL or empty content_type is
  * treated as not excluded.
  *
- * Requirements: Spec 36 Requirement 5 AC 2, AC 3, AC 4
+ * Acceptance criteria: built-in hard exclusions (SSE, NDJSON, stream+json)
+ * and user-configured exclusion array with case-insensitive exact matching
  *
  * Parameters:
  *   content_type - Content-Type string to check (may be NULL)

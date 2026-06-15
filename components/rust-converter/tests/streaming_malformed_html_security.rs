@@ -4,8 +4,8 @@
 //! inputs safely without crashing, producing unbounded output, or leaking
 //! dangerous content.
 //!
-//! **Validates: Requirement 6 AC 1 (Malformed HTML test)**
-//! **Validates: Requirement 1 AC 3 (No unbounded allocation in streaming path)**
+//! **Validates: malformed HTML handling**
+//! **Validates: no unbounded allocation in streaming path**
 
 #![cfg(feature = "streaming")]
 
@@ -41,7 +41,7 @@ fn make_converter_with_budget(budget: MemoryBudget) -> StreamingConverter {
 /// Deeply nested (1500 levels) HTML must not panic or produce unbounded output.
 /// The sanitizer's MAX_NESTING_DEPTH (1000) should kick in.
 ///
-/// **Validates: Requirement 6 AC 1, Requirement 1 AC 3**
+/// **Validates: malformed HTML handling, no unbounded allocation**
 #[test]
 fn deeply_nested_elements_no_panic() {
     let depth = 1500;
@@ -69,7 +69,7 @@ fn deeply_nested_elements_no_panic() {
 /// Deeply nested elements fed in small chunks (1 byte at a time) must not panic.
 /// Tests boundary handling when nesting depth increases across chunk boundaries.
 ///
-/// **Validates: Requirement 6 AC 1, Requirement 1 AC 3**
+/// **Validates: malformed HTML handling, no unbounded allocation**
 #[test]
 fn deeply_nested_elements_single_byte_chunks_no_panic() {
     let depth = 500;
@@ -115,7 +115,7 @@ fn deeply_nested_elements_single_byte_chunks_no_panic() {
 /// Extremely deep nesting (10000 levels) with a tight budget should hit budget
 /// limits before causing any unbounded behavior.
 ///
-/// **Validates: Requirement 1 AC 3**
+/// **Validates: no unbounded allocation**
 #[test]
 fn extreme_nesting_tight_budget_bounded() {
     let depth = 10_000;
@@ -167,7 +167,7 @@ fn extreme_nesting_tight_budget_bounded() {
 
 /// Unclosed tags must not cause the converter to panic or hang.
 ///
-/// **Validates: Requirement 6 AC 1**
+/// **Validates: malformed HTML handling**
 #[test]
 fn unclosed_tags_no_panic() {
     let cases: &[&[u8]] = &[
@@ -195,7 +195,7 @@ fn unclosed_tags_no_panic() {
 
 /// Unclosed tags fed across chunk boundaries should not corrupt state.
 ///
-/// **Validates: Requirement 6 AC 1**
+/// **Validates: malformed HTML handling**
 #[test]
 fn unclosed_tags_split_across_chunks() {
     let html = b"<html><body><div><p>paragraph<span>inline<em>emphasis";
@@ -224,7 +224,7 @@ fn unclosed_tags_split_across_chunks() {
 
 /// Invalid UTF-8 sequences must not cause panics.
 ///
-/// **Validates: Requirement 6 AC 1**
+/// **Validates: malformed HTML handling**
 #[test]
 fn invalid_utf8_no_panic() {
     let cases: &[&[u8]] = &[
@@ -262,7 +262,7 @@ fn invalid_utf8_no_panic() {
 
 /// Invalid UTF-8 split at a chunk boundary (partial multibyte across feeds).
 ///
-/// **Validates: Requirement 6 AC 1, AGENTS.md Rule 4**
+/// **Validates: malformed HTML handling, AGENTS.md Rule 4**
 #[test]
 fn invalid_utf8_split_across_chunks() {
     /* Valid UTF-8: "Ω" is 0xCE 0xA9 — split in the middle */
@@ -284,7 +284,7 @@ fn invalid_utf8_split_across_chunks() {
 
 /// Completely random bytes must not panic.
 ///
-/// **Validates: Requirement 6 AC 1**
+/// **Validates: malformed HTML handling**
 #[test]
 fn random_bytes_no_panic() {
     /* Deterministic pseudo-random sequence */
@@ -310,7 +310,7 @@ fn random_bytes_no_panic() {
 
 /// Extremely long attribute values must not cause unbounded output.
 ///
-/// **Validates: Requirement 1 AC 3**
+/// **Validates: no unbounded allocation**
 #[test]
 fn long_attribute_values_bounded_output() {
     let long_value = "x".repeat(100_000);
@@ -352,7 +352,7 @@ fn long_attribute_values_bounded_output() {
 
 /// Long href attribute with a safe URL should not cause unbounded allocation.
 ///
-/// **Validates: Requirement 1 AC 3**
+/// **Validates: no unbounded allocation**
 #[test]
 fn long_href_bounded() {
     let long_path = "a".repeat(50_000);
@@ -382,7 +382,7 @@ fn long_href_bounded() {
 
 /// Script tags in the streaming path must be fully suppressed.
 ///
-/// **Validates: Requirement 6 AC 1**
+/// **Validates: malformed HTML handling**
 #[test]
 fn script_injection_suppressed() {
     let html = concat!(
@@ -426,7 +426,7 @@ fn script_injection_suppressed() {
 
 /// Style tags in the streaming path must be suppressed.
 ///
-/// **Validates: Requirement 6 AC 1**
+/// **Validates: malformed HTML handling**
 #[test]
 fn style_injection_suppressed() {
     let html = concat!(
@@ -464,7 +464,7 @@ fn style_injection_suppressed() {
 
 /// Script injected across chunk boundaries must still be suppressed.
 ///
-/// **Validates: Requirement 6 AC 1**
+/// **Validates: malformed HTML handling**
 #[test]
 fn script_split_across_chunks_suppressed() {
     let html = b"<!DOCTYPE html><html><body><p>before</p><script>evil()</script><p>after</p></body></html>";
@@ -495,7 +495,7 @@ fn script_split_across_chunks_suppressed() {
 
 /// JavaScript URL in link must be blocked in streaming path.
 ///
-/// **Validates: Requirement 6 AC 1, AGENTS.md Rule 27**
+/// **Validates: malformed HTML handling, AGENTS.md Rule 27**
 #[test]
 fn javascript_url_in_link_blocked_streaming() {
     let html = concat!(
@@ -529,7 +529,7 @@ fn javascript_url_in_link_blocked_streaming() {
 
 /// Control characters in URLs must be rejected (AGENTS.md Rule 27).
 ///
-/// **Validates: Requirement 6 AC 1, AGENTS.md Rule 27**
+/// **Validates: malformed HTML handling, AGENTS.md Rule 27**
 #[test]
 fn control_chars_in_url_rejected_streaming() {
     let html = "<html><body><a href=\"https://example.com/\x01\x02\x03\">link</a></body></html>";
@@ -559,7 +559,7 @@ fn control_chars_in_url_rejected_streaming() {
 
 /// Multiple XSS vectors in one document, streamed in small chunks.
 ///
-/// **Validates: Requirement 6 AC 1**
+/// **Validates: malformed HTML handling**
 #[test]
 fn multiple_xss_vectors_chunked() {
     let html = concat!(
@@ -606,7 +606,7 @@ fn multiple_xss_vectors_chunked() {
 
 /// Adversarial input that tries to exhaust the output buffer should be rejected.
 ///
-/// **Validates: Requirement 1 AC 3**
+/// **Validates: no unbounded allocation**
 #[test]
 fn adversarial_output_amplification_bounded() {
     /* Many heading elements that expand in Markdown (# prefix + newlines) */
@@ -657,7 +657,7 @@ fn adversarial_output_amplification_bounded() {
 
 /// Completely empty input should not crash and should produce empty output.
 ///
-/// **Validates: Requirement 6 AC 1**
+/// **Validates: malformed HTML handling**
 #[test]
 fn empty_input_handled_gracefully() {
     let mut conv = make_default_converter();
@@ -673,7 +673,7 @@ fn empty_input_handled_gracefully() {
 /// Input that is entirely non-HTML random bytes should produce a result
 /// (possibly empty Markdown) without panicking.
 ///
-/// **Validates: Requirement 6 AC 1**
+/// **Validates: malformed HTML handling**
 #[test]
 fn non_html_input_no_panic() {
     let inputs: &[&[u8]] = &[
@@ -700,7 +700,7 @@ fn non_html_input_no_panic() {
 
 /// Malformed tag-soup with interleaved open/close that doesn't form valid HTML.
 ///
-/// **Validates: Requirement 6 AC 1**
+/// **Validates: malformed HTML handling**
 #[test]
 fn tag_soup_no_panic() {
     let html = concat!(
@@ -726,7 +726,7 @@ fn tag_soup_no_panic() {
 
 /// Extremely long single tag name should not cause unbounded allocation.
 ///
-/// **Validates: Requirement 1 AC 3**
+/// **Validates: no unbounded allocation**
 #[test]
 fn extremely_long_tag_name_bounded() {
     let long_tag = "a".repeat(100_000);
@@ -753,7 +753,7 @@ fn extremely_long_tag_name_bounded() {
 
 /// HTML comment with adversarial content (never closed) should not hang.
 ///
-/// **Validates: Requirement 6 AC 1**
+/// **Validates: malformed HTML handling**
 #[test]
 fn unclosed_comment_no_hang() {
     let html = "<!DOCTYPE html><html><body><!-- this comment is never closed and goes on forever ";

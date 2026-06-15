@@ -7,7 +7,7 @@
  * returns INELIGIBLE_RANGE; all other non-200 codes return
  * INELIGIBLE_STATUS.
  *
- * Requirements: Spec 41, Requirement 2 AC 1, Requirement 6 AC 1
+ * Requirements: streaming security and resource limits, auth/status checked before streaming candidate, oversized body / replay overflow handling
  *   - status_code checked before streaming candidate evaluation
  *   - Status code excluded test (security)
  *
@@ -215,7 +215,7 @@ init_conf(ngx_http_markdown_conf_t *conf)
 /* ================================================================
  * Security Test 1: HTTP 200 is eligible
  *
- * Validates: Requirement 2 AC 1 (positive control)
+ * Validates: auth/status checked before streaming candidate (positive control)
  *
  * Only HTTP 200 OK responses pass the status check and are
  * eligible for conversion.
@@ -246,7 +246,7 @@ test_status_200_eligible(void)
 /* ================================================================
  * Security Test 2: HTTP 206 returns INELIGIBLE_RANGE
  *
- * Validates: Requirement 2 AC 1, Requirement 6 AC 1
+ * Validates: auth/status checked before streaming candidate, oversized body / replay overflow handling
  *
  * 206 Partial Content is a special case: it fails the status check
  * (not 200), but the eligibility function routes it to INELIGIBLE_RANGE
@@ -280,7 +280,7 @@ test_status_206_ineligible_range(void)
 /* ================================================================
  * Security Test 3: Redirect status codes return INELIGIBLE_STATUS
  *
- * Validates: Requirement 2 AC 1, Requirement 6 AC 1
+ * Validates: auth/status checked before streaming candidate, oversized body / replay overflow handling
  *
  * Redirect responses (301, 302) must never be converted. They
  * typically have no body or a short redirect notice.
@@ -318,7 +318,7 @@ test_redirect_status_ineligible(void)
 /* ================================================================
  * Security Test 4: 304 Not Modified returns INELIGIBLE_STATUS
  *
- * Validates: Requirement 2 AC 1, Requirement 6 AC 1
+ * Validates: auth/status checked before streaming candidate, oversized body / replay overflow handling
  *
  * 304 has no body. Converting it would produce empty output.
  * ================================================================ */
@@ -347,7 +347,7 @@ test_status_304_ineligible(void)
 /* ================================================================
  * Security Test 5: Client error (404) returns INELIGIBLE_STATUS
  *
- * Validates: Requirement 2 AC 1, Requirement 6 AC 1
+ * Validates: auth/status checked before streaming candidate, oversized body / replay overflow handling
  *
  * Error pages should not be converted as they are not the
  * primary content the agent is requesting.
@@ -377,7 +377,7 @@ test_status_404_ineligible(void)
 /* ================================================================
  * Security Test 6: Server error (500) returns INELIGIBLE_STATUS
  *
- * Validates: Requirement 2 AC 1, Requirement 6 AC 1
+ * Validates: auth/status checked before streaming candidate, oversized body / replay overflow handling
  *
  * Server error pages must not be converted. Converting them
  * could mask operational errors from monitoring tools.
@@ -407,7 +407,7 @@ test_status_500_ineligible(void)
 /* ================================================================
  * Security Test 7: Status check runs before streaming candidate
  *
- * Validates: Requirement 2 AC 1
+ * Validates: auth/status checked before streaming candidate
  *
  * The status check is the SECOND check in check_eligibility()
  * (after method), meaning it runs before content-type, streaming
@@ -467,7 +467,7 @@ int
 main(void)
 {
     printf("\n========================================\n");
-    printf("Status Code Excluded Security Tests (Spec 41)\n");
+    printf("Status Code Excluded Security Tests (streaming security and resource limits)\n");
     printf("========================================\n");
 
     test_status_200_eligible();

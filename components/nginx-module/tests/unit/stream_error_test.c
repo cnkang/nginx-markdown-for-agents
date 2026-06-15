@@ -2,7 +2,7 @@
  * Test: stream_error
  *
  * Validates the streaming error handler integration module (streaming fallback state machine,
- * tasks 6.1-6.4):
+ * streaming error policy integration):
  *
  * 6.1: Pre-commit + on_error=pass  -> PASS_HTML (replay)
  * 6.2: Pre-commit + on_error=reject -> NGX_HTTP_BAD_GATEWAY
@@ -278,7 +278,7 @@ static void test_setup(void)
 }
 
 
-/* --- Task 6.1: Pre-commit + pass = replay HTML --- */
+/* --- pre-commit pass: replay HTML --- */
 
 static void test_task_6_1_precommit_pass_replay_html(void)
 {
@@ -314,7 +314,7 @@ static void test_task_6_1_precommit_pass_replay_html(void)
                 "6.1: state PASSTHROUGH");
     TEST_ASSERT(test_request.headers_out.content_type_len
                 == sizeof("text/html") - 1, "6.1: CT=text/html");
-    TEST_PASS("Task 6.1: pre-commit + pass = replay HTML");
+    TEST_PASS("pre-commit pass: replay HTML");
 }
 
 static void test_precommit_uses_stream_on_error_policy(void)
@@ -469,7 +469,7 @@ static void test_precommit_pass_replay_preserves_existing_pending(void)
     TEST_PASS("Pre-commit replay backpressure preserves existing pending");
 }
 
-/* --- Task 6.2: Pre-commit + reject = 502 --- */
+/* --- pre-commit reject: return 502 --- */
 
 static void test_task_6_2_precommit_reject_502(void)
 {
@@ -495,10 +495,10 @@ static void test_task_6_2_precommit_reject_502(void)
                 "6.2: state PASSTHROUGH");
     TEST_ASSERT(test_replay_chain_called == 0, "6.2: no replay");
     TEST_ASSERT(test_output_filter_called == 0, "6.2: no output_filter");
-    TEST_PASS("Task 6.2: pre-commit + reject = 502");
+    TEST_PASS("pre-commit reject: return 502");
 }
 
-/* --- Task 6.3: Post-commit + pass = safe_finish --- */
+/* --- post-commit pass: safe_finish --- */
 
 static void test_task_6_3_postcommit_pass_safe_finish(void)
 {
@@ -522,10 +522,10 @@ static void test_task_6_3_postcommit_pass_safe_finish(void)
                 "6.3: state POST_COMMIT_SAFE_FINISH");
     TEST_ASSERT(test_replay_chain_called == 0, "6.3: no replay");
     TEST_ASSERT(test_calloc_buf_called >= 1, "6.3: send_terminal called");
-    TEST_PASS("Task 6.3: post-commit + pass = safe_finish");
+    TEST_PASS("post-commit pass: safe_finish");
 }
 
-/* --- Task 6.3f: safe_finish send_terminal fails -> abort fallback --- */
+/* --- safe_finish send_terminal fails -> abort fallback --- */
 
 static void test_task_6_3_postcommit_pass_safe_finish_fails(void)
 {
@@ -553,7 +553,7 @@ static void test_task_6_3_postcommit_pass_safe_finish_fails(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
         "6.3f: returns abort failure instead of swallowing it");
-    TEST_PASS("Task 6.3: safe_finish fails -> abort fallback");
+    TEST_PASS("post-commit pass: safe_finish fails -> abort fallback");
 }
 
 static void test_task_6_3_abort_fallback_returns_again(void)
@@ -579,10 +579,10 @@ static void test_task_6_3_abort_fallback_returns_again(void)
         "safe_finish fallback abort should propagate NGX_AGAIN");
     TEST_ASSERT(ctx.streaming.pending_output != NULL,
         "abort fallback should preserve pending terminal output");
-    TEST_PASS("Task 6.3: abort fallback propagates NGX_AGAIN");
+    TEST_PASS("post-commit pass: abort fallback propagates NGX_AGAIN");
 }
 
-/* --- Task 6.4: Post-commit + reject = abort --- */
+/* --- post-commit reject: abort --- */
 
 static void test_task_6_4_postcommit_reject_abort(void)
 {
@@ -605,7 +605,7 @@ static void test_task_6_4_postcommit_reject_abort(void)
                 "6.4: state POST_COMMIT_ABORT");
     TEST_ASSERT(test_replay_chain_called == 0, "6.4: no replay");
     TEST_ASSERT(test_calloc_buf_called >= 1, "6.4: send_terminal called");
-    TEST_PASS("Task 6.4: post-commit + reject = abort");
+    TEST_PASS("post-commit reject: abort");
 }
 
 static void test_task_6_4_postcommit_abort_returns_again(void)
@@ -629,7 +629,7 @@ static void test_task_6_4_postcommit_abort_returns_again(void)
         "6.4: abort should propagate NGX_AGAIN");
     TEST_ASSERT(ctx.streaming.pending_output != NULL,
         "6.4: abort should preserve pending terminal output");
-    TEST_PASS("Task 6.4: abort propagates NGX_AGAIN");
+    TEST_PASS("post-commit reject: abort propagates NGX_AGAIN");
 }
 
 /* --- NULL parameters --- */
@@ -780,7 +780,7 @@ static void test_content_type_restored(void)
 
 int main(void)
 {
-    TEST_SECTION("Stream Error Handler (Spec 37, Tasks 6.1-6.4)");
+    TEST_SECTION("Stream Error Handler (streaming error policy integration)");
     test_task_6_1_precommit_pass_replay_html();
     test_precommit_uses_stream_on_error_policy();
     test_precommit_reject_uses_stream_on_error_policy();
@@ -797,6 +797,16 @@ int main(void)
     test_replay_chain_null();
     test_output_filter_failure();
     test_content_type_restored();
+
+    /*
+     * Unknown action test: the decision engine's closed enum cannot
+     * produce unknown actions through normal call paths.  The default
+     * branch in on_error's action switch returns NGX_OK with ERR-level
+     * logging, which is verified by code inspection and the comment
+     * above the default case.  A future refactoring could introduce
+     * a mock decision engine to exercise this branch directly.
+     */
+
     printf("\n  All stream error handler tests passed\n\n");
     return 0;
 }

@@ -18,7 +18,8 @@ logic, and header plan application, independent decompression budget with parse
 timeout and parser budget directives, runtime diagnostics endpoint, dynconf
 dry-run and last-known-good rollback, DEB/RPM packaging pipeline, Kubernetes
 deployment examples, FFI ABI layout verification, CI supply-chain hardening,
-and a repo-owned harness for agent workflow governance. Core features are
+supplemental static security checks, report-oriented supply-chain visibility, and a
+repo-owned harness for agent workflow governance. Core features are
 implemented and tested. The codebase includes unit, integration, E2E,
 fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,

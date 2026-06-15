@@ -66,6 +66,19 @@
         "PYTHONPATH=. pytest -q tools/perf/tests"
       ]
     },
+    "security-static": {
+      "phase": "cheap-blocker",
+      "commands": [
+        "make security-static"
+      ]
+    },
+    "supply-chain": {
+      "phase": "report-oriented-visibility",
+      "commands": [
+        "make supply-chain"
+      ],
+      "notes": "local command requires trivy and syft; GitHub workflow runs PR/push/scheduled/manual report-oriented visibility checks"
+    },
     "rust-streaming": {
       "phase": "focused-semantic",
       "commands": [
@@ -399,6 +412,56 @@
         "harness-sync",
         "harness-security",
         "release-quality"
+      ]
+    },
+    {
+      "id": "security-static-supply-chain",
+      "doc": "docs/harness/risk-packs/security-static-supply-chain.md",
+      "primary_surfaces": [
+        "workflow-static-security",
+        "secret-scanning",
+        "rust-dependency-policy",
+        "supply-chain-visibility"
+      ],
+      "supporting_surfaces": [
+        "ci-gating",
+        "docs-tooling"
+      ],
+      "paths": [
+        ".github/workflows/security-static.yml",
+        ".github/workflows/supply-chain.yml",
+        ".github/workflows/codeql.yml",
+        ".semgrep.yml",
+        ".gitleaks.toml",
+        "deny.toml",
+        "Makefile",
+        "components/**/Cargo.toml",
+        "components/**/Cargo.lock",
+        "tools/**/Cargo.toml",
+        "tools/**/Cargo.lock",
+        "tools/**/*.sh",
+        "packaging/**/*.sh",
+        "examples/**/*.sh",
+        "charts/**"
+      ],
+      "keywords": [
+        "actionlint",
+        "shellcheck",
+        "gitleaks",
+        "semgrep",
+        "cargo-deny",
+        "trivy",
+        "sbom",
+        "scorecard",
+        "secret scanning",
+        "license policy",
+        "supply chain"
+      ],
+      "verification_families": [
+        "harness-sync",
+        "security-static",
+        "supply-chain",
+        "docs-tooling"
       ]
     },
     {
