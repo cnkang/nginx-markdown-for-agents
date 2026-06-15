@@ -905,7 +905,7 @@ fn test_chars_per_token_affects_estimate() {
 }
 
 // ============================================================================
-// Additional Tests for Task 9.3: FFI Null Pointer Handling
+// Additional Tests for FFI Null Pointer Handling
 // ============================================================================
 
 #[test]
@@ -1812,4 +1812,99 @@ fn test_make_decision_disabled_skips() {
     }
     assert_eq!(result.decision, 1, "disabled must skip");
     assert_eq!(result.reason_code, 15, "Disabled discriminant is 15");
+}
+
+#[cfg(feature = "streaming")]
+#[test]
+fn test_shared_option_field_semantics_aligned() {
+    use nginx_markdown_converter::ffi::{MarkdownOptions, StreamingOptions};
+
+    let md_opts = MarkdownOptions {
+        flavor: 1,
+        timeout_ms: 5000,
+        generate_etag: 1,
+        estimate_tokens: 0,
+        front_matter: 0,
+        content_type: ptr::null(),
+        content_type_len: 0,
+        base_url: ptr::null(),
+        base_url_len: 0,
+        streaming_budget: 2 * 1024 * 1024,
+        prune_noise: 1,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        memory_budget: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
+        parse_timeout_ms: 30000,
+        parser_memory_budget: 64 * 1024 * 1024,
+        flush_threshold: 16384,
+    };
+
+    let st_opts = StreamingOptions {
+        flavor: 1,
+        timeout_ms: 5000,
+        streaming_budget: 2 * 1024 * 1024,
+        flush_threshold: 16384,
+        generate_etag: 1,
+        estimate_tokens: 0,
+        front_matter: 0,
+        prune_noise: 1,
+        content_type: ptr::null(),
+        content_type_len: 0,
+        base_url: ptr::null(),
+        base_url_len: 0,
+        prune_selectors: ptr::null(),
+        prune_selector_len: 0,
+        prune_protection_selectors: ptr::null(),
+        prune_protection_selector_len: 0,
+        llm_provider: 0,
+        chars_per_token_fixed: 0,
+    };
+
+    assert_eq!(
+        md_opts.flavor, st_opts.flavor,
+        "flavor must match across MarkdownOptions and StreamingOptions"
+    );
+    assert_eq!(
+        md_opts.timeout_ms, st_opts.timeout_ms,
+        "timeout_ms must match"
+    );
+    assert_eq!(
+        md_opts.streaming_budget, st_opts.streaming_budget,
+        "streaming_budget must match"
+    );
+    assert_eq!(
+        md_opts.flush_threshold, st_opts.flush_threshold,
+        "flush_threshold must match"
+    );
+    assert_eq!(
+        md_opts.generate_etag, st_opts.generate_etag,
+        "generate_etag must match"
+    );
+    assert_eq!(
+        md_opts.estimate_tokens, st_opts.estimate_tokens,
+        "estimate_tokens must match"
+    );
+    assert_eq!(
+        md_opts.front_matter, st_opts.front_matter,
+        "front_matter must match"
+    );
+    assert_eq!(
+        md_opts.llm_provider, st_opts.llm_provider,
+        "llm_provider must match"
+    );
+    assert_eq!(
+        md_opts.chars_per_token_fixed, st_opts.chars_per_token_fixed,
+        "chars_per_token_fixed must match"
+    );
+
+    let md_prune_on = md_opts.prune_noise != 0;
+    let st_prune_on = st_opts.prune_noise != 0;
+    assert_eq!(
+        md_prune_on, st_prune_on,
+        "prune_noise boolean semantics must match (MarkdownOptions u32 vs StreamingOptions u8)"
+    );
 }
