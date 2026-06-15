@@ -107,10 +107,6 @@ configuration directives.
   `effective_conf` parameter. All call sites must be updated.
 - **BREAKING**: `ctx->stream_sm` and `ctx->streaming` layout changed;
   third-party modules must rebuild. See `docs/guides/MIGRATION-0.8.md`.
-- **BREAKING**: `markdown_streaming_engine` no longer accepts `$variable`;
-  only `off`, `auto`, `on` are accepted. Variable-driven control removed.
-- **BREAKING**: v0.6.x compatibility bridge removed entirely. 0.8.0 does not
-  preserve v0.6.x streaming configuration compatibility.
 - **BREAKING**: 0.6.x `NGX_HTTP_MARKDOWN_STREAMING_ENGINE_*` constants
   removed; use `NGX_HTTP_MARKDOWN_STREAM_ENGINE_*` (different AUTO/ON
   values). 0.8.0 does not preserve 0.6.x streaming compatibility.
