@@ -151,7 +151,7 @@ ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
 
 /* Mock: ngx_http_markdown_is_authenticated */
 ngx_int_t
-ngx_http_markdown_is_authenticated(ngx_http_request_t *r,
+ngx_http_markdown_is_authenticated(const ngx_http_request_t *r,
                                    const ngx_http_markdown_conf_t *conf)
 {
     UNUSED(r); UNUSED(conf);
