@@ -1429,7 +1429,7 @@ void markdown_streaming_abort(struct StreamingConverterHandle *handle);
  * On failure (`POST_COMMIT_ABORT` = 4), structures could not be safely
  * closed. The output buffer is set to NULL/0. The caller must abort and
  * discard or truncate the partial output. **C MUST NOT infer or synthesize
- * Markdown closure for Rust-owned parser/emitter state** (Requirement 1.8).
+ * Markdown closure for Rust-owned parser/emitter state** (safety invariant).
  *
  * This call always consumes the handle; after this function returns the
  * handle is invalid and must not be passed to any other function.

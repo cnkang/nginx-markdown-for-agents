@@ -546,7 +546,7 @@ mod tests {
     use proptest::prelude::*;
 
     // ========================================================================
-    // Task 8.2: Unit tests for CharsetState
+    // Unit tests for CharsetState
     // ========================================================================
 
     // --- Content-Type header charset priority ---
@@ -897,7 +897,7 @@ mod tests {
     }
 
     // ========================================================================
-    // Task 8.3: Property test for Charset Detection equivalence (Property 9)
+    // Property test for Charset Detection equivalence
     // ========================================================================
 
     /// Produces a proptest strategy that yields a random encoding label supported by encoding_rs.

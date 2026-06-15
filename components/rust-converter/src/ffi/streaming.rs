@@ -729,7 +729,7 @@ pub unsafe extern "C" fn markdown_streaming_abort(handle: *mut StreamingConverte
 /// On failure (`POST_COMMIT_ABORT` = 4), structures could not be safely
 /// closed. The output buffer is set to NULL/0. The caller must abort and
 /// discard or truncate the partial output. **C MUST NOT infer or synthesize
-/// Markdown closure for Rust-owned parser/emitter state** (Requirement 1.8).
+/// Markdown closure for Rust-owned parser/emitter state** (safety invariant: C must not infer Markdown closure).
 ///
 /// This call always consumes the handle; after this function returns the
 /// handle is invalid and must not be passed to any other function.
@@ -1491,7 +1491,7 @@ mod tests {
 
     // ================================================================
     // Streaming FFI finish function tests
-    // Feature: streaming-engine-skeleton, Requirement 1.1 (signal EOF)
+    // (signal EOF to close the stream)
     // ================================================================
 
     #[test]
@@ -1589,7 +1589,7 @@ mod tests {
 
     // ================================================================
     // Streaming FFI reason function tests
-    // Feature: streaming-engine-skeleton, Requirement 4.4
+    // (finalize returns budget consumption stats)
     // ================================================================
 
     #[test]
@@ -1680,7 +1680,7 @@ mod tests {
 
     // ================================================================
     // Output buffer ownership contract tests
-    // Feature: streaming-engine-skeleton, Requirement 1.5, 1.6
+    // (feed chunk size and cumulative budget enforcement)
     //
     // These tests validate the output buffer ownership, lifetime, and
     // free rules documented in the module-level "Output buffer ownership
@@ -1884,7 +1884,7 @@ mod tests {
 
     // ================================================================
     // Post-commit safe-finish API tests
-    // Feature: streaming-engine-skeleton, Requirement 1.7, 1.8
+    // (finalize error handling and safety invariant)
     //
     // These tests validate the post-commit safe-finish/abort API that
     // allows C to handle errors after output has been committed.
