@@ -1768,7 +1768,8 @@ ngx_http_markdown_streaming_commit(
     rc = ngx_http_markdown_streaming_update_headers(
         r, ctx, conf);
     if (rc != NGX_OK) {
-        return NGX_ERROR;
+        return ngx_http_markdown_streaming_precommit_error(
+            r, ctx, conf, ERROR_STREAMING_FALLBACK);
     }
 
     rc = ngx_http_next_header_filter(r);

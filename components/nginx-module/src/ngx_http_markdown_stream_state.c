@@ -453,6 +453,12 @@ ngx_http_markdown_stream_decide_pre_commit_replay_unavailable(
             NGX_HTTP_MD_ACTION_REJECT_502,
             NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED);
 
+    case NGX_HTTP_MD_EVENT_ON_ERROR_REJECT:
+        return ngx_http_markdown_make_decision(
+            NGX_HTTP_MD_STATE_PASSTHROUGH,
+            NGX_HTTP_MD_ACTION_REJECT_502,
+            NGX_HTTP_MD_REASON_ON_ERROR_REJECT);
+
     default:
         /*
          * Unknown/unrecognized event in PRE_COMMIT_REPLAY_UNAVAILABLE:

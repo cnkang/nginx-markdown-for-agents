@@ -95,14 +95,6 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
 /*
- * Streaming commit state constants (removed in 0.8.0: see
- * NGX_HTTP_MARKDOWN_STREAM_ENGINE_* below for the v0.8.0 constants).
- * The old NGX_HTTP_MARKDOWN_STREAMING_ENGINE_* constants used AUTO=2;
- * the new constants use AUTO=1, ON=2.  0.8.0 does not preserve
- * 0.6.x streaming compatibility.
- */
-
-/*
  * Streaming commit state constants
  */
 #define NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE   0
