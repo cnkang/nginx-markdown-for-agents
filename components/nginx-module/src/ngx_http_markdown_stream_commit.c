@@ -138,8 +138,14 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    (void) ngx_http_markdown_stream_commit_apply_auth_cache_control(
+    rc = ngx_http_markdown_stream_commit_apply_auth_cache_control(
         r, conf);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown stream commit: "
+                      "failed to apply auth Cache-Control");
+        return NGX_ERROR;
+    }
 
     /*
      * --- Phase 2: Infallible mutations ---
