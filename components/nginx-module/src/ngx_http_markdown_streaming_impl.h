@@ -17,6 +17,7 @@
 
 #include "ngx_http_markdown_streaming_decomp_impl.h"
 #include "ngx_http_markdown_stream_postcommit.h"
+#include "ngx_http_markdown_stream_commit.h"
 
 /* Forward declarations */
 static ngx_http_markdown_otel_span_t *ngx_http_markdown_otel_span_start(
@@ -743,8 +744,14 @@ common_checks:
 /*
  * Update response headers at the commit boundary.
  *
- * Sets Content-Type to text/markdown, adds Vary: Accept,
- * removes Content-Length and Content-Encoding.
+ * Delegates to the authoritative ngx_http_markdown_stream_commit_headers()
+ * which implements the two-phase atomic commit design (Rule 39).
+ * This wrapper preserves the existing call signature in streaming_impl
+ * while ensuring a single header mutation code path.
+ *
+ * Note: stream_commit_headers() also sets headers_committed and
+ * transitions state to COMMITTED.  The caller (streaming_commit)
+ * must NOT duplicate these assignments.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_update_headers(
@@ -752,76 +759,14 @@ ngx_http_markdown_streaming_update_headers(
     const ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf)
 {
-    ngx_int_t  rc;
-
-    /* Set Content-Type: text/markdown; charset=utf-8 */
-    r->headers_out.content_type.data =
-        ngx_http_markdown_content_type;
-    r->headers_out.content_type.len =
-        NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN;
-    r->headers_out.content_type_len =
-        r->headers_out.content_type.len;
-    r->headers_out.charset.len = 0;
-    r->headers_out.charset.data = NULL;
-
-    /* Add Vary: Accept */
-    rc = ngx_http_markdown_add_vary_accept(r);
-    if (rc != NGX_OK) {
-        return NGX_ERROR;
-    }
-
-    /* Remove Content-Length (streaming = chunked) */
-    ngx_http_clear_content_length(r);
-    r->headers_out.content_length_n = -1;
-
-    /* Remove Content-Encoding if decompressing */
-    if (ctx->decompression.needed) {
-        ngx_http_markdown_remove_content_encoding(r);
-    }
-
     /*
-     * Remove any upstream ETag header.
-     *
-     * In streaming mode the Markdown ETag is computed
-     * incrementally via BLAKE3 and is only available
-     * after finalize().  An upstream HTML ETag would be
-     * stale and semantically wrong for the transformed
-     * Markdown body.  Clear it unconditionally so the
-     * response never carries a mismatched ETag.
+     * stream_commit_headers takes a non-const ctx because it sets
+     * headers_committed and state.  The const qualifier on our ctx
+     * parameter is from the historical signature; our caller
+     * (streaming_commit) owns a mutable ctx.
      */
-    rc = ngx_http_markdown_set_etag(r, NULL, 0);
-    if (rc != NGX_OK) {
-        return NGX_ERROR;
-    }
-
-    /*
-     * Auth cache control for streaming path (Requirement 11.1).
-     *
-     * Apply the same auth/cache safety logic as the full-buffer
-     * path (ngx_http_markdown_update_headers).  When the request
-     * is authenticated and auth_policy is allow, upgrade
-     * Cache-Control to at least private.  This ensures the
-     * streaming conversion engine choice does not affect cache
-     * safety.
-     *
-     * Guarded by NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
-     * to match the full-buffer path's compile-time gate.
-     */
-#if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
-    if (ngx_http_markdown_is_authenticated(r, conf)) {
-        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
-        if (rc != NGX_OK) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                "markdown: failed to modify "
-                "Cache-Control for authenticated content");
-            return rc;
-        }
-    }
-#else
-    (void) conf;
-#endif
-
-    return NGX_OK;
+    return ngx_http_markdown_stream_commit_headers(
+        r, (ngx_http_markdown_ctx_t *) ctx, conf);
 }
 
 
@@ -1835,10 +1780,11 @@ ngx_http_markdown_streaming_commit(
         NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx->headers_forwarded = 1;
 
-    /* Sync streaming fallback state machine with runtime commit */
-    ctx->stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
-    ctx->stream_sm.headers_committed = 1;
-
+    /*
+     * stream_sm.state and headers_committed were already set by
+     * stream_commit_headers().  Verify they are consistent with
+     * the runtime commit_state transition.
+     */
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
         "markdown: commit "
@@ -2073,7 +2019,7 @@ ngx_http_markdown_streaming_track_feed_budget(
     }
 
     /*
-     * Parser budget enforcement (Requirement 1 AC 1).
+     * Parser budget enforcement (cumulative input size limit).
      *
      * Use cumulative input bytes as a proxy for parser memory
      * pressure — matching the full-buffer path which rejects when

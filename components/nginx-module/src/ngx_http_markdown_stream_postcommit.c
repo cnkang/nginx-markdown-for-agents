@@ -4,7 +4,7 @@
  * Implements safe-finish and abort paths for post-commit errors in
  * the streaming fallback state machine (streaming fallback state machine, tasks 5.1–5.4).
  *
- * Critical safety property (Requirement 5):
+ * Critical safety property — post-commit irreversibility:
  *   After headers or Markdown bytes are sent (COMMITTED state),
  *   post-commit errors MUST NOT revert to HTML, append HTML,
  *   mix Markdown/HTML, send conflicting Content-Type, or return 502.
@@ -54,8 +54,7 @@ ngx_http_markdown_stream_postcommit_space(u_char ch);
 
 
 /*
- * Task 5.1: Request Rust finish-mode API to close known Markdown
- * structures.
+ * Request the Rust finish-mode API to close known Markdown structures.
  *
  * Calls markdown_streaming_safe_finish to emit closing markers for
  * any open Markdown structures (lists, blockquotes, code blocks, etc.).
@@ -251,7 +250,7 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
 
 
 /*
- * Task 5.2: Protocol-safe abort after honoring pending
+ * Protocol-safe abort after honoring pending
  * output/backpressure state.
  *
  * Steps:
@@ -333,7 +332,7 @@ ngx_http_markdown_stream_postcommit_abort(
 
 
 /*
- * Task 5.3: Guard — never send HTML after commit.
+ * Guard — never send HTML after commit.
  *
  * Checks that the request is in a post-commit state and that no
  * HTML content signatures are present in the output chain.
@@ -420,7 +419,7 @@ ngx_http_markdown_stream_postcommit_guard(
 
 
 /*
- * Task 5.4: Log a post-commit event with structured fields.
+ * Log a post-commit event with structured fields.
  *
  * Emits a structured log entry at NGX_LOG_WARN level containing:
  *   phase=postcommit
@@ -650,6 +649,23 @@ ngx_http_markdown_stream_postcommit_match_tag(
 }
 
 
+/*
+ * Best-effort heuristic: scan early response bytes for obvious HTML
+ * markers after post-commit error recovery.
+ *
+ * THIS IS NOT A SECURITY BOUNDARY.  It is a diagnostic guard that
+ * detects obviously-HTML content that slipped through after a
+ * post-commit conversion error.  Known blind spots include:
+ *   - HTML entities / encoded HTML (e.g. &lt;html&gt;)
+ *   - Tags split across buffer/chunk boundaries
+ *   - Tags beyond the scan window (first ~1 KB)
+ *   - Non-obvious HTML payloads (SVG, MathML, custom elements)
+ *   - HTML comments, CDATA sections, processing instructions
+ *
+ * Do NOT rely on this function to prevent HTML injection.  The
+ * post-commit safety property (no HTML after Markdown commit) is
+ * enforced by state-machine invariants, not by content inspection.
+ */
 static ngx_flag_t
 ngx_http_markdown_stream_postcommit_has_html_signature(
     const u_char *data, size_t len)

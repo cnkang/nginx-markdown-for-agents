@@ -4,7 +4,7 @@
  * Implements the post-commit error handling paths for the streaming
  * state machine (Component 5 of streaming fallback state machine design).
  *
- * Critical safety property (Requirement 5):
+ * Critical safety property — post-commit irreversibility:
  *   After headers or Markdown bytes are sent (COMMITTED state),
  *   post-commit errors MUST NOT:
  *     - Revert to HTML
@@ -17,7 +17,7 @@
  *     - Safe-finish: graceful Markdown closure via Rust converter
  *     - Abort: protocol-safe disconnect
  *
- * Design constraint (Component 5):
+ * Design constraint — Rust ownership boundary:
  *   C must NOT synthesize Markdown closure for Rust-owned
  *   parser/emitter state.  Safe-finish delegates to the Rust
  *   converter finish-mode API.

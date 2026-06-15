@@ -95,11 +95,12 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
 /*
- * Streaming engine mode constants
+ * Streaming commit state constants (removed in 0.8.0: see
+ * NGX_HTTP_MARKDOWN_STREAM_ENGINE_* below for the v0.8.0 constants).
+ * The old NGX_HTTP_MARKDOWN_STREAMING_ENGINE_* constants used AUTO=2;
+ * the new constants use AUTO=1, ON=2.  0.8.0 does not preserve
+ * 0.6.x streaming compatibility.
  */
-#define NGX_HTTP_MARKDOWN_STREAMING_ENGINE_OFF   0
-#define NGX_HTTP_MARKDOWN_STREAMING_ENGINE_ON    1
-#define NGX_HTTP_MARKDOWN_STREAMING_ENGINE_AUTO  2
 
 /*
  * Streaming commit state constants
@@ -185,42 +186,46 @@ ngx_http_markdown_stream_reason_str(
     ngx_http_markdown_stream_reason_e reason)
 {
     static const char *reason_strings[] = {
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE */
-        "eligible",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_CONTENT_LENGTH_KNOWN */
-        "content_length_known",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD */
-        "below_threshold",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED */
-        "config_disabled",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE */
-        "excluded_content_type",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_HTML */
-        "not_html",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED */
-        "compressed",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE */
-        "not_candidate",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_ACCEPT_MISMATCH */
-        "accept_mismatch",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR */
-        "precommit_html_error",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_BUDGET */
-        "precommit_budget",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_TIMEOUT */
-        "precommit_timeout",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR */
-        "postcommit_parse_error",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_BUDGET_EXCEEDED */
-        "postcommit_budget_exceeded",
-        /* NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_IO_ERROR */
-        "postcommit_io_error"
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE] = "eligible",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_CONTENT_LENGTH_KNOWN] =
+            "content_length_known",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD] =
+            "below_threshold",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED] =
+            "config_disabled",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE] =
+            "excluded_content_type",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_HTML] = "not_html",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED] = "compressed",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_NOT_CANDIDATE] =
+            "not_candidate",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_ACCEPT_MISMATCH] =
+            "accept_mismatch",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_HTML_ERROR] =
+            "precommit_html_error",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_BUDGET] =
+            "precommit_budget",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_PRECOMMIT_TIMEOUT] =
+            "precommit_timeout",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR] =
+            "postcommit_parse_error",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_BUDGET_EXCEEDED] =
+            "postcommit_budget_exceeded",
+        [NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_IO_ERROR] =
+            "postcommit_io_error"
     };
 
     _Static_assert(
         sizeof(reason_strings) / sizeof(reason_strings[0])
         == NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT,
         "stream reason strings must match reason enum");
+
+    _Static_assert(
+        NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE == 0,
+        "reason enum must start at 0");
+    _Static_assert(
+        NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT == 15,
+        "reason enum count must match designated initializer coverage");
 
     if ((unsigned) reason >= NGX_HTTP_MARKDOWN_STREAM_REASON_COUNT) {
         return "unknown";
@@ -252,7 +257,7 @@ ngx_http_markdown_path_selection(ngx_uint_t path,
  * Streaming fallback state machine types (v0.8.0 streaming fallback state machine).
  *
  * These types implement the pure-function decision engine defined in
- * RFC 0008 section 3.  The state machine governs runtime transitions
+ * the streaming fallback state machine design.  The state machine governs runtime transitions
  * between streaming, full-buffer, passthrough, and failure modes.
  *
  * Placement: unconditionally available (not gated by

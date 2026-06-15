@@ -317,4 +317,6 @@ ngx_http_markdown_stream_replay_cleanup(void *data)
 
     buf->size = 0;
     buf->capacity = 0;
+    buf->max_size = 0;
+    buf->pool = NULL;
 }

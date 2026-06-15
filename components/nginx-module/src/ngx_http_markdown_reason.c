@@ -419,7 +419,7 @@ ngx_http_markdown_reason_streaming_skip_unsupported(void)
  * Logged when the path selector forces full-buffer because
  * the response has Content-Encoding (compressed).  Compressed
  * responses MUST NOT enter the streaming parser directly
- * (Requirement 3 AC 1).
+ * (compressed content must not enter the streaming parser directly).
  *
  * Returns:
  *   Pointer to static ngx_str_t "STREAMING_SKIP_COMPRESSED"

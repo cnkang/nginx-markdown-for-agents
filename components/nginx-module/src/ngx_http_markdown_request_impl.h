@@ -511,7 +511,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     /*
      * Check eligibility before Accept negotiation.
      *
-     * The decision chain order (Requirement 2.1) is:
+     * The decision chain order (eligibility check ordering) is:
      * scope -> method -> status -> range -> streaming ->
      * content-type -> size -> auth -> Accept.
      * Accept must be last before conversion attempt.
@@ -606,7 +606,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
 
     /*
      * Detect Content-Encoding ALWAYS, before streaming candidate
-     * evaluation (Spec 41, Requirement 3 AC 1).
+     * evaluation (compression detection before streaming candidate evaluation).
      *
      * Compressed responses MUST NOT enter the streaming parser
      * directly.  Detection runs unconditionally so that:
@@ -618,8 +618,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      *  - auto_decompress OFF + any encoding present: passthrough
      *    (compressed data must not enter parser).
      *
-     * Requirements: 1.1, 1.6, 4.2, 8.1, 10.3, 11.1, 11.5
-     * Spec 41 Req 3 AC 1, AC 4, AC 5
+     * Covers: compression detection, auto_decompress off passthrough,
+     * unknown format handling, and compressed content exclusion from streaming
      */
     ctx->decompression.type = ngx_http_markdown_detect_compression(r);
 
@@ -628,7 +628,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             /*
              * auto_decompress is OFF but Content-Encoding is present.
              * Cannot safely parse compressed content — passthrough.
-             * (Spec 41 Requirement 3 AC 5)
+             * (auto_decompress disabled: compressed content must not enter parser)
              */
             ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
                          "markdown: Content-Encoding present "
@@ -648,7 +648,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
                    == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN)
         {
             /*
-             * Unsupported compression format detected (Task 4.2)
+             * Unsupported compression format detected
              *
              * This is an expected degradation scenario, not a
              * failure.  We gracefully degrade by returning the
@@ -658,7 +658,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
              * ngx_http_markdown_detect_compression() with the
              * format name.
              *
-             * Requirements: 1.6, 11.5
+              * Covers: unsupported compression format handling
              */
             return ngx_http_markdown_handle_unsupported_compression(
                 r, ctx, conf);
@@ -692,7 +692,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * path; that is enforced at body-filter time since the
      * replay decision happens after conversion attempt.
      *
-     * Requirements: 16.1, 16.3, 16.4, 16.6, 16.7
+     * Covers: threshold routing, HEAD/304 bypass, path selection,
+     * unknown-length deferral, fail-open replay enforcement
      */
 
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -710,7 +711,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ctx->streaming.reason = selection.reason;
 
     /*
-     * Compression guard (Requirement 3 AC 1, streaming security enforcement):
+     * Compression guard (streaming security enforcement):
      *
      * Compressed responses MUST NOT enter the streaming parser
      * directly.  When Content-Encoding is detected, override the
@@ -914,7 +915,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
      * header phase, the threshold decision was deferred
      * until the full body is buffered.
      *
-     * Requirements: 16.7
+     * Covers: deferred path selection for chunked/unknown-length responses
      */
 #ifdef MARKDOWN_INCREMENTAL_ENABLED
     if (conf->large_body_threshold > 0
@@ -1092,7 +1093,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
  * Called for each chunk of the response body.
  * Buffers the response and performs conversion when complete.
  * 
- * This implements Task 14.7: Body filter hook
+ * Body filter hook
  * - Accumulates response chunks in buffer
  * - Detects when all chunks are buffered (last_buf flag)
  * - Calls Rust conversion engine via FFI
@@ -1100,7 +1101,8 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
  * - Sends converted Markdown response
  * - Handles errors with configured strategy
  *
- * Requirements: FR-02.4, FR-04.1, FR-09.1, FR-09.2, FR-10.1, FR-10.3
+ * Covers: body accumulation, conversion execution, header updates,
+ * Markdown output, error strategy application
  * 
  * @param r   The request structure
  * @param in  The input chain containing response body chunks
