@@ -2,17 +2,17 @@
  * Streaming Fallback State Machine — Error Handler Integration
  *
  * Wires the streaming on_error configuration into the streaming state
- * machine (streaming fallback state machine, tasks 6.1–6.4).
+ * machine (streaming fallback state machine, pre-commit pass-through and post-commit error policy wiring).
  *
  * This module is the main entry point called by the body filter when
  * a streaming error occurs.  It populates the decision context from
  * request state, calls the decision engine, and executes the resulting
  * action via the replay, commit, and post-commit modules.
  *
- * Task 6.1: Pre-commit + on_error=pass  -> replay HTML via chain
- * Task 6.2: Pre-commit + on_error=reject -> return 502
- * Task 6.3: Post-commit + on_error=pass  -> safe_finish (abort fallback)
- * Task 6.4: Post-commit + on_error=reject -> abort
+ * Pre-commit + on_error=pass  -> replay HTML via chain
+ * Pre-commit + on_error=reject -> return 502
+ * Post-commit + on_error=pass  -> safe_finish (abort fallback)
+ * Post-commit + on_error=reject -> abort
  *
  * Design invariant: post-commit paths NEVER return HTML or 502.
  */
@@ -118,15 +118,15 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
     switch (decision.action) {
 
     case NGX_HTTP_MD_ACTION_PASS_HTML:
-        /*
-         * Task 6.1: Pre-commit + pass = replay HTML.
-         * Build replay chain, restore Content-Type, send downstream.
-         */
+         /*
+          * Pre-commit with pass policy: replay original HTML.
+          * Build replay chain, restore Content-Type, send downstream.
+          */
         return ngx_http_markdown_stream_error_pass_html(r, ctx);
 
     case NGX_HTTP_MD_ACTION_REJECT_502:
         /*
-         * Task 6.2: Pre-commit + reject = 502.
+         * Pre-commit with reject policy: return 502.
          * Return NGX_HTTP_BAD_GATEWAY; the caller (body filter)
          * uses this to finalize with 502.
          */
@@ -137,7 +137,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
 
     case NGX_HTTP_MD_ACTION_SAFE_FINISH:
         /*
-         * Task 6.3: Post-commit + pass = safe_finish.
+         * Post-commit with pass policy: safe finish.
          * Attempt graceful Markdown closure via Rust finish-mode.
          * If safe_finish fails, fall back to abort.
          *
@@ -160,7 +160,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
 
     case NGX_HTTP_MD_ACTION_ABORT:
         /*
-         * Task 6.4: Post-commit + reject = abort.
+         * Post-commit with reject policy: abort.
          * Protocol-safe disconnect (no HTML, no 502).
          */
         return ngx_http_markdown_stream_postcommit_abort(r, ctx);
@@ -174,7 +174,22 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
         return NGX_OK;
 
     default:
-        /* Unknown action: treat as handled */
+        /*
+         * Unknown action from decision engine.  Log at ERR level
+         * with available context.  Return NGX_OK for protocol safety:
+         * the streaming response may be partially sent and returning
+         * NGX_ERROR could cause a 502 that the client sees after
+         * already receiving Markdown content.  NGX_OK means "no
+         * further action needed" which is the least-surprise outcome
+         * for an unrecognized state-machine action.
+         */
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown stream on_error: "
+                      "unknown action %ui in state %ui "
+                      "(reason=%ui), treating as no-op",
+                      (ngx_uint_t) decision.action,
+                      (ngx_uint_t) decision.new_state,
+                      (ngx_uint_t) decision.reason);
         return NGX_OK;
     }
 }
@@ -183,7 +198,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
 /*
  * Execute the PASS_HTML action: replay buffered HTML downstream.
  *
- * Steps (task 6.1):
+ * Steps (pre-commit pass-through HTML replay):
  *   1. Build replay chain from ngx_http_markdown_stream_replay_chain()
  *   2. Restore original Content-Type to text/html
  *   3. Send the replay chain downstream via ngx_http_output_filter()

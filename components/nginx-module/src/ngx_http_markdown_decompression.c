@@ -53,12 +53,12 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
     /* Get Content-Encoding header from response headers */
     h = r->headers_out.content_encoding;
     
-    /* Handle missing or empty Content-Encoding header (Requirement 1.5) */
+    /* Handle missing or empty Content-Encoding header (empty or missing Content-Encoding) */
     if (h == NULL || h->value.len == 0) {
         return NGX_HTTP_MARKDOWN_COMPRESSION_NONE;
     }
     
-    /* Check for gzip compression (case-insensitive, Requirement 1.2) */
+    /* Check for gzip compression (case-insensitive, gzip compression detection) */
     if (h->value.len == sizeof("gzip") - 1
         && ngx_strncasecmp(h->value.data,
                             ngx_http_markdown_encoding_gzip,
@@ -67,7 +67,7 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
         return NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
     }
     
-    /* Check for deflate compression (case-insensitive, Requirement 1.3) */
+    /* Check for deflate compression (case-insensitive, deflate compression detection) */
     if (h->value.len == sizeof("deflate") - 1
         && ngx_strncasecmp(h->value.data,
                             ngx_http_markdown_encoding_deflate,
@@ -76,7 +76,7 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
         return NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE;
     }
     
-    /* Check for brotli compression (case-insensitive, Requirement 1.4) */
+    /* Check for brotli compression (case-insensitive, brotli compression detection) */
     if (h->value.len == sizeof("br") - 1
         && ngx_strncasecmp(h->value.data,
                             ngx_http_markdown_encoding_br,
@@ -85,7 +85,7 @@ ngx_http_markdown_detect_compression(ngx_http_request_t *r)
         return NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI;
     }
     
-    /* Unknown or unsupported compression format (Requirement 1.6) */
+    /* Unknown or unsupported compression format (unknown or unsupported compression format) */
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                  "markdown: decompression unsupported, compression=%V, "
                  "returning original content",
@@ -556,7 +556,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     
-    /* Log that we're using zlib for decompression (Requirement 13.5) */
+    /* Log that we're using zlib for decompression (zlib decompression path) */
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: using zlib for gzip/deflate decompression, type=%d",
                   type);
@@ -564,7 +564,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     /* Collect all input data into a single buffer */
     input_size = ngx_http_markdown_chain_size(in);
     
-    /* Validate input size (Requirement 6.5) */
+    /* Validate input size (input size validation) */
     if (input_size == 0 || input_size == (size_t) -1) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: decompression failed, "
@@ -601,7 +601,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     stream.next_in = input_data;
     stream.avail_in = (uInt) input_size;
     
-    /* Set windowBits based on compression type (Requirement 2.1, 2.2) */
+    /* Set windowBits based on compression type (windowBits selection based on compression type) */
     if (type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
         /* MAX_WBITS + 16 for gzip format */
         window_bits = MAX_WBITS + 16;
@@ -626,7 +626,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    /* Allocate output buffer using nginx memory pool (Requirement 9.1, 14.2) */
+    /* Allocate output buffer using nginx memory pool (output buffer allocation from nginx pool) */
     output_data = ngx_pnalloc(r->pool, output_size);
     if (output_data == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -689,7 +689,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         }
     }
     
-    /* Check if decompressed size exceeds decompression budget (Requirement 9.3, 9.4) */
+    /* Check if decompressed size exceeds decompression budget (decompressed size budget enforcement) */
     if (stream.total_out > conf->decompress.max_size) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: decompressed size (%uz) exceeds decompression budget (%uz), "
@@ -806,7 +806,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
     
-    /* Log that we're using brotli library for decompression (Requirement 3.2) */
+    /* Log that we're using brotli library for decompression (brotli decompression path) */
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: using brotli library for decompression");
     
@@ -837,7 +837,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    /* Create brotli decoder instance (Requirement 3.2) */
+    /* Create brotli decoder instance (brotli decoder instance creation) */
     decoder = BrotliDecoderCreateInstance(NULL, NULL, NULL);
     if (decoder == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -854,7 +854,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    /* Allocate output buffer using nginx memory pool (Requirement 3.2, 14.1) */
+    /* Allocate output buffer using nginx memory pool (brotli output buffer allocation from nginx pool) */
     output_data = ngx_pnalloc(r->pool, output_size);
     if (output_data == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -983,7 +983,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     cl->next = NULL;
     *out = cl;
     
-    /* Clean up decoder instance (Requirement 3.2) */
+    /* Clean up decoder instance (brotli decoder cleanup) */
     BrotliDecoderDestroyInstance(decoder);
     
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -999,7 +999,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     (void) in;
     (void) out;
 
-    /* Brotli support not compiled in (Requirement 3.3) */
+    /* Brotli support not compiled in (brotli support not compiled in) */
     ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                  "markdown: brotli not supported, "
                  "brotli module not compiled in");
@@ -1044,7 +1044,7 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
     switch (type) {
         case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
         case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
-            /* Use zlib for gzip/deflate decompression (Requirement 2.3) */
+            /* Use zlib for gzip/deflate decompression (zlib for gzip/deflate decompression) */
             rc = ngx_http_markdown_decompress_gzip(r, type, in, out);
 
             if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
@@ -1056,7 +1056,7 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
             return rc;
             
         case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
-            /* Use brotli library for brotli decompression (Requirement 3.4) */
+            /* Use brotli library for brotli decompression (brotli library for brotli decompression) */
             rc = ngx_http_markdown_decompress_brotli(r, in, out);
             
             /* Handle NGX_DECLINED from brotli function (when brotli not available) */

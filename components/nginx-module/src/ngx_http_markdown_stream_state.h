@@ -2,7 +2,7 @@
  * Streaming Fallback State Machine — Decision Engine Interface
  *
  * Pure-function decision engine for the streaming fallback state machine
- * defined in RFC 0008 section 3.  Given a current state context and an
+ * defined in the streaming fallback state machine design.  Given a current state context and an
  * incoming event, the engine returns a deterministic decision (new state,
  * action, reason code) without side effects.
  *
