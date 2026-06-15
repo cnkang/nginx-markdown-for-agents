@@ -1,11 +1,11 @@
 /*
  * Test: v070_default_values
  *
- * Validates that all new v0.7.0 configuration directives have correct
- * default values that do not break existing 0.6.x behavior.
+ * Validates that v0.7.0/v0.8.0 configuration directives resolve to the
+ * current release defaults.
  *
- * Key principle: a 0.6.x config with NO new directives must produce
- * identical behavior under 0.7.0 (no behavioral change from defaults alone).
+ * Key principle: an unset config must resolve deterministically to the
+ * current design defaults.
  *
  * Verified defaults:
  *   - decompress_max_size: inherits max_size (10MB default) when unset
@@ -16,7 +16,7 @@
  *
  * This test exercises the merge function with both parent and child at
  * their unset sentinels, confirming that the resolved defaults match
- * the design specification and do not alter 0.6.x semantics.
+ * the design specification.
  */
 
 #include "../include/test_common.h"
@@ -253,8 +253,7 @@ static ngx_pool_t g_pool;
 
 /*
  * Test 1: Verify new v0.7.0 directive defaults when both parent and
- * child are at their unset sentinels (simulates a 0.6.x config with
- * no new directives specified).
+ * child are at their unset sentinels.
  */
 static void
 test_v070_defaults_both_unset(void)
@@ -264,7 +263,7 @@ test_v070_defaults_both_unset(void)
     ngx_http_markdown_conf_t *child;
     const char *rc;
 
-    TEST_SUBSECTION("v0.7.0 defaults: both parent and child unset (0.6.x compat)");
+    TEST_SUBSECTION("v0.7.0 defaults: both parent and child unset");
 
     memset(&cf, 0, sizeof(cf));
     cf.pool = &g_pool;
@@ -285,7 +284,7 @@ test_v070_defaults_both_unset(void)
     TEST_ASSERT(child->advanced.dynconf_dry_run == NGX_CONF_UNSET,
         "dynconf_dry_run should start as NGX_CONF_UNSET");
 
-    /* Run merge (simulates 0.6.x config with no new directives) */
+    /* Run merge with no directives configured. */
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
     TEST_ASSERT(rc == NGX_CONF_OK, "merge_conf should succeed");
 
@@ -323,7 +322,7 @@ test_v070_defaults_both_unset(void)
     TEST_ASSERT(child->advanced.dynconf_dry_run == 0,
         "dynconf_dry_run should default to 0 (off)");
 
-    TEST_PASS("All v0.7.0 defaults correct for 0.6.x compatibility");
+    TEST_PASS("All v0.7.0 defaults correct");
 
     free(parent);
     free(child);
@@ -512,9 +511,7 @@ test_v070_directives_child_override(void)
 }
 
 /*
- * Test 6: Verify that 0.6.x-era defaults are unchanged by v0.7.0.
- * This confirms backward compatibility: a config that worked in 0.6.x
- * produces identical runtime behavior in 0.7.0.
+ * Test 6: Verify that core defaults remain stable.
  */
 static void
 test_06x_defaults_unchanged(void)
@@ -524,7 +521,7 @@ test_06x_defaults_unchanged(void)
     ngx_http_markdown_conf_t *child;
     const char *rc;
 
-    TEST_SUBSECTION("0.6.x defaults unchanged in 0.7.0");
+    TEST_SUBSECTION("core defaults unchanged");
 
     memset(&cf, 0, sizeof(cf));
     cf.pool = &g_pool;
@@ -538,35 +535,35 @@ test_06x_defaults_unchanged(void)
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
     TEST_ASSERT(rc == NGX_CONF_OK, "merge_conf should succeed");
 
-    /* Core 0.6.x defaults must remain unchanged */
+    /* Core defaults must remain unchanged */
     TEST_ASSERT(child->enabled == 0,
-        "enabled should default to off (0.6.x compat)");
+        "enabled should default to off");
     TEST_ASSERT(child->max_size == 10 * 1024 * 1024,
-        "max_size should default to 10MB (0.6.x compat)");
+        "max_size should default to 10MB");
     TEST_ASSERT(child->timeout == 5000,
-        "timeout should default to 5000ms (0.6.x compat)");
+        "timeout should default to 5000ms");
     TEST_ASSERT(child->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
-        "on_error should default to pass (0.6.x compat)");
+        "on_error should default to pass");
     TEST_ASSERT(child->flavor == NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK,
-        "flavor should default to commonmark (0.6.x compat)");
+        "flavor should default to commonmark");
     TEST_ASSERT(child->token_estimate == 0,
-        "token_estimate should default to off (0.6.x compat)");
+        "token_estimate should default to off");
     TEST_ASSERT(child->front_matter == 0,
-        "front_matter should default to off (0.6.x compat)");
+        "front_matter should default to off");
     TEST_ASSERT(child->on_wildcard == 0,
-        "on_wildcard should default to off (0.6.x compat)");
+        "on_wildcard should default to off");
     TEST_ASSERT(child->buffer_chunked == 1,
-        "buffer_chunked should default to on (0.6.x compat)");
+        "buffer_chunked should default to on");
     TEST_ASSERT(child->decompress.auto_decompress == 1,
-        "auto_decompress should default to on (0.6.x compat)");
+        "auto_decompress should default to on");
     TEST_ASSERT(child->policy.generate_etag == 1,
-        "generate_etag should default to on (0.6.x compat)");
+        "generate_etag should default to on");
     TEST_ASSERT(child->advanced.dynconf_enabled == 0,
-        "dynconf_enabled should default to off (0.6.x compat)");
+        "dynconf_enabled should default to off");
     TEST_ASSERT(child->advanced.prune_noise == 1,
-        "prune_noise should default to on (0.6.x compat)");
+        "prune_noise should default to on");
 
-    TEST_PASS("All 0.6.x defaults preserved in 0.7.0");
+    TEST_PASS("All core defaults preserved");
 
     free(parent);
     free(child);
@@ -574,14 +571,13 @@ test_06x_defaults_unchanged(void)
 
 
 /*
- * Test: v0.8.0 compatibility bridge default threshold regression guard.
+ * Test: v0.8.0 default threshold regression guard.
  *
  * Confirms that after full merge_conf() with no directives configured,
- * stream.threshold retains its 0.8.0 default of 1m and is NOT overwritten
- * by the legacy streaming.auto_threshold default of 32k.
+ * stream.threshold retains its 0.8.0 default of 1m.
  *
- * Also confirms that when the legacy directive IS explicitly set,
- * the bridge maps it correctly.
+ * Also confirms that when the directive IS explicitly set,
+ * the value is preserved correctly.
  */
 static void
 test_080_threshold_bridge_full_merge(void)
@@ -591,10 +587,10 @@ test_080_threshold_bridge_full_merge(void)
     ngx_http_markdown_conf_t *child;
     const char *rc;
 
-    TEST_SUBSECTION("v0.8.0 threshold bridge via full merge_conf");
+    TEST_SUBSECTION("v0.8.0 threshold defaults via full merge_conf");
 
     /*
-     * Case 1: No threshold directives set (neither old nor new).
+     * Case 1: No threshold directives set.
      * stream.threshold must remain at 0.8.0 default (1m).
      */
     memset(&cf, 0, sizeof(cf));
@@ -615,19 +611,13 @@ test_080_threshold_bridge_full_merge(void)
         "directive was explicitly set");
     TEST_ASSERT(child->stream.threshold_explicit == 0,
         "threshold_explicit must be 0 when unset");
-    TEST_ASSERT(child->streaming.auto_threshold_explicit == 0,
-        "auto_threshold_explicit must be 0 when unset");
 
     free(parent);
     free(child);
 
     /*
-     * Case 2: Legacy markdown_streaming_auto_threshold 64k is explicitly set.
-     * The bridge should map it into stream.threshold.
-     *
-     * In real NGINX, the parent would first be merged against its own
-     * parent (grandparent), which sets auto_threshold_explicit = 1.
-     * Then the child merges against the parent and inherits the flag.
+     * Case 2: markdown_stream_threshold 64k is explicitly set.
+     * The explicit value should be preserved through merge.
      */
     memset(&cf, 0, sizeof(cf));
     cf.pool = &g_pool;
@@ -643,32 +633,32 @@ test_080_threshold_bridge_full_merge(void)
         TEST_ASSERT(parent != NULL, "parent conf allocation (case 2)");
         TEST_ASSERT(child != NULL, "child conf allocation (case 2)");
 
-        /* Simulate: operator set markdown_streaming_auto_threshold 64k at parent level */
-        parent->streaming.auto_threshold = 64 * 1024;
+        /* Simulate: operator set markdown_stream_threshold 64k at parent level */
+        parent->stream.threshold = 64 * 1024;
 
-        /* Merge parent against grandparent (sets auto_threshold_explicit=1) */
+        /* Merge parent against grandparent (sets threshold_explicit=1) */
         rc = ngx_http_markdown_merge_conf(&cf, grandparent, parent);
         TEST_ASSERT(rc == NGX_CONF_OK, "merge parent should succeed");
 
-        TEST_ASSERT(parent->streaming.auto_threshold_explicit == 1,
-            "parent auto_threshold_explicit must be 1 after merge");
+        TEST_ASSERT(parent->stream.threshold_explicit == 1,
+            "parent threshold_explicit must be 1 after merge");
 
         /* Merge child against parent */
         rc = ngx_http_markdown_merge_conf(&cf, parent, child);
         TEST_ASSERT(rc == NGX_CONF_OK, "merge child should succeed");
 
-        TEST_ASSERT(child->streaming.auto_threshold_explicit == 1,
-            "auto_threshold_explicit must be 1 when parent set it");
+        TEST_ASSERT(child->stream.threshold_explicit == 1,
+            "threshold_explicit must be 1 when parent set it");
         TEST_ASSERT(child->stream.threshold == 64 * 1024,
-            "stream.threshold must be 64k when legacy directive "
-            "was explicitly set");
+            "stream.threshold must be 64k when "
+            "explicitly set");
 
         free(grandparent);
         free(parent);
         free(child);
     }
 
-    TEST_PASS("v0.8.0 threshold bridge: full merge_conf regression guard");
+    TEST_PASS("v0.8.0 threshold defaults: full merge_conf regression guard");
 }
 
 /* ── Main ─────────────────────────────────────────────────────────── */

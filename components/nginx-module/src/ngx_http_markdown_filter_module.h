@@ -427,13 +427,11 @@ typedef enum {
  * - advanced.dynconf_dry_run: 0 (off by default)
  *
  * Streaming defaults when MARKDOWN_STREAMING_ENABLED is compiled in:
- * - streaming_engine: NULL (auto mode in v0.6.0; was off in 0.5.x)
- * - streaming_budget: NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT
- * - streaming_on_error: NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS
- * - streaming_shadow: 0 (off by default)
- * - streaming_auto_threshold: NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT
- *     (legacy field default 32k; does NOT affect runtime unless explicitly set;
- *      v0.8.0 effective threshold is stream.threshold default 1m)
+ * - stream.engine: auto (1) — NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO
+ * - stream.budget: NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT
+ * - stream.on_error: NGX_HTTP_MARKDOWN_ON_ERROR_PASS
+ * - stream.shadow: 0 (off by default)
+ * - stream.threshold: NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT (1m)
  *
  * v0.8.0 streaming config defaults (streaming configuration directives):
  * - stream.engine: auto (1)

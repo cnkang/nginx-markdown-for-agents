@@ -503,7 +503,7 @@ test_create_conf_defaults(void)
         "timeout should be unset");
     TEST_ASSERT(conf->ops.metrics_format == NGX_CONF_UNSET_UINT,
         "metrics format should be unset");
-    TEST_ASSERT(conf->streaming.budget == NGX_CONF_UNSET_SIZE,
+    TEST_ASSERT(conf->stream.budget == NGX_CONF_UNSET_SIZE,
         "streaming budget should be unset");
 
     TEST_PASS("create_conf defaults covered");
@@ -557,12 +557,12 @@ test_merge_conf(void)
     parent.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
     parent.ops.metrics_per_path = 1;
     parent.ops.otel_enabled = 0;
-    parent.streaming.engine = &cv;
-    parent.streaming.budget = 777;
-    parent.streaming.budget_explicit = 1;
-    parent.streaming.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
-    parent.streaming.shadow = 1;
-    parent.streaming.auto_threshold = 32768;
+    parent.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
+    parent.stream.budget = 777;
+    parent.stream.budget_explicit = 1;
+    parent.stream.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
+    parent.stream.shadow = 1;
+    parent.stream.threshold = 32768;
     parent.advanced.prune_noise = 1;
     parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
     parent.advanced.llm_provider = NGX_CONF_UNSET_UINT;
@@ -596,11 +596,18 @@ test_merge_conf(void)
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
     child.ops.otel_enabled = NGX_CONF_UNSET;
-    child.streaming.budget = NGX_CONF_UNSET_SIZE;
-    child.streaming.budget_explicit = 0;
-    child.streaming.on_error = NGX_CONF_UNSET_UINT;
-    child.streaming.shadow = NGX_CONF_UNSET;
-    child.streaming.auto_threshold = NGX_CONF_UNSET_SIZE;
+    child.stream.engine = NGX_CONF_UNSET_UINT;
+    child.stream.budget = NGX_CONF_UNSET_SIZE;
+    child.stream.budget_explicit = 0;
+    child.stream.on_error = NGX_CONF_UNSET_UINT;
+    child.stream.shadow = NGX_CONF_UNSET;
+    child.stream.threshold = NGX_CONF_UNSET_SIZE;
+    child.stream.threshold_explicit = 0;
+    child.stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
+    child.stream.flush_min = NGX_CONF_UNSET_SIZE;
+    child.stream.on_error_explicit = 0;
+    child.stream.shadow_explicit = 0;
+    child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -617,11 +624,11 @@ test_merge_conf(void)
         "child should inherit complex expression");
     TEST_ASSERT(child.max_size == 2048, "child should inherit max_size");
     TEST_ASSERT(child.timeout == 42, "child should inherit timeout");
-    TEST_ASSERT(child.streaming.engine == &cv,
-        "child should inherit streaming engine");
-    TEST_ASSERT(child.streaming.budget == 777,
-        "child should inherit streaming budget");
-    TEST_ASSERT(child.streaming.on_error
+    TEST_ASSERT(child.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
+        "child should inherit stream engine");
+    TEST_ASSERT(child.stream.budget == 777,
+        "child should inherit stream budget");
+    TEST_ASSERT(child.stream.on_error
         == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT,
         "child should inherit streaming on_error");
 
@@ -653,11 +660,18 @@ test_merge_conf(void)
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
     child.ops.otel_enabled = NGX_CONF_UNSET;
-    child.streaming.budget = NGX_CONF_UNSET_SIZE;
-    child.streaming.budget_explicit = 0;
-    child.streaming.on_error = NGX_CONF_UNSET_UINT;
-    child.streaming.shadow = NGX_CONF_UNSET;
-    child.streaming.auto_threshold = NGX_CONF_UNSET_SIZE;
+    child.stream.engine = NGX_CONF_UNSET_UINT;
+    child.stream.budget = NGX_CONF_UNSET_SIZE;
+    child.stream.budget_explicit = 0;
+    child.stream.on_error = NGX_CONF_UNSET_UINT;
+    child.stream.shadow = NGX_CONF_UNSET;
+    child.stream.threshold = NGX_CONF_UNSET_SIZE;
+    child.stream.threshold_explicit = 0;
+    child.stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
+    child.stream.flush_min = NGX_CONF_UNSET_SIZE;
+    child.stream.on_error_explicit = 0;
+    child.stream.shadow_explicit = 0;
+    child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -1025,11 +1039,18 @@ test_merge_conf_double_unset(void)
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
     child.ops.otel_enabled = NGX_CONF_UNSET;
-    child.streaming.budget = NGX_CONF_UNSET_SIZE;
-    child.streaming.budget_explicit = 0;
-    child.streaming.on_error = NGX_CONF_UNSET_UINT;
-    child.streaming.shadow = NGX_CONF_UNSET;
-    child.streaming.auto_threshold = NGX_CONF_UNSET_SIZE;
+    child.stream.engine = NGX_CONF_UNSET_UINT;
+    child.stream.budget = NGX_CONF_UNSET_SIZE;
+    child.stream.budget_explicit = 0;
+    child.stream.on_error = NGX_CONF_UNSET_UINT;
+    child.stream.shadow = NGX_CONF_UNSET;
+    child.stream.threshold = NGX_CONF_UNSET_SIZE;
+    child.stream.threshold_explicit = 0;
+    child.stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
+    child.stream.flush_min = NGX_CONF_UNSET_SIZE;
+    child.stream.on_error_explicit = 0;
+    child.stream.shadow_explicit = 0;
+    child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -1053,16 +1074,14 @@ test_merge_conf_double_unset(void)
 }
 
 static void
-test_streaming_compat_budget_explicit_maps_to_stream(void)
+test_stream_budget_explicit_maps_to_stream(void)
 {
     ngx_conf_t cf;
     ngx_http_markdown_conf_t *parent;
     ngx_http_markdown_conf_t *child;
-    ngx_http_markdown_conf_t *inherited_parent;
-    ngx_http_markdown_conf_t *legacy_child;
     char *rc;
 
-    TEST_SUBSECTION("streaming compatibility budget explicit mapping");
+    TEST_SUBSECTION("stream.budget explicit mapping");
 
     memset(&cf, 0, sizeof(cf));
     cf.pool = &g_pool;
@@ -1071,48 +1090,46 @@ test_streaming_compat_budget_explicit_maps_to_stream(void)
     TEST_ASSERT(parent != NULL && child != NULL,
                 "create_conf should allocate parent and child");
 
-    child->streaming.budget = 4 * 1024 * 1024;
+    child->stream.budget = 4 * 1024 * 1024;
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
 
     TEST_ASSERT(rc == NGX_CONF_OK,
-                "merge_conf should accept legacy streaming budget");
-    TEST_ASSERT(child->streaming.budget_explicit == 1,
-                "legacy streaming budget should stay explicit");
+                "merge_conf should accept stream budget");
     TEST_ASSERT(child->stream.budget == 4 * 1024 * 1024,
-                "legacy streaming budget should map into stream budget");
+                "stream budget should be preserved");
     TEST_ASSERT(child->stream.budget_explicit == 1,
-                "mapped stream budget should stay explicit");
+                "stream budget should stay explicit");
 
-    inherited_parent = ngx_http_markdown_create_conf(&cf);
-    legacy_child = ngx_http_markdown_create_conf(&cf);
-    TEST_ASSERT(inherited_parent != NULL && legacy_child != NULL,
+    parent = ngx_http_markdown_create_conf(&cf);
+    child = ngx_http_markdown_create_conf(&cf);
+    TEST_ASSERT(parent != NULL && child != NULL,
                 "create_conf should allocate inherited budget fixtures");
 
-    inherited_parent->stream.budget = 8 * 1024 * 1024;
-    inherited_parent->stream.budget_explicit = 1;
-    legacy_child->streaming.budget = 4 * 1024 * 1024;
+    parent->stream.budget = 8 * 1024 * 1024;
+    parent->stream.budget_explicit = 1;
+    child->stream.budget = 4 * 1024 * 1024;
 
-    rc = ngx_http_markdown_merge_conf(&cf, inherited_parent, legacy_child);
+    rc = ngx_http_markdown_merge_conf(&cf, parent, child);
 
     TEST_ASSERT(rc == NGX_CONF_OK,
-                "merge_conf should accept child legacy budget override");
-    TEST_ASSERT(legacy_child->stream.budget == 4 * 1024 * 1024,
-                "child legacy budget should override inherited stream budget");
-    TEST_ASSERT(legacy_child->stream.budget_explicit == 1,
-                "child legacy budget override should mark stream explicit");
-    TEST_PASS("streaming compatibility budget explicit mapping");
+                "merge_conf should accept child stream budget override");
+    TEST_ASSERT(child->stream.budget == 4 * 1024 * 1024,
+                "child stream budget should override parent stream budget");
+    TEST_ASSERT(child->stream.budget_explicit == 1,
+                "child stream budget override should mark explicit");
+    TEST_PASS("stream.budget explicit mapping");
 }
 
 static void
-test_streaming_compat_preserves_explicit_new_defaults(void)
+test_stream_preserves_explicit_defaults(void)
 {
     ngx_conf_t cf;
     ngx_http_markdown_conf_t *parent;
     ngx_http_markdown_conf_t *child;
     char *rc;
 
-    TEST_SUBSECTION("streaming compatibility explicit defaults");
+    TEST_SUBSECTION("stream explicit defaults");
 
     memset(&cf, 0, sizeof(cf));
     cf.pool = &g_pool;
@@ -1123,22 +1140,20 @@ test_streaming_compat_preserves_explicit_new_defaults(void)
 
     child->stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     child->stream.shadow = 0;
-    child->streaming.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
-    child->streaming.shadow = 1;
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
 
     TEST_ASSERT(rc == NGX_CONF_OK,
-                "merge_conf should accept mixed old/new stream settings");
+                "merge_conf should accept stream settings");
     TEST_ASSERT(child->stream.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
-                "explicit new on_error=pass should not be overwritten");
+                "explicit on_error=pass should not be overwritten");
     TEST_ASSERT(child->stream.on_error_explicit == 1,
-                "explicit new on_error should be tracked");
+                "explicit on_error should be tracked");
     TEST_ASSERT(child->stream.shadow == 0,
-                "explicit new shadow=off should not be overwritten");
+                "explicit shadow=off should not be overwritten");
     TEST_ASSERT(child->stream.shadow_explicit == 1,
-                "explicit new shadow should be tracked");
-    TEST_PASS("streaming compatibility preserves explicit defaults");
+                "explicit shadow should be tracked");
+    TEST_PASS("stream explicit defaults preserved");
 }
 
 /*
@@ -1269,17 +1284,17 @@ test_memory_budget_priority_chain(void)
         parent_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
         parent_conf.enabled = 1;
         parent_conf.max_size = 10 * 1024 * 1024;
-        parent_conf.streaming.budget = NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT;
-        parent_conf.streaming.budget_explicit = 0;
-        parent_conf.streaming.auto_threshold = 32768;
+        parent_conf.stream.budget = NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT;
+        parent_conf.stream.budget_explicit = 0;
+        parent_conf.stream.threshold = 32768;
         parent_conf.advanced.prune_noise = 1;
         parent_conf.advanced.memory_budget = 50 * 1024 * 1024;
 
         child_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
         child_conf.max_size = NGX_CONF_UNSET_SIZE;
-        child_conf.streaming.budget = NGX_CONF_UNSET_SIZE;
-        child_conf.streaming.budget_explicit = 0;
-        child_conf.streaming.auto_threshold = NGX_CONF_UNSET_SIZE;
+        child_conf.stream.budget = NGX_CONF_UNSET_SIZE;
+        child_conf.stream.budget_explicit = 0;
+        child_conf.stream.threshold = NGX_CONF_UNSET_SIZE;
         child_conf.advanced.prune_noise = NGX_CONF_UNSET;
         child_conf.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
         child_conf.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -1299,9 +1314,9 @@ test_memory_budget_priority_chain(void)
         child_conf.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
         child_conf.enabled = 1;
         child_conf.max_size = 5 * 1024 * 1024;
-        child_conf.streaming.budget = NGX_CONF_UNSET_SIZE;
-        child_conf.streaming.budget_explicit = 0;
-        child_conf.streaming.auto_threshold = NGX_CONF_UNSET_SIZE;
+        child_conf.stream.budget = NGX_CONF_UNSET_SIZE;
+        child_conf.stream.budget_explicit = 0;
+        child_conf.stream.threshold = NGX_CONF_UNSET_SIZE;
         child_conf.advanced.prune_noise = NGX_CONF_UNSET;
         child_conf.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
         child_conf.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -1350,8 +1365,8 @@ test_decompress_max_size_zero_rejected(void)
     child.flavor = NGX_CONF_UNSET_UINT;
     child.decompress.auto_decompress = 1;
     child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
-    child.streaming.budget = NGX_CONF_UNSET_SIZE;
-    child.streaming.auto_threshold = NGX_CONF_UNSET_SIZE;
+    child.stream.budget = NGX_CONF_UNSET_SIZE;
+    child.stream.threshold = NGX_CONF_UNSET_SIZE;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -1380,8 +1395,8 @@ main(void)
     test_create_conf_defaults();
     test_merge_conf();
     test_merge_conf_double_unset();
-    test_streaming_compat_budget_explicit_maps_to_stream();
-    test_streaming_compat_preserves_explicit_new_defaults();
+    test_stream_budget_explicit_maps_to_stream();
+    test_stream_preserves_explicit_defaults();
     test_name_helpers_and_levels();
     test_name_helpers_unknown_branches();
     test_filter_flag_and_is_enabled();

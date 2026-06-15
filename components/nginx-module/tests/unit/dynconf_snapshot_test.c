@@ -281,7 +281,7 @@ test_default_config_all_keys_present(void)
     conf.policy.generate_etag = 1;
     conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
     conf.ops.trust_forwarded_headers = 0;
-    conf.streaming.engine = NULL;
+    conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
     conf.stream.budget = 2 * 1024 * 1024;
     conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     conf.stream.shadow = 0;
@@ -348,8 +348,8 @@ test_default_config_all_keys_present(void)
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming_shadow"),
         "should contain markdown_streaming_shadow key");
     TEST_ASSERT(output_contains_key(out_buf, out_len,
-        "markdown_streaming_auto_threshold"),
-        "should contain markdown_streaming_auto_threshold key");
+        "markdown_stream_threshold"),
+        "should contain markdown_stream_threshold key");
 
     /* Verify default values match expected */
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
@@ -446,7 +446,7 @@ test_custom_config_values_reflected(void)
     conf.policy.generate_etag = 0;
     conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
     conf.ops.trust_forwarded_headers = 1;
-    conf.streaming.engine = NULL;
+    conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
     conf.stream.budget = 4 * 1024 * 1024;
     conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     conf.stream.shadow = 1;

@@ -814,7 +814,7 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
 #ifdef MARKDOWN_STREAMING_ENABLED
     if (ngx_http_markdown_effective_memory_budget(eff, conf)
             != NGX_CONF_UNSET_SIZE
-        && !conf->streaming.budget_explicit)
+        && !conf->stream.budget_explicit)
     {
         options->streaming_budget =
             ngx_http_markdown_effective_memory_budget(eff, conf);

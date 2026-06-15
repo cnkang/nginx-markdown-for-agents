@@ -551,6 +551,12 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 #endif
     ngx_http_markdown_merge_stream_values(conf, prev);
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (stream_budget_set) {
+        conf->stream.budget_explicit = 1;
+    }
+#endif
+
     /*
      * Set threshold_explicit AFTER the merge so that:
      * - If this level explicitly set threshold, mark it explicit (1).
@@ -1070,12 +1076,10 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     }
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-    if (conf->streaming.engine != NULL) {
-        streaming_engine_str = "configured (v0.6 compat)";
-    } else if (conf->stream.engine
-               != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO)
-    {
-        streaming_engine_str = "static (v0.8)";
+    if (conf->stream.engine != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO) {
+        streaming_engine_str = (conf->stream.engine
+                                == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF)
+            ? "off" : "on";
     } else {
         streaming_engine_str = "auto (default)";
     }

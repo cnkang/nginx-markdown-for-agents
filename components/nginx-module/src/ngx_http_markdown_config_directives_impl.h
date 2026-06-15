@@ -1217,9 +1217,9 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * - auto: automatic selection based on threshold (default)
      * - on: streaming always enabled for eligible responses
      *
-     * When MARKDOWN_STREAMING_ENABLED is compiled in, the v0.6.0
-     * complex-value handler above takes precedence for this
-     * directive name (supports $variable per-request rollout).
+     * Streaming-enabled builds register the same directive above through
+     * ngx_conf_set_enum_slot. Non-streaming builds keep this parser so
+     * config validation reports invalid values consistently.
      *
      * Default: auto
      * Context: http, server, location

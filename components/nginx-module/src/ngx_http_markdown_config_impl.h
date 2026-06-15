@@ -52,8 +52,7 @@ static char *ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd,
 static char *ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse content types eligible for Markdown conversion (positive allowlist). */
 static char *ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-#if !defined(MARKDOWN_STREAMING_ENABLED)                                      \
-    || defined(NGX_HTTP_MARKDOWN_TEST_LEGACY_STREAM_ENGINE_HANDLER)
+#if !defined(MARKDOWN_STREAMING_ENABLED)
 /* Parse v0.8.0 markdown_streaming_engine enum: off, auto, on. */
 static char *ngx_http_markdown_stream_engine_handler(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf);
