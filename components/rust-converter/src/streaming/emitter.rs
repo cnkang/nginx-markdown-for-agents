@@ -2637,7 +2637,7 @@ mod tests {
         assert_eq!(escape_link_label("a\nb"), "a b");
     }
 
-    // ── Nested inline formatting tests (Task 3.2) ─────────────────
+    // ── Nested inline formatting tests ─────────────────
 
     #[test]
     fn test_bold_inside_link() {

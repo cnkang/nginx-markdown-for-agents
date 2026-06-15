@@ -119,7 +119,7 @@ pub struct StreamingConverter {
     canonical_found: bool,
     /// Bytes of `<head>` region processed so far (for lookahead budget enforcement).
     /// When this exceeds `budget.lookahead`, front matter extraction triggers
-    /// an Explicit_Fallback per Requirement 10.2.
+    /// an explicit fallback on budget exhaustion.
     head_bytes_seen: usize,
     /// Trailing bytes from the previous chunk that form an incomplete UTF-8
     /// sequence. Prepended to the next chunk before `String::from_utf8_lossy`
@@ -367,7 +367,7 @@ impl StreamingConverter {
         // 1. Check cooperative timeout
         self.check_timeout()?;
 
-        // 1b. Parser budget enforcement (Requirement 1 AC 1).
+        // 1b. Parser budget enforcement (cumulative input size limit).
         // Track cumulative input bytes and reject when the total exceeds
         // the configured parser_budget. Uses input size as a proxy for
         // parser memory pressure (matching the full-buffer path).
@@ -674,9 +674,9 @@ impl StreamingConverter {
         }
 
         // Front matter extraction: collect metadata from <head> region,
-        // but only when metadata extraction is enabled (Requirement 10.1).
+        // but only when metadata extraction is enabled (metadata extraction guard).
         // If the <head> region exceeds the lookahead budget, trigger
-        // Explicit_Fallback per Requirement 10.2 (FrontMatterOverflow).
+        // explicit fallback on front-matter overflow.
         if self.state_machine.in_head && self.options.extract_metadata {
             let budget_exceeded = self.extract_metadata_from_event(&event);
             if budget_exceeded && matches!(self.commit_state, CommitState::PreCommit) {
@@ -861,7 +861,7 @@ impl StreamingConverter {
         //
         // Note: `head_bytes_seen` is intentionally NOT included here.
         // It is a cumulative counter for lookahead budget enforcement
-        // (Requirement 10.2), not a measure of resident memory.
+        // (budget metric, not a measure of resident memory).
         let working_set = self.emitter.pending_bytes()
             + self.emitter.flushed_bytes()
             + self.state_machine.stack_bytes_estimate()
@@ -883,7 +883,7 @@ impl StreamingConverter {
     /// Tracks the cumulative size of `<head>` events against the
     /// lookahead budget. Returns `true` if the budget is exceeded,
     /// signalling that the caller should trigger an Explicit_Fallback
-    /// per Requirement 10.2.
+    /// on budget exhaustion.
     fn extract_metadata_from_event(&mut self, event: &StreamEvent) -> bool {
         // Estimate the byte cost of this event for lookahead budget tracking.
         // This is a rough estimate — we count tag names, attribute keys/values,
