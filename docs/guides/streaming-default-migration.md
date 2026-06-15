@@ -189,7 +189,7 @@ explicit markdown_memory_budget  → medium priority
 compiled-in default              → lowest priority
 ```
 
-**Planned removal**: 0.8.0. Migrate before then::
+**Planned removal**: 0.8.0. Migrate before then:
 
 ```nginx
 # Before (0.5.x)
