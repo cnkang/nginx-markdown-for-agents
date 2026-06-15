@@ -2,7 +2,7 @@
  * Test: stream_replay
  *
  * Validates the replay buffer tracking for the streaming fallback
- * state machine (streaming fallback state machine, task 7.2).
+ * state machine (streaming fallback state machine, replay buffer).
  *
  * Tests init, append, overflow, available, and chain operations
  * of ngx_http_markdown_stream_replay_*() functions.
@@ -590,7 +590,7 @@ static void test_available_size_exceeds_capacity(void)
 
 int main(void)
 {
-    TEST_SECTION("Stream Replay Buffer (Spec 37, Task 7.2)");
+    TEST_SECTION("Stream Replay Buffer (streaming fallback state machine, replay buffer)");
 
     test_init_zero_capacity();
     test_init_valid_capacity();

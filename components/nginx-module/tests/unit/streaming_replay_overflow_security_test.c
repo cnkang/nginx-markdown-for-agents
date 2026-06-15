@@ -9,10 +9,10 @@
  *   - REPLAY_OVERFLOW event fires when buffer capacity is exceeded
  *   - State machine transitions to PRE_COMMIT_REPLAY_UNAVAILABLE
  *   - Decision engine handles fallback correctly (full-buffer or reject)
- *   - Fail-open/reject preservation per on_error policy (Requirement 5)
+ *   - Fail-open/reject preservation per on_error policy (fail-open/fail-closed policy preservation)
  *
- * Feature: streaming-security-resource-limits (Spec 41, Task 4.2)
- * Validates: Requirement 6 AC 1 (replay overflow), Requirement 5
+ * Feature: streaming-security-resource-limits (streaming security resource limits)
+ * Validates: oversized body / replay overflow handling, fail-open/fail-closed policy preservation
  * AGENTS.md: Rule 14 (regression tests), Rule 38 (replay buffer data integrity)
  */
 
@@ -213,7 +213,7 @@ test_setup(void)
  *           capacity. Verify NGX_DECLINED is returned (the signal
  *           that triggers REPLAY_OVERFLOW in the body filter).
  *
- * Validates: Requirement 6 AC 1
+ * Validates: oversized body / replay overflow handling
  * ================================================================ */
 
 static void
@@ -273,7 +273,7 @@ test_overflow_fires_on_exceed_capacity(void)
  *           is fed. This simulates a large upstream response body
  *           hitting a small precommit_buffer setting.
  *
- * Validates: Requirement 6 AC 1, Rule 38
+ * Validates: oversized body / replay overflow handling, Rule 38
  * ================================================================ */
 
 static void
@@ -318,7 +318,7 @@ test_overflow_single_large_chunk(void)
  * Case B: within_resource_limits=0, on_error=pass -> PASSTHROUGH
  * Case C: within_resource_limits=0, on_error=reject -> REJECT_502
  *
- * Validates: Requirement 5, Requirement 6 AC 1
+ * Validates: fail-open/fail-closed policy preservation, oversized body / replay overflow handling
  * ================================================================ */
 
 static void
@@ -436,7 +436,7 @@ test_decision_engine_overflow_exceeded_limits_reject(void)
  *           proceed with streaming (without replay capability).
  *           Verify that COMMIT event transitions to COMMITTED state.
  *
- * Validates: Requirement 5 (fail-open preservation)
+ * Validates: fail-open/fail-closed policy preservation (fail-open preservation)
  * ================================================================ */
 
 static void
@@ -482,7 +482,7 @@ test_replay_unavailable_can_still_commit(void)
  *           what the body filter does when replay_append returns
  *           NGX_DECLINED.
  *
- * Validates: Requirement 6 AC 1, Rule 38
+ * Validates: oversized body / replay overflow handling, Rule 38
  * ================================================================ */
 
 static void
@@ -554,7 +554,7 @@ test_e2e_overflow_to_decision(void)
  *           The overflow is detected precisely at the boundary.
  *           No data corruption or partial writes occur.
  *
- * Validates: Requirement 1 AC 3 (no unbounded allocation), Rule 38
+ * Validates: no unbounded allocation, Rule 38
  * ================================================================ */
 
 static void
@@ -612,9 +612,9 @@ test_incremental_overflow_boundary(void)
  *
  * Scenario: When resource limits are exceeded AND on_error=reject,
  *           the decision engine should still produce REJECT_502.
- *           This verifies fail-closed semantics per Requirement 5.
+ *           This verifies fail-closed semantics per fail-open/fail-closed policy preservation.
  *
- * Validates: Requirement 5 AC 2
+ * Validates: reject policy produces 502 (fail-closed)
  * ================================================================ */
 
 static void
@@ -656,7 +656,7 @@ main(void)
 {
     TEST_SECTION(
         "Streaming Replay Overflow Security Tests "
-        "(Spec 41, Task 4.2)");
+        "(streaming security resource limits)");
 
     /* Replay buffer overflow detection */
     test_overflow_fires_on_exceed_capacity();

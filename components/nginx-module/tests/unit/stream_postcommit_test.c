@@ -2,7 +2,7 @@
  * Test: stream_postcommit
  *
  * Validates the post-commit safety property for the streaming
- * fallback state machine (streaming fallback state machine, task 7.4).
+ * fallback state machine (streaming fallback state machine, post-commit safety).
  *
  * Property test: exercises the decision engine from COMMITTED state
  * with every possible event and verifies:
@@ -14,7 +14,7 @@
  *
  * Also tests the postcommit guard function.
  *
- * Validates: Requirements 5.1, 5.2
+ * Validates: post-commit never produces PASS_HTML, post-commit never produces REJECT_502
  */
 
 #include "../include/test_common.h"
@@ -1357,7 +1357,7 @@ static void test_guard_fails_html_comment(void)
 
 int main(void)
 {
-    TEST_SECTION("Post-commit Safety Property (Spec 37, Task 7.4)");
+    TEST_SECTION("Post-commit Safety Property (streaming fallback state machine, post-commit safety)");
 
     test_committed_never_produces_html();
     test_post_commit_terminals_never_produce_html();
@@ -1377,7 +1377,7 @@ int main(void)
     test_guard_fails_script_tag();
     test_guard_fails_html_comment();
 
-    TEST_SECTION("Post-commit safe_finish (Task 5.1)");
+    TEST_SECTION("Post-commit safe_finish (safe_finish)");
     test_safe_finish_happy_path();
     test_safe_finish_empty_rust_output_sends_terminal();
     test_safe_finish_copies_rust_output_before_free();
@@ -1389,7 +1389,7 @@ int main(void)
     test_safe_finish_null_params();
     test_safe_finish_send_terminal_fails();
 
-    TEST_SECTION("Post-commit abort (Task 5.2)");
+    TEST_SECTION("Post-commit abort (abort)");
     test_abort_happy_path();
     test_abort_from_safe_finish_state();
     test_abort_idempotent_reentry();

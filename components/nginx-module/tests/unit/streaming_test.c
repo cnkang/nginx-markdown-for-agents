@@ -5,7 +5,7 @@
  *   output chain construction, size limit, and timeout.
  *
  * Feature: nginx-streaming-runtime-and-ffi
- * Validates: Properties 1-6, 11-14
+ * Validates: decompression safety through backpressure handling
  *
  * All tests are gated with MARKDOWN_STREAMING_ENABLED.
  */
@@ -244,7 +244,7 @@ test_select_processing_path(const test_conf_t *conf,
 
 /* ================================================================
  * 14.1 Engine selection unit tests
- * Feature: nginx-streaming-runtime-and-ffi, Property 2
+ * Feature: nginx-streaming-runtime-and-ffi, engine selection / shadow error isolation
  * ================================================================ */
 
 static void
@@ -378,7 +378,7 @@ test_engine_on_conditional_full(void)
  * Verify conditional_requests if_modified_since_only allows
  * streaming path.
  *
- * Validates: Requirement 6.2
+ * Validates: conditional if_modified_since_only allows streaming
  */
 static void
 test_engine_on_conditional_ims_only(void)
@@ -415,7 +415,7 @@ test_engine_on_conditional_ims_only(void)
 /*
  * Verify conditional_requests disabled allows streaming path.
  *
- * Validates: Requirement 6.3
+ * Validates: conditional disabled allows streaming
  */
 static void
 test_engine_on_conditional_disabled(void)
@@ -550,7 +550,7 @@ test_engine_auto_no_cl(void)
 
 /* ================================================================
  * 14.2 Streaming decompression unit tests
- * Feature: nginx-streaming-runtime-and-ffi, Property 1
+ * Feature: nginx-streaming-runtime-and-ffi, decompression safety
  * ================================================================ */
 
 static void
@@ -588,7 +588,7 @@ test_decomp_empty_input(void)
 
 /* ================================================================
  * 14.3 Streaming body filter chunk processing
- * Feature: nginx-streaming-runtime-and-ffi, Property 3
+ * Feature: nginx-streaming-runtime-and-ffi, chunk processing
  * ================================================================ */
 
 static void
@@ -637,7 +637,7 @@ test_chunk_processing_size_limit(void)
 
 /* ================================================================
  * 14.4 Backpressure handling
- * Feature: nginx-streaming-runtime-and-ffi, Property 13
+ * Feature: nginx-streaming-runtime-and-ffi, backpressure handling
  * ================================================================ */
 
 typedef struct {
@@ -745,7 +745,7 @@ test_backpressure_deferred_finalize_resume(void)
 
 /* ================================================================
  * 14.5 Pre-Commit fallback
- * Feature: nginx-streaming-runtime-and-ffi, Property 5
+ * Feature: nginx-streaming-runtime-and-ffi, pre-commit fallback / ETag stripping
  * ================================================================ */
 
 static void
@@ -772,9 +772,9 @@ test_precommit_fallback(void)
 
 /* ================================================================
  * 14.6 Post-Commit error handling
- * Feature: nginx-streaming-runtime-and-ffi, Property 6
+ * Feature: nginx-streaming-runtime-and-ffi, post-commit error handling
  *
- * Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5
+ * Validates: post-commit error always fail-closed through debug log fields
  * ================================================================ */
 
 static void
@@ -814,7 +814,7 @@ test_postcommit_error(void)
  * Verify post-commit error is always fail-closed regardless
  * of streaming_on_error config value.
  *
- * Validates: Requirement 3.2 (always fail-closed)
+ * Validates: post-commit ignores on_error policy
  */
 static void
 test_postcommit_error_ignores_on_error_policy(void)
@@ -894,7 +894,7 @@ test_postcommit_error_ignores_on_error_policy(void)
  * Verify post-commit error debug log includes bytes_sent,
  * error_code, and chunks_processed.
  *
- * Validates: Requirement 3.5 (debug log details)
+ * Validates: debug log includes bytes_sent/error_code/chunks
  */
 static void
 test_postcommit_error_debug_log_details(void)
@@ -993,7 +993,7 @@ test_simulate_postcommit_handler(uint32_t error_code,
  * Verify post-commit error handling for various error codes.
  * All error types must result in the same fail-closed behavior.
  *
- * Validates: Requirements 3.1, 3.3
+ * Validates: post-commit error always fail-closed, all error codes produce fail-closed
  */
 static void
 test_postcommit_error_various_error_codes(void)
@@ -1124,7 +1124,7 @@ test_config_engine_values(void)
 
 /* ================================================================
  * 14.8 Output chain construction
- * Feature: nginx-streaming-runtime-and-ffi, Property 4
+ * Feature: nginx-streaming-runtime-and-ffi, output chain construction
  * ================================================================ */
 
 typedef struct {
@@ -1192,7 +1192,7 @@ test_output_chain_flush(void)
 
 /* ================================================================
  * 14.9 Size limit and timeout
- * Feature: nginx-streaming-runtime-and-ffi, Property 11
+ * Feature: nginx-streaming-runtime-and-ffi, size limit and timeout
  * ================================================================ */
 
 static void
@@ -1280,9 +1280,9 @@ test_timeout_precommit(void)
 
 /* ================================================================
  * 15.6 Streaming Headers Policy
- * Feature: streaming-failure-cache-semantics, Property 7, 8
+ * Feature: streaming-failure-cache-semantics, shadow_diff_total ≤ shadow_total invariant, backward compatibility
  *
- * Validates: Requirements 7.1, 7.2, 7.3, 7.4, 7.5
+ * Validates: commit boundary header modifications
  *
  * These tests verify the streaming headers strategy:
  * - Commit_Boundary removes Content-Length
@@ -1307,7 +1307,7 @@ static void test_precommit_no_header_modification(void);
  * ngx_http_clear_content_length(r) and sets
  * r->headers_out.content_length_n = -1.
  *
- * Validates: Requirement 7.1
+ * Validates: commit boundary removes Content-Length
  */
 static void
 test_commit_boundary_removes_content_length(void)
@@ -1370,7 +1370,7 @@ test_commit_boundary_removes_content_length(void)
  * ctx->decompression.needed and calls
  * ngx_http_markdown_remove_content_encoding(r).
  *
- * Validates: Requirement 7.4
+ * Validates: commit boundary removes Content-Encoding (conditional)
  */
 static void
 test_commit_boundary_removes_content_encoding(void)
@@ -1407,7 +1407,7 @@ test_commit_boundary_removes_content_encoding(void)
  * Verify that Content-Encoding is NOT removed when
  * decompression was not needed (upstream sent uncompressed).
  *
- * Validates: Requirement 7.4 (conditional removal)
+ * Validates: commit boundary removes Content-Encoding (conditional removal)
  */
 static void
 test_commit_boundary_skips_content_encoding_no_decomp(void)
@@ -1445,7 +1445,7 @@ test_commit_boundary_skips_content_encoding_no_decomp(void)
  * enables chunked (r->chunked = 1). This ordering ensures
  * they never coexist.
  *
- * Validates: Requirement 7.3
+ * Validates: Content-Length and chunked never coexist
  */
 static void
 test_streaming_no_cl_and_chunked_coexist(void)
@@ -1528,7 +1528,7 @@ test_streaming_no_cl_and_chunked_coexist(void)
  * Pre_Commit_Phase, the streaming body filter processes
  * chunks through the Rust engine without touching headers.
  *
- * Validates: Requirement 7.5
+ * Validates: pre-commit phase does not modify headers
  */
 static void
 test_precommit_no_header_modification(void)
@@ -1633,7 +1633,7 @@ test_precommit_no_header_modification(void)
  * not the transformed Markdown body, so forwarding it would
  * break cache semantics.
  *
- * Validates: Requirement 5.5, Property 5
+ * Validates: upstream ETag stripped at commit boundary, pre-commit fallback / ETag stripping
  */
 static void
 test_commit_boundary_strips_upstream_etag(void)
@@ -1694,7 +1694,7 @@ test_commit_boundary_strips_upstream_etag(void)
  * prebuffer exhaustion, and feed errors — all of which
  * must be observable by operators.
  *
- * Validates: Requirement 2.4
+ * Validates: all pre-commit fail-open paths record metrics
  */
 static void
 test_precommit_all_failopen_paths_record_metrics(void)
@@ -1749,7 +1749,7 @@ test_precommit_all_failopen_paths_record_metrics(void)
  * streaming_on_error=reject instead of falling through
  * to the full-buffer on_error policy.
  *
- * Validates: Requirement 4.4 (directive independence)
+ * Validates: directive independence from top-level on_error
  */
 static void
 test_init_failure_respects_streaming_on_error(void)
@@ -1889,7 +1889,7 @@ test_streaming_failopen_increments_global_counter(void)
  * 15.9.1 streaming_on_error Config Parsing
  * Feature: streaming-failure-cache-semantics
  *
- * Validates: Requirements 4.1, 4.2, 4.5, 4.6
+ * Validates: streaming_on_error directive completeness
  *
  * Tests for markdown_streaming_on_error directive:
  * - Legal values (pass, reject) are accepted
@@ -1927,7 +1927,7 @@ static void test_metrics_failed_total(void);
  * Verify that legal values (pass, reject) are accepted
  * and map to the correct constants.
  *
- * Validates: Requirement 4.1
+ * Validates: streaming_on_error legal values and default
  */
 static void
 test_config_on_error_legal_values(void)
@@ -1985,7 +1985,7 @@ test_config_on_error_legal_values(void)
  *       prev->streaming_on_error,
  *       NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS);
  *
- * Validates: Requirement 4.1 (default = pass)
+ * Validates: streaming_on_error legal values and default (default = pass)
  */
 static void
 test_config_on_error_default_value(void)
@@ -2025,7 +2025,7 @@ test_config_on_error_default_value(void)
  * Verify config inheritance: child inherits from parent
  * when not explicitly set.
  *
- * Validates: Requirement 4.5
+ * Validates: streaming_on_error config inheritance
  */
 static void
 test_config_on_error_inheritance(void)
@@ -2097,7 +2097,7 @@ test_config_on_error_inheritance(void)
  * ngx_conf_set_enum_slot only accepts values defined in
  * the enum table. Any other value causes a config error.
  *
- * Validates: Requirement 4.1 (invalid rejection)
+ * Validates: streaming_on_error legal values and default (invalid rejection)
  */
 static void
 test_config_on_error_invalid_values(void)
@@ -2139,7 +2139,7 @@ test_config_on_error_invalid_values(void)
  * 15.9.2 Pre-Commit Strategy Routing
  * Feature: streaming-failure-cache-semantics
  *
- * Validates: Requirements 2.1, 2.2, 2.3, 2.4
+ * Validates: FALLBACK routing through metrics recording
  *
  * Tests the full matrix:
  * - ERROR_STREAMING_FALLBACK × pass → full-buffer fallback
@@ -2321,7 +2321,7 @@ test_precommit_strategy_internal_reject(void)
  * 15.9.6 Metrics Increment
  * Feature: streaming-failure-cache-semantics
  *
- * Validates: Requirements 2.4, 3.4
+ * Validates: FALLBACK always routes to full-buffer, postcommit_error_total increments
  *
  * Tests that each reason code increments the correct
  * metrics counter:
@@ -2350,7 +2350,7 @@ typedef struct {
  * Uses branch-driven stub to mirror production logic:
  * commit_state = PRE_COMMIT, on_error != REJECT (i.e. PASS).
  *
- * Validates: Requirement 2.4, Rule 14 (branch-driven tests)
+ * Validates: all pre-commit fail-open paths record metrics, Rule 14 (branch-driven tests)
  */
 static void
 test_metrics_precommit_failopen(void)
@@ -2434,7 +2434,7 @@ test_metrics_precommit_failopen(void)
  * Uses branch-driven stub to mirror production logic:
  * commit_state = PRE_COMMIT, on_error = REJECT.
  *
- * Validates: Requirement 2.4, Rule 14 (branch-driven tests)
+ * Validates: all pre-commit fail-open paths record metrics, Rule 14 (branch-driven tests)
  */
 static void
 test_metrics_precommit_reject(void)
@@ -2486,7 +2486,7 @@ test_metrics_precommit_reject(void)
  * Uses branch-driven stub to mirror production logic:
  * commit_state = POST_COMMIT.
  *
- * Validates: Requirement 3.4, Rule 14 (branch-driven tests)
+ * Validates: postcommit_error_total increments, Rule 14 (branch-driven tests)
  */
 static void
 test_metrics_postcommit_error(void)
@@ -2537,7 +2537,7 @@ test_metrics_postcommit_error(void)
  * each failure type (pre-commit fail-open, pre-commit
  * reject, post-commit error, fallback).
  *
- * Validates: Requirements 2.4, 3.4, Rule 14
+ * Validates: all pre-commit fail-open paths record metrics, postcommit_error_total increments, Rule 14
  */
 static void
 test_metrics_failed_total(void)
@@ -3316,9 +3316,9 @@ test_precommit_memory_limit_budget_parity(void)
 
 
 /* ================================================================
- * Shadow Mode Configuration Tests (Spec #17)
+ * Shadow Mode Configuration Tests (shadow mode and TTFB)
  *
- * Validates: Requirements 2.1 (shadow directive), Property 8
+ * Validates: FALLBACK always routes to full-buffer (shadow directive), backward compatibility
  * (backward compatibility)
  * ================================================================ */
 
@@ -3333,7 +3333,7 @@ static void test_config_shadow_invalid_values(void);
  * Verify that on/off are accepted as legal values for
  * markdown_streaming_shadow.
  *
- * Validates: Requirement 2.1
+ * Validates: FALLBACK always routes to full-buffer
  */
 static void
 test_config_shadow_legal_values(void)
@@ -3383,7 +3383,7 @@ test_config_shadow_legal_values(void)
  *   ngx_conf_merge_value(conf->streaming_shadow,
  *       prev->streaming_shadow, 0);
  *
- * Validates: Requirement 2.1 (default = off)
+ * Validates: FALLBACK always routes to full-buffer (default = off)
  */
 static void
 test_config_shadow_default_value(void)
@@ -3416,7 +3416,7 @@ test_config_shadow_default_value(void)
  * Verify that streaming_shadow inherits from parent
  * when child is unset.
  *
- * Validates: Requirement 2.1 (http/server/location context)
+ * Validates: FALLBACK always routes to full-buffer (http/server/location context)
  */
 static void
 test_config_shadow_inheritance(void)
@@ -3469,7 +3469,7 @@ test_config_shadow_inheritance(void)
  * any other value causes NGINX config parse failure.
  * We verify the flag semantics here.
  *
- * Validates: Requirement 2.1
+ * Validates: FALLBACK always routes to full-buffer
  */
 static void
 test_config_shadow_invalid_values(void)
@@ -3509,12 +3509,12 @@ test_config_shadow_invalid_values(void)
 
 
 /* ================================================================
- * Shadow Mode Runtime Tests (Spec #17)
+ * Shadow Mode Runtime Tests (shadow mode and TTFB)
  *
  * These tests verify shadow mode behavior using lightweight
  * stubs.  The actual FFI calls are tested via e2e tests.
  *
- * Validates: Properties 1, 2, 7
+ * Validates: decompression safety, engine selection / shadow error isolation, shadow_diff_total ≤ shadow_total invariant
  * ================================================================ */
 
 /* Forward declarations for shadow runtime tests */
@@ -3526,7 +3526,7 @@ static void test_shadow_error_isolation(void);
 /*
  * Verify that shadow_total increments when shadow mode runs.
  *
- * Validates: Property 7 (shadow_diff_total <= shadow_total)
+ * Validates: shadow_diff_total ≤ shadow_total invariant (shadow_diff_total <= shadow_total)
  *
  * Limitation: This test directly manipulates counters rather than
  * exercising the production ngx_http_markdown_shadow_compare()
@@ -3564,7 +3564,7 @@ test_shadow_metrics_increment(void)
 /*
  * Verify that shadow_diff_total increments only on diff.
  *
- * Validates: Property 7
+ * Validates: shadow_diff_total ≤ shadow_total invariant
  *
  * Limitation: Same as test_shadow_metrics_increment — direct
  * counter manipulation, not production branch logic.
@@ -3603,7 +3603,7 @@ test_shadow_diff_metrics(void)
  * Verify that shadow mode errors do not affect the
  * client response path (error isolation).
  *
- * Validates: Property 2
+ * Validates: engine selection / shadow error isolation
  */
 static void
 test_shadow_error_isolation(void)
@@ -3650,7 +3650,7 @@ test_shadow_error_isolation(void)
 
 
 /* ================================================================
- * TTFB Gauge Regression Tests (Spec #17)
+ * TTFB Gauge Regression Tests (shadow mode and TTFB)
  *
  * Validates that the TTFB latch in send_output and
  * resume_pending correctly distinguishes non-empty data
@@ -3793,7 +3793,7 @@ test_ttfb_nonempty_pending_records(void)
 
 
 /* ================================================================
- * Bug Condition Exploration Tests (Bugfix Spec)
+ * Bug Condition Exploration Tests (preservation bugfix)
  *
  * These tests encode EXPECTED (correct) behavior for 4 bugs
  * found during streaming code review. They are designed to
@@ -3803,8 +3803,9 @@ test_ttfb_nonempty_pending_records(void)
  * in a single run. The final assertion at the end ensures
  * the test binary exits non-zero if any bug was confirmed.
  *
- * Validates: Requirements 1.1, 1.2, 1.3, 4.1, 4.2, 4.3,
- *            4.4, 7.1, 7.2, 7.3, 10.1, 10.2
+ * Validates: fallback return value correctness, streaming_on_error legal values and default,
+ *            decomp inflate loop completeness, tail feed error handling,
+ *            invalid static value rejection at parse time
  * ================================================================ */
 
 static int  bug_exploration_failures = 0;
@@ -3833,7 +3834,7 @@ static int  bug_exploration_failures = 0;
  * On unfixed code, the function returns NGX_OK, so this
  * test will FAIL.
  *
- * **Validates: Requirements 1.1, 1.2, 1.3**
+ * **Validates: fallback return value correctness**
  */
 static void
 test_fallback_return_value_on_error(void)
@@ -3888,7 +3889,7 @@ test_fallback_return_value_on_error(void)
  * and asserts that all data is decompressed. On unfixed
  * code, only a single inflate() worth of output is produced.
  *
- * **Validates: Requirements 4.1, 4.2, 4.3, 4.4**
+ * **Validates: decomp inflate loop completeness**
  */
 static void
 test_decomp_incomplete_inflate_error(void)
@@ -3954,7 +3955,7 @@ test_decomp_incomplete_inflate_error(void)
  * markdown_streaming_feed() returns a non-SUCCESS error,
  * the error is silently ignored and finalize continues.
  *
- * **Validates: Requirements 7.1, 7.2, 7.3**
+ * **Validates: tail feed error handling**
  */
 static void
 test_finalize_tail_feed_error(void)
@@ -4024,7 +4025,7 @@ test_finalize_tail_feed_error(void)
  * silently compiled as complex values and fall back to
  * "off" at runtime.
  *
- * **Validates: Requirements 10.1, 10.2**
+ * **Validates: invalid static value rejection at parse time**
  */
 static void
 test_config_invalid_static_value(void)
@@ -4103,7 +4104,7 @@ test_config_invalid_static_value(void)
 
 
 /* ================================================================
- * Preservation Tests (Bugfix Spec - Task 2)
+ * Preservation Tests (preservation bugfix)
  *
  * These tests capture baseline behavior for NON-bug inputs.
  * They MUST PASS on unfixed code, confirming that the behavior
@@ -4112,8 +4113,12 @@ test_config_invalid_static_value(void)
  * After each bug fix, these tests are re-run to verify no
  * regressions were introduced.
  *
- * **Validates: Requirements 3.1, 3.2, 3.3, 6.1, 6.2, 6.3,
- *              9.1, 9.2, 9.3, 12.1, 12.2, 12.3**
+ * **Validates: post-commit error always fail-closed, post-commit ignores on_error policy,
+ *              all error codes produce fail-closed, conditional if_modified_since_only allows streaming,
+ *              conditional disabled allows streaming, tail feed SUCCESS sends output,
+ *              no tail data -> direct finalize, no decompression -> skip decomp,
+ *              valid static values accepted, variable expressions compile,
+ *              duplicate directive -> 'is duplicate'**
  * ================================================================ */
 
 
@@ -4125,7 +4130,7 @@ test_config_invalid_static_value(void)
  * and returns NGX_OK so the main loop continues consuming
  * buffers. This behavior must not change after the fix.
  *
- * **Validates: Requirements 3.2**
+ * **Validates: post-commit ignores on_error policy**
  */
 static void
 test_preserve_normal_feed_returns_ok(void)
@@ -4168,7 +4173,7 @@ test_preserve_normal_feed_returns_ok(void)
  * buffer_append returns error), fallback_to_fullbuffer
  * returns NGX_ERROR. This error path must not change.
  *
- * **Validates: Requirements 3.1**
+ * **Validates: post-commit error always fail-closed**
  */
 static void
 test_preserve_fallback_buffer_fail(void)
@@ -4212,7 +4217,7 @@ test_preserve_fallback_buffer_fail(void)
  * decomp_feed produces complete output. This is the
  * non-bug path that must remain unchanged.
  *
- * **Validates: Requirements 6.1**
+ * **Validates: conditional if_modified_since_only allows streaming**
  */
 static void
 test_preserve_small_data_complete(void)
@@ -4265,7 +4270,7 @@ test_preserve_small_data_complete(void)
  * returns NGX_OK with no output. This early-return
  * path must remain unchanged.
  *
- * **Validates: Requirements 6.3**
+ * **Validates: conditional disabled allows streaming**
  */
 static void
 test_preserve_empty_input_ok(void)
@@ -4310,7 +4315,7 @@ test_preserve_empty_input_ok(void)
  * limit, decomp_feed returns NGX_ERROR. This size
  * limit enforcement must remain unchanged.
  *
- * **Validates: Requirements 6.2**
+ * **Validates: conditional if_modified_since_only allows streaming**
  */
 static void
 test_preserve_exceeds_max_size(void)
@@ -4359,7 +4364,7 @@ test_preserve_exceeds_max_size(void)
  * feed returns SUCCESS with output, the output is sent
  * downstream. This normal path must remain unchanged.
  *
- * **Validates: Requirements 9.1**
+ * **Validates: tail feed SUCCESS sends output**
  */
 static void
 test_preserve_tail_feed_success(void)
@@ -4408,7 +4413,7 @@ test_preserve_tail_feed_success(void)
  * the code skips the tail feed and goes straight to
  * markdown_streaming_finalize. This must remain unchanged.
  *
- * **Validates: Requirements 9.2**
+ * **Validates: no tail data -> direct finalize**
  */
 static void
 test_preserve_no_tail_data(void)
@@ -4456,7 +4461,7 @@ test_preserve_no_tail_data(void)
  * decomp_finish block is skipped and we go straight to
  * markdown_streaming_finalize. This must remain unchanged.
  *
- * **Validates: Requirements 9.3**
+ * **Validates: no decompression -> skip decomp**
  */
 static void
 test_preserve_no_decompression(void)
@@ -4498,7 +4503,7 @@ test_preserve_no_decompression(void)
  * as valid static values (case-insensitive). These must
  * continue to be accepted after the fix adds validation.
  *
- * **Validates: Requirements 12.1**
+ * **Validates: valid static values accepted**
  */
 static void
 test_preserve_valid_static_values(void)
@@ -4546,7 +4551,7 @@ test_preserve_valid_static_values(void)
  * ngx_http_compile_complex_value. This path must remain
  * unchanged after adding static value validation.
  *
- * **Validates: Requirements 12.2**
+ * **Validates: variable expressions compile**
  */
 static void
 test_preserve_variable_expression(void)
@@ -4595,7 +4600,7 @@ test_preserve_variable_expression(void)
  * once, the function returns "is duplicate". This check
  * is at the top of the function and must remain unchanged.
  *
- * **Validates: Requirements 12.3**
+ * **Validates: duplicate directive -> 'is duplicate'**
  */
 static void
 test_preserve_duplicate_directive(void)
@@ -4769,7 +4774,7 @@ main(void)
     test_preserve_variable_expression();
     test_preserve_duplicate_directive();
 
-    TEST_SECTION("Bug Condition Exploration (Bugfix Spec)");
+    TEST_SECTION("Bug Condition Exploration (preservation bugfix)");
     test_fallback_return_value_on_error();
     test_decomp_incomplete_inflate_error();
     test_finalize_tail_feed_error();
