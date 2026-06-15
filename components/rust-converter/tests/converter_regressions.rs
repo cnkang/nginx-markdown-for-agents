@@ -55,7 +55,7 @@ fn link_text_extraction_should_skip_removed_children() {
 
 /// Headings nested inside container elements (`<div>`, `<section>`, `<article>`)
 /// must preserve their Markdown level regardless of container nesting depth.
-/// Regression guard for Requirement 1.4 (semantic fidelity spec).
+/// Regression guard for semantic fidelity.
 #[test]
 fn headings_inside_containers_preserve_level() {
     // Heading inside <div>

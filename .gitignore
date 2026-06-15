@@ -126,6 +126,13 @@ venv/
 # Matrix updater transient artifact
 matrix-diff.json
 
+# Security and supply-chain scan outputs
+trivy-results.txt
+sbom.spdx.json
+scorecard-results.json
+.semgrep/
+gitleaks-report.*
+
 # Compiler / profiler artifacts
 *.profraw
 *.profdata

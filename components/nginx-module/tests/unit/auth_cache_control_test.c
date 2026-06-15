@@ -267,31 +267,31 @@ test_auth_detection(void)
 
     TEST_SUBSECTION("Authentication detection");
 
-    /* Bearer token triggers auth (Requirement 1.1, 1.2) */
+    /* Bearer token triggers auth (Authorization header presence detection) */
     r.authorization = "Bearer token";
     r.cookie_header = NULL;
     TEST_ASSERT(is_authenticated(&r, patterns, ARRAY_SIZE(patterns)) == 1,
                 "Authorization header with Bearer token should authenticate");
 
-    /* Both Authorization and auth cookie present (Requirement 3.1 — OR logic) */
+    /* Both Authorization and auth cookie present (OR logic across auth signals) */
     r.authorization = "Bearer token";
     r.cookie_header = "session_id=abc";
     TEST_ASSERT(is_authenticated(&r, patterns, ARRAY_SIZE(patterns)) == 1,
                 "Both Authorization and auth cookie present should authenticate");
 
-    /* Basic credentials trigger auth (Requirement 1.2 — scheme-agnostic) */
+    /* Basic credentials trigger auth (scheme-agnostic Authorization detection) */
     r.authorization = "Basic dXNlcjpwYXNz";
     r.cookie_header = NULL;
     TEST_ASSERT(is_authenticated(&r, patterns, ARRAY_SIZE(patterns)) == 1,
                 "Authorization header with Basic credentials should authenticate");
 
-    /* Digest scheme triggers auth (Requirement 1.2 — scheme-agnostic) */
+    /* Digest scheme triggers auth (scheme-agnostic Authorization detection) */
     r.authorization = "Digest username=\"user\"";
     r.cookie_header = NULL;
     TEST_ASSERT(is_authenticated(&r, patterns, ARRAY_SIZE(patterns)) == 1,
                 "Authorization header with Digest scheme should authenticate");
 
-    /* Absent Authorization header with no auth cookies → unauthenticated (Requirement 1.3) */
+    /* Absent Authorization header with no auth cookies: unauthenticated */
     r.authorization = NULL;
     r.cookie_header = NULL;
     TEST_ASSERT(is_authenticated(&r, patterns, ARRAY_SIZE(patterns)) == 0,
@@ -307,7 +307,7 @@ test_auth_detection(void)
                 "Non-auth cookies should not authenticate");
 
     /*
-     * Multiple Cookie headers simulation (Requirement 2.5).
+     * Multiple Cookie headers simulation (multi-header chain iteration).
      *
      * The production code iterates Cookie headers via ->next chain.
      * This test simulates the second Cookie header containing an auth
@@ -341,7 +341,7 @@ test_cache_control_adjustment(void)
     TEST_ASSERT(STR_EQ(adjust_cache_control_for_auth("private, no-store", 1), "private, no-store"),
                 "private, no-store should be preserved unchanged");
     TEST_ASSERT(STR_EQ(adjust_cache_control_for_auth("public", 0), "public"), "Unauthenticated request should not change Cache-Control");
-    /* Neutral headers: append private (Requirement 9) */
+    /* Neutral headers: append private */
     TEST_ASSERT(STR_EQ(adjust_cache_control_for_auth("max-age=3600", 1), "max-age=3600, private"),
                 "Neutral max-age should get private appended");
     TEST_ASSERT(STR_EQ(adjust_cache_control_for_auth("no-cache, max-age=0", 1), "no-cache, max-age=0, private"),
@@ -349,11 +349,11 @@ test_cache_control_adjustment(void)
     /* Empty Cache-Control value treated as absent */
     TEST_ASSERT(STR_EQ(adjust_cache_control_for_auth("", 1), "private"),
                 "Empty Cache-Control should become private");
-    /* Extra whitespace handling (Requirement 10.4) */
+    /* Extra whitespace handling */
     TEST_ASSERT(STR_EQ(adjust_cache_control_for_auth("  public  ,  max-age=600  ", 1), "max-age=600, private"),
                 "Extra whitespace around public should be handled");
     /*
-     * no-cache="public" should NOT trigger public detection (Requirement 10.3).
+     * no-cache="public" should NOT trigger public detection.
      *
      * The production code tokenizes on commas first, so
      * "no-cache=\"public\"" is a single token that does not start with
@@ -369,7 +369,7 @@ test_cache_control_adjustment(void)
 }
 
 /*
- * Auth policy deny mode behavioral test (Requirement 4).
+ * Auth policy deny mode behavioral test.
  *
  * Simulates the production decision chain from request_impl.h:
  * if auth_policy == DENY and request is authenticated, skip conversion.
@@ -395,7 +395,7 @@ test_auth_policy_deny_mode(void)
     int authenticated;
     const char *decision;
 
-    TEST_SUBSECTION("Auth policy deny mode (Requirement 4)");
+    TEST_SUBSECTION("Auth policy deny mode");
 
     /* Deny + authenticated → skip with INELIGIBLE_AUTH */
     r.authorization = "Bearer token";
@@ -425,7 +425,7 @@ test_auth_policy_deny_mode(void)
 }
 
 /*
- * Streaming path auth cache control parity tests (Requirement 11).
+ * Streaming path auth cache control parity tests.
  *
  * The streaming path now calls the same adjust_cache_control_for_auth
  * logic as the full-buffer path. These tests verify that the streaming
@@ -438,22 +438,22 @@ test_auth_policy_deny_mode(void)
 static void
 test_streaming_path_auth_cache_control(void)
 {
-    TEST_SUBSECTION("Streaming path auth cache control parity (Requirement 11)");
+    TEST_SUBSECTION("Streaming path auth cache control parity");
 
-    /* 11.5: No existing Cache-Control → add private */
+    /* No existing Cache-Control: add private */
     TEST_ASSERT(STR_EQ(adjust_cache_control_for_auth(NULL, 1), "private"),
                 "Streaming: missing CC should become private");
 
-    /* 11.6: no-store preserved */
+    /* no-store preserved */
     TEST_ASSERT(STR_EQ(adjust_cache_control_for_auth("no-store", 1), "no-store"),
                 "Streaming: no-store should be preserved");
 
-    /* 11.7: public upgraded to private */
+    /* public upgraded to private */
     TEST_ASSERT(STR_EQ(adjust_cache_control_for_auth("public, max-age=600", 1),
                         "max-age=600, private"),
                 "Streaming: public should be upgraded to private");
 
-    /* 11.8: Parity — full-buffer and streaming produce identical output */
+    /* Parity: full-buffer and streaming produce identical output */
     {
         struct {
             const char *input_cc;
@@ -489,7 +489,7 @@ test_streaming_path_auth_cache_control(void)
 }
 
 /*
- * Fail-open safety test (Requirement 5.4).
+ * Fail-open safety test.
  *
  * When conversion fails (fail-open), Cache-Control must be preserved
  * unchanged regardless of auth state. The adjust function is NOT called
@@ -522,7 +522,7 @@ fail_open_dispatch_cache_control(const char *original_cc, int authenticated)
 static void
 test_fail_open_preserves_cache_control(void)
 {
-    TEST_SUBSECTION("Fail-open preserves Cache-Control (Requirement 5.4)");
+    TEST_SUBSECTION("Fail-open preserves Cache-Control");
 
     /*
      * On fail-open, the module does NOT call adjust_cache_control_for_auth.
@@ -563,7 +563,7 @@ test_fail_open_preserves_cache_control(void)
 }
 
 /*
- * Cache policy matrix verification (Requirement 12, Design Policy Matrix).
+ * Cache policy matrix verification.
  *
  * Covers all combinations of auth state, upstream Cache-Control value,
  * and auth policy mode as specified in the design document.
@@ -576,7 +576,7 @@ test_cache_policy_matrix(void)
     int authenticated;
     const char *decision;
 
-    TEST_SUBSECTION("Cache policy matrix (Requirements 5-9, 12)");
+    TEST_SUBSECTION("Cache policy matrix");
 
     /*
      * 13.1: Unauthenticated × {absent, public, private, no-store} × {allow, deny}
@@ -660,7 +660,7 @@ test_cache_policy_matrix(void)
 }
 
 /*
- * Streaming header update integration test (Requirement 11.5-11.8).
+ * Streaming header update integration test.
  *
  * DIVERGENCE RISK: The production function
  * ngx_http_markdown_streaming_update_headers() cannot be linked into
@@ -691,8 +691,7 @@ test_streaming_header_update_integration(void)
     const char *decision;
     const char *cache_result;
 
-    TEST_SUBSECTION("Streaming header update integration "
-                    "(Requirement 11.5-11.8)");
+    TEST_SUBSECTION("Streaming header update integration");
 
     /*
      * Simulate the production decision chain for the streaming path:

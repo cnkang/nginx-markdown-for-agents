@@ -82,8 +82,8 @@ ngx_http_markdown_const_strncasecmp(const u_char *s1, const u_char *s2,
  * @param base_url  Output parameter for constructed base URL
  * @return      NGX_OK on success, NGX_ERROR on failure
  *
- * Requirements: Design - URL Resolution, NGINX Integration
- * Task: 14.8 Implement base_url construction with guarded X-Forwarded headers
+ * Covers: base URL construction from request headers and server config
+ * Implements: base_url construction with guarded X-Forwarded headers
  */
 static u_char ngx_http_markdown_hdr_x_forwarded_proto[] = "X-Forwarded-Proto";
 static u_char ngx_http_markdown_hdr_x_forwarded_host[] = "X-Forwarded-Host";
@@ -526,7 +526,7 @@ ngx_http_markdown_construct_base_url(ngx_http_request_t *r, ngx_pool_t *pool,
          * Memory allocation failed for base_url - critical system error.
          * 
          * Log level: NGX_LOG_CRIT (critical system failure)
-         * Requirements: FR-09.5, FR-09.6, FR-09.7
+         * Covers: base_url allocation failure handling
          */
         ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                      "markdown: failed to allocate memory for base_url, category=system");
@@ -1441,10 +1441,10 @@ ngx_http_markdown_shadow_compare(
      * engine before freeing the result (lifecycle ordering:
      * read FFI struct fields before calling the free function).
      *
-     * Requirement 2.8: record streaming engine peak memory
+     * Record streaming engine peak memory
      * estimate in shadow mode when available.
      *
-     * Requirement 3.7: update the last_peak_memory_bytes gauge
+     * Update the last_peak_memory_bytes gauge
      * unconditionally so the gauge reflects the most recent
      * streaming conversion, whether from the primary streaming
      * path or shadow mode.  Skipping the write when the value

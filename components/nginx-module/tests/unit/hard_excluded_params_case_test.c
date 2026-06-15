@@ -6,7 +6,7 @@
  * mixed-case variants.  This ensures that an attacker cannot bypass the
  * streaming exclusion list by appending parameters or altering case.
  *
- * Validates: Spec 41, Requirement 4 AC 4
+ * Validates: streaming security and resource limits, hard-excluded content types always passthrough AC 4
  *   "Matching ignores Content-Type parameters and case, and is evaluated
  *    before decompression or parser allocation."
  *
@@ -332,7 +332,7 @@ main(void)
 {
     printf("\n========================================\n");
     printf("hard_excluded_params_case Security Tests\n");
-    printf("  (Spec 41, Req 4 AC 4)\n");
+    printf("  (streaming security and resource limits, hard-excluded content types always passthrough AC 4)\n");
     printf("========================================\n");
 
     test_mixed_case_exclusions();

@@ -1282,9 +1282,15 @@ markdown_llm_provider openai-gpt;
 **Default:** `0` (use provider default)
 **Context:** http, server, location
 
-Explicit chars-per-token ratio for token estimation, stored as fixed-point * 10 (e.g., `38` = 3.8 chars/token). Overrides both the default (4.0) and the provider-specific ratio. Set to `0` to use the provider's default.
+Explicit chars-per-token ratio for token estimation, stored as an integer
+fixed-point value multiplied by 10 (e.g., `38` = 3.8 chars/token). Overrides
+both the default (4.0) and the provider-specific ratio. Set to `0` to use the
+provider's default.
 
-**Range:** 0–255 (0.0–25.5 chars/token). Practical range: 20–60.
+**Range:** 0-255. Non-zero values encode raw ratios from 0.1 to 25.5
+chars/token; decoded values below 1.0 are normalized to the effective minimum
+1.0 before token estimation. Practical values are usually 20-60 (2.0-6.0
+chars/token).
 
 **Example:**
 ```nginx

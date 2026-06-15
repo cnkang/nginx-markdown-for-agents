@@ -2,7 +2,8 @@
 name = "test-corpus-conversion"
 version = "0.6.3"
 edition = "2024"
+license = "BSD-2-Clause"
 publish = false
 
 [dependencies]
-nginx-markdown-converter = { path = "../../../components/rust-converter" }
+nginx-markdown-converter = { version = "0.8.0", path = "../../../components/rust-converter" }

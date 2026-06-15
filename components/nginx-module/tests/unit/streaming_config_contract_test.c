@@ -13,7 +13,7 @@
  * - Reserved directive absent from directive inventory (5.6)
  * - Hard exclusions match MIME types with parameters (5.7)
  *
- * Requirements: Spec 36, Requirements 1-6, 9
+ * Requirements: streaming configuration contract
  */
 
 #include "../include/test_common.h"
@@ -534,7 +534,7 @@ test_valid_values(void)
     ngx_http_markdown_conf_t mcf;
     const char              *rc;
 
-    TEST_SUBSECTION("5.1 Valid values for each directive");
+    TEST_SUBSECTION("Valid values for each directive");
 
     setup_cf(&cf, &args, values, 2);
     g_compile_complex_rc = NGX_OK;
@@ -656,7 +656,7 @@ test_stream_engine_handler_valid(void)
     ngx_http_markdown_conf_t mcf;
     char                    *rc;
 
-    TEST_SUBSECTION("5.1b v0.8.0 stream_engine_handler direct");
+    TEST_SUBSECTION("v0.8.0 stream_engine_handler direct");
 
     setup_cf(&cf, &args, values, 2);
     set_arg(&cmd.name, "markdown_streaming_engine");
@@ -705,7 +705,7 @@ test_invalid_values(void)
     ngx_http_markdown_conf_t mcf;
     const char              *rc;
 
-    TEST_SUBSECTION("5.2 Invalid values rejected");
+    TEST_SUBSECTION("Invalid values rejected");
 
     setup_cf(&cf, &args, values, 2);
     g_compile_complex_rc = NGX_OK;
@@ -804,7 +804,7 @@ test_stream_engine_handler_rejection(void)
     ngx_http_markdown_conf_t mcf;
     char                    *rc;
 
-    TEST_SUBSECTION("5.2b v0.8.0 stream_engine_handler rejection");
+    TEST_SUBSECTION("v0.8.0 stream_engine_handler rejection");
 
     setup_cf(&cf, &args, values, 2);
     set_arg(&cmd.name, "markdown_streaming_engine");
@@ -866,7 +866,7 @@ test_allocation_failure(void)
     ngx_http_markdown_conf_t mcf;
     char                    *rc;
 
-    TEST_SUBSECTION("5.2c Allocation failure paths");
+    TEST_SUBSECTION("5.2c Allocation failure paths");;
 
     setup_cf(&cf, &args, values, 2);
     set_arg(&cmd.name, "markdown_stream_excluded_types");
@@ -934,7 +934,7 @@ test_default_inheritance(void)
     ngx_http_markdown_conf_t parent;
     ngx_http_markdown_conf_t child;
 
-    TEST_SUBSECTION("5.3 Default inheritance");
+    TEST_SUBSECTION("Default inheritance");
 
     /* Test 1: Both unset -> defaults applied */
     init_conf(&parent);
@@ -1004,7 +1004,7 @@ test_reserved_directive_rejected(void)
     ngx_str_t bad_directive;
     size_t    result;
 
-    TEST_SUBSECTION("5.4 Reserved directive rejected");
+    TEST_SUBSECTION("Reserved directive rejected");
 
     /*
      * The reserved directive markdown_stream_flush_interval is NOT
@@ -1032,7 +1032,7 @@ test_hard_exclusions_always_present(void)
     ngx_http_markdown_conf_t conf;
     ngx_str_t                ct;
 
-    TEST_SUBSECTION("5.5 Hard exclusions always present");
+    TEST_SUBSECTION("Hard exclusions always present");
 
     init_conf(&conf);
     conf.stream.excluded_types = NULL;
@@ -1112,7 +1112,7 @@ test_reserved_directive_absent_from_inventory(void)
     ngx_str_t fi_str;
     size_t    parsed;
 
-    TEST_SUBSECTION("5.6 Reserved directive absent from inventory");
+    TEST_SUBSECTION("Reserved directive absent from inventory");
 
     TEST_ASSERT(!command_table_contains("markdown_stream_flush_interval"),
         "reserved directive NOT in production command table");
@@ -1135,7 +1135,7 @@ test_hard_exclusions_with_parameters(void)
     ngx_http_markdown_conf_t conf;
     ngx_str_t                ct;
 
-    TEST_SUBSECTION("5.7 Hard exclusions match MIME types with parameters");
+    TEST_SUBSECTION("Hard exclusions match MIME types with parameters");
 
     init_conf(&conf);
     conf.stream.excluded_types = NULL;
@@ -1207,7 +1207,7 @@ test_auto_threshold_compatibility_bridge(void)
     ngx_http_markdown_conf_t parent;
     ngx_http_markdown_conf_t child;
 
-    TEST_SUBSECTION("5.8 auto_threshold compatibility bridge");
+    TEST_SUBSECTION("auto_threshold compatibility bridge");
 
     /*
      * Test 1: No directives set at all.
@@ -1284,7 +1284,7 @@ int
 main(void)
 {
     printf("\n========================================\n");
-    printf("streaming_config_contract Tests (Spec 36)\n");
+    printf("streaming_config_contract Tests (streaming configuration contract)\n");
     printf("========================================\n");
 
     g_compile_complex_rc = NGX_OK;

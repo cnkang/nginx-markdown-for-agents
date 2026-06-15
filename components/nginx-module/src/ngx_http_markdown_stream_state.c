@@ -1,7 +1,7 @@
 /*
  * Streaming Fallback State Machine — Decision Engine Implementation
  *
- * Pure-function decision engine for RFC 0008 section 3.  Maps
+ * Pure-function decision engine for streaming fallback state machine design.  Maps
  * (current_state, event, context) to (new_state, action, reason_code).
  *
  * Design invariants:
@@ -171,7 +171,7 @@ ngx_http_markdown_stream_decide(const ngx_http_markdown_stream_ctx_t *ctx,
 
 
 /*
- * NOT_ELIGIBLE state handler (task 2.2).
+ * NOT_ELIGIBLE state handler — initial eligibility evaluation.
  *
  * Initial state for all requests.  Only two valid transitions:
  *   - EVENT_ELIGIBLE -> STREAMING_CANDIDATE (begin evaluation)
@@ -210,7 +210,8 @@ ngx_http_markdown_stream_decide_not_eligible(
 
 
 /*
- * STREAMING_CANDIDATE state handler (tasks 2.3, 2.8).
+ * STREAMING_CANDIDATE state handler — streaming candidate evaluation
+ * and full-buffer fallback evaluation.
  *
  * The request has been deemed eligible.  Valid transitions:
  *   - EVENT_STREAMING_START -> PRE_COMMIT (streaming begins)
@@ -233,7 +234,7 @@ ngx_http_markdown_stream_decide_streaming_candidate(
             NGX_HTTP_MD_ACTION_CONTINUE_STREAMING,
             NGX_HTTP_MD_REASON_ELIGIBLE);
 
-    /* Full-buffer triggers with resource limit check (task 2.8) */
+    /* Full-buffer triggers with resource limit check (full-buffer fallback evaluation) */
     case NGX_HTTP_MD_EVENT_STRICT_ETAG:
         return ngx_http_markdown_try_full_buffer(
             ctx, NGX_HTTP_MD_REASON_STRICT_ETAG);
@@ -260,25 +261,27 @@ ngx_http_markdown_stream_decide_streaming_candidate(
 
 
 /*
- * PRE_COMMIT state handler (tasks 2.4, 2.5, 2.6, 2.8).
+ * PRE_COMMIT state handler — pre-commit fallback with replay available,
+ * pre-commit fallback without replay, header commit transition, and
+ * full-buffer fallback evaluation.
  *
  * Streaming has started but headers are not yet committed.
  * The available transitions depend on replay_available and
  * headers_committed flags:
  *
- * When replay_available=true AND headers_committed=false (task 2.4):
+ * When replay_available=true AND headers_committed=false (pre-commit fallback with replay available):
  *   - Fallback events -> PASSTHROUGH with PASS_HTML action
  *   - Full-doc feature -> FULL_BUFFER_FALLBACK (if within limits)
  *   - ON_ERROR_PASS -> PASSTHROUGH with PASS_HTML
  *   - ON_ERROR_REJECT -> PASSTHROUGH with REJECT_502
  *
- * When replay_available=false AND headers_committed=false (task 2.5):
+ * When replay_available=false AND headers_committed=false (pre-commit fallback without replay):
  *   - Delegated to PRE_COMMIT_REPLAY_UNAVAILABLE handler
  *
- * EVENT_COMMIT (task 2.6):
+ * EVENT_COMMIT (header commit transition):
  *   - -> COMMITTED with COMMIT_HEADERS action
  *
- * Full-buffer triggers (task 2.8):
+ * Full-buffer triggers (full-buffer fallback evaluation):
  *   - Resource limit check applies
  */
 static ngx_http_markdown_decision_t
@@ -287,7 +290,7 @@ ngx_http_markdown_stream_decide_pre_commit(
     ngx_http_markdown_stream_event_e event)
 {
     /*
-     * Task 2.6: EVENT_COMMIT transitions to COMMITTED regardless
+     * Header commit transition: EVENT_COMMIT transitions to COMMITTED regardless
      * of replay state — the caller has decided to proceed.
      */
     if (event == NGX_HTTP_MD_EVENT_COMMIT) {
@@ -298,8 +301,8 @@ ngx_http_markdown_stream_decide_pre_commit(
     }
 
     /*
-     * Task 2.5: If replay is unavailable but headers are not
-     * committed, delegate to the replay-unavailable handler for
+     * Pre-commit fallback without replay: If replay is unavailable but headers
+     * are not committed, delegate to the replay-unavailable handler for
      * forced decision semantics.
      */
     if (!ctx->replay_available && !ctx->headers_committed) {
@@ -308,8 +311,8 @@ ngx_http_markdown_stream_decide_pre_commit(
     }
 
     /*
-     * Task 2.4: Pre-commit fallback when replay is available
-     * and headers are uncommitted.
+     * Pre-commit fallback with replay available: fallback when replay
+     * is available and headers are uncommitted.
      */
     if (ctx->replay_available && !ctx->headers_committed) {
         switch (event) {
@@ -348,7 +351,7 @@ ngx_http_markdown_stream_decide_pre_commit(
                 NGX_HTTP_MD_ACTION_REJECT_502,
                 NGX_HTTP_MD_REASON_ON_ERROR_REJECT);
 
-        /* Full-buffer triggers (task 2.8) */
+        /* Full-buffer triggers (full-buffer fallback evaluation) */
         case NGX_HTTP_MD_EVENT_STRICT_ETAG:
             return ngx_http_markdown_try_full_buffer(
                 ctx, NGX_HTTP_MD_REASON_STRICT_ETAG);
@@ -387,7 +390,8 @@ ngx_http_markdown_stream_decide_pre_commit(
 
 
 /*
- * PRE_COMMIT_REPLAY_UNAVAILABLE state handler (task 2.5).
+ * PRE_COMMIT_REPLAY_UNAVAILABLE state handler — pre-commit fallback
+ * without replay.
  *
  * Replay buffer has overflowed but headers are not yet committed.
  * HTML passthrough is no longer available.  The module must either:
@@ -426,7 +430,7 @@ ngx_http_markdown_stream_decide_pre_commit_replay_unavailable(
             NGX_HTTP_MD_ACTION_REJECT_502,
             NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED);
 
-    /* Full-buffer triggers (task 2.8) */
+    /* Full-buffer triggers (full-buffer fallback evaluation) */
     case NGX_HTTP_MD_EVENT_STRICT_ETAG:
         return ngx_http_markdown_try_full_buffer(
             ctx, NGX_HTTP_MD_REASON_STRICT_ETAG);
@@ -449,17 +453,30 @@ ngx_http_markdown_stream_decide_pre_commit_replay_unavailable(
             NGX_HTTP_MD_ACTION_REJECT_502,
             NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED);
 
-    default:
+    case NGX_HTTP_MD_EVENT_ON_ERROR_REJECT:
         return ngx_http_markdown_make_decision(
             NGX_HTTP_MD_STATE_PASSTHROUGH,
             NGX_HTTP_MD_ACTION_REJECT_502,
-            NGX_HTTP_MD_REASON_RESOURCE_LIMIT_EXCEEDED);
+            NGX_HTTP_MD_REASON_ON_ERROR_REJECT);
+
+    default:
+        /*
+         * Unknown/unrecognized event in PRE_COMMIT_REPLAY_UNAVAILABLE:
+         * safe passthrough, not REJECT_502.  Unknown future events
+         * must not accidentally reject valid upstream responses.
+         * Only explicit NGX_HTTP_MD_EVENT_RESOURCE_LIMIT warrants
+         * REJECT_502 (known resource exhaustion).
+         */
+        return ngx_http_markdown_make_decision(
+            NGX_HTTP_MD_STATE_PASSTHROUGH,
+            NGX_HTTP_MD_ACTION_PASSTHROUGH,
+            NGX_HTTP_MD_REASON_NOT_ELIGIBLE);
     }
 }
 
 
 /*
- * COMMITTED state handler (task 2.7).
+ * COMMITTED state handler — post-commit error handling.
  *
  * Headers have been sent downstream.  The critical safety property
  * applies here: we must NEVER produce PASS_HTML or REJECT_502.
@@ -501,7 +518,7 @@ ngx_http_markdown_stream_decide_committed(
 
 
 /*
- * FULL_BUFFER_FALLBACK state handler (task 2.8).
+ * FULL_BUFFER_FALLBACK state handler — full-buffer fallback evaluation.
  *
  * The module has switched to full-buffer mode.  This is a stable
  * processing state (not terminal like PASSTHROUGH).  The only

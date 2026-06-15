@@ -2,7 +2,7 @@
  * Test: stream_commit
  *
  * Validates the header commit sequence for the streaming fallback
- * state machine (streaming fallback state machine, task 7.3).
+ * state machine (streaming fallback state machine, header commit).
  *
  * Tests successful commit, double commit, wrong-state commit,
  * NULL parameters, and header mutation correctness.
@@ -139,6 +139,33 @@ ngx_http_markdown_set_etag(ngx_http_request_t *r,
     return test_set_etag_rc;
 }
 
+/* Mock: ngx_http_markdown_remove_content_encoding */
+static int test_remove_content_encoding_called;
+
+void
+ngx_http_markdown_remove_content_encoding(ngx_http_request_t *r)
+{
+    UNUSED(r);
+    test_remove_content_encoding_called = 1;
+}
+
+/* Mock: ngx_http_markdown_is_authenticated */
+ngx_int_t
+ngx_http_markdown_is_authenticated(const ngx_http_request_t *r,
+                                   const ngx_http_markdown_conf_t *conf)
+{
+    UNUSED(r); UNUSED(conf);
+    return 0;
+}
+
+/* Mock: ngx_http_markdown_modify_cache_control_for_auth */
+ngx_int_t
+ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
+{
+    UNUSED(r);
+    return NGX_OK;
+}
+
 /* Stub: ngx_log_error_core */
 void
 ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
@@ -186,7 +213,7 @@ static void test_commit_success(void)
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
     ctx.stream_sm.headers_committed = 0;
 
-    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx);
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
 
     TEST_ASSERT(rc == NGX_OK, "commit returns NGX_OK");
     TEST_ASSERT(ctx.stream_sm.headers_committed == 1,
@@ -212,7 +239,7 @@ static void test_double_commit(void)
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
 
-    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx);
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
 
     TEST_ASSERT(rc == NGX_ERROR, "double commit returns NGX_ERROR");
     TEST_PASS("Double commit returns NGX_ERROR");
@@ -230,13 +257,13 @@ static void test_commit_wrong_state(void)
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_NOT_ELIGIBLE;
     ctx.stream_sm.headers_committed = 0;
 
-    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx);
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
 
     TEST_ASSERT(rc == NGX_ERROR,
                 "commit from NOT_ELIGIBLE returns NGX_ERROR");
 
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_PASSTHROUGH;
-    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx);
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
 
     TEST_ASSERT(rc == NGX_ERROR,
                 "commit from PASSTHROUGH returns NGX_ERROR");
@@ -254,10 +281,10 @@ static void test_commit_null_params(void)
     memset(&ctx, 0, sizeof(ctx));
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
 
-    rc = ngx_http_markdown_stream_commit_headers(NULL, &ctx);
+    rc = ngx_http_markdown_stream_commit_headers(NULL, &ctx, NULL);
     TEST_ASSERT(rc == NGX_ERROR, "NULL request returns NGX_ERROR");
 
-    rc = ngx_http_markdown_stream_commit_headers(&test_request, NULL);
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, NULL, NULL);
     TEST_ASSERT(rc == NGX_ERROR, "NULL ctx returns NGX_ERROR");
 
     TEST_PASS("NULL parameters return NGX_ERROR");
@@ -274,7 +301,7 @@ static void test_content_type_set(void)
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
     ctx.stream_sm.headers_committed = 0;
 
-    ngx_http_markdown_stream_commit_headers(&test_request, &ctx);
+    ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
 
     TEST_ASSERT(test_request.headers_out.content_type.len
                 == NGX_HTTP_MARKDOWN_CONTENT_TYPE_LEN,
@@ -300,7 +327,7 @@ static void test_content_length_cleared(void)
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
     ctx.stream_sm.headers_committed = 0;
 
-    ngx_http_markdown_stream_commit_headers(&test_request, &ctx);
+    ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
 
     TEST_ASSERT(test_request.headers_out.content_length_n == -1,
                 "content_length_n = -1");
@@ -324,7 +351,7 @@ static void test_commit_from_replay_unavailable(void)
         NGX_HTTP_MD_STATE_PRE_COMMIT_REPLAY_UNAVAILABLE;
     ctx.stream_sm.headers_committed = 0;
 
-    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx);
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
 
     TEST_ASSERT(rc == NGX_OK, "commit from replay-unavailable ok");
     TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_COMMITTED,
@@ -349,7 +376,7 @@ static void test_commit_vary_failure_aborts(void)
     /* Make vary accept fail */
     test_vary_accept_rc = NGX_ERROR;
 
-    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx);
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
 
     TEST_ASSERT(rc == NGX_ERROR,
                 "commit fails when vary fails");
@@ -383,7 +410,7 @@ static void test_commit_etag_failure_aborts(void)
     /* Make etag removal fail */
     test_set_etag_rc = NGX_ERROR;
 
-    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx);
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
 
     TEST_ASSERT(rc == NGX_ERROR,
                 "commit fails when etag fails");
@@ -415,7 +442,7 @@ static void test_commit_content_length_absent(void)
     test_request.headers_out.content_length = NULL;
     test_request.headers_out.content_length_n = -1;
 
-    ngx_http_markdown_stream_commit_headers(&test_request, &ctx);
+    ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
 
     TEST_ASSERT(test_request.headers_out.content_length_n == -1,
                 "content_length_n stays -1");
@@ -425,9 +452,82 @@ static void test_commit_content_length_absent(void)
 }
 
 
+/* --- Decompression.needed controls Content-Encoding removal --- */
+
+static void test_content_encoding_removed_when_decompression_needed(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+    ctx.decompression.needed = 1;
+
+    test_remove_content_encoding_called = 0;
+
+    ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
+
+    TEST_ASSERT(test_remove_content_encoding_called == 1,
+                "Content-Encoding removed when decompression needed");
+    TEST_PASS("Content-Encoding removed when decompression needed");
+}
+
+static void test_content_encoding_preserved_when_no_decompression(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+    ctx.decompression.needed = 0;
+
+    test_remove_content_encoding_called = 0;
+
+    ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
+
+    TEST_ASSERT(test_remove_content_encoding_called == 0,
+                "Content-Encoding NOT removed when no decompression");
+    TEST_PASS("Content-Encoding preserved when no decompression");
+}
+
+
+/* --- Vary failure does not expose partial mutations --- */
+
+static void test_commit_vary_failure_no_content_type_leak(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+
+    test_vary_accept_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
+
+    TEST_ASSERT(rc == NGX_ERROR, "commit fails on vary error");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 0,
+                "headers_committed stays 0");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PRE_COMMIT,
+                "state stays PRE_COMMIT");
+    TEST_ASSERT(test_request.headers_out.content_type.data == NULL,
+                "content_type not modified on vary failure");
+    TEST_ASSERT(test_request.headers_out.content_type.len == 0,
+                "content_type_len not modified on vary failure");
+    TEST_ASSERT(test_request.headers_out.content_length_n == 12345,
+                "content_length_n not modified on vary failure");
+
+    TEST_PASS("Vary failure does not leak content-type mutation");
+}
+
+
 int main(void)
 {
-    TEST_SECTION("Stream Header Commit (Spec 37, Task 7.3)");
+    TEST_SECTION("Stream Header Commit (streaming fallback state machine, header commit)");
 
     test_commit_success();
     test_double_commit();
@@ -439,6 +539,9 @@ int main(void)
     test_commit_vary_failure_aborts();
     test_commit_etag_failure_aborts();
     test_commit_content_length_absent();
+    test_content_encoding_removed_when_decompression_needed();
+    test_content_encoding_preserved_when_no_decompression();
+    test_commit_vary_failure_no_content_type_leak();
 
     printf("\n  All stream commit tests passed\n\n");
     return 0;

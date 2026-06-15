@@ -72,6 +72,12 @@ configuration directives.
 - **Homebrew tap installation** for macOS.
 - **Unified DEB/RPM release workflow** with nFPM.
 - **Helm chart** and Kubernetes deployment examples.
+- **Supplemental static security gates**: `security-static.yml` adds
+  actionlint, shellcheck, gitleaks, focused Semgrep, and cargo-deny checks
+  around the existing CodeQL workflow.
+- **Supply-chain visibility workflow**: `supply-chain.yml` adds report-oriented
+  Trivy filesystem/IaC scanning, SPDX SBOM generation, and OpenSSF Scorecard
+  for PR, push, scheduled, and manual triggers.
 
 ### Changed
 
@@ -79,12 +85,26 @@ configuration directives.
   directive. Existing configurations still parse, and explicit values are
   bridged to `markdown_stream_threshold` unless the new directive is also
   explicitly configured.
+- Clarified FFI token-ratio fixed-point boundaries, documented streaming
+  reason pointer lifetime, and kept security/supply-chain gate guidance aligned
+  with the PR/push/scheduled/manual reporting workflow semantics.
 - **BREAKING**: Streaming engine now produces `Transfer-Encoding: chunked`
   output instead of `Content-Length` for streaming responses.
 - **BREAKING**: `MarkdownOptions` FFI layout now includes
   `flush_threshold` for `markdown_stream_flush_min`. C and Rust integrations
   that construct `MarkdownOptions` directly must rebuild against the 0.8.0
   headers and initialize the new field.
+- **BREAKING**: `FFIHeaderEntry.op_type` now supports value `3` (delete-all
+  matching entries). Old binaries must not be mixed with 0.8.0 libraries.
+- **BREAKING**: `ngx_http_markdown_check_eligibility()` now requires a 4th
+  `effective_conf` parameter. All call sites must be updated.
+- **BREAKING**: `ctx->stream_sm` and `ctx->streaming` layout changed;
+  third-party modules must rebuild. See `docs/guides/MIGRATION-0.8.md`.
+- **BREAKING**: 0.6.x `NGX_HTTP_MARKDOWN_STREAMING_ENGINE_*` constants
+  removed; use `NGX_HTTP_MARKDOWN_STREAM_ENGINE_*` (different AUTO/ON
+  values). 0.8.0 does not preserve 0.6.x streaming compatibility.
+- **BREAKING**: Rust converter and NGINX C module must be deployed as a
+  matched pair. Mixing versions causes FFI layout mismatches.
 - Auto-mode streaming threshold default changed from 32 KB to 1 MB to align
   with the true streaming contract definition (ADR-0013).
 - `markdown_max_size` directive now emits an info-level deprecation warning

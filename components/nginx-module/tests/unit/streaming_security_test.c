@@ -6,8 +6,8 @@
  *   - Budget exceeded metric increments (failures_resource_limit)
  *   - Correct on_error=pass (fail-open) and on_error=reject behavior
  *
- * Spec 41: Streaming Security, Resource Limits, and Compression
- * Validates: Requirement 6 AC 1 (oversized body)
+ * streaming security and resource limits: Streaming Security, Resource Limits, and Compression
+ * Validates: oversized body / replay overflow handling
  *
  * AGENTS.md compliance:
  *   Rule 14: security regression test with cross-boundary/malformed input
@@ -507,7 +507,7 @@ main(void)
 {
     printf("\n========================================\n");
     printf("streaming_security Tests\n");
-    printf("Spec 41: Oversized Body Security\n");
+    printf("streaming security and resource limits: Oversized Body Security\n");
     printf("========================================\n\n");
 
     TEST_SECTION("Oversized body — fail-open/reject semantics");

@@ -49,6 +49,7 @@ detect_rpm_repo_baseurl() {
         die "/etc/os-release not found; cannot select nginx.org RPM repository"
     fi
 
+    # shellcheck disable=SC1091 # Runtime distro metadata, only available in target image.
     . /etc/os-release
 
     local channel
@@ -56,10 +57,12 @@ detect_rpm_repo_baseurl() {
 
     case "${ID:-}" in
         amzn)
+            # shellcheck disable=SC2016 # $basearch is expanded by dnf/yum.
             printf 'http://nginx.org/packages/%samzn/%s/$basearch/\n' \
                 "$channel" "${VERSION_ID%%.*}"
             ;;
         almalinux|centos|rocky|rhel)
+            # shellcheck disable=SC2016 # $releasever/$basearch are expanded by dnf/yum.
             printf 'http://nginx.org/packages/%scentos/$releasever/$basearch/\n' \
                 "$channel"
             ;;
@@ -196,6 +199,7 @@ case "$PKG_FORMAT" in
 
         # Add nginx.org repository — select path based on distro ID and
         # channel (stable vs mainline) by NGINX minor-version parity.
+        # shellcheck disable=SC1091 # Runtime distro metadata, only available in target image.
         . /etc/os-release
         case "${ID:-}" in
             ubuntu)
