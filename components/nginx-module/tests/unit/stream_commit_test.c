@@ -40,6 +40,10 @@
 
 #define MARKDOWN_STREAMING_ENABLED 1
 
+#ifndef NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
+#define NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL 1
+#endif
+
 #ifndef ngx_str_set
 #define ngx_str_set(str, text)                                    \
     (str)->len = sizeof(text) - 1; (str)->data = (u_char *) text
@@ -119,6 +123,9 @@ static int test_vary_accept_called;
 static int test_vary_accept_rc;
 static int test_set_etag_called;
 static int test_set_etag_rc;
+static int test_is_authenticated;
+static int test_auth_cache_control_called;
+static int test_auth_cache_control_rc;
 
 /* Mock: ngx_http_markdown_add_vary_accept */
 ngx_int_t
@@ -155,7 +162,7 @@ ngx_http_markdown_is_authenticated(const ngx_http_request_t *r,
                                    const ngx_http_markdown_conf_t *conf)
 {
     UNUSED(r); UNUSED(conf);
-    return 0;
+    return test_is_authenticated;
 }
 
 /* Mock: ngx_http_markdown_modify_cache_control_for_auth */
@@ -163,7 +170,8 @@ ngx_int_t
 ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
 {
     UNUSED(r);
-    return NGX_OK;
+    test_auth_cache_control_called = 1;
+    return test_auth_cache_control_rc;
 }
 
 /* Stub: ngx_log_error_core */
@@ -199,6 +207,9 @@ static void test_setup(void)
     test_vary_accept_rc = NGX_OK;
     test_set_etag_called = 0;
     test_set_etag_rc = NGX_OK;
+    test_is_authenticated = 0;
+    test_auth_cache_control_called = 0;
+    test_auth_cache_control_rc = NGX_OK;
 }
 
 /* --- Successful commit --- */
@@ -525,6 +536,87 @@ static void test_commit_vary_failure_no_content_type_leak(void)
 }
 
 
+/* --- Auth Cache-Control failure aborts commit --- */
+
+static void test_commit_auth_cache_control_failure_aborts(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+
+    test_is_authenticated = 1;
+    test_auth_cache_control_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_commit_headers(
+        &test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "commit fails when auth Cache-Control fails");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 0,
+                "headers_committed stays 0 on auth CC failure");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PRE_COMMIT,
+                "state stays PRE_COMMIT on auth CC failure");
+    TEST_ASSERT(test_request.headers_out.content_type.data == NULL,
+                "Content-Type not set on auth CC failure");
+    TEST_ASSERT(test_request.headers_out.content_type.len == 0,
+                "Content-Type len not set on auth CC failure");
+    TEST_ASSERT(test_request.headers_out.content_length_n == 12345,
+                "Content-Length value preserved on auth CC failure");
+    TEST_ASSERT(test_request.headers_out.content_length
+                == &test_content_length_elt,
+                "Content-Length pointer preserved on auth CC failure");
+    TEST_ASSERT(test_content_length_elt.hash == 1,
+                "Content-Length header still valid on auth CC failure");
+    TEST_ASSERT(test_auth_cache_control_called == 1,
+                "auth Cache-Control was called");
+    TEST_ASSERT(test_vary_accept_called == 1,
+                "Vary was set before auth CC failure");
+    TEST_ASSERT(test_set_etag_called == 1,
+                "ETag was removed before auth CC failure");
+
+    TEST_PASS("Auth Cache-Control failure aborts commit (Phase 1 semantics)");
+}
+
+
+/* --- Auth Cache-Control success with authenticated request --- */
+
+static void test_commit_auth_cache_control_success(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+
+    test_is_authenticated = 1;
+    test_auth_cache_control_rc = NGX_OK;
+
+    rc = ngx_http_markdown_stream_commit_headers(
+        &test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "commit succeeds when auth Cache-Control succeeds");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 1,
+                "headers_committed set on auth CC success");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_COMMITTED,
+                "state = COMMITTED on auth CC success");
+    TEST_ASSERT(test_auth_cache_control_called == 1,
+                "auth Cache-Control was called");
+
+    TEST_PASS("Auth Cache-Control success with authenticated request");
+}
+
+
 int main(void)
 {
     TEST_SECTION("Stream Header Commit (streaming fallback state machine, header commit)");
@@ -542,6 +634,8 @@ int main(void)
     test_content_encoding_removed_when_decompression_needed();
     test_content_encoding_preserved_when_no_decompression();
     test_commit_vary_failure_no_content_type_leak();
+    test_commit_auth_cache_control_failure_aborts();
+    test_commit_auth_cache_control_success();
 
     printf("\n  All stream commit tests passed\n\n");
     return 0;
