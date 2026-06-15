@@ -305,8 +305,8 @@ ngx_http_markdown_streaming_cleanup(void *data);
 /*
  * Engine selector: determine the processing path for a request.
  *
- * Evaluates the markdown_streaming_engine complex value and
- * applies the selection rules (engine mode, HEAD request,
+ * Evaluates the markdown_streaming_engine enum and applies the
+ * selection rules (engine mode, HEAD request,
  * 304 status, conditional_requests policy, content-type
  * exclusions, and auto-mode content-length threshold).
  *
@@ -533,8 +533,8 @@ ngx_http_markdown_log_conditional_streaming(
 /*
  * Engine selector: determine the processing path for a request.
  *
- * Evaluates the markdown_streaming_engine complex value once
- * in the header filter phase and caches the result.
+ * Evaluates the markdown_streaming_engine enum once in the header
+ * filter phase and caches the result.
  *
  * Evaluation order (per design doc):
  * 1. engine == off -> PATH_FULLBUFFER
@@ -567,7 +567,11 @@ ngx_http_markdown_select_processing_path(
 
     engine_mode = conf->stream.engine;
 
-common_checks:
+    if (engine_mode == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF) {
+        return ngx_http_markdown_path_selection(
+            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+            NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
+    }
 
     /* Rule 3: HEAD request */
     if (r->method == NGX_HTTP_HEAD) {

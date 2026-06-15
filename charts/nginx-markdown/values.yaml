@@ -104,7 +104,7 @@ markdown:
     engine: "auto"
     budget: "2m"
     onError: "pass"
-    autoThreshold: "32k"
+    threshold: "1m"
     shadow: false
 
   # Noise pruning (v0.6.0)

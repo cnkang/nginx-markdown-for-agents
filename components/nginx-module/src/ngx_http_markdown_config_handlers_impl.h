@@ -903,29 +903,14 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
     return NGX_CONF_OK;
 }
 
-/*
- * v0.8.0 streaming directive handlers (streaming configuration directives).
- *
- * These handlers parse the new streaming configuration directives
- * defined in the streaming configuration design.  They validate values at config-parse
- * time and reject invalid input with clear error messages.
- */
-
-#if !defined(MARKDOWN_STREAMING_ENABLED)                                      \
-    || defined(NGX_HTTP_MARKDOWN_TEST_LEGACY_STREAM_ENGINE_HANDLER)
+#ifndef MARKDOWN_STREAMING_ENABLED
 /*
  * Configuration directive handler: markdown_streaming_engine (v0.8.0)
  *
- * Accepts exactly: off, auto, on.
- * Stores as ngx_uint_t enum in conf->stream.engine.
- *
- * Parameters:
- *   cf   - configuration context
- *   cmd  - directive definition
- *   conf - location configuration pointer
- *
- * Returns:
- *   NGX_CONF_OK on success, NGX_CONF_ERROR on invalid value
+ * Non-streaming builds keep the directive parseable so configuration
+ * validation fails only on invalid values, not on missing symbols. Runtime
+ * selection still falls back to the full-buffer path because streaming code is
+ * not compiled in.
  */
 static char *
 ngx_http_markdown_stream_engine_handler(ngx_conf_t *cf,

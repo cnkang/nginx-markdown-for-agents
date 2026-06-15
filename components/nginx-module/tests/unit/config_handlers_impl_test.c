@@ -528,6 +528,40 @@ ngx_http_conf_get_module_loc_conf(ngx_conf_t *cf, ngx_module_t module)
     return g_clcf;
 }
 
+static char *
+ngx_http_markdown_stream_engine_handler(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    (void) cmd;
+
+    value = cf->args->elts;
+
+    if (mcf->stream.engine != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    if (value[1].len == 3
+        && ngx_memcmp(value[1].data, "off", 3) == 0)
+    {
+        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF;
+    } else if (value[1].len == 4
+               && ngx_memcmp(value[1].data, "auto", 4) == 0)
+    {
+        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
+    } else if (value[1].len == 2
+               && ngx_memcmp(value[1].data, "on", 2) == 0)
+    {
+        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
+    } else {
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
+
 /*
  * Returns the test instance of ngx_http_markdown_main_conf_t,
  * allowing ngx_http_markdown_set_dynconf_path to read and write
@@ -632,7 +666,10 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->stream_types = NGX_CONF_UNSET_PTR;
     mcf->large_body_threshold = NGX_CONF_UNSET_SIZE;
     mcf->ops.metrics_format = NGX_CONF_UNSET_UINT;
-    mcf->streaming.engine = NULL;
+    mcf->stream.engine = NGX_CONF_UNSET_UINT;
+    mcf->stream.threshold = NGX_CONF_UNSET_SIZE;
+    mcf->stream.flush_min = NGX_CONF_UNSET_SIZE;
+    mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;
 }
 
 /*
@@ -1286,19 +1323,17 @@ test_metrics_handlers(void)
 }
 
 /*
- * Verify streaming_engine handler: static values, duplicate
- * detection, variable compilation, and compile failure.
+ * Verify stream_engine handler: static enum values, duplicate
+ * detection, and invalid value rejection.
  *
- * Semantic contract mirrored: ngx_http_markdown_streaming_engine
- * accepts static tokens or NGINX variable expressions, stores the
- * compiled complex value in mcf->streaming.engine, rejects
- * duplicates, and returns NGX_CONF_ERROR for invalid tokens or
- * compilation failures.
+ * Semantic contract mirrored: ngx_http_markdown_stream_engine_handler
+ * accepts static enum tokens (off, auto, on), stores the value in
+ * mcf.stream.engine, rejects duplicates, and returns NGX_CONF_ERROR
+ * for invalid tokens.
  *
  * Return: void.
  *
- * Side effects: modifies g_compile_complex_rc; asserts on
- *               mcf.streaming.engine.
+ * Side effects: asserts on mcf.stream.engine.
  */
 static void
 test_streaming_engine_handler(void)
@@ -1310,7 +1345,7 @@ test_streaming_engine_handler(void)
     ngx_http_markdown_conf_t mcf;
     const char              *rc;
 
-    TEST_SUBSECTION("streaming_engine handler");
+    TEST_SUBSECTION("stream_engine handler");
 
     setup_cf(&cf, &args, values, 2);
     set_arg(&cmd.name, "markdown_streaming_engine");
@@ -1318,38 +1353,103 @@ test_streaming_engine_handler(void)
 
     init_conf(&mcf);
     set_arg(&values[1], "auto");
-    rc = ngx_http_markdown_streaming_engine(&cf, &cmd, &mcf);
+    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "auto should parse");
-    TEST_ASSERT(mcf.streaming.engine != NULL,
-        "compiled streaming engine value should be set");
+    TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO,
+        "stream engine should be set to AUTO");
 
-    rc = ngx_http_markdown_streaming_engine(&cf, &cmd, &mcf);
+    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
     TEST_ASSERT(strcmp(rc, "is duplicate") == 0,
-        "duplicate streaming_engine should fail");
+        "duplicate stream_engine should fail");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "off");
+    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "off should parse");
+    TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF,
+        "stream engine should be set to OFF");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "on");
+    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "on should parse");
+    TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
+        "stream engine should be set to ON");
 
     init_conf(&mcf);
     set_arg(&values[1], "invalid");
-    rc = ngx_http_markdown_streaming_engine(&cf, &cmd, &mcf);
+    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
         "invalid static value should fail");
-
-    init_conf(&mcf);
-    set_arg(&values[1], "$streaming_mode");
-    g_compile_complex_rc = NGX_OK;
-    rc = ngx_http_markdown_streaming_engine(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK,
-        "variable expression should compile");
-
-    init_conf(&mcf);
-    set_arg(&values[1], "$compile_fails");
-    g_compile_complex_rc = NGX_ERROR;
-    rc = ngx_http_markdown_streaming_engine(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "compile failure should return error");
 
     g_compile_complex_rc = NGX_OK;
 
     TEST_PASS("streaming_engine branches covered");
+}
+
+/*
+ * Verify v0.8.0 streaming directive handlers that live in the production
+ * handler header: threshold, flush_min, and excluded_types.
+ *
+ * Return: void.
+ *
+ * Side effects: allocates test arrays via the local ngx_array_create stub.
+ */
+static void
+test_v080_stream_directive_handlers(void)
+{
+    ngx_conf_t               cf;
+    ngx_array_t              args;
+    ngx_str_t                values[3];
+    ngx_command_t            cmd;
+    ngx_http_markdown_conf_t mcf;
+    const ngx_str_t         *types;
+    const char              *rc;
+
+    TEST_SUBSECTION("v0.8 stream directive handlers");
+
+    setup_cf(&cf, &args, values, 2);
+
+    init_conf(&mcf);
+    set_arg(&cmd.name, "markdown_stream_threshold");
+    set_arg(&values[0], "markdown_stream_threshold");
+    set_arg(&values[1], "64k");
+    rc = ngx_http_markdown_stream_threshold_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "stream threshold should parse");
+    TEST_ASSERT(mcf.stream.threshold == 64 * 1024,
+        "stream threshold should store parsed size");
+
+    init_conf(&mcf);
+    set_arg(&cmd.name, "markdown_stream_flush_min");
+    set_arg(&values[0], "markdown_stream_flush_min");
+    set_arg(&values[1], "16k");
+    rc = ngx_http_markdown_stream_flush_min_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "stream flush_min should parse");
+    TEST_ASSERT(mcf.stream.flush_min == 16 * 1024,
+        "stream flush_min should store parsed size");
+
+    init_conf(&mcf);
+    setup_cf(&cf, &args, values, 3);
+    set_arg(&cmd.name, "markdown_stream_excluded_types");
+    set_arg(&values[0], "markdown_stream_excluded_types");
+    set_arg(&values[1], "text/event-stream");
+    set_arg(&values[2], "application/x-ndjson");
+    rc = ngx_http_markdown_stream_excluded_types_handler(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "stream excluded_types should parse");
+    TEST_ASSERT(mcf.stream.excluded_types != NULL,
+        "stream excluded_types should allocate array");
+    TEST_ASSERT(mcf.stream.excluded_types->nelts == 2,
+        "stream excluded_types should store both values");
+
+    types = mcf.stream.excluded_types->elts;
+    TEST_ASSERT(types != NULL, "excluded type entries should be available");
+    TEST_ASSERT(types[0].len == strlen("text/event-stream"),
+        "first excluded type length should match");
+    TEST_ASSERT(memcmp(types[0].data, "text/event-stream",
+                       types[0].len) == 0,
+        "first excluded type value should match");
+
+    TEST_PASS("v0.8 stream directive handler branches covered");
 }
 
 /*
@@ -1708,6 +1808,7 @@ main(void)
     test_large_body_threshold_handler();
     test_metrics_handlers();
     test_streaming_engine_handler();
+    test_v080_stream_directive_handlers();
     test_parse_size_edge_cases();
     test_markdown_filter_palloc_failure();
     test_set_dynconf_path();

@@ -1,26 +1,31 @@
 # Streaming Default & Noise Pruning Migration Guide
 
-**Version**: 0.6.0
-**Audience**: Operators upgrading from 0.5.x to 0.6.0
+**Version**: 0.8.0
+**Audience**: Operators upgrading from 0.5.x/0.6.x/0.7.x to 0.8.0
 
 ## Overview
 
-v0.6.0 introduces two default behavior changes:
+v0.6.0 introduced two default behavior changes. v0.8.0 removes the
+v0.6.x compatibility bridge entirely:
 
-| Default | 0.5.x | 0.6.0 | Impact |
-|---|---|---|---|
-| `markdown_streaming_engine` | `off` (full-buffer) | `auto` (per-request selection) | Large/chunked responses use streaming by default |
-| `markdown_prune_noise` | N/A (compile-time opt-in) | `on` (runtime, default-enabled) | Noise regions (nav, footer, ads) removed by default |
+| Default | 0.5.x | 0.6.0–0.7.x | 0.8.0 | Impact |
+|---|---|---|---|---|
+| `markdown_streaming_engine` | `off` (full-buffer) | `auto` (per-request selection) | `auto` (per-request selection) | Large/chunked responses use streaming by default |
+| `markdown_prune_noise` | N/A (compile-time opt-in) | `on` (runtime, default-enabled) | `on` (runtime, default-enabled) | Noise regions (nav, footer, ads) removed by default |
+| `markdown_streaming_auto_threshold` | N/A (new in 0.6.0) | Accepted (32k default) | **Removed** — `nginx -t` fails | Must use `markdown_stream_threshold` |
+| `markdown_streaming_engine` `$variable` | Accepted | Accepted | **Removed** — `nginx -t` fails | Must use fixed `off`/`auto`/`on` |
 
-**Key guarantee**: Explicit `off`/`on` configurations produce identical behavior to 0.5.x.
+**Key guarantee**: Explicit `off`/`on` configurations produce identical behavior
+to 0.5.x. However, configurations using `markdown_streaming_auto_threshold` or
+`markdown_streaming_engine $variable` **must be updated before upgrading to 0.8.0**.
 
 ## Migration Paths
 
-### Path A: Accept 0.6.0 Defaults (Recommended)
+### Path A: Accept 0.8.0 Defaults (Recommended)
 
-No configuration changes needed. You get:
+No configuration changes needed (if not using removed directives). You get:
 
-- **Auto mode**: responses > 32 KiB or chunked use streaming; smaller responses use full-buffer
+- **Auto mode**: responses > 1 MiB or chunked use streaming; smaller responses use full-buffer
 - **Noise pruning**: nav, footer, aside, ads, cookie banners removed from output
 
 Monitor the new reason codes in logs:
@@ -63,7 +68,7 @@ markdown_streaming_engine off;
 ### How Auto Mode Selects Engine
 
 ```
-if Content-Length > markdown_streaming_auto_threshold:
+if Content-Length > markdown_stream_threshold:
     → streaming engine
 elif Transfer-Encoding: chunked:
     → streaming engine
@@ -74,12 +79,15 @@ else:
 ### Configuring the Threshold
 
 ```nginx
-# Lower threshold: stream more responses (default 32k)
-markdown_streaming_auto_threshold 16k;
+# Lower threshold: stream more responses (default 1m)
+markdown_stream_threshold 512k;
 
 # Higher threshold: stream only very large responses
-markdown_streaming_auto_threshold 64k;
+markdown_stream_threshold 5m;
 ```
+
+**Note**: `markdown_streaming_auto_threshold` was removed in 0.8.0.
+Use `markdown_stream_threshold` instead.
 
 ### Monitoring Auto Mode Selection
 
@@ -142,7 +150,34 @@ If pruning removes all content:
 2. `PRUNE_EMPTY_FALLBACK` reason code is logged
 3. `prune_empty_fallback_total` metric is incremented
 
-## Deprecation Notices
+## Deprecation and Removal Notices
+
+### `markdown_streaming_auto_threshold` — REMOVED in 0.8.0
+
+This directive is no longer registered. `nginx -t` will fail with
+"unknown directive" if it appears in your configuration. Replace with
+`markdown_stream_threshold`:
+
+```nginx
+# Before (0.6.x/0.7.x) — NO LONGER ACCEPTED
+markdown_streaming_auto_threshold 64k;
+
+# After (0.8.0) — required
+markdown_stream_threshold 64k;
+```
+
+### `markdown_streaming_engine` `$variable` — REMOVED in 0.8.0
+
+The directive no longer accepts NGINX variables. Only `off`, `auto`, and
+`on` are accepted:
+
+```nginx
+# Before (0.6.x/0.7.x) — NO LONGER ACCEPTED
+markdown_streaming_engine $streaming_flag;
+
+# After (0.8.0) — use a fixed value
+markdown_streaming_engine auto;
+```
 
 ### `markdown_max_size` and `markdown_streaming_budget`
 
@@ -154,7 +189,7 @@ explicit markdown_memory_budget  → medium priority
 compiled-in default              → lowest priority
 ```
 
-**Planned removal**: 0.8.0. Migrate before then:
+**Planned removal**: 0.8.0. Migrate before then::
 
 ```nginx
 # Before (0.5.x)
@@ -194,3 +229,4 @@ curl -s -H "Accept: text/markdown" http://localhost/page | head -50
 |---------|------|--------|---------|
 | 0.6.0 | 2026-04-28 | v060-prod | Initial migration guide |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.8.0 | 2026-06-15 | Kang | Updated for 0.8.0: markdown_streaming_auto_threshold removed, $variable support removed, default threshold changed to 1m |
