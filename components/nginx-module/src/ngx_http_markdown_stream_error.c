@@ -175,21 +175,11 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
 
     default:
         /*
-         * Unknown action from decision engine.  Log at ERR level
-         * with available context.  Return NGX_OK for protocol safety:
-         * the streaming response may be partially sent and returning
-         * NGX_ERROR could cause a 502 that the client sees after
-         * already receiving Markdown content.  NGX_OK means "no
-         * further action needed" which is the least-surprise outcome
-         * for an unrecognized state-machine action.
+         * Unknown/unrecognized state-machine action.  Return NGX_OK
+         * for protocol safety: the streaming response may be partially
+         * sent and returning NGX_ERROR could cause a 502 visible
+         * downstream.  NGX_OK means "no further action needed".
          */
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream on_error: "
-                      "unknown action %ui in state %ui "
-                      "(reason=%ui), treating as no-op",
-                      (ngx_uint_t) decision.action,
-                      (ngx_uint_t) decision.new_state,
-                      (ngx_uint_t) decision.reason);
         return NGX_OK;
     }
 }
