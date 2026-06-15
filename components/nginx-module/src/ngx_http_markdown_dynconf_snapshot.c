@@ -433,11 +433,6 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     p = ngx_http_markdown_snapshot_size(p, last,
         "markdown_stream_flush_min",
         conf->stream.flush_min, 1);
-
-    /* markdown_streaming_auto_threshold (deprecated alias for markdown_stream_threshold) */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_streaming_auto_threshold",
-        conf->stream.threshold, 0);
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
     /*

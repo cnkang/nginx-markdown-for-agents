@@ -722,30 +722,12 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
     size_t       threshold;
     size_t       precommit_buffer;
     size_t       flush_min;
-    ngx_flag_t   legacy_auto_threshold_explicit;
-    u_char       legacy_auto_threshold_explicit_str[sizeof("false")];
+    ngx_flag_t   threshold_explicit;
+    u_char       threshold_explicit_str[sizeof("false")];
 
-    /*
-     * engine: the actual resolved engine mode (off/auto/on).
-     * engine_source: how the engine value was determined
-     *   (default/configured/dynamic).
-     */
-    if (conf != NULL && conf->streaming.engine != NULL) {
-        engine_source_str = "dynamic";
-        /* Dynamic engine: resolve from complex value at runtime;
-         * report the static fallback here since we lack request context */
-        if (conf->stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF) {
-            engine_str = "off";
-        } else if (conf->stream.engine
-                   == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON)
-        {
-            engine_str = "on";
-        } else {
-            engine_str = "auto";
-        }
-    } else if (conf != NULL
-               && conf->stream.engine
-                  != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO)
+    if (conf != NULL
+        && conf->stream.engine
+           != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO)
     {
         engine_source_str = "configured";
         if (conf->stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF) {
@@ -768,12 +750,12 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
         ? conf->stream.precommit_buffer : 0;
     flush_min = (conf != NULL)
         ? conf->stream.flush_min : 0;
-    legacy_auto_threshold_explicit = (conf != NULL
-        && conf->streaming.auto_threshold_explicit) ? 1 : 0;
-    if (legacy_auto_threshold_explicit) {
-        ngx_memcpy(legacy_auto_threshold_explicit_str, "true", sizeof("true"));
+    threshold_explicit = (conf != NULL
+        && conf->stream.threshold_explicit) ? 1 : 0;
+    if (threshold_explicit) {
+        ngx_memcpy(threshold_explicit_str, "true", sizeof("true"));
     } else {
-        ngx_memcpy(legacy_auto_threshold_explicit_str, "false",
+        ngx_memcpy(threshold_explicit_str, "false",
                    sizeof("false"));
     }
 
@@ -785,12 +767,11 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
         "    \"threshold\": %uz,\n"
         "    \"precommit_buffer\": %uz,\n"
         "    \"flush_min\": %uz,\n"
-        "    \"auto_threshold\": %uz,\n"
-        "    \"legacy_auto_threshold_explicit\": %s\n"
+        "    \"threshold_explicit\": %s\n"
         "  }\n",
         engine_str, engine_source_str, on_error_str, threshold,
         precommit_buffer, flush_min,
-        threshold, legacy_auto_threshold_explicit_str);
+        threshold_explicit_str);
 #else
     p = ngx_slprintf(p, last,
         "  \"streaming_config\": null\n");

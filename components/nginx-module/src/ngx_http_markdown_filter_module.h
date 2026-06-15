@@ -107,19 +107,6 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
     (2 * 1024 * 1024)
 
 /*
- * Legacy auto-mode threshold field default: 32 KiB
- *
- * This is the internal default for the v0.6.0 streaming.auto_threshold
- * field.  In v0.8.0, the effective runtime threshold is controlled by
- * stream.threshold (default: 1 MiB via NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT).
- * This legacy default only takes effect when the operator explicitly sets
- * the old markdown_streaming_auto_threshold directive, triggering the
- * compatibility bridge to map the value into stream.threshold.
- */
-#define NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT \
-    (32 * 1024)
-
-/*
  * Streaming on_error policy constants
  *
  * Controls Pre_Commit_Phase failure behavior for the
@@ -482,18 +469,6 @@ typedef struct {
     ngx_flag_t   dynconf_dry_run;           /* markdown_dynconf_dry_run on|off (default: off) */
 } ngx_http_markdown_advanced_cfg_t;
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-typedef struct {
-    ngx_http_complex_value_t  *engine;          /* markdown_streaming_engine (complex value) */
-    size_t                     budget;          /* markdown_streaming_budget (default: 2m) */
-    ngx_flag_t                 budget_explicit; /* 1 if operator set markdown_streaming_budget */
-    ngx_uint_t                 on_error;        /* markdown_streaming_on_error pass|reject */
-    ngx_flag_t                 shadow;          /* markdown_streaming_shadow on|off */
-    size_t                     auto_threshold;  /* markdown_streaming_auto_threshold (legacy field default: 32k; v0.8.0 effective default is stream.threshold 1m unless this directive is explicitly set) */
-    ngx_flag_t                 auto_threshold_explicit; /* 1 if operator set markdown_streaming_auto_threshold */
-} ngx_http_markdown_streaming_cfg_t;
-#endif
-
 typedef struct {
     ngx_flag_t   enabled;              /* markdown_filter static resolved value */
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
@@ -548,21 +523,11 @@ typedef struct {
         ngx_msec_t   otel_export_timeout;   /* markdown_otel_export_timeout (default: 5000ms) */
     } ops;
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-    ngx_http_markdown_streaming_cfg_t streaming;
-#endif
-
     /*
-     * v0.8.0 unified streaming configuration (streaming configuration directives).
+     * Unified streaming configuration (v0.8.0+).
      *
-     * This is the runtime source-of-truth for all streaming directives.
-     * The v0.6.0 `streaming.*` fields (under MARKDOWN_STREAMING_ENABLED)
-     * serve as a compatibility layer: during merge, their values are
-     * mapped into `stream.*` when the operator uses the old directive
-     * names.  Runtime code MUST read from `stream.*` exclusively.
-     *
-     * Migration priority during merge:
-     *   stream.* explicit  >  streaming.* mapped  >  defaults
+     * This is the sole runtime source-of-truth for all streaming
+     * directives.  There is no compatibility layer from v0.6.x.
      */
     struct {
         ngx_uint_t    engine;              /* markdown_streaming_engine off|auto|on */
@@ -649,50 +614,6 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
 
 #undef NGX_MD_MERGE_STREAM
 }
-
-#ifdef MARKDOWN_STREAMING_ENABLED
-/*
- * Map legacy v0.6.0 streaming.* fields into the v0.8.0 stream.* runtime
- * source of truth after both structures have been merged.
- *
- * Sentinel casts intentionally avoid NGX_CONF_UNSET_* macros here because
- * standalone unit harnesses include this header before defining those macros.
- */
-static ngx_inline void
-ngx_http_markdown_bridge_legacy_stream_values(
-    ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev,
-    ngx_flag_t streaming_budget_set,
-    ngx_flag_t stream_budget_set)
-{
-    if (conf->streaming.on_error != (ngx_uint_t) -1
-        && !conf->stream.on_error_explicit)
-    {
-        conf->stream.on_error = conf->streaming.on_error;
-    }
-
-    if (conf->streaming.budget != NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE
-        && streaming_budget_set
-        && !stream_budget_set)
-    {
-        conf->stream.budget = conf->streaming.budget;
-        conf->stream.budget_explicit = conf->streaming.budget_explicit
-            || prev->stream.budget_explicit;
-    }
-
-    if (conf->streaming.shadow != (ngx_flag_t) -1
-        && !conf->stream.shadow_explicit)
-    {
-        conf->stream.shadow = conf->streaming.shadow;
-    }
-
-    if (conf->streaming.auto_threshold_explicit
-        && !conf->stream.threshold_explicit)
-    {
-        conf->stream.threshold = conf->streaming.auto_threshold;
-    }
-}
-#endif
 
 /*
  * Main configuration structure
