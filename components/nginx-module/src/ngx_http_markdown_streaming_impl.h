@@ -342,7 +342,7 @@ ngx_http_markdown_select_processing_path(
 static ngx_int_t
 ngx_http_markdown_streaming_update_headers(
     ngx_http_request_t *r,
-    const ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf);
 
 /*
@@ -756,17 +756,10 @@ common_checks:
 static ngx_int_t
 ngx_http_markdown_streaming_update_headers(
     ngx_http_request_t *r,
-    const ngx_http_markdown_ctx_t *ctx,
+    ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf)
 {
-    /*
-     * stream_commit_headers takes a non-const ctx because it sets
-     * headers_committed and state.  The const qualifier on our ctx
-     * parameter is from the historical signature; our caller
-     * (streaming_commit) owns a mutable ctx.
-     */
-    return ngx_http_markdown_stream_commit_headers(
-        r, (ngx_http_markdown_ctx_t *) ctx, conf);
+    return ngx_http_markdown_stream_commit_headers(r, ctx, conf);
 }
 
 

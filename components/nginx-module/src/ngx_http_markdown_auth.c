@@ -652,7 +652,7 @@ ngx_http_markdown_cookie_matches_pattern(const ngx_str_t *cookie_name,
  * @return      1 if authentication cookie found, 0 otherwise
  */
 static ngx_int_t
-ngx_http_markdown_has_auth_cookies(ngx_http_request_t *r,
+ngx_http_markdown_has_auth_cookies(const ngx_http_request_t *r,
                                    const ngx_http_markdown_conf_t *conf)
 {
     ngx_table_elt_t  *cookie_header;
@@ -720,7 +720,7 @@ ngx_http_markdown_has_auth_cookies(ngx_http_request_t *r,
  * @return      1 if authenticated, 0 otherwise
  */
 ngx_int_t
-ngx_http_markdown_is_authenticated(ngx_http_request_t *r,
+ngx_http_markdown_is_authenticated(const ngx_http_request_t *r,
                                    const ngx_http_markdown_conf_t *conf)
 {
     if (r == NULL) {
