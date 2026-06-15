@@ -693,6 +693,9 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
                                              struct MarkdownOptions *options)
 {
     ngx_str_t base_url;
+#ifdef MARKDOWN_STREAMING_ENABLED
+    size_t    budget;
+#endif
 
     markdown_options_init(options);
     if (conf->flavor > UINT32_MAX) {
@@ -812,12 +815,10 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
      * not explicitly set streaming_budget.
      */
 #ifdef MARKDOWN_STREAMING_ENABLED
-    if (ngx_http_markdown_effective_memory_budget(eff, conf)
-            != NGX_CONF_UNSET_SIZE
-        && !conf->stream.budget_explicit)
-    {
-        options->streaming_budget =
-            ngx_http_markdown_effective_memory_budget(eff, conf);
+    budget = ngx_http_markdown_effective_memory_budget(eff, conf);
+
+    if (budget != NGX_CONF_UNSET_SIZE && !conf->stream.budget_explicit) {
+        options->streaming_budget = budget;
     }
 #endif
 

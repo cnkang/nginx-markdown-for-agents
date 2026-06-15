@@ -4070,19 +4070,17 @@ test_config_invalid_static_value(void)
          * Static values without '$' are validated against
          * off/on/auto — invalid ones are rejected.
          */
-        if (!has_dollar && !is_valid_static) {
+        if (has_dollar || !is_valid_static) {
             would_reject = 1;  /* fixed: rejects invalid */
         } else {
-            would_reject = 0;  /* valid or variable */
+            would_reject = 0;  /* valid static enum */
         }
 
         /*
-         * Bug condition: static value that is not
-         * off/on/auto and has no '$'
+         * Bug condition: value is not a static off/on/auto enum
+         * but would not be rejected.
          */
-        if (!has_dollar && !is_valid_static
-            && would_reject == 0)
-        {
+        if ((has_dollar || !is_valid_static) && would_reject == 0) {
             all_rejected = 0;
         }
     }
