@@ -138,14 +138,8 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    rc = ngx_http_markdown_stream_commit_apply_auth_cache_control(
+    (void) ngx_http_markdown_stream_commit_apply_auth_cache_control(
         r, conf);
-    if (rc != NGX_OK) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
-                      "failed to apply auth Cache-Control");
-        return NGX_ERROR;
-    }
 
     /*
      * --- Phase 2: Infallible mutations ---
@@ -153,33 +147,15 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
      * These operations are pointer/integer assignments that cannot
      * fail.  They are ordered so that Content-Type is set first
      * (establishing the Markdown content type) followed by
-     * Content-Length and Content-Encoding removal.
+     * Content-Length and Content-Encoding removal.  Return values
+     * are intentionally not checked — all three functions are
+     * documented as always returning NGX_OK.
      */
 
-    rc = ngx_http_markdown_stream_commit_set_content_type(r);
-    if (rc != NGX_OK) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
-                      "failed to set Content-Type");
-        return NGX_ERROR;
-    }
-
-    rc = ngx_http_markdown_stream_commit_remove_content_length(r);
-    if (rc != NGX_OK) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
-                      "failed to remove Content-Length");
-        return NGX_ERROR;
-    }
-
-    rc = ngx_http_markdown_stream_commit_maybe_remove_content_encoding(
+    (void) ngx_http_markdown_stream_commit_set_content_type(r);
+    (void) ngx_http_markdown_stream_commit_remove_content_length(r);
+    (void) ngx_http_markdown_stream_commit_maybe_remove_content_encoding(
         r, ctx);
-    if (rc != NGX_OK) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown stream commit: "
-                      "failed to remove Content-Encoding");
-        return NGX_ERROR;
-    }
 
     /*
      * All mutations succeeded — set committed flag.
