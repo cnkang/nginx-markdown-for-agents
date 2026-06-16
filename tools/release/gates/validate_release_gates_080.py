@@ -28,6 +28,9 @@ import sys
 import tomllib
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # noqa: E402
+from lib.path_validation import validate_read_path  # noqa: E402
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 MAKEFILE = PROJECT_ROOT / "Makefile"
 CARGO_TOML_PATH = PROJECT_ROOT / "components" / "rust-converter" / "Cargo.toml"
@@ -92,7 +95,10 @@ class ValidationResult:
 
 def read(path: Path) -> str:
     """Read a file; return empty string if it does not exist."""
-    return path.read_text(encoding="utf-8") if path.is_file() else ""
+    validated = validate_read_path(
+        path, must_exist=False, purpose="release gate input"
+    )
+    return validated.read_text(encoding="utf-8") if validated.is_file() else ""
 
 
 def _expected_cargo_version() -> str:
@@ -170,10 +176,7 @@ def check_removed_conf_fields(result: ValidationResult) -> None:
     sources: dict[str, str] = {}
     if src_dir.is_dir():
         for path in src_dir.rglob("*.[ch]"):
-            try:
-                content = path.read_text(encoding="utf-8")
-            except OSError:
-                continue
+            content = read(path)
             sources[path.name] = content
     removed_fields = [
         r"conf->streaming\.engine",

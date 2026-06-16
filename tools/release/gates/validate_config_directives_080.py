@@ -67,6 +67,10 @@ NEW_DIRECTIVES = [
         "type": "size",
         "doc_heading": "markdown_stream_threshold",
         "merge_pattern": r"conf->stream\.threshold",
+        "default_pattern": (
+            r"NGX_MD_MERGE_STREAM\(\s*threshold\s*,\s*size_t\s*,\s*-1\s*,"
+            r"\s*NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT\s*\)"
+        ),
         "description": "auto-mode streaming threshold (replaces markdown_streaming_auto_threshold)",
     },
     {
@@ -74,6 +78,10 @@ NEW_DIRECTIVES = [
         "type": "size",
         "doc_heading": "markdown_stream_precommit_buffer",
         "merge_pattern": r"conf->stream\.precommit_buffer",
+        "default_pattern": (
+            r"NGX_MD_MERGE_STREAM\(\s*precommit_buffer\s*,\s*size_t\s*,"
+            r"\s*-1\s*,\s*262144\s*\)"
+        ),
         "description": "pre-commit replay buffer size",
     },
     {
@@ -81,6 +89,10 @@ NEW_DIRECTIVES = [
         "type": "size",
         "doc_heading": "markdown_stream_flush_min",
         "merge_pattern": r"conf->stream\.flush_min",
+        "default_pattern": (
+            r"NGX_MD_MERGE_STREAM\(\s*flush_min\s*,\s*size_t\s*,"
+            r"\s*-1\s*,\s*16384\s*\)"
+        ),
         "description": "minimum Markdown output batch size before flush",
     },
     {
@@ -88,6 +100,10 @@ NEW_DIRECTIVES = [
         "type": "string_list",
         "doc_heading": "markdown_stream_excluded_types",
         "merge_pattern": r"conf->stream\.excluded_types",
+        "default_pattern": (
+            r"conf->stream\.excluded_types\s*=.*\?"
+            r"\s*prev->stream\.excluded_types\s*:\s*NULL\s*;"
+        ),
         "description": "additional MIME types excluded from streaming",
     },
 ]
@@ -220,16 +236,16 @@ def check_directive_merge(
 
 def check_directive_default(
     directive_name: str,
-    merge_pattern: str,
-    core_src: str,
+    default_pattern: str,
+    default_src: str,
     result: ValidationResult,
 ) -> None:
     """Verify a default value is defined via the merge macro."""
     check_id = f"default:{directive_name}"
-    if not core_src:
-        result.fail(check_id, "config_core_impl.h not found")
+    if not default_src:
+        result.fail(check_id, "default source files not found")
         return
-    if re.search(merge_pattern, core_src):
+    if re.search(default_pattern, default_src, re.S):
         result.pass_(check_id, "default value defined via merge macro")
     else:
         result.fail(check_id, "no default value found")
@@ -297,15 +313,18 @@ def validate_all(result: ValidationResult) -> None:
             "source file not found — cannot validate removed constants",
         )
 
+    default_src = "\n".join([core_src, filter_h])
+
     for directive in NEW_DIRECTIVES:
         name = directive["name"]
         doc_heading = directive["doc_heading"]
         merge_pat = directive["merge_pattern"]
+        default_pat = directive["default_pattern"]
 
         check_directive_in_source(name, directives_src, result)
         check_directive_in_docs(name, doc_heading, docs, result)
         check_directive_merge(name, merge_pat, core_src, result)
-        check_directive_default(name, merge_pat, core_src, result)
+        check_directive_default(name, default_pat, default_src, result)
 
     for directive in REMOVED_DIRECTIVES:
         name = directive["name"]
