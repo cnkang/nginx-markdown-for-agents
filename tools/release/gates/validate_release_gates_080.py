@@ -174,10 +174,12 @@ def check_removed_conf_fields(result: ValidationResult) -> None:
         PROJECT_ROOT / "components" / "nginx-module" / "src"
     )
     sources: dict[str, str] = {}
-    if src_dir.is_dir():
-        for path in src_dir.rglob("*.[ch]"):
-            content = read(path)
-            sources[path.name] = content
+    if not src_dir.is_dir():
+        result.fail("removed:fields:sources", f"{src_dir} is not a directory")
+        return
+    for path in src_dir.rglob("*.[ch]"):
+        content = read(path)
+        sources[str(path.relative_to(src_dir))] = content
     removed_fields = [
         r"conf->streaming\.engine",
         r"conf->streaming\.auto_threshold",
