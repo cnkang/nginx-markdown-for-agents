@@ -305,8 +305,8 @@ ngx_http_markdown_streaming_cleanup(void *data);
 /*
  * Engine selector: determine the processing path for a request.
  *
- * Evaluates the markdown_streaming_engine complex value and
- * applies the selection rules (engine mode, HEAD request,
+ * Evaluates the markdown_streaming_engine enum and applies the
+ * selection rules (engine mode, HEAD request,
  * 304 status, conditional_requests policy, content-type
  * exclusions, and auto-mode content-length threshold).
  *
@@ -533,8 +533,8 @@ ngx_http_markdown_log_conditional_streaming(
 /*
  * Engine selector: determine the processing path for a request.
  *
- * Evaluates the markdown_streaming_engine complex value once
- * in the header filter phase and caches the result.
+ * Evaluates the markdown_streaming_engine enum once in the header
+ * filter phase and caches the result.
  *
  * Evaluation order (per design doc):
  * 1. engine == off -> PATH_FULLBUFFER
@@ -545,9 +545,9 @@ ngx_http_markdown_log_conditional_streaming(
  * 6. Content-Type is text/event-stream -> PATH_FULLBUFFER
  * 7. stream_types exclusion match -> PATH_FULLBUFFER
  * 8. engine == on -> PATH_STREAMING
- * 9. engine == auto + CL >= auto_threshold -> PATH_STREAMING
+ * 9. engine == auto + CL >= markdown_stream_threshold -> PATH_STREAMING
  * 10. engine == auto + chunked -> PATH_STREAMING
- * 11. engine == auto + CL < auto_threshold -> PATH_FULLBUFFER
+ * 11. engine == auto + CL < markdown_stream_threshold -> PATH_FULLBUFFER
  *
  * Default (no markdown_streaming_engine directive): auto mode.
  */
@@ -557,7 +557,6 @@ ngx_http_markdown_select_processing_path(
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff)
 {
-    ngx_str_t    val;
     ngx_uint_t   engine_mode;
 
     if (conf == NULL) {
@@ -566,79 +565,13 @@ ngx_http_markdown_select_processing_path(
             NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
     }
 
-    /*
-     * v0.8.0 source-of-truth: read engine from conf->stream.engine
-     * first.  If the v0.8.0 directive was explicitly set (not at the
-     * compiled-in AUTO default), use it directly.  Otherwise fall back
-     * to the v0.6.0 complex-value streaming.engine for compatibility.
-     *
-     * When falling back to streaming.engine, the evaluated string is
-     * mapped to the v0.8.0 engine constants (STREAM_ENGINE_*) for
-     * uniform downstream comparison.
-     */
-    if (conf->stream.engine != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO
-        || conf->streaming.engine == NULL)
-    {
-        engine_mode = conf->stream.engine;
-        goto common_checks;
-    }
+    engine_mode = conf->stream.engine;
 
-    /* v0.6.0 fallback: evaluate the complex value */
-    if (ngx_http_complex_value(r, conf->streaming.engine,
-                               &val) != NGX_OK)
-    {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-            "markdown: failed to evaluate "
-            "markdown_streaming_engine, "
-            "falling back to full-buffer");
+    if (engine_mode == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF) {
         return ngx_http_markdown_path_selection(
             NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
             NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
     }
-
-    /* Parse the evaluated string and map to v0.8.0 constants */
-    {
-        static u_char  str_off[]  = "off";
-        static u_char  str_on[]   = "on";
-        static u_char  str_auto[] = "auto";
-
-        if (val.len == 3
-            && ngx_strncasecmp(val.data, str_off,
-                               3) == 0)
-        {
-            return ngx_http_markdown_path_selection(
-                NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
-                NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
-        }
-
-        if (val.len == 2
-            && ngx_strncasecmp(val.data, str_on,
-                               2) == 0)
-        {
-            engine_mode =
-                NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
-
-        } else if (val.len == 4
-                   && ngx_strncasecmp(val.data,
-                                      str_auto,
-                                      4) == 0)
-        {
-            engine_mode =
-                NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
-
-        } else {
-            ngx_log_error(NGX_LOG_WARN,
-                r->connection->log, 0,
-                "markdown: invalid "
-                "markdown_streaming_engine value "
-                "\"%V\", falling back to off", &val);
-            return ngx_http_markdown_path_selection(
-                NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
-                NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
-        }
-    }
-
-common_checks:
 
     /* Rule 3: HEAD request */
     if (r->method == NGX_HTTP_HEAD) {
@@ -724,7 +657,7 @@ common_checks:
         && (size_t) r->headers_out.content_length_n
            < conf->stream.threshold)
     {
-        /* CL < auto_threshold: use full-buffer */
+        /* CL < markdown_stream_threshold: use full-buffer */
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_eligible_fullbuffer_auto());
         return ngx_http_markdown_path_selection(
@@ -732,7 +665,7 @@ common_checks:
             NGX_HTTP_MARKDOWN_STREAM_REASON_BELOW_THRESHOLD);
     }
 
-    /* auto + CL >= auto_threshold or chunked (no CL) */
+    /* auto + CL >= markdown_stream_threshold or chunked (no CL) */
     ngx_http_markdown_log_decision(r, conf, eff,
         ngx_http_markdown_reason_eligible_streaming_auto());
     return ngx_http_markdown_path_selection(

@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 pub enum RuntimeMode {
     /// Reuse a prebuilt module-enabled NGINX binary.
     Reuse(PathBuf),
-    /// Prepare a runnable runtime (directly or via compatibility bridge).
+    /// Prepare a runnable runtime (directly or via bootstrap).
     Bootstrap,
 }
 

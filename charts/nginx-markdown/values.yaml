@@ -104,24 +104,24 @@ markdown:
     engine: "auto"
     budget: "2m"
     onError: "pass"
-    autoThreshold: "32k"
+    threshold: "1m"
     shadow: false
 
-  # Noise pruning (v0.6.0)
+  # Noise pruning
   prune:
     noise: true
     selectors: ""
     protectionSelectors: ""
 
-  # Content-type routing (v0.6.0)
+  # Content-type routing
   contentTypes: []
 
-  # LLM adapter (v0.6.0)
+  # LLM adapter
   llm:
     provider: "default"
     charsPerToken: 0
 
-  # Unified memory budget (v0.6.0)
+  # Unified memory budget
   memoryBudget: ""
 
 # Metrics endpoint

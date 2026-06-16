@@ -66,7 +66,7 @@ static ngx_str_t ngx_http_markdown_reason_skip_accept_reject_str =
 static ngx_str_t ngx_http_markdown_reason_skip_conditional_str =
     ngx_string("SKIPPED_CONDITIONAL");
 
-/* Content-type routing reason codes (v0.6.0 P1-3) */
+/* Content-type routing reason codes */
 
 static ngx_str_t ngx_http_markdown_reason_ct_route_default_str =
     ngx_string("CT_ROUTE_DEFAULT");

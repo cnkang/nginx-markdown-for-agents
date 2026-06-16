@@ -384,12 +384,12 @@ impl StreamingConverter {
             }
         }
 
-        // v0.6.0: noise-region pruning is now supported at the
+        // Noise-region pruning is supported at the
         // streaming tokenizer level via should_prune_with_config().
         // The pre-commit fallback is no longer needed when pruning
         // is enabled — pruned elements are simply skipped during
         // tokenization.  Remove the blanket fallback that was
-        // required in 0.5.x when streaming lacked pruning support.
+        // required when streaming lacked pruning support.
 
         // 2. Charset detection / transcoding
         let transcoded = self

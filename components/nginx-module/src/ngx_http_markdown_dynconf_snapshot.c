@@ -216,26 +216,25 @@ ngx_http_markdown_log_verbosity_str(ngx_uint_t val)
 
 #ifdef MARKDOWN_STREAMING_ENABLED
 /*
- * Map streaming engine mode to string representation.
+ * Map streaming engine enum to string representation.
  *
- * The streaming engine is stored as a complex value; when NULL
- * it defaults to "auto" mode.  This helper maps the resolved
- * mode constant to a human-readable string.
+ * The streaming engine is stored as a ngx_uint_t enum
+ * (off=0, auto=1, on=2).  This helper maps the enum value
+ * to a human-readable string.
  */
 static const char *
-ngx_http_markdown_streaming_engine_str(
-    const ngx_http_markdown_streaming_cfg_t *streaming)
+ngx_http_markdown_streaming_engine_str(ngx_uint_t engine)
 {
-    if (streaming->engine == NULL) {
+    switch (engine) {
+    case NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF:
+        return "off";
+    case NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO:
         return "auto";
+    case NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON:
+        return "on";
+    default:
+        return "unknown";
     }
-
-    /*
-     * When the engine is a complex value, we cannot resolve it
-     * without a request context.  Report as "configured" to
-     * indicate a non-default value is set.
-     */
-    return "configured";
 }
 
 
@@ -403,7 +402,7 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     /* markdown_streaming_engine */
     p = ngx_http_markdown_snapshot_str(p, last,
         "markdown_streaming_engine",
-        ngx_http_markdown_streaming_engine_str(&conf->streaming), 1);
+        ngx_http_markdown_streaming_engine_str(conf->stream.engine), 1);
 
     /* markdown_streaming_budget */
     p = ngx_http_markdown_snapshot_size(p, last,
@@ -433,11 +432,6 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     p = ngx_http_markdown_snapshot_size(p, last,
         "markdown_stream_flush_min",
         conf->stream.flush_min, 1);
-
-    /* markdown_streaming_auto_threshold (deprecated alias for markdown_stream_threshold) */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_streaming_auto_threshold",
-        conf->stream.threshold, 0);
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
     /*

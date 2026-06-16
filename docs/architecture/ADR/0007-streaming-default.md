@@ -69,6 +69,17 @@ context: http, server, location
 
 **Rollback**: Set `markdown_streaming_engine off;` at http level to restore 0.5.x default behavior.
 
+### v0.8.0 Compatibility Bridge Removal
+
+The v0.6.0 compatibility bridge that mapped `markdown_streaming_auto_threshold`
+to `markdown_stream_threshold` during configuration merge has been removed in
+v0.8.0. The `ngx_http_markdown_streaming_cfg_t` struct, `conf->streaming`
+field, and the `ngx_http_markdown_bridge_legacy_stream_values` /
+`ngx_http_markdown_merge_streaming_values` functions no longer exist. Runtime
+code reads from `conf->stream.*` exclusively. `markdown_streaming_auto_threshold`
+is no longer a registered directive — `nginx -t` will fail if it appears in
+configuration.
+
 ## Implementation Sketch
 
 1. Change `ngx_conf_merge_uint_value(conf->streaming_engine, prev->streaming_engine, NGX_HTTP_MARKDOWN_STREAMING_AUTO)` in merge_conf
@@ -96,3 +107,4 @@ context: http, server, location
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.6.0 | 2026-04-28 | v060-prod | Initial ADR for streaming-default |
+| 0.8.0 | 2026-06-15 | Kang | Documented v0.8.0 compatibility bridge removal; markdown_streaming_auto_threshold removed |

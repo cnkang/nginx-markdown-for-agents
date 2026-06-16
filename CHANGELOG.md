@@ -81,10 +81,17 @@ configuration directives.
 
 ### Changed
 
-- `markdown_streaming_auto_threshold` is now a deprecated compatibility
-  directive. Existing configurations still parse, and explicit values are
-  bridged to `markdown_stream_threshold` unless the new directive is also
-  explicitly configured.
+- `markdown_streaming_auto_threshold` is **removed** in 0.8.0. It is no
+  longer registered as a directive; `nginx -t` will fail with "unknown
+  directive" if it appears in configuration. Use `markdown_stream_threshold`
+  instead.
+- `markdown_streaming_engine` no longer accepts `$variable` — only the
+  enum values `off`, `auto`, and `on` are accepted. Variable-driven
+  per-request engine selection has been removed.
+- The v0.6.x compatibility bridge (`ngx_http_markdown_streaming_cfg_t`,
+  `conf->streaming`, `ngx_http_markdown_bridge_legacy_stream_values`,
+  `ngx_http_markdown_merge_streaming_values`) has been removed entirely.
+  Runtime code reads from `conf->stream.*` exclusively.
 - Clarified FFI token-ratio fixed-point boundaries, documented streaming
   reason pointer lifetime, and kept security/supply-chain gate guidance aligned
   with the PR/push/scheduled/manual reporting workflow semantics.
@@ -118,14 +125,21 @@ configuration directives.
 - `markdown_max_size`: emits info-level deprecation warning; use
   `markdown_stream_threshold` and `markdown_stream_precommit_buffer` instead.
   Scheduled for removal in a future release.
-- `markdown_streaming_auto_threshold`: accepted for compatibility and mapped
-  to `markdown_stream_threshold` when explicitly configured. New
-  configurations should use `markdown_stream_threshold` directly.
 
 ### Removed
 
-- None. The legacy `markdown_streaming_auto_threshold` directive remains
-  registered for compatibility in 0.8.0.
+- `markdown_streaming_auto_threshold`: removed entirely — no longer a
+  registered directive. `nginx -t` will fail with "unknown directive".
+  Use `markdown_stream_threshold` instead.
+- `$variable` support for `markdown_streaming_engine`: removed. The
+  directive now only accepts `off`, `auto`, or `on`.
+- `ngx_http_markdown_streaming_cfg_t` struct and `conf->streaming` field.
+- `ngx_http_markdown_bridge_legacy_stream_values` function.
+- `ngx_http_markdown_merge_streaming_values` function.
+- `NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT` (32k) constant.
+- Dynconf snapshot `markdown_streaming_auto_threshold` alias.
+- Diagnostics field `legacy_auto_threshold_explicit` (replaced by
+  `threshold_explicit`).
 
 ### Fixed
 

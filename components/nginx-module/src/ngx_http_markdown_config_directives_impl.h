@@ -35,6 +35,17 @@ static ngx_conf_enum_t
       NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT },
     { ngx_null_string, 0 }
 };
+
+static ngx_conf_enum_t
+    ngx_http_markdown_streaming_engine_enum[] = {
+    { ngx_string("off"),
+      NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF },
+    { ngx_string("auto"),
+      NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO },
+    { ngx_string("on"),
+      NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON },
+    { ngx_null_string, 0 }
+};
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 static ngx_conf_enum_t
@@ -620,28 +631,24 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     /*
-     * markdown_streaming_engine off|on|auto|$variable
+     * markdown_streaming_engine off|on|auto
      *
      * Streaming engine selection mode.
-     * Supports per-request variable-driven rollout.
      * Default: auto (per-request selection based on
-     *          markdown_stream_threshold in v0.8.0; explicit legacy
-     *          markdown_streaming_auto_threshold values are bridged
-     *          only when the new directive is not set)
+     *          markdown_stream_threshold)
      * Context: http, server, location
      *
      * Example:
      *   markdown_streaming_engine auto;
-     *   markdown_streaming_engine $streaming_flag;
      */
     {
         ngx_string("markdown_streaming_engine"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_http_markdown_streaming_engine,
+        ngx_conf_set_enum_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        0,
-        NULL
+        offsetof(ngx_http_markdown_conf_t, stream.engine),
+        &ngx_http_markdown_streaming_engine_enum
     },
 
     /*
@@ -660,7 +667,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_size_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, streaming.budget),
+        offsetof(ngx_http_markdown_conf_t, stream.budget),
         NULL
     },
 
@@ -687,7 +694,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
         ngx_conf_set_enum_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, streaming.on_error),
+        offsetof(ngx_http_markdown_conf_t, stream.on_error),
         &ngx_http_markdown_streaming_on_error_enum
     },
 
@@ -710,36 +717,10 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
             |NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
         ngx_conf_set_flag_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, streaming.shadow),
+        offsetof(ngx_http_markdown_conf_t, stream.shadow),
         NULL
     },
 
-    /*
-     * markdown_streaming_auto_threshold <size>
-     *
-     * LEGACY (v0.6.0): Content-Length threshold for auto mode engine selection.
-     * In v0.8.0, use markdown_stream_threshold instead.
-     *
-     * When explicitly set, this value is mapped into the v0.8.0
-     * stream.threshold via the compatibility bridge.  If not set,
-     * the v0.8.0 default of 1m (markdown_stream_threshold) applies.
-     *
-     * Legacy field default: 32k (only used when this directive is explicitly set)
-     * Effective v0.8.0 runtime default: stream.threshold = 1m
-     * Context: http, server, location
-     *
-     * Example:
-     *   markdown_streaming_auto_threshold 64k;
-     */
-    {
-        ngx_string("markdown_streaming_auto_threshold"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_size_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, streaming.auto_threshold),
-        NULL
-    },
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
     /*
@@ -749,7 +730,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * When enabled, structural HTML regions matching prune
      * selectors are excluded from Markdown output.
      *
-     * Default: on (v0.6.0)
+     * Default: on
      * Context: http, server, location
      *
      * Example:
@@ -1236,9 +1217,9 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * - auto: automatic selection based on threshold (default)
      * - on: streaming always enabled for eligible responses
      *
-     * When MARKDOWN_STREAMING_ENABLED is compiled in, the v0.6.0
-     * complex-value handler above takes precedence for this
-     * directive name (supports $variable per-request rollout).
+     * Streaming-enabled builds register the same directive above through
+     * ngx_conf_set_enum_slot. Non-streaming builds keep this parser so
+     * config validation reports invalid values consistently.
      *
      * Default: auto
      * Context: http, server, location
