@@ -97,5 +97,5 @@ Safety/engineering invariants always win; user-task controls scope and approach.
 | 0.6.3 | 2026-05-14 | Kang | Added shell-hygiene (S7682/S1066/Rule 18) and const-correctness detection scripts; extended tooling-path-security pack paths and keywords; updated harness-security family description |
 | 0.6.6 | 2026-05-16 | Kang | Added replay buffer keywords (replay buffer, failopen_completed, precommit_error) to runtime-streaming risk pack; updated primary surfaces to include replay buffer integrity; introduced Spec Resolver Priority section (priority-ordered resolution: agents-baseline > user-task > active-spec-pointer > agents-workflow > harness-core > replay-calibration) ensuring safety/engineering invariants always win over user-task scope |
 | 0.7.0 | 2026-05-31 | Kiro | Added v070-gates verification family (release-gates-check-070, test-rust, check-headers) to sync with JSON manifest |
-| 0.8.0 | 2026-06-04 | Codex | Added v080-gates verification family for release-gates-check-080; added tools/harness/tests/ to tooling-path-security risk pack paths |
+| 0.8.0 | 2026-06-16 | Codex | Added v080-gates verification family for release-gates-check-080; added tools/harness/tests/ to tooling-path-security risk pack paths |
 | 0.8.2 | 2026-06-13 | Codex | Added security-static and supply-chain verification families plus the security-static-supply-chain risk pack |

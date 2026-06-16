@@ -480,7 +480,7 @@ remediation:
 | 0.7.15 | 2026-06-03 | Codex | Strengthened Rule 13 for package smoke job-container checkout prerequisites |
 | 0.7.16 | 2026-06-03 | Codex | Strengthened Rule 13 for tag release gates avoiding user-local spec dependencies in clean CI checkouts |
 | 0.7.17 | 2026-06-04 | Codex | Strengthened Rule 6 for streaming code-block fence state across split text events |
-| 0.8.0 | 2026-06-04 | Kang | 0.8.0 release gate target (release-gates-check-080) with streaming, coverage, matrix, and clean-checkout gates |
+| 0.8.0 | 2026-06-16 | Kang | 0.8.0 release gate target (release-gates-check-080) with streaming, coverage, matrix, and clean-checkout gates |
 | 0.8.1 | 2026-06-10 | Codex | Strengthened Rule 13 for newer release gates that reuse prior-version validators with caller-parameterized active version assertions and current release-matrix schema consumers |
 | 0.8.2 | 2026-06-12 | Kang | Added Rules 44–47: streaming deflate semantics (44), effective_conf NULL-safe access (45), FFI NULL/empty boundary guards (46), terminal-sent latch NGX_AGAIN semantics (47); strengthened Rules 13 (verified-rustup), 30 (cross-TU visibility, sentinel consistency) |
 | 0.8.3 | 2026-06-13 | Codex | Added Rule 48 for supplemental static security and supply-chain gates with focused Semgrep, secret scanning, cargo-deny, Trivy/SBOM/Scorecard, and local Make targets |

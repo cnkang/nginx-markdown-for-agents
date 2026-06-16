@@ -229,4 +229,4 @@ curl -s -H "Accept: text/markdown" http://localhost/page | head -50
 |---------|------|--------|---------|
 | 0.6.0 | 2026-04-28 | v060-prod | Initial migration guide |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.8.0 | 2026-06-15 | Kang | Updated for 0.8.0: markdown_streaming_auto_threshold removed, $variable support removed, default threshold changed to 1m |
+| 0.8.0 | 2026-06-16 | Kang | Updated for 0.8.0: markdown_streaming_auto_threshold removed, $variable support removed, default threshold changed to 1m |

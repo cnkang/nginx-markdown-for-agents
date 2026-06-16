@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.0] - 2026-06-10
+## [0.8.0] - 2026-06-16
 
 True streaming contract, fallback state machine, streaming observability,
 streaming security enforcement, release matrix source of truth, and streaming
@@ -118,7 +118,7 @@ configuration directives.
   at startup. It remains functional but may be removed in a future release.
 - Diagnostics endpoint resets on configuration reload cycles.
 - Release gate validation strengthened with Rust build invariant assertions
-  and deeper 0.7.0 validation checks.
+  and deeper 0.8.0 validation checks.
 
 ### Deprecated
 
