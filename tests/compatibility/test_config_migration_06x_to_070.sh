@@ -1,10 +1,13 @@
 #!/bin/bash
 #
-# Configuration Migration Test: 0.6.x → 0.7.0 Semantic Equivalence
+# Configuration Migration Test: 0.6.x → 0.8.0 Semantic Equivalence
 #
 # Validates that all configuration directives available in 0.6.x are still
-# accepted by the 0.7.0 module without errors, and that default values and
-# directive parsing remain semantically equivalent.
+# accepted by the 0.8.0 module without errors (where not intentionally removed),
+# and that removed directives are properly rejected by nginx -t.
+#
+# Removed in 0.8.0:
+#   - markdown_streaming_auto_threshold (use markdown_stream_threshold)
 #
 # This test uses `nginx -t` to validate configuration syntax acceptance.
 # It does NOT require a running NGINX instance — only a compiled binary
@@ -44,7 +47,8 @@ usage() {
   cat <<EOF >&2
 Usage: $(basename "$0") [--nginx-bin PATH] [--keep-artifacts] [-h|--help]
 
-Validate that 0.6.x configuration directives are accepted by the 0.7.0 module.
+Validate that 0.6.x configuration directives are accepted by the 0.8.0 module,
+and that removed directives are properly rejected.
 
 Options:
   --nginx-bin PATH     Path to NGINX binary with markdown module
@@ -194,7 +198,7 @@ TMPDIR_BASE="$(mktemp -d /tmp/config-migration-06x-070.XXXXXX)"
 mkdir -p "${TMPDIR_BASE}"
 
 echo "==========================================================" >&2
-echo " Configuration Migration Test: 0.6.x → 0.7.0" >&2
+echo " Configuration Migration Test: 0.6.x → 0.8.0" >&2
 echo " NGINX binary: ${NGINX_BIN}" >&2
 echo " Temp dir: ${TMPDIR_BASE}" >&2
 echo "==========================================================" >&2
@@ -452,10 +456,10 @@ validate_config 46 "markdown_streaming_shadow on" \
     markdown_streaming_engine on;
     markdown_streaming_shadow on;" || true
 
-validate_config 47 "markdown_streaming_auto_threshold" \
+validate_config 47 "markdown_stream_threshold (replaces auto_threshold)" \
   "markdown_filter on;
     markdown_streaming_engine auto;
-    markdown_streaming_auto_threshold 256k;" || true
+    markdown_stream_threshold 256k;" || true
 
 # ============================================================
 # Section 12: Memory budget (0.6.x replacement for max_size)
@@ -540,7 +544,7 @@ validate_config 59 "markdown_dynconf_dry_run on" \
 echo "" >&2
 echo "--- Section 17: Combined 0.6.x Realistic Configuration ---" >&2
 
-validate_config 60 "Full 0.6.x production config" \
+validate_config 60 "Full 0.6.x production config (0.8.0 migrated)" \
   "markdown_filter on;
     markdown_max_size 10m;
     markdown_memory_budget 10m;
@@ -559,12 +563,12 @@ validate_config 60 "Full 0.6.x production config" \
     markdown_prune_selectors \"nav,footer\";
     markdown_trust_forwarded_headers off;
     markdown_streaming_engine auto;
+    markdown_stream_threshold 256k;
     markdown_streaming_budget 2m;
     markdown_streaming_on_error pass;
-    markdown_streaming_auto_threshold 256k;
     markdown_metrics_shm_size 1m;" || true
 
-validate_config 61 "Full 0.6.x + 0.7.0 new directives coexist" \
+validate_config 61 "Full 0.6.x + 0.7.0 + 0.8.0 new directives coexist" \
   "markdown_filter on;
     markdown_max_size 10m;
     markdown_memory_budget 10m;
@@ -583,9 +587,9 @@ validate_config 61 "Full 0.6.x + 0.7.0 new directives coexist" \
     markdown_prune_noise on;
     markdown_trust_forwarded_headers on;
     markdown_streaming_engine auto;
+    markdown_stream_threshold 512k;
     markdown_streaming_budget 4m;
     markdown_streaming_on_error pass;
-    markdown_streaming_auto_threshold 512k;
     markdown_dynamic_config on;
     markdown_dynamic_config_path /tmp/dynconf.json;
     markdown_decompress_max_size 20m;
@@ -621,6 +625,59 @@ validate_config 62 "Multi-level inheritance (http + server + location)" \
     }" || true
 
 # ============================================================
+# Section 18: Removed directives (0.8.0 negative tests)
+# ============================================================
+echo "" >&2
+echo "--- Section 18: Removed Directives (0.8.0 must reject) ---" >&2
+
+# validate_config_rejected — Write a config snippet and verify nginx -t FAILS.
+# This is the inverse of validate_config: the test passes when nginx -t rejects
+# the configuration (exit code != 0).
+validate_config_rejected() {
+  local test_id="$1"
+  local description="$2"
+  local http_directives="$3"
+  : "${http_directives}"
+
+  local conf_file="${TMPDIR_BASE}/test_neg_${test_id}.conf"
+  local log_file="${TMPDIR_BASE}/test_neg_${test_id}.log"
+
+  cat > "${conf_file}" <<EOF
+worker_processes 1;
+error_log /dev/null crit;
+pid ${TMPDIR_BASE}/test_neg_${test_id}.pid;
+
+events { worker_connections 64; }
+
+http {
+    ${http_directives}
+
+    server {
+        listen 127.0.0.1:19999;
+        location / {
+            return 200 'ok';
+        }
+    }
+}
+EOF
+
+  log_test "N${test_id}" "${description}"
+
+  if "${NGINX_BIN}" -t -c "${conf_file}" >"${log_file}" 2>&1; then
+    log_fail "directive was ACCEPTED (expected rejection)"
+    return 1
+  else
+    log_pass
+    return 0
+  fi
+}
+
+validate_config_rejected 1 "markdown_streaming_auto_threshold (REMOVED in 0.8.0)" \
+  "markdown_filter on;
+    markdown_streaming_engine auto;
+    markdown_streaming_auto_threshold 64k;" || true
+
+# ============================================================
 # Summary
 # ============================================================
 echo "" >&2
@@ -630,7 +687,7 @@ echo "==========================================================" >&2
 
 if [[ "${TESTS_FAILED}" -gt 0 ]]; then
   echo "" >&2
-  echo "FAILURE: ${TESTS_FAILED} configuration(s) rejected by 0.7.0 module." >&2
+  echo "FAILURE: ${TESTS_FAILED} configuration(s) rejected or unexpectedly accepted by 0.8.0 module." >&2
   echo "This indicates a backward-incompatible directive change." >&2
   if [[ "${KEEP_ARTIFACTS}" -eq 0 ]]; then
     echo "Re-run with --keep-artifacts to inspect failing configs." >&2
@@ -639,5 +696,5 @@ if [[ "${TESTS_FAILED}" -gt 0 ]]; then
 fi
 
 echo "" >&2
-echo "SUCCESS: All 0.6.x configurations accepted by 0.7.0 module." >&2
+echo "SUCCESS: All 0.6.x configurations accepted by 0.8.0 module (removed directives properly rejected)." >&2
 exit 0
