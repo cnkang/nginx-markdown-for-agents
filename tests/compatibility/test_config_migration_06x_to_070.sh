@@ -666,9 +666,14 @@ EOF
   if "${NGINX_BIN}" -t -c "${conf_file}" >"${log_file}" 2>&1; then
     log_fail "directive was ACCEPTED (expected rejection)"
     return 1
-  else
+  fi
+
+  if grep -qi "unknown directive" "${log_file}" 2>/dev/null; then
     log_pass
     return 0
+  else
+    log_fail "rejected for unexpected reason (no 'unknown directive' in error log)"
+    return 1
   fi
 }
 

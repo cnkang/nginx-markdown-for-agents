@@ -165,11 +165,17 @@ def check_removed_constants(result: ValidationResult) -> None:
 
 def check_removed_conf_fields(result: ValidationResult) -> None:
     """Verify conf->streaming.* fields are absent from all C sources."""
-    sources = {
-        "config_core_impl.h": read(CONFIG_CORE_H),
-        "filter_module.h": read(FILTER_MODULE_H),
-        "streaming_impl.h": read(STREAMING_IMPL_H),
-    }
+    src_dir = (
+        PROJECT_ROOT / "components" / "nginx-module" / "src"
+    )
+    sources: dict[str, str] = {}
+    if src_dir.is_dir():
+        for path in src_dir.rglob("*.[ch]"):
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            sources[path.name] = content
     removed_fields = [
         r"conf->streaming\.engine",
         r"conf->streaming\.auto_threshold",
@@ -304,7 +310,7 @@ def check_changelog(result: ValidationResult) -> None:
         result.fail("changelog:080", "CHANGELOG.md missing 0.8.0 section")
 
 
-def validate_all(result: ValidationResult, mode: str) -> None:
+def validate_all(result: ValidationResult) -> None:
     """Run every release gate check and record pass/fail in result."""
     check_cargo_version(result)
     check_removed_directive(result)
@@ -341,7 +347,7 @@ def main() -> int:
     args = parser.parse_args()
 
     result = ValidationResult()
-    validate_all(result, args.mode)
+    validate_all(result)
     print_report(result)
     return 1 if result.has_failures else 0
 
