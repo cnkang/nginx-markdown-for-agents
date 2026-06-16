@@ -1981,9 +1981,9 @@ test_config_on_error_legal_values(void)
  * Verify that the default value is pass (ON_ERROR_PASS = 0).
  *
  * The merge logic uses:
- *   ngx_conf_merge_uint_value(conf->streaming.on_error,
- *       prev->streaming_on_error,
- *       NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS);
+ *   ngx_conf_merge_uint_value(conf->stream.on_error,
+ *       prev->stream.on_error,
+ *       NGX_HTTP_MARKDOWN_ON_ERROR_PASS);
  *
  * Validates: streaming_on_error legal values and default (default = pass)
  */
@@ -3380,8 +3380,8 @@ test_config_shadow_legal_values(void)
  * Verify that the default value is off (0).
  *
  * The merge logic uses:
- *   ngx_conf_merge_value(conf->streaming_shadow,
- *       prev->streaming_shadow, 0);
+ *   ngx_conf_merge_value(conf->stream.shadow,
+ *       prev->stream.shadow, 0);
  *
  * Validates: FALLBACK always routes to full-buffer (default = off)
  */
@@ -4022,8 +4022,7 @@ test_finalize_tail_feed_error(void)
 /*
  * Bug 4: markdown_streaming_engine directive accepts any
  * static string without validation. Typos like "atuo" are
- * silently compiled as complex values and fall back to
- * "off" at runtime.
+ * silently accepted and fall back to "off" at runtime.
  *
  * **Validates: invalid static value rejection at parse time**
  */
@@ -4067,23 +4066,21 @@ test_config_invalid_static_value(void)
         }
 
         /*
-         * Simulate fixed streaming_engine() logic:
+         * Simulate fixed stream_engine_handler() logic:
          * Static values without '$' are validated against
          * off/on/auto — invalid ones are rejected.
          */
-        if (!has_dollar && !is_valid_static) {
+        if (has_dollar || !is_valid_static) {
             would_reject = 1;  /* fixed: rejects invalid */
         } else {
-            would_reject = 0;  /* valid or variable */
+            would_reject = 0;  /* valid static enum */
         }
 
         /*
-         * Bug condition: static value that is not
-         * off/on/auto and has no '$'
+         * Bug condition: value is not a static off/on/auto enum
+         * but would not be rejected.
          */
-        if (!has_dollar && !is_valid_static
-            && would_reject == 0)
-        {
+        if ((has_dollar || !is_valid_static) && would_reject == 0) {
             all_rejected = 0;
         }
     }
@@ -4613,8 +4610,8 @@ test_preserve_duplicate_directive(void)
 
     /*
      * Simulate the duplicate check at the top of
-     * ngx_http_markdown_streaming_engine():
-     * if (mcf->streaming_engine != NULL) {
+     * ngx_http_markdown_stream_engine_handler():
+     * if (mcf->stream.engine != NGX_CONF_UNSET_UINT) {
      *     return "is duplicate";
      * }
      */

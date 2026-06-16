@@ -211,10 +211,9 @@ full-buffer and incremental streaming FFI entrypoints.
 `markdown_streaming_engine` defaults to `auto`. In auto mode, known small
 responses remain on the full-buffer path while large or chunked responses can
 enter the streaming path. The 0.8.0 threshold is
-`markdown_stream_threshold` (default `1m`). The legacy
-`markdown_streaming_auto_threshold` directive remains registered only as a
-compatibility bridge: when explicitly configured and the new threshold is not,
-its value is mapped into `markdown_stream_threshold`.
+`markdown_stream_threshold` (default `1m`). The v0.6.x
+`markdown_streaming_auto_threshold` directive has been removed in 0.8.0;
+use `markdown_stream_threshold` directly.
 
 ### Streaming Body Filter
 
@@ -337,3 +336,4 @@ the operation list and applies changes to `r->headers_out`.
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 subsystems section (negotiator, conditional, decision, header_plan, security extensions, bounded decompression, parser timeout/budget, diagnostics endpoint, dynconf dry-run/LKG, reason code FFI accessor, header plan atomic application) |
 | 0.8.0 | 2026-06-10 | Kang | Added true streaming architecture, engine-selection compatibility notes, streaming FFI/fallback boundaries, observability, and release-gates-check-080 references |
+| 0.8.0 | 2026-06-15 | Kang | Updated engine-selection section: removed compatibility bridge reference (v0.6.x compat removed in 0.8.0) |

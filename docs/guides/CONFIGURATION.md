@@ -574,31 +574,32 @@ markdown_trust_forwarded_headers on;
 
 ---
 
-### Streaming Directives (0.5.0+, default changed to auto in 0.6.0)
+### Streaming Directives (v0.8.0 configuration contract)
 
-These directives control the streaming conversion path introduced in 0.5.0.
-In v0.6.0, the default changed from `off` to `auto`: responses are
+v0.8.0 uses the unified `conf->stream.*` configuration model. The module no
+longer preserves the 0.6.x streaming compatibility bridge. Responses are
 automatically routed to streaming or full-buffer based on Content-Length
-and `markdown_stream_threshold`. Set `markdown_streaming_engine off`
-explicitly to restore 0.5.x behavior.
-
+and `markdown_stream_threshold`. Use `markdown_stream_threshold` for
+auto-mode threshold control.
 
 #### markdown_streaming_engine
 
-**Syntax:** `markdown_streaming_engine off | on | auto | $variable;`
-**Default:** `auto` (was `off` prior to 0.6.0)
+**Syntax:** `markdown_streaming_engine off | on | auto;`
+**Default:** `auto`
 **Context:** http, server, location
 
 Controls whether the streaming conversion engine is used. When `off`,
-all requests use the full-buffer conversion path and behavior is identical to 0.5.x.
-When `auto` (the 0.6.0 default), the engine is selected automatically per-request.
+all requests use the full-buffer conversion path.
+When `auto`, the engine is selected automatically per-request.
 
 - `off`: Disable streaming. All requests use the full-buffer path.
 - `on`: Enable streaming for all eligible requests.
 - `auto`: Enable streaming with automatic fallback to full-buffer when the streaming
   engine encounters unsupported features (e.g., tables requiring full-buffer processing).
-- `$variable`: Per-request variable-driven control. Resolved values accept `on`/`off`/`auto`
-  (case-insensitive). This enables canary and percentage-based rollouts.
+
+**Note**: `$variable` support was removed in v0.8.0. The directive only accepts
+the enum values `off`, `on`, and `auto`. If your configuration uses a variable
+(e.g. `markdown_streaming_engine $flag`), `nginx -t` will reject it.
 
 **Example:**
 ```nginx
@@ -608,12 +609,8 @@ markdown_streaming_engine on;
 # Auto mode with fallback
 markdown_streaming_engine auto;
 
-# Variable-driven canary rollout
-map $http_cookie $streaming_flag {
-    default      off;
-    "~*canary=1" on;
-}
-markdown_streaming_engine $streaming_flag;
+# Disable streaming
+markdown_streaming_engine off;
 ```
 
 #### markdown_streaming_budget
@@ -830,12 +827,6 @@ meets or exceeds this threshold are considered for streaming conversion. Respons
 below the threshold always use the full-buffer path.
 
 The value must be greater than zero; `0` is rejected by `nginx -t`.
-
-Compatibility: legacy `markdown_streaming_auto_threshold` remains accepted in
-v0.8.0. When it is explicitly configured and `markdown_stream_threshold` is
-not, the module maps the legacy value into `markdown_stream_threshold`. If both
-directives are configured, `markdown_stream_threshold` wins. New
-configurations should use `markdown_stream_threshold` directly.
 
 **Valid Units:** `k` (kilobytes), `m` (megabytes)
 
@@ -1054,7 +1045,7 @@ configured together.
 | `markdown_stream_threshold` + `Content-Length` | When the upstream response includes a `Content-Length` header and the value is below `markdown_stream_threshold`, the response always uses the full-buffer path regardless of `markdown_streaming_engine on`. This is a size-based eligibility gate, not an error. |
 | `markdown_stream_excluded_types` + `markdown_content_types` | Both must permit the content type for streaming conversion. `markdown_content_types` controls whether the module processes a response at all (any path). `markdown_stream_excluded_types` is an additional filter that prevents specific types from entering the streaming path. A type excluded from streaming may still be converted via full-buffer if it passes the general eligibility checks. |
 | `markdown_stream_precommit_buffer` + `markdown_streaming_on_error` | The pre-commit buffer enables fail-open replay: if an error occurs before the commit boundary, the buffered original HTML is replayed to the client. When `markdown_stream_precommit_buffer 0` (replay disabled), any pre-commit error immediately triggers the `markdown_streaming_on_error` policy without replay capability. |
-| `markdown_streaming_engine auto` + variable usage | When `markdown_streaming_engine` is set to a variable (`$variable`), the variable is resolved at request time. The resolved value (`on`, `off`, or `auto`) applies for the entire request lifecycle. Combine with `map` directives for percentage-based rollout or per-path control. |
+| `markdown_streaming_engine auto` + explicit value | When `markdown_streaming_engine` is set to a fixed value (`off`, `on`, or `auto`), it applies for the entire request lifecycle. Use different values at different configuration levels (http/server/location) for per-path control. |
 
 **Non-obvious behaviors to watch for:**
 
@@ -1077,11 +1068,10 @@ configured together.
    close to `markdown_streaming_budget` leaves little room for converter working
    memory and may trigger budget-exceeded errors.
 
-5. **Variable-driven streaming + inheritance.** A `markdown_streaming_engine $var`
-   at the `http` level is inherited by all `server`/`location` blocks. The variable
-   itself is resolved per-request in the innermost matching context. Override with
-   an explicit value (`off`, `on`, `auto`) in specific locations to exclude them
-   from variable-driven rollout.
+5. **Streaming engine configuration inheritance.** A `markdown_streaming_engine`
+   directive at the `http` level is inherited by all `server`/`location` blocks.
+   Override with an explicit value (`off`, `on`, `auto`) in specific locations to
+   exclude them from the inherited setting.
 
 6. **Default `auto` mode does not activate streaming.** When `markdown_conditional_requests`
    is `full_support` (the default), the streaming selector always routes to full-buffer
@@ -1186,10 +1176,10 @@ Path to the dynamic configuration file.  Only effective when
 | Key | Value | Maps to |
 |-----|-------|---------|
 | `markdown_filter` | `on` \| `off` | `conf->enabled`, overrides complex values |
-| `prune_noise` | `on` \| `off` | `conf->prune_noise` |
-| `log_verbosity` | `error` \| `warn` \| `info` \| `debug` | `conf->log_verbosity` (module enum) |
-| `streaming_budget` | `<size>` (e.g. `64k`, `4m`) | `conf->streaming_budget` |
-| `memory_budget` | `<size>` (e.g. `128k`) | `conf->memory_budget` |
+| `prune_noise` | `on` \| `off` | `conf->advanced.prune_noise` |
+| `log_verbosity` | `error` \| `warn` \| `info` \| `debug` | `conf->policy.log_verbosity` (module enum) |
+| `streaming_budget` | `<size>` (e.g. `64k`, `4m`) | `conf->stream.budget` |
+| `memory_budget` | `<size>` (e.g. `128k`) | `conf->advanced.memory_budget` |
 
 **Not supported via dynconf** (require `nginx -s reload`):
 `markdown_content_types`, `markdown_stream_types`, auth policy,
@@ -1678,23 +1668,21 @@ markdown_memory_budget 5m;
 
 ---
 
-#### markdown_streaming_auto_threshold
+### Removed Directives
 
-**Syntax:** `markdown_streaming_auto_threshold <size>;`
-**Default:** `32k` (legacy field; effective v0.8.0 runtime default is `1m` via `markdown_stream_threshold`)
-**Context:** http, server, location
-**Status:** Deprecated since 0.8.0 — use `markdown_stream_threshold`
+The following directives have been removed in v0.8.0 and are no longer accepted. `nginx -t` will fail with "unknown directive" if any of these appear in configuration.
 
-Content-Length threshold for auto-mode engine selection. In v0.8.0, `markdown_stream_threshold` replaces it with a default of `1m`.
+#### markdown_streaming_auto_threshold — REMOVED in 0.8.0
 
-When explicitly set, this value is mapped into the v0.8.0 `stream.threshold` via the compatibility bridge. If both directives are configured at the same level, `markdown_stream_threshold` wins.
+This directive has been **removed** in v0.8.0. It is no longer registered.
+Use `markdown_stream_threshold` instead.
 
 **Migration:**
 ```nginx
-# Before (deprecated)
+# Before (0.6.x/0.7.x) — NO LONGER ACCEPTED IN 0.8.0
 markdown_streaming_auto_threshold 64k;
 
-# After (recommended)
+# After (0.8.0) — required
 markdown_stream_threshold 64k;
 ```
 

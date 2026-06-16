@@ -10,7 +10,10 @@ body. This is opt-in via `markdown_streaming_engine auto` (the new default)
 and only activates for responses that meet size/transfer criteria.
 
 **Key guarantee**: Setting `markdown_streaming_engine off` produces behavior
-identical to 0.7.x. No existing configuration breaks on upgrade.
+identical to 0.7.x. However, **0.8.0 removes v0.6.x streaming compatibility**:
+configurations using `markdown_streaming_auto_threshold` or
+`markdown_streaming_engine $variable` must be updated before upgrading.
+See sections 5 and 10 below.
 
 ---
 
@@ -96,7 +99,7 @@ New reason codes (see [streaming-observability](../features/streaming-observabil
 | `postcommit_budget_exceeded` | Budget exceeded after commit |
 | `postcommit_io_error` | I/O error after commit |
 
-### 5. Deprecated directives
+### 5. Removed and deprecated directives
 
 Per the deprecation schedule announced in 0.6.0, the following directives
 have changed status in 0.8.0:
@@ -105,23 +108,36 @@ have changed status in 0.8.0:
 |-----------|-----------------|-------------|
 | `markdown_max_size` | Deprecated (accepted with info-level warning) | `markdown_memory_budget` |
 | `markdown_streaming_budget` | Still available as path-specific override | `markdown_memory_budget` (unified) |
-| `markdown_streaming_auto_threshold` | Deprecated compatibility directive; accepted and bridged when explicitly configured | `markdown_stream_threshold` |
+| `markdown_streaming_auto_threshold` | **Removed** — `nginx -t` will fail with "unknown directive" | `markdown_stream_threshold` |
 
-If your configuration still uses `markdown_streaming_auto_threshold`,
-0.8.0 will continue to parse it and map the explicit value to
-`markdown_stream_threshold` unless the new directive is also explicitly set.
-Migrate anyway so future removal is a no-op for your configuration:
+**`markdown_streaming_auto_threshold` is REMOVED in 0.8.0.** It is not
+deprecated — it is gone. NGINX will refuse to start if your configuration
+contains this directive. You **must** update your configuration before
+upgrading:
 
 ```nginx
-# Before (0.7.x)
+# Before (0.7.x) — NO LONGER ACCEPTED
 markdown_streaming_auto_threshold 64k;
 
-# After (0.8.0)
+# After (0.8.0) — required
 markdown_stream_threshold 64k;
 ```
 
-If both directives are configured at the same level, `markdown_stream_threshold`
-wins.
+**`markdown_streaming_engine` no longer accepts `$variable`.** The directive
+now only accepts enum values `off`, `auto`, or `on`. Variable-driven control
+is no longer supported. If your configuration uses a variable:
+
+```nginx
+# Before (0.7.x) — NO LONGER ACCEPTED
+map $http_cookie $streaming_flag {
+    default      off;
+    "~*canary=1" on;
+}
+markdown_streaming_engine $streaming_flag;
+
+# After (0.8.0) — use a fixed value
+markdown_streaming_engine auto;
+```
 
 **Note**: `markdown_max_size` still works but emits a deprecation warning.
 Migrate to `markdown_memory_budget` at your convenience.
@@ -184,17 +200,27 @@ v0.8.0 **does not preserve** 0.6.x streaming compatibility:
 - `NGX_HTTP_MARKDOWN_STREAMING_ENGINE_*` constants (OFF=0, ON=1, AUTO=2)
   have been removed. Use `NGX_HTTP_MARKDOWN_STREAM_ENGINE_*` (OFF=0,
   AUTO=1, ON=2) instead. Note the different AUTO/ON values.
-- The `streaming.auto_threshold` directive is bridged to
-  `stream.threshold` during configuration merge but the old naming and
-  default (32k) are not retained as runtime semantics.
-- The `streaming.*` configuration sub-struct serves only as a compatibility
-  bridge; runtime code reads from `stream.*` exclusively.
+- `markdown_streaming_auto_threshold` directive is **removed** — it is not
+  deprecated or bridged. `nginx -t` will fail with "unknown directive".
+  Use `markdown_stream_threshold` instead.
+- `markdown_streaming_engine` no longer accepts `$variable` — only the enum
+  values `off`, `auto`, `on` are accepted. Variable-driven per-request engine
+  selection is no longer supported.
+- `ngx_http_markdown_streaming_cfg_t` struct and `conf->streaming` field have
+  been removed. Runtime code reads from `conf->stream.*` exclusively.
+- `ngx_http_markdown_bridge_legacy_stream_values` and
+  `ngx_http_markdown_merge_streaming_values` functions have been removed.
+- `ngx_http_markdown_select_processing_path` no longer falls back to
+  `conf->streaming.engine` from the v0.6.x compatibility bridge.
+- Diagnostics now shows `threshold_explicit` instead of
+  `legacy_auto_threshold_explicit`.
+- Dynconf snapshot no longer includes `markdown_streaming_auto_threshold` alias.
 
-**Impact**: Configurations that relied on the exact values of
-`NGX_HTTP_MARKDOWN_STREAMING_ENGINE_AUTO` (was 2, now 1) or
-`NGX_HTTP_MARKDOWN_STREAMING_ENGINE_ON` (was 1, now 2) must be audited.
-This only affects code that compared against raw integer values rather than
-using the symbolic constants.
+**Impact**: Configurations that use `markdown_streaming_auto_threshold` or
+`markdown_streaming_engine $variable` **must be updated before upgrading to
+0.8.0**. NGINX will refuse to start with the old directives. C/Rust FFI
+must be upgraded in lockstep — mixing 0.7.x and 0.8.0 components causes
+FFI layout mismatches.
 
 ### 11. Rust converter and C module must be upgraded together
 
@@ -372,3 +398,4 @@ output parity before enabling streaming for live traffic.
 | 0.8.0 | 2026-06-10 | Kang | Initial migration guide |
 | 0.8.0 | 2026-06-12 | Codex | Added missing streaming reason codes: `not_html`, `compressed`, `not_candidate`, `accept_mismatch` |
 | 0.8.0 | 2026-06-15 | Kang | Document FFIHeaderEntry.op_type=3, check_eligibility API change, ctx layout change, 0.6.x incompatibility, paired deployment requirement |
+| 0.8.0 | 2026-06-15 | Kang | Update for 0.6.x compat removal: markdown_streaming_auto_threshold is REMOVED (not deprecated), $variable support removed from markdown_streaming_engine, compatibility bridge functions removed |

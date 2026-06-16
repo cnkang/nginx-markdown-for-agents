@@ -285,17 +285,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->ops.otel_span_buffer_size = NGX_CONF_UNSET_UINT;
     conf->ops.otel_export_timeout = NGX_CONF_UNSET_MSEC;
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-    conf->streaming.engine = NULL;
-    conf->streaming.budget = NGX_CONF_UNSET_SIZE;
-    conf->streaming.budget_explicit = 0;
-    conf->streaming.on_error = NGX_CONF_UNSET_UINT;
-    conf->streaming.shadow = NGX_CONF_UNSET;
-    conf->streaming.auto_threshold = NGX_CONF_UNSET_SIZE;
-    conf->streaming.auto_threshold_explicit = 0;
-#endif
-
-    /* v0.8.0 streaming config (streaming configuration directives) */
+    /* v0.8.0 streaming config */
     conf->stream.engine = NGX_CONF_UNSET_UINT;
     conf->stream.threshold = NGX_CONF_UNSET_SIZE;
     conf->stream.threshold_explicit = -1;
@@ -492,44 +482,11 @@ ngx_http_markdown_merge_core_values(ngx_http_markdown_conf_t *conf,
     ngx_http_markdown_merge_core_ptr_values(conf, prev);
 }
 
-#ifdef MARKDOWN_STREAMING_ENABLED
 /*
- * Merge v0.6.0 streaming-only options (compatibility layer).
- *
- * These fields are still parsed from the old directive names.  Their
- * values are mapped into stream.* in the compatibility bridge within
- * ngx_http_markdown_merge_conf() after this function runs.
+ * Merge advanced/pruning/dynconf configuration values.
  */
 static void
-ngx_http_markdown_merge_streaming_values(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev, ngx_flag_t streaming_budget_set,
-    ngx_flag_t streaming_auto_threshold_set)
-{
-    if (conf->streaming.engine == NULL) {
-        conf->streaming.engine = prev->streaming.engine;
-    }
-    ngx_conf_merge_size_value(conf->streaming.budget,
-                              prev->streaming.budget,
-                              NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT);
-    conf->streaming.budget_explicit = streaming_budget_set
-        || prev->streaming.budget_explicit;
-    ngx_conf_merge_uint_value(conf->streaming.on_error,
-                              prev->streaming.on_error,
-                              NGX_HTTP_MARKDOWN_ON_ERROR_PASS);
-    ngx_conf_merge_value(conf->streaming.shadow, prev->streaming.shadow, 0);
-    ngx_conf_merge_size_value(conf->streaming.auto_threshold,
-                              prev->streaming.auto_threshold,
-                              NGX_HTTP_MARKDOWN_STREAMING_AUTO_THRESHOLD_DEFAULT);
-    conf->streaming.auto_threshold_explicit = streaming_auto_threshold_set
-        || prev->streaming.auto_threshold_explicit;
-}
-#endif
-
-/*
- * Merge v0.6.0-specific configuration surfaces.
- */
-static void
-ngx_http_markdown_merge_v060_values(ngx_http_markdown_conf_t *conf,
+ngx_http_markdown_merge_advanced_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev)
 {
     ngx_conf_merge_value(conf->advanced.prune_noise, prev->advanced.prune_noise, 1);
@@ -575,71 +532,45 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      */
     ngx_flag_t  max_size_set = (conf->max_size != NGX_CONF_UNSET_SIZE);
 #ifdef MARKDOWN_STREAMING_ENABLED
-    ngx_flag_t  streaming_budget_set =
-        (conf->streaming.budget != NGX_CONF_UNSET_SIZE);
-    ngx_flag_t  streaming_auto_threshold_set =
-        (conf->streaming.auto_threshold != NGX_CONF_UNSET_SIZE);
     ngx_flag_t  stream_on_error_set =
         (conf->stream.on_error != NGX_CONF_UNSET_UINT);
     ngx_flag_t  stream_shadow_set =
         (conf->stream.shadow != NGX_CONF_UNSET);
+#endif
     ngx_flag_t  stream_threshold_set =
         (conf->stream.threshold != NGX_CONF_UNSET_SIZE);
+#ifdef MARKDOWN_STREAMING_ENABLED
     ngx_flag_t  stream_budget_set =
         (conf->stream.budget != NGX_CONF_UNSET_SIZE);
 #endif
 
     ngx_http_markdown_merge_core_values(conf, prev);
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-    ngx_http_markdown_merge_streaming_values(conf, prev, streaming_budget_set,
-                                             streaming_auto_threshold_set);
-#endif
-
-    /* v0.8.0 streaming config (streaming configuration directives) */
-#ifdef MARKDOWN_STREAMING_ENABLED
-    conf->stream.on_error_explicit = stream_on_error_set;
-    conf->stream.shadow_explicit = stream_shadow_set;
-#endif
     ngx_http_markdown_merge_stream_values(conf, prev);
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (stream_on_error_set) {
+        conf->stream.on_error_explicit = 1;
+    }
+    if (stream_shadow_set) {
+        conf->stream.shadow_explicit = 1;
+    }
+    if (stream_budget_set) {
+        conf->stream.budget_explicit = 1;
+    }
+#endif
 
     /*
      * Set threshold_explicit AFTER the merge so that:
      * - If this level explicitly set threshold, mark it explicit (1).
      * - If this level did NOT set it, inherit the parent's
-     *   threshold_explicit flag via the merge macro — so a parent's
-     *   explicit setting propagates to children.
-     * This prevents the compatibility bridge from overwriting a
-     * value explicitly set at any ancestor level.
+     *   threshold_explicit flag via the merge macro.
      */
-#ifdef MARKDOWN_STREAMING_ENABLED
     if (stream_threshold_set) {
         conf->stream.threshold_explicit = 1;
     }
-#endif
 
-    /*
-     * Compatibility bridge: map v0.6.0 streaming.* values into stream.*
-     * when the v0.8.0 directive was not explicitly set but the v0.6.0
-     * directive was.  This ensures operators using the old directive
-     * names still see their settings take effect at runtime, which
-     * now reads exclusively from stream.*.
-     *
-     * For scalar fields we can copy at merge time.  The engine field
-     * is a complex value in v0.6.0 (evaluated per-request), so it
-     * cannot be statically mapped here — instead the runtime
-     * select_processing_path() falls back to streaming.engine when
-     * stream.engine is at the compiled-in default (AUTO).
-     *
-     * Priority: stream.* explicit  >  streaming.* mapped  >  defaults
-     */
-#ifdef MARKDOWN_STREAMING_ENABLED
-    ngx_http_markdown_bridge_legacy_stream_values(conf, prev,
-                                                 streaming_budget_set,
-                                                 stream_budget_set);
-#endif
-
-    ngx_http_markdown_merge_v060_values(conf, prev);
+    ngx_http_markdown_merge_advanced_values(conf, prev);
 
     ngx_http_markdown_apply_memory_budget_override(conf, prev, max_size_set);
 
@@ -1146,12 +1077,10 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     }
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-    if (conf->streaming.engine != NULL) {
-        streaming_engine_str = "configured (v0.6 compat)";
-    } else if (conf->stream.engine
-               != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO)
-    {
-        streaming_engine_str = "static (v0.8)";
+    if (conf->stream.engine != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO) {
+        streaming_engine_str = (conf->stream.engine
+                                == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF)
+            ? "off" : "on";
     } else {
         streaming_engine_str = "auto (default)";
     }
@@ -1178,7 +1107,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                         " streaming_budget=%uz"
                         " streaming_on_error=%V"
                         " streaming_shadow=%i"
-                        " streaming_auto_threshold=%uz"
+                        " streaming_threshold=%uz"
 #endif
                        ,
                        (ngx_uint_t) conf->enabled,

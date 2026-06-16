@@ -25,7 +25,7 @@
  *     copy of the snapshot that was active when it entered the
  *     header filter.
  *
- * Requirements: v0.6.0 P2-10, v0.6.1 P0-1, P0-2, P1-2
+ * Requirements: P2-10, P0-1, P0-2, P1-2
  */
 
 #ifndef NGX_HTTP_MARKDOWN_DYNCONF_IMPL_H

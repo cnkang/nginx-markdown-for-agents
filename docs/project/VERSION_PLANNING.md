@@ -100,7 +100,8 @@ The strategic review implies the following documentation posture:
 
 - Streaming engine as default (`auto` mode), with `markdown_streaming_engine auto` as the new default
 - Noise pruning default enabled (`markdown_prune_noise on`), with protection selectors and empty-output fallback
-- `markdown_streaming_auto_threshold` for Content-Type/Content-Length-aware engine selection
+- `markdown_stream_threshold` for Content-Type/Content-Length-aware engine selection
+  (replaces the removed `markdown_streaming_auto_threshold`)
 - Unified memory budget (`markdown_memory_budget`) superseding dual `markdown_max_size` + `markdown_streaming_budget`
 - 0.6.0 VERSION_PLANNING, release gates, and streaming-default migration guide
 - ADR-0006 (OTel), ADR-0007 (Streaming Default), ADR-0008 (Noise Pruning Default)
@@ -152,6 +153,7 @@ This release changes **two defaults** that affect behavior for configurations th
 |-----------|-----------------|--------------------------------------|-----------------|
 | `markdown_max_size` | Supported, emits deprecation warning at `info` verbosity | Explicit `markdown_max_size` > `markdown_memory_budget` > compile-time default | 0.8.0 (two release grace period) |
 | `markdown_streaming_budget` | Supported, emits deprecation warning at `info` verbosity | Explicit `markdown_streaming_budget` > `markdown_memory_budget` > compile-time default | 0.8.0 (two release grace period) |
+| `markdown_streaming_auto_threshold` | Removed in 0.8.0 — `nginx -t` will fail | N/A — use `markdown_stream_threshold` instead | Removed in 0.8.0 |
 | `markdown_memory_budget` | New in 0.6.0 | — | — |
 
 Migration example:

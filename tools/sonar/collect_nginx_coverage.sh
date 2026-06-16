@@ -523,11 +523,10 @@ http {
             markdown_log_verbosity debug;
         }
 
-        # Streaming engine selected by request arg (on/off/auto/invalid)
-        location /streaming-variable {
+        location /streaming-off {
             root html;
             markdown_filter on;
-            markdown_streaming_engine \$arg_engine;
+            markdown_streaming_engine off;
             markdown_conditional_requests disabled;
             markdown_log_verbosity debug;
         }
@@ -750,8 +749,8 @@ EOF
 # Create subdirectories for location blocks that use root html
 for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional no-etag \
               no-wildcard disabled gfm commonmark small-limit log-error \
-              streaming streaming-auto streaming-tiny-budget \
-              streaming-variable streaming-fullsupport streaming-ims-only \
+              streaming streaming-auto streaming-off streaming-tiny-budget \
+              streaming-fullsupport streaming-ims-only \
               streaming-reject-budget no-forwarded-trust \
               streaming-etag-tokens streaming-front-matter streaming-gfm \
               streaming-large-budget streaming-on-error-reject \
@@ -778,8 +777,8 @@ HTML
 # (below) so the size-limit rejection test exercises the over-limit path.
 for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditional no-etag \
               no-wildcard disabled gfm commonmark log-error \
-              streaming streaming-auto streaming-tiny-budget \
-              streaming-variable streaming-fullsupport streaming-ims-only \
+              streaming streaming-auto streaming-off streaming-tiny-budget \
+              streaming-fullsupport streaming-ims-only \
               streaming-reject-budget no-forwarded-trust \
               streaming-etag-tokens streaming-front-matter streaming-gfm \
               streaming-large-budget streaming-on-error-reject \
@@ -1116,15 +1115,13 @@ curl -sS -H "${ACCEPT_MARKDOWN}" -H 'If-None-Match: "etag-value"' \
 curl -sS -H "${ACCEPT_MARKDOWN}" -H "${HDR_IF_MODIFIED_SINCE_FUTURE}" \
   "http://127.0.0.1:${PORT}/streaming-ims-only/index.html" -o /dev/null -w "  streaming ims-only IMS: HTTP %{http_code}\n"
 
-# Streaming engine variable selection (on/off/auto/invalid)
+# Streaming engine enum selection (on/off/auto)
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  "http://127.0.0.1:${PORT}/streaming-variable/index.html?engine=on" -o /dev/null -w "  streaming variable on: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/streaming/index.html" -o /dev/null -w "  streaming enum on: HTTP %{http_code}\n"
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  "http://127.0.0.1:${PORT}/streaming-variable/index.html?engine=off" -o /dev/null -w "  streaming variable off: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/streaming-off/index.html" -o /dev/null -w "  streaming enum off: HTTP %{http_code}\n"
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  "http://127.0.0.1:${PORT}/streaming-variable/index.html?engine=auto" -o /dev/null -w "  streaming variable auto: HTTP %{http_code}\n"
-curl -sS -H "${ACCEPT_MARKDOWN}" \
-  "http://127.0.0.1:${PORT}/streaming-variable/index.html?engine=bad" -o /dev/null -w "  streaming variable invalid: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/streaming-auto/index.html" -o /dev/null -w "  streaming enum auto: HTTP %{http_code}\n"
 
 # ── Extended streaming scenarios (exercises streaming_impl.h deeper paths) ──
 

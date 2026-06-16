@@ -507,7 +507,7 @@ release-gates-check-070:
 #     matrix-release-tests job
 #
 # Classification (Req 6):
-#   BLOCKING: All 15 sub-checks below are release-blocking.
+#   BLOCKING: All 17 sub-checks below are release-blocking.
 #   EXPERIMENTAL (non-blocking, not in this gate):
 #     - Performance benchmarks (perf-artifacts, perf-smoke in CI)
 #     - Nightly fuzz beyond smoke (nightly-fuzz.yml)
@@ -527,8 +527,10 @@ release-gates-check-070:
 #  11. make harness-check                     — Harness truth surface validation (Req 9)
 #  12. validate_release_gates.py              — Release gate framework
 #  13. validate_naming.py                     — Artifact naming consistency
-#  14. v0.7.0 gate validators (repo-owned)    — Prior-version gates remain active
-#  15. Harness boundary: routing-manifest.json + risk-packs + core.md + README.md exist (Req 9)
+#  14. v0.8.0 gate validators (0.8-specific: compat bridge removal, new directives)
+#  15. legacy/prior-version regression validators (0.7.0 gates remain active)
+#  16. Harness boundary: routing-manifest.json + risk-packs + core.md + README.md exist (Req 9)
+#  17. Clean-checkout boundary verification (no user-local state required)
 #
 # Environment variables:
 #   RELEASE_GATE_ALLOW_SKIP_FUZZ=1       - skip fuzz smoke when
@@ -541,14 +543,14 @@ release-gates-check-070:
 
 release-gates-check-080:
 	@echo "=== v0.8.0 Release Gate: Starting ==="
-	@echo "  [1/15] build + check-headers"
+	@echo "  [1/17] build + check-headers"
 	$(MAKE) build
 	$(MAKE) check-headers
-	@echo "  [2/15] test-rust (includes streaming tests — Req 1)"
+	@echo "  [2/17] test-rust (includes streaming tests — Req 1)"
 	$(MAKE) test-rust
-	@echo "  [3/15] test-nginx-unit (state machine + config parsing — Req 1, 2)"
+	@echo "  [3/17] test-nginx-unit (state machine + config parsing — Req 1, 2)"
 	$(MAKE) test-nginx-unit
-	@echo "  [4/15] test-rust-fuzz-smoke"
+	@echo "  [4/17] test-rust-fuzz-smoke"
 	@if cargo +nightly --version >/dev/null 2>&1; then \
 	$(MAKE) test-rust-fuzz-smoke; \
 	else \
@@ -558,7 +560,7 @@ release-gates-check-080:
 	echo "FAIL: test-rust-fuzz-smoke requires cargo +nightly; set RELEASE_GATE_ALLOW_SKIP_FUZZ=1 to skip for non-release validation" >&2; exit 1; \
 	fi; \
 	fi
-	@echo "  [5/15] verify-chunked-native-e2e-smoke (native NGINX chunked/no-CL — Req 1.2)"
+	@echo "  [5/17] verify-chunked-native-e2e-smoke (native NGINX chunked/no-CL — Req 1.2)"
 	@if [ -n "$$NGINX_BIN" ]; then \
 	$(MAKE) verify-chunked-native-e2e-smoke; \
 	else \
@@ -568,9 +570,9 @@ release-gates-check-080:
 	echo "FAIL: verify-chunked-native-e2e-smoke requires NGINX_BIN; set RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 to skip for non-release validation" >&2; exit 1; \
 	fi; \
 	fi
-	@echo "  [6/15] test-e2e-rust (Rust E2E harness — Req 1)"
+	@echo "  [6/17] test-e2e-rust (Rust E2E harness — Req 1)"
 	$(MAKE) test-e2e-rust
-	@echo "  [7/15] coverage-c (C coverage gate — Req 4)"
+	@echo "  [7/17] coverage-c (C coverage gate — Req 4)"
 	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (advisory)"
 	@if command -v lcov >/dev/null 2>&1 && [ -d "$(NGINX_TEST_DIR)" ]; then \
 	$(MAKE) coverage-c; \
@@ -581,7 +583,7 @@ release-gates-check-080:
 	echo "FAIL: coverage-c requires lcov and NGINX test dir; set RELEASE_GATE_ALLOW_SKIP_COVERAGE=1 to skip for non-release validation" >&2; exit 1; \
 	fi; \
 	fi
-	@echo "  [8/15] coverage-rust (Rust coverage gate — Req 4)"
+	@echo "  [8/17] coverage-rust (Rust coverage gate — Req 4)"
 	@echo "  Policy source: AGENTS.md Rule 25 — 80% aggregate; 90% critical paths (advisory)"
 	@if cargo llvm-cov --version >/dev/null 2>&1; then \
 	$(MAKE) coverage-rust; \
@@ -596,31 +598,32 @@ release-gates-check-080:
 	@echo "  [critical-path-coverage] 90% target for auth, error handling, FFI boundary, conditional requests"
 	@echo "  [critical-path-coverage] NOTE: 90% critical-path coverage is advisory per AGENTS.md Rule 25;"
 	@echo "  [critical-path-coverage]       80% aggregate is the programmatic enforcement gate."
-	@echo "  [9/15] docs-check (documentation consistency — Req 3)"
+	@echo "  [9/17] docs-check (documentation consistency — Req 3)"
 	$(MAKE) docs-check
-	@echo "  [10/15] matrix validate_workflow_matrix_consumers (Req 5)"
+	@echo "  [10/17] matrix validate_workflow_matrix_consumers (Req 5)"
 	python3 tools/release/matrix/validate_workflow_matrix_consumers.py
-	@echo "  [11/15] harness-check (harness truth surface — Req 9)"
+	@echo "  [11/17] harness-check (harness truth surface — Req 9)"
 	$(MAKE) harness-check
-	@echo "  [12/15] validate_release_gates.py (release gate framework)"
+	@echo "  [12/17] validate_release_gates.py (release gate framework)"
 	python3 tools/release/gates/validate_release_gates.py
-	@echo "  [13/15] validate_naming.py (artifact naming)"
+	@echo "  [13/17] validate_naming.py (artifact naming)"
 	python3 tools/release/gates/validate_naming.py
-	@echo "  [14/15] v0.7.0 gate validators (repo-owned, prior-version gates)"
+	@echo "  [14/17] v0.8.0 gate validators (0.8-specific: compat bridge removal, new directives)"
+	python3 tools/release/gates/validate_release_gates_080.py
+	python3 tools/release/gates/validate_config_directives_080.py
+	@echo "  [15/17] legacy/prior-version regression validators (0.7.0 gates remain active)"
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_release_gates_070.py --mode strict
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_config_directives_070.py
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_metrics_070.py
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_reason_codes_070.py
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_package_metadata_070.py
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_k8s_manifests_070.py
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_fuzz_packaging_070.py
-	@echo "  [15/15] harness boundary: routing-manifest.json + risk-packs (Req 9)"
+	@echo "  [16/17] harness boundary: routing-manifest.json + risk-packs (Req 9)"
 	@test -f docs/harness/routing-manifest.json || { echo "FAIL: docs/harness/routing-manifest.json not found — release gates require repo-owned harness sources" >&2; exit 1; }
 	@test -d docs/harness/risk-packs || { echo "FAIL: docs/harness/risk-packs/ not found — release gates require repo-owned risk-pack inputs" >&2; exit 1; }
 	@test -f docs/harness/core.md || { echo "FAIL: docs/harness/core.md not found — release gates require repo-owned harness sources (Req 9.3)" >&2; exit 1; }
 	@test -f docs/harness/README.md || { echo "FAIL: docs/harness/README.md not found — release gates require repo-owned harness sources (Req 9.3)" >&2; exit 1; }
-	@echo ""
-	@echo "  [clean-checkout] Boundary verification (Req 9):"
+	@echo "  [17/17] clean-checkout boundary verification"
 	@echo "  All validators use only repo-owned sources (no .kiro/, no .codeartsdoer/, no adapter caches)."
 	@echo "  Inputs: tools/, docs/, components/, AGENTS.md, Makefile, .github/workflows/"
 	@echo "  This gate is reproducible from a clean 'git clone' without user-local state."

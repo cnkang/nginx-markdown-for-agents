@@ -36,15 +36,9 @@
 #define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS    0
 #define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT  1
 
-typedef struct {
-    ngx_http_complex_value_t  *engine;
-    size_t                     budget;
-    ngx_flag_t                 budget_explicit;
-    ngx_uint_t                 on_error;
-    ngx_flag_t                 shadow;
-    size_t                     auto_threshold;
-    ngx_flag_t                 auto_threshold_explicit;
-} ngx_http_markdown_streaming_cfg_t;
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF   0
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO  1
+#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON    2
 #endif
 
 #define ngx_memcpy(dst, src, n)      memcpy(dst, src, n)
@@ -124,19 +118,19 @@ typedef struct {
 typedef struct ngx_http_markdown_conf_s {
     ngx_http_markdown_ops_cfg_t     ops;
     ngx_http_markdown_policy_cfg_t  policy;
-#ifdef MARKDOWN_STREAMING_ENABLED
-    ngx_http_markdown_streaming_cfg_t streaming;
-#endif
     struct {
         ngx_uint_t    engine;
         size_t        threshold;
+        ngx_flag_t    threshold_explicit;
         size_t        precommit_buffer;
         size_t        flush_min;
         ngx_array_t  *excluded_types;
         ngx_uint_t    on_error;
+        ngx_flag_t    on_error_explicit;
         size_t        budget;
         ngx_flag_t    budget_explicit;
         ngx_flag_t    shadow;
+        ngx_flag_t    shadow_explicit;
     } stream;
 } ngx_http_markdown_conf_t;
 
@@ -488,6 +482,8 @@ test_access_and_json_builder(void)
 
     reset_test_state();
     init_request(&r, &c, &conf, &addr);
+    conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
+    conf.stream.threshold_explicit = 1;
 
     rc = ngx_http_markdown_diagnostics_init(
         &ngx_http_markdown_g_diag_state, r.pool, 2);
@@ -518,9 +514,13 @@ test_access_and_json_builder(void)
                 "JSON should include metrics");
     TEST_ASSERT(strstr(json, "\"dynconf_state\"") != NULL,
                 "JSON should include dynconf state");
+    TEST_ASSERT(strstr(json, "\"engine\": \"on\"") != NULL,
+                "JSON should expose configured streaming engine");
+    TEST_ASSERT(strstr(json, "\"engine_source\": \"configured\"") != NULL,
+                "JSON should expose configured engine source");
     TEST_ASSERT(strstr(json,
-                "\"legacy_auto_threshold_explicit\": false") != NULL,
-                "JSON should expose legacy threshold bridge state");
+                "\"threshold_explicit\": true") != NULL,
+                "JSON should expose threshold explicit state");
     TEST_ASSERT(strstr(json, "\"reason_code\": 11") != NULL,
                 "JSON should include recorded reason");
 

@@ -44,7 +44,7 @@ data:
         markdown_streaming_engine {{ .Values.markdown.streaming.engine }};
         markdown_streaming_budget {{ .Values.markdown.streaming.budget }};
         markdown_streaming_on_error {{ .Values.markdown.streaming.onError }};
-        markdown_streaming_auto_threshold {{ .Values.markdown.streaming.autoThreshold }};
+        markdown_stream_threshold {{ .Values.markdown.streaming.threshold }};
         {{- if .Values.markdown.streaming.shadow }}
         markdown_streaming_shadow on;
         {{- end }}
