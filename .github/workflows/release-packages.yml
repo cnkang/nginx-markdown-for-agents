@@ -709,6 +709,8 @@ jobs:
           # legacy local-spec validators here; tag release CI checkouts do not
           # include user-local Kiro spec directories.
           python3 tools/release/gates/validate_naming.py
+          python3 tools/release/gates/validate_release_gates_080.py
+          python3 tools/release/gates/validate_config_directives_080.py
           python3 tools/release/gates/validate_release_gates_070.py --mode strict
           python3 tools/release/gates/validate_config_directives_070.py
           python3 tools/release/gates/validate_metrics_070.py
