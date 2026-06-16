@@ -133,6 +133,7 @@ jobs:
               - 'tools/release/matrix/**'
               - 'tools/release-matrix.json'
               - 'tools/release/gates/validate_*_070.py'
+              - 'tools/release/gates/validate_*_080.py'
             corpus_tools:
               - 'tools/corpus/**'
             workflows:
