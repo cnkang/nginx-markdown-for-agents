@@ -8,7 +8,7 @@ documented, and that removed directives are absent from the source:
 1. New v0.8.0 directives exist in C source, docs, merge, and defaults
 2. Removed v0.8.0 directives are NOT in the C command array
 3. Removed v0.8.0 directives are documented as REMOVED in CONFIGURATION.md
-4. No conf->streaming fields remain (replaced by conf->stream in v0.8.0)
+4. No conf->streaming fields remain in any C source under src/ (replaced by conf->stream in v0.8.0)
 
 New directives validated:
 - markdown_stream_threshold (size, replaces markdown_streaming_auto_threshold)
@@ -272,7 +272,7 @@ def check_constant_not_in_source(
 def check_conf_field_not_in_source(
     field_pattern: str, sources: dict[str, str], result: ValidationResult
 ) -> None:
-    """Verify removed conf->streaming.* fields are absent from all C sources."""
+    """Verify removed conf->streaming.* fields are absent from C sources."""
     check_id = f"removed-field:{field_pattern}"
     found_in = []
     for name, content in sources.items():
@@ -337,11 +337,14 @@ def validate_all(result: ValidationResult) -> None:
         for constant in REMOVED_CONSTANTS:
             check_constant_not_in_source(constant, filter_h, result)
 
-    c_sources = {
-        "config_directives_impl.h": directives_src,
-        "config_core_impl.h": core_src,
-        "filter_module.h": filter_h,
-    }
+    c_sources: dict[str, str] = {}
+    src_dir = (
+        PROJECT_ROOT / "components" / "nginx-module" / "src"
+    )
+    for c_path in src_dir.rglob("*.[ch]"):
+        content = read_safe(c_path)
+        if content:
+            c_sources[c_path.name] = content
     for field_pat in REMOVED_CONF_FIELDS:
         check_conf_field_not_in_source(field_pat, c_sources, result)
 

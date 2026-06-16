@@ -574,24 +574,23 @@ markdown_trust_forwarded_headers on;
 
 ---
 
-### Streaming Directives (0.5.0+, default changed to auto in 0.6.0)
+### Streaming Directives (v0.8.0 configuration contract)
 
-These directives control the streaming conversion path introduced in 0.5.0.
-In v0.6.0, the default changed from `off` to `auto`: responses are
+v0.8.0 uses the unified `conf->stream.*` configuration model. The module no
+longer preserves the 0.6.x streaming compatibility bridge. Responses are
 automatically routed to streaming or full-buffer based on Content-Length
-and `markdown_stream_threshold`. Set `markdown_streaming_engine off`
-explicitly to restore 0.5.x behavior.
-
+and `markdown_stream_threshold`. Use `markdown_stream_threshold` for
+auto-mode threshold control.
 
 #### markdown_streaming_engine
 
 **Syntax:** `markdown_streaming_engine off | on | auto;`
-**Default:** `auto` (was `off` prior to 0.6.0)
+**Default:** `auto`
 **Context:** http, server, location
 
 Controls whether the streaming conversion engine is used. When `off`,
-all requests use the full-buffer conversion path and behavior is identical to 0.5.x.
-When `auto` (the 0.6.0 default), the engine is selected automatically per-request.
+all requests use the full-buffer conversion path.
+When `auto`, the engine is selected automatically per-request.
 
 - `off`: Disable streaming. All requests use the full-buffer path.
 - `on`: Enable streaming for all eligible requests.
@@ -1177,10 +1176,10 @@ Path to the dynamic configuration file.  Only effective when
 | Key | Value | Maps to |
 |-----|-------|---------|
 | `markdown_filter` | `on` \| `off` | `conf->enabled`, overrides complex values |
-| `prune_noise` | `on` \| `off` | `conf->prune_noise` |
-| `log_verbosity` | `error` \| `warn` \| `info` \| `debug` | `conf->log_verbosity` (module enum) |
-| `streaming_budget` | `<size>` (e.g. `64k`, `4m`) | `conf->streaming_budget` |
-| `memory_budget` | `<size>` (e.g. `128k`) | `conf->memory_budget` |
+| `prune_noise` | `on` \| `off` | `conf->advanced.prune_noise` |
+| `log_verbosity` | `error` \| `warn` \| `info` \| `debug` | `conf->policy.log_verbosity` (module enum) |
+| `streaming_budget` | `<size>` (e.g. `64k`, `4m`) | `conf->stream.budget` |
+| `memory_budget` | `<size>` (e.g. `128k`) | `conf->advanced.memory_budget` |
 
 **Not supported via dynconf** (require `nginx -s reload`):
 `markdown_content_types`, `markdown_stream_types`, auth policy,
@@ -1669,10 +1668,13 @@ markdown_memory_budget 5m;
 
 ---
 
+### Removed Directives
+
+The following directives have been removed in v0.8.0 and are no longer accepted. `nginx -t` will fail with "unknown directive" if any of these appear in configuration.
+
 #### markdown_streaming_auto_threshold — REMOVED in 0.8.0
 
-This directive has been **removed** in v0.8.0. It is no longer registered;
-`nginx -t` will fail with "unknown directive" if it appears in configuration.
+This directive has been **removed** in v0.8.0. It is no longer registered.
 Use `markdown_stream_threshold` instead.
 
 **Migration:**
