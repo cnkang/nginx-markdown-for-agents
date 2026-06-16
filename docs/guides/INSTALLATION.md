@@ -173,7 +173,7 @@ If you need deterministic control over compiler flags or local patching, use [Ma
 
 Starting with v0.7.0, release workflows build DEB and RPM artifacts for
 supported Linux distributions and attach them to GitHub Releases. APT/YUM repository publishing is planned, but public APT/YUM repository publishing is not
-part of the 0.8.0 GA channel. Do not use `apt-get install
+part of the current GA channel. Do not use `apt-get install
 nginx-module-markdown` or `yum install nginx-module-markdown` unless you
 operate your own package repository.
 
