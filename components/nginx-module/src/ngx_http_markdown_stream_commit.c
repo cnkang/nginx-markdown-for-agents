@@ -9,8 +9,9 @@
  *   Phase 1 (fallible): Vary: Accept, ETag removal, auth Cache-Control.
  *     If any step fails, NGX_ERROR is returned before headers are sent
  *     downstream.  Earlier Phase 1 mutations may be present in
- *     headers_out but are invisible because the caller's fallback sends
- *     the original upstream headers.
+ *     headers_out but are invisible because the pre-commit failure
+ *     path aborts to full-buffer processing without committing
+ *     Markdown headers.
  *   Phase 2 (infallible): Content-Type, Content-Length, Content-Encoding.
  *     These are pointer/integer writes that cannot fail.
  *   Only after both phases complete are headers_committed and state set.
@@ -113,13 +114,13 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
      * Atomicity guarantee: if Vary succeeds but ETag fails, the
      * Vary header HAS been added to the headers_out list.  However,
      * the request is still in pre-commit state and headers have NOT
-     * been sent to the network.  The caller's fallback path sends
-     * the original upstream headers (Content-Type: text/html), so
-     * the extra Vary: Accept is harmless — it does not change
+     * been sent to the network.  The pre-commit failure path aborts
+     * to full-buffer processing without committing Markdown headers,
+     * so the extra Vary: Accept is harmless — it does not change
      * content negotiation semantics for an HTML response.
      * Similarly, a removed ETag in the headers list is not visible
-     * because the full-buffer/fallback path restores upstream
-     * headers before sending.
+     * because the full-buffer path restores upstream headers before
+     * sending.
      */
 
     rc = ngx_http_markdown_stream_commit_set_vary(r);
