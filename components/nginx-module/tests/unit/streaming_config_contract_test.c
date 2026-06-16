@@ -577,6 +577,12 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
     mcf->stream.flush_min = NGX_CONF_UNSET_SIZE;
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;
+    mcf->stream.on_error = NGX_CONF_UNSET_UINT;
+    mcf->stream.on_error_explicit = -1;
+    mcf->stream.budget = NGX_CONF_UNSET_SIZE;
+    mcf->stream.budget_explicit = -1;
+    mcf->stream.shadow = -1;
+    mcf->stream.shadow_explicit = -1;
 }
 
 /* ================================================================
