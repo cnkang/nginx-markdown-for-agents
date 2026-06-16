@@ -247,6 +247,11 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   payload [13]
 - Container jobs with Bash-only syntax set `defaults.run.shell: bash` or
   equivalent step-level `shell: bash` before relying on bashisms [13]
+- Release Dockerfiles that copy and execute repository scripts install every
+  interpreter named by those scripts' shebangs before first execution, or
+  invoke only scripts valid for the base image's guaranteed shell. Minimal
+  images must not assume `/usr/bin/env bash` exists unless `bash` is installed
+  in the same stage [13]
 - Package dependency constraints must either use distro-resolvable package
   versions/EVRs or non-exact version floors. Do not exact-match a naked
   upstream NGINX source version when distro packages append release suffixes
@@ -484,3 +489,4 @@ remediation:
 | 0.8.1 | 2026-06-10 | Codex | Strengthened Rule 13 for newer release gates that reuse prior-version validators with caller-parameterized active version assertions and current release-matrix schema consumers |
 | 0.8.2 | 2026-06-12 | Kang | Added Rules 44–47: streaming deflate semantics (44), effective_conf NULL-safe access (45), FFI NULL/empty boundary guards (46), terminal-sent latch NGX_AGAIN semantics (47); strengthened Rules 13 (verified-rustup), 30 (cross-TU visibility, sentinel consistency) |
 | 0.8.3 | 2026-06-13 | Codex | Added Rule 48 for supplemental static security and supply-chain gates with focused Semgrep, secret scanning, cargo-deny, Trivy/SBOM/Scorecard, and local Make targets |
+| 0.8.4 | 2026-06-16 | Codex | Strengthened Rule 13 for release Dockerfile script interpreter prerequisites in minimal images |

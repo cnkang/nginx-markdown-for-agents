@@ -103,6 +103,12 @@ Required:
   - Container jobs that use Bash-only syntax (`[[ ... ]]`, brace expansion,
     arrays, `source`, or `set -o pipefail`) must set `defaults.run.shell:
     bash` at the job level or `shell: bash` on every affected run step.
+  - Release Dockerfiles that copy and execute repository scripts must install
+    every interpreter named by those scripts' shebangs before the first
+    execution, or invoke only scripts valid for the base image's guaranteed
+    shell.  Minimal base images such as Alpine must not assume
+    `/usr/bin/env bash` exists unless `bash` is installed in the same image
+    stage before the script runs.
   - Package smoke tests for architecture-specific artifacts must run on a
     matching runner architecture or an explicit emulation path.
   - Container-job package smoke images must contain prerequisites needed before

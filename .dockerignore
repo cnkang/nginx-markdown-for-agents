@@ -27,6 +27,7 @@
 **/*.dylib
 
 # Test artifacts
+components/rust-converter/fuzz/
 components/nginx-module/tests/build/
 
 # Documentation (if not needed for build)

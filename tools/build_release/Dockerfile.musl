@@ -18,6 +18,7 @@ RUN set -eux; \
         done; \
     }; \
     retry 5 apk add --no-cache \
+        bash \
         build-base \
         ca-certificates \
         curl \
