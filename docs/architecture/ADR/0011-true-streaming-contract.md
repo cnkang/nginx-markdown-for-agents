@@ -66,7 +66,7 @@ as "true streaming."
 
 ## Date
 
-2026-06-04
+2026-06-16
 
 ## Authors
 
@@ -76,4 +76,4 @@ Project Team
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.8.0 | 2026-06-04 | Kang | Initial ADR for 0.8.0 true streaming contract |
+| 0.8.0 | 2026-06-16 | Kang | Initial ADR for 0.8.0 true streaming contract |

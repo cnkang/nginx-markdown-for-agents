@@ -107,4 +107,4 @@ configuration.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.6.0 | 2026-04-28 | v060-prod | Initial ADR for streaming-default |
-| 0.8.0 | 2026-06-15 | Kang | Documented v0.8.0 compatibility bridge removal; markdown_streaming_auto_threshold removed |
+| 0.8.0 | 2026-06-16 | Kang | Documented v0.8.0 compatibility bridge removal; markdown_streaming_auto_threshold removed |

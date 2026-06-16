@@ -87,4 +87,4 @@ thresholds.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.8.0 | 2026-06-10 | Kang  | Initial feature compatibility matrix |
+| 0.8.0 | 2026-06-16 | Kang  | Initial feature compatibility matrix |

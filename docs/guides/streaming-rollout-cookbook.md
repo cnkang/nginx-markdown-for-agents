@@ -616,5 +616,5 @@ the appropriate operator action.
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Initial rollout cookbook with shadow mode phases |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.8.0 | 2026-06-10 | Kang  | Rewritten for v0.8.0 true streaming: updated directive names, added staged rollout strategy, monitoring guidance, emergency disable, rollback decision table |
-| 0.8.0 | 2026-06-10 | Kang  | Expanded Monitoring Guidance: health thresholds, PromQL alert rules, JSON curl examples, reason code interpretation table, per-phase health indicators |
+| 0.8.0 | 2026-06-16 | Kang  | Rewritten for v0.8.0 true streaming: updated directive names, added staged rollout strategy, monitoring guidance, emergency disable, rollback decision table |
+| 0.8.0 | 2026-06-16 | Kang  | Expanded Monitoring Guidance: health thresholds, PromQL alert rules, JSON curl examples, reason code interpretation table, per-phase health indicators |
