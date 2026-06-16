@@ -19,7 +19,20 @@ from tools.release.matrix.completeness_check import (
 # -- helpers ------------------------------------------------------------------
 
 SAMPLE_ENTRY = {"nginx": "1.24.0", "os_type": "glibc", "arch": "x86_64", "support_tier": "full"}
+CURRENT_SCHEMA_ENTRY = {
+    "nginx_version": "1.24.0",
+    "nginx_channel": "oldstable",
+    "os": "linux",
+    "libc": "musl",
+    "arch": "arm64",
+    "artifact_type": "dynamic-module",
+    "test_level": "docker-validation",
+    "support_tier": "supported",
+    "release_blocking": False,
+    "owner_workflow": ".github/workflows/release-binaries.yml",
+}
 SAMPLE_FILENAME = "ngx_http_markdown_filter_module-1.24.0-glibc-x86_64.tar.gz"
+CURRENT_SCHEMA_FILENAME = "ngx_http_markdown_filter_module-1.24.0-musl-aarch64.tar.gz"
 
 
 def _write_matrix(tmp: Path, entries: list[dict], *, schema_version: str = "1.0.0") -> Path:
@@ -39,6 +52,16 @@ def _write_matrix(tmp: Path, entries: list[dict], *, schema_version: str = "1.0.
         "schema_version": schema_version,
         "support_tiers": {"full": "desc", "source_only": "desc"},
         "matrix": entries,
+    }))
+    return p
+
+
+def _write_current_matrix(tmp: Path, entries: list[dict]) -> Path:
+    """Create a current-schema release-matrix.json in the given directory."""
+    p = tmp / "release-matrix.json"
+    p.write_text(json.dumps({
+        "schema_version": "2.0.0",
+        "entries": entries,
     }))
     return p
 
@@ -77,6 +100,32 @@ def test_load_matrix_filters_full_tier(tmp_path):
 def test_load_matrix_empty(tmp_path):
     p = _write_matrix(tmp_path, [])
     assert load_matrix(str(p)) == []
+
+
+def test_load_matrix_current_schema_selects_release_binaries_entries(tmp_path):
+    entries = [
+        CURRENT_SCHEMA_ENTRY,
+        {
+            **CURRENT_SCHEMA_ENTRY,
+            "libc": "glibc",
+            "arch": "amd64",
+            "owner_workflow": ".github/workflows/release-packages.yml",
+        },
+        {
+            **CURRENT_SCHEMA_ENTRY,
+            "support_tier": "experimental",
+        },
+    ]
+    p = _write_current_matrix(tmp_path, entries)
+
+    assert load_matrix(str(p)) == [
+        {
+            "nginx": "1.24.0",
+            "os_type": "musl",
+            "arch": "aarch64",
+            "support_tier": "supported",
+        }
+    ]
 
 
 # -- collect_artifacts (directory mode) ---------------------------------------
@@ -162,6 +211,15 @@ def test_main_exit_0_file_list(tmp_path):
     matrix_path = _write_matrix(tmp_path, entries)
     listing = tmp_path / "list.txt"
     listing.write_text(SAMPLE_FILENAME + "\n")
+
+    rc = main(["--matrix", str(matrix_path), "--artifacts", str(listing)])
+    assert rc == 0
+
+
+def test_main_exit_0_current_schema_file_list(tmp_path):
+    matrix_path = _write_current_matrix(tmp_path, [CURRENT_SCHEMA_ENTRY])
+    listing = tmp_path / "list.txt"
+    listing.write_text(CURRENT_SCHEMA_FILENAME + "\n")
 
     rc = main(["--matrix", str(matrix_path), "--artifacts", str(listing)])
     assert rc == 0

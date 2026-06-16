@@ -32,56 +32,58 @@ jobs:
         with:
           python-version: '3.14.3'
 
-      - name: Update Release Matrix
+      - name: Validate release matrix consumers
         run: |
-          python3 tools/release/matrix/update_matrix.py
-          if [ -f tools/matrix-diff.json ]; then
-            echo "Release matrix was refreshed before resolving binaries:"
-            python3 -m json.tool tools/matrix-diff.json
-          else
-            echo "Release matrix is already current."
-          fi
-
-      - name: Validate updated release matrix
-        run: |
-          python3 tools/release/matrix/validate_doc_matrix_sync.py
-          python3 tools/release/matrix/validate_matrix_install_consistency.py
           python3 tools/release/matrix/validate_workflow_matrix_consumers.py
 
       - name: Extract build matrix from release-matrix.json
         id: resolve
         run: |
-          # Read full-support entries from the release matrix and output
-          # them as a complete entry list for matrix.include consumption.
+          # Read release-binaries-owned supported entries from the checked-in
+          # release matrix and output them for matrix.include consumption.
           python3 - <<'PY'
           import json, os
 
           with open("tools/release-matrix.json", "r") as f:
               data = json.load(f)
 
-          # Only build entries with support_tier == "full"
-          full_entries = [
+          def normalize_arch(arch):
+              return {
+                  "amd64": "x86_64",
+                  "arm64": "aarch64",
+              }.get(arch, arch)
+
+          owner = ".github/workflows/release-binaries.yml"
+          entries = [
               {
-                  "nginx": e["nginx"],
-                  "os_type": e["os_type"],
-                  "arch": e["arch"],
+                  "nginx": e["nginx_version"],
+                  "os_type": e["libc"],
+                  "arch": normalize_arch(e["arch"]),
                   "support_tier": e["support_tier"],
               }
-              for e in data.get("matrix", [])
-              if e.get("support_tier") == "full"
+              for e in data.get("entries", [])
+              if e.get("owner_workflow") == owner
+              and e.get("support_tier") == "supported"
+              and e.get("artifact_type") == "dynamic-module"
+              and e.get("libc") in {"glibc", "musl"}
           ]
 
+          if not entries:
+              raise SystemExit(
+                  "No supported release-binaries entries found in release-matrix.json"
+              )
+
           # Sort for deterministic ordering
-          full_entries.sort(key=lambda e: (
+          entries.sort(key=lambda e: (
               tuple(int(p) for p in e["nginx"].split(".")),
               e["os_type"],
               e["arch"],
           ))
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write(f"matrix_entries={json.dumps(full_entries)}\n")
+              out.write(f"matrix_entries={json.dumps(entries)}\n")
 
-          print(f"Resolved {len(full_entries)} build entries from release-matrix.json")
+          print(f"Resolved {len(entries)} build entries from release-matrix.json")
           PY
 
       - id: checkout_ref
@@ -163,7 +165,7 @@ jobs:
     name: Publish Binaries to Release
     needs: completeness-check
     runs-on: ubuntu-latest
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && startsWith(github.event.inputs.version, 'v'))
     permissions:
       contents: write
     steps:
@@ -256,6 +258,7 @@ jobs:
       - name: Upload Assets
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
           files: |
             artifacts/**/*.tar.gz
             artifacts/nginx-version-groups.json
