@@ -1052,8 +1052,8 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
                                                    ngx_http_markdown_ctx_t *ctx,
                                                    const ngx_http_markdown_conf_t *conf)
 {
-    ngx_chain_t  *compressed_chain;
-    ngx_chain_t  *decompressed_chain;
+    ngx_chain_t  *compressed_chain = NULL;
+    ngx_chain_t  *decompressed_chain = NULL;
     ngx_int_t     decompress_rc;
     ngx_int_t     rc;
 
