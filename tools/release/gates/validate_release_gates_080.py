@@ -181,8 +181,7 @@ def check_removed_conf_fields(result: ValidationResult) -> None:
         content = read(path)
         sources[str(path.relative_to(src_dir))] = content
     removed_fields = [
-        r"conf->streaming\.engine",
-        r"conf->streaming\.auto_threshold",
+        r"conf->streaming\.",
     ]
     for field_pat in removed_fields:
         found_in = []

@@ -25,7 +25,7 @@ to 0.5.x. However, configurations using `markdown_streaming_auto_threshold` or
 
 No configuration changes needed (if not using removed directives). You get:
 
-- **Auto mode**: responses > 1 MiB or chunked use streaming; smaller responses use full-buffer
+- **Auto mode**: responses >= 1 MiB or chunked use streaming; smaller responses use full-buffer
 - **Noise pruning**: nav, footer, aside, ads, cookie banners removed from output
 
 Monitor the new reason codes in logs:
@@ -68,7 +68,7 @@ markdown_streaming_engine off;
 ### How Auto Mode Selects Engine
 
 ```
-if Content-Length > markdown_stream_threshold:
+if Content-Length >= markdown_stream_threshold:
     → streaming engine
 elif Transfer-Encoding: chunked:
     → streaming engine

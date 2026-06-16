@@ -122,8 +122,7 @@ REMOVED_CONSTANTS = [
 ]
 
 REMOVED_CONF_FIELDS = [
-    r"conf->streaming\.engine",
-    r"conf->streaming\.auto_threshold",
+    r"conf->streaming\.",
 ]
 
 
