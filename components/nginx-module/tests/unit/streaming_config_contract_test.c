@@ -932,7 +932,7 @@ test_allocation_failure(void)
     ngx_http_markdown_conf_t mcf;
     char                    *rc;
 
-    TEST_SUBSECTION("5.2c Allocation failure paths");;
+    TEST_SUBSECTION("5.2c Allocation failure paths");
 
     setup_cf(&cf, &args, values, 2);
     set_arg(&cmd.name, "markdown_stream_excluded_types");
