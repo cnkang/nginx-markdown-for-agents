@@ -16,7 +16,7 @@ Required:
   `src/scenarios/`.  Each scenario must follow the established pattern:
   Reuse_Mode executes actual HTTP tests against a provided NGINX binary;
   Bootstrap_Mode must resolve a runnable runtime directly or through a
-  documented compatibility bridge while preserving harness-owned scenario
+  documented bootstrap path while preserving harness-owned scenario
   execution and assertions.
 - Adding new Python pytest files under
   `components/nginx-module/tests/e2e/` is forbidden.  That directory is

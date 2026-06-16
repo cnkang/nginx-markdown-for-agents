@@ -730,7 +730,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * When enabled, structural HTML regions matching prune
      * selectors are excluded from Markdown output.
      *
-     * Default: on (v0.6.0)
+     * Default: on
      * Context: http, server, location
      *
      * Example:

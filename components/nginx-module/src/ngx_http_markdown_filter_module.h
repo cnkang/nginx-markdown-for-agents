@@ -297,10 +297,9 @@ typedef struct {
 } ngx_http_markdown_decision_t;
 
 /*
- * v0.8.0 streaming engine mode constants (markdown_streaming_engine directive).
+ * Streaming engine mode constants (markdown_streaming_engine directive).
  *
- * These are distinct from the v0.6.0 MARKDOWN_STREAMING_ENABLED constants
- * above.  The 0.8.0 directive uses a simple enum stored as ngx_uint_t
+ * These use a simple enum stored as ngx_uint_t
  * rather than a complex value.
  */
 #define NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF   0
@@ -543,7 +542,7 @@ typedef struct {
     } stream;
 
     /*
-     * Noise pruning configuration (v0.6.0).
+     * Noise pruning configuration.
      */
     ngx_http_markdown_advanced_cfg_t advanced;
 } ngx_http_markdown_conf_t;
@@ -1118,7 +1117,7 @@ typedef struct {
     } parse_interrupts;
 
     /*
-     * Per-path metrics (v0.6.0 P1-2).
+     * Per-path metrics.
      *
      * When markdown_metrics_per_path is enabled, URI paths are
      * tracked individually in an RB-tree allocated from the slab

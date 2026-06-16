@@ -483,10 +483,10 @@ ngx_http_markdown_merge_core_values(ngx_http_markdown_conf_t *conf,
 }
 
 /*
- * Merge v0.6.0-specific configuration surfaces.
+ * Merge advanced/pruning/dynconf configuration values.
  */
 static void
-ngx_http_markdown_merge_v060_values(ngx_http_markdown_conf_t *conf,
+ngx_http_markdown_merge_advanced_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev)
 {
     ngx_conf_merge_value(conf->advanced.prune_noise, prev->advanced.prune_noise, 1);
@@ -570,7 +570,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         conf->stream.threshold_explicit = 1;
     }
 
-    ngx_http_markdown_merge_v060_values(conf, prev);
+    ngx_http_markdown_merge_advanced_values(conf, prev);
 
     ngx_http_markdown_apply_memory_budget_override(conf, prev, max_size_set);
 

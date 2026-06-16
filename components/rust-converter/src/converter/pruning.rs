@@ -6,7 +6,7 @@
 //! are never visited). Semantic noise regions (`<nav>`, `<footer>`, `<aside>`)
 //! are optionally prunable behind the `prune_noise_regions` feature flag.
 //!
-//! In v0.6.0, pruning is default-enabled at runtime via `PruneConfig` and
+//! Noise pruning is default-enabled at runtime via `PruneConfig` and
 //! the `markdown_prune_noise` NGINX directive. The compile-time feature flag
 //! remains for conditional compilation of pruning-extended logic.
 //!

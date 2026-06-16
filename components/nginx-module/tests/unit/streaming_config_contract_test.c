@@ -1259,14 +1259,14 @@ test_hard_exclusions_with_parameters(void)
 
 
 /* ================================================================
- * 5.8 Compatibility bridge: auto_threshold mapping
+ * 5.8 stream.threshold defaults and override
  *
- * Tests that the v0.6.0→v0.8.0 auto_threshold bridge only fires
- * when the old directive was explicitly set, and does NOT overwrite
- * the 0.8.0 default when nobody configured either directive.
+ * Tests that the stream.threshold default is preserved when no
+ * directive is explicitly set, and that explicit overrides are
+ * correctly inherited from parent and applied from child.
  * ================================================================ */
 static void
-test_auto_threshold_compatibility_bridge(void)
+test_stream_threshold_defaults_and_override(void)
 {
     ngx_http_markdown_conf_t parent;
     ngx_http_markdown_conf_t child;
@@ -1343,7 +1343,7 @@ main(void)
     test_hard_exclusions_always_present();
     test_reserved_directive_absent_from_inventory();
     test_hard_exclusions_with_parameters();
-    test_auto_threshold_compatibility_bridge();
+    test_stream_threshold_defaults_and_override();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
