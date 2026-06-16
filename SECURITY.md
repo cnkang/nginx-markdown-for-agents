@@ -115,4 +115,4 @@ Nightly GitHub Actions coverage is defined in `.github/workflows/nightly-fuzz.ym
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.3 | 2026-05-14 | Kang | Update supported version line to 0.6.x |
 | 0.7.0 | 2026-05-25 | Kang | Update supported version line to 0.7.x |
-| 0.8.0 | 2026-06-10 | Kang | Update supported version line to 0.8.x |
+| 0.8.0 | 2026-06-16 | Kang | Update supported version line to 0.8.x |

@@ -335,5 +335,5 @@ the operation list and applies changes to `r->headers_out`.
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 subsystems section (negotiator, conditional, decision, header_plan, security extensions, bounded decompression, parser timeout/budget, diagnostics endpoint, dynconf dry-run/LKG, reason code FFI accessor, header plan atomic application) |
-| 0.8.0 | 2026-06-10 | Kang | Added true streaming architecture, engine-selection compatibility notes, streaming FFI/fallback boundaries, observability, and release-gates-check-080 references |
-| 0.8.0 | 2026-06-15 | Kang | Updated engine-selection section: removed compatibility bridge reference (v0.6.x compat removed in 0.8.0) |
+| 0.8.0 | 2026-06-16 | Kang | Added true streaming architecture, engine-selection compatibility notes, streaming FFI/fallback boundaries, observability, and release-gates-check-080 references |
+| 0.8.0 | 2026-06-16 | Kang | Updated engine-selection section: removed compatibility bridge reference (v0.6.x compat removed in 0.8.0) |
