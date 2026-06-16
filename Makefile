@@ -507,7 +507,7 @@ release-gates-check-070:
 #     matrix-release-tests job
 #
 # Classification (Req 6):
-#   BLOCKING: All 15 sub-checks below are release-blocking.
+#   BLOCKING: All 17 sub-checks below are release-blocking.
 #   EXPERIMENTAL (non-blocking, not in this gate):
 #     - Performance benchmarks (perf-artifacts, perf-smoke in CI)
 #     - Nightly fuzz beyond smoke (nightly-fuzz.yml)
@@ -527,8 +527,10 @@ release-gates-check-070:
 #  11. make harness-check                     — Harness truth surface validation (Req 9)
 #  12. validate_release_gates.py              — Release gate framework
 #  13. validate_naming.py                     — Artifact naming consistency
-#  14. v0.7.0 gate validators (repo-owned)    — Prior-version gates remain active
-#  15. Harness boundary: routing-manifest.json + risk-packs + core.md + README.md exist (Req 9)
+#  14. v0.8.0 gate validators (0.8-specific: compat bridge removal, new directives)
+#  15. legacy/prior-version regression validators (0.7.0 gates remain active)
+#  16. Harness boundary: routing-manifest.json + risk-packs + core.md + README.md exist (Req 9)
+#  17. Clean-checkout boundary verification (no user-local state required)
 #
 # Environment variables:
 #   RELEASE_GATE_ALLOW_SKIP_FUZZ=1       - skip fuzz smoke when
@@ -609,7 +611,7 @@ release-gates-check-080:
 	@echo "  [14/17] v0.8.0 gate validators (0.8-specific: compat bridge removal, new directives)"
 	python3 tools/release/gates/validate_release_gates_080.py
 	python3 tools/release/gates/validate_config_directives_080.py
-	@echo "  [15/17] v0.7.0 gate validators (repo-owned, prior-version gates)"
+	@echo "  [15/17] legacy/prior-version regression validators (0.7.0 gates remain active)"
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_release_gates_070.py --mode strict
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_metrics_070.py
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_reason_codes_070.py

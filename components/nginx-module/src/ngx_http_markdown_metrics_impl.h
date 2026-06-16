@@ -147,7 +147,7 @@ typedef struct {
     } streaming;
 #endif
 
-    /* Per-path metrics (v0.6.0 P1-2) */
+    /* Per-path metrics */
     struct {
         ngx_atomic_uint_t path_entries;
         ngx_atomic_uint_t path_conversions;

@@ -3380,8 +3380,8 @@ test_config_shadow_legal_values(void)
  * Verify that the default value is off (0).
  *
  * The merge logic uses:
- *   ngx_conf_merge_value(conf->streaming_shadow,
- *       prev->streaming_shadow, 0);
+ *   ngx_conf_merge_value(conf->stream.shadow,
+ *       prev->stream.shadow, 0);
  *
  * Validates: FALLBACK always routes to full-buffer (default = off)
  */
