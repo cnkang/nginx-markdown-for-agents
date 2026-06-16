@@ -49,10 +49,28 @@ jobs:
           with open("tools/release-matrix.json", "r") as f:
               data = json.load(f)
 
+          def normalize_arch(arch):
+              return {
+                  "amd64": "x86_64",
+                  "arm64": "aarch64",
+              }.get(arch, arch)
+
           full_entries = [
-              e for e in data.get("matrix", [])
-              if e.get("support_tier") == "full"
+              {
+                  "nginx": e["nginx_version"],
+                  "os_type": e["libc"],
+                  "arch": normalize_arch(e["arch"]),
+                  "support_tier": e["support_tier"],
+              }
+              for e in data.get("entries", [])
+              if e.get("support_tier") == "supported"
+              and e.get("artifact_type") == "dynamic-module"
+              and e.get("libc") in {"glibc", "musl"}
           ]
+          if not full_entries:
+              raise SystemExit(
+                  "No supported dynamic-module entries found in release-matrix.json"
+              )
           full_nginx_versions = {e["nginx"] for e in full_entries}
 
           def version_tuple(version: str) -> tuple[int, ...]:

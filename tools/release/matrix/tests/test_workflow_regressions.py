@@ -34,27 +34,42 @@ def _step_by_name(steps: list[dict[str, object]], name: str) -> dict[str, object
     raise AssertionError(f"Missing workflow step: {name}")
 
 
-def test_release_binaries_updates_matrix_before_resolving_builds() -> None:
-    """Release binaries must refresh nginx.org matrix data before building."""
+def test_release_binaries_resolves_current_schema_without_mutating_matrix() -> None:
+    """Release binaries must build from the checked-in current matrix schema."""
     workflow = _workflow_data("release-binaries.yml")
     steps = workflow["jobs"]["prepare"]["steps"]
     step_names = [step["name"] for step in steps if "name" in step]
 
-    update_step = _step_by_name(steps, "Update Release Matrix")
-    validate_step = _step_by_name(steps, "Validate updated release matrix")
+    validate_step = _step_by_name(steps, "Validate release matrix consumers")
+    resolve_step = _step_by_name(steps, "Extract build matrix from release-matrix.json")
 
-    assert "python3 tools/release/matrix/update_matrix.py" in update_step["run"]
-    assert "tools/matrix-diff.json" in update_step["run"]
-    assert "python3 tools/release/matrix/validate_doc_matrix_sync.py" in validate_step["run"]
-    assert (
-        "python3 tools/release/matrix/validate_matrix_install_consistency.py"
-        in validate_step["run"]
+    assert "python3 tools/release/matrix/update_matrix.py" not in _workflow_text(
+        "release-binaries.yml"
     )
-    assert step_names.index("Update Release Matrix") < step_names.index(
+    assert "python3 tools/release/matrix/validate_workflow_matrix_consumers.py" in validate_step["run"]
+    assert 'data.get("entries", [])' in resolve_step["run"]
+    assert '".github/workflows/release-binaries.yml"' in resolve_step["run"]
+    assert '"nginx": e["nginx_version"]' in resolve_step["run"]
+    assert '"os_type": e["libc"]' in resolve_step["run"]
+    assert '"amd64": "x86_64"' in resolve_step["run"]
+    assert '"arm64": "aarch64"' in resolve_step["run"]
+    assert 'data.get("matrix", [])' not in resolve_step["run"]
+    assert 'support_tier") == "full"' not in resolve_step["run"]
+    assert step_names.index("Validate release matrix consumers") < step_names.index(
         "Extract build matrix from release-matrix.json"
     )
-    assert step_names.index("Validate updated release matrix") < step_names.index(
-        "Extract build matrix from release-matrix.json"
+
+
+def test_release_binaries_workflow_dispatch_can_publish_tag_assets() -> None:
+    """Manual recovery runs for release tags must upload assets to that tag."""
+    workflow = _workflow_data("release-binaries.yml")
+    publish = workflow["jobs"]["publish-release"]
+    upload = _step_by_name(publish["steps"], "Upload Assets")
+
+    assert "workflow_dispatch" in publish["if"]
+    assert "startsWith(github.event.inputs.version, 'v')" in publish["if"]
+    assert upload["with"]["tag_name"] == (
+        "${{ github.event.inputs.version || github.ref_name }}"
     )
 
 
@@ -97,6 +112,12 @@ def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash
         "Select representative matrix entries",
     )
     resolve_run = resolve_step["run"]
+    assert 'data.get("entries", [])' in resolve_run
+    assert '"nginx": e["nginx_version"]' in resolve_run
+    assert '"os_type": e["libc"]' in resolve_run
+    assert '"amd64": "x86_64"' in resolve_run
+    assert '"arm64": "aarch64"' in resolve_run
+    assert 'data.get("matrix", [])' not in resolve_run
     assert "nginx.org/en/download.html" in resolve_run
     assert "sorted(set(upstream_versions), key=version_tuple)[-1]" in resolve_run
     assert '"variant": "upstream-upper"' in resolve_run

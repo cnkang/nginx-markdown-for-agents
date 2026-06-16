@@ -30,6 +30,15 @@ ARTIFACT_TEMPLATE = (
     "ngx_http_markdown_filter_module-{nginx}-{os_type}-{arch}.tar.gz"
 )
 REQUIRED_ENTRY_KEYS = ("nginx", "os_type", "arch")
+RELEASE_BINARIES_WORKFLOW = ".github/workflows/release-binaries.yml"
+
+
+def _normalize_arch(arch: str) -> str:
+    """Normalize release-matrix architecture names to binary artifact names."""
+    return {
+        "amd64": "x86_64",
+        "arm64": "aarch64",
+    }.get(arch, arch)
 
 
 def _require_entry_keys(entry: dict, *, context: str) -> None:
@@ -51,18 +60,38 @@ def _require_entry_keys(entry: dict, *, context: str) -> None:
 
 def load_matrix(matrix_path: str) -> List[dict]:
     """
-    Load the release matrix JSON and select entries whose `support_tier` is "full".
+    Load release-binary entries from a release matrix JSON file.
     
     Parameters:
-        matrix_path (str): Filesystem path to a JSON file containing a top-level "matrix" list of entry objects.
+        matrix_path (str): Filesystem path to release-matrix.json. The current
+            schema uses top-level "entries"; the legacy schema used "matrix".
     
     Returns:
-        List[dict]: Matrix entries from the file whose `support_tier` equals "full".
+        List[dict]: Normalized entries with "nginx", "os_type", and "arch"
+        keys matching release binary artifact filenames.
     """
     resolved = validate_read_path(matrix_path, purpose="release matrix")
     data = json.loads(resolved.read_text(encoding="utf-8"))
 
-    if not isinstance(data, dict) or not isinstance(data.get("matrix"), list):
+    if not isinstance(data, dict):
+        return []
+
+    if isinstance(data.get("entries"), list):
+        return [
+            {
+                "nginx": entry["nginx_version"],
+                "os_type": entry["libc"],
+                "arch": _normalize_arch(entry["arch"]),
+                "support_tier": entry["support_tier"],
+            }
+            for entry in data["entries"]
+            if entry.get("owner_workflow") == RELEASE_BINARIES_WORKFLOW
+            and entry.get("support_tier") == "supported"
+            and entry.get("artifact_type") == "dynamic-module"
+            and entry.get("libc") in {"glibc", "musl"}
+        ]
+
+    if not isinstance(data.get("matrix"), list):
         return []
 
     return [
@@ -196,8 +225,9 @@ def main(argv: List[str] | None = None) -> int:
     matrix_entries = load_matrix(args.matrix)
     if not matrix_entries:
         print(
-            "ERROR: No installable (support_tier=full) entries found in matrix. "
-            "The matrix may be empty or malformed.",
+            "ERROR: No release-binaries entries found in matrix. The matrix "
+            "may be empty, malformed, or missing supported dynamic-module "
+            "entries owned by .github/workflows/release-binaries.yml.",
             file=sys.stderr,
         )
         return 1
