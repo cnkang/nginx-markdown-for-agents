@@ -22,7 +22,6 @@ Security: All file reads use Path.resolve() within PROJECT_ROOT.
 
 from __future__ import annotations
 
-import argparse
 import os
 import re
 import sys
@@ -337,15 +336,7 @@ def print_report(result: ValidationResult) -> None:
 
 
 def main() -> int:
-    """Entry point: parse args, run validation, print report, return exit code."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--mode",
-        choices=["basic", "strict", "evidence"],
-        default="basic",
-    )
-    args = parser.parse_args()
-
+    """Entry point: run validation, print report, return exit code."""
     result = ValidationResult()
     validate_all(result)
     print_report(result)
