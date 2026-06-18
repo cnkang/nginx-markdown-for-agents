@@ -20,6 +20,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from threshold_engine import (
+    _write_json,
     build_direction_map,
     build_verdict_report,
     compute_deviation,
@@ -28,6 +29,22 @@ from threshold_engine import (
     judge_metric,
     main,
 )
+
+
+def test_write_json_rejects_symlink_escape(tmp_path):
+    reports_dir = Path(__file__).resolve().parents[3] / "perf" / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "outside.json"
+    symlink = reports_dir / "threshold-engine-symlink-escape.json"
+    symlink.unlink(missing_ok=True)
+    symlink.symlink_to(outside)
+
+    try:
+        with pytest.raises(ValueError, match="escapes"):
+            _write_json({"verdict": "pass"}, symlink)
+        assert not outside.exists()
+    finally:
+        symlink.unlink(missing_ok=True)
 
 # ---------------------------------------------------------------------------
 # Fixtures

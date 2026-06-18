@@ -12,6 +12,28 @@ import run_corpus_benchmark as rcb  # noqa: E402
 from run_corpus_benchmark import discover_fixtures, write_examples  # noqa: E402
 
 
+def test_run_converter_rejects_repo_symlink_to_external_command():
+    link_dir = rcb.REPO_ROOT / ".test-tmp"
+    link_dir.mkdir(exist_ok=True)
+    converter_link = link_dir / "external-converter"
+    html_path = link_dir / "external-converter-input.html"
+    converter_link.unlink(missing_ok=True)
+    converter_link.symlink_to("/bin/echo")
+    html_path.write_text("<p>test</p>", encoding="utf-8")
+
+    try:
+        output, exit_code, latency_ms = rcb.run_converter(
+            str(converter_link), str(html_path)
+        )
+    finally:
+        converter_link.unlink(missing_ok=True)
+        html_path.unlink(missing_ok=True)
+
+    assert output == ""
+    assert exit_code == 1
+    assert latency_ms == 0.0
+
+
 def test_discover_fixtures_persists_validated_html_path(tmp_path):
     corpus_dir = tmp_path / "corpus"
     corpus_dir.mkdir()

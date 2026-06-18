@@ -16,6 +16,7 @@ Environment variables:
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.path_validation import validate_read_path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPORT_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\.json$")
 
 # ---------------------------------------------------------------------------
 # Default thresholds used when the thresholds config file is missing or a
@@ -353,16 +355,18 @@ def _write_json(data, path):
     """
     if path is None:
         return
-    # S8707 sanitizer: resolve path to absolute form and verify it stays within
-    # the repository root using os.path.abspath() + startswith() — a pattern
-    # recognized by SonarCloud's taint analysis as a path-traversal validator.
-    safe_root = os.path.abspath(str(REPO_ROOT))
-    abs_path = os.path.abspath(str(path))
-    if not abs_path.startswith(safe_root + os.sep) and abs_path != safe_root:
+    raw_path = Path(path)
+    filename = raw_path.name
+    if _REPORT_FILENAME_RE.fullmatch(filename) is None:
+        raise ValueError(f"Invalid verdict report filename: {filename!r}")
+
+    target = raw_path.resolve()
+    try:
+        target.relative_to(REPO_ROOT)
+    except ValueError:
         raise ValueError(
-            f"Write path {abs_path} escapes repository root {safe_root}"
+            f"Write path {target} escapes repository root {REPO_ROOT}"
         )
-    target = Path(abs_path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
         json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
