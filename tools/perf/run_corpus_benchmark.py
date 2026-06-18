@@ -145,6 +145,13 @@ def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
     """
     if ".." in converter_bin or ".." in html_path:
         return "", 1, 0.0
+    if "\0" in converter_bin or "\0" in html_path:
+        return "", 1, 0.0
+    # Inline S8701 denylist: reject shell metacharacters that could enable
+    # injection even in list-form subprocess invocation.
+    _shell_meta = set("|;&$`<>?{}[]()!#~")
+    if any(c in _shell_meta for c in converter_bin + html_path):
+        return "", 1, 0.0
     if not os.path.isfile(converter_bin):
         return "", 1, 0.0
     if not os.access(converter_bin, os.X_OK):
