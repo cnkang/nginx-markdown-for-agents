@@ -1431,8 +1431,12 @@ void markdown_streaming_abort(struct StreamingConverterHandle *handle);
  * discard or truncate the partial output. **C MUST NOT infer or synthesize
  * Markdown closure for Rust-owned parser/emitter state** (safety invariant: C must not infer Markdown closure).
  *
- * This call always consumes the handle; after this function returns the
- * handle is invalid and must not be passed to any other function.
+ * This call consumes the handle after validation succeeds (the handle and
+ * output pointers are non-NULL). If validation fails, `ERROR_INVALID_INPUT`
+ * is returned and the handle is not consumed; the caller remains responsible
+ * for aborting or freeing it. All other return codes consume the handle. In
+ * particular, a caught panic (`ERROR_INTERNAL`) can only occur after
+ * `Box::from_raw` has taken ownership, so the handle is consumed in that case.
  *
  * # Safety
  *
