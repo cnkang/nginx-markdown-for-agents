@@ -315,7 +315,8 @@ ngx_http_markdown_stream_commit_remove_etag(
  */
 static ngx_int_t
 ngx_http_markdown_stream_commit_apply_auth_cache_control(
-    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
+    ngx_http_request_t *r, /* NOSONAR: r passed to non-const modify_cache_control_for_auth */
+    const ngx_http_markdown_conf_t *conf)
 {
 #if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     ngx_int_t  rc;
