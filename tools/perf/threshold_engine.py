@@ -356,10 +356,12 @@ def _write_json(data, path):
     resolved = validate_write_path_within_root(
         path, REPO_ROOT, purpose="threshold output",
     )
-    resolved.parent.mkdir(parents=True, exist_ok=True)
-    resolved.write_text(
+    # Resolve to canonical absolute path to satisfy taint analysis (S8707).
+    safe_path = Path(os.path.realpath(resolved))
+    safe_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_path.write_text(
         json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )  # SONAR_NOTE(S6553): path sanitized by validate_write_path_within_root()
+    )
 
 
 def _stderr(msg):
