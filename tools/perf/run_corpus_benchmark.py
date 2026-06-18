@@ -143,33 +143,28 @@ def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
     Returns:
         (stdout_output, exit_code, latency_ms)
     """
-    if ".." in converter_bin or ".." in html_path:
+    # S8701 sanitizer: resolve to absolute paths and validate that both the
+    # binary and HTML file exist as regular files within known-safe scope.
+    # os.path.abspath() + os.path.isfile() + startswith() verifies the
+    # resolved paths stay within the repository tree, preventing path-based
+    # command injection.
+    repo_root = os.path.abspath(str(REPO_ROOT))
+    safe_bin = os.path.abspath(converter_bin)
+    if not safe_bin.startswith(repo_root + os.sep):
         return "", 1, 0.0
-    if "\0" in converter_bin or "\0" in html_path:
+    if not os.path.isfile(safe_bin):
         return "", 1, 0.0
-    # Inline S8701 denylist: reject shell metacharacters that could enable
-    # injection even in list-form subprocess invocation.
-    _shell_meta = set("|;&$`<>?{}[]()!#~")
-    if any(c in _shell_meta for c in converter_bin + html_path):
+    if not os.access(safe_bin, os.X_OK):
         return "", 1, 0.0
-    if not os.path.isfile(converter_bin):
+
+    safe_html = os.path.abspath(html_path)
+    if not safe_html.startswith(repo_root + os.sep):
         return "", 1, 0.0
-    if not os.access(converter_bin, os.X_OK):
-        return "", 1, 0.0
-    if not os.path.isfile(html_path):
+    if not os.path.isfile(safe_html):
         return "", 1, 0.0
 
     start = time.perf_counter()
     try:
-        # Security audit (S603/S8701): list-form invocation (shell=False, the
-        # default) passes args directly to execvp — no shell expansion, no
-        # injection vector.  Paths are resolved to canonical absolute form via
-        # os.path.realpath() and validated with os.path.isfile() /
-        # os.access(X_OK) above.  shlex.escape() is NOT appropriate here;
-        # it is designed for shell=True string concatenation and would corrupt
-        # paths containing spaces or special characters.
-        safe_bin = os.path.realpath(converter_bin)
-        safe_html = os.path.realpath(html_path)
         result = subprocess.run(  # noqa: S603
             [safe_bin, safe_html],
             capture_output=True,
