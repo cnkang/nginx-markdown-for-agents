@@ -298,20 +298,14 @@ ngx_http_markdown_stream_commit_remove_etag(
 }
 
 
-/*
- * Apply authenticated content Cache-Control protection.
+/**
+ * Applies Cache-Control protection for authenticated requests.
  *
- * When the request is authenticated and auth_policy allows
- * conversion, upgrade Cache-Control to at least "private" to prevent
- * shared caches from storing authenticated Markdown content.  This
- * matches the full-buffer path's behavior.
+ * Modifies Cache-Control for authenticated requests only when the
+ * NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL compile-time gate is enabled.
  *
- * Guarded by NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL compile-time
- * gate for parity with the full-buffer path.
- *
- * Returns:
- *   NGX_OK on success (or when compile-time gate is off)
- *   NGX_ERROR on Cache-Control modification failure
+ * @param r HTTP request.
+ * @return NGX_OK on success or when not applicable; NGX_ERROR on modification failure.
  */
 static ngx_int_t
 ngx_http_markdown_stream_commit_apply_auth_cache_control(

@@ -157,15 +157,15 @@ ngx_http_markdown_stream_postcommit_safe_finish(
 
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-/*
- * Internal helper: invoke Rust streaming safe_finish and handle
- * the result.  Extracted to reduce cognitive complexity and nesting
- * depth of the top-level safe_finish function.
+/**
+ * Invoke the Rust safe_finish handler and transmit response closure.
  *
- * Returns:
- *   NGX_OK    - Rust finish completed, response closed
- *   NGX_AGAIN - Downstream backpressure, caller must retry
- *   NGX_ERROR - Rust finish failed, caller should follow abort path
+ * Calls markdown_streaming_safe_finish to obtain closing bytes. On validation
+ * failure, aborts the Rust handle. Sends closing bytes if provided, otherwise
+ * sends an empty terminal chain.
+ *
+ * @return NGX_OK if closure completed, NGX_AGAIN on downstream backpressure,
+ *         NGX_ERROR if Rust failed or send operation failed.
  */
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_finish_via_rust(
