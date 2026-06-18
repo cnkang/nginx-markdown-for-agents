@@ -385,7 +385,10 @@ ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
  * user-configured excluded types. Content-Type parameters (after `;`)
  * are ignored. Matching is case-insensitive and exact.
  *
- * @param content_type Content-Type string to check.
+ * A NULL or empty content_type is treated as not excluded (returns 0),
+ * so callers without a Content-Type header will not be short-circuited.
+ *
+ * @param content_type Content-Type string to check; may be NULL or empty.
  * @param conf Module location configuration.
  * @returns 1 if the content type is excluded, 0 otherwise.
  */

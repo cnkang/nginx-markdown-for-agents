@@ -301,10 +301,16 @@ ngx_http_markdown_stream_commit_remove_etag(
 /**
  * Applies Cache-Control protection for authenticated requests.
  *
- * Modifies Cache-Control for authenticated requests only when the
- * NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL compile-time gate is enabled.
+ * When the NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL compile-time gate
+ * is enabled and the request is authenticated (as determined by the active
+ * auth_policy via ngx_http_markdown_is_authenticated), this upgrades the
+ * response Cache-Control to at least "private": a "public" directive is
+ * rewritten to "private", and a missing/private-less header gets "private"
+ * appended. "no-store" is preserved and never downgraded. This mirrors
+ * the full-buffer path so streaming and buffered responses behave identically.
  *
  * @param r HTTP request.
+ * @param conf Module location configuration (used for auth_policy check).
  * @return NGX_OK on success or when not applicable; NGX_ERROR on modification failure.
  */
 static ngx_int_t
