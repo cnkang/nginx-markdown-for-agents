@@ -239,6 +239,12 @@ markdown_streaming_safe_finish(struct StreamingConverterHandle *handle,
 }
 
 void
+markdown_streaming_abort(struct StreamingConverterHandle *handle)
+{
+    UNUSED(handle);
+}
+
+void
 markdown_streaming_output_free(u_char *data, uintptr_t len)
 {
     UNUSED(data);
