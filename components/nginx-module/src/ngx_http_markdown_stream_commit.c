@@ -50,7 +50,7 @@ ngx_http_markdown_stream_commit_remove_etag(
 
 static ngx_int_t
 ngx_http_markdown_stream_commit_apply_auth_cache_control(
-    const ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
 
 
 /*
@@ -315,7 +315,7 @@ ngx_http_markdown_stream_commit_remove_etag(
  */
 static ngx_int_t
 ngx_http_markdown_stream_commit_apply_auth_cache_control(
-    const ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
 {
 #if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     ngx_int_t  rc;
@@ -325,8 +325,7 @@ ngx_http_markdown_stream_commit_apply_auth_cache_control(
     }
 
     if (ngx_http_markdown_is_authenticated(r, conf)) {
-        rc = ngx_http_markdown_modify_cache_control_for_auth(
-            (ngx_http_request_t *) r);
+        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
         if (rc != NGX_OK) {
             return rc;
         }
