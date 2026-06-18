@@ -154,14 +154,17 @@ def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
 
     start = time.perf_counter()
     try:
-        # Security audit (S603): list-form invocation (shell=False, the default)
-        # passes args directly to execvp — no shell expansion, no injection
-        # vector.  Both paths are validated above with os.path.isfile() and
-        # os.access().  shlex.escape() is NOT appropriate here; it is designed
-        # for shell=True string concatenation and would corrupt paths
-        # containing spaces or special characters.
+        # Security audit (S603/S8701): list-form invocation (shell=False, the
+        # default) passes args directly to execvp — no shell expansion, no
+        # injection vector.  Paths are resolved to canonical absolute form via
+        # os.path.realpath() and validated with os.path.isfile() /
+        # os.access(X_OK) above.  shlex.escape() is NOT appropriate here;
+        # it is designed for shell=True string concatenation and would corrupt
+        # paths containing spaces or special characters.
+        safe_bin = os.path.realpath(converter_bin)
+        safe_html = os.path.realpath(html_path)
         result = subprocess.run(  # noqa: S603
-            [converter_bin, html_path],
+            [safe_bin, safe_html],
             capture_output=True,
             text=True,
             timeout=30,
