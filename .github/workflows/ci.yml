@@ -508,8 +508,8 @@ jobs:
             --current perf/reports/perf-measurement-${{ steps.platform.outputs.name }}.json \
             --thresholds perf/thresholds.json \
             --metrics-schema perf/metrics-schema.json \
-            --output-json perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json \
-            --platform ${{ steps.platform.outputs.name }}
+            --platform ${{ steps.platform.outputs.name }} \
+            > perf/reports/perf-verdict-${{ steps.platform.outputs.name }}.json
 
       - name: Upload measurement report
         if: always()

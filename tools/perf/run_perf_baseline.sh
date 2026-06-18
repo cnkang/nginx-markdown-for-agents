@@ -321,7 +321,7 @@ fi
 
 BASELINE_JSON="${BASELINES_DIR}/${PLATFORM}.json"
 
-# run_threshold_engine runs the threshold engine to compare the current measurement JSON against the baseline and write a verdict JSON.
+# run_threshold_engine runs the threshold engine and redirects its JSON stdout to the verdict file.
 # If python3 is unavailable the function logs a warning and returns with success; otherwise it invokes the Python threshold_engine tool and returns its exit code.
 run_threshold_engine() {
   if ! command -v python3 &>/dev/null; then
@@ -341,8 +341,7 @@ run_threshold_engine() {
     --current "$JSON_OUTPUT" \
     --thresholds "$REPO_ROOT/$THRESHOLDS_CONFIG" \
     --metrics-schema "$REPO_ROOT/$METRICS_SCHEMA" \
-    --output-json "$VERDICT_OUTPUT" \
-    --platform "$PLATFORM" || exit_code=$?
+    --platform "$PLATFORM" > "$VERDICT_OUTPUT" || exit_code=$?
 
   return $exit_code
 }

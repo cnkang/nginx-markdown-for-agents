@@ -20,7 +20,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from threshold_engine import (
-    _write_json,
     build_direction_map,
     build_verdict_report,
     compute_deviation,
@@ -29,22 +28,6 @@ from threshold_engine import (
     judge_metric,
     main,
 )
-
-
-def test_write_json_rejects_symlink_escape(tmp_path):
-    reports_dir = Path(__file__).resolve().parents[3] / "perf" / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    outside = tmp_path / "outside.json"
-    symlink = reports_dir / "threshold-engine-symlink-escape.json"
-    symlink.unlink(missing_ok=True)
-    symlink.symlink_to(outside)
-
-    try:
-        with pytest.raises(ValueError, match="escapes"):
-            _write_json({"verdict": "pass"}, symlink)
-        assert not outside.exists()
-    finally:
-        symlink.unlink(missing_ok=True)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -81,25 +64,6 @@ def _write_tmp_json(data, suffix=".json"):
     json.dump(data, f)
     f.close()
     return f.name
-
-
-def _temp_output_path(suffix=".json"):
-    """
-    Reserve a temporary output file path within the repo root for testing.
-    
-    Parameters:
-        suffix (str): File name suffix (for example, ".json") to append to the temporary file.
-    
-    Returns:
-        str: Filesystem path to the created temporary file within the repo's test temp directory.
-    """
-    repo_root = Path(__file__).resolve().parents[3]
-    tmp_dir = repo_root / ".test-tmp"
-    tmp_dir.mkdir(exist_ok=True)
-    f = tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=str(tmp_dir))
-    path = f.name
-    f.close()
-    return path
 
 
 def _make_baseline(tiers=None):
@@ -198,10 +162,9 @@ class TestSpecificVerdicts:
 
     def test_all_pass_when_identical(self):
         """Identical baseline and current → all pass."""
-        out_path = _temp_output_path()
         report, has_failure = build_verdict_report(
             _make_baseline(), _make_current(), THRESHOLDS_CFG,
-            DIRECTION_MAP, "ubuntu-latest", out_path,
+            DIRECTION_MAP, "ubuntu-latest",
         )
         assert report["overall_verdict"] == "pass"
         assert not has_failure
@@ -218,10 +181,9 @@ class TestSpecificVerdicts:
             "peak_memory_bytes": 1000000,
             "req_per_s": 1000.0, "input_mb_per_s": 50.0,
         }})
-        out_path = _temp_output_path()
         report, has_failure = build_verdict_report(
             _make_baseline(), current, THRESHOLDS_CFG,
-            DIRECTION_MAP, "ubuntu-latest", out_path,
+            DIRECTION_MAP, "ubuntu-latest",
         )
         assert report["overall_verdict"] == "warn"
         assert not has_failure
@@ -237,10 +199,9 @@ class TestSpecificVerdicts:
             "peak_memory_bytes": 1000000,
             "req_per_s": 1000.0, "input_mb_per_s": 50.0,
         }})
-        out_path = _temp_output_path()
         report, has_failure = build_verdict_report(
             _make_baseline(), current, THRESHOLDS_CFG,
-            DIRECTION_MAP, "ubuntu-latest", out_path,
+            DIRECTION_MAP, "ubuntu-latest",
         )
         assert report["overall_verdict"] == "fail"
         assert has_failure
@@ -254,10 +215,9 @@ class TestSpecificVerdicts:
             "req_per_s": 600.0,  # -40% → fail
             "input_mb_per_s": 50.0,
         }})
-        out_path = _temp_output_path()
         report, has_failure = build_verdict_report(
             _make_baseline(), current, THRESHOLDS_CFG,
-            DIRECTION_MAP, "ubuntu-latest", out_path,
+            DIRECTION_MAP, "ubuntu-latest",
         )
         assert has_failure
         assert report["comparison"]["tiers"]["small"]["req_per_s"]["verdict"] == "fail"
@@ -291,38 +251,46 @@ class TestDeviationEdgeCases:
 class TestMissingBaseline:
     """When baseline file is absent, engine skips comparison with exit 0."""
 
-    def test_missing_baseline_returns_zero(self):
+    def test_missing_baseline_emits_verdict_json_to_stdout(self, capsys):
         current_path = _write_tmp_json(_make_current())
         thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = _temp_output_path()
-
         exit_code = main([
             "--baseline", "/nonexistent/baseline.json",
             "--current", current_path,
             "--thresholds", thresholds_path,
             "--metrics-schema", schema_path,
-            "--output-json", out_path,
+            "--platform", "ubuntu-latest",
+        ])
+
+        assert exit_code == 0
+        assert json.loads(capsys.readouterr().out)["overall_verdict"] == "skipped"
+
+    def test_missing_baseline_returns_zero(self):
+        current_path = _write_tmp_json(_make_current())
+        thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
+        schema_path = _write_tmp_json(METRICS_SCHEMA)
+        exit_code = main([
+            "--baseline", "/nonexistent/baseline.json",
+            "--current", current_path,
+            "--thresholds", thresholds_path,
+            "--metrics-schema", schema_path,
             "--platform", "ubuntu-latest",
         ])
         assert exit_code == 0
 
-    def test_missing_baseline_verdict_is_skipped(self):
+    def test_missing_baseline_verdict_is_skipped(self, capsys):
         current_path = _write_tmp_json(_make_current())
         thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = _temp_output_path()
-
         main([
             "--baseline", "/nonexistent/baseline.json",
             "--current", current_path,
             "--thresholds", thresholds_path,
             "--metrics-schema", schema_path,
-            "--output-json", out_path,
             "--platform", "ubuntu-latest",
         ])
-        with open(out_path) as f:
-            verdict = json.load(f)
+        verdict = json.loads(capsys.readouterr().out)
         assert verdict["overall_verdict"] == "skipped"
         assert verdict["comparison"]["tiers"] == {}
         assert verdict["comparison"]["baseline_commit"] is None
@@ -342,14 +310,11 @@ class TestErrorHandling:
         current_path = _write_tmp_json(_make_current())
         thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = _temp_output_path()
-
         exit_code = main([
             "--baseline", str(baseline_path),
             "--current", current_path,
             "--thresholds", thresholds_path,
             "--metrics-schema", schema_path,
-            "--output-json", out_path,
             "--platform", "ubuntu-latest",
         ])
 
@@ -368,14 +333,11 @@ class TestErrorHandling:
         baseline_path = _write_tmp_json(_make_baseline())
         current_path = _write_tmp_json(_make_current())
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = _temp_output_path()
-
         exit_code = main([
             "--baseline", baseline_path,
             "--current", current_path,
             "--thresholds", str(thresholds_path),
             "--metrics-schema", schema_path,
-            "--output-json", out_path,
             "--platform", "ubuntu-latest",
         ])
 
@@ -392,14 +354,11 @@ class TestErrorHandling:
         current_path = _write_tmp_json(_make_current())
         thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = _temp_output_path()
-
         exit_code = main([
             "--baseline", baseline_path,
             "--current", current_path,
             "--thresholds", thresholds_path,
             "--metrics-schema", schema_path,
-            "--output-json", out_path,
             "--platform", "ubuntu-latest",
         ])
 
@@ -413,23 +372,19 @@ class TestErrorHandling:
 class TestMissingThresholds:
     """When thresholds config is absent, engine uses built-in defaults."""
 
-    def test_missing_thresholds_uses_defaults(self):
+    def test_missing_thresholds_uses_defaults(self, capsys):
         baseline_path = _write_tmp_json(_make_baseline())
         current_path = _write_tmp_json(_make_current())
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = _temp_output_path()
-
         exit_code = main([
             "--baseline", baseline_path,
             "--current", current_path,
             "--thresholds", "/nonexistent/thresholds.json",
             "--metrics-schema", schema_path,
-            "--output-json", out_path,
             "--platform", "ubuntu-latest",
         ])
         assert exit_code == 0
-        with open(out_path) as f:
-            verdict = json.load(f)
+        verdict = json.loads(capsys.readouterr().out)
         assert verdict["overall_verdict"] == "pass"
 
     def test_get_threshold_fallback_to_defaults(self):
@@ -451,38 +406,31 @@ class TestPerfGateSkip:
         current_path = _write_tmp_json(_make_current())
         thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = _temp_output_path()
-
         exit_code = main([
             "--baseline", "/nonexistent/baseline.json",
             "--current", current_path,
             "--thresholds", thresholds_path,
             "--metrics-schema", schema_path,
-            "--output-json", out_path,
             "--platform", "ubuntu-latest",
         ])
         assert exit_code == 0
 
-    def test_skip_verdict_is_skipped(self, monkeypatch):
+    def test_skip_verdict_is_skipped(self, monkeypatch, capsys):
         monkeypatch.setenv("PERF_GATE_SKIP", "1")
         current_path = _write_tmp_json(_make_current())
         thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = _temp_output_path()
-
         main([
             "--baseline", "/nonexistent/baseline.json",
             "--current", current_path,
             "--thresholds", thresholds_path,
             "--metrics-schema", schema_path,
-            "--output-json", out_path,
             "--platform", "ubuntu-latest",
         ])
-        with open(out_path) as f:
-            verdict = json.load(f)
+        verdict = json.loads(capsys.readouterr().out)
         assert verdict["overall_verdict"] == "skipped"
 
-    def test_skip_not_triggered_when_unset(self, monkeypatch):
+    def test_skip_not_triggered_when_unset(self, monkeypatch, capsys):
         """
         Verify that when PERF_GATE_SKIP is not set, the threshold engine runs normally and produces an overall verdict of "pass" for matching baseline and current inputs.
         """
@@ -491,17 +439,13 @@ class TestPerfGateSkip:
         current_path = _write_tmp_json(_make_current())
         thresholds_path = _write_tmp_json(THRESHOLDS_CFG)
         schema_path = _write_tmp_json(METRICS_SCHEMA)
-        out_path = _temp_output_path()
-
         exit_code = main([
             "--baseline", baseline_path,
             "--current", current_path,
             "--thresholds", thresholds_path,
             "--metrics-schema", schema_path,
-            "--output-json", out_path,
             "--platform", "ubuntu-latest",
         ])
         assert exit_code == 0
-        with open(out_path) as f:
-            verdict = json.load(f)
+        verdict = json.loads(capsys.readouterr().out)
         assert verdict["overall_verdict"] == "pass"

@@ -328,6 +328,8 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Binary prerequisites validate executability [19]
 - Path containment uses canonical targets after symlink resolution; CLI-derived
   executables must match a fixed canonical allowlist before subprocess use [33]
+- Single-artifact CLI tools should emit stdout for caller redirection instead
+  of accepting an unnecessary caller-controlled write path [33]
 - Config nesting matches code; accept both key names [8b]
 - Harness checks affect pass/fail, not INFO-only [19]
 
