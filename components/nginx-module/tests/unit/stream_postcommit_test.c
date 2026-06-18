@@ -672,6 +672,8 @@ static void test_safe_finish_happy_path(void)
                 "state = POST_COMMIT_SAFE_FINISH");
     TEST_ASSERT(test_output_filter_called == 1,
                 "send_terminal called output_filter");
+    TEST_ASSERT(test_streaming_abort_called == 0,
+                "streaming abort must not be called on success");
     TEST_PASS("safe_finish happy path");
 }
 
@@ -701,6 +703,8 @@ static void test_safe_finish_empty_rust_output_sends_terminal(void)
                 "empty safe_finish should not free a NULL output");
     TEST_ASSERT(ctx.streaming.handle == NULL,
                 "safe_finish consumes the streaming handle");
+    TEST_ASSERT(test_streaming_abort_called == 0,
+                "streaming abort must not be called on empty output success");
     TEST_PASS("safe_finish empty Rust output sends terminal");
 }
 
@@ -741,6 +745,8 @@ static void test_safe_finish_copies_rust_output_before_free(void)
                 "Rust free should use original output pointer");
     TEST_ASSERT(test_output_free_len == sizeof(closing) - 1,
                 "Rust free should use original output length");
+    TEST_ASSERT(test_streaming_abort_called == 0,
+                "streaming abort must not be called on successful copy path");
     TEST_PASS("safe_finish copies Rust output before free");
 }
 
@@ -775,6 +781,8 @@ static void test_safe_finish_backpressure_preserves_pending_chain(void)
                 "request should be marked buffered on backpressure");
     TEST_ASSERT(test_output_free_called == 1,
                 "Rust output should still be freed after pool copy");
+    TEST_ASSERT(test_streaming_abort_called == 0,
+                "streaming abort must not be called on backpressure");
     TEST_PASS("safe_finish backpressure preserves pending chain");
 }
 
@@ -878,6 +886,8 @@ static void test_safe_finish_send_terminal_fails(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
                 "safe_finish send_terminal fails -> NGX_ERROR");
+    TEST_ASSERT(test_streaming_abort_called == 0,
+                "streaming abort must not be called when send_terminal fails");
     TEST_PASS("safe_finish send_terminal failure propagates");
 }
 
