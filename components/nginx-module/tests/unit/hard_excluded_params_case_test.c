@@ -252,6 +252,48 @@ test_htab_before_parameters_exclusions(void)
     TEST_PASS("HTAB parameter separators cannot bypass exclusions");
 }
 
+/*
+ * Security: trailing HTAB/OWS without parameters.
+ * The type portion OWS-stripping logic must handle content types
+ * followed only by whitespace (no semicolon, no parameters).
+ */
+static void
+test_trailing_ows_no_parameters(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_str_t                ct;
+
+    TEST_SUBSECTION("Trailing OWS without parameters");
+    init_conf(&conf);
+
+    /* Single trailing HTAB */
+    set_ct(&ct, "application/x-ndjson\t");
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
+        "trailing HTAB must not bypass x-ndjson exclusion");
+
+    /* Single trailing SP */
+    set_ct(&ct, "text/event-stream ");
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
+        "trailing SP must not bypass event-stream exclusion");
+
+    /* Mixed SP + HTAB */
+    set_ct(&ct, "application/stream+json \t");
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
+        "trailing SP+HTAB must not bypass stream+json exclusion");
+
+    /* Multiple tabs and spaces */
+    set_ct(&ct, "application/x-ndjson \t \t");
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
+        "multiple trailing OWS must not bypass x-ndjson exclusion");
+
+    /* Only whitespace (should not match anything) */
+    set_ct(&ct, "  \t  ");
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 0,
+        "pure OWS must not match any exclusion");
+
+    TEST_PASS("Trailing OWS without parameters correctly handled");
+}
+
 /* ══════════════════════════════════════════════════════════════════
  * Security: combined case + parameters
  *
@@ -377,6 +419,7 @@ main(void)
     test_mixed_case_exclusions();
     test_parameter_stripping_exclusions();
     test_htab_before_parameters_exclusions();
+    test_trailing_ows_no_parameters();
     test_combined_case_and_params();
     test_partial_match_not_excluded();
     test_non_excluded_types();
