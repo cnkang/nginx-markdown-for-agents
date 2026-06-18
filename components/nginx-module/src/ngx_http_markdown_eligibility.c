@@ -128,7 +128,8 @@ ngx_http_markdown_check_content_type(const ngx_http_request_t *r,
                                    ct_entry[i].len) == 0
                 && (content_type->len == ct_entry[i].len
                     || content_type->data[ct_entry[i].len] == ';'
-                    || content_type->data[ct_entry[i].len] == ' '))
+                    || content_type->data[ct_entry[i].len] == ' '
+                    || content_type->data[ct_entry[i].len] == '\t'))
             {
                 return 1;
             }
@@ -142,7 +143,8 @@ ngx_http_markdown_check_content_type(const ngx_http_request_t *r,
                            text_html, 9) == 0
         && (content_type->len == 9
             || content_type->data[9] == ';'
-            || content_type->data[9] == ' '))
+            || content_type->data[9] == ' '
+            || content_type->data[9] == '\t'))
     {
         return 1;
     }
@@ -258,7 +260,8 @@ ngx_http_markdown_is_streaming(const ngx_http_request_t *r,
                            text_event_stream, 17) == 0
         && (content_type->len == 17
             || content_type->data[17] == ';'
-            || content_type->data[17] == ' '))
+            || content_type->data[17] == ' '
+            || content_type->data[17] == '\t'))
     {
         return 1;
     }
@@ -274,7 +277,8 @@ ngx_http_markdown_is_streaming(const ngx_http_request_t *r,
                                stream_type[i].len) == 0 &&
                 (content_type->len == stream_type[i].len
                  || content_type->data[stream_type[i].len] == ';'
-                 || content_type->data[stream_type[i].len] == ' '))
+                 || content_type->data[stream_type[i].len] == ' '
+                 || content_type->data[stream_type[i].len] == '\t'))
             {
                 return 1;
             }
@@ -428,8 +432,11 @@ ngx_http_markdown_stream_type_excluded(const ngx_str_t *content_type,
         type_len = (size_t) (p - content_type->data);
     }
 
-    /* Strip trailing whitespace from the type portion */
-    while (type_len > 0 && content_type->data[type_len - 1] == ' ') {
+    /* Strip HTTP optional whitespace (SP / HTAB) from the type portion. */
+    while (type_len > 0
+           && (content_type->data[type_len - 1] == ' '
+               || content_type->data[type_len - 1] == '\t'))
+    {
         type_len--;
     }
 

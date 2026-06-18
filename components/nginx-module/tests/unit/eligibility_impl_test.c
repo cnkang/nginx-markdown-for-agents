@@ -140,6 +140,11 @@ test_check_content_type_default(void)
         ngx_http_markdown_check_content_type(&r, &conf) == 1,
         "text/html with space separator should match");
 
+    set_str(&r.headers_out.content_type, "text/html\t;charset=utf-8");
+    TEST_ASSERT(
+        ngx_http_markdown_check_content_type(&r, &conf) == 1,
+        "text/html with HTAB separator should match");
+
     set_str(&r.headers_out.content_type, "text/htmlx");
     TEST_ASSERT(
         ngx_http_markdown_check_content_type(&r, &conf) == 0,
@@ -192,6 +197,12 @@ test_check_content_type_custom_allowlist(void)
         ngx_http_markdown_check_content_type(&r, &conf) == 1,
         "application/xhtml+xml matches custom allowlist");
 
+    set_str(&r.headers_out.content_type,
+            "application/xhtml+xml\t;charset=utf-8");
+    TEST_ASSERT(
+        ngx_http_markdown_check_content_type(&r, &conf) == 1,
+        "custom allowlist should accept HTAB separator");
+
     set_str(&r.headers_out.content_type, "application/json");
     TEST_ASSERT(
         ngx_http_markdown_check_content_type(&r, &conf) == 0,
@@ -221,6 +232,12 @@ test_is_streaming_detection(void)
     TEST_ASSERT(
         ngx_http_markdown_is_streaming(&r, &conf) == 1,
         "text/event-stream with charset should be detected");
+
+    set_str(&r.headers_out.content_type,
+            "text/event-stream\t;charset=utf-8");
+    TEST_ASSERT(
+        ngx_http_markdown_is_streaming(&r, &conf) == 1,
+        "text/event-stream with HTAB separator should be detected");
 
     set_str(&r.headers_out.content_type, "text/html");
     TEST_ASSERT(
@@ -261,6 +278,12 @@ test_is_streaming_configured_types(void)
     TEST_ASSERT(
         ngx_http_markdown_is_streaming(&r, &conf) == 1,
         "configured stream type should be detected");
+
+    set_str(&r.headers_out.content_type,
+            "application/x-ndjson\t;charset=utf-8");
+    TEST_ASSERT(
+        ngx_http_markdown_is_streaming(&r, &conf) == 1,
+        "configured stream type should accept HTAB separator");
 
     set_str(&r.headers_out.content_type, "text/html");
     TEST_ASSERT(
