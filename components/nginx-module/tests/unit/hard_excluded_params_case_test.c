@@ -213,6 +213,87 @@ test_parameter_stripping_exclusions(void)
     TEST_PASS("Parameter stripping correctly blocks bypass attempts");
 }
 
+
+/*
+ * Security: HTTP OWS before parameters includes both SP and HTAB.
+ * HTAB must not bypass built-in or configured streaming exclusions.
+ */
+static void
+test_htab_before_parameters_exclusions(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_array_t              excluded_types;
+    ngx_str_t                configured_type;
+    ngx_str_t                ct;
+
+    TEST_SUBSECTION("HTAB before Content-Type parameters");
+    init_conf(&conf);
+
+    set_ct(&ct, "application/x-ndjson\t;charset=utf-8");
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
+        "HTAB must not bypass application/x-ndjson exclusion");
+
+    set_ct(&ct, "application/stream+json\t; charset=utf-8");
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
+        "HTAB must not bypass application/stream+json exclusion");
+
+    set_ct(&configured_type, "text/x-stream");
+    excluded_types.elts = &configured_type;
+    excluded_types.nelts = 1;
+    excluded_types.size = sizeof(ngx_str_t);
+    excluded_types.nalloc = 1;
+    excluded_types.pool = NULL;
+    conf.stream.excluded_types = &excluded_types;
+
+    set_ct(&ct, "text/x-stream\t;charset=utf-8");
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
+        "HTAB must not bypass configured stream exclusion");
+
+    TEST_PASS("HTAB parameter separators cannot bypass exclusions");
+}
+
+/*
+ * Security: trailing HTAB/OWS without parameters.
+ * The type portion OWS-stripping logic must handle content types
+ * followed only by whitespace (no semicolon, no parameters).
+ */
+static void
+test_trailing_ows_no_parameters(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_str_t                ct;
+
+    TEST_SUBSECTION("Trailing OWS without parameters");
+    init_conf(&conf);
+
+    /* Single trailing HTAB */
+    set_ct(&ct, "application/x-ndjson\t");
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
+        "trailing HTAB must not bypass x-ndjson exclusion");
+
+    /* Single trailing SP */
+    set_ct(&ct, "text/event-stream ");
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
+        "trailing SP must not bypass event-stream exclusion");
+
+    /* Mixed SP + HTAB */
+    set_ct(&ct, "application/stream+json \t");
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
+        "trailing SP+HTAB must not bypass stream+json exclusion");
+
+    /* Multiple tabs and spaces */
+    set_ct(&ct, "application/x-ndjson \t \t");
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 1,
+        "multiple trailing OWS must not bypass x-ndjson exclusion");
+
+    /* Only whitespace (should not match anything) */
+    set_ct(&ct, "  \t  ");
+    TEST_ASSERT(ngx_http_markdown_stream_type_excluded(&ct, &conf) == 0,
+        "pure OWS must not match any exclusion");
+
+    TEST_PASS("Trailing OWS without parameters correctly handled");
+}
+
 /* ══════════════════════════════════════════════════════════════════
  * Security: combined case + parameters
  *
@@ -337,6 +418,8 @@ main(void)
 
     test_mixed_case_exclusions();
     test_parameter_stripping_exclusions();
+    test_htab_before_parameters_exclusions();
+    test_trailing_ows_no_parameters();
     test_combined_case_and_params();
     test_partial_match_not_excluded();
     test_non_excluded_types();

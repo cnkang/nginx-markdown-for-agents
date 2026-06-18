@@ -50,7 +50,7 @@ ngx_http_markdown_stream_commit_remove_etag(
 
 static ngx_int_t
 ngx_http_markdown_stream_commit_apply_auth_cache_control(
-    const ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
+    ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
 
 
 /*
@@ -298,24 +298,25 @@ ngx_http_markdown_stream_commit_remove_etag(
 }
 
 
-/*
- * Apply authenticated content Cache-Control protection.
+/**
+ * Applies Cache-Control protection for authenticated requests.
  *
- * When the request is authenticated and auth_policy allows
- * conversion, upgrade Cache-Control to at least "private" to prevent
- * shared caches from storing authenticated Markdown content.  This
- * matches the full-buffer path's behavior.
+ * When the NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL compile-time gate
+ * is enabled and the request is authenticated (as determined by the active
+ * auth_policy via ngx_http_markdown_is_authenticated), this upgrades the
+ * response Cache-Control to at least "private": a "public" directive is
+ * rewritten to "private", and a missing/private-less header gets "private"
+ * appended. "no-store" is preserved and never downgraded. This mirrors
+ * the full-buffer path so streaming and buffered responses behave identically.
  *
- * Guarded by NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL compile-time
- * gate for parity with the full-buffer path.
- *
- * Returns:
- *   NGX_OK on success (or when compile-time gate is off)
- *   NGX_ERROR on Cache-Control modification failure
+ * @param r HTTP request.
+ * @param conf Module location configuration (used for auth_policy check).
+ * @return NGX_OK on success or when not applicable; NGX_ERROR on modification failure.
  */
 static ngx_int_t
 ngx_http_markdown_stream_commit_apply_auth_cache_control(
-    const ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf)
+    ngx_http_request_t *r, /* NOSONAR: r passed to non-const modify_cache_control_for_auth */
+    const ngx_http_markdown_conf_t *conf)
 {
 #if NGX_HTTP_MARKDOWN_ENABLE_AUTH_CACHE_CONTROL
     ngx_int_t  rc;
@@ -325,8 +326,7 @@ ngx_http_markdown_stream_commit_apply_auth_cache_control(
     }
 
     if (ngx_http_markdown_is_authenticated(r, conf)) {
-        rc = ngx_http_markdown_modify_cache_control_for_auth(
-            (ngx_http_request_t *) r);
+        rc = ngx_http_markdown_modify_cache_control_for_auth(r);
         if (rc != NGX_OK) {
             return rc;
         }
