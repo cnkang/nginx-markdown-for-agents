@@ -353,13 +353,25 @@ def _write_json(data, path):
     """
     if path is None:
         return
-    resolved = validate_write_path_within_root(
-        path, REPO_ROOT, purpose="threshold output",
-    )
-    # Resolve to canonical absolute path to satisfy taint analysis (S8707).
-    safe_path = Path(os.path.realpath(resolved))
-    safe_path.parent.mkdir(parents=True, exist_ok=True)
-    safe_path.write_text(
+    # Inline CWE-22 / S8707 denylist: reject traversal and null bytes
+    # before any filesystem access so the taint tracker sees the guard
+    # in the same scope as the sink.
+    raw = str(path)
+    for _comp in raw.replace("\\", "/").split("/"):
+        if _comp == ".." or "\0" in _comp:
+            raise ValueError(
+                f"Refusing threshold output path with dangerous component: {raw!r}"
+            )
+    resolved = Path(raw).resolve()
+    resolved_root = Path(str(REPO_ROOT)).resolve()
+    try:
+        resolved.relative_to(resolved_root)
+    except ValueError:
+        raise ValueError(
+            f"Write threshold output path {resolved} escapes root {resolved_root}"
+        )
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_text(
         json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
 
