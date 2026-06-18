@@ -18,6 +18,8 @@ file write safety, subprocess argument safety, shell hygiene, or C const-correct
 
 - CLI-derived paths bypass validation and allow traversal outside repo root
 - write paths are created from unresolved parents and follow symlink escapes
+- in-tree executable symlinks satisfy lexical containment but target external
+  commands
 - subprocess invocations use shell interpolation with user-influenced values
 - security checks exist but are not routed by harness families for changed files
 - repeated PR rounds patch the same path-safety class without durable routing
@@ -40,7 +42,8 @@ file write safety, subprocess argument safety, shell hygiene, or C const-correct
 
 - Path-validation contracts in `AGENTS.md` and `tools/lib/path_validation.py`
   must match actual tooling callsites (`validate_read_path`,
-  `validate_write_path_within_root`, resolved parent handling).
+  `validate_write_path_within_root`, canonical target containment, fixed
+  executable allowlists).
 - If new tooling surfaces accept path-like CLI inputs, include those paths in
   `docs/harness/routing-manifest.json` so routing does not degrade to zero-hit
   blind spots.
@@ -70,3 +73,4 @@ PYTHONPATH=. pytest -q tools/perf/tests
 |---------|------|--------|---------|
 | 0.6.2 | 2026-05-11 | Kang | Initial pack for recurring tooling path-security fixes and routing coverage |
 | 0.6.3 | 2026-05-14 | Kang | Extended with shell hygiene (S7682/S1066/Rule 18), const-correctness detection, and curl --head patterns |
+| 0.8.1 | 2026-06-18 | Codex | Require canonical symlink-aware containment and fixed allowlists for CLI-selected executables |

@@ -108,7 +108,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 30 | nginx-idioms | NUL-terminate ngx_str_t before C API calls; EOF last-line handling; cross-TU visibility; sentinel consistency |
 | 31 | nginx-idioms | After merge: verify compile, diff --check, function count, no duplicates |
 | 32 | security-cwe | ssize_t→size_t needs non-negative check; overflow guard on addition |
-| 33 | security-cwe | Python open() needs validate_read_path(); resolve before mkdir |
+| 33 | security-cwe | Canonicalize Python paths before containment; allowlist CLI executables |
 | 34 | dynconf-snapshot | Read mutable fields through effective_conf; snapshot race elimination; bind once at header_filter entry |
 | 35 | dynconf-snapshot | dynconf_enabled gate; applied_mtime after successful reload; unknown keys → NGX_ERROR; startup apply |
 | 36 | harness-routing | Route recurring tooling fixes to focused security family |
@@ -326,6 +326,8 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 
 **Python** (P)
 - Binary prerequisites validate executability [19]
+- Path containment uses canonical targets after symlink resolution; CLI-derived
+  executables must match a fixed canonical allowlist before subprocess use [33]
 - Config nesting matches code; accept both key names [8b]
 - Harness checks affect pass/fail, not INFO-only [19]
 

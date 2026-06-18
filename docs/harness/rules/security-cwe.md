@@ -58,16 +58,25 @@ Required:
   before the `open()` call.  Hard-coded paths within the repo (e.g.
   `REPO_ROOT / "known-file"`) are exempt.
 - Every write-path construction (`Path(path)`) where `path` comes from CLI
-  arguments must call `.resolve()` before `.mkdir(parents=True)` or `open()`
-  to prevent symlink traversal.
+  arguments must call `.resolve()` before containment checks,
+  `.mkdir(parents=True)`, or `open()` to prevent symlink traversal. Containment
+  must be checked on that canonical target with `Path.relative_to()` or an
+  equivalent path-aware operation; lexical prefix checks such as
+  `abspath().startswith()` are insufficient.
 - `Path(path).parent.mkdir(parents=True)` must use a resolved path:
   `resolved = Path(path).resolve()` then `resolved.parent.mkdir(...)`.
 - New Python tooling scripts that accept file paths as CLI arguments must
   import and use `path_validation` helpers.  Scripts that intentionally accept
   arbitrary paths must document "trusted input only" in their `--help` text.
-- Subprocess calls with path arguments from CLI must use list form (not
-  string interpolation with shell=True) and validate executability.
+- Subprocess calls with executable paths from CLI must use list form (not
+  string interpolation with `shell=True`), resolve symlinks, and require the
+  canonical executable to match a fixed allowlist. Checking only that a path
+  is inside the repository and executable is insufficient because an in-tree
+  symlink can target an arbitrary external command. The executable passed to
+  `subprocess` must come from the fixed allowlist, not from the raw CLI value.
 
 Verification:
 - `tools/harness/detect_cwe22_paths.py tools/`
 - `make harness-security-checks`
+- Regression tests covering symlink escapes for both write targets and
+  CLI-selected executables

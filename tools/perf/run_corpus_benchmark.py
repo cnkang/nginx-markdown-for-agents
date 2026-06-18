@@ -60,6 +60,16 @@ from report_schema import (  # noqa: E402
 from report_utils import detect_platform, write_json  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+CORPUS_CONVERTER_BIN = (
+    REPO_ROOT
+    / "tools"
+    / "corpus"
+    / "test-corpus-conversion"
+    / "target"
+    / "release"
+    / "test-corpus-conversion"
+)
+
 
 def _resolve_repo_output_path(path: str, *, purpose: str) -> Path:
     raw_output = Path(path)
@@ -143,30 +153,26 @@ def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
     Returns:
         (stdout_output, exit_code, latency_ms)
     """
-    # S8701 sanitizer: resolve to absolute paths and validate that both the
-    # binary and HTML file exist as regular files within known-safe scope.
-    # os.path.abspath() + os.path.isfile() + startswith() verifies the
-    # resolved paths stay within the repository tree, preventing path-based
-    # command injection.
-    repo_root = os.path.abspath(str(REPO_ROOT))
-    safe_bin = os.path.abspath(converter_bin)
-    if not safe_bin.startswith(repo_root + os.sep):
+    safe_bin = Path(converter_bin).resolve()
+    if safe_bin != CORPUS_CONVERTER_BIN:
         return "", 1, 0.0
-    if not os.path.isfile(safe_bin):
+    if not safe_bin.is_file():
         return "", 1, 0.0
     if not os.access(safe_bin, os.X_OK):
         return "", 1, 0.0
 
-    safe_html = os.path.abspath(html_path)
-    if not safe_html.startswith(repo_root + os.sep):
+    safe_html = Path(html_path).resolve()
+    try:
+        safe_html.relative_to(REPO_ROOT)
+    except ValueError:
         return "", 1, 0.0
-    if not os.path.isfile(safe_html):
+    if not safe_html.is_file():
         return "", 1, 0.0
 
     start = time.perf_counter()
     try:
         result = subprocess.run(  # noqa: S603
-            [safe_bin, safe_html],
+            [str(CORPUS_CONVERTER_BIN), str(safe_html)],
             capture_output=True,
             text=True,
             timeout=30,
@@ -458,12 +464,21 @@ def main(argv: list[str] | None = None) -> int:
     args = build_cli_parser().parse_args(argv)
 
     corpus_dir = validate_read_path(args.corpus_dir, purpose="corpus directory")
-    converter_bin = args.converter_bin
+    converter_bin = validate_read_path(
+        args.converter_bin, purpose="corpus converter", must_exist=False,
+    )
     output_path = args.output
     factor = args.token_approx_factor
 
     # Validate converter binary
-    if not os.path.isfile(converter_bin) or not os.access(converter_bin, os.X_OK):
+    if converter_bin != CORPUS_CONVERTER_BIN:
+        print(
+            f"ERROR: converter must be the repository corpus converter: "
+            f"{CORPUS_CONVERTER_BIN}",
+            file=sys.stderr,
+        )
+        return 1
+    if not converter_bin.is_file() or not os.access(converter_bin, os.X_OK):
         print(
             f"ERROR: converter binary not found or not executable: {converter_bin}",
             file=sys.stderr,
