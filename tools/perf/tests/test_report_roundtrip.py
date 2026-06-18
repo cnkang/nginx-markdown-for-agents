@@ -2,7 +2,7 @@
 
 Properties tested:
   - Property 4: Report JSON roundtrip consistency — exercises the real
-    ``threshold_engine`` parse/serialize path (``load_json`` / ``_write_json``)
+    ``threshold_engine`` parse/serialize path (``load_json`` / ``_serialize_json``)
     on both generated and binary-produced reports.
   - Property 3: Report schema consistency (local vs CI reports share same schema).
 
@@ -22,7 +22,7 @@ from hypothesis import strategies as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from threshold_engine import REPO_ROOT, _write_json, load_json  # noqa: E402
+from threshold_engine import REPO_ROOT, _serialize_json, load_json  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Schema constants (from perf/metrics-schema.json)
@@ -211,11 +211,11 @@ def test_property4_measurement_report_roundtrip(report):
         path_b = os.path.join(tmpdir, "measurement_b.json")
 
         # First roundtrip: write → read
-        _write_json(report, path_a)
+        Path(path_a).write_text(_serialize_json(report), encoding="utf-8")
         loaded_a = load_json(path_a)
 
         # Second roundtrip: write loaded data → read again
-        _write_json(loaded_a, path_b)
+        Path(path_b).write_text(_serialize_json(loaded_a), encoding="utf-8")
         loaded_b = load_json(path_b)
 
         assert loaded_a == loaded_b, "Measurement Report roundtrip diverged after second write/read"
@@ -241,10 +241,10 @@ def test_property4_verdict_report_roundtrip(report):
         path_a = os.path.join(tmpdir, "verdict_a.json")
         path_b = os.path.join(tmpdir, "verdict_b.json")
 
-        _write_json(report, path_a)
+        Path(path_a).write_text(_serialize_json(report), encoding="utf-8")
         loaded_a = load_json(path_a)
 
-        _write_json(loaded_a, path_b)
+        Path(path_b).write_text(_serialize_json(loaded_a), encoding="utf-8")
         loaded_b = load_json(path_b)
 
         assert loaded_a == loaded_b, "Verdict Report roundtrip diverged after second write/read"
@@ -273,7 +273,7 @@ def test_property4_real_binary_measurement_roundtrip():
     """Roundtrip a Measurement Report produced by the real perf_baseline binary.
 
     Invokes the binary for the ``small`` tier, then runs the report through
-    _write_json → load_json → _write_json → load_json and asserts stability.
+    serialize → load → serialize → load and asserts stability.
     """
     binary, repo_root = _find_perf_binary()
     if binary is None:
@@ -294,14 +294,14 @@ def test_property4_real_binary_measurement_roundtrip():
         # First roundtrip
         loaded_a = load_json(original)
         path_b = os.path.join(tmpdir, "roundtrip_b.json")
-        _write_json(loaded_a, path_b)
+        Path(path_b).write_text(_serialize_json(loaded_a), encoding="utf-8")
         loaded_b = load_json(path_b)
 
         assert loaded_a == loaded_b, "Real binary report diverged after roundtrip"
 
         # Second roundtrip for byte stability
         path_c = os.path.join(tmpdir, "roundtrip_c.json")
-        _write_json(loaded_b, path_c)
+        Path(path_c).write_text(_serialize_json(loaded_b), encoding="utf-8")
         raw_b = Path(path_b).read_text(encoding="utf-8")
         raw_c = Path(path_c).read_text(encoding="utf-8")
         assert raw_b == raw_c, "Real binary report serialization not byte-stable"

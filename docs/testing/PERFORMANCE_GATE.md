@@ -80,6 +80,10 @@ The script builds the release binary, runs benchmarks, generates a
 Measurement Report, invokes the threshold engine for a Verdict Report,
 and prints a text summary to stderr.
 
+When invoked directly, `threshold_engine.py` emits the Verdict Report JSON to
+stdout and diagnostics to stderr. Redirect stdout to the intended artifact;
+the Python process does not accept a caller-controlled output path.
+
 ## Baseline Management
 
 Baselines are stored in `perf/baselines/<platform>.json` and must be

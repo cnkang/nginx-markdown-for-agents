@@ -74,6 +74,10 @@ Required:
   is inside the repository and executable is insufficient because an in-tree
   symlink can target an arbitrary external command. The executable passed to
   `subprocess` must come from the fixed allowlist, not from the raw CLI value.
+- For single-artifact CLI tools, prefer emitting the artifact to stdout and
+  letting the trusted caller redirect it. Do not accept a caller-controlled
+  output path when the Python process does not need filesystem ownership of
+  the artifact.
 
 Verification:
 - `tools/harness/detect_cwe22_paths.py tools/`

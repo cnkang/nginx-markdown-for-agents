@@ -16,7 +16,6 @@ Environment variables:
 import argparse
 import json
 import os
-import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,7 +24,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.path_validation import validate_read_path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-_REPORT_FILENAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\.json$")
 
 # ---------------------------------------------------------------------------
 # Default thresholds used when the thresholds config file is missing or a
@@ -150,17 +148,16 @@ def judge_metric(deviation_pct, direction, warning_pct, blocking_pct):
 # Verdict report builders
 # ---------------------------------------------------------------------------
 
-def build_skipped_verdict(reason, platform, output_path):
+def build_skipped_verdict(reason, platform):
     """
-    Create and write a "skipped" verdict report and emit the skip reason.
+    Emit a "skipped" verdict report and its reason.
     
     Parameters:
         reason (str): Human-readable explanation for skipping; written to stderr.
         platform (str): Platform name to include in the report.
-        output_path (str | None): File path to write the JSON report; if None, no file is written.
-    
+
     Returns:
-        dict: The verdict report object that was written.
+        dict: The verdict report object emitted to stdout.
     """
     report = {
         "schema_version": "1.0.0",
@@ -175,7 +172,7 @@ def build_skipped_verdict(reason, platform, output_path):
             "tiers": {},
         },
     }
-    _write_json(report, output_path)
+    _emit_json(report)
     _stderr(reason)
     return report
 
@@ -282,11 +279,13 @@ def _overall_verdict(has_warning, has_failure):
     return "pass"
 
 
-def build_verdict_report(baseline, current, thresholds_cfg, direction_map, platform, output_path):
+def build_verdict_report(
+    baseline, current, thresholds_cfg, direction_map, platform,
+):
     """
     Builds a verdict report comparing current measurements to a baseline.
     
-    Writes the report JSON to output_path and prints a human-readable summary to stderr.
+    Writes report JSON to stdout and a human-readable summary to stderr.
     
     Returns:
         tuple: (report, has_failure) where `report` is the verdict report dictionary and
@@ -334,7 +333,7 @@ def build_verdict_report(baseline, current, thresholds_cfg, direction_map, platf
         },
     }
 
-    _write_json(report, output_path)
+    _emit_json(report)
     _print_text_summary(comparison_tiers, overall)
     return report, has_failure
 
@@ -343,34 +342,14 @@ def build_verdict_report(baseline, current, thresholds_cfg, direction_map, platf
 # Output helpers
 # ---------------------------------------------------------------------------
 
-def _write_json(data, path):
-    """
-    Write `data` as pretty-printed JSON to `path`.
-    
-    If `path` is None, the function does nothing. The function ensures the parent directory exists, writes UTF-8 encoded JSON with an indent of 2, disables ASCII-only escaping, and appends a trailing newline.
-    
-    Parameters:
-        data: The Python object to serialize to JSON.
-        path (str | None): Filesystem path to write the JSON to, or `None` to skip writing.
-    """
-    if path is None:
-        return
-    raw_path = Path(path)
-    filename = raw_path.name
-    if _REPORT_FILENAME_RE.fullmatch(filename) is None:
-        raise ValueError(f"Invalid verdict report filename: {filename!r}")
+def _serialize_json(data):
+    """Return stable pretty-printed JSON with a trailing newline."""
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
-    target = raw_path.resolve()
-    try:
-        target.relative_to(REPO_ROOT)
-    except ValueError:
-        raise ValueError(
-            f"Write path {target} escapes repository root {REPO_ROOT}"
-        )
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+
+def _emit_json(data):
+    """Write a JSON report to stdout for caller-controlled redirection."""
+    sys.stdout.write(_serialize_json(data))
 
 
 def _stderr(msg):
@@ -438,7 +417,6 @@ def parse_args(argv=None):
             - current: path to the current measurement JSON
             - thresholds: path to the thresholds configuration JSON
             - metrics_schema: path to the metrics schema JSON
-            - output_json: path to write the Verdict Report JSON
             - platform: platform name for threshold lookup (default: "default")
     """
     parser = argparse.ArgumentParser(
@@ -466,11 +444,6 @@ def parse_args(argv=None):
         help="Path to the metrics schema JSON.",
     )
     parser.add_argument(
-        "--output-json",
-        required=True,
-        help="Path to write the Verdict Report JSON.",
-    )
-    parser.add_argument(
         "--platform",
         default="default",
         help="Platform name for threshold lookup (default: 'default').",
@@ -480,7 +453,7 @@ def parse_args(argv=None):
 
 def main(argv=None):
     """
-    Run the threshold engine CLI flow: parse arguments, compare current measurements against a baseline using configured thresholds, emit a verdict JSON to the configured output path, and print a human-readable summary to stderr.
+    Run the threshold engine CLI flow and emit verdict JSON to stdout.
     
     Parameters:
         argv (list[str] | None): Optional list of command-line arguments to parse; if None, uses sys.argv.
@@ -495,7 +468,6 @@ def main(argv=None):
         build_skipped_verdict(
             "Performance gate skipped by PERF_GATE_SKIP=1",
             args.platform,
-            args.output_json,
         )
         return 0
 
@@ -515,7 +487,6 @@ def main(argv=None):
         build_skipped_verdict(
             f"No baseline found for platform {platform_label}, skipping comparison",
             args.platform,
-            args.output_json,
         )
         return 0
 
@@ -557,7 +528,6 @@ def main(argv=None):
         thresholds_cfg,
         direction_map,
         args.platform,
-        args.output_json,
     )
 
     return 1 if has_failure else 0
