@@ -224,20 +224,17 @@ ngx_http_markdown_check_size_limit(const ngx_http_request_t *r,
     return 1;
 }
 
-/*
- * Check if Content-Type indicates unbounded streaming
+/**
+ * Detects unbounded streaming responses.
  *
- * Checks if the response is an unbounded streaming type that should not
- * be converted per FR-02.8. This includes Server-Sent Events and other
- * streaming content types configured in stream_types.
+ * Determines whether the response Content-Type indicates an unbounded streaming
+ * type. Checks for the built-in text/event-stream type and configured streaming
+ * type exclusions.
  *
- * Parameters:
- *   r    - NGINX request structure
- *   conf - Module configuration
+ * @param r    The HTTP request structure.
+ * @param conf Module configuration.
  *
- * Returns:
- *   1 if response is unbounded streaming (ineligible)
- *   0 if response is not streaming (eligible)
+ * @return 1 if the response is an unbounded streaming type, 0 otherwise.
  */
 static ngx_int_t
 ngx_http_markdown_is_streaming(const ngx_http_request_t *r,
@@ -380,27 +377,20 @@ ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
     return NGX_HTTP_MARKDOWN_ELIGIBLE;
 }
 
-/*
- * Check whether a content type is excluded from streaming conversion.
+/**
+ * Determines whether a content type is excluded from streaming conversion.
  *
- * Returns the union of built-in hard exclusions (text/event-stream,
- * application/x-ndjson, application/stream+json) and the user-configured
- * conf->stream.excluded_types array.
+ * Checks for built-in hard exclusions (text/event-stream,
+ * application/x-ndjson, application/stream+json) and any
+ * user-configured excluded types. Content-Type parameters (after `;`)
+ * are ignored. Matching is case-insensitive and exact.
  *
- * Matching is case-insensitive and ignores Content-Type parameters
- * (anything after the first ';').  NULL or empty content_type is
- * treated as not excluded.
+ * A NULL or empty content_type is treated as not excluded (returns 0),
+ * so callers without a Content-Type header will not be short-circuited.
  *
- * Acceptance criteria: built-in hard exclusions (SSE, NDJSON, stream+json)
- * and user-configured exclusion array with case-insensitive exact matching
- *
- * Parameters:
- *   content_type - Content-Type string to check (may be NULL)
- *   conf         - Module location configuration
- *
- * Returns:
- *   1 if the content type is excluded from streaming
- *   0 if the content type is not excluded
+ * @param content_type Content-Type string to check; may be NULL or empty.
+ * @param conf Module location configuration.
+ * @returns 1 if the content type is excluded, 0 otherwise.
  */
 ngx_int_t
 ngx_http_markdown_stream_type_excluded(const ngx_str_t *content_type,
