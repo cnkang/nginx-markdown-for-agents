@@ -181,7 +181,10 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
         ctx->streaming.handle,
         &close_data, &close_len);
 
-    /* Handle is consumed by safe_finish regardless of outcome */
+    /* Only validation failure leaves the handle unconsumed. */
+    if (finish_rc == ERROR_INVALID_INPUT) {
+        markdown_streaming_abort(ctx->streaming.handle);
+    }
     ctx->streaming.handle = NULL;
 
     if (finish_rc == POST_COMMIT_ABORT) {
@@ -673,7 +676,7 @@ ngx_http_markdown_stream_postcommit_has_html_signature(
     const u_char       *p;
     const u_char       *last;
     const u_char       *scan_last;
-    static u_char       doctype[] = {
+    static const u_char doctype[] = {
         'D', 'O', 'C', 'T', 'Y', 'P', 'E'
     };
     static const u_char tag_names[] =

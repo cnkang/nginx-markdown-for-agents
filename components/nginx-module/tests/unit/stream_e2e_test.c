@@ -324,6 +324,13 @@ markdown_streaming_safe_finish(struct StreamingConverterHandle *handle,
     return e2e_safe_finish_rc;
 }
 
+/* Stub: markdown_streaming_abort */
+void
+markdown_streaming_abort(struct StreamingConverterHandle *handle)
+{
+    UNUSED(handle);
+}
+
 /* Stub: markdown_streaming_output_free */
 void
 markdown_streaming_output_free(u_char *data, uintptr_t len)
