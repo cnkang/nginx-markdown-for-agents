@@ -194,7 +194,9 @@ jobs:
           make rust-lib
           make copy-headers
           make check-headers
-          git diff --exit-code -- components/rust-converter/include/markdown_converter.h
+          git diff --exit-code -- \
+            components/rust-converter/include/markdown_converter.h \
+            components/nginx-module/src/markdown_converter.h
 
   rust-quality:
     name: Rust Quality Gate
