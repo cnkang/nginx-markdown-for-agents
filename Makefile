@@ -283,7 +283,7 @@ security-shellcheck:
 	fi
 
 security-gitleaks:
-	@command -v gitleaks >/dev/null 2>&1 || { echo "ERROR: gitleaks not found. Install with: go install github.com/zricethezav/gitleaks/v8@v8.30.1" >&2; exit 127; }
+	@command -v gitleaks >/dev/null 2>&1 || { echo "ERROR: gitleaks not found. Install with: go install github.com/zricethezav/gitleaks/v8@83d9cd684c87d95d656c1458ef04895a7f1cbd8e # v8.30.1" >&2; exit 127; }
 	gitleaks detect --source . --no-git --redact --config .gitleaks.toml --verbose
 
 security-semgrep:
