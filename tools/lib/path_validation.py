@@ -93,9 +93,18 @@ def validate_write_path_within_root(
         Resolved absolute Path (within root).
 
     Raises:
-        ValueError: If the resolved path escapes the root directory.
+        ValueError: If the resolved path escapes the root directory
+                    or contains '..' traversal components.
     """
-    resolved = Path(str(path)).resolve()
+    raw = str(path)
+
+    components = raw.replace("\\", "/").split("/")
+    if ".." in components:
+        raise ValueError(
+            f"Refusing write {purpose} path with '..' traversal component: {raw!r}"
+        )
+
+    resolved = Path(raw).resolve()
     resolved_root = Path(str(root)).resolve()
 
     try:

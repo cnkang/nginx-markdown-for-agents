@@ -143,6 +143,8 @@ def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
     Returns:
         (stdout_output, exit_code, latency_ms)
     """
+    if ".." in converter_bin or ".." in html_path:
+        return "", 1, 0.0
     if not os.path.isfile(converter_bin):
         return "", 1, 0.0
     if not os.access(converter_bin, os.X_OK):

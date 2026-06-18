@@ -27,6 +27,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.path_validation import validate_read_path  # noqa: E402
+
 
 @dataclass(frozen=True)
 class CoverageSummary:
@@ -68,7 +71,8 @@ def parse_lcov_summary(lcov_path: Path) -> CoverageSummary:
     if not lcov_path.exists():
         raise FileNotFoundError(f"lcov file not found: {lcov_path}")
 
-    text = lcov_path.read_text(encoding="utf-8", errors="replace")
+    resolved = validate_read_path(lcov_path, purpose="lcov input")
+    text = resolved.read_text(encoding="utf-8", errors="replace")
 
     lines_hit = _LCOC_LINE_RE.search(text)
     func_hit = _LCOC_FUNC_RE.search(text)

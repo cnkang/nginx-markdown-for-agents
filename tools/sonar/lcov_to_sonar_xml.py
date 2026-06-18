@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # noqa: E402
-from lib.path_validation import validate_read_path
+from lib.path_validation import validate_read_path, validate_write_path_within_root
 
 
 def _parse_da_line(
@@ -170,9 +170,12 @@ def main() -> int:
 
     tree = ET.ElementTree(root)
     ET.indent(tree, space="  ")
-    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-    tree.write(args.output, encoding="unicode", xml_declaration=True)
-    print(f"Wrote {args.output} ({len(merged)} files)", file=sys.stderr)
+    resolved_output = validate_write_path_within_root(
+        args.output, os.getcwd(), purpose="SonarQube XML output",
+    )
+    os.makedirs(str(resolved_output.parent), exist_ok=True)
+    tree.write(str(resolved_output), encoding="unicode", xml_declaration=True)
+    print(f"Wrote {resolved_output} ({len(merged)} files)", file=sys.stderr)
     return 0
 
 
