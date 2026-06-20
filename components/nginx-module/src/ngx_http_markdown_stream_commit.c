@@ -39,8 +39,8 @@
 
 /*
  * Maximum number of header entries tracked per single header name
- * (Vary, ETag, Cache-Control).  In practice each is 0 or 1 entry;
- * the bound covers pathological multi-value headers.
+ * (Vary, ETag, Cache-Control).  Snapshot fails before Phase 1 mutation
+ * when a header has more matching entries, preserving Rule 39 atomicity.
  */
 #define NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX  4
 
@@ -98,11 +98,28 @@ ngx_http_markdown_stream_commit_header_matches(
     return 1;
 }
 
+static ngx_int_t
+ngx_http_markdown_stream_commit_snapshot_entry(
+    ngx_http_markdown_hdr_snap_t *snap, ngx_table_elt_t *entry)
+{
+    if (snap->count >= NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX) {
+        return NGX_ERROR;
+    }
+
+    snap->entries[snap->count].entry = entry;
+    snap->entries[snap->count].orig_value = entry->value;
+    snap->entries[snap->count].orig_hash = entry->hash;
+    snap->count++;
+
+    return NGX_OK;
+}
+
 /*
  * Snapshot all entries matching a header name in the headers_out list.
- * Records entry pointer, original value, and original hash for each.
+ * Records entry pointer, original value, and original hash for each.  Returns
+ * NGX_ERROR before mutation if the fixed snapshot capacity is exceeded.
  */
-static void
+static ngx_int_t
 ngx_http_markdown_stream_commit_snapshot_header(
     ngx_http_request_t *r,
     const u_char *name, size_t name_len,
@@ -125,24 +142,30 @@ ngx_http_markdown_stream_commit_snapshot_header(
                 continue;
             }
 
-            if (ngx_http_markdown_stream_commit_header_matches(
-                    &elts[i], name, name_len)
-                && snap->count < NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX)
+            if (!ngx_http_markdown_stream_commit_header_matches(
+                    &elts[i], name, name_len))
             {
-                snap->entries[snap->count].entry = &elts[i];
-                snap->entries[snap->count].orig_value = elts[i].value;
-                snap->entries[snap->count].orig_hash = elts[i].hash;
-                snap->count++;
+                continue;
+            }
+
+            if (ngx_http_markdown_stream_commit_snapshot_entry(
+                    snap, &elts[i]) != NGX_OK)
+            {
+                return NGX_ERROR;
             }
         }
         part = part->next;
     }
+
+    return NGX_OK;
 }
 
 /*
  * Roll back a single header: restore original value/hash on snapshotted
  * entries, then invalidate any entries that were pushed after the snapshot
  * (i.e. entries with index >= orig_nelts that match the header name).
+ * orig_nelts is the total linear entry count across all list parts; rollback
+ * uses the same linear traversal index.
  */
 static void
 ngx_http_markdown_stream_commit_rollback_header(
@@ -186,20 +209,32 @@ ngx_http_markdown_stream_commit_rollback_header(
  * Take a full Phase 1 snapshot: Vary, ETag, Cache-Control,
  * and the typed ETag pointer.
  */
-static void
+static ngx_int_t
 ngx_http_markdown_stream_commit_take_snapshot(
     ngx_http_request_t *r, ngx_http_markdown_commit_snap_t *snap)
 {
-    ngx_http_markdown_stream_commit_snapshot_header(
-        r, (const u_char *) "Vary", 4, &snap->vary);
+    if (ngx_http_markdown_stream_commit_snapshot_header(
+            r, (const u_char *) "Vary", 4, &snap->vary) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
-    ngx_http_markdown_stream_commit_snapshot_header(
-        r, (const u_char *) "ETag", 4, &snap->etag);
+    if (ngx_http_markdown_stream_commit_snapshot_header(
+            r, (const u_char *) "ETag", 4, &snap->etag) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
-    ngx_http_markdown_stream_commit_snapshot_header(
-        r, (const u_char *) "Cache-Control", 13, &snap->cache_control);
+    if (ngx_http_markdown_stream_commit_snapshot_header(
+            r, (const u_char *) "Cache-Control", 13,
+            &snap->cache_control) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
     snap->orig_etag_ptr = r->headers_out.etag;
+
+    return NGX_OK;
 }
 
 /*
@@ -307,7 +342,13 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
      * headers_out is restored to its pre-commit state.
      */
 
-    ngx_http_markdown_stream_commit_take_snapshot(r, &snap);
+    rc = ngx_http_markdown_stream_commit_take_snapshot(r, &snap);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown stream commit: "
+                      "snapshot capacity exceeded before header mutation");
+        return NGX_ERROR;
+    }
 
     rc = ngx_http_markdown_stream_commit_set_vary(r);
     if (rc != NGX_OK) {
