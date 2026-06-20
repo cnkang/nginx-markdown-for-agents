@@ -5,11 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.1] - 2026-06-19
+## [0.8.1] - 2026-06-20
 
-Maintenance release on top of 0.8.0: streaming header commit atomicity
-(Rule 39), FFI handle ownership correctness, HTTP OWS compliance, and
-security hardening of the performance/coverage tooling.
+Maintenance, stability, and security-hardening release on top of 0.8.0:
+streaming header commit atomicity (Rule 39), FFI handle ownership correctness,
+HTTP OWS compliance, and performance/coverage tooling hardening.
 
 ### Fixed
 
@@ -20,21 +20,24 @@ security hardening of the performance/coverage tooling.
   the fallback/full-buffer path. Rollback restores original `hash`/`value`
   for modified entries, invalidates newly pushed entries (`hash=0`), and
   restores the typed `etag` pointer. No use-after-free or double-free under
-  the request-pool memory model.
-- **FFI handle consumption contract for `safe_finish`**: when
+  the request-pool memory model. Snapshot collection now fails before any
+  Phase 1 mutation when a header exceeds the fixed snapshot capacity, rather
+  than silently leaving entries outside the rollback set.
+- **Corrected FFI cleanup contract**: when
   `markdown_streaming_safe_finish` returns `ERROR_INVALID_INPUT` (validation
   failure), the handle is no longer consumed by Rust. The NGINX C module now
   calls `markdown_streaming_abort()` to free the unconsumed handle, preventing
-  a resource leak. See the breaking-change note below for external FFI
-  consumers.
+  a resource leak.
 - **Eligibility Content-Type OWS compliance (#149)**: Content-Type matching
   in `ngx_http_markdown_check_content_type()`, `ngx_http_markdown_is_streaming()`,
   and `ngx_http_markdown_stream_type_excluded()` now accepts HTAB as an
   optional whitespace separator per RFC 7230, in addition to SP. Trailing
   OWS stripping also handles HTAB.
-- **FFI invalid-input handle abort**: `ngx_http_markdown_stream_postcommit_finish_via_rust()`
-  aborts the Rust handle on `ERROR_INVALID_INPUT` before nulling the typed
-  pointer, matching the corrected consumption contract.
+- **Full-buffer backpressure tail duplication**: when the downstream NGINX
+  copy filter returns `NGX_AGAIN`, resume now drains the filter's retained
+  chain with a `NULL` input instead of resubmitting the original converted
+  body. This prevents duplicated response tails under concurrent large-body
+  traffic.
 
 ### Security
 
@@ -64,21 +67,18 @@ security hardening of the performance/coverage tooling.
   contract.
 - Improved docstrings for eligibility and auth cache-control helpers
   (Doxygen-style `@param`/`@return`).
-
-### Breaking Changes
-
-- **`markdown_streaming_safe_finish` FFI contract**: the handle is now
-  consumed only after validation succeeds. On `ERROR_INVALID_INPUT`, the
-  handle is **not** consumed and the caller must call
-  `markdown_streaming_abort()` (or otherwise free it). The bundled NGINX C
-  module already handles this; third-party FFI consumers that assumed the
-  handle was always consumed must update their cleanup path.
+- **FFI contract clarification**: `markdown_streaming_safe_finish` consumes
+  its handle only after validation succeeds. On `ERROR_INVALID_INPUT`, it is
+  not consumed and the caller must call `markdown_streaming_abort()` or
+  otherwise free it. The bundled NGINX C module already handles this cleanup;
+  third-party FFI consumers should align their invalid-input path.
 
 ### Tests
 
-- Added 5 rollback unit tests for `stream_commit` covering Vary/ETag/Cache-Control
-  failure rollback, cross-header rollback (ETag failure rolls back prior Vary
-  mutation), and typed ETag pointer restoration.
+- Added snapshot/rollback unit coverage for `stream_commit`, including
+  Vary/ETag/Cache-Control failure rollback, cross-header rollback, typed ETag
+  pointer restoration, and pre-mutation snapshot-capacity failure for each
+  matching header family.
 - Added trailing OWS exclusion and abort-contract assertions to streaming
   tests.
 - Added `hard_excluded_params_case_test.c` for eligibility hard-exclusion
