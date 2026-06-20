@@ -81,6 +81,23 @@ typedef struct {
 /*  Snapshot helpers                                                   */
 /* ------------------------------------------------------------------ */
 
+static ngx_flag_t
+ngx_http_markdown_stream_commit_header_matches(
+    const ngx_table_elt_t *entry, const u_char *name, size_t name_len)
+{
+    if (entry->key.len != name_len) {
+        return 0;
+    }
+
+    for (ngx_uint_t i = 0; i < name_len; i++) {
+        if (ngx_tolower(entry->key.data[i]) != ngx_tolower(name[i])) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 /*
  * Snapshot all entries matching a header name in the headers_out list.
  * Records entry pointer, original value, and original hash for each.
@@ -93,7 +110,6 @@ ngx_http_markdown_stream_commit_snapshot_header(
 {
     ngx_list_part_t  *part;
     ngx_table_elt_t  *elts;
-    ngx_uint_t        i;
 
     snap->count = 0;
     snap->orig_nelts = 0;
@@ -102,23 +118,21 @@ ngx_http_markdown_stream_commit_snapshot_header(
 
     while (part != NULL) {
         elts = part->elts;
-        for (i = 0; i < part->nelts; i++) {
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
             snap->orig_nelts++;
 
             if (elts[i].hash == 0) {
                 continue;
             }
 
-            if (elts[i].key.len == name_len
-                && ngx_strncasecmp(elts[i].key.data,
-                                   (u_char *) name, name_len) == 0)
+            if (ngx_http_markdown_stream_commit_header_matches(
+                    &elts[i], name, name_len)
+                && snap->count < NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX)
             {
-                if (snap->count < NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX) {
-                    snap->entries[snap->count].entry = &elts[i];
-                    snap->entries[snap->count].orig_value = elts[i].value;
-                    snap->entries[snap->count].orig_hash = elts[i].hash;
-                    snap->count++;
-                }
+                snap->entries[snap->count].entry = &elts[i];
+                snap->entries[snap->count].orig_value = elts[i].value;
+                snap->entries[snap->count].orig_hash = elts[i].hash;
+                snap->count++;
             }
         }
         part = part->next;
@@ -136,10 +150,12 @@ ngx_http_markdown_stream_commit_rollback_header(
     const u_char *name, size_t name_len,
     ngx_http_markdown_hdr_snap_t *snap)
 {
-    ngx_uint_t  i;
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+    ngx_uint_t        idx;
 
     /* Restore snapshotted entries */
-    for (i = 0; i < snap->count; i++) {
+    for (ngx_uint_t i = 0; i < snap->count; i++) {
         if (snap->entries[i].entry != NULL) {
             snap->entries[i].entry->value = snap->entries[i].orig_value;
             snap->entries[i].entry->hash = snap->entries[i].orig_hash;
@@ -147,29 +163,22 @@ ngx_http_markdown_stream_commit_rollback_header(
     }
 
     /* Invalidate newly-pushed entries (hash=0 per Rule 40) */
-    if (snap->orig_nelts > 0 || 1) {
-        ngx_list_part_t  *part;
-        ngx_table_elt_t  *elts;
-        ngx_uint_t        idx;
+    part = &r->headers_out.headers.part;
+    idx = 0;
 
-        part = &r->headers_out.headers.part;
-        idx = 0;
-
-        while (part != NULL) {
-            elts = part->elts;
-            for (i = 0; i < part->nelts; i++) {
-                if (idx >= snap->orig_nelts
-                    && elts[i].hash != 0
-                    && elts[i].key.len == name_len
-                    && ngx_strncasecmp(elts[i].key.data,
-                                       (u_char *) name, name_len) == 0)
-                {
-                    elts[i].hash = 0;
-                }
-                idx++;
+    while (part != NULL) {
+        elts = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (idx >= snap->orig_nelts
+                && elts[i].hash != 0
+                && ngx_http_markdown_stream_commit_header_matches(
+                    &elts[i], name, name_len))
+            {
+                elts[i].hash = 0;
             }
-            part = part->next;
+            idx++;
         }
+        part = part->next;
     }
 }
 
