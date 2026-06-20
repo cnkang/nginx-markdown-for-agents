@@ -5,6 +5,88 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-06-19
+
+Maintenance release on top of 0.8.0: streaming header commit atomicity
+(Rule 39), FFI handle ownership correctness, HTTP OWS compliance, and
+security hardening of the performance/coverage tooling.
+
+### Fixed
+
+- **Streaming header commit atomicity (Rule 39)**: `ngx_http_markdown_stream_commit_headers()`
+  now snapshots Vary, ETag, and Cache-Control header state before Phase 1
+  mutations and rolls back on any Phase 1 failure. Previously a Vary success
+  followed by an ETag failure left a partially mutated header set, polluting
+  the fallback/full-buffer path. Rollback restores original `hash`/`value`
+  for modified entries, invalidates newly pushed entries (`hash=0`), and
+  restores the typed `etag` pointer. No use-after-free or double-free under
+  the request-pool memory model.
+- **FFI handle consumption contract for `safe_finish`**: when
+  `markdown_streaming_safe_finish` returns `ERROR_INVALID_INPUT` (validation
+  failure), the handle is no longer consumed by Rust. The NGINX C module now
+  calls `markdown_streaming_abort()` to free the unconsumed handle, preventing
+  a resource leak. See the breaking-change note below for external FFI
+  consumers.
+- **Eligibility Content-Type OWS compliance (#149)**: Content-Type matching
+  in `ngx_http_markdown_check_content_type()`, `ngx_http_markdown_is_streaming()`,
+  and `ngx_http_markdown_stream_type_excluded()` now accepts HTAB as an
+  optional whitespace separator per RFC 7230, in addition to SP. Trailing
+  OWS stripping also handles HTAB.
+- **FFI invalid-input handle abort**: `ngx_http_markdown_stream_postcommit_finish_via_rust()`
+  aborts the Rust handle on `ERROR_INVALID_INPUT` before nulling the typed
+  pointer, matching the corrected consumption contract.
+
+### Security
+
+- **Path traversal hardening in tooling**: `validate_write_path_within_root()`
+  now rejects any path containing a `..` traversal component before resolving,
+  as defense-in-depth on top of the existing `resolve()` + `startswith` check.
+- **Taint sink guards (S8701/S8707)**: inlined denylist checks and
+  `abspath`+`startswith` validators added to performance and coverage
+  tooling path sinks.
+- **Removed threshold output path sink**: `threshold_engine.py` no longer
+  writes verdict reports to a caller-supplied file path; reports are emitted
+  to stdout, eliminating a path-escape vector.
+- **Closed perf tooling path escapes**: `run_corpus_benchmark.py` and
+  related helpers now validate read/write paths through the shared
+  `path_validation` module.
+- **CI supply-chain**: gitleaks is pinned by commit SHA in the security
+  workflow, and both header copies (`markdown_converter.h`) are checked for
+  consistency.
+
+### Changed
+
+- **Const-correctness**: removed unnecessary `(ngx_http_request_t *)` casts
+  in the auth Cache-Control streaming path;
+  `ngx_http_markdown_stream_commit_apply_auth_cache_control()` now takes a
+  non-const `ngx_http_request_t *` (annotated `NOSONAR` for the SonarCloud
+  false positive) matching `ngx_http_markdown_modify_cache_control_for_auth()`'s
+  contract.
+- Improved docstrings for eligibility and auth cache-control helpers
+  (Doxygen-style `@param`/`@return`).
+
+### Breaking Changes
+
+- **`markdown_streaming_safe_finish` FFI contract**: the handle is now
+  consumed only after validation succeeds. On `ERROR_INVALID_INPUT`, the
+  handle is **not** consumed and the caller must call
+  `markdown_streaming_abort()` (or otherwise free it). The bundled NGINX C
+  module already handles this; third-party FFI consumers that assumed the
+  handle was always consumed must update their cleanup path.
+
+### Tests
+
+- Added 5 rollback unit tests for `stream_commit` covering Vary/ETag/Cache-Control
+  failure rollback, cross-header rollback (ETag failure rolls back prior Vary
+  mutation), and typed ETag pointer restoration.
+- Added trailing OWS exclusion and abort-contract assertions to streaming
+  tests.
+- Added `hard_excluded_params_case_test.c` for eligibility hard-exclusion
+  parameter coverage.
+- Added `stream_postcommit_test.c` assertions for the corrected handle
+  consumption contract.
+- `stream_commit.c` unit coverage: 97.2% lines / 100% functions.
+
 ## [0.8.0] - 2026-06-16
 
 True streaming contract, fallback state machine, streaming observability,
