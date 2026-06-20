@@ -144,23 +144,115 @@ static int test_is_authenticated;
 static int test_auth_cache_control_called;
 static int test_auth_cache_control_rc;
 
-/* Mock: ngx_http_markdown_add_vary_accept */
+/* Forward declarations for stubs defined later */
+ngx_table_elt_t *ngx_list_push(ngx_list_t *list);
+void *ngx_pnalloc(ngx_pool_t *pool, size_t size);
+#ifndef ngx_memcpy
+#define ngx_memcpy(dst, src, n)  memcpy((dst), (src), (n))
+#endif
+
+/* Mock: ngx_http_markdown_add_vary_accept
+ *
+ * Simulates real behavior: if no Vary header exists, pushes a new
+ * "Vary: Accept" entry; if Vary exists without "Accept", appends
+ * ", Accept" to the value.  This makes rollback tests meaningful.
+ */
 ngx_int_t
 ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
 {
-    UNUSED(r);
+    ngx_table_elt_t  *vary;
+    ngx_table_elt_t  *h;
+    u_char           *p;
+    size_t            len;
+    const char        suffix[] = ", Accept";
+
     test_vary_accept_called = 1;
-    return test_vary_accept_rc;
+    if (test_vary_accept_rc != NGX_OK) {
+        return test_vary_accept_rc;
+    }
+
+    /* Find existing Vary header */
+    vary = NULL;
+    {
+        ngx_table_elt_t *elts;
+        ngx_uint_t       i;
+        elts = (ngx_table_elt_t *) r->headers_out.headers.part.elts;
+        for (i = 0; i < r->headers_out.headers.part.nelts; i++) {
+            if (elts[i].hash != 0
+                && elts[i].key.len == 4
+                && ngx_strncasecmp(elts[i].key.data,
+                                   (const u_char *) "Vary", 4) == 0)
+            {
+                vary = &elts[i];
+                break;
+            }
+        }
+    }
+
+    if (vary == NULL) {
+        /* Push new Vary: Accept */
+        h = ngx_list_push(&r->headers_out.headers);
+        if (h == NULL) {
+            return NGX_ERROR;
+        }
+        h->hash = 1;
+        h->key.data = (u_char *) "Vary";
+        h->key.len = 4;
+        h->value.data = (u_char *) "Accept";
+        h->value.len = 6;
+        return NGX_OK;
+    }
+
+    /* Append ", Accept" to existing value */
+    len = vary->value.len + sizeof(suffix) - 1;
+    p = ngx_pnalloc(r->pool, len);
+    if (p == NULL) {
+        return NGX_ERROR;
+    }
+    ngx_memcpy(p, vary->value.data, vary->value.len);
+    ngx_memcpy(p + vary->value.len, suffix, sizeof(suffix) - 1);
+    vary->value.data = p;
+    vary->value.len = len;
+    return NGX_OK;
 }
 
-/* Mock: ngx_http_markdown_set_etag */
+/* Mock: ngx_http_markdown_set_etag
+ *
+ * Simulates real behavior: when etag is NULL/0, invalidates all
+ * existing ETag entries (hash=0) and clears the typed pointer.
+ * This makes rollback tests meaningful.
+ */
 ngx_int_t
 ngx_http_markdown_set_etag(ngx_http_request_t *r,
                            const u_char *etag_value, size_t etag_len)
 {
-    UNUSED(r); UNUSED(etag_value); UNUSED(etag_len);
+    ngx_table_elt_t  *elts;
+    ngx_uint_t        i;
+
     test_set_etag_called = 1;
-    return test_set_etag_rc;
+    if (test_set_etag_rc != NGX_OK) {
+        return test_set_etag_rc;
+    }
+
+    if (etag_value != NULL && etag_len > 0) {
+        /* Not used by stream_commit_remove_etag, but keep for completeness */
+        return NGX_OK;
+    }
+
+    /* Invalidate all existing ETag entries (hash=0) */
+    elts = (ngx_table_elt_t *) r->headers_out.headers.part.elts;
+    for (i = 0; i < r->headers_out.headers.part.nelts; i++) {
+        if (elts[i].hash != 0
+            && elts[i].key.len == 4
+            && ngx_strncasecmp(elts[i].key.data,
+                               (const u_char *) "ETag", 4) == 0)
+        {
+            elts[i].hash = 0;
+        }
+    }
+
+    r->headers_out.etag = NULL;
+    return NGX_OK;
 }
 
 /* Mock: ngx_http_markdown_remove_content_encoding */
@@ -182,13 +274,66 @@ ngx_http_markdown_is_authenticated(const ngx_http_request_t *r,
     return test_is_authenticated;
 }
 
-/* Mock: ngx_http_markdown_modify_cache_control_for_auth */
+/* Mock: ngx_http_markdown_modify_cache_control_for_auth
+ *
+ * Simulates real behavior: modifies the existing Cache-Control
+ * header value (e.g. appends ", private").  This makes rollback
+ * tests meaningful.
+ */
 ngx_int_t
 ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
 {
-    UNUSED(r);
+    ngx_table_elt_t  *cc;
+    ngx_table_elt_t  *elts;
+    u_char           *p;
+    size_t            len;
+    ngx_uint_t        i;
+    const char        suffix[] = ", private";
+
     test_auth_cache_control_called = 1;
-    return test_auth_cache_control_rc;
+    if (test_auth_cache_control_rc != NGX_OK) {
+        return test_auth_cache_control_rc;
+    }
+
+    /* Find existing Cache-Control header */
+    cc = NULL;
+    elts = (ngx_table_elt_t *) r->headers_out.headers.part.elts;
+    for (i = 0; i < r->headers_out.headers.part.nelts; i++) {
+        if (elts[i].hash != 0
+            && elts[i].key.len == 13
+            && ngx_strncasecmp(elts[i].key.data,
+                               (const u_char *) "Cache-Control", 13) == 0)
+        {
+            cc = &elts[i];
+            break;
+        }
+    }
+
+    if (cc == NULL) {
+        /* If no CC header, push a new one */
+        cc = ngx_list_push(&r->headers_out.headers);
+        if (cc == NULL) {
+            return NGX_ERROR;
+        }
+        cc->hash = 1;
+        cc->key.data = (u_char *) "Cache-Control";
+        cc->key.len = 13;
+        cc->value.data = (u_char *) "private";
+        cc->value.len = 7;
+        return NGX_OK;
+    }
+
+    /* Append ", private" to existing value */
+    len = cc->value.len + sizeof(suffix) - 1;
+    p = ngx_pnalloc(r->pool, len);
+    if (p == NULL) {
+        return NGX_ERROR;
+    }
+    ngx_memcpy(p, cc->value.data, cc->value.len);
+    ngx_memcpy(p + cc->value.len, suffix, sizeof(suffix) - 1);
+    cc->value.data = p;
+    cc->value.len = len;
+    return NGX_OK;
 }
 
 /* Stub: ngx_log_error_core */
