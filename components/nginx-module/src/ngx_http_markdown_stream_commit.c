@@ -5,16 +5,23 @@
  * This is the single authoritative path for all streaming header
  * mutations.  No other code path may mutate streaming response headers.
  *
- * Two-phase design (Rule 39):
+ * Two-phase design with transactional rollback (Rule 39):
  *   Phase 1 (fallible): Vary: Accept, ETag removal, auth Cache-Control.
- *     If any step fails, NGX_ERROR is returned before headers are sent
- *     downstream.  Earlier Phase 1 mutations may be present in
- *     headers_out but are invisible because the pre-commit failure
- *     path aborts to full-buffer processing without committing
- *     Markdown headers.
+ *     Before Phase 1 begins, the original state of every header that
+ *     Phase 1 may touch is snapshotted.  If any Phase 1 step fails,
+ *     the snapshot is used to roll back all prior Phase 1 mutations
+ *     so headers_out is restored to its pre-commit state.  This
+ *     guarantees that the caller's fallback / fail-open path sees
+ *     the original upstream headers, not a partially-mutated set.
  *   Phase 2 (infallible): Content-Type, Content-Length, Content-Encoding.
  *     These are pointer/integer writes that cannot fail.
  *   Only after both phases complete are headers_committed and state set.
+ *
+ * Rollback scope (Rule 39 transactional guarantee):
+ *   The snapshot/rollback covers Vary, ETag, and Cache-Control.
+ *   Modified entries have value/hash restored; newly-pushed entries
+ *   are invalidated via hash=0 (Rule 40); typed ETag pointer restored.
+ *   No use-after-free/double-free/dangling pointer under pool model.
  *
  * Header commit safety invariant:
  *   Header decisions MUST be completed before outgoing headers are

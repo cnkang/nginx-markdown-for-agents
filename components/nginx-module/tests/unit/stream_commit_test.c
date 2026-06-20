@@ -77,6 +77,21 @@ typedef struct {
     ngx_log_t *log;
 } ngx_connection_impl_t;
 
+typedef struct ngx_list_part_s ngx_list_part_t;
+
+struct ngx_list_part_s {
+    void            *elts;
+    ngx_uint_t       nelts;
+    ngx_list_part_t *next;
+};
+
+typedef struct {
+    ngx_list_part_t  part;
+    size_t           size;
+    ngx_uint_t       nalloc;
+    void            *pool;
+} ngx_list_t;
+
 typedef struct ngx_table_elt_s {
     ngx_uint_t    hash;
     ngx_str_t     key;
@@ -91,6 +106,8 @@ typedef struct {
     ngx_uint_t         status;
     off_t              content_length_n;
     ngx_table_elt_t   *content_length;
+    ngx_table_elt_t   *etag;
+    ngx_list_t         headers;
 } ngx_http_headers_out_t;
 
 struct ngx_http_request_s {
@@ -182,9 +199,34 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
     UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);
 }
 
+/* Stub: ngx_list_push */
+ngx_table_elt_t *
+ngx_list_push(ngx_list_t *list)
+{
+    ngx_table_elt_t *elts;
+    if (list->part.elts == NULL) {
+        return NULL;
+    }
+    if (list->part.nelts >= list->nalloc) {
+        return NULL;
+    }
+    elts = (ngx_table_elt_t *) list->part.elts;
+    return &elts[list->part.nelts++];
+}
+
+/* Stub: ngx_pnalloc */
+void *
+ngx_pnalloc(ngx_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    return malloc(size);
+}
+
 /* Include the commit source after mocks */
 #include "../../src/ngx_http_markdown_stream_commit.c"
 
+
+static ngx_table_elt_t test_headers_storage[32];
 
 static void test_setup(void)
 {
@@ -193,6 +235,7 @@ static void test_setup(void)
     memset(&test_connection, 0, sizeof(test_connection));
     memset(&test_request, 0, sizeof(test_request));
     memset(&test_content_length_elt, 0, sizeof(test_content_length_elt));
+    memset(test_headers_storage, 0, sizeof(test_headers_storage));
 
     test_pool.log = &test_log;
     test_connection.log = &test_log;
@@ -202,6 +245,15 @@ static void test_setup(void)
     test_request.headers_out.content_length_n = 12345;
     test_content_length_elt.hash = 1;
     test_request.headers_out.content_length = &test_content_length_elt;
+
+    /* Initialize headers list with capacity 32 */
+    test_request.headers_out.headers.part.elts = test_headers_storage;
+    test_request.headers_out.headers.part.nelts = 0;
+    test_request.headers_out.headers.part.next = NULL;
+    test_request.headers_out.headers.size = sizeof(ngx_table_elt_t);
+    test_request.headers_out.headers.nalloc = 32;
+    test_request.headers_out.headers.pool = NULL;
+    test_request.headers_out.etag = NULL;
 
     test_vary_accept_called = 0;
     test_vary_accept_rc = NGX_OK;
@@ -617,6 +669,233 @@ static void test_commit_auth_cache_control_success(void)
 }
 
 
+/* Helper: push a header into the test request headers list */
+static ngx_table_elt_t *
+test_push_header(const char *key, const char *value)
+{
+    ngx_table_elt_t *h = ngx_list_push(&test_request.headers_out.headers);
+    TEST_ASSERT(h != NULL, "header list push failed");
+    h->hash = 1;
+    h->key.data = (u_char *) key;
+    h->key.len = strlen(key);
+    h->value.data = (u_char *) value;
+    h->value.len = strlen(value);
+    return h;
+}
+
+/* Helper: find a header in the test request headers list */
+static ngx_table_elt_t *
+test_find_header(const char *key)
+{
+    ngx_table_elt_t *elts = (ngx_table_elt_t *) test_request.headers_out.headers.part.elts;
+    size_t key_len = strlen(key);
+    for (ngx_uint_t i = 0; i < test_request.headers_out.headers.part.nelts; i++) {
+        if (elts[i].hash != 0 &&
+            elts[i].key.len == key_len &&
+            ngx_strncasecmp(elts[i].key.data, (const u_char *) key, key_len) == 0) {
+            return &elts[i];
+        }
+    }
+    return NULL;
+}
+
+/* --- Rollback: Vary failure restores pre-existing Vary header --- */
+
+static void test_rollback_vary_failure_restores_vary(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *orig_vary;
+    ngx_table_elt_t *found_vary;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+
+    /* Pre-existing Vary: Cookie header */
+    orig_vary = test_push_header("Vary", "Cookie");
+    TEST_ASSERT(orig_vary != NULL, "pre-existing Vary pushed");
+
+    /* Make vary accept fail */
+    test_vary_accept_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
+
+    TEST_ASSERT(rc == NGX_ERROR, "commit fails on vary error");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 0,
+                "headers_committed stays 0");
+
+    /* The original Vary header must still be present and unmodified */
+    found_vary = test_find_header("Vary");
+    TEST_ASSERT(found_vary != NULL, "Vary header still present after rollback");
+    TEST_ASSERT(found_vary == orig_vary,
+                "Vary header pointer unchanged after rollback");
+    TEST_ASSERT(found_vary->hash == 1,
+                "Vary header hash restored to 1");
+    TEST_ASSERT(found_vary->value.len == 6,
+                "Vary header value length restored");
+    TEST_ASSERT(memcmp(found_vary->value.data, "Cookie", 6) == 0,
+                "Vary header value restored to Cookie");
+
+    TEST_PASS("Rollback: Vary failure restores pre-existing Vary header");
+}
+
+/* --- Rollback: ETag failure restores pre-existing ETag header --- */
+
+static void test_rollback_etag_failure_restores_etag(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *orig_etag;
+    ngx_table_elt_t *found_etag;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+
+    /* Pre-existing ETag header */
+    orig_etag = test_push_header("ETag", "\"abc123\"");
+    test_request.headers_out.etag = orig_etag;
+
+    /* Make etag removal fail */
+    test_set_etag_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
+
+    TEST_ASSERT(rc == NGX_ERROR, "commit fails on etag error");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 0,
+                "headers_committed stays 0");
+
+    /* The original ETag header must still be present and unmodified */
+    found_etag = test_find_header("ETag");
+    TEST_ASSERT(found_etag != NULL, "ETag header still present after rollback");
+    TEST_ASSERT(found_etag == orig_etag,
+                "ETag header pointer unchanged after rollback");
+    TEST_ASSERT(found_etag->hash == 1,
+                "ETag header hash restored to 1");
+    TEST_ASSERT(test_request.headers_out.etag == orig_etag,
+                "typed ETag pointer restored");
+
+    TEST_PASS("Rollback: ETag failure restores pre-existing ETag header");
+}
+
+/* --- Rollback: Cache-Control failure restores pre-existing CC header --- */
+
+static void test_rollback_cc_failure_restores_cc(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_table_elt_t *orig_cc;
+    ngx_table_elt_t *found_cc;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+
+    /* Pre-existing Cache-Control: public header */
+    orig_cc = test_push_header("Cache-Control", "public");
+
+    test_is_authenticated = 1;
+    test_auth_cache_control_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_commit_headers(
+        &test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_ERROR, "commit fails on auth CC error");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 0,
+                "headers_committed stays 0");
+
+    /* The original Cache-Control header must still be present and unmodified */
+    found_cc = test_find_header("Cache-Control");
+    TEST_ASSERT(found_cc != NULL, "CC header still present after rollback");
+    TEST_ASSERT(found_cc == orig_cc,
+                "CC header pointer unchanged after rollback");
+    TEST_ASSERT(found_cc->hash == 1,
+                "CC header hash restored to 1");
+    TEST_ASSERT(found_cc->value.len == 6,
+                "CC header value length restored");
+    TEST_ASSERT(memcmp(found_cc->value.data, "public", 6) == 0,
+                "CC header value restored to public");
+
+    TEST_PASS("Rollback: CC failure restores pre-existing Cache-Control header");
+}
+
+/* --- Rollback: ETag failure also rolls back Vary mutation --- */
+
+static void test_rollback_etag_failure_rolls_back_vary(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *orig_vary;
+    ngx_table_elt_t *found_vary;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+
+    /* Pre-existing Vary: Cookie header */
+    orig_vary = test_push_header("Vary", "Cookie");
+
+    /* Vary succeeds, but ETag fails */
+    test_vary_accept_rc = NGX_OK;
+    test_set_etag_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
+
+    TEST_ASSERT(rc == NGX_ERROR, "commit fails on etag error");
+    TEST_ASSERT(test_vary_accept_called == 1, "Vary was called");
+    TEST_ASSERT(test_set_etag_called == 1, "ETag was called");
+
+    /* The original Vary header must be restored despite Vary mutation succeeding */
+    found_vary = test_find_header("Vary");
+    TEST_ASSERT(found_vary != NULL, "Vary header still present after rollback");
+    TEST_ASSERT(found_vary == orig_vary,
+                "Vary header pointer unchanged after rollback");
+    TEST_ASSERT(found_vary->hash == 1,
+                "Vary header hash restored to 1");
+    TEST_ASSERT(found_vary->value.len == 6,
+                "Vary header value length restored");
+    TEST_ASSERT(memcmp(found_vary->value.data, "Cookie", 6) == 0,
+                "Vary header value restored to Cookie");
+
+    TEST_PASS("Rollback: ETag failure rolls back prior Vary mutation");
+}
+
+/* --- Rollback: typed ETag pointer restored after Vary failure --- */
+
+static void test_rollback_restores_typed_etag_pointer(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *orig_etag;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+
+    /* Pre-existing typed ETag pointer */
+    orig_etag = test_push_header("ETag", "\"v1\"");
+    test_request.headers_out.etag = orig_etag;
+
+    /* Make vary fail (Phase 1 step 1) */
+    test_vary_accept_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
+
+    TEST_ASSERT(rc == NGX_ERROR, "commit fails on vary error");
+    TEST_ASSERT(test_request.headers_out.etag == orig_etag,
+                "typed ETag pointer restored after rollback");
+
+    TEST_PASS("Rollback: typed ETag pointer restored after Vary failure");
+}
+
 int main(void)
 {
     TEST_SECTION("Stream Header Commit (streaming fallback state machine, header commit)");
@@ -636,6 +915,11 @@ int main(void)
     test_commit_vary_failure_no_content_type_leak();
     test_commit_auth_cache_control_failure_aborts();
     test_commit_auth_cache_control_success();
+    test_rollback_vary_failure_restores_vary();
+    test_rollback_etag_failure_restores_etag();
+    test_rollback_cc_failure_restores_cc();
+    test_rollback_etag_failure_rolls_back_vary();
+    test_rollback_restores_typed_etag_pointer();
 
     printf("\n  All stream commit tests passed\n\n");
     return 0;
