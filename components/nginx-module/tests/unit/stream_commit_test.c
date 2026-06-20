@@ -1041,6 +1041,94 @@ static void test_rollback_restores_typed_etag_pointer(void)
     TEST_PASS("Rollback: typed ETag pointer restored after Vary failure");
 }
 
+/* --- Snapshot overflow fails before any Phase 1 mutation --- */
+
+static void
+test_snapshot_overflow_for_header(const char *name, const char *value)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_table_elt_t *headers[NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX + 1];
+    ngx_table_elt_t *original_etag;
+    ngx_str_t values[NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX + 1];
+    ngx_str_t original_content_type;
+    ngx_uint_t hashes[NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX + 1];
+    ngx_uint_t original_nelts;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    test_request.headers_out.content_type.data = (u_char *) "text/html";
+    test_request.headers_out.content_type.len = sizeof("text/html") - 1;
+    original_content_type = test_request.headers_out.content_type;
+
+    for (ngx_uint_t i = 0;
+         i < NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX + 1;
+         i++)
+    {
+        headers[i] = test_push_header(name, value);
+        values[i] = headers[i]->value;
+        hashes[i] = headers[i]->hash;
+    }
+
+    if (strcmp(name, "ETag") == 0) {
+        test_request.headers_out.etag = headers[0];
+    }
+    original_etag = test_request.headers_out.etag;
+    original_nelts = test_request.headers_out.headers.part.nelts;
+
+    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+                "snapshot overflow returns NGX_ERROR");
+    TEST_ASSERT(test_vary_accept_called == 0,
+                "Vary mutation not called after snapshot overflow");
+    TEST_ASSERT(test_set_etag_called == 0,
+                "ETag mutation not called after snapshot overflow");
+    TEST_ASSERT(test_auth_cache_control_called == 0,
+                "Cache-Control mutation not called after snapshot overflow");
+    TEST_ASSERT(ctx.stream_sm.headers_committed == 0,
+                "headers_committed remains clear after snapshot overflow");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PRE_COMMIT,
+                "state remains PRE_COMMIT after snapshot overflow");
+    TEST_ASSERT(test_request.headers_out.content_type.data
+                == original_content_type.data,
+                "Content-Type pointer remains unchanged");
+    TEST_ASSERT(test_request.headers_out.content_type.len
+                == original_content_type.len,
+                "Content-Type length remains unchanged");
+    TEST_ASSERT(test_request.headers_out.content_length_n == 12345,
+                "Content-Length remains unchanged after snapshot overflow");
+    TEST_ASSERT(test_request.headers_out.content_length
+                == &test_content_length_elt,
+                "Content-Length pointer remains unchanged");
+    TEST_ASSERT(test_request.headers_out.headers.part.nelts == original_nelts,
+                "snapshot overflow does not push a new header");
+    TEST_ASSERT(test_request.headers_out.etag == original_etag,
+                "typed ETag pointer remains unchanged");
+
+    for (ngx_uint_t i = 0;
+         i < NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX + 1;
+         i++)
+    {
+        TEST_ASSERT(headers[i]->hash == hashes[i],
+                    "original header hash remains unchanged");
+        TEST_ASSERT(headers[i]->value.data == values[i].data,
+                    "original header value pointer remains unchanged");
+        TEST_ASSERT(headers[i]->value.len == values[i].len,
+                    "original header value length remains unchanged");
+    }
+}
+
+static void test_snapshot_overflow_fails_before_mutation(void)
+{
+    test_snapshot_overflow_for_header("Vary", "Cookie");
+    test_snapshot_overflow_for_header("ETag", "\"original\"");
+    test_snapshot_overflow_for_header("Cache-Control", "public");
+
+    TEST_PASS("All snapshot overflows fail before Phase 1 mutation");
+}
+
 int main(void)
 {
     TEST_SECTION("Stream Header Commit (streaming fallback state machine, header commit)");
@@ -1065,6 +1153,7 @@ int main(void)
     test_rollback_cc_failure_restores_cc();
     test_rollback_etag_failure_rolls_back_vary();
     test_rollback_restores_typed_etag_pointer();
+    test_snapshot_overflow_fails_before_mutation();
 
     printf("\n  All stream commit tests passed\n\n");
     return 0;
