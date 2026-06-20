@@ -1109,24 +1109,6 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
  * @return    NGX_OK on success, NGX_ERROR on error
  */
 static ngx_int_t
-ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx)
-{
-    ngx_int_t  rc;
-
-    rc = ngx_http_next_body_filter(r, ctx->fullbuffer.pending_output);
-    if (rc == NGX_AGAIN) {
-        return NGX_AGAIN;
-    }
-
-    ctx->fullbuffer.pending_output = NULL;
-    ctx->fullbuffer.pending_has_data = 0;
-    r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-
-    return rc;
-}
-
-static ngx_int_t
 ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
     ngx_http_markdown_ctx_t   *ctx;

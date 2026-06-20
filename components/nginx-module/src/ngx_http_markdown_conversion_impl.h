@@ -1909,4 +1909,43 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
     return rc;
 }
 
+/*
+ * Resume a full-buffer response after downstream backpressure.
+ *
+ * The NGINX copy filter retains the unsent portion after returning NGX_AGAIN.
+ * Passing the original chain again would append a duplicate copy of that
+ * tail.  A NULL input asks the downstream filter chain to drain its existing
+ * buffered state.  The request-owned chain pointer remains only as a lifetime
+ * anchor and pending-state marker until the downstream chain finishes.
+ *
+ * Parameters:
+ *   r   - current request
+ *   ctx - request context with a pending full-buffer response
+ *
+ * Returns:
+ *   NGX_AGAIN while downstream remains blocked; otherwise the downstream
+ *   return code after clearing the module's pending state.
+ */
+static ngx_int_t
+ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_next_body_filter(r, NULL);
+    if (rc == NGX_AGAIN) {
+        return NGX_AGAIN;
+    }
+
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
+    }
+
+    ctx->fullbuffer.pending_output = NULL;
+    ctx->fullbuffer.pending_has_data = 0;
+    r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+
+    return rc;
+}
+
 #endif /* NGX_HTTP_MARKDOWN_CONVERSION_IMPL_H */
