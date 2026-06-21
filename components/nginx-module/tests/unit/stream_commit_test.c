@@ -344,19 +344,31 @@ ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
     UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);
 }
 
-/* Stub: ngx_list_push */
+/* Stub: ngx_list_push
+ *
+ * Supports cross-part push: when part1 is full and part2 is linked
+ * (part->next != NULL), pushes into the next part.  This makes
+ * multipart rollback tests realistic.
+ */
 ngx_table_elt_t *
 ngx_list_push(ngx_list_t *list)
 {
+    ngx_list_part_t *part;
     ngx_table_elt_t *elts;
-    if (list->part.elts == NULL) {
+
+    part = &list->part;
+    while (part != NULL) {
+        if (part->nelts < list->nalloc) {
+            elts = (ngx_table_elt_t *) part->elts;
+            return &elts[part->nelts++];
+        }
+        if (part->next != NULL) {
+            part = part->next;
+            continue;
+        }
         return NULL;
     }
-    if (list->part.nelts >= list->nalloc) {
-        return NULL;
-    }
-    elts = (ngx_table_elt_t *) list->part.elts;
-    return &elts[list->part.nelts++];
+    return NULL;
 }
 
 /* Stub: ngx_pnalloc */
@@ -1373,17 +1385,30 @@ static void test_multipart_rollback_new_push_invalidated_across_parts(void)
 {
     ngx_http_markdown_ctx_t ctx;
     ngx_table_elt_t *orig_vary;
-    ngx_table_elt_t *new_vary_via_push;
+    ngx_table_elt_t *new_vary_in_p2;
     ngx_str_t orig_vary_value;
     ngx_int_t rc;
+    ngx_uint_t i;
 
-    test_setup();
+    test_setup_multipart();
     memset(&ctx, 0, sizeof(ctx));
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
     ctx.stream_sm.headers_committed = 0;
 
-    orig_vary = test_push_header("Vary", "Cookie");
+    mp_push_part1("X-App", "v1");
+    mp_push_part1("X-Req-Id", "42");
+    mp_push_part1("X-Color", "blue");
+    mp_push_part1("X-Env", "prod");
+    mp_push_part1("X-Region", "us");
+    mp_push_part1("X-Shard", "3");
+    mp_push_part1("X-Pool", "main");
+    orig_vary = mp_push_part1("Vary", "Cookie");
     orig_vary_value = orig_vary->value;
+
+    mp_link_part2();
+
+    mp_push_part2("ETag", "\"orig\"");
+    mp_push_part2("X-Trace", "abc");
 
     test_vary_accept_rc = NGX_OK;
     test_set_etag_rc = NGX_ERROR;
@@ -1392,30 +1417,30 @@ static void test_multipart_rollback_new_push_invalidated_across_parts(void)
 
     TEST_ASSERT(rc == NGX_ERROR, "commit returns NGX_ERROR on ETag failure");
 
-    TEST_ASSERT(orig_vary->hash == 1, "original Vary hash restored");
+    TEST_ASSERT(orig_vary->hash == 1, "original Vary hash restored in part1");
     TEST_ASSERT(orig_vary->value.data == orig_vary_value.data,
-                "original Vary value restored");
+                "original Vary value restored in part1");
+    TEST_ASSERT(orig_vary->value.len == orig_vary_value.len,
+                "original Vary value len restored in part1");
 
-    new_vary_via_push = NULL;
-    {
-        ngx_table_elt_t *elts = (ngx_table_elt_t *)
-            test_request.headers_out.headers.part.elts;
-        ngx_uint_t n = test_request.headers_out.headers.part.nelts;
-        for (ngx_uint_t i = 0; i < n; i++) {
-            if (elts[i].key.len == 4 &&
-                ngx_strncasecmp(elts[i].key.data, (const u_char *) "Vary", 4) == 0 &&
-                elts[i].hash == 0) {
-                new_vary_via_push = &elts[i];
-                break;
-            }
+    new_vary_in_p2 = NULL;
+    for (i = 0; i < mp_part2.nelts; i++) {
+        ngx_table_elt_t *h = &mp_part2_storage[i];
+        if (h->key.len == 4
+            && ngx_strncasecmp(h->key.data, (const u_char *) "Vary", 4) == 0
+            && h->hash == 0)
+        {
+            new_vary_in_p2 = h;
+            break;
         }
     }
 
-    if (new_vary_via_push != NULL) {
-        TEST_PASS("Multipart rollback: new Vary push entry has hash=0 (invalidated)");
-    } else {
-        TEST_PASS("Multipart rollback: no extra Vary push entry (ngx_list_push not called)");
-    }
+    TEST_ASSERT(new_vary_in_p2 != NULL,
+                "new Vary push entry exists in part2 after rollback");
+    TEST_ASSERT(new_vary_in_p2->hash == 0,
+                "new Vary push entry has hash=0 (invalidated by rollback)");
+
+    TEST_PASS("Multipart rollback: new Vary push in part2 invalidated across parts");
 }
 
 static void test_multipart_rollback_cc_failure_target_in_p1_etag_in_p2(void)
@@ -1479,7 +1504,7 @@ static void test_multipart_orig_nelts_cross_part_count(void)
     mp_push_part2("X-Trace", "def");
 
     rc = ngx_http_markdown_stream_commit_snapshot_header(
-        &test_request, &snap.vary, "Vary");
+        &test_request, (const u_char *) "Vary", 4, &snap.vary);
 
     TEST_ASSERT(rc == NGX_OK, "snapshot Vary succeeds");
     TEST_ASSERT(snap.vary.count == 1, "one Vary entry snapshotted");
@@ -1487,7 +1512,7 @@ static void test_multipart_orig_nelts_cross_part_count(void)
                 "orig_nelts counts all entries across both parts");
 
     rc = ngx_http_markdown_stream_commit_snapshot_header(
-        &test_request, &snap.etag, "ETag");
+        &test_request, (const u_char *) "ETag", 4, &snap.etag);
 
     TEST_ASSERT(rc == NGX_OK, "snapshot ETag succeeds");
     TEST_ASSERT(snap.etag.count == 1, "one ETag entry snapshotted");
