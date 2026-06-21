@@ -151,6 +151,62 @@ void *ngx_pnalloc(ngx_pool_t *pool, size_t size);
 #define ngx_memcpy(dst, src, n)  memcpy((dst), (src), (n))
 #endif
 
+/* Helper: find a header by name across all ngx_list_part_t parts.
+ * Returns the first matching entry with hash != 0, or NULL.
+ */
+static ngx_table_elt_t *
+test_find_header_in_list(ngx_list_t *list, const char *name, size_t name_len)
+{
+    ngx_list_part_t *part;
+    ngx_table_elt_t *elts;
+    ngx_uint_t       i;
+
+    part = &list->part;
+    while (part != NULL) {
+        elts = (ngx_table_elt_t *) part->elts;
+        for (i = 0; i < part->nelts; i++) {
+            if (elts[i].hash != 0
+                && elts[i].key.len == name_len
+                && ngx_strncasecmp(elts[i].key.data,
+                                   (const u_char *) name, name_len) == 0)
+            {
+                return &elts[i];
+            }
+        }
+        part = part->next;
+    }
+    return NULL;
+}
+
+/* Helper: iterate all entries matching a header name across all parts.
+ * Calls callback for each matching entry with hash != 0.
+ */
+typedef void (*test_header_iter_cb)(ngx_table_elt_t *h, void *ctx);
+
+static void
+test_iter_header_in_list(ngx_list_t *list, const char *name, size_t name_len,
+                         test_header_iter_cb cb, void *cb_ctx)
+{
+    ngx_list_part_t *part;
+    ngx_table_elt_t *elts;
+    ngx_uint_t       i;
+
+    part = &list->part;
+    while (part != NULL) {
+        elts = (ngx_table_elt_t *) part->elts;
+        for (i = 0; i < part->nelts; i++) {
+            if (elts[i].hash != 0
+                && elts[i].key.len == name_len
+                && ngx_strncasecmp(elts[i].key.data,
+                                   (const u_char *) name, name_len) == 0)
+            {
+                cb(&elts[i], cb_ctx);
+            }
+        }
+        part = part->next;
+    }
+}
+
 /* Mock: ngx_http_markdown_add_vary_accept
  *
  * Simulates real behavior: if no Vary header exists, pushes a new
@@ -171,26 +227,9 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
         return test_vary_accept_rc;
     }
 
-    /* Find existing Vary header */
-    vary = NULL;
-    {
-        ngx_table_elt_t *elts;
-        ngx_uint_t       i;
-        elts = (ngx_table_elt_t *) r->headers_out.headers.part.elts;
-        for (i = 0; i < r->headers_out.headers.part.nelts; i++) {
-            if (elts[i].hash != 0
-                && elts[i].key.len == 4
-                && ngx_strncasecmp(elts[i].key.data,
-                                   (const u_char *) "Vary", 4) == 0)
-            {
-                vary = &elts[i];
-                break;
-            }
-        }
-    }
+    vary = test_find_header_in_list(&r->headers_out.headers, "Vary", 4);
 
     if (vary == NULL) {
-        /* Push new Vary: Accept */
         h = ngx_list_push(&r->headers_out.headers);
         if (h == NULL) {
             return NGX_ERROR;
@@ -203,7 +242,6 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
         return NGX_OK;
     }
 
-    /* Append ", Accept" to existing value */
     len = vary->value.len + sizeof(suffix) - 1;
     p = ngx_pnalloc(r->pool, len);
     if (p == NULL) {
@@ -222,34 +260,33 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
  * existing ETag entries (hash=0) and clears the typed pointer.
  * This makes rollback tests meaningful.
  */
+typedef struct {
+    ngx_uint_t count;
+} test_etag_invalidate_ctx;
+
+static void
+test_etag_invalidate_cb(ngx_table_elt_t *h, void *ctx)
+{
+    UNUSED(ctx);
+    h->hash = 0;
+}
+
 ngx_int_t
 ngx_http_markdown_set_etag(ngx_http_request_t *r,
                            const u_char *etag_value, size_t etag_len)
 {
-    ngx_table_elt_t  *elts;
-    ngx_uint_t        i;
-
     test_set_etag_called = 1;
     if (test_set_etag_rc != NGX_OK) {
         return test_set_etag_rc;
     }
 
     if (etag_value != NULL && etag_len > 0) {
-        /* Not used by stream_commit_remove_etag, but keep for completeness */
         return NGX_OK;
     }
 
-    /* Invalidate all existing ETag entries (hash=0) */
-    elts = (ngx_table_elt_t *) r->headers_out.headers.part.elts;
-    for (i = 0; i < r->headers_out.headers.part.nelts; i++) {
-        if (elts[i].hash != 0
-            && elts[i].key.len == 4
-            && ngx_strncasecmp(elts[i].key.data,
-                               (const u_char *) "ETag", 4) == 0)
-        {
-            elts[i].hash = 0;
-        }
-    }
+    test_iter_header_in_list(&r->headers_out.headers,
+                             "ETag", 4,
+                             test_etag_invalidate_cb, NULL);
 
     r->headers_out.etag = NULL;
     return NGX_OK;
@@ -284,10 +321,8 @@ ngx_int_t
 ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
 {
     ngx_table_elt_t  *cc;
-    ngx_table_elt_t  *elts;
     u_char           *p;
     size_t            len;
-    ngx_uint_t        i;
     const char        suffix[] = ", private";
 
     test_auth_cache_control_called = 1;
@@ -295,22 +330,10 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
         return test_auth_cache_control_rc;
     }
 
-    /* Find existing Cache-Control header */
-    cc = NULL;
-    elts = (ngx_table_elt_t *) r->headers_out.headers.part.elts;
-    for (i = 0; i < r->headers_out.headers.part.nelts; i++) {
-        if (elts[i].hash != 0
-            && elts[i].key.len == 13
-            && ngx_strncasecmp(elts[i].key.data,
-                               (const u_char *) "Cache-Control", 13) == 0)
-        {
-            cc = &elts[i];
-            break;
-        }
-    }
+    cc = test_find_header_in_list(&r->headers_out.headers,
+                                  "Cache-Control", 13);
 
     if (cc == NULL) {
-        /* If no CC header, push a new one */
         cc = ngx_list_push(&r->headers_out.headers);
         if (cc == NULL) {
             return NGX_ERROR;
@@ -323,7 +346,6 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
         return NGX_OK;
     }
 
-    /* Append ", private" to existing value */
     len = cc->value.len + sizeof(suffix) - 1;
     p = ngx_pnalloc(r->pool, len);
     if (p == NULL) {
@@ -1384,9 +1406,7 @@ static void test_multipart_rollback_etag_failure_restores_vary_in_p1_etag_in_p2(
 static void test_multipart_rollback_new_push_invalidated_across_parts(void)
 {
     ngx_http_markdown_ctx_t ctx;
-    ngx_table_elt_t *orig_vary;
     ngx_table_elt_t *new_vary_in_p2;
-    ngx_str_t orig_vary_value;
     ngx_int_t rc;
     ngx_uint_t i;
 
@@ -1402,8 +1422,7 @@ static void test_multipart_rollback_new_push_invalidated_across_parts(void)
     mp_push_part1("X-Region", "us");
     mp_push_part1("X-Shard", "3");
     mp_push_part1("X-Pool", "main");
-    orig_vary = mp_push_part1("Vary", "Cookie");
-    orig_vary_value = orig_vary->value;
+    mp_push_part1("X-Flavor", "dev");
 
     mp_link_part2();
 
@@ -1416,12 +1435,6 @@ static void test_multipart_rollback_new_push_invalidated_across_parts(void)
     rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
 
     TEST_ASSERT(rc == NGX_ERROR, "commit returns NGX_ERROR on ETag failure");
-
-    TEST_ASSERT(orig_vary->hash == 1, "original Vary hash restored in part1");
-    TEST_ASSERT(orig_vary->value.data == orig_vary_value.data,
-                "original Vary value restored in part1");
-    TEST_ASSERT(orig_vary->value.len == orig_vary_value.len,
-                "original Vary value len restored in part1");
 
     new_vary_in_p2 = NULL;
     for (i = 0; i < mp_part2.nelts; i++) {
@@ -1439,6 +1452,10 @@ static void test_multipart_rollback_new_push_invalidated_across_parts(void)
                 "new Vary push entry exists in part2 after rollback");
     TEST_ASSERT(new_vary_in_p2->hash == 0,
                 "new Vary push entry has hash=0 (invalidated by rollback)");
+    TEST_ASSERT(new_vary_in_p2->value.len == 6,
+                "new Vary push entry value is 'Accept'");
+    TEST_ASSERT(memcmp(new_vary_in_p2->value.data, "Accept", 6) == 0,
+                "new Vary push entry value data is 'Accept'");
 
     TEST_PASS("Multipart rollback: new Vary push in part2 invalidated across parts");
 }
