@@ -808,6 +808,32 @@ test_modify_cc_append_private(void)
     TEST_PASS("private appended to no-cache");
 }
 
+static void
+test_modify_cc_ignores_invalidated_no_store(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t    *active;
+    ngx_int_t           rc;
+
+    reset_pool();
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    add_header(&r->headers_out.headers, "Cache-Control", "no-store", 0);
+    active = add_header(&r->headers_out.headers,
+                        "Cache-Control", "public", 1);
+
+    rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+
+    TEST_ASSERT(rc == NGX_OK, "invalidated no-store is ignored");
+    TEST_ASSERT(active != NULL && active->hash == 1,
+                "active Cache-Control remains active");
+    TEST_ASSERT(ngx_http_markdown_cache_control_has_directive(
+                    &active->value, &ngx_http_markdown_private_directive),
+                "active public Cache-Control is rewritten private");
+    TEST_PASS("invalidated no-store cannot bypass private cache policy");
+}
+
 /* ── get_auth_patterns ───────────────────────────────────────── */
 
 static void
@@ -899,6 +925,7 @@ main(void)
     test_modify_cc_public_mixed();
     test_modify_cc_already_private();
     test_modify_cc_append_private();
+    test_modify_cc_ignores_invalidated_no_store();
 
     test_get_auth_patterns_null_conf();
     test_get_auth_patterns_empty_conf();

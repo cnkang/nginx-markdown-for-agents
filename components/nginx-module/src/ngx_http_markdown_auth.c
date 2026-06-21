@@ -560,7 +560,9 @@ ngx_http_markdown_cookie_matches_any_pattern(const ngx_str_t *cookie_name,
 static ngx_int_t
 ngx_http_markdown_has_authorization_header(const ngx_http_request_t *r)
 {
-    if (r == NULL || r->headers_in.authorization == NULL) {
+    if (r == NULL || r->headers_in.authorization == NULL
+        || r->headers_in.authorization->hash == 0)
+    {
         return 0;
     }
 
@@ -816,7 +818,9 @@ ngx_http_markdown_cache_control_has_directive(const ngx_str_t *value,
 static ngx_flag_t
 ngx_http_markdown_is_cache_control_header(const ngx_table_elt_t *header)
 {
-    if (header->key.len != sizeof(ngx_http_markdown_hdr_cache_control) - 1) {
+    if (header->hash == 0
+        || header->key.len != sizeof(ngx_http_markdown_hdr_cache_control) - 1)
+    {
         return 0;
     }
 
