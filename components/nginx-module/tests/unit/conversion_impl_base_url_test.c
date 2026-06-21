@@ -1859,6 +1859,7 @@ test_fullbuffer_resume_pending_lifecycle(void)
     TEST_ASSERT(rc == NGX_AGAIN,
                 "initial send should establish pending state");
 
+    r.buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
     rc = ngx_http_markdown_body_filter_resume_pending(&r, &ctx);
     TEST_ASSERT(rc == NGX_AGAIN,
                 "persistent downstream backpressure should remain pending");
@@ -1869,7 +1870,7 @@ test_fullbuffer_resume_pending_lifecycle(void)
     TEST_ASSERT(ctx.fullbuffer.pending_has_data == 1,
                 "persistent backpressure should retain the pending latch");
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
-                "persistent backpressure should retain the buffered flag");
+                "persistent backpressure should reassert the buffered flag");
 
     g_next_body_filter_rc = NGX_ERROR;
     g_metric_inc_sink = 0;
