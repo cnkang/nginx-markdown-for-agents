@@ -253,6 +253,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh
 	bash tools/harness/tests/test_detect_c_pure_logic.sh
 	bash tools/harness/tests/test_detect_volatile_atomic.sh
+	bash tools/harness/tests/test_security_gitleaks_scope.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
 license-check:
@@ -284,7 +285,7 @@ security-shellcheck:
 
 security-gitleaks:
 	@command -v gitleaks >/dev/null 2>&1 || { echo "ERROR: gitleaks not found. Install with: go install github.com/zricethezav/gitleaks/v8@83d9cd684c87d95d656c1458ef04895a7f1cbd8e # v8.30.1" >&2; exit 127; }
-	gitleaks detect --source . --no-git --redact --config .gitleaks.toml --verbose
+	bash tools/security/run_gitleaks_tracked.sh
 
 security-semgrep:
 	@command -v semgrep >/dev/null 2>&1 || { echo "ERROR: semgrep not found. Install with: python3 -m pip install --user semgrep==1.166.0" >&2; exit 127; }

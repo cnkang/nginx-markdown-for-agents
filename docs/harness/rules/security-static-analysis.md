@@ -33,6 +33,11 @@ Required:
 - `gitleaks` must fail on real secrets, private keys, signing material, API
   keys, tokens, and passwords. Allowlist only test fixtures or placeholders
   with narrow path or regex scope.
+- Local `gitleaks` execution must scan exactly Git-tracked worktree content so
+  tracked edits are covered while ignored local adapters, caches, and build
+  state cannot create findings for files absent from a clean checkout. Any
+  tracked-file materialization must preserve unusual filenames with NUL-safe
+  traversal.
 - Semgrep CE rules must stay high-confidence and repo-specific. Avoid broad
   noisy packs as PR-blocking checks until findings are triaged and documented.
 - `cargo-deny` must check Rust advisories, license policy, bans, and sources for
