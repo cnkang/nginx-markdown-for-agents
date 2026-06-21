@@ -195,6 +195,11 @@ ngx_http_markdown_invalidate_headers_in_part(const ngx_http_request_t *r,
         headers = part->elts;
         i = 0;
         while (i < part->nelts) {
+            if (headers[i].hash == 0) {
+                i++;
+                continue;
+            }
+
             if (headers[i].key.len != name_len
                 || ngx_http_markdown_strncasecmp_const(headers[i].key.data,
                                                        name,

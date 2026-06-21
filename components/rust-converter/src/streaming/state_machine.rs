@@ -8,6 +8,13 @@ use crate::error::ConversionError;
 use crate::streaming::budget::MemoryBudget;
 use crate::streaming::types::StreamEvent;
 
+pub(crate) fn is_safe_code_fence_language(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'.' | b'#' | b'-')
+        })
+}
+
 /// Document structure context tracked on the state stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StructuralContext {
@@ -215,8 +222,9 @@ impl StructuralStateMachine {
                 if self.current_context() == Some(&StructuralContext::CodeBlock(None)) {
                     let lang = attrs.iter().find(|(k, _)| k == "class").and_then(|(_, v)| {
                         v.split_whitespace()
-                            .find(|c| c.starts_with("language-"))
-                            .map(|c| c.trim_start_matches("language-").to_string())
+                            .filter_map(|class| class.strip_prefix("language-"))
+                            .find(|language| is_safe_code_fence_language(language))
+                            .map(ToOwned::to_owned)
                     });
                     if lang.is_some() {
                         // Update the parent CodeBlock context with the language
@@ -862,6 +870,53 @@ mod tests {
         .unwrap();
         assert!(sm.in_preformatted);
         // The CodeBlock context should now have the language
+        assert_eq!(
+            sm.current_context(),
+            Some(&StructuralContext::CodeBlock(Some("rust".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_code_block_rejects_fence_corrupting_language() {
+        for language in ["language-rust```", "language-rust\0malicious"] {
+            let mut sm = default_sm();
+            sm.process_event(&start_tag("pre")).unwrap();
+            sm.process_event(&start_tag_with_attrs("code", vec![("class", language)]))
+                .unwrap();
+
+            assert_eq!(
+                sm.current_context(),
+                Some(&StructuralContext::CodeBlock(None))
+            );
+        }
+    }
+
+    #[test]
+    fn test_code_block_accepts_safe_punctuation_in_language() {
+        let mut sm = default_sm();
+        sm.process_event(&start_tag("pre")).unwrap();
+        sm.process_event(&start_tag_with_attrs(
+            "code",
+            vec![("class", "language-c++")],
+        ))
+        .unwrap();
+
+        assert_eq!(
+            sm.current_context(),
+            Some(&StructuralContext::CodeBlock(Some("c++".to_string())))
+        );
+    }
+
+    #[test]
+    fn test_code_block_skips_unsafe_language_before_safe_language() {
+        let mut sm = default_sm();
+        sm.process_event(&start_tag("pre")).unwrap();
+        sm.process_event(&start_tag_with_attrs(
+            "code",
+            vec![("class", "language-bad``` language-rust")],
+        ))
+        .unwrap();
+
         assert_eq!(
             sm.current_context(),
             Some(&StructuralContext::CodeBlock(Some("rust".to_string())))

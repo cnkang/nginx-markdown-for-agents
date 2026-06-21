@@ -127,6 +127,10 @@ struct ngx_http_request_s {
 /* Include the module header for types */
 #include "../../src/ngx_http_markdown_filter_module.h"
 
+static ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r,
+    ngx_chain_t *in);
+#include "../../src/ngx_http_markdown_filter_chain_impl.h"
+
 /* Include the decision engine source directly */
 #include "../../src/ngx_http_markdown_stream_state.h"
 #include "../../src/ngx_http_markdown_stream_state.c"
@@ -145,16 +149,27 @@ static int test_output_filter_called;
 static int test_output_filter_rc;
 static ngx_chain_t *test_output_filter_chain;
 static ngx_buf_t *test_output_filter_buf;
+static int test_poison_top_filter_called;
 
-/* Mock: ngx_http_output_filter (needed by postcommit) */
-ngx_int_t
-ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
+/* Saved downstream body filter used by the production delegation helper. */
+static ngx_int_t
+test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
     UNUSED(r);
     test_output_filter_called++;
     test_output_filter_chain = in;
     test_output_filter_buf = (in != NULL) ? in->buf : NULL;
     return test_output_filter_rc;
+}
+
+/* Poison top filter: these paths must never re-enter the global chain. */
+ngx_int_t
+ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
+{
+    UNUSED(r);
+    UNUSED(in);
+    test_poison_top_filter_called++;
+    return NGX_ERROR;
 }
 
 /* Track ngx_calloc_buf behavior */
@@ -296,6 +311,8 @@ static void test_setup(void)
     test_output_filter_rc = NGX_OK;
     test_output_filter_chain = NULL;
     test_output_filter_buf = NULL;
+    test_poison_top_filter_called = 0;
+    ngx_http_next_body_filter = test_next_body_filter;
     test_calloc_buf_called = 0;
     test_calloc_buf_result = NULL;
     memset(&test_calloc_buf_storage, 0, sizeof(test_calloc_buf_storage));
@@ -671,7 +688,11 @@ static void test_safe_finish_happy_path(void)
                 == NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH,
                 "state = POST_COMMIT_SAFE_FINISH");
     TEST_ASSERT(test_output_filter_called == 1,
-                "send_terminal called output_filter");
+                "send_terminal called saved downstream filter");
+    TEST_ASSERT(test_output_filter_chain != NULL,
+                "delegation helper forwarded the terminal chain");
+    TEST_ASSERT(test_poison_top_filter_called == 0,
+                "send_terminal bypassed the poison top filter");
     TEST_ASSERT(test_streaming_abort_called == 0,
                 "streaming abort must not be called on success");
     TEST_PASS("safe_finish happy path");
@@ -771,6 +792,10 @@ static void test_safe_finish_backpressure_preserves_pending_chain(void)
 
     TEST_ASSERT(rc == NGX_AGAIN,
                 "closing-byte backpressure should return NGX_AGAIN");
+    TEST_ASSERT(test_output_filter_called == 1,
+                "NGX_AGAIN came from the saved downstream filter");
+    TEST_ASSERT(test_poison_top_filter_called == 0,
+                "backpressured send bypassed the poison top filter");
     TEST_ASSERT(ctx.streaming.pending_output == test_output_filter_chain,
                 "pending chain should be the pool-owned output chain");
     TEST_ASSERT(ctx.streaming.pending_has_data == 1,

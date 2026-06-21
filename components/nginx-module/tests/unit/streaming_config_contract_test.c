@@ -533,6 +533,34 @@ stream_engine_directive(void)
 }
 
 static void
+test_dynconf_directives_support_published_contexts(void)
+{
+    static const char *names[] = {
+        "markdown_dynamic_config",
+        "markdown_dynamic_config_path",
+        "markdown_dynconf_dry_run"
+    };
+    ngx_command_t     *cmd;
+    size_t             i;
+
+    TEST_SUBSECTION("dynconf directives support published contexts");
+
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        cmd = find_directive(names[i]);
+        TEST_ASSERT(cmd != NULL,
+            "dynconf directive should be registered");
+        TEST_ASSERT((cmd->type & NGX_HTTP_MAIN_CONF) != 0,
+            "dynconf directive should allow HTTP context");
+        TEST_ASSERT((cmd->type & NGX_HTTP_SRV_CONF) != 0,
+            "dynconf directive should allow server context");
+        TEST_ASSERT((cmd->type & NGX_HTTP_LOC_CONF) != 0,
+            "dynconf directive should allow location context");
+    }
+
+    TEST_PASS("dynconf directives preserve all published contexts");
+}
+
+static void
 set_arg(ngx_str_t *arg, const char *s)
 {
     arg->data = (u_char *) (uintptr_t) s;
@@ -1335,6 +1363,7 @@ main(void)
 
     test_valid_values();
     test_stream_engine_handler_valid();
+    test_dynconf_directives_support_published_contexts();
     test_invalid_values();
     test_stream_engine_handler_rejection();
     test_allocation_failure();

@@ -36,7 +36,8 @@ typedef struct ngx_table_elt_s ngx_table_elt_t;
 typedef struct ngx_http_headers_in_s ngx_http_headers_in_t;
 typedef struct ngx_http_headers_out_s ngx_http_headers_out_t;
 
-struct ngx_pool_s { int dummy; };
+struct ngx_log_s { int dummy; };
+struct ngx_pool_s { ngx_log_t *log; };
 
 struct ngx_table_elt_s {
     ngx_str_t key;
@@ -93,6 +94,37 @@ ngx_strlchr(u_char *p, u_char *last, u_char c)
 }
 
 #include "../../src/ngx_http_markdown_eligibility.c"
+
+typedef struct ngx_pool_cleanup_s {
+    void                         (*handler)(void *data);
+    void                          *data;
+    struct ngx_pool_cleanup_s     *next;
+} ngx_pool_cleanup_t;
+
+static ngx_pool_cleanup_t  test_cleanup;
+static ngx_uint_t          test_alloc_calls;
+
+ngx_pool_cleanup_t *
+ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    UNUSED(size);
+    memset(&test_cleanup, 0, sizeof(test_cleanup));
+    return &test_cleanup;
+}
+
+void *
+ngx_alloc(size_t size, ngx_log_t *log)
+{
+    UNUSED(log);
+    test_alloc_calls++;
+    return malloc(size);
+}
+
+#define ngx_free free
+#define ngx_memcpy memcpy
+
+#include "../../src/ngx_http_markdown_buffer.c"
 
 
 static ngx_pool_t g_pool;
@@ -415,6 +447,12 @@ test_check_size_limit_boundary(void)
         ngx_http_markdown_check_size_limit(&r, &conf, NULL) == 1,
         "max_size=0 (unlimited) + large CL should pass");
 
+    conf.advanced.memory_budget = 1024;
+    r.headers_out.content_length_n = 1025;
+    TEST_ASSERT(
+        ngx_http_markdown_check_size_limit(&r, &conf, NULL) == 0,
+        "memory_budget should bound an unlimited max_size");
+
     TEST_PASS("Size limit boundary cases correct");
 }
 
@@ -536,6 +574,36 @@ test_check_size_limit_with_eff(void)
 }
 
 
+static void
+test_zero_limit_buffer_initializes_lazily(void)
+{
+    ngx_http_markdown_buffer_t  buffer;
+    ngx_log_t                   log;
+    ngx_pool_t                  pool;
+
+    TEST_SUBSECTION("buffer_init: zero limit remains lazy");
+
+    memset(&buffer, 0, sizeof(buffer));
+    memset(&log, 0, sizeof(log));
+    memset(&pool, 0, sizeof(pool));
+    pool.log = &log;
+    test_alloc_calls = 0;
+
+    TEST_ASSERT(ngx_http_markdown_buffer_init(&buffer, 0, &pool) == NGX_OK,
+                "zero limit should initialize as unlimited");
+    TEST_ASSERT(test_alloc_calls == 0,
+                "unlimited initialization should not allocate eagerly");
+    TEST_ASSERT(ngx_http_markdown_buffer_append(
+                    &buffer, (const u_char *) "test", 4) == NGX_OK,
+                "unlimited buffer should accept a bounded append");
+    TEST_ASSERT(test_alloc_calls == 1,
+                "first append should allocate only on demand");
+
+    test_cleanup.handler(test_cleanup.data);
+    TEST_PASS("Zero limit initializes lazily and appends on demand");
+}
+
+
 int
 main(void)
 {
@@ -547,6 +615,7 @@ main(void)
     test_check_content_type_custom_allowlist();
     test_is_streaming_detection();
     test_is_streaming_configured_types();
+    test_zero_limit_buffer_initializes_lazily();
     test_check_eligibility_full_chain();
     test_check_size_limit_boundary();
     test_check_size_limit_with_eff();
