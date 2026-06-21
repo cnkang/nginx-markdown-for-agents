@@ -191,7 +191,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
  * Steps (pre-commit pass-through HTML replay):
  *   1. Build replay chain from ngx_http_markdown_stream_replay_chain()
  *   2. Restore original Content-Type to text/html
- *   3. Send the replay chain downstream via ngx_http_output_filter()
+ *   3. Send the replay chain via the saved downstream body filter
  *   4. State already transitioned to PASSTHROUGH by decision engine
  *
  * Returns:
@@ -236,7 +236,7 @@ ngx_http_markdown_stream_error_pass_html(ngx_http_request_t *r,
                    ctx->stream_sm.replay_buf.size);
 
     /* Send the replayed HTML downstream */
-    rc = ngx_http_output_filter(r, chain);
+    rc = ngx_http_markdown_next_body_filter(r, chain);
     if (rc == NGX_AGAIN) {
         if (ctx->streaming.pending_output != NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,

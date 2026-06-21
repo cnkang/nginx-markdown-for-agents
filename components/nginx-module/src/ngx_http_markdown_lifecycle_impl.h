@@ -55,8 +55,9 @@ ngx_http_markdown_filter_init(ngx_conf_t *cf)
 static ngx_int_t
 ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
 {
-    const ngx_http_conf_ctx_t       *http_ctx;
-    ngx_http_markdown_conf_t  *lcf;
+    const ngx_http_conf_ctx_t              *http_ctx;
+    const ngx_http_markdown_main_conf_t    *mcf;
+    ngx_http_markdown_conf_t               *dynconf_conf;
 
     if (ngx_http_markdown_metrics_shm_zone == NULL
         || ngx_http_markdown_metrics_shm_zone->data == NULL)
@@ -106,13 +107,18 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
     http_ctx = (const ngx_http_conf_ctx_t *)
         ngx_get_conf(cycle->conf_ctx, ngx_http_module);
     if (http_ctx != NULL) {
-        lcf = (ngx_http_markdown_conf_t *)
-            http_ctx->loc_conf[ngx_http_markdown_filter_module.ctx_index];
-        if (lcf != NULL && lcf->advanced.dynconf_enabled
-            && lcf->advanced.dynconf_path.len > 0
+        mcf = (const ngx_http_markdown_main_conf_t *)
+            http_ctx->main_conf[
+                ngx_http_markdown_filter_module.ctx_index];
+        dynconf_conf = ngx_http_markdown_dynconf_owner(mcf);
+
+        if (dynconf_conf != NULL
+            && dynconf_conf->advanced.dynconf_enabled
+            && dynconf_conf->advanced.dynconf_path.len > 0
             && ngx_http_markdown_dynconf_start(
                    &ngx_http_markdown_dynconf_watcher,
-                   cycle, &lcf->advanced.dynconf_path, lcf, cycle->log)
+                   cycle, &dynconf_conf->advanced.dynconf_path,
+                   dynconf_conf, cycle->log)
                != NGX_OK)
         {
             ngx_log_error(NGX_LOG_WARN, cycle->log, 0,
@@ -126,12 +132,6 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
          * setting because the SHM metrics struct is process-wide.
          */
         if (ngx_http_markdown_metrics != NULL) {
-            const ngx_http_markdown_main_conf_t  *mcf;
-
-            mcf = (const ngx_http_markdown_main_conf_t *)
-                http_ctx->main_conf[
-                    ngx_http_markdown_filter_module.ctx_index];
-
             if (mcf != NULL)
             {
                 ngx_http_markdown_metrics->per_path.cardinality_limit =

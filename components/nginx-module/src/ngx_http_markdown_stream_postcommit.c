@@ -456,7 +456,7 @@ ngx_http_markdown_stream_postcommit_log(
  * Send a terminal chain (empty last_buf=1) to close the response.
  *
  * Allocates a buffer and chain link from the request pool, sets
- * last_buf=1, and sends via ngx_http_output_filter.  This closes
+ * last_buf=1, and sends via the saved downstream body filter.  This closes
  * the HTTP response without sending any additional content bytes.
  *
  * Returns:
@@ -498,7 +498,7 @@ ngx_http_markdown_stream_postcommit_send_terminal(
     out->buf = b;
     out->next = NULL;
 
-    rc = ngx_http_output_filter(r, out);
+    rc = ngx_http_markdown_next_body_filter(r, out);
 
     if (rc == NGX_AGAIN) {
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -571,7 +571,7 @@ ngx_http_markdown_stream_postcommit_send_closing(
     out->buf = b;
     out->next = NULL;
 
-    rc = ngx_http_output_filter(r, out);
+    rc = ngx_http_markdown_next_body_filter(r, out);
 
     if (rc == NGX_AGAIN) {
 #ifdef MARKDOWN_STREAMING_ENABLED

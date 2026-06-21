@@ -15,6 +15,7 @@
 #include "ngx_http_markdown_dynconf_impl.h"
 #include "ngx_http_markdown_otel_impl.h"
 #include "ngx_http_markdown_module_state_impl.h"
+#include "ngx_http_markdown_filter_chain_impl.h"
 #include "ngx_http_markdown_config_impl.h"
 #include "ngx_http_markdown_lifecycle_impl.h"
 #include "ngx_http_markdown_decision_log_impl.h"

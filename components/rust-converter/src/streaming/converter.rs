@@ -855,6 +855,7 @@ impl StreamingConverter {
         // Only count state that is actually resident in memory right now:
         // - emitter pending buffer (not yet flushed)
         // - emitter flushed buffer (awaiting take_flushed by caller)
+        // - emitter link/code collectors (separate retained allocations)
         // - state machine stack
         // - metadata extracted from <head> (actual String allocations)
         // - html_title_buf (temporary <title> text before </title>)
@@ -862,11 +863,14 @@ impl StreamingConverter {
         // Note: `head_bytes_seen` is intentionally NOT included here.
         // It is a cumulative counter for lookahead budget enforcement
         // (budget metric, not a measure of resident memory).
-        let working_set = self.emitter.pending_bytes()
-            + self.emitter.flushed_bytes()
-            + self.state_machine.stack_bytes_estimate()
-            + self.metadata.bytes_estimate()
-            + self.html_title_buf.len();
+        let working_set = self
+            .emitter
+            .pending_bytes()
+            .saturating_add(self.emitter.flushed_bytes())
+            .saturating_add(self.emitter.resident_collector_bytes())
+            .saturating_add(self.state_machine.stack_bytes_estimate())
+            .saturating_add(self.metadata.bytes_estimate())
+            .saturating_add(self.html_title_buf.len());
         self.stats.peak_memory_estimate = self.stats.peak_memory_estimate.max(working_set);
 
         // Enforce budget.total: the working set must not exceed the
@@ -928,8 +932,11 @@ impl StreamingConverter {
                         // wins. Canonicals without href are skipped, matching
                         // full-buffer `find_link_href_recursive` which returns
                         // `get_attr("href")` — if None, recursion continues.
-                        let is_canonical =
-                            attrs.iter().any(|(k, v)| k == "rel" && v == "canonical");
+                        let is_canonical = attrs.iter().any(|(k, v)| {
+                            k == "rel"
+                                && v.split_ascii_whitespace()
+                                    .any(|token| token.eq_ignore_ascii_case("canonical"))
+                        });
                         if is_canonical
                             && let Some((_, href)) = attrs.iter().find(|(k, _)| k == "href")
                         {
@@ -2340,6 +2347,39 @@ mod tests {
             conv.metadata().url.as_deref(),
             Some("https://example.com/page"),
         );
+    }
+
+    #[test]
+    fn test_canonical_rel_uses_case_insensitive_token_list_matching() {
+        let html = br#"<html><head>
+            <link rel="alternate CANONICAL stylesheet"
+                  href="https://example.com/token-canonical">
+            </head><body><p>hello</p></body></html>"#;
+        let mut conv = make_converter_with_metadata();
+
+        conv.feed_chunk(html).unwrap();
+
+        assert_eq!(
+            conv.metadata().url.as_deref(),
+            Some("https://example.com/token-canonical")
+        );
+    }
+
+    #[test]
+    fn test_total_budget_counts_resident_link_text() {
+        let budget = MemoryBudget {
+            total: 160,
+            state_stack: 128,
+            output_buffer: 1024,
+            charset_sniff: 16,
+            lookahead: 16,
+        };
+        let mut conv = StreamingConverter::new(ConversionOptions::default(), budget);
+
+        conv.feed_chunk(b"<body><a href='/'>").unwrap();
+        let err = conv.feed_chunk(&vec![b'x'; 512]).unwrap_err();
+
+        assert_eq!(err.code(), 6);
     }
 
     /// P3 regression: when no canonical/og:url, finalize should fall back

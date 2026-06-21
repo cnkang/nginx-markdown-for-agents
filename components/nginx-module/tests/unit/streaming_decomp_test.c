@@ -20,6 +20,10 @@
 #include <limits.h>
 #include <zlib.h>
 
+#ifdef NGX_HTTP_BROTLI
+#include <brotli/encode.h>
+#endif
+
 #define NGX_OK 0
 #define NGX_ERROR -1
 #define NGX_AGAIN -2
@@ -109,6 +113,9 @@ static ngx_uint_t g_palloc_fail_once = 0;
  */
 static ngx_uint_t g_palloc_return_static_once = 0;
 
+/* Total request-pool bytes requested by the production path under test. */
+static size_t g_palloc_bytes = 0;
+
 /*
  * g_pcalloc_fail_once - When non-zero, the next call to ngx_pcalloc returns
  * NULL and the flag is cleared.  Used to inject a single zeroed-allocation
@@ -122,6 +129,9 @@ static ngx_uint_t g_pcalloc_fail_once = 0;
  * failure (e.g. for buffer expansion).
  */
 static ngx_uint_t g_alloc_fail_once = 0;
+
+/* Return a non-freeable stand-in once for huge-size guard tests. */
+static ngx_uint_t g_alloc_return_static_once = 0;
 
 /*
  * g_cleanup_add_fail_once - When non-zero, the next call to
@@ -213,6 +223,7 @@ void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
 {
     UNUSED(pool);
+    g_palloc_bytes += size;
     if (g_palloc_fail_once) {
         g_palloc_fail_once = 0;
         return NULL;
@@ -272,6 +283,10 @@ ngx_alloc(size_t size, ngx_log_t *log)
         g_alloc_fail_once = 0;
         return NULL;
     }
+    if (g_alloc_return_static_once) {
+        g_alloc_return_static_once = 0;
+        return g_static_pool_buf;
+    }
     return malloc(size);
 }
 
@@ -289,6 +304,9 @@ ngx_alloc(size_t size, ngx_log_t *log)
 void
 ngx_free(void *p)
 {
+    if (p == g_static_pool_buf) {
+        return;
+    }
     free(p);
 }
 
@@ -531,6 +549,11 @@ typedef struct {
     ngx_pool_t            pool;
 } test_pool_t;
 
+static int
+compress_payload(const u_char *in, size_t in_len,
+    ngx_http_markdown_compression_type_e type,
+    u_char **out, size_t *out_len);
+
 /*
  * test_pool_reset - Zero-initialise a test pool and clear all failure-injection
  * flags and inflate mock state.  Call at the start of every test case to
@@ -548,12 +571,127 @@ test_pool_reset(test_pool_t *tp)
     memset(tp, 0, sizeof(*tp));
     g_palloc_fail_once = 0;
     g_palloc_return_static_once = 0;
+    g_palloc_bytes = 0;
     g_pcalloc_fail_once = 0;
     g_alloc_fail_once = 0;
+    g_alloc_return_static_once = 0;
     g_cleanup_add_fail_once = 0;
     g_inflate_init_fail_once = 0;
     test_reset_inflate_mode();
 }
+
+
+/*
+ * Feed a valid gzip stream one compressed byte at a time and verify that
+ * request-pool allocation tracks emitted output rather than chunk count.
+ */
+static void
+test_tiny_chunks_do_not_amplify_request_pool(void)
+{
+    const char                          *text;
+    size_t                               text_len;
+    u_char                              *compressed;
+    size_t                               compressed_len;
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    size_t                               emitted;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("tiny chunks keep request-pool use output-bounded");
+
+    text = "tiny compressed chunks must not reserve 4 KiB each";
+    text_len = test_cstrnlen(text, 1024);
+    compressed = NULL;
+    test_pool_reset(&tp);
+
+    rc = compress_payload((const u_char *) text, text_len,
+                          NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+                          &compressed, &compressed_len);
+    TEST_ASSERT(rc == NGX_OK, "compression should succeed");
+
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, text_len + 1);
+    TEST_ASSERT(decomp != NULL, "decompressor should be created");
+
+    emitted = 0;
+    for (size_t i = 0; i < compressed_len; i++) {
+        u_char  *out;
+        size_t   out_len;
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, &compressed[i], 1, &out, &out_len,
+            &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK, "one-byte feed should succeed");
+        emitted += out_len;
+        free(out);
+    }
+
+    TEST_ASSERT(emitted == text_len,
+        "tiny feeds should emit the complete decompressed payload");
+    TEST_ASSERT(g_palloc_bytes <= emitted,
+        "request-pool allocation must be bounded by emitted output");
+
+    free(compressed);
+    free(decomp);
+    TEST_PASS("tiny chunk request-pool amplification rejected");
+}
+
+
+#ifdef NGX_HTTP_BROTLI
+/* Verify terminal validation rejects a Brotli stream missing its tail. */
+static void
+test_truncated_brotli_finish_errors(void)
+{
+    const uint8_t                        text[] =
+        "truncated brotli input must fail at finish";
+    size_t                               compressed_len;
+    uint8_t                              compressed[256];
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char                              *out;
+    size_t                               out_len;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("finish error on truncated brotli stream");
+
+    compressed_len = sizeof(compressed);
+    TEST_ASSERT(BrotliEncoderCompress(
+                    BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                    BROTLI_MODE_TEXT, sizeof(text) - 1, text,
+                    &compressed_len, compressed)
+                == BROTLI_TRUE,
+        "brotli compression should succeed");
+    TEST_ASSERT(compressed_len > 2,
+        "brotli payload should be long enough to truncate");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, sizeof(text));
+    TEST_ASSERT(decomp != NULL, "brotli decompressor should be created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len - 2,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "truncated brotli feed should await terminal validation");
+    free(out);
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_finish(
+        decomp, &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "finish should reject an incomplete brotli stream");
+
+    free(out);
+    free(decomp);
+    TEST_PASS("truncated brotli stream rejected at finish");
+}
+#endif
 
 /*
  * test_pool_run_cleanups - Execute all registered cleanup handlers on a
@@ -1113,7 +1251,7 @@ test_create_helper_and_limit_branches(void)
     buf = heap_buf;
     buf_size = (size_t) -1;
     rc = ngx_http_markdown_streaming_decomp_expand_buf(
-        &heap_buf, &buf, &buf_size, &test_log);
+        &heap_buf, &buf, &buf_size, 0, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "expand_buf should fail on size overflow");
     TEST_ASSERT(heap_buf == NULL,
@@ -1126,7 +1264,7 @@ test_create_helper_and_limit_branches(void)
     buf_size = 8;
     g_alloc_fail_once = 1;
     rc = ngx_http_markdown_streaming_decomp_expand_buf(
-        &heap_buf, &buf, &buf_size, &test_log);
+        &heap_buf, &buf, &buf_size, 0, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "expand_buf should fail when ngx_alloc fails");
     TEST_ASSERT(heap_buf == NULL,
@@ -1314,36 +1452,36 @@ test_feed_empty_and_large_size_paths(void)
     TEST_ASSERT(out == NULL && out_len == 0,
         "zero-length input should not produce output");
 
-    g_palloc_fail_once = 1;
+    g_alloc_fail_once = 1;
     rc = ngx_http_markdown_streaming_decomp_feed(
         decomp, (const u_char *) "x", 1, &out, &out_len,
         &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "feed should fail when initial output buffer allocation fails");
 
-    g_palloc_fail_once = 0;
-    g_palloc_return_static_once = 0;
+    g_alloc_fail_once = 0;
+    g_alloc_return_static_once = 0;
     huge_in_len = ((size_t) -1 / 4) + 1;
     one_byte = 'x';
     out = NULL;
     out_len = 0;
-    g_palloc_return_static_once = 1;
+    g_alloc_return_static_once = 1;
     rc = ngx_http_markdown_streaming_decomp_feed(
         decomp, &one_byte, huge_in_len, &out, &out_len,
         &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "feed should fail safely on saturated initial size");
-    g_palloc_return_static_once = 0;
+    g_alloc_return_static_once = 0;
 
     out = NULL;
     out_len = 0;
-    g_palloc_return_static_once = 1;
+    g_alloc_return_static_once = 1;
     rc = ngx_http_markdown_streaming_decomp_feed(
         decomp, &one_byte, ((size_t) UINT_MAX / 2) + 1,
         &out, &out_len, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "feed should fail when output buffer size exceeds zlib uInt");
-    g_palloc_return_static_once = 0;
+    g_alloc_return_static_once = 0;
 
     free(decomp);
     TEST_PASS("feed empty/large-size branches covered");
@@ -1637,6 +1775,10 @@ main(void)
     test_create_and_cleanup();
     test_create_failure_paths_and_cleanup_default();
     test_roundtrip_and_empty_feed();
+#ifdef NGX_HTTP_BROTLI
+    test_truncated_brotli_finish_errors();
+#endif
+    test_tiny_chunks_do_not_amplify_request_pool();
     test_budget_and_invalid_type_branches();
     test_truncated_finish_errors();
     test_create_helper_and_limit_branches();

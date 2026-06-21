@@ -295,6 +295,7 @@ ngx_http_markdown_streaming_decomp_expand_buf(
     u_char **heap_buf_ptr,
     u_char **buf_ptr,
     size_t *buf_size_ptr,
+    size_t max_size,
     ngx_log_t *log)
 {
     u_char  *new_buf;
@@ -317,6 +318,9 @@ ngx_http_markdown_streaming_decomp_expand_buf(
     }
 
     new_size = old_size * 2;
+    if (max_size > 0 && new_size > max_size) {
+        new_size = max_size;
+    }
 
     new_buf = ngx_alloc(new_size, log);
     if (new_buf == NULL) {
@@ -356,6 +360,13 @@ ngx_http_markdown_streaming_decomp_finalize_buf(
     ngx_pool_t *pool)
 {
     u_char  *pool_buf;
+
+    if (produced == 0) {
+        ngx_free(heap_buf);
+        *buf_ptr = NULL;
+        *buf_size_ptr = 0;
+        return NGX_OK;
+    }
 
     pool_buf = ngx_palloc(pool, produced);
     if (pool_buf == NULL) {
@@ -437,8 +448,21 @@ ngx_http_markdown_streaming_decomp_inflate_step(
     }
 
     if (decomp->state.zlib.avail_out == 0) {
+        size_t  remaining;
+
+        remaining = 0;
+        if (decomp->max_decompressed_size > 0) {
+            remaining = decomp->max_decompressed_size
+                        - decomp->total_decompressed;
+            if (*buf_size_ptr >= remaining) {
+                ngx_free(*heap_buf_ptr);
+                *heap_buf_ptr = NULL;
+                return -2;
+            }
+        }
+
         if (ngx_http_markdown_streaming_decomp_expand_buf(
-                heap_buf_ptr, buf_ptr, buf_size_ptr, log)
+                heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log)
             != NGX_OK)
         {
             return -1;
@@ -495,8 +519,8 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
     int      using_heap;
     int      step_rc;
 
-    heap_buf = NULL;
-    using_heap = 0;
+    heap_buf = *buf_ptr;
+    using_heap = 1;
 
     for ( ;; ) {
         step_rc =
@@ -617,11 +641,22 @@ ngx_http_markdown_streaming_decomp_brotli_step(
 
     if (brc == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
         size_t  old_size;
+        size_t  remaining;
 
         old_size = *buf_size_ptr;
+        remaining = 0;
+        if (decomp->max_decompressed_size > 0) {
+            remaining = decomp->max_decompressed_size
+                        - decomp->total_decompressed;
+            if (old_size >= remaining) {
+                ngx_free(*heap_buf_ptr);
+                *heap_buf_ptr = NULL;
+                return -2;
+            }
+        }
 
         if (ngx_http_markdown_streaming_decomp_expand_buf(
-                heap_buf_ptr, buf_ptr, buf_size_ptr, log)
+                heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log)
             != NGX_OK)
         {
             return -1;
@@ -660,8 +695,8 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
 
     decomp->brotli_avail_out = *buf_size_ptr;
     decomp->brotli_next_out = *buf_ptr;
-    heap_buf = NULL;
-    using_heap = 0;
+    heap_buf = *buf_ptr;
+    using_heap = 1;
 
     for ( ;; ) {
         step_rc =
@@ -728,6 +763,8 @@ ngx_http_markdown_streaming_decomp_feed_zlib(
             "markdown: "
             "buffer size %uz exceeds zlib uInt max",
             *buf_size_ptr);
+        ngx_free(*buf_ptr);
+        *buf_ptr = NULL;
         return NGX_ERROR;
     }
 
@@ -764,6 +801,8 @@ ngx_http_markdown_streaming_decomp_feed_case_zlib(
             "markdown: "
             "input length %uz exceeds zlib uInt max",
             in_len);
+        ngx_free(*ctx->buf_ptr);
+        *ctx->buf_ptr = NULL;
         return NGX_ERROR;
     }
 
@@ -835,7 +874,7 @@ ngx_http_markdown_streaming_decomp_feed(
         return NGX_OK;
     }
 
-    /* Estimate output buffer: 4x input or 4KB minimum */
+    /* Estimate transient output workspace: 4x input or 4KB minimum. */
     if (in_len > (size_t) -1 / 4) {
         buf_size = (size_t) -1;  /* saturate to max */
     } else {
@@ -859,11 +898,17 @@ ngx_http_markdown_streaming_decomp_feed(
         remaining = decomp->max_decompressed_size
                     - decomp->total_decompressed;
         if (buf_size > remaining) {
-            buf_size = remaining + 1;
+            buf_size = remaining;
         }
     }
 
-    buf = ngx_palloc(pool, buf_size);
+    /*
+     * The workspace must be reclaimable after every compressed chunk.
+     * Request-pool allocations cannot be individually freed, so reserving
+     * the 4 KiB estimate there amplifies tiny chunks for the request lifetime.
+     * The decode loops transfer only produced bytes into pool memory.
+     */
+    buf = ngx_alloc(buf_size, log);
     if (buf == NULL) {
         return NGX_ERROR;
     }
@@ -907,6 +952,7 @@ ngx_http_markdown_streaming_decomp_feed(
 #endif
 
     default:
+        ngx_free(buf);
         return NGX_DECLINED;
     }
 
@@ -1033,12 +1079,25 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             size_t  old_size;
 
             old_size = *buf_size_ptr;
+            if (decomp->max_decompressed_size > 0
+                && old_size >= decomp->max_decompressed_size
+                               - decomp->total_decompressed)
+            {
+                ngx_http_markdown_streaming_decomp_finish_free_heap(
+                    &heap_buf);
+                return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+            }
             /*
              * expand_buf() frees any previous heap buffer if expansion fails,
              * so we can safely return directly on NGX_ERROR here.
              */
             if (ngx_http_markdown_streaming_decomp_expand_buf(
-                    &heap_buf, buf_ptr, buf_size_ptr, log)
+                    &heap_buf, buf_ptr, buf_size_ptr,
+                    decomp->max_decompressed_size > 0
+                    ? decomp->max_decompressed_size
+                      - decomp->total_decompressed
+                    : 0,
+                    log)
                 != NGX_OK)
             {
                 return NGX_ERROR;
@@ -1150,6 +1209,7 @@ ngx_http_markdown_streaming_decomp_finish(
             ngx_log_error(NGX_LOG_WARN, log, 0,
                 "markdown: "
                 "brotli stream not finished");
+            return NGX_ERROR;
         }
         decomp->finished = 1;
         break;

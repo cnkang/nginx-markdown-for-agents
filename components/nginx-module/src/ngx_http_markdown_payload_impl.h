@@ -552,11 +552,15 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
     }
 
     rc = ngx_http_markdown_fail_open_with_buffered_prefix(r, ctx, cl);
-    if (rc != NGX_OK) {
-        return rc;
-    }
 
-    return NGX_DONE;
+    /*
+     * Preserve the downstream result.  The oversized chain may not be the
+     * terminal upstream chain when the response is chunked.  Returning
+     * NGX_DONE after a successful replay would stop later body-filter calls
+     * and truncate the original response.  With eligible cleared, subsequent
+     * chunks take the ordinary pass-through path.
+     */
+    return rc;
 }
 
 /*
