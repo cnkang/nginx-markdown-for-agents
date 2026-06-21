@@ -1245,29 +1245,7 @@ mp_push_part2(const char *key, const char *value)
     return h;
 }
 
-static ngx_table_elt_t *
-mp_find_header(const char *key)
-{
-    size_t key_len = strlen(key);
-    ngx_uint_t i;
-    for (i = 0; i < test_request.headers_out.headers.part.nelts; i++) {
-        ngx_table_elt_t *h = &mp_part1_storage[i];
-        if (h->hash != 0 &&
-            h->key.len == key_len &&
-            ngx_strncasecmp(h->key.data, (const u_char *) key, key_len) == 0) {
-            return h;
-        }
-    }
-    for (i = 0; i < mp_part2.nelts; i++) {
-        ngx_table_elt_t *h = &mp_part2_storage[i];
-        if (h->hash != 0 &&
-            h->key.len == key_len &&
-            ngx_strncasecmp(h->key.data, (const u_char *) key, key_len) == 0) {
-            return h;
-        }
-    }
-    return NULL;
-}
+
 
 static void test_multipart_rollback_vary_in_part2(void)
 {

@@ -613,8 +613,8 @@ version support declarations into a release matrix source of truth (ADR-0014).
 The 0.8.1 and 0.8.2 patch releases harden streaming atomicity, FFI cleanup,
 OWS compliance, backpressure resume, release-gate naming, and documentation
 consistency without changing the 0.8.x configuration contract. It also
-includes streaming observability (streaming observability), streaming security
-enforcement (streaming security enforcement), streaming configuration directives, Prometheus-compatible
+includes streaming observability (metrics and tracing), streaming security
+enforcement (policy validation and alerts), streaming configuration directives, Prometheus-compatible
 metrics, decision reason codes, rollout and rollback guides, parity and
 evidence workflows for streaming rollout safety, dynamic configuration
 hot-reload, OpenTelemetry tracing, per-path metrics, OS package distribution,
