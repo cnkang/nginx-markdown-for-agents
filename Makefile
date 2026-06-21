@@ -648,7 +648,7 @@ release-gates-check-070-docker:
 release-gates-check-strict:
 	python3 tools/release/gates/validate_release_gates.py --mode strict
 	python3 tools/release/gates/validate_naming.py
-	python3 tools/release/gates/validate_release_gates_070.py --mode strict
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_release_gates_070.py --mode strict
 	python3 tools/release/gates/validate_fuzz_packaging_070.py
 	@echo "=== Strict: Release Workflow Gate ==="
 	@test -f .github/workflows/release-packages.yml || { echo "FAIL: .github/workflows/release-packages.yml not found" >&2; exit 1; }
