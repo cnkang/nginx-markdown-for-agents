@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Verify the gitleaks wrapper scans tracked worktree files and excludes ignored state.
+
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/nginx-markdown-gitleaks-test.XXXXXX")"
+ignored_dir="$repo_root/.codeartsdoer/gitleaks-scope-test"
+
+cleanup() {
+    rm -rf "$tmp_dir"
+    rm -rf "$ignored_dir"
+}
+
+trap cleanup EXIT
+mkdir -p "$tmp_dir/bin" "$ignored_dir"
+printf '%s\n' 'ignored-local-secret-marker' > "$ignored_dir/fixture.txt"
+
+cat > "$tmp_dir/bin/gitleaks" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+source_dir=""
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --source)
+            source_dir="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+[[ -n "$source_dir" ]]
+[[ -f "$source_dir/AGENTS.md" ]]
+[[ ! -e "$source_dir/.codeartsdoer/gitleaks-scope-test/fixture.txt" ]]
+EOF
+chmod +x "$tmp_dir/bin/gitleaks"
+
+PATH="$tmp_dir/bin:$PATH" bash "$repo_root/tools/security/run_gitleaks_tracked.sh"
+echo "gitleaks tracked-worktree scope test passed"
