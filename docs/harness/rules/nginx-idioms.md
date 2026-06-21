@@ -162,6 +162,10 @@ Required:
   step fails (allocation failure, header set failure), abort the entire
   operation and return `NGX_ERROR`.  Do not log the error and continue with
   partially applied headers — downstream consumers will see inconsistent state.
+- Fixed-capacity transaction snapshots must detect capacity overflow before
+  the first mutation and return `NGX_ERROR`.  Never silently omit matching
+  state from a rollback snapshot; a rollback set that does not cover every
+  mutable entry cannot satisfy the atomicity contract.
 
 Verification:
 - `grep -rn 'ngx_http_finalize_request' components/nginx-module/src/`

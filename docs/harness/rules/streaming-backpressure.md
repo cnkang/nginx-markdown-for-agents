@@ -12,10 +12,23 @@ paths:
 Historical issues: `5649890`, `23165d9`, `cfd4bd8`, `f97be3f`.
 
 Required:
-- If downstream filter returns `NGX_AGAIN`, persist the unsent chain in context and resume it later.
+- Determine ownership at the filter boundary before handling `NGX_AGAIN`.
+  Persist and resubmit a chain only while this module still owns the unsent
+  data.  If a downstream filter such as the NGINX copy filter has retained
+  the chain, keep only a request-lifetime anchor/pending latch and resume the
+  downstream filter with `NULL`; resubmitting the original chain duplicates
+  its unsent tail.
+- On resume, preserve the pending latch and buffered flag while downstream
+  returns `NGX_AGAIN`; clear both on terminal success or failure.
 - Never overwrite pending output with terminal empty `last_buf` while data is still pending.
 - On fallback from streaming to full-buffer path, reset state flags that gate conversion flow (for example conversion-attempt flags).
 - Fail-open paths must still honor header/body ordering and deferred-header forwarding.
+
+Verification:
+- `grep -rn 'pending_output\|resume_pending' components/nginx-module/src/`
+- For each resume path, verify whether downstream retained the original chain.
+  A copy-filter-owned chain must be resumed with
+  `ngx_http_next_body_filter(r, NULL)`, not with the original chain pointer.
 
 ---
 
@@ -136,6 +149,9 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 3. No blocking calls, no raw malloc/free, no global mutable state. (Baseline)
 4. Return codes (`NGX_OK`, `NGX_AGAIN`, `NGX_DECLINED`, `NGX_ERROR`, `NGX_DONE`) used with correct semantics. (Baseline, Rule 2)
 5. Backpressure: if the change touches body-filter output, confirm pending-chain and `last_buf` ordering are preserved. (Rule 1)
+   At every `NGX_AGAIN` boundary, identify who owns the unsent chain. Module-owned
+   chains are resubmitted; downstream-owned chains are drained with a `NULL`
+   input and must never receive the original chain twice.
 6. Memory budgets enforced on every allocation path; auxiliary buffers freed on all exits. (Rule 3)
 7. UTF-8 chunk-boundary safety if touching streaming text paths. (Rule 4)
 8. **No unguarded operations on values that may be NULL/uninitialized/invalid** — this includes dereference, relational comparison (`>`, `<`), arithmetic, or field access through pointers. Use explicit guards or boolean flags set at the production site. (Baseline C style)
@@ -159,7 +175,7 @@ For each code change you are about to produce, mentally (or explicitly in a thin
 26. Residual code integrity: after merge or >500-line change in a single file, verify compilation, `git diff --check`, function count, and no duplicate adjacent blocks. For >30-line changes, verify the file is not truncated (closing brace present). (Rule 31)
 27. Snapshot race elimination: in `header_filter`, `ngx_http_markdown_dynconf_watcher.active_snapshot` must be read exactly once at function entry into a function-lifetime `snap_copy`; `early_eff` is built from that once. Both variables must have function-lifetime scope. ctx binding must copy from these function-level variables (via `ngx_http_markdown_bind_request_snapshot()`), never re-read the global `active_snapshot` or re-invoke `build_effective_conf()`. `handle_ctx_alloc_failure()` must receive `eff` (not NULL). (Rule 34)
 28. Fail-open replay buffer integrity: if the change touches fail-open or streaming pre-commit paths, verify (a) replay buffer init failure triggers `precommit_error`, (b) replay buffer append failure triggers `precommit_error` (not just a warning), (c) `failopen_completed` flag prevents duplicate `finalize_request` after terminal-buffer passthrough, (d) `results.failopen_count` is incremented only after downstream `NGX_OK` (not at decision point). (Rule 38)
-29. NGX_DONE terminal semantics: after `ngx_http_finalize_request()`, the function must return immediately. Callers receiving `NGX_DONE` must treat it as terminal success — no further filter calls or body sends. Multi-step header modifications must be atomic (abort on first failure). (Rule 39)
+29. NGX_DONE terminal semantics: after `ngx_http_finalize_request()`, the function must return immediately. Callers receiving `NGX_DONE` must treat it as terminal success — no further filter calls or body sends. Multi-step header modifications must be atomic (abort on first failure). Fixed-capacity rollback snapshots must fail before mutation when capacity is exceeded; they must never silently omit mutable entries. (Rule 39)
 30. Invalidated header filtering: all header lookup/iteration functions must skip entries where `hash == 0`. NGINX marks deleted headers by zeroing hash; reading such entries returns stale data. (Rule 40)
 31. Format string argument matching: when adding metrics to text/JSON renderers using `ngx_snprintf`, verify specifier count and types match the argument list exactly. (Rule 8)
 

@@ -83,6 +83,8 @@ static ngx_int_t g_update_headers_rc = 0;
 static ngx_int_t g_failopen_rc = 0;
 static ngx_uint_t g_failopen_call_count = 0;
 static ngx_int_t g_next_body_filter_rc = 0;
+static ngx_chain_t *g_next_body_filter_last_input = NULL;
+static ngx_uint_t g_next_body_filter_call_count = 0;
 static ngx_uint_t g_markdown_result_free_calls = 0;
 static ngx_uint_t g_pnalloc_fail_once = 0;
 static ngx_uint_t g_pcalloc_fail_once = 0;
@@ -763,7 +765,8 @@ static ngx_int_t
 test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
     UNUSED(r);
-    UNUSED(in);
+    g_next_body_filter_last_input = in;
+    g_next_body_filter_call_count++;
     return g_next_body_filter_rc;
 }
 
@@ -785,6 +788,8 @@ reset_stub_state(void)
     g_failopen_rc = NGX_OK;
     g_failopen_call_count = 0;
     g_next_body_filter_rc = NGX_OK;
+    g_next_body_filter_last_input = NULL;
+    g_next_body_filter_call_count = 0;
     g_markdown_result_free_calls = 0;
     g_pnalloc_fail_once = 0;
     g_pcalloc_fail_once = 0;
@@ -1762,6 +1767,131 @@ test_send_conversion_output_paths(void)
 }
 
 /*
+ * Regression: the NGINX copy filter owns its unsent chain after returning
+ * NGX_AGAIN.  Resume must call the downstream filter with NULL so it drains
+ * that retained state instead of receiving the original chain a second time.
+ */
+static void
+test_fullbuffer_resume_does_not_resubmit_pending_chain(void)
+{
+    ngx_http_request_t        r;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_http_markdown_conf_t  conf;
+    struct MarkdownResult     result;
+    ngx_chain_t              *original_chain;
+    ngx_int_t                 rc;
+    u_char                    out[] = "markdown";
+
+    TEST_SUBSECTION("full-buffer resume drains downstream-owned state");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.markdown = out;
+    result.markdown_len = sizeof(out) - 1;
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_send_conversion_output(
+        &r, &ctx, &conf, &result, 1);
+    original_chain = ctx.fullbuffer.pending_output;
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "initial full-buffer send should preserve NGX_AGAIN");
+    TEST_ASSERT(original_chain != NULL,
+                "initial full-buffer send should retain request state");
+    TEST_ASSERT(g_next_body_filter_last_input == original_chain,
+                "initial send should submit the converted body chain");
+    TEST_ASSERT(ctx.fullbuffer.pending_has_data == 1,
+                "initial NGX_AGAIN should set the pending latch");
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
+                "initial NGX_AGAIN should set the module buffered flag");
+
+    g_next_body_filter_rc = NGX_OK;
+    g_metric_inc_sink = 0;
+    rc = ngx_http_markdown_body_filter_resume_pending(&r, &ctx);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "full-buffer resume should return downstream success");
+    TEST_ASSERT(g_next_body_filter_call_count == 2,
+                "resume should make exactly one additional downstream call");
+    TEST_ASSERT(g_next_body_filter_last_input == NULL,
+                "resume must flush downstream state without resubmitting chain");
+    TEST_ASSERT(ctx.fullbuffer.pending_output == NULL,
+                "successful resume should clear the retained chain anchor");
+    TEST_ASSERT(ctx.fullbuffer.pending_has_data == 0,
+                "successful resume should clear the pending latch");
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
+                "successful resume should clear the module buffered flag");
+    TEST_ASSERT(g_metric_inc_sink == 1,
+                "successful resume should record full-buffer delivery");
+
+    TEST_PASS("Full-buffer resume does not duplicate downstream pending data");
+}
+
+/* Verify persistent backpressure keeps state and terminal failure clears it. */
+static void
+test_fullbuffer_resume_pending_lifecycle(void)
+{
+    ngx_http_request_t        r;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_http_markdown_conf_t  conf;
+    struct MarkdownResult     result;
+    ngx_chain_t              *original_chain;
+    ngx_int_t                 rc;
+    u_char                    out[] = "markdown";
+
+    TEST_SUBSECTION("full-buffer resume pending lifecycle");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.markdown = out;
+    result.markdown_len = sizeof(out) - 1;
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_send_conversion_output(
+        &r, &ctx, &conf, &result, 1);
+    original_chain = ctx.fullbuffer.pending_output;
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "initial send should establish pending state");
+
+    r.buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+    rc = ngx_http_markdown_body_filter_resume_pending(&r, &ctx);
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "persistent downstream backpressure should remain pending");
+    TEST_ASSERT(g_next_body_filter_last_input == NULL,
+                "persistent resume should drain with NULL input");
+    TEST_ASSERT(ctx.fullbuffer.pending_output == original_chain,
+                "persistent backpressure should retain the chain anchor");
+    TEST_ASSERT(ctx.fullbuffer.pending_has_data == 1,
+                "persistent backpressure should retain the pending latch");
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
+                "persistent backpressure should reassert the buffered flag");
+
+    g_next_body_filter_rc = NGX_ERROR;
+    g_metric_inc_sink = 0;
+    rc = ngx_http_markdown_body_filter_resume_pending(&r, &ctx);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "terminal downstream failure should propagate");
+    TEST_ASSERT(g_next_body_filter_last_input == NULL,
+                "failure resume should still use NULL input");
+    TEST_ASSERT(ctx.fullbuffer.pending_output == NULL,
+                "terminal failure should clear the chain anchor");
+    TEST_ASSERT(ctx.fullbuffer.pending_has_data == 0,
+                "terminal failure should clear the pending latch");
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
+                "terminal failure should clear the buffered flag");
+    TEST_ASSERT(g_metric_inc_sink == 0,
+                "terminal failure should not record delivery");
+
+    TEST_PASS("Full-buffer resume pending lifecycle is symmetric");
+}
+
+/*
  * Verify miscellaneous conversion helper branches:
  * record_conversion_latency, record_system_failure, and
  * record_token_savings_if_enabled with various token_estimate
@@ -1837,6 +1967,8 @@ main(void)
     test_handle_conversion_failure_paths();
     test_converter_not_initialized_path();
     test_send_conversion_output_paths();
+    test_fullbuffer_resume_does_not_resubmit_pending_chain();
+    test_fullbuffer_resume_pending_lifecycle();
     test_misc_conversion_helpers();
 
     printf("\n========================================\n");
