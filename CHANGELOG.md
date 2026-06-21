@@ -13,9 +13,9 @@ Patch release closeout for the 0.8.x line before 0.9.0 spec execution.
 
 - Synchronized "current release line" wording across project status, README,
   installation, compatibility, and package distribution docs to reference 0.8.x
-  (latest patch 0.8.1) rather than 0.8.0.
+  (latest patch 0.8.2) rather than 0.8.0.
 - Updated package artifact examples in `PACKAGE_DISTRIBUTION.md` and
-  `COMPATIBILITY.md` from 0.8.0 to 0.8.1 to avoid guiding users toward
+  `COMPATIBILITY.md` from 0.8.1 to 0.8.2 to avoid guiding users toward
   outdated artifacts.
 - Finalized RFC-0008 status from `Draft` to `Accepted / Implemented in 0.8.0`,
   with an implementation note covering 0.8.0 streaming contract and 0.8.1
