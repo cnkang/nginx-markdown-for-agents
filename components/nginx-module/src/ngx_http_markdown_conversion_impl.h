@@ -1934,6 +1934,7 @@ ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
 
     rc = ngx_http_next_body_filter(r, NULL);
     if (rc == NGX_AGAIN) {
+        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
         return NGX_AGAIN;
     }
 
