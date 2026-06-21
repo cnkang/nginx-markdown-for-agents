@@ -1,3 +1,7 @@
+use std::time::Duration;
+
+use crate::converter::ConversionContext;
+use crate::error::ConversionError;
 use crate::parser::parse_html;
 
 use super::{MetadataExtractor, PageMetadata};
@@ -102,6 +106,54 @@ fn test_extract_canonical_url() {
         metadata.url,
         Some("https://example.com/canonical".to_string())
     );
+}
+
+#[test]
+fn test_extract_canonical_rel_token_list_case_insensitive() {
+    let html = b"<html><head>
+        <link rel=\"alternate CANONICAL preload\" href=\"https://example.com/canonical\" />
+    </head></html>";
+    let dom = parse_html(html).unwrap();
+    let extractor = MetadataExtractor::new(None, false);
+    let metadata = extractor.extract(&dom).unwrap();
+
+    assert_eq!(
+        metadata.url,
+        Some("https://example.com/canonical".to_string())
+    );
+}
+
+#[test]
+fn test_metadata_extraction_rejects_excessive_depth_without_recursion() {
+    let depth = 1_100;
+    let mut html = String::with_capacity(depth * 11);
+    html.push_str("<html><head></head><body>");
+    for _ in 0..depth {
+        html.push_str("<div>");
+    }
+    for _ in 0..depth {
+        html.push_str("</div>");
+    }
+    html.push_str("</body></html>");
+
+    let dom = parse_html(html.as_bytes()).unwrap();
+    let extractor = MetadataExtractor::new(None, false);
+    let error = extractor.extract(&dom).unwrap_err();
+
+    assert!(matches!(error, ConversionError::InvalidInput(_)));
+    assert!(error.to_string().contains("metadata nesting depth"));
+}
+
+#[test]
+fn test_metadata_extraction_honors_conversion_timeout() {
+    let dom = parse_html(b"<html><head><title>Late</title></head></html>").unwrap();
+    let extractor = MetadataExtractor::new(None, false);
+    let mut ctx = ConversionContext::new(Duration::from_nanos(1));
+    std::thread::sleep(Duration::from_millis(1));
+
+    let error = extractor.extract_with_context(&dom, &mut ctx).unwrap_err();
+
+    assert!(matches!(error, ConversionError::Timeout));
 }
 
 #[test]
