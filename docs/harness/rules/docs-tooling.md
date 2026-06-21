@@ -1,11 +1,12 @@
 ---
 domain: docs-tooling
-rules: [9]
+rules: [9, 49]
 paths:
   - "docs/**"
   - "tools/**"
   - "README.md"
   - "INSTALLATION.md"
+  - "THIRD-PARTY-NOTICES"
 ---
 
 ## Docs & Tooling Drift
@@ -37,3 +38,14 @@ Required:
   default plain-text format uses human-readable labels that differ from JSON
   keys and Prometheus series names; omitting `Accept` causes false negatives
   when grepping for snake_case keys.
+
+### 49. THIRD-PARTY-NOTICES drift with dependency changes
+Required:
+- When any dependency is added, removed, or has its version changed (in
+  Cargo.toml, Cargo.lock, or C/NGINX build files), the corresponding entry
+  in `THIRD-PARTY-NOTICES` must be updated in the same changeset.
+- Version numbers in THIRD-PARTY-NOTICES must match the resolved versions in
+  `Cargo.lock` (not the semver range in Cargo.toml).
+- New dependencies must be added with correct license type, copyright notice,
+  and license text. Removed dependencies must be deleted.
+- Verify with: `diff <(grep '^version =' Cargo.lock) <(grep '[0-9]\+\.[0-9]\+' THIRD-PARTY-NOTICES)`
