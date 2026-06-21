@@ -260,9 +260,6 @@ ngx_http_markdown_add_vary_accept(ngx_http_request_t *r)
  * existing ETag entries (hash=0) and clears the typed pointer.
  * This makes rollback tests meaningful.
  */
-typedef struct {
-    ngx_uint_t count;
-} test_etag_invalidate_ctx;
 
 static void
 test_etag_invalidate_cb(ngx_table_elt_t *h, void *ctx)
@@ -1441,6 +1438,7 @@ static void test_multipart_rollback_new_push_invalidated_across_parts(void)
 static void test_multipart_rollback_cc_failure_target_in_p1_etag_in_p2(void)
 {
     ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
     ngx_table_elt_t *cc_in_p1;
     ngx_table_elt_t *etag_in_p2;
     ngx_str_t orig_cc_value;
@@ -1449,6 +1447,7 @@ static void test_multipart_rollback_cc_failure_target_in_p1_etag_in_p2(void)
 
     test_setup_multipart();
     memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
     ctx.stream_sm.headers_committed = 0;
 
@@ -1466,7 +1465,8 @@ static void test_multipart_rollback_cc_failure_target_in_p1_etag_in_p2(void)
     test_is_authenticated = 1;
     test_auth_cache_control_rc = NGX_ERROR;
 
-    rc = ngx_http_markdown_stream_commit_headers(&test_request, &ctx, NULL);
+    rc = ngx_http_markdown_stream_commit_headers(
+        &test_request, &ctx, &conf);
 
     TEST_ASSERT(rc == NGX_ERROR, "commit returns NGX_ERROR on CC failure");
     TEST_ASSERT(cc_in_p1->hash == 1, "Cache-Control hash restored in part1");
