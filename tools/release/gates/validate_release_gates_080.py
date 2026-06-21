@@ -33,6 +33,9 @@ from lib.path_validation import validate_read_path  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 MAKEFILE = PROJECT_ROOT / "Makefile"
+RELEASE_PACKAGES_WORKFLOW = (
+    PROJECT_ROOT / ".github" / "workflows" / "release-packages.yml"
+)
 CARGO_TOML_PATH = PROJECT_ROOT / "components" / "rust-converter" / "Cargo.toml"
 CONFIG_DIRECTIVES_H = (
     PROJECT_ROOT
@@ -122,6 +125,37 @@ def check_cargo_version(result: ValidationResult) -> None:
         result.pass_(CARGO_VERSION_GATE, f"Cargo version is {expected}")
     else:
         result.fail(CARGO_VERSION_GATE, f"version is {version}, expected {expected}")
+
+
+def check_release_package_workflow_version(result: ValidationResult) -> None:
+    """Verify tag package gates expect the active Cargo release version."""
+    workflow = read(RELEASE_PACKAGES_WORKFLOW)
+    if not workflow:
+        result.fail("workflow:release-version", "release-packages.yml missing")
+        return
+    match = re.search(
+        r'^\s*RELEASE_GATE_EXPECTED_CARGO_VERSION:\s*["\']([^"\']+)["\']\s*$',
+        workflow,
+        re.MULTILINE,
+    )
+    if match is None:
+        result.fail(
+            "workflow:release-version",
+            "release-packages.yml does not set the expected Cargo version",
+        )
+        return
+    version = match.group(1)
+    expected = _expected_cargo_version()
+    if version == expected:
+        result.pass_(
+            "workflow:release-version",
+            f"release-packages.yml expects Cargo version {expected}",
+        )
+    else:
+        result.fail(
+            "workflow:release-version",
+            f"release-packages.yml expects {version}, active version is {expected}",
+        )
 
 
 def check_removed_directive(result: ValidationResult) -> None:
@@ -316,6 +350,7 @@ def check_changelog(result: ValidationResult) -> None:
 def validate_all(result: ValidationResult) -> None:
     """Run every release gate check and record pass/fail in result."""
     check_cargo_version(result)
+    check_release_package_workflow_version(result)
     check_removed_directive(result)
     check_removed_constants(result)
     check_removed_conf_fields(result)
