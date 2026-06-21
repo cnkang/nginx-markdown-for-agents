@@ -698,7 +698,7 @@ jobs:
 
       - name: Run tag release gates
         env:
-          RELEASE_GATE_EXPECTED_CARGO_VERSION: "0.8.1"
+          RELEASE_GATE_EXPECTED_CARGO_VERSION: "0.8.2"
         run: |
           # Run the v0.8.0 release gate validators that are not already covered
           # by the build/package/smoke-test jobs above. The full

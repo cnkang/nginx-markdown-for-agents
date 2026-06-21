@@ -55,11 +55,11 @@ Architecture mapping:
 ## DEB Artifacts (Ubuntu, Debian)
 
 Replace `VERSION` below with the release tag you are installing (latest patch
-on the 0.8.x line is `0.8.1`). `NGINX_VERSION` must match the NGINX ABI you
+on the 0.8.x line is `0.8.2`). `NGINX_VERSION` must match the NGINX ABI you
 run.
 
 ```bash
-VERSION=0.8.1  # replace with the release tag you are installing
+VERSION=0.8.2  # replace with the release tag you are installing
 NGINX_VERSION=1.26.3
 ARCH=amd64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
@@ -74,11 +74,11 @@ sudo apt install "./${PKG}"
 ## RPM Artifacts (AlmaLinux, Amazon Linux, RHEL)
 
 Replace `VERSION` below with the release tag you are installing (latest patch
-on the 0.8.x line is `0.8.1`). `NGINX_VERSION` must match the NGINX ABI you
+on the 0.8.x line is `0.8.2`). `NGINX_VERSION` must match the NGINX ABI you
 run.
 
 ```bash
-VERSION=0.8.1  # replace with the release tag you are installing
+VERSION=0.8.2  # replace with the release tag you are installing
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
