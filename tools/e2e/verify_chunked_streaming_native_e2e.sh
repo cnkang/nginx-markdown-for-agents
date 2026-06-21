@@ -228,12 +228,14 @@ mkdir -p "${RAW_DIR}"
 cat > "${UPSTREAM_SCRIPT}" <<'PY'
 #!/usr/bin/env python3
 import argparse
+import time
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 SMALL_END_TOKEN = "SMALL_STREAM_END_TOKEN"
 OVERSIZE_END_TOKEN = "OVERSIZE_STREAM_END_TOKEN"
+DELAYED_END_TOKEN = "DELAYED_OVERSIZE_STREAM_END_TOKEN"
 GZIP_END_TOKEN = "GZIP_STREAM_END_TOKEN"
 DEFLATE_END_TOKEN = "DEFLATE_STREAM_END_TOKEN"
 SMALL_TARGET = 2 * 1024 * 1024
@@ -271,6 +273,9 @@ def compress_payload(body: bytes, mode: str) -> bytes:
 
 SMALL_BODY = build_payload("Chunked Small", SMALL_TARGET, SMALL_END_TOKEN)
 OVERSIZE_BODY = build_payload("Chunked Oversize", OVERSIZE_TARGET, OVERSIZE_END_TOKEN)
+DELAYED_BODY = build_payload(
+    "Delayed Chunked Oversize", OVERSIZE_TARGET, DELAYED_END_TOKEN
+)
 GZIP_SOURCE_BODY = build_payload(
     "Chunked Gzip", COMPRESSED_TARGET, GZIP_END_TOKEN
 )
@@ -305,6 +310,23 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b"0\r\n\r\n")
         self.wfile.flush()
 
+    def _write_delayed_oversize(self):
+        split = 10 * 1024 * 1024
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=UTF-8")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        for part in (DELAYED_BODY[:split], DELAYED_BODY[split:]):
+            self.wfile.write(f"{len(part):X}\r\n".encode("ascii"))
+            self.wfile.write(part)
+            self.wfile.write(b"\r\n")
+            self.wfile.flush()
+            time.sleep(0.2)
+        self.wfile.write(b"0\r\n\r\n")
+        self.wfile.flush()
+
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/health":
@@ -320,6 +342,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/oversize":
             self._write_chunked(OVERSIZE_BODY)
+            return
+        if path == "/delayed-oversize":
+            self._write_delayed_oversize()
             return
         if path == "/small-gzip":
             self._write_chunked(GZIP_BODY, content_encoding="gzip")
@@ -395,6 +420,7 @@ def main():
     if args.print_metrics:
         print(f"SMALL_LEN={len(SMALL_BODY)}")
         print(f"OVERSIZE_LEN={len(OVERSIZE_BODY)}")
+        print(f"DELAYED_LEN={len(DELAYED_BODY)}")
         print(f"GZIP_SOURCE_LEN={len(GZIP_SOURCE_BODY)}")
         print(f"GZIP_COMPRESSED_LEN={len(GZIP_BODY)}")
         print(f"DEFLATE_SOURCE_LEN={len(DEFLATE_SOURCE_BODY)}")
@@ -406,6 +432,7 @@ def main():
         )
         print(f"SMALL_END_TOKEN={SMALL_END_TOKEN}")
         print(f"OVERSIZE_END_TOKEN={OVERSIZE_END_TOKEN}")
+        print(f"DELAYED_END_TOKEN={DELAYED_END_TOKEN}")
         print(f"GZIP_END_TOKEN={GZIP_END_TOKEN}")
         print(f"DEFLATE_END_TOKEN={DEFLATE_END_TOKEN}")
         return
@@ -426,13 +453,13 @@ load_upstream_metrics() {
 
   while IFS='=' read -r key value; do
     case "${key}" in
-      SMALL_LEN|OVERSIZE_LEN|GZIP_SOURCE_LEN|GZIP_COMPRESSED_LEN|DEFLATE_SOURCE_LEN|DEFLATE_COMPRESSED_LEN|TRUNCATED_GZIP_COMPRESSED_LEN|TRUNCATED_DEFLATE_COMPRESSED_LEN)
+      SMALL_LEN|OVERSIZE_LEN|DELAYED_LEN|GZIP_SOURCE_LEN|GZIP_COMPRESSED_LEN|DEFLATE_SOURCE_LEN|DEFLATE_COMPRESSED_LEN|TRUNCATED_GZIP_COMPRESSED_LEN|TRUNCATED_DEFLATE_COMPRESSED_LEN)
         [[ "${value}" =~ ^[0-9]+$ ]] || {
           echo "invalid numeric upstream metric: ${key}=${value}" >&2
           return 1
         }
         ;;
-      SMALL_END_TOKEN|OVERSIZE_END_TOKEN|GZIP_END_TOKEN|DEFLATE_END_TOKEN)
+      SMALL_END_TOKEN|OVERSIZE_END_TOKEN|DELAYED_END_TOKEN|GZIP_END_TOKEN|DEFLATE_END_TOKEN)
         [[ "${value}" =~ ^[A-Z0-9_]+$ ]] || {
           echo "invalid upstream token metric: ${key}=${value}" >&2
           return 1
@@ -586,6 +613,25 @@ actual_oversize_bytes="$(wc -c < "${RAW_DIR}/oversize.body" | tr -d ' ')"
 }
 grep -q "${OVERSIZE_END_TOKEN}" "${RAW_DIR}/oversize.body" || {
   echo "oversize missing final tail marker (possible truncation)" >&2
+  exit 1
+}
+
+echo "==> Case 2b: oversized fail-open must accept later upstream chunks"
+delayed_line="$(curl -sS -D "${RAW_DIR}/delayed.hdr" \
+  -o "${RAW_DIR}/delayed.body" -H "${ACCEPT_MARKDOWN_HEADER}" \
+  --max-time 240 "http://127.0.0.1:${PORT}/stream/delayed-oversize" \
+  -w "${CURL_METRICS_FMT}")"
+echo "${delayed_line}" | grep -q "${PATTERN_HTTP_200}" || {
+  echo "delayed oversize failed: ${delayed_line}" >&2
+  exit 1
+}
+actual_delayed_bytes="$(wc -c < "${RAW_DIR}/delayed.body" | tr -d ' ')"
+[[ "${actual_delayed_bytes}" == "${DELAYED_LEN}" ]] || {
+  echo "delayed oversize body length mismatch: expected ${DELAYED_LEN}, got ${actual_delayed_bytes}" >&2
+  exit 1
+}
+grep -q "${DELAYED_END_TOKEN}" "${RAW_DIR}/delayed.body" || {
+  echo "delayed oversize missing later tail marker (terminal truncation)" >&2
   exit 1
 }
 

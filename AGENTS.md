@@ -320,6 +320,10 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   secret scanning, high-confidence Semgrep rules, and Rust dependency/license
   policy; keep third-party actions pinned to immutable SHAs and keep PR checks
   lightweight [48]
+- Local secret scans must cover Git-tracked worktree content, including tracked
+  edits, while excluding ignored adapter state, caches, and other files that
+  cannot enter a clean release checkout. Preserve NUL-safe filename handling
+  when materializing the tracked scan scope [48]
 - Supply-chain visibility workflows such as Trivy, SBOM generation, and
   OpenSSF Scorecard may run on PR, push, schedule, and manual triggers, but
   remain report-oriented unless a specific blocking threshold is adopted. Do
@@ -497,5 +501,6 @@ remediation:
 | 0.8.1 | 2026-06-10 | Codex | Strengthened Rule 13 for newer release gates that reuse prior-version validators with caller-parameterized active version assertions and current release-matrix schema consumers |
 | 0.8.2 | 2026-06-12 | Kang | Added Rules 44–47: streaming deflate semantics (44), effective_conf NULL-safe access (45), FFI NULL/empty boundary guards (46), terminal-sent latch NGX_AGAIN semantics (47); strengthened Rules 13 (verified-rustup), 30 (cross-TU visibility, sentinel consistency) |
 | 0.8.3 | 2026-06-13 | Codex | Added Rule 48 for supplemental static security and supply-chain gates with focused Semgrep, secret scanning, cargo-deny, Trivy/SBOM/Scorecard, and local Make targets |
+| 0.8.4 | 2026-06-21 | Codex | Strengthened Rule 48 so local secret scans cover tracked release content without inheriting ignored adapter state |
 | 0.8.4 | 2026-06-16 | Codex | Strengthened Rule 13 for release Dockerfile script interpreter prerequisites in minimal images |
 | 0.8.2 | 2026-06-21 | Kang | 0.8.2 patch release closeout: release-gates-check-08x alias, RFC-0008 Accepted, markdown_stream_flush_interval commitment narrowed, multipart header rollback regression tests |
