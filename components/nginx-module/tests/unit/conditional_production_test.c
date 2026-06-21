@@ -52,6 +52,13 @@ struct MarkdownConverterHandle { int dummy; };
     do { (void)(level); (void)(log); (void)(err);               \
          (void)(arg1); } while (0)
 
+#ifdef ngx_log_debug2
+#undef ngx_log_debug2
+#endif
+#define ngx_log_debug2(level, log, err, fmt, arg1, arg2)        \
+    do { (void)(level); (void)(log); (void)(err);               \
+         (void)(arg1); (void)(arg2); } while (0)
+
 #ifdef ngx_log_error
 #undef ngx_log_error
 #endif
@@ -59,6 +66,10 @@ struct MarkdownConverterHandle { int dummy; };
     do { (void)(level); (void)(log); (void)(err); } while (0)
 
 #define ngx_memcpy(dst, src, n)    memcpy(dst, src, n)
+#define ngx_cpymem(dst, src, n)    (((u_char *) memcpy(dst, src, (n))) + (n))
+#define ngx_strncmp(s1, s2, n)     strncmp((const char *) (s1), \
+                                            (const char *) (s2), (n))
+#define ngx_null_string            { 0, NULL }
 #define ngx_pfree(pool, p)         do { (void)(pool); (void)(p); } while (0)
 #define ngx_str_set(str, text)                                          \
     (str)->len = sizeof(text) - 1; (str)->data = (u_char *) text
@@ -71,9 +82,17 @@ struct ngx_pool_s {
     int dummy;
 };
 
+struct ngx_array_s {
+    void       *elts;
+    ngx_uint_t  nelts;
+    size_t      size;
+    ngx_uint_t  nalloc;
+    ngx_pool_t *pool;
+};
+
 /* struct ngx_buf_s provided by nginx_stubs/ngx_core.h */
 
-typedef struct {
+typedef struct ngx_table_elt_s {
     ngx_str_t key;
     ngx_str_t value;
     ngx_uint_t hash;
@@ -106,6 +125,8 @@ struct ngx_http_request_s {
     struct {
         ngx_list_t headers;
         ngx_table_elt_t *accept;
+        ngx_table_elt_t *cookie;
+        ngx_table_elt_t *authorization;
     } headers_in;
     struct {
         ngx_uint_t status;
@@ -185,6 +206,48 @@ static int g_cond_result_code;
 static int g_convert_error_code;
 static uint8_t *g_convert_etag;
 static uintptr_t g_convert_etag_len;
+
+ngx_int_t
+ngx_http_markdown_set_etag(ngx_http_request_t *r, const u_char *etag,
+    size_t etag_len)
+{
+    ngx_list_part_t *part;
+    ngx_table_elt_t *headers;
+
+    for (part = &r->headers_out.headers.part; part != NULL; part = part->next) {
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash != 0 && headers[i].key.len == 4
+                && strncasecmp((const char *) headers[i].key.data,
+                               "ETag", 4)
+                   == 0)
+            {
+                headers[i].hash = 0;
+            }
+        }
+    }
+
+    if (etag == NULL || etag_len == 0) {
+        r->headers_out.etag = NULL;
+        return NGX_OK;
+    }
+
+    ngx_table_elt_t *h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+    h->hash = 1;
+    h->key.data = (u_char *) "ETag";
+    h->key.len = 4;
+    h->value.data = ngx_pnalloc(r->pool, etag_len);
+    if (h->value.data == NULL) {
+        return NGX_ERROR;
+    }
+    ngx_memcpy(h->value.data, etag, etag_len);
+    h->value.len = etag_len;
+    r->headers_out.etag = h;
+    return NGX_OK;
+}
 
 ngx_int_t
 ngx_http_send_header(ngx_http_request_t *r)
@@ -350,6 +413,7 @@ markdown_reason_code_count(void)
 }
 
 #include "../../src/ngx_http_markdown_conditional.c"
+#include "../../src/ngx_http_markdown_auth.c"
 
 static ngx_list_t *
 create_header_list(void)
@@ -423,6 +487,74 @@ test_send_304_with_etag(void)
     TEST_ASSERT(r->headers_out.status == NGX_HTTP_NOT_MODIFIED,
         "Status is 304");
     TEST_PASS("send_304 with ETag");
+}
+
+static void
+test_send_304_replaces_existing_etag(void)
+{
+    ngx_table_elt_t *upstream_etag;
+    ngx_uint_t active_etags;
+
+    g_pool_offset = 0;
+    g_send_header_rc = NGX_OK;
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    upstream_etag = add_header(&r->headers_out.headers,
+                               "ETag", "\"upstream\"");
+    r->headers_out.etag = upstream_etag;
+
+    static uint8_t etag_data[] = "\"markdown\"";
+    struct MarkdownResult result;
+    memset(&result, 0, sizeof(result));
+    result.etag = etag_data;
+    result.etag_len = sizeof(etag_data) - 1;
+
+    ngx_int_t rc = ngx_http_markdown_send_304(r, &result);
+    TEST_ASSERT(rc == NGX_DONE, "send_304 returns NGX_DONE");
+    TEST_ASSERT(upstream_etag->hash == 0,
+                "Existing upstream ETag should be invalidated");
+    TEST_ASSERT(r->headers_out.etag != upstream_etag,
+                "Typed ETag pointer should reference Markdown ETag");
+
+    active_etags = 0;
+    ngx_table_elt_t *headers = r->headers_out.headers.part.elts;
+    for (ngx_uint_t i = 0; i < r->headers_out.headers.part.nelts; i++) {
+        if (headers[i].hash != 0 && headers[i].key.len == 4
+            && strncasecmp((const char *) headers[i].key.data,
+                           "ETag", 4)
+               == 0)
+        {
+            active_etags++;
+        }
+    }
+    TEST_ASSERT(active_etags == 1,
+                "304 response should contain exactly one active ETag");
+    TEST_PASS("send_304 replaces existing ETag");
+}
+
+static void
+test_auth_ignores_invalidated_authorization(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t *authorization;
+
+    g_pool_offset = 0;
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    authorization = add_header(&r->headers_in.headers,
+                               "Authorization", "Bearer stale");
+    r->headers_in.authorization = authorization;
+    authorization->hash = 0;
+
+    TEST_ASSERT(ngx_http_markdown_is_authenticated(r, NULL) == 0,
+                "Invalidated Authorization should not authenticate request");
+
+    authorization->hash = 1;
+    TEST_ASSERT(ngx_http_markdown_is_authenticated(r, NULL) == 1,
+                "Active Authorization should authenticate request");
+    TEST_PASS("invalidated Authorization is ignored");
 }
 
 static void
@@ -867,6 +999,8 @@ main(void)
     printf("========================================\n");
 
     test_send_304_with_etag();
+    test_send_304_replaces_existing_etag();
+    test_auth_ignores_invalidated_authorization();
     test_send_304_null_result();
     test_send_304_empty_etag();
     test_send_304_send_header_fails();

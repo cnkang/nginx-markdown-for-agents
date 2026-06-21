@@ -451,6 +451,8 @@ test_main_conf_create_and_init(void)
         "metrics_shm_size should be unset");
     TEST_ASSERT(mcf->metrics_shm_zone == NULL,
         "metrics_shm_zone should start NULL");
+    TEST_ASSERT(mcf->dynconf_owner_conf == NULL,
+        "dynconf owner config should start NULL");
 
     memset(&zone, 0, sizeof(zone));
     g_shared_zone = &zone;
@@ -686,6 +688,52 @@ test_merge_conf(void)
         "static enabled source should clear complex pointer");
 
     TEST_PASS("merge_conf branches covered");
+}
+
+static void
+test_dynconf_owner_uses_merged_config(void)
+{
+    ngx_conf_t                     cf;
+    ngx_http_markdown_conf_t      *parent;
+    ngx_http_markdown_conf_t      *owner;
+    ngx_http_markdown_main_conf_t  main_conf;
+    char                          *rc;
+
+    TEST_SUBSECTION("dynconf owner uses merged config");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    memset(&main_conf, 0, sizeof(main_conf));
+
+    parent = ngx_http_markdown_create_conf(&cf);
+    owner = ngx_http_markdown_create_conf(&cf);
+    TEST_ASSERT(parent != NULL && owner != NULL,
+        "dynconf merge configs should allocate");
+
+    parent->advanced.dynconf_enabled = 1;
+    parent->advanced.dynconf_dry_run = 1;
+    owner->advanced.dynconf_path.data =
+        (u_char *) "/etc/nginx/markdown-dynconf.conf";
+    owner->advanced.dynconf_path.len =
+        strlen((char *) owner->advanced.dynconf_path.data);
+    main_conf.dynconf_owner_conf = owner;
+
+    rc = ngx_http_markdown_merge_conf(&cf, parent, owner);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "dynconf owner merge should succeed");
+    TEST_ASSERT(ngx_http_markdown_dynconf_owner(&main_conf) == owner,
+        "worker owner lookup should return the path owner");
+    TEST_ASSERT(owner->advanced.dynconf_enabled == 1,
+        "owner should inherit dynconf enablement");
+    TEST_ASSERT(owner->advanced.dynconf_dry_run == 1,
+        "owner should inherit dynconf dry-run mode");
+    TEST_ASSERT(owner->advanced.dynconf_path.len > 0,
+        "owner should retain its configured dynconf path");
+
+    TEST_ASSERT(ngx_http_markdown_dynconf_owner(NULL) == NULL,
+        "worker owner lookup should be NULL-safe");
+
+    TEST_PASS("dynconf watcher binds to coherent merged owner config");
 }
 
 /*
@@ -1394,6 +1442,7 @@ main(void)
     test_main_conf_create_and_init();
     test_create_conf_defaults();
     test_merge_conf();
+    test_dynconf_owner_uses_merged_config();
     test_merge_conf_double_unset();
     test_stream_budget_explicit_maps_to_stream();
     test_stream_preserves_explicit_defaults();

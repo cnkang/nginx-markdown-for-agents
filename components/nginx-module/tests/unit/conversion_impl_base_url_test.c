@@ -894,6 +894,62 @@ test_untrusted_forwarded_headers_ignored(void)
 }
 
 
+/* URI authority delimiters in a trusted forwarded host must be rejected. */
+static void
+test_forwarded_host_authority_delimiters_fall_back(void)
+{
+    static const char *invalid_hosts[] = {
+        "user@attacker.example",
+        "proxy.example#fragment",
+        "proxy.example?query"
+    };
+    ngx_http_request_t r;
+    ngx_http_markdown_conf_t conf;
+    ngx_table_elt_t headers[2];
+    ngx_str_t scheme;
+    ngx_str_t host;
+    ngx_str_t base_url;
+
+    TEST_SUBSECTION("X-Forwarded-Host authority delimiters are rejected");
+
+    for (size_t i = 0; i < ARRAY_SIZE(invalid_hosts); i++) {
+        init_request(&r);
+        memset(&conf, 0, sizeof(conf));
+        conf.ops.trust_forwarded_headers = 1;
+
+        set_str(&r.schema, "http");
+        set_str(&r.headers_in.server, "origin.example.com");
+        set_str(&r.uri, "/articles/page.html");
+
+        set_str(&headers[0].key, "X-Forwarded-Proto");
+        set_str(&headers[0].value, "https");
+        headers[0].hash = 1;
+        set_str(&headers[1].key, "X-Forwarded-Host");
+        set_str(&headers[1].value, invalid_hosts[i]);
+        headers[1].hash = 1;
+        set_single_header_list(&r, headers, ARRAY_SIZE(headers));
+        r.loc_conf = &conf;
+
+        TEST_ASSERT(ngx_http_markdown_select_base_url_parts(
+                        &r, &scheme, &host) == NGX_OK,
+                    "invalid forwarded authority should use direct fallback");
+        assert_str_eq(&scheme, "http", "fallback scheme should be direct");
+        assert_str_eq(&host, "origin.example.com",
+                      "invalid forwarded authority should not enter base_url");
+
+        TEST_ASSERT(ngx_http_markdown_construct_base_url(
+                        &r, r.pool, &base_url) == NGX_OK,
+                    "fallback base_url construction should succeed");
+        assert_str_eq(&base_url,
+                      "http://origin.example.com/articles/page.html",
+                      "base_url should retain direct request authority");
+        free(base_url.data);
+    }
+
+    TEST_PASS("Forwarded authority delimiters fall back safely");
+}
+
+
 static void
 test_direct_request_path(void)
 {
@@ -1947,6 +2003,7 @@ main(void)
 
     test_forwarded_headers_priority();
     test_untrusted_forwarded_headers_ignored();
+    test_forwarded_host_authority_delimiters_fall_back();
     test_direct_request_path();
     test_server_name_fallback_path();
     test_host_with_comma_falls_back();

@@ -62,6 +62,7 @@ ngx_http_markdown_parse_size(const ngx_str_t *line)
 {
     char                 buf[64];
     char                *endptr;
+    char                *number;
     size_t               len;
     size_t               value;
     size_t               scale;
@@ -79,6 +80,17 @@ ngx_http_markdown_parse_size(const ngx_str_t *line)
 
     memcpy(buf, line->data, len);
     buf[len] = '\0';
+
+    number = buf;
+    while (*number == ' ' || *number == '\t' || *number == '\r'
+           || *number == '\n' || *number == '\f' || *number == '\v')
+    {
+        number++;
+    }
+
+    if (*number == '-') {
+        return (size_t) NGX_ERROR;
+    }
 
     suffix = '\0';
     if (len > 1) {
@@ -98,7 +110,7 @@ ngx_http_markdown_parse_size(const ngx_str_t *line)
     }
 
     errno = 0;
-    raw = strtoull(buf, &endptr, 10);
+    raw = strtoull(number, &endptr, 10);
     if (errno == ERANGE || *endptr != '\0'
         || raw > (unsigned long long) NGX_MAX_SIZE_T_VALUE)
     {
@@ -841,8 +853,9 @@ ngx_http_markdown_diagnostics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void
  * to reject the configuration immediately — before nginx -t or
  * worker startup — preventing ambiguous multi-location dynconf.
  *
- * Dynconf supports only a single global instance; the operator must
- * place the directive at http/server level or in only one location.
+ * Dynconf supports only a single global instance; the operator may
+ * place the directive at http, server, or location level, but only
+ * one configuration object may own the global watcher.
  *
  * Duplicate detection reads from ngx_http_markdown_main_conf_t
  * (config-parse scope) rather than a file-scope static, so the flag
@@ -899,6 +912,7 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
     mcf->advanced.dynconf_path = value[1];
     mmcf->dynconf_path_configured = 1;
     mmcf->dynconf_first_path = value[1];
+    mmcf->dynconf_owner_conf = mcf;
 
     return NGX_CONF_OK;
 }
