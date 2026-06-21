@@ -358,7 +358,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 Follow evidence-first verification (no completion claim without fresh command output):
 - Docs/tools changes: `make docs-check`
 - Release-gate tooling: `make release-gates-check`
-- Release gates 0.8.0: `make release-gates-check-080` (comprehensive v0.8.0 release readiness gate)
+- Release gates 0.8.x: `make release-gates-check-08x` (canonical 0.8.x patch-line entry; `release-gates-check-080` is the compatible original name)
 - Rust converter/streaming changes: `make test-rust`
 - Rust example/benchmark changes: `cargo check --all-targets` in the crate
   directory to catch edition-specific errors (examples are only compiled
@@ -498,3 +498,4 @@ remediation:
 | 0.8.2 | 2026-06-12 | Kang | Added Rules 44–47: streaming deflate semantics (44), effective_conf NULL-safe access (45), FFI NULL/empty boundary guards (46), terminal-sent latch NGX_AGAIN semantics (47); strengthened Rules 13 (verified-rustup), 30 (cross-TU visibility, sentinel consistency) |
 | 0.8.3 | 2026-06-13 | Codex | Added Rule 48 for supplemental static security and supply-chain gates with focused Semgrep, secret scanning, cargo-deny, Trivy/SBOM/Scorecard, and local Make targets |
 | 0.8.4 | 2026-06-16 | Codex | Strengthened Rule 13 for release Dockerfile script interpreter prerequisites in minimal images |
+| 0.8.2 | 2026-06-21 | Kang | 0.8.2 patch release closeout: release-gates-check-08x alias, RFC-0008 Accepted, markdown_stream_flush_interval commitment narrowed, multipart header rollback regression tests |

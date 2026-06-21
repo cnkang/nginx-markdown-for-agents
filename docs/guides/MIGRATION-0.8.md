@@ -314,7 +314,7 @@ markdown_stream_excluded_types text/csv application/atom+xml;
 ### Reserved: markdown_stream_flush_interval
 
 > **Not implemented in 0.8.0.** Using this directive causes `nginx -t` to fail.
-> Reserved for a future 0.8.x release for time-based flush control. Do not
+> Reserved for a future release for time-based flush control. Do not
 > include it in configuration files.
 
 ---

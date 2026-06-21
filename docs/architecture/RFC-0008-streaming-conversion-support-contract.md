@@ -2,11 +2,20 @@
 
 | Field          | Value                     |
 |----------------|---------------------------|
-| Status         | Draft                     |
+| Status         | Accepted / Implemented in 0.8.0 |
 | Target Version | 0.8.0                     |
-| Author         | —                         |
+| Author         | Kang                      |
 | Created        | 2026-06-04                |
 | Scope          | True streaming contract, defaults, fallback semantics, support matrix source |
+
+## Implementation Note
+
+RFC-0008 was implemented in 0.8.0, which shipped the true streaming contract,
+fallback semantics, and support matrix source of truth as specified in this
+document. The 0.8.1 patch release added further hardening: streaming header
+commit atomicity (Rule 39 rollback semantics), FFI streaming finish invalid
+input handle ownership / cleanup contract, Content-Type OWS / HTAB compliance,
+and full-buffer backpressure NGX_AGAIN resume tail duplication fix.
 
 ---
 
@@ -167,7 +176,7 @@ the minimum size threshold.
 # markdown_stream_flush_interval 100ms;
 ```
 
-`markdown_stream_flush_interval` is reserved for a future 0.8.x release. Its
+`markdown_stream_flush_interval` is reserved for a future release. Its
 semantics are defined here for completeness: when set, the module MAY also
 flush if the maximum wait time elapses regardless of output size. This
 directive MUST NOT be documented as implemented or accepted in configuration
