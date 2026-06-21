@@ -124,6 +124,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 46 | ffi-crosslang | FFI operations must validate NULL/empty key inputs; guards on both sides of FFI boundary; NULL/empty-input test coverage |
 | 47 | streaming-backpressure | Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return |
 | 48 | security-static-analysis | CodeQL remains primary SAST; supplemental static security and supply-chain gates must stay focused, pinned, low-noise, and locally runnable |
+| 49 | docs-tooling | THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions; add/remove/update entries in same changeset as Cargo.lock changes |
 
 ## Required Agent Workflow
 
@@ -341,6 +342,8 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Workflow/script/dependency security docs must mention the matching local
   targets (`make security-static`, `make supply-chain`) and whether the gate is
   PR-blocking or report-oriented visibility [48]
+- THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions;
+  add/remove/update entries in same changeset as Cargo.lock changes [49]
 
 **If any item would be violated, redesign the change before writing it.**
 

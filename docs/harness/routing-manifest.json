@@ -298,7 +298,8 @@
         "tools/release/**",
         ".github/workflows/**",
         ".sonarcloud.properties",
-        "Makefile"
+        "Makefile",
+        "THIRD-PARTY-NOTICES"
       ],
       "keywords": [
         "docs",
@@ -307,7 +308,9 @@
         "path filter",
         "installation",
         "sonar",
-        "compile_commands"
+        "compile_commands",
+        "THIRD-PARTY-NOTICES",
+        "dependency notices"
       ],
       "verification_families": [
         "harness-sync",
