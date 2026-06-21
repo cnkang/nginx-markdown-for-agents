@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-06-21
+
+Patch release closeout for the 0.8.x line before 0.9.0 spec execution.
+
+### Changed
+
+- Synchronized "current release line" wording across project status, README,
+  installation, compatibility, and package distribution docs to reference 0.8.x
+  (latest patch 0.8.1) rather than 0.8.0.
+- Updated package artifact examples in `PACKAGE_DISTRIBUTION.md` and
+  `COMPATIBILITY.md` from 0.8.0 to 0.8.1 to avoid guiding users toward
+  outdated artifacts.
+- Finalized RFC-0008 status from `Draft` to `Accepted / Implemented in 0.8.0`,
+  with an implementation note covering 0.8.0 streaming contract and 0.8.1
+  Rule 39 / FFI cleanup / OWS / backpressure hardening.
+- Narrowed `markdown_stream_flush_interval` commitment from "future 0.8.x
+  release" to "future release" so the 0.8.x patch line is not bound to
+  delivering it.
+- Added `make release-gates-check-08x` as the canonical 0.8.x patch-line
+  entry point, reusing the 0.8.0 gate logic without duplicating it.
+  `release-gates-check-080` remains as the compatible original name.
+
+### Tests
+
+- Added stream commit multipart header-list rollback regression tests covering
+  cross-part `orig_nelts` semantics (Rule 39 / Rule 40): Vary in part2
+  restoration, target and non-target headers in part2, cross-header rollback
+  across parts (ETag failure rolls back Vary in p1 and ETag in p2), new-push
+  entry invalidation, Cache-Control failure cross-part rollback, and explicit
+  `orig_nelts` cross-part linear count verification.
+
 ## [0.8.1] - 2026-06-20
 
 Maintenance, stability, and security-hardening release on top of 0.8.0:
