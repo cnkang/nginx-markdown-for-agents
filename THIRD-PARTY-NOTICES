@@ -127,7 +127,7 @@ Section B: Rust Conversion Engine Dependencies
 
 --------------------------------------------------------------------------------
 
-7.  blake3 1.8.3
+7.  blake3 1.8.5
     https://github.com/BLAKE3-team/BLAKE3
     License: CC0-1.0 OR Apache-2.0
     Copyright (c) 2019-2024 Samuel Neves and Jack O'Connor
@@ -147,7 +147,7 @@ Section B: Rust Conversion Engine Dependencies
 
 --------------------------------------------------------------------------------
 
-9.  regex 1.12.3
+9.  regex 1.12.4
     https://github.com/rust-lang/regex
     License: MIT OR Apache-2.0
     Copyright (c) 2014 The Rust Project Developers
@@ -177,7 +177,7 @@ Section B: Rust Conversion Engine Dependencies
 
 --------------------------------------------------------------------------------
 
-12. brotli 8.0.2 (Rust crate)
+12. brotli 8.0.4 (Rust crate)
     https://github.com/dropbox/rust-brotli
     License: BSD-3-Clause OR MIT
     Copyright (c) 2016 Dropbox, Inc.
