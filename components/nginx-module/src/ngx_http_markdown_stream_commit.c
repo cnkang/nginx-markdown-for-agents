@@ -5,16 +5,23 @@
  * This is the single authoritative path for all streaming header
  * mutations.  No other code path may mutate streaming response headers.
  *
- * Two-phase design (Rule 39):
+ * Two-phase design with transactional rollback (Rule 39):
  *   Phase 1 (fallible): Vary: Accept, ETag removal, auth Cache-Control.
- *     If any step fails, NGX_ERROR is returned before headers are sent
- *     downstream.  Earlier Phase 1 mutations may be present in
- *     headers_out but are invisible because the pre-commit failure
- *     path aborts to full-buffer processing without committing
- *     Markdown headers.
+ *     Before Phase 1 begins, the original state of every header that
+ *     Phase 1 may touch is snapshotted.  If any Phase 1 step fails,
+ *     the snapshot is used to roll back all prior Phase 1 mutations
+ *     so headers_out is restored to its pre-commit state.  This
+ *     guarantees that the caller's fallback / fail-open path sees
+ *     the original upstream headers, not a partially-mutated set.
  *   Phase 2 (infallible): Content-Type, Content-Length, Content-Encoding.
  *     These are pointer/integer writes that cannot fail.
  *   Only after both phases complete are headers_committed and state set.
+ *
+ * Rollback scope (Rule 39 transactional guarantee):
+ *   The snapshot/rollback covers Vary, ETag, and Cache-Control.
+ *   Modified entries have value/hash restored; newly-pushed entries
+ *   are invalidated via hash=0 (Rule 40); typed ETag pointer restored.
+ *   No use-after-free/double-free/dangling pointer under pool model.
  *
  * Header commit safety invariant:
  *   Header decisions MUST be completed before outgoing headers are
@@ -26,7 +33,234 @@
 #include "ngx_http_markdown_stream_commit.h"
 
 
-/* Function prototypes */
+/* ------------------------------------------------------------------ */
+/*  Snapshot / rollback structures for Rule 39 transactional atomicity */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Maximum number of header entries tracked per single header name
+ * (Vary, ETag, Cache-Control).  Snapshot fails before Phase 1 mutation
+ * when a header has more matching entries, preserving Rule 39 atomicity.
+ */
+#define NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX  4
+
+/*
+ * Per-header snapshot: records the original state of a header entry
+ * that Phase 1 may mutate, so it can be restored on rollback.
+ */
+typedef struct {
+    ngx_table_elt_t  *entry;       /* pointer to the header in headers_out */
+    ngx_str_t         orig_value;  /* original value.data / value.len      */
+    ngx_uint_t        orig_hash;   /* original hash (0 = absent/invalid)   */
+} ngx_http_markdown_hdr_snap_entry_t;
+
+/*
+ * Snapshot for one named header (e.g. Vary).  Also records the
+ * headers list nelts before Phase 1 so newly-pushed entries can be
+ * invalidated on rollback.
+ */
+typedef struct {
+    ngx_http_markdown_hdr_snap_entry_t  entries[NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX];
+    ngx_uint_t                          count;       /* entries snapshotted */
+    ngx_uint_t                          orig_nelts;  /* list nelts before Phase 1 */
+} ngx_http_markdown_hdr_snap_t;
+
+/*
+ * Full Phase 1 snapshot: Vary, ETag, Cache-Control plus the typed
+ * ETag pointer from headers_out.
+ */
+typedef struct {
+    ngx_http_markdown_hdr_snap_t  vary;
+    ngx_http_markdown_hdr_snap_t  etag;
+    ngx_http_markdown_hdr_snap_t  cache_control;
+    ngx_table_elt_t              *orig_etag_ptr;  /* r->headers_out.etag */
+} ngx_http_markdown_commit_snap_t;
+
+
+/* ------------------------------------------------------------------ */
+/*  Snapshot helpers                                                   */
+/* ------------------------------------------------------------------ */
+
+static ngx_flag_t
+ngx_http_markdown_stream_commit_header_matches(
+    const ngx_table_elt_t *entry, const u_char *name, size_t name_len)
+{
+    if (entry->key.len != name_len) {
+        return 0;
+    }
+
+    for (ngx_uint_t i = 0; i < name_len; i++) {
+        if (ngx_tolower(entry->key.data[i]) != ngx_tolower(name[i])) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static ngx_int_t
+ngx_http_markdown_stream_commit_snapshot_entry(
+    ngx_http_markdown_hdr_snap_t *snap, ngx_table_elt_t *entry)
+{
+    if (snap->count >= NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX) {
+        return NGX_ERROR;
+    }
+
+    snap->entries[snap->count].entry = entry;
+    snap->entries[snap->count].orig_value = entry->value;
+    snap->entries[snap->count].orig_hash = entry->hash;
+    snap->count++;
+
+    return NGX_OK;
+}
+
+/*
+ * Snapshot all entries matching a header name in the headers_out list.
+ * Records entry pointer, original value, and original hash for each.  Returns
+ * NGX_ERROR before mutation if the fixed snapshot capacity is exceeded.
+ */
+static ngx_int_t
+ngx_http_markdown_stream_commit_snapshot_header(
+    ngx_http_request_t *r,
+    const u_char *name, size_t name_len,
+    ngx_http_markdown_hdr_snap_t *snap)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+
+    snap->count = 0;
+    snap->orig_nelts = 0;
+
+    part = &r->headers_out.headers.part;
+
+    while (part != NULL) {
+        elts = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            snap->orig_nelts++;
+
+            if (elts[i].hash == 0) {
+                continue;
+            }
+
+            if (!ngx_http_markdown_stream_commit_header_matches(
+                    &elts[i], name, name_len))
+            {
+                continue;
+            }
+
+            if (ngx_http_markdown_stream_commit_snapshot_entry(
+                    snap, &elts[i]) != NGX_OK)
+            {
+                return NGX_ERROR;
+            }
+        }
+        part = part->next;
+    }
+
+    return NGX_OK;
+}
+
+/*
+ * Roll back a single header: restore original value/hash on snapshotted
+ * entries, then invalidate any entries that were pushed after the snapshot
+ * (i.e. entries with index >= orig_nelts that match the header name).
+ * orig_nelts is the total linear entry count across all list parts; rollback
+ * uses the same linear traversal index.
+ */
+static void
+ngx_http_markdown_stream_commit_rollback_header(
+    ngx_http_request_t *r,
+    const u_char *name, size_t name_len,
+    ngx_http_markdown_hdr_snap_t *snap)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+    ngx_uint_t        idx;
+
+    /* Restore snapshotted entries */
+    for (ngx_uint_t i = 0; i < snap->count; i++) {
+        if (snap->entries[i].entry != NULL) {
+            snap->entries[i].entry->value = snap->entries[i].orig_value;
+            snap->entries[i].entry->hash = snap->entries[i].orig_hash;
+        }
+    }
+
+    /* Invalidate newly-pushed entries (hash=0 per Rule 40) */
+    part = &r->headers_out.headers.part;
+    idx = 0;
+
+    while (part != NULL) {
+        elts = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (idx >= snap->orig_nelts
+                && elts[i].hash != 0
+                && ngx_http_markdown_stream_commit_header_matches(
+                    &elts[i], name, name_len))
+            {
+                elts[i].hash = 0;
+            }
+            idx++;
+        }
+        part = part->next;
+    }
+}
+
+/*
+ * Take a full Phase 1 snapshot: Vary, ETag, Cache-Control,
+ * and the typed ETag pointer.
+ */
+static ngx_int_t
+ngx_http_markdown_stream_commit_take_snapshot(
+    ngx_http_request_t *r, ngx_http_markdown_commit_snap_t *snap)
+{
+    if (ngx_http_markdown_stream_commit_snapshot_header(
+            r, (const u_char *) "Vary", 4, &snap->vary) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_stream_commit_snapshot_header(
+            r, (const u_char *) "ETag", 4, &snap->etag) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_stream_commit_snapshot_header(
+            r, (const u_char *) "Cache-Control", 13,
+            &snap->cache_control) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    snap->orig_etag_ptr = r->headers_out.etag;
+
+    return NGX_OK;
+}
+
+/*
+ * Roll back all Phase 1 mutations using the snapshot.
+ */
+static void
+ngx_http_markdown_stream_commit_rollback(
+    ngx_http_request_t *r, ngx_http_markdown_commit_snap_t *snap)
+{
+    ngx_http_markdown_stream_commit_rollback_header(
+        r, (const u_char *) "Vary", 4, &snap->vary);
+
+    ngx_http_markdown_stream_commit_rollback_header(
+        r, (const u_char *) "ETag", 4, &snap->etag);
+
+    ngx_http_markdown_stream_commit_rollback_header(
+        r, (const u_char *) "Cache-Control", 13, &snap->cache_control);
+
+    /* Restore typed ETag pointer */
+    r->headers_out.etag = snap->orig_etag_ptr;
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Function prototypes                                                */
+/* ------------------------------------------------------------------ */
 
 static ngx_int_t
 ngx_http_markdown_stream_commit_remove_content_length(
@@ -75,7 +309,8 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
                                          ngx_http_markdown_ctx_t *ctx,
                                          const ngx_http_markdown_conf_t *conf)
 {
-    ngx_int_t  rc;
+    ngx_int_t                        rc;
+    ngx_http_markdown_commit_snap_t  snap;
 
     if (r == NULL || ctx == NULL) {
         return NGX_ERROR;
@@ -102,32 +337,25 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
     /*
      * --- Phase 1: Fallible header operations ---
      *
-     * These operations may fail (e.g. allocation failure in Vary).
-     * Order: Vary -> ETag -> auth Cache-Control.
-     * If any fails, headers have not been sent downstream.
-     *
-     * Note: Vary and ETag removal are ordered before Content-Type
-     * and Content-Length because they can fail.  Content-Type
-     * assignment and Content-Length removal are infallible and
-     * belong to Phase 2.
-     *
-     * Atomicity guarantee: if Vary succeeds but ETag fails, the
-     * Vary header HAS been added to the headers_out list.  However,
-     * the request is still in pre-commit state and headers have NOT
-     * been sent to the network.  The pre-commit failure path aborts
-     * to full-buffer processing without committing Markdown headers,
-     * so the extra Vary: Accept is harmless — it does not change
-     * content negotiation semantics for an HTML response.
-     * Similarly, a removed ETag in the headers list is not visible
-     * because the full-buffer path restores upstream headers before
-     * sending.
+     * Snapshot the original header state before any mutation.
+     * If any step fails, roll back all prior mutations so
+     * headers_out is restored to its pre-commit state.
      */
+
+    rc = ngx_http_markdown_stream_commit_take_snapshot(r, &snap);
+    if (rc != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown stream commit: "
+                      "snapshot capacity exceeded before header mutation");
+        return NGX_ERROR;
+    }
 
     rc = ngx_http_markdown_stream_commit_set_vary(r);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown stream commit: "
                       "failed to set Vary header");
+        ngx_http_markdown_stream_commit_rollback(r, &snap);
         return NGX_ERROR;
     }
 
@@ -136,6 +364,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown stream commit: "
                       "failed to remove ETag");
+        ngx_http_markdown_stream_commit_rollback(r, &snap);
         return NGX_ERROR;
     }
 
@@ -145,6 +374,7 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown stream commit: "
                       "failed to apply auth Cache-Control");
+        ngx_http_markdown_stream_commit_rollback(r, &snap);
         return NGX_ERROR;
     }
 

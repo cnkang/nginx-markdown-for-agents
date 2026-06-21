@@ -485,7 +485,7 @@ release-gates-check-070:
 	@$(MAKE) harness-check
 	@echo "  Harness Rule Coverage Gate: ALL PASSED"
 
-# release-gates-check-080: comprehensive v0.8.0 release readiness gate.
+# release-gates-check-080: comprehensive v0.8.x release readiness gate.
 #
 # Coverage policy source: AGENTS.md Rule 25
 #   - 80% aggregate line+function coverage (programmatic gate via coverage_gate.py)
@@ -541,8 +541,10 @@ release-gates-check-070:
 #                                           when NGINX source or lcov/cargo-llvm-cov
 #                                           is unavailable
 
+RELEASE_GATE_080_ACTIVE_VERSION ?= 0.8.1
+
 release-gates-check-080:
-	@echo "=== v0.8.0 Release Gate: Starting ==="
+	@echo "=== v0.8.x Release Gate: Starting ($(RELEASE_GATE_080_ACTIVE_VERSION)) ==="
 	@echo "  [1/17] build + check-headers"
 	$(MAKE) build
 	$(MAKE) check-headers
@@ -609,15 +611,15 @@ release-gates-check-080:
 	@echo "  [13/17] validate_naming.py (artifact naming)"
 	python3 tools/release/gates/validate_naming.py
 	@echo "  [14/17] v0.8.0 gate validators (0.8-specific: compat bridge removal, new directives)"
-	python3 tools/release/gates/validate_release_gates_080.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_release_gates_080.py
 	python3 tools/release/gates/validate_config_directives_080.py
 	@echo "  [15/17] legacy/prior-version regression validators (0.7.0 gates remain active)"
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_release_gates_070.py --mode strict
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_metrics_070.py
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_reason_codes_070.py
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_package_metadata_070.py
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_k8s_manifests_070.py
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=0.8.0 python3 tools/release/gates/validate_fuzz_packaging_070.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_release_gates_070.py --mode strict
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_metrics_070.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_reason_codes_070.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_package_metadata_070.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_k8s_manifests_070.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_fuzz_packaging_070.py
 	@echo "  [16/17] harness boundary: routing-manifest.json + risk-packs (Req 9)"
 	@test -f docs/harness/routing-manifest.json || { echo "FAIL: docs/harness/routing-manifest.json not found — release gates require repo-owned harness sources" >&2; exit 1; }
 	@test -d docs/harness/risk-packs || { echo "FAIL: docs/harness/risk-packs/ not found — release gates require repo-owned risk-pack inputs" >&2; exit 1; }
@@ -630,7 +632,7 @@ release-gates-check-080:
 	@if [ -d ".kiro/specs" ] && grep -r "\.kiro/" tools/release/ tools/harness/ 2>/dev/null | grep -v "\.kiro/steering" | grep -qv "^$$"; then \
 		echo "WARNING: potential .kiro/ reference found in gate validators (review needed)" >&2; \
 	fi
-	@echo "=== v0.8.0 Release Gate: ALL PASSED ==="
+	@echo "=== v0.8.x Release Gate: ALL PASSED ($(RELEASE_GATE_080_ACTIVE_VERSION)) ==="
 
 release-gates-check-legacy:
 	python3 tools/release/legacy/validate_release_gates.py
@@ -807,7 +809,7 @@ help:
 	@echo "  release-gates-check-055  - Validate 0.5.5 release gates (evidence, known-diffs, docs)"
 	@echo "  release-gates-check-060  - Validate 0.6.0 release gates (streaming default, pruning, budget)"
 	@echo "  release-gates-check-070  - Validate 0.7.0 release gates (runtime correctness, package compat, fuzz)"
-	@echo "  release-gates-check-080  - Validate 0.8.0 release gates (streaming, coverage, matrix, harness boundary)"
+	@echo "  release-gates-check-080  - Validate 0.8.x release gates (streaming, coverage, matrix, harness boundary)"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
 	@echo "  release-notes            - Generate release notes from release-matrix.json"

@@ -74,7 +74,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 
 | Rule | Domain File | Summary |
 |------|-------------|---------|
-| 1 | streaming-backpressure | Persist unsent chain on NGX_AGAIN; never overwrite pending with terminal last_buf |
+| 1 | streaming-backpressure | Resume NGX_AGAIN according to chain ownership; never duplicate or overwrite pending data |
 | 2 | streaming-backpressure | Correct return codes in fail-open branches; don't advance unconsumed buffer positions; cross-ref Rule 38 for replay buffer |
 | 3 | memory-budget | Enforce all budgets; free auxiliary buffers on all exits; track peak memory |
 | 4 | encoding-charset | Preserve incomplete UTF-8 tails across chunks; flush decoders at EOF |
@@ -114,7 +114,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 36 | harness-routing | Route recurring tooling fixes to focused security family |
 | 37 | e2e-runner | Rust-first E2E; no new Python e2e files; parity entries required |
 | 38 | streaming-backpressure | Replay buffer init/append failure → precommit_error; failopen_completed flag; delivery after downstream OK |
-| 39 | nginx-idioms | NGX_DONE terminal semantics; return immediately after finalize; multi-step header atomicity |
+| 39 | nginx-idioms | NGX_DONE terminal semantics; multi-step header atomicity; bounded snapshots fail before mutation |
 | 40 | nginx-idioms | Filter hash==0 (invalidated) headers in all lookup/iteration functions |
 | 41 | shell | Shell harness detect_*.sh scripts must use POSIX ERE ([[:space:]] not \s); grep -E for extended patterns |
 | 42 | c-safety | volatile only for single-threaded compiler barriers; direct aggregate __atomic_* usage is forbidden |
@@ -144,7 +144,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-converter, **S** = shell, **P** = python, **D** = docs
 
 **Streaming & Backpressure** (C)
-- Pending-chain preserved on NGX_AGAIN; last_buf not overwritten while pending [1]
+- NGX_AGAIN resume honors chain ownership: module-owned chains persist; downstream-owned chains drain with NULL; last_buf never overwrites pending data [1]
 - Fail-open return codes correct; replay buffer init/append failure → precommit_error [2,38]
 - failopen_completed prevents duplicate finalize; failopen_count after downstream OK [38]
 - UTF-8 tails preserved across chunk boundaries; flush at EOF [4]
@@ -186,6 +186,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - effective_conf NULL-safe access; cross-TU field visibility; sentinel consistency [45]
 - NGX_DONE terminal: return immediately after finalize_request; callers check NGX_DONE [39]
 - Multi-step header modification atomic: abort on first failure, no partial apply [39]
+- Bounded transaction snapshots: capacity overflow fails before mutation; never silently truncate rollback state [39]
 - Header lookup/iteration filters hash==0 (invalidated) entries [40]
 
 **HTML Sanitizer & Output Safety** (C, R, D)
