@@ -41,7 +41,6 @@ const PARSER_BYTES_PER_INPUT_BYTE: u64 = 7;
 const PARSER_BYTES_PER_TAG_OPENER: u64 = 512;
 
 /// Estimate the peak parser/transcoding/DOM working set before parsing.
-///
 /// Returns `u64::MAX` on arithmetic overflow so callers fail closed against
 /// every finite parser budget.
 pub(crate) fn estimate_parser_working_set(input_len: usize, tag_openers: usize) -> u64 {

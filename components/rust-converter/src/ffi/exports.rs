@@ -386,16 +386,12 @@ pub unsafe extern "C" fn markdown_make_decision(
 }
 
 /// Build a header plan for a successful Markdown conversion.
-///
 /// The returned plan contains Rust-owned buffers. The C caller must release
 /// the plan via `markdown_header_plan_free`.
-///
 /// This function treats `result` as uninitialized output storage and never
 /// reads its previous fields. Callers that already own a plan in the same
 /// storage must call `markdown_header_plan_free` before rebuilding it.
-///
 /// # Safety
-///
 /// The caller must ensure that:
 /// - `content_type` points to readable UTF-8 bytes of `content_type_len`
 /// - `result` points to writable storage for a `FFIHeaderPlan`; its previous
@@ -416,6 +412,9 @@ pub unsafe extern "C" fn markdown_build_header_plan(
      * any field before initialization: writable C storage may be uninitialized. */
     unsafe { ptr::write(result, std::mem::zeroed()) };
     let result_ref = unsafe { &mut *result };
+    /* Centralize the empty-plan shape so construction and panic fallback
+     * stay synchronized if FFIHeaderPlan gains fields. */
+    reset_header_plan_to_empty(result_ref);
 
     // Defense-in-depth: header plan construction allocates and builds string
     // buffers. A panic must never unwind into C. On panic we leave the output
@@ -512,11 +511,20 @@ pub unsafe extern "C" fn markdown_build_header_plan(
     }));
 
     if outcome.is_err() {
-        /* Panic caught — ensure a safe zeroed state (empty plan). */
-        result_ref.handle = std::ptr::null_mut();
-        result_ref.entries = std::ptr::null();
-        result_ref.count = 0;
+        /* Panic caught — ensure a safe empty plan. */
+        reset_header_plan_to_empty(result_ref);
     }
+}
+
+/// Reset an `FFIHeaderPlan` to the safe empty shape (no entries, null handle).
+///
+/// Centralizes the zeroed-plan initialization used both at construction time
+/// (before `markdown_build_header_plan` populates it) and on panic fallback,
+/// so the two paths cannot drift apart if `FFIHeaderPlan` gains fields.
+fn reset_header_plan_to_empty(plan: &mut FFIHeaderPlan) {
+    plan.handle = std::ptr::null_mut();
+    plan.entries = std::ptr::null();
+    plan.count = 0;
 }
 
 /// Validate a URL for use in Markdown link destinations.
