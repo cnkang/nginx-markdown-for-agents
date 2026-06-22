@@ -1580,10 +1580,10 @@ test_feed_mocked_inflate_paths(void)
 /*
  * test_finish_zlib_paths_and_helpers - Verify the finish_zlib helper's
  * error, budget, overflow, expansion, and finalize-failure paths, plus
- * the finish_free_heap helper.
+ * the free_heap helper.
  *
  * Branches covered:
- *   - finish_free_heap frees and clears a non-NULL heap pointer
+ *   - free_heap frees and clears a non-NULL heap pointer
  *   - inflate error during Z_FINISH returns NGX_ERROR
  *   - budget exceeded during finish tail returns
  *     NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED
@@ -1606,9 +1606,9 @@ test_finish_zlib_paths_and_helpers(void)
 
     heap_buf = malloc(16);
     TEST_ASSERT(heap_buf != NULL, "heap allocation should succeed");
-    ngx_http_markdown_streaming_decomp_finish_free_heap(&heap_buf);
+    ngx_http_markdown_streaming_decomp_free_heap(&heap_buf);
     TEST_ASSERT(heap_buf == NULL,
-        "finish helper should free and clear non-NULL heap pointer");
+        "free_heap should free and clear non-NULL heap pointer");
 
     test_pool_reset(&tp);
     decomp = ngx_http_markdown_streaming_decomp_create(

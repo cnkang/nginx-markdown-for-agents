@@ -280,6 +280,24 @@ ngx_http_markdown_streaming_decomp_check_limit(
 
 
 /*
+ * Free a heap-allocated buffer through a pointer-to-pointer,
+ * guarding against NULL pointer and setting the pointer to NULL
+ * after release to prevent dangling references.
+ *
+ * Used consistently across inflate, brotli, feed, and finish
+ * paths to enforce a single defensive free pattern.
+ */
+static void
+ngx_http_markdown_streaming_decomp_free_heap(u_char **heap_buf_ptr)
+{
+    if (heap_buf_ptr != NULL && *heap_buf_ptr != NULL) {
+        ngx_free(*heap_buf_ptr);
+        *heap_buf_ptr = NULL;
+    }
+}
+
+
+/*
  * Expand a heap-backed working buffer to double its size.
  *
  * On success, *heap_buf_ptr is updated to the new allocation
@@ -310,10 +328,7 @@ ngx_http_markdown_streaming_decomp_expand_buf(
             "markdown: "
             "expand_buf size overflow, old_size=%uz",
             old_size);
-        if (*heap_buf_ptr != NULL) {
-            ngx_free(*heap_buf_ptr);
-            *heap_buf_ptr = NULL;
-        }
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return NGX_ERROR;
     }
 
@@ -324,18 +339,13 @@ ngx_http_markdown_streaming_decomp_expand_buf(
 
     new_buf = ngx_alloc(new_size, log);
     if (new_buf == NULL) {
-        if (*heap_buf_ptr != NULL) {
-            ngx_free(*heap_buf_ptr);
-            *heap_buf_ptr = NULL;
-        }
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return NGX_ERROR;
     }
 
     ngx_memcpy(new_buf, *buf_ptr, old_size);
 
-    if (*heap_buf_ptr != NULL) {
-        ngx_free(*heap_buf_ptr);
-    }
+    ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
 
     *heap_buf_ptr = new_buf;
     *buf_ptr = new_buf;
@@ -415,9 +425,7 @@ ngx_http_markdown_streaming_decomp_inflate_step(
         ngx_log_error(NGX_LOG_ERR, log, 0,
             "markdown: "
             "inflate error %d", zrc);
-        if (*heap_buf_ptr != NULL) {
-            ngx_free(*heap_buf_ptr);
-        }
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return -1;
     }
 
@@ -432,9 +440,7 @@ ngx_http_markdown_streaming_decomp_inflate_step(
             "decompressed size %uz exceeds limit %uz",
             decomp->total_decompressed + *out_produced,
             decomp->max_decompressed_size);
-        if (*heap_buf_ptr != NULL) {
-            ngx_free(*heap_buf_ptr);
-        }
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return -2;  /* budget exceeded */
     }
 
@@ -455,8 +461,7 @@ ngx_http_markdown_streaming_decomp_inflate_step(
             remaining = decomp->max_decompressed_size
                         - decomp->total_decompressed;
             if (*buf_size_ptr >= remaining) {
-                ngx_free(*heap_buf_ptr);
-                *heap_buf_ptr = NULL;
+                ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
                 return -2;
             }
         }
@@ -483,9 +488,7 @@ ngx_http_markdown_streaming_decomp_inflate_step(
                     "expanded buffer half %uz exceeds "
                     "zlib uInt max",
                     *buf_size_ptr / 2);
-                if (*heap_buf_ptr != NULL) {
-                    ngx_free(*heap_buf_ptr);
-                }
+                ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
                 return -1;
             }
             decomp->state.zlib.avail_out = half_out;
@@ -612,9 +615,7 @@ ngx_http_markdown_streaming_decomp_brotli_step(
         ngx_log_error(NGX_LOG_ERR, log, 0,
             "markdown: "
             "brotli decode error");
-        if (*heap_buf_ptr != NULL) {
-            ngx_free(*heap_buf_ptr);
-        }
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return -1;
     }
 
@@ -628,9 +629,7 @@ ngx_http_markdown_streaming_decomp_brotli_step(
             "decompressed size %uz exceeds limit %uz",
             decomp->total_decompressed + *out_produced,
             decomp->max_decompressed_size);
-        if (*heap_buf_ptr != NULL) {
-            ngx_free(*heap_buf_ptr);
-        }
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return -2;  /* budget exceeded */
     }
 
@@ -649,8 +648,7 @@ ngx_http_markdown_streaming_decomp_brotli_step(
             remaining = decomp->max_decompressed_size
                         - decomp->total_decompressed;
             if (old_size >= remaining) {
-                ngx_free(*heap_buf_ptr);
-                *heap_buf_ptr = NULL;
+                ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
                 return -2;
             }
         }
@@ -763,8 +761,7 @@ ngx_http_markdown_streaming_decomp_feed_zlib(
             "markdown: "
             "buffer size %uz exceeds zlib uInt max",
             *buf_size_ptr);
-        ngx_free(*buf_ptr);
-        *buf_ptr = NULL;
+        ngx_http_markdown_streaming_decomp_free_heap(buf_ptr);
         return NGX_ERROR;
     }
 
@@ -801,8 +798,7 @@ ngx_http_markdown_streaming_decomp_feed_case_zlib(
             "markdown: "
             "input length %uz exceeds zlib uInt max",
             in_len);
-        ngx_free(*ctx->buf_ptr);
-        *ctx->buf_ptr = NULL;
+        ngx_http_markdown_streaming_decomp_free_heap(ctx->buf_ptr);
         return NGX_ERROR;
     }
 
@@ -953,6 +949,7 @@ ngx_http_markdown_streaming_decomp_feed(
 
     default:
         ngx_free(buf);
+        buf = NULL;
         return NGX_DECLINED;
     }
 
@@ -982,17 +979,6 @@ ngx_http_markdown_streaming_decomp_feed(
     *out_data = buf;
     *out_len = produced;
     return NGX_OK;
-}
-
-
-static void
-ngx_http_markdown_streaming_decomp_finish_free_heap(
-    u_char **heap_buf_ptr)
-{
-    if (*heap_buf_ptr != NULL) {
-        ngx_free(*heap_buf_ptr);
-        *heap_buf_ptr = NULL;
-    }
 }
 
 
@@ -1034,7 +1020,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             ngx_log_error(NGX_LOG_ERR, log, 0,
                 "markdown: "
                 "finish inflate error %d", zrc);
-            ngx_http_markdown_streaming_decomp_finish_free_heap(
+            ngx_http_markdown_streaming_decomp_free_heap(
                 &heap_buf);
             return NGX_ERROR;
         }
@@ -1050,7 +1036,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
                 "decompressed size %uz exceeds limit %uz",
                 decomp->total_decompressed + *produced_ptr,
                 decomp->max_decompressed_size);
-            ngx_http_markdown_streaming_decomp_finish_free_heap(
+            ngx_http_markdown_streaming_decomp_free_heap(
                 &heap_buf);
             return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
         }
@@ -1066,7 +1052,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             ngx_log_error(NGX_LOG_ERR, log, 0,
                 "markdown: "
                 "finish inflate incomplete stream");
-            ngx_http_markdown_streaming_decomp_finish_free_heap(
+            ngx_http_markdown_streaming_decomp_free_heap(
                 &heap_buf);
             return NGX_ERROR;
         }
@@ -1083,7 +1069,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
                 && old_size >= decomp->max_decompressed_size
                                - decomp->total_decompressed)
             {
-                ngx_http_markdown_streaming_decomp_finish_free_heap(
+                ngx_http_markdown_streaming_decomp_free_heap(
                     &heap_buf);
                 return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
             }
@@ -1116,7 +1102,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
                         "finish expand %uz exceeds "
                         "zlib uInt max",
                         *buf_size_ptr - old_size);
-                    ngx_http_markdown_streaming_decomp_finish_free_heap(
+                    ngx_http_markdown_streaming_decomp_free_heap(
                         &heap_buf);
                     return NGX_ERROR;
                 }
