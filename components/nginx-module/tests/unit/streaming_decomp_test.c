@@ -1277,14 +1277,16 @@ test_create_helper_and_limit_branches(void)
     buf_size = 16;
     g_palloc_fail_once = 1;
     rc = ngx_http_markdown_streaming_decomp_finalize_buf(
-        heap_buf, &buf, &buf_size, 8, &tp.pool);
+        &heap_buf, &buf, &buf_size, 8, &tp.pool);
     /*
-     * finalize_buf() takes ownership of heap_buf and frees it on
-     * both success and error paths.
+     * finalize_buf() takes ownership of the heap buffer by pointer-to-
+     * pointer and frees it on both success and error paths, clearing
+     * *heap_buf_ptr so the caller cannot double-free or leak it.
      */
-    heap_buf = NULL;
     TEST_ASSERT(rc == NGX_ERROR,
         "finalize_buf should fail when pool allocation fails");
+    TEST_ASSERT(heap_buf == NULL,
+        "finalize_buf should clear heap pointer on error");
 
     TEST_PASS("create/helper/limit branches covered");
 }

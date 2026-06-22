@@ -1104,7 +1104,7 @@ ngx_http_markdown_streaming_resume_pending(
     ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf)
 {
-    ngx_chain_t  *out;
+    const ngx_chain_t  *out;
     ngx_int_t     rc;
     ngx_flag_t    pending_last_buf;
 
