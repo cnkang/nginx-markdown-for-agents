@@ -27,6 +27,11 @@ fi
 # excluding ignored adapter state and other non-release files.
 tar --null -T "$file_list" -cf - | tar -xf - -C "$scan_root"
 
+if [[ -z "$(ls -A "$scan_root")" ]]; then
+    echo "ERROR: gitleaks scan root is empty after extraction" >&2
+    exit 1
+fi
+
 cd "$scan_root"
 gitleaks detect \
     --source . \
