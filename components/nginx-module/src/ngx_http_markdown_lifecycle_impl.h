@@ -131,12 +131,9 @@ ngx_http_markdown_init_worker(ngx_cycle_t *cycle)
          * into the shared metrics struct.  This is a global (http-level)
          * setting because the SHM metrics struct is process-wide.
          */
-        if (ngx_http_markdown_metrics != NULL) {
-            if (mcf != NULL)
-            {
-                ngx_http_markdown_metrics->per_path.cardinality_limit =
-                    mcf->metrics_per_path_cardinality;
-            }
+        if (ngx_http_markdown_metrics != NULL && mcf != NULL) {
+            ngx_http_markdown_metrics->per_path.cardinality_limit =
+                mcf->metrics_per_path_cardinality;
         }
     }
 
