@@ -1661,11 +1661,8 @@ test_finish_zlib_paths_and_helpers(void)
         decomp, &buf, &buf_size, &produced, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "finish_zlib should fail on inflate error");
-    /*
-     * finish_zlib() frees the heap buffer on error and clears
-     * *buf_ptr, so buf is NULL here.
-     */
-    free(buf);
+    TEST_ASSERT(buf == NULL,
+        "finish_zlib should clear buf after freeing heap on inflate error");
     free(decomp);
 
     test_pool_reset(&tp);
@@ -1681,11 +1678,8 @@ test_finish_zlib_paths_and_helpers(void)
         decomp, &buf, &buf_size, &produced, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
         "finish_zlib should return budget exceeded when tail is too large");
-    /*
-     * finish_zlib() frees the heap buffer on budget-exceeded and
-     * clears *buf_ptr, so buf is NULL here.
-     */
-    free(buf);
+    TEST_ASSERT(buf == NULL,
+        "finish_zlib should clear buf after freeing heap on budget exceeded");
     free(decomp);
 
     test_pool_reset(&tp);
@@ -1699,10 +1693,8 @@ test_finish_zlib_paths_and_helpers(void)
         decomp, &buf, &buf_size, &produced, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "finish_zlib should fail when initial finish buffer exceeds uInt");
-    /*
-     * g_static_pool_buf is not freed by free_heap (it checks for
-     * this special address), and *buf_ptr is cleared to NULL.
-     */
+    TEST_ASSERT(buf == NULL,
+        "finish_zlib should clear buf on uInt overflow (g_static_pool_buf not freed)");
     free(decomp);
 
     test_pool_reset(&tp);
@@ -1742,11 +1734,8 @@ test_finish_zlib_paths_and_helpers(void)
         decomp, &buf, &buf_size, &produced, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "finish_zlib should fail when finalize_buf cannot allocate");
-    /*
-     * finish_zlib() frees the heap buffer on finalize_buf failure and
-     * clears *buf_ptr, so buf is NULL here.
-     */
-    buf = NULL;
+    TEST_ASSERT(buf == NULL,
+        "finish_zlib should clear buf after freeing heap on finalize failure");
     free(decomp);
 
     TEST_PASS("finish_zlib helper/error/budget/expand branches covered");
