@@ -716,21 +716,20 @@ impl StreamingConverter {
         // Sanitize
         let decision = self.sanitizer.process_event(event);
 
-        let sanitized_event = match decision {
-            SanitizeDecision::Pass(ev) | SanitizeDecision::PassModified(ev) => ev,
-            SanitizeDecision::Skip => return Ok(()),
-            SanitizeDecision::DepthExceeded => {
-                return Err(self.wrap_error(ConversionError::MemoryLimit(
-                    "nesting depth exceeded during sanitization".to_string(),
-                )));
-            }
-        };
-
         // Mirror implied end-tag closures (e.g. `</p>` before `<div>`) into
         // the StructuralStateMachine so its context stack does not leak stale
         // open elements. The sanitizer tracks which optional end tags were
         // implied by the incoming StartTag; we synthesize the corresponding
-        // Exit actions here, before processing the StartTag itself.
+        // Exit actions here, BEFORE the Skip decision is applied.
+        //
+        // This must happen before the Skip/Pass branch because implied
+        // closures are produced even when the current tag is stripped or
+        // skipped (e.g. `<form>` in FORM_ELEMENTS is skipped but still
+        // triggers `</p>` closure via PARAGRAPH_CLOSING_START_TAGS).
+        // Dropping the closures on Skip would leave the state machine's
+        // context stack stale, causing downstream content to be emitted
+        // in the wrong block context (e.g. paragraph text glued to form
+        // content).
         let implied_closures = std::mem::take(&mut self.sanitizer.implied_closures);
         for closed_tag in &implied_closures {
             let synthetic = StreamEvent::EndTag {
@@ -745,6 +744,16 @@ impl StreamingConverter {
                 .map_err(|e| self.wrap_error(e))?;
             self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
         }
+
+        let sanitized_event = match decision {
+            SanitizeDecision::Pass(ev) | SanitizeDecision::PassModified(ev) => ev,
+            SanitizeDecision::Skip => return Ok(()),
+            SanitizeDecision::DepthExceeded => {
+                return Err(self.wrap_error(ConversionError::MemoryLimit(
+                    "nesting depth exceeded during sanitization".to_string(),
+                )));
+            }
+        };
 
         // State machine
         let action = self
