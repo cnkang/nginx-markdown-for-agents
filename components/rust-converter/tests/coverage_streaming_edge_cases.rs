@@ -258,6 +258,69 @@ fn test_streaming_code_block() {
     assert!(md.contains("fn main"));
 }
 
+/// Verifies that the streaming path recognizes the `lang-` prefix for code
+/// fence languages, matching the full-buffer path (parity requirement).
+#[test]
+fn test_streaming_code_block_lang_prefix_parity() {
+    let mut converter = make_converter();
+    let html = b"<pre><code class=\"lang-python\">print(\"hello\")</code></pre>";
+    converter.feed_chunk(html).expect("feed failed");
+    let result = converter.finalize().expect("finalize failed");
+    let md = String::from_utf8_lossy(&result.final_markdown);
+    assert!(md.contains("python"), "streaming should honor lang- prefix, got: {md}");
+}
+
+/// Verifies that an invalid language followed by a valid one is handled
+/// correctly in the streaming path, matching the full-buffer path.
+#[test]
+fn test_streaming_code_block_invalid_then_valid_language_parity() {
+    let mut converter = make_converter();
+    let html = b"<pre><code class=\"language-bad/token language-rust\">fn main() {}</code></pre>";
+    converter.feed_chunk(html).expect("feed failed");
+    let result = converter.finalize().expect("finalize failed");
+    let md = String::from_utf8_lossy(&result.final_markdown);
+    assert!(md.contains("rust"), "streaming should pick rust, got: {md}");
+    assert!(!md.contains("bad/token"));
+}
+
+/// Regression: omitted `</p>` before a block-level start tag (e.g. `<div>`)
+/// must produce a separator between the paragraph text and the following
+/// block, not glue them together. The streaming sanitizer mirrors implied
+/// end-tag closures into the StructuralStateMachine so the paragraph context
+/// is exited before the next block opens.
+#[test]
+fn test_streaming_omitted_p_closure_separates_blocks() {
+    let mut converter = make_converter();
+    let html = b"<html><body><p>intro<div>block</div></body></html>";
+    converter.feed_chunk(html).expect("feed failed");
+    let result = converter.finalize().expect("finalize failed");
+    let md = String::from_utf8_lossy(&result.final_markdown);
+    assert!(
+        !md.contains("introblock"),
+        "paragraph text must not glue to following block, got: {md}"
+    );
+    assert!(md.contains("intro"), "missing intro: {md}");
+    assert!(md.contains("block"), "missing block: {md}");
+}
+
+/// Regression: omitted `</li>` between consecutive list items must not
+/// merge item content. The sanitizer's implied closure for `<li>` is
+/// propagated to the StructuralStateMachine.
+#[test]
+fn test_streaming_omitted_li_closure_separates_items() {
+    let mut converter = make_converter();
+    let html = b"<html><body><ul><li>first<li>second</ul></body></html>";
+    converter.feed_chunk(html).expect("feed failed");
+    let result = converter.finalize().expect("finalize failed");
+    let md = String::from_utf8_lossy(&result.final_markdown);
+    assert!(md.contains("first"), "missing first: {md}");
+    assert!(md.contains("second"), "missing second: {md}");
+    assert!(
+        !md.contains("firstsecond"),
+        "list items must not glue together, got: {md}"
+    );
+}
+
 #[test]
 fn test_streaming_list() {
     let mut converter = make_converter();
