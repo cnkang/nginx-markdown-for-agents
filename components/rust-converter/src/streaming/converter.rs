@@ -726,6 +726,26 @@ impl StreamingConverter {
             }
         };
 
+        // Mirror implied end-tag closures (e.g. `</p>` before `<div>`) into
+        // the StructuralStateMachine so its context stack does not leak stale
+        // open elements. The sanitizer tracks which optional end tags were
+        // implied by the incoming StartTag; we synthesize the corresponding
+        // Exit actions here, before processing the StartTag itself.
+        let implied_closures = std::mem::take(&mut self.sanitizer.implied_closures);
+        for closed_tag in &implied_closures {
+            let synthetic = StreamEvent::EndTag {
+                name: closed_tag.clone(),
+            };
+            let action = self
+                .state_machine
+                .process_event(&synthetic)
+                .map_err(|e| self.wrap_error(e))?;
+            self.emitter
+                .process_action(&action, &mut self.state_machine)
+                .map_err(|e| self.wrap_error(e))?;
+            self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
+        }
+
         // State machine
         let action = self
             .state_machine
