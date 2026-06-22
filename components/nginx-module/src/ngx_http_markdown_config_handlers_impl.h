@@ -62,7 +62,7 @@ ngx_http_markdown_parse_size(const ngx_str_t *line)
 {
     char                 buf[64];
     char                *endptr;
-    char                *number;
+    const char          *number;
     size_t               len;
     size_t               value;
     size_t               scale;
@@ -88,7 +88,7 @@ ngx_http_markdown_parse_size(const ngx_str_t *line)
         number++;
     }
 
-    if (*number == '-') {
+    if (*number == '\0' || *number == '-') {
         return (size_t) NGX_ERROR;
     }
 
@@ -111,7 +111,7 @@ ngx_http_markdown_parse_size(const ngx_str_t *line)
 
     errno = 0;
     raw = strtoull(number, &endptr, 10);
-    if (errno == ERANGE || *endptr != '\0'
+    if (errno == ERANGE || endptr == number || *endptr != '\0'
         || raw > (unsigned long long) NGX_MAX_SIZE_T_VALUE)
     {
         return (size_t) NGX_ERROR;
