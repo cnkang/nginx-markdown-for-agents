@@ -306,6 +306,42 @@ fn test_streaming_omitted_p_closure_separates_blocks() {
     assert!(md.contains("block"), "missing block: {md}");
 }
 
+/// Regression: implied `</p>` closure before a skipped `<form>` must still
+/// propagate to the state machine. The sanitizer produces `implied_closures`
+/// even when the current tag is returned as `Skip` (e.g. `<form>` is both a
+/// PARAGRAPH_CLOSING_START_TAG and a FORM_ELEMENT). Prior to the fix, the
+/// `Skip` branch returned before consuming implied closures, leaving the
+/// state machine's paragraph context open and gluing "intro" to form content.
+#[test]
+fn test_streaming_implied_closure_before_skip_propagates() {
+    let mut converter = make_converter();
+    let html = b"<html><body><p>intro<form>inside</form></body></html>";
+    converter.feed_chunk(html).expect("feed failed");
+    let result = converter.finalize().expect("finalize failed");
+    let md = String::from_utf8_lossy(&result.final_markdown);
+    assert!(md.contains("intro"), "missing intro: {md}");
+    assert!(
+        !md.contains("introinside"),
+        "skipped form must not glue to preceding paragraph, got: {md}"
+    );
+}
+
+/// Regression: second paragraph after skipped form must not merge with the first.
+#[test]
+fn test_streaming_implied_closure_before_skip_multiple_paragraphs() {
+    let mut converter = make_converter();
+    let html = b"<html><body><p>first<form>skip</form><p>second</body></html>";
+    converter.feed_chunk(html).expect("feed failed");
+    let result = converter.finalize().expect("finalize failed");
+    let md = String::from_utf8_lossy(&result.final_markdown);
+    assert!(md.contains("first"), "missing first: {md}");
+    assert!(md.contains("second"), "missing second: {md}");
+    assert!(
+        !md.contains("firstsecond"),
+        "paragraphs must not merge through skipped form, got: {md}"
+    );
+}
+
 /// Regression: omitted `</li>` between consecutive list items must not
 /// merge item content. The sanitizer's implied closure for `<li>` is
 /// propagated to the StructuralStateMachine.
