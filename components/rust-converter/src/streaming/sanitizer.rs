@@ -157,6 +157,13 @@ pub struct StreamingSanitizer {
     /// Name of the outermost pruned element that entered prune mode,
     /// for name-aware exit (same pattern as skip_element).
     prune_element: Option<String>,
+    /// Tags that were implicitly closed by the most recent
+    /// `close_optional_end_tags_for_start` call, in close order
+    /// (innermost first). Consumed by the streaming converter to mirror
+    /// the closures into the StructuralStateMachine so its context stack
+    /// does not leak stale open elements (e.g. `Paragraph` surviving an
+    /// implied `</p>` when `<div>` opens).
+    pub(crate) implied_closures: Vec<String>,
 }
 
 impl StreamingSanitizer {
@@ -181,6 +188,7 @@ impl StreamingSanitizer {
             prune_config: PruneConfig::disabled(),
             prune_depth: 0,
             prune_element: None,
+            implied_closures: Vec::new(),
         }
     }
 
@@ -242,6 +250,7 @@ impl StreamingSanitizer {
     /// }
     /// ```
     pub fn process_event(&mut self, event: StreamEvent) -> SanitizeDecision {
+        self.implied_closures.clear();
         match &event {
             StreamEvent::StartTag {
                 name,
@@ -582,12 +591,14 @@ impl StreamingSanitizer {
         if let Some(idx) = close_index
             && targets.contains(&self.nesting_stack[idx].as_str())
         {
-            self.truncate_nesting_stack(idx);
+            let closed = self.truncate_nesting_stack(idx);
+            self.implied_closures.extend(closed);
         }
     }
 
     /// Removes an implicitly closed element and all of its open descendants.
-    fn truncate_nesting_stack(&mut self, index: usize) {
+    /// Returns the closed tag names in close order (innermost first).
+    fn truncate_nesting_stack(&mut self, index: usize) -> Vec<String> {
         let closed_tags: Vec<String> = self.nesting_stack.drain(index..).collect();
         for tag in closed_tags.iter().rev() {
             if let Some(strip_index) = self.strip_stack.iter().rposition(|open| open == tag) {
@@ -595,6 +606,7 @@ impl StreamingSanitizer {
             }
         }
         self.nesting_depth = self.nesting_stack.len();
+        closed_tags
     }
 }
 
