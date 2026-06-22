@@ -854,6 +854,12 @@ ngx_http_markdown_streaming_decomp_feed_case_brotli(
  *   NGX_ERROR    - decompression error or size limit exceeded
  *   NGX_DECLINED - unsupported format
  */
+static ngx_int_t ngx_http_markdown_streaming_decomp_apply_limits(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    size_t produced,
+    u_char **buf_ptr,
+    ngx_log_t *log);
+
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_feed(
     ngx_http_markdown_streaming_decomp_t *decomp,
