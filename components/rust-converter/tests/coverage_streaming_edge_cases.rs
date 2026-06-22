@@ -306,6 +306,22 @@ fn test_streaming_omitted_p_closure_separates_blocks() {
     assert!(md.contains("block"), "missing block: {md}");
 }
 
+/// Implied paragraph closure must unwind nested inline contexts from the
+/// inside out so their Markdown delimiters do not cross the paragraph break.
+#[test]
+fn test_streaming_implied_p_closure_unwinds_inline_contexts_first() {
+    let mut converter = make_converter();
+    let html = b"<html><body><p><strong>intro<div>block</div></body></html>";
+    converter.feed_chunk(html).expect("feed failed");
+    let result = converter.finalize().expect("finalize failed");
+    let md = String::from_utf8_lossy(&result.final_markdown);
+
+    assert!(
+        md.contains("**intro**\n"),
+        "bold delimiter must close before the paragraph break, got: {md}"
+    );
+}
+
 /// Regression: implied `</p>` closure before a skipped `<form>` must still
 /// propagate to the state machine. The sanitizer produces `implied_closures`
 /// even when the current tag is returned as `Skip` (e.g. `<form>` is both a

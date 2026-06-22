@@ -599,13 +599,14 @@ impl StreamingSanitizer {
     /// Removes an implicitly closed element and all of its open descendants.
     /// Returns the closed tag names in close order (innermost first).
     fn truncate_nesting_stack(&mut self, index: usize) -> Vec<String> {
-        let closed_tags: Vec<String> = self.nesting_stack.drain(index..).collect();
+        let mut closed_tags: Vec<String> = self.nesting_stack.drain(index..).collect();
         for tag in closed_tags.iter().rev() {
             if let Some(strip_index) = self.strip_stack.iter().rposition(|open| open == tag) {
                 self.strip_stack.remove(strip_index);
             }
         }
         self.nesting_depth = self.nesting_stack.len();
+        closed_tags.reverse();
         closed_tags
     }
 }
