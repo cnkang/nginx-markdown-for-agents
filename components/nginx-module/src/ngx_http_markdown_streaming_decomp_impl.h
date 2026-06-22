@@ -1257,7 +1257,7 @@ ngx_http_markdown_streaming_decomp_finish(
     }
 
     buf_size = 4096;
-    buf = ngx_palloc(pool, buf_size);
+    buf = ngx_alloc(buf_size, log);
     if (buf == NULL) {
         return NGX_ERROR;
     }
