@@ -991,8 +991,12 @@ ngx_http_markdown_streaming_decomp_feed(
 
     /*
      * Post-decode size validation: check for overflow and budget limits.
-     * Returns NGX_OK on success, or the appropriate error code after
-     * freeing the heap buffer. On success, total_decompressed is updated.
+     * Returns NGX_OK on success, or the appropriate error code.
+     * On success, total_decompressed is updated.
+     *
+     * Ownership: the decode loop's finalize_buf() has already transferred
+     * the heap workspace to pool memory. apply_limits() validates only
+     * and does not free the buffer — pool reclaim handles its lifetime.
      */
     {
         ngx_int_t  limit_rc;
@@ -1013,8 +1017,15 @@ ngx_http_markdown_streaming_decomp_feed(
 /*
  * Validate decompressed size against overflow and budget limits after
  * a decode pass. On success, updates decomp->total_decompressed and
- * returns NGX_OK. On failure, frees the heap buffer and returns the
- * appropriate error code (NGX_ERROR or NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED).
+ * returns NGX_OK. On failure, returns the appropriate error code
+ * (NGX_ERROR or NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) without
+ * freeing the buffer.
+ *
+ * Ownership note: when called from ngx_http_markdown_streaming_decomp_feed,
+ * the decode loop has already called finalize_buf() which transferred
+ * the heap workspace to pool memory. The buffer at *buf_ptr is
+ * therefore pool-allocated and must NOT be freed here — the pool
+ * reclaim handles its lifetime.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_apply_limits(
@@ -1023,18 +1034,14 @@ ngx_http_markdown_streaming_decomp_apply_limits(
     u_char **buf_ptr,
     ngx_log_t *log)
 {
+    (void) buf_ptr;
+
     if (decomp->total_decompressed > NGX_MAX_SIZE_T_VALUE - produced) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
             "markdown: "
             "decompressed size overflow, total=%uz produced=%uz",
             decomp->total_decompressed,
             produced);
-        /*
-         * buf holds a freshly allocated heap buffer that the decode
-         * loop did not transfer to pool memory on this error path;
-         * release it and keep the output slots cleared.
-         */
-        ngx_http_markdown_streaming_decomp_free_heap(buf_ptr);
         return NGX_ERROR;
     }
 
@@ -1048,7 +1055,6 @@ ngx_http_markdown_streaming_decomp_apply_limits(
             "decompressed size %uz exceeds limit %uz",
             decomp->total_decompressed,
             decomp->max_decompressed_size);
-        ngx_http_markdown_streaming_decomp_free_heap(buf_ptr);
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
 
