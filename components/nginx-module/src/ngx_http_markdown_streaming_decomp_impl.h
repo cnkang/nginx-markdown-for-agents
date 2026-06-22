@@ -1057,6 +1057,61 @@ ngx_http_markdown_streaming_decomp_apply_limits(
 
 
 static ngx_int_t
+ngx_http_markdown_streaming_decomp_finish_zlib_expand(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    u_char **heap_buf_ptr,
+    u_char **buf_ptr,
+    size_t *buf_size_ptr,
+    ngx_flag_t *using_heap_ptr,
+    ngx_log_t *log)
+{
+    size_t   old_size;
+    uInt     expand_out;
+
+    old_size = *buf_size_ptr;
+    if (decomp->max_decompressed_size > 0
+        && old_size >= decomp->max_decompressed_size
+                       - decomp->total_decompressed)
+    {
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    }
+    /*
+     * expand_buf() frees any previous heap buffer if expansion fails,
+     * so we can safely return directly on NGX_ERROR here.
+     */
+    if (ngx_http_markdown_streaming_decomp_expand_buf(
+            heap_buf_ptr, buf_ptr, buf_size_ptr,
+            decomp->max_decompressed_size > 0
+            ? decomp->max_decompressed_size
+              - decomp->total_decompressed
+            : 0,
+            log)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    *using_heap_ptr = 1;
+    decomp->state.zlib.next_out = *buf_ptr + old_size;
+    if (ngx_http_markdown_streaming_decomp_size_to_uint(
+            *buf_size_ptr - old_size, &expand_out))
+    {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+            "markdown: "
+            "finish expand %uz exceeds "
+            "zlib uInt max",
+            *buf_size_ptr - old_size);
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        return NGX_ERROR;
+    }
+    decomp->state.zlib.avail_out = expand_out;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
 ngx_http_markdown_streaming_decomp_finish_zlib(
     ngx_http_markdown_streaming_decomp_t *decomp,
     u_char **buf_ptr,
@@ -1068,6 +1123,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
     u_char      *heap_buf;
     ngx_flag_t   using_heap;
     int          zrc;
+    ngx_int_t    rc;
 
     heap_buf = NULL;
     using_heap = 0;
@@ -1135,53 +1191,11 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             continue;
         }
 
-        {
-            size_t  old_size;
-
-            old_size = *buf_size_ptr;
-            if (decomp->max_decompressed_size > 0
-                && old_size >= decomp->max_decompressed_size
-                               - decomp->total_decompressed)
-            {
-                ngx_http_markdown_streaming_decomp_free_heap(
-                    &heap_buf);
-                return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
-            }
-            /*
-             * expand_buf() frees any previous heap buffer if expansion fails,
-             * so we can safely return directly on NGX_ERROR here.
-             */
-            if (ngx_http_markdown_streaming_decomp_expand_buf(
-                    &heap_buf, buf_ptr, buf_size_ptr,
-                    decomp->max_decompressed_size > 0
-                    ? decomp->max_decompressed_size
-                      - decomp->total_decompressed
-                    : 0,
-                    log)
-                != NGX_OK)
-            {
-                return NGX_ERROR;
-            }
-
-            using_heap = 1;
-            decomp->state.zlib.next_out = *buf_ptr + old_size;
-            {
-                uInt  expand_out;
-
-                if (ngx_http_markdown_streaming_decomp_size_to_uint(
-                        *buf_size_ptr - old_size, &expand_out))
-                {
-                    ngx_log_error(NGX_LOG_ERR, log, 0,
-                        "markdown: "
-                        "finish expand %uz exceeds "
-                        "zlib uInt max",
-                        *buf_size_ptr - old_size);
-                    ngx_http_markdown_streaming_decomp_free_heap(
-                        &heap_buf);
-                    return NGX_ERROR;
-                }
-                decomp->state.zlib.avail_out = expand_out;
-            }
+        rc = ngx_http_markdown_streaming_decomp_finish_zlib_expand(
+                 decomp, &heap_buf, buf_ptr, buf_size_ptr,
+                 &using_heap, log);
+        if (rc != NGX_OK) {
+            return rc;
         }
     }
 
