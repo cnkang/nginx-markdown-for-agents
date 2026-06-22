@@ -40,4 +40,22 @@ EOF
 chmod +x "$tmp_dir/bin/gitleaks"
 
 PATH="$tmp_dir/bin:$PATH" bash "$repo_root/tools/security/run_gitleaks_tracked.sh"
+
+deleted_repo="$tmp_dir/deleted-repo"
+mkdir -p "$deleted_repo"
+git -C "$deleted_repo" init -q
+printf '%s\n' 'tracked-live-content' > "$deleted_repo/AGENTS.md"
+printf '%s\n' 'tracked-before-delete' > "$deleted_repo/removed.txt"
+git -C "$deleted_repo" add AGENTS.md removed.txt
+git -C "$deleted_repo" \
+    -c user.name='Harness Test' \
+    -c user.email='harness@example.invalid' \
+    commit -qm 'test fixture'
+rm -f "$deleted_repo/removed.txt"
+
+(
+    cd "$deleted_repo"
+    PATH="$tmp_dir/bin:$PATH" \
+        bash "$repo_root/tools/security/run_gitleaks_tracked.sh"
+)
 echo "gitleaks tracked-worktree scope test passed"
