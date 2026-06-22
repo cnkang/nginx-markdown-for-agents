@@ -267,7 +267,10 @@ fn test_streaming_code_block_lang_prefix_parity() {
     converter.feed_chunk(html).expect("feed failed");
     let result = converter.finalize().expect("finalize failed");
     let md = String::from_utf8_lossy(&result.final_markdown);
-    assert!(md.contains("python"), "streaming should honor lang- prefix, got: {md}");
+    assert!(
+        md.contains("python"),
+        "streaming should honor lang- prefix, got: {md}"
+    );
 }
 
 /// Verifies that an invalid language followed by a valid one is handled

@@ -343,25 +343,25 @@ impl MarkdownConverter {
             } = child.data
                 && name.local.as_ref() == "code"
             {
-                    for attr in attrs.borrow().iter() {
-                        if attr.name.local.as_ref() == "class" {
-                            let class_value = attr.value.to_string();
-                            for class in class_value.split_whitespace() {
-                                let candidate = class
-                                    .strip_prefix("language-")
-                                    .or_else(|| class.strip_prefix("lang-"));
-                                if let Some(lang) = candidate
-                                    && let Some(valid) = Self::safe_code_language(lang)
-                                {
-                                    language = valid;
-                                    break;
-                                }
-                            }
-                            if !language.is_empty() {
+                for attr in attrs.borrow().iter() {
+                    if attr.name.local.as_ref() == "class" {
+                        let class_value = attr.value.to_string();
+                        for class in class_value.split_whitespace() {
+                            let candidate = class
+                                .strip_prefix("language-")
+                                .or_else(|| class.strip_prefix("lang-"));
+                            if let Some(lang) = candidate
+                                && let Some(valid) = Self::safe_code_language(lang)
+                            {
+                                language = valid;
                                 break;
                             }
                         }
+                        if !language.is_empty() {
+                            break;
+                        }
                     }
+                }
             }
         }
 

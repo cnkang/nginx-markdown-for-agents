@@ -163,9 +163,7 @@ fn test_metadata_extraction_honors_conversion_timeout() {
 fn test_metadata_extraction_times_out_during_traversal() {
     let mut html = String::from("<html><head><title>Deep</title>");
     for i in 0..4000 {
-        html.push_str(&format!(
-            "<meta name=\"k{i}\" content=\"v{i}\" />"
-        ));
+        html.push_str(&format!("<meta name=\"k{i}\" content=\"v{i}\" />"));
     }
     html.push_str("</head></html>");
 

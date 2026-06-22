@@ -823,16 +823,12 @@ void markdown_make_decision(uint8_t enabled,
 
 /**
  * Build a header plan for a successful Markdown conversion.
- *
  * The returned plan contains Rust-owned buffers. The C caller must release
  * the plan via `markdown_header_plan_free`.
- *
  * This function treats `result` as uninitialized output storage and never
  * reads its previous fields. Callers that already own a plan in the same
  * storage must call `markdown_header_plan_free` before rebuilding it.
- *
  * # Safety
- *
  * The caller must ensure that:
  * - `content_type` points to readable UTF-8 bytes of `content_type_len`
  * - `result` points to writable storage for a `FFIHeaderPlan`; its previous
