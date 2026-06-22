@@ -222,7 +222,11 @@ impl StructuralStateMachine {
                 if self.current_context() == Some(&StructuralContext::CodeBlock(None)) {
                     let lang = attrs.iter().find(|(k, _)| k == "class").and_then(|(_, v)| {
                         v.split_whitespace()
-                            .filter_map(|class| class.strip_prefix("language-"))
+                            .filter_map(|class| {
+                                class
+                                    .strip_prefix("language-")
+                                    .or_else(|| class.strip_prefix("lang-"))
+                            })
                             .find(|language| is_safe_code_fence_language(language))
                             .map(ToOwned::to_owned)
                     });
