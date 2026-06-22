@@ -156,6 +156,31 @@ fn test_metadata_extraction_honors_conversion_timeout() {
     assert!(matches!(error, ConversionError::Timeout));
 }
 
+/// Verify that timeout checks inside the metadata DOM traversal are enforced,
+/// not just the entry-point check. A shallow DOM passes the initial deadline,
+/// but a deep DOM with many meta tags must trip `increment_and_check()` mid-walk.
+#[test]
+fn test_metadata_extraction_times_out_during_traversal() {
+    let mut html = String::from("<html><head><title>Deep</title>");
+    for i in 0..4000 {
+        html.push_str(&format!(
+            "<meta name=\"k{i}\" content=\"v{i}\" />"
+        ));
+    }
+    html.push_str("</head></html>");
+
+    let dom = parse_html(html.as_bytes()).unwrap();
+    let extractor = MetadataExtractor::new(None, false);
+    let mut ctx = ConversionContext::new(Duration::from_millis(1));
+
+    let result = extractor.extract_with_context(&dom, &mut ctx);
+
+    assert!(
+        matches!(result, Err(ConversionError::Timeout)),
+        "expected mid-traversal timeout, got {result:?}"
+    );
+}
+
 #[test]
 fn test_url_fallback_to_base_url() {
     let html = b"<html><head><title>Test</title></head></html>";
