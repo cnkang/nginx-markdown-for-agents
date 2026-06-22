@@ -117,6 +117,16 @@ static ngx_uint_t g_palloc_return_static_once = 0;
 static size_t g_palloc_bytes = 0;
 
 /*
+ * g_palloc_ptrs / g_palloc_ptr_count — Tracks pointers returned by ngx_palloc
+ * so that ngx_free() can detect an illegal free of pool memory.  In real
+ * NGINX, pool allocations cannot be individually freed; this catches the
+ * ownership bug where apply_limits() called free_heap() on a pool buffer.
+ */
+#define G_PALLOC_PTR_MAX  256
+static void    *g_palloc_ptrs[G_PALLOC_PTR_MAX];
+static size_t   g_palloc_ptr_count = 0;
+
+/*
  * g_pcalloc_fail_once - When non-zero, the next call to ngx_pcalloc returns
  * NULL and the flag is cleared.  Used to inject a single zeroed-allocation
  * failure.
@@ -222,6 +232,8 @@ test_reset_inflate_mode(void)
 void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
 {
+    void  *p;
+
     UNUSED(pool);
     g_palloc_bytes += size;
     if (g_palloc_fail_once) {
@@ -232,7 +244,11 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
         g_palloc_return_static_once = 0;
         return g_static_pool_buf;
     }
-    return malloc(size);
+    p = malloc(size);
+    if (p != NULL && g_palloc_ptr_count < G_PALLOC_PTR_MAX) {
+        g_palloc_ptrs[g_palloc_ptr_count++] = p;
+    }
+    return p;
 }
 
 /*
@@ -304,8 +320,24 @@ ngx_alloc(size_t size, ngx_log_t *log)
 void
 ngx_free(void *p)
 {
+    size_t  i;
+
+    if (p == NULL) {
+        return;
+    }
     if (p == g_static_pool_buf) {
         return;
+    }
+    for (i = 0; i < g_palloc_ptr_count; i++) {
+        if (g_palloc_ptrs[i] == p) {
+            fprintf(stderr,
+                "TEST FAIL: ngx_free() called on pool-allocated pointer %p\n"
+                "  pool index=%zu g_palloc_ptr_count=%zu\n"
+                "  This indicates an ownership bug — pool memory must not "
+                "be individually freed.\n",
+                p, i, g_palloc_ptr_count);
+            abort();
+        }
     }
     free(p);
 }
@@ -572,6 +604,7 @@ test_pool_reset(test_pool_t *tp)
     g_palloc_fail_once = 0;
     g_palloc_return_static_once = 0;
     g_palloc_bytes = 0;
+    g_palloc_ptr_count = 0;
     g_pcalloc_fail_once = 0;
     g_alloc_fail_once = 0;
     g_alloc_return_static_once = 0;
