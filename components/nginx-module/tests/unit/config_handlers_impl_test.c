@@ -1527,6 +1527,21 @@ test_parse_size_edge_cases(void)
     TEST_ASSERT(result == (size_t) NGX_ERROR,
         "negative suffixed size with leading space should return NGX_ERROR");
 
+    set_arg(&line, "   ");
+    result = ngx_http_markdown_parse_size(&line);
+    TEST_ASSERT(result == (size_t) NGX_ERROR,
+        "all-whitespace input should return NGX_ERROR (empty after trim)");
+
+    set_arg(&line, "   abc");
+    result = ngx_http_markdown_parse_size(&line);
+    TEST_ASSERT(result == (size_t) NGX_ERROR,
+        "whitespace followed by non-digits should return NGX_ERROR");
+
+    set_arg(&line, "   12abc");
+    result = ngx_http_markdown_parse_size(&line);
+    TEST_ASSERT(result == (size_t) NGX_ERROR,
+        "digits followed by non-numeric trailing should return NGX_ERROR");
+
     TEST_PASS("parse_size edge cases covered");
 }
 
