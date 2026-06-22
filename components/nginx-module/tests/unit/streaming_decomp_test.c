@@ -1661,6 +1661,10 @@ test_finish_zlib_paths_and_helpers(void)
         decomp, &buf, &buf_size, &produced, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "finish_zlib should fail on inflate error");
+    /*
+     * finish_zlib() frees the heap buffer on error and clears
+     * *buf_ptr, so buf is NULL here.
+     */
     free(buf);
     free(decomp);
 
@@ -1677,6 +1681,10 @@ test_finish_zlib_paths_and_helpers(void)
         decomp, &buf, &buf_size, &produced, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
         "finish_zlib should return budget exceeded when tail is too large");
+    /*
+     * finish_zlib() frees the heap buffer on budget-exceeded and
+     * clears *buf_ptr, so buf is NULL here.
+     */
     free(buf);
     free(decomp);
 
@@ -1691,6 +1699,10 @@ test_finish_zlib_paths_and_helpers(void)
         decomp, &buf, &buf_size, &produced, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "finish_zlib should fail when initial finish buffer exceeds uInt");
+    /*
+     * g_static_pool_buf is not freed by free_heap (it checks for
+     * this special address), and *buf_ptr is cleared to NULL.
+     */
     free(decomp);
 
     test_pool_reset(&tp);
@@ -1708,6 +1720,11 @@ test_finish_zlib_paths_and_helpers(void)
         "finish_zlib should succeed when mocked flow expands then ends");
     TEST_ASSERT(produced > 64,
         "finish_zlib expand path should report produced bytes above old size");
+    /*
+     * On success finalize_buf() transfers the heap buffer to pool
+     * memory and frees the heap allocation, so buf now points to a
+     * pool-owned buffer (malloc-backed in this harness).
+     */
     free(buf);
     free(decomp);
 
@@ -1726,8 +1743,8 @@ test_finish_zlib_paths_and_helpers(void)
     TEST_ASSERT(rc == NGX_ERROR,
         "finish_zlib should fail when finalize_buf cannot allocate");
     /*
-     * finish_zlib() owns the expanded heap buffer and finalize_buf()
-     * frees it on this error path, so buf is dangling here by design.
+     * finish_zlib() frees the heap buffer on finalize_buf failure and
+     * clears *buf_ptr, so buf is NULL here.
      */
     buf = NULL;
     free(decomp);

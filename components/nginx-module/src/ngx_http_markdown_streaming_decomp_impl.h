@@ -1131,8 +1131,15 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
     int          zrc;
     ngx_int_t    rc;
 
-    heap_buf = NULL;
-    using_heap = 0;
+    /*
+     * Track the caller-supplied buffer (allocated via ngx_alloc in
+     * finish()) as the initial heap workspace.  This ensures
+     * finalize_buf() always transfers produced bytes to pool memory
+     * and releases the heap allocation, regardless of whether
+     * expansion occurred.
+     */
+    heap_buf = *buf_ptr;
+    using_heap = 1;
 
     decomp->state.zlib.next_in = Z_NULL;
     decomp->state.zlib.avail_in = 0;
@@ -1144,6 +1151,8 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             "markdown: "
             "finish buffer %uz exceeds zlib uInt max",
             *buf_size_ptr);
+        ngx_http_markdown_streaming_decomp_free_heap(&heap_buf);
+        *buf_ptr = NULL;
         return NGX_ERROR;
     }
 
@@ -1158,6 +1167,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
                 "finish inflate error %d", zrc);
             ngx_http_markdown_streaming_decomp_free_heap(
                 &heap_buf);
+            *buf_ptr = NULL;
             return NGX_ERROR;
         }
 
@@ -1174,6 +1184,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
                 decomp->max_decompressed_size);
             ngx_http_markdown_streaming_decomp_free_heap(
                 &heap_buf);
+            *buf_ptr = NULL;
             return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
         }
 
@@ -1190,6 +1201,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
                 "finish inflate incomplete stream");
             ngx_http_markdown_streaming_decomp_free_heap(
                 &heap_buf);
+            *buf_ptr = NULL;
             return NGX_ERROR;
         }
 
@@ -1201,19 +1213,23 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
                  decomp, &heap_buf, buf_ptr, buf_size_ptr,
                  &using_heap, log);
         if (rc != NGX_OK) {
+            *buf_ptr = NULL;
             return rc;
         }
     }
 
-    if (!using_heap) {
-        return NGX_OK;
-    }
-
+    /*
+     * Always finalize: transfer produced bytes to pool memory (or
+     * free the heap buffer if nothing was produced).  This guarantees
+     * the caller receives either a pool-owned buffer or NULL/0, never
+     * a leaked raw heap pointer.
+     */
     if (ngx_http_markdown_streaming_decomp_finalize_buf(
             &heap_buf, buf_ptr, buf_size_ptr,
             *produced_ptr, pool)
         != NGX_OK)
     {
+        *buf_ptr = NULL;
         return NGX_ERROR;
     }
 
@@ -1224,12 +1240,20 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
 /*
  * Finish decompression (handle last_buf).
  *
+ * Allocates a transient heap workspace via ngx_alloc, then delegates to
+ * the format-specific finish path.  On success the workspace is either
+ * transferred to pool memory (via finalize_buf) or freed when no output
+ * is produced; the caller always receives a pool-owned buffer or
+ * NULL/0, never a raw heap pointer.
+ *
  * For zlib, flushes remaining data with Z_FINISH.
- * For brotli, checks stream completeness.
+ * For brotli, checks stream completeness (no tail output).
+ *
+ * All error paths free the heap workspace before returning.
  *
  * Returns:
- *   NGX_OK    - success
- *   NGX_ERROR - decompression error
+ *   NGX_OK    - success (*out_data is pool-owned or NULL)
+ *   NGX_ERROR - decompression error (heap workspace freed)
  */
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_finish(
@@ -1276,6 +1300,11 @@ ngx_http_markdown_streaming_decomp_finish(
                 decomp, &buf, &buf_size,
                 &produced, pool, log);
         if (finish_rc != NGX_OK) {
+            /*
+             * finish_zlib frees the heap buffer on all error paths
+             * and clears *buf_ptr, so buf is already NULL here.
+             */
+            buf = NULL;
             return finish_rc;
         }
         break;
@@ -1289,13 +1318,24 @@ ngx_http_markdown_streaming_decomp_finish(
             ngx_log_error(NGX_LOG_WARN, log, 0,
                 "markdown: "
                 "brotli stream not finished");
+            ngx_free(buf);
+            buf = NULL;
             return NGX_ERROR;
         }
         decomp->finished = 1;
+        /*
+         * Brotli finish produces no tail output; free the heap
+         * workspace and return NULL/0 to the caller.
+         */
+        ngx_free(buf);
+        buf = NULL;
+        produced = 0;
         break;
 #endif
 
     default:
+        ngx_free(buf);
+        buf = NULL;
         return NGX_ERROR;
     }
 
