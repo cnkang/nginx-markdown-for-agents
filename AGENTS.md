@@ -79,7 +79,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 3 | memory-budget | Enforce all budgets; free auxiliary buffers on all exits; track peak memory |
 | 4 | encoding-charset | Preserve incomplete UTF-8 tails across chunks; flush decoders at EOF |
 | 5 | html-sanitizer | Void elements self-closing; skip-mode name-aware; nesting-depth saturation-safe |
-| 6 | html-sanitizer | In-link markers accumulated; code-block raw/fence state preserved across text-event boundaries; blockquote consistent; URL extraction includes media elements |
+| 6 | html-sanitizer | In-link markers accumulated; structural closures unwind inner-to-outer; code-block raw/fence state preserved across text-event boundaries; blockquote consistent; URL extraction includes media elements |
 | 7 | observability-metrics | Explicit skip-reason mapping; reason-code tests aligned; new reason codes need log_decision() callsite |
 | 8 | observability-metrics | Fail on truncation; SHM layout version; non-overlapping Prometheus families; every metric has runtime write; delivery counters after success; format string argument matching |
 | 8b | observability-metrics | Config nesting matches code; consumer accepts both key names; combined report reads streaming_metrics first |
@@ -193,6 +193,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 **HTML Sanitizer & Output Safety** (C, R, D)
 - Void elements self-closing; skip-mode name-aware [5]
 - In-link markers accumulated; code-block raw/fence state preserved across text-event boundaries; media URL extraction [6]
+- Implied or batched structural closures unwind inner-to-outer before enclosing block state [6]
 - Link/URL escaping at every emission site; reject control chars [27]
 
 **Testing & Coverage** (C, T, R)
@@ -322,8 +323,9 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   lightweight [48]
 - Local secret scans must cover Git-tracked worktree content, including tracked
   edits, while excluding ignored adapter state, caches, and other files that
-  cannot enter a clean release checkout. Preserve NUL-safe filename handling
-  when materializing the tracked scan scope [48]
+  cannot enter a clean release checkout. Omit tracked paths that are absent due
+  to worktree deletions, and preserve NUL-safe filename handling when
+  materializing the tracked scan scope [48]
 - Supply-chain visibility workflows such as Trivy, SBOM generation, and
   OpenSSF Scorecard may run on PR, push, schedule, and manual triggers, but
   remain report-oriented unless a specific blocking threshold is adopted. Do
@@ -502,5 +504,6 @@ remediation:
 | 0.8.2 | 2026-06-12 | Kang | Added Rules 44–47: streaming deflate semantics (44), effective_conf NULL-safe access (45), FFI NULL/empty boundary guards (46), terminal-sent latch NGX_AGAIN semantics (47); strengthened Rules 13 (verified-rustup), 30 (cross-TU visibility, sentinel consistency) |
 | 0.8.3 | 2026-06-13 | Codex | Added Rule 48 for supplemental static security and supply-chain gates with focused Semgrep, secret scanning, cargo-deny, Trivy/SBOM/Scorecard, and local Make targets |
 | 0.8.4 | 2026-06-21 | Codex | Strengthened Rule 48 so local secret scans cover tracked release content without inheriting ignored adapter state |
+| 0.8.5 | 2026-06-22 | Codex | Strengthened Rules 6 and 48 for inner-to-outer structural closure ordering and deletion-safe tracked-worktree secret scans |
 | 0.8.4 | 2026-06-16 | Codex | Strengthened Rule 13 for release Dockerfile script interpreter prerequisites in minimal images |
 | 0.8.2 | 2026-06-21 | Kang | 0.8.2 patch release closeout: release-gates-check-08x alias, RFC-0008 Accepted, markdown_stream_flush_interval commitment narrowed, multipart header rollback regression tests |

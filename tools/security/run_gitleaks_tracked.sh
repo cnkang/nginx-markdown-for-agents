@@ -15,7 +15,11 @@ cleanup() {
 trap cleanup EXIT
 
 cd "$repo_root"
-git ls-files -z > "$file_list"
+git ls-files -z | while IFS= read -r -d '' tracked_path; do
+    if [[ -e "$tracked_path" || -L "$tracked_path" ]]; then
+        printf '%s\0' "$tracked_path"
+    fi
+done > "$file_list"
 
 if [[ ! -s "$file_list" ]]; then
     echo "ERROR: no Git-tracked files found for gitleaks scan" >&2

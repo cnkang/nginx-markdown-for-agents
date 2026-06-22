@@ -36,8 +36,9 @@ Required:
 - Local `gitleaks` execution must scan exactly Git-tracked worktree content so
   tracked edits are covered while ignored local adapters, caches, and build
   state cannot create findings for files absent from a clean checkout. Any
-  tracked-file materialization must preserve unusual filenames with NUL-safe
-  traversal.
+  tracked-file materialization must omit tracked paths that are absent because
+  they were deleted in the worktree and preserve unusual filenames with
+  NUL-safe traversal.
 - Semgrep CE rules must stay high-confidence and repo-specific. Avoid broad
   noisy packs as PR-blocking checks until findings are triaged and documented.
 - `cargo-deny` must check Rust advisories, license policy, bans, and sources for
