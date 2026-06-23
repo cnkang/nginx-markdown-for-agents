@@ -602,16 +602,14 @@ ngx_http_markdown_decomp_zlib_cleanup(void *decoder_state)
 }
 
 
+#ifdef NGX_HTTP_BROTLI
 /* brotli cleanup adapter: forwards to BrotliDecoderDestroyInstance. */
 static void
 ngx_http_markdown_decomp_brotli_cleanup(void *decoder_state)
 {
-#ifdef NGX_HTTP_BROTLI
     BrotliDecoderDestroyInstance((BrotliDecoderState *) decoder_state);
-#else
-    (void) decoder_state;
-#endif
 }
+#endif
 
 
 /*
