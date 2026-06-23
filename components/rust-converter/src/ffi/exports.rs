@@ -588,9 +588,8 @@ pub unsafe extern "C" fn markdown_validate_url(url: *const u8, url_len: usize) -
             return 1;
         }
         // SAFETY: caller guarantees `url` points to `url_len` readable bytes.
-        let url_str = match std::str::from_utf8(unsafe {
-            std::slice::from_raw_parts(url, url_len)
-        }) {
+        let url_str = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(url, url_len) })
+        {
             Ok(s) => s,
             Err(_) => return 0,
         };
@@ -629,9 +628,8 @@ pub unsafe extern "C" fn markdown_is_dangerous_url(url: *const u8, url_len: usiz
             return 0;
         }
         // SAFETY: caller guarantees `url` points to `url_len` readable bytes.
-        let url_str = match std::str::from_utf8(unsafe {
-            std::slice::from_raw_parts(url, url_len)
-        }) {
+        let url_str = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(url, url_len) })
+        {
             Ok(s) => s,
             Err(_) => return 1,
         };

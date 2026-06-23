@@ -52,6 +52,10 @@ ngx_http_markdown_stream_postcommit_tag_boundary(u_char ch);
 static ngx_flag_t
 ngx_http_markdown_stream_postcommit_space(u_char ch);
 
+static ngx_int_t
+ngx_http_markdown_stream_postcommit_handle_send_result(
+    ngx_http_request_t *r, ngx_int_t rc, const char *label);
+
 
 /*
  * Request the Rust finish-mode API to close known Markdown structures.
