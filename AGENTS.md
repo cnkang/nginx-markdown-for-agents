@@ -79,7 +79,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 3 | memory-budget | Enforce all budgets; free auxiliary buffers on all exits; track peak memory |
 | 4 | encoding-charset | Preserve incomplete UTF-8 tails across chunks; flush decoders at EOF |
 | 5 | html-sanitizer | Void elements self-closing; skip-mode name-aware; nesting-depth saturation-safe |
-| 6 | html-sanitizer | In-link markers accumulated; code-block raw/fence state preserved across text-event boundaries; blockquote consistent; URL extraction includes media elements |
+| 6 | html-sanitizer | In-link markers accumulated; structural closures unwind inner-to-outer; code-block raw/fence state preserved across text-event boundaries; blockquote consistent; URL extraction includes media elements |
 | 7 | observability-metrics | Explicit skip-reason mapping; reason-code tests aligned; new reason codes need log_decision() callsite |
 | 8 | observability-metrics | Fail on truncation; SHM layout version; non-overlapping Prometheus families; every metric has runtime write; delivery counters after success; format string argument matching |
 | 8b | observability-metrics | Config nesting matches code; consumer accepts both key names; combined report reads streaming_metrics first |
@@ -133,10 +133,33 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 - Identify invariants likely to break (header ordering, backpressure, reason codes, buffer bounds).
 - List boundary surfaces up front when the change crosses layers (NGINX C, Rust core, FFI/header, docs, scripts, CI).
 - Identify minimum verification commands before writing code.
+- Define the checkable outcome before editing: failing case and expected
+  behavior for bugs, observable behavior for features, unchanged behavior for
+  refactors, or concrete risk list for reviews.
+- Confirm the current repository and branch before coding tasks. Use the
+  current branch unless the user explicitly asks to create, switch, or choose
+  another branch.
 - When remediating SonarCloud findings for a PR, fetch findings from
   `api/issues/search` with explicit `componentKeys`, `pullRequest`,
   and `statuses=OPEN,CONFIRMED`; do not rely solely on dashboard
   "top issues" summaries, which may include already-closed items.
+
+### Repository operation safety
+- Keep diffs tied to the current request. Do not mix behavior changes with
+  unrelated formatting sweeps, renames, broad reorganization, new dependencies,
+  or abstractions for one caller unless they are required for correctness or
+  verification.
+- Mention unrelated dead code, cleanup opportunities, or design concerns
+  separately instead of fixing them inside the current patch.
+- Commit only changes tied to the current request. Before each commit, review
+  the staged diff and summarize what changed.
+- Run the relevant checks before pushing when practical. Use normal push
+  access only; do not force-push, rewrite history, change remotes, change
+  repository settings, manage collaborators, alter branch protection, or
+  delete branches unless the user explicitly requested that operation.
+- Do not use wildcard cleanup deletes, scripted deletion loops, or broad
+  recursive deletion commands. Delete only literal named paths required by the
+  task; ask first when multiple deletions or recursive cleanup are necessary.
 
 ### Pre-output Checklist (domain-grouped)
 
@@ -193,6 +216,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 **HTML Sanitizer & Output Safety** (C, R, D)
 - Void elements self-closing; skip-mode name-aware [5]
 - In-link markers accumulated; code-block raw/fence state preserved across text-event boundaries; media URL extraction [6]
+- Implied or batched structural closures unwind inner-to-outer before enclosing block state [6]
 - Link/URL escaping at every emission site; reject control chars [27]
 
 **Testing & Coverage** (C, T, R)
@@ -320,6 +344,11 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   secret scanning, high-confidence Semgrep rules, and Rust dependency/license
   policy; keep third-party actions pinned to immutable SHAs and keep PR checks
   lightweight [48]
+- Local secret scans must cover Git-tracked worktree content, including tracked
+  edits, while excluding ignored adapter state, caches, and other files that
+  cannot enter a clean release checkout. Omit tracked paths that are absent due
+  to worktree deletions, and preserve NUL-safe filename handling when
+  materializing the tracked scan scope [48]
 - Supply-chain visibility workflows such as Trivy, SBOM generation, and
   OpenSSF Scorecard may run on PR, push, schedule, and manual triggers, but
   remain report-oriented unless a specific blocking threshold is adopted. Do
@@ -351,6 +380,8 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Preserve NGINX event-driven semantics; no hidden blocking calls.
 - Add/adjust tests in the same change set for each fixed behavior.
 - Keep docs and validators synced when user-facing or SOP behavior changes.
+- Clean up imports, variables, helpers, and docs references made unused by the
+  current change.
 - For Sonar-driven fixes, map each change to an open issue key and
   file/line from the current API response, and skip already-closed items.
 
@@ -358,7 +389,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 Follow evidence-first verification (no completion claim without fresh command output):
 - Docs/tools changes: `make docs-check`
 - Release-gate tooling: `make release-gates-check`
-- Release gates 0.8.0: `make release-gates-check-080` (comprehensive v0.8.0 release readiness gate)
+- Release gates 0.8.x: `make release-gates-check-08x` (canonical 0.8.x patch-line entry; `release-gates-check-080` is the compatible original name)
 - Rust converter/streaming changes: `make test-rust`
 - Rust example/benchmark changes: `cargo check --all-targets` in the crate
   directory to catch edition-specific errors (examples are only compiled
@@ -493,8 +524,12 @@ remediation:
 | 0.7.15 | 2026-06-03 | Codex | Strengthened Rule 13 for package smoke job-container checkout prerequisites |
 | 0.7.16 | 2026-06-03 | Codex | Strengthened Rule 13 for tag release gates avoiding user-local spec dependencies in clean CI checkouts |
 | 0.7.17 | 2026-06-04 | Codex | Strengthened Rule 6 for streaming code-block fence state across split text events |
-| 0.8.0 | 2026-06-16 | Kang | 0.8.0 release gate target (release-gates-check-080) with streaming, coverage, matrix, and clean-checkout gates |
 | 0.8.1 | 2026-06-10 | Codex | Strengthened Rule 13 for newer release gates that reuse prior-version validators with caller-parameterized active version assertions and current release-matrix schema consumers |
 | 0.8.2 | 2026-06-12 | Kang | Added Rules 44–47: streaming deflate semantics (44), effective_conf NULL-safe access (45), FFI NULL/empty boundary guards (46), terminal-sent latch NGX_AGAIN semantics (47); strengthened Rules 13 (verified-rustup), 30 (cross-TU visibility, sentinel consistency) |
-| 0.8.3 | 2026-06-13 | Codex | Added Rule 48 for supplemental static security and supply-chain gates with focused Semgrep, secret scanning, cargo-deny, Trivy/SBOM/Scorecard, and local Make targets |
-| 0.8.4 | 2026-06-16 | Codex | Strengthened Rule 13 for release Dockerfile script interpreter prerequisites in minimal images |
+| 0.8.2 | 2026-06-13 | Kang | Added Rule 48 for supplemental static security and supply-chain gates with focused Semgrep, secret scanning, cargo-deny, Trivy/SBOM/Scorecard, and local Make targets |
+| 0.8.0 | 2026-06-16 | Kang | 0.8.0 release gate target (release-gates-check-080) with streaming, coverage, matrix, and clean-checkout gates |
+| 0.8.2 | 2026-06-16 | Kang | Strengthened Rule 13 for release Dockerfile script interpreter prerequisites in minimal images |
+| 0.8.2 | 2026-06-21 | Kang | Strengthened Rule 48 so local secret scans cover tracked release content without inheriting ignored adapter state |
+| 0.8.2 | 2026-06-22 | Kang | Strengthened Rules 6 and 48 for inner-to-outer structural closure ordering and deletion-safe tracked-worktree secret scans |
+| 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
+| 0.8.2 | 2026-06-23 | Kang | Added general workflow safeguards for checkable outcomes, request-scoped diffs, Git operation safety, and deletion safety |

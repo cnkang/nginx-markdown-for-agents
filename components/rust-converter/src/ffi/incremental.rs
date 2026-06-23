@@ -37,8 +37,10 @@ use crate::incremental::IncrementalConverter;
 use crate::token_estimator::TokenEstimator;
 
 use super::abi::{
-    ERROR_INTERNAL, ERROR_INVALID_INPUT, ERROR_SUCCESS, MarkdownOptions, MarkdownResult,
+    ERROR_INTERNAL, ERROR_INVALID_INPUT, ERROR_PARSE_BUDGET_EXCEEDED, ERROR_SUCCESS,
+    MarkdownOptions, MarkdownResult,
 };
+use super::convert::{estimate_parser_working_set, max_input_for_parser_budget};
 use super::memory::{free_buffer, reset_result, set_error_result};
 use super::options::decode_options;
 
@@ -68,6 +70,9 @@ use super::options::decode_options;
 ///   consistently.
 pub struct IncrementalConverterHandle {
     inner: IncrementalConverter,
+    parser_memory_budget: u64,
+    buffered_input_bytes: usize,
+    buffered_tag_openers: usize,
     generate_etag: bool,
     estimate_tokens: bool,
     chars_per_token: f32,
@@ -167,11 +172,19 @@ pub unsafe extern "C" fn markdown_incremental_new_with_code(
         let opts_ref = unsafe { &*options };
         let decoded = decode_options(opts_ref).map_err(|err| err.code())?;
 
-        let mut converter = IncrementalConverter::new(decoded.conversion);
+        let max_buffer_size = max_input_for_parser_budget(decoded.parser_memory_budget);
+        let mut converter = if decoded.parser_memory_budget == 0 {
+            IncrementalConverter::new(decoded.conversion)
+        } else {
+            IncrementalConverter::with_max_buffer_size(decoded.conversion, max_buffer_size)
+        };
         converter.set_content_type(decoded.content_type.map(ToOwned::to_owned));
-        converter.set_timeout(decoded.timeout);
+        converter.set_timeout(decoded.parse_timeout);
         Ok(Box::into_raw(Box::new(IncrementalConverterHandle {
             inner: converter,
+            parser_memory_budget: decoded.parser_memory_budget,
+            buffered_input_bytes: 0,
+            buffered_tag_openers: 0,
             generate_etag: decoded.generate_etag,
             estimate_tokens: decoded.estimate_tokens,
             chars_per_token: decoded.effective_chars_per_token,
@@ -259,8 +272,32 @@ pub unsafe extern "C" fn markdown_incremental_feed(
             unsafe { std::slice::from_raw_parts(data, data_len) }
         };
 
+        let next_input_bytes = match handle_ref.buffered_input_bytes.checked_add(chunk.len()) {
+            Some(value) => value,
+            None => return ERROR_PARSE_BUDGET_EXCEEDED,
+        };
+        let chunk_tag_openers = chunk.iter().filter(|byte| **byte == b'<').count();
+        let next_tag_openers = match handle_ref
+            .buffered_tag_openers
+            .checked_add(chunk_tag_openers)
+        {
+            Some(value) => value,
+            None => return ERROR_PARSE_BUDGET_EXCEEDED,
+        };
+
+        if handle_ref.parser_memory_budget > 0
+            && estimate_parser_working_set(next_input_bytes, next_tag_openers)
+                > handle_ref.parser_memory_budget
+        {
+            return ERROR_PARSE_BUDGET_EXCEEDED;
+        }
+
         match handle_ref.inner.feed_chunk(chunk) {
-            Ok(()) => ERROR_SUCCESS,
+            Ok(()) => {
+                handle_ref.buffered_input_bytes = next_input_bytes;
+                handle_ref.buffered_tag_openers = next_tag_openers;
+                ERROR_SUCCESS
+            }
             Err(e) => e.code(),
         }
     });
@@ -397,4 +434,51 @@ pub unsafe extern "C" fn markdown_incremental_free(handle: *mut IncrementalConve
     }
     // SAFETY: caller guarantees `handle` is a live, unconsumed pointer.
     unsafe { drop(Box::from_raw(handle)) };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ffi::exports::{markdown_options_init, markdown_result_free};
+
+    fn options() -> MarkdownOptions {
+        let mut options = unsafe { std::mem::zeroed() };
+        unsafe { markdown_options_init(&mut options) };
+        options
+    }
+
+    #[test]
+    fn constructor_applies_parser_budget_to_amplified_markup() {
+        let mut options = options();
+        options.parser_memory_budget = 32 * 1024;
+        let handle = unsafe { markdown_incremental_new(&options) };
+        assert!(!handle.is_null());
+
+        let dense_markup = b"<i></i>".repeat(32);
+        let code =
+            unsafe { markdown_incremental_feed(handle, dense_markup.as_ptr(), dense_markup.len()) };
+        assert_eq!(code, ERROR_PARSE_BUDGET_EXCEEDED);
+
+        unsafe { markdown_incremental_free(handle) };
+    }
+
+    #[test]
+    fn constructor_uses_parse_timeout_for_finalize() {
+        let mut options = options();
+        options.timeout_ms = 60_000;
+        options.parse_timeout_ms = 1;
+        let handle = unsafe { markdown_incremental_new(&options) };
+        assert!(!handle.is_null());
+
+        let html = b"<div>text</div>".repeat(20_000);
+        assert_eq!(
+            unsafe { markdown_incremental_feed(handle, html.as_ptr(), html.len()) },
+            ERROR_SUCCESS
+        );
+
+        let mut result: MarkdownResult = unsafe { std::mem::zeroed() };
+        let code = unsafe { markdown_incremental_finalize(handle, &mut result) };
+        assert_eq!(code, crate::ffi::ERROR_TIMEOUT);
+        unsafe { markdown_result_free(&mut result) };
+    }
 }

@@ -121,6 +121,10 @@ struct ngx_http_request_s {
 /* Include the module header for types */
 #include "../../src/ngx_http_markdown_filter_module.h"
 
+static ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r,
+    ngx_chain_t *in);
+#include "../../src/ngx_http_markdown_filter_chain_impl.h"
+
 /* Include the decision engine source directly */
 #include "../../src/ngx_http_markdown_stream_state.h"
 #include "../../src/ngx_http_markdown_stream_state.c"
@@ -217,6 +221,7 @@ ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     return mock_output_filter_rc;
 }
+
 
 /*
  * Mock: ngx_http_markdown_stream_replay_chain
@@ -351,6 +356,7 @@ markdown_streaming_output_free(u_char *data, uintptr_t len)
 static void
 e2e_setup(void)
 {
+    ngx_http_next_body_filter = ngx_http_output_filter;
     mock_output_filter_called = 0;
     mock_output_filter_rc = NGX_OK;
     mock_output_filter_chain = NULL;

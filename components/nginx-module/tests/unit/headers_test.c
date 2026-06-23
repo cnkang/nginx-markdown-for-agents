@@ -638,6 +638,42 @@ test_update_headers_removes_duplicate_content_encoding(void)
     TEST_PASS("Duplicate Content-Encoding headers are removed");
 }
 
+static void
+test_update_headers_skips_invalidated_accept_ranges(void)
+{
+    ngx_http_request_t r = new_request();
+    ngx_http_markdown_conf_t conf;
+    MarkdownResult result;
+    ngx_table_elt_t *invalid_ranges;
+    ngx_table_elt_t *active_ranges;
+
+    TEST_SUBSECTION("Accept-Ranges removal skips invalidated entries");
+
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+    result.markdown_len = 10;
+
+    invalid_ranges = push_header(&r, "Accept-Ranges", "none");
+    active_ranges = push_header(&r, "Accept-Ranges", "bytes");
+    invalid_ranges->hash = 0;
+    r.headers_out.accept_ranges = active_ranges;
+    r.allow_ranges = 1;
+
+    TEST_ASSERT(ngx_http_markdown_update_headers(&r, &result, &conf) == NGX_OK,
+                "update_headers should remove active Accept-Ranges");
+    TEST_ASSERT(invalid_ranges->hash == 0,
+                "Invalidated Accept-Ranges should stay inactive");
+    TEST_ASSERT(active_ranges->hash == 0,
+                "Active Accept-Ranges after invalid entry should be removed");
+    TEST_ASSERT(r.headers_out.accept_ranges == NULL,
+                "Typed Accept-Ranges pointer should be cleared");
+    TEST_ASSERT(r.allow_ranges == 0,
+                "Range support should be disabled");
+
+    free_request(&r);
+    TEST_PASS("Invalidated Accept-Ranges entries are skipped");
+}
+
 int
 main(void)
 {
@@ -654,6 +690,7 @@ main(void)
     test_update_headers_ignores_invalidated_vary();
     test_update_headers_creates_vary_after_invalidated_only();
     test_update_headers_removes_duplicate_content_encoding();
+    test_update_headers_skips_invalidated_accept_ranges();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

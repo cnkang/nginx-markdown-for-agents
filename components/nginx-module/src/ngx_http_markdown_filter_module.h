@@ -69,6 +69,10 @@ struct ngx_http_markdown_effective_conf_s {
 typedef struct ngx_http_markdown_effective_conf_s
     ngx_http_markdown_effective_conf_t;
 
+/* Delegate body output to the downstream filter saved during module init. */
+ngx_int_t ngx_http_markdown_next_body_filter(ngx_http_request_t *r,
+    ngx_chain_t *in);
+
 /*
  * Forward declaration for OTel span type.
  * Full definition is in ngx_http_markdown_otel_impl.h.
@@ -565,6 +569,10 @@ ngx_http_markdown_effective_body_buffer_limit(
         return conf->max_size;
     }
 
+    if (conf->max_size == 0) {
+        return budget;
+    }
+
     return (budget < conf->max_size) ? budget : conf->max_size;
 }
 
@@ -618,20 +626,28 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
  * Holds process-wide shared state that is initialized once during
  * configuration parsing and then reused by all worker processes.
  *
- * dynconf_path_configured and dynconf_first_path track whether a
- * markdown_dynamic_config_path directive has already been set in
- * any configuration context, so duplicate detection lives in
- * config-parse scope (per nginx -t / reload) rather than in a
- * process-lifetime file-scope static variable that survives across
- * reloads.
+ * The dynconf fields track the unique markdown_dynamic_config_path
+ * directive and the location configuration that owns it.  The owner
+ * pointer lets worker startup bind the single global watcher to an
+ * http, server, or location configuration after inheritance merges.
  */
 typedef struct {
     ngx_shm_zone_t *metrics_shm_zone;  /* Shared-memory zone for cross-worker metrics */
     size_t          metrics_shm_size;  /* Configured metrics SHM size (default: 8 pages) */
     ngx_flag_t      dynconf_path_configured; /* 1 after first markdown_dynamic_config_path directive */
     ngx_str_t       dynconf_first_path;      /* Path value from the first directive (for diagnostics) */
+    /* Merged config that owns the unique dynconf path. */
+    ngx_http_markdown_conf_t *dynconf_owner_conf;
     ngx_uint_t      metrics_per_path_cardinality; /* markdown_metrics_per_path_cardinality (default: 100, global) */
 } ngx_http_markdown_main_conf_t;
+
+/* Return the merged config selected to own the per-worker dynconf watcher. */
+static ngx_inline ngx_http_markdown_conf_t *
+ngx_http_markdown_dynconf_owner(
+    const ngx_http_markdown_main_conf_t *main_conf)
+{
+    return main_conf != NULL ? main_conf->dynconf_owner_conf : NULL;
+}
 
 /*
  * Response buffer structure

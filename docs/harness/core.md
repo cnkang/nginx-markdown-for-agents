@@ -44,6 +44,7 @@ The default card stays short:
 - likely primary pack
 - supporting packs, if any
 - minimum cheap blockers
+- checkable outcome
 - one-sentence risk note
 
 Expand to a detailed card only when:
@@ -76,6 +77,16 @@ does, the route changes. The initial guess does not get special authority.
 The default path should stay cheap. Prefer a fast blocker-first flow and widen
 only when the touched surface, warnings, or drift signals justify more cost.
 Do not spend replay or history-scan budget on every task by default.
+
+Define the checkable outcome before calling work done:
+
+- bug fix: failing case and expected behavior
+- feature: observable behavior the user should see
+- refactor: behavior that must remain unchanged
+- review: concrete risks, missing tests, and regressions
+
+Use the narrowest meaningful verification that proves that outcome. If a
+stronger check is skipped, record why.
 
 Warnings are not cleanup theater. Do not silence a warning by weakening checks,
 shrinking coverage, or deleting behavior unless the warning itself proves the
@@ -209,3 +220,4 @@ pre-output checklist.
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.8.2 | 2026-06-23 | Kang | Added checkable-outcome guidance for risk cards and verification closeout |

@@ -1012,7 +1012,7 @@ in the current release. They are **not registered** in the module command table.
 |-------|-------|
 | **Status** | Reserved — not available |
 | **Intended purpose** | Time-based flush control for streaming output (flush after N milliseconds even if `markdown_stream_flush_min` bytes have not accumulated) |
-| **Planned version** | Future 0.8.x release (pending finalization of time-based flush semantics) |
+| **Planned version** | Future release (pending finalization of time-based flush semantics) |
 | **Defined in** | RFC 0008 |
 | **Current behavior** | Not registered; NGINX rejects the directive at configuration parse time |
 

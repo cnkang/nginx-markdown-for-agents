@@ -106,6 +106,20 @@ fn test_blocks_code_block_lang_prefix() {
     assert!(md.contains("print"));
 }
 
+/// Verifies that an invalid language class (containing a `/`) does not stop
+/// scanning for a later valid language in the same class list. This is a
+/// regression test for the bug where the first matching prefix broke out of
+/// the loop regardless of whether `safe_code_language` accepted it.
+#[test]
+fn test_blocks_code_block_invalid_then_valid_language() {
+    let md = convert_html(
+        r#"<pre><code class="language-bad/token language-rust">fn main() {}</code></pre>"#,
+    );
+    assert!(md.contains("rust"), "expected rust language, got: {md}");
+    assert!(!md.contains("bad/token"));
+    assert!(md.contains("fn main()"));
+}
+
 /// Verifies that code blocks containing backticks use a longer fence to avoid
 /// content conflicts.
 #[test]

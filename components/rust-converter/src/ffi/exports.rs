@@ -386,15 +386,17 @@ pub unsafe extern "C" fn markdown_make_decision(
 }
 
 /// Build a header plan for a successful Markdown conversion.
-///
 /// The returned plan contains Rust-owned buffers. The C caller must release
 /// the plan via `markdown_header_plan_free`.
-///
+/// This function treats `result` as uninitialized output storage and never
+/// reads its previous fields. Callers that already own a plan in the same
+/// storage must call `markdown_header_plan_free` before rebuilding it.
 /// # Safety
-///
 /// The caller must ensure that:
 /// - `content_type` points to readable UTF-8 bytes of `content_type_len`
-/// - `result` points to writable storage for a `FFIHeaderPlan`
+/// - `result` points to writable storage for a `FFIHeaderPlan`; its previous
+///   bytes may be uninitialized, but any previously-owned plan must have been
+///   released before this call
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_build_header_plan(
     content_type: *const u8,
@@ -406,16 +408,13 @@ pub unsafe extern "C" fn markdown_build_header_plan(
         return;
     }
 
+    /* `result` is a pure output parameter. Do not create a reference or read
+     * any field before initialization: writable C storage may be uninitialized. */
+    unsafe { ptr::write(result, std::mem::zeroed()) };
     let result_ref = unsafe { &mut *result };
-
-    /* Save and release any previously-held plan to avoid leaking the old handle.
-     * Zero the result struct BEFORE dropping the old handle so that no field
-     * ever points into freed memory (eliminates dangling-pointer window). */
-    let old_handle = result_ref.handle;
-    unsafe { ptr::write(result_ref, std::mem::zeroed()) };
-    if !old_handle.is_null() {
-        unsafe { drop(Box::from_raw(old_handle as *mut HeaderPlanOwned)) };
-    }
+    /* Centralize the empty-plan shape so construction and panic fallback
+     * stay synchronized if FFIHeaderPlan gains fields. */
+    reset_header_plan_to_empty(result_ref);
 
     // Defense-in-depth: header plan construction allocates and builds string
     // buffers. A panic must never unwind into C. On panic we leave the output
@@ -512,11 +511,20 @@ pub unsafe extern "C" fn markdown_build_header_plan(
     }));
 
     if outcome.is_err() {
-        /* Panic caught — ensure a safe zeroed state (empty plan). */
-        result_ref.handle = std::ptr::null_mut();
-        result_ref.entries = std::ptr::null();
-        result_ref.count = 0;
+        /* Panic caught — ensure a safe empty plan. */
+        reset_header_plan_to_empty(result_ref);
     }
+}
+
+/// Reset an `FFIHeaderPlan` to the safe empty shape (no entries, null handle).
+///
+/// Centralizes the zeroed-plan initialization used both at construction time
+/// (before `markdown_build_header_plan` populates it) and on panic fallback,
+/// so the two paths cannot drift apart if `FFIHeaderPlan` gains fields.
+fn reset_header_plan_to_empty(plan: &mut FFIHeaderPlan) {
+    plan.handle = std::ptr::null_mut();
+    plan.entries = std::ptr::null();
+    plan.count = 0;
 }
 
 /// Validate a URL for use in Markdown link destinations.
@@ -1000,6 +1008,19 @@ mod tests {
         assert!(plan.handle.is_null());
         assert!(plan.entries.is_null());
         assert_eq!(plan.count, 0);
+    }
+
+    #[test]
+    fn header_plan_build_initializes_uninitialized_output_storage() {
+        let mut plan = std::mem::MaybeUninit::<FFIHeaderPlan>::uninit();
+        unsafe {
+            markdown_build_header_plan(std::ptr::null(), 0, 0, plan.as_mut_ptr());
+            let mut plan = plan.assume_init();
+            assert!(plan.count > 0);
+            assert!(!plan.handle.is_null());
+            assert!(!plan.entries.is_null());
+            markdown_header_plan_free(&mut plan);
+        }
     }
 
     #[test]

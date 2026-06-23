@@ -280,6 +280,24 @@ ngx_http_markdown_streaming_decomp_check_limit(
 
 
 /*
+ * Free a heap-allocated buffer through a pointer-to-pointer,
+ * guarding against NULL pointer and setting the pointer to NULL
+ * after release to prevent dangling references.
+ *
+ * Used consistently across inflate, brotli, feed, and finish
+ * paths to enforce a single defensive free pattern.
+ */
+static void
+ngx_http_markdown_streaming_decomp_free_heap(u_char **heap_buf_ptr)
+{
+    if (heap_buf_ptr != NULL && *heap_buf_ptr != NULL) {
+        ngx_free(*heap_buf_ptr);
+        *heap_buf_ptr = NULL;
+    }
+}
+
+
+/*
  * Expand a heap-backed working buffer to double its size.
  *
  * On success, *heap_buf_ptr is updated to the new allocation
@@ -295,6 +313,7 @@ ngx_http_markdown_streaming_decomp_expand_buf(
     u_char **heap_buf_ptr,
     u_char **buf_ptr,
     size_t *buf_size_ptr,
+    size_t max_size,
     ngx_log_t *log)
 {
     u_char  *new_buf;
@@ -309,29 +328,24 @@ ngx_http_markdown_streaming_decomp_expand_buf(
             "markdown: "
             "expand_buf size overflow, old_size=%uz",
             old_size);
-        if (*heap_buf_ptr != NULL) {
-            ngx_free(*heap_buf_ptr);
-            *heap_buf_ptr = NULL;
-        }
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return NGX_ERROR;
     }
 
     new_size = old_size * 2;
+    if (max_size > 0 && new_size > max_size) {
+        new_size = max_size;
+    }
 
     new_buf = ngx_alloc(new_size, log);
     if (new_buf == NULL) {
-        if (*heap_buf_ptr != NULL) {
-            ngx_free(*heap_buf_ptr);
-            *heap_buf_ptr = NULL;
-        }
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return NGX_ERROR;
     }
 
     ngx_memcpy(new_buf, *buf_ptr, old_size);
 
-    if (*heap_buf_ptr != NULL) {
-        ngx_free(*heap_buf_ptr);
-    }
+    ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
 
     *heap_buf_ptr = new_buf;
     *buf_ptr = new_buf;
@@ -343,13 +357,19 @@ ngx_http_markdown_streaming_decomp_expand_buf(
 /*
  * Copy heap working buffer back to pool memory and free it.
  *
+ * Takes the heap buffer by pointer-to-pointer so the release path
+ * stays consistent with free_heap/expand_buf: on every exit the
+ * heap allocation is released and *heap_buf_ptr is cleared, which
+ * prevents callers from accidentally double-freeing or leaking the
+ * old workspace.
+ *
  * Returns:
  *   NGX_OK    - success (*buf_ptr updated to pool allocation)
  *   NGX_ERROR - pool allocation failure (heap buffer freed)
  */
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_finalize_buf(
-    u_char *heap_buf,
+    u_char **heap_buf_ptr,
     u_char **buf_ptr,
     size_t *buf_size_ptr,
     size_t produced,
@@ -357,14 +377,26 @@ ngx_http_markdown_streaming_decomp_finalize_buf(
 {
     u_char  *pool_buf;
 
+    if (produced == 0) {
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        *buf_ptr = NULL;
+        *buf_size_ptr = 0;
+        return NGX_OK;
+    }
+
     pool_buf = ngx_palloc(pool, produced);
     if (pool_buf == NULL) {
-        ngx_free(heap_buf);
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return NGX_ERROR;
     }
 
-    ngx_memcpy(pool_buf, heap_buf, produced);
-    ngx_free(heap_buf);
+    /*
+     * free_heap() performs NULL-guarded release; safe to dereference
+     * *heap_buf_ptr for the copy because produced > 0 here implies
+     * heap_buf_ptr is non-NULL and non-empty.
+     */
+    ngx_memcpy(pool_buf, *heap_buf_ptr, produced);
+    ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
 
     *buf_ptr = pool_buf;
     *buf_size_ptr = produced;
@@ -404,9 +436,7 @@ ngx_http_markdown_streaming_decomp_inflate_step(
         ngx_log_error(NGX_LOG_ERR, log, 0,
             "markdown: "
             "inflate error %d", zrc);
-        if (*heap_buf_ptr != NULL) {
-            ngx_free(*heap_buf_ptr);
-        }
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return -1;
     }
 
@@ -421,9 +451,7 @@ ngx_http_markdown_streaming_decomp_inflate_step(
             "decompressed size %uz exceeds limit %uz",
             decomp->total_decompressed + *out_produced,
             decomp->max_decompressed_size);
-        if (*heap_buf_ptr != NULL) {
-            ngx_free(*heap_buf_ptr);
-        }
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return -2;  /* budget exceeded */
     }
 
@@ -437,8 +465,23 @@ ngx_http_markdown_streaming_decomp_inflate_step(
     }
 
     if (decomp->state.zlib.avail_out == 0) {
+        size_t  remaining;
+        size_t  old_size;
+
+        remaining = 0;
+        if (decomp->max_decompressed_size > 0) {
+            remaining = decomp->max_decompressed_size
+                        - decomp->total_decompressed;
+            if (*buf_size_ptr >= remaining) {
+                ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+                return -2;
+            }
+        }
+
+        old_size = *buf_size_ptr;
+
         if (ngx_http_markdown_streaming_decomp_expand_buf(
-                heap_buf_ptr, buf_ptr, buf_size_ptr, log)
+                heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log)
             != NGX_OK)
         {
             return -1;
@@ -446,25 +489,27 @@ ngx_http_markdown_streaming_decomp_inflate_step(
 
         *using_heap_ptr = 1;
 
-        decomp->state.zlib.next_out =
-            *buf_ptr + (*buf_size_ptr / 2);
+        /*
+         * Expansion may cap growth at max_size, so resume at the old
+         * end (already-produced bytes remain intact at [0, old_size))
+         * and expose the actually-available space as avail_out.
+         */
+        decomp->state.zlib.next_out = *buf_ptr + old_size;
         {
-            uInt  half_out;
+            uInt  avail_out;
 
             if (ngx_http_markdown_streaming_decomp_size_to_uint(
-                    *buf_size_ptr / 2, &half_out))
+                    *buf_size_ptr - old_size, &avail_out))
             {
                 ngx_log_error(NGX_LOG_ERR, log, 0,
                     "markdown: "
-                    "expanded buffer half %uz exceeds "
+                    "expanded buffer free space %uz exceeds "
                     "zlib uInt max",
-                    *buf_size_ptr / 2);
-                if (*heap_buf_ptr != NULL) {
-                    ngx_free(*heap_buf_ptr);
-                }
+                    *buf_size_ptr - old_size);
+                ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
                 return -1;
             }
-            decomp->state.zlib.avail_out = half_out;
+            decomp->state.zlib.avail_out = avail_out;
         }
     }
 
@@ -495,8 +540,8 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
     int      using_heap;
     int      step_rc;
 
-    heap_buf = NULL;
-    using_heap = 0;
+    heap_buf = *buf_ptr;
+    using_heap = 1;
 
     for ( ;; ) {
         step_rc =
@@ -520,7 +565,7 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
 
     if (using_heap
         && ngx_http_markdown_streaming_decomp_finalize_buf(
-               heap_buf, buf_ptr, buf_size_ptr,
+               &heap_buf, buf_ptr, buf_size_ptr,
                *out_produced, pool)
            != NGX_OK)
     {
@@ -588,9 +633,7 @@ ngx_http_markdown_streaming_decomp_brotli_step(
         ngx_log_error(NGX_LOG_ERR, log, 0,
             "markdown: "
             "brotli decode error");
-        if (*heap_buf_ptr != NULL) {
-            ngx_free(*heap_buf_ptr);
-        }
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return -1;
     }
 
@@ -604,9 +647,7 @@ ngx_http_markdown_streaming_decomp_brotli_step(
             "decompressed size %uz exceeds limit %uz",
             decomp->total_decompressed + *out_produced,
             decomp->max_decompressed_size);
-        if (*heap_buf_ptr != NULL) {
-            ngx_free(*heap_buf_ptr);
-        }
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return -2;  /* budget exceeded */
     }
 
@@ -617,11 +658,21 @@ ngx_http_markdown_streaming_decomp_brotli_step(
 
     if (brc == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
         size_t  old_size;
+        size_t  remaining;
 
         old_size = *buf_size_ptr;
+        remaining = 0;
+        if (decomp->max_decompressed_size > 0) {
+            remaining = decomp->max_decompressed_size
+                        - decomp->total_decompressed;
+            if (old_size >= remaining) {
+                ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+                return -2;
+            }
+        }
 
         if (ngx_http_markdown_streaming_decomp_expand_buf(
-                heap_buf_ptr, buf_ptr, buf_size_ptr, log)
+                heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log)
             != NGX_OK)
         {
             return -1;
@@ -660,8 +711,8 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
 
     decomp->brotli_avail_out = *buf_size_ptr;
     decomp->brotli_next_out = *buf_ptr;
-    heap_buf = NULL;
-    using_heap = 0;
+    heap_buf = *buf_ptr;
+    using_heap = 1;
 
     for ( ;; ) {
         step_rc =
@@ -686,7 +737,7 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
 
     if (using_heap) {
         if (ngx_http_markdown_streaming_decomp_finalize_buf(
-                heap_buf, buf_ptr, buf_size_ptr,
+                &heap_buf, buf_ptr, buf_size_ptr,
                 *out_produced, pool)
             != NGX_OK)
         {
@@ -728,6 +779,7 @@ ngx_http_markdown_streaming_decomp_feed_zlib(
             "markdown: "
             "buffer size %uz exceeds zlib uInt max",
             *buf_size_ptr);
+        ngx_http_markdown_streaming_decomp_free_heap(buf_ptr);
         return NGX_ERROR;
     }
 
@@ -764,6 +816,7 @@ ngx_http_markdown_streaming_decomp_feed_case_zlib(
             "markdown: "
             "input length %uz exceeds zlib uInt max",
             in_len);
+        ngx_http_markdown_streaming_decomp_free_heap(ctx->buf_ptr);
         return NGX_ERROR;
     }
 
@@ -801,6 +854,12 @@ ngx_http_markdown_streaming_decomp_feed_case_brotli(
  *   NGX_ERROR    - decompression error or size limit exceeded
  *   NGX_DECLINED - unsupported format
  */
+static ngx_int_t ngx_http_markdown_streaming_decomp_apply_limits(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    size_t produced,
+    u_char **buf_ptr,
+    ngx_log_t *log);
+
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_feed(
     ngx_http_markdown_streaming_decomp_t *decomp,
@@ -822,20 +881,25 @@ ngx_http_markdown_streaming_decomp_feed(
         return NGX_ERROR;
     }
 
+    /*
+     * Defensive baseline: clear the caller-facing output slots before
+     * any work begins so every error path (including the budget/alloc
+     * early returns below) is guaranteed to emit empty output and never
+     * leak stale caller-supplied values.
+     */
+    *out_data = NULL;
+    *out_len = 0;
+
     if (decomp->finished) {
-        *out_data = NULL;
-        *out_len = 0;
         return NGX_OK;
     }
 
     /* Empty input is a no-op */
     if (in_data == NULL || in_len == 0) {
-        *out_data = NULL;
-        *out_len = 0;
         return NGX_OK;
     }
 
-    /* Estimate output buffer: 4x input or 4KB minimum */
+    /* Estimate transient output workspace: 4x input or 4KB minimum. */
     if (in_len > (size_t) -1 / 4) {
         buf_size = (size_t) -1;  /* saturate to max */
     } else {
@@ -852,19 +916,26 @@ ngx_http_markdown_streaming_decomp_feed(
         if (decomp->total_decompressed
             >= decomp->max_decompressed_size)
         {
-            /* Budget already exhausted */
+            /* Budget already exhausted; output already cleared above */
             return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
         }
 
         remaining = decomp->max_decompressed_size
                     - decomp->total_decompressed;
         if (buf_size > remaining) {
-            buf_size = remaining + 1;
+            buf_size = remaining;
         }
     }
 
-    buf = ngx_palloc(pool, buf_size);
+    /*
+     * The workspace must be reclaimable after every compressed chunk.
+     * Request-pool allocations cannot be individually freed, so reserving
+     * the 4 KiB estimate there amplifies tiny chunks for the request lifetime.
+     * The decode loops transfer only produced bytes into pool memory.
+     */
+    buf = ngx_alloc(buf_size, log);
     if (buf == NULL) {
+        /* output already cleared above */
         return NGX_ERROR;
     }
 
@@ -885,6 +956,11 @@ ngx_http_markdown_streaming_decomp_feed(
         inflate_rc = ngx_http_markdown_streaming_decomp_feed_case_zlib(
             decomp, in_data, in_len, &feed_ctx);
         if (inflate_rc != NGX_OK) {
+            /*
+             * The inflate loop frees the heap workspace on error via
+             * free_heap; output slots already hold NULL/0 from the
+             * defensive baseline, so no additional cleanup here.
+             */
             return inflate_rc;
         }
 
@@ -899,6 +975,7 @@ ngx_http_markdown_streaming_decomp_feed(
         brotli_rc = ngx_http_markdown_streaming_decomp_feed_case_brotli(
             decomp, in_data, in_len, &feed_ctx);
         if (brotli_rc != NGX_OK) {
+            /* Same invariant as the zlib path above. */
             return brotli_rc;
         }
 
@@ -907,10 +984,58 @@ ngx_http_markdown_streaming_decomp_feed(
 #endif
 
     default:
+        ngx_free(buf);
+        buf = NULL;
         return NGX_DECLINED;
     }
 
-    /* Check size limit and protect against integer overflow. */
+    /*
+     * Post-decode size validation: check for overflow and budget limits.
+     * Returns NGX_OK on success, or the appropriate error code.
+     * On success, total_decompressed is updated.
+     *
+     * Ownership: the decode loop's finalize_buf() has already transferred
+     * the heap workspace to pool memory. apply_limits() validates only
+     * and does not free the buffer — pool reclaim handles its lifetime.
+     */
+    {
+        ngx_int_t  limit_rc;
+
+        limit_rc = ngx_http_markdown_streaming_decomp_apply_limits(
+            decomp, produced, &buf, log);
+        if (limit_rc != NGX_OK) {
+            return limit_rc;
+        }
+    }
+
+    *out_data = buf;
+    *out_len = produced;
+    return NGX_OK;
+}
+
+
+/*
+ * Validate decompressed size against overflow and budget limits after
+ * a decode pass. On success, updates decomp->total_decompressed and
+ * returns NGX_OK. On failure, returns the appropriate error code
+ * (NGX_ERROR or NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) without
+ * freeing the buffer.
+ *
+ * Ownership note: when called from ngx_http_markdown_streaming_decomp_feed,
+ * the decode loop has already called finalize_buf() which transferred
+ * the heap workspace to pool memory. The buffer at *buf_ptr is
+ * therefore pool-allocated and must NOT be freed here — the pool
+ * reclaim handles its lifetime.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_apply_limits(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    size_t produced,
+    u_char **buf_ptr,
+    ngx_log_t *log)
+{
+    (void) buf_ptr;
+
     if (decomp->total_decompressed > NGX_MAX_SIZE_T_VALUE - produced) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
             "markdown: "
@@ -933,20 +1058,62 @@ ngx_http_markdown_streaming_decomp_feed(
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
 
-    *out_data = buf;
-    *out_len = produced;
     return NGX_OK;
 }
 
 
-static void
-ngx_http_markdown_streaming_decomp_finish_free_heap(
-    u_char **heap_buf_ptr)
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_finish_zlib_expand(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    u_char **heap_buf_ptr,
+    u_char **buf_ptr,
+    size_t *buf_size_ptr,
+    ngx_flag_t *using_heap_ptr,
+    ngx_log_t *log)
 {
-    if (*heap_buf_ptr != NULL) {
-        ngx_free(*heap_buf_ptr);
-        *heap_buf_ptr = NULL;
+    size_t   old_size;
+    uInt     expand_out;
+
+    old_size = *buf_size_ptr;
+    if (decomp->max_decompressed_size > 0
+        && old_size >= decomp->max_decompressed_size
+                       - decomp->total_decompressed)
+    {
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
+    /*
+     * expand_buf() frees any previous heap buffer if expansion fails,
+     * so we can safely return directly on NGX_ERROR here.
+     */
+    if (ngx_http_markdown_streaming_decomp_expand_buf(
+            heap_buf_ptr, buf_ptr, buf_size_ptr,
+            decomp->max_decompressed_size > 0
+            ? decomp->max_decompressed_size
+              - decomp->total_decompressed
+            : 0,
+            log)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    *using_heap_ptr = 1;
+    decomp->state.zlib.next_out = *buf_ptr + old_size;
+    if (ngx_http_markdown_streaming_decomp_size_to_uint(
+            *buf_size_ptr - old_size, &expand_out))
+    {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+            "markdown: "
+            "finish expand %uz exceeds "
+            "zlib uInt max",
+            *buf_size_ptr - old_size);
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        return NGX_ERROR;
+    }
+    decomp->state.zlib.avail_out = expand_out;
+
+    return NGX_OK;
 }
 
 
@@ -962,9 +1129,17 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
     u_char      *heap_buf;
     ngx_flag_t   using_heap;
     int          zrc;
+    ngx_int_t    rc;
 
-    heap_buf = NULL;
-    using_heap = 0;
+    /*
+     * Track the caller-supplied buffer (allocated via ngx_alloc in
+     * finish()) as the initial heap workspace.  This ensures
+     * finalize_buf() always transfers produced bytes to pool memory
+     * and releases the heap allocation, regardless of whether
+     * expansion occurred.
+     */
+    heap_buf = *buf_ptr;
+    using_heap = 1;
 
     decomp->state.zlib.next_in = Z_NULL;
     decomp->state.zlib.avail_in = 0;
@@ -976,6 +1151,8 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             "markdown: "
             "finish buffer %uz exceeds zlib uInt max",
             *buf_size_ptr);
+        ngx_http_markdown_streaming_decomp_free_heap(&heap_buf);
+        *buf_ptr = NULL;
         return NGX_ERROR;
     }
 
@@ -988,8 +1165,9 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             ngx_log_error(NGX_LOG_ERR, log, 0,
                 "markdown: "
                 "finish inflate error %d", zrc);
-            ngx_http_markdown_streaming_decomp_finish_free_heap(
+            ngx_http_markdown_streaming_decomp_free_heap(
                 &heap_buf);
+            *buf_ptr = NULL;
             return NGX_ERROR;
         }
 
@@ -1004,8 +1182,9 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
                 "decompressed size %uz exceeds limit %uz",
                 decomp->total_decompressed + *produced_ptr,
                 decomp->max_decompressed_size);
-            ngx_http_markdown_streaming_decomp_finish_free_heap(
+            ngx_http_markdown_streaming_decomp_free_heap(
                 &heap_buf);
+            *buf_ptr = NULL;
             return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
         }
 
@@ -1020,8 +1199,9 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             ngx_log_error(NGX_LOG_ERR, log, 0,
                 "markdown: "
                 "finish inflate incomplete stream");
-            ngx_http_markdown_streaming_decomp_finish_free_heap(
+            ngx_http_markdown_streaming_decomp_free_heap(
                 &heap_buf);
+            *buf_ptr = NULL;
             return NGX_ERROR;
         }
 
@@ -1029,52 +1209,27 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             continue;
         }
 
-        {
-            size_t  old_size;
-
-            old_size = *buf_size_ptr;
-            /*
-             * expand_buf() frees any previous heap buffer if expansion fails,
-             * so we can safely return directly on NGX_ERROR here.
-             */
-            if (ngx_http_markdown_streaming_decomp_expand_buf(
-                    &heap_buf, buf_ptr, buf_size_ptr, log)
-                != NGX_OK)
-            {
-                return NGX_ERROR;
-            }
-
-            using_heap = 1;
-            decomp->state.zlib.next_out = *buf_ptr + old_size;
-            {
-                uInt  expand_out;
-
-                if (ngx_http_markdown_streaming_decomp_size_to_uint(
-                        *buf_size_ptr - old_size, &expand_out))
-                {
-                    ngx_log_error(NGX_LOG_ERR, log, 0,
-                        "markdown: "
-                        "finish expand %uz exceeds "
-                        "zlib uInt max",
-                        *buf_size_ptr - old_size);
-                    ngx_http_markdown_streaming_decomp_finish_free_heap(
-                        &heap_buf);
-                    return NGX_ERROR;
-                }
-                decomp->state.zlib.avail_out = expand_out;
-            }
+        rc = ngx_http_markdown_streaming_decomp_finish_zlib_expand(
+                 decomp, &heap_buf, buf_ptr, buf_size_ptr,
+                 &using_heap, log);
+        if (rc != NGX_OK) {
+            *buf_ptr = NULL;
+            return rc;
         }
     }
 
-    if (!using_heap) {
-        return NGX_OK;
-    }
-
+    /*
+     * Always finalize: transfer produced bytes to pool memory (or
+     * free the heap buffer if nothing was produced).  This guarantees
+     * the caller receives either a pool-owned buffer or NULL/0, never
+     * a leaked raw heap pointer.
+     */
     if (ngx_http_markdown_streaming_decomp_finalize_buf(
-            heap_buf, buf_ptr, buf_size_ptr,
+            &heap_buf, buf_ptr, buf_size_ptr,
             *produced_ptr, pool)
         != NGX_OK)
     {
+        *buf_ptr = NULL;
         return NGX_ERROR;
     }
 
@@ -1085,12 +1240,20 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
 /*
  * Finish decompression (handle last_buf).
  *
+ * Allocates a transient heap workspace via ngx_alloc, then delegates to
+ * the format-specific finish path.  On success the workspace is either
+ * transferred to pool memory (via finalize_buf) or freed when no output
+ * is produced; the caller always receives a pool-owned buffer or
+ * NULL/0, never a raw heap pointer.
+ *
  * For zlib, flushes remaining data with Z_FINISH.
- * For brotli, checks stream completeness.
+ * For brotli, checks stream completeness (no tail output).
+ *
+ * All error paths free the heap workspace before returning.
  *
  * Returns:
- *   NGX_OK    - success
- *   NGX_ERROR - decompression error
+ *   NGX_OK    - success (*out_data is pool-owned or NULL)
+ *   NGX_ERROR - decompression error (heap workspace freed)
  */
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_finish(
@@ -1118,7 +1281,7 @@ ngx_http_markdown_streaming_decomp_finish(
     }
 
     buf_size = 4096;
-    buf = ngx_palloc(pool, buf_size);
+    buf = ngx_alloc(buf_size, log);
     if (buf == NULL) {
         return NGX_ERROR;
     }
@@ -1137,6 +1300,11 @@ ngx_http_markdown_streaming_decomp_finish(
                 decomp, &buf, &buf_size,
                 &produced, pool, log);
         if (finish_rc != NGX_OK) {
+            /*
+             * finish_zlib frees the heap buffer on all error paths
+             * and clears *buf_ptr, so buf is already NULL here.
+             */
+            buf = NULL;
             return finish_rc;
         }
         break;
@@ -1150,12 +1318,24 @@ ngx_http_markdown_streaming_decomp_finish(
             ngx_log_error(NGX_LOG_WARN, log, 0,
                 "markdown: "
                 "brotli stream not finished");
+            ngx_free(buf);
+            buf = NULL;
+            return NGX_ERROR;
         }
         decomp->finished = 1;
+        /*
+         * Brotli finish produces no tail output; free the heap
+         * workspace and return NULL/0 to the caller.
+         */
+        ngx_free(buf);
+        buf = NULL;
+        produced = 0;
         break;
 #endif
 
     default:
+        ngx_free(buf);
+        buf = NULL;
         return NGX_ERROR;
     }
 

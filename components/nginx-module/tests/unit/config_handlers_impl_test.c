@@ -1454,7 +1454,7 @@ test_v080_stream_directive_handlers(void)
 
 /*
  * Verify ngx_http_markdown_parse_size edge cases: NULL input,
- * oversized input, and bare number (no suffix).
+ * oversized input, negative input, and bare number (no suffix).
  *
  * Semantic contract mirrored: parse_size returns (size_t) NGX_ERROR
  * for NULL/empty/oversized inputs, and returns the raw value when
@@ -1516,6 +1516,31 @@ test_parse_size_edge_cases(void)
     result = ngx_http_markdown_parse_size(&line);
     TEST_ASSERT(result == 0,
         "zero value should parse");
+
+    set_arg(&line, "-2");
+    result = ngx_http_markdown_parse_size(&line);
+    TEST_ASSERT(result == (size_t) NGX_ERROR,
+        "negative bare size should return NGX_ERROR");
+
+    set_arg(&line, " -2k");
+    result = ngx_http_markdown_parse_size(&line);
+    TEST_ASSERT(result == (size_t) NGX_ERROR,
+        "negative suffixed size with leading space should return NGX_ERROR");
+
+    set_arg(&line, "   ");
+    result = ngx_http_markdown_parse_size(&line);
+    TEST_ASSERT(result == (size_t) NGX_ERROR,
+        "all-whitespace input should return NGX_ERROR (empty after trim)");
+
+    set_arg(&line, "   abc");
+    result = ngx_http_markdown_parse_size(&line);
+    TEST_ASSERT(result == (size_t) NGX_ERROR,
+        "whitespace followed by non-digits should return NGX_ERROR");
+
+    set_arg(&line, "   12abc");
+    result = ngx_http_markdown_parse_size(&line);
+    TEST_ASSERT(result == (size_t) NGX_ERROR,
+        "digits followed by non-numeric trailing should return NGX_ERROR");
 
     TEST_PASS("parse_size edge cases covered");
 }
@@ -1579,6 +1604,7 @@ test_set_dynconf_path(void)
     ngx_str_t                  values[2];
     ngx_command_t              cmd;
     ngx_http_markdown_conf_t   mcf;
+    ngx_http_markdown_conf_t   duplicate_mcf;
     const char                *rc;
 
     TEST_SUBSECTION("set_dynconf_path handler");
@@ -1598,12 +1624,16 @@ test_set_dynconf_path(void)
                 "main conf marked as configured");
     TEST_ASSERT(g_main_conf.dynconf_first_path.len > 0,
                 "first path recorded in main conf");
+    TEST_ASSERT(g_main_conf.dynconf_owner_conf == &mcf,
+                "main conf should retain the path owner config");
 
     /* Duplicate should fail */
-    init_conf(&mcf);
-    rc = ngx_http_markdown_set_dynconf_path(&cf, &cmd, &mcf);
+    init_conf(&duplicate_mcf);
+    rc = ngx_http_markdown_set_dynconf_path(&cf, &cmd, &duplicate_mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
                 "duplicate path should be rejected");
+    TEST_ASSERT(g_main_conf.dynconf_owner_conf == &mcf,
+                "duplicate path must not replace the original owner");
 
     /* Empty value should succeed (no-op) */
     memset(&g_main_conf, 0, sizeof(g_main_conf));
