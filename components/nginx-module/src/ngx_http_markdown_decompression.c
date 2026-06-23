@@ -453,26 +453,31 @@ ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
             return NGX_OK;
         }
 
-        if (zrc == Z_OK) {
+        /* Z_OK and Z_BUF_ERROR both signal a stall that can be retried
+         * after growing the output buffer; they differ only in the
+         * error category / label passed to the shared stall handler.
+         * Consolidating the two branches here removes a 4-line
+         * continue/return duplicate (Rule 31). */
+        if (zrc == Z_OK || zrc == Z_BUF_ERROR) {
+            ngx_int_t  category;
+            const char *label;
+
+            if (zrc == Z_OK) {
+                category = NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
+                label = "Z_OK";
+            } else {
+                category = NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+                label = "Z_BUF_ERROR";
+            }
+
             rc = ngx_http_markdown_handle_inflate_stall(
                 r, conf, stream, output_data, output_size,
-                NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
+                category, label);
             if (rc == NGX_AGAIN) {
                 continue;
             }
             return rc;
         }
-
-        if (zrc == Z_BUF_ERROR) {
-            rc = ngx_http_markdown_handle_inflate_stall(
-                r, conf, stream, output_data, output_size,
-                NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, "Z_BUF_ERROR");
-            if (rc == NGX_AGAIN) {
-                continue;
-            }
-            return rc;
-        }
-
         if (zrc == Z_DATA_ERROR) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                          "markdown: decompression failed, "
@@ -534,6 +539,192 @@ ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
  *
  * Requirements: 2.1, 2.2, 2.3, 9.1, 9.2, 13.1, 13.5, 14.1, 14.2
  */
+
+
+/*
+ * Cleanup callback signature for ngx_http_markdown_decomp_alloc_output.
+ *
+ * Called when the output allocation fails, so the caller can release the
+ * backend-specific decoder state (inflateEnd for zlib, destroy-instance
+ * for brotli) before the helper logs and returns NGX_ERROR.
+ */
+typedef void (*ngx_http_markdown_decomp_cleanup_t)(void *decoder_state);
+
+
+/*
+ * Allocate the decompression output buffer from r->pool, logging and
+ * cleaning up decoder state on failure.
+ *
+ * Shared by the zlib (gzip/deflate) and brotli decompression paths so the
+ * two backends cannot drift apart on the alloc-failure error path. The
+ * caller provides a backend-specific cleanup callback invoked only on
+ * failure (the caller retains ownership of decoder_state on success).
+ *
+ * Parameters:
+ *   r             - nginx request (logging + pool)
+ *   output_size   - capacity to allocate
+ *   cleanup       - decoder cleanup callback (NULL if no cleanup needed)
+ *   decoder_state - opaque pointer forwarded to cleanup (e.g. z_stream*
+ *                   or BrotliDecoderState*)
+ *
+ * Returns:
+ *   non-NULL u_char* on success, NULL on failure (error logged + cleanup
+ *   invoked).
+ */
+static u_char *
+ngx_http_markdown_decomp_alloc_output(ngx_http_request_t *r,
+    size_t output_size, ngx_http_markdown_decomp_cleanup_t cleanup,
+    void *decoder_state)
+{
+    u_char  *output_data;
+
+    output_data = ngx_pnalloc(r->pool, output_size);
+    if (output_data == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: failed to allocate decompression buffer, "
+                     "size=%uz, category=system",
+                     output_size);
+        if (cleanup != NULL) {
+            cleanup(decoder_state);
+        }
+        return NULL;
+    }
+
+    return output_data;
+}
+
+
+/* zlib cleanup adapter: forwards to inflateEnd via the z_stream pointer. */
+static void
+ngx_http_markdown_decomp_zlib_cleanup(void *decoder_state)
+{
+    inflateEnd((z_stream *) decoder_state);
+}
+
+
+/* brotli cleanup adapter: forwards to BrotliDecoderDestroyInstance. */
+static void
+ngx_http_markdown_decomp_brotli_cleanup(void *decoder_state)
+{
+#ifdef NGX_HTTP_BROTLI
+    BrotliDecoderDestroyInstance((BrotliDecoderState *) decoder_state);
+#else
+    (void) decoder_state;
+#endif
+}
+
+
+/*
+ * Validate decompression input size and collect the input chain into a
+ * single contiguous buffer allocated from the request pool.
+ *
+ * Shared by the zlib (gzip/deflate) and brotli decompression paths so the
+ * two functions cannot drift apart on size validation or buffer setup.
+ *
+ * Parameters:
+ *   r           - nginx request
+ *   in          - input chain with compressed bytes
+ *   input_data  - on success, points to the pool-allocated buffer holding
+ *                 a copy of the input chain contents
+ *   input_size  - on success, the total size of the collected input
+ *
+ * Returns:
+ *   NGX_OK on success (input_data/input_size populated)
+ *   NGX_ERROR if the input chain is empty, oversized, or cannot be copied
+ */
+static ngx_int_t
+ngx_http_markdown_decomp_collect_input(ngx_http_request_t *r,
+    const ngx_chain_t *in, u_char **input_data, size_t *input_size)
+{
+    size_t   sz;
+
+    sz = ngx_http_markdown_chain_size(in);
+
+    if (sz == 0 || sz == (size_t) -1) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: decompression failed, "
+                     "invalid input size, category=conversion");
+        return NGX_ERROR;
+    }
+
+    *input_data = ngx_pnalloc(r->pool, sz);
+    if (*input_data == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: failed to allocate input buffer, "
+                     "size=%uz, category=system",
+                     sz);
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_chain_to_buffer(in, *input_data, sz) != NGX_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: failed to collect input data, "
+                     "category=system");
+        return NGX_ERROR;
+    }
+
+    *input_size = sz;
+    return NGX_OK;
+}
+
+
+/*
+ * Build the output chain wrapping a pool-allocated decompressed buffer.
+ *
+ * Shared by the zlib (gzip/deflate) and brotli decompression paths so the
+ * buffer setup + chain link construction cannot drift apart.
+ *
+ * Parameters:
+ *   r            - nginx request
+ *   output_data  - start of the decompressed output buffer
+ *   output_size  - total capacity of output_data (b->end = output_data + output_size)
+ *   used         - actual decompressed length (b->last = output_data + used)
+ *   last_buf     - 1 to set b->last_buf (main request terminal), 0 otherwise
+ *   out          - on success, set to a newly allocated chain link wrapping the buffer
+ *
+ * Returns:
+ *   NGX_OK on success (*out populated)
+ *   NGX_ERROR on allocation failure (buf or chain link)
+ */
+static ngx_int_t
+ngx_http_markdown_decomp_build_output_chain(ngx_http_request_t *r,
+    u_char *output_data, size_t output_size, size_t used, u_char last_buf,
+    ngx_chain_t **out)
+{
+    ngx_buf_t    *b;
+    ngx_chain_t  *cl;
+
+    b = ngx_calloc_buf(r->pool);
+    if (b == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: failed to create output buffer, "
+                     "category=system");
+        return NGX_ERROR;
+    }
+
+    b->pos = output_data;
+    b->last = output_data + used;
+    b->start = output_data;
+    b->end = output_data + output_size;
+    b->temporary = 1;
+    b->last_buf = last_buf;
+
+    cl = ngx_alloc_chain_link(r->pool);
+    if (cl == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: failed to allocate chain link, "
+                     "category=system");
+        return NGX_ERROR;
+    }
+
+    cl->buf = b;
+    cl->next = NULL;
+    *out = cl;
+
+    return NGX_OK;
+}
+
+
 ngx_int_t
 ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                                    ngx_http_markdown_compression_type_e type,
@@ -541,14 +732,11 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                                    ngx_chain_t **out)
 {
     z_stream                           stream;
-    ngx_buf_t                         *b;
-    ngx_chain_t                       *cl;
     u_char                            *input_data;
     size_t                             input_size;
     u_char                            *output_data;
     size_t                             output_size;
     size_t                             total_decompressed;
-    ngx_int_t                          chain_rc;
     ngx_int_t                          loop_rc;
     int                                zrc;
     int                                window_bits;
@@ -561,31 +749,12 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                   "markdown: using zlib for gzip/deflate decompression, type=%d",
                   type);
     
-    /* Collect all input data into a single buffer */
-    input_size = ngx_http_markdown_chain_size(in);
-    
-    /* Validate input size (input size validation) */
-    if (input_size == 0 || input_size == (size_t) -1) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: decompression failed, "
-                     "invalid input size, category=conversion");
-        return NGX_ERROR;
-    }
-    
-    input_data = ngx_pnalloc(r->pool, input_size);
-    if (input_data == NULL) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: failed to allocate input buffer, "
-                     "size=%uz, category=system",
-                     input_size);
-        return NGX_ERROR;
-    }
-    
-    chain_rc = ngx_http_markdown_chain_to_buffer(in, input_data, input_size);
-    if (chain_rc != NGX_OK) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: failed to collect input data, "
-                     "category=system");
+    /* Collect all input data into a single buffer and validate its size
+     * (shared with the brotli path via ngx_http_markdown_decomp_collect_input
+     * so the two decompression backends cannot drift apart on size checks). */
+    if (ngx_http_markdown_decomp_collect_input(r, in, &input_data,
+                                               &input_size) != NGX_OK)
+    {
         return NGX_ERROR;
     }
 
@@ -627,13 +796,9 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     }
     
     /* Allocate output buffer using nginx memory pool (output buffer allocation from nginx pool) */
-    output_data = ngx_pnalloc(r->pool, output_size);
+    output_data = ngx_http_markdown_decomp_alloc_output(r, output_size,
+        ngx_http_markdown_decomp_zlib_cleanup, &stream);
     if (output_data == NULL) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: failed to allocate decompression buffer, "
-                     "size=%uz, category=system",
-                     output_size);
-        inflateEnd(&stream);
         return NGX_ERROR;
     }
     
@@ -699,42 +864,22 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
     
-    /* Create output chain wrapping the decompressed data directly
-     * (avoids a second allocation + memcpy). */
-    b = ngx_calloc_buf(r->pool);
-    if (b == NULL) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: failed to create output buffer, "
-                     "category=system");
-        inflateEnd(&stream);
-        return NGX_ERROR;
-    }
-    
-    b->pos = output_data;
-    b->last = output_data + stream.total_out;
-    b->start = output_data;
-    b->end = output_data + output_size;
-    b->temporary = 1;
-    b->last_buf = 1;
-    
-    cl = ngx_alloc_chain_link(r->pool);
-    if (cl == NULL) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: failed to allocate chain link, "
-                     "category=system");
-        inflateEnd(&stream);
-        return NGX_ERROR;
-    }
-    
-    cl->buf = b;
-    cl->next = NULL;
-    *out = cl;
-    
     /* Save total_out before inflateEnd releases the stream (Rule 15) */
     total_decompressed = stream.total_out;
 
     /* Clean up with inflateEnd() */
     inflateEnd(&stream);
+    
+    /* Build the output chain wrapping the decompressed data directly
+     * (avoids a second allocation + memcpy). Shared with the brotli path
+     * via ngx_http_markdown_decomp_build_output_chain so the two backends
+     * cannot drift apart on buffer/chain setup. */
+    if (ngx_http_markdown_decomp_build_output_chain(r, output_data, output_size,
+                                                    total_decompressed, 1,
+                                                    out) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
     
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: decompression succeeded, "
@@ -791,8 +936,6 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     /* Brotli support is compiled in */
     BrotliDecoderState          *decoder;
     BrotliDecoderResult          result;
-    ngx_buf_t                   *b;
-    ngx_chain_t                 *cl;
     u_char                      *input_data;
     size_t                       input_size;
     u_char                      *output_data;
@@ -810,30 +953,12 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: using brotli library for decompression");
     
-    /* Collect all input data into a single buffer */
-    input_size = ngx_http_markdown_chain_size(in);
-    
-    /* Validate input size */
-    if (input_size == 0 || input_size == (size_t) -1) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: decompression failed, "
-                     "invalid input size, category=conversion");
-        return NGX_ERROR;
-    }
-    
-    input_data = ngx_pnalloc(r->pool, input_size);
-    if (input_data == NULL) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: failed to allocate input buffer, "
-                     "size=%uz, category=system",
-                     input_size);
-        return NGX_ERROR;
-    }
-    
-    if (ngx_http_markdown_chain_to_buffer(in, input_data, input_size) != NGX_OK) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: failed to collect input data, "
-                     "category=system");
+    /* Collect all input data into a single buffer and validate its size
+     * (shared with the zlib path via ngx_http_markdown_decomp_collect_input
+     * so the two decompression backends cannot drift apart on size checks). */
+    if (ngx_http_markdown_decomp_collect_input(r, in, &input_data,
+                                               &input_size) != NGX_OK)
+    {
         return NGX_ERROR;
     }
     
@@ -855,13 +980,9 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     }
     
     /* Allocate output buffer using nginx memory pool (brotli output buffer allocation from nginx pool) */
-    output_data = ngx_pnalloc(r->pool, output_size);
+    output_data = ngx_http_markdown_decomp_alloc_output(r, output_size,
+        ngx_http_markdown_decomp_brotli_cleanup, decoder);
     if (output_data == NULL) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: failed to allocate decompression buffer, "
-                     "size=%uz, category=system",
-                     output_size);
-        BrotliDecoderDestroyInstance(decoder);
         return NGX_ERROR;
     }
     
@@ -952,39 +1073,19 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
     
-    /* Create output chain wrapping the decompressed data directly
-     * (avoids a second allocation + memcpy). */
-    b = ngx_calloc_buf(r->pool);
-    if (b == NULL) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: failed to create output buffer, "
-                     "category=system");
-        BrotliDecoderDestroyInstance(decoder);
-        return NGX_ERROR;
-    }
-    
-    b->pos = output_data;
-    b->last = output_data + total_out;
-    b->start = output_data;
-    b->end = output_data + output_size;
-    b->temporary = 1;
-    b->last_buf = 1;
-    
-    cl = ngx_alloc_chain_link(r->pool);
-    if (cl == NULL) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                     "markdown: failed to allocate chain link, "
-                     "category=system");
-        BrotliDecoderDestroyInstance(decoder);
-        return NGX_ERROR;
-    }
-    
-    cl->buf = b;
-    cl->next = NULL;
-    *out = cl;
-    
     /* Clean up decoder instance (brotli decoder cleanup) */
     BrotliDecoderDestroyInstance(decoder);
+    
+    /* Build the output chain wrapping the decompressed data directly
+     * (avoids a second allocation + memcpy). Shared with the zlib path
+     * via ngx_http_markdown_decomp_build_output_chain so the two backends
+     * cannot drift apart on buffer/chain setup. */
+    if (ngx_http_markdown_decomp_build_output_chain(r, output_data, output_size,
+                                                    total_out, 1,
+                                                    out) != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
     
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: brotli decompression succeeded, "

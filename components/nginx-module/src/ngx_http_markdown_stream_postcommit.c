@@ -131,17 +131,10 @@ ngx_http_markdown_stream_postcommit_safe_finish(
 
     /* No Rust handle: send terminal chain (empty last_buf) */
     rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
-    if (rc == NGX_AGAIN) {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "markdown postcommit safe_finish: "
-                       "terminal chain pending (NGX_AGAIN)");
-        return NGX_AGAIN;
-    }
+    rc = ngx_http_markdown_stream_postcommit_handle_send_result(r, rc,
+        "terminal chain pending (NGX_AGAIN)");
     if (rc != NGX_OK && rc != NGX_DONE) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown postcommit safe_finish: "
-                      "failed to send terminal chain");
-        return NGX_ERROR;
+        return rc;
     }
 
     /* Log the post-commit event */
@@ -211,16 +204,10 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
 
         markdown_streaming_output_free(close_data, close_len);
 
-        if (rc == NGX_AGAIN) {
-            return NGX_AGAIN;
-        }
-
+        rc = ngx_http_markdown_stream_postcommit_handle_send_result(r, rc,
+            "closing bytes pending (NGX_AGAIN)");
         if (rc != NGX_OK && rc != NGX_DONE) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                          "markdown postcommit safe_finish: "
-                          "failed to send closing bytes (rc=%i)",
-                          rc);
-            return NGX_ERROR;
+            return rc;
         }
 
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -230,18 +217,10 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
     }
 
     rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
-    if (rc == NGX_AGAIN) {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "markdown postcommit safe_finish: "
-                       "terminal chain pending (NGX_AGAIN), "
-                       "no closing bytes path");
-        return NGX_AGAIN;
-    }
+    rc = ngx_http_markdown_stream_postcommit_handle_send_result(r, rc,
+        "terminal chain pending (NGX_AGAIN), no closing bytes path");
     if (rc != NGX_OK && rc != NGX_DONE) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown postcommit safe_finish: "
-                      "failed to send terminal chain");
-        return NGX_ERROR;
+        return rc;
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -453,6 +432,118 @@ ngx_http_markdown_stream_postcommit_log(
 
 
 /*
+ * Wrap a pre-built terminal buffer in a chain link, send it through the
+ * downstream body filter, and handle the NGX_AGAIN re-entry / terminal-sent
+ * bookkeeping shared by both the empty-terminal and closing-bytes paths.
+ *
+ * The caller is responsible for allocating `b` from r->pool and setting
+ * its content/flags (only `b->last_buf` is read here to decide whether
+ * `main_terminal_sent` may be latched, per Rule 47: the latch is set only
+ * after a successful downstream return, never on NGX_AGAIN).
+ *
+ * Parameters:
+ *   r   - current HTTP request
+ *   ctx - module context (streaming state); NULL returns NGX_ERROR
+ *   b   - pre-allocated buffer (caller-populated); ownership transfers to the chain
+ *   pending_has_data  - 1 if the buffer carries real bytes (closing path),
+ *                       0 for the empty terminal chain
+ *   pending_output_bytes - byte count to record when buffered on NGX_AGAIN
+ *
+ * Returns:
+ *   NGX_OK / NGX_DONE / NGX_AGAIN as returned by the body filter, or
+ *   NGX_ERROR on chain-link allocation failure or NGX_AGAIN re-entry.
+ */
+static ngx_int_t
+ngx_http_markdown_stream_postcommit_send_chain(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_buf_t *b,
+    ngx_flag_t pending_has_data, size_t pending_output_bytes)
+{
+    ngx_chain_t  *out;
+    ngx_int_t     rc;
+
+    out = ngx_alloc_chain_link(r->pool);
+    if (out == NULL) {
+        return NGX_ERROR;
+    }
+
+    out->buf = b;
+    out->next = NULL;
+
+    rc = ngx_http_markdown_next_body_filter(r, out);
+
+    if (rc == NGX_AGAIN) {
+#ifdef MARKDOWN_STREAMING_ENABLED
+        if (ctx->streaming.pending_output != NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "markdown postcommit: "
+                          "pending output re-entry detected");
+            return NGX_ERROR;
+        }
+
+        ctx->streaming.pending_output = out;
+        ctx->streaming.pending_has_data = pending_has_data;
+        ctx->streaming.pending_output_bytes = pending_output_bytes;
+        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+#endif
+    }
+
+    /* Rule 47: only latch main_terminal_sent after a successful
+     * downstream return, never on NGX_AGAIN. */
+    if (b->last_buf && (rc == NGX_OK || rc == NGX_DONE)) {
+#ifdef MARKDOWN_STREAMING_ENABLED
+        ctx->streaming.main_terminal_sent = 1;
+#endif
+    }
+
+    return rc;
+}
+
+
+/*
+ * Check whether the main terminal has already been sent; if not, allocate
+ * a fresh terminal buffer from r->pool.
+ *
+ * Consolidates the terminal-sent short-circuit + buffer allocation shared
+ * by both the empty and closing-bytes terminal senders so the two paths
+ * cannot drift apart on the early-return guard or the alloc-failure path.
+ *
+ * Parameters:
+ *   r   - current HTTP request
+ *   ctx - module context (may be NULL; caller must guard earlier)
+ *   out - on success (return value 1), set to a fresh ngx_buf_t owned by
+ *         the caller; on short-circuit (return value 0) left untouched
+ *
+ * Returns:
+ *   1  - buffer allocated, caller should populate and send
+ *   0  - terminal already sent, caller should return NGX_OK
+ *  -1  - allocation failed, caller should return NGX_ERROR
+ */
+static ngx_int_t
+ngx_http_markdown_stream_postcommit_acquire_terminal_buf(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_buf_t **out)
+{
+    ngx_buf_t  *b;
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (r == r->main && ctx->streaming.main_terminal_sent) {
+        return 0;
+    }
+#endif
+
+    b = ngx_calloc_buf(r->pool);
+    if (b == NULL) {
+        return -1;
+    }
+
+    b->last_buf = (r == r->main) ? 1 : 0;
+    b->last_in_chain = 1;
+
+    *out = b;
+    return 1;
+}
+
+
+/*
  * Send a terminal chain (empty last_buf=1) to close the response.
  *
  * Allocates a buffer and chain link from the request pool, sets
@@ -467,62 +558,27 @@ static ngx_int_t
 ngx_http_markdown_stream_postcommit_send_terminal(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
 {
-    ngx_buf_t    *b;
-    ngx_chain_t  *out;
-    ngx_int_t     rc;
+    ngx_buf_t   *b;
+    ngx_int_t    acquired;
 
+    /* send_terminal is the only path allowed when ctx is NULL: guard
+     * before acquiring so the acquire helper never sees a NULL ctx. */
     if (ctx == NULL) {
         return NGX_ERROR;
     }
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-    if (r == r->main && ctx->streaming.main_terminal_sent) {
+    acquired = ngx_http_markdown_stream_postcommit_acquire_terminal_buf(
+        r, ctx, &b);
+    if (acquired == 0) {
         return NGX_OK;
     }
-#endif
-
-    b = ngx_calloc_buf(r->pool);
-    if (b == NULL) {
+    if (acquired < 0) {
         return NGX_ERROR;
     }
 
-    b->last_buf = (r == r->main) ? 1 : 0;
-    b->last_in_chain = 1;
     b->sync = 1;
 
-    out = ngx_alloc_chain_link(r->pool);
-    if (out == NULL) {
-        return NGX_ERROR;
-    }
-
-    out->buf = b;
-    out->next = NULL;
-
-    rc = ngx_http_markdown_next_body_filter(r, out);
-
-    if (rc == NGX_AGAIN) {
-#ifdef MARKDOWN_STREAMING_ENABLED
-        if (ctx->streaming.pending_output != NULL) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                          "markdown postcommit send_terminal: "
-                          "pending output re-entry detected");
-            return NGX_ERROR;
-        }
-
-        ctx->streaming.pending_output = out;
-        ctx->streaming.pending_has_data = 0;
-        ctx->streaming.pending_output_bytes = 0;
-        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
-#endif
-    }
-
-    if (b->last_buf && (rc == NGX_OK || rc == NGX_DONE)) {
-#ifdef MARKDOWN_STREAMING_ENABLED
-        ctx->streaming.main_terminal_sent = 1;
-#endif
-    }
-
-    return rc;
+    return ngx_http_markdown_stream_postcommit_send_chain(r, ctx, b, 0, 0);
 }
 
 
@@ -537,19 +593,23 @@ ngx_http_markdown_stream_postcommit_send_closing(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const u_char *data, size_t len)
 {
-    ngx_buf_t    *b;
-    ngx_chain_t  *out;
-    ngx_int_t     rc;
+    ngx_buf_t   *b;
+    ngx_int_t    acquired;
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-    if (r == r->main && ctx->streaming.main_terminal_sent) {
+    /* send_closing is only reached from safe_finish, which already
+     * validated ctx; acquire the buffer and inline the two non-acquire
+     * outcomes (already-sent / alloc-fail) into the same return path
+     * used by the populate+send steps below to avoid duplicating the
+     * if (acquired == 0) / if (acquired < 0) guard pair. */
+    acquired = ngx_http_markdown_stream_postcommit_acquire_terminal_buf(
+        r, ctx, &b);
+    switch (acquired) {
+    case 0:
         return NGX_OK;
-    }
-#endif
-
-    b = ngx_calloc_buf(r->pool);
-    if (b == NULL) {
+    case -1:
         return NGX_ERROR;
+    default: /* 1 — buffer acquired, fall through to populate + send */
+        break;
     }
 
     b->pos = ngx_palloc(r->pool, len);
@@ -560,39 +620,43 @@ ngx_http_markdown_stream_postcommit_send_closing(
     ngx_memcpy(b->pos, data, len);
     b->last = b->pos + len;
     b->memory = 1;
-    b->last_buf = (r == r->main) ? 1 : 0;
-    b->last_in_chain = 1;
 
-    out = ngx_alloc_chain_link(r->pool);
-    if (out == NULL) {
-        return NGX_ERROR;
-    }
+    return ngx_http_markdown_stream_postcommit_send_chain(r, ctx, b, 1, len);
+}
 
-    out->buf = b;
-    out->next = NULL;
 
-    rc = ngx_http_markdown_next_body_filter(r, out);
-
+/*
+ * Classify the result of ngx_http_markdown_stream_postcommit_send_terminal
+ * (or send_closing) and emit the matching log + return code.
+ *
+ * Shared by the safe_finish branches so the NGX_AGAIN / non-OK handling
+ * cannot drift apart across the two terminal-send call sites.
+ *
+ * Parameters:
+ *   r     - current HTTP request (logging)
+ *   rc    - downstream return code from send_terminal/send_closing
+ *   label - short tag included in the NGX_AGAIN debug log (e.g.
+ *           "terminal chain pending (NGX_AGAIN)" or the no-closing-bytes
+ *           variant)
+ *
+ * Returns:
+ *   rc unchanged when NGX_OK / NGX_DONE / NGX_AGAIN, NGX_ERROR otherwise.
+ */
+static ngx_int_t
+ngx_http_markdown_stream_postcommit_handle_send_result(
+    ngx_http_request_t *r, ngx_int_t rc, const char *label)
+{
     if (rc == NGX_AGAIN) {
-#ifdef MARKDOWN_STREAMING_ENABLED
-        if (ctx->streaming.pending_output != NULL) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                          "markdown postcommit safe_finish: "
-                          "pending output re-entry detected");
-            return NGX_ERROR;
-        }
-
-        ctx->streaming.pending_output = out;
-        ctx->streaming.pending_has_data = 1;
-        ctx->streaming.pending_output_bytes = len;
-        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
-#endif
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "markdown postcommit safe_finish: %s", label);
+        return NGX_AGAIN;
     }
 
-    if (b->last_buf && (rc == NGX_OK || rc == NGX_DONE)) {
-#ifdef MARKDOWN_STREAMING_ENABLED
-        ctx->streaming.main_terminal_sent = 1;
-#endif
+    if (rc != NGX_OK && rc != NGX_DONE) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown postcommit safe_finish: "
+                      "failed to send terminal chain");
+        return NGX_ERROR;
     }
 
     return rc;
