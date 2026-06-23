@@ -208,7 +208,7 @@ while IFS= read -r src_file; do
                     if (allocpos > eqpos || allocpos == eqpos + 0) {
                         varname = normalize_lvalue(line)
                         # Validate it is a plausible lvalue
-                        if (varname ~ /^[a-zA-Z_*().>[-]+$/ && length(varname) > 0) {
+                        if (varname ~ /^[a-zA-Z0-9_*().>[-]+$/ && length(varname) > 0) {
                             pool_vars[varname] = func_start
                             is_pool_alloc = 1
                         }
