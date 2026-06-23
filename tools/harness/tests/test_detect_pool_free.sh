@@ -172,7 +172,44 @@ else
 fi
 rm -f "${src_dir}/deref_field.c"
 
-# ── Fixture 7: failure message does not recommend ngx_pfree ──
+# ── Fixture 7: numeric lvalue buf2 → ngx_free(buf2) — VIOLATION ──
+cat >"${src_dir}/numeric_var.c" <<'C'
+void f(void) {
+    u_char *buf2 = ngx_palloc(pool, 128);
+    if (buf2 == NULL) { return; }
+    ngx_free(buf2);
+}
+C
+out="${tmp_dir}/numeric_var.out"
+rc=0
+run_detector "${src_dir}" "${out}" || rc=$?
+if [[ "${rc}" -ne 0 ]] && grep -qF "ngx_free(buf2)" "${out}"; then
+    pass "detects numeric-lvalue pool-allocated var freed with ngx_free"
+else
+    fail "detects numeric-lvalue pool-allocated var freed with ngx_free" \
+        "exit=${rc}; output=$(tr '\n' ' ' <"${out}")"
+fi
+rm -f "${src_dir}/numeric_var.c"
+
+# ── Fixture 8: numeric struct lvalue ctx2->data → ngx_free — VIOLATION ──
+cat >"${src_dir}/numeric_struct.c" <<'C'
+void f(void) {
+    ctx2->data = ngx_palloc(pool, 256);
+    ngx_free(ctx2->data);
+}
+C
+out="${tmp_dir}/numeric_struct.out"
+rc=0
+run_detector "${src_dir}" "${out}" || rc=$?
+if [[ "${rc}" -ne 0 ]] && grep -qF "ngx_free(ctx2->data)" "${out}"; then
+    pass "detects numeric-struct-lvalue pool-allocated pointer freed with ngx_free"
+else
+    fail "detects numeric-struct-lvalue pool-allocated pointer freed with ngx_free" \
+        "exit=${rc}; output=$(tr '\n' ' ' <"${out}")"
+fi
+rm -f "${src_dir}/numeric_struct.c"
+
+# ── Fixture 9: failure message does not recommend ngx_pfree ──
 cat >"${src_dir}/msg_check.c" <<'C'
 void f(void) {
     u_char *buf = ngx_palloc(pool, 128);
