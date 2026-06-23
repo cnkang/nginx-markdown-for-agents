@@ -170,6 +170,12 @@ ngx_http_markdown_plan_copy_value_to_pool(ngx_http_request_t *r,
 {
     u_char  *pool_val;
 
+    if (entry->value_len == 0) {
+        h->value.data = NULL;
+        h->value.len = 0;
+        return NGX_OK;
+    }
+
     pool_val = ngx_pnalloc(r->pool, entry->value_len);
     if (pool_val == NULL) {
         return NGX_ERROR;
