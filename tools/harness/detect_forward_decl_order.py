@@ -59,7 +59,8 @@ TYPEDEF_SIMPLE_RE = re.compile(
     r"^\s*typedef\s+(?:struct|enum)\s+\w+\s+(\w+_t)\s*;",
 )
 
-# Function declaration pattern:
+# Function declaration pattern (applied to a logical single line that
+# may have been assembled by joining physical continuation lines):
 #   return_type function_name(args);
 # Heuristic: a line ending in ");" that contains an identifier followed
 # by "(" and at least one parameter.
@@ -79,6 +80,16 @@ PARAM_TYPE_RE = re.compile(
 # Comment lines (skip)
 COMMENT_RE = re.compile(
     r"^\s*/\*|^\s*\*\s|^\s*//",
+)
+
+# Pattern that looks like the start of a function declaration: a line
+# containing an identifier followed by "(" that does NOT yet end in ");".
+# Used to detect multi-line prototypes for joining.
+FUNC_DECL_START_RE = re.compile(
+    r"^\s*"
+    r"(?:static\s+|extern\s+|inline\s+)*"
+    r"(?:const\s+)?[\w\s\*]+\s*"
+    r"\w+\s*\([^;]*$"
 )
 
 
@@ -123,6 +134,13 @@ def _parse_func_decls(
 ) -> list[tuple[int, str, list[str]]]:
     """Extract function declarations and their parameter types.
 
+    Handles both single-line and multi-line prototypes.  A multi-line
+    prototype is detected when a line looks like the start of a
+    declaration (qualified return type + name + open paren, no closing
+    ``;``) and is joined with following lines until a ``);`` terminator
+    is reached.  The recorded line number is the first physical line of
+    the prototype.
+
     Args:
         lines: Source lines of the header file.
 
@@ -131,20 +149,62 @@ def _parse_func_decls(
         param_type_names are the _t-suffixed type names found in params.
     """
     decls: list[tuple[int, str, list[str]]] = []
-    for idx, line in enumerate(lines, start=1):
+    n = len(lines)
+    i = 0
+    while i < n:
+        line = lines[i]
         if COMMENT_RE.search(line):
+            i += 1
             continue
         # Skip preprocessor lines
         if line.lstrip().startswith("#"):
+            i += 1
             continue
+
+        # Try single-line match first
         m = FUNC_DECL_RE.search(line)
-        if not m:
+        if m:
+            func_name = m.group(2)
+            params = m.group(3)
+            param_types = list(PARAM_TYPE_RE.findall(params))
+            decls.append((i + 1, func_name, param_types))
+            i += 1
             continue
-        func_name = m.group(2)
-        params = m.group(3)
-        # Extract _t-suffixed type names from parameter list
-        param_types = list(PARAM_TYPE_RE.findall(params))
-        decls.append((idx, func_name, param_types))
+
+        # Multi-line prototype: a line that opens a paren but does not
+        # close the declaration on the same line.  Join continuation
+        # lines until we hit ");".
+        if FUNC_DECL_START_RE.search(line):
+            start = i
+            joined = line.rstrip()
+            j = i + 1
+            while j < n:
+                cont = lines[j].rstrip()
+                # Skip comment-only continuation lines
+                if COMMENT_RE.search(cont):
+                    j += 1
+                    continue
+                joined += " " + cont
+                # Stop once we have a terminating ");"
+                if ");" in cont or joined.rstrip().endswith(");"):
+                    break
+                j += 1
+                # Safety bound: don't join more than 40 lines
+                if j - start > 40:
+                    break
+            m = FUNC_DECL_RE.search(joined)
+            if m:
+                func_name = m.group(2)
+                params = m.group(3)
+                param_types = list(PARAM_TYPE_RE.findall(params))
+                decls.append((start + 1, func_name, param_types))
+                i = j + 1
+                continue
+            # Not a real prototype; advance one line.
+            i += 1
+            continue
+
+        i += 1
     return decls
 
 
@@ -208,6 +268,11 @@ def main() -> int:
         help="Directory to scan (default: components/nginx-module/src); "
              "trusted input only",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit 1 on any forward-declaration order violation",
+    )
     args = parser.parse_args()
 
     scan_dir = Path(args.directory)
@@ -226,6 +291,7 @@ def main() -> int:
 
     print("=== Forward-Declaration Order Detection (Rule 24) ===", file=sys.stderr)
     print(f"Scanning: {scan_dir}", file=sys.stderr)
+    print(f"Strict: {1 if args.strict else 0}", file=sys.stderr)
     print("", file=sys.stderr)
 
     all_warnings: list[str] = []
@@ -255,7 +321,14 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    # Advisory: always exit 0
+    if args.strict and all_warnings:
+        print(
+            f"FAIL (strict): {len(all_warnings)} forward-declaration "
+            f"order violation(s) — fix before merge (Rule 24)",
+            file=sys.stderr,
+        )
+        return 1
+
     return 0
 
 

@@ -248,16 +248,18 @@ harness-security-checks:
 	bash tools/harness/detect_c_pure_logic.sh
 	bash tools/harness/detect_volatile_atomic.sh
 	bash tools/harness/detect_pool_free.sh
-	bash tools/harness/detect_ffi_panic_safety.sh
+	bash tools/harness/detect_ffi_panic_safety.sh --strict
 	PYTHONPATH=. python3 tools/harness/detect_forward_decl_order.py components/nginx-module/src
 	PYTHONPATH=. python3 tools/harness/detect_duplicate_code.py components/nginx-module/src
-	PYTHONPATH=. python3 tools/harness/detect_open_without_path_validation.py --path tools/
+	PYTHONPATH=. python3 tools/harness/detect_open_without_path_validation.py --path tools/ --strict
 
 test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh
 	bash tools/harness/tests/test_detect_c_pure_logic.sh
 	bash tools/harness/tests/test_detect_volatile_atomic.sh
+	bash tools/harness/tests/test_detect_pool_free.sh
+	bash tools/harness/tests/test_detect_ffi_panic_safety.sh
 	bash tools/harness/tests/test_security_gitleaks_scope.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 

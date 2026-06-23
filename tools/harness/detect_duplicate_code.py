@@ -41,11 +41,18 @@ ADJACENT_MIN_LINES = 3      # 3+ identical consecutive lines, immediately repeat
 # A duplicate block is classified by matching keywords in its content.
 # The first matching category wins; if none match, it falls through to
 # "structural" (low priority).
+#
+# Keywords are kept specific: bare substrings like "alloc", "buffer",
+# "free", "memcpy" would match far too many benign lines and inflate
+# the "memory" direct-fix count.  Instead we anchor on the NGINX
+# allocator/free function names and the explicit buffer-lifecycle
+# helpers that genuinely indicate duplicated memory-management
+# logic.
 MEMORY_KEYWORDS = (
-    "ngx_palloc", "ngx_pnalloc", "ngx_pcalloc", "ngx_alloc", "ngx_free",
-    "ngx_pfree", "malloc", "free", "alloc", "memcpy", "memmove", "memzero",
-    "ngx_create_temp_buf", "ngx_calloc_buf", "ngx_alloc_chain_link",
-    "ngx_create_buf", "pool_val", "output_data", "input_data", "buffer",
+    "ngx_palloc", "ngx_pnalloc", "ngx_pcalloc",
+    "ngx_alloc_chain_link", "ngx_create_temp_buf",
+    "ngx_create_buf", "ngx_calloc_buf",
+    "pool_val",  # project-specific header-plan allocation helper
 )
 ROLLBACK_KEYWORDS = (
     "undo->", "rollback", "orig_hash", "orig_value", "op_type",
@@ -372,7 +379,9 @@ def main() -> int:
     """Main entry point.
 
     Returns:
-        Exit code: 0 always (advisory).
+        Exit code: 0 in advisory mode.  In --strict mode, exit 1 when any
+        direct-fix (memory/rollback/ffi-validation/postcommit) warning or
+        adjacent merge-residual duplicate is found.
     """
     parser = argparse.ArgumentParser(
         description="Detect duplicate code blocks in C source files "
@@ -384,6 +393,11 @@ def main() -> int:
         default="components/nginx-module/src",
         help="Directory to scan (default: components/nginx-module/src); "
              "trusted input only",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit 1 on direct-fix warnings or adjacent merge residuals",
     )
     args = parser.parse_args()
 
@@ -402,6 +416,7 @@ def main() -> int:
 
     print("=== Duplicate Code Block Detection (Rule 31) ===", file=sys.stderr)
     print(f"Scanning: {scan_dir}", file=sys.stderr)
+    print(f"Strict: {1 if args.strict else 0}", file=sys.stderr)
     print("", file=sys.stderr)
 
     all_warnings: list[str] = []
@@ -433,6 +448,8 @@ def main() -> int:
     n_rollback = sum(1 for m in all_warnings if "[rollback]" in m)
     n_ffi = sum(1 for m in all_warnings if "[ffi-validation]" in m)
     n_postcommit = sum(1 for m in all_warnings if "[postcommit]" in m)
+    n_adjacent = len([w for w in all_warnings if "adjacent" in w])
+    n_direct_fix = n_memory + n_rollback + n_ffi + n_postcommit
     n_state = sum(1 for m in all_reviews if "[state-machine]" in m)
     n_struct = sum(1 for m in all_reviews if "[structural]" in m)
     n_log = sum(1 for m in all_infos if "[log-only]" in m)
@@ -442,20 +459,34 @@ def main() -> int:
     print("=== Summary (by risk semantics) ===", file=sys.stderr)
     print(f"  memory (direct-fix):           {n_memory}", file=sys.stderr)
     print(f"  rollback (direct-fix):         {n_rollback}", file=sys.stderr)
-    print(f"  ffi-validation (direct-fix):  {n_ffi}", file=sys.stderr)
+    print(f"  ffi-validation (direct-fix):   {n_ffi}", file=sys.stderr)
     print(f"  postcommit (direct-fix):       {n_postcommit}", file=sys.stderr)
-    print(f"  state-machine (human-review):  {n_state}", file=sys.stderr)
-    print(f"  structural (human-review):     {n_struct}", file=sys.stderr)
-    print(f"  log-only (ignore-by-rule):     {n_log}", file=sys.stderr)
-    print(f"  signature (ignore-by-rule):    {n_sig}", file=sys.stderr)
-    print(f"  adjacent (merge residual):     {len([w for w in all_warnings if 'adjacent' in w])}", file=sys.stderr)
+    print(f"  state-machine (human-review):   {n_state}", file=sys.stderr)
+    print(f"  structural (human-review):      {n_struct}", file=sys.stderr)
+    print(f"  log-only (ignore-by-rule):      {n_log}", file=sys.stderr)
+    print(f"  signature (ignore-by-rule):     {n_sig}", file=sys.stderr)
+    print(f"  adjacent (merge residual):      {n_adjacent}", file=sys.stderr)
     print("", file=sys.stderr)
 
+    # Determine the verdict considering all three buckets (warnings,
+    # reviews, infos).  Previously reviews were dropped from the
+    # verdict so a file with only REVIEW findings printed "PASS: no
+    # duplicate code blocks found" — a misleading false-negative
+    # message.
+    n_total = (
+        len(all_warnings) + len(all_reviews) + len(all_infos)
+    )
     if all_warnings:
         print(
-            f"PASS with warnings: {len(all_warnings)} adjacent duplicate "
-            f"block(s) — merge residuals detected, review recommended "
-            f"(Rule 31)",
+            f"PASS with warnings: {len(all_warnings)} warning(s) "
+            f"({n_adjacent} adjacent merge-residual, {n_direct_fix} "
+            f"direct-fix) — review recommended (Rule 31)",
+            file=sys.stderr,
+        )
+    elif all_reviews:
+        print(
+            f"PASS with reviews: {len(all_reviews)} review(s) — "
+            f"manual review recommended (Rule 31)",
             file=sys.stderr,
         )
     elif all_infos:
@@ -467,7 +498,15 @@ def main() -> int:
     else:
         print("PASS: no duplicate code blocks found", file=sys.stderr)
 
-    # Advisory: always exit 0
+    if args.strict and (n_direct_fix > 0 or n_adjacent > 0):
+        print(
+            f"FAIL (strict): {n_direct_fix} direct-fix warning(s) and "
+            f"{n_adjacent} adjacent merge-residual duplicate(s) — "
+            f"fix before merge (Rule 31)",
+            file=sys.stderr,
+        )
+        return 1
+
     return 0
 
 
