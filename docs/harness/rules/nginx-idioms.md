@@ -1,6 +1,6 @@
 ---
 domain: nginx-idioms
-rules: [28, 29, 30, 31, 39, 40]
+rules: [28, 29, 30, 31, 39, 40, 50]
 paths:
   - "components/nginx-module/src/**"
 ---
@@ -117,6 +117,17 @@ Required:
   are a common merge residual).
 - For any single file change exceeding 30 lines, verify the last function in
   the file still has its closing brace and the file is not truncated.
+- **Organic duplicate code detection**: Duplicate adjacent code blocks are
+  not only a merge residual — they can also accumulate organically when
+  a developer copies a block within the same file (for example config
+  handlers, auth/otel helper functions).  When adding a new code block
+  that is similar to an existing block in the same file, check whether the
+  two blocks can be unified into a shared helper.  If a code block of 5+
+  lines is duplicated (non-adjacent) within the same file, extract the
+  common logic into a function.  CI tooling (`detect_duplicate_code.py`)
+  should flag both adjacent duplicates (3+ identical consecutive lines
+  immediately repeated) and non-adjacent duplicates (5+ identical
+  consecutive lines appearing elsewhere in the same file).
 - CI configuration should flag diffs exceeding 100 lines for mandatory review
   (not auto-merge).
 - After rebasing or cherry-picking, run `make test-nginx-unit` (or the
@@ -204,3 +215,27 @@ Verification:
 - For each header iteration loop, verify `hash == 0` is checked before
   accessing header fields.
 - `bash tools/harness/detect_header_hash_filter.sh`
+
+---
+
+### 50. OWS separator handling in Content-Type parsing
+Historical issues: 69750e02 (HTAB not accepted as OWS), 7e3718bf (trailing OWS).
+
+Required:
+- When parsing `Content-Type` headers for streaming eligibility checks,
+  accept both space (`SP`, 0x20) and horizontal tab (`HTAB`, 0x09) as
+  optional whitespace (OWS) separators per RFC 7230.  Some clients send
+  `text/markdown;\tcharset=utf-8` with a tab after the semicolon; rejecting
+  HTAB causes false-negative eligibility decisions.
+- Exclude trailing OWS after the parameter value.  A Content-Type like
+  `text/markdown; charset=utf-8 ` (trailing space) must not fail the
+  charset check — strip trailing OWS before comparing the parameter
+  value.
+- When adding or modifying a Content-Type parser, test with both SP and
+  HTAB separators, and with trailing OWS on the parameter value.
+
+Verification:
+- `grep -rn 'Content.Type\|content.type\|charset' components/nginx-module/src/`
+  — for each parser, verify it handles HTAB as OWS.
+- `make test-nginx-unit` — eligibility tests cover HTAB separator and
+  trailing OWS exclusion.

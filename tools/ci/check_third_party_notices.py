@@ -21,6 +21,22 @@ ROOT = Path(__file__).resolve().parents[2]
 NOTICES_PATH = ROOT / "THIRD-PARTY-NOTICES"
 CARGO_TOML = ROOT / "components" / "rust-converter" / "Cargo.toml"
 
+# Additional Cargo.toml files for sub-workspaces that have their own
+# Cargo.lock.  These are checked for stale lock files and their direct
+# dependencies are not required to appear in THIRD-PARTY-NOTICES (they
+# are dev/test/fuzz only), but their Cargo.lock must be in sync with
+# their Cargo.toml.
+SUB_WORKSPACE_CARGO_TOMLS: list[Path] = [
+    ROOT / "components" / "rust-converter" / "fuzz" / "Cargo.toml",
+    ROOT / "tools" / "corpus" / "test-corpus-conversion" / "Cargo.toml",
+]
+
+# Corresponding Cargo.lock files for sub-workspaces.
+SUB_WORKSPACE_CARGO_LOCKS: list[Path] = [
+    ROOT / "components" / "rust-converter" / "fuzz" / "Cargo.lock",
+    ROOT / "tools" / "corpus" / "test-corpus-conversion" / "Cargo.lock",
+]
+
 # Known C-side runtime dependencies that must appear in the notices file.
 # Each tuple is (display_name, list_of_search_patterns).
 C_RUNTIME_DEPS: list[tuple[str, list[str]]] = [
@@ -103,11 +119,36 @@ def main() -> int:
         for display_name, patterns in C_RUNTIME_DEPS
         if not check_dep_in_notices(patterns, notices)
     )
+
+    # --- Sub-workspace Cargo.lock existence check ---
+    # These sub-workspaces have their own Cargo.lock that can go stale
+    # when Cargo.toml changes are made without running cargo update.
+    # We only check existence here — a full lock-file freshness check
+    # requires running cargo and is left to CI.
+    stale_locks: list[str] = []
+    for cargo_toml, cargo_lock in zip(
+        SUB_WORKSPACE_CARGO_TOMLS, SUB_WORKSPACE_CARGO_LOCKS,
+    ):
+        if cargo_toml.is_file() and not cargo_lock.is_file():
+            stale_locks.append(
+                f"Cargo.lock missing for {cargo_toml.relative_to(ROOT)}"
+            )
+
+    if stale_locks:
+        print("Sub-workspace Cargo.lock issues detected:")
+        for item in stale_locks:
+            print(f"  - {item}")
+        print("Run `cargo generate-lockfile` in each sub-workspace directory.")
+        # Report as warning, not failure — lock file may not exist yet
+        # in early development.  CI will catch staleness via --locked.
+
     # --- Report ---
     if missing:
         return report_missing_and_fail(missing)
     dep_count = len(rust_deps) + len(C_RUNTIME_DEPS)
     print(f"THIRD-PARTY-NOTICES coverage check passed ({dep_count} dependencies verified).")
+    if stale_locks:
+        print(f"WARNING: {len(stale_locks)} sub-workspace Cargo.lock issue(s) detected.")
     return 0
 
 

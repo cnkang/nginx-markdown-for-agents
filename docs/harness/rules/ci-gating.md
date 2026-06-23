@@ -165,6 +165,38 @@ Required:
     pre-existing cluster, it must not delete that cluster during cleanup.
     Runtime assertions must count structured pod fields with one item per line,
     not by grepping collapsed one-line jsonpath output.
+  - **Homebrew formula release integrity**:
+    - The formula SHA-256 checksum must be generated from the release tag's
+      `git archive` output (for example `git archive --format=tar.gz <tag>`),
+      not from the working-tree HEAD archive.  Using HEAD produces a different
+      checksum each time the worktree changes, causing `brew audit` failures
+      and checksum drift between the formula and the actual release artifact.
+      When a release tag is created or moved, regenerate the SHA-256 from
+      that tag and update the formula in the same changeset.
+    - In the Homebrew formula, the `version` stanza must appear before the
+      `sha256` stanza.  `brew audit --strict` requires this ordering; a
+      formula with `sha256` before `version` fails the audit even if both
+      values are correct.
+    - The formula's NGINX dependency version must be derived from package
+      metadata (for example `nginx --version` output or the dependency
+      formula's `version`), not hardcoded to a specific upstream version.
+      Hardcoded versions drift when the NGINX formula updates.
+    - The tap publish workflow must validate that the git tag exists and
+      matches the expected release version before pushing the formula update
+      to the tap repository.  Publishing a formula for a non-existent tag
+      causes `brew install` to fail for users.
+    - The formula gate and the release verify workflow must use the same
+      `brew audit` standard.  If the gate uses `brew audit --strict` and the
+      release verify uses `brew audit` (without `--strict`), formula issues
+      pass the gate but fail post-release verification.
+    - The formula must build the module against the NGINX version installed
+      by the formula's dependency, not against a separately-specified NGINX
+      source tree.  Building against a different version produces a module
+      binary with ABI mismatch.
+    - When `cbindgen` is required for a source-build formula, the formula
+      must install `cbindgen` as a build dependency before the build step.
+      A missing `cbindgen` causes the Rust converter to fail generating C
+      headers, breaking the source build.
 
 Verification:
 - `bash tools/harness/detect_ci_supply_chain.sh`

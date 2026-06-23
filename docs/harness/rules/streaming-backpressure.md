@@ -1,6 +1,6 @@
 ---
 domain: streaming-backpressure
-rules: [1, 2, 38, 47]
+rules: [1, 2, 38, 47, 51]
 paths:
   - "components/nginx-module/src/**"
   - "components/rust-converter/src/streaming/**"
@@ -124,6 +124,43 @@ Verification:
   `NGX_AGAIN` return from `ngx_http_output_filter`.
 - `make test-nginx-unit` — stream-postcommit tests include
   terminal-only NGX_AGAIN regression test.
+
+---
+
+### 51. Auth cache-control commit failure handling in streaming
+Historical issues: ef0815ef (auth cache-control commit failures), 44074485
+(multiple Cache-Control headers), d0042944/579f3ab4 (any_public before
+has_private ordering).
+
+Required:
+- When the streaming two-phase commit applies auth `Cache-Control`
+  headers (for example `stream_commit_apply_auth_cache_control`), the
+  function must handle commit failures gracefully: if setting a header
+  fails, the commit must abort and route through `precommit_error`
+  rather than continuing with partial auth headers.
+- When processing `Cache-Control` response headers for auth cache
+  decisions, iterate **all** `Cache-Control` entries (full
+  `ngx_list_part_t` chain, per Rule 28), not just the first one.  Some
+  upstreams send multiple `Cache-Control` headers (for example
+  `public` and `private` separately).
+- When aggregating `public` vs `private` flags across multiple
+  `Cache-Control` headers, check `any_public` before `has_private`:
+  if any header says `public` and a later header says `private`, the
+  response is still cacheable as `public` for auth purposes unless
+  `private` explicitly overrides.  Checking `has_private` first
+  causes a false negative when `public` appears after `private`.
+- The `r` parameter in `stream_commit_apply_auth_cache_control` should
+  be `const`-qualified when the function only reads from `r` (per
+  Rule 24), but this must not conflict with NGINX callback signatures.
+
+Verification:
+- `grep -rn 'stream_commit_apply_auth_cache_control\|auth.*cache.*control' components/nginx-module/src/`
+  — verify commit failure routes through precommit_error.
+- `grep -rn 'Cache.Control\|cache_control' components/nginx-module/src/`
+  — verify full ngx_list_part_t iteration and any_public-before-has_private
+  ordering.
+- `make test-nginx-unit` — auth cache-control tests cover multi-header
+  and commit-failure scenarios.
 
 ## Required Agent Workflow
 

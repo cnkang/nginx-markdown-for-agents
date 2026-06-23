@@ -56,6 +56,15 @@ Required:
   headers. If a callable API is needed, declare the underlying function symbol
   (for example `ngx_log_error_core`) and keep signature parity with the
   canonical declaration in the owning header, including `const` qualifiers.
+- **Forward declaration ordering**: Forward declarations must appear
+  **after** all type definitions (typedefs, struct definitions, enum
+  definitions) that the declaration references.  A forward declaration
+  that names a type defined later in the same header causes a
+  compilation error (unknown type) or, with some compilers, an implicit
+  `int` fallback.  When adding a forward declaration, scan the header
+  for the typedef it depends on and place the declaration below it.
+  Forward declarations belong at file scope in the impl header, not
+  inside function bodies or local blocks.
 - Treat static-analysis findings that imply undefined behavior, data truncation,
   or invalid memory access risk as correctness/security issues and fix them in
   code; do not defer as cosmetic cleanup.
