@@ -11,13 +11,12 @@
 //!    unwinding into C frames (undefined behavior per the FFI contract)
 //! 3. **Result marshalling** — conversion of Rust `Result` into C `MarkdownResult`
 //!
-//! The remaining exports are lifecycle helpers:
-//! - `markdown_converter_new` — safe constructor that allocates a converter
-//!   handle (uses `catch_unwind` but does not perform input validation or
-//!   result marshalling)
-//! - `markdown_converter_free` / `markdown_result_free` — release functions
-//!   that deallocate handles and result buffers without conversion or
-//!   panic-catching
+//! All non-trivial FFI exports and release helpers (`markdown_result_free`,
+//! `markdown_converter_free`, `markdown_header_plan_free`,
+//! `markdown_decompress_free`, etc.) are wrapped in `panic::catch_unwind` to
+//! guarantee that no Rust panic can unwind across the FFI boundary.  Simpler
+//! helpers (`markdown_options_init`, `markdown_*_result_init`) are panic-free
+//! by construction (they only call `ptr::write`).
 //!
 //! # Exported Functions
 //!
