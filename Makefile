@@ -249,8 +249,8 @@ harness-security-checks:
 	bash tools/harness/detect_volatile_atomic.sh
 	bash tools/harness/detect_pool_free.sh
 	bash tools/harness/detect_ffi_panic_safety.sh --strict
-	PYTHONPATH=. python3 tools/harness/detect_forward_decl_order.py components/nginx-module/src
-	PYTHONPATH=. python3 tools/harness/detect_duplicate_code.py components/nginx-module/src
+	PYTHONPATH=. python3 tools/harness/detect_forward_decl_order.py components/nginx-module/src --strict
+	PYTHONPATH=. python3 tools/harness/detect_duplicate_code.py components/nginx-module/src --strict
 	PYTHONPATH=. python3 tools/harness/detect_open_without_path_validation.py --path tools/ --strict
 
 test-harness:
