@@ -133,10 +133,33 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 - Identify invariants likely to break (header ordering, backpressure, reason codes, buffer bounds).
 - List boundary surfaces up front when the change crosses layers (NGINX C, Rust core, FFI/header, docs, scripts, CI).
 - Identify minimum verification commands before writing code.
+- Define the checkable outcome before editing: failing case and expected
+  behavior for bugs, observable behavior for features, unchanged behavior for
+  refactors, or concrete risk list for reviews.
+- Confirm the current repository and branch before coding tasks. Use the
+  current branch unless the user explicitly asks to create, switch, or choose
+  another branch.
 - When remediating SonarCloud findings for a PR, fetch findings from
   `api/issues/search` with explicit `componentKeys`, `pullRequest`,
   and `statuses=OPEN,CONFIRMED`; do not rely solely on dashboard
   "top issues" summaries, which may include already-closed items.
+
+### Repository operation safety
+- Keep diffs tied to the current request. Do not mix behavior changes with
+  unrelated formatting sweeps, renames, broad reorganization, new dependencies,
+  or abstractions for one caller unless they are required for correctness or
+  verification.
+- Mention unrelated dead code, cleanup opportunities, or design concerns
+  separately instead of fixing them inside the current patch.
+- Commit only changes tied to the current request. Before each commit, review
+  the staged diff and summarize what changed.
+- Run the relevant checks before pushing when practical. Use normal push
+  access only; do not force-push, rewrite history, change remotes, change
+  repository settings, manage collaborators, alter branch protection, or
+  delete branches unless the user explicitly requested that operation.
+- Do not use wildcard cleanup deletes, scripted deletion loops, or broad
+  recursive deletion commands. Delete only literal named paths required by the
+  task; ask first when multiple deletions or recursive cleanup are necessary.
 
 ### Pre-output Checklist (domain-grouped)
 
@@ -357,6 +380,8 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Preserve NGINX event-driven semantics; no hidden blocking calls.
 - Add/adjust tests in the same change set for each fixed behavior.
 - Keep docs and validators synced when user-facing or SOP behavior changes.
+- Clean up imports, variables, helpers, and docs references made unused by the
+  current change.
 - For Sonar-driven fixes, map each change to an open issue key and
   file/line from the current API response, and skip already-closed items.
 
@@ -507,3 +532,4 @@ remediation:
 | 0.8.5 | 2026-06-22 | Codex | Strengthened Rules 6 and 48 for inner-to-outer structural closure ordering and deletion-safe tracked-worktree secret scans |
 | 0.8.4 | 2026-06-16 | Codex | Strengthened Rule 13 for release Dockerfile script interpreter prerequisites in minimal images |
 | 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
+| 0.8.6 | 2026-06-23 | Codex | Added general workflow safeguards for checkable outcomes, request-scoped diffs, Git operation safety, and deletion safety |
