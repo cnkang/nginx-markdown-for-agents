@@ -121,10 +121,33 @@ static size_t g_palloc_bytes = 0;
  * so that ngx_free() can detect an illegal free of pool memory.  In real
  * NGINX, pool allocations cannot be individually freed; this catches the
  * ownership bug where apply_limits() called free_heap() on a pool buffer.
+ *
+ * Harness semantics: ngx_palloc() is backed by malloc() so the buffers are
+ * individually reclaimable for leak-free test teardown, but ngx_free() must
+ * NOT silently absorb a pool-pointer free.  Instead it records a violation
+ * flag that the test asserts stays clear.  Test-owned reclamation of these
+ * malloc-backed pool allocations is performed exclusively by
+ * test_pool_free_tracked_allocations(), which bypasses the violation guard.
  */
 #define G_PALLOC_PTR_MAX  256
 static void    *g_palloc_ptrs[G_PALLOC_PTR_MAX];
 static size_t   g_palloc_ptr_count = 0;
+
+/*
+ * g_free_on_palloc_violation - Set when ngx_free() is called with a pointer
+ * that ngx_palloc() returned (i.e. an attempt to individually free pool
+ * memory).  Tests assert this stays 0; a non-zero value indicates a
+ * production-code ownership regression such as apply_limits() freeing a
+ * pool-owned buffer.
+ */
+static ngx_uint_t g_free_on_palloc_violation = 0;
+
+/*
+ * g_free_on_static_pool_violation - Set when ngx_free() is called with
+ * g_static_pool_buf, which simulates a pool-managed buffer whose lifetime
+ * is controlled by the pool, not by free().  Tests assert this stays 0.
+ */
+static ngx_uint_t g_free_on_static_pool_violation = 0;
 
 /*
  * g_pcalloc_fail_once - When non-zero, the next call to ngx_pcalloc returns
@@ -310,12 +333,20 @@ ngx_alloc(size_t size, ngx_log_t *log)
  * ngx_free - Stub for the NGINX deallocator.
  *
  * DIVERGENCE RISK: Production ngx_free may differ from libc free on
- * platforms with custom allocators; this stub simply calls free().
- * The semantic contract mirrored is: "releases memory allocated by
- * ngx_alloc or ngx_palloc stubs."
+ * platforms with custom allocators; this stub calls free() for raw
+ * ngx_alloc-backed heap buffers.  For ngx_palloc-backed buffers and the
+ * static pool-buffer stand-in, it does NOT free; instead it records a
+ * violation flag so tests can assert that production code never attempts
+ * to individually free pool memory (the apply_limits/free_heap ownership
+ * regression).  The semantic contract mirrored is: "releases memory
+ * allocated by ngx_alloc; pool allocations are not individually freeable."
  *
  * Parameters:
  *   p - pointer to memory to free
+ *
+ * Side effects: sets g_free_on_palloc_violation or
+ *               g_free_on_static_pool_violation on a pool-buffer free
+ *               attempt; tests assert these remain 0.
  */
 void
 ngx_free(void *p)
@@ -326,19 +357,19 @@ ngx_free(void *p)
         return;
     }
     if (p == g_static_pool_buf) {
+        g_free_on_static_pool_violation = 1;
         return;
     }
     for (i = 0; i < g_palloc_ptr_count; i++) {
         if (g_palloc_ptrs[i] == p) {
             /*
-             * In this test harness ngx_palloc() is backed by malloc(),
-             * so the pointer is individually freeable.  Remove it from
-             * the tracking set and free it so that subsequent ngx_free()
-             * calls on a recycled address (malloc may reuse it) do not
-             * trigger a false-positive ownership abort.
+             * Production code must never call ngx_free() on a pool
+             * allocation.  Record the violation and leave the tracking
+             * entry intact so the test harness can still reclaim the
+             * malloc-backed block via test_pool_free_tracked_allocations()
+             * during teardown.
              */
-            g_palloc_ptrs[i] = g_palloc_ptrs[--g_palloc_ptr_count];
-            free(p);
+            g_free_on_palloc_violation = 1;
             return;
         }
     }
@@ -590,6 +621,33 @@ compress_payload(const u_char *in, size_t in_len,
     u_char **out, size_t *out_len);
 
 /*
+ * test_pool_free_tracked_allocations - Reclaim the malloc-backed blocks
+ * recorded by the ngx_palloc() stub without going through ngx_free(), so
+ * the ownership-violation guard is not triggered.  This is the only
+ * sanctioned path for releasing pool-allocation stand-ins in this harness.
+ *
+ * After the call, g_palloc_ptrs is empty and g_palloc_ptr_count is 0.
+ * The violation flags are left untouched so the caller can assert them.
+ *
+ * Side effects: free()s every entry in g_palloc_ptrs, resets
+ *               g_palloc_ptr_count to 0.
+ */
+static void
+test_pool_free_tracked_allocations(void)
+{
+    size_t  i;
+
+    for (i = 0; i < g_palloc_ptr_count; i++) {
+        if (g_palloc_ptrs[i] != NULL
+            && g_palloc_ptrs[i] != g_static_pool_buf) {
+            free(g_palloc_ptrs[i]);
+        }
+        g_palloc_ptrs[i] = NULL;
+    }
+    g_palloc_ptr_count = 0;
+}
+
+/*
  * test_pool_reset - Zero-initialise a test pool and clear all failure-injection
  * flags and inflate mock state.  Call at the start of every test case to
  * ensure a clean slate.
@@ -597,22 +655,25 @@ compress_payload(const u_char *in, size_t in_len,
  * Parameters:
  *   tp - test pool to reset
  *
- * Side effects: zeroes *tp, clears all g_*_fail_once flags,
- *               resets inflate mode to real.
+ * Side effects: zeroes *tp, reclaims tracked ngx_palloc allocations,
+ *               clears all g_*_fail_once flags, clears ngx_free violation
+ *               flags, resets inflate mode to real.
  */
 static void
 test_pool_reset(test_pool_t *tp)
 {
+    test_pool_free_tracked_allocations();
     memset(tp, 0, sizeof(*tp));
     g_palloc_fail_once = 0;
     g_palloc_return_static_once = 0;
     g_palloc_bytes = 0;
-    g_palloc_ptr_count = 0;
     g_pcalloc_fail_once = 0;
     g_alloc_fail_once = 0;
     g_alloc_return_static_once = 0;
     g_cleanup_add_fail_once = 0;
     g_inflate_init_fail_once = 0;
+    g_free_on_palloc_violation = 0;
+    g_free_on_static_pool_violation = 0;
     test_reset_inflate_mode();
 }
 
@@ -661,13 +722,22 @@ test_tiny_chunks_do_not_amplify_request_pool(void)
             &tp.pool, &test_log);
         TEST_ASSERT(rc == NGX_OK, "one-byte feed should succeed");
         emitted += out_len;
-        free(out);
+        /*
+         * out is pool-owned (ngx_palloc-tracked); reclaim via the
+         * sanctioned helper rather than free() so the ownership
+         * guard stays armed across iterations.
+         */
+        test_pool_free_tracked_allocations();
     }
 
     TEST_ASSERT(emitted == text_len,
         "tiny feeds should emit the complete decompressed payload");
     TEST_ASSERT(g_palloc_bytes <= emitted,
         "request-pool allocation must be bounded by emitted output");
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
 
     free(compressed);
     free(decomp);
@@ -714,7 +784,8 @@ test_truncated_brotli_finish_errors(void)
         &out, &out_len, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_OK,
         "truncated brotli feed should await terminal validation");
-    free(out);
+    /* out is pool-owned; reclaim via the sanctioned helper. */
+    test_pool_free_tracked_allocations();
 
     out = NULL;
     out_len = 0;
@@ -723,8 +794,13 @@ test_truncated_brotli_finish_errors(void)
     TEST_ASSERT(rc == NGX_ERROR,
         "finish should reject an incomplete brotli stream");
 
+    /* finish error path publishes NULL output. */
     free(out);
     free(decomp);
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
     TEST_PASS("truncated brotli stream rejected at finish");
 }
 #endif
@@ -1078,8 +1154,12 @@ test_roundtrip_and_empty_feed(void)
         }
 
         free(compressed);
-        free(out);
+        /* out is pool-owned; reclaimed by the next test_pool_reset. */
         free(decomp);
+        TEST_ASSERT(g_free_on_palloc_violation == 0,
+            "production code must not ngx_free() pool memory");
+        TEST_ASSERT(g_free_on_static_pool_violation == 0,
+            "production code must not ngx_free() static pool memory");
     }
 
     TEST_PASS("feed round-trip and empty-input branches covered");
@@ -1228,8 +1308,12 @@ test_truncated_finish_errors(void)
     }
 
     free(compressed);
-    free(out);
+    /* out is pool-owned; reclaimed by the next test_pool_reset. */
     free(decomp);
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
     TEST_PASS("finish error branch covered");
 }
 
@@ -1715,9 +1799,10 @@ test_finish_zlib_paths_and_helpers(void)
     /*
      * On success finalize_buf() transfers the heap buffer to pool
      * memory and frees the heap allocation, so buf now points to a
-     * pool-owned buffer (malloc-backed in this harness).
+     * pool-owned buffer (malloc-backed in this harness).  Reclaim it
+     * via the sanctioned helper rather than free().
      */
-    free(buf);
+    test_pool_free_tracked_allocations();
     free(decomp);
 
     test_pool_reset(&tp);
@@ -1738,6 +1823,10 @@ test_finish_zlib_paths_and_helpers(void)
         "finish_zlib should clear buf after freeing heap on finalize failure");
     free(decomp);
 
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
     TEST_PASS("finish_zlib helper/error/budget/expand branches covered");
 }
 
@@ -1781,7 +1870,7 @@ test_finish_wrapper_success_and_overflow_paths(void)
         "finish should publish tail output on success");
     TEST_ASSERT(decomp->total_decompressed > 1,
         "finish should add produced bytes into running total");
-    free(out);
+    /* out is pool-owned; reclaimed by the next test_pool_reset. */
     free(decomp);
 
     test_pool_reset(&tp);
@@ -1798,10 +1887,77 @@ test_finish_wrapper_success_and_overflow_paths(void)
         "finish should still succeed when total would overflow");
     TEST_ASSERT(decomp->total_decompressed == (size_t) -1,
         "finish should saturate total_decompressed on overflow");
-    free(out);
+    /* out is pool-owned; reclaimed by the next test_pool_reset. */
     free(decomp);
 
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
     TEST_PASS("finish wrapper success/overflow branches covered");
+}
+
+/*
+ * test_ngx_free_rejects_pool_memory - Verify the ownership-tracking guard
+ * actually fires when ngx_free() is handed a pool-backed pointer.
+ *
+ * This is the regression test for the apply_limits()/free_heap() ownership
+ * bug class: production code must never call ngx_free() on a buffer
+ * allocated by ngx_palloc() (pool memory is not individually freeable in
+ * real NGINX).  The guard must surface the violation rather than silently
+ * absorbing it, otherwise the harness cannot detect a future regression.
+ *
+ * Branches covered:
+ *   - ngx_free() on a tracked ngx_palloc() pointer sets the violation flag
+ *     and does NOT free the block (so the harness can still reclaim it)
+ *   - ngx_free() on g_static_pool_buf sets the static-pool violation flag
+ *   - ngx_free() on an untracked ngx_alloc() heap pointer frees normally
+ *     and sets neither flag
+ */
+static void
+test_ngx_free_rejects_pool_memory(void)
+{
+    test_pool_t  tp;
+    u_char     *pool_ptr;
+    u_char     *heap_ptr;
+
+    TEST_SUBSECTION("ngx_free ownership guard fires on pool memory");
+
+    test_pool_reset(&tp);
+
+    /* A tracked ngx_palloc() pointer. */
+    pool_ptr = ngx_palloc(&tp.pool, 32);
+    TEST_ASSERT(pool_ptr != NULL, "ngx_palloc should succeed");
+    TEST_ASSERT(g_palloc_ptr_count == 1,
+        "ngx_palloc pointer should be tracked");
+
+    /* ngx_free() must not reclaim it; it must flag the violation. */
+    ngx_free(pool_ptr);
+    TEST_ASSERT(g_free_on_palloc_violation == 1,
+        "ngx_free on a pool pointer must set the violation flag");
+    TEST_ASSERT(g_palloc_ptr_count == 1,
+        "ngx_free must not remove the tracked pool pointer");
+
+    /* A second ngx_free() on the static pool stand-in. */
+    ngx_free(g_static_pool_buf);
+    TEST_ASSERT(g_free_on_static_pool_violation == 1,
+        "ngx_free on the static pool buffer must set the violation flag");
+
+    /* An untracked ngx_alloc() heap pointer frees normally. */
+    heap_ptr = ngx_alloc(16, &test_log);
+    TEST_ASSERT(heap_ptr != NULL, "ngx_alloc should succeed");
+    ngx_free(heap_ptr);
+    TEST_ASSERT(g_free_on_palloc_violation == 1,
+        "heap free must not clear the pool-violation flag");
+    TEST_ASSERT(g_free_on_static_pool_violation == 1,
+        "heap free must not clear the static-pool-violation flag");
+
+    /* Reclaim the tracked pool allocation via the sanctioned helper. */
+    test_pool_free_tracked_allocations();
+    TEST_ASSERT(g_palloc_ptr_count == 0,
+        "tracked allocations should be reclaimed by the helper");
+
+    TEST_PASS("ngx_free ownership guard covered");
 }
 
 /*
@@ -1832,6 +1988,7 @@ main(void)
     test_feed_mocked_inflate_paths();
     test_finish_zlib_paths_and_helpers();
     test_finish_wrapper_success_and_overflow_paths();
+    test_ngx_free_rejects_pool_memory();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
