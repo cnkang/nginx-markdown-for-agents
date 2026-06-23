@@ -379,27 +379,39 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 ### Current Release Line (0.8.x)
 
 The 0.8.x release line is the current maintained line. The latest patch
-release is 0.8.1; 0.8.2 is a closeout patch that synchronizes version-line
-documentation, finalizes RFC-0008 status, narrows the
-`markdown_stream_flush_interval` commitment, adds stream commit multipart
-rollback regression coverage, and aligns the 0.8.x release-gate naming.
+release is 0.8.2; 0.8.1 and 0.8.2 are patch releases that
+harden stability, security, and release-gate consistency without introducing
+new user-visible features or breaking configuration changes.
 
-#### 0.8.2 (closeout patch, in preparation)
+#### 0.8.2 (latest patch)
 
+- Streaming decompression hardening: eliminated heap leaks in `finish_zlib()`
+  across all exit paths, hardened buffer expansion error paths, and enforced
+  `ngx_alloc`/`ngx_free` exclusively for resizable buffer backing stores
+  (Rule 43).
+- Implied closure correctness (Rule 6): structural closures now unwind
+  inner-to-outer; the Rust converter consumes implied closures before the
+  sanitizer Skip decision and mirrors them to the state machine.
+- FFI safety: centralized header plan reset for panic safety; parser working-set
+  estimation with overflow-safe budget enforcement.
+- Streaming decompression budget and memory accounting (Rule 3, Rule 44).
+- Code fence language handling: `lang-` prefix support and sanitization in the
+  streaming converter.
+- `parse_size()` hardening for empty, whitespace-only, and malformed input.
+- Security scan scoping: gitleaks scoped to tracked worktree content, skipping
+  deleted paths and guarding against empty scan roots (Rule 48).
 - Synced "current release line" wording across project, README, installation,
-  and compatibility docs to 0.8.x (latest patch 0.8.1).
-- Finalized RFC-0008 status from `Draft` to `Accepted / Implemented in 0.8.0`,
-  with implementation notes covering 0.8.0 streaming contract and 0.8.1
-  Rule 39 / FFI cleanup / OWS / backpressure hardening.
+  and compatibility docs to 0.8.x (latest patch 0.8.2).
+- Finalized RFC-0008 status from `Draft` to `Accepted / Implemented in 0.8.0`.
 - Narrowed `markdown_stream_flush_interval` commitment from "future 0.8.x" to
-  "future release" so the 0.8.x patch line is not bound to delivering it.
+  "future release".
 - Added stream commit multipart header-list rollback regression tests covering
   cross-part `orig_nelts` semantics (Rule 39 / Rule 40).
 - Added `make release-gates-check-08x` as the canonical 0.8.x patch-line entry
-  point, reusing the 0.8.0 gate logic without duplicating it.
-- Updated `CHANGELOG.md` with a 0.8.2 entry scoped to this closeout work.
+  point.
+- Updated `THIRD-PARTY-NOTICES` with current dependency versions (Rule 49).
 
-#### 0.8.1 (latest patch)
+#### 0.8.1
 
 - Streaming header commit atomicity / Rule 39 rollback semantics.
 - FFI streaming finish invalid input handle ownership / cleanup contract.
@@ -602,7 +614,7 @@ See `examples/docker/` for Docker build examples.
 ## Summary
 
 **NGINX Markdown for Agents** is on the 0.8.x release line (latest patch:
-0.8.1; 0.8.2 closeout in preparation). The project provides
+0.8.2). The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 dual-engine model, with bounded-memory streaming as the default path and
 full-buffer conversion as the fallback. Version 0.8.0 formalizes the true
@@ -611,7 +623,8 @@ state machine (ADR-0012), aligns the auto-mode streaming policy with the true
 streaming contract definition (ADR-0013), and consolidates platform and
 version support declarations into a release matrix source of truth (ADR-0014).
 The 0.8.1 and 0.8.2 patch releases harden streaming atomicity, FFI cleanup,
-OWS compliance, backpressure resume, release-gate naming, and documentation
+OWS compliance, backpressure resume, streaming decompression, implied-closure
+correctness, release-gate naming, and documentation
 consistency without changing the 0.8.x configuration contract. It also
 includes streaming observability (metrics and tracing), streaming security
 enforcement (policy validation and alerts), streaming configuration directives, Prometheus-compatible
@@ -650,4 +663,4 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 | 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |
 | 0.7.0 | 2026-06-03 | Kang | Version bump to 0.7.0; add Rust-first architecture, decompression budget, diagnostics, dynconf dry-run, DEB/RPM, K8s, FFI ABI verification, CI supply-chain hardening |
 | 0.8.0 | 2026-06-16 | Kang | Version bump to 0.8.0; true streaming contract, fallback state machine, streaming observability, streaming security enforcement, release matrix source of truth, streaming config directives |
-| 0.8.2 | 2026-06-21 | Kang | 0.8.x patch-line closeout: synced "current release line" wording to 0.8.x (latest patch 0.8.1), finalized RFC-0008 status, narrowed `markdown_stream_flush_interval` commitment, added stream commit multipart rollback regression tests, added `release-gates-check-08x` alias |
+| 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |

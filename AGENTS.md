@@ -506,4 +506,4 @@ remediation:
 | 0.8.4 | 2026-06-21 | Codex | Strengthened Rule 48 so local secret scans cover tracked release content without inheriting ignored adapter state |
 | 0.8.5 | 2026-06-22 | Codex | Strengthened Rules 6 and 48 for inner-to-outer structural closure ordering and deletion-safe tracked-worktree secret scans |
 | 0.8.4 | 2026-06-16 | Codex | Strengthened Rule 13 for release Dockerfile script interpreter prerequisites in minimal images |
-| 0.8.2 | 2026-06-21 | Kang | 0.8.2 patch release closeout: release-gates-check-08x alias, RFC-0008 Accepted, markdown_stream_flush_interval commitment narrowed, multipart header rollback regression tests |
+| 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
