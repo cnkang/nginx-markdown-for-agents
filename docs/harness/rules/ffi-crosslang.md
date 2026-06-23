@@ -78,11 +78,19 @@ Required:
   out before the consumption call.
 
 Verification:
-- `grep -rn 'catch_unwind' components/rust-converter/src/ffi/` — verify
+- `grep -rn 'catch_unwind' components/rust-converter/src/` — verify
   non-trivial FFI exports are wrapped.
-- `grep -rn '#\[no_mangle\]' components/rust-converter/src/ffi/` — every
-  hit should either be inside a `catch_unwind` or have a comment explaining
-  why it is trivial enough to skip.
+- `grep -rnE '#\[no_mangle\]|#\[unsafe\(no_mangle\)\]' components/rust-converter/src/`
+  — every hit should either be inside a `catch_unwind` or have a comment
+  explaining why it is trivial enough to skip.  Both the legacy
+  `#[no_mangle]` and the Rust 2024 `#[unsafe(no_mangle)]` forms must be
+  recognised; the detector `detect_ffi_panic_safety.sh` matches both.
+- `bash tools/harness/detect_ffi_panic_safety.sh --strict` — classifies
+  every FFI export into direct_catch / delegated_catch /
+  safe_init_helper / safe_static_lookup / free_helper /
+  unsafe_business_logic / unknown and fails (exit 1) on
+  unsafe_business_logic, unknown, or free_helper_without_catch.  The
+  Makefile `harness-security-checks` target runs this in strict mode.
 - `grep -rn '#\[repr(' components/rust-converter/src/ | grep -i 'enum\|reason\|error_code'`
   — verify FFI-exposed enums have explicit repr.
 - `grep -rn 'safe_finish\|markdown_result_free\|markdown_converter_free' components/nginx-module/src/`

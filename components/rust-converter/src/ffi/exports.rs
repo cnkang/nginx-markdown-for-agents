@@ -142,13 +142,16 @@ pub unsafe extern "C" fn markdown_result_free(result: *mut MarkdownResult) {
     }
 
     // SAFETY: `result` was validated as non-NULL above.
-    let result_ref = unsafe { &mut *result };
-    free_buffer(&mut result_ref.markdown, &mut result_ref.markdown_len);
-    free_buffer(&mut result_ref.etag, &mut result_ref.etag_len);
-    free_buffer(&mut result_ref.error_message, &mut result_ref.error_len);
-    result_ref.token_estimate = 0;
-    result_ref.error_code = 0;
-    result_ref.peak_memory_estimate = 0;
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: `result` was validated as non-NULL above.
+        let result_ref = unsafe { &mut *result };
+        free_buffer(&mut result_ref.markdown, &mut result_ref.markdown_len);
+        free_buffer(&mut result_ref.etag, &mut result_ref.etag_len);
+        free_buffer(&mut result_ref.error_message, &mut result_ref.error_len);
+        result_ref.token_estimate = 0;
+        result_ref.error_code = 0;
+        result_ref.peak_memory_estimate = 0;
+    }));
 }
 
 /// Destroy a converter handle previously returned by `markdown_converter_new()`.
@@ -164,8 +167,10 @@ pub unsafe extern "C" fn markdown_converter_free(handle: *mut MarkdownConverterH
         return;
     }
 
-    // SAFETY: `handle` was validated as non-NULL above and originated from `Box::into_raw`.
-    unsafe { drop(Box::from_raw(handle)) };
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: `handle` was validated as non-NULL above and originated from `Box::into_raw`.
+        unsafe { drop(Box::from_raw(handle)) };
+    }));
 }
 
 /// Perform Accept header content negotiation.
@@ -323,66 +328,69 @@ pub unsafe extern "C" fn markdown_make_decision(
         return;
     }
 
-    let result_ref = unsafe { &mut *result };
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: `result` was validated as non-NULL above.
+        let result_ref = unsafe { &mut *result };
 
-    use crate::decision::reason_code::ReasonCode;
-    use crate::decision::{Decision, DecisionContext, SkipReason, make_decision};
-    let ctx = DecisionContext {
-        enabled: enabled != 0,
-        eligible: eligible != 0,
-        accept_prefers_markdown: accept_prefers_markdown != 0,
-        accept_header_present: accept_header_present != 0,
-        conditional_not_modified: conditional_not_modified != 0,
-        decompression_ok: decompression_ok != 0,
-        parse_timed_out: parse_timed_out != 0,
-        parse_budget_exceeded: parse_budget_exceeded != 0,
-    };
+        use crate::decision::reason_code::ReasonCode;
+        use crate::decision::{Decision, DecisionContext, SkipReason, make_decision};
+        let ctx = DecisionContext {
+            enabled: enabled != 0,
+            eligible: eligible != 0,
+            accept_prefers_markdown: accept_prefers_markdown != 0,
+            accept_header_present: accept_header_present != 0,
+            conditional_not_modified: conditional_not_modified != 0,
+            decompression_ok: decompression_ok != 0,
+            parse_timed_out: parse_timed_out != 0,
+            parse_budget_exceeded: parse_budget_exceeded != 0,
+        };
 
-    match make_decision(&ctx) {
-        Decision::Convert => {
-            result_ref.decision = 0;
-            /* Converted == ReasonCode::Converted (0). */
-            result_ref.reason_code = ReasonCode::Converted.discriminant() as u8;
+        match make_decision(&ctx) {
+            Decision::Convert => {
+                result_ref.decision = 0;
+                /* Converted == ReasonCode::Converted (0). */
+                result_ref.reason_code = ReasonCode::Converted.discriminant() as u8;
+            }
+            Decision::Skip(reason) => {
+                result_ref.decision = 1;
+                /* Map the pre-conversion SkipReason onto the canonical
+                 * ReasonCode discriminants (the single source of truth in
+                 * decision::reason_code). This lets C callers feed
+                 * reason_code directly into markdown_reason_code_str() /
+                 * markdown_reason_code_metric_key() without a second
+                 * translation table. Post-conversion failure categories
+                 * (streaming/decompression codes) are reported through
+                 * separate FFI paths (streaming result codes,
+                 * FFIDecompResult.error_category), not this decision result.
+                 * All mapped discriminants are <= 15, so they fit in the
+                 * uint8_t reason_code field. */
+                let canonical = match reason {
+                    SkipReason::SkipAccept => ReasonCode::SkippedAccept,
+                    SkipReason::SkipNoAccept => ReasonCode::SkippedNoAccept,
+                    SkipReason::SkipConditional => ReasonCode::SkippedConditional,
+                    SkipReason::FailDecompression => ReasonCode::FailedDecompression,
+                    SkipReason::ParseTimeout => ReasonCode::ParseTimeout,
+                    SkipReason::ParseBudgetExceeded => ReasonCode::ParseBudgetExceeded,
+                    SkipReason::NotEligible => ReasonCode::NotEligible,
+                    SkipReason::Disabled => ReasonCode::Disabled,
+                };
+                result_ref.reason_code = canonical.discriminant() as u8;
+                /* The pre-conversion skip reasons all map to canonical
+                 * discriminants in the 0..=15 range (the C uint8_t reason_code
+                 * contract). ReasonCode is repr(u8) so the cast itself can never
+                 * truncate; this assert guards the stronger documented invariant
+                 * that decision results stay within the pre-conversion subset, so
+                 * adding a high-valued post-conversion variant to this match arm
+                 * is caught in debug builds. */
+                debug_assert!(
+                    canonical.discriminant() <= 15,
+                    "decision ReasonCode discriminant {} exceeds the documented \
+                     pre-conversion range (0..=15)",
+                    canonical.discriminant()
+                );
+            }
         }
-        Decision::Skip(reason) => {
-            result_ref.decision = 1;
-            /* Map the pre-conversion SkipReason onto the canonical
-             * ReasonCode discriminants (the single source of truth in
-             * decision::reason_code). This lets C callers feed
-             * reason_code directly into markdown_reason_code_str() /
-             * markdown_reason_code_metric_key() without a second
-             * translation table. Post-conversion failure categories
-             * (streaming/decompression codes) are reported through
-             * separate FFI paths (streaming result codes,
-             * FFIDecompResult.error_category), not this decision result.
-             * All mapped discriminants are <= 15, so they fit in the
-             * uint8_t reason_code field. */
-            let canonical = match reason {
-                SkipReason::SkipAccept => ReasonCode::SkippedAccept,
-                SkipReason::SkipNoAccept => ReasonCode::SkippedNoAccept,
-                SkipReason::SkipConditional => ReasonCode::SkippedConditional,
-                SkipReason::FailDecompression => ReasonCode::FailedDecompression,
-                SkipReason::ParseTimeout => ReasonCode::ParseTimeout,
-                SkipReason::ParseBudgetExceeded => ReasonCode::ParseBudgetExceeded,
-                SkipReason::NotEligible => ReasonCode::NotEligible,
-                SkipReason::Disabled => ReasonCode::Disabled,
-            };
-            result_ref.reason_code = canonical.discriminant() as u8;
-            /* The pre-conversion skip reasons all map to canonical
-             * discriminants in the 0..=15 range (the C uint8_t reason_code
-             * contract). ReasonCode is repr(u8) so the cast itself can never
-             * truncate; this assert guards the stronger documented invariant
-             * that decision results stay within the pre-conversion subset, so
-             * adding a high-valued post-conversion variant to this match arm
-             * is caught in debug builds. */
-            debug_assert!(
-                canonical.discriminant() <= 15,
-                "decision ReasonCode discriminant {} exceeds the documented \
-                 pre-conversion range (0..=15)",
-                canonical.discriminant()
-            );
-        }
-    }
+    }));
 }
 
 /// Build a header plan for a successful Markdown conversion.
@@ -538,20 +546,28 @@ fn reset_header_plan_to_empty(plan: &mut FFIHeaderPlan) {
 /// bytes or is NULL when `url_len == 0`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_validate_url(url: *const u8, url_len: usize) -> u8 {
-    let url_str = if url.is_null() || url_len == 0 {
-        return 1;
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(url, url_len) }) {
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| -> u8 {
+        if url.is_null() || url_len == 0 {
+            return 1;
+        }
+        // SAFETY: caller guarantees `url` points to `url_len` readable bytes.
+        let url_str = match std::str::from_utf8(unsafe {
+            std::slice::from_raw_parts(url, url_len)
+        }) {
             Ok(s) => s,
             Err(_) => return 0,
-        }
-    };
+        };
 
-    use crate::security::validate_link_url;
-    if validate_link_url(url_str).is_ok() {
-        1
-    } else {
-        0
+        use crate::security::validate_link_url;
+        if validate_link_url(url_str).is_ok() {
+            1
+        } else {
+            0
+        }
+    }));
+    match outcome {
+        Ok(v) => v,
+        Err(_) => 0,
     }
 }
 
@@ -565,21 +581,29 @@ pub unsafe extern "C" fn markdown_validate_url(url: *const u8, url_len: usize) -
 /// bytes or is NULL when `url_len == 0`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_is_dangerous_url(url: *const u8, url_len: usize) -> u8 {
-    let url_str = if url.is_null() || url_len == 0 {
-        return 0;
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(url, url_len) }) {
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| -> u8 {
+        if url.is_null() || url_len == 0 {
+            return 0;
+        }
+        // SAFETY: caller guarantees `url` points to `url_len` readable bytes.
+        let url_str = match std::str::from_utf8(unsafe {
+            std::slice::from_raw_parts(url, url_len)
+        }) {
             Ok(s) => s,
             Err(_) => return 1,
-        }
-    };
+        };
 
-    use crate::security::SecurityValidator;
-    let validator = SecurityValidator::new();
-    if validator.is_dangerous_url(url_str) {
-        1
-    } else {
-        0
+        use crate::security::SecurityValidator;
+        let validator = SecurityValidator::new();
+        if validator.is_dangerous_url(url_str) {
+            1
+        } else {
+            0
+        }
+    }));
+    match outcome {
+        Ok(v) => v,
+        Err(_) => 0,
     }
 }
 
@@ -657,17 +681,20 @@ pub unsafe extern "C" fn markdown_header_plan_free(plan: *mut FFIHeaderPlan) {
         return;
     }
 
-    let plan_ref = unsafe { &mut *plan };
-    if !plan_ref.handle.is_null() {
-        /* Save the old handle before clearing external fields */
-        let old_handle = plan_ref.handle;
-        /* Zero all externally-visible fields FIRST */
-        plan_ref.handle = std::ptr::null_mut();
-        plan_ref.entries = std::ptr::null();
-        plan_ref.count = 0;
-        /* Now drop — no external field points to freed memory */
-        unsafe { drop(Box::from_raw(old_handle as *mut HeaderPlanOwned)) };
-    }
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: `plan` was validated as non-NULL above.
+        let plan_ref = unsafe { &mut *plan };
+        if !plan_ref.handle.is_null() {
+            /* Save the old handle before clearing external fields */
+            let old_handle = plan_ref.handle;
+            /* Zero all externally-visible fields FIRST */
+            plan_ref.handle = std::ptr::null_mut();
+            plan_ref.entries = std::ptr::null();
+            plan_ref.count = 0;
+            /* Now drop — no external field points to freed memory */
+            unsafe { drop(Box::from_raw(old_handle as *mut HeaderPlanOwned)) };
+        }
+    }));
 }
 
 /// Convert a C pointer + length pair to an optional UTF-8 `&str`.
@@ -929,16 +956,19 @@ pub unsafe extern "C" fn markdown_decompress_free(result: *mut FFIDecompResult) 
         return;
     }
 
-    let result_ref = unsafe { &mut *result };
-    if !result_ref.output.is_null() && result_ref.output_len > 0 {
-        // Reconstruct the Box<[u8]> from the raw parts and drop it
-        let slice =
-            unsafe { std::slice::from_raw_parts_mut(result_ref.output, result_ref.output_len) };
-        unsafe { drop(Box::from_raw(slice)) };
-    }
-    result_ref.output = ptr::null_mut();
-    result_ref.output_len = 0;
-    result_ref.error_category = 0;
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: `result` was validated as non-NULL above.
+        let result_ref = unsafe { &mut *result };
+        if !result_ref.output.is_null() && result_ref.output_len > 0 {
+            // Reconstruct the Box<[u8]> from the raw parts and drop it
+            let slice =
+                unsafe { std::slice::from_raw_parts_mut(result_ref.output, result_ref.output_len) };
+            unsafe { drop(Box::from_raw(slice)) };
+        }
+        result_ref.output = ptr::null_mut();
+        result_ref.output_len = 0;
+        result_ref.error_category = 0;
+    }));
 }
 
 /// Zero-initialize an FFIDecompResult struct.
