@@ -263,6 +263,35 @@ push_header(ngx_http_request_t *r, const char *key, const char *value)
     return h;
 }
 
+/*
+ * Bounded substring search that does not require NUL-terminated input.
+ * Returns 1 if `needle` is found within `haystack[0..haystack_len)`, 0 otherwise.
+ */
+static int
+find_substr(const u_char *haystack, size_t haystack_len,
+    const char *needle, size_t needle_len)
+{
+    size_t limit;
+
+    if (needle_len == 0) {
+        return 1;
+    }
+
+    if (needle_len > haystack_len) {
+        return 0;
+    }
+
+    limit = haystack_len - needle_len + 1;
+
+    for (size_t i = 0; i < limit; i++) {
+        if (memcmp(haystack + i, needle, needle_len) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static ngx_table_elt_t *
 find_header(ngx_http_request_t *r, const char *key)
 {
@@ -372,11 +401,13 @@ test_update_headers_full_path(void)
 
     vary = find_header(&r, "Vary");
     TEST_ASSERT(vary != NULL, "Vary header should exist");
-    TEST_ASSERT(strstr((char *) vary->value.data, "Accept") != NULL, "Vary should include Accept");
+    TEST_ASSERT(find_substr(vary->value.data, vary->value.len, "Accept", 6),
+                "Vary should include Accept");
 
     token_h = find_header(&r, "X-Markdown-Tokens");
     TEST_ASSERT(token_h != NULL, "Token header should be present when enabled");
-    TEST_ASSERT(strstr((char *) token_h->value.data, "123") != NULL, "Token header value should contain token count");
+    TEST_ASSERT(find_substr(token_h->value.data, token_h->value.len, "123", 3),
+                "Token header value should contain token count");
 
     free_request(&r);
     TEST_PASS("Full header update path works");
@@ -461,7 +492,7 @@ test_update_headers_etag_no_existing(void)
     TEST_ASSERT(r.headers_out.etag != NULL, "ETag should be set");
     vary = find_header(&r, "Vary");
     TEST_ASSERT(vary != NULL, "Vary header should be created");
-    TEST_ASSERT(strstr((char *) vary->value.data, "Accept") != NULL,
+    TEST_ASSERT(find_substr(vary->value.data, vary->value.len, "Accept", 6),
                 "Vary should include Accept");
 
     free_request(&r);
@@ -560,7 +591,8 @@ test_update_headers_ignores_invalidated_vary(void)
     TEST_ASSERT(valid_vary->hash != 0, "Valid Vary should stay active");
     TEST_ASSERT(count_active_headers(&r, "Vary") == 1,
                 "Only the valid Vary header should remain active");
-    TEST_ASSERT(strstr((char *) valid_vary->value.data, "Accept") != NULL,
+    TEST_ASSERT(find_substr(valid_vary->value.data, valid_vary->value.len,
+                "Accept", 6),
                 "Valid Vary should be updated with Accept");
 
     free_request(&r);
@@ -599,7 +631,7 @@ test_update_headers_creates_vary_after_invalidated_only(void)
     vary = find_header(&r, "Vary");
     TEST_ASSERT(vary != NULL, "Active Vary header should exist");
     TEST_ASSERT(vary != invalid_vary, "Active Vary should not reuse inactive entry");
-    TEST_ASSERT(strstr((char *) vary->value.data, "Accept") != NULL,
+    TEST_ASSERT(find_substr(vary->value.data, vary->value.len, "Accept", 6),
                 "Created Vary should include Accept");
 
     free_request(&r);
