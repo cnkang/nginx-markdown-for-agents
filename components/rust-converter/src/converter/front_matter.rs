@@ -32,6 +32,7 @@ impl MarkdownConverter {
         &self,
         dom: &markup5ever_rcdom::RcDom,
         output: &mut String,
+        ctx: &mut ConversionContext,
     ) -> Result<(), ConversionError> {
         if !(self.options.include_front_matter && self.options.extract_metadata) {
             return Ok(());
@@ -42,9 +43,8 @@ impl MarkdownConverter {
             self.options.resolve_relative_urls,
         );
 
-        if let Ok(metadata) = extractor.extract(dom) {
-            self.write_front_matter(output, &metadata)?;
-        }
+        let metadata = extractor.extract_with_context(dom, ctx)?;
+        self.write_front_matter(output, &metadata)?;
 
         Ok(())
     }

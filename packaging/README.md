@@ -35,7 +35,7 @@ The configuration uses template variables injected by the CI matrix:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `PKG_VERSION` | Project version (from tag or workflow input) | `0.8.0` |
+| `PKG_VERSION` | Project version (from tag or workflow input) | `0.8.2` |
 | `NGINX_VERSION` | Target NGINX version from build matrix | `1.26.3` |
 | `NFPM_ARCH` | Target architecture | `amd64`, `arm64` |
 

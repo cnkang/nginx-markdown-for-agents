@@ -49,9 +49,9 @@ ngx_http_markdown_buffer_init(ngx_http_markdown_buffer_t *buf,
         return NGX_ERROR;
     }
 
-    /* Validate max_size is reasonable (must be > 0) */
+    /* A zero directive value is the public unlimited-size sentinel. */
     if (max_size == 0) {
-        return NGX_ERROR;
+        max_size = NGX_HTTP_MARKDOWN_CONF_UNSET_SIZE;
     }
 
     /*

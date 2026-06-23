@@ -18,7 +18,9 @@ use crate::error::ConversionError;
 use crate::security::escape_link_label;
 use crate::streaming::budget::MemoryBudget;
 use crate::streaming::sanitizer::is_dangerous_url;
-use crate::streaming::state_machine::{StateMachineAction, StructuralContext};
+use crate::streaming::state_machine::{
+    StateMachineAction, StructuralContext, is_safe_code_fence_language,
+};
 
 fn longest_backtick_run(content: &str) -> usize {
     let mut max_run = 0;
@@ -328,6 +330,14 @@ impl IncrementalEmitter {
         self.flushed.len()
     }
 
+    /// Heap capacity retained by collectors that are separate from the
+    /// pending and flushed output buffers.
+    pub(crate) fn resident_collector_bytes(&self) -> usize {
+        self.link_text
+            .capacity()
+            .saturating_add(self.code_block_buffer.capacity())
+    }
+
     /// Finalizes the emitter and returns the fully normalized output.
     ///
     /// Closes any open code block if present, moves pending bytes to the ready buffer, removes extra trailing newlines so at most one final `\n` remains, and returns the complete output bytes.
@@ -444,7 +454,10 @@ impl IncrementalEmitter {
                 // we are in a code block and emit the opening fence
                 // when the first text arrives or on exit.
                 self.in_code_block = true;
-                self.code_fence_lang = lang.clone();
+                self.code_fence_lang = lang
+                    .as_deref()
+                    .filter(|value| is_safe_code_fence_language(value))
+                    .map(ToOwned::to_owned);
                 self.code_block_backtick_max = 0;
                 self.code_block_trailing_backticks = 0;
                 self.code_block_buffer.clear();
@@ -538,7 +551,11 @@ impl IncrementalEmitter {
             StructuralContext::CodeBlock(lang) => {
                 let fence_len = (3usize).max(self.code_block_backtick_max + 1);
                 let fence_str = "`".repeat(fence_len);
-                let effective_lang = lang.clone().or_else(|| self.code_fence_lang.clone());
+                let effective_lang = lang
+                    .as_deref()
+                    .filter(|value| is_safe_code_fence_language(value))
+                    .map(ToOwned::to_owned)
+                    .or_else(|| self.code_fence_lang.clone());
                 let opening_fence = match effective_lang {
                     Some(l) => format!("{}{}\n", fence_str, l),
                     None => format!("{}\n", fence_str),
@@ -1815,6 +1832,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_resident_collector_bytes_include_link_and_code_buffers() {
+        let budget = MemoryBudget::default();
+        let mut emitter = IncrementalEmitter::new(&budget);
+
+        emitter.append_link_text("link text retained until the closing tag");
+        emitter
+            .code_block_buffer
+            .extend_from_slice(b"code retained until the closing fence");
+
+        assert_eq!(
+            emitter.resident_collector_bytes(),
+            emitter.link_text.capacity() + emitter.code_block_buffer.capacity()
+        );
+        assert!(emitter.resident_collector_bytes() > 0);
+    }
+
     // ── Image tests ─────────────────────────────────────────────────
 
     /// Verifies that an HTML `<img>` inside a paragraph is emitted as Markdown image syntax.
@@ -1865,6 +1899,25 @@ mod tests {
         ]);
         assert!(output.contains("```rust\n"), "got: {}", output);
         assert!(output.contains("fn main() {}"), "got: {}", output);
+    }
+
+    #[test]
+    fn test_code_block_sink_rejects_unsafe_language() {
+        let (mut emitter, mut sm) = make_pair();
+        let code_block = StructuralContext::CodeBlock(Some("rust```".to_string()));
+
+        emitter
+            .process_action(&StateMachineAction::Enter(code_block.clone()), &mut sm)
+            .unwrap();
+        emitter
+            .process_action(&StateMachineAction::Text("let x = 1;".to_string()), &mut sm)
+            .unwrap();
+        emitter
+            .process_action(&StateMachineAction::Exit(code_block), &mut sm)
+            .unwrap();
+
+        let output = String::from_utf8(emitter.finalize().unwrap()).unwrap();
+        assert_eq!(output, "```\nlet x = 1;\n```\n");
     }
 
     // ── Inline code tests ───────────────────────────────────────────

@@ -294,6 +294,7 @@ struct ngx_time_s {
  */
 static ngx_int_t g_next_body_filter_rc = NGX_OK;
 static ngx_uint_t g_next_body_filter_calls = 0;
+static ngx_chain_t *g_next_body_filter_last_in = NULL;
 static ngx_int_t g_next_header_filter_rc = NGX_OK;
 static ngx_int_t g_complex_value_rc = NGX_OK;
 static ngx_int_t g_add_vary_rc = NGX_OK;
@@ -417,8 +418,8 @@ static ngx_int_t
 ngx_http_next_body_filter_stub(ngx_http_request_t *r, ngx_chain_t *in)
 {
     UNUSED(r);
-    UNUSED(in);
     g_next_body_filter_calls++;
+    g_next_body_filter_last_in = in;
     if (g_next_body_filter_seq_idx < g_next_body_filter_seq_len) {
         return g_next_body_filter_seq[g_next_body_filter_seq_idx++];
     }
@@ -1195,6 +1196,7 @@ reset_globals(void)
 {
     g_next_body_filter_rc = NGX_OK;
     g_next_body_filter_calls = 0;
+    g_next_body_filter_last_in = NULL;
     g_next_header_filter_rc = NGX_OK;
     g_complex_value_rc = NGX_OK;
     g_add_vary_rc = NGX_OK;
@@ -1567,6 +1569,7 @@ test_send_output_and_resume_paths(void)
     ngx_chain_t             c_ok;
     ngx_buf_t               b_err;
     ngx_chain_t             c_err;
+    ngx_chain_t            *pending_anchor;
     u_char                  data[] = "hello";
     ngx_int_t               rc;
 
@@ -1597,12 +1600,26 @@ test_send_output_and_resume_paths(void)
     TEST_ASSERT(rc == NGX_AGAIN, "send_output should propagate NGX_AGAIN");
     TEST_ASSERT(ctx.streaming.pending_output != NULL,
         "NGX_AGAIN should store pending output");
+    pending_anchor = ctx.streaming.pending_output;
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
         "NGX_AGAIN should set buffered flag");
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "resume_pending should preserve persistent backpressure");
+    TEST_ASSERT(g_next_body_filter_last_in == NULL,
+        "resume_pending must drain downstream-owned state with NULL");
+    TEST_ASSERT(ctx.streaming.pending_output == pending_anchor,
+        "persistent backpressure must preserve the pending anchor");
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
+        "persistent backpressure must preserve the buffered flag");
 
     g_next_body_filter_rc = NGX_OK;
     rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK, "resume_pending should drain pending chain");
+    TEST_ASSERT(g_next_body_filter_last_in == NULL,
+        "successful resume must not resubmit the original chain");
     TEST_ASSERT(ctx.streaming.pending_output == NULL,
         "resume should clear pending chain");
     TEST_ASSERT(ctx.streaming.pending_has_data == 0,

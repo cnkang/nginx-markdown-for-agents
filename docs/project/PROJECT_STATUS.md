@@ -11,7 +11,7 @@ steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.8.0)**, the project includes a dual-engine
+As of the **current release line (0.8.x)**, the project includes a dual-engine
 conversion model (streaming default with full-buffer fallback), Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
 logic, and header plan application, independent decompression budget with parse
@@ -25,13 +25,16 @@ fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,
 operations, architecture, and contributor-facing harness maintenance.
 
-### Release 0.8.0 (Current)
+### Release 0.8.x Line (Current)
 
-**Status:** Current release
+**Status:** Current release line. The 0.8.x line began with 0.8.0 (true
+streaming contract) and continues with patch releases (0.8.1, 0.8.2) that
+harden stability, security, and release-gate consistency without introducing
+new user-visible features or breaking configuration changes.
 
 Version 0.8.0 formalizes true streaming semantics as a first-class, verifiable
-contract. See the [Current Release 0.8.0](#current-release-080) section below
-for detailed goals, non-goals, and implementation status.
+contract. See the [Current Release Line 0.8.x](#current-release-line-08x)
+section below for detailed goals, non-goals, and implementation status.
 
 ### Release 0.7.0 Updates
 
@@ -373,24 +376,72 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release (0.8.0)
-- True streaming contract: formalized incremental input processing, incremental
+### Current Release Line (0.8.x)
+
+The 0.8.x release line is the current maintained line. The latest patch
+release is 0.8.2; 0.8.1 and 0.8.2 are patch releases that
+harden stability, security, and release-gate consistency without introducing
+new user-visible features or breaking configuration changes.
+
+#### 0.8.2 (latest patch)
+
+- Streaming decompression hardening: eliminated heap leaks in `finish_zlib()`
+  across all exit paths, hardened buffer expansion error paths, and enforced
+  `ngx_alloc`/`ngx_free` exclusively for resizable buffer backing stores
+  (Rule 43).
+- Implied closure correctness (Rule 6): structural closures now unwind
+  inner-to-outer; the Rust converter consumes implied closures before the
+  sanitizer Skip decision and mirrors them to the state machine.
+- FFI safety: centralized header plan reset for panic safety; parser working-set
+  estimation with overflow-safe budget enforcement.
+- Streaming decompression budget and memory accounting (Rule 3, Rule 44).
+- Code fence language handling: `lang-` prefix support and sanitization in the
+  streaming converter.
+- `parse_size()` hardening for empty, whitespace-only, and malformed input.
+- Security scan scoping: gitleaks scoped to tracked worktree content, skipping
+  deleted paths and guarding against empty scan roots (Rule 48).
+- Synced "current release line" wording across project, README, installation,
+  and compatibility docs to 0.8.x (latest patch 0.8.2).
+- Finalized RFC-0008 status from `Draft` to `Accepted / Implemented in 0.8.0`.
+- Narrowed `markdown_stream_flush_interval` commitment from "future 0.8.x" to
+  "future release".
+- Added stream commit multipart header-list rollback regression tests covering
+  cross-part `orig_nelts` semantics (Rule 39 / Rule 40).
+- Added `make release-gates-check-08x` as the canonical 0.8.x patch-line entry
+  point.
+- Updated `THIRD-PARTY-NOTICES` with current dependency versions (Rule 49).
+
+#### 0.8.1
+
+- Streaming header commit atomicity / Rule 39 rollback semantics.
+- FFI streaming finish invalid input handle ownership / cleanup contract.
+- Content-Type OWS / HTAB compliance.
+- Full-buffer backpressure `NGX_AGAIN` resume tail duplication.
+- Release/perf/coverage tooling path traversal and taint sink hardening.
+- Static security / supply-chain gate additions and documentation.
+
+#### 0.8.0 (line anchor)
+
+- True streaming contract: formalize incremental input processing, incremental
   output emission, and bounded memory as a single verifiable contract
   (RFC 0008, ADR-0011)
-- Streaming fallback state machine: pre-commit/post-commit two-phase error
+- Fallback state machine: implement pre-commit/post-commit two-phase error
   handling with deterministic recovery semantics (ADR-0012)
-- Default-auto engine: aligned auto-mode streaming policy with the true
+- Default-auto engine: align the auto-mode streaming policy with the true
   streaming contract definition (ADR-0013)
-- Support matrix source of truth: consolidated platform, version, and package
+- Support matrix source of truth: consolidate platform, version, and package
   support declarations into a single machine-readable matrix consumed by CI,
   docs, and packaging (ADR-0014)
-- Streaming observability: engine selection counters, fallback/failure counters,
-  streaming reason codes (streaming observability)
-- Streaming security enforcement: hard-excluded content types with security
-  test suite (streaming security enforcement)
-- Streaming configuration directives: `markdown_stream_threshold`,
-  `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`,
-  `markdown_stream_excluded_types` (#137)
+
+**Non-goals for 0.8.x line:**
+- SSE/NDJSON conversion (out of scope for this release line)
+- Full parser rewrite (incremental improvements only)
+- Edge-CDN deployment model (origin-near architecture retained)
+- Implementing `markdown_stream_flush_interval` (reserved for a future release;
+  current use causes `nginx -t` to fail)
+
+### Implemented Features (0.8.x line)
+
 - Dual-engine conversion architecture: streaming default with full-buffer
   fallback
 - Rust-first architecture: Accept negotiation, conditional requests, decision
@@ -415,25 +466,6 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 - OS package manager distribution (APT, YUM/DNF, Homebrew)
 - Rollout and rollback guides with executable operator procedures
 - Performance baseline gating system and hardened CI/CD validation
-
-### Current Release 0.8.0
-
-**Goals (implemented):**
-- True streaming contract: formalize incremental input processing, incremental
-  output emission, and bounded memory as a single verifiable contract
-  (RFC 0008, ADR-0011)
-- Fallback state machine: implement pre-commit/post-commit two-phase error
-  handling with deterministic recovery semantics (ADR-0012)
-- Default-auto engine: align the auto-mode streaming policy with the true
-  streaming contract definition (ADR-0013)
-- Support matrix source of truth: consolidate platform, version, and package
-  support declarations into a single machine-readable matrix consumed by CI,
-  docs, and packaging (ADR-0014)
-
-**Non-goals for 0.8.0:**
-- SSE/NDJSON conversion (out of scope for this release)
-- Full parser rewrite (incremental improvements only)
-- Edge-CDN deployment model (origin-near architecture retained)
 
 ### Near-Term
 - Expand streaming rollout samples across mixed traffic profiles
@@ -581,7 +613,8 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is at version 0.8.0. The project provides
+**NGINX Markdown for Agents** is on the 0.8.x release line (latest patch:
+0.8.2). The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 dual-engine model, with bounded-memory streaming as the default path and
 full-buffer conversion as the fallback. Version 0.8.0 formalizes the true
@@ -589,8 +622,12 @@ streaming contract (RFC 0008, ADR-0011), introduces the streaming fallback
 state machine (ADR-0012), aligns the auto-mode streaming policy with the true
 streaming contract definition (ADR-0013), and consolidates platform and
 version support declarations into a release matrix source of truth (ADR-0014).
-It also includes streaming observability (streaming observability), streaming security
-enforcement (streaming security enforcement), streaming configuration directives, Prometheus-compatible
+The 0.8.1 and 0.8.2 patch releases harden streaming atomicity, FFI cleanup,
+OWS compliance, backpressure resume, streaming decompression, implied-closure
+correctness, release-gate naming, and documentation
+consistency without changing the 0.8.x configuration contract. It also
+includes streaming observability (metrics and tracing), streaming security
+enforcement (policy validation and alerts), streaming configuration directives, Prometheus-compatible
 metrics, decision reason codes, rollout and rollback guides, parity and
 evidence workflows for streaming rollout safety, dynamic configuration
 hot-reload, OpenTelemetry tracing, per-path metrics, OS package distribution,
@@ -626,3 +663,4 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 | 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |
 | 0.7.0 | 2026-06-03 | Kang | Version bump to 0.7.0; add Rust-first architecture, decompression budget, diagnostics, dynconf dry-run, DEB/RPM, K8s, FFI ABI verification, CI supply-chain hardening |
 | 0.8.0 | 2026-06-16 | Kang | Version bump to 0.8.0; true streaming contract, fallback state machine, streaming observability, streaming security enforcement, release matrix source of truth, streaming config directives |
+| 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |

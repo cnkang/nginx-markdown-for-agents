@@ -588,7 +588,7 @@ impl MarkdownConverter {
 
         // Extract metadata and add YAML front matter if enabled
         if self.options.include_front_matter && self.options.extract_metadata {
-            self.maybe_write_front_matter_from_dom(dom, &mut output)?;
+            self.maybe_write_front_matter_from_dom(dom, &mut output, ctx)?;
             // Check timeout after metadata extraction
             ctx.check_timeout()?;
         }
@@ -2470,6 +2470,28 @@ mod tests {
 
         assert!(result.contains("```javascript"));
         assert!(result.contains("const x = 42;"));
+    }
+
+    #[test]
+    fn test_code_block_preserves_common_safe_language_identifiers() {
+        let html = b"<pre><code class=\"language-c++\">int main() {}</code></pre>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(result.contains("```c++\n"));
+    }
+
+    #[test]
+    fn test_code_block_rejects_language_that_can_break_fence() {
+        let html = b"<pre><code class=\"language-```yaml\">safe: value</code></pre>";
+        let dom = parse_html(html).expect("Parse failed");
+        let converter = MarkdownConverter::new();
+        let result = converter.convert(&dom).expect("Conversion failed");
+
+        assert!(result.contains("```\nsafe: value\n```"));
+        assert!(!result.contains("```yaml"));
+        assert!(!result.contains("``````yaml"));
     }
 
     #[test]

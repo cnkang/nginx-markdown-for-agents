@@ -106,6 +106,10 @@ struct ngx_http_request_s {
 /* Include the module header for types */
 #include "../../src/ngx_http_markdown_filter_module.h"
 
+static ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r,
+    ngx_chain_t *in);
+#include "../../src/ngx_http_markdown_filter_chain_impl.h"
+
 /* Include the decision engine source directly */
 #include "../../src/ngx_http_markdown_stream_state.h"
 #include "../../src/ngx_http_markdown_stream_state.c"
@@ -127,6 +131,7 @@ struct ngx_http_request_s {
 static int test_output_filter_called;
 static int test_output_filter_rc;
 static ngx_chain_t *test_output_filter_chain;
+static int test_poison_top_filter_called;
 static int test_replay_chain_called;
 static ngx_chain_t *test_replay_chain_result;
 
@@ -148,14 +153,24 @@ static ngx_http_request_t    test_request;
 /* Function prototypes */
 static void test_setup(void);
 
-/* Mock: ngx_http_output_filter */
-ngx_int_t
-ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
+/* Saved downstream body filter used by the production delegation helper. */
+static ngx_int_t
+test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
     UNUSED(r);
     test_output_filter_called++;
     test_output_filter_chain = in;
     return test_output_filter_rc;
+}
+
+/* Poison top filter: replay and postcommit output must bypass it. */
+ngx_int_t
+ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
+{
+    UNUSED(r);
+    UNUSED(in);
+    test_poison_top_filter_called++;
+    return NGX_ERROR;
 }
 
 /* Mock: replay_chain */
@@ -263,6 +278,8 @@ static void test_setup(void)
     test_output_filter_called = 0;
     test_output_filter_rc = NGX_OK;
     test_output_filter_chain = NULL;
+    test_poison_top_filter_called = 0;
+    ngx_http_next_body_filter = test_next_body_filter;
     test_replay_chain_called = 0;
     test_replay_chain_result = NULL;
     test_calloc_buf_called = 0;
@@ -315,7 +332,12 @@ static void test_task_6_1_precommit_pass_replay_html(void)
 
     TEST_ASSERT(rc == NGX_OK, "6.1: returns NGX_OK");
     TEST_ASSERT(test_replay_chain_called == 1, "6.1: replay_chain called");
-    TEST_ASSERT(test_output_filter_called == 1, "6.1: output_filter called");
+    TEST_ASSERT(test_output_filter_called == 1,
+                "6.1: saved downstream filter called");
+    TEST_ASSERT(test_output_filter_chain == &fc,
+                "6.1: helper forwarded replay chain");
+    TEST_ASSERT(test_poison_top_filter_called == 0,
+                "6.1: replay bypassed poison top filter");
     TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "6.1: state PASSTHROUGH");
     TEST_ASSERT(test_request.headers_out.content_type_len
@@ -422,6 +444,10 @@ static void test_precommit_pass_replay_html_backpressure(void)
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
     TEST_ASSERT(rc == NGX_AGAIN, "replay backpressure -> NGX_AGAIN");
+    TEST_ASSERT(test_output_filter_called == 1,
+        "replay backpressure came from saved downstream filter");
+    TEST_ASSERT(test_poison_top_filter_called == 0,
+        "replay backpressure bypassed poison top filter");
     TEST_ASSERT(test_output_filter_chain == &fc,
         "output filter should receive replay chain");
     TEST_ASSERT(ctx.streaming.pending_output == &fc,

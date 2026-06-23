@@ -229,7 +229,9 @@ ngx_http_markdown_streaming_handle_backpressure(
 /*
  * Resume sending pending output after backpressure clears.
  *
- * Retries the buffered chain via ngx_http_next_body_filter.
+ * Drains the chain retained by the downstream filter by calling
+ * ngx_http_next_body_filter with NULL.  pending_output remains a
+ * request-lifetime anchor and state latch; it is never resubmitted.
  * On success, records deferred TTFB and terminal metrics if
  * applicable, then sends any deferred last_buf. Clears the
  * NGX_HTTP_MARKDOWN_BUFFERED flag when the pending chain
@@ -1102,7 +1104,7 @@ ngx_http_markdown_streaming_resume_pending(
     ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf)
 {
-    ngx_chain_t  *out;
+    const ngx_chain_t  *out;
     ngx_int_t     rc;
     ngx_flag_t    pending_last_buf;
 
@@ -1123,7 +1125,6 @@ ngx_http_markdown_streaming_resume_pending(
         return NGX_OK;
     }
 
-    ctx->streaming.pending_output = NULL;
     /*
      * Capture last_buf before calling the downstream filter: once
      * the chain is consumed the buf metadata may be modified by
@@ -1132,17 +1133,18 @@ ngx_http_markdown_streaming_resume_pending(
     pending_last_buf = (out->buf != NULL && out->buf->last_buf
                         && r == r->main) ? 1 : 0;
     /*
-     * Retry the exact buffered chain first; only after it drains do we
-     * allow finalize() to emit a terminal empty last_buf.
+     * The downstream filter retained the original chain when it returned
+     * NGX_AGAIN.  Resume that owned state with NULL; resubmitting out would
+     * duplicate its unsent tail (Rule 1).
      */
-    rc = ngx_http_next_body_filter(r, out);
+    rc = ngx_http_next_body_filter(r, NULL);
 
     if (rc == NGX_AGAIN) {
-        ctx->streaming.pending_output = out;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
         return NGX_AGAIN;
     }
 
+    ctx->streaming.pending_output = NULL;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 
     /*

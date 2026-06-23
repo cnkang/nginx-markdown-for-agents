@@ -65,7 +65,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         harness-check harness-check-full harness-security-checks test-harness \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
-	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-legacy release-gates-check-strict \
+	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-08x release-gates-check-legacy release-gates-check-strict \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         verify-streaming-failure-cache-e2e \
@@ -253,6 +253,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh
 	bash tools/harness/tests/test_detect_c_pure_logic.sh
 	bash tools/harness/tests/test_detect_volatile_atomic.sh
+	bash tools/harness/tests/test_security_gitleaks_scope.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
 license-check:
@@ -284,7 +285,7 @@ security-shellcheck:
 
 security-gitleaks:
 	@command -v gitleaks >/dev/null 2>&1 || { echo "ERROR: gitleaks not found. Install with: go install github.com/zricethezav/gitleaks/v8@83d9cd684c87d95d656c1458ef04895a7f1cbd8e # v8.30.1" >&2; exit 127; }
-	gitleaks detect --source . --no-git --redact --config .gitleaks.toml --verbose
+	bash tools/security/run_gitleaks_tracked.sh
 
 security-semgrep:
 	@command -v semgrep >/dev/null 2>&1 || { echo "ERROR: semgrep not found. Install with: python3 -m pip install --user semgrep==1.166.0" >&2; exit 127; }
@@ -541,7 +542,7 @@ release-gates-check-070:
 #                                           when NGINX source or lcov/cargo-llvm-cov
 #                                           is unavailable
 
-RELEASE_GATE_080_ACTIVE_VERSION ?= 0.8.1
+RELEASE_GATE_080_ACTIVE_VERSION ?= 0.8.2
 
 release-gates-check-080:
 	@echo "=== v0.8.x Release Gate: Starting ($(RELEASE_GATE_080_ACTIVE_VERSION)) ==="
@@ -634,6 +635,9 @@ release-gates-check-080:
 	fi
 	@echo "=== v0.8.x Release Gate: ALL PASSED ($(RELEASE_GATE_080_ACTIVE_VERSION)) ==="
 
+release-gates-check-08x: release-gates-check-080
+	@echo "  (release-gates-check-08x is an alias for release-gates-check-080, the 0.8.x patch-line gate)"
+
 release-gates-check-legacy:
 	python3 tools/release/legacy/validate_release_gates.py
 
@@ -645,7 +649,7 @@ release-gates-check-070-docker:
 release-gates-check-strict:
 	python3 tools/release/gates/validate_release_gates.py --mode strict
 	python3 tools/release/gates/validate_naming.py
-	python3 tools/release/gates/validate_release_gates_070.py --mode strict
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_release_gates_070.py --mode strict
 	python3 tools/release/gates/validate_fuzz_packaging_070.py
 	@echo "=== Strict: Release Workflow Gate ==="
 	@test -f .github/workflows/release-packages.yml || { echo "FAIL: .github/workflows/release-packages.yml not found" >&2; exit 1; }
@@ -810,6 +814,7 @@ help:
 	@echo "  release-gates-check-060  - Validate 0.6.0 release gates (streaming default, pruning, budget)"
 	@echo "  release-gates-check-070  - Validate 0.7.0 release gates (runtime correctness, package compat, fuzz)"
 	@echo "  release-gates-check-080  - Validate 0.8.x release gates (streaming, coverage, matrix, harness boundary)"
+	@echo "  release-gates-check-08x  - Alias for release-gates-check-080 (0.8.x patch-line canonical entry)"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
 	@echo "  release-notes            - Generate release notes from release-matrix.json"

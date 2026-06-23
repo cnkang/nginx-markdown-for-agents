@@ -25,7 +25,7 @@ Use it when you need more than deployment guidance but less than source-level im
 
 | RFC | Title | Status | Target Version |
 |-----|-------|--------|----------------|
-| [RFC-0008](RFC-0008-streaming-conversion-support-contract.md) | Streaming Conversion and Support Contract | Draft | 0.8.0 |
+| [RFC-0008](RFC-0008-streaming-conversion-support-contract.md) | Streaming Conversion and Support Contract | Accepted / Implemented in 0.8.0 | 0.8.0 |
 
 ## Scope
 

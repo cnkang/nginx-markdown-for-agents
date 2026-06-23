@@ -61,14 +61,14 @@ Components:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| VERSION | Module semantic version | 0.8.0 |
+| VERSION | Module semantic version | 0.8.2 |
 | NGINX_VERSION | Target NGINX version (major.minor.patch) | 1.26.3 |
 | ARCH | CPU architecture (amd64, arm64) | amd64 |
 
 Example:
 
 ```text
-nginx-module-markdown-for-agents_0.8.0_nginx-1.26.3_amd64.deb
+nginx-module-markdown-for-agents_0.8.2_nginx-1.26.3_amd64.deb
 ```
 
 ### RPM Package Naming
@@ -83,14 +83,14 @@ Components:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| VERSION | Module semantic version | 0.8.0 |
+| VERSION | Module semantic version | 0.8.2 |
 | NGINX_VERSION | Target NGINX version (major.minor.patch) | 1.26.3 |
 | ARCH | CPU architecture (x86_64, aarch64) | x86_64 |
 
 Example:
 
 ```text
-nginx-module-markdown-for-agents-0.8.0-nginx1.26.3-1.x86_64.rpm
+nginx-module-markdown-for-agents-0.8.2-nginx1.26.3-1.x86_64.rpm
 ```
 
 ### Architecture Mapping
@@ -122,7 +122,7 @@ installation.
 Download `SHA256SUMS` from the same GitHub Release page as the package:
 
 ```bash
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.0/SHA256SUMS
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.2/SHA256SUMS
 ```
 
 ### Verifying a Downloaded Package
@@ -138,10 +138,10 @@ Or verify manually:
 
 ```bash
 # Compute the checksum of the downloaded file
-sha256sum nginx-module-markdown-for-agents_0.8.0_nginx-1.26.3_amd64.deb
+sha256sum nginx-module-markdown-for-agents_0.8.2_nginx-1.26.3_amd64.deb
 
 # Compare the output against the corresponding line in SHA256SUMS
-grep "nginx-module-markdown-for-agents_0.8.0_nginx-1.26.3_amd64.deb" SHA256SUMS
+grep "nginx-module-markdown-for-agents_0.8.2_nginx-1.26.3_amd64.deb" SHA256SUMS
 ```
 
 Both values must match exactly. If they differ, do not install the package
@@ -158,8 +158,8 @@ Each line in `SHA256SUMS` follows the standard format:
 Example:
 
 ```text
-a1b2c3d4...  nginx-module-markdown-for-agents_0.8.0_nginx-1.26.3_amd64.deb
-e5f6a7b8...  nginx-module-markdown-for-agents-0.8.0-nginx1.26.3-1.x86_64.rpm
+a1b2c3d4...  nginx-module-markdown-for-agents_0.8.2_nginx-1.26.3_amd64.deb
+e5f6a7b8...  nginx-module-markdown-for-agents-0.8.2-nginx1.26.3-1.x86_64.rpm
 ```
 
 ## GPG Signature Verification
@@ -205,9 +205,9 @@ The recommended verification sequence:
 
 ```bash
 # 1. Download the package, checksums, and signature
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.0/SHA256SUMS
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.0/SHA256SUMS.asc
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.0/<package-file>
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.2/SHA256SUMS
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.2/SHA256SUMS.asc
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.2/<package-file>
 
 # 2. Verify GPG signature on the checksum file
 gpg --verify SHA256SUMS.asc SHA256SUMS

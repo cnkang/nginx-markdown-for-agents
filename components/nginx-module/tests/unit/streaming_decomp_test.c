@@ -20,6 +20,10 @@
 #include <limits.h>
 #include <zlib.h>
 
+#ifdef NGX_HTTP_BROTLI
+#include <brotli/encode.h>
+#endif
+
 #define NGX_OK 0
 #define NGX_ERROR -1
 #define NGX_AGAIN -2
@@ -109,6 +113,42 @@ static ngx_uint_t g_palloc_fail_once = 0;
  */
 static ngx_uint_t g_palloc_return_static_once = 0;
 
+/* Total request-pool bytes requested by the production path under test. */
+static size_t g_palloc_bytes = 0;
+
+/*
+ * g_palloc_ptrs / g_palloc_ptr_count — Tracks pointers returned by ngx_palloc
+ * so that ngx_free() can detect an illegal free of pool memory.  In real
+ * NGINX, pool allocations cannot be individually freed; this catches the
+ * ownership bug where apply_limits() called free_heap() on a pool buffer.
+ *
+ * Harness semantics: ngx_palloc() is backed by malloc() so the buffers are
+ * individually reclaimable for leak-free test teardown, but ngx_free() must
+ * NOT silently absorb a pool-pointer free.  Instead it records a violation
+ * flag that the test asserts stays clear.  Test-owned reclamation of these
+ * malloc-backed pool allocations is performed exclusively by
+ * test_pool_free_tracked_allocations(), which bypasses the violation guard.
+ */
+#define G_PALLOC_PTR_MAX  256
+static void    *g_palloc_ptrs[G_PALLOC_PTR_MAX];
+static size_t   g_palloc_ptr_count = 0;
+
+/*
+ * g_free_on_palloc_violation - Set when ngx_free() is called with a pointer
+ * that ngx_palloc() returned (i.e. an attempt to individually free pool
+ * memory).  Tests assert this stays 0; a non-zero value indicates a
+ * production-code ownership regression such as apply_limits() freeing a
+ * pool-owned buffer.
+ */
+static ngx_uint_t g_free_on_palloc_violation = 0;
+
+/*
+ * g_free_on_static_pool_violation - Set when ngx_free() is called with
+ * g_static_pool_buf, which simulates a pool-managed buffer whose lifetime
+ * is controlled by the pool, not by free().  Tests assert this stays 0.
+ */
+static ngx_uint_t g_free_on_static_pool_violation = 0;
+
 /*
  * g_pcalloc_fail_once - When non-zero, the next call to ngx_pcalloc returns
  * NULL and the flag is cleared.  Used to inject a single zeroed-allocation
@@ -122,6 +162,9 @@ static ngx_uint_t g_pcalloc_fail_once = 0;
  * failure (e.g. for buffer expansion).
  */
 static ngx_uint_t g_alloc_fail_once = 0;
+
+/* Return a non-freeable stand-in once for huge-size guard tests. */
+static ngx_uint_t g_alloc_return_static_once = 0;
 
 /*
  * g_cleanup_add_fail_once - When non-zero, the next call to
@@ -212,7 +255,10 @@ test_reset_inflate_mode(void)
 void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
 {
+    void  *p;
+
     UNUSED(pool);
+    g_palloc_bytes += size;
     if (g_palloc_fail_once) {
         g_palloc_fail_once = 0;
         return NULL;
@@ -221,7 +267,11 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
         g_palloc_return_static_once = 0;
         return g_static_pool_buf;
     }
-    return malloc(size);
+    p = malloc(size);
+    if (p != NULL && g_palloc_ptr_count < G_PALLOC_PTR_MAX) {
+        g_palloc_ptrs[g_palloc_ptr_count++] = p;
+    }
+    return p;
 }
 
 /*
@@ -272,6 +322,10 @@ ngx_alloc(size_t size, ngx_log_t *log)
         g_alloc_fail_once = 0;
         return NULL;
     }
+    if (g_alloc_return_static_once) {
+        g_alloc_return_static_once = 0;
+        return g_static_pool_buf;
+    }
     return malloc(size);
 }
 
@@ -279,16 +333,46 @@ ngx_alloc(size_t size, ngx_log_t *log)
  * ngx_free - Stub for the NGINX deallocator.
  *
  * DIVERGENCE RISK: Production ngx_free may differ from libc free on
- * platforms with custom allocators; this stub simply calls free().
- * The semantic contract mirrored is: "releases memory allocated by
- * ngx_alloc or ngx_palloc stubs."
+ * platforms with custom allocators; this stub calls free() for raw
+ * ngx_alloc-backed heap buffers.  For ngx_palloc-backed buffers and the
+ * static pool-buffer stand-in, it does NOT free; instead it records a
+ * violation flag so tests can assert that production code never attempts
+ * to individually free pool memory (the apply_limits/free_heap ownership
+ * regression).  The semantic contract mirrored is: "releases memory
+ * allocated by ngx_alloc; pool allocations are not individually freeable."
  *
  * Parameters:
  *   p - pointer to memory to free
+ *
+ * Side effects: sets g_free_on_palloc_violation or
+ *               g_free_on_static_pool_violation on a pool-buffer free
+ *               attempt; tests assert these remain 0.
  */
 void
 ngx_free(void *p)
 {
+    size_t  i;
+
+    if (p == NULL) {
+        return;
+    }
+    if (p == g_static_pool_buf) {
+        g_free_on_static_pool_violation = 1;
+        return;
+    }
+    for (i = 0; i < g_palloc_ptr_count; i++) {
+        if (g_palloc_ptrs[i] == p) {
+            /*
+             * Production code must never call ngx_free() on a pool
+             * allocation.  Record the violation and leave the tracking
+             * entry intact so the test harness can still reclaim the
+             * malloc-backed block via test_pool_free_tracked_allocations()
+             * during teardown.
+             */
+            g_free_on_palloc_violation = 1;
+            return;
+        }
+    }
     free(p);
 }
 
@@ -531,6 +615,38 @@ typedef struct {
     ngx_pool_t            pool;
 } test_pool_t;
 
+static int
+compress_payload(const u_char *in, size_t in_len,
+    ngx_http_markdown_compression_type_e type,
+    u_char **out, size_t *out_len);
+
+/*
+ * test_pool_free_tracked_allocations - Reclaim the malloc-backed blocks
+ * recorded by the ngx_palloc() stub without going through ngx_free(), so
+ * the ownership-violation guard is not triggered.  This is the only
+ * sanctioned path for releasing pool-allocation stand-ins in this harness.
+ *
+ * After the call, g_palloc_ptrs is empty and g_palloc_ptr_count is 0.
+ * The violation flags are left untouched so the caller can assert them.
+ *
+ * Side effects: free()s every entry in g_palloc_ptrs, resets
+ *               g_palloc_ptr_count to 0.
+ */
+static void
+test_pool_free_tracked_allocations(void)
+{
+    size_t  i;
+
+    for (i = 0; i < g_palloc_ptr_count; i++) {
+        if (g_palloc_ptrs[i] != NULL
+            && g_palloc_ptrs[i] != g_static_pool_buf) {
+            free(g_palloc_ptrs[i]);
+        }
+        g_palloc_ptrs[i] = NULL;
+    }
+    g_palloc_ptr_count = 0;
+}
+
 /*
  * test_pool_reset - Zero-initialise a test pool and clear all failure-injection
  * flags and inflate mock state.  Call at the start of every test case to
@@ -539,21 +655,155 @@ typedef struct {
  * Parameters:
  *   tp - test pool to reset
  *
- * Side effects: zeroes *tp, clears all g_*_fail_once flags,
- *               resets inflate mode to real.
+ * Side effects: zeroes *tp, reclaims tracked ngx_palloc allocations,
+ *               clears all g_*_fail_once flags, clears ngx_free violation
+ *               flags, resets inflate mode to real.
  */
 static void
 test_pool_reset(test_pool_t *tp)
 {
+    test_pool_free_tracked_allocations();
     memset(tp, 0, sizeof(*tp));
     g_palloc_fail_once = 0;
     g_palloc_return_static_once = 0;
+    g_palloc_bytes = 0;
     g_pcalloc_fail_once = 0;
     g_alloc_fail_once = 0;
+    g_alloc_return_static_once = 0;
     g_cleanup_add_fail_once = 0;
     g_inflate_init_fail_once = 0;
+    g_free_on_palloc_violation = 0;
+    g_free_on_static_pool_violation = 0;
     test_reset_inflate_mode();
 }
+
+
+/*
+ * Feed a valid gzip stream one compressed byte at a time and verify that
+ * request-pool allocation tracks emitted output rather than chunk count.
+ */
+static void
+test_tiny_chunks_do_not_amplify_request_pool(void)
+{
+    const char                          *text;
+    size_t                               text_len;
+    u_char                              *compressed;
+    size_t                               compressed_len;
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    size_t                               emitted;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("tiny chunks keep request-pool use output-bounded");
+
+    text = "tiny compressed chunks must not reserve 4 KiB each";
+    text_len = test_cstrnlen(text, 1024);
+    compressed = NULL;
+    test_pool_reset(&tp);
+
+    rc = compress_payload((const u_char *) text, text_len,
+                          NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+                          &compressed, &compressed_len);
+    TEST_ASSERT(rc == NGX_OK, "compression should succeed");
+
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, text_len + 1);
+    TEST_ASSERT(decomp != NULL, "decompressor should be created");
+
+    emitted = 0;
+    for (size_t i = 0; i < compressed_len; i++) {
+        u_char  *out;
+        size_t   out_len;
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, &compressed[i], 1, &out, &out_len,
+            &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK, "one-byte feed should succeed");
+        emitted += out_len;
+        /*
+         * out is pool-owned (ngx_palloc-tracked); reclaim via the
+         * sanctioned helper rather than free() so the ownership
+         * guard stays armed across iterations.
+         */
+        test_pool_free_tracked_allocations();
+    }
+
+    TEST_ASSERT(emitted == text_len,
+        "tiny feeds should emit the complete decompressed payload");
+    TEST_ASSERT(g_palloc_bytes <= emitted,
+        "request-pool allocation must be bounded by emitted output");
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
+
+    free(compressed);
+    free(decomp);
+    TEST_PASS("tiny chunk request-pool amplification rejected");
+}
+
+
+#ifdef NGX_HTTP_BROTLI
+/* Verify terminal validation rejects a Brotli stream missing its tail. */
+static void
+test_truncated_brotli_finish_errors(void)
+{
+    const uint8_t                        text[] =
+        "truncated brotli input must fail at finish";
+    size_t                               compressed_len;
+    uint8_t                              compressed[256];
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char                              *out;
+    size_t                               out_len;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("finish error on truncated brotli stream");
+
+    compressed_len = sizeof(compressed);
+    TEST_ASSERT(BrotliEncoderCompress(
+                    BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                    BROTLI_MODE_TEXT, sizeof(text) - 1, text,
+                    &compressed_len, compressed)
+                == BROTLI_TRUE,
+        "brotli compression should succeed");
+    TEST_ASSERT(compressed_len > 2,
+        "brotli payload should be long enough to truncate");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, sizeof(text));
+    TEST_ASSERT(decomp != NULL, "brotli decompressor should be created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len - 2,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "truncated brotli feed should await terminal validation");
+    /* out is pool-owned; reclaim via the sanctioned helper. */
+    test_pool_free_tracked_allocations();
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_finish(
+        decomp, &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "finish should reject an incomplete brotli stream");
+
+    /* finish error path publishes NULL output. */
+    free(out);
+    free(decomp);
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
+    TEST_PASS("truncated brotli stream rejected at finish");
+}
+#endif
 
 /*
  * test_pool_run_cleanups - Execute all registered cleanup handlers on a
@@ -904,8 +1154,12 @@ test_roundtrip_and_empty_feed(void)
         }
 
         free(compressed);
-        free(out);
+        /* out is pool-owned; reclaimed by the next test_pool_reset. */
         free(decomp);
+        TEST_ASSERT(g_free_on_palloc_violation == 0,
+            "production code must not ngx_free() pool memory");
+        TEST_ASSERT(g_free_on_static_pool_violation == 0,
+            "production code must not ngx_free() static pool memory");
     }
 
     TEST_PASS("feed round-trip and empty-input branches covered");
@@ -1054,8 +1308,12 @@ test_truncated_finish_errors(void)
     }
 
     free(compressed);
-    free(out);
+    /* out is pool-owned; reclaimed by the next test_pool_reset. */
     free(decomp);
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
     TEST_PASS("finish error branch covered");
 }
 
@@ -1113,7 +1371,7 @@ test_create_helper_and_limit_branches(void)
     buf = heap_buf;
     buf_size = (size_t) -1;
     rc = ngx_http_markdown_streaming_decomp_expand_buf(
-        &heap_buf, &buf, &buf_size, &test_log);
+        &heap_buf, &buf, &buf_size, 0, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "expand_buf should fail on size overflow");
     TEST_ASSERT(heap_buf == NULL,
@@ -1126,7 +1384,7 @@ test_create_helper_and_limit_branches(void)
     buf_size = 8;
     g_alloc_fail_once = 1;
     rc = ngx_http_markdown_streaming_decomp_expand_buf(
-        &heap_buf, &buf, &buf_size, &test_log);
+        &heap_buf, &buf, &buf_size, 0, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "expand_buf should fail when ngx_alloc fails");
     TEST_ASSERT(heap_buf == NULL,
@@ -1139,14 +1397,16 @@ test_create_helper_and_limit_branches(void)
     buf_size = 16;
     g_palloc_fail_once = 1;
     rc = ngx_http_markdown_streaming_decomp_finalize_buf(
-        heap_buf, &buf, &buf_size, 8, &tp.pool);
+        &heap_buf, &buf, &buf_size, 8, &tp.pool);
     /*
-     * finalize_buf() takes ownership of heap_buf and frees it on
-     * both success and error paths.
+     * finalize_buf() takes ownership of the heap buffer by pointer-to-
+     * pointer and frees it on both success and error paths, clearing
+     * *heap_buf_ptr so the caller cannot double-free or leak it.
      */
-    heap_buf = NULL;
     TEST_ASSERT(rc == NGX_ERROR,
         "finalize_buf should fail when pool allocation fails");
+    TEST_ASSERT(heap_buf == NULL,
+        "finalize_buf should clear heap pointer on error");
 
     TEST_PASS("create/helper/limit branches covered");
 }
@@ -1314,36 +1574,36 @@ test_feed_empty_and_large_size_paths(void)
     TEST_ASSERT(out == NULL && out_len == 0,
         "zero-length input should not produce output");
 
-    g_palloc_fail_once = 1;
+    g_alloc_fail_once = 1;
     rc = ngx_http_markdown_streaming_decomp_feed(
         decomp, (const u_char *) "x", 1, &out, &out_len,
         &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "feed should fail when initial output buffer allocation fails");
 
-    g_palloc_fail_once = 0;
-    g_palloc_return_static_once = 0;
+    g_alloc_fail_once = 0;
+    g_alloc_return_static_once = 0;
     huge_in_len = ((size_t) -1 / 4) + 1;
     one_byte = 'x';
     out = NULL;
     out_len = 0;
-    g_palloc_return_static_once = 1;
+    g_alloc_return_static_once = 1;
     rc = ngx_http_markdown_streaming_decomp_feed(
         decomp, &one_byte, huge_in_len, &out, &out_len,
         &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "feed should fail safely on saturated initial size");
-    g_palloc_return_static_once = 0;
+    g_alloc_return_static_once = 0;
 
     out = NULL;
     out_len = 0;
-    g_palloc_return_static_once = 1;
+    g_alloc_return_static_once = 1;
     rc = ngx_http_markdown_streaming_decomp_feed(
         decomp, &one_byte, ((size_t) UINT_MAX / 2) + 1,
         &out, &out_len, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "feed should fail when output buffer size exceeds zlib uInt");
-    g_palloc_return_static_once = 0;
+    g_alloc_return_static_once = 0;
 
     free(decomp);
     TEST_PASS("feed empty/large-size branches covered");
@@ -1434,6 +1694,14 @@ test_feed_mocked_inflate_paths(void)
         &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "feed should fail when total_decompressed would overflow size_t");
+    /*
+     * This path mirrors the historical apply_limits() ownership bug:
+     * finalize_buf() has already transferred the buffer to pool memory
+     * when apply_limits() reports the overflow error.  Production code
+     * must not ngx_free() the pool-owned buffer on the error return.
+     */
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "post-decode overflow must not ngx_free() pool memory");
     free(decomp);
 
     TEST_PASS("feed mocked inflate branches covered");
@@ -1442,10 +1710,10 @@ test_feed_mocked_inflate_paths(void)
 /*
  * test_finish_zlib_paths_and_helpers - Verify the finish_zlib helper's
  * error, budget, overflow, expansion, and finalize-failure paths, plus
- * the finish_free_heap helper.
+ * the free_heap helper.
  *
  * Branches covered:
- *   - finish_free_heap frees and clears a non-NULL heap pointer
+ *   - free_heap frees and clears a non-NULL heap pointer
  *   - inflate error during Z_FINISH returns NGX_ERROR
  *   - budget exceeded during finish tail returns
  *     NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED
@@ -1468,9 +1736,9 @@ test_finish_zlib_paths_and_helpers(void)
 
     heap_buf = malloc(16);
     TEST_ASSERT(heap_buf != NULL, "heap allocation should succeed");
-    ngx_http_markdown_streaming_decomp_finish_free_heap(&heap_buf);
+    ngx_http_markdown_streaming_decomp_free_heap(&heap_buf);
     TEST_ASSERT(heap_buf == NULL,
-        "finish helper should free and clear non-NULL heap pointer");
+        "free_heap should free and clear non-NULL heap pointer");
 
     test_pool_reset(&tp);
     decomp = ngx_http_markdown_streaming_decomp_create(
@@ -1485,7 +1753,8 @@ test_finish_zlib_paths_and_helpers(void)
         decomp, &buf, &buf_size, &produced, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "finish_zlib should fail on inflate error");
-    free(buf);
+    TEST_ASSERT(buf == NULL,
+        "finish_zlib should clear buf after freeing heap on inflate error");
     free(decomp);
 
     test_pool_reset(&tp);
@@ -1501,7 +1770,8 @@ test_finish_zlib_paths_and_helpers(void)
         decomp, &buf, &buf_size, &produced, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
         "finish_zlib should return budget exceeded when tail is too large");
-    free(buf);
+    TEST_ASSERT(buf == NULL,
+        "finish_zlib should clear buf after freeing heap on budget exceeded");
     free(decomp);
 
     test_pool_reset(&tp);
@@ -1515,6 +1785,8 @@ test_finish_zlib_paths_and_helpers(void)
         decomp, &buf, &buf_size, &produced, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "finish_zlib should fail when initial finish buffer exceeds uInt");
+    TEST_ASSERT(buf == NULL,
+        "finish_zlib should clear buf on uInt overflow (g_static_pool_buf not freed)");
     free(decomp);
 
     test_pool_reset(&tp);
@@ -1532,7 +1804,13 @@ test_finish_zlib_paths_and_helpers(void)
         "finish_zlib should succeed when mocked flow expands then ends");
     TEST_ASSERT(produced > 64,
         "finish_zlib expand path should report produced bytes above old size");
-    free(buf);
+    /*
+     * On success finalize_buf() transfers the heap buffer to pool
+     * memory and frees the heap allocation, so buf now points to a
+     * pool-owned buffer (malloc-backed in this harness).  Reclaim it
+     * via the sanctioned helper rather than free().
+     */
+    test_pool_free_tracked_allocations();
     free(decomp);
 
     test_pool_reset(&tp);
@@ -1549,13 +1827,14 @@ test_finish_zlib_paths_and_helpers(void)
         decomp, &buf, &buf_size, &produced, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "finish_zlib should fail when finalize_buf cannot allocate");
-    /*
-     * finish_zlib() owns the expanded heap buffer and finalize_buf()
-     * frees it on this error path, so buf is dangling here by design.
-     */
-    buf = NULL;
+    TEST_ASSERT(buf == NULL,
+        "finish_zlib should clear buf after freeing heap on finalize failure");
     free(decomp);
 
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
     TEST_PASS("finish_zlib helper/error/budget/expand branches covered");
 }
 
@@ -1599,7 +1878,7 @@ test_finish_wrapper_success_and_overflow_paths(void)
         "finish should publish tail output on success");
     TEST_ASSERT(decomp->total_decompressed > 1,
         "finish should add produced bytes into running total");
-    free(out);
+    /* out is pool-owned; reclaimed by the next test_pool_reset. */
     free(decomp);
 
     test_pool_reset(&tp);
@@ -1616,10 +1895,77 @@ test_finish_wrapper_success_and_overflow_paths(void)
         "finish should still succeed when total would overflow");
     TEST_ASSERT(decomp->total_decompressed == (size_t) -1,
         "finish should saturate total_decompressed on overflow");
-    free(out);
+    /* out is pool-owned; reclaimed by the next test_pool_reset. */
     free(decomp);
 
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
     TEST_PASS("finish wrapper success/overflow branches covered");
+}
+
+/*
+ * test_ngx_free_rejects_pool_memory - Verify the ownership-tracking guard
+ * actually fires when ngx_free() is handed a pool-backed pointer.
+ *
+ * This is the regression test for the apply_limits()/free_heap() ownership
+ * bug class: production code must never call ngx_free() on a buffer
+ * allocated by ngx_palloc() (pool memory is not individually freeable in
+ * real NGINX).  The guard must surface the violation rather than silently
+ * absorbing it, otherwise the harness cannot detect a future regression.
+ *
+ * Branches covered:
+ *   - ngx_free() on a tracked ngx_palloc() pointer sets the violation flag
+ *     and does NOT free the block (so the harness can still reclaim it)
+ *   - ngx_free() on g_static_pool_buf sets the static-pool violation flag
+ *   - ngx_free() on an untracked ngx_alloc() heap pointer frees normally
+ *     and sets neither flag
+ */
+static void
+test_ngx_free_rejects_pool_memory(void)
+{
+    test_pool_t  tp;
+    u_char     *pool_ptr;
+    u_char     *heap_ptr;
+
+    TEST_SUBSECTION("ngx_free ownership guard fires on pool memory");
+
+    test_pool_reset(&tp);
+
+    /* A tracked ngx_palloc() pointer. */
+    pool_ptr = ngx_palloc(&tp.pool, 32);
+    TEST_ASSERT(pool_ptr != NULL, "ngx_palloc should succeed");
+    TEST_ASSERT(g_palloc_ptr_count == 1,
+        "ngx_palloc pointer should be tracked");
+
+    /* ngx_free() must not reclaim it; it must flag the violation. */
+    ngx_free(pool_ptr);
+    TEST_ASSERT(g_free_on_palloc_violation == 1,
+        "ngx_free on a pool pointer must set the violation flag");
+    TEST_ASSERT(g_palloc_ptr_count == 1,
+        "ngx_free must not remove the tracked pool pointer");
+
+    /* A second ngx_free() on the static pool stand-in. */
+    ngx_free(g_static_pool_buf);
+    TEST_ASSERT(g_free_on_static_pool_violation == 1,
+        "ngx_free on the static pool buffer must set the violation flag");
+
+    /* An untracked ngx_alloc() heap pointer frees normally. */
+    heap_ptr = ngx_alloc(16, &test_log);
+    TEST_ASSERT(heap_ptr != NULL, "ngx_alloc should succeed");
+    ngx_free(heap_ptr);
+    TEST_ASSERT(g_free_on_palloc_violation == 1,
+        "heap free must not clear the pool-violation flag");
+    TEST_ASSERT(g_free_on_static_pool_violation == 1,
+        "heap free must not clear the static-pool-violation flag");
+
+    /* Reclaim the tracked pool allocation via the sanctioned helper. */
+    test_pool_free_tracked_allocations();
+    TEST_ASSERT(g_palloc_ptr_count == 0,
+        "tracked allocations should be reclaimed by the helper");
+
+    TEST_PASS("ngx_free ownership guard covered");
 }
 
 /*
@@ -1637,6 +1983,10 @@ main(void)
     test_create_and_cleanup();
     test_create_failure_paths_and_cleanup_default();
     test_roundtrip_and_empty_feed();
+#ifdef NGX_HTTP_BROTLI
+    test_truncated_brotli_finish_errors();
+#endif
+    test_tiny_chunks_do_not_amplify_request_pool();
     test_budget_and_invalid_type_branches();
     test_truncated_finish_errors();
     test_create_helper_and_limit_branches();
@@ -1646,6 +1996,7 @@ main(void)
     test_feed_mocked_inflate_paths();
     test_finish_zlib_paths_and_helpers();
     test_finish_wrapper_success_and_overflow_paths();
+    test_ngx_free_rejects_pool_memory();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

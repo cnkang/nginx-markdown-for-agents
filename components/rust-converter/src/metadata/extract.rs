@@ -37,9 +37,12 @@ use std::cell::Ref;
 
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
+use crate::converter::ConversionContext;
 use crate::error::ConversionError;
 
 use super::{MetadataExtractor, PageMetadata};
+
+const MAX_METADATA_DEPTH: usize = 1000;
 
 impl MetadataExtractor {
     /// Extract page metadata from a parsed DOM tree.
@@ -47,68 +50,92 @@ impl MetadataExtractor {
     /// Extraction order is deterministic so repeated conversions over identical
     /// input yield stable front-matter output.
     pub fn extract(&self, dom: &RcDom) -> Result<PageMetadata, ConversionError> {
+        let mut ctx = ConversionContext::new(std::time::Duration::ZERO);
+        self.extract_with_context(dom, &mut ctx)
+    }
+
+    /// Extract page metadata while sharing the conversion timeout and node
+    /// accounting used by the main DOM traversal.
+    pub(crate) fn extract_with_context(
+        &self,
+        dom: &RcDom,
+        ctx: &mut ConversionContext,
+    ) -> Result<PageMetadata, ConversionError> {
+        ctx.check_timeout()?;
         let mut metadata = PageMetadata::new();
 
-        metadata.title = self.find_title(dom);
-        self.extract_meta_tags(dom, &mut metadata)?;
+        metadata.title = self.find_title(dom, ctx)?;
+        let canonical = self.extract_meta_tags_and_canonical(dom, &mut metadata, ctx)?;
 
-        if let Some(canonical) = self.find_canonical(dom) {
+        if let Some(canonical) = canonical {
             metadata.url = Some(self.resolve_url(&canonical));
         } else {
             metadata.url = self.base_url.clone();
         }
 
+        ctx.check_timeout()?;
         Ok(metadata)
     }
 
     /// Resolve document title from the first `<title>` element.
-    fn find_title(&self, dom: &RcDom) -> Option<String> {
-        self.find_element_text(dom, "title")
+    fn find_title(
+        &self,
+        dom: &RcDom,
+        ctx: &mut ConversionContext,
+    ) -> Result<Option<String>, ConversionError> {
+        self.find_element_text(dom, "title", ctx)
     }
 
-    /// Resolve canonical URL from `<link rel="canonical">`.
-    fn find_canonical(&self, dom: &RcDom) -> Option<String> {
-        self.find_link_href(dom, "canonical")
-    }
-
-    /// Traverse the DOM and collect metadata from `<meta ...>` tags.
-    fn extract_meta_tags(
+    /// Traverse the DOM once to collect meta tags and the first canonical URL.
+    fn extract_meta_tags_and_canonical(
         &self,
         dom: &RcDom,
         metadata: &mut PageMetadata,
-    ) -> Result<(), ConversionError> {
-        self.traverse_for_meta(&dom.document, metadata)
-    }
+        ctx: &mut ConversionContext,
+    ) -> Result<Option<String>, ConversionError> {
+        let mut canonical = None;
+        let mut stack = vec![(dom.document.clone(), 0usize)];
 
-    /// Depth-first traversal that processes metadata-relevant nodes.
-    fn traverse_for_meta(
-        &self,
-        node: &Handle,
-        metadata: &mut PageMetadata,
-    ) -> Result<(), ConversionError> {
-        match node.data {
-            NodeData::Element {
-                ref name,
-                ref attrs,
-                ..
-            } => {
-                if name.local.as_ref() == "meta" {
-                    self.process_meta_tag(&attrs.borrow(), metadata)?;
-                }
+        while let Some((node, depth)) = stack.pop() {
+            Self::check_depth(depth)?;
+            ctx.increment_and_check()?;
 
-                for child in node.children.borrow().iter() {
-                    self.traverse_for_meta(child, metadata)?;
+            match node.data {
+                NodeData::Element {
+                    ref name,
+                    ref attrs,
+                    ..
+                } => {
+                    if name.local.as_ref() == "meta" {
+                        self.process_meta_tag(&attrs.borrow(), metadata)?;
+                    } else if name.local.as_ref() == "link" && canonical.is_none() {
+                        let attrs_ref = attrs.borrow();
+                        let has_canonical_rel = attrs_ref.iter().any(|attr| {
+                            attr.name.local.as_ref() == "rel"
+                                && attr
+                                    .value
+                                    .split_ascii_whitespace()
+                                    .any(|token| token.eq_ignore_ascii_case("canonical"))
+                        });
+                        if has_canonical_rel {
+                            canonical = self.get_attr(&attrs_ref, "href");
+                        }
+                    }
+
+                    for child in node.children.borrow().iter().rev() {
+                        stack.push((child.clone(), depth + 1));
+                    }
                 }
-            }
-            NodeData::Document => {
-                for child in node.children.borrow().iter() {
-                    self.traverse_for_meta(child, metadata)?;
+                NodeData::Document => {
+                    for child in node.children.borrow().iter().rev() {
+                        stack.push((child.clone(), depth + 1));
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         }
 
-        Ok(())
+        Ok(canonical)
     }
 
     /// Merge one meta tag into the accumulated metadata structure.
@@ -166,94 +193,77 @@ impl MetadataExtractor {
     }
 
     /// Locate the first matching element and return its text content.
-    fn find_element_text(&self, dom: &RcDom, element_name: &str) -> Option<String> {
-        Self::find_element_text_recursive(&dom.document, element_name)
-    }
+    fn find_element_text(
+        &self,
+        dom: &RcDom,
+        element_name: &str,
+        ctx: &mut ConversionContext,
+    ) -> Result<Option<String>, ConversionError> {
+        let mut stack = vec![(dom.document.clone(), 0usize)];
 
-    /// Recursive helper for `find_element_text`.
-    fn find_element_text_recursive(node: &Handle, element_name: &str) -> Option<String> {
-        match node.data {
-            NodeData::Element { ref name, .. } => {
-                if name.local.as_ref() == element_name {
-                    let mut text = String::new();
-                    Self::extract_text_content(node, &mut text);
-                    return Some(text.trim().to_string());
-                }
+        while let Some((node, depth)) = stack.pop() {
+            Self::check_depth(depth)?;
+            ctx.increment_and_check()?;
 
-                for child in node.children.borrow().iter() {
-                    if let Some(text) = Self::find_element_text_recursive(child, element_name) {
-                        return Some(text);
+            match node.data {
+                NodeData::Element { ref name, .. } => {
+                    if name.local.as_ref() == element_name {
+                        return Self::extract_text_content(&node, depth, ctx)
+                            .map(|text| Some(text.trim().to_string()));
+                    }
+
+                    for child in node.children.borrow().iter().rev() {
+                        stack.push((child.clone(), depth + 1));
                     }
                 }
-            }
-            NodeData::Document => {
-                for child in node.children.borrow().iter() {
-                    if let Some(text) = Self::find_element_text_recursive(child, element_name) {
-                        return Some(text);
+                NodeData::Document => {
+                    for child in node.children.borrow().iter().rev() {
+                        stack.push((child.clone(), depth + 1));
                     }
                 }
+                _ => {}
             }
-            _ => {}
         }
 
-        None
-    }
-
-    /// Locate a `<link>` tag by `rel` and return its `href` value.
-    fn find_link_href(&self, dom: &RcDom, rel: &str) -> Option<String> {
-        self.find_link_href_recursive(&dom.document, rel)
-    }
-
-    /// Recursive helper for `find_link_href`.
-    fn find_link_href_recursive(&self, node: &Handle, rel: &str) -> Option<String> {
-        match node.data {
-            NodeData::Element {
-                ref name,
-                ref attrs,
-                ..
-            } => {
-                if name.local.as_ref() == "link" {
-                    let attrs_ref = attrs.borrow();
-                    let has_rel = attrs_ref.iter().any(|attr| {
-                        attr.name.local.as_ref() == "rel" && attr.value.as_ref() == rel
-                    });
-
-                    if has_rel {
-                        return self.get_attr(&attrs_ref, "href");
-                    }
-                }
-
-                for child in node.children.borrow().iter() {
-                    if let Some(href) = self.find_link_href_recursive(child, rel) {
-                        return Some(href);
-                    }
-                }
-            }
-            NodeData::Document => {
-                for child in node.children.borrow().iter() {
-                    if let Some(href) = self.find_link_href_recursive(child, rel) {
-                        return Some(href);
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        None
+        Ok(None)
     }
 
     /// Append all descendant text nodes into `output` in DOM order.
-    fn extract_text_content(node: &Handle, output: &mut String) {
-        match node.data {
-            NodeData::Text { ref contents } => {
-                output.push_str(&contents.borrow());
-            }
-            NodeData::Element { .. } | NodeData::Document => {
-                for child in node.children.borrow().iter() {
-                    Self::extract_text_content(child, output);
+    fn extract_text_content(
+        node: &Handle,
+        initial_depth: usize,
+        ctx: &mut ConversionContext,
+    ) -> Result<String, ConversionError> {
+        let mut output = String::new();
+        let mut stack = vec![(node.clone(), initial_depth)];
+
+        while let Some((current, depth)) = stack.pop() {
+            Self::check_depth(depth)?;
+            ctx.increment_and_check()?;
+
+            match current.data {
+                NodeData::Text { ref contents } => {
+                    output.push_str(&contents.borrow());
                 }
+                NodeData::Element { .. } | NodeData::Document => {
+                    for child in current.children.borrow().iter().rev() {
+                        stack.push((child.clone(), depth + 1));
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
+
+        Ok(output)
+    }
+
+    fn check_depth(depth: usize) -> Result<(), ConversionError> {
+        if depth > MAX_METADATA_DEPTH {
+            return Err(ConversionError::InvalidInput(format!(
+                "metadata nesting depth exceeds {MAX_METADATA_DEPTH}"
+            )));
+        }
+
+        Ok(())
     }
 }

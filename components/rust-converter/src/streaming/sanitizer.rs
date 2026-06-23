@@ -29,6 +29,57 @@ const VOID_ELEMENTS: &[&str] = &[
     "track", "wbr",
 ];
 
+/// Start tags that implicitly close an open paragraph in button scope.
+const PARAGRAPH_CLOSING_START_TAGS: &[&str] = &[
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "details",
+    "div",
+    "dl",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hgroup",
+    "hr",
+    "main",
+    "menu",
+    "nav",
+    "ol",
+    "p",
+    "pre",
+    "search",
+    "section",
+    "table",
+    "ul",
+];
+
+const BUTTON_SCOPE_BOUNDARIES: &[&str] = &[
+    "applet", "button", "caption", "html", "marquee", "object", "table", "td", "th", "template",
+];
+const LIST_ITEM_SCOPE_BOUNDARIES: &[&str] = &[
+    "applet", "caption", "html", "marquee", "menu", "object", "ol", "table", "td", "th",
+    "template", "ul",
+];
+const DEFINITION_SCOPE_BOUNDARIES: &[&str] = &["dl", "html", "table", "template"];
+const SELECT_SCOPE_BOUNDARIES: &[&str] = &["datalist", "select", "template"];
+const TABLE_SCOPE_BOUNDARIES: &[&str] = &["html", "table", "template"];
+const TABLE_SECTION_SCOPE_BOUNDARIES: &[&str] =
+    &["html", "table", "tbody", "tfoot", "thead", "template"];
+const TABLE_ROW_SCOPE_BOUNDARIES: &[&str] =
+    &["html", "table", "tbody", "tfoot", "thead", "tr", "template"];
+const RUBY_SCOPE_BOUNDARIES: &[&str] = &["html", "ruby", "table", "template"];
+
 /// Elements whose entire subtree is removed (content discarded).
 const DANGEROUS_CONTAINER_ELEMENTS: &[&str] = &["script", "style", "noscript", "applet"];
 
@@ -106,6 +157,13 @@ pub struct StreamingSanitizer {
     /// Name of the outermost pruned element that entered prune mode,
     /// for name-aware exit (same pattern as skip_element).
     prune_element: Option<String>,
+    /// Tags that were implicitly closed by the most recent
+    /// `close_optional_end_tags_for_start` call, in close order
+    /// (innermost first). Consumed by the streaming converter to mirror
+    /// the closures into the StructuralStateMachine so its context stack
+    /// does not leak stale open elements (e.g. `Paragraph` surviving an
+    /// implied `</p>` when `<div>` opens).
+    pub(crate) implied_closures: Vec<String>,
 }
 
 impl StreamingSanitizer {
@@ -130,6 +188,7 @@ impl StreamingSanitizer {
             prune_config: PruneConfig::disabled(),
             prune_depth: 0,
             prune_element: None,
+            implied_closures: Vec::new(),
         }
     }
 
@@ -191,6 +250,7 @@ impl StreamingSanitizer {
     /// }
     /// ```
     pub fn process_event(&mut self, event: StreamEvent) -> SanitizeDecision {
+        self.implied_closures.clear();
         match &event {
             StreamEvent::StartTag {
                 name,
@@ -216,6 +276,10 @@ impl StreamingSanitizer {
                         self.skip_depth = self.skip_depth.saturating_add(1);
                     }
                     return SanitizeDecision::Skip;
+                }
+
+                if self.prune_depth == 0 {
+                    self.close_optional_end_tags_for_start(tag);
                 }
 
                 // Dangerous elements: skip entire subtree
@@ -470,9 +534,80 @@ impl StreamingSanitizer {
     /// depth is recalculated from the stack length.
     fn pop_open_tag(&mut self, tag: &str) {
         if let Some(idx) = self.nesting_stack.iter().rposition(|open| open == tag) {
-            self.nesting_stack.remove(idx);
+            self.truncate_nesting_stack(idx);
         }
         self.nesting_depth = self.nesting_stack.len();
+    }
+
+    /// Applies tree-builder implied end-tag behavior visible from start tags.
+    fn close_optional_end_tags_for_start(&mut self, tag: &str) {
+        if PARAGRAPH_CLOSING_START_TAGS.contains(&tag) {
+            self.close_nearest_in_scope(&["p"], BUTTON_SCOPE_BOUNDARIES);
+        }
+
+        match tag {
+            "li" => {
+                self.close_nearest_in_scope(&["li"], LIST_ITEM_SCOPE_BOUNDARIES);
+            }
+            "dt" | "dd" => {
+                self.close_nearest_in_scope(&["dt", "dd"], DEFINITION_SCOPE_BOUNDARIES);
+            }
+            "rb" => {
+                self.close_nearest_in_scope(&["rb", "rt", "rtc", "rp"], RUBY_SCOPE_BOUNDARIES);
+            }
+            "rt" | "rtc" | "rp" => {
+                self.close_nearest_in_scope(&["rb", "rt", "rtc", "rp"], RUBY_SCOPE_BOUNDARIES);
+            }
+            "option" => {
+                self.close_nearest_in_scope(&["option"], SELECT_SCOPE_BOUNDARIES);
+            }
+            "optgroup" => {
+                self.close_nearest_in_scope(&["option"], SELECT_SCOPE_BOUNDARIES);
+                self.close_nearest_in_scope(&["optgroup"], SELECT_SCOPE_BOUNDARIES);
+            }
+            "colgroup" => {
+                self.close_nearest_in_scope(&["colgroup"], TABLE_SCOPE_BOUNDARIES);
+            }
+            "thead" | "tbody" | "tfoot" => {
+                self.close_nearest_in_scope(&["thead", "tbody", "tfoot"], TABLE_SCOPE_BOUNDARIES);
+            }
+            "tr" => {
+                self.close_nearest_in_scope(&["td", "th"], TABLE_ROW_SCOPE_BOUNDARIES);
+                self.close_nearest_in_scope(&["tr"], TABLE_SECTION_SCOPE_BOUNDARIES);
+            }
+            "td" | "th" => {
+                self.close_nearest_in_scope(&["td", "th"], TABLE_ROW_SCOPE_BOUNDARIES);
+            }
+            _ => {}
+        }
+    }
+
+    /// Closes the nearest target unless an HTML scope boundary is encountered.
+    fn close_nearest_in_scope(&mut self, targets: &[&str], boundaries: &[&str]) {
+        let close_index = self.nesting_stack.iter().rposition(|open| {
+            targets.contains(&open.as_str()) || boundaries.contains(&open.as_str())
+        });
+
+        if let Some(idx) = close_index
+            && targets.contains(&self.nesting_stack[idx].as_str())
+        {
+            let closed = self.truncate_nesting_stack(idx);
+            self.implied_closures.extend(closed);
+        }
+    }
+
+    /// Removes an implicitly closed element and all of its open descendants.
+    /// Returns the closed tag names in close order (innermost first).
+    fn truncate_nesting_stack(&mut self, index: usize) -> Vec<String> {
+        let mut closed_tags: Vec<String> = self.nesting_stack.drain(index..).collect();
+        for tag in closed_tags.iter().rev() {
+            if let Some(strip_index) = self.strip_stack.iter().rposition(|open| open == tag) {
+                self.strip_stack.remove(strip_index);
+            }
+        }
+        self.nesting_depth = self.nesting_stack.len();
+        closed_tags.reverse();
+        closed_tags
     }
 }
 
@@ -1059,6 +1194,73 @@ mod tests {
             SanitizeDecision::Pass(_)
         ));
         assert_eq!(san.nesting_depth(), 0);
+    }
+
+    #[test]
+    fn test_optional_end_tag_siblings_do_not_accumulate_nesting_depth() {
+        let cases = [
+            (&["li", "li", "li", "li"][..], 1),
+            (&["p", "span", "div"][..], 1),
+            (&["dl", "dt", "dd"][..], 2),
+            (&["ruby", "rb", "rt", "rp"][..], 2),
+            (
+                &["select", "optgroup", "option", "option", "optgroup"][..],
+                2,
+            ),
+            (&["table", "colgroup", "colgroup"][..], 2),
+            (&["table", "thead", "tbody", "tfoot"][..], 2),
+        ];
+
+        for (tags, expected_depth) in cases {
+            let mut san = StreamingSanitizer::with_max_depth(tags.len());
+            for tag in tags {
+                assert!(matches!(
+                    san.process_event(start_tag(tag, vec![])),
+                    SanitizeDecision::Pass(_) | SanitizeDecision::Skip
+                ));
+            }
+            assert_eq!(san.nesting_depth(), expected_depth, "tags: {tags:?}");
+        }
+
+        let mut table = StreamingSanitizer::with_max_depth(4);
+        for tag in ["table", "tbody", "tr", "td", "td", "tr", "td"] {
+            assert!(matches!(
+                table.process_event(start_tag(tag, vec![])),
+                SanitizeDecision::Pass(_)
+            ));
+        }
+        assert_eq!(table.nesting_depth(), 4);
+
+        let mut pruned = StreamingSanitizer::with_max_depth(1);
+        pruned.prune_config.enabled = true;
+        pruned.prune_config.selectors = vec!["nav".to_string()];
+        assert!(matches!(
+            pruned.process_event(start_tag("p", vec![])),
+            SanitizeDecision::Pass(_)
+        ));
+        assert_eq!(
+            pruned.process_event(start_tag("nav", vec![])),
+            SanitizeDecision::Skip
+        );
+        assert_eq!(pruned.nesting_depth(), 0);
+    }
+
+    #[test]
+    fn test_optional_end_tag_rules_preserve_genuine_nested_list_items() {
+        let mut san = StreamingSanitizer::with_max_depth(4);
+
+        for tag in ["ul", "li", "ul", "li"] {
+            assert!(matches!(
+                san.process_event(start_tag(tag, vec![])),
+                SanitizeDecision::Pass(_)
+            ));
+        }
+        assert_eq!(san.nesting_depth(), 4);
+
+        assert_eq!(
+            san.process_event(start_tag("span", vec![])),
+            SanitizeDecision::DepthExceeded
+        );
     }
 
     #[test]

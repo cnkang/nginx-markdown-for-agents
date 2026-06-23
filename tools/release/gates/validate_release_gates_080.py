@@ -70,6 +70,7 @@ STREAMING_IMPL_H = (
 )
 
 CARGO_VERSION_GATE = "cargo:version"
+RELEASE_VERSION_GATE = "workflow:release-version"
 
 
 class ValidationResult:
@@ -131,7 +132,7 @@ def check_release_package_workflow_version(result: ValidationResult) -> None:
     """Verify tag package gates expect the active Cargo release version."""
     workflow = read(RELEASE_PACKAGES_WORKFLOW)
     if not workflow:
-        result.fail("workflow:release-version", "release-packages.yml missing")
+        result.fail(RELEASE_VERSION_GATE, "release-packages.yml missing")
         return
     match = re.search(
         r'^\s*RELEASE_GATE_EXPECTED_CARGO_VERSION:\s*["\']([^"\']+)["\']\s*$',
@@ -140,7 +141,7 @@ def check_release_package_workflow_version(result: ValidationResult) -> None:
     )
     if match is None:
         result.fail(
-            "workflow:release-version",
+            RELEASE_VERSION_GATE,
             "release-packages.yml does not set the expected Cargo version",
         )
         return
@@ -148,12 +149,12 @@ def check_release_package_workflow_version(result: ValidationResult) -> None:
     expected = _expected_cargo_version()
     if version == expected:
         result.pass_(
-            "workflow:release-version",
+            RELEASE_VERSION_GATE,
             f"release-packages.yml expects Cargo version {expected}",
         )
     else:
         result.fail(
-            "workflow:release-version",
+            RELEASE_VERSION_GATE,
             f"release-packages.yml expects {version}, active version is {expected}",
         )
 

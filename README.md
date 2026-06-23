@@ -493,13 +493,13 @@ Additional changes:
 
 ## Roadmap
 
-Current release (0.8.0):
+Current release line (0.8.x; latest patch 0.8.2):
 
 - Dual-engine streaming model: full-buffer default + streaming engine for large/chunked responses
 - `auto` mode as the default `markdown_streaming_engine` setting
 - Bounded-memory streaming conversion with size-based flush (`markdown_stream_flush_min`)
 - Pre-commit safety: fallback to HTML if conversion error occurs before output is committed
-- Streaming release gate: `make release-gates-check-080` validates the 0.8.0 release contract
+- Streaming release gate: `make release-gates-check-08x` (alias of `release-gates-check-080`) validates the 0.8.x release contract
 - Static security gate: `.github/workflows/security-static.yml` runs actionlint,
   shellcheck, gitleaks, focused Semgrep, and cargo-deny for workflow, script,
   secret, and Rust dependency policy changes
@@ -549,6 +549,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 |---------|------|--------|---------|
 | 0.8.0 | 2026-06-16 | Codex | Synchronized English and Chinese README structure, Quick Start examples, local test commands, platform support heading, and v0.8.0 roadmap wording |
 | 0.8.0 | 2026-06-16 | Kang | v0.8.0 streaming release readiness: dual-engine model, auto mode default, bounded-memory conversion, pre-commit safety, 0.6.x compatibility removal, release-gates-check-080, migration guide, and rollout cookbook links |
+| 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
 | 0.7.0 | 2026-06-03 | Kang | P0 correctness, Rust-first architecture, independent decompression budget, Accept negotiation, parse timeout/budget, DEB/RPM packaging, K8s examples, runtime diagnostics, dynconf dry-run/rollback |
 | 0.6.3 | 2026-05-14 | Kang | Version bump to 0.6.3, release-matrix refresh, and final hardening notes |
 | 0.6.2 | 2026-05-08 | Kang | Version bump to 0.6.2 for release |

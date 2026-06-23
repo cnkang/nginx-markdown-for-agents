@@ -4,7 +4,7 @@
 # Generates both .deb and .rpm packages from pre-built Module_SO artifacts.
 #
 # Environment variables (injected by workflow matrix):
-#   PKG_VERSION          - Project version (e.g. 0.8.0)
+#   PKG_VERSION          - Project version (e.g. 0.8.2)
 #   NGINX_VERSION        - Target NGINX version (e.g. 1.26.3)
 #   NGINX_VERSION_FLOOR  - Minor branch floor (e.g. 1.26.0)
 #   NGINX_VERSION_CEIL   - Minor branch ceiling exclusive (e.g. 1.27.0)

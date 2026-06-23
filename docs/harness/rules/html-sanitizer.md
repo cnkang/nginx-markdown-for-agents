@@ -25,6 +25,11 @@ Historical issues: `1688e80`, `77a46d6`, `2c7d6a9`.
 
 Required:
 - In-link formatting markers (bold/italic/inline-code) must be accumulated in link text, not flushed outside link context.
+- When one parser event implicitly or explicitly closes multiple open
+  structures, unwind them from innermost to outermost and mirror the same
+  closure order into sanitizer, state-machine, and emitter state. Closing an
+  enclosing block before nested inline contexts may cross Markdown delimiters
+  over paragraph or list boundaries.
 - Code-block output must preserve raw content (blank lines/trailing spaces) and bypass generic normalization.
 - Streaming code-block emitters must carry delimiter state across text-event
   boundaries.  Fence length must be chosen from the longest backtick run across

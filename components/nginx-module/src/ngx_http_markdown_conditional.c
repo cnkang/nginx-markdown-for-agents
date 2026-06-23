@@ -323,26 +323,14 @@ ngx_http_markdown_send_304(ngx_http_request_t *r,
     r->headers_out.content_length_n = -1;
 
     if (result != NULL && result->etag != NULL && result->etag_len > 0) {
-        h = ngx_list_push(&r->headers_out.headers);
-        if (h == NULL) {
+        rc = ngx_http_markdown_set_etag(r, result->etag, result->etag_len);
+        if (rc != NGX_OK) {
             return NGX_ERROR;
         }
-
-        h->hash = 1;
-        ngx_str_set(&h->key, "ETag");
-
-        h->value.data = ngx_pnalloc(r->pool, result->etag_len);
-        if (h->value.data == NULL) {
-            return NGX_ERROR;
-        }
-
-        ngx_memcpy(h->value.data, result->etag, result->etag_len);
-        h->value.len = result->etag_len;
-
-        r->headers_out.etag = h;
 
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown: 304 response with ETag: \"%V\"", &h->value);
+                      "markdown: 304 response with ETag: \"%V\"",
+                      &r->headers_out.etag->value);
     }
 
     h = ngx_list_push(&r->headers_out.headers);

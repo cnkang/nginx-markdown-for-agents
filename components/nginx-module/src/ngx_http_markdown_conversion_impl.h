@@ -141,8 +141,9 @@ ngx_http_markdown_scheme_is_http_family(const ngx_str_t *scheme)
 /*
  * Validate characters in an extracted host value.
  *
- * Rejects control characters (0x00-0x1F, 0x7F), spaces, commas, and
- * path separators (/,\).  For non-IPv6 hosts, enforces digit-only
+ * Rejects control characters (0x00-0x1F, 0x7F), spaces, commas, URI
+ * authority delimiters (@, #, ?), and path separators (/,\).  For
+ * non-IPv6 hosts, enforces digit-only
  * port after the first ':'.  For IPv6 bracket literals, only rejects
  * the structural danger characters (port is validated separately
  * after bracket matching).
@@ -173,7 +174,9 @@ ngx_http_markdown_validate_host_chars(const u_char *host_data,
             continue;
         }
 
-        if (c == '/' || c == '\\' || c == ' ' || c == ',') {
+        if (c == '/' || c == '\\' || c == ' ' || c == ','
+            || c == '@' || c == '#' || c == '?')
+        {
             return 0;
         }
 

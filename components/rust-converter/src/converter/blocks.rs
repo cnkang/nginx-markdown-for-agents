@@ -347,11 +347,13 @@ impl MarkdownConverter {
                     if attr.name.local.as_ref() == "class" {
                         let class_value = attr.value.to_string();
                         for class in class_value.split_whitespace() {
-                            if let Some(lang) = class.strip_prefix("language-") {
-                                language = lang.to_string();
-                                break;
-                            } else if let Some(lang) = class.strip_prefix("lang-") {
-                                language = lang.to_string();
+                            let candidate = class
+                                .strip_prefix("language-")
+                                .or_else(|| class.strip_prefix("lang-"));
+                            if let Some(lang) = candidate
+                                && let Some(valid) = Self::safe_code_language(lang)
+                            {
+                                language = valid;
                                 break;
                             }
                         }
@@ -383,5 +385,19 @@ impl MarkdownConverter {
         output.push('\n');
 
         Ok(())
+    }
+
+    /// Accept common code-language identifiers without allowing characters
+    /// that can alter the opening Markdown fence or inject a new line.
+    fn safe_code_language(language: &str) -> Option<String> {
+        if !language.is_empty()
+            && language.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'+' | b'.' | b'#')
+            })
+        {
+            return Some(language.to_string());
+        }
+
+        None
     }
 }
