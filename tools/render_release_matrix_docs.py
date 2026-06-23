@@ -1314,14 +1314,18 @@ def _handle_release_notes(
     """Handle --release-notes mode. Returns exit code."""
     previous_data = None
     if previous_path:
-        if not previous_path.exists():
+        try:
+            validated_prev = validate_read_path(
+                previous_path, purpose="previous release matrix"
+            )
+        except (OSError, ValueError) as e:
             print(
-                f"ERROR: Previous matrix not found: {previous_path}",
+                f"ERROR: Previous matrix not found: {e}",
                 file=sys.stderr,
             )
             return 1
         try:
-            previous_data = load_matrix(previous_path)
+            previous_data = load_matrix(validated_prev)
         except (OSError, ValueError) as e:
             print(
                 f"ERROR: Failed to load previous matrix: {e}",
@@ -1378,7 +1382,10 @@ def main() -> int:
 
     # Load matrix
     try:
-        matrix_data = load_matrix(args.matrix)
+        matrix_path = validate_read_path(
+            args.matrix, purpose="release matrix"
+        )
+        matrix_data = load_matrix(matrix_path)
     except (OSError, ValueError) as e:
         print(f"ERROR: Failed to load matrix: {e}", file=sys.stderr)
         return 2
