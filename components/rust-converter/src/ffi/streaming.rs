@@ -908,12 +908,17 @@ pub unsafe extern "C" fn markdown_streaming_reason(
         return ptr::null();
     }
 
-    // SAFETY: caller guarantees `handle` is a live pointer from `_new`.
-    let handle_ref = unsafe { &*handle };
-
-    match &handle_ref.last_reason {
-        Some(cstr) => cstr.as_ptr(),
-        None => ptr::null(),
+    let outcome = panic::catch_unwind(AssertUnwindSafe(|| -> *const c_char {
+        // SAFETY: caller guarantees `handle` is a live pointer from `_new`.
+        let handle_ref = unsafe { &*handle };
+        match &handle_ref.last_reason {
+            Some(cstr) => cstr.as_ptr(),
+            None => ptr::null(),
+        }
+    }));
+    match outcome {
+        Ok(p) => p,
+        Err(_) => ptr::null(),
     }
 }
 
