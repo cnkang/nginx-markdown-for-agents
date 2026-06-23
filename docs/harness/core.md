@@ -220,4 +220,4 @@ pre-output checklist.
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.8.6 | 2026-06-23 | Codex | Added checkable-outcome guidance for risk cards and verification closeout |
+| 0.8.2 | 2026-06-23 | Kang | Added checkable-outcome guidance for risk cards and verification closeout |
