@@ -5,9 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.2] - 2026-06-21
+## [0.8.2] - 2026-06-23
 
-Patch release closeout for the 0.8.x line before 0.9.0 spec execution.
+Patch release for the 0.8.x line: streaming decompression hardening, FFI
+safety, implied-closure correctness, decompression budget enforcement, and
+release-line documentation closeout.
+
+### Added
+
+- **Parser working-set estimation and overflow-safe budget** (FFI): the FFI
+  boundary now estimates the parser working set and enforces an overflow-safe
+  budget before conversion, preventing unbounded memory use on pathological
+  inputs (Rule 43).
+- **Streaming decompression budget and memory accounting**: the streaming
+  decompression path now enforces the configured decompression budget and
+  tracks streaming memory consumption against the module memory budget
+  (Rule 3, Rule 44).
+- **Rule 49 (THIRD-PARTY-NOTICES sync)**: `THIRD-PARTY-NOTICES` must stay in
+  sync with resolved dependency versions; add/remove/update entries in the
+  same changeset as `Cargo.lock` changes.
+- `make release-gates-check-08x` as the canonical 0.8.x patch-line entry
+  point, reusing the 0.8.0 gate logic without duplicating it.
+  `release-gates-check-080` remains as the compatible original name.
 
 ### Changed
 
@@ -23,9 +42,51 @@ Patch release closeout for the 0.8.x line before 0.9.0 spec execution.
 - Narrowed `markdown_stream_flush_interval` commitment from "future 0.8.x
   release" to "future release" so the 0.8.x patch line is not bound to
   delivering it.
-- Added `make release-gates-check-08x` as the canonical 0.8.x patch-line
-  entry point, reusing the 0.8.0 gate logic without duplicating it.
-  `release-gates-check-080` remains as the compatible original name.
+- Extracted zlib finish buffer-expansion helper to reduce duplication across
+  streaming decompression error paths.
+- Unified streaming decompression free-heap pattern: `ngx_alloc`/`ngx_free`
+  used exclusively for resizable buffer backing stores (Rule 43).
+- Simplified code language class prefix matching in the Rust converter.
+- Extracted duplicated `workflow:release-version` literal into a shared Python
+  constant.
+- Scoped gitleaks to tracked worktree content, excluding ignored adapter state
+  and caches (Rule 48).
+- Updated `THIRD-PARTY-NOTICES` with current dependency versions.
+- Clarified header plan safety contract in C headers.
+
+### Fixed
+
+- **Implied closure ordering (Rule 6)**: structural closures now unwind
+  inner-to-outer before enclosing block state; the Rust converter consumes
+  implied closures before the sanitizer Skip decision, and mirrors implied
+  closures to the state machine.
+- **Streaming decompression heap leaks**: eliminated heap leaks in
+  `finish_zlib()` across all exit paths; buffer pointers are now set to NULL
+  after free to prevent double-free.
+- **Pool vs heap memory safety**: `apply_limits()` no longer calls `ngx_free`
+  on pool-allocated memory; the finish workspace uses `ngx_alloc` exclusively
+  (Rule 43).
+- **Streaming decompression buffer expansion**: hardened error paths in buffer
+  expansion with proper overflow checks and fallback behavior.
+- **Code fence language handling**: the streaming converter now supports the
+  `lang-` prefix in code fence language identifiers and sanitizes code fence
+  language strings against malformed input.
+- **FFI header plan panic safety**: centralized FFI header plan reset so that
+  panic-safe cleanup always restores a consistent state.
+- **Header validation and buffer sizing**: improved header validation, buffer
+  sizing, and config initialization in the NGINX C module.
+- **`parse_size` hardening**: `parse_size()` now correctly handles empty,
+  whitespace-only, and malformed size directive input.
+- **Forward declaration**: added missing forward declaration for `apply_limits`
+  to fix an implicit declaration error.
+- **Security scan**: gitleaks now skips deleted paths in tracked worktree scans
+  and guards against empty scan roots after tar extraction.
+- **Build**: injected `RELEASE_GATE_EXPECTED_CARGO_VERSION` into
+  `release-gates-check-strict` for consistent version validation.
+- **Dependencies**: regenerated stale `Cargo.lock` files for fuzz and
+  test-corpus-conversion workspaces.
+- **Tests**: removed unused typedef, corrected `snapshot_header` call
+  signatures, and fixed multipart rollback test scenarios.
 
 ### Tests
 
@@ -35,6 +96,10 @@ Patch release closeout for the 0.8.x line before 0.9.0 spec execution.
   across parts (ETag failure rolls back Vary in p1 and ETag in p2), new-push
   entry invalidation, Cache-Control failure cross-part rollback, and explicit
   `orig_nelts` cross-part linear count verification.
+- Added regression tests for implied closure on Skip decision and streaming
+  language prefix handling.
+- Added metadata traversal timeout regression test.
+- Added `assert buf NULL` on `finish_zlib` error paths.
 
 ## [0.8.1] - 2026-06-20
 
