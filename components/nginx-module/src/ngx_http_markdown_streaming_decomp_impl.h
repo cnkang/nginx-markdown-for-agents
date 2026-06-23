@@ -1237,6 +1237,38 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
 }
 
 
+#ifdef NGX_HTTP_BROTLI
+/*
+ * Finish brotli decompression.  Brotli produces no tail output; checks
+ * stream completeness, marks finished, and releases the heap workspace.
+ *
+ * Returns NGX_OK on success, NGX_ERROR on incomplete stream.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_finish_brotli(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    u_char **buf_ptr,
+    size_t *produced_ptr,
+    ngx_log_t *log)
+{
+    if (!BrotliDecoderIsFinished(decomp->state.brotli)) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+            "markdown: "
+            "brotli stream not finished");
+        ngx_free(*buf_ptr);
+        *buf_ptr = NULL;
+        return NGX_ERROR;
+    }
+
+    decomp->finished = 1;
+    ngx_free(*buf_ptr);
+    *buf_ptr = NULL;
+    *produced_ptr = 0;
+    return NGX_OK;
+}
+#endif
+
+
 /*
  * Finish decompression (handle last_buf).
  *
@@ -1312,25 +1344,18 @@ ngx_http_markdown_streaming_decomp_finish(
 
 #ifdef NGX_HTTP_BROTLI
     case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
-        if (!BrotliDecoderIsFinished(
-                decomp->state.brotli))
-        {
-            ngx_log_error(NGX_LOG_WARN, log, 0,
-                "markdown: "
-                "brotli stream not finished");
-            ngx_free(buf);
+    {
+        ngx_int_t  brotli_finish_rc;
+
+        brotli_finish_rc =
+            ngx_http_markdown_streaming_decomp_finish_brotli(
+                decomp, &buf, &produced, log);
+        if (brotli_finish_rc != NGX_OK) {
             buf = NULL;
-            return NGX_ERROR;
+            return brotli_finish_rc;
         }
-        decomp->finished = 1;
-        /*
-         * Brotli finish produces no tail output; free the heap
-         * workspace and return NULL/0 to the caller.
-         */
-        ngx_free(buf);
-        buf = NULL;
-        produced = 0;
         break;
+    }
 #endif
 
     default:
