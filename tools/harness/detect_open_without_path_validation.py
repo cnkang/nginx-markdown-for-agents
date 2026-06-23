@@ -167,10 +167,36 @@ def _collect_validated_vars(tree: ast.AST) -> set[str]:
     return validated
 
 
-def _collect_hardcoded_vars(tree: ast.AST) -> set[str]:
-    """Collect variables assigned from __file__ / REPO_ROOT / repo_root.
+def _expr_derives_from_hardcoded(
+    node: ast.AST, hardcoded: set[str],
+) -> bool:
+    """Return True if *node* is an expression that derives from a
+    trusted hardcoded path source.
 
-    These are treated as safe hardcoded path sources.
+    Recognizes ``__file__`` and any name already in *hardcoded*
+    appearing anywhere inside the expression tree (for example inside
+    ``Path(__file__).resolve().parents[2]`` or
+    ``REPO_ROOT / "tools" / "release-matrix.json"``).
+    """
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name):
+            if sub.id == "__file__" or sub.id in hardcoded:
+                return True
+    return False
+
+
+def _collect_hardcoded_vars(tree: ast.AST) -> set[str]:
+    """Collect variables assigned from safe (trusted) path sources.
+
+    Trusted sources include:
+      - ``__file__`` / ``REPO_ROOT`` / ``repo_root`` (module-relative roots)
+      - string literals (``out = "output.json"``) — literal strings are
+        compile-time constants and cannot carry runtime taint
+      - ``Path(__file__)``, ``Path(REPO_ROOT)`` wrappers
+      - ``REPO_ROOT / "filename"`` joins with a hardcoded left side
+
+    Variables holding untrusted runtime values (function parameters,
+    ``sys.argv``, ``os.environ``, CLI args) are NOT included.
     """
     hardcoded: set[str] = {"REPO_ROOT", "repo_root"}
 
@@ -190,6 +216,24 @@ def _collect_hardcoded_vars(tree: ast.AST) -> set[str]:
                 if isinstance(target, ast.Name):
                     hardcoded.add(target.id)
             continue
+        # Any value derived from __file__ (e.g.
+        # ``Path(__file__).resolve().parents[2]``) is a trusted
+        # module-relative root.  Walk the expression and treat the
+        # target as hardcoded if ``__file__`` or a known hardcoded
+        # variable appears anywhere in the derivation tree.
+        if _expr_derives_from_hardcoded(value, hardcoded):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    hardcoded.add(target.id)
+            continue
+        # String literal assignment: out = "output.json"
+        # Literal strings are compile-time constants and cannot carry
+        # runtime taint, so variables holding them are trusted.
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    hardcoded.add(target.id)
+            continue
         # Path(__file__) or Path(REPO_ROOT) or REPO_ROOT / "x"
         if isinstance(value, ast.Call):
             func = value.func
@@ -204,10 +248,14 @@ def _collect_hardcoded_vars(tree: ast.AST) -> set[str]:
                         if isinstance(target, ast.Name):
                             hardcoded.add(target.id)
             continue
-        # BinOp: REPO_ROOT / "filename"  (ast.Div with REPO_ROOT on left)
+        # BinOp: REPO_ROOT / "filename" / "sub" (possibly chained).
+        # The full expression is safe if the leftmost base is a
+        # hardcoded name and every right operand is a literal or
+        # hardcoded value.  We recurse so that
+        # ``RELEASE_MATRIX = ROOT / "tools" / "release-matrix.json"``
+        # is recognized as safe.
         if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Div):
-            left = value.left
-            if isinstance(left, ast.Name) and left.id in hardcoded:
+            if _is_safe_path_expr(value, hardcoded, hardcoded):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         hardcoded.add(target.id)
@@ -264,12 +312,18 @@ def _is_safe_path_expr(
                 return True
         return False
 
-    # (e) BinOp like REPO_ROOT / "file" — safe if left side is hardcoded
-    #     or a pytest fixture (tmp_path / "output.json").
+    # (e) BinOp like REPO_ROOT / "file" or tmp_path / "output.json".
+    #     BOTH sides must be safe: left is a trusted root (hardcoded var,
+    #     validated var, pytest fixture, literal) AND right is a literal
+    #     string, a validated/hardcoded var, or a safe derived value.
+    #     Requiring only the left side to be safe would let
+    #     ``tmp_path / user_input`` sail through despite ``user_input``
+    #     being untrusted — a real CWE-22 taint source.
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-        if _is_safe_path_expr(node.left, validated_vars, hardcoded_vars):
-            return True
-        return False
+        return (
+            _is_safe_path_expr(node.left, validated_vars, hardcoded_vars)
+            and _is_safe_path_expr(node.right, validated_vars, hardcoded_vars)
+        )
 
     # JoinedStr (f-string) with only literal parts.
     if isinstance(node, ast.JoinedStr):
