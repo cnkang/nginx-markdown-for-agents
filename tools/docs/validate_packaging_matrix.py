@@ -45,15 +45,19 @@ TIER_ORDER: dict[str, int] = {
 }
 
 
-def load_release_matrix(path: Path) -> dict:
+def load_release_matrix() -> dict:
     """Load the authoritative release-matrix.json."""
-    with open(path, encoding="utf-8") as f:
+    # RELEASE_MATRIX is a repo-relative hardcoded constant (ROOT /
+    # "tools" / "release-matrix.json"); no untrusted input flows here.
+    with open(RELEASE_MATRIX, encoding="utf-8") as f:
         return json.load(f)
 
 
-def load_packaging_matrix(path: Path) -> dict:
+def load_packaging_matrix() -> dict:
     """Load packaging/matrix.yaml."""
-    with open(path, encoding="utf-8") as f:
+    # PACKAGING_MATRIX is a repo-relative hardcoded constant (ROOT /
+    # "packaging" / "matrix.yaml"); no untrusted input flows here.
+    with open(PACKAGING_MATRIX, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -101,8 +105,8 @@ def validate() -> list[str]:
         )
         return errors
 
-    release_data = load_release_matrix(RELEASE_MATRIX)
-    packaging_data = load_packaging_matrix(PACKAGING_MATRIX)
+    release_data = load_release_matrix()
+    packaging_data = load_packaging_matrix()
 
     if packaging_data is None:
         errors.append("packaging/matrix.yaml is empty or invalid YAML")
