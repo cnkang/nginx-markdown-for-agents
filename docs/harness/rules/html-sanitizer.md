@@ -34,6 +34,16 @@ Required:
 - Streaming code-block emitters must carry delimiter state across text-event
   boundaries.  Fence length must be chosen from the longest backtick run across
   the whole block, including runs split across adjacent tokenizer events.
+- Streaming code-block emitters must also carry the code fence **language
+  identifier** across text-event boundaries.  The language string (for
+  example `rust`, `language-rust`) may be split across adjacent tokenizer
+  events; the state machine must buffer partial language bytes and
+  assemble the complete identifier before matching it against the
+  `language-` class prefix.  When matching a language class for HTML
+  output, strip the `language-` prefix and use the bare language name.
+  A streaming emitter that only reads the first text event's language
+  bytes will produce an empty or truncated class attribute when the
+  fence language spans a chunk boundary.
 - Blockquote markers must be emitted consistently on entry and after newline boundaries.
 - URL extraction parity must include media-bearing elements, not only `img`
   (at minimum `video`, `audio`, `source`, `track`, and `area` where

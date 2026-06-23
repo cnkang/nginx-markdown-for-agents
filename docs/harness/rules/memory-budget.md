@@ -46,5 +46,39 @@ Required:
   (e.g. decompression output exceeds capacity), it MUST use `ngx_alloc`
   for the new allocation and `ngx_free` for the old — never `ngx_palloc`
   or `ngx_pfree`.
-- Verification: `grep -n 'ngx_p.*alloc.*buffer\\.data\|ngx_pfree.*buffer'
+- **Generalized pool-vs-heap rule**: Any buffer that is independently
+  allocated, resized, or freed during request processing — not only
+  `ctx->buffer.data` but also streaming decompression workspaces (for
+  example zlib `finish()` output buffers, `apply_limits` temporary
+  buffers, buffer-expansion scratch space) — MUST use `ngx_alloc` /
+  `ngx_free`.  Pool-allocating such a buffer and later calling
+  `ngx_free` on it is undefined behavior: `ngx_free` calls the system
+  `free()`, which expects a heap pointer from `malloc`/`ngx_alloc`, not
+  a pool-internal pointer from `ngx_palloc`/`ngx_pcalloc`.  Conversely,
+  a buffer allocated with `ngx_alloc` must never be freed with
+  `ngx_pfree` — use `ngx_free` exclusively.
+- **Decompression finish workspace**: The zlib `finish()` path may
+  need to grow its output buffer when compressed data expands beyond
+  the initial allocation.  This workspace must be `ngx_alloc`-backed
+  so it can be `ngx_free`-d on every exit path (success, error, and
+  overflow).  Leaking the workspace on an error path causes a
+  per-request heap leak that accumulates under load.
+- **Free-on-all-exits discipline**: Every `ngx_alloc`-backed buffer
+  introduced in a streaming or decompression path must have a matching
+  `ngx_free` on every exit path — success, error, overflow, and
+  panic/abort.  Use `goto` cleanup labels or NGINX pool cleanup handlers
+  to ensure no exit skips the free.  When adding a new exit path to an
+  existing function that already holds an `ngx_alloc`-backed buffer,
+  audit all exits in the same changeset.
+
+Verification:
+- `grep -n 'ngx_p.*alloc.*buffer\\\\.data\\|ngx_pfree.*buffer'
   components/nginx-module/src/` must return zero hits.
+- `grep -rn 'ngx_palloc\\|ngx_pcalloc\\|ngx_pnalloc' components/nginx-module/src/`
+  — for each hit in a streaming or decompression source file, verify the
+  resulting pointer is NOT later passed to `ngx_free`.
+- `grep -rn 'ngx_free' components/nginx-module/src/` — for each hit,
+  trace the freed pointer back to its allocation and confirm it was
+  `ngx_alloc`-backed, not pool-allocated.
+- `grep -rn 'ngx_alloc' components/nginx-module/src/` — for each hit,
+  verify every exit path from the allocating function calls `ngx_free`.
