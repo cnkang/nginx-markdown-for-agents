@@ -10,6 +10,7 @@ file_list="$(mktemp "${TMPDIR:-/tmp}/nginx-markdown-gitleaks-files.XXXXXX")"
 cleanup() {
     rm -rf "$scan_root"
     rm -f "$file_list"
+    return 0
 }
 
 trap cleanup EXIT

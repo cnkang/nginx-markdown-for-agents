@@ -10,6 +10,7 @@ ignored_dir="$repo_root/.codeartsdoer/gitleaks-scope-test"
 cleanup() {
     rm -rf "$tmp_dir"
     rm -rf "$ignored_dir"
+    return 0
 }
 
 trap cleanup EXIT
@@ -52,6 +53,10 @@ git -C "$deleted_repo" \
     -c user.email='harness@example.invalid' \
     commit -qm 'test fixture'
 rm -f "$deleted_repo/removed.txt"
+if [[ -e "$deleted_repo/removed.txt" ]]; then
+    echo "failed to delete removed.txt fixture" >&2
+    exit 1
+fi
 
 (
     cd "$deleted_repo"
