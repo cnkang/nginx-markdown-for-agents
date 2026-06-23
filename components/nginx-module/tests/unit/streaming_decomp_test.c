@@ -1694,6 +1694,14 @@ test_feed_mocked_inflate_paths(void)
         &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "feed should fail when total_decompressed would overflow size_t");
+    /*
+     * This path mirrors the historical apply_limits() ownership bug:
+     * finalize_buf() has already transferred the buffer to pool memory
+     * when apply_limits() reports the overflow error.  Production code
+     * must not ngx_free() the pool-owned buffer on the error return.
+     */
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "post-decode overflow must not ngx_free() pool memory");
     free(decomp);
 
     TEST_PASS("feed mocked inflate branches covered");
