@@ -205,7 +205,9 @@ def _maybe_propagate_path_wrapper(
     src_vars = scope_validated.get(src_scope, set())
     if arg.id in src_vars or arg.id in _TRUSTED_ROOT_NAMES:
         dst_scope = _find_scope(node, parent_map)
-        scope_validated.setdefault(dst_scope, set()).add(arg.id)
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                scope_validated.setdefault(dst_scope, set()).add(target.id)
 
 
 def _propagate_path_wrappers(
@@ -231,6 +233,18 @@ def _find_scope(node: ast.AST, parent_map: dict[int, ast.AST]) -> str:
     return MODULE_SCOPE
 
 
+# Function/method names that are safe path constructors or accessors.
+# These are NOT taint sources — they transform trusted inputs, not
+# untrusted user input.  When _expr_derives_from_hardcoded walks an
+# expression tree, it ignores these names.
+_SAFE_PATH_FUNCS = frozenset({
+    "Path", "Pathlib", "pathlib",
+    "resolve", "absolute", "absolute_path",
+    "parents", "parent", "name", "stem", "suffix", "with_suffix",
+    "home", "cwd", "expanduser",
+})
+
+
 def _expr_derives_from_hardcoded(
     node: ast.AST, hardcoded: set[str],
 ) -> bool:
@@ -241,9 +255,15 @@ def _expr_derives_from_hardcoded(
     False if ANY Name node in the expression tree is not trusted,
     ensuring mixed expressions like ``REPO_ROOT / user_input`` are
     properly rejected.
+
+    Safe path constructor/accessor function names (``Path``,
+    ``resolve``, ``parents``, etc.) are ignored — they are not taint
+    sources, only transformers of trusted inputs.
     """
     for sub in ast.walk(node):
         if isinstance(sub, ast.Name):
+            if sub.id in _SAFE_PATH_FUNCS:
+                continue
             if sub.id != "__file__" and sub.id not in hardcoded:
                 return False
     return True

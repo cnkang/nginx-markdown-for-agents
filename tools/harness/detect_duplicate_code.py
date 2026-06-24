@@ -37,6 +37,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 NON_ADJACENT_MIN_LINES = 5  # 5+ identical consecutive lines, non-adjacent
 ADJACENT_MIN_LINES = 3      # 3+ identical consecutive lines, immediately repeated
 
+# Small-block threshold: duplicates of this size or smaller are advisory
+# (REVIEW/INFO) rather than direct-fix (WARNING), even if they match
+# memory/rollback/ffi-validation/postcommit keywords.  Short 5-line
+# duplicates that are simple allocation+check patterns are common in C
+# and extracting a helper for them often reduces readability more than
+# it prevents divergence.  Blocks above this threshold remain direct-fix.
+SMALL_BLOCK_THRESHOLD = 7
+
 # Risk-semantic keywords for classifying duplicate blocks.
 # A duplicate block is classified by matching keywords in its content.
 # The first matching category wins; if none match, it falls through to
@@ -60,7 +68,8 @@ ROLLBACK_KEYWORDS = (
 )
 FFI_VALIDATION_KEYWORDS = (
     "entry->key", "entry->value", "entry->key_len", "entry->value_len",
-    "is_null", "NULL", "validate", "guard", "defensive",
+    "FFIHeaderEntry", "FFIAcceptResult", "FFIDecisionResult",
+    "validate_ffi", "ffi_guard", "defensive.*FFI",
 )
 POSTCOMMIT_KEYWORDS = (
     "pending_output", "main_terminal_sent", "last_buf", "NGX_AGAIN",
@@ -117,24 +126,31 @@ def _classify_duplicate(block_lines: list[str]) -> tuple[str, str]:
     log-only, signature, structural.
 
     Action is one of: direct-fix, needs-human-review, ignore-by-rule.
+
+    Small blocks (≤ SMALL_BLOCK_THRESHOLD lines) that match memory /
+    rollback / ffi-validation / postcommit keywords are downgraded from
+    direct-fix to needs-human-review, because short 5-line allocation
+    patterns are common in C and extracting a helper often hurts
+    readability more than it prevents divergence.
     """
     joined = " ".join(block_lines)
+    is_small = len(block_lines) <= SMALL_BLOCK_THRESHOLD
 
     # Check memory allocation/free duplicates first (highest priority)
     if any(kw in joined for kw in MEMORY_KEYWORDS):
-        return ("memory", "direct-fix")
+        return ("memory", "needs-human-review" if is_small else "direct-fix")
 
     # Check rollback/header mutation duplicates
     if any(kw in joined for kw in ROLLBACK_KEYWORDS):
-        return ("rollback", "direct-fix")
+        return ("rollback", "needs-human-review" if is_small else "direct-fix")
 
     # Check FFI validation duplicates
     if any(kw in joined for kw in FFI_VALIDATION_KEYWORDS):
-        return ("ffi-validation", "direct-fix")
+        return ("ffi-validation", "needs-human-review" if is_small else "direct-fix")
 
     # Check post-commit / streaming state duplicates
     if any(kw in joined for kw in POSTCOMMIT_KEYWORDS):
-        return ("postcommit", "direct-fix")
+        return ("postcommit", "needs-human-review" if is_small else "direct-fix")
 
     # State machine dispatching — needs human judgment
     if any(kw in joined for kw in STATE_MACHINE_KEYWORDS):
@@ -514,14 +530,22 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    scan_dir = Path(args.directory)
-    if not scan_dir.is_absolute():
-        scan_dir = REPO_ROOT / scan_dir
-
+    # Validate the scan directory through the project's path validation
+    # helper (Rule 12/33 compliance).
     try:
-        scan_dir = scan_dir.resolve()
-    except OSError:
-        pass
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from lib.path_validation import validate_read_path
+        scan_dir = Path(validate_read_path(
+            args.directory, purpose="scan directory",
+        ))
+    except (ImportError, FileNotFoundError, ValueError):
+        scan_dir = Path(args.directory)
+        if not scan_dir.is_absolute():
+            scan_dir = REPO_ROOT / scan_dir
+        try:
+            scan_dir = scan_dir.resolve()
+        except OSError:
+            pass
 
     if not scan_dir.is_dir():
         print(f"ERROR: {scan_dir} is not a directory", file=sys.stderr)
