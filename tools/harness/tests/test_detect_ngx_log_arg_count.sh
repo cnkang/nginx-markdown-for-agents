@@ -93,7 +93,7 @@ fi
 cat >"${src_dir}/debug0_mismatch.c" <<'C'
 void test(void) {
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown: missing %d");
+                   "markdown: foo ) value=%d");
 }
 C
 rm -f "${src_dir}/mismatch.c"

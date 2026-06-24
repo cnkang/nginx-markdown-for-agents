@@ -85,7 +85,18 @@ while IFS= read -r line; do
         # Walk character by character to find the format string
         while [[ $i -lt $len ]]; do
             ch="${after_macro:$i:1}"
-            if [[ "$ch" == "(" ]]; then
+            if [[ "$ch" == "\\" ]] && [[ "$in_string" -eq 1 ]]; then
+                # Skip escaped character inside string
+                i=$((i + 1))
+            elif [[ "$ch" == '"' ]]; then
+                if [[ "$in_string" -eq 0 ]]; then
+                    in_string=1
+                else
+                    in_string=0
+                fi
+            elif [[ $in_string -eq 1 ]]; then
+                :
+            elif [[ "$ch" == "(" ]]; then
                 depth=$((depth + 1))
             elif [[ "$ch" == ")" ]] && [[ $depth -eq 0 ]] && \
                 [[ $fmt_start -ge 0 ]] && [[ $comma_count -ge 3 ]]; then
@@ -93,7 +104,7 @@ while IFS= read -r line; do
                 break
             elif [[ "$ch" == ")" ]]; then
                 depth=$((depth - 1))
-            elif [[ "$ch" == "," ]] && [[ $depth -eq 0 ]] && [[ "$in_string" -eq 0 ]]; then
+            elif [[ "$ch" == "," ]] && [[ $depth -eq 0 ]]; then
                 comma_count=$((comma_count + 1))
                 if [[ $comma_count -eq 3 ]]; then
                     fmt_start=$((i + 1))
@@ -103,15 +114,6 @@ while IFS= read -r line; do
                     fmt_part="${after_macro:$fmt_start:$((i - fmt_start))}"
                     break
                 fi
-            elif [[ "$ch" == '"' ]]; then
-                if [[ "$in_string" -eq 0 ]]; then
-                    in_string=1
-                else
-                    in_string=0
-                fi
-            elif [[ "$ch" == "\\" ]] && [[ "$in_string" -eq 1 ]]; then
-                # Skip escaped character inside string
-                i=$((i + 1))
             fi
             i=$((i + 1))
         done
