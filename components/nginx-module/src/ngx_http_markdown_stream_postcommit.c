@@ -54,7 +54,7 @@ ngx_http_markdown_stream_postcommit_space(u_char ch);
 
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_handle_send_result(
-    ngx_http_request_t *r, ngx_int_t rc);
+    ngx_http_request_t *r, ngx_int_t rc, const char *action);
 
 
 /*
@@ -135,7 +135,8 @@ ngx_http_markdown_stream_postcommit_safe_finish(
 
     /* No Rust handle: send terminal chain (empty last_buf) */
     rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
-    rc = ngx_http_markdown_stream_postcommit_handle_send_result(r, rc);
+    rc = ngx_http_markdown_stream_postcommit_handle_send_result(
+        r, rc, "safe_finish");
     if (rc != NGX_OK && rc != NGX_DONE) {
         return rc;
     }
@@ -207,7 +208,8 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
 
         markdown_streaming_output_free(close_data, close_len);
 
-        rc = ngx_http_markdown_stream_postcommit_handle_send_result(r, rc);
+        rc = ngx_http_markdown_stream_postcommit_handle_send_result(
+            r, rc, "safe_finish");
         if (rc != NGX_OK && rc != NGX_DONE) {
             return rc;
         }
@@ -219,7 +221,8 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
     }
 
     rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
-    rc = ngx_http_markdown_stream_postcommit_handle_send_result(r, rc);
+    rc = ngx_http_markdown_stream_postcommit_handle_send_result(
+        r, rc, "safe_finish");
     if (rc != NGX_OK && rc != NGX_DONE) {
         return rc;
     }
@@ -292,14 +295,10 @@ ngx_http_markdown_stream_postcommit_abort(
      * No content bytes are sent — just the empty last_buf marker.
      */
     rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
-    if (rc == NGX_AGAIN) {
-        return NGX_AGAIN;
-    }
+    rc = ngx_http_markdown_stream_postcommit_handle_send_result(
+        r, rc, "abort");
     if (rc != NGX_OK && rc != NGX_DONE) {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown postcommit abort: "
-                      "failed to send terminal chain");
-        return NGX_ERROR;
+        return rc;
     }
 
     /* Log the abort event */
@@ -634,30 +633,29 @@ ngx_http_markdown_stream_postcommit_send_closing(
  * cannot drift apart across the two terminal-send call sites.
  *
  * Parameters:
- *   r     - current HTTP request (logging)
- *   rc    - downstream return code from send_terminal/send_closing
- *   label - short tag included in the NGX_AGAIN debug log (e.g.
- *           "terminal chain pending (NGX_AGAIN)" or the no-closing-bytes
- *           variant)
+ *   r      - current HTTP request (logging)
+ *   rc     - downstream return code from send_terminal/send_closing
+ *   action - short context tag interpolated into the log prefix
+ *            (e.g. "safe_finish" or "abort")
  *
  * Returns:
  *   rc unchanged when NGX_OK / NGX_DONE / NGX_AGAIN, NGX_ERROR otherwise.
  */
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_handle_send_result(
-    ngx_http_request_t *r, ngx_int_t rc)
+    ngx_http_request_t *r, ngx_int_t rc, const char *action)
 {
     if (rc == NGX_AGAIN) {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "markdown postcommit safe_finish: "
-                       "downstream backpressure");
+        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "markdown postcommit %s: downstream backpressure",
+                       action);
         return NGX_AGAIN;
     }
 
     if (rc != NGX_OK && rc != NGX_DONE) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "markdown postcommit safe_finish: "
-                      "failed to send terminal chain");
+                      "markdown postcommit %s: failed to send terminal chain",
+                      action);
         return NGX_ERROR;
     }
 
