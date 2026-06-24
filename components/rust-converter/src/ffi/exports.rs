@@ -465,100 +465,117 @@ pub unsafe extern "C" fn markdown_build_header_plan(
     // Defense-in-depth: header plan construction allocates and builds string
     // buffers. A panic must never unwind into C. On panic we leave the output
     // struct zeroed (count=0, entries=null, handle=null) — the safe empty plan.
-    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        let ct = if content_type.is_null() || content_type_len == 0 {
-            "text/markdown; charset=utf-8"
-        } else {
-            std::str::from_utf8(unsafe {
-                std::slice::from_raw_parts(content_type, content_type_len)
-            })
-            .unwrap_or("text/markdown; charset=utf-8")
-        };
+    //
+    // Atomic write after catch: the closure computes all return values as
+    // local variables.  After catch_unwind returns Ok, fields are written
+    // atomically so a panic cannot leave the output struct partially updated.
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(
+        || -> (
+            *mut FFIHeaderPlanHandle,
+            *const FFIHeaderEntry,
+            usize,
+        ) {
+            let ct = if content_type.is_null() || content_type_len == 0 {
+                "text/markdown; charset=utf-8"
+            } else {
+                std::str::from_utf8(unsafe {
+                    std::slice::from_raw_parts(content_type, content_type_len)
+                })
+                .unwrap_or("text/markdown; charset=utf-8")
+            };
 
-        use crate::header_plan::{HeaderOp, HeaderPlan};
-        let plan = HeaderPlan::for_markdown_conversion(ct, has_etag != 0);
+            use crate::header_plan::{HeaderOp, HeaderPlan};
+            let plan = HeaderPlan::for_markdown_conversion(ct, has_etag != 0);
 
-        let mut owned = HeaderPlanOwned {
-            entries: Vec::with_capacity(plan.ops.len()),
-            key_storage: Vec::with_capacity(plan.ops.len()),
-            value_storage: Vec::with_capacity(plan.ops.len()),
-        };
+            let mut owned = HeaderPlanOwned {
+                entries: Vec::with_capacity(plan.ops.len()),
+                key_storage: Vec::with_capacity(plan.ops.len()),
+                value_storage: Vec::with_capacity(plan.ops.len()),
+            };
 
-        for op in &plan.ops {
-            match op {
-                HeaderOp::Set { name, value } => {
-                    let mut key_vec = name.as_bytes().to_vec();
-                    key_vec.push(0); /* NUL-terminate per FFI contract */
-                    let mut val_vec = value.as_bytes().to_vec();
-                    val_vec.push(0); /* NUL-terminate per FFI contract */
-                    let key_len = key_vec.len() - 1; /* exclude NUL from len */
-                    let val_len = val_vec.len() - 1;
-                    owned.key_storage.push(key_vec.into_boxed_slice());
-                    owned.value_storage.push(val_vec.into_boxed_slice());
-                    let key = &owned.key_storage[owned.key_storage.len() - 1];
-                    let val = &owned.value_storage[owned.value_storage.len() - 1];
-                    owned.entries.push(FFIHeaderEntry {
-                        op_type: 0,
-                        key: key.as_ptr(),
-                        key_len,
-                        value: val.as_ptr(),
-                        value_len: val_len,
-                    });
-                }
-                HeaderOp::Delete { name } => {
-                    let mut key_vec = name.as_bytes().to_vec();
-                    key_vec.push(0); /* NUL-terminate per FFI contract */
-                    let key_len = key_vec.len() - 1;
-                    owned.key_storage.push(key_vec.into_boxed_slice());
-                    let key = &owned.key_storage[owned.key_storage.len() - 1];
-                    owned.entries.push(FFIHeaderEntry {
-                        op_type: 1,
-                        key: key.as_ptr(),
-                        key_len,
-                        value: std::ptr::null(),
-                        value_len: 0,
-                    });
-                }
-                HeaderOp::DeleteAll { name } => {
-                    let mut key_vec = name.as_bytes().to_vec();
-                    key_vec.push(0); /* NUL-terminate per FFI contract */
-                    let key_len = key_vec.len() - 1;
-                    owned.key_storage.push(key_vec.into_boxed_slice());
-                    let key = &owned.key_storage[owned.key_storage.len() - 1];
-                    owned.entries.push(FFIHeaderEntry {
-                        op_type: 3,
-                        key: key.as_ptr(),
-                        key_len,
-                        value: std::ptr::null(),
-                        value_len: 0,
-                    });
-                }
-                HeaderOp::SetEtagPlaceholder => {
-                    owned.entries.push(FFIHeaderEntry {
-                        op_type: 2,
-                        key: std::ptr::null(),
-                        key_len: 0,
-                        value: std::ptr::null(),
-                        value_len: 0,
-                    });
+            for op in &plan.ops {
+                match op {
+                    HeaderOp::Set { name, value } => {
+                        let mut key_vec = name.as_bytes().to_vec();
+                        key_vec.push(0); /* NUL-terminate per FFI contract */
+                        let mut val_vec = value.as_bytes().to_vec();
+                        val_vec.push(0); /* NUL-terminate per FFI contract */
+                        let key_len = key_vec.len() - 1; /* exclude NUL from len */
+                        let val_len = val_vec.len() - 1;
+                        owned.key_storage.push(key_vec.into_boxed_slice());
+                        owned.value_storage.push(val_vec.into_boxed_slice());
+                        let key = &owned.key_storage[owned.key_storage.len() - 1];
+                        let val = &owned.value_storage[owned.value_storage.len() - 1];
+                        owned.entries.push(FFIHeaderEntry {
+                            op_type: 0,
+                            key: key.as_ptr(),
+                            key_len,
+                            value: val.as_ptr(),
+                            value_len: val_len,
+                        });
+                    }
+                    HeaderOp::Delete { name } => {
+                        let mut key_vec = name.as_bytes().to_vec();
+                        key_vec.push(0); /* NUL-terminate per FFI contract */
+                        let key_len = key_vec.len() - 1;
+                        owned.key_storage.push(key_vec.into_boxed_slice());
+                        let key = &owned.key_storage[owned.key_storage.len() - 1];
+                        owned.entries.push(FFIHeaderEntry {
+                            op_type: 1,
+                            key: key.as_ptr(),
+                            key_len,
+                            value: std::ptr::null(),
+                            value_len: 0,
+                        });
+                    }
+                    HeaderOp::DeleteAll { name } => {
+                        let mut key_vec = name.as_bytes().to_vec();
+                        key_vec.push(0); /* NUL-terminate per FFI contract */
+                        let key_len = key_vec.len() - 1;
+                        owned.key_storage.push(key_vec.into_boxed_slice());
+                        let key = &owned.key_storage[owned.key_storage.len() - 1];
+                        owned.entries.push(FFIHeaderEntry {
+                            op_type: 3,
+                            key: key.as_ptr(),
+                            key_len,
+                            value: std::ptr::null(),
+                            value_len: 0,
+                        });
+                    }
+                    HeaderOp::SetEtagPlaceholder => {
+                        owned.entries.push(FFIHeaderEntry {
+                            op_type: 2,
+                            key: std::ptr::null(),
+                            key_len: 0,
+                            value: std::ptr::null(),
+                            value_len: 0,
+                        });
+                    }
                 }
             }
-        }
 
-        if owned.entries.is_empty() {
-            result_ref.handle = std::ptr::null_mut();
-            result_ref.entries = std::ptr::null();
-            result_ref.count = 0;
-        } else {
-            result_ref.entries = owned.entries.as_ptr();
-            result_ref.count = owned.entries.len();
-            result_ref.handle = Box::into_raw(Box::new(owned)) as *mut FFIHeaderPlanHandle;
-        }
-    }));
+            let count = owned.entries.len();
+            if count == 0 {
+                (std::ptr::null_mut(), std::ptr::null(), 0)
+            } else {
+                let entries_ptr = owned.entries.as_ptr();
+                let handle =
+                    Box::into_raw(Box::new(owned)) as *mut FFIHeaderPlanHandle;
+                (handle, entries_ptr, count)
+            }
+        },
+    ));
 
-    if outcome.is_err() {
-        /* Panic caught — ensure a safe empty plan. */
-        reset_header_plan_to_empty(result_ref);
+    match outcome {
+        Ok((handle, entries, count)) => {
+            result_ref.handle = handle;
+            result_ref.entries = entries;
+            result_ref.count = count;
+        }
+        Err(_) => {
+            /* Panic caught — ensure a safe empty plan. */
+            reset_header_plan_to_empty(result_ref);
+        }
     }
 }
 
