@@ -52,8 +52,24 @@ VALIDATION_FUNCS = {
     "validate_read_path",
     "validate_write_path_within_root",
     "_resolve_repo_write_path",
-    "_validate_state_path",
 }
+
+# File-scoped validation functions that are only recognized within their
+# owning file.  This avoids promoting file-specific helpers to a global
+# allowlist where they could unintentionally whitelist open() calls in
+# unrelated modules.
+#
+#   tools/harness/state_store.py
+#       validate_user_local_state_path  — user-local path override (env var
+#       HARNESS_STATE_DIR); rejects ".." traversal and resolves to an
+#       absolute path before any file operation.
+FILE_SCOPED_VALIDATORS: dict[str, set[str]] = {
+    "tools/harness/state_store.py": {"validate_user_local_state_path"},
+}
+
+# Current file being scanned (set by check_file before per-file analysis).
+# Used by _is_known_validator to check file-scoped validators.
+_current_rel: str = ""
 
 # Trusted fixture names that pytest provides — paths derived from
 # these are safe in test contexts and should not trigger CWE-22 warnings.
@@ -77,6 +93,21 @@ EXEMPT_FILES = {
     "tools/harness/detect_open_without_path_validation.py",
     "tools/harness/detect_cwe22_paths.py",
 }
+
+
+def _is_known_validator(name: str) -> bool:
+    """Return True if *name* is a known validation function.
+
+    Checks both the global ``VALIDATION_FUNCS`` set and the
+    ``FILE_SCOPED_VALIDATORS`` for the file currently being scanned
+    (``_current_rel``).
+    """
+    if name in VALIDATION_FUNCS:
+        return True
+    file_validators = FILE_SCOPED_VALIDATORS.get(_current_rel)
+    if file_validators is not None and name in file_validators:
+        return True
+    return False
 
 
 def _display_path(path: Path) -> str:
@@ -164,7 +195,7 @@ def _collect_direct_validation_assignments(
         if not isinstance(value, ast.Call):
             continue
         name = _func_call_name(value)
-        if name in VALIDATION_FUNCS:
+        if _is_known_validator(name):
             scope = _find_scope(node, parent_map)
             for target in node.targets:
                 if isinstance(target, ast.Name):
@@ -383,7 +414,7 @@ def _is_safe_call_expr(
 ) -> bool:
     """Return True if a Call node is a safe path expression."""
     name = _func_call_name(node)
-    if name in VALIDATION_FUNCS:
+    if _is_known_validator(name):
         return True
     if _is_path_constructor(node.func) and node.args:
         if _is_safe_path_expr(node.args[0], validated_vars, hardcoded_vars, scope):
@@ -546,6 +577,8 @@ def check_file(
     Returns:
         Tuple of (errors, warnings) lists.
     """
+    global _current_rel
+
     errors: list[str] = []
     warnings: list[str] = []
 
@@ -567,6 +600,7 @@ def check_file(
         )
         return errors, warnings
 
+    _current_rel = rel
     validated_vars = _collect_validated_vars(tree)
     hardcoded_vars = _collect_hardcoded_vars(tree)
 
