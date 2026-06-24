@@ -74,6 +74,18 @@ Required:
   is inside the repository and executable is insufficient because an in-tree
   symlink can target an arbitrary external command. The executable passed to
   `subprocess` must come from the fixed allowlist, not from the raw CLI value.
+- **ValueError propagation from validate_read_path**: When wrapping
+  `validate_read_path()` in a try/except block, do NOT catch `ValueError`.
+  `validate_read_path()` raises `ValueError` when a path traversal attempt
+  is detected (for example `..` components).  Catching `ValueError` alongside
+  `ImportError` or `FileNotFoundError` silently swallows the traversal
+  rejection, allowing an attacker-controlled path to proceed to `open()`.
+  The correct exception tuple is `(ImportError, FileNotFoundError)` — these
+  cover the "path_validation module unavailable" and "directory does not
+  exist" fallback cases, while letting `ValueError` propagate as an
+  explicit rejection.  When refactoring a `try/except` around
+  `validate_read_path`, audit the caught exception types to ensure
+  `ValueError` is not in the tuple.
 - For single-artifact CLI tools, prefer emitting the artifact to stdout and
   letting the trusted caller redirect it. Do not accept a caller-controlled
   output path when the Python process does not need filesystem ownership of

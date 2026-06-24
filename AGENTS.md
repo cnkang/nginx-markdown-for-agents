@@ -125,6 +125,8 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 47 | streaming-backpressure | Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return |
 | 48 | security-static-analysis | CodeQL remains primary SAST; supplemental static security and supply-chain gates must stay focused, pinned, low-noise, and locally runnable |
 | 49 | docs-tooling | THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions; add/remove/update entries in same changeset as Cargo.lock changes |
+| 50 | nginx-idioms | Content-Type OWS separator accepts HTAB; trailing OWS excluded before parameter comparison |
+| 51 | streaming-backpressure | Auth Cache-Control commit failure routes through precommit_error; multi-header aggregation checks any_public before has_private |
 
 ## Required Agent Workflow
 
@@ -174,10 +176,13 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - UTF-8 tails preserved across chunk boundaries; flush at EOF [4]
 - Streaming decompression uses raw deflate; truncated streams rejected; test payloads match production format [44]
 - Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return [47]
+- Auth Cache-Control commit failure routes through precommit_error; multi-header aggregation checks any_public before has_private [51]
 
 **Memory & Budget** (C, R)
 - All budgets enforced; auxiliary buffers freed on all exits [3]
 - No unbounded allocations; pool-preferred [Baseline]
+- Resizable buffers (buffer.data, decomp workspace, scratch) use ngx_alloc/ngx_free exclusively; never pool-allocate then ngx_free [43]
+- Every ngx_alloc-backed buffer has matching ngx_free on all exit paths [43]
 
 **Observability & Metrics** (C, R, D)
 - New metrics: complete lifecycle (struct→snapshot→renderer→write site) [8,23]
@@ -187,6 +192,8 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Multi-path exit: symmetric success/failure metrics on every path [23]
 - Metric names match actual semantics; unit suffix matches resolution [8]
 - Format string specifiers match argument list in all renderers (count and type) [8]
+- ngx_log_debugN / ngx_log_errorN suffix digit matches actual argument count [8]
+- `bash tools/harness/detect_ngx_log_arg_count.sh` — CI gate for suffix-digit mismatch [8]
 
 **FFI & Cross-Language** (C, R)
 - Rust struct changes → both C headers + all init sites + cleanup helpers [15]
@@ -194,11 +201,22 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Read foreign-owned struct fields BEFORE free/release [15]
 - FFI error code classification covers all header-defined codes [15]
 - FFI operations validate NULL/empty key inputs; guards on both sides of FFI boundary; NULL/empty-input test coverage [46]
+- Zero-length value (value_len==0): C-side sets target field to NULL/0, not a zero-length pool alloc [46]
+- Non-trivial Rust FFI exports wrapped in catch_unwind; panic returns error code, not UB [15]
+- Fail-closed fallback: FFI output struct initialized to safe default before catch_unwind [15]
+- Atomic write after catch: closure computes return values; fields written only after Ok [15]
+- FFI resources managed by Drop guards within catch_unwind for panic safety [15]
+- FFI enums use explicit #[repr(u8)] / #[repr(i32)] for layout safety [15]
+- FFI handle consumed after safe_finish/free — no pointer reuse after consumption [15]
+- cbindgen header drift: run make check-headers after Rust FFI changes [15]
 
 **C Safety** (C)
 - No implicit declarations; narrowing cast needs bounds check + overflow path [24]
 - Const-correctness; no const-dropping casts; no macro-shadow declarations [24]
 - Forward declarations match definitions (same changeset) [24]
+- Forward declarations appear after all typedefs they reference; at file scope [24]
+- NOSONAR annotations include reason + rule ref; bare `/* NOSONAR */` forbidden; only for NGINX API contract [24]
+- `bash tools/harness/detect_nosonar_discipline.sh` — CI gate for bare NOSONAR [24]
 - No unguarded ops on NULL/uninitialized/invalid values [Baseline]
 
 **NGINX Idioms** (C)
@@ -212,10 +230,12 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Multi-step header modification atomic: abort on first failure, no partial apply [39]
 - Bounded transaction snapshots: capacity overflow fails before mutation; never silently truncate rollback state [39]
 - Header lookup/iteration filters hash==0 (invalidated) entries [40]
+- Content-Type OWS separator accepts HTAB; trailing OWS excluded before parameter comparison [50]
 
 **HTML Sanitizer & Output Safety** (C, R, D)
 - Void elements self-closing; skip-mode name-aware [5]
 - In-link markers accumulated; code-block raw/fence state preserved across text-event boundaries; media URL extraction [6]
+- Streaming code fence language identifier buffered across text-event boundaries; language- prefix matching [6]
 - Implied or batched structural closures unwind inner-to-outer before enclosing block state [6]
 - Link/URL escaping at every emission site; reject control chars [27]
 
@@ -354,6 +374,10 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   remain report-oriented unless a specific blocking threshold is adopted. Do
   not describe them as hard blocking gates without documenting the
   runtime/noise tradeoff and enforcing threshold semantics [48]
+- Homebrew formula SHA-256 generated from release tag git archive (not HEAD);
+  version stanza before sha256; nginx version derived from dependency
+  metadata; tap publish validates tag existence; formula gate and release
+  verify use same audit standard [13]
 
 **Python** (P)
 - Binary prerequisites validate executability [19]
@@ -533,3 +557,6 @@ remediation:
 | 0.8.2 | 2026-06-22 | Kang | Strengthened Rules 6 and 48 for inner-to-outer structural closure ordering and deletion-safe tracked-worktree secret scans |
 | 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
 | 0.8.2 | 2026-06-23 | Kang | Added general workflow safeguards for checkable outcomes, request-scoped diffs, Git operation safety, and deletion safety |
+| 0.8.2 | 2026-06-23 | Kang | Strengthened Rule 15 with FFI panic safety (catch_unwind), Drop guards, enum repr layout safety, handle consumption contract, and cbindgen header drift CI gate; strengthened Rule 13 with Homebrew formula release integrity (SHA-256 from tag archive, version-before-sha256 ordering, nginx version from metadata, tap publish tag validation, audit standard alignment, cbindgen build dep); generalized Rule 43 for all resizable buffers (decomp workspace, scratch) not only buffer.data; strengthened Rule 24 with forward declaration ordering after typedefs; strengthened Rule 6 with streaming code fence language identifier buffering across text-event boundaries; added Rule 50 (Content-Type OWS/HTAB separator); added Rule 51 (auth Cache-Control commit failure handling); strengthened Rule 31 for organic duplicate code detection; strengthened detect_const_correctness.py with NGINX callback signature detection; extended check_third_party_notices.py with sub-workspace Cargo.lock existence check; added detect_pool_free.sh, detect_ffi_panic_safety.sh, detect_forward_decl_order.py, detect_duplicate_code.py, detect_open_without_path_validation.py |
+| 0.8.2 | 2026-06-24 | Kang | Strengthened Rule 8 with ngx_log_debugN / ngx_log_errorN argument count matching; strengthened Rule 15 with fail-closed fallback initialization and atomic write after catch pattern; strengthened Rule 24 with NOSONAR annotation discipline (reason + rule ref required, bare NOSONAR forbidden, only for NGINX API contract); strengthened Rule 46 with zero-length value boundary handling (value_len==0 → set NULL/0 not zero-length pool alloc); fixed detect_open_without_path_validation.py `_expr_derives_from_hardcoded` to ignore Path constructor function names and fix `_maybe_propagate_path_wrapper` target tracking; fixed detect_cwe22_paths.py to distinguish builtin open() from .open() method calls and keyword args from positional args; added SMALL_BLOCK_THRESHOLD=7 to detect_duplicate_code.py to downgrade short duplicates to advisory; narrowed FFI_VALIDATION_KEYWORDS to remove overly broad NULL/validate/guard; detect_forward_decl_order.py and detect_duplicate_code.py now validate own args.directory via validate_read_path |
+| 0.8.2 | 2026-06-24 | Kang | Strengthened Rule 31 with semantic-equivalence requirement for duplicate consolidation (branches with distinct error classification must not be collapsed); strengthened Rule 44 with Z_OK vs Z_BUF_ERROR inflate semantics distinction; strengthened Rule 33 with ValueError propagation trap for validate_read_path try/except; added detect_ngx_log_arg_count.sh (CI gate for ngx_log_debugN/errorN suffix-digit/argument-count mismatch); added detect_nosonar_discipline.sh (CI gate for bare NOSONAR without reason); refactored detect_cwe190_casts.sh allowlists from line-number-based to pattern-based matching to survive code edits that shift line numbers (26 stale warnings eliminated) |

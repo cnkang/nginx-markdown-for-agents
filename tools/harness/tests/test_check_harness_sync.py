@@ -17,6 +17,7 @@ def test_collect_results_skips_missing_kiro(tmp_path, monkeypatch):
     repo = tmp_path
     _write_repo_fixture(repo, with_kiro=False)
     monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "GITHUB_WORKFLOWS_DIR", repo / ".github" / "workflows")
     monkeypatch.setattr(sync, "MANIFEST_PATH", repo / "docs/harness/routing-manifest.json")
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
@@ -32,6 +33,7 @@ def test_collect_results_warns_for_local_kiro_drift(tmp_path, monkeypatch):
     repo = tmp_path
     _write_repo_fixture(repo, with_kiro=True, kiro_has_links=False)
     monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "GITHUB_WORKFLOWS_DIR", repo / ".github" / "workflows")
     monkeypatch.setattr(sync, "MANIFEST_PATH", repo / "docs/harness/routing-manifest.json")
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
@@ -53,6 +55,7 @@ def test_collect_results_fail_when_pack_doc_missing(tmp_path, monkeypatch):
     (repo / "docs/harness/risk-packs/runtime-streaming.md").unlink()
 
     monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "GITHUB_WORKFLOWS_DIR", repo / ".github" / "workflows")
     monkeypatch.setattr(sync, "MANIFEST_PATH", repo / "docs/harness/routing-manifest.json")
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
@@ -71,6 +74,7 @@ def test_collect_results_handles_missing_harness_doc_without_crash(tmp_path, mon
     (repo / "docs/harness/core.md").unlink()
 
     monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "GITHUB_WORKFLOWS_DIR", repo / ".github" / "workflows")
     monkeypatch.setattr(sync, "MANIFEST_PATH", repo / "docs/harness/routing-manifest.json")
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
@@ -140,6 +144,7 @@ def test_collect_results_accept_reordered_status_semantics(tmp_path, monkeypatch
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "GITHUB_WORKFLOWS_DIR", repo / ".github" / "workflows")
     monkeypatch.setattr(sync, "MANIFEST_PATH", manifest_path)
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
@@ -179,6 +184,7 @@ def test_collect_results_passes_traceable_recent_analysis_report(tmp_path, monke
     )
 
     monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "GITHUB_WORKFLOWS_DIR", repo / ".github" / "workflows")
     monkeypatch.setattr(sync, "MANIFEST_PATH", repo / "docs/harness/routing-manifest.json")
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
@@ -218,6 +224,7 @@ def test_collect_results_fails_unclosed_recent_analysis_report(tmp_path, monkeyp
     )
 
     monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "GITHUB_WORKFLOWS_DIR", repo / ".github" / "workflows")
     monkeypatch.setattr(sync, "MANIFEST_PATH", repo / "docs/harness/routing-manifest.json")
     monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
     monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")

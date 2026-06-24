@@ -61,8 +61,21 @@ OPEN_CALL_RE = re.compile(
     r"(?:os\.)?open\s*\(",
 )
 
+# Match builtin open() or os.open() — NOT .open() method calls.
+# A .open() call (e.g. path.open(encoding=...)) has a dot before open.
+BUILTIN_OPEN_CALL_RE = re.compile(
+    r"(?<!\.)\b(?:os\.)?open\s*\(",
+)
+
 OPEN_ARG_RE = re.compile(
     r"(?:os\.)?open\s*\(\s*(\w+)",
+)
+
+# Detect keyword arguments that are NOT the path argument.
+# In ``open(file, encoding="utf-8")``, ``encoding`` is a keyword arg,
+# not the path.  The path is the first positional argument.
+KEYWORD_ARG_RE = re.compile(
+    r"^\s*(\w+)\s*=",
 )
 
 
@@ -230,6 +243,7 @@ def _is_file_derived_assignment(line: str) -> bool:
         "__file__" in rhs
         or "repo_root" in rhs
         or "REPO_ROOT" in rhs
+        or "ROOT" in rhs
     )
 
 
@@ -368,6 +382,45 @@ def _add_assignment_lhs_by_predicate(
             target.add(lhs)
 
 
+def _extract_method_open_first_arg(line: str) -> str | None:
+    """Extract the path argument from a .open() method call.
+
+    For ``path.open(encoding=...)``, the path is the receiver, not
+    the first positional arg.  Returns the receiver identifier, or
+    None if the call should be skipped.
+    """
+    open_paren_idx = line.find(".open(")
+    if open_paren_idx < 0:
+        return None
+
+    after_paren = line[open_paren_idx + 5:]
+    if KEYWORD_ARG_RE.match(after_paren):
+        return _extract_path_open_receiver(line)
+
+    # Positional arg present, but for .open() the path is the receiver.
+    return _extract_path_open_receiver(line)
+
+
+def _extract_builtin_open_first_arg(line: str) -> str | None:
+    """Extract the first positional argument from a builtin open() call.
+
+    Returns None if no positional path arg is found or if the first
+    arg is a keyword argument.
+    """
+    m = OPEN_ARG_RE.search(line)
+    if not m:
+        return None
+
+    first_arg = m.group(1)
+    open_match = BUILTIN_OPEN_CALL_RE.search(line)
+    if open_match:
+        after_paren = line[open_match.end():]
+        if KEYWORD_ARG_RE.match(after_paren):
+            return None
+
+    return first_arg
+
+
 def _scan_open_calls(
     lines: list[str],
     has_validation_import: bool,
@@ -388,11 +441,9 @@ def _scan_open_calls(
         if NON_FILE_OPEN_RE.search(line):
             continue
 
-        m = OPEN_ARG_RE.search(line)
-        if not m:
+        first_arg = _resolve_open_first_arg(line)
+        if first_arg is None:
             continue
-
-        first_arg = m.group(1)
 
         call_errors, call_warnings = _classify_open_call(
             first_arg, line, lines, lineno,
@@ -403,6 +454,13 @@ def _scan_open_calls(
         warnings.extend(call_warnings)
 
     return errors, warnings
+
+
+def _resolve_open_first_arg(line: str) -> str | None:
+    """Determine the path argument for any open() call variant."""
+    if BUILTIN_OPEN_CALL_RE.search(line):
+        return _extract_builtin_open_first_arg(line)
+    return _extract_method_open_first_arg(line)
 
 
 def _scan_path_constructions(

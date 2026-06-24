@@ -45,6 +45,19 @@ Required:
   the streaming path must independently enforce raw deflate — do not assume
   the two paths share format configuration.
 
+- `Z_OK` and `Z_BUF_ERROR` have distinct semantics in `inflate()`:
+  `Z_OK` means inflate made progress (consumed input and/or produced
+  output); `Z_BUF_ERROR` means no progress was made.  When the output
+  buffer is exhausted (`avail_out == 0`), both codes are recoverable by
+  growing the buffer and retrying.  However, `Z_BUF_ERROR` with available
+  output space and remaining input is an unexpected stall (potential
+  format error), while `Z_OK` with `avail_out > 0` simply means more
+  data is available — loop again without intervention.  Never merge the
+  two branches into a single `if (zrc == Z_OK || zrc == Z_BUF_ERROR)`
+  without first checking `avail_out` to distinguish the recoverable stall
+  from the normal-progress case (see Rule 31: semantic-equivalence
+  requirement for duplicate consolidation).
+
 Verification:
 - `grep -rn 'windowBits\|Z_RAW\|inflateInit' components/nginx-module/src/ components/rust-converter/src/`
 - Verify streaming decompression uses raw deflate (`windowBits = -15` or

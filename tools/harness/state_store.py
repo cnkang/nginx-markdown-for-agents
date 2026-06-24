@@ -17,6 +17,30 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_FILE = "events.jsonl"
 
 
+def validate_user_local_state_path(path: Path) -> Path:
+    """Reject traversal components and resolve *path* to an absolute form.
+
+    This is a lightweight validation for user-local state directories:
+    it ensures ``..`` cannot escape the intended root, and returns a
+    resolved ``Path`` that is safe to open.
+
+    Args:
+        path: Raw path to validate.
+
+    Returns:
+        Resolved absolute Path.
+
+    Raises:
+        ValueError: If the path contains ``..`` traversal components.
+    """
+    raw = str(path)
+    if ".." in Path(raw).parts:
+        raise ValueError(
+            f"Refusing state path with '..' traversal component: {raw!r}"
+        )
+    return Path(raw).expanduser().resolve()
+
+
 @dataclass(frozen=True)
 class StateEvent:
     """A single harness state event with type, key, source, note, and timestamp."""
@@ -34,6 +58,9 @@ def state_dir(repo_root: Path | None = None) -> Path:
     Uses HARNESS_STATE_DIR environment variable if set, otherwise
     defaults to ~/.gstack/projects/<repo-name>/harness-state/.
 
+    The override path is validated to reject ``..`` traversal components
+    and resolved to an absolute form before use.
+
     Args:
         repo_root: Repository root path. Defaults to REPO_ROOT.
 
@@ -43,7 +70,7 @@ def state_dir(repo_root: Path | None = None) -> Path:
     repo_root = repo_root or REPO_ROOT
     override = os.environ.get("HARNESS_STATE_DIR")
     if override:
-        return Path(override).expanduser()
+        return validate_user_local_state_path(Path(override))
     return Path.home() / ".gstack" / "projects" / repo_root.name / "harness-state"
 
 
@@ -98,7 +125,7 @@ def append_event(
     Returns:
         Path to the state file that was appended to.
     """
-    path = state_file(repo_root)
+    path = validate_user_local_state_path(state_file(repo_root))
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "event_type": event_type,
@@ -123,7 +150,7 @@ def load_events(repo_root: Path | None = None) -> list[dict[str, Any]]:
     Returns:
         List of validated event dictionaries, in file order.
     """
-    path = state_file(repo_root)
+    path = validate_user_local_state_path(state_file(repo_root))
     if not path.exists():
         return []
     events: list[dict[str, Any]] = []

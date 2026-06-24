@@ -500,6 +500,8 @@ def _collect_stale_execution_surface_refs() -> list[str]:
         REPO_ROOT / "docs" / "testing" / "E2E_TESTS.md",
     )
     for surface in execution_surfaces:
+        if not surface.is_file():
+            continue
         text = surface.read_text(encoding="utf-8")
         refs.extend(
             f"{_display_path(surface)}::{filename}"

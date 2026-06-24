@@ -432,8 +432,10 @@ pub unsafe extern "C" fn markdown_incremental_free(handle: *mut IncrementalConve
     if handle.is_null() {
         return;
     }
-    // SAFETY: caller guarantees `handle` is a live, unconsumed pointer.
-    unsafe { drop(Box::from_raw(handle)) };
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: caller guarantees `handle` is a live, unconsumed pointer.
+        unsafe { drop(Box::from_raw(handle)) };
+    }));
 }
 
 #[cfg(test)]
