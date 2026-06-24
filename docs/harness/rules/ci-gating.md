@@ -186,9 +186,9 @@ Required:
       to the tap repository.  Publishing a formula for a non-existent tag
       causes `brew install` to fail for users.
     - The formula gate and the release verify workflow must use the same
-      `brew audit` standard.  If the gate uses `brew audit --strict` and the
-      release verify uses `brew audit` (without `--strict`), formula issues
-      pass the gate but fail post-release verification.
+      `brew audit` standard.  If the gate uses `brew audit` (without
+      `--strict`) and the release verify uses `brew audit --strict`, formula
+      issues pass the gate but fail post-release verification.
     - The formula must build the module against the NGINX version installed
       by the formula's dependency, not against a separately-specified NGINX
       source tree.  Building against a different version produces a module
