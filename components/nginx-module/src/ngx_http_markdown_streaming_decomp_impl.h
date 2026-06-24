@@ -592,11 +592,10 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
  * with error/limit/expand handling.
  *
  * Returns:
- *   1  - done (SUCCESS or avail_in == 0)
- *   0  - continue iterating
- *  -1  - error (heap_buf freed if needed)
- *  -2  - budget exceeded (heap_buf freed if needed)
- *  -1  - error (heap_buf freed if needed)
+ *  1  - done (SUCCESS or avail_in == 0)
+ *  0  - continue iterating
+ * -1  - error (heap_buf freed if needed)
+ * -2  - budget exceeded (heap_buf freed if needed)
  */
 static int
 ngx_http_markdown_streaming_decomp_brotli_step(
