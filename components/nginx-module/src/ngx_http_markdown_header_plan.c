@@ -319,7 +319,7 @@ ngx_http_markdown_plan_find_header(ngx_http_request_t *r,
  * count_headers visitor: increments a counter (ctx is ngx_uint_t*).
  */
 static ngx_int_t
-ngx_http_markdown_plan_count_header_visitor(ngx_table_elt_t *h, void *ctx)
+ngx_http_markdown_plan_count_header_visitor(ngx_table_elt_t *h, void *ctx) /* NOSONAR: h type dictated by ngx_http_markdown_plan_header_visitor_t callback typedef (Rule 24) */
 {
     ngx_uint_t  *count = ctx;
 

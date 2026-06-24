@@ -894,7 +894,7 @@ ngx_http_markdown_for_each_cache_control_header(ngx_http_request_t *r,
  * the first Cache-Control entry pointer.
  */
 static ngx_int_t
-ngx_http_markdown_scan_cc_visitor(ngx_http_request_t *r,
+ngx_http_markdown_scan_cc_visitor(ngx_http_request_t *r, /* NOSONAR: r type dictated by ngx_http_markdown_cc_visitor_t callback typedef (Rule 24) */
     ngx_table_elt_t *entry, void *ctx)
 {
     ngx_http_markdown_cc_scan_t  *scan = ctx;
