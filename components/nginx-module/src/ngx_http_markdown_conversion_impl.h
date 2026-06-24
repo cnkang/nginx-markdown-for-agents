@@ -1343,27 +1343,26 @@ ngx_http_markdown_shadow_compare(
     struct MarkdownResult             st_result;
     uint8_t                          *out_data;
     uintptr_t                         out_len;
+    ngx_int_t                         opt_rc;
     uint32_t                          init_rc;
     uint32_t                          rc;
     const ngx_time_t                 *tp;
     ngx_msec_t                        shadow_start;
     ngx_msec_t                        shadow_elapsed;
 
-    rc = ngx_http_markdown_prepare_conversion_options(
+    opt_rc = ngx_http_markdown_prepare_conversion_options(
         r, conf, ctx->effective_conf, &options);
-    if (rc != NGX_OK) {
+    if (opt_rc != NGX_OK) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
             "markdown: shadow conversion options failed rc=%i",
-            (ngx_int_t) rc);
+            opt_rc);
         return;
     }
 
     /*
-     * Record shadow attempt unconditionally at entry so
-     * shadow_total reflects attempts, not only successful
-     * comparisons.  This keeps the shadow_diff_rate formula
-     * (shadow_diff_total / shadow_total) well-defined even
-     * when the streaming engine fails to initialize.
+     * Record the shadow attempt after conversion options are
+     * prepared so shadow_total reflects actual shadow runs, not
+     * requests that fail before the streaming engine starts.
      */
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.shadow_total);
     ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
