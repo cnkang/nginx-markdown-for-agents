@@ -87,6 +87,10 @@ while IFS= read -r line; do
             ch="${after_macro:$i:1}"
             if [[ "$ch" == "(" ]]; then
                 depth=$((depth + 1))
+            elif [[ "$ch" == ")" ]] && [[ $depth -eq 0 ]] && \
+                [[ $fmt_start -ge 0 ]] && [[ $comma_count -ge 3 ]]; then
+                fmt_part="${after_macro:$fmt_start:$((i - fmt_start))}"
+                break
             elif [[ "$ch" == ")" ]]; then
                 depth=$((depth - 1))
             elif [[ "$ch" == "," ]] && [[ $depth -eq 0 ]] && [[ "$in_string" -eq 0 ]]; then
@@ -99,10 +103,6 @@ while IFS= read -r line; do
                     fmt_part="${after_macro:$fmt_start:$((i - fmt_start))}"
                     break
                 fi
-            elif [[ "$ch" == ")" ]] && [[ $depth -eq 0 ]] && \
-                [[ $fmt_start -ge 0 ]] && [[ $comma_count -ge 3 ]]; then
-                fmt_part="${after_macro:$fmt_start:$((i - fmt_start))}"
-                break
             elif [[ "$ch" == '"' ]]; then
                 if [[ "$in_string" -eq 0 ]]; then
                     in_string=1
