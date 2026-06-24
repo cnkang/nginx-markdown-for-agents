@@ -305,9 +305,9 @@ def main() -> int:
         scan_dir = Path(validate_read_path(
             args.directory, purpose="scan directory",
         ))
-    except (ImportError, FileNotFoundError, ValueError) as exc:
+    except (ImportError, FileNotFoundError) as exc:
         # Fallback: if path_validation is unavailable, resolve manually.
-        # This only happens in standalone execution outside the repo.
+        # ValueError from validate_read_path propagates (path traversal rejected).
         scan_dir = Path(args.directory)
         if not scan_dir.is_absolute():
             scan_dir = REPO_ROOT / scan_dir
