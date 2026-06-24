@@ -1349,8 +1349,14 @@ ngx_http_markdown_shadow_compare(
     ngx_msec_t                        shadow_start;
     ngx_msec_t                        shadow_elapsed;
 
-    ngx_http_markdown_prepare_conversion_options(
+    rc = ngx_http_markdown_prepare_conversion_options(
         r, conf, ctx->effective_conf, &options);
+    if (rc != NGX_OK) {
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+            "markdown: shadow conversion options failed rc=%i",
+            (ngx_int_t) rc);
+        return;
+    }
 
     /*
      * Record shadow attempt unconditionally at entry so

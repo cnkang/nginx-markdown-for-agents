@@ -129,6 +129,7 @@
     "release-governance": {
       "phase": "focused-semantic",
       "commands": [
+        "make release-gates-check-080",
         "make release-gates-check",
         "make release-gates-check-strict",
         "make release-gates-check-055"
