@@ -308,7 +308,8 @@ def main() -> int:
     except (ImportError, FileNotFoundError):
         # Fallback: if path_validation is unavailable, resolve manually.
         # ValueError from validate_read_path propagates (path traversal rejected).
-        scan_dir = Path(args.directory)
+        scan_dir_raw = str(args.directory)
+        scan_dir = Path(scan_dir_raw)
         if not scan_dir.is_absolute():
             scan_dir = REPO_ROOT / scan_dir
         try:
