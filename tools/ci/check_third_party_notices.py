@@ -19,7 +19,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 NOTICES_PATH = ROOT / "THIRD-PARTY-NOTICES"
-CARGO_TOML = ROOT / "components" / "rust-converter" / "Cargo.toml"
+_CARGO_TOML_NAME = "Cargo.toml"
+CARGO_TOML = ROOT / "components" / "rust-converter" / _CARGO_TOML_NAME
 
 # Additional Cargo.toml files for sub-workspaces that have their own
 # Cargo.lock.  These are checked for stale lock files and their direct
@@ -27,8 +28,8 @@ CARGO_TOML = ROOT / "components" / "rust-converter" / "Cargo.toml"
 # are dev/test/fuzz only), but their Cargo.lock must be in sync with
 # their Cargo.toml.
 SUB_WORKSPACE_CARGO_TOMLS: list[Path] = [
-    ROOT / "components" / "rust-converter" / "fuzz" / "Cargo.toml",
-    ROOT / "tools" / "corpus" / "test-corpus-conversion" / "Cargo.toml",
+    ROOT / "components" / "rust-converter" / "fuzz" / _CARGO_TOML_NAME,
+    ROOT / "tools" / "corpus" / "test-corpus-conversion" / _CARGO_TOML_NAME,
 ]
 
 # Corresponding Cargo.lock files for sub-workspaces.
@@ -128,6 +129,7 @@ def main() -> int:
     stale_locks: list[str] = []
     for cargo_toml, cargo_lock in zip(
         SUB_WORKSPACE_CARGO_TOMLS, SUB_WORKSPACE_CARGO_LOCKS,
+        strict=True,
     ):
         if cargo_toml.is_file() and not cargo_lock.is_file():
             stale_locks.append(
