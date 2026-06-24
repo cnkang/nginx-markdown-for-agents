@@ -305,7 +305,7 @@ def main() -> int:
         scan_dir = Path(validate_read_path(
             args.directory, purpose="scan directory",
         ))
-    except (ImportError, FileNotFoundError) as exc:
+    except (ImportError, FileNotFoundError):
         # Fallback: if path_validation is unavailable, resolve manually.
         # ValueError from validate_read_path propagates (path traversal rejected).
         scan_dir = Path(args.directory)

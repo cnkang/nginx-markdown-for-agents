@@ -150,9 +150,10 @@ def _classify_duplicate(block_lines: list[str]) -> tuple[str, str]:
 
     for keywords, category, fixed_action in _DIRECT_FIX_CATEGORIES:
         if any(kw in joined for kw in keywords):
-            action = fixed_action if fixed_action else (
-                "needs-human-review" if is_small else "direct-fix"
-            )
+            if fixed_action:
+                action = fixed_action
+            else:
+                action = "needs-human-review" if is_small else "direct-fix"
             return (category, action)
 
     # Pure signature/declaration duplicates — C structural, default skip
