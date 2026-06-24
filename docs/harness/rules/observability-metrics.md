@@ -279,3 +279,12 @@ Required:
   specifiers and arguments side-by-side.  Prefer extracting per-metric
   `ngx_snprintf` calls over monolithic format strings when the argument list
   exceeds 10 items.
+- **`ngx_log_debugN` argument count matching**: the NGINX debug logging
+  macros `ngx_log_debug0` through `ngx_log_debug8` encode the argument
+  count in the macro name suffix.  When adding or modifying a
+  `ngx_log_debugN` call, verify that the suffix digit exactly matches
+  the number of format arguments passed after the format string.  A
+  mismatch (for example `ngx_log_debug2` with only one `%`-substitution
+  argument) silently reads garbage from the stack or corrupts the log
+  output.  This applies equally to `ngx_log_debugN` and the error-level
+  `ngx_log_errorN` family.
