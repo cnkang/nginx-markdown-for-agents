@@ -63,7 +63,8 @@ def test_adjacent_merge_residual_is_detected(det, tmp_path):
 
 
 def test_memory_duplicate_classified_direct_fix(det, tmp_path):
-    # A non-adjacent duplicate containing ngx_palloc → memory/direct-fix
+    # A non-adjacent duplicate containing ngx_palloc → memory/direct-fix.
+    # Block exceeds SMALL_BLOCK_THRESHOLD so it is not downgraded.
     block = """\
     u_char *buf = ngx_palloc(r->pool, len);
     if (buf == NULL) {
@@ -71,6 +72,7 @@ def test_memory_duplicate_classified_direct_fix(det, tmp_path):
     }
     ngx_memcpy(buf, src, len);
     out = buf;
+    extra_line_to_exceed_threshold = 1;
     """
     src = f"""
     void f(void) {{
@@ -213,6 +215,7 @@ def test_narrow_memory_keywords_reduce_noise(det, tmp_path):
 
 
 def test_strict_mode_exits_nonzero_on_direct_fix(det, tmp_path, monkeypatch):
+    # Block must exceed SMALL_BLOCK_THRESHOLD to get direct-fix action.
     block = """\
     u_char *buf = ngx_palloc(r->pool, len);
     if (buf == NULL) {
@@ -220,6 +223,7 @@ def test_strict_mode_exits_nonzero_on_direct_fix(det, tmp_path, monkeypatch):
     }
     ngx_memcpy(buf, src, len);
     out = buf;
+    extra_line_to_exceed_threshold = 1;
     """
     src = f"""
     void f(void) {{
