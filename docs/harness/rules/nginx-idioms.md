@@ -128,6 +128,20 @@ Required:
   should flag both adjacent duplicates (3+ identical consecutive lines
   immediately repeated) and non-adjacent duplicates (5+ identical
   consecutive lines appearing elsewhere in the same file).
+- **Semantic-equivalence requirement for duplicate consolidation**: When
+  consolidating two code branches into a shared path (for example merging
+  `if (zrc == Z_OK) { ... }` and `if (zrc == Z_BUF_ERROR) { ... }` into
+  a single `if (zrc == Z_OK || zrc == Z_BUF_ERROR)` block), verify that
+  the two branches are truly semantically equivalent before merging.
+  Branches that share the same *shape* but differ in error classification,
+  log label, retry semantics, or side effects must not be collapsed into
+  a single path — the apparent duplication encodes a real semantic
+  distinction.  Before consolidating, document: (a) what the two branches
+  share (control flow, resource handling), and (b) how they differ (error
+  code, log label, state transition).  If (b) is non-empty, keep the
+  branches separate or parameterize the difference rather than collapsing
+  it.  A consolidated branch that silently merges distinct error
+  categories is a correctness bug, not a cleanup.
 - CI configuration should flag diffs exceeding 100 lines for mandatory review
   (not auto-merge).
 - After rebasing or cherry-picking, run `make test-nginx-unit` (or the
