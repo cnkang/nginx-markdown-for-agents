@@ -151,7 +151,7 @@ ngx_http_markdown_plan_save_modify_undo(
     ngx_http_markdown_plan_undo_t *undo, ngx_uint_t op_type,
     ngx_table_elt_t *h)
 {
-    undo->op_type = op_type;
+    undo->op_type = (uint8_t) op_type;
     undo->header = h;
     undo->orig_hash = h->hash;
     undo->orig_value = h->value;
@@ -199,7 +199,7 @@ static void
 ngx_http_markdown_plan_set_noop_undo(ngx_http_markdown_plan_undo_t *undo,
     ngx_uint_t op_type)
 {
-    undo->op_type = op_type;
+    undo->op_type = (uint8_t) op_type;
     undo->header = NULL;
     undo->orig_hash = 0;
     undo->orig_value.data = NULL;
@@ -252,19 +252,18 @@ ngx_http_markdown_plan_for_each_header_named(ngx_http_request_t *r,
         headers = part->elts;
 
         for (ngx_uint_t i = 0; i < part->nelts; i++) {
-            if (headers[i].hash == 0 || headers[i].key.data == NULL) {
+            if (headers[i].hash == 0
+                || headers[i].key.data == NULL
+                || headers[i].key.len != name_len
+                || !ngx_http_markdown_plan_name_eq(headers[i].key.data,
+                                                   name, name_len))
+            {
                 continue;
             }
 
-            if (headers[i].key.len == name_len
-                && ngx_http_markdown_plan_name_eq(headers[i].key.data,
-                                                  name,
-                                                  name_len))
-            {
-                rc = visitor(&headers[i], ctx);
-                if (rc != NGX_OK) {
-                    return rc;
-                }
+            rc = visitor(&headers[i], ctx);
+            if (rc != NGX_OK) {
+                return rc;
             }
         }
 

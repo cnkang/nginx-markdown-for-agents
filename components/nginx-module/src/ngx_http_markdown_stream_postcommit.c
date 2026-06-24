@@ -54,7 +54,7 @@ ngx_http_markdown_stream_postcommit_space(u_char ch);
 
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_handle_send_result(
-    ngx_http_request_t *r, ngx_int_t rc, const char *label);
+    ngx_http_request_t *r, ngx_int_t rc);
 
 
 /*
@@ -135,8 +135,7 @@ ngx_http_markdown_stream_postcommit_safe_finish(
 
     /* No Rust handle: send terminal chain (empty last_buf) */
     rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
-    rc = ngx_http_markdown_stream_postcommit_handle_send_result(r, rc,
-        "terminal chain pending (NGX_AGAIN)");
+    rc = ngx_http_markdown_stream_postcommit_handle_send_result(r, rc);
     if (rc != NGX_OK && rc != NGX_DONE) {
         return rc;
     }
@@ -208,8 +207,7 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
 
         markdown_streaming_output_free(close_data, close_len);
 
-        rc = ngx_http_markdown_stream_postcommit_handle_send_result(r, rc,
-            "closing bytes pending (NGX_AGAIN)");
+        rc = ngx_http_markdown_stream_postcommit_handle_send_result(r, rc);
         if (rc != NGX_OK && rc != NGX_DONE) {
             return rc;
         }
@@ -221,8 +219,7 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
     }
 
     rc = ngx_http_markdown_stream_postcommit_send_terminal(r, ctx);
-    rc = ngx_http_markdown_stream_postcommit_handle_send_result(r, rc,
-        "terminal chain pending (NGX_AGAIN), no closing bytes path");
+    rc = ngx_http_markdown_stream_postcommit_handle_send_result(r, rc);
     if (rc != NGX_OK && rc != NGX_DONE) {
         return rc;
     }
@@ -648,11 +645,12 @@ ngx_http_markdown_stream_postcommit_send_closing(
  */
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_handle_send_result(
-    ngx_http_request_t *r, ngx_int_t rc, const char *label)
+    ngx_http_request_t *r, ngx_int_t rc)
 {
     if (rc == NGX_AGAIN) {
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "markdown postcommit safe_finish: %s", label);
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                       "markdown postcommit safe_finish: "
+                       "downstream backpressure");
         return NGX_AGAIN;
     }
 
