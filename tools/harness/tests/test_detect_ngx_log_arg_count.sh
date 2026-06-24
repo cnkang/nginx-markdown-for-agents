@@ -114,6 +114,8 @@ void test(void) {
                    "markdown: etag: \"%V\"", &r->headers_out.etag->value);
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "markdown: literal arg=%s", "100% done");
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "markdown: key,value)=%d", value);
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                     "markdown: size=%uz, count=%ui", size, count);
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
