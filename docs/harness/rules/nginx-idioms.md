@@ -228,7 +228,7 @@ Required:
   `text/markdown;\tcharset=utf-8` with a tab after the semicolon; rejecting
   HTAB causes false-negative eligibility decisions.
 - Exclude trailing OWS after the parameter value.  A Content-Type like
-  `text/markdown; charset=utf-8 ` (trailing space) must not fail the
+  `text/markdown; charset=utf-8` (trailing space) must not fail the
   charset check — strip trailing OWS before comparing the parameter
   value.
 - When adding or modifying a Content-Type parser, test with both SP and
