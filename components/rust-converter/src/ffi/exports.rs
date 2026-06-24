@@ -470,11 +470,7 @@ pub unsafe extern "C" fn markdown_build_header_plan(
     // local variables.  After catch_unwind returns Ok, fields are written
     // atomically so a panic cannot leave the output struct partially updated.
     let outcome = panic::catch_unwind(panic::AssertUnwindSafe(
-        || -> (
-            *mut FFIHeaderPlanHandle,
-            *const FFIHeaderEntry,
-            usize,
-        ) {
+        || -> (*mut FFIHeaderPlanHandle, *const FFIHeaderEntry, usize) {
             let ct = if content_type.is_null() || content_type_len == 0 {
                 "text/markdown; charset=utf-8"
             } else {
@@ -559,8 +555,7 @@ pub unsafe extern "C" fn markdown_build_header_plan(
                 (std::ptr::null_mut(), std::ptr::null(), 0)
             } else {
                 let entries_ptr = owned.entries.as_ptr();
-                let handle =
-                    Box::into_raw(Box::new(owned)) as *mut FFIHeaderPlanHandle;
+                let handle = Box::into_raw(Box::new(owned)) as *mut FFIHeaderPlanHandle;
                 (handle, entries_ptr, count)
             }
         },
