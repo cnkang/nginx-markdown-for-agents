@@ -121,6 +121,8 @@ static ngx_int_t
 ngx_http_markdown_plan_validate_entry(ngx_http_request_t *r,
     const FFIHeaderEntry *entry)
 {
+    (void) r;
+
     if (entry->key == NULL || entry->key_len == 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: plan entry has NULL/empty key");
@@ -371,6 +373,28 @@ typedef struct {
     ngx_uint_t                              saved_count;
 } ngx_http_markdown_plan_delete_all_ctx_t;
 
+#ifdef NGX_HTTP_MARKDOWN_HEADER_PLAN_TEST_HOOKS
+static ngx_int_t ngx_http_markdown_plan_test_delete_all_visitor_hook(
+    ngx_table_elt_t *h, void *ctx);
+#endif
+
+
+static void
+ngx_http_markdown_plan_restore_delete_all_saved(
+    ngx_http_markdown_plan_delete_all_ctx_t *dctx)
+{
+    ngx_uint_t  j;
+
+    if (dctx->saved == NULL) {
+        return;
+    }
+
+    for (j = 0; j < dctx->saved_count; j++) {
+        dctx->saved[j].header->hash = dctx->saved[j].orig_hash;
+        dctx->saved[j].header->value = dctx->saved[j].orig_value;
+    }
+}
+
 
 /*
  * delete_all visitor: save the matching header's original state and
@@ -383,9 +407,7 @@ ngx_http_markdown_plan_delete_all_visitor(ngx_table_elt_t *h, void *ctx)
     ngx_http_markdown_plan_delete_all_ctx_t  *dctx = ctx;
 
     if (dctx->saved_count >= dctx->count) {
-        for (ngx_uint_t j = 0; j < dctx->saved_count; j++) {
-            dctx->saved[j].header->hash = dctx->saved[j].orig_hash;
-        }
+        ngx_http_markdown_plan_restore_delete_all_saved(dctx);
         return NGX_ERROR;
     }
 
@@ -394,6 +416,15 @@ ngx_http_markdown_plan_delete_all_visitor(ngx_table_elt_t *h, void *ctx)
     dctx->saved[dctx->saved_count].orig_value = h->value;
     dctx->saved_count++;
     h->hash = 0;
+
+#ifdef NGX_HTTP_MARKDOWN_HEADER_PLAN_TEST_HOOKS
+    if (ngx_http_markdown_plan_test_delete_all_visitor_hook(h, dctx)
+        != NGX_OK)
+    {
+        ngx_http_markdown_plan_restore_delete_all_saved(dctx);
+        return NGX_ERROR;
+    }
+#endif
 
     return NGX_OK;
 }

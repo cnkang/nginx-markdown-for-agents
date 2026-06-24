@@ -23,6 +23,8 @@
 #define NGX_OK         0
 #define NGX_ERROR     -1
 
+#define NGX_HTTP_MARKDOWN_HEADER_PLAN_TEST_HOOKS 1
+
 #undef NGX_LOG_ERR
 #define NGX_LOG_ERR    4
 #define NGX_LOG_DEBUG  8
@@ -41,6 +43,8 @@ struct ngx_connection_s {
 /* Pool stub */
 static u_char g_pool_buf[1024 * 256];
 static size_t g_pool_offset;
+static int g_palloc_fail_count;
+static int g_delete_all_visitor_fail_count;
 
 typedef struct ngx_pool_s {
     int dummy;
@@ -61,6 +65,12 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
     void *p;
     size_t aligned;
     (void) pool;
+    if (g_palloc_fail_count > 0) {
+        g_palloc_fail_count--;
+        if (g_palloc_fail_count == 0) {
+            return NULL;
+        }
+    }
     aligned = (size + 7) & ~(size_t)7;
     if (g_pool_offset + aligned > sizeof(g_pool_buf)) {
         return NULL;
@@ -216,6 +226,8 @@ setup_request(void)
     memset(g_headers, 0, sizeof(g_headers));
     g_header_count = 0;
     g_plan_freed = 0;
+    g_palloc_fail_count = 0;
+    g_delete_all_visitor_fail_count = 0;
 
     g_request.connection = &g_conn;
     g_request.pool = &g_pool;
@@ -237,6 +249,25 @@ add_existing_header(const char *name, const char *value)
     g_header_count++;
     g_request.headers_out.headers.part.nelts = g_header_count;
 }
+
+#ifdef NGX_HTTP_MARKDOWN_HEADER_PLAN_TEST_HOOKS
+static ngx_int_t
+ngx_http_markdown_plan_test_delete_all_visitor_hook(ngx_table_elt_t *h,
+    void *ctx)
+{
+    (void) h;
+    (void) ctx;
+
+    if (g_delete_all_visitor_fail_count > 0) {
+        g_delete_all_visitor_fail_count--;
+        if (g_delete_all_visitor_fail_count == 0) {
+            return NGX_ERROR;
+        }
+    }
+
+    return NGX_OK;
+}
+#endif
 
 #define apply_header_plan ngx_http_markdown_apply_header_plan
 #include "ngx_http_markdown_header_plan.c"
@@ -381,6 +412,68 @@ test_set_overwrite_existing(void)
                 "value should be updated to new-value");
 
     TEST_PASS("SET overwrite existing correct");
+}
+
+static void
+test_set_new_header_value_allocation_failure_cleans_up(void)
+{
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_SET,
+        (const uint8_t *)"X-Test-Header", 13,
+        (const uint8_t *)"some-value", 10 };
+
+    TEST_SUBSECTION("SET new header value allocation failure");
+
+    setup_request();
+    plan.handle = &handle;
+    plan.entries = &entry;
+    plan.count = 1;
+    g_palloc_fail_count = 3;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_ERROR,
+                "SET new header should fail when value allocation fails");
+    TEST_ASSERT(g_header_count == 1,
+                "failed SET may leave a single invalidated list entry");
+    TEST_ASSERT(g_headers[0].hash == 0,
+                "failed SET must invalidate the partial header");
+    TEST_ASSERT(count_active_headers((const u_char *)"X-Test-Header", 13) == 0,
+                "failed SET must not leave an active header");
+
+    TEST_PASS("SET new header failure cleans up partial state");
+}
+
+static void
+test_set_overwrite_existing_value_allocation_failure(void)
+{
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_SET,
+        (const uint8_t *)"X-Test-Header", 13,
+        (const uint8_t *)"new-value", 9 };
+    ngx_table_elt_t *h;
+
+    TEST_SUBSECTION("SET overwrite value allocation failure");
+
+    setup_request();
+    add_existing_header("X-Test-Header", "old-value");
+
+    plan.handle = &handle;
+    plan.entries = &entry;
+    plan.count = 1;
+    g_palloc_fail_count = 2;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_ERROR,
+                "SET overwrite should fail when value allocation fails");
+
+    h = find_header((const u_char *)"X-Test-Header", 13);
+    TEST_ASSERT(h != NULL, "header should still exist after rollback");
+    TEST_ASSERT(h->hash == 1, "header should remain active after rollback");
+    TEST_ASSERT(h->value.len == 9, "value length should remain original");
+    TEST_ASSERT(memcmp(h->value.data, "old-value", 9) == 0,
+                "value should be restored to old-value");
+
+    TEST_PASS("SET overwrite allocation failure rolls back");
 }
 
 static void
@@ -599,6 +692,39 @@ test_modify_existing(void)
 }
 
 static void
+test_modify_existing_value_allocation_failure(void)
+{
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_MODIFY,
+        (const uint8_t *)"Content-Length", 14,
+        (const uint8_t *)"42", 2 };
+    ngx_table_elt_t *h;
+
+    TEST_SUBSECTION("MODIFY value allocation failure");
+
+    setup_request();
+    add_existing_header("Content-Length", "1024");
+
+    plan.handle = &handle;
+    plan.entries = &entry;
+    plan.count = 1;
+    g_palloc_fail_count = 2;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_ERROR,
+                "MODIFY should fail when value allocation fails");
+
+    h = find_header((const u_char *)"Content-Length", 14);
+    TEST_ASSERT(h != NULL, "header should still exist after rollback");
+    TEST_ASSERT(h->hash == 1, "header should remain active after rollback");
+    TEST_ASSERT(h->value.len == 4, "value length should remain original");
+    TEST_ASSERT(memcmp(h->value.data, "1024", 4) == 0,
+                "value should be restored to original");
+
+    TEST_PASS("MODIFY allocation failure rolls back");
+}
+
+static void
 test_modify_nonexistent(void)
 {
     FFIHeaderPlan plan;
@@ -708,6 +834,34 @@ test_delete_all_removes_duplicate_headers(void)
     TEST_ASSERT(g_plan_freed == 1, "plan should be freed after success");
 
     TEST_PASS("DELETE_ALL removes duplicate headers");
+}
+
+static void
+test_delete_all_visitor_failure_restores_duplicate_headers(void)
+{
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_DELETE_ALL,
+        (const uint8_t *)"Content-Encoding", 16, NULL, 0 };
+
+    TEST_SUBSECTION("DELETE_ALL visitor failure restores duplicate headers");
+
+    setup_request();
+    add_existing_header("Content-Encoding", "gzip");
+    add_existing_header("Content-Encoding", "br");
+
+    plan.handle = &handle;
+    plan.entries = &entry;
+    plan.count = 1;
+    g_delete_all_visitor_fail_count = 1;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_ERROR,
+                "DELETE_ALL should fail when visitor fails");
+    TEST_ASSERT(count_active_headers((const u_char *)"Content-Encoding",
+                                     16) == 2,
+                "DELETE_ALL visitor failure must restore every header");
+
+    TEST_PASS("DELETE_ALL visitor failure restores state");
 }
 
 
@@ -949,6 +1103,8 @@ main(void)
     test_exceed_max_entries();
     test_set_new_header();
     test_set_overwrite_existing();
+    test_set_new_header_value_allocation_failure_cleans_up();
+    test_set_overwrite_existing_value_allocation_failure();
     test_set_content_type_no_list_entry();
     test_set_content_type_invalidates_stale_entry();
     test_set_content_type_invalidates_all_stale_entries();
@@ -957,9 +1113,11 @@ main(void)
     test_delete_nonexistent();
     test_modify_existing();
     test_modify_nonexistent();
+    test_modify_existing_value_allocation_failure();
     test_set_etag_placeholder_noop();
     test_unknown_op_type_rollback();
     test_delete_all_removes_duplicate_headers();
+    test_delete_all_visitor_failure_restores_duplicate_headers();
     test_delete_all_rollback_restores_duplicate_headers();
     test_delete_all_null_key_returns_error();
     test_set_empty_value();
