@@ -111,8 +111,9 @@ def _func_call_name(node: ast.AST) -> str | None:
     return None
 
 
-def _collect_validated_vars(tree: ast.AST) -> set[str]:
-    """Collect variable names assigned from a validation-helper call.
+def _collect_validated_vars(tree: ast.AST) -> dict[str, set[str]]:
+    """Collect variable names assigned from a validation-helper call,
+    keyed by enclosing scope.
 
     Handles::
 
@@ -126,9 +127,30 @@ def _collect_validated_vars(tree: ast.AST) -> set[str]:
 
     Only direct assignments at any scope are tracked; nested expressions
     and conditional reassignments are NOT modelled (conservative).
-    """
-    validated: set[str] = set()
 
+    Scope-qualified names ("scope:var") prevent a validated variable in
+    one function from incorrectly validating an unrelated variable with
+    the same name in a different function or scope.
+    """
+    parent_map: dict[int, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parent_map[id(child)] = node
+
+    scope_validated: dict[str, set[str]] = {}
+
+    _collect_direct_validation_assignments(tree, parent_map, scope_validated)
+    _propagate_path_wrappers(tree, parent_map, scope_validated)
+
+    return scope_validated
+
+
+def _collect_direct_validation_assignments(
+    tree: ast.AST,
+    parent_map: dict[int, ast.AST],
+    scope_validated: dict[str, set[str]],
+) -> None:
+    """Collect direct assignments from validation helpers."""
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign):
             continue
@@ -137,18 +159,24 @@ def _collect_validated_vars(tree: ast.AST) -> set[str]:
             continue
         name = _func_call_name(value)
         if name in VALIDATION_FUNCS:
+            scope = _find_scope(node, parent_map)
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    validated.add(target.id)
+                    scope_validated.setdefault(scope, set()).add(target.id)
 
-    # Propagate through Path(validated_var) wrappers.
+
+def _propagate_path_wrappers(
+    tree: ast.AST,
+    parent_map: dict[int, ast.AST],
+    scope_validated: dict[str, set[str]],
+) -> None:
+    """Propagate validated status through Path(validated_var) wrappers."""
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign):
             continue
         value = node.value
         if not isinstance(value, ast.Call):
             continue
-        # Match Path(x) or pathlib.Path(x)
         func = value.func
         is_path_ctor = (
             (isinstance(func, ast.Name) and func.id == "Path")
@@ -159,30 +187,42 @@ def _collect_validated_vars(tree: ast.AST) -> set[str]:
         if not value.args:
             continue
         arg = value.args[0]
-        if isinstance(arg, ast.Name) and arg.id in validated:
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    validated.add(target.id)
+        if isinstance(arg, ast.Name):
+            src_scope = _find_scope(arg, parent_map)
+            src_vars = scope_validated.get(src_scope, set())
+            if arg.id in src_vars or arg.id in {"REPO_ROOT", "repo_root"}:
+                dst_scope = _find_scope(node, parent_map)
+                scope_validated.setdefault(dst_scope, set()).add(arg.id)
 
-    return validated
+
+def _find_scope(node: ast.AST, parent_map: dict[int, ast.AST]) -> str:
+    """Find the enclosing scope name for a node."""
+    cur = node
+    while id(cur) in parent_map:
+        cur = parent_map[id(cur)]
+        if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return f"func:{cur.name}"
+        if isinstance(cur, ast.ClassDef):
+            return f"class:{cur.name}"
+    return "<module>"
 
 
 def _expr_derives_from_hardcoded(
     node: ast.AST, hardcoded: set[str],
 ) -> bool:
-    """Return True if *node* is an expression that derives from a
-    trusted hardcoded path source.
+    """Return True if *node* is an expression where ALL Name nodes are
+    trusted hardcoded path sources.
 
-    Recognizes ``__file__`` and any name already in *hardcoded*
-    appearing anywhere inside the expression tree (for example inside
-    ``Path(__file__).resolve().parents[2]`` or
-    ``REPO_ROOT / "tools" / "release-matrix.json"``).
+    Recognizes ``__file__`` and names already in *hardcoded*.  Returns
+    False if ANY Name node in the expression tree is not trusted,
+    ensuring mixed expressions like ``REPO_ROOT / user_input`` are
+    properly rejected.
     """
     for sub in ast.walk(node):
         if isinstance(sub, ast.Name):
-            if sub.id == "__file__" or sub.id in hardcoded:
-                return True
-    return False
+            if sub.id != "__file__" and sub.id not in hardcoded:
+                return False
+    return True
 
 
 def _collect_hardcoded_vars(tree: ast.AST) -> set[str]:
@@ -203,129 +243,89 @@ def _collect_hardcoded_vars(tree: ast.AST) -> set[str]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Assign):
             continue
-        value = node.value
-        # __file__
-        if isinstance(value, ast.Name) and value.id == "__file__":
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    hardcoded.add(target.id)
-            continue
-        # REPO_ROOT / repo_root used directly
-        if isinstance(value, ast.Name) and value.id in hardcoded:
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    hardcoded.add(target.id)
-            continue
-        # Any value derived from __file__ (e.g.
-        # ``Path(__file__).resolve().parents[2]``) is a trusted
-        # module-relative root.  Walk the expression and treat the
-        # target as hardcoded if ``__file__`` or a known hardcoded
-        # variable appears anywhere in the derivation tree.
-        if _expr_derives_from_hardcoded(value, hardcoded):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    hardcoded.add(target.id)
-            continue
-        # String literal assignment: out = "output.json"
-        # Literal strings are compile-time constants and cannot carry
-        # runtime taint, so variables holding them are trusted.
-        if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    hardcoded.add(target.id)
-            continue
-        # Path(__file__) or Path(REPO_ROOT) or REPO_ROOT / "x"
-        if isinstance(value, ast.Call):
-            func = value.func
-            is_path_ctor = (
-                (isinstance(func, ast.Name) and func.id == "Path")
-                or (isinstance(func, ast.Attribute) and func.attr == "Path")
-            )
-            if is_path_ctor and value.args:
-                arg = value.args[0]
-                if isinstance(arg, ast.Name) and arg.id in hardcoded:
-                    for target in node.targets:
-                        if isinstance(target, ast.Name):
-                            hardcoded.add(target.id)
-            continue
-        # BinOp: REPO_ROOT / "filename" / "sub" (possibly chained).
-        # The full expression is safe if the leftmost base is a
-        # hardcoded name and every right operand is a literal or
-        # hardcoded value.  We recurse so that
-        # ``RELEASE_MATRIX = ROOT / "tools" / "release-matrix.json"``
-        # is recognized as safe.
-        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Div):
-            if _is_safe_path_expr(value, hardcoded, hardcoded):
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        hardcoded.add(target.id)
+        _try_add_hardcoded(node, hardcoded)
 
     return hardcoded
 
 
+def _try_add_hardcoded(node: ast.Assign, hardcoded: set[str]) -> None:
+    """Try to add assignment targets to hardcoded set if value is safe."""
+    value = node.value
+
+    if isinstance(value, ast.Name) and value.id in ("__file__", *hardcoded):
+        _add_targets(node, hardcoded)
+        return
+
+    if _expr_derives_from_hardcoded(value, hardcoded):
+        _add_targets(node, hardcoded)
+        return
+
+    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+        _add_targets(node, hardcoded)
+        return
+
+    if isinstance(value, ast.Call):
+        _try_add_path_call_hardcoded(node, value, hardcoded)
+        return
+
+    if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Div):
+        if _is_safe_path_expr(value, {}, hardcoded):
+            _add_targets(node, hardcoded)
+
+
+def _try_add_path_call_hardcoded(
+    node: ast.Assign, value: ast.Call, hardcoded: set[str],
+) -> None:
+    """Add targets if Call is Path(hardcoded_var)."""
+    func = value.func
+    is_path_ctor = (
+        (isinstance(func, ast.Name) and func.id == "Path")
+        or (isinstance(func, ast.Attribute) and func.attr == "Path")
+    )
+    if is_path_ctor and value.args:
+        arg = value.args[0]
+        if isinstance(arg, ast.Name) and arg.id in hardcoded:
+            _add_targets(node, hardcoded)
+
+
+def _add_targets(node: ast.Assign, target_set: set[str]) -> None:
+    """Add all assignment target names to the set."""
+    for target in node.targets:
+        if isinstance(target, ast.Name):
+            target_set.add(target.id)
+
+
 def _is_safe_path_expr(
     node: ast.AST,
-    validated_vars: set[str],
+    validated_vars: dict[str, set[str]],
     hardcoded_vars: set[str],
+    scope: str = "<module>",
 ) -> bool:
     """Return True if the path expression is considered safe.
 
     Safe means: literal string, direct validation-helper call, a known
-    validated variable, a known hardcoded variable, a pytest fixture,
-    or a derived attribute (``.parent``, ``.name``) of a validated
-    variable.
+    validated variable (in the same scope), a known hardcoded variable,
+    a pytest fixture, or a derived attribute (``.parent``, ``.name``) of
+    a validated variable.
     """
-    # (a) Literal string or any constant.
     if isinstance(node, ast.Constant):
         return True
 
-    # (b) Direct call to a validation helper.
     if isinstance(node, ast.Call):
-        name = _func_call_name(node)
-        if name in VALIDATION_FUNCS:
-            return True
-        # Path(validated_var) or Path(hardcoded_var)
-        func = node.func
-        is_path_ctor = (
-            (isinstance(func, ast.Name) and func.id == "Path")
-            or (isinstance(func, ast.Attribute) and func.attr == "Path")
-        )
-        if is_path_ctor and node.args:
-            if _is_safe_path_expr(node.args[0], validated_vars, hardcoded_vars):
-                return True
-        return False
+        return _is_safe_call_expr(node, validated_vars, hardcoded_vars, scope)
 
-    # (c) Variable that was assigned from a validation helper.
     if isinstance(node, ast.Name):
-        if node.id in validated_vars or node.id in hardcoded_vars:
-            return True
-        # Pytest fixtures (tmp_path, tmpdir) are trusted test paths.
-        if node.id in PYTEST_FIXTURE_NAMES:
-            return True
-        return False
+        return _is_safe_name_expr(node, validated_vars, hardcoded_vars, scope)
 
-    # (d) Derived attribute of a validated variable:
-    #     validated_var.parent, validated_var.name, etc.
     if isinstance(node, ast.Attribute):
-        if node.attr in DERIVED_ATTRS:
-            if _is_safe_path_expr(node.value, validated_vars, hardcoded_vars):
-                return True
-        return False
+        return _is_safe_attr_expr(node, validated_vars, hardcoded_vars, scope)
 
-    # (e) BinOp like REPO_ROOT / "file" or tmp_path / "output.json".
-    #     BOTH sides must be safe: left is a trusted root (hardcoded var,
-    #     validated var, pytest fixture, literal) AND right is a literal
-    #     string, a validated/hardcoded var, or a safe derived value.
-    #     Requiring only the left side to be safe would let
-    #     ``tmp_path / user_input`` sail through despite ``user_input``
-    #     being untrusted — a real CWE-22 taint source.
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         return (
-            _is_safe_path_expr(node.left, validated_vars, hardcoded_vars)
-            and _is_safe_path_expr(node.right, validated_vars, hardcoded_vars)
+            _is_safe_path_expr(node.left, validated_vars, hardcoded_vars, scope)
+            and _is_safe_path_expr(node.right, validated_vars, hardcoded_vars, scope)
         )
 
-    # JoinedStr (f-string) with only literal parts.
     if isinstance(node, ast.JoinedStr):
         return all(
             isinstance(v, ast.Constant)
@@ -335,9 +335,59 @@ def _is_safe_path_expr(
     return False
 
 
+def _is_safe_call_expr(
+    node: ast.Call,
+    validated_vars: dict[str, set[str]],
+    hardcoded_vars: set[str],
+    scope: str,
+) -> bool:
+    """Return True if a Call node is a safe path expression."""
+    name = _func_call_name(node)
+    if name in VALIDATION_FUNCS:
+        return True
+    func = node.func
+    is_path_ctor = (
+        (isinstance(func, ast.Name) and func.id == "Path")
+        or (isinstance(func, ast.Attribute) and func.attr == "Path")
+    )
+    if is_path_ctor and node.args:
+        if _is_safe_path_expr(node.args[0], validated_vars, hardcoded_vars, scope):
+            return True
+    return False
+
+
+def _is_safe_name_expr(
+    node: ast.Name,
+    validated_vars: dict[str, set[str]],
+    hardcoded_vars: set[str],
+    scope: str,
+) -> bool:
+    """Return True if a Name node is a safe path expression."""
+    scope_vars = validated_vars.get(scope, set())
+    module_vars = validated_vars.get("<module>", set())
+    if node.id in scope_vars or node.id in module_vars or node.id in hardcoded_vars:
+        return True
+    if node.id in PYTEST_FIXTURE_NAMES:
+        return True
+    return False
+
+
+def _is_safe_attr_expr(
+    node: ast.Attribute,
+    validated_vars: dict[str, set[str]],
+    hardcoded_vars: set[str],
+    scope: str,
+) -> bool:
+    """Return True if an Attribute node is a safe path expression."""
+    if node.attr in DERIVED_ATTRS:
+        if _is_safe_path_expr(node.value, validated_vars, hardcoded_vars, scope):
+            return True
+    return False
+
+
 def _find_open_calls(
     tree: ast.AST,
-    validated_vars: set[str],
+    validated_vars: dict[str, set[str]],
     hardcoded_vars: set[str],
     rel: str,
     strict: bool,
@@ -350,33 +400,30 @@ def _find_open_calls(
     errors: list[str] = []
     warnings: list[str] = []
 
+    parent_map: dict[int, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parent_map[id(child)] = node
+
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
 
         func = node.func
-        is_open = False
+        is_open = (
+            (isinstance(func, ast.Name) and func.id == "open")
+            or (isinstance(func, ast.Attribute) and func.attr == "open")
+        )
 
-        # builtin open(...)
-        if isinstance(func, ast.Name) and func.id == "open":
-            is_open = True
-        # something.open(...) — attribute access
-        elif isinstance(func, ast.Attribute) and func.attr == "open":
-            is_open = True
-
-        if not is_open:
-            continue
-
-        if not node.args:
-            # open() with no args — not a file-open we care about.
+        if not is_open or not node.args:
             continue
 
         path_arg = node.args[0]
+        scope = _find_scope(node, parent_map)
 
-        if _is_safe_path_expr(path_arg, validated_vars, hardcoded_vars):
+        if _is_safe_path_expr(path_arg, validated_vars, hardcoded_vars, scope):
             continue
 
-        # Not safe → finding.
         expr_str = _unparse(path_arg)
         lineno = node.lineno
         detail = (

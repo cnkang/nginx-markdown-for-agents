@@ -134,7 +134,7 @@ while IFS= read -r src_file; do
                 ch = substr(lhs, i, 1)
                 if (ch == ")") depth++
                 if (ch == "(") depth--
-                if (depth == 0 && ch == " " || ch == "\t") {
+                if (depth == 0 && (ch == " " || ch == "\t")) {
                     start = i + 1
                     break
                 }

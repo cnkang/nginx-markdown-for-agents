@@ -104,9 +104,7 @@ def _is_noise_line(line: str) -> bool:
         return True
     if stripped in ("{", "}", "};"):
         return True
-    if stripped.startswith("/*") or stripped.startswith("*") or stripped.startswith("//"):
-        return True
-    if stripped.startswith("#"):  # preprocessor directives
+    if stripped.startswith(("/*", "*", "//", "#")):
         return True
     return False
 
@@ -177,21 +175,7 @@ def _find_adjacent_duplicates(
 
     i = 0
     while i < n:
-        # Try block sizes from ADJACENT_MIN_LINES up to a reasonable max
-        best_block = 0
-        for block_size in range(ADJACENT_MIN_LINES, min(50, (n - i) // 2) + 1):
-            block_a = [lines[j].strip() for j in range(i, i + block_size)]
-            block_b_start = i + block_size
-            block_b = [
-                lines[j].strip()
-                for j in range(block_b_start, block_b_start + block_size)
-            ]
-            # Skip if any line in block is noise
-            if any(_is_noise_line(l) for l in block_a):
-                break
-            if block_a == block_b:
-                best_block = block_size
-
+        best_block = _find_best_adjacent_block(lines, i, n)
         if best_block >= ADJACENT_MIN_LINES:
             content_preview = lines[i].strip()
             if len(content_preview) > 60:
@@ -201,12 +185,88 @@ def _find_adjacent_duplicates(
                 f"({best_block} lines immediately repeated, merge residual "
                 f"per Rule 31): first line: {content_preview}"
             )
-            # Skip past both blocks to avoid overlapping reports
             i += best_block * 2
         else:
             i += 1
 
     return warnings
+
+
+def _find_best_adjacent_block(
+    lines: list[str], start: int, n: int,
+) -> int:
+    """Find the largest adjacent duplicate block starting at 'start'.
+
+    Returns the block size (>= ADJACENT_MIN_LINES) or 0 if none found.
+    """
+    best_block = 0
+    for block_size in range(ADJACENT_MIN_LINES, min(50, (n - start) // 2) + 1):
+        block_a = [lines[j].strip() for j in range(start, start + block_size)]
+        block_b_start = start + block_size
+        block_b = [
+            lines[j].strip()
+            for j in range(block_b_start, block_b_start + block_size)
+        ]
+        if any(_is_noise_line(line) for line in block_a):
+            break
+        if block_a == block_b:
+            best_block = block_size
+    return best_block
+
+
+def _build_block_map(
+    stripped: list[str], n: int,
+) -> dict[tuple[str, ...], list[int]]:
+    """Build a map from block-tuple to list of starting line indices."""
+    block_map: dict[tuple[str, ...], list[int]] = {}
+    for i in range(n - NON_ADJACENT_MIN_LINES + 1):
+        block = tuple(stripped[i : i + NON_ADJACENT_MIN_LINES])
+        if all(_is_noise_line(line) for line in block):
+            continue
+        noise_count = sum(1 for line in block if _is_noise_line(line))
+        if noise_count > 2:
+            continue
+        block_map.setdefault(block, []).append(i)
+    return block_map
+
+
+def _has_non_adjacent_pair(starts: list[int]) -> bool:
+    """Return True if any pair of starts is non-adjacent."""
+    for a_idx in range(len(starts)):
+        for b_idx in range(a_idx + 1, len(starts)):
+            if starts[b_idx] != starts[a_idx] + NON_ADJACENT_MIN_LINES:
+                return True
+    return False
+
+
+def _extend_block_length(
+    stripped: list[str], starts: list[int], n: int,
+) -> int:
+    """Extend block to maximal common length across all occurrences."""
+    max_len = NON_ADJACENT_MIN_LINES
+    min_start = min(starts)
+    for ext in range(NON_ADJACENT_MIN_LINES + 1, n - min_start + 1):
+        ext_blocks = set()
+        valid = True
+        for s in starts:
+            if s + ext > n:
+                valid = False
+                break
+            ext_blocks.add(tuple(stripped[s : s + ext]))
+        if not valid or len(ext_blocks) != 1:
+            break
+        max_len = ext
+    return max_len
+
+
+def _is_range_overlapping(
+    s: int, end: int, reported: list[tuple[int, int]],
+) -> bool:
+    """Return True if [s, end] overlaps any reported range."""
+    return any(
+        not (end < r_start or s > r_end)
+        for r_start, r_end in reported
+    )
 
 
 def _find_non_adjacent_duplicates(
@@ -231,118 +291,74 @@ def _find_non_adjacent_duplicates(
     if n < NON_ADJACENT_MIN_LINES:
         return infos
 
-    # Build stripped lines, preserving original line numbers
     stripped = [lines[i].strip() for i in range(n)]
-
-    # Map from block-tuple → list of starting line indices
-    block_map: dict[tuple[str, ...], list[int]] = {}
-
-    for i in range(n - NON_ADJACENT_MIN_LINES + 1):
-        block = tuple(
-            stripped[i : i + NON_ADJACENT_MIN_LINES]
-        )
-        # Skip blocks that are entirely noise
-        if all(_is_noise_line(l) for l in block):
-            continue
-        # Skip blocks with more than 2 noise lines (mostly structural)
-        noise_count = sum(1 for l in block if _is_noise_line(l))
-        if noise_count > 2:
-            continue
-
-        block_map.setdefault(block, []).append(i)
-
-    # Report blocks that appear more than once
+    block_map = _build_block_map(stripped, n)
     reported_ranges: list[tuple[int, int]] = []
 
-    for block, starts in block_map.items():
+    for starts in block_map.values():
         if len(starts) < 2:
             continue
-        # Filter out adjacent duplicates already reported by the
-        # adjacent detector: only report if any pair is non-adjacent
-        has_non_adjacent = False
-        for a_idx in range(len(starts)):
-            for b_idx in range(a_idx + 1, len(starts)):
-                a_start = starts[a_idx]
-                b_start = starts[b_idx]
-                # Non-adjacent = the second block does not start
-                # immediately after the first block ends
-                if b_start != a_start + NON_ADJACENT_MIN_LINES:
-                    has_non_adjacent = True
-                    break
-            if has_non_adjacent:
-                break
-
-        if not has_non_adjacent:
+        if not _has_non_adjacent_pair(starts):
             continue
 
-        # Extend each block to its maximal length (find the longest
-        # common prefix among all occurrences).  ext is the total block
-        # length being tested; we track the largest that still matches.
-        max_len = NON_ADJACENT_MIN_LINES
-        min_start = min(starts)
-        for ext in range(NON_ADJACENT_MIN_LINES + 1, n - min_start + 1):
-            ext_blocks = set()
-            valid = True
-            for s in starts:
-                if s + ext > n:
-                    valid = False
-                    break
-                ext_blocks.add(tuple(stripped[s : s + ext]))
-            if not valid or len(ext_blocks) != 1:
-                break
-            max_len = ext
+        total_len = _extend_block_length(stripped, starts, n)
 
-        total_len = max_len
-
-        # Check for overlap with already-reported ranges
         for s in starts:
             end = s + total_len - 1
-            if any(
-                not (end < r_start or s > r_end)
-                for r_start, r_end in reported_ranges
-            ):
+            if _is_range_overlapping(s, end, reported_ranges):
                 continue
 
-            # Report each non-adjacent occurrence
-            for s2 in starts:
-                if s2 == s:
-                    continue
-                if abs(s2 - s) < total_len:
-                    continue  # overlapping occurrence, skip
-                end2 = s2 + total_len - 1
-                if any(
-                    not (end2 < r_start or s2 > r_end)
-                    for r_start, r_end in reported_ranges
-                ):
-                    continue
-
-                content_preview = lines[s].strip()
-                if len(content_preview) > 60:
-                    content_preview = content_preview[:57] + "..."
-
-                # Classify the duplicate by risk semantics
-                block_content = [stripped[s + j] for j in range(total_len)]
-                category, action = _classify_duplicate(block_content)
-
-                # Determine output level based on action
-                if action == "direct-fix":
-                    level = "WARNING"
-                elif action == "needs-human-review":
-                    level = "REVIEW"
-                else:
-                    level = "INFO"
-
-                infos.append(
-                    f"  {level:7s} {rel}:{s + 1} — duplicate block "
-                    f"({total_len} lines) also at line {s2 + 1} "
-                    f"[{category}] ({action}): "
-                    f"first line: {content_preview}"
-                )
-                reported_ranges.append((s, s + total_len - 1))
-                reported_ranges.append((s2, s2 + total_len - 1))
-                break
+            _report_non_adjacent_occurrences(
+                lines, stripped, starts, s, total_len,
+                rel, reported_ranges, infos,
+            )
 
     return infos
+
+
+def _report_non_adjacent_occurrences(
+    lines: list[str],
+    stripped: list[str],
+    starts: list[int],
+    s: int,
+    total_len: int,
+    rel: str,
+    reported_ranges: list[tuple[int, int]],
+    infos: list[str],
+) -> None:
+    """Report non-adjacent duplicate occurrences for a given block."""
+    for s2 in starts:
+        if s2 == s:
+            continue
+        if abs(s2 - s) < total_len:
+            continue
+        end2 = s2 + total_len - 1
+        if _is_range_overlapping(s2, end2, reported_ranges):
+            continue
+
+        content_preview = lines[s].strip()
+        if len(content_preview) > 60:
+            content_preview = content_preview[:57] + "..."
+
+        block_content = [stripped[s + j] for j in range(total_len)]
+        category, action = _classify_duplicate(block_content)
+
+        if action == "direct-fix":
+            level = "WARNING"
+        elif action == "needs-human-review":
+            level = "REVIEW"
+        else:
+            level = "INFO"
+
+        infos.append(
+            f"  {level:7s} {rel}:{s + 1} — duplicate block "
+            f"({total_len} lines) also at line {s2 + 1} "
+            f"[{category}] ({action}): "
+            f"first line: {content_preview}"
+        )
+        reported_ranges.append((s, s + total_len - 1))
+        reported_ranges.append((s2, s2 + total_len - 1))
+        break
 
 
 def check_file(filepath: Path) -> tuple[list[str], list[str]]:
@@ -373,6 +389,103 @@ def check_file(filepath: Path) -> tuple[list[str], list[str]]:
     infos = _find_non_adjacent_duplicates(lines, rel)
 
     return warnings, infos
+
+
+def _count_by_category(
+    all_warnings: list[str],
+    all_reviews: list[str],
+    all_infos: list[str],
+) -> dict[str, int]:
+    """Count findings by risk-semantic category."""
+    return {
+        "memory": sum(1 for m in all_warnings if "[memory]" in m),
+        "rollback": sum(1 for m in all_warnings if "[rollback]" in m),
+        "ffi": sum(1 for m in all_warnings if "[ffi-validation]" in m),
+        "postcommit": sum(1 for m in all_warnings if "[postcommit]" in m),
+        "adjacent": len([w for w in all_warnings if "adjacent" in w]),
+        "state": sum(1 for m in all_reviews if "[state-machine]" in m),
+        "struct": sum(1 for m in all_reviews if "[structural]" in m),
+        "log": sum(1 for m in all_infos if "[log-only]" in m),
+        "sig": sum(1 for m in all_infos if "[signature]" in m),
+    }
+
+
+def _print_summary_and_verdict(
+    all_warnings: list[str],
+    all_reviews: list[str],
+    all_infos: list[str],
+    strict: bool,
+) -> int:
+    """Print the risk-semantic summary and return exit code.
+
+    Returns 1 in strict mode when direct-fix warnings or adjacent merge
+    residuals are found; 0 otherwise.
+    """
+    counts = _count_by_category(all_warnings, all_reviews, all_infos)
+    n_direct_fix = (
+        counts["memory"] + counts["rollback"]
+        + counts["ffi"] + counts["postcommit"]
+    )
+
+    print("", file=sys.stderr)
+    print("=== Summary (by risk semantics) ===", file=sys.stderr)
+    print(f"  memory (direct-fix):           {counts['memory']}", file=sys.stderr)
+    print(f"  rollback (direct-fix):         {counts['rollback']}", file=sys.stderr)
+    print(f"  ffi-validation (direct-fix):   {counts['ffi']}", file=sys.stderr)
+    print(f"  postcommit (direct-fix):       {counts['postcommit']}", file=sys.stderr)
+    print(f"  state-machine (human-review):   {counts['state']}", file=sys.stderr)
+    print(f"  structural (human-review):      {counts['struct']}", file=sys.stderr)
+    print(f"  log-only (ignore-by-rule):      {counts['log']}", file=sys.stderr)
+    print(f"  signature (ignore-by-rule):     {counts['sig']}", file=sys.stderr)
+    print(f"  adjacent (merge residual):      {counts['adjacent']}", file=sys.stderr)
+    print("", file=sys.stderr)
+
+    _print_verdict_line(
+        all_warnings, all_reviews, all_infos,
+        n_direct_fix, counts["adjacent"],
+    )
+
+    if strict and (n_direct_fix > 0 or counts["adjacent"] > 0):
+        print(
+            f"FAIL (strict): {n_direct_fix} direct-fix warning(s) and "
+            f"{counts['adjacent']} adjacent merge-residual duplicate(s) — "
+            f"fix before merge (Rule 31)",
+            file=sys.stderr,
+        )
+        return 1
+
+    return 0
+
+
+def _print_verdict_line(
+    all_warnings: list[str],
+    all_reviews: list[str],
+    all_infos: list[str],
+    n_direct_fix: int,
+    n_adjacent: int,
+) -> None:
+    """Print the single verdict line based on finding counts."""
+    if all_warnings:
+        print(
+            f"PASS with warnings: {len(all_warnings)} warning(s) "
+            f"({n_adjacent} adjacent merge-residual, {n_direct_fix} "
+            f"direct-fix) — review recommended (Rule 31)",
+            file=sys.stderr,
+        )
+    elif all_reviews:
+        print(
+            f"PASS with reviews: {len(all_reviews)} review(s) — "
+            f"manual review recommended (Rule 31)",
+            file=sys.stderr,
+        )
+    elif all_infos:
+        print(
+            f"PASS with info: {len(all_infos)} non-adjacent duplicate "
+            f"block(s) — consider refactoring (Rule 31)",
+            file=sys.stderr,
+        )
+    else:
+        print("PASS: no duplicate code blocks found", file=sys.stderr)
 
 
 def main() -> int:
@@ -443,71 +556,9 @@ def main() -> int:
     for i in all_infos:
         print(i, file=sys.stderr)
 
-    # Count by category
-    n_memory = sum(1 for m in all_warnings if "[memory]" in m)
-    n_rollback = sum(1 for m in all_warnings if "[rollback]" in m)
-    n_ffi = sum(1 for m in all_warnings if "[ffi-validation]" in m)
-    n_postcommit = sum(1 for m in all_warnings if "[postcommit]" in m)
-    n_adjacent = len([w for w in all_warnings if "adjacent" in w])
-    n_direct_fix = n_memory + n_rollback + n_ffi + n_postcommit
-    n_state = sum(1 for m in all_reviews if "[state-machine]" in m)
-    n_struct = sum(1 for m in all_reviews if "[structural]" in m)
-    n_log = sum(1 for m in all_infos if "[log-only]" in m)
-    n_sig = sum(1 for m in all_infos if "[signature]" in m)
-
-    print("", file=sys.stderr)
-    print("=== Summary (by risk semantics) ===", file=sys.stderr)
-    print(f"  memory (direct-fix):           {n_memory}", file=sys.stderr)
-    print(f"  rollback (direct-fix):         {n_rollback}", file=sys.stderr)
-    print(f"  ffi-validation (direct-fix):   {n_ffi}", file=sys.stderr)
-    print(f"  postcommit (direct-fix):       {n_postcommit}", file=sys.stderr)
-    print(f"  state-machine (human-review):   {n_state}", file=sys.stderr)
-    print(f"  structural (human-review):      {n_struct}", file=sys.stderr)
-    print(f"  log-only (ignore-by-rule):      {n_log}", file=sys.stderr)
-    print(f"  signature (ignore-by-rule):     {n_sig}", file=sys.stderr)
-    print(f"  adjacent (merge residual):      {n_adjacent}", file=sys.stderr)
-    print("", file=sys.stderr)
-
-    # Determine the verdict considering all three buckets (warnings,
-    # reviews, infos).  Previously reviews were dropped from the
-    # verdict so a file with only REVIEW findings printed "PASS: no
-    # duplicate code blocks found" — a misleading false-negative
-    # message.
-    n_total = (
-        len(all_warnings) + len(all_reviews) + len(all_infos)
+    return _print_summary_and_verdict(
+        all_warnings, all_reviews, all_infos, args.strict,
     )
-    if all_warnings:
-        print(
-            f"PASS with warnings: {len(all_warnings)} warning(s) "
-            f"({n_adjacent} adjacent merge-residual, {n_direct_fix} "
-            f"direct-fix) — review recommended (Rule 31)",
-            file=sys.stderr,
-        )
-    elif all_reviews:
-        print(
-            f"PASS with reviews: {len(all_reviews)} review(s) — "
-            f"manual review recommended (Rule 31)",
-            file=sys.stderr,
-        )
-    elif all_infos:
-        print(
-            f"PASS with info: {len(all_infos)} non-adjacent duplicate "
-            f"block(s) — consider refactoring (Rule 31)",
-            file=sys.stderr,
-        )
-    else:
-        print("PASS: no duplicate code blocks found", file=sys.stderr)
-
-    if args.strict and (n_direct_fix > 0 or n_adjacent > 0):
-        print(
-            f"FAIL (strict): {n_direct_fix} direct-fix warning(s) and "
-            f"{n_adjacent} adjacent merge-residual duplicate(s) — "
-            f"fix before merge (Rule 31)",
-            file=sys.stderr,
-        )
-        return 1
-
-    return 0
 
 
 if __name__ == "__main__":

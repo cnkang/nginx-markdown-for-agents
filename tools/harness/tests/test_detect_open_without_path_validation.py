@@ -143,6 +143,7 @@ def test_unvalidated_param_is_unsafe(det):
             pass
     """
     errors, warnings = _check_source(det, src)
+    assert errors == []
     assert len(warnings) == 1
     assert "open(path)" in warnings[0]
 

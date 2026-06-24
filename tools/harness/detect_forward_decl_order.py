@@ -129,6 +129,33 @@ def _parse_typedef_lines(lines: list[str]) -> dict[str, int]:
     return typedefs
 
 
+def _join_multiline_prototype(
+    lines: list[str], start: int, n: int,
+) -> tuple[int, str] | None:
+    """Join a multi-line prototype starting at 'start' into a single string.
+
+    Returns (end_index, joined_line) or None if not a real prototype.
+    The end_index is the line after the last continuation line.
+    """
+    joined = lines[start].rstrip()
+    j = start + 1
+    while j < n:
+        cont = lines[j].rstrip()
+        if COMMENT_RE.search(cont):
+            j += 1
+            continue
+        joined += " " + cont
+        if ");" in cont or joined.rstrip().endswith(");"):
+            break
+        j += 1
+        if j - start > 40:
+            break
+    m = FUNC_DECL_RE.search(joined)
+    if m:
+        return (j + 1, joined)
+    return None
+
+
 def _parse_func_decls(
     lines: list[str],
 ) -> list[tuple[int, str, list[str]]]:
@@ -156,12 +183,10 @@ def _parse_func_decls(
         if COMMENT_RE.search(line):
             i += 1
             continue
-        # Skip preprocessor lines
         if line.lstrip().startswith("#"):
             i += 1
             continue
 
-        # Try single-line match first
         m = FUNC_DECL_RE.search(line)
         if m:
             func_name = m.group(2)
@@ -171,36 +196,18 @@ def _parse_func_decls(
             i += 1
             continue
 
-        # Multi-line prototype: a line that opens a paren but does not
-        # close the declaration on the same line.  Join continuation
-        # lines until we hit ");".
         if FUNC_DECL_START_RE.search(line):
-            start = i
-            joined = line.rstrip()
-            j = i + 1
-            while j < n:
-                cont = lines[j].rstrip()
-                # Skip comment-only continuation lines
-                if COMMENT_RE.search(cont):
-                    j += 1
+            result = _join_multiline_prototype(lines, i, n)
+            if result:
+                j, joined = result
+                m = FUNC_DECL_RE.search(joined)
+                if m:
+                    func_name = m.group(2)
+                    params = m.group(3)
+                    param_types = list(PARAM_TYPE_RE.findall(params))
+                    decls.append((i + 1, func_name, param_types))
+                    i = j
                     continue
-                joined += " " + cont
-                # Stop once we have a terminating ");"
-                if ");" in cont or joined.rstrip().endswith(");"):
-                    break
-                j += 1
-                # Safety bound: don't join more than 40 lines
-                if j - start > 40:
-                    break
-            m = FUNC_DECL_RE.search(joined)
-            if m:
-                func_name = m.group(2)
-                params = m.group(3)
-                param_types = list(PARAM_TYPE_RE.findall(params))
-                decls.append((start + 1, func_name, param_types))
-                i = j + 1
-                continue
-            # Not a real prototype; advance one line.
             i += 1
             continue
 
