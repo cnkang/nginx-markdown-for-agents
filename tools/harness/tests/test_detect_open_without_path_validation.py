@@ -245,17 +245,15 @@ def test_validate_write_path_within_root_is_safe(det):
     assert warnings == []
 
 
-def test_validate_state_path_is_safe(det):
-    # _validate_state_path() is registered in VALIDATION_FUNCS
-    src = """
-    def _validate_state_path(path):
-        return path
+def test_state_store_real_file_pass(det):
+    """check_file() on the real state_store.py must show no open() violations.
 
-    def f(repo_root):
-        path = _validate_state_path(repo_root / "events.jsonl")
-        with open(path) as fh:
-            pass
+    state_store.py uses ``validate_user_local_state_path()`` which is
+    registered in FILE_SCOPED_VALIDATORS for this file only.  This is
+    an end-to-end integration test — it verifies that the file-scoped
+    validation mechanism works on the actual production code.
     """
-    errors, warnings = _check_source(det, src)
+    path = REPO_ROOT / "tools/harness/state_store.py"
+    errors, warnings = det.check_file(path, strict=True)
     assert errors == []
     assert warnings == []

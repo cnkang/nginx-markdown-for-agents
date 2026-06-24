@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_FILE = "events.jsonl"
 
 
-def _validate_state_path(path: Path) -> Path:
+def validate_user_local_state_path(path: Path) -> Path:
     """Reject traversal components and resolve *path* to an absolute form.
 
     This is a lightweight validation for user-local state directories:
@@ -70,7 +70,7 @@ def state_dir(repo_root: Path | None = None) -> Path:
     repo_root = repo_root or REPO_ROOT
     override = os.environ.get("HARNESS_STATE_DIR")
     if override:
-        return _validate_state_path(Path(override))
+        return validate_user_local_state_path(Path(override))
     return Path.home() / ".gstack" / "projects" / repo_root.name / "harness-state"
 
 
@@ -125,7 +125,7 @@ def append_event(
     Returns:
         Path to the state file that was appended to.
     """
-    path = _validate_state_path(state_file(repo_root))
+    path = validate_user_local_state_path(state_file(repo_root))
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "event_type": event_type,
@@ -150,7 +150,7 @@ def load_events(repo_root: Path | None = None) -> list[dict[str, Any]]:
     Returns:
         List of validated event dictionaries, in file order.
     """
-    path = _validate_state_path(state_file(repo_root))
+    path = validate_user_local_state_path(state_file(repo_root))
     if not path.exists():
         return []
     events: list[dict[str, Any]] = []
