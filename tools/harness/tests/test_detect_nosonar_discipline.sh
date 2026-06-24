@@ -65,13 +65,29 @@ else
     fail "NOSONAR with reason -> exit 0" "got exit ${exit_code}: $(cat "${output_file}")"
 fi
 
-# Test 3: Bare NOSONAR without reason -> FAIL
+# Test 3: NOSONAR with non-letter reason -> PASS
+cat >"${src_dir}/non_letter_reason.c" <<'C'
+void test(void) {
+    p = (u_char *) accessor(code, &len); /* NOSONAR: 123 reason starts with a digit */
+}
+C
+rm -f "${src_dir}/clean.c"
+
+exit_code=0
+(cd "${tmp_dir}" && bash "${DETECTOR}") >"${output_file}" 2>&1 || exit_code=$?
+if [[ "${exit_code}" -eq 0 ]]; then
+    pass "NOSONAR with non-letter reason -> exit 0"
+else
+    fail "NOSONAR with non-letter reason -> exit 0" "got exit ${exit_code}: $(cat "${output_file}")"
+fi
+
+# Test 4: Bare NOSONAR without reason -> FAIL
 cat >"${src_dir}/bare.c" <<'C'
 void test(void) {
     p = (u_char *) accessor(code, &len); /* NOSONAR */
 }
 C
-rm -f "${src_dir}/clean.c"
+rm -f "${src_dir}/non_letter_reason.c"
 
 exit_code=0
 (cd "${tmp_dir}" && bash "${DETECTOR}") >"${output_file}" 2>&1 || exit_code=$?
@@ -81,7 +97,7 @@ else
     fail "bare NOSONAR -> exit 1 + VIOLATION" "got exit ${exit_code}: $(cat "${output_file}")"
 fi
 
-# Test 4: NOSONAR with Rule reference -> PASS
+# Test 5: NOSONAR with Rule reference -> PASS
 cat >"${src_dir}/rule_ref.c" <<'C'
 static ngx_int_t visitor(ngx_table_elt_t *h, void *ctx)
     /* NOSONAR: h type dictated by callback typedef (Rule 24) */
@@ -99,7 +115,7 @@ else
     fail "NOSONAR with Rule reference -> exit 0" "got exit ${exit_code}: $(cat "${output_file}")"
 fi
 
-# Test 5: No NOSONAR at all -> PASS
+# Test 6: No NOSONAR at all -> PASS
 cat >"${src_dir}/none.c" <<'C'
 int main(void) { return 0; }
 C

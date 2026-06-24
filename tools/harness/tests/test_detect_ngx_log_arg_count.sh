@@ -89,13 +89,19 @@ else
     fail "debug2 with 1 arg -> exit 1 + VIOLATION" "got exit ${exit_code}: $(cat "${output_file}")"
 fi
 
-# Test 4: NGINX-style %V and %uz specifiers counted correctly
+# Test 4: NGINX-style, literal-percent, and star-width specifiers counted correctly
 cat >"${src_dir}/nginx_fmt.c" <<'C'
 void test(void) {
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "markdown: etag: \"%V\"", &r->headers_out.etag->value);
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "markdown: literal arg=%s", "100% done");
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "markdown: size=%uz, count=%ui", size, count);
+                    "markdown: size=%uz, count=%ui", size, count);
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "markdown: precision=%.*s", precision, text);
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "markdown: width=%0*d", width, value);
 }
 C
 rm -f "${src_dir}/mismatch.c"
@@ -103,9 +109,9 @@ rm -f "${src_dir}/mismatch.c"
 exit_code=0
 (cd "${tmp_dir}" && bash "${DETECTOR}") >"${output_file}" 2>&1 || exit_code=$?
 if [[ "${exit_code}" -eq 0 ]]; then
-    pass "NGINX %V and %uz specifiers -> exit 0"
+    pass "NGINX %V, literal-percent, and star-width specifiers -> exit 0"
 else
-    fail "NGINX %V and %uz specifiers -> exit 0" "got exit ${exit_code}: $(cat "${output_file}")"
+    fail "NGINX %V, literal-percent, and star-width specifiers -> exit 0" "got exit ${exit_code}: $(cat "${output_file}")"
 fi
 
 # Test 5: %*s consumes 2 args (width + string)

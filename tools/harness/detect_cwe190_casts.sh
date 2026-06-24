@@ -66,11 +66,11 @@ readonly WIDE_TYPES='size_t|ngx_uint_t|off_t|ngx_int_t'
 #
 # These are casts that ARE guarded but whose guard relationship is
 # too complex for the simple line-proximity heuristic to detect.
-# Format: "basename:regex_pattern:guard_description"
+# Format: "basename<TAB>regex_pattern<TAB>guard_description"
 # The regex_pattern is matched against the source line content.
 readonly GUARDED_CAST_ALLOWLIST=(
-    "ngx_http_markdown_config_handlers_impl.h:raw>NGX_MAX_SIZE_T_VALUE.*value=.size_t.raw:raw>NGX_MAX_SIZE_T_VALUE before value=(size_t)raw"
-    "ngx_http_markdown_dynconf_impl.h:.size_t.parsed.>.*max_size_t.*out=.size_t.parsed:(size_t)parsed>max_size_t before *out=(size_t)parsed"
+    $'ngx_http_markdown_config_handlers_impl.h\traw>NGX_MAX_SIZE_T_VALUE.*value=.size_t.raw\traw>NGX_MAX_SIZE_T_VALUE before value=(size_t)raw'
+    $'ngx_http_markdown_dynconf_impl.h\t.size_t.parsed.>.*max_size_t.*out=.size_t.parsed\t(size_t)parsed>max_size_t before *out=(size_t)parsed'
 )
 
 # ── Known safe cast patterns (file:pattern → safety reason) ──
@@ -81,44 +81,44 @@ readonly GUARDED_CAST_ALLOWLIST=(
 #   - Cast of a value that is already size_t/uintptr_t (identity cast)
 #   - Cast used in a guard comparison itself (not a data conversion)
 #   - Cast with a guard on the same line (ternary / inline check)
-# Format: "basename:regex_pattern:safety_reason"
+# Format: "basename<TAB>regex_pattern<TAB>safety_reason"
 # The regex_pattern is matched against the source line content (not line number),
 # so it survives code edits that shift line numbers.
 readonly SAFE_CAST_ALLOWLIST=(
     # ── Compile-time constants ──
-    "ngx_http_markdown_otel_impl.h:NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN:compile-time constant NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN"
-    "ngx_http_markdown_otel_impl.h:NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN:compile-time constant NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN"
+    $'ngx_http_markdown_otel_impl.h\tNGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN\tcompile-time constant NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN'
+    $'ngx_http_markdown_otel_impl.h\tNGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN\tcompile-time constant NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN'
     # ── NGX_ERROR sentinel returns (not data casts) ──
-    "ngx_http_markdown_config_handlers_impl.h:return.*size_t.*NGX_ERROR:NGX_ERROR sentinel return (not a data cast)"
-    "ngx_http_markdown_config_handlers_impl.h:==.*size_t.*NGX_ERROR:NGX_ERROR sentinel comparison (not a data cast)"
-    "ngx_http_markdown_dynconf_impl.h:return.*size_t.*NGX_ERROR:NGX_ERROR sentinel return (not a data cast)"
-    "ngx_http_markdown_dynconf_impl.h:==.*size_t.*NGX_ERROR:NGX_ERROR sentinel comparison (not a data cast)"
-    "ngx_http_markdown_decompression.c:==.*size_t.*NGX_ERROR:NGX_ERROR sentinel comparison (not a data cast)"
-    "ngx_http_markdown_header_plan.c:==.*size_t.*NGX_ERROR:NGX_ERROR sentinel comparison (not a data cast)"
+    $'ngx_http_markdown_config_handlers_impl.h\treturn.*size_t.*NGX_ERROR\tNGX_ERROR sentinel return (not a data cast)'
+    $'ngx_http_markdown_config_handlers_impl.h\t==.*size_t.*NGX_ERROR\tNGX_ERROR sentinel comparison (not a data cast)'
+    $'ngx_http_markdown_dynconf_impl.h\treturn.*size_t.*NGX_ERROR\tNGX_ERROR sentinel return (not a data cast)'
+    $'ngx_http_markdown_dynconf_impl.h\t==.*size_t.*NGX_ERROR\tNGX_ERROR sentinel comparison (not a data cast)'
+    $'ngx_http_markdown_decompression.c\t==.*size_t.*NGX_ERROR\tNGX_ERROR sentinel comparison (not a data cast)'
+    $'ngx_http_markdown_header_plan.c\t==.*size_t.*NGX_ERROR\tNGX_ERROR sentinel comparison (not a data cast)'
     # ── UINT_MAX clamp guards (the cast IS the guard) ──
-    "ngx_http_markdown_decompression.c:size_t.*UINT_MAX:UINT_MAX constant clamp guard itself"
-    "ngx_http_markdown_streaming_decomp_impl.h:size_t.*UINT_MAX:guard comparison val>(size_t)UINT_MAX"
+    $'ngx_http_markdown_decompression.c\tsize_t.*UINT_MAX\tUINT_MAX constant clamp guard itself'
+    $'ngx_http_markdown_streaming_decomp_impl.h\tsize_t.*UINT_MAX\tguard comparison val>(size_t)UINT_MAX'
     # ── INT_MAX ternary guards on same line ──
-    "ngx_http_markdown_conversion_impl.h:INT_MAX.*ternary:guarded by INT_MAX ternary on same line"
-    "ngx_http_markdown_conversion_impl.h:error_len.*INT_MAX:guarded by INT_MAX ternary on same line"
+    $'ngx_http_markdown_conversion_impl.h\tINT_MAX.*ternary\tguarded by INT_MAX ternary on same line'
+    $'ngx_http_markdown_conversion_impl.h\terror_len.*INT_MAX\tguarded by INT_MAX ternary on same line'
     # ── uintptr_t→size_t same-width identity casts (FFI fields) ──
-    "ngx_http_markdown_payload_impl.h:size_t.*output_len:uintptr_t→size_t same-width cast (FFI output_len)"
-    "ngx_http_markdown_header_plan.c:size_t.*value_len:uintptr_t→size_t same-width cast (FFI value_len for log)"
-    "ngx_http_markdown_header_plan.c:size_t.*plan->count:uintptr_t→size_t same-width cast (FFI plan->count for log)"
-    "ngx_http_markdown_header_plan.c:size_t.*entry->value_len:uintptr_t→size_t same-width cast (FFI value_len for log)"
-    "ngx_http_markdown_header_plan.c:size_t.*i[^a-zA-Z]:uintptr_t→size_t same-width cast (loop index for log)"
-    "ngx_http_markdown_conversion_impl.h:size_t.*feed_len:uintptr_t→size_t same-width cast (FFI feed_len)"
-    "ngx_http_markdown_conversion_impl.h:size_t.*markdown_len:uintptr_t→size_t same-width cast (FFI markdown_len)"
-    "ngx_http_markdown_conversion_impl.h:size_t.*out_len:uintptr_t→size_t same-width cast (FFI out_len)"
-    "ngx_http_markdown_conversion_impl.h:size_t.*peak_memory:uintptr_t→size_t same-width cast (FFI peak_memory_estimate for log)"
-    "ngx_http_markdown_diagnostics.c:size_t.*decision_count:ngx_uint_t→size_t same-width identity cast"
+    $'ngx_http_markdown_payload_impl.h\tsize_t.*output_len\tuintptr_t→size_t same-width cast (FFI output_len)'
+    $'ngx_http_markdown_header_plan.c\tsize_t.*value_len\tuintptr_t→size_t same-width cast (FFI value_len for log)'
+    $'ngx_http_markdown_header_plan.c\tsize_t.*plan->count\tuintptr_t→size_t same-width cast (FFI plan->count for log)'
+    $'ngx_http_markdown_header_plan.c\tsize_t.*entry->value_len\tuintptr_t→size_t same-width cast (FFI value_len for log)'
+    $'ngx_http_markdown_header_plan.c\tsize_t.*i[^a-zA-Z]\tuintptr_t→size_t same-width cast (loop index for log)'
+    $'ngx_http_markdown_conversion_impl.h\tsize_t.*feed_len\tuintptr_t→size_t same-width cast (FFI feed_len)'
+    $'ngx_http_markdown_conversion_impl.h\tsize_t.*markdown_len\tuintptr_t→size_t same-width cast (FFI markdown_len)'
+    $'ngx_http_markdown_conversion_impl.h\tsize_t.*out_len\tuintptr_t→size_t same-width cast (FFI out_len)'
+    $'ngx_http_markdown_conversion_impl.h\tsize_t.*peak_memory\tuintptr_t→size_t same-width cast (FFI peak_memory_estimate for log)'
+    $'ngx_http_markdown_diagnostics.c\tsize_t.*decision_count\tngx_uint_t→size_t same-width identity cast'
     # ── Bounded ternary (always 0 or 1) ──
-    "ngx_http_markdown_accept.c:size_t.*accept.*ternary:bounded ternary produces 0 or 1 (always fits uint8_t)"
-    "ngx_http_markdown_accept.c:accept_encoding.*size_t:bounded ternary produces 0 or 1 (always fits uint8_t)"
+    $'ngx_http_markdown_accept.c\tsize_t.*accept.*ternary\tbounded ternary produces 0 or 1 (always fits uint8_t)'
+    $'ngx_http_markdown_accept.c\taccept_encoding.*size_t\tbounded ternary produces 0 or 1 (always fits uint8_t)'
     # ── strtoull result already guarded by ERANGE+NGX_MAX_SIZE_T_VALUE ──
-    "ngx_http_markdown_config_handlers_impl.h:value.*size_t.*raw:strtoull result guarded by ERANGE+NGX_MAX_SIZE_T_VALUE check above"
+    $'ngx_http_markdown_config_handlers_impl.h\tvalue.*size_t.*raw\tstrtoull result guarded by ERANGE+NGX_MAX_SIZE_T_VALUE check above'
     # ── estimated already clamped by decompress_max_size ──
-    "ngx_http_markdown_decompression.c:size_t.*estimated:estimated already clamped by decompress_max_size (size_t) above"
+    $'ngx_http_markdown_decompression.c\tsize_t.*estimated\testimated already clamped by decompress_max_size (size_t) above'
 )
 
 # ── Pattern (c): direct ngx_parse_size() + (size_t) ──
@@ -174,10 +174,10 @@ narrow_hits=0
 # Match (uint32_t), (uint8_t), (uInt) casts of expressions that look
 # like they hold size_t-range values
 #
-# Pattern-specific safe-cast allowlist (file:regex_pattern:safety_reason)
+# Pattern-specific safe-cast allowlist (file<TAB>regex_pattern<TAB>safety_reason)
 # for narrowing casts whose guard is in the calling function, not nearby.
 readonly NARROW_SAFE_ALLOWLIST=(
-    "ngx_http_markdown_decompression.c:avail_out.*uInt.*output_size.*used:output_size already clamped to UINT_MAX by grow_output_buffer upstream"
+    $'ngx_http_markdown_decompression.c\tavail_out.*uInt.*output_size.*used\toutput_size already clamped to UINT_MAX by grow_output_buffer upstream'
 )
 while IFS= read -r match; do
     if [[ -z "$match" ]]; then
@@ -190,9 +190,7 @@ while IFS= read -r match; do
     # Check pattern-specific safe-cast allowlist first
     narrow_allowlisted=0
     for entry in "${NARROW_SAFE_ALLOWLIST[@]}"; do
-        entry_file="$(echo "$entry" | cut -d: -f1)"
-        entry_pattern="$(echo "$entry" | cut -d: -f2)"
-        entry_desc="$(echo "$entry" | cut -d: -f3-)"
+        IFS=$'\t' read -r entry_file entry_pattern entry_desc <<< "$entry"
         if [[ "$basename_n" == "$entry_file" ]] && echo "$content" | grep -qE "$entry_pattern"; then
             echo "  OK      ${file}:${line} — narrowing cast allowlisted (${entry_desc})" >&2
             narrow_allowlisted=1
@@ -275,9 +273,7 @@ while IFS= read -r match; do
     # Check explicit allowlist for known guarded patterns
     allowlisted=0
     for entry in "${GUARDED_CAST_ALLOWLIST[@]}"; do
-        entry_file="$(echo "$entry" | cut -d: -f1)"
-        entry_pattern="$(echo "$entry" | cut -d: -f2)"
-        entry_desc="$(echo "$entry" | cut -d: -f3-)"
+        IFS=$'\t' read -r entry_file entry_pattern entry_desc <<< "$entry"
         if [[ "$basename" == "$entry_file" ]] && echo "$content_line" | grep -qE "$entry_pattern"; then
             echo "  OK      ${file}:${line} — ssize_t→size_t cast in allowlisted guarded pattern (${entry_desc})" >&2
             allowlisted=1
@@ -291,9 +287,7 @@ while IFS= read -r match; do
 
     # Check safe-cast allowlist for known safe patterns
     for entry in "${SAFE_CAST_ALLOWLIST[@]}"; do
-        entry_file="$(echo "$entry" | cut -d: -f1)"
-        entry_pattern="$(echo "$entry" | cut -d: -f2)"
-        entry_desc="$(echo "$entry" | cut -d: -f3-)"
+        IFS=$'\t' read -r entry_file entry_pattern entry_desc <<< "$entry"
         if [[ "$basename" == "$entry_file" ]] && echo "$content_line" | grep -qE "$entry_pattern"; then
             echo "  OK      ${file}:${line} — safe cast (${entry_desc})" >&2
             allowlisted=1

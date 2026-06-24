@@ -71,9 +71,11 @@ while IFS= read -r line; do
         after_macro="${line#*ngx_log_${macro_kind}${digit}(}"
 
         # Split into arguments by counting parens; the 4th argument
-        # (1-indexed) is the format string.  We approximate by finding
-        # the first string literal after 3 commas at depth 0.
+        # (1-indexed) is the format string.  We capture only that
+        # argument so later string literals do not contribute percent
+        # signs to the format walk.
         fmt_part=""
+        fmt_start=-1
         depth=0
         comma_count=0
         in_string=0
@@ -89,11 +91,18 @@ while IFS= read -r line; do
                 depth=$((depth - 1))
             elif [[ "$ch" == "," ]] && [[ $depth -eq 0 ]] && [[ "$in_string" -eq 0 ]]; then
                 comma_count=$((comma_count + 1))
-                if [[ $comma_count -ge 3 ]]; then
-                    # Everything after the 3rd comma is the format string + args
-                    fmt_part="${after_macro:$((i + 1))}"
+                if [[ $comma_count -eq 3 ]]; then
+                    fmt_start=$((i + 1))
+                elif [[ $comma_count -gt 3 ]] && [[ $fmt_start -ge 0 ]]; then
+                    # Stop at the 5th argument boundary so only the format
+                    # argument itself is inspected.
+                    fmt_part="${after_macro:$fmt_start:$((i - fmt_start))}"
                     break
                 fi
+            elif [[ "$ch" == ")" ]] && [[ $depth -eq 0 ]] && \
+                [[ $fmt_start -ge 0 ]] && [[ $comma_count -ge 3 ]]; then
+                fmt_part="${after_macro:$fmt_start:$((i - fmt_start))}"
+                break
             elif [[ "$ch" == '"' ]]; then
                 if [[ "$in_string" -eq 0 ]]; then
                     in_string=1
@@ -147,7 +156,7 @@ while IFS= read -r line; do
                 fmt_specifiers=$((fmt_specifiers + 1))
                 # Skip the specifier: % [flags] [width] [.prec] [length] conversion
                 j=$((j + 1))
-                # Check for * width — consumes an extra argument
+                # Count any * in the width or precision slots.
                 if [[ $j -lt $flen ]] && [[ "${fmt_part:$j:1}" == "*" ]]; then
                     fmt_specifiers=$((fmt_specifiers + 1))
                     j=$((j + 1))
@@ -156,6 +165,11 @@ while IFS= read -r line; do
                 # NGINX-specific: M, V, u, z, T, etc. are conversion chars, not modifiers
                 while [[ $j -lt $flen ]]; do
                     c="${fmt_part:$j:1}"
+                    if [[ "$c" == "*" ]]; then
+                        fmt_specifiers=$((fmt_specifiers + 1))
+                        j=$((j + 1))
+                        continue
+                    fi
                     case "$c" in
                         '-'|'+'|' '|'#'|'0'|'.'|[0-9]|'l'|'h'|'j'|'z'|'t'|'L')
                             j=$((j + 1))
@@ -186,8 +200,8 @@ done < <(
     # Join continuation lines and prefix with file:line.
     # Two cases: explicit backslash continuation, and implicit multi-line
     # function calls (open paren without close on same line).
-    find "$SRC_DIR" \( -name '*.c' -o -name '*.h' \) 2>/dev/null |
-    while IFS= read -r f; do
+    find "$SRC_DIR" \( -name '*.c' -o -name '*.h' \) -print0 2>/dev/null |
+    while IFS= read -r -d '' f; do
         awk '
             /\\$/ {
                 if (cont == "") { line_no = NR }
