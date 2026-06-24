@@ -438,6 +438,11 @@ ngx_http_markdown_handle_inflate_stall(ngx_http_request_t *r,
  *   NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR on other zlib errors
  *   NGX_ERROR on allocation failure
  */
+static ngx_int_t handle_inflate_stall(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf, z_stream *stream,
+    u_char **output_data, size_t *output_size,
+    ngx_int_t fallback_error, const char *label);
+
 static ngx_int_t
 ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf, z_stream *stream,
@@ -462,29 +467,23 @@ ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
          * output and/or input is an unexpected stall and is classified
          * as a format error.
          */
-        if (zrc == Z_OK) {
-            if (stream->avail_out == 0) {
-                rc = ngx_http_markdown_handle_inflate_stall(
-                    r, conf, stream, output_data, output_size,
-                    NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
-                if (rc == NGX_AGAIN) {
-                    continue;
-                }
-                return rc;
-            }
-
+        if (zrc == Z_OK && stream->avail_out > 0) {
             continue;
         }
 
-        if (zrc == Z_BUF_ERROR) {
-            rc = ngx_http_markdown_handle_inflate_stall(
-                r, conf, stream, output_data, output_size,
-                NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, "Z_BUF_ERROR");
+        if (zrc == Z_OK || zrc == Z_BUF_ERROR) {
+            rc = handle_inflate_stall(r, conf, stream, output_data,
+                output_size,
+                zrc == Z_OK
+                    ? NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR
+                    : NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+                zrc == Z_OK ? "Z_OK" : "Z_BUF_ERROR");
             if (rc == NGX_AGAIN) {
                 continue;
             }
             return rc;
         }
+
         if (zrc == Z_DATA_ERROR) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                          "markdown: decompression failed, "
@@ -498,6 +497,27 @@ ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
                      "inflate error: %d, category=conversion", zrc);
         return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
     }
+}
+
+
+/*
+ * Handle an inflate stall: attempt to grow the output buffer and resume,
+ * or propagate a terminal error.  Returns NGX_AGAIN when the caller
+ * should retry, or an error code to propagate to the caller.
+ */
+static ngx_int_t
+handle_inflate_stall(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf, z_stream *stream,
+    u_char **output_data, size_t *output_size,
+    ngx_int_t fallback_error, const char *label)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_markdown_handle_inflate_stall(
+        r, conf, stream, output_data, output_size,
+        fallback_error, label);
+
+    return rc;
 }
 
 

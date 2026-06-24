@@ -136,37 +136,41 @@ def _classify_duplicate(block_lines: list[str]) -> tuple[str, str]:
     joined = " ".join(block_lines)
     is_small = len(block_lines) <= SMALL_BLOCK_THRESHOLD
 
-    # Check memory allocation/free duplicates first (highest priority)
-    if any(kw in joined for kw in MEMORY_KEYWORDS):
-        return ("memory", "needs-human-review" if is_small else "direct-fix")
+    # Data-driven classification: (keywords, category, fixed_action).
+    # fixed_action=None means use the default (direct-fix / review based
+    # on is_small); a string overrides for that category.
+    _DIRECT_FIX_CATEGORIES: list[tuple[tuple[str, ...], str, str | None]] = [
+        (MEMORY_KEYWORDS,        "memory",         None),
+        (ROLLBACK_KEYWORDS,      "rollback",       None),
+        (FFI_VALIDATION_KEYWORDS, "ffi-validation", None),
+        (POSTCOMMIT_KEYWORDS,    "postcommit",     None),
+        (STATE_MACHINE_KEYWORDS, "state-machine",  "needs-human-review"),
+        (LOG_ONLY_KEYWORDS,      "log-only",       "ignore-by-rule"),
+    ]
 
-    # Check rollback/header mutation duplicates
-    if any(kw in joined for kw in ROLLBACK_KEYWORDS):
-        return ("rollback", "needs-human-review" if is_small else "direct-fix")
-
-    # Check FFI validation duplicates
-    if any(kw in joined for kw in FFI_VALIDATION_KEYWORDS):
-        return ("ffi-validation", "needs-human-review" if is_small else "direct-fix")
-
-    # Check post-commit / streaming state duplicates
-    if any(kw in joined for kw in POSTCOMMIT_KEYWORDS):
-        return ("postcommit", "needs-human-review" if is_small else "direct-fix")
-
-    # State machine dispatching — needs human judgment
-    if any(kw in joined for kw in STATE_MACHINE_KEYWORDS):
-        return ("state-machine", "needs-human-review")
-
-    # Log-only duplicates — low priority, usually not worth extracting
-    if any(kw in joined for kw in LOG_ONLY_KEYWORDS):
-        return ("log-only", "ignore-by-rule")
+    for keywords, category, fixed_action in _DIRECT_FIX_CATEGORIES:
+        if any(kw in joined for kw in keywords):
+            action = fixed_action if fixed_action else (
+                "needs-human-review" if is_small else "direct-fix"
+            )
+            return (category, action)
 
     # Pure signature/declaration duplicates — C structural, default skip
-    if all(kw in joined for kw in ["ngx_http_request_t"]) or \
-       any(kw in joined for kw in SIGNATURE_KEYWORDS) and \
-       not any(kw in joined for kw in MEMORY_KEYWORDS + ROLLBACK_KEYWORDS + POSTCOMMIT_KEYWORDS):
+    if _is_signature_duplicate(joined):
         return ("signature", "ignore-by-rule")
 
     return ("structural", "needs-human-review")
+
+
+def _is_signature_duplicate(joined: str) -> bool:
+    """Return True when the block is a C function signature/declaration."""
+    if "ngx_http_request_t" in joined:
+        return True
+    if any(kw in joined for kw in SIGNATURE_KEYWORDS):
+        exclude = MEMORY_KEYWORDS + ROLLBACK_KEYWORDS + POSTCOMMIT_KEYWORDS
+        if not any(kw in joined for kw in exclude):
+            return True
+    return False
 
 
 def _find_adjacent_duplicates(
@@ -504,6 +508,64 @@ def _print_verdict_line(
         print("PASS: no duplicate code blocks found", file=sys.stderr)
 
 
+def _resolve_scan_dir(directory: str) -> Path | None:
+    """Resolve and validate the scan directory.
+
+    Returns the resolved Path, or None if the directory is invalid.
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from lib.path_validation import validate_read_path
+        return Path(validate_read_path(
+            directory, purpose="scan directory",
+        ))
+    except (ImportError, FileNotFoundError, ValueError):
+        scan_dir = Path(directory)
+        if not scan_dir.is_absolute():
+            scan_dir = REPO_ROOT / scan_dir
+        try:
+            return scan_dir.resolve()
+        except OSError:
+            return scan_dir
+
+
+def _classify_file_infos(
+    file_infos: list[str],
+) -> tuple[list[str], list[str], list[str]]:
+    """Split file infos into warnings, reviews, and info lists."""
+    warnings: list[str] = []
+    reviews: list[str] = []
+    infos: list[str] = []
+    for msg in file_infos:
+        if "WARNING" in msg:
+            warnings.append(msg)
+        elif "REVIEW" in msg:
+            reviews.append(msg)
+        else:
+            infos.append(msg)
+    return warnings, reviews, infos
+
+
+def _scan_files(
+    scan_dir: Path,
+) -> tuple[list[str], list[str], list[str]]:
+    """Scan all C files in scan_dir and classify findings."""
+    all_warnings: list[str] = []
+    all_infos: list[str] = []
+    all_reviews: list[str] = []
+
+    c_files = sorted(scan_dir.rglob("*.c"))
+    for filepath in c_files:
+        file_warnings, file_infos = check_file(filepath)
+        all_warnings.extend(file_warnings)
+        w, r, i = _classify_file_infos(file_infos)
+        all_warnings.extend(w)
+        all_reviews.extend(r)
+        all_infos.extend(i)
+
+    return all_warnings, all_reviews, all_infos
+
+
 def main() -> int:
     """Main entry point.
 
@@ -530,24 +592,8 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    # Validate the scan directory through the project's path validation
-    # helper (Rule 12/33 compliance).
-    try:
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-        from lib.path_validation import validate_read_path
-        scan_dir = Path(validate_read_path(
-            args.directory, purpose="scan directory",
-        ))
-    except (ImportError, FileNotFoundError, ValueError):
-        scan_dir = Path(args.directory)
-        if not scan_dir.is_absolute():
-            scan_dir = REPO_ROOT / scan_dir
-        try:
-            scan_dir = scan_dir.resolve()
-        except OSError:
-            pass
-
-    if not scan_dir.is_dir():
+    scan_dir = _resolve_scan_dir(args.directory)
+    if scan_dir is None or not scan_dir.is_dir():
         print(f"ERROR: {scan_dir} is not a directory", file=sys.stderr)
         return 0  # advisory: exit 0 even on error
 
@@ -556,22 +602,7 @@ def main() -> int:
     print(f"Strict: {1 if args.strict else 0}", file=sys.stderr)
     print("", file=sys.stderr)
 
-    all_warnings: list[str] = []
-    all_infos: list[str] = []
-    all_reviews: list[str] = []
-
-    c_files = sorted(scan_dir.rglob("*.c"))
-    for filepath in c_files:
-        file_warnings, file_infos = check_file(filepath)
-        all_warnings.extend(file_warnings)
-        # Split infos into warnings/reviews/info based on classification
-        for msg in file_infos:
-            if "WARNING" in msg:
-                all_warnings.append(msg)
-            elif "REVIEW" in msg:
-                all_reviews.append(msg)
-            else:
-                all_infos.append(msg)
+    all_warnings, all_reviews, all_infos = _scan_files(scan_dir)
 
     for w in all_warnings:
         print(w, file=sys.stderr)
