@@ -520,7 +520,7 @@ ngx_http_markdown_stream_postcommit_send_chain(
  */
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_acquire_terminal_buf(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_buf_t **out)
+    ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx, ngx_buf_t **out)
 {
     ngx_buf_t  *b;
 
