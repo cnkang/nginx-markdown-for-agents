@@ -24,6 +24,7 @@
 #
 # Usage:
 #   NGINX_URL=http://localhost:8080 ./conditional_request_test.sh
+#   STRICT_CONDITIONAL=1 NGINX_URL=http://localhost:8080 ./conditional_request_test.sh
 #
 # Exit codes:
 #   0 — all checks passed
@@ -34,6 +35,7 @@ set -e
 
 NGINX_URL="${NGINX_URL:-http://localhost:8080}"
 TEST_PATH="${TEST_PATH:-/}"
+STRICT_CONDITIONAL="${STRICT_CONDITIONAL:-0}"
 PASS_COUNT=0
 FAIL_COUNT=0
 
@@ -47,6 +49,17 @@ fail() {
     local msg="$1"
     FAIL_COUNT=$((FAIL_COUNT + 1))
     echo "FAIL: $msg" >&2
+}
+
+strict_conditional_enabled() {
+    case "$STRICT_CONDITIONAL" in
+        1|true|TRUE|yes|YES|on|ON)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 check_prerequisites() {
@@ -85,6 +98,9 @@ LAST_MODIFIED=$(echo "$HEADERS" | grep -i "^last-modified:" | sed 's/^last-modif
 if [[ -n "$ETAG" ]]; then
     pass "ETag header present: $ETAG"
 else
+    if strict_conditional_enabled; then
+        fail "STRICT_CONDITIONAL requires an ETag header"
+    fi
     pass "no ETag header (conditional_requests may be disabled or generate_etag off)"
 fi
 
@@ -108,30 +124,38 @@ if [[ -n "$ETAG" ]]; then
         304)
             pass "If-None-Match returns 304 Not Modified"
 
-            HEADERS_FILE=$(mktemp)
-            BODY_FILE=$(mktemp)
-            HTTP_CODE=$(curl -sf -D "$HEADERS_FILE" -o "$BODY_FILE" -w "%{http_code}" \
+            BODY=$(curl -sf \
                 -H "Accept: text/markdown" \
                 -H "If-None-Match: ${ETAG}" \
-                "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HTTP_CODE="000"
+                "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || BODY=""
 
-            BODY_SIZE=$(wc -c < "$BODY_FILE" | tr -d ' ')
-            rm -f "$HEADERS_FILE" "$BODY_FILE"
-
-            if [[ "$HTTP_CODE" == "304" && "$BODY_SIZE" == "0" ]]; then
-                pass "304 response has no body"
+            if [[ -z "$BODY" ]]; then
+                pass "304 response has empty body"
             else
-                fail "304 response body check failed (code=$HTTP_CODE, bytes=$BODY_SIZE)"
+                BODY_LEN=${#BODY}
+                if strict_conditional_enabled; then
+                    fail "STRICT_CONDITIONAL requires empty 304 body, got ${BODY_LEN} bytes"
+                else
+                    pass "304 response body is minimal (${BODY_LEN} bytes)"
+                fi
             fi
             ;;
         200)
-            pass "If-None-Match returns 200 (conditional may be disabled)"
+            if strict_conditional_enabled; then
+                fail "STRICT_CONDITIONAL requires If-None-Match to return 304, got 200"
+            else
+                pass "If-None-Match returns 200 (conditional may be disabled)"
+            fi
             ;;
         000)
             fail "no response for If-None-Match request"
             ;;
         *)
-            pass "If-None-Match returns $HTTP_CODE"
+            if strict_conditional_enabled; then
+                fail "STRICT_CONDITIONAL requires If-None-Match to return 304, got $HTTP_CODE"
+            else
+                pass "If-None-Match returns $HTTP_CODE"
+            fi
             ;;
     esac
 else
@@ -288,10 +312,18 @@ if [[ -n "$ETAG" ]]; then
         if echo "$VARY" | grep -qi "accept"; then
             pass "Vary: Accept present on 304 response"
         else
-            pass "Vary header present but no Accept: $VARY"
+            if strict_conditional_enabled; then
+                fail "STRICT_CONDITIONAL requires Vary: Accept, got: $VARY"
+            else
+                pass "Vary header present but no Accept: $VARY"
+            fi
         fi
     else
-        pass "no Vary header on 304 (may be omitted)"
+        if strict_conditional_enabled; then
+            fail "STRICT_CONDITIONAL requires Vary: Accept on 304 response"
+        else
+            pass "no Vary header on 304 (may be omitted)"
+        fi
     fi
 else
     echo "Step 7: SKIPPED (no ETag available)" >&2
@@ -311,10 +343,14 @@ if [[ -n "$ETAG" ]]; then
         pass "304 response has empty body"
     else
         BODY_LEN=${#BODY}
-        if [[ "$BODY_LEN" -lt 10 ]]; then
-            pass "304 response body is minimal (${BODY_LEN} bytes)"
+        if strict_conditional_enabled; then
+            fail "STRICT_CONDITIONAL requires empty 304 body, got ${BODY_LEN} bytes"
         else
-            fail "304 response has body (${BODY_LEN} bytes)"
+            if [[ "$BODY_LEN" -lt 10 ]]; then
+                pass "304 response body is minimal (${BODY_LEN} bytes)"
+            else
+                fail "304 response has body (${BODY_LEN} bytes)"
+            fi
         fi
     fi
 else
