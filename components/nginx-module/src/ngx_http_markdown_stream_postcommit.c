@@ -646,7 +646,7 @@ ngx_http_markdown_stream_postcommit_handle_send_result(
     ngx_http_request_t *r, ngx_int_t rc, const char *action)
 {
     if (rc == NGX_AGAIN) {
-        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                        "markdown postcommit %s: downstream backpressure",
                        action);
         return NGX_AGAIN;
