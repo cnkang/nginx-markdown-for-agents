@@ -219,7 +219,10 @@ C
 out="${tmp_dir}/msg_check.out"
 rc=0
 run_detector "${src_dir}" "${out}" || rc=$?
-if grep -q "ngx_pfree" "${out}"; then
+if [[ ! -s "${out}" ]]; then
+    fail "failure message must not recommend ngx_pfree" \
+        "detector produced no output — violation not detected"
+elif grep -q "ngx_pfree" "${out}"; then
     fail "failure message must not recommend ngx_pfree" \
         "message recommends ngx_pfree which is wrong per Rule 43"
 else

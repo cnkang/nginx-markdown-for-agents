@@ -287,7 +287,7 @@ while IFS= read -r rs_file; do
             # Skip the map file entirely (it is the first input file).
             # Use FNR so line numbers match the source file being scanned.
             FNR < start_line { next }
-            FNR >= start_line && FNR <= start_line + 3 {
+            FNR >= start_line && FNR <= start_line + 10 {
                 if ($0 ~ /pub[[:space:]]+(unsafe[[:space:]]+)?extern[[:space:]]*"C"[[:space:]]+fn/) {
                     func_start = FNR
                     line = $0
