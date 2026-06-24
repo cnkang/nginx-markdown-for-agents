@@ -58,6 +58,11 @@ VALIDATION_FUNCS = {
 # these are safe in test contexts and should not trigger CWE-22 warnings.
 PYTEST_FIXTURE_NAMES = {"tmp_path", "tmpdir"}
 
+# Scope label used for the module-level scope (no enclosing function or
+# class).  Referenced by _find_scope, _is_safe_path_expr, and
+# _is_safe_name_expr.
+MODULE_SCOPE = "<module>"
+
 # Path attribute accesses that derive from a validated variable.
 # When the open() argument is `validated_var.parent` or
 # `validated_var.name`, we treat it as safe because the parent path
@@ -165,6 +170,44 @@ def _collect_direct_validation_assignments(
                     scope_validated.setdefault(scope, set()).add(target.id)
 
 
+_PATH_CTOR_NAMES = {"Path"}
+
+
+def _is_path_constructor(func: ast.expr) -> bool:
+    """Return True if *func* is a ``Path`` constructor call target."""
+    if isinstance(func, ast.Name) and func.id in _PATH_CTOR_NAMES:
+        return True
+    return isinstance(func, ast.Attribute) and func.attr in _PATH_CTOR_NAMES
+
+
+# Trusted module-level path roots treated as safe sources for Path()
+# wrappers when propagating validated status.
+_TRUSTED_ROOT_NAMES = {"REPO_ROOT", "repo_root"}
+
+
+def _maybe_propagate_path_wrapper(
+    node: ast.Assign,
+    parent_map: dict[int, ast.AST],
+    scope_validated: dict[str, set[str]],
+) -> None:
+    """If *node* is ``x = Path(validated_var)``, mark the wrapper target
+    as validated in its enclosing scope.  Otherwise do nothing.
+    """
+    value = node.value
+    if not isinstance(value, ast.Call) or not _is_path_constructor(value.func):
+        return
+    if not value.args:
+        return
+    arg = value.args[0]
+    if not isinstance(arg, ast.Name):
+        return
+    src_scope = _find_scope(arg, parent_map)
+    src_vars = scope_validated.get(src_scope, set())
+    if arg.id in src_vars or arg.id in _TRUSTED_ROOT_NAMES:
+        dst_scope = _find_scope(node, parent_map)
+        scope_validated.setdefault(dst_scope, set()).add(arg.id)
+
+
 def _propagate_path_wrappers(
     tree: ast.AST,
     parent_map: dict[int, ast.AST],
@@ -172,27 +215,8 @@ def _propagate_path_wrappers(
 ) -> None:
     """Propagate validated status through Path(validated_var) wrappers."""
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        value = node.value
-        if not isinstance(value, ast.Call):
-            continue
-        func = value.func
-        is_path_ctor = (
-            (isinstance(func, ast.Name) and func.id == "Path")
-            or (isinstance(func, ast.Attribute) and func.attr == "Path")
-        )
-        if not is_path_ctor:
-            continue
-        if not value.args:
-            continue
-        arg = value.args[0]
-        if isinstance(arg, ast.Name):
-            src_scope = _find_scope(arg, parent_map)
-            src_vars = scope_validated.get(src_scope, set())
-            if arg.id in src_vars or arg.id in {"REPO_ROOT", "repo_root"}:
-                dst_scope = _find_scope(node, parent_map)
-                scope_validated.setdefault(dst_scope, set()).add(arg.id)
+        if isinstance(node, ast.Assign):
+            _maybe_propagate_path_wrapper(node, parent_map, scope_validated)
 
 
 def _find_scope(node: ast.AST, parent_map: dict[int, ast.AST]) -> str:
@@ -204,7 +228,7 @@ def _find_scope(node: ast.AST, parent_map: dict[int, ast.AST]) -> str:
             return f"func:{cur.name}"
         if isinstance(cur, ast.ClassDef):
             return f"class:{cur.name}"
-    return "<module>"
+    return MODULE_SCOPE
 
 
 def _expr_derives_from_hardcoded(
@@ -277,12 +301,7 @@ def _try_add_path_call_hardcoded(
     node: ast.Assign, value: ast.Call, hardcoded: set[str],
 ) -> None:
     """Add targets if Call is Path(hardcoded_var)."""
-    func = value.func
-    is_path_ctor = (
-        (isinstance(func, ast.Name) and func.id == "Path")
-        or (isinstance(func, ast.Attribute) and func.attr == "Path")
-    )
-    if is_path_ctor and value.args:
+    if _is_path_constructor(value.func) and value.args:
         arg = value.args[0]
         if isinstance(arg, ast.Name) and arg.id in hardcoded:
             _add_targets(node, hardcoded)
@@ -299,7 +318,7 @@ def _is_safe_path_expr(
     node: ast.AST,
     validated_vars: dict[str, set[str]],
     hardcoded_vars: set[str],
-    scope: str = "<module>",
+    scope: str = MODULE_SCOPE,
 ) -> bool:
     """Return True if the path expression is considered safe.
 
@@ -345,12 +364,7 @@ def _is_safe_call_expr(
     name = _func_call_name(node)
     if name in VALIDATION_FUNCS:
         return True
-    func = node.func
-    is_path_ctor = (
-        (isinstance(func, ast.Name) and func.id == "Path")
-        or (isinstance(func, ast.Attribute) and func.attr == "Path")
-    )
-    if is_path_ctor and node.args:
+    if _is_path_constructor(node.func) and node.args:
         if _is_safe_path_expr(node.args[0], validated_vars, hardcoded_vars, scope):
             return True
     return False
@@ -364,7 +378,7 @@ def _is_safe_name_expr(
 ) -> bool:
     """Return True if a Name node is a safe path expression."""
     scope_vars = validated_vars.get(scope, set())
-    module_vars = validated_vars.get("<module>", set())
+    module_vars = validated_vars.get(MODULE_SCOPE, set())
     if node.id in scope_vars or node.id in module_vars or node.id in hardcoded_vars:
         return True
     if node.id in PYTEST_FIXTURE_NAMES:
@@ -383,6 +397,35 @@ def _is_safe_attr_expr(
         if _is_safe_path_expr(node.value, validated_vars, hardcoded_vars, scope):
             return True
     return False
+
+
+_OPEN_CTOR_NAMES = {"open"}
+
+
+def _is_open_call(node: ast.Call) -> bool:
+    """Return True if *node* is a builtin ``open(...)`` or a
+    ``Path(...).open(...)`` / ``some_var.open(...)`` call.
+    """
+    func = node.func
+    if isinstance(func, ast.Name) and func.id in _OPEN_CTOR_NAMES:
+        return True
+    return isinstance(func, ast.Attribute) and func.attr in _OPEN_CTOR_NAMES
+
+
+_OPEN_DETAIL_TEMPLATE = (
+    "open({expr}) — path not passed through "
+    "validate_read_path() / validate_write_path_within_root() "
+    "/ _resolve_repo_write_path()"
+)
+
+
+def _build_open_finding(
+    rel: str, lineno: int, expr_str: str, strict: bool,
+) -> str:
+    """Format a single open()-validation finding line."""
+    level = "ERROR" if strict else "WARNING"
+    detail = _OPEN_DETAIL_TEMPLATE.format(expr=expr_str)
+    return f"  {level}   {rel}:{lineno} — {detail}"
 
 
 def _find_open_calls(
@@ -406,16 +449,9 @@ def _find_open_calls(
             parent_map[id(child)] = node
 
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+        if not isinstance(node, ast.Call) or not _is_open_call(node):
             continue
-
-        func = node.func
-        is_open = (
-            (isinstance(func, ast.Name) and func.id == "open")
-            or (isinstance(func, ast.Attribute) and func.attr == "open")
-        )
-
-        if not is_open or not node.args:
+        if not node.args:
             continue
 
         path_arg = node.args[0]
@@ -424,18 +460,11 @@ def _find_open_calls(
         if _is_safe_path_expr(path_arg, validated_vars, hardcoded_vars, scope):
             continue
 
-        expr_str = _unparse(path_arg)
-        lineno = node.lineno
-        detail = (
-            f"open({expr_str}) — path not passed through "
-            f"validate_read_path() / validate_write_path_within_root() "
-            f"/ _resolve_repo_write_path()"
-        )
-
+        finding = _build_open_finding(rel, node.lineno, _unparse(path_arg), strict)
         if strict:
-            errors.append(f"  ERROR   {rel}:{lineno} — {detail}")
+            errors.append(finding)
         else:
-            warnings.append(f"  WARNING {rel}:{lineno} — {detail}")
+            warnings.append(finding)
 
     return errors, warnings
 

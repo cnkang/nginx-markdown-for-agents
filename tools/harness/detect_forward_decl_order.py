@@ -63,13 +63,15 @@ TYPEDEF_SIMPLE_RE = re.compile(
 # may have been assembled by joining physical continuation lines):
 #   return_type function_name(args);
 # Heuristic: a line ending in ");" that contains an identifier followed
-# by "(" and at least one parameter.
+# by "(" and at least one parameter.  The groups below capture, in order,
+# the (optionally const-qualified) return type, the function name, and the
+# raw parameter list text.
 FUNC_DECL_RE = re.compile(
     r"^\s*"
-    r"(?:static\s+|extern\s+|inline\s+)*"  # optional qualifiers
-    r"((?:const\s+)?[\w\s\*]+?)\s*"        # return type (greedy-ish)
-    r"(\w+)\s*"                             # function name
-    r"\(([^;]*)\)\s*;"                      # parameter list + semicolon
+    r"(?:static\s+|extern\s+|inline\s+)*"
+    r"((?:const\s+)?[\w\s\*]+?)\s*"
+    r"(\w+)\s*"
+    r"\(([^;]*)\)\s*;"
 )
 
 # Parameter type extraction: pull out type names that end in _t
@@ -156,6 +158,27 @@ def _join_multiline_prototype(
     return None
 
 
+def _extract_decl_from_match(
+    m: re.Match[str], lineno: int,
+) -> tuple[int, str, list[str]]:
+    """Build a (lineno, func_name, param_type_names) tuple from a regex
+    match on FUNC_DECL_RE.
+    """
+    func_name = m.group(2)
+    params = m.group(3)
+    param_types = list(PARAM_TYPE_RE.findall(params))
+    return (lineno, func_name, param_types)
+
+
+def _is_skippable_line(line: str) -> bool:
+    """Return True for comment and preprocessor lines that should not be
+    inspected for function declarations.
+    """
+    if COMMENT_RE.search(line):
+        return True
+    return line.lstrip().startswith("#")
+
+
 def _parse_func_decls(
     lines: list[str],
 ) -> list[tuple[int, str, list[str]]]:
@@ -180,19 +203,13 @@ def _parse_func_decls(
     i = 0
     while i < n:
         line = lines[i]
-        if COMMENT_RE.search(line):
-            i += 1
-            continue
-        if line.lstrip().startswith("#"):
+        if _is_skippable_line(line):
             i += 1
             continue
 
         m = FUNC_DECL_RE.search(line)
         if m:
-            func_name = m.group(2)
-            params = m.group(3)
-            param_types = list(PARAM_TYPE_RE.findall(params))
-            decls.append((i + 1, func_name, param_types))
+            decls.append(_extract_decl_from_match(m, i + 1))
             i += 1
             continue
 
@@ -202,10 +219,7 @@ def _parse_func_decls(
                 j, joined = result
                 m = FUNC_DECL_RE.search(joined)
                 if m:
-                    func_name = m.group(2)
-                    params = m.group(3)
-                    param_types = list(PARAM_TYPE_RE.findall(params))
-                    decls.append((i + 1, func_name, param_types))
+                    decls.append(_extract_decl_from_match(m, i + 1))
                     i = j
                     continue
             i += 1
