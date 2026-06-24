@@ -396,6 +396,36 @@ mod tests {
         assert_eq!(result.unwrap_err(), DecompError::BudgetExceeded);
     }
 
+    fn high_ratio_payload() -> Vec<u8> {
+        vec![b'Z'; 64 * 1024]
+    }
+
+    #[test]
+    fn gzip_and_brotli_high_ratio_within_budget() {
+        let original = high_ratio_payload();
+        let gzip = gzip_compress(&original);
+        let brotli = brotli_compress(&original);
+
+        let gzip_result = decompress_bounded(&gzip, Format::Gzip, original.len()).unwrap();
+        let brotli_result = decompress_bounded(&brotli, Format::Brotli, original.len()).unwrap();
+
+        assert_eq!(gzip_result.output, original);
+        assert_eq!(brotli_result.output, original);
+    }
+
+    #[test]
+    fn gzip_and_brotli_high_ratio_budget_exceeded() {
+        let original = high_ratio_payload();
+        let gzip = gzip_compress(&original);
+        let brotli = brotli_compress(&original);
+
+        let gzip_result = decompress_bounded(&gzip, Format::Gzip, 128);
+        let brotli_result = decompress_bounded(&brotli, Format::Brotli, 128);
+
+        assert_eq!(gzip_result.unwrap_err(), DecompError::BudgetExceeded);
+        assert_eq!(brotli_result.unwrap_err(), DecompError::BudgetExceeded);
+    }
+
     #[test]
     fn gzip_format_error_on_invalid_input() {
         let garbage = b"this is not gzip data at all";
