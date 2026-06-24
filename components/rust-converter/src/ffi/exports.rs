@@ -1443,17 +1443,17 @@ mod tests {
     }
 
     #[test]
-    fn validate_url_panic_fallback_returns_zero_safe() {
+    fn validate_url_panic_fallback_returns_zero_unsafe() {
         /* Inject a panic inside markdown_validate_url to exercise the
          * catch_unwind Err branch. The documented contract is
-         * panic -> 0 (fail-open safe). */
+         * panic -> 0 (fail-closed unsafe). */
         let url = b"https://example.com/";
         set_test_panic(Some("validate_url"));
         let rc = unsafe { markdown_validate_url(url.as_ptr(), url.len()) };
         set_test_panic(None);
         assert_eq!(
             rc, 0,
-            "markdown_validate_url panic fallback must return 0 (safe)"
+            "markdown_validate_url panic fallback must return 0 (fail-closed unsafe)"
         );
     }
 
