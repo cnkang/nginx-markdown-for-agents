@@ -107,6 +107,22 @@ if [[ -n "$ETAG" ]]; then
     case "$HTTP_CODE" in
         304)
             pass "If-None-Match returns 304 Not Modified"
+
+            HEADERS_FILE=$(mktemp)
+            BODY_FILE=$(mktemp)
+            HTTP_CODE=$(curl -sf -D "$HEADERS_FILE" -o "$BODY_FILE" -w "%{http_code}" \
+                -H "Accept: text/markdown" \
+                -H "If-None-Match: ${ETAG}" \
+                "${NGINX_URL}${TEST_PATH}" 2>/dev/null) || HTTP_CODE="000"
+
+            BODY_SIZE=$(wc -c < "$BODY_FILE" | tr -d ' ')
+            rm -f "$HEADERS_FILE" "$BODY_FILE"
+
+            if [[ "$HTTP_CODE" == "304" && "$BODY_SIZE" == "0" ]]; then
+                pass "304 response has no body"
+            else
+                fail "304 response body check failed (code=$HTTP_CODE, bytes=$BODY_SIZE)"
+            fi
             ;;
         200)
             pass "If-None-Match returns 200 (conditional may be disabled)"

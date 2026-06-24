@@ -834,6 +834,42 @@ test_modify_cc_ignores_invalidated_no_store(void)
     TEST_PASS("invalidated no-store cannot bypass private cache policy");
 }
 
+static void
+test_modify_cc_no_store_and_public_normalizes_public(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t    *no_store;
+    ngx_table_elt_t    *public_entry;
+    ngx_int_t           rc;
+
+    reset_pool();
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    no_store = add_header(&r->headers_out.headers,
+                          "Cache-Control", "no-store", 1);
+    public_entry = add_header(&r->headers_out.headers,
+                              "Cache-Control", "public", 1);
+
+    rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+
+    TEST_ASSERT(rc == NGX_OK, "no-store plus public should succeed");
+    TEST_ASSERT(no_store != NULL && no_store->hash == 1,
+                "no-store header should remain active");
+    TEST_ASSERT(ngx_http_markdown_cache_control_has_directive(
+                    &no_store->value, &ngx_http_markdown_no_store_directive),
+                "no-store directive should be preserved");
+    TEST_ASSERT(public_entry != NULL && public_entry->hash == 1,
+                "public header should remain active");
+    TEST_ASSERT(ngx_http_markdown_cache_control_has_directive(
+                    &public_entry->value, &ngx_http_markdown_private_directive),
+                "public header should be normalized to private");
+    TEST_ASSERT(!ngx_http_markdown_cache_control_has_directive(
+                    &public_entry->value, &ngx_http_markdown_public_directive),
+                "public header should no longer advertise public");
+    TEST_PASS("no-store plus public normalized");
+}
+
 /* ── get_auth_patterns ───────────────────────────────────────── */
 
 static void
@@ -926,6 +962,7 @@ main(void)
     test_modify_cc_already_private();
     test_modify_cc_append_private();
     test_modify_cc_ignores_invalidated_no_store();
+    test_modify_cc_no_store_and_public_normalizes_public();
 
     test_get_auth_patterns_null_conf();
     test_get_auth_patterns_empty_conf();
