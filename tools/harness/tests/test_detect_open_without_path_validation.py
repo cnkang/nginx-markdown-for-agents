@@ -205,6 +205,7 @@ def test_method_open_tmp_path_div_user_input_still_fails(det):
     errors, warnings = _check_source(det, src, strict=True)
     assert len(errors) == 1
     assert "open(p)" in errors[0]
+    assert warnings == []
 
 
 def test_main_strict_flag_exits_nonzero(tmp_path, det, monkeypatch):
