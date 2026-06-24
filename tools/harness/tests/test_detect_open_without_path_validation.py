@@ -159,6 +159,54 @@ def test_strict_mode_promotes_to_error(det):
     assert warnings == []
 
 
+def test_method_open_unvalidated_receiver_strict_fail(det):
+    src = """
+    def f(path):
+        with path.open(encoding="utf-8") as fh:
+            pass
+    """
+    errors, warnings = _check_source(det, src, strict=True)
+    assert len(errors) == 1
+    assert "path" in errors[0]
+    assert warnings == []
+
+
+def test_method_open_validated_receiver_pass(det):
+    src = """
+    from lib.path_validation import validate_read_path
+    def f(untrusted):
+        p = validate_read_path(untrusted)
+        with p.open(encoding="utf-8") as fh:
+            pass
+    """
+    errors, warnings = _check_source(det, src)
+    assert errors == []
+    assert warnings == []
+
+
+def test_method_open_repo_root_div_literal_pass(det):
+    src = """
+    REPO_ROOT = Path(__file__).resolve().parents[2]
+    with (REPO_ROOT / "x").open() as fh:
+        pass
+    """
+    errors, warnings = _check_source(det, src)
+    assert errors == []
+    assert warnings == []
+
+
+def test_method_open_tmp_path_div_user_input_still_fails(det):
+    src = """
+    def test_x(tmp_path, user_input):
+        p = tmp_path / user_input
+        with p.open(encoding="utf-8") as fh:
+            pass
+    """
+    errors, warnings = _check_source(det, src, strict=True)
+    assert len(errors) == 1
+    assert "open(p)" in errors[0]
+
+
 def test_main_strict_flag_exits_nonzero(tmp_path, det, monkeypatch):
     # Drive main() with a directory containing an unsafe open() call.
     bad = tmp_path / "bad.py"

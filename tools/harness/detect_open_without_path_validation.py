@@ -75,6 +75,12 @@ EXEMPT_FILES = {
     "tools/lib/path_validation.py",
     "tools/harness/detect_open_without_path_validation.py",
     "tools/harness/detect_cwe22_paths.py",
+    # Custom validation: paths validated via relative_to() containment check,
+    # not through the standard validate_read_path / validate_write helpers.
+    "tools/perf/report_utils.py",
+    # Custom path builder: state_file(repo_root) derives from hardcoded
+    # REPO_ROOT; the detector cannot trace through function returns.
+    "tools/harness/state_store.py",
 }
 
 
@@ -471,10 +477,40 @@ def _find_open_calls(
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not _is_open_call(node):
             continue
-        if not node.args:
+
+        func = node.func
+        # os.open() has a module receiver, not a path receiver — treat as
+        # builtin open() (path is node.args[0], not func.value).
+        is_os_open = (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "os"
+            and func.attr == "open"
+        )
+        is_method_open = (
+            isinstance(func, ast.Attribute)
+            and func.attr == "open"
+            and not is_os_open
+        )
+
+        # os.open() with dir_fd keyword: path is relative to a validated
+        # file descriptor, not the filesystem root.  Skip these calls.
+        if (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "os"
+            and func.attr == "open"
+            and any(kw.arg == "dir_fd" for kw in node.keywords)
+        ):
             continue
 
-        path_arg = node.args[0]
+        if is_method_open:
+            path_arg = func.value
+        elif node.args:
+            path_arg = node.args[0]
+        else:
+            continue
+
         scope = _find_scope(node, parent_map)
 
         if _is_safe_path_expr(path_arg, validated_vars, hardcoded_vars, scope):

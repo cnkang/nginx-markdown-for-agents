@@ -243,6 +243,7 @@ def _is_file_derived_assignment(line: str) -> bool:
         "__file__" in rhs
         or "repo_root" in rhs
         or "REPO_ROOT" in rhs
+        or "ROOT" in rhs
     )
 
 

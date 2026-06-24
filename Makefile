@@ -237,7 +237,7 @@ harness-check-full:
 
 harness-security-checks:
 	bash tools/harness/detect_cwe190_casts.sh
-	PYTHONPATH=. python3 tools/harness/detect_cwe22_paths.py tools/
+	PYTHONPATH=. python3 tools/harness/detect_cwe22_paths.py tools/ --strict
 	bash tools/harness/detect_live_conf_reads.sh
 	bash tools/harness/detect_shell_hygiene.sh tools/
 	PYTHONPATH=. python3 tools/harness/detect_const_correctness.py components/nginx-module/src
