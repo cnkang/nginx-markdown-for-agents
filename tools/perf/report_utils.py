@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from lib.path_validation import validate_read_path
+from lib.path_validation import validate_read_path, validate_write_path_within_root
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -45,36 +45,14 @@ def load_json(path: str | Path) -> dict:
 def write_json(data: dict, path: str | Path) -> None:
     """
     Write a dictionary to disk as pretty-printed UTF-8 JSON and ensure the target directory exists.
-    
+
     The JSON is written with 2-space indentation, non-ASCII characters preserved, and a trailing newline is appended.
-    
+
     Parameters:
         data (dict): Mapping to serialize to JSON.
         path (str | Path): Destination file path; parent directories will be created if missing.
     """
-    raw_output_str = str(path)
-    if not re.fullmatch(r"[A-Za-z0-9._/\-]+", raw_output_str):
-        raise ValueError(
-            f"Refusing write path with unsafe characters: {path!r}"
-        )
-    raw_output = Path(raw_output_str)
-    if ".." in raw_output.parts:
-        raise ValueError(
-            f"Refusing write path with '..' traversal component: {path!r}"
-        )
-    resolved_root = REPO_ROOT.resolve()
-    if raw_output.is_absolute():
-        validated_output = raw_output.resolve()
-    else:
-        validated_output = (resolved_root / raw_output).resolve()
-    try:
-        validated_output.relative_to(resolved_root)
-    except ValueError:
-        raise ValueError(
-            f"Write report output path {validated_output} escapes root "
-            f"{resolved_root}; refusing to write outside the intended "
-            "directory tree"
-        )
+    validated_output = validate_write_path_within_root(path, REPO_ROOT, purpose="report output")
     validated_output.parent.mkdir(parents=True, exist_ok=True)
     with validated_output.open("w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2, ensure_ascii=False)

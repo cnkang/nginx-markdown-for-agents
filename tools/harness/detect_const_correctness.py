@@ -91,6 +91,34 @@ INTENTIONAL_MUTATOR_RE = re.compile(
     r"end|export|ensure|snapshot|otel_span|reserve|forward)"
 )
 
+# NGINX callback signature patterns — adding const to these parameters
+# causes function-pointer type mismatches and compilation failures.
+# Rule 24 NGINX callback signature exception.
+# These patterns match function declarations where the parameter type
+# is dictated by NGINX framework callback signatures and must NOT be
+# const-qualified.
+NGINX_CALLBACK_PATTERNS = re.compile(
+    r"(?:ngx_command_t\s+\*cmd"           # ngx_command_t.set handler
+    r"|ngx_conf_t\s+\*cf\s*,\s*ngx_command_t"  # config directive handler
+    r"|ngx_http_request_t\s+\*r\s*\)"      # ngx_http_handler_pt
+    r"|ngx_http_request_t\s+\*r\s*,\s*ngx_chain_t"  # body filter
+    r"|ngx_http_request_t\s+\*r\s*,\s*ngx_list_t"   # header filter
+    r"|ngx_cycle_t\s+\*cycle"              # init/exit handler
+    r"|ngx_event_t\s+\*ev"                 # event handler
+    r")"
+)
+
+# Functions that match NGINX callback signatures — their parameters
+# must match the NGINX-defined function pointer types exactly.
+# Adding const to these causes type mismatches.
+CALLBACK_FUNC_RE = re.compile(
+    r"(?:ngx_http_markdown_(?:handler|filter|header_filter|body_filter|"
+    r"init|postconfig|create_conf|merge_conf|init_worker|exit_worker|"
+    r"preconfiguration|postconfiguration)"
+    r"|ngx_http_(?:markdown_)?(?:next_|top_)?(?:body|header)_filter"
+    r")"
+)
+
 
 def _display_path(path: Path) -> str:
     """Return a repo-relative display string for path."""
@@ -137,7 +165,15 @@ def _should_skip_line(line: str) -> bool:
         return True
     if "(" not in line:
         return True
-    return bool(INTENTIONAL_MUTATOR_RE.search(line))
+    if INTENTIONAL_MUTATOR_RE.search(line):
+        return True
+    # Skip NGINX callback signatures — Rule 24 exception.
+    # Adding const to these parameters causes compilation failures.
+    if NGINX_CALLBACK_PATTERNS.search(line):
+        return True
+    if CALLBACK_FUNC_RE.search(line):
+        return True
+    return False
 
 
 def _build_finding_message(

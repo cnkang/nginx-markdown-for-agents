@@ -11,13 +11,12 @@
 //!    unwinding into C frames (undefined behavior per the FFI contract)
 //! 3. **Result marshalling** — conversion of Rust `Result` into C `MarkdownResult`
 //!
-//! The remaining exports are lifecycle helpers:
-//! - `markdown_converter_new` — safe constructor that allocates a converter
-//!   handle (uses `catch_unwind` but does not perform input validation or
-//!   result marshalling)
-//! - `markdown_converter_free` / `markdown_result_free` — release functions
-//!   that deallocate handles and result buffers without conversion or
-//!   panic-catching
+//! All non-trivial FFI exports and release helpers (`markdown_result_free`,
+//! `markdown_converter_free`, `markdown_header_plan_free`,
+//! `markdown_decompress_free`, etc.) are wrapped in `panic::catch_unwind` to
+//! guarantee that no Rust panic can unwind across the FFI boundary.  Simpler
+//! helpers (`markdown_options_init`, `markdown_*_result_init`) are panic-free
+//! by construction (they only call `ptr::write`).
 //!
 //! # Exported Functions
 //!
@@ -49,6 +48,26 @@ use super::abi::{
 use super::convert::convert_inner;
 use super::memory::{free_buffer, reset_result, set_error_result, set_success_result};
 use super::options::{required_bytes, required_ref};
+
+#[cfg(test)]
+thread_local! {
+    /// Test-only panic injection switch. When set to the matching tag,
+    /// the corresponding FFI closure panics on the next call so tests
+    /// can exercise the catch_unwind fail-open/fail-closed fallbacks.
+    /// Not present in release builds — has zero production cost.
+    static TEST_PANIC_TAG: std::cell::Cell<Option<&'static str>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn test_should_panic(tag: &'static str) -> bool {
+    TEST_PANIC_TAG.with(|c| c.get() == Some(tag))
+}
+
+#[cfg(test)]
+fn set_test_panic(tag: Option<&'static str>) {
+    TEST_PANIC_TAG.with(|c| c.set(tag));
+}
 
 struct HeaderPlanOwned {
     entries: Vec<FFIHeaderEntry>,
@@ -142,13 +161,16 @@ pub unsafe extern "C" fn markdown_result_free(result: *mut MarkdownResult) {
     }
 
     // SAFETY: `result` was validated as non-NULL above.
-    let result_ref = unsafe { &mut *result };
-    free_buffer(&mut result_ref.markdown, &mut result_ref.markdown_len);
-    free_buffer(&mut result_ref.etag, &mut result_ref.etag_len);
-    free_buffer(&mut result_ref.error_message, &mut result_ref.error_len);
-    result_ref.token_estimate = 0;
-    result_ref.error_code = 0;
-    result_ref.peak_memory_estimate = 0;
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: `result` was validated as non-NULL above.
+        let result_ref = unsafe { &mut *result };
+        free_buffer(&mut result_ref.markdown, &mut result_ref.markdown_len);
+        free_buffer(&mut result_ref.etag, &mut result_ref.etag_len);
+        free_buffer(&mut result_ref.error_message, &mut result_ref.error_len);
+        result_ref.token_estimate = 0;
+        result_ref.error_code = 0;
+        result_ref.peak_memory_estimate = 0;
+    }));
 }
 
 /// Destroy a converter handle previously returned by `markdown_converter_new()`.
@@ -164,8 +186,10 @@ pub unsafe extern "C" fn markdown_converter_free(handle: *mut MarkdownConverterH
         return;
     }
 
-    // SAFETY: `handle` was validated as non-NULL above and originated from `Box::into_raw`.
-    unsafe { drop(Box::from_raw(handle)) };
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: `handle` was validated as non-NULL above and originated from `Box::into_raw`.
+        unsafe { drop(Box::from_raw(handle)) };
+    }));
 }
 
 /// Perform Accept header content negotiation.
@@ -323,66 +347,88 @@ pub unsafe extern "C" fn markdown_make_decision(
         return;
     }
 
+    // SAFETY: `result` was validated as non-NULL above.
     let result_ref = unsafe { &mut *result };
 
+    // Initialize the output to a safe fallback *before* the catch_unwind block
+    // so that a panic anywhere in the decision path always leaves `result`
+    // holding a defined, fail-open skip state instead of stale/uninitialized
+    // bytes. The normal path below overwrites both fields on success.
     use crate::decision::reason_code::ReasonCode;
-    use crate::decision::{Decision, DecisionContext, SkipReason, make_decision};
-    let ctx = DecisionContext {
-        enabled: enabled != 0,
-        eligible: eligible != 0,
-        accept_prefers_markdown: accept_prefers_markdown != 0,
-        accept_header_present: accept_header_present != 0,
-        conditional_not_modified: conditional_not_modified != 0,
-        decompression_ok: decompression_ok != 0,
-        parse_timed_out: parse_timed_out != 0,
-        parse_budget_exceeded: parse_budget_exceeded != 0,
-    };
+    result_ref.decision = 1; /* skip */
+    result_ref.reason_code = ReasonCode::FfiCallError.discriminant() as u8;
 
-    match make_decision(&ctx) {
-        Decision::Convert => {
-            result_ref.decision = 0;
-            /* Converted == ReasonCode::Converted (0). */
-            result_ref.reason_code = ReasonCode::Converted.discriminant() as u8;
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| -> (u8, u8) {
+        #[cfg(test)]
+        if test_should_panic("make_decision") {
+            panic!("test-injected panic in markdown_make_decision");
         }
-        Decision::Skip(reason) => {
-            result_ref.decision = 1;
-            /* Map the pre-conversion SkipReason onto the canonical
-             * ReasonCode discriminants (the single source of truth in
-             * decision::reason_code). This lets C callers feed
-             * reason_code directly into markdown_reason_code_str() /
-             * markdown_reason_code_metric_key() without a second
-             * translation table. Post-conversion failure categories
-             * (streaming/decompression codes) are reported through
-             * separate FFI paths (streaming result codes,
-             * FFIDecompResult.error_category), not this decision result.
-             * All mapped discriminants are <= 15, so they fit in the
-             * uint8_t reason_code field. */
-            let canonical = match reason {
-                SkipReason::SkipAccept => ReasonCode::SkippedAccept,
-                SkipReason::SkipNoAccept => ReasonCode::SkippedNoAccept,
-                SkipReason::SkipConditional => ReasonCode::SkippedConditional,
-                SkipReason::FailDecompression => ReasonCode::FailedDecompression,
-                SkipReason::ParseTimeout => ReasonCode::ParseTimeout,
-                SkipReason::ParseBudgetExceeded => ReasonCode::ParseBudgetExceeded,
-                SkipReason::NotEligible => ReasonCode::NotEligible,
-                SkipReason::Disabled => ReasonCode::Disabled,
-            };
-            result_ref.reason_code = canonical.discriminant() as u8;
-            /* The pre-conversion skip reasons all map to canonical
-             * discriminants in the 0..=15 range (the C uint8_t reason_code
-             * contract). ReasonCode is repr(u8) so the cast itself can never
-             * truncate; this assert guards the stronger documented invariant
-             * that decision results stay within the pre-conversion subset, so
-             * adding a high-valued post-conversion variant to this match arm
-             * is caught in debug builds. */
-            debug_assert!(
-                canonical.discriminant() <= 15,
-                "decision ReasonCode discriminant {} exceeds the documented \
-                 pre-conversion range (0..=15)",
-                canonical.discriminant()
-            );
+        #[cfg(not(test))]
+        let _ = ("make_decision",);
+        use crate::decision::{Decision, DecisionContext, SkipReason, make_decision};
+        let ctx = DecisionContext {
+            enabled: enabled != 0,
+            eligible: eligible != 0,
+            accept_prefers_markdown: accept_prefers_markdown != 0,
+            accept_header_present: accept_header_present != 0,
+            conditional_not_modified: conditional_not_modified != 0,
+            decompression_ok: decompression_ok != 0,
+            parse_timed_out: parse_timed_out != 0,
+            parse_budget_exceeded: parse_budget_exceeded != 0,
+        };
+
+        match make_decision(&ctx) {
+            Decision::Convert => {
+                /* Converted == ReasonCode::Converted (0). */
+                (0, ReasonCode::Converted.discriminant() as u8)
+            }
+            Decision::Skip(reason) => {
+                /* Map the pre-conversion SkipReason onto the canonical
+                 * ReasonCode discriminants (the single source of truth in
+                 * decision::reason_code). This lets C callers feed
+                 * reason_code directly into markdown_reason_code_str() /
+                 * markdown_reason_code_metric_key() without a second
+                 * translation table. Post-conversion failure categories
+                 * (streaming/decompression codes) are reported through
+                 * separate FFI paths (streaming result codes,
+                 * FFIDecompResult.error_category), not this decision result.
+                 * All mapped discriminants are <= 15, so they fit in the
+                 * uint8_t reason_code field. */
+                let canonical = match reason {
+                    SkipReason::SkipAccept => ReasonCode::SkippedAccept,
+                    SkipReason::SkipNoAccept => ReasonCode::SkippedNoAccept,
+                    SkipReason::SkipConditional => ReasonCode::SkippedConditional,
+                    SkipReason::FailDecompression => ReasonCode::FailedDecompression,
+                    SkipReason::ParseTimeout => ReasonCode::ParseTimeout,
+                    SkipReason::ParseBudgetExceeded => ReasonCode::ParseBudgetExceeded,
+                    SkipReason::NotEligible => ReasonCode::NotEligible,
+                    SkipReason::Disabled => ReasonCode::Disabled,
+                };
+                /* The pre-conversion skip reasons all map to canonical
+                 * discriminants in the 0..=15 range (the C uint8_t reason_code
+                 * contract). ReasonCode is repr(u8) so the cast itself can never
+                 * truncate; this assert guards the stronger documented invariant
+                 * that decision results stay within the pre-conversion subset, so
+                 * adding a high-valued post-conversion variant to this match arm
+                 * is caught in debug builds. */
+                debug_assert!(
+                    canonical.discriminant() <= 15,
+                    "decision ReasonCode discriminant {} exceeds the documented \
+                     pre-conversion range (0..=15)",
+                    canonical.discriminant()
+                );
+                (1, canonical.discriminant() as u8)
+            }
         }
+    }));
+
+    if let Ok((decision, reason_code)) = outcome {
+        /* Write both fields atomically after confirming no panic. */
+        result_ref.decision = decision;
+        result_ref.reason_code = reason_code;
     }
+    /* else: panic caught — the fail-open skip + FfiCallError fallback
+     * set above remains in place. Nothing else to write. */
 }
 
 /// Build a header plan for a successful Markdown conversion.
@@ -419,100 +465,112 @@ pub unsafe extern "C" fn markdown_build_header_plan(
     // Defense-in-depth: header plan construction allocates and builds string
     // buffers. A panic must never unwind into C. On panic we leave the output
     // struct zeroed (count=0, entries=null, handle=null) — the safe empty plan.
-    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        let ct = if content_type.is_null() || content_type_len == 0 {
-            "text/markdown; charset=utf-8"
-        } else {
-            std::str::from_utf8(unsafe {
-                std::slice::from_raw_parts(content_type, content_type_len)
-            })
-            .unwrap_or("text/markdown; charset=utf-8")
-        };
+    //
+    // Atomic write after catch: the closure computes all return values as
+    // local variables.  After catch_unwind returns Ok, fields are written
+    // atomically so a panic cannot leave the output struct partially updated.
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(
+        || -> (*mut FFIHeaderPlanHandle, *const FFIHeaderEntry, usize) {
+            let ct = if content_type.is_null() || content_type_len == 0 {
+                "text/markdown; charset=utf-8"
+            } else {
+                std::str::from_utf8(unsafe {
+                    std::slice::from_raw_parts(content_type, content_type_len)
+                })
+                .unwrap_or("text/markdown; charset=utf-8")
+            };
 
-        use crate::header_plan::{HeaderOp, HeaderPlan};
-        let plan = HeaderPlan::for_markdown_conversion(ct, has_etag != 0);
+            use crate::header_plan::{HeaderOp, HeaderPlan};
+            let plan = HeaderPlan::for_markdown_conversion(ct, has_etag != 0);
 
-        let mut owned = HeaderPlanOwned {
-            entries: Vec::with_capacity(plan.ops.len()),
-            key_storage: Vec::with_capacity(plan.ops.len()),
-            value_storage: Vec::with_capacity(plan.ops.len()),
-        };
+            let mut owned = HeaderPlanOwned {
+                entries: Vec::with_capacity(plan.ops.len()),
+                key_storage: Vec::with_capacity(plan.ops.len()),
+                value_storage: Vec::with_capacity(plan.ops.len()),
+            };
 
-        for op in &plan.ops {
-            match op {
-                HeaderOp::Set { name, value } => {
-                    let mut key_vec = name.as_bytes().to_vec();
-                    key_vec.push(0); /* NUL-terminate per FFI contract */
-                    let mut val_vec = value.as_bytes().to_vec();
-                    val_vec.push(0); /* NUL-terminate per FFI contract */
-                    let key_len = key_vec.len() - 1; /* exclude NUL from len */
-                    let val_len = val_vec.len() - 1;
-                    owned.key_storage.push(key_vec.into_boxed_slice());
-                    owned.value_storage.push(val_vec.into_boxed_slice());
-                    let key = &owned.key_storage[owned.key_storage.len() - 1];
-                    let val = &owned.value_storage[owned.value_storage.len() - 1];
-                    owned.entries.push(FFIHeaderEntry {
-                        op_type: 0,
-                        key: key.as_ptr(),
-                        key_len,
-                        value: val.as_ptr(),
-                        value_len: val_len,
-                    });
-                }
-                HeaderOp::Delete { name } => {
-                    let mut key_vec = name.as_bytes().to_vec();
-                    key_vec.push(0); /* NUL-terminate per FFI contract */
-                    let key_len = key_vec.len() - 1;
-                    owned.key_storage.push(key_vec.into_boxed_slice());
-                    let key = &owned.key_storage[owned.key_storage.len() - 1];
-                    owned.entries.push(FFIHeaderEntry {
-                        op_type: 1,
-                        key: key.as_ptr(),
-                        key_len,
-                        value: std::ptr::null(),
-                        value_len: 0,
-                    });
-                }
-                HeaderOp::DeleteAll { name } => {
-                    let mut key_vec = name.as_bytes().to_vec();
-                    key_vec.push(0); /* NUL-terminate per FFI contract */
-                    let key_len = key_vec.len() - 1;
-                    owned.key_storage.push(key_vec.into_boxed_slice());
-                    let key = &owned.key_storage[owned.key_storage.len() - 1];
-                    owned.entries.push(FFIHeaderEntry {
-                        op_type: 3,
-                        key: key.as_ptr(),
-                        key_len,
-                        value: std::ptr::null(),
-                        value_len: 0,
-                    });
-                }
-                HeaderOp::SetEtagPlaceholder => {
-                    owned.entries.push(FFIHeaderEntry {
-                        op_type: 2,
-                        key: std::ptr::null(),
-                        key_len: 0,
-                        value: std::ptr::null(),
-                        value_len: 0,
-                    });
+            for op in &plan.ops {
+                match op {
+                    HeaderOp::Set { name, value } => {
+                        let mut key_vec = name.as_bytes().to_vec();
+                        key_vec.push(0); /* NUL-terminate per FFI contract */
+                        let mut val_vec = value.as_bytes().to_vec();
+                        val_vec.push(0); /* NUL-terminate per FFI contract */
+                        let key_len = key_vec.len() - 1; /* exclude NUL from len */
+                        let val_len = val_vec.len() - 1;
+                        owned.key_storage.push(key_vec.into_boxed_slice());
+                        owned.value_storage.push(val_vec.into_boxed_slice());
+                        let key = &owned.key_storage[owned.key_storage.len() - 1];
+                        let val = &owned.value_storage[owned.value_storage.len() - 1];
+                        owned.entries.push(FFIHeaderEntry {
+                            op_type: 0,
+                            key: key.as_ptr(),
+                            key_len,
+                            value: val.as_ptr(),
+                            value_len: val_len,
+                        });
+                    }
+                    HeaderOp::Delete { name } => {
+                        let mut key_vec = name.as_bytes().to_vec();
+                        key_vec.push(0); /* NUL-terminate per FFI contract */
+                        let key_len = key_vec.len() - 1;
+                        owned.key_storage.push(key_vec.into_boxed_slice());
+                        let key = &owned.key_storage[owned.key_storage.len() - 1];
+                        owned.entries.push(FFIHeaderEntry {
+                            op_type: 1,
+                            key: key.as_ptr(),
+                            key_len,
+                            value: std::ptr::null(),
+                            value_len: 0,
+                        });
+                    }
+                    HeaderOp::DeleteAll { name } => {
+                        let mut key_vec = name.as_bytes().to_vec();
+                        key_vec.push(0); /* NUL-terminate per FFI contract */
+                        let key_len = key_vec.len() - 1;
+                        owned.key_storage.push(key_vec.into_boxed_slice());
+                        let key = &owned.key_storage[owned.key_storage.len() - 1];
+                        owned.entries.push(FFIHeaderEntry {
+                            op_type: 3,
+                            key: key.as_ptr(),
+                            key_len,
+                            value: std::ptr::null(),
+                            value_len: 0,
+                        });
+                    }
+                    HeaderOp::SetEtagPlaceholder => {
+                        owned.entries.push(FFIHeaderEntry {
+                            op_type: 2,
+                            key: std::ptr::null(),
+                            key_len: 0,
+                            value: std::ptr::null(),
+                            value_len: 0,
+                        });
+                    }
                 }
             }
-        }
 
-        if owned.entries.is_empty() {
-            result_ref.handle = std::ptr::null_mut();
-            result_ref.entries = std::ptr::null();
-            result_ref.count = 0;
-        } else {
-            result_ref.entries = owned.entries.as_ptr();
-            result_ref.count = owned.entries.len();
-            result_ref.handle = Box::into_raw(Box::new(owned)) as *mut FFIHeaderPlanHandle;
-        }
-    }));
+            let count = owned.entries.len();
+            if count == 0 {
+                (std::ptr::null_mut(), std::ptr::null(), 0)
+            } else {
+                let entries_ptr = owned.entries.as_ptr();
+                let handle = Box::into_raw(Box::new(owned)) as *mut FFIHeaderPlanHandle;
+                (handle, entries_ptr, count)
+            }
+        },
+    ));
 
-    if outcome.is_err() {
-        /* Panic caught — ensure a safe empty plan. */
-        reset_header_plan_to_empty(result_ref);
+    match outcome {
+        Ok((handle, entries, count)) => {
+            result_ref.handle = handle;
+            result_ref.entries = entries;
+            result_ref.count = count;
+        }
+        Err(_) => {
+            /* Panic caught — ensure a safe empty plan. */
+            reset_header_plan_to_empty(result_ref);
+        }
     }
 }
 
@@ -538,21 +596,31 @@ fn reset_header_plan_to_empty(plan: &mut FFIHeaderPlan) {
 /// bytes or is NULL when `url_len == 0`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_validate_url(url: *const u8, url_len: usize) -> u8 {
-    let url_str = if url.is_null() || url_len == 0 {
-        return 1;
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(url, url_len) }) {
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| -> u8 {
+        #[cfg(test)]
+        if test_should_panic("validate_url") {
+            panic!("test-injected panic in markdown_validate_url");
+        }
+        #[cfg(not(test))]
+        let _ = ("validate_url",);
+        if url.is_null() || url_len == 0 {
+            return 1;
+        }
+        // SAFETY: caller guarantees `url` points to `url_len` readable bytes.
+        let url_str = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(url, url_len) })
+        {
             Ok(s) => s,
             Err(_) => return 0,
-        }
-    };
+        };
 
-    use crate::security::validate_link_url;
-    if validate_link_url(url_str).is_ok() {
-        1
-    } else {
-        0
-    }
+        use crate::security::validate_link_url;
+        if validate_link_url(url_str).is_ok() {
+            1
+        } else {
+            0
+        }
+    }));
+    outcome.unwrap_or_default()
 }
 
 /// Check if a URL uses a dangerous scheme (javascript:, data:, etc.).
@@ -565,22 +633,32 @@ pub unsafe extern "C" fn markdown_validate_url(url: *const u8, url_len: usize) -
 /// bytes or is NULL when `url_len == 0`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_is_dangerous_url(url: *const u8, url_len: usize) -> u8 {
-    let url_str = if url.is_null() || url_len == 0 {
-        return 0;
-    } else {
-        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(url, url_len) }) {
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| -> u8 {
+        #[cfg(test)]
+        if test_should_panic("is_dangerous_url") {
+            panic!("test-injected panic in markdown_is_dangerous_url");
+        }
+        #[cfg(not(test))]
+        let _ = ("is_dangerous_url",);
+        if url.is_null() || url_len == 0 {
+            return 0;
+        }
+        // SAFETY: caller guarantees `url` points to `url_len` readable bytes.
+        let url_str = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(url, url_len) })
+        {
             Ok(s) => s,
             Err(_) => return 1,
-        }
-    };
+        };
 
-    use crate::security::SecurityValidator;
-    let validator = SecurityValidator::new();
-    if validator.is_dangerous_url(url_str) {
-        1
-    } else {
-        0
-    }
+        use crate::security::SecurityValidator;
+        let validator = SecurityValidator::new();
+        if validator.is_dangerous_url(url_str) {
+            1
+        } else {
+            0
+        }
+    }));
+    outcome.unwrap_or(1)
 }
 
 /// Build a base URL from X-Forwarded-Host and X-Forwarded-Proto headers.
@@ -657,17 +735,20 @@ pub unsafe extern "C" fn markdown_header_plan_free(plan: *mut FFIHeaderPlan) {
         return;
     }
 
-    let plan_ref = unsafe { &mut *plan };
-    if !plan_ref.handle.is_null() {
-        /* Save the old handle before clearing external fields */
-        let old_handle = plan_ref.handle;
-        /* Zero all externally-visible fields FIRST */
-        plan_ref.handle = std::ptr::null_mut();
-        plan_ref.entries = std::ptr::null();
-        plan_ref.count = 0;
-        /* Now drop — no external field points to freed memory */
-        unsafe { drop(Box::from_raw(old_handle as *mut HeaderPlanOwned)) };
-    }
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: `plan` was validated as non-NULL above.
+        let plan_ref = unsafe { &mut *plan };
+        if !plan_ref.handle.is_null() {
+            /* Save the old handle before clearing external fields */
+            let old_handle = plan_ref.handle;
+            /* Zero all externally-visible fields FIRST */
+            plan_ref.handle = std::ptr::null_mut();
+            plan_ref.entries = std::ptr::null();
+            plan_ref.count = 0;
+            /* Now drop — no external field points to freed memory */
+            unsafe { drop(Box::from_raw(old_handle as *mut HeaderPlanOwned)) };
+        }
+    }));
 }
 
 /// Convert a C pointer + length pair to an optional UTF-8 `&str`.
@@ -929,16 +1010,19 @@ pub unsafe extern "C" fn markdown_decompress_free(result: *mut FFIDecompResult) 
         return;
     }
 
-    let result_ref = unsafe { &mut *result };
-    if !result_ref.output.is_null() && result_ref.output_len > 0 {
-        // Reconstruct the Box<[u8]> from the raw parts and drop it
-        let slice =
-            unsafe { std::slice::from_raw_parts_mut(result_ref.output, result_ref.output_len) };
-        unsafe { drop(Box::from_raw(slice)) };
-    }
-    result_ref.output = ptr::null_mut();
-    result_ref.output_len = 0;
-    result_ref.error_category = 0;
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: `result` was validated as non-NULL above.
+        let result_ref = unsafe { &mut *result };
+        if !result_ref.output.is_null() && result_ref.output_len > 0 {
+            // Reconstruct the Box<[u8]> from the raw parts and drop it
+            let slice =
+                unsafe { std::slice::from_raw_parts_mut(result_ref.output, result_ref.output_len) };
+            unsafe { drop(Box::from_raw(slice)) };
+        }
+        result_ref.output = ptr::null_mut();
+        result_ref.output_len = 0;
+        result_ref.error_category = 0;
+    }));
 }
 
 /// Zero-initialize an FFIDecompResult struct.
@@ -1299,5 +1383,84 @@ mod tests {
         assert!(result.output.is_null());
         assert_eq!(result.output_len, 0);
         assert_eq!(result.error_category, 0);
+    }
+
+    #[test]
+    fn make_decision_panic_fallback_writes_skip_and_ffi_error() {
+        use crate::decision::reason_code::ReasonCode;
+
+        let mut result: FFIDecisionResult = unsafe { std::mem::zeroed() };
+        /* Poison the output to ensure the function overwrites stale bytes
+         * rather than leaving them. decision=0x5a, reason_code=0x5a. */
+        result.decision = 0x5a;
+        result.reason_code = 0x5a;
+
+        set_test_panic(Some("make_decision"));
+        unsafe {
+            markdown_make_decision(1, 1, 1, 1, 0, 1, 0, 0, &mut result);
+        }
+        set_test_panic(None);
+
+        assert_eq!(
+            result.decision, 1,
+            "panic fallback must set decision=skip (1), got {}",
+            result.decision
+        );
+        assert_eq!(
+            result.reason_code,
+            ReasonCode::FfiCallError.discriminant() as u8,
+            "panic fallback must set reason_code=FfiCallError ({}), got {}",
+            ReasonCode::FfiCallError.discriminant(),
+            result.reason_code
+        );
+    }
+
+    #[test]
+    fn make_decision_normal_path_overwrites_fallback() {
+        /* Disabled module → SkipReason::Disabled. Ensures the fallback
+         * pre-init does not leak into the success path. */
+        let mut result: FFIDecisionResult = unsafe { std::mem::zeroed() };
+        unsafe {
+            markdown_make_decision(0, 1, 0, 0, 0, 1, 0, 0, &mut result);
+        }
+        assert_eq!(result.decision, 1);
+        assert_eq!(
+            result.reason_code,
+            crate::decision::reason_code::ReasonCode::Disabled.discriminant() as u8
+        );
+    }
+
+    #[test]
+    fn is_dangerous_url_panic_fallback_returns_one_fail_closed() {
+        let url = b"https://example.com/";
+        set_test_panic(Some("is_dangerous_url"));
+        let rc = unsafe { markdown_is_dangerous_url(url.as_ptr(), url.len()) };
+        set_test_panic(None);
+        assert_eq!(
+            rc, 1,
+            "markdown_is_dangerous_url panic fallback must fail-closed (return 1)"
+        );
+    }
+
+    #[test]
+    fn validate_url_panic_fallback_returns_zero_unsafe() {
+        /* Inject a panic inside markdown_validate_url to exercise the
+         * catch_unwind Err branch. The documented contract is
+         * panic -> 0 (fail-closed unsafe). */
+        let url = b"https://example.com/";
+        set_test_panic(Some("validate_url"));
+        let rc = unsafe { markdown_validate_url(url.as_ptr(), url.len()) };
+        set_test_panic(None);
+        assert_eq!(
+            rc, 0,
+            "markdown_validate_url panic fallback must return 0 (fail-closed unsafe)"
+        );
+    }
+
+    #[test]
+    fn validate_url_normal_path_returns_one() {
+        let url = b"https://example.com/";
+        let rc = unsafe { markdown_validate_url(url.as_ptr(), url.len()) };
+        assert_eq!(rc, 1, "valid URL should be marked safe (1)");
     }
 }

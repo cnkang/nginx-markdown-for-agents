@@ -830,6 +830,101 @@ ngx_http_markdown_is_cache_control_header(const ngx_table_elt_t *header)
 }
 
 /*
+ * Callback signature for ngx_http_markdown_for_each_cache_control_header.
+ *
+ * Called once per Cache-Control entry found while walking the NGINX
+ * header list.  The opaque `ctx` pointer is forwarded unchanged from
+ * the iterator call site.  Returning NGX_OK continues iteration;
+ * returning any other value stops iteration and is returned to the
+ * caller as the iterator result.
+ */
+typedef ngx_int_t (*ngx_http_markdown_cc_visitor_t)(
+    ngx_http_request_t *r, ngx_table_elt_t *entry, void *ctx);
+
+
+/*
+ * Walk every Cache-Control entry in `headers` and invoke `visitor`
+ * for each one.
+ *
+ * Centralizes the ngx_list_part_t chain walk (Rule 28) + the
+ * is_cache_control_header() filter so the scan and rewrite paths
+ * cannot drift apart on traversal semantics.
+ *
+ * Parameters:
+ *   r       - HTTP request (forwarded to the visitor)
+ *   headers - the outgoing headers list to walk
+ *   visitor - per-entry callback
+ *   ctx     - opaque pointer forwarded to the visitor
+ *
+ * Returns:
+ *   NGX_OK if every visitor returned NGX_OK, otherwise the first
+ *   non-NGX_OK value returned by the visitor (iteration stops on the
+ *   first non-OK return).
+ */
+static ngx_int_t
+ngx_http_markdown_for_each_cache_control_header(ngx_http_request_t *r,
+    ngx_list_t *headers, ngx_http_markdown_cc_visitor_t visitor, void *ctx)
+{
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+    ngx_int_t         rc;
+
+    part = &headers->part;
+    for (/* void */; part != NULL; part = part->next) {
+        elts = part->elts;
+        for (size_t i = 0; i < part->nelts; i++) {
+            if (!ngx_http_markdown_is_cache_control_header(&elts[i])) {
+                continue;
+            }
+
+            rc = visitor(r, &elts[i], ctx);
+            if (rc != NGX_OK) {
+                return rc;
+            }
+        }
+    }
+
+    return NGX_OK;
+}
+
+
+/*
+ * Visitor for ngx_http_markdown_scan_cache_control_headers:
+ * collects no-store / private / public directive flags and remembers
+ * the first Cache-Control entry pointer.
+ */
+static ngx_int_t
+ngx_http_markdown_scan_cc_visitor(ngx_http_request_t *r, /* NOSONAR: r type dictated by ngx_http_markdown_cc_visitor_t callback typedef (Rule 24) */
+    ngx_table_elt_t *entry, void *ctx)
+{
+    ngx_http_markdown_cc_scan_t  *scan = ctx;
+
+    (void) r;
+
+    if (scan->first_entry == NULL) {
+        scan->first_entry = entry;
+    }
+    if (ngx_http_markdown_cache_control_has_directive(
+            &entry->value, &ngx_http_markdown_no_store_directive))
+    {
+        scan->has_no_store = 1;
+    }
+    if (ngx_http_markdown_cache_control_has_directive(
+            &entry->value, &ngx_http_markdown_private_directive))
+    {
+        scan->has_private = 1;
+    }
+    if (ngx_http_markdown_cache_control_has_directive(
+            &entry->value, &ngx_http_markdown_public_directive))
+    {
+        scan->any_public = 1;
+    }
+
+    return NGX_OK;
+}
+
+
+/*
  * Scan all Cache-Control headers and collect directive flags.
  *
  * Iterates the NGINX header linked list, identifies Cache-Control
@@ -845,42 +940,15 @@ static void
 ngx_http_markdown_scan_cache_control_headers(ngx_list_t *headers,
                                              ngx_http_markdown_cc_scan_t *scan)
 {
-    ngx_list_part_t  *part;
-    ngx_table_elt_t  *elts;
-
     scan->first_entry = NULL;
     scan->has_no_store = 0;
     scan->has_private = 0;
     scan->any_public = 0;
 
-    part = &headers->part;
-    for (/* void */; part != NULL; part = part->next) {
-        elts = part->elts;
-        for (size_t i = 0; i < part->nelts; i++) {
-            if (!ngx_http_markdown_is_cache_control_header(&elts[i])) {
-                continue;
-            }
-
-            if (scan->first_entry == NULL) {
-                scan->first_entry = &elts[i];
-            }
-            if (ngx_http_markdown_cache_control_has_directive(
-                    &elts[i].value, &ngx_http_markdown_no_store_directive))
-            {
-                scan->has_no_store = 1;
-            }
-            if (ngx_http_markdown_cache_control_has_directive(
-                    &elts[i].value, &ngx_http_markdown_private_directive))
-            {
-                scan->has_private = 1;
-            }
-            if (ngx_http_markdown_cache_control_has_directive(
-                    &elts[i].value, &ngx_http_markdown_public_directive))
-            {
-                scan->any_public = 1;
-            }
-        }
-    }
+    /* r is unused by the scan visitor; pass NULL since the visitor
+     * only needs the entry + ctx. */
+    (void) ngx_http_markdown_for_each_cache_control_header(NULL, headers,
+        ngx_http_markdown_scan_cc_visitor, scan);
 }
 
 /*
@@ -936,30 +1004,40 @@ ngx_http_markdown_ensure_private_on_entry(ngx_http_request_t *r,
  *   NGX_OK    - all entries updated successfully
  *   NGX_ERROR - allocation failed on any entry
  */
+/*
+ * Trampoline that adapts the 2-arg ensure_private_on_entry to the
+ * 3-arg ngx_http_markdown_cc_visitor_t signature (ctx is unused).
+ */
+static ngx_int_t
+ngx_http_markdown_ensure_private_visitor(ngx_http_request_t *r,
+    ngx_table_elt_t *entry, void *ctx)
+{
+    (void) ctx;
+    return ngx_http_markdown_ensure_private_on_entry(r, entry);
+}
+
+
+/*
+ * Rewrite all Cache-Control entries that contain "public" to use "private".
+ *
+ * Iterates the NGINX header linked list.  For each Cache-Control entry
+ * that contains "public", strips it and appends "private".  For entries
+ * that lack both "public" and "private", appends ", private".
+ *
+ * Parameters:
+ *   r       - the HTTP request (pool used for allocation, logging)
+ *   headers - the outgoing headers list to rewrite
+ *
+ * Returns:
+ *   NGX_OK    - all entries updated successfully
+ *   NGX_ERROR - allocation failed on any entry
+ */
 static ngx_int_t
 ngx_http_markdown_rewrite_public_entries(ngx_http_request_t *r,
                                          ngx_list_t *headers)
 {
-    ngx_list_part_t  *part;
-    ngx_table_elt_t  *elts;
-    ngx_int_t         rc;
-
-    part = &headers->part;
-    for (/* void */; part != NULL; part = part->next) {
-        elts = part->elts;
-        for (size_t i = 0; i < part->nelts; i++) {
-            if (!ngx_http_markdown_is_cache_control_header(&elts[i])) {
-                continue;
-            }
-
-            rc = ngx_http_markdown_ensure_private_on_entry(r, &elts[i]);
-            if (rc != NGX_OK) {
-                return rc;
-            }
-        }
-    }
-
-    return NGX_OK;
+    return ngx_http_markdown_for_each_cache_control_header(r, headers,
+        ngx_http_markdown_ensure_private_visitor, NULL);
 }
 
 /*

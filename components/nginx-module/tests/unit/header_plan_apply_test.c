@@ -769,6 +769,129 @@ test_delete_all_null_key_returns_error(void)
 
 
 static void
+test_set_empty_value(void)
+{
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_SET,
+        (const uint8_t *)"X-Empty", 7,
+        (const uint8_t *)"", 0 };
+    ngx_table_elt_t *h;
+
+    TEST_SUBSECTION("SET with empty value (value_len=0)");
+
+    setup_request();
+    plan.handle = &handle;
+    plan.entries = &entry;
+    plan.count = 1;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_OK,
+                "SET empty value should succeed");
+
+    h = find_header((const u_char *)"X-Empty", 7);
+    TEST_ASSERT(h != NULL, "header should exist after SET");
+    TEST_ASSERT(h->hash == 1, "header hash should be 1");
+    TEST_ASSERT(h->value.len == 0, "value length should be 0");
+    TEST_ASSERT(h->value.data == NULL, "value data should be NULL");
+
+    TEST_PASS("SET empty value correct");
+}
+
+static void
+test_set_empty_value_rollback(void)
+{
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entries[2] = {
+        { NGX_HTTP_MARKDOWN_PLAN_OP_SET,
+          (const uint8_t *)"X-Empty", 7,
+          (const uint8_t *)"", 0 },
+        { 99, (const uint8_t *)"X-Bad", 5, NULL, 0 }
+    };
+    ngx_table_elt_t *h;
+
+    TEST_SUBSECTION("SET empty value rollback on later failure");
+
+    setup_request();
+    plan.handle = &handle;
+    plan.entries = entries;
+    plan.count = 2;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_ERROR,
+                "unknown later op should fail the plan");
+
+    h = find_header((const u_char *)"X-Empty", 7);
+    TEST_ASSERT(h == NULL,
+                "rolled-back SET with empty value should not be visible");
+
+    TEST_PASS("SET empty value rollback correct");
+}
+
+static void
+test_modify_existing_empty_value(void)
+{
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entry = { NGX_HTTP_MARKDOWN_PLAN_OP_MODIFY,
+        (const uint8_t *)"X-Change", 8,
+        (const uint8_t *)"", 0 };
+    ngx_table_elt_t *h;
+
+    TEST_SUBSECTION("MODIFY existing header to empty value");
+
+    setup_request();
+    add_existing_header("X-Change", "original");
+
+    plan.handle = &handle;
+    plan.entries = &entry;
+    plan.count = 1;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_OK,
+                "MODIFY to empty value should succeed");
+
+    h = find_header((const u_char *)"X-Change", 8);
+    TEST_ASSERT(h != NULL, "header should still exist");
+    TEST_ASSERT(h->value.len == 0, "value length should be 0");
+    TEST_ASSERT(h->value.data == NULL, "value data should be NULL");
+
+    TEST_PASS("MODIFY to empty value correct");
+}
+
+static void
+test_modify_existing_empty_value_rollback(void)
+{
+    FFIHeaderPlan plan;
+    FFIHeaderPlanHandle handle;
+    FFIHeaderEntry entries[2] = {
+        { NGX_HTTP_MARKDOWN_PLAN_OP_MODIFY,
+          (const uint8_t *)"X-Change", 8,
+          (const uint8_t *)"", 0 },
+        { 99, (const uint8_t *)"X-Bad", 5, NULL, 0 }
+    };
+    ngx_table_elt_t *h;
+
+    TEST_SUBSECTION("MODIFY to empty value rollback restores original");
+
+    setup_request();
+    add_existing_header("X-Change", "original");
+
+    plan.handle = &handle;
+    plan.entries = entries;
+    plan.count = 2;
+
+    TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_ERROR,
+                "unknown later op should fail the plan");
+
+    h = find_header((const u_char *)"X-Change", 8);
+    TEST_ASSERT(h != NULL, "header should exist after rollback");
+    TEST_ASSERT(h->value.len == 8, "value length should be restored");
+    TEST_ASSERT(memcmp(h->value.data, "original", 8) == 0,
+                "value should be restored to original");
+
+    TEST_PASS("MODIFY empty value rollback restores original");
+}
+
+static void
 test_multi_op_plan(void)
 {
     FFIHeaderPlan plan;
@@ -839,6 +962,10 @@ main(void)
     test_delete_all_removes_duplicate_headers();
     test_delete_all_rollback_restores_duplicate_headers();
     test_delete_all_null_key_returns_error();
+    test_set_empty_value();
+    test_set_empty_value_rollback();
+    test_modify_existing_empty_value();
+    test_modify_existing_empty_value_rollback();
     test_multi_op_plan();
 
     printf("\n========================================\n");
