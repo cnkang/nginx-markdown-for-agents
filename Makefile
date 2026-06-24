@@ -247,6 +247,8 @@ harness-security-checks:
 	bash tools/harness/detect_ffi_struct_init.sh
 	bash tools/harness/detect_c_pure_logic.sh
 	bash tools/harness/detect_volatile_atomic.sh
+	bash tools/harness/detect_nosonar_discipline.sh
+	bash tools/harness/detect_ngx_log_arg_count.sh
 	bash tools/harness/detect_pool_free.sh
 	bash tools/harness/detect_ffi_panic_safety.sh --strict
 	PYTHONPATH=. python3 tools/harness/detect_forward_decl_order.py components/nginx-module/src --strict
@@ -258,6 +260,8 @@ test-harness:
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh
 	bash tools/harness/tests/test_detect_c_pure_logic.sh
 	bash tools/harness/tests/test_detect_volatile_atomic.sh
+	bash tools/harness/tests/test_detect_nosonar_discipline.sh
+	bash tools/harness/tests/test_detect_ngx_log_arg_count.sh
 	bash tools/harness/tests/test_detect_pool_free.sh
 	bash tools/harness/tests/test_detect_ffi_panic_safety.sh
 	bash tools/harness/tests/test_security_gitleaks_scope.sh
