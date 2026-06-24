@@ -429,6 +429,7 @@ test_set_new_header_value_allocation_failure_cleans_up(void)
     plan.handle = &handle;
     plan.entries = &entry;
     plan.count = 1;
+    /* Fail the third allocation: undo array, header key, then header value. */
     g_palloc_fail_count = 3;
 
     TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_ERROR,
@@ -461,6 +462,7 @@ test_set_overwrite_existing_value_allocation_failure(void)
     plan.handle = &handle;
     plan.entries = &entry;
     plan.count = 1;
+    /* Fail the second allocation: undo array, then the replacement value. */
     g_palloc_fail_count = 2;
 
     TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_ERROR,
@@ -709,6 +711,7 @@ test_modify_existing_value_allocation_failure(void)
     plan.handle = &handle;
     plan.entries = &entry;
     plan.count = 1;
+    /* Fail the second allocation: undo array, then the replacement value. */
     g_palloc_fail_count = 2;
 
     TEST_ASSERT(apply_header_plan(&g_request, &plan) == NGX_ERROR,
