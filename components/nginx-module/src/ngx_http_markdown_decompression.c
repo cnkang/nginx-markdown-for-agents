@@ -360,10 +360,10 @@ ngx_http_markdown_grow_decomp_buffer(ngx_http_request_t *r,
 /*
  * Handle a zlib "no progress" condition (avail_out or avail_in exhausted).
  *
- * Called from the inflate loop when inflate() returns Z_OK or Z_BUF_ERROR
- * without reaching Z_STREAM_END. Checks output buffer exhaustion first
- * (grow), then input exhaustion (truncated), then reports an unexpected
- * stall.
+ * Called from the inflate loop when inflate() returns Z_BUF_ERROR
+ * without reaching Z_STREAM_END, or when inflate() returns Z_OK but
+ * avail_out is 0. Checks output buffer exhaustion first (grow), then
+ * input exhaustion (truncated), then reports an unexpected stall.
  *
  * Parameters:
  *   r             - nginx request structure
@@ -417,8 +417,8 @@ ngx_http_markdown_handle_inflate_stall(ngx_http_request_t *r,
 /*
  * Run the zlib inflate loop until Z_STREAM_END or error.
  *
- * Handles buffer growth on avail_out exhaustion (Z_OK or Z_BUF_ERROR
- * with avail_out == 0) by calling ngx_http_markdown_grow_decomp_buffer.
+ * Handles buffer growth on avail_out exhaustion (Z_OK with avail_out == 0
+ * or Z_BUF_ERROR) by calling ngx_http_markdown_grow_decomp_buffer.
  * Prioritizes output buffer growth over truncated-input classification
  * to avoid misdiagnosing streams where zlib needs one more call after
  * consuming all input bytes.
@@ -453,26 +453,33 @@ ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
             return NGX_OK;
         }
 
-        /* Z_OK and Z_BUF_ERROR both signal a stall that can be retried
-         * after growing the output buffer; they differ only in the
-         * error category / label passed to the shared stall handler.
-         * Consolidating the two branches here removes a 4-line
-         * continue/return duplicate (Rule 31). */
-        if (zrc == Z_OK || zrc == Z_BUF_ERROR) {
-            ngx_int_t  category;
-            const char *label;
-
-            if (zrc == Z_OK) {
-                category = NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
-                label = "Z_OK";
-            } else {
-                category = NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
-                label = "Z_BUF_ERROR";
+        /*
+         * Z_OK means inflate() made progress (consumed input and/or
+         * produced output).  If the output buffer is exhausted, grow it
+         * and continue; otherwise simply loop again.  Z_BUF_ERROR means
+         * no progress could be made, which is only a recoverable stall
+         * when avail_out == 0; any other Z_BUF_ERROR with available
+         * output and/or input is an unexpected stall and is classified
+         * as a format error.
+         */
+        if (zrc == Z_OK) {
+            if (stream->avail_out == 0) {
+                rc = ngx_http_markdown_handle_inflate_stall(
+                    r, conf, stream, output_data, output_size,
+                    NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
+                if (rc == NGX_AGAIN) {
+                    continue;
+                }
+                return rc;
             }
 
+            continue;
+        }
+
+        if (zrc == Z_BUF_ERROR) {
             rc = ngx_http_markdown_handle_inflate_stall(
                 r, conf, stream, output_data, output_size,
-                category, label);
+                NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, "Z_BUF_ERROR");
             if (rc == NGX_AGAIN) {
                 continue;
             }
