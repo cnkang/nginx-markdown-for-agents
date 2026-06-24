@@ -296,15 +296,25 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    scan_dir = Path(args.directory)
-    if not scan_dir.is_absolute():
-        scan_dir = REPO_ROOT / scan_dir
-
-    # Resolve for display
+    # Validate the scan directory through the project's path validation
+    # helper (Rule 12/33 compliance — the detector itself must not bypass
+    # path validation).
     try:
-        scan_dir = scan_dir.resolve()
-    except OSError:
-        pass
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from lib.path_validation import validate_read_path
+        scan_dir = Path(validate_read_path(
+            args.directory, purpose="scan directory",
+        ))
+    except (ImportError, FileNotFoundError, ValueError) as exc:
+        # Fallback: if path_validation is unavailable, resolve manually.
+        # This only happens in standalone execution outside the repo.
+        scan_dir = Path(args.directory)
+        if not scan_dir.is_absolute():
+            scan_dir = REPO_ROOT / scan_dir
+        try:
+            scan_dir = scan_dir.resolve()
+        except OSError:
+            pass
 
     if not scan_dir.is_dir():
         print(f"ERROR: {scan_dir} is not a directory", file=sys.stderr)
