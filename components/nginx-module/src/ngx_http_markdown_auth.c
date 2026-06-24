@@ -1077,27 +1077,32 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
     }
 
     /*
-     * Rule 3: Preserve "no-store" - NEVER downgrade
-     * If any Cache-Control header contains "no-store", leave all
-     * unchanged.
-     */
-    if (scan.has_no_store) {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown: preserving Cache-Control with no-store");
-        return NGX_OK;
-    }
-
-    /*
-     * If any Cache-Control header still contains "public", strip
-     * public from ALL such entries and append private.  This covers:
+     * If any Cache-Control header contains "public", strip public from
+     * ALL such entries and append private.  This covers:
      *   - First header has "public"
      *   - First header has "private" but a later header has "public"
      *   - Multiple headers each have "public"
      * In all cases, each entry with public is rewritten.
      */
     if (scan.any_public) {
+        if (scan.has_no_store) {
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                          "markdown: normalizing public Cache-Control "
+                          "while preserving no-store");
+        }
         return ngx_http_markdown_rewrite_public_entries(
                    r, &r->headers_out.headers);
+    }
+
+    /*
+     * Rule 3: Preserve "no-store" - NEVER downgrade.
+     * If any Cache-Control header contains "no-store" and none contains
+     * "public", leave all unchanged.
+     */
+    if (scan.has_no_store) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: preserving Cache-Control with no-store");
+        return NGX_OK;
     }
 
     if (scan.has_private) {
