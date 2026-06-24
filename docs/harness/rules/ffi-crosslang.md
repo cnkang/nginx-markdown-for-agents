@@ -46,6 +46,29 @@ Required:
   never abort or unwind into C.  Trivial functions that only read a
   constant or return a fixed value may omit the wrapper with a comment
   documenting why.
+- **Fail-closed fallback initialization**: Before calling `catch_unwind`,
+  initialize any FFI output struct (for example `FFIDecisionResult`,
+  `MarkdownResult`) to a safe fail-closed default value.  If the closure
+  panics after partially writing struct fields, the caller receives a
+  defined, safe state instead of stale or uninitialized bytes.  For
+  decision results, the fail-closed default is `decision=1` (skip) with
+  `reason_code=FfiCallError`.  For URL validation, the fail-closed
+  default is `0` (validation failed = safe reject) or `1` (dangerous =
+  safe default), depending on the function's safe fallback.
+- **Atomic write after catch**: The `catch_unwind` closure should compute
+  return values as local variables, NOT directly write to the FFI output
+  struct's fields.  After `catch_unwind` returns `Ok`, write all fields
+  atomically.  This prevents a panic from leaving the output struct in a
+  partially-written, inconsistent state.  Example pattern:
+  ```rust
+  result_ref.decision = 1; // fail-closed default
+  result_ref.reason_code = ReasonCode::FfiCallError.discriminant() as u8;
+  let outcome = catch_unwind(|| -> (u8, u8) { /* compute only */ });
+  if let Ok((d, r)) = outcome {
+      result_ref.decision = d;     // atomic write after success
+      result_ref.reason_code = r;
+  }
+  ```
 - **FFI resource ownership and Drop guards**: When an FFI export allocates
   or holds a resource (for example `HeaderPlan`, `MarkdownConverterHandle`)
   that must be released by a matching `*_free()` or `safe_finish()` call,
@@ -130,6 +153,24 @@ Required:
 - When a new FFI operation is added, the test suite must include at least
   one test for the NULL/empty input case on each side of the boundary.
   This prevents regressions if a later refactor removes the guard.
+- **Zero-length value boundary**: When an FFI operation receives a
+  value with `value_len == 0` (but `value != NULL`), the C-side handler
+  must explicitly set the target field to `NULL`/`0` rather than
+  allocating a zero-length buffer via `ngx_pnalloc(pool, 0)`.  Zero-
+  length pool allocations have implementation-defined behavior (may
+  return NULL or a non-NULL pointer) and the resulting `ngx_str_t` would
+  have `len=0` but a dangling or NULL `data` pointer.  The correct
+  pattern is:
+  ```c
+  if (entry->value_len == 0) {
+      h->value.data = NULL;
+      h->value.len = 0;
+      return NGX_OK;
+  }
+  ```
+  This applies to all FFI-to-C value copy paths, including header plan
+  operations (SET, MODIFY) and any new operation that copies FFI string
+  data into NGINX pool-owned structures.
 
 Verification:
 - `grep -rn 'op_type\|operation_type' components/rust-converter/src/ffi/`
