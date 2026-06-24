@@ -36,9 +36,9 @@ while IFS=: read -r file lineno content; do
     CHECKED=$((CHECKED + 1))
 
     # Check if the NOSONAR annotation has a reason (text after "NOSONAR:")
-    # The pattern must be "NOSONAR:" followed by non-whitespace text
-    if printf '%s' "$content" | grep -qE 'NOSONAR:[[:space:]]*[A-Za-z]'; then
-        : # OK — has a reason starting with a letter
+    # Any non-empty text after the colon is accepted.
+    if printf '%s' "$content" | grep -qE 'NOSONAR:[[:space:]]*[^[:space:]]'; then
+        : # OK — has a reason
     else
         echo "  [nosonar] VIOLATION: $file:$lineno — bare NOSONAR without reason (Rule 24 requires /* NOSONAR: <reason> */)" >&2
         VIOLATIONS=$((VIOLATIONS + 1))

@@ -260,6 +260,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_ffi_struct_init.sh
 	bash tools/harness/tests/test_detect_c_pure_logic.sh
 	bash tools/harness/tests/test_detect_volatile_atomic.sh
+	bash tools/harness/tests/test_detect_cwe190_casts.sh
 	bash tools/harness/tests/test_detect_nosonar_discipline.sh
 	bash tools/harness/tests/test_detect_ngx_log_arg_count.sh
 	bash tools/harness/tests/test_detect_pool_free.sh
