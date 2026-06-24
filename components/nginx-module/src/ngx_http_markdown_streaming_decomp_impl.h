@@ -807,7 +807,7 @@ ngx_http_markdown_streaming_decomp_feed_case_zlib(
      * On builds without ZLIB_CONST it is Bytef *, but inflate()
      * reads from the buffer only.
      */
-    decomp->state.zlib.next_in = (Bytef *) in_data; /* NOSONAR */
+    decomp->state.zlib.next_in = (Bytef *) in_data; /* NOSONAR: zlib z_stream.next_in requires Bytef* (non-const) without ZLIB_CONST */
     if (ngx_http_markdown_streaming_decomp_size_to_uint(
             in_len, &decomp->state.zlib.avail_in))
     {
