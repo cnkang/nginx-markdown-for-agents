@@ -59,7 +59,7 @@ ngx_http_markdown_fill_str_from_rust(uint32_t code,
     }
 
     len = 0;
-    p = (const u_char *) accessor(code, &len);
+    p = accessor(code, &len);
     out_str->data = (u_char *) p; /* NOSONAR: ngx_str_t.data is u_char* per NGINX API */
 
     if (out_str->data == NULL) {
