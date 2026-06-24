@@ -383,8 +383,6 @@ static void
 ngx_http_markdown_plan_restore_delete_all_saved(
     ngx_http_markdown_plan_delete_all_ctx_t *dctx)
 {
-    ngx_uint_t  j;
-
     if (dctx->saved == NULL) {
         return;
     }
@@ -394,7 +392,7 @@ ngx_http_markdown_plan_restore_delete_all_saved(
      * header list to its exact pre-delete_all state.  The overflow path
      * and the test-hook failure path both reuse this helper.
      */
-    for (j = 0; j < dctx->saved_count; j++) {
+    for (ngx_uint_t j = 0; j < dctx->saved_count; j++) {
         dctx->saved[j].header->hash = dctx->saved[j].orig_hash;
         dctx->saved[j].header->value = dctx->saved[j].orig_value;
     }
