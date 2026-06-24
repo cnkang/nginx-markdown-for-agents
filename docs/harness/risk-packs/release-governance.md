@@ -50,6 +50,7 @@ CI, scope governance, or go/no-go tooling changes.
 make harness-check
 make docs-check
 make release-gates-check
+make release-gates-check-080
 ```
 
 When release gate schema, legacy validation, or matrix governance changes, also
@@ -58,6 +59,10 @@ run:
 ```bash
 make release-gates-check-strict
 ```
+
+For 0.8.x release readiness, treat `make release-gates-check-080` (or the
+`make release-gates-check-08x` alias) as the release target. `make release-gates-check`
+remains the framework baseline; it is not the full release gate.
 
 Run `make release-gates-check-legacy` only when the legacy spec inputs it
 requires are present.  In clones where those inputs are absent, record the

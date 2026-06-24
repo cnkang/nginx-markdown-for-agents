@@ -7,6 +7,10 @@
 #include <limits.h>
 #include <time.h>
 
+#ifndef MARKDOWN_STREAMING_ENABLED
+#define MARKDOWN_STREAMING_ENABLED 1
+#endif
+
 #include "../../src/ngx_http_markdown_filter_module.h"
 
 /*
@@ -19,6 +23,15 @@ ngx_http_markdown_effective_prune_noise(
     const ngx_http_markdown_conf_t *conf)
 {
     return (eff != NULL) ? eff->prune_noise : conf->advanced.prune_noise;
+}
+
+static size_t
+ngx_http_markdown_effective_streaming_budget(
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_http_markdown_conf_t *conf)
+{
+    return (eff != NULL) ? eff->streaming_budget
+                         : conf->stream.budget;
 }
 
 static size_t
@@ -86,9 +99,21 @@ static ngx_int_t g_next_body_filter_rc = 0;
 static ngx_chain_t *g_next_body_filter_last_input = NULL;
 static ngx_uint_t g_next_body_filter_call_count = 0;
 static ngx_uint_t g_markdown_result_free_calls = 0;
+static ngx_uint_t g_log_decision_calls = 0;
+static ngx_uint_t g_reason_streaming_shadow_calls = 0;
+static ngx_uint_t g_streaming_new_with_code_calls = 0;
+static ngx_uint_t g_streaming_feed_calls = 0;
+static ngx_uint_t g_streaming_finish_calls = 0;
+static ngx_uint_t g_streaming_free_calls = 0;
+static ngx_uint_t g_abort_calls = 0;
+static ngx_uint_t g_output_free_calls = 0;
 static ngx_uint_t g_pnalloc_fail_once = 0;
 static ngx_uint_t g_pcalloc_fail_once = 0;
 static ngx_uint_t g_alloc_chain_fail_once = 0;
+static uint32_t g_streaming_new_with_code_rc = 0;
+static uint32_t g_streaming_feed_rc = 0;
+static uint32_t g_streaming_finalize_rc = 0;
+static uint32_t g_streaming_new_with_code_null_handle = 0;
 
 /* FFI stub constants and functions used by conversion_impl.h */
 #define ERROR_SUCCESS 0
@@ -196,6 +221,89 @@ markdown_result_init(struct MarkdownResult *result)
         return;
     }
     memset(result, 0, sizeof(*result));
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_streaming_shadow(void)
+{
+    static ngx_str_t  reason = {
+        sizeof("STREAMING_SHADOW") - 1,
+        (u_char *) "STREAMING_SHADOW"
+    };
+
+    g_reason_streaming_shadow_calls++;
+    return &reason;
+}
+
+void
+ngx_http_markdown_log_decision(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *eff,
+    const ngx_str_t *reason_code)
+{
+    UNUSED(r);
+    UNUSED(conf);
+    UNUSED(eff);
+    UNUSED(reason_code);
+    g_log_decision_calls++;
+}
+
+void
+markdown_streaming_abort(struct StreamingConverterHandle *handle)
+{
+    UNUSED(handle);
+    g_abort_calls++;
+}
+
+void
+markdown_streaming_output_free(uint8_t *data, uintptr_t len)
+{
+    UNUSED(data);
+    UNUSED(len);
+    g_output_free_calls++;
+}
+
+uint32_t
+markdown_streaming_new_with_code(const struct MarkdownOptions *options,
+    struct StreamingConverterHandle **out_handle)
+{
+    UNUSED(options);
+    g_streaming_new_with_code_calls++;
+    if (out_handle != NULL && !g_streaming_new_with_code_null_handle) {
+        *out_handle = (struct StreamingConverterHandle *) (uintptr_t) 0x1;
+    }
+    return g_streaming_new_with_code_rc;
+}
+
+uint32_t
+markdown_streaming_feed(struct StreamingConverterHandle *handle,
+    const uint8_t *html, uintptr_t html_len,
+    uint8_t **out_data, uintptr_t *out_len)
+{
+    UNUSED(handle);
+    UNUSED(html);
+    UNUSED(html_len);
+    UNUSED(out_data);
+    UNUSED(out_len);
+    g_streaming_feed_calls++;
+    return g_streaming_feed_rc;
+}
+
+uint32_t
+markdown_streaming_finalize(struct StreamingConverterHandle *handle,
+    struct MarkdownResult *result)
+{
+    UNUSED(handle);
+    UNUSED(result);
+    g_streaming_finish_calls++;
+    return g_streaming_finalize_rc;
+}
+
+void
+markdown_streaming_free(struct StreamingConverterHandle *handle)
+{
+    UNUSED(handle);
+    g_streaming_free_calls++;
 }
 
 typedef struct ngx_list_part_s ngx_list_part_t;
@@ -791,9 +899,21 @@ reset_stub_state(void)
     g_next_body_filter_last_input = NULL;
     g_next_body_filter_call_count = 0;
     g_markdown_result_free_calls = 0;
+    g_log_decision_calls = 0;
+    g_reason_streaming_shadow_calls = 0;
+    g_streaming_new_with_code_calls = 0;
+    g_streaming_feed_calls = 0;
+    g_streaming_finish_calls = 0;
+    g_streaming_free_calls = 0;
+    g_abort_calls = 0;
+    g_output_free_calls = 0;
     g_pnalloc_fail_once = 0;
     g_pcalloc_fail_once = 0;
     g_alloc_chain_fail_once = 0;
+    g_streaming_new_with_code_rc = ERROR_SUCCESS;
+    g_streaming_feed_rc = ERROR_SUCCESS;
+    g_streaming_finalize_rc = ERROR_SUCCESS;
+    g_streaming_new_with_code_null_handle = 0;
     ngx_http_next_body_filter = test_next_body_filter;
 }
 
@@ -1440,7 +1560,53 @@ test_prepare_conversion_options_schema_server_fallback(void)
         free((void *)(uintptr_t) options.base_url);
     }
 
-    TEST_PASS("prepare_conversion_options schema+server fallback correct");
+TEST_PASS("prepare_conversion_options schema+server fallback correct");
+}
+
+
+/*
+ * Verify shadow compare exits early when prepare_conversion_options
+ * rejects invalid shadow-mode options.
+ */
+static void
+test_shadow_compare_prepare_options_failure(void)
+{
+    ngx_http_request_t        r;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_http_markdown_conf_t  conf;
+    struct MarkdownResult     fb_result;
+
+    TEST_SUBSECTION("shadow compare: prepare options failure");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&fb_result, 0, sizeof(fb_result));
+
+    ctx.buffer.data = (u_char *) "shadow body";
+    ctx.buffer.size = sizeof("shadow body") - 1;
+    ctx.effective_conf = NULL;
+
+    conf.advanced.llm_provider = (ngx_uint_t) UINT8_MAX + 1;
+    conf.advanced.chars_per_token_fixed = 1;
+
+    ngx_http_markdown_shadow_compare(&r, &ctx, &conf, &fb_result, 7);
+
+    TEST_ASSERT(g_reason_streaming_shadow_calls == 0,
+                "shadow compare must not resolve the shadow reason after option failure");
+    TEST_ASSERT(g_log_decision_calls == 0,
+                "shadow compare must not log a shadow decision after option failure");
+    TEST_ASSERT(g_streaming_new_with_code_calls == 0,
+                "shadow compare must not initialize streaming after option failure");
+    TEST_ASSERT(g_streaming_feed_calls == 0,
+                "shadow compare must not feed streaming after option failure");
+    TEST_ASSERT(g_streaming_finish_calls == 0,
+                "shadow compare must not finish streaming after option failure");
+    TEST_ASSERT(g_streaming_free_calls == 0,
+                "shadow compare must not free streaming after option failure");
+
+    TEST_PASS("shadow compare aborts on prepare options failure");
 }
 
 
@@ -2018,6 +2184,7 @@ main(void)
     test_prepare_conversion_options_prune_selectors();
     test_prepare_conversion_options_prune_protection_selectors();
     test_prepare_conversion_options_schema_server_fallback();
+    test_shadow_compare_prepare_options_failure();
     test_scheme_is_http_family();
     test_find_request_header_multi_part();
     test_validate_conversion_result_paths();
