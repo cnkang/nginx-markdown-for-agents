@@ -454,6 +454,49 @@ def _build_open_finding(
     return f"  {level}   {rel}:{lineno} — {detail}"
 
 
+def _build_parent_map(tree: ast.AST) -> dict[int, ast.AST]:
+    """Build a mapping from child node id to parent node."""
+    parent_map: dict[int, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parent_map[id(child)] = node
+    return parent_map
+
+
+def _is_os_open_dir_fd(func: ast.AST, node: ast.Call) -> bool:
+    """Return True if *node* is ``os.open()`` with a ``dir_fd`` keyword."""
+    return (
+        isinstance(func, ast.Attribute)
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "os"
+        and func.attr == "open"
+        and any(kw.arg == "dir_fd" for kw in node.keywords)
+    )
+
+
+def _resolve_path_arg(node: ast.Call) -> ast.expr | None:
+    """Return the expression that supplies the path for an open() call.
+
+    For method-style opens (``p.open()``) the path is the receiver.
+    For builtin ``open(...)`` the path is the first positional argument.
+    Returns ``None`` when no path argument can be determined.
+    """
+    func = node.func
+    is_method_open = (
+        isinstance(func, ast.Attribute)
+        and func.attr == "open"
+        and not (
+            isinstance(func.value, ast.Name)
+            and func.value.id == "os"
+        )
+    )
+    if is_method_open:
+        return func.value
+    if node.args:
+        return node.args[0]
+    return None
+
+
 def _find_open_calls(
     tree: ast.AST,
     validated_vars: dict[str, set[str]],
@@ -469,46 +512,17 @@ def _find_open_calls(
     errors: list[str] = []
     warnings: list[str] = []
 
-    parent_map: dict[int, ast.AST] = {}
-    for node in ast.walk(tree):
-        for child in ast.iter_child_nodes(node):
-            parent_map[id(child)] = node
+    parent_map = _build_parent_map(tree)
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not _is_open_call(node):
             continue
 
-        func = node.func
-        # os.open() has a module receiver, not a path receiver — treat as
-        # builtin open() (path is node.args[0], not func.value).
-        is_os_open = (
-            isinstance(func, ast.Attribute)
-            and isinstance(func.value, ast.Name)
-            and func.value.id == "os"
-            and func.attr == "open"
-        )
-        is_method_open = (
-            isinstance(func, ast.Attribute)
-            and func.attr == "open"
-            and not is_os_open
-        )
-
-        # os.open() with dir_fd keyword: path is relative to a validated
-        # file descriptor, not the filesystem root.  Skip these calls.
-        if (
-            isinstance(func, ast.Attribute)
-            and isinstance(func.value, ast.Name)
-            and func.value.id == "os"
-            and func.attr == "open"
-            and any(kw.arg == "dir_fd" for kw in node.keywords)
-        ):
+        if _is_os_open_dir_fd(node.func, node):
             continue
 
-        if is_method_open:
-            path_arg = func.value
-        elif node.args:
-            path_arg = node.args[0]
-        else:
+        path_arg = _resolve_path_arg(node)
+        if path_arg is None:
             continue
 
         scope = _find_scope(node, parent_map)
