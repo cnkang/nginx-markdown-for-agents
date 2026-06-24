@@ -389,6 +389,11 @@ ngx_http_markdown_plan_restore_delete_all_saved(
         return;
     }
 
+    /*
+     * Restore both hash and value so every rollback path returns the
+     * header list to its exact pre-delete_all state.  The overflow path
+     * and the test-hook failure path both reuse this helper.
+     */
     for (j = 0; j < dctx->saved_count; j++) {
         dctx->saved[j].header->hash = dctx->saved[j].orig_hash;
         dctx->saved[j].header->value = dctx->saved[j].orig_value;
@@ -407,6 +412,10 @@ ngx_http_markdown_plan_delete_all_visitor(ngx_table_elt_t *h, void *ctx)
     ngx_http_markdown_plan_delete_all_ctx_t  *dctx = ctx;
 
     if (dctx->saved_count >= dctx->count) {
+        /*
+         * Overflow is a rollback path too: restore the saved headers
+         * before failing so the caller never sees a partial delete_all.
+         */
         ngx_http_markdown_plan_restore_delete_all_saved(dctx);
         return NGX_ERROR;
     }
@@ -421,6 +430,11 @@ ngx_http_markdown_plan_delete_all_visitor(ngx_table_elt_t *h, void *ctx)
     if (ngx_http_markdown_plan_test_delete_all_visitor_hook(h, dctx)
         != NGX_OK)
     {
+        /*
+         * Test-hook failures must also unwind the current header.  The
+         * shared restore helper returns the full saved set to its original
+         * hash/value state before we report failure upstream.
+         */
         ngx_http_markdown_plan_restore_delete_all_saved(dctx);
         return NGX_ERROR;
     }
