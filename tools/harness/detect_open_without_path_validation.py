@@ -67,10 +67,6 @@ FILE_SCOPED_VALIDATORS: dict[str, set[str]] = {
     "tools/harness/state_store.py": {"validate_user_local_state_path"},
 }
 
-# Current file being scanned (set by check_file before per-file analysis).
-# Used by _is_known_validator to check file-scoped validators.
-_current_rel: str = ""
-
 # Trusted fixture names that pytest provides — paths derived from
 # these are safe in test contexts and should not trigger CWE-22 warnings.
 PYTEST_FIXTURE_NAMES = {"tmp_path", "tmpdir"}
@@ -95,16 +91,15 @@ EXEMPT_FILES = {
 }
 
 
-def _is_known_validator(name: str) -> bool:
+def _is_known_validator(name: str, rel: str = "") -> bool:
     """Return True if *name* is a known validation function.
 
     Checks both the global ``VALIDATION_FUNCS`` set and the
-    ``FILE_SCOPED_VALIDATORS`` for the file currently being scanned
-    (``_current_rel``).
+    ``FILE_SCOPED_VALIDATORS`` for the file currently being scanned.
     """
     if name in VALIDATION_FUNCS:
         return True
-    file_validators = FILE_SCOPED_VALIDATORS.get(_current_rel)
+    file_validators = FILE_SCOPED_VALIDATORS.get(rel)
     if file_validators is not None and name in file_validators:
         return True
     return False
@@ -148,7 +143,7 @@ def _func_call_name(node: ast.AST) -> str | None:
     return None
 
 
-def _collect_validated_vars(tree: ast.AST) -> dict[str, set[str]]:
+def _collect_validated_vars(tree: ast.AST, rel: str = "") -> dict[str, set[str]]:
     """Collect variable names assigned from a validation-helper call,
     keyed by enclosing scope.
 
@@ -176,7 +171,7 @@ def _collect_validated_vars(tree: ast.AST) -> dict[str, set[str]]:
 
     scope_validated: dict[str, set[str]] = {}
 
-    _collect_direct_validation_assignments(tree, parent_map, scope_validated)
+    _collect_direct_validation_assignments(tree, parent_map, scope_validated, rel)
     _propagate_path_wrappers(tree, parent_map, scope_validated)
 
     return scope_validated
@@ -186,6 +181,7 @@ def _collect_direct_validation_assignments(
     tree: ast.AST,
     parent_map: dict[int, ast.AST],
     scope_validated: dict[str, set[str]],
+    rel: str = "",
 ) -> None:
     """Collect direct assignments from validation helpers."""
     for node in ast.walk(tree):
@@ -195,7 +191,7 @@ def _collect_direct_validation_assignments(
         if not isinstance(value, ast.Call):
             continue
         name = _func_call_name(value)
-        if _is_known_validator(name):
+        if _is_known_validator(name, rel):
             scope = _find_scope(node, parent_map)
             for target in node.targets:
                 if isinstance(target, ast.Name):
@@ -371,6 +367,7 @@ def _is_safe_path_expr(
     validated_vars: dict[str, set[str]],
     hardcoded_vars: set[str],
     scope: str = MODULE_SCOPE,
+    rel: str = "",
 ) -> bool:
     """Return True if the path expression is considered safe.
 
@@ -383,18 +380,18 @@ def _is_safe_path_expr(
         return True
 
     if isinstance(node, ast.Call):
-        return _is_safe_call_expr(node, validated_vars, hardcoded_vars, scope)
+        return _is_safe_call_expr(node, validated_vars, hardcoded_vars, scope, rel)
 
     if isinstance(node, ast.Name):
         return _is_safe_name_expr(node, validated_vars, hardcoded_vars, scope)
 
     if isinstance(node, ast.Attribute):
-        return _is_safe_attr_expr(node, validated_vars, hardcoded_vars, scope)
+        return _is_safe_attr_expr(node, validated_vars, hardcoded_vars, scope, rel)
 
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         return (
-            _is_safe_path_expr(node.left, validated_vars, hardcoded_vars, scope)
-            and _is_safe_path_expr(node.right, validated_vars, hardcoded_vars, scope)
+            _is_safe_path_expr(node.left, validated_vars, hardcoded_vars, scope, rel)
+            and _is_safe_path_expr(node.right, validated_vars, hardcoded_vars, scope, rel)
         )
 
     if isinstance(node, ast.JoinedStr):
@@ -411,13 +408,14 @@ def _is_safe_call_expr(
     validated_vars: dict[str, set[str]],
     hardcoded_vars: set[str],
     scope: str,
+    rel: str = "",
 ) -> bool:
     """Return True if a Call node is a safe path expression."""
     name = _func_call_name(node)
-    if _is_known_validator(name):
+    if _is_known_validator(name, rel):
         return True
     if _is_path_constructor(node.func) and node.args:
-        if _is_safe_path_expr(node.args[0], validated_vars, hardcoded_vars, scope):
+        if _is_safe_path_expr(node.args[0], validated_vars, hardcoded_vars, scope, rel):
             return True
     return False
 
@@ -443,10 +441,11 @@ def _is_safe_attr_expr(
     validated_vars: dict[str, set[str]],
     hardcoded_vars: set[str],
     scope: str,
+    rel: str = "",
 ) -> bool:
     """Return True if an Attribute node is a safe path expression."""
     if node.attr in DERIVED_ATTRS:
-        if _is_safe_path_expr(node.value, validated_vars, hardcoded_vars, scope):
+        if _is_safe_path_expr(node.value, validated_vars, hardcoded_vars, scope, rel):
             return True
     return False
 
@@ -553,7 +552,7 @@ def _find_open_calls(
 
         scope = _find_scope(node, parent_map)
 
-        if _is_safe_path_expr(path_arg, validated_vars, hardcoded_vars, scope):
+        if _is_safe_path_expr(path_arg, validated_vars, hardcoded_vars, scope, rel):
             continue
 
         finding = _build_open_finding(rel, node.lineno, _unparse(path_arg), strict)
@@ -577,8 +576,6 @@ def check_file(
     Returns:
         Tuple of (errors, warnings) lists.
     """
-    global _current_rel
-
     errors: list[str] = []
     warnings: list[str] = []
 
@@ -600,8 +597,7 @@ def check_file(
         )
         return errors, warnings
 
-    _current_rel = rel
-    validated_vars = _collect_validated_vars(tree)
+    validated_vars = _collect_validated_vars(tree, rel)
     hardcoded_vars = _collect_hardcoded_vars(tree)
 
     file_errors, file_warnings = _find_open_calls(
