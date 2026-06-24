@@ -5,11 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.2] - 2026-06-23
+## [0.8.2] - 2026-06-25
 
 Patch release for the 0.8.x line: streaming decompression hardening, FFI
-safety, implied-closure correctness, decompression budget enforcement, and
-release-line documentation closeout.
+panic safety, implied-closure correctness, decompression budget enforcement,
+harness detector improvements, C module deduplication, and release-line
+documentation closeout.
 
 ### Added
 
@@ -27,6 +28,22 @@ release-line documentation closeout.
 - `make release-gates-check-08x` as the canonical 0.8.x patch-line entry
   point, reusing the 0.8.0 gate logic without duplicating it.
   `release-gates-check-080` remains as the compatible original name.
+- **FFI catch_unwind panic safety**: all FFI exports are now wrapped in
+  `catch_unwind` so a Rust panic returns an error code instead of undefined
+  behavior. The fallback path initializes output structs to safe defaults
+  (fail-closed), and return values are written atomically after the closure
+  completes (Rule 15).
+- **Harness ngx_log arg-count and NOSONAR discipline detectors**:
+  `detect_ngx_log_arg_count.sh` verifies `ngx_log_debugN`/`ngx_log_errorN`
+  suffix digits match actual argument count (Rule 8);
+  `detect_nosonar_discipline.sh` rejects bare `/* NOSONAR */` without a reason
+  annotation (Rule 24). Both detectors include fixture tests and are registered
+  in `harness-security-checks` and `test-harness` Makefile targets.
+- **Harness detector strict mode**: `detect_duplicate_code.py`,
+  `detect_ffi_panic_safety.sh`, `detect_forward_decl_order.py`,
+  `detect_open_without_path_validation.py`, and `detect_pool_free.sh` now
+  support a `--strict` flag that escalates warnings to hard failures for CI
+  gating.
 
 ### Changed
 
@@ -53,6 +70,19 @@ release-line documentation closeout.
   and caches (Rule 48).
 - Updated `THIRD-PARTY-NOTICES` with current dependency versions.
 - Clarified header plan safety contract in C headers.
+- **C module deduplication**: extracted shared helpers across five C source
+  files — `fill_str_from_rust` in `reason_ffi.c`; `decomp_collect_input`,
+  `decomp_build_output_chain`, `decomp_alloc_output` in `decompression.c`;
+  `for_each_header_named` iterator with visitor pattern and four helpers in
+  `header_plan.c`; `for_each_cache_control_header` iterator in `auth.c`;
+  `send_chain`, `acquire_terminal_buf`, `handle_send_result` in
+  `stream_postcommit.c` (Rule 31).
+- Parameterized postcommit send-result helper with an explicit action context.
+- Extracted brotli finish buffer-expansion helper for switch statement
+  consistency.
+- Simplified nesting in the `init_worker` path.
+- Updated harness rule documentation: strengthened Rules 8, 15, 24, 31, 33, 44,
+  46, and 49 in `AGENTS.md` and `docs/harness/rules/` domain files.
 
 ### Fixed
 
@@ -73,6 +103,36 @@ release-line documentation closeout.
   language strings against malformed input.
 - **FFI header plan panic safety**: centralized FFI header plan reset so that
   panic-safe cleanup always restores a consistent state.
+- **FFI catch_unwind fallback hardening**: the `catch_unwind` fallback path now
+  initializes output structs to safe defaults (fail-closed) and writes return
+  values only after the closure succeeds; Drop guards within `catch_unwind`
+  ensure panic-safe resource cleanup (Rule 15).
+- **FFI atomic writes**: `markdown_build_header_plan` now aligns with the
+  atomic-write-after-catch pattern — closure computes return values, fields
+  are written only after `Ok`.
+- **Inflate decompression semantics**: separated `Z_OK` and `Z_BUF_ERROR`
+  handling in the inflate loop so partial-fill buffer conditions are no longer
+  conflated with successful output (Rule 44).
+- **`ngx_log_debug` argument count**: corrected suffix-digit / argument-count
+  mismatch in `handle_send_result` (Rule 8).
+- **C const-correctness and idiom improvements**: removed unnecessary casts in
+  the auth Cache-Control streaming path; const-qualified read-only parameters;
+  suppressed typedef-dictated `S995` findings where the cast is mandated by
+  the NGINX callback signature (Rule 24).
+- **Header plan `copy_value_to_pool` empty value**: `copy_value_to_pool()` now
+  handles empty values without abnormal behavior.
+- **CLI path validation (CWE-22)**: `render_release_matrix_docs.py` now
+  validates `--matrix` and `--previous` paths via `validate_read_path` at the
+  CLI entry point before passing to `load_matrix`, breaking the unsanitized
+  taint flow (Rule 33).
+- **Shadow options guard**: added missing guard for shadow option return
+  handling and clarified the associated release gate.
+- **Pool-free ownership guard**: armed the `ngx_free` ownership guard against
+  pool-memory regressions in decompression test infrastructure.
+- **Harness detector correctness**: narrowed `validate_user_local_state_path`
+  to file-scoped validators, narrowed whole-file exemptions to explicit
+  validation functions, improved AST/CWE-22 detectors, and improved Python
+  detector correctness across multiple detection tools.
 - **Header validation and buffer sizing**: improved header validation, buffer
   sizing, and config initialization in the NGINX C module.
 - **`parse_size` hardening**: `parse_size()` now correctly handles empty,
@@ -100,6 +160,15 @@ release-line documentation closeout.
   language prefix handling.
 - Added metadata traversal timeout regression test.
 - Added `assert buf NULL` on `finish_zlib` error paths.
+- Added strict conditional smoke mode for conditional request E2E tests.
+- Added high-ratio decompression regression tests covering compressed
+  payloads with extreme compression ratios.
+- Normalized auth and 304 response E2E assertions for consistent
+  behavior verification.
+- Hardened header plan rollback coverage with additional failure-path
+  scenarios.
+- Added streaming decompression pool-free assertion on the post-decode
+  overflow path to guard against pool-memory regressions.
 
 ## [0.8.1] - 2026-06-20
 
