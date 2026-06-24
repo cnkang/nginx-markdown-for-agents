@@ -257,3 +257,25 @@ def test_state_store_real_file_pass(det):
     errors, warnings = det.check_file(path, strict=True)
     assert errors == []
     assert warnings == []
+
+
+def test_state_validator_name_not_global(det, tmp_path):
+    """A function named validate_user_local_state_path() in a non-state_store
+    file must NOT be treated as a trusted validator.  FILE_SCOPED_VALIDATORS
+    only exempts ``state_store.py``.
+    """
+    bad = tmp_path / "bad.py"
+    bad.write_text(
+        '''
+def validate_user_local_state_path(path):
+    return path
+
+def f(path):
+    safe = validate_user_local_state_path(path)
+    with open(safe) as fh:
+        pass
+''',
+        encoding="utf-8",
+    )
+    errors, warnings = det.check_file(bad, strict=True)
+    assert len(errors) == 1
