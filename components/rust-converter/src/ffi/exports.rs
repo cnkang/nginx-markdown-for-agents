@@ -358,7 +358,7 @@ pub unsafe extern "C" fn markdown_make_decision(
     result_ref.decision = 1; /* skip */
     result_ref.reason_code = ReasonCode::FfiCallError.discriminant() as u8;
 
-    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| -> (u8, u8) {
         #[cfg(test)]
         if test_should_panic("make_decision") {
             panic!("test-injected panic in markdown_make_decision");
@@ -379,12 +379,10 @@ pub unsafe extern "C" fn markdown_make_decision(
 
         match make_decision(&ctx) {
             Decision::Convert => {
-                result_ref.decision = 0;
                 /* Converted == ReasonCode::Converted (0). */
-                result_ref.reason_code = ReasonCode::Converted.discriminant() as u8;
+                (0, ReasonCode::Converted.discriminant() as u8)
             }
             Decision::Skip(reason) => {
-                result_ref.decision = 1;
                 /* Map the pre-conversion SkipReason onto the canonical
                  * ReasonCode discriminants (the single source of truth in
                  * decision::reason_code). This lets C callers feed
@@ -406,7 +404,6 @@ pub unsafe extern "C" fn markdown_make_decision(
                     SkipReason::NotEligible => ReasonCode::NotEligible,
                     SkipReason::Disabled => ReasonCode::Disabled,
                 };
-                result_ref.reason_code = canonical.discriminant() as u8;
                 /* The pre-conversion skip reasons all map to canonical
                  * discriminants in the 0..=15 range (the C uint8_t reason_code
                  * contract). ReasonCode is repr(u8) so the cast itself can never
@@ -420,14 +417,18 @@ pub unsafe extern "C" fn markdown_make_decision(
                      pre-conversion range (0..=15)",
                     canonical.discriminant()
                 );
+                (1, canonical.discriminant() as u8)
             }
         }
     }));
 
-    if outcome.is_err() {
-        /* Panic caught — the fail-open skip + FfiCallError fallback set
-         * above remains in place. Nothing else to write. */
+    if let Ok((decision, reason_code)) = outcome {
+        /* Write both fields atomically after confirming no panic. */
+        result_ref.decision = decision;
+        result_ref.reason_code = reason_code;
     }
+    /* else: panic caught — the fail-open skip + FfiCallError fallback
+     * set above remains in place. Nothing else to write. */
 }
 
 /// Build a header plan for a successful Markdown conversion.
@@ -584,6 +585,12 @@ fn reset_header_plan_to_empty(plan: &mut FFIHeaderPlan) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_validate_url(url: *const u8, url_len: usize) -> u8 {
     let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| -> u8 {
+        #[cfg(test)]
+        if test_should_panic("validate_url") {
+            panic!("test-injected panic in markdown_validate_url");
+        }
+        #[cfg(not(test))]
+        let _ = ("validate_url",);
         if url.is_null() || url_len == 0 {
             return 1;
         }
@@ -601,10 +608,7 @@ pub unsafe extern "C" fn markdown_validate_url(url: *const u8, url_len: usize) -
             0
         }
     }));
-    match outcome {
-        Ok(v) => v,
-        Err(_) => 0,
-    }
+    outcome.unwrap_or_default()
 }
 
 /// Check if a URL uses a dangerous scheme (javascript:, data:, etc.).
@@ -642,10 +646,7 @@ pub unsafe extern "C" fn markdown_is_dangerous_url(url: *const u8, url_len: usiz
             0
         }
     }));
-    match outcome {
-        Ok(v) => v,
-        Err(_) => 1,
-    }
+    outcome.unwrap_or(1)
 }
 
 /// Build a base URL from X-Forwarded-Host and X-Forwarded-Proto headers.
@@ -1431,10 +1432,21 @@ mod tests {
 
     #[test]
     fn validate_url_panic_fallback_returns_zero_safe() {
-        /* validate_url uses no test hook, but we exercise the existing
-         * catch_unwind Err branch by feeding a non-panicking input — the
-         * documented contract is panic -> 0 (safe). Verify the normal
-         * safe path returns 1 and that no test hook is needed. */
+        /* Inject a panic inside markdown_validate_url to exercise the
+         * catch_unwind Err branch. The documented contract is
+         * panic -> 0 (fail-open safe). */
+        let url = b"https://example.com/";
+        set_test_panic(Some("validate_url"));
+        let rc = unsafe { markdown_validate_url(url.as_ptr(), url.len()) };
+        set_test_panic(None);
+        assert_eq!(
+            rc, 0,
+            "markdown_validate_url panic fallback must return 0 (safe)"
+        );
+    }
+
+    #[test]
+    fn validate_url_normal_path_returns_one() {
         let url = b"https://example.com/";
         let rc = unsafe { markdown_validate_url(url.as_ptr(), url.len()) };
         assert_eq!(rc, 1, "valid URL should be marked safe (1)");
