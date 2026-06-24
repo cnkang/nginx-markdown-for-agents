@@ -89,7 +89,25 @@ else
     fail "debug2 with 1 arg -> exit 1 + VIOLATION" "got exit ${exit_code}: $(cat "${output_file}")"
 fi
 
-# Test 4: NGINX-style, literal-percent, and star-width specifiers counted correctly
+# Test 4: debug0 with format specifier and no extra args -> FAIL
+cat >"${src_dir}/debug0_mismatch.c" <<'C'
+void test(void) {
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "markdown: missing %d");
+}
+C
+rm -f "${src_dir}/mismatch.c"
+
+exit_code=0
+(cd "${tmp_dir}" && bash "${DETECTOR}") >"${output_file}" 2>&1 || exit_code=$?
+if [[ "${exit_code}" -ne 0 ]] && grep -q 'VIOLATION' "${output_file}"; then
+    pass "debug0 with format specifier and no args -> exit 1 + VIOLATION"
+else
+    fail "debug0 with format specifier and no args -> exit 1 + VIOLATION" "got exit ${exit_code}: $(cat "${output_file}")"
+fi
+rm -f "${src_dir}/debug0_mismatch.c"
+
+# Test 5: NGINX-style, literal-percent, and star-width specifiers counted correctly
 cat >"${src_dir}/nginx_fmt.c" <<'C'
 void test(void) {
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -114,7 +132,7 @@ else
     fail "NGINX %V, literal-percent, and star-width specifiers -> exit 0" "got exit ${exit_code}: $(cat "${output_file}")"
 fi
 
-# Test 5: %*s consumes 2 args (width + string)
+# Test 6: %*s consumes 2 args (width + string)
 cat >"${src_dir}/star_width.c" <<'C'
 void test(void) {
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -132,7 +150,7 @@ else
     fail "%*s (2 args) + %uz (1 arg) = 3 args with debug3 -> exit 0" "got exit ${exit_code}: $(cat "${output_file}")"
 fi
 
-# Test 6: Macro definition (not a call) -> skipped
+# Test 7: Macro definition (not a call) -> skipped
 cat >"${src_dir}/macro.c" <<'C'
 #define NGX_HTTP_MARKDOWN_LOG_DEBUG1(level, log, err, fmt, arg) \
     do {                                                        \
