@@ -229,3 +229,33 @@ def test_main_advisory_returns_zero(tmp_path, det, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["detect_open", "--path", str(tmp_path)])
     rc = det.main()
     assert rc == 0
+
+
+def test_validate_write_path_within_root_is_safe(det):
+    # validate_write_path_within_root() is a known validation helper
+    src = """
+    from lib.path_validation import validate_write_path_within_root
+    def f(path):
+        safe = validate_write_path_within_root(path, "/root")
+        with open(safe) as fh:
+            pass
+    """
+    errors, warnings = _check_source(det, src)
+    assert errors == []
+    assert warnings == []
+
+
+def test_validate_state_path_is_safe(det):
+    # _validate_state_path() is registered in VALIDATION_FUNCS
+    src = """
+    def _validate_state_path(path):
+        return path
+
+    def f(repo_root):
+        path = _validate_state_path(repo_root / "events.jsonl")
+        with open(path) as fh:
+            pass
+    """
+    errors, warnings = _check_source(det, src)
+    assert errors == []
+    assert warnings == []

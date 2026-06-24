@@ -52,6 +52,7 @@ VALIDATION_FUNCS = {
     "validate_read_path",
     "validate_write_path_within_root",
     "_resolve_repo_write_path",
+    "_validate_state_path",
 }
 
 # Trusted fixture names that pytest provides — paths derived from
@@ -75,12 +76,6 @@ EXEMPT_FILES = {
     "tools/lib/path_validation.py",
     "tools/harness/detect_open_without_path_validation.py",
     "tools/harness/detect_cwe22_paths.py",
-    # Custom validation: paths validated via relative_to() containment check,
-    # not through the standard validate_read_path / validate_write helpers.
-    "tools/perf/report_utils.py",
-    # Custom path builder: state_file(repo_root) derives from hardcoded
-    # REPO_ROOT; the detector cannot trace through function returns.
-    "tools/harness/state_store.py",
 }
 
 
