@@ -945,10 +945,8 @@ ngx_http_markdown_streaming_decomp_feed(
     feed_ctx.pool = pool;
     feed_ctx.log = log;
 
-    switch (decomp->type) {
-
-    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
-    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+    if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+        || decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
     {
         ngx_int_t  inflate_rc;
 
@@ -962,12 +960,9 @@ ngx_http_markdown_streaming_decomp_feed(
              */
             return inflate_rc;
         }
-
-        break;
     }
-
 #ifdef NGX_HTTP_BROTLI
-    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+    else if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI)
     {
         ngx_int_t  brotli_rc;
 
@@ -977,12 +972,9 @@ ngx_http_markdown_streaming_decomp_feed(
             /* Same invariant as the zlib path above. */
             return brotli_rc;
         }
-
-        break;
     }
 #endif
-
-    default:
+    else {
         ngx_free(buf);
         buf = NULL;
         return NGX_DECLINED;
@@ -1319,10 +1311,8 @@ ngx_http_markdown_streaming_decomp_finish(
 
     produced = 0;
 
-    switch (decomp->type) {
-
-    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
-    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+    if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+        || decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
     {
         ngx_int_t  finish_rc;
 
@@ -1338,11 +1328,9 @@ ngx_http_markdown_streaming_decomp_finish(
             buf = NULL;
             return finish_rc;
         }
-        break;
     }
-
 #ifdef NGX_HTTP_BROTLI
-    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+    else if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI)
     {
         ngx_int_t  brotli_finish_rc;
 
@@ -1353,11 +1341,9 @@ ngx_http_markdown_streaming_decomp_finish(
             buf = NULL;
             return brotli_finish_rc;
         }
-        break;
     }
 #endif
-
-    default:
+    else {
         ngx_free(buf);
         buf = NULL;
         return NGX_ERROR;
