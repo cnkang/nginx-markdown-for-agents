@@ -482,6 +482,20 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - Rust URL 控制字符验证与 link 转义
 - FFI ABI 布局验证与 header 漂移检测
 
+## v0.8.2 新特性
+
+v0.8.2 是一个加固 0.8.x 流式线路的补丁版本：
+
+- **流式解压预算强制执行** — 流式解压路径现在会强制执行配置的解压预算，并根据模块内存预算跟踪流式内存消耗（Rule 3、Rule 44）。
+- **FFI panic 安全** — 所有 FFI 导出现在都用 `catch_unwind` 包装，使 Rust panic 返回错误码而不是未定义行为；回退路径将输出结构体初始化为安全默认值（fail-closed）。
+- **隐式闭合正确性** — 结构性闭合现在在闭合块状态之前从内到外展开，修复了 HTML sanitizer 隐式闭合排序问题（Rule 6）。
+- **C 模块去重** — 从五个 C 源文件中提取共享辅助函数，减少重复并提高可维护性（Rule 31）。
+- **inflate 解压语义** — 在 inflate 循环中分离 `Z_OK` 和 `Z_BUF_ERROR` 处理，使部分填充缓冲区条件不再与成功输出混淆（Rule 44）。
+- **harness 检测器改进** — 新增 `detect_ngx_log_arg_count.sh` 和 `detect_nosonar_discipline.sh` 检测器，支持 `--strict` 模式；改进 AST/CWE-22 检测器和路径验证。
+- **安全扫描范围限定** — gitleaks 现在覆盖 Git 跟踪的工作树内容，同时排除被忽略的适配器状态和缓存（Rule 48）。
+
+完整变更列表见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 路线方向
 
 当前版本线 (0.8.x；最新 patch 0.8.2)：
@@ -538,6 +552,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.8.2 | 2026-06-25 | Kang | v0.8.2 发布：流式解压加固、FFI panic 安全、隐式闭合正确性、解压预算强制执行、安全扫描范围限定、版本线文档收口 |
 | 0.8.2 | 2026-06-23 | Kang | 0.8.2 发布：流式解压加固、隐式闭合正确性、FFI panic 安全、解压预算强制执行、安全扫描范围限定、版本线文档收口 |
 | 0.8.0 | 2026-06-16 | Codex | 同步中英文 README 结构、Quick Start 示例、本地测试命令、平台支持标题和 v0.8.0 路线说明 |
 | 0.8.0 | 2026-06-16 | Kang | 0.8.0 正式发布文档就绪：双引擎流式转换（auto 默认）、有界内存增量处理、提交前安全回退、旧阈值指令兼容、新流式指令、可观测性与 release-gates-check-080 |
