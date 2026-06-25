@@ -491,6 +491,20 @@ Additional changes:
 - Rust URL control character validation and link escaping
 - FFI ABI layout verification and header drift detection
 
+## What's New in v0.8.2
+
+v0.8.2 is a patch release hardening the 0.8.x streaming line:
+
+- **Streaming decompression budget enforcement** — the streaming decompression path now enforces the configured decompression budget and tracks streaming memory consumption against the module memory budget (Rule 3, Rule 44).
+- **FFI panic safety** — all FFI exports are now wrapped in `catch_unwind` so a Rust panic returns an error code instead of undefined behavior; fallback paths initialize output structs to safe defaults (fail-closed).
+- **Implied closure correctness** — structural closures now unwind inner-to-outer before enclosing block state, fixing HTML sanitizer implied-closure ordering (Rule 6).
+- **C module deduplication** — extracted shared helpers across five C source files to reduce duplication and improve maintainability (Rule 31).
+- **Inflate decompression semantics** — separated `Z_OK` and `Z_BUF_ERROR` handling in the inflate loop so partial-fill buffer conditions are no longer conflated with successful output (Rule 44).
+- **Harness detector improvements** — new `detect_ngx_log_arg_count.sh` and `detect_nosonar_discipline.sh` detectors with `--strict` mode support; improved AST/CWE-22 detectors and path validation.
+- **Security scan scoping** — gitleaks now covers Git-tracked worktree content while excluding ignored adapter state and caches (Rule 48).
+
+For the full list, see [CHANGELOG.md](CHANGELOG.md).
+
 ## Roadmap
 
 Current release line (0.8.x; latest patch 0.8.2):
@@ -547,6 +561,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.8.2 | 2026-06-25 | Kang | v0.8.2 release: streaming decompression hardening, FFI panic safety, implied-closure correctness, decompression budget enforcement, security scan scoping, release-line documentation closeout |
 | 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
 | 0.8.0 | 2026-06-16 | Codex | Synchronized English and Chinese README structure, Quick Start examples, local test commands, platform support heading, and v0.8.0 roadmap wording |
 | 0.8.0 | 2026-06-16 | Kang | v0.8.0 streaming release readiness: dual-engine model, auto mode default, bounded-memory conversion, pre-commit safety, 0.6.x compatibility removal, release-gates-check-080, migration guide, and rollout cookbook links |
