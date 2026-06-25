@@ -1,6 +1,6 @@
 # ADR-0013: Streaming Default Policy
 
-**Status**: Proposed
+**Status**: Accepted (implemented in 0.8.0)
 **Date**: 2026-06-04
 **Context**: v0.8.0 True Streaming Contract
 
