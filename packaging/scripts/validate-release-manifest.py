@@ -129,9 +129,13 @@ def validate_manifest(
                 check_no_placeholders(fname, f"{prefix}.filename", errors)
                 manifest_filenames.add(fname)
 
-                # Check file exists and SHA matches
-                fpath = artifact_dir / fname
-                if not fpath.exists():
+                # Reject path traversal — filename must resolve inside artifact_dir
+                fpath = (artifact_dir / fname).resolve()
+                if not str(fpath).startswith(str(artifact_dir.resolve())):
+                    errors.append(
+                        f"{prefix}: filename escapes artifact directory: {fname}"
+                    )
+                elif not fpath.exists():
                     errors.append(f"{prefix}: file not found in artifacts: {fname}")
                 elif "sha256" in pkg:
                     actual_sha = sha256_file(fpath)
