@@ -969,12 +969,15 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
     }));
     match outcome {
         Ok(Ok(decomp_result)) => {
-            let mut boxed = decomp_result.output.into_boxed_slice();
+            let boxed = decomp_result.output.into_boxed_slice();
             result_ref.output_len = boxed.len();
-            result_ref.output = boxed.as_mut_ptr();
             result_ref.error_category = 0;
-            // Prevent deallocation — C caller owns via markdown_decompress_free
-            std::mem::forget(boxed);
+            // Transfer ownership to C caller.  Use Box::into_raw to
+            // prevent deallocation while keeping the pointer valid.
+            // Note: Box<[u8]> is a fat pointer; we extract the data
+            // pointer separately since C ABI uses *mut u8 + len.
+            let ptr = Box::into_raw(boxed);
+            result_ref.output = ptr as *mut u8;
             0
         }
         Ok(Err(e)) => {
