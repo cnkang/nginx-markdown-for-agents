@@ -81,10 +81,10 @@ pub struct StructuralStateMachine {
     stack: Vec<StructuralContext>,
     /// Memory budget used for stack enforcement.
     budget: MemoryBudget,
-    /// **Deprecated / dead field.** The emitter maintains its own
-    /// `needs_block_separator` independently.  This field is retained
-    /// temporarily for API compatibility; prefer reading from the
-    /// emitter.
+    /// **Deprecated / dead field.** The [`IncrementalEmitter`](super::emitter::IncrementalEmitter)
+    /// now manages block-separator state internally via its own `needs_block_separator`
+    /// tracking, making this field redundant. Retained to preserve struct layout and
+    /// ABI stability across FFI; safe to remove in the next breaking-change release.
     pub needs_block_separator: bool,
     /// Current list nesting depth (for indentation).
     pub list_depth: usize,
