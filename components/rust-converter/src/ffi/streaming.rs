@@ -475,8 +475,7 @@ pub unsafe extern "C" fn markdown_streaming_feed(
                 handle_ref.last_reason = None;
                 if !output.markdown.is_empty() {
                     let boxed = output.markdown.into_boxed_slice();
-                    let len = boxed.len();
-                    let raw = Box::into_raw(boxed) as *mut u8;
+                    let (raw, len) = crate::ffi::memory::leak_boxed_slice_to_raw(boxed);
                     // SAFETY: out_data and out_len validated as non-NULL above.
                     unsafe {
                         *out_data = raw;
@@ -571,8 +570,7 @@ pub unsafe extern "C" fn markdown_streaming_finish(
                 let final_md = streaming_result.final_markdown;
                 if !final_md.is_empty() {
                     let boxed_md = final_md.into_boxed_slice();
-                    let len = boxed_md.len();
-                    let raw = Box::into_raw(boxed_md) as *mut u8;
+                    let (raw, len) = crate::ffi::memory::leak_boxed_slice_to_raw(boxed_md);
                     // SAFETY: out_data and out_len validated as non-NULL above.
                     unsafe {
                         *out_data = raw;
@@ -651,14 +649,16 @@ pub unsafe extern "C" fn markdown_streaming_finalize(
         Ok(Ok((streaming_result, generate_etag, estimate_tokens))) => {
             // Set final markdown output.
             let md_bytes = streaming_result.final_markdown.into_boxed_slice();
-            result_ref.markdown_len = md_bytes.len();
-            result_ref.markdown = Box::into_raw(md_bytes) as *mut u8;
+            let (md_ptr, md_len) = crate::ffi::memory::leak_boxed_slice_to_raw(md_bytes);
+            result_ref.markdown_len = md_len;
+            result_ref.markdown = md_ptr;
 
             // Set ETag if generation was requested and available.
             if generate_etag && let Some(etag_str) = streaming_result.etag {
                 let etag_bytes = etag_str.into_bytes().into_boxed_slice();
-                result_ref.etag_len = etag_bytes.len();
-                result_ref.etag = Box::into_raw(etag_bytes) as *mut u8;
+                let (etag_ptr, etag_len) = crate::ffi::memory::leak_boxed_slice_to_raw(etag_bytes);
+                result_ref.etag_len = etag_len;
+                result_ref.etag = etag_ptr;
             }
 
             // Set token estimate if requested and available.
@@ -788,8 +788,7 @@ pub unsafe extern "C" fn markdown_streaming_safe_finish(
             Ok(closing_bytes) => {
                 if !closing_bytes.is_empty() {
                     let boxed_md = closing_bytes.into_boxed_slice();
-                    let len = boxed_md.len();
-                    let raw = Box::into_raw(boxed_md) as *mut u8;
+                    let (raw, len) = crate::ffi::memory::leak_boxed_slice_to_raw(boxed_md);
                     // SAFETY: out_data and out_len validated as non-NULL above.
                     unsafe {
                         *out_data = raw;
@@ -874,8 +873,9 @@ pub unsafe extern "C" fn markdown_streaming_output_free(data: *mut u8, len: usiz
     let _ = panic::catch_unwind(AssertUnwindSafe(|| {
         // Reconstruct the Box<[u8]> from the raw pointer and length.
         let raw_slice = ptr::slice_from_raw_parts_mut(data, len);
-        // SAFETY: `data` was allocated by `Box<[u8]>` via `Box::into_raw`
-        // in `markdown_streaming_feed`, and `len` is the original length.
+        // SAFETY: `data` was allocated by `Box<[u8]>` and transferred via
+        // `leak_boxed_slice_to_raw` (`as_mut_ptr` + `mem::forget`) in
+        // `markdown_streaming_feed`, and `len` is the original length.
         unsafe { drop(Box::from_raw(raw_slice)) };
     }));
 }
