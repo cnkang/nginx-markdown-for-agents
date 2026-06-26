@@ -2,8 +2,9 @@
 //!
 //! This module provides internal helpers for managing the memory of
 //! [`MarkdownResult`] fields across the FFI boundary. All pointer fields in
-//! the result struct are owned by Rust and allocated via `Box::into_raw`;
-//! they must be freed by calling `markdown_result_free()` from C.
+//! All pointer fields in the result struct are owned by Rust and transferred
+//! to C via `as_mut_ptr` + `mem::forget` (see Rule 53); they must be freed
+//! by calling `markdown_result_free()` from C.
 //!
 //! # Functions
 //!
@@ -24,7 +25,7 @@
 
 use std::ptr;
 
-use super::abi::{ConversionOutput, ERROR_SUCCESS, MarkdownResult};
+use super::abi::{ConversionOutput, MarkdownResult, ERROR_SUCCESS};
 
 /// Reset an output struct to a clean success-initialized state.
 pub(crate) fn reset_result(result: &mut MarkdownResult) {
@@ -45,24 +46,32 @@ pub(crate) fn set_error_result(
     error_code: u32,
     error_message: String,
 ) {
-    let error_bytes = error_message.into_bytes().into_boxed_slice();
+    let mut error_bytes = error_message.into_bytes().into_boxed_slice();
     result.error_code = error_code;
     result.error_len = error_bytes.len();
-    result.error_message = Box::into_raw(error_bytes) as *mut u8;
+    let p = error_bytes.as_mut_ptr();
+    std::mem::forget(error_bytes);
+    result.error_message = p;
 }
 
 /// Populate a result struct with successful conversion output buffers.
 pub(crate) fn set_success_result(result: &mut MarkdownResult, output: ConversionOutput) {
-    result.markdown_len = output.markdown.len();
-    result.markdown = Box::into_raw(output.markdown) as *mut u8;
+    let mut markdown_buf = output.markdown;
+    result.markdown_len = markdown_buf.len();
+    let p = markdown_buf.as_mut_ptr();
+    std::mem::forget(markdown_buf);
+    result.markdown = p;
     result.token_estimate = output.token_estimate;
     result.error_code = ERROR_SUCCESS;
     result.error_message = ptr::null_mut();
     result.error_len = 0;
 
     if let Some(etag_bytes) = output.etag {
-        result.etag_len = etag_bytes.len();
-        result.etag = Box::into_raw(etag_bytes) as *mut u8;
+        let mut etag_buf = etag_bytes;
+        result.etag_len = etag_buf.len();
+        let p = etag_buf.as_mut_ptr();
+        std::mem::forget(etag_buf);
+        result.etag = p;
     } else {
         result.etag = ptr::null_mut();
         result.etag_len = 0;
