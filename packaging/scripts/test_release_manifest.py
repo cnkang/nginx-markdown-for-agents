@@ -516,5 +516,60 @@ class TestValidateManifest(unittest.TestCase):
         self.assertEqual(errors, [], f"Unexpected errors: {errors}")
 
 
+    def test_filename_parent_directory_traversal(self):
+        """Filename with ../ prefix must be rejected."""
+        self._make_valid_manifest([
+            {
+                "filename": "../evil.deb",
+                "format": "deb",
+                "version": "0.8.3",
+                "nginx_version": "1.28.0",
+                "arch": "amd64",
+                "sha256": "0" * 64,
+            }
+        ])
+        errors = self._validate()
+        self.assertTrue(
+            any("filename escapes artifact directory" in e for e in errors),
+            f"Expected path traversal error, got: {errors}",
+        )
+
+    def test_filename_nested_traversal(self):
+        """Nested ../ must be rejected (subdir/../../evil.deb)."""
+        self._make_valid_manifest([
+            {
+                "filename": "subdir/../../evil.deb",
+                "format": "deb",
+                "version": "0.8.3",
+                "nginx_version": "1.28.0",
+                "arch": "amd64",
+                "sha256": "0" * 64,
+            }
+        ])
+        errors = self._validate()
+        self.assertTrue(
+            any("filename escapes artifact directory" in e for e in errors),
+            f"Expected path traversal error, got: {errors}",
+        )
+
+    def test_filename_absolute_path(self):
+        """Absolute path filename must be rejected."""
+        self._make_valid_manifest([
+            {
+                "filename": "/etc/evil.deb",
+                "format": "deb",
+                "version": "0.8.3",
+                "nginx_version": "1.28.0",
+                "arch": "amd64",
+                "sha256": "0" * 64,
+            }
+        ])
+        errors = self._validate()
+        self.assertTrue(
+            any("filename escapes artifact directory" in e for e in errors),
+            f"Expected path traversal error, got: {errors}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
