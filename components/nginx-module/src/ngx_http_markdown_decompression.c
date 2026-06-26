@@ -294,21 +294,24 @@ ngx_http_markdown_grow_output_buffer(ngx_http_request_t *r,
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
 
+    /* Use ngx_pfree to release the old pool buffer immediately instead
+     * of accumulating in the request pool until
+     * request cleanup.  This reduces peak memory for responses that
+     * trigger multiple growth cycles. */
     new_data = ngx_pnalloc(r->pool, new_size);
     if (new_data == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: failed to reallocate decompression "
-                     "buffer, size=%uz, category=system",
+                     "buffer (pnalloc), size=%uz, category=system",
                      new_size);
         return NGX_ERROR;
     }
-
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown: decompression buffer realloc "
-                  "used=%uz new_size=%uz (old buffer in pool)",
-                  used, new_size);
-
+                "markdown: decompression buffer realloc "
+                "used=%uz new_size=%uz (old buffer freed)",
+                used, new_size);
     ngx_memcpy(new_data, *output_data, used);
+    ngx_pfree(r->pool, *output_data);
     *output_data = new_data;
     *output_size = new_size;
 
