@@ -491,6 +491,19 @@ Additional changes:
 - Rust URL control character validation and link escaping
 - FFI ABI layout verification and header drift detection
 
+## What's New in v0.8.3
+
+v0.8.3 is a closeout hardening release for the 0.8.x line:
+
+- **Streaming state machine fixes** — corrected `pop_contexts_up_to` return order (innermost-first) and added `CodeBlock` handling in `ol`/`ul` derived state branches to prevent tag soup regressions.
+- **Streaming emitter ExitMany** — new `ExitMany` action enables batch context unwinding from mid-stack, fixing implied-closure ordering for nested block elements.
+- **Decompression buffer memory safety** — switched decompression workspace from `ngx_alloc`/`ngx_free` (heap) to `ngx_pnalloc`/`ngx_pfree` (pool-backed) to avoid mixing allocation lifetimes and prevent pool expansion side effects (Rule 43).
+- **Snapshot capacity increase** — raised the snapshot max from 4 to 8 entries in the stream commit path, supporting more complex multi-header mutation plans.
+- **FFI Box::into_raw correctness** — fixed a use-after-free pattern in converter handle allocation by ensuring `Box::into_raw` is called after initialization succeeds.
+- **Full release gate validation** — all 0.8.x release gates pass: `make harness-check` (15/15), `make test-harness` (all detectors), `make release-gates-check-08x`, `make test-nginx-unit`, `make test-rust-fuzz-smoke`.
+
+For the full list, see [CHANGELOG.md](CHANGELOG.md).
+
 ## What's New in v0.8.2
 
 v0.8.2 is a patch release hardening the 0.8.x streaming line:
@@ -507,7 +520,7 @@ For the full list, see [CHANGELOG.md](CHANGELOG.md).
 
 ## Roadmap
 
-Current release line (0.8.x; latest patch 0.8.2):
+Current release line (0.8.x; latest patch 0.8.3):
 
 - Dual-engine streaming model: full-buffer default + streaming engine for large/chunked responses
 - `auto` mode as the default `markdown_streaming_engine` setting
@@ -561,6 +574,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.8.3 | 2026-06-26 | Kang | v0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |
 | 0.8.2 | 2026-06-25 | Kang | v0.8.2 release: streaming decompression hardening, FFI panic safety, implied-closure correctness, decompression budget enforcement, security scan scoping, release-line documentation closeout |
 | 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
 | 0.8.0 | 2026-06-16 | Codex | Synchronized English and Chinese README structure, Quick Start examples, local test commands, platform support heading, and v0.8.0 roadmap wording |

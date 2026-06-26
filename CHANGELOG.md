@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-06-26
+
+Closeout hardening release for the 0.8.x line: streaming state machine
+correctness, decompression buffer memory safety, FFI handle lifecycle,
+and full release gate validation.
+
+### Fixed
+
+- **Streaming `pop_contexts_up_to` return order** — corrected to return
+  innermost-first (pop order) instead of bottom-up (stack order), matching
+  HTML implied end tag semantics and fixing `test_misnested*` regressions
+  (Rule 6).
+- **Streaming `ol`/`ul` derived state** — added `CodeBlock` handling so
+  that `in_preformatted` and `in_preformatted_code` are not incorrectly
+  updated while inside a fenced code block (Rule 6).
+- **Streaming emitter `ExitMany`** — new action enables batch context
+  unwinding from mid-stack, fixing implied-closure ordering for nested
+  block elements (Rule 6).
+- **Decompression buffer memory safety** — switched from `ngx_alloc`/`ngx_free`
+  (heap) to `ngx_pnalloc`/`ngx_pfree` (pool-backed) to avoid mixing
+  allocation lifetimes and prevent pool expansion side effects (Rule 43).
+- **Snapshot capacity** — raised snapshot max from 4 to 8 entries in the
+  stream commit path, supporting more complex multi-header mutation plans
+  (Rule 39).
+- **FFI `Box::into_raw` correctness** — fixed use-after-free pattern in
+  converter handle allocation by ensuring `Box::into_raw` is called only
+  after initialization succeeds (Rule 15).
+- **Unit test `ngx_pfree` mock** — added missing `ngx_pfree` mock to
+  `decompression_production_test.c` so decompression unit tests compile
+  and link correctly.
+
+### Verified
+
+- `make harness-check` — 15/15 PASS
+- `make test-harness` — all detector tests PASS
+- `RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 make release-gates-check-08x` — PASS
+- `make test-nginx-unit` — all C module unit tests PASS
+- `cargo test --workspace` — 1385 Rust tests PASS, 0 failed
+- `make test-rust-fuzz-smoke` — all fuzz smoke tests PASS
+- `detect_ffi_panic_safety.sh --strict` — PASS (0 flagged)
+- `detect_nosonar_discipline.sh` — PASS (10 annotations)
+- `detect_ngx_log_arg_count.sh` — PASS (90 calls)
+- `detect_volatile_atomic.sh` — PASS
+
 ## [0.8.2] - 2026-06-25
 
 Patch release for the 0.8.x line: streaming decompression hardening, FFI
