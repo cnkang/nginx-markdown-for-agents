@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Closeout hardening release for the 0.8.x line: streaming state machine
 correctness, decompression buffer memory safety, FFI handle lifecycle,
-and full release gate validation.
+and 0.8.x release gate validation.
 
 ### Fixed
 
@@ -18,14 +18,14 @@ and full release gate validation.
   HTML implied end tag semantics and fixing `test_misnested*` regressions
   (Rule 6).
 - **Streaming `ol`/`ul` derived state** — added `CodeBlock` handling so
-  that `in_preformatted` and `in_preformatted_code` are not incorrectly
-  updated while inside a fenced code block (Rule 6).
+  that `in_preformatted` is cleared correctly when misnested list closures
+  unwind an open code block (Rule 6).
 - **Streaming emitter `ExitMany`** — new action enables batch context
   unwinding from mid-stack, fixing implied-closure ordering for nested
   block elements (Rule 6).
-- **Decompression buffer memory safety** — switched from `ngx_alloc`/`ngx_free`
-  (heap) to `ngx_pnalloc`/`ngx_pfree` (pool-backed) to avoid mixing
-  allocation lifetimes and prevent pool expansion side effects (Rule 43).
+- **Decompression buffer memory safety** — switched to pool-backed allocation
+  (`ngx_pnalloc`/`ngx_pfree`) so the buffer lifetime matches the request pool
+  and avoids heap/pool ownership mixing (Rule 43).
 - **Snapshot capacity** — raised snapshot max from 4 to 8 entries in the
   stream commit path, supporting more complex multi-header mutation plans
   (Rule 39).
