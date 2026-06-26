@@ -92,6 +92,7 @@ ngx_module_t ngx_http_markdown_filter_module;
 static int g_pnalloc_fail_count;
 static int g_calloc_buf_fail_once;
 static int g_chain_link_fail_once;
+static int g_pfree_count;
 
 ngx_http_markdown_conf_t *
 ngx_http_get_module_loc_conf(ngx_http_request_t *r, ngx_module_t module)
@@ -146,14 +147,16 @@ ngx_alloc_chain_link(ngx_pool_t *pool)
     return ngx_pcalloc(pool, sizeof(ngx_chain_t));
 }
 
-/* Mock ngx_pfree: pool free is a no-op in unit tests (pool lifetime is test scope).
- * ngx_pfree is declared in ngx_palloc.h (via ngx_core.h) as ngx_int_t, so we
- * provide a compatible definition without the static qualifier. */
+/* Mock ngx_pfree: records the call for regression coverage of buffer growth
+ * paths.  ngx_pfree is declared in ngx_palloc.h (via ngx_core.h) as
+ * ngx_int_t, so we provide a compatible definition without the static
+ * qualifier. */
 ngx_int_t
 ngx_pfree(ngx_pool_t *pool, void *p)
 {
     (void) pool;
     (void) p;
+    g_pfree_count++;
     return NGX_OK;
 }
 
@@ -172,6 +175,7 @@ init_request(ngx_http_request_t *r)
     g_pnalloc_fail_count = 0;
     g_calloc_buf_fail_once = 0;
     g_chain_link_fail_once = 0;
+    g_pfree_count = 0;
 
     memset(r, 0, sizeof(*r));
     r->pool = &g_pool;
@@ -612,6 +616,8 @@ test_grow_output_buffer_direct(void)
     /* new_size = max(300*2, 300+4096) = 4396, capped at max_size=1500 */
     TEST_ASSERT(output_size == 1500,
                 "grow_output_buffer should cap at max_size");
+    TEST_ASSERT(g_pfree_count == 1,
+                "grow_output_buffer should call ngx_pfree on old buffer");
 
     /* Budget exceeded: used >= max_size */
     output_data = initial_buf;
