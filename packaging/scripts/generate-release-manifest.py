@@ -193,10 +193,12 @@ def build_manifest(
     no_source: bool,
 ) -> dict:
     """Build the complete manifest."""
-    # Discover packages
-    deb_files = sorted(artifact_dir.glob("*.deb"))
-    rpm_files = sorted(artifact_dir.glob("*.rpm"))
-    all_files = deb_files + rpm_files
+    # Discover packages — sort all files globally for deterministic ordering
+    # that matches the validator's global-filename-sort check.
+    all_files = sorted(
+        f for f in artifact_dir.iterdir()
+        if f.suffix in (".deb", ".rpm") and f.is_file()
+    )
 
     if not all_files:
         print(
