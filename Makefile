@@ -239,6 +239,7 @@ harness-security-checks:
 	bash tools/harness/detect_cwe190_casts.sh
 	PYTHONPATH=. python3 tools/harness/detect_cwe22_paths.py tools/ --strict
 	bash tools/harness/detect_live_conf_reads.sh
+	bash tools/harness/detect_ffi_fat_pointer_transfer.sh
 	bash tools/harness/detect_shell_hygiene.sh tools/
 	PYTHONPATH=. python3 tools/harness/detect_const_correctness.py components/nginx-module/src
 	bash tools/harness/detect_ci_supply_chain.sh
@@ -265,6 +266,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_ngx_log_arg_count.sh
 	bash tools/harness/tests/test_detect_pool_free.sh
 	bash tools/harness/tests/test_detect_ffi_panic_safety.sh
+	bash tools/harness/tests/test_detect_ffi_fat_pointer_transfer.sh
 	bash tools/harness/tests/test_security_gitleaks_scope.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
