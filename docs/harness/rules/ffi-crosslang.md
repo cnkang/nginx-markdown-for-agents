@@ -200,4 +200,4 @@ Required:
 Verification:
 - `grep -rn 'as_mut_ptr' components/rust-converter/src/` — verify ownership transfer uses the `as_mut_ptr` + `mem::forget` pattern for slices.
 - `grep -rn 'Box::into_raw' components/rust-converter/src/` — verify `Box::into_raw` is NOT used for transferring slice/Vec ownership to C.
-- `grep -rn 'return std::ptr::null_mut()' components/rust-converter/src/` — verify empty buffers are returned as NULL.
+- `grep -rn 'null_mut' components/rust-converter/src/ffi/` — verify empty buffers are assigned NULL via `ptr::null_mut()` (both `ptr::null_mut()` and `std::ptr::null_mut()` forms). The NULL convention is applied through field assignments (e.g., `result_ref.output = ptr::null_mut();`), not return statements.
