@@ -379,11 +379,8 @@ impl StructuralStateMachine {
     fn handle_end_tag(&mut self, name: &str) -> Result<StateMachineAction, ConversionError> {
         match name {
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p" | "li" | "pre" | "blockquote" | "a"
-            | "strong" | "b" | "em" | "i" | "code" => {
-                self.pop_and_update_derived_state(name, false)
-            }
-            "ol" => self.pop_and_update_derived_state(name, true),
-            "ul" => self.pop_and_update_derived_state(name, false),
+            | "strong" | "b" | "em" | "i" | "code" => self.pop_and_update_derived_state(name),
+            "ol" | "ul" => self.pop_and_update_derived_state(name),
             "head" => {
                 self.in_head = false;
                 Ok(StateMachineAction::None)
@@ -392,17 +389,22 @@ impl StructuralStateMachine {
         }
     }
 
-    /// Shared end-tag logic: pop contexts up to `tag_name`, update derived
-    /// state (`list_depth`, `blockquote_depth`, `in_preformatted`, and
-    /// optionally `ordered_list_counters`), and return the appropriate exit
-    /// action.
+    /// Shared end-tag logic: pop contexts up to `tag_name`, reconcile
+    /// derived state for every popped context, and return the appropriate
+    /// exit action.
     ///
-    /// When `pop_ordered_counters` is `true` (the `ol` branch), closing an
-    /// `OrderedList` context also pops the corresponding counter.
+    /// For each `StructuralContext` drained from the stack:
+    /// - `OrderedList` → decrement `list_depth` and pop the counter
+    /// - `UnorderedList` → decrement `list_depth`
+    /// - `Blockquote` → decrement `blockquote_depth`
+    /// - `CodeBlock` → clear `in_preformatted`
+    ///
+    /// This ensures misnested HTML that implicitly closes an `OrderedList`
+    /// (e.g. `</ul>` or `</blockquote>` draining an inner `<ol>`) always
+    /// leaves `ordered_list_counters` consistent with the stack.
     fn pop_and_update_derived_state(
         &mut self,
         tag_name: &str,
-        pop_ordered_counters: bool,
     ) -> Result<StateMachineAction, ConversionError> {
         let popped = self.pop_contexts_up_to(tag_name);
         if popped.is_empty() {
@@ -412,9 +414,7 @@ impl StructuralStateMachine {
             match ctx {
                 StructuralContext::OrderedList(_) => {
                     self.list_depth = self.list_depth.saturating_sub(1);
-                    if pop_ordered_counters {
-                        self.ordered_list_counters.pop();
-                    }
+                    self.ordered_list_counters.pop();
                 }
                 StructuralContext::UnorderedList => {
                     self.list_depth = self.list_depth.saturating_sub(1);
@@ -1286,5 +1286,78 @@ mod tests {
             action,
             StateMachineAction::Exit(StructuralContext::OrderedList(_))
         ));
+    }
+
+    // --- Misnested ordered-list counter regression tests (P1) ---
+
+    /// `</blockquote>` closing over `<ol><li>` must drain the OrderedList
+    /// and pop its counter so `ordered_list_counters` is empty afterwards.
+    #[test]
+    fn test_misnested_ordered_list_drained_by_blockquote_clears_counter() {
+        let mut sm = default_sm();
+        // Build: <blockquote><ol><li>x</blockquote>
+        sm.process_event(&start_tag("blockquote")).unwrap();
+        sm.process_event(&start_tag("ol")).unwrap();
+        sm.process_event(&start_tag("li")).unwrap();
+        sm.process_event(&text("x")).unwrap();
+
+        assert_eq!(sm.ordered_list_counters.len(), 1);
+        assert_eq!(sm.list_depth, 1);
+        assert_eq!(sm.blockquote_depth, 1);
+
+        // </blockquote> drains li, ol, blockquote (3 contexts)
+        let action = sm.process_event(&end_tag("blockquote")).unwrap();
+        match action {
+            StateMachineAction::ExitMany(contexts) => {
+                assert_eq!(contexts.len(), 3);
+                assert!(matches!(contexts[0], StructuralContext::ListItem));
+                assert!(matches!(contexts[1], StructuralContext::OrderedList(_)));
+                assert!(matches!(contexts[2], StructuralContext::Blockquote));
+            }
+            _ => panic!(
+                "expected ExitMany for misnested blockquote, got {:?}",
+                action
+            ),
+        }
+        assert_eq!(sm.depth(), 0);
+        assert_eq!(sm.list_depth, 0);
+        assert_eq!(sm.blockquote_depth, 0);
+        assert!(
+            sm.ordered_list_counters.is_empty(),
+            "ordered_list_counters must be empty after blockquote drains ol"
+        );
+    }
+
+    /// `</ul>` closing over `<ol><li>` must drain the OrderedList
+    /// and pop its counter so `ordered_list_counters` is empty afterwards.
+    #[test]
+    fn test_misnested_ordered_list_drained_by_ul_clears_counter() {
+        let mut sm = default_sm();
+        // Build: <ul><ol><li>x</ul>
+        sm.process_event(&start_tag("ul")).unwrap();
+        sm.process_event(&start_tag("ol")).unwrap();
+        sm.process_event(&start_tag("li")).unwrap();
+        sm.process_event(&text("x")).unwrap();
+
+        assert_eq!(sm.ordered_list_counters.len(), 1);
+        assert_eq!(sm.list_depth, 2);
+
+        // </ul> drains li, ol, ul (3 contexts)
+        let action = sm.process_event(&end_tag("ul")).unwrap();
+        match action {
+            StateMachineAction::ExitMany(contexts) => {
+                assert_eq!(contexts.len(), 3);
+                assert!(matches!(contexts[0], StructuralContext::ListItem));
+                assert!(matches!(contexts[1], StructuralContext::OrderedList(_)));
+                assert!(matches!(contexts[2], StructuralContext::UnorderedList));
+            }
+            _ => panic!("expected ExitMany for misnested ul, got {:?}", action),
+        }
+        assert_eq!(sm.depth(), 0);
+        assert_eq!(sm.list_depth, 0);
+        assert!(
+            sm.ordered_list_counters.is_empty(),
+            "ordered_list_counters must be empty after ul drains ol"
+        );
     }
 }
