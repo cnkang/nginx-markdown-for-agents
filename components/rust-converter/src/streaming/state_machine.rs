@@ -652,13 +652,6 @@ impl StructuralStateMachine {
     }
 }
 
-/// Determines whether an HTML tag name represents a block-level element.
-///
-/// # Returns
-///
-/// `true` if `tag` is a block-level element (`h1`–`h6`, `p`, `pre`, `blockquote`, `li`, `ol`, or `ul`), `false` otherwise.
-///
-
 /// Determine whether a `StructuralContext` corresponds to the given HTML closing tag name.
 ///
 /// The comparison is name-based (e.g., `Heading(1)` ↔ `"h1"`, `Paragraph` ↔ `"p"`, `OrderedList(_)` ↔ `"ol"`, etc.).
