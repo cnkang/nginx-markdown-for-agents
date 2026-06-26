@@ -380,84 +380,58 @@ impl StructuralStateMachine {
         match name {
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p" | "li" | "pre" | "blockquote" | "a"
             | "strong" | "b" | "em" | "i" | "code" => {
-                let popped = self.pop_contexts_up_to(name);
-                if popped.is_empty() {
-                    return Ok(StateMachineAction::None);
-                }
-                // Update derived state for every popped context.
-                for ctx in &popped {
-                    match ctx {
-                        StructuralContext::OrderedList(_) | StructuralContext::UnorderedList => {
-                            self.list_depth = self.list_depth.saturating_sub(1);
-                        }
-                        StructuralContext::Blockquote => {
-                            self.blockquote_depth = self.blockquote_depth.saturating_sub(1);
-                        }
-                        StructuralContext::CodeBlock(_) => {
-                            self.in_preformatted = false;
-                        }
-                        _ => {}
-                    }
-                }
-                if popped.len() == 1 {
-                    Ok(StateMachineAction::Exit(popped.into_iter().next().unwrap()))
-                } else {
-                    Ok(StateMachineAction::ExitMany(popped))
-                }
+                self.pop_and_update_derived_state(name, false)
             }
-            "ol" => {
-                let popped = self.pop_contexts_up_to(name);
-                if popped.is_empty() {
-                    return Ok(StateMachineAction::None);
-                }
-                for ctx in &popped {
-                    match ctx {
-                        StructuralContext::OrderedList(_) => {
-                            self.list_depth = self.list_depth.saturating_sub(1);
-                            self.ordered_list_counters.pop();
-                        }
-                        StructuralContext::UnorderedList => {
-                            self.list_depth = self.list_depth.saturating_sub(1);
-                        }
-                        StructuralContext::CodeBlock(_) => {
-                            self.in_preformatted = false;
-                        }
-                        _ => {}
-                    }
-                }
-                if popped.len() == 1 {
-                    Ok(StateMachineAction::Exit(popped.into_iter().next().unwrap()))
-                } else {
-                    Ok(StateMachineAction::ExitMany(popped))
-                }
-            }
-            "ul" => {
-                let popped = self.pop_contexts_up_to(name);
-                if popped.is_empty() {
-                    return Ok(StateMachineAction::None);
-                }
-                for ctx in &popped {
-                    match ctx {
-                        StructuralContext::OrderedList(_) | StructuralContext::UnorderedList => {
-                            self.list_depth = self.list_depth.saturating_sub(1);
-                        }
-                        StructuralContext::CodeBlock(_) => {
-                            self.in_preformatted = false;
-                        }
-                        _ => {}
-                    }
-                }
-                if popped.len() == 1 {
-                    Ok(StateMachineAction::Exit(popped.into_iter().next().unwrap()))
-                } else {
-                    Ok(StateMachineAction::ExitMany(popped))
-                }
-            }
+            "ol" => self.pop_and_update_derived_state(name, true),
+            "ul" => self.pop_and_update_derived_state(name, false),
             "head" => {
                 self.in_head = false;
                 Ok(StateMachineAction::None)
             }
             _ => Ok(StateMachineAction::None),
+        }
+    }
+
+    /// Shared end-tag logic: pop contexts up to `tag_name`, update derived
+    /// state (`list_depth`, `blockquote_depth`, `in_preformatted`, and
+    /// optionally `ordered_list_counters`), and return the appropriate exit
+    /// action.
+    ///
+    /// When `pop_ordered_counters` is `true` (the `ol` branch), closing an
+    /// `OrderedList` context also pops the corresponding counter.
+    fn pop_and_update_derived_state(
+        &mut self,
+        tag_name: &str,
+        pop_ordered_counters: bool,
+    ) -> Result<StateMachineAction, ConversionError> {
+        let popped = self.pop_contexts_up_to(tag_name);
+        if popped.is_empty() {
+            return Ok(StateMachineAction::None);
+        }
+        for ctx in &popped {
+            match ctx {
+                StructuralContext::OrderedList(_) => {
+                    self.list_depth = self.list_depth.saturating_sub(1);
+                    if pop_ordered_counters {
+                        self.ordered_list_counters.pop();
+                    }
+                }
+                StructuralContext::UnorderedList => {
+                    self.list_depth = self.list_depth.saturating_sub(1);
+                }
+                StructuralContext::Blockquote => {
+                    self.blockquote_depth = self.blockquote_depth.saturating_sub(1);
+                }
+                StructuralContext::CodeBlock(_) => {
+                    self.in_preformatted = false;
+                }
+                _ => {}
+            }
+        }
+        if popped.len() == 1 {
+            Ok(StateMachineAction::Exit(popped.into_iter().next().unwrap()))
+        } else {
+            Ok(StateMachineAction::ExitMany(popped))
         }
     }
 
