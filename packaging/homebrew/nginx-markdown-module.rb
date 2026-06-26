@@ -1,10 +1,11 @@
 class NginxMarkdownModule < Formula
   desc "NGINX module for HTML-to-Markdown conversion"
   homepage "https://github.com/cnkang/nginx-markdown-for-agents"
-  url "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.8.3.tar.gz"
-  # Regenerate sha256 after publishing the v0.8.3 tag:
-  #   curl -sL https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.8.3.tar.gz | sha256sum
-  sha256 "PLACEHOLDER_UPDATE_AFTER_TAG_PUBLISH"
+  # Source formula for the Homebrew tap publish workflow.
+  # The workflow rewrites `url` and `sha256` to the target release tag
+  # before pushing to the tap repository.
+  url "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.8.2.tar.gz"
+  sha256 "ed1164d69a29656b935633e104667f3a2b833e071839d3a691aa115c1cb9fc7d"
   license "BSD-2-Clause"
 
   depends_on "cbindgen" => :build
