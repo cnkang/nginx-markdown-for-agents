@@ -146,6 +146,17 @@ ngx_alloc_chain_link(ngx_pool_t *pool)
     return ngx_pcalloc(pool, sizeof(ngx_chain_t));
 }
 
+/* Mock ngx_pfree: pool free is a no-op in unit tests (pool lifetime is test scope).
+ * ngx_pfree is declared in ngx_palloc.h (via ngx_core.h) as ngx_int_t, so we
+ * provide a compatible definition without the static qualifier. */
+ngx_int_t
+ngx_pfree(ngx_pool_t *pool, void *p)
+{
+    (void) pool;
+    (void) p;
+    return NGX_OK;
+}
+
 #include "../../src/ngx_http_markdown_decompression.c"
 
 static ngx_log_t               g_log;
