@@ -760,16 +760,25 @@ jobs:
         shell: bash
 
       - name: Generate release manifest
+        env:
+          GH_REF_TYPE: ${{ github.ref_type }}
+          GH_REF_NAME: ${{ github.ref_name }}
+          GH_SHA: ${{ github.sha }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_RUN_NUMBER: ${{ github.run_number }}
+          GH_REF: ${{ github.ref }}
+          GH_REPO: ${{ github.repository }}
+          GH_INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            TAG="${{ github.ref_name }}"
+          if [[ "${GH_REF_TYPE}" == "tag" ]]; then
+            TAG="${GH_REF_NAME}"
             VERSION="${TAG#v}"
-            SOURCE_URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
+            SOURCE_URL="https://github.com/${GH_REPO}/archive/refs/tags/${TAG}.tar.gz"
             SOURCE_SHA="$(curl -fsSL "${SOURCE_URL}" | sha256sum | awk '{print $1}')"
             SOURCE_ARGS=(--source-url "${SOURCE_URL}" --source-sha "${SOURCE_SHA}")
           else
             TAG=""
-            VERSION="${{ inputs.version }}"
+            VERSION="${GH_INPUT_VERSION}"
             SOURCE_ARGS=(--no-source)
           fi
 
@@ -788,12 +797,12 @@ jobs:
             -o artifacts/release-manifest.json \
             --version "${VERSION}" \
             "${TAG_ARGS[@]}" \
-            --commit "${{ github.sha }}" \
-            --run-id "${{ github.run_id }}" \
-            --run-number "${{ github.run_number }}" \
-            --ref "${{ github.ref }}" \
-            --ref-type "${{ github.ref_type }}" \
-            --repo "${{ github.repository }}" \
+            --commit "${GH_SHA}" \
+            --run-id "${GH_RUN_ID}" \
+            --run-number "${GH_RUN_NUMBER}" \
+            --ref "${GH_REF}" \
+            --ref-type "${GH_REF_TYPE}" \
+            --repo "${GH_REPO}" \
             "${SOURCE_ARGS[@]}"
         shell: bash
 
