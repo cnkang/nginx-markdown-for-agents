@@ -111,6 +111,11 @@ class TestGenerateManifest(unittest.TestCase):
         manifest = json.loads(self.output.read_text())
         self.assertEqual(len(manifest["packages"]), 4)
 
+        # Packages must be globally sorted by filename (validator requirement)
+        filenames = [p["filename"] for p in manifest["packages"]]
+        self.assertEqual(filenames, sorted(filenames),
+                         "Packages not globally sorted by filename")
+
         # Check RPM arch normalization
         rpm_pkgs = [p for p in manifest["packages"] if p["format"] == "rpm"]
         for pkg in rpm_pkgs:
@@ -180,6 +185,49 @@ class TestGenerateManifest(unittest.TestCase):
         subprocess.run(args, capture_output=True, text=True)
         out2 = self.output.read_text()
         self.assertEqual(out1, out2)
+
+    def test_empty_string_args_normalized(self):
+        """Empty --version and --tag should be normalized to None."""
+        self._write_package(
+            "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
+        )
+        result = subprocess.run(
+            [
+                sys.executable, str(GENERATE_SCRIPT),
+                "-d", str(self.artifact_dir),
+                "-o", str(self.output),
+                "--version", "",
+                "--tag", "",
+                "--no-source",
+            ],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads(self.output.read_text())
+        self.assertEqual(manifest["version"], "0.8.3")
+        self.assertIsNone(manifest["git"]["tag"])
+
+    def test_nontag_dispatch_no_invented_tag(self):
+        """Non-tag dispatch must not synthesize git.tag = v{version}."""
+        self._write_package(
+            "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
+        )
+        result = subprocess.run(
+            [
+                sys.executable, str(GENERATE_SCRIPT),
+                "-d", str(self.artifact_dir),
+                "-o", str(self.output),
+                "--version", "0.8.3",
+                "--no-source",
+                "--ref-type", "branch",
+            ],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads(self.output.read_text())
+        self.assertIsNone(manifest["git"]["tag"],
+                          "Non-tag dispatch invented git.tag")
+        self.assertEqual(manifest["workflow"]["ref_type"], "branch")
 
 
 class TestValidateManifest(unittest.TestCase):
@@ -328,6 +376,144 @@ class TestValidateManifest(unittest.TestCase):
         self.sha256sums_path.write_text("abc123  some-other-file.deb\n")
         errors = self._validate()
         self.assertTrue(any("release-manifest.json" in e and "sha256sums" in e.lower() for e in errors))
+
+    def test_nontag_no_source_validates(self):
+        """Non-tag manifest with --no-source should pass validation."""
+        fname = "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
+        path = self.artifact_dir / fname
+        path.write_bytes(b"fake-content")
+        manifest = {
+            "schema_version": 1,
+            "project": "nginx-markdown-for-agents",
+            "version": "0.8.3",
+            "git": {
+                "repository": "cnkang/nginx-markdown-for-agents",
+                "commit": "deadbeef12345678",
+            },
+            "source": {"available": False},
+            "packages": [
+                {
+                    "filename": fname,
+                    "format": "deb",
+                    "version": "0.8.3",
+                    "nginx_version": "1.28.0",
+                    "arch": "amd64",
+                    "sha256": sha256_bytes(b"fake-content"),
+                }
+            ],
+            "integrity": {
+                "checksums": "SHA256SUMS",
+                "signature": "SHA256SUMS.asc",
+                "signature_type": "gpg-detached-ascii-armored",
+                "signed_file": "SHA256SUMS",
+            },
+            "workflow": {
+                "provider": "github-actions",
+                "workflow": "release-packages.yml",
+                "ref_type": "branch",
+            },
+        }
+        self.manifest_path.write_text(json.dumps(manifest, indent=2))
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        entries = []
+        for f in sorted(self.artifact_dir.iterdir()):
+            entries.append(f"{sha256_bytes(f.read_bytes())}  {f.name}")
+        self.sha256sums_path.write_text("\n".join(entries) + "\n")
+        errors = self._validate()
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_tag_missing_source_sha_fails(self):
+        """Tag release without source.sha256 should fail validation."""
+        fname = "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
+        path = self.artifact_dir / fname
+        path.write_bytes(b"fake-content")
+        manifest = {
+            "schema_version": 1,
+            "project": "nginx-markdown-for-agents",
+            "version": "0.8.3",
+            "git": {
+                "repository": "cnkang/nginx-markdown-for-agents",
+                "tag": "v0.8.3",
+                "commit": "deadbeef12345678",
+            },
+            "source": {
+                "available": True,
+                "archive_url": "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.8.3.tar.gz",
+                # sha256 missing
+            },
+            "packages": [
+                {
+                    "filename": fname,
+                    "format": "deb",
+                    "version": "0.8.3",
+                    "nginx_version": "1.28.0",
+                    "arch": "amd64",
+                    "sha256": sha256_bytes(b"fake-content"),
+                }
+            ],
+            "integrity": {
+                "checksums": "SHA256SUMS",
+                "signature": "SHA256SUMS.asc",
+                "signature_type": "gpg-detached-ascii-armored",
+                "signed_file": "SHA256SUMS",
+            },
+            "workflow": {
+                "provider": "github-actions",
+                "workflow": "release-packages.yml",
+                "ref_type": "tag",
+            },
+        }
+        self.manifest_path.write_text(json.dumps(manifest, indent=2))
+        errors = self._validate()
+        self.assertTrue(any("source.sha256" in e for e in errors),
+                        f"Expected source.sha256 error, got: {errors}")
+
+    def test_tag_valid_source_sha_passes(self):
+        """Tag release with valid source.sha256 should pass validation."""
+        fname = "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
+        path = self.artifact_dir / fname
+        path.write_bytes(b"fake-content")
+        manifest = {
+            "schema_version": 1,
+            "project": "nginx-markdown-for-agents",
+            "version": "0.8.3",
+            "git": {
+                "repository": "cnkang/nginx-markdown-for-agents",
+                "tag": "v0.8.3",
+                "commit": "deadbeef12345678",
+            },
+            "source": {
+                "available": True,
+                "archive_url": "https://github.com/cnkang/nginx-markdown-for-agents/archive/refs/tags/v0.8.3.tar.gz",
+                "sha256": "a" * 64,
+            },
+            "packages": [
+                {
+                    "filename": fname,
+                    "format": "deb",
+                    "version": "0.8.3",
+                    "nginx_version": "1.28.0",
+                    "arch": "amd64",
+                    "sha256": sha256_bytes(b"fake-content"),
+                }
+            ],
+            "integrity": {
+                "checksums": "SHA256SUMS",
+                "signature": "SHA256SUMS.asc",
+                "signature_type": "gpg-detached-ascii-armored",
+                "signed_file": "SHA256SUMS",
+            },
+            "workflow": {
+                "provider": "github-actions",
+                "workflow": "release-packages.yml",
+                "ref_type": "tag",
+            },
+        }
+        self.manifest_path.write_text(json.dumps(manifest, indent=2))
+        errors = self._validate()
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
 
 
 if __name__ == "__main__":
