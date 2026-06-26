@@ -402,6 +402,9 @@ new user-visible features or breaking configuration changes.
 - Full release gate validation: all 0.8.x gates pass (harness-check
   15/15, test-harness, release-gates-check-08x, test-nginx-unit,
   test-rust-fuzz-smoke, FFI panic safety --strict, all detector tests).
+- Release integrity: `release-manifest.json` added as a release asset for
+  DEB/RPM packages, generated before `SHA256SUMS` and covered by the
+  `SHA256SUMS.asc` GPG signature chain for tag releases.
 
 #### 0.8.2
 

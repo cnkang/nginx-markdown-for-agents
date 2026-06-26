@@ -228,23 +228,26 @@ the associated packages.
 The recommended verification sequence:
 
 ```bash
-# 1. Download the package, checksums, and signature
+# 1. Download the package, checksums, signature, and manifest
 curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.3/SHA256SUMS
 curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.3/SHA256SUMS.asc
 curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.3/<package-file>
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.3/release-manifest.json
 
 # 2. Verify GPG signature on the checksum file
 gpg --verify SHA256SUMS.asc SHA256SUMS
 
-# 3. Verify the package checksum
+# 3. Verify the package and manifest checksums
 sha256sum --check --ignore-missing SHA256SUMS
 ```
 
-If both steps succeed, the package is authentic and intact.
+If all steps succeed, the package and manifest are authentic and intact.
+The manifest (`release-manifest.json`) is included in `SHA256SUMS` and therefore
+covered by the GPG signature on `SHA256SUMS`.
 
 ## Security Policy
 
-- Packages are GPG-signed with a project key.
+- Release checksums are GPG-signed with the project release key (`SHA256SUMS.asc` signs `SHA256SUMS`). Package authenticity is verified by first verifying the signed checksum file, then checking the downloaded package against `SHA256SUMS`.
 - The default `postinst` script does NOT add `load_module` to `nginx.conf`.
 - Operators must explicitly enable the module, ensuring intentional activation.
 - Module is loaded as a dynamic module (`--add-dynamic-module`), not compiled in.
