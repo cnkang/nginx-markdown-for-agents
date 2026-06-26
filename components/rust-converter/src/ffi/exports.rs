@@ -1291,6 +1291,45 @@ mod tests {
     }
 
     #[test]
+    fn decompress_bounded_empty_output_returns_null() {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+
+        // Compress an empty payload — the decompressor succeeds but
+        // produces a zero-length output.  The FFI layer must return
+        // output=NULL + output_len=0 (not a dangling thin pointer) so
+        // that decompress_free can safely skip the buffer.
+        let original: Vec<u8> = Vec::new();
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&original).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decompress_bounded(
+                compressed.as_ptr(),
+                compressed.len(),
+                0, // gzip
+                1024,
+                &mut result,
+            )
+        };
+        assert_eq!(rc, 0, "Expected success (0), got {rc}");
+        assert_eq!(result.error_category, 0);
+        assert!(
+            result.output.is_null(),
+            "output must be NULL for empty result"
+        );
+        assert_eq!(result.output_len, 0);
+
+        // Free must be a safe no-op on the NULL/zero-length buffer.
+        unsafe { markdown_decompress_free(&mut result) };
+        assert!(result.output.is_null());
+        assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
     fn decompress_bounded_budget_exceeded() {
         use flate2::Compression;
         use flate2::write::GzEncoder;
