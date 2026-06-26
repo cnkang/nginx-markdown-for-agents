@@ -31,7 +31,7 @@
 
 use std::ptr;
 
-use super::abi::{ConversionOutput, MarkdownResult, ERROR_SUCCESS};
+use super::abi::{ConversionOutput, ERROR_SUCCESS, MarkdownResult};
 
 /// Leak a [`Box<[u8]>`] into a `(thin pointer, length)` pair for C ABI
 /// export, avoiding the `Box::into_raw(Box<[u8]>) as *mut u8` fat-pointer
@@ -66,9 +66,7 @@ pub(crate) fn set_error_result(
     error_code: u32,
     error_message: String,
 ) {
-    let (ptr, len) = leak_boxed_slice_to_raw(
-        error_message.into_bytes().into_boxed_slice(),
-    );
+    let (ptr, len) = leak_boxed_slice_to_raw(error_message.into_bytes().into_boxed_slice());
     result.error_code = error_code;
     result.error_len = len;
     result.error_message = ptr;
