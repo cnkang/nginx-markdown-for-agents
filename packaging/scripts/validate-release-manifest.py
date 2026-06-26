@@ -89,10 +89,11 @@ def validate_manifest(
 
     # git
     git = manifest["git"]
+    is_tag_release = manifest.get("workflow", {}).get("ref_type") == "tag"
     if not isinstance(git, dict):
         errors.append("git must be an object")
     else:
-        for key in ("repository", "tag", "commit"):
+        for key in ("repository", "commit"):
             if key not in git:
                 errors.append(f"Missing git.{key}")
             elif not git[key]:
@@ -101,6 +102,15 @@ def validate_manifest(
                 check_no_placeholders(git[key], f"git.{key}", errors)
         if "commit" in git and not re.match(r"^[0-9a-f]{7,40}$", git["commit"]):
             errors.append(f"git.commit does not look like a SHA: {git['commit']}")
+
+        # git.tag is required for tag releases, optional for workflow_dispatch
+        if is_tag_release:
+            if "tag" not in git:
+                errors.append("Missing git.tag (required for tag releases)")
+            elif not git["tag"]:
+                errors.append("git.tag is empty (required for tag releases)")
+            else:
+                check_no_placeholders(git["tag"], "git.tag", errors)
 
     # packages
     packages = manifest.get("packages", [])
@@ -139,9 +149,26 @@ def validate_manifest(
                 if not re.match(r"^[0-9a-f]{64}$", pkg["sha256"]):
                     errors.append(f"{prefix}: sha256 is not a 64-char hex string")
 
-    # source (optional but recommended for tag releases)
+    # source — required for tag releases, optional for workflow_dispatch
     source = manifest.get("source")
-    if source and isinstance(source, dict):
+    if is_tag_release:
+        if not source or not isinstance(source, dict):
+            errors.append("source is required for tag releases")
+        elif not source.get("available", False):
+            errors.append("source.available must be true for tag releases")
+        else:
+            if "archive_url" not in source or not source["archive_url"]:
+                errors.append("source.archive_url is required for tag releases")
+            else:
+                check_no_placeholders(source["archive_url"], "source.archive_url", errors)
+            if "sha256" not in source or not source["sha256"]:
+                errors.append("source.sha256 is required for tag releases")
+            else:
+                check_no_placeholders(source["sha256"], "source.sha256", errors)
+                if not re.match(r"^[0-9a-f]{64}$", source["sha256"]):
+                    errors.append("source.sha256 is not a 64-char hex string")
+    elif source and isinstance(source, dict):
+        # Non-tag: source is optional; if present and available, validate fields
         if source.get("available", False):
             if "archive_url" in source:
                 check_no_placeholders(source["archive_url"], "source.archive_url", errors)

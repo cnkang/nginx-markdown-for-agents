@@ -761,19 +761,40 @@ jobs:
 
       - name: Generate release manifest
         run: |
-          VERSION="${{ github.ref_type == 'tag' && github.ref_name || '' }}"
-          VERSION="${VERSION#v}"  # strip leading 'v'
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#v}"
+            SOURCE_URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
+            SOURCE_SHA="$(curl -fsSL "${SOURCE_URL}" | sha256sum | awk '{print $1}')"
+            SOURCE_ARGS=(--source-url "${SOURCE_URL}" --source-sha "${SOURCE_SHA}")
+          else
+            TAG=""
+            VERSION="${{ inputs.version }}"
+            SOURCE_ARGS=(--no-source)
+          fi
+
+          if [[ -z "${VERSION}" ]]; then
+            echo "ERROR: manifest version could not be determined" >&2
+            exit 1
+          fi
+
+          TAG_ARGS=()
+          if [[ -n "${TAG}" ]]; then
+            TAG_ARGS=(--tag "${TAG}")
+          fi
+
           python3 packaging/scripts/generate-release-manifest.py \
             -d artifacts/ \
             -o artifacts/release-manifest.json \
             --version "${VERSION}" \
-            --tag "${{ github.ref_type == 'tag' && github.ref_name || '' }}" \
+            "${TAG_ARGS[@]}" \
             --commit "${{ github.sha }}" \
             --run-id "${{ github.run_id }}" \
             --run-number "${{ github.run_number }}" \
             --ref "${{ github.ref }}" \
             --ref-type "${{ github.ref_type }}" \
-            --repo "${{ github.repository }}"
+            --repo "${{ github.repository }}" \
+            "${SOURCE_ARGS[@]}"
         shell: bash
 
       - name: Generate SHA256SUMS

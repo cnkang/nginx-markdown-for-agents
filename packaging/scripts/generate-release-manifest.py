@@ -230,8 +230,9 @@ def build_manifest(
         version = version_from_tag(tag)
     if version is None:
         version = detected_version
-    if tag is None:
-        tag = f"v{version}"
+    # Do NOT synthesize tag = "v{version}" here.
+    # For non-tag dispatch (workflow_dispatch), git.tag should be None
+    # rather than an invented tag that was never actually pushed.
 
     # Source archive
     if no_source:
@@ -295,6 +296,11 @@ def main() -> None:
     parser.add_argument("--no-source", action="store_true", help="Mark source unavailable")
     args = parser.parse_args()
 
+    # Normalize empty strings to None so downstream logic treats them
+    # as "not provided" rather than using them as literal values.
+    def _none_if_empty(val: str | None) -> str | None:
+        return val if val else None
+
     artifact_dir = Path(args.artifact_dir)
     if not artifact_dir.is_dir():
         print(f"ERROR: Artifact directory not found: {artifact_dir}", file=sys.stderr)
@@ -302,16 +308,16 @@ def main() -> None:
 
     manifest = build_manifest(
         artifact_dir=artifact_dir,
-        version=args.version,
-        tag=args.tag,
-        commit=args.commit,
-        run_id=args.run_id,
-        run_number=args.run_number,
-        ref=args.ref,
-        ref_type=args.ref_type,
-        repo=args.repo,
-        source_url=args.source_url,
-        source_sha=args.source_sha,
+        version=_none_if_empty(args.version),
+        tag=_none_if_empty(args.tag),
+        commit=_none_if_empty(args.commit),
+        run_id=_none_if_empty(args.run_id),
+        run_number=_none_if_empty(args.run_number),
+        ref=_none_if_empty(args.ref),
+        ref_type=_none_if_empty(args.ref_type),
+        repo=_none_if_empty(args.repo),
+        source_url=_none_if_empty(args.source_url),
+        source_sha=_none_if_empty(args.source_sha),
         no_source=args.no_source,
     )
 
