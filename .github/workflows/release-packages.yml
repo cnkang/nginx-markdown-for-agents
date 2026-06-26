@@ -77,7 +77,7 @@ permissions: {}
 #   - package:             Generate .deb/.rpm via nFPM (matrix)
 #   - smoke-test:          Container install + module load verification (matrix)
 #   - release-gate:        Tag-only release governance and artifact layout gate
-#   - integrity-checksums: SHA256SUMS generation (no protected environment)
+#   - integrity-checksums: SHA256SUMS + release-manifest.json generation
 #   - integrity-signing:   Optional GPG signing (protected environment, tag only)
 #   - publish:             Upload to GitHub Release (tag) or workflow artifacts (dispatch)
 #
@@ -759,9 +759,34 @@ jobs:
           ls -la artifacts/
         shell: bash
 
+      - name: Generate release manifest
+        run: |
+          VERSION="${{ github.ref_type == 'tag' && github.ref_name || '' }}"
+          VERSION="${VERSION#v}"  # strip leading 'v'
+          python3 packaging/scripts/generate-release-manifest.py \
+            -d artifacts/ \
+            -o artifacts/release-manifest.json \
+            --version "${VERSION}" \
+            --tag "${{ github.ref_type == 'tag' && github.ref_name || '' }}" \
+            --commit "${{ github.sha }}" \
+            --run-id "${{ github.run_id }}" \
+            --run-number "${{ github.run_number }}" \
+            --ref "${{ github.ref }}" \
+            --ref-type "${{ github.ref_type }}" \
+            --repo "${{ github.repository }}"
+        shell: bash
+
       - name: Generate SHA256SUMS
         run: |
           ./packaging/scripts/generate-checksums.sh -d artifacts/
+        shell: bash
+
+      - name: Validate release manifest
+        run: |
+          python3 packaging/scripts/validate-release-manifest.py \
+            -m artifacts/release-manifest.json \
+            -d artifacts/ \
+            --sha256sums artifacts/SHA256SUMS
         shell: bash
 
       - name: Upload SHA256SUMS
@@ -769,6 +794,14 @@ jobs:
         with:
           name: checksums
           path: artifacts/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 5
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-manifest
+          path: artifacts/release-manifest.json
           if-no-files-found: error
           retention-days: 5
 
@@ -902,6 +935,12 @@ jobs:
         continue-on-error: true
         with:
           name: checksums-signature
+          path: release-assets/
+
+      - name: Download release manifest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-manifest
           path: release-assets/
 
       - name: List release assets
