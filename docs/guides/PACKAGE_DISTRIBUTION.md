@@ -183,7 +183,8 @@ It does not by itself prove byte-for-byte reproducible builds.
 Download the manifest from the same GitHub Release page:
 
 ```bash
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.3/release-manifest.json
+curl -fsSL -H "Accept: application/json" -o release-manifest.json \
+  https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.3/release-manifest.json
 ```
 
 ## GPG Signature Verification
