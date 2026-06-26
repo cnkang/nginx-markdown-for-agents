@@ -135,6 +135,14 @@
         "make release-gates-check-055"
       ]
     },
+    "release-manifest": {
+      "phase": "focused-semantic",
+      "commands": [
+        "python3 packaging/scripts/test_release_manifest.py",
+        "make release-gates-check"
+      ],
+      "notes": "Validates release-manifest.json generation, validation, and path traversal protection (Rule 54)"
+    },
     "runtime-e2e": {
       "phase": "umbrella",
       "commands": [
