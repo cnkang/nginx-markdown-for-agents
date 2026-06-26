@@ -40,7 +40,6 @@ class TestGenerateManifest(unittest.TestCase):
         self.tmpdir = tempfile.mkdtemp()
         self.artifact_dir = Path(self.tmpdir) / "artifacts"
         self.artifact_dir.mkdir()
-        self.output = Path(self.tmpdir) / "output" / "release-manifest.json"
 
     def tearDown(self):
         import shutil
@@ -51,25 +50,26 @@ class TestGenerateManifest(unittest.TestCase):
         path.write_bytes(content)
         return sha256_bytes(content)
 
+    def _run_generate(self, extra_args: list[str]) -> subprocess.CompletedProcess:
+        args = [
+            sys.executable, str(GENERATE_SCRIPT),
+            "-d", str(self.artifact_dir),
+        ] + extra_args
+        return subprocess.run(args, capture_output=True, text=True)
+
     def test_single_deb(self):
         expected_sha = self._write_package(
             "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
         )
-        result = subprocess.run(
-            [
-                sys.executable, str(GENERATE_SCRIPT),
-                "-d", str(self.artifact_dir),
-                "-o", str(self.output),
-                "--version", "0.8.3",
-                "--tag", "v0.8.3",
-                "--commit", "abc1234def5678",
-                "--repo", "cnkang/nginx-markdown-for-agents",
-            ],
-            capture_output=True, text=True,
-        )
+        result = self._run_generate([
+            "--version", "0.8.3",
+            "--tag", "v0.8.3",
+            "--commit", "abc1234def5678",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+        ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        manifest = json.loads(self.output.read_text())
+        manifest = json.loads(result.stdout)
         self.assertEqual(manifest["schema_version"], 1)
         self.assertEqual(manifest["project"], "nginx-markdown-for-agents")
         self.assertEqual(manifest["version"], "0.8.3")
@@ -94,21 +94,15 @@ class TestGenerateManifest(unittest.TestCase):
             "nginx-module-markdown-for-agents-0.8.3-nginx1.28.0-1.aarch64.rpm"
         )
 
-        result = subprocess.run(
-            [
-                sys.executable, str(GENERATE_SCRIPT),
-                "-d", str(self.artifact_dir),
-                "-o", str(self.output),
-                "--version", "0.8.3",
-                "--tag", "v0.8.3",
-                "--commit", "abc1234",
-                "--repo", "cnkang/nginx-markdown-for-agents",
-            ],
-            capture_output=True, text=True,
-        )
+        result = self._run_generate([
+            "--version", "0.8.3",
+            "--tag", "v0.8.3",
+            "--commit", "abc1234",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+        ])
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        manifest = json.loads(self.output.read_text())
+        manifest = json.loads(result.stdout)
         self.assertEqual(len(manifest["packages"]), 4)
 
         # Packages must be globally sorted by filename (validator requirement)
@@ -123,49 +117,31 @@ class TestGenerateManifest(unittest.TestCase):
             self.assertIn(pkg["rpm_arch"], ("x86_64", "aarch64"))
 
     def test_no_packages_fails(self):
-        result = subprocess.run(
-            [
-                sys.executable, str(GENERATE_SCRIPT),
-                "-d", str(self.artifact_dir),
-                "-o", str(self.output),
-                "--version", "0.8.3",
-                "--repo", "cnkang/nginx-markdown-for-agents",
-            ],
-            capture_output=True, text=True,
-        )
+        result = self._run_generate([
+            "--version", "0.8.3",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+        ])
         self.assertNotEqual(result.returncode, 0)
 
     def test_invalid_filename_fails(self):
         (self.artifact_dir / "bad-file.deb").write_bytes(b"x")
-        result = subprocess.run(
-            [
-                sys.executable, str(GENERATE_SCRIPT),
-                "-d", str(self.artifact_dir),
-                "-o", str(self.output),
-                "--version", "0.8.3",
-                "--repo", "cnkang/nginx-markdown-for-agents",
-            ],
-            capture_output=True, text=True,
-        )
+        result = self._run_generate([
+            "--version", "0.8.3",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+        ])
         self.assertNotEqual(result.returncode, 0)
 
     def test_no_source(self):
         self._write_package(
             "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
         )
-        result = subprocess.run(
-            [
-                sys.executable, str(GENERATE_SCRIPT),
-                "-d", str(self.artifact_dir),
-                "-o", str(self.output),
-                "--version", "0.8.3",
-                "--repo", "cnkang/nginx-markdown-for-agents",
-                "--no-source",
-            ],
-            capture_output=True, text=True,
-        )
+        result = self._run_generate([
+            "--version", "0.8.3",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+            "--no-source",
+        ])
         self.assertEqual(result.returncode, 0, result.stderr)
-        manifest = json.loads(self.output.read_text())
+        manifest = json.loads(result.stdout)
         self.assertFalse(manifest["source"]["available"])
 
     def test_deterministic_output(self):
@@ -173,37 +149,26 @@ class TestGenerateManifest(unittest.TestCase):
             "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
         )
         args = [
-            sys.executable, str(GENERATE_SCRIPT),
-            "-d", str(self.artifact_dir),
-            "-o", str(self.output),
             "--version", "0.8.3",
             "--commit", "deadbeef",
             "--repo", "cnkang/nginx-markdown-for-agents",
         ]
-        subprocess.run(args, capture_output=True, text=True)
-        out1 = self.output.read_text()
-        subprocess.run(args, capture_output=True, text=True)
-        out2 = self.output.read_text()
-        self.assertEqual(out1, out2)
+        r1 = self._run_generate(args)
+        r2 = self._run_generate(args)
+        self.assertEqual(r1.stdout, r2.stdout)
 
     def test_empty_string_args_normalized(self):
         """Empty --version and --tag should be normalized to None."""
         self._write_package(
             "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
         )
-        result = subprocess.run(
-            [
-                sys.executable, str(GENERATE_SCRIPT),
-                "-d", str(self.artifact_dir),
-                "-o", str(self.output),
-                "--version", "",
-                "--tag", "",
-                "--no-source",
-            ],
-            capture_output=True, text=True,
-        )
+        result = self._run_generate([
+            "--version", "",
+            "--tag", "",
+            "--no-source",
+        ])
         self.assertEqual(result.returncode, 0, result.stderr)
-        manifest = json.loads(self.output.read_text())
+        manifest = json.loads(result.stdout)
         self.assertEqual(manifest["version"], "0.8.3")
         self.assertIsNone(manifest["git"]["tag"])
 
@@ -212,19 +177,13 @@ class TestGenerateManifest(unittest.TestCase):
         self._write_package(
             "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
         )
-        result = subprocess.run(
-            [
-                sys.executable, str(GENERATE_SCRIPT),
-                "-d", str(self.artifact_dir),
-                "-o", str(self.output),
-                "--version", "0.8.3",
-                "--no-source",
-                "--ref-type", "branch",
-            ],
-            capture_output=True, text=True,
-        )
+        result = self._run_generate([
+            "--version", "0.8.3",
+            "--no-source",
+            "--ref-type", "branch",
+        ])
         self.assertEqual(result.returncode, 0, result.stderr)
-        manifest = json.loads(self.output.read_text())
+        manifest = json.loads(result.stdout)
         self.assertIsNone(manifest["git"]["tag"],
                           "Non-tag dispatch invented git.tag")
         self.assertEqual(manifest["workflow"]["ref_type"], "branch")

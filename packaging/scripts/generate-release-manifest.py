@@ -5,11 +5,10 @@ Scans an artifact directory for .deb and .rpm files, parses metadata from
 filenames, computes SHA-256 hashes, and produces a deterministic JSON manifest.
 
 Usage:
-    generate-release-manifest.py -d ARTIFACT_DIR -o OUTPUT [options]
+    generate-release-manifest.py -d ARTIFACT_DIR [options]
 
 Options:
     -d DIR       Directory containing .deb and .rpm artifacts (required)
-    -o OUTPUT    Output file path (default: artifacts/release-manifest.json)
     --version V  Package version (overrides auto-detection from filename)
     --tag T      Git tag (e.g. v0.8.3).  Implies --version from tag.
     --commit C   Git commit SHA (overrides git rev-parse)
@@ -282,7 +281,6 @@ def main() -> None:
         description="Generate release-manifest.json"
     )
     parser.add_argument("-d", "--artifact-dir", required=True, help="Artifact directory")
-    parser.add_argument("-o", "--output", default="artifacts/release-manifest.json", help="Output path")
     parser.add_argument("--version", default=None, help="Package version")
     parser.add_argument("--tag", default=None, help="Git tag (e.g. v0.8.3)")
     parser.add_argument("--commit", default=None, help="Git commit SHA")
@@ -321,16 +319,13 @@ def main() -> None:
         no_source=args.no_source,
     )
 
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
     text = json.dumps(manifest, indent=2, sort_keys=False) + "\n"
-    output_path.write_text(text, encoding="utf-8")
+    print(text, end="")
 
-    print(f"Release manifest written to: {output_path}", file=sys.stderr)
-    print(f"  version: {manifest['version']}")
-    print(f"  packages: {len(manifest['packages'])}")
-    print(f"  source available: {manifest['source'].get('available', False)}")
+    print("Release manifest generated successfully", file=sys.stderr)
+    print(f"  version: {manifest['version']}", file=sys.stderr)
+    print(f"  packages: {len(manifest['packages'])}", file=sys.stderr)
+    print(f"  source available: {manifest['source'].get('available', False)}", file=sys.stderr)
 
 
 if __name__ == "__main__":

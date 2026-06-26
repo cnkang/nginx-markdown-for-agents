@@ -794,7 +794,6 @@ jobs:
 
           python3 packaging/scripts/generate-release-manifest.py \
             -d artifacts/ \
-            -o artifacts/release-manifest.json \
             --version "${VERSION}" \
             "${TAG_ARGS[@]}" \
             --commit "${GH_SHA}" \
@@ -803,7 +802,8 @@ jobs:
             --ref "${GH_REF}" \
             --ref-type "${GH_REF_TYPE}" \
             --repo "${GH_REPO}" \
-            "${SOURCE_ARGS[@]}"
+            "${SOURCE_ARGS[@]}" \
+            > artifacts/release-manifest.json
         shell: bash
 
       - name: Generate SHA256SUMS
