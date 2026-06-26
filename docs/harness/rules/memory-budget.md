@@ -63,6 +63,11 @@ Required:
   so it can be `ngx_free`-d on every exit path (success, error, and
   overflow).  Leaking the workspace on an error path causes a
   per-request heap leak that accumulates under load.
+  **Exception**: Fixed-size decompression workspaces that are NOT
+  resized and have pool-lifetime semantics may use `ngx_pnalloc`/
+  `ngx_pfree` to avoid mixing allocation lifetimes. Historical issue:
+  commit `1956124f` switched decompression from heap to pool-backed
+  to prevent pool expansion side effects.
 - **Free-on-all-exits discipline**: Every `ngx_alloc`-backed buffer
   introduced in a streaming or decompression path must have a matching
   `ngx_free` on every exit path — success, error, overflow, and

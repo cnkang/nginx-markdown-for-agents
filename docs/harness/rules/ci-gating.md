@@ -1,6 +1,6 @@
 ---
 domain: ci-gating
-rules: [13, 48]
+rules: [13, 48, 54]
 paths:
   - ".github/workflows/**"
   - "Makefile"
@@ -206,3 +206,14 @@ Verification:
 - `python3 tools/release/gates/validate_package_metadata_070.py`
 - `python3 tools/release/gates/validate_k8s_manifests_070.py`
 - `make release-gates-check`
+
+---
+
+### 54. Release artifact path traversal protection
+Historical issues: `f303ec3f`, `ee7c9d22`.
+
+Required:
+- When validating filenames from a release manifest against an artifact directory, resolve paths and verify containment before accessing. Use `Path.relative_to()` or `startswith` on resolved paths to reject filenames that escape the artifact directory.
+
+Verification:
+- `grep -rn 'relative_to\|startswith.*resolve' packaging/scripts/validate-release-manifest.py` — verify path traversal guards exist.

@@ -1,6 +1,6 @@
 ---
 domain: ffi-crosslang
-rules: [15, 46]
+rules: [15, 46, 53]
 paths:
   - "components/rust-converter/src/**"
   - "components/rust-converter/include/**"
@@ -10,10 +10,11 @@ paths:
 ## FFI & Cross-Language Interface
 
 ### 15. Cross-language interface and FFI synchronization
-Historical issues: `dbb5722`, `dfeffc4`, `ceeaf38`, `5970807`.
+Historical issues: `dbb5722`, `dfeffc4`, `ceeaf38`, `5970807`, `366ecf0e`.
 
 Required:
 - When Rust FFI structs, options, defaults, or error codes change, update all affected boundaries in the same change set: Rust ABI/options code, public C headers, NGINX call sites, tests, and operator-facing scripts.
+- **Initialization-before-ownership-transfer ordering**: When an FFI export allocates a resource and transfers ownership to C (for example via `Box::into_raw`, `as_mut_ptr` + `mem::forget`, or similar), the allocation must be fully initialized **before** the ownership transfer. Do not call the ownership-transfer function on a partially-initialized value. If initialization fails, free the resource on the Rust side and return an error code — never transfer a partially-initialized resource to C. Historical issue: commit `366ecf0e` fixed a use-after-free where `Box::into_raw` was called before initialization completed.
 - Treat FFI comments and header docs as part of the interface contract; stale interface docs are a bug, not a cleanup item.
 - Add at least one boundary-level test when introducing or changing an FFI option/error path (for example header-level, feature-independence, or end-to-end verification).
 - **When adding a field to any FFI struct (for example `MarkdownResult`, `MarkdownOptions`, `StreamingStats`), apply this complete-sync checklist:**
@@ -173,9 +174,30 @@ Required:
   data into NGINX pool-owned structures.
 
 Verification:
-- `grep -rn 'op_type\|operation_type' components/rust-converter/src/ffi/`
+|- `grep -rn 'op_type\|operation_type' components/rust-converter/src/ffi/`
   — verify each FFI entry point validates key/name inputs.
-- `grep -rn 'key\.data.*==.*NULL\|key_len.*==.*0\|\.is_null()' components/nginx-module/src/ components/rust-converter/src/`
+|- `grep -rn 'key\.data.*==.*NULL\|key_len.*==.*0\|\.is_null()' components/nginx-module/src/ components/rust-converter/src/`
   — verify guards exist on both sides of the FFI boundary.
-- `make test-rust` and `make test-nginx-unit` — NULL/empty-input FFI
+|- `make test-rust` and `make test-nginx-unit` — NULL/empty-input FFI
   tests must pass.
+
+---
+
+### 53. FFI fat-pointer safety and empty-result NULL convention
+Historical issues: `ec34a4ff`, `feebb9bf`.
+
+Required:
+- **Fat-pointer safety when transferring ownership**: When transferring ownership of a Rust slice or `Vec` to C via a raw pointer, do **not** use `Box::into_raw()` on the slice/Vec itself, as this relies on the internal fat-pointer layout (pointer + length) which is not stable or compatible with C's expectation of a simple pointer. Instead, use the pattern:
+  ```rust
+  let mut boxed = slice.to_vec().into_boxed_slice();
+  let ptr = boxed.as_mut_ptr();
+  std::mem::forget(boxed);
+  return ptr as *mut c_char;
+  ```
+  This ensures that only the data pointer is passed to C, and the allocation is leaked intentionally to be managed by the C-side free helper.
+- **Empty-result NULL convention**: FFI functions that return a pointer to a buffer (e.g., a string or byte array) must return `NULL` if the result is empty, rather than a pointer to a zero-length allocation. This allows C free helpers to simply check `if (ptr == NULL) return;` and avoid calling the allocator for empty buffers, reducing overhead and avoiding implementation-defined behavior of zero-length allocations.
+
+Verification:
+- `grep -rn 'as_mut_ptr' components/rust-converter/src/` — verify ownership transfer uses the `as_mut_ptr` + `mem::forget` pattern for slices.
+- `grep -rn 'Box::into_raw' components/rust-converter/src/` — verify `Box::into_raw` is NOT used for transferring slice/Vec ownership to C.
+- `grep -rn 'return std::ptr::null_mut()' components/rust-converter/src/` — verify empty buffers are returned as NULL.

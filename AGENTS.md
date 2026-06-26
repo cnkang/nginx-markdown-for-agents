@@ -127,6 +127,9 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 49 | docs-tooling | THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions; add/remove/update entries in same changeset as Cargo.lock changes |
 | 50 | nginx-idioms | Content-Type OWS separator accepts HTAB; trailing OWS excluded before parameter comparison |
 | 51 | streaming-backpressure | Auth Cache-Control commit failure routes through precommit_error; multi-header aggregation checks any_public before has_private |
+| 52 | streaming-backpressure | Derived-state reconciliation on multi-context drain; ALL derived state reconciled for EVERY popped context |
+| 53 | ffi-crosslang | FFI fat-pointer safety; use as_mut_ptr + mem::forget for slice ownership transfer; empty results return NULL |
+| 54 | ci-gating | Release artifact path traversal protection; resolve and verify containment before accessing manifest filenames |
 
 ## Required Agent Workflow
 
@@ -177,6 +180,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Streaming decompression uses raw deflate; truncated streams rejected; test payloads match production format [44]
 - Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return [47]
 - Auth Cache-Control commit failure routes through precommit_error; multi-header aggregation checks any_public before has_private [51]
+- Derived-state reconciliation on multi-context drain: ALL derived state reconciled for EVERY popped context [52]
 
 **Memory & Budget** (C, R)
 - All budgets enforced; auxiliary buffers freed on all exits [3]
@@ -209,6 +213,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - FFI enums use explicit #[repr(u8)] / #[repr(i32)] for layout safety [15]
 - FFI handle consumed after safe_finish/free — no pointer reuse after consumption [15]
 - cbindgen header drift: run make check-headers after Rust FFI changes [15]
+- FFI fat-pointer safety: use as_mut_ptr + mem::forget for slice ownership transfer; empty results return NULL [53]
 
 **C Safety** (C)
 - No implicit declarations; narrowing cast needs bounds check + overflow path [24]
@@ -374,6 +379,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   remain report-oriented unless a specific blocking threshold is adopted. Do
   not describe them as hard blocking gates without documenting the
   runtime/noise tradeoff and enforcing threshold semantics [48]
+- Release artifact path traversal protection: validate manifest filenames resolve within artifact directory before accessing [54]
 - Homebrew formula SHA-256 generated from release tag git archive (not HEAD);
   version stanza before sha256; nginx version derived from dependency
   metadata; tap publish validates tag existence; formula gate and release
@@ -526,6 +532,7 @@ remediation:
 | 0.5.5 | 2026-04-24 | Codex | Added recent Git analysis remediation closeout rule |
 | 0.6.0 | 2026-05-02 | Kang | Comment/doc audit: Rust module docs, C function comments, Python docstrings, shell script headers; version 0.6.0 consistency fixes |
 | 0.6.1 | 2026-05-06 | Kang | Rules 27–31: Markdown escaping/injection prevention, full ngx_list_part_t iteration, flag clearing ordering, NUL-termination/EOF boundary, merge residual integrity; output-safety risk pack |
+| 0.8.3 | 2026-06-26 | Kang | Rules 52–54: derived-state reconciliation on multi-context drain (streaming), FFI fat-pointer safety and empty-result NULL convention, release artifact path traversal protection; updated Rule 15 (initialization-before-ownership-transfer), Rule 43 (pool-backed decompression exception); added release-manifest verification family to routing manifest |
 | 0.6.2 | 2026-05-07 | Kang | Rule 35: dynconf snapshot isolation (dynconf_enabled gate), reload retry contract (applied_mtime separation), unknown key atomic rejection, startup apply of existing dynconf file, harness-check-full includes harness-security-checks |
 | 0.6.2 | 2026-05-11 | Kang | Rule 36: require routing-manifest coverage and focused security family routing for recurring tooling path-safety fixes |
 | 0.6.6 | 2026-05-16 | Kang | Rule 38: fail-open replay buffer data integrity (init/append failure → precommit_error, failopen_completed state, delivery vs decision counter separation); Rule 2 cross-reference to Rule 38; Rule 8 delivery counter semantics; Rule 23 delivery vs decision counter guidance; C module checklist item 28 |
