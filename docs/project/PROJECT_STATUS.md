@@ -60,7 +60,8 @@ section below for detailed goals, non-goals, and implementation status.
   - Rust layout tests for `MarkdownResult`, `FFIAcceptResult`, error/reason
     code uniqueness.
   - C `static_assert` for critical struct sizeof and offsetof.
-- DEB/RPM packaging pipeline with GPG signing and repository metadata.
+- DEB/RPM packaging pipeline with SHA256SUMS, mandatory tag-release GPG signing,
+  release-manifest.json traceability, and repository metadata.
 - Kubernetes deployment examples (Ingress Controller, Helm chart, manifests).
 - Runtime diagnostics endpoint (`/nginx-markdown/diagnostics`).
 - Dynconf dry-run and last-known-good rollback.

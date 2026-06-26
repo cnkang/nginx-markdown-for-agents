@@ -11,6 +11,14 @@ Closeout hardening release for the 0.8.x line: streaming state machine
 correctness, decompression buffer memory safety, FFI handle lifecycle,
 and 0.8.x release gate validation.
 
+### Added
+
+- **`release-manifest.json`** — new release asset for DEB/RPM package releases.
+  The manifest records git tag, commit SHA, package metadata, package SHA-256
+  hashes, source archive hash for tag releases, and GitHub Actions workflow
+  metadata.  It is generated before `SHA256SUMS`, included in `SHA256SUMS`,
+  and protected by the `SHA256SUMS.asc` GPG signature chain for tag releases.
+
 ### Fixed
 
 - **Streaming `pop_contexts_up_to` return order** — corrected to return
