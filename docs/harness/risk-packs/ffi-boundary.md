@@ -20,6 +20,9 @@ plumbing, or error-code classification change.
 - FFI option defaults vs NGINX call sites
 - test helper constructors vs new struct fields
 - operator docs vs changed enum or error naming
+- fat-pointer safety when transferring slice/Vec ownership to C (Rule 53):
+  use `as_mut_ptr` + `mem::forget`, never `Box::into_raw` for slices;
+  empty buffers return NULL instead of zero-length allocations
 
 ## Minimum Verification
 

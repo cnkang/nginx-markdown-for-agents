@@ -43,6 +43,10 @@ CI, scope governance, or go/no-go tooling changes.
   `git diff --check`, function count, and no duplicate adjacent blocks (Rule 31)
 - after >30-line single-file changes, verify the file is not truncated
   (closing brace present) (Rule 31)
+- release manifest generation, validation, and path traversal protection must
+  stay synchronized: `generate-release-manifest.py` and
+  `validate-release-manifest.py` must agree on schema, and path traversal
+  guards must reject filenames that escape the artifact directory (Rule 54)
 
 ## Minimum Verification
 
@@ -58,6 +62,12 @@ run:
 
 ```bash
 make release-gates-check-strict
+```
+
+When release manifest generation or validation changes, also run:
+
+```bash
+python3 packaging/scripts/test_release_manifest.py
 ```
 
 For 0.8.x release readiness, treat `make release-gates-check-080` (or the
