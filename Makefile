@@ -554,7 +554,7 @@ release-gates-check-070:
 #                                           when NGINX source or lcov/cargo-llvm-cov
 #                                           is unavailable
 
-RELEASE_GATE_080_ACTIVE_VERSION ?= 0.8.2
+RELEASE_GATE_080_ACTIVE_VERSION ?= 0.8.3
 
 release-gates-check-080:
 	@echo "=== v0.8.x Release Gate: Starting ($(RELEASE_GATE_080_ACTIVE_VERSION)) ==="
