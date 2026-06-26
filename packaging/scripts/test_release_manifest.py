@@ -512,6 +512,15 @@ class TestValidateManifest(unittest.TestCase):
             },
         }
         self.manifest_path.write_text(json.dumps(manifest, indent=2))
+        # Write manifest to artifact dir so it gets included in checksums
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        # Generate SHA256SUMS including both package and manifest
+        entries = []
+        for f in sorted(self.artifact_dir.iterdir()):
+            entries.append(f"{sha256_bytes(f.read_bytes())}  {f.name}")
+        self.sha256sums_path.write_text("\n".join(entries) + "\n")
         errors = self._validate()
         self.assertEqual(errors, [], f"Unexpected errors: {errors}")
 
