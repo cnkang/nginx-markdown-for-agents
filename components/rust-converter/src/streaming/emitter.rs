@@ -237,6 +237,12 @@ impl IncrementalEmitter {
         match action {
             StateMachineAction::Enter(ctx) => self.handle_enter(ctx, sm),
             StateMachineAction::Exit(ctx) => self.handle_exit(ctx, sm),
+            StateMachineAction::ExitMany(contexts) => {
+                for ctx in contexts {
+                    self.handle_exit(ctx, sm)?;
+                }
+                Ok(())
+            }
             StateMachineAction::Text(text) => self.handle_text(text),
             StateMachineAction::FallbackRequired(_) | StateMachineAction::None => Ok(()),
         }
