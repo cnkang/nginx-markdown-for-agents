@@ -63,7 +63,8 @@ Decompression failures (corrupt data, resource limits, system errors):
 
 ## Safety and Resource Controls
 
-- Decompressed output is bounded by `markdown_max_size`.
+- Decompressed output is bounded by `markdown_decompress_max_size` (introduced in v0.7.0).
+  When not explicitly set, it inherits the value of `markdown_max_size` as a fallback.
 - Input/output buffers are validated before use.
 - Memory is allocated from request pools and cleaned automatically.
 - Error paths perform structured cleanup.
