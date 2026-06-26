@@ -972,13 +972,19 @@ pub unsafe extern "C" fn markdown_decompress_bounded(
             let mut boxed = decomp_result.output.into_boxed_slice();
             result_ref.output_len = boxed.len();
             result_ref.error_category = 0;
-            // Transfer ownership to C caller.  Extract a plain *mut u8
-            // via as_mut_ptr (thin pointer) then forget the Box so the
-            // allocator keeps the backing memory alive.  This avoids
-            // relying on Box<[u8]> fat-pointer layout details.
-            let ptr = boxed.as_mut_ptr();
-            std::mem::forget(boxed);
-            result_ref.output = ptr;
+            if boxed.is_empty() {
+                // Empty result: follow FFI convention by returning NULL
+                // so callers (and decompress_free) can skip the buffer.
+                result_ref.output = ptr::null_mut();
+            } else {
+                // Transfer ownership to C caller.  Extract a plain *mut u8
+                // via as_mut_ptr (thin pointer) then forget the Box so the
+                // allocator keeps the backing memory alive.  This avoids
+                // relying on Box<[u8]> fat-pointer layout details.
+                let ptr = boxed.as_mut_ptr();
+                std::mem::forget(boxed);
+                result_ref.output = ptr;
+            }
             0
         }
         Ok(Err(e)) => {
