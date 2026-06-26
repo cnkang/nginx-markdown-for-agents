@@ -160,6 +160,30 @@ Example:
 ```text
 a1b2c3d4...  nginx-module-markdown-for-agents_0.8.2_nginx-1.26.3_amd64.deb
 e5f6a7b8...  nginx-module-markdown-for-agents-0.8.2-nginx1.26.3-1.x86_64.rpm
+f9a0b1c2...  release-manifest.json
+```
+
+## Release Manifest
+
+Every release includes a `release-manifest.json` providing structured metadata
+about the release: git tag, commit SHA, package filenames with SHA-256 hashes,
+source archive hash (for tag releases), and GitHub Actions workflow metadata.
+
+The manifest is generated during the `integrity-checksums` CI job and is
+included in `SHA256SUMS`. The `SHA256SUMS` file is then signed as
+`SHA256SUMS.asc` for tag releases, providing a chain of custody:
+
+```
+release-manifest.json → included in SHA256SUMS → signed as SHA256SUMS.asc
+```
+
+The manifest provides release asset traceability and checksum cross-reference.
+It does not by itself prove byte-for-byte reproducible builds.
+
+Download the manifest from the same GitHub Release page:
+
+```bash
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.2/release-manifest.json
 ```
 
 ## GPG Signature Verification

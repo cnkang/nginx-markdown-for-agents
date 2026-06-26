@@ -76,9 +76,11 @@ fi
 
 cd "$ARTIFACT_DIR"
 
-# Gather .deb and .rpm files; handle cases where one type may be absent
+# Gather .deb, .rpm, and release-manifest.json files; handle cases where
+# one type may be absent.
 DEB_FILES=()
 RPM_FILES=()
+MANIFEST_FILE=""
 
 for f in *.deb; do
     [[ -e "$f" ]] || continue
@@ -90,13 +92,17 @@ for f in *.rpm; do
     RPM_FILES+=("$f")
 done
 
-ALL_FILES=(${DEB_FILES[@]+"${DEB_FILES[@]}"} ${RPM_FILES[@]+"${RPM_FILES[@]}"})
-
-if [[ ${#ALL_FILES[@]} -eq 0 ]]; then
-    die "No .deb or .rpm files found in '$ARTIFACT_DIR'."
+if [[ -e "release-manifest.json" ]]; then
+    MANIFEST_FILE="release-manifest.json"
 fi
 
-info "Found ${#DEB_FILES[@]} .deb and ${#RPM_FILES[@]} .rpm file(s)"
+ALL_FILES=(${DEB_FILES[@]+"${DEB_FILES[@]}"} ${RPM_FILES[@]+"${RPM_FILES[@]}"} ${MANIFEST_FILE:+"${MANIFEST_FILE}"})
+
+if [[ ${#ALL_FILES[@]} -eq 0 ]]; then
+    die "No .deb, .rpm, or release-manifest.json files found in '$ARTIFACT_DIR'."
+fi
+
+info "Found ${#DEB_FILES[@]} .deb, ${#RPM_FILES[@]} .rpm, and manifest=${MANIFEST_FILE:-none}"
 
 ##############################################################################
 # Generate SHA256SUMS
