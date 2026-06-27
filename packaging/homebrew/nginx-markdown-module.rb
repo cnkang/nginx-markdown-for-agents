@@ -30,7 +30,7 @@ class NginxMarkdownModule < Formula
       args = [
         "--with-compat",
         "--add-dynamic-module=#{buildpath}/components/nginx-module",
-        "--with-cc-opt=-I#{Formula["openssl@3"].opt_include} -I#{Formula["pcre2"].opt_include}",
+        "--with-cc-opt=-I#{formula_opt_include("openssl@3")} -I#{formula_opt_include("pcre2")}",
         "--with-ld-opt=-L#{formula_opt_lib("openssl@3")} -L#{formula_opt_lib("pcre2")}",
       ]
       system "./configure", *args
