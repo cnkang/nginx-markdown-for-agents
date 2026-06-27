@@ -1,0 +1,94 @@
+# Pre-commit hooks for nginx-markdown-for-agents
+# Install: pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Rust formatting and linting
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all -- --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+      
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --all-targets --all-features -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+  
+  # Shell script quality
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        args: [-x, --severity=warning]
+  
+  # Version consistency
+  - repo: local
+    hooks:
+      - id: version-consistency
+        name: version consistency check
+        entry: tools/harness/detect_version_consistency.sh
+        language: script
+        pass_filenames: false
+        files: ^(Cargo\.toml|charts/|docs/guides/INSTALLATION\.md)
+  
+  # FFI header synchronization
+  - repo: local
+    hooks:
+      - id: ffi-header-sync
+        name: FFI header synchronization
+        entry: make check-headers
+        language: system
+        pass_filenames: false
+        files: ^components/rust-converter/src/ffi/
+  
+  # C code quality
+  - repo: local
+    hooks:
+      - id: detect-pool-free
+        name: detect pool/free mismatch
+        entry: tools/harness/detect_pool_free.sh
+        language: script
+        files: ^components/nginx-module/src/.*\.c$
+      
+      - id: detect-backpressure-resume
+        name: detect backpressure resume patterns
+        entry: tools/harness/detect_backpressure_resume.sh
+        language: script
+        files: ^components/nginx-module/src/.*\.c$
+      
+      - id: detect-decompression-budget
+        name: detect decompression budget enforcement
+        entry: tools/harness/detect_decompression_budget.sh
+        language: script
+        files: ^components/nginx-module/src/.*decomp.*\.c$
+  
+  # Rust FFI safety
+  - repo: local
+    hooks:
+      - id: detect-ffi-fat-pointer
+        name: detect FFI fat pointer transfer
+        entry: tools/harness/detect_ffi_fat_pointer_transfer.sh
+        language: script
+        files: ^components/rust-converter/src/ffi/.*\.rs$
+      
+      - id: detect-ffi-panic-safety
+        name: detect FFI panic safety
+        entry: tools/harness/detect_ffi_panic_safety.sh
+        language: script
+        files: ^components/rust-converter/src/ffi/.*\.rs$
+  
+  # General code quality
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
