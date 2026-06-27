@@ -256,6 +256,11 @@ harness-security-checks:
 	PYTHONPATH=. python3 tools/harness/detect_duplicate_code.py components/nginx-module/src --strict
 	PYTHONPATH=. python3 tools/harness/detect_open_without_path_validation.py --path tools/ --strict
 	bash tools/harness/detect_version_consistency.sh
+	bash tools/harness/detect_backpressure_resume.sh
+	bash tools/harness/detect_decompression_budget.sh
+	PYTHONPATH=. python3 tools/harness/detect_test_assertion_coverage.py
+	PYTHONPATH=. python3 tools/harness/detect_html_sanitizer_invariants.py
+	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
 
 test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
