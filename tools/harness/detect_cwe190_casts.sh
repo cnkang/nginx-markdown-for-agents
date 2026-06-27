@@ -330,6 +330,105 @@ if [[ "$ssize_hits" -eq 0 ]]; then
 fi
 echo "" >&2
 
+# ── Pattern (d): (size_t)(ptr - ptr) — pointer subtraction cast to size_t ──
+# When pointers are reversed (e.g. last < pos), the ptrdiff_t result is
+# negative, and casting to (size_t) wraps to a huge positive value.
+# Use ngx_http_markdown_buf_len_safe(buf) to get a safe length instead.
+#
+# Known safe contexts (not flagged):
+#   - Used in a comparison context (>=, <=, ==) that self-guards the bounds
+#   - Preceded by an explicit bounds check on the same pointer pair
+#   - Allowlisted as known-safe or doc-comment
+
+echo "--- Pattern (d): (size_t)(ptr - ptr) pointer subtraction without guard ---" >&2
+
+# Allowlisted pointer subtraction patterns (file:regex → reason)
+readonly PTR_SUB_SAFE_ALLOWLIST=(
+    # Doc comments only
+    $'ngx_http_markdown_filter_module.h\t\*.*\(size_t\)\tDoc comment (not executable code)'
+    # ── Forward-only string/token parsing — end pointer always > start ──
+    $'ngx_http_markdown_config_core_impl.h\tend - start\tforward-only string normalization (end guaranteed > start by loop above)'
+    $'ngx_http_markdown_stream_postcommit.c\tlast - p\tforward-only buffer scanning, called only when last > p (validated by caller)'
+    $'ngx_http_markdown_auth.c\ttoken_end - token_start\tforward-only token scanning within bounds'
+    $'ngx_http_markdown_auth.c\tdst - new_value\tforward-only buffer fill (dst monotonically advances)'
+    $'ngx_http_markdown_auth.c\tname_end - name_start\tforward-only cookie name scanning within bounds'
+)
+
+ptr_sub_hits=0
+while IFS= read -r match; do
+    if [[ -z "$match" ]]; then
+        continue
+    fi
+    file="$(echo "$match" | cut -d: -f1)"
+    line="$(echo "$match" | cut -d: -f2)"
+    content_line="$(echo "$match" | cut -d: -f3-)"
+    basename="$(basename "$file")"
+
+    # Check safe-cast allowlist
+    allowlisted=0
+    for entry in "${PTR_SUB_SAFE_ALLOWLIST[@]}"; do
+        IFS=$'\t' read -r entry_file entry_pattern entry_desc <<< "$entry"
+        if [[ "$basename" == "$entry_file" ]] && echo "$content_line" | grep -qE "$entry_pattern"; then
+            echo "  OK      ${file}:${line} — allowlisted (${entry_desc})" >&2
+            allowlisted=1
+            break
+        fi
+    done
+    if [[ "$allowlisted" -eq 1 ]]; then
+        ptr_sub_hits=$((ptr_sub_hits + 1))
+        continue
+    fi
+
+    # Self-guarding: used in a comparison context (>=, <=, ==)
+    if echo "$content_line" | grep -qE '>=|<=|!=\s*\(|==\s*\(|==\s+[0-9]'; then
+        echo "  OK      ${file}:${line} — pointer subtraction in comparison context (self-guarding)" >&2
+        allowlisted=1
+    fi
+
+    # Self-guarding: used as condition in if/while (e.g. `if ((size_t)(x - y))`)
+    if echo "$content_line" | grep -qE '^\s*if\s*\(|^\s*} else if\s*\(|^\s*while\s*\('; then
+        echo "  OK      ${file}:${line} — pointer subtraction in condition (self-guarding)" >&2
+        allowlisted=1
+    fi
+
+    if [[ "$allowlisted" -eq 1 ]]; then
+        ptr_sub_hits=$((ptr_sub_hits + 1))
+        continue
+    fi
+
+    # Check for guard in preceding 5 lines
+    context_start=$((line - 5))
+    if [[ "$context_start" -lt 1 ]]; then
+        context_start=1
+    fi
+    context_block="$(sed -n "${context_start},${line}p" "$file" 2>/dev/null)"
+    has_guard=0
+    # Guard: explicit <=/</>=/> comparison on pointer variables
+    if echo "$context_block" | grep -qiE '(last|p|pos|ptr|end|start|src|dst|buf|cur|begin)\s*[<>]=?\s*(last|p|pos|ptr|end|start|src|dst|buf|cur|begin)'; then
+        has_guard=1
+    fi
+    # Guard: buf_len_safe or validated length function
+    if echo "$context_block" | grep -qiE 'buf_len_safe'; then
+        has_guard=1
+    fi
+    # Guard: non-negative or error-check against the pointer pair
+    if echo "$context_block" | grep -qiE '< 0|>= 0|!= NGX_ERROR|== NGX_ERROR'; then
+        has_guard=1
+    fi
+    if [[ "$has_guard" -eq 1 ]]; then
+        echo "  OK      ${file}:${line} — pointer subtraction with guard" >&2
+    else
+        echo "  WARNING ${file}:${line} — (size_t)(ptr-ptr) without nearby bound guard: ${content_line}" >&2
+        warnings=$((warnings + 1))
+    fi
+    ptr_sub_hits=$((ptr_sub_hits + 1))
+done < <(grep -rnE '\(size_t\)[[:space:]]*\([a-zA-Z_][a-zA-Z0-9_.>]*[[:space:]]*-[[:space:]]*[a-zA-Z_][a-zA-Z0-9_.>]*\)' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
+
+if [[ "$ptr_sub_hits" -eq 0 ]]; then
+    echo "  (none found)" >&2
+fi
+echo "" >&2
+
 # ── Summary ──
 echo "=== Summary ===" >&2
 echo "  Errors:   ${errors}" >&2

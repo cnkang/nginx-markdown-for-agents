@@ -1,42 +1,19 @@
 #!/bin/bash
 #
-# detect_backpressure_resume.sh — Backpressure Resume Pattern Detection
+# detect_backpressure_resume.sh — Backpressure Resume Pattern Detection (v6)
 #                                  (Rule 1, 2, 38, 47, 51, 52)
 #
-# Rule 1 (streaming-backpressure): When returning NGX_AGAIN, the streaming
-#   engine must preserve state (offset, buffer position) to allow correct
-#   resumption. The state must not be lost or corrupted.
-#
-# Rule 2 (streaming-backpressure): After NGX_AGAIN, the pending chain must
-#   be correctly managed. The last_buf flag must not be overwritten.
-#
-# Rule 38 (streaming-backpressure): Replay buffer must maintain data
-#   integrity across NGX_AGAIN boundaries.
-#
-# Rule 47 (streaming-backpressure): Terminal-sent latching must not be
-#   modified after NGX_AGAIN is returned.
-#
-# Detection strategy:
-#   1. Scan all .c files in the nginx-module source directory.
-#   2. Find functions that return NGX_AGAIN.
-#   3. Check if these functions have state preservation logic:
-#      - Look for offset/position tracking (ctx->offset, ctx->pos, etc.)
-#      - Look for buffer state saving (ctx->buffer, ctx->last_buf, etc.)
-#      - Look for pending chain management (ctx->out, ctx->last_out, etc.)
-#   4. Flag functions that return NGX_AGAIN but lack state preservation.
-#
-# This is a heuristic detector — it looks for common patterns but may
-# have false positives/negatives. Manual review is still required.
+# Detects functions that return NGX_AGAIN without proper state preservation.
 #
 # Usage:
 #   bash tools/harness/detect_backpressure_resume.sh [directory]
 #     directory defaults to components/nginx-module/src
 #
 # Exit codes:
-#   0 — no violations found (or only warnings)
+#   0 — no violations found
 #   1 — one or more violations detected
 
-set -euo pipefail
+set -eu
 
 SCRIPT_DIR="$(dirname "$0")"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -47,78 +24,82 @@ if [[ ! -d "$SRC_DIR" ]]; then
     exit 2
 fi
 
-violations=0
-warnings=0
+tmp_violations=$(mktemp)
+trap 'rm -f "$tmp_violations"' EXIT
 
-# Find all .c files
-mapfile -t c_files < <(find "$SRC_DIR" -name "*.c" -type f)
+while IFS= read -r -d '' file; do
+    grep -n "return.*NGX_AGAIN" "$file" 2>/dev/null | \
+        while IFS=: read -r line_num content; do
+        [[ -z "$line_num" ]] && continue
+        [[ -z "$content" ]] && continue
 
-if [[ ${#c_files[@]} -eq 0 ]]; then
-    echo "No C files found in $SRC_DIR"
-    exit 0
-fi
+        # Skip comment-only lines, documentation, and case labels
+        echo "$content" | grep -qE '^\s*//|^\s*\*|@return|@param' && continue
+        echo "$content" | grep -qE 'case.*:' && continue
 
-for file in "${c_files[@]}"; do
-    # Find functions that return NGX_AGAIN
-    # Look for patterns like: return NGX_AGAIN;
-    while IFS= read -r line_num; do
-        # Extract function context (look backwards for function signature)
-        func_start=$(awk -v end="$line_num" '
-            /^[a-zA-Z_].*\(.*\).*\{/ { last_func = NR }
-            NR == end { print last_func; exit }
-        ' "$file")
-        
-        if [[ -z "$func_start" ]]; then
+        block_start=$((line_num - 30))
+        [[ $block_start -lt 1 ]] && block_start=1
+
+        surrounding_code=$(sed -n "${block_start},${line_num}p" "$file")
+
+        # Skip decompression helper functions
+        if echo "$surrounding_code" | grep -qE 'z_stream|avail_in|avail_out'; then
             continue
         fi
-        
+
+        # Check for ANY state-save pattern
+        has_save=0
+
+        if echo "$surrounding_code" | grep -qE 'pending_output|pending_has_data|save_pending|resume_pending'; then
+            has_save=1
+        fi
+        if echo "$surrounding_code" | grep -qE 'fullbuffer\.(save|pending)'; then
+            has_save=1
+        fi
+        if echo "$surrounding_code" | grep -qE 'buffered\s+[|&]=|NGX_HTTP_MARKDOWN_BUFFERED'; then
+            has_save=1
+        fi
+        if echo "$surrounding_code" | grep -qE 'main_terminal_sent|pending_output_bytes'; then
+            has_save=1
+        fi
+
+        if [[ $has_save -ne 0 ]]; then
+            continue
+        fi
+
         # Extract function name
-        func_name=$(sed -n "${func_start}p" "$file" | grep -oE '^[a-zA-Z_][a-zA-Z0-9_]*' | head -1)
-        
+        func_name=$(echo "$surrounding_code" | grep -oE 'ngx_http_markdown_[a-zA-Z_0-9]+' | tail -1)
         if [[ -z "$func_name" ]]; then
+            func_name=$(echo "$surrounding_code" | grep -oE '^[a-zA-Z_][a-zA-Z0-9_]*\s+\b[a-zA-Z_][a-zA-Z0-9_]*\s*\(' | sed 's/.* //;s/(//' | tail -1)
+        fi
+        [[ -z "$func_name" ]] && continue
+
+        # Skip utility/pass-through functions
+        if echo "$func_name" | grep -qE 'handle_|_result[^s]|helper|_log$|_free_'; then
             continue
         fi
-        
-        # Check if function has state preservation patterns
-        # Look for: ctx->offset, ctx->pos, ctx->buffer, ctx->out, ctx->last_out, etc.
-        func_body=$(sed -n "${func_start},${line_num}p" "$file")
-        
-        has_state_preservation=0
-        
-        # Check for offset/position tracking
-        if echo "$func_body" | grep -qE '(ctx|state|r)->(offset|pos|position|cur|current)'; then
-            has_state_preservation=1
-        fi
-        
-        # Check for buffer state saving
-        if echo "$func_body" | grep -qE '(ctx|state|r)->(buffer|buf|last_buf|last_in_chain)'; then
-            has_state_preservation=1
-        fi
-        
-        # Check for pending chain management
-        if echo "$func_body" | grep -qE '(ctx|state|r)->(out|last_out|pending|chain)'; then
-            has_state_preservation=1
-        fi
-        
-        # Check for explicit state save/restore comments
-        if echo "$func_body" | grep -qiE '(save.*state|restore.*state|preserve.*state|resume)'; then
-            has_state_preservation=1
-        fi
-        
-        if [[ $has_state_preservation -eq 0 ]]; then
-            echo "WARNING: $file:$line_num: Function '$func_name' returns NGX_AGAIN but may lack state preservation" >&2
-            warnings=$((warnings + 1))
-        fi
-        
-    done < <(grep -n "return.*NGX_AGAIN" "$file" | cut -d: -f1)
-done
 
-if [[ $violations -gt 0 ]]; then
-    echo "ERROR: Found $violations violation(s) and $warnings warning(s)" >&2
+        # Must use ctx/state (streaming state machine) to be a violation
+        body_start=$(echo "$surrounding_code" | grep -n '^[[:space:]]*{' | tail -1 | cut -d: -f1)
+        if [[ -n "$body_start" ]]; then
+            body_code=$(echo "$surrounding_code" | sed -n "${body_start},\$p")
+        else
+            body_code="$surrounding_code"
+        fi
+        if ! echo "$body_code" | grep -qE '\b(ctx|state)\b'; then
+            continue
+        fi
+
+        echo "VIOLATION: $file:$line_num — '$func_name' returns NGX_AGAIN without state save" >> "$tmp_violations"
+    done
+done < <(find "$SRC_DIR" -name "*.c" -type f -print0)
+
+violations=$(wc -l < "$tmp_violations" | tr -d '[:space:]')
+
+if [[ "$violations" -gt 0 ]]; then
+    cat "$tmp_violations" >&2
+    echo "ERROR: Found $violations backpressure violation(s)" >&2
     exit 1
-elif [[ $warnings -gt 0 ]]; then
-    echo "WARNING: Found $warnings potential issue(s) — manual review recommended" >&2
-    exit 0
 else
     echo "OK: No backpressure resume issues detected"
     exit 0

@@ -146,6 +146,13 @@ _USER_DERIVED_VAR_RE = re.compile(
     r"^(args|options|cli_|user_|input_|untrusted_)",
 )
 
+# Pattern (e): Path.read_text() / Path.write_text() method calls on
+# unvalidated Path variables.  These methods silently read/write files
+# and are equivalent to open() for CWE-22 purposes.
+_PATH_METHOD_RE = re.compile(
+    r"(\w+)\.(read_text|write_text)\s*\(",
+)
+
 
 def _display_path(path: Path) -> str:
     """Return a repo-relative display string for path."""
@@ -244,7 +251,33 @@ def _is_file_derived_assignment(line: str) -> bool:
         or "repo_root" in rhs
         or "REPO_ROOT" in rhs
         or "ROOT" in rhs
+        or "_DIR" in rhs
     )
+
+
+def _is_all_caps_path_constant(line: str) -> bool:
+    """Detect ALL_CAPS constants assigned to a filesystem path literal.
+
+    E.g. ``VERSION_PLANNING_PATH = PROJECT_ROOT / "docs/VERSION_PLANNING.md"``
+    or ``MODULE_CONFIG = REPO_ROOT / "Cargo.toml"``.
+    """
+    if "=" not in line:
+        return False
+    lhs = line.split("=", 1)[0].strip()
+    rhs = line.split("=", 1)[1]
+    # Variable name must be ALL_CAPS with possible underscores
+    if not re.match(r"^[A-Z_][A-Z0-9_]*$", lhs):
+        return False
+    # RHS must contain a quoted path segment
+    if not re.search(r"""["'][^"'"]*["']""", rhs):
+        return False
+    # Either a / operator for path concatenation, or a path suffix in the name
+    has_path_op = bool(re.search(r"""["']\s*/\s*|\s*/\s*["']""", rhs))
+    has_path_suffix = bool(re.search(
+        r"_(PATH|DIR|ROOT|FILE|SCRIPT|TOML|YML|YAML|JSON|LOCK|MD|CARGO|CONFIG|CHECKLIST|EVIDENCE|MANIFEST|TEMPLATE|METRICS|GATE)$",
+        lhs,
+    ))
+    return has_path_op or has_path_suffix
 
 
 def _is_tempfile_assignment(line: str) -> bool:
@@ -356,6 +389,9 @@ def _collect_hardcoded_vars(lines: list[str]) -> set[str]:
     )
     _add_assignment_lhs_by_predicate(
         lines, _is_tempfile_assignment, hardcoded_vars,
+    )
+    _add_assignment_lhs_by_predicate(
+        lines, _is_all_caps_path_constant, hardcoded_vars,
     )
 
     for line in lines:
@@ -508,6 +544,82 @@ def _scan_path_constructions(
     return errors, warnings
 
 
+# Pattern (f): chained Path(args.x).read_text() — exploit in one line
+_CHAINED_PATH_METHOD_RE = re.compile(
+    r"Path\s*\(\s*(\w[\w.]*)\s*\)\s*\.\s*(read_text|write_text|open)\s*\(",
+)
+
+
+def _scan_path_method_calls(
+    lines: list[str],
+    rel: str,
+    strict: bool,
+) -> tuple[list[str], list[str]]:
+    """Scan for Path method calls on unvalidated user-derived variables.
+
+    Catches two exploitable patterns:
+
+    1. Chained: ``Path(args.x).read_text()`` — single-line exploit where
+       a Path() from user input is immediately used to read/write files.
+       (The ``Path(args.x)`` part is separately caught by pattern (d).)
+
+    2. Standalone: ``args_variable.read_text()`` — when the variable name
+       itself indicates user-derived origin (args, input, cli, etc.).
+
+    NOTE: Function parameters (``path.read_text()``) and test variables
+    (``p.write_text()``) are NOT flagged — the detector cannot determine
+    if their caller validates the path. Only variables whose NAMES suggest
+    external origin are flagged for standalone calls.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    for lineno, line in enumerate(lines, start=1):
+        if COMMENT_RE.match(line.lstrip()):
+            continue
+
+        # ── Case 1: chained Path(source).read_text() on one line ──
+        # Only flag when the Path argument itself comes from user input
+        # (e.g. Path(args.x)); skip test fixtures like Path(path_a).
+        chain_m = _CHAINED_PATH_METHOD_RE.search(line)
+        if chain_m:
+            chain_var = chain_m.group(1)
+            # Extract the root variable from dotted expression (args.x → args)
+            root_var = chain_var.split('.')[0] if '.' in chain_var else chain_var
+            if _USER_DERIVED_VAR_RE.match(root_var):
+                method = chain_m.group(2)
+                detail = (
+                    f"{rel}:{lineno} — chained Path({chain_var}).{method}() — "
+                    f"validate path first (per AGENTS.md Rule 33)"
+                )
+                _emit_finding(strict, errors, warnings,
+                    f"  ERROR   {detail}",
+                    f"  WARNING {detail}")
+            continue
+
+        # ── Case 2: standalone var.read_text() where var name indicates ──
+        # ── user-originating path (e.g. args_path, input_file)          ──
+        m = _PATH_METHOD_RE.search(line)
+        if not m:
+            continue
+        var_name = m.group(1)
+
+        # Only flag if the variable name itself suggests user-derived origin
+        if not _USER_DERIVED_VAR_RE.match(var_name):
+            continue
+
+        method = m.group(2)
+        detail = (
+            f"{rel}:{lineno} — {var_name}.{method}() — "
+            f"'{var_name}' may contain user-derived path; validate first"
+        )
+        _emit_finding(strict, errors, warnings,
+            f"  ERROR   {detail}",
+            f"  WARNING {detail}")
+
+    return errors, warnings
+
+
 def check_file(
     filepath: Path, *, strict: bool = False,
 ) -> tuple[list[str], list[str]]:
@@ -553,6 +665,13 @@ def check_file(
     )
     errors.extend(path_errors)
     warnings.extend(path_warnings)
+
+    # ── Pattern (e): Path.read_text() / write_text() on unvalidated vars ──
+    method_errors, method_warnings = _scan_path_method_calls(
+        lines, rel, strict,
+    )
+    errors.extend(method_errors)
+    warnings.extend(method_warnings)
 
     return errors, warnings
 
