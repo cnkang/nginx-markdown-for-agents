@@ -18,6 +18,10 @@ and 0.8.x release gate validation.
   hashes, source archive hash for tag releases, and GitHub Actions workflow
   metadata.  It is generated before `SHA256SUMS`, included in `SHA256SUMS`,
   and protected by the `SHA256SUMS.asc` GPG signature chain for tag releases.
+- **Version consistency detector (Rule 55)** — `detect_version_consistency.sh`
+  validates version alignment across Cargo.toml, Chart.yaml, and internal
+  dependencies. Integrated into `harness-security-checks` to prevent version
+  drift issues during release preparation.
 
 ### Fixed
 
@@ -50,7 +54,7 @@ and 0.8.x release gate validation.
 - `make test-harness` — all detector tests PASS
 - `RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 make release-gates-check-08x` — PASS
 - `make test-nginx-unit` — all C module unit tests PASS
-- `cargo test --workspace` — 1385 Rust tests PASS, 0 failed
+- `cargo test --workspace` — 1388 Rust tests PASS, 0 failed
 - `make test-rust-fuzz-smoke` — all fuzz smoke tests PASS
 - `detect_ffi_panic_safety.sh --strict` — PASS (0 flagged)
 - `detect_nosonar_discipline.sh` — PASS (10 annotations)
