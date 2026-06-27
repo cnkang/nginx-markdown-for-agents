@@ -44,15 +44,15 @@ fi
 violations=0
 warnings=0
 
-# Find all .c files
-mapfile -t c_files < <(find "$SRC_DIR" -name "*.c" -type f)
+# Find all .c and .h files
+mapfile -t source_files < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f)
 
-if [[ ${#c_files[@]} -eq 0 ]]; then
-    echo "No C files found in $SRC_DIR"
+if [[ ${#source_files[@]} -eq 0 ]]; then
+    echo "No source files found in $SRC_DIR"
     exit 0
 fi
 
-for file in "${c_files[@]}"; do
+for file in "${source_files[@]}"; do
     # Check if file is decompression-related
     if ! grep -qE "(decompress|inflate|zlib|brotli|gzip|deflate)" "$file"; then
         continue

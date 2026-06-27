@@ -55,19 +55,43 @@ def extract_test_functions(content: str, file_path: Path) -> List[Tuple[str, int
         start_pos = match.start()
         line_num = content[:start_pos].count('\n') + 1
         
-        # Find the function body (matching braces)
+        # Find the function body (matching braces, skipping string literals)
         brace_start = match.end() - 1
         brace_count = 0
         func_end = brace_start
+        in_string = False
+        in_raw_string = False
         
-        for i in range(brace_start, len(content)):
-            if content[i] == '{':
-                brace_count += 1
-            elif content[i] == '}':
-                brace_count -= 1
-                if brace_count == 0:
-                    func_end = i + 1
-                    break
+        i = brace_start
+        while i < len(content):
+            c = content[i]
+            
+            # Skip braces inside string literals
+            if not in_string and not in_raw_string:
+                if c == '"' and (i == 0 or content[i-1] != '\\'):
+                    if i >= 2 and content[i-2:i] == 'r#':
+                        in_raw_string = True
+                    else:
+                        in_string = True
+                elif c in ('{', '}'):
+                    if c == '{':
+                        brace_count += 1
+                    else:
+                        brace_count -= 1
+                        if brace_count == 0:
+                            func_end = i + 1
+                            break
+            elif in_string:
+                if c == '"' and content[i-1] != '\\':
+                    in_string = False
+            elif in_raw_string:
+                if c == '"' and content[i-1:i] == '#"':
+                    in_raw_string = False
+            
+            i += 1
+        
+        if brace_count != 0:
+            continue
         
         func_body = content[brace_start:func_end]
         
