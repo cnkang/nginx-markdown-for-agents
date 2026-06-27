@@ -24,18 +24,21 @@ NC='\033[0m'
 ERRORS=0
 
 log_error() {
-    echo -e "${RED}ERROR:${NC} $1" >&2
+    local msg="$1"
+    echo -e "${RED}ERROR:${NC} ${msg}" >&2
     ERRORS=$((ERRORS + 1))
     return 0
 }
 
 log_pass() {
-    echo -e "${GREEN}PASS:${NC} $1"
+    local msg="$1"
+    echo -e "${GREEN}PASS:${NC} ${msg}"
     return 0
 }
 
 log_info() {
-    echo -e "${YELLOW}INFO:${NC} $1" >&2
+    local msg="$1"
+    echo -e "${YELLOW}INFO:${NC} ${msg}" >&2
     return 0
 }
 
