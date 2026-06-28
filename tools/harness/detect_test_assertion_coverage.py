@@ -32,7 +32,6 @@ Exit codes:
   1 — one or more violations detected
 """
 
-import os
 import re
 import sys
 from pathlib import Path
@@ -43,66 +42,67 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.path_validation import validate_read_path
 
 
-def extract_test_functions(content: str, file_path: Path) -> List[Tuple[str, int, str, bool, bool]]:
+def _find_test_function_end(content: str, brace_start: int) -> int | None:
+    """Return the end offset for a test function body."""
+    brace_count = 0
+    in_string = False
+    in_raw_string = False
+
+    i = brace_start
+    while i < len(content):
+        c = content[i]
+
+        if in_string:
+            if c == '"' and (i == 0 or content[i - 1] != '\\'):
+                in_string = False
+        elif in_raw_string:
+            if c == '"' and content[i - 1:i] == '#"':
+                in_raw_string = False
+        elif c == '"' and (i == 0 or content[i - 1] != '\\'):
+            if i >= 2 and content[i - 2:i] == 'r#':
+                in_raw_string = True
+            else:
+                in_string = True
+        elif c == '{':
+            brace_count += 1
+        elif c == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                return i + 1
+
+        i += 1
+
+    return None
+
+
+def extract_test_functions(content: str) -> List[Tuple[str, int, str, bool, bool]]:
     """Extract test functions with their line numbers and bodies."""
     tests = []
-    
+
     # Match #[test] functions
     test_pattern = r'#\[test\]\s*(?:#\[.*?\]\s*)*fn\s+(\w+)\s*\([^)]*\)\s*(?:->\s*[^{]+)?\{'
-    
+
     for match in re.finditer(test_pattern, content, re.MULTILINE | re.DOTALL):
         func_name = match.group(1)
         start_pos = match.start()
         line_num = content[:start_pos].count('\n') + 1
-        
-        # Find the function body (matching braces, skipping string literals)
+
         brace_start = match.end() - 1
-        brace_count = 0
-        func_end = brace_start
-        in_string = False
-        in_raw_string = False
-        
-        i = brace_start
-        while i < len(content):
-            c = content[i]
-            
-            # Skip braces inside string literals
-            if not in_string and not in_raw_string:
-                if c == '"' and (i == 0 or content[i-1] != '\\'):
-                    if i >= 2 and content[i-2:i] == 'r#':
-                        in_raw_string = True
-                    else:
-                        in_string = True
-                elif c in ('{', '}'):
-                    if c == '{':
-                        brace_count += 1
-                    else:
-                        brace_count -= 1
-                        if brace_count == 0:
-                            func_end = i + 1
-                            break
-            elif in_string:
-                if c == '"' and content[i-1] != '\\':
-                    in_string = False
-            elif in_raw_string:
-                if c == '"' and content[i-1:i] == '#"':
-                    in_raw_string = False
-            
-            i += 1
-        
-        if brace_count != 0:
+
+        func_end = _find_test_function_end(content, brace_start)
+        if func_end is None:
             continue
-        
+
         func_body = content[brace_start:func_end]
-        
+
         # Check if test has #[should_panic] attribute
         has_should_panic = bool(re.search(r'#\[should_panic', content[max(0, start_pos-200):start_pos]))
-        
+
         # Check if test uses proptest or quickcheck
         is_property_test = bool(re.search(r'(?:proptest|quickcheck|for_all)', func_body))
-        
+
         tests.append((func_name, line_num, func_body, has_should_panic, is_property_test))
-    
+
     return tests
 
 
@@ -180,10 +180,10 @@ def main():
     for test_file in test_dir.rglob('*.rs'):
         try:
             content = test_file.read_text(encoding='utf-8')
-        except Exception as e:
+        except Exception:
             continue
         
-        tests = extract_test_functions(content, test_file)
+        tests = extract_test_functions(content)
         
         for func_name, line_num, func_body, has_should_panic, is_property_test in tests:
             issues = check_test_assertions(

@@ -146,14 +146,6 @@ _USER_DERIVED_VAR_RE = re.compile(
     r"^(args|options|cli_|user_|input_|untrusted_)",
 )
 
-# Pattern (e): Path.read_text() / Path.write_text() method calls on
-# unvalidated Path variables.  These methods silently read/write files
-# and are equivalent to open() for CWE-22 purposes.
-_PATH_METHOD_RE = re.compile(
-    r"(\w+)\.(read_text|write_text)\s*\(",
-)
-
-
 def _display_path(path: Path) -> str:
     """Return a repo-relative display string for path."""
     try:
@@ -269,13 +261,15 @@ def _is_all_caps_path_constant(line: str) -> bool:
     if not re.match(r"^[A-Z_][A-Z0-9_]*$", lhs):
         return False
     # RHS must contain a quoted path segment
-    if not re.search(r"""["'][^"'"]*["']""", rhs):
+    if '"' not in rhs and "'" not in rhs:
         return False
     # Either a / operator for path concatenation, or a path suffix in the name
-    has_path_op = bool(re.search(r"""["']\s*/\s*|\s*/\s*["']""", rhs))
-    has_path_suffix = bool(re.search(
-        r"_(PATH|DIR|ROOT|FILE|SCRIPT|TOML|YML|YAML|JSON|LOCK|MD|CARGO|CONFIG|CHECKLIST|EVIDENCE|MANIFEST|TEMPLATE|METRICS|GATE)$",
-        lhs,
+    has_path_op = "/" in rhs
+    has_path_suffix = lhs.endswith((
+        "_PATH", "_DIR", "_ROOT", "_FILE", "_SCRIPT", "_TOML",
+        "_YML", "_YAML", "_JSON", "_LOCK", "_MD", "_CARGO",
+        "_CONFIG", "_CHECKLIST", "_EVIDENCE", "_MANIFEST",
+        "_TEMPLATE", "_METRICS", "_GATE",
     ))
     return has_path_op or has_path_suffix
 
@@ -550,6 +544,19 @@ _CHAINED_PATH_METHOD_RE = re.compile(
 )
 
 
+def _extract_standalone_path_method_call(line: str) -> tuple[str, str] | None:
+    """Extract ``receiver.method`` for standalone Path method calls."""
+    for method in ("read_text", "write_text"):
+        needle = f".{method}("
+        idx = line.find(needle)
+        if idx <= 0:
+            continue
+        receiver = line[:idx].strip()
+        if receiver.isidentifier():
+            return receiver, method
+    return None
+
+
 def _scan_path_method_calls(
     lines: list[str],
     rel: str,
@@ -599,16 +606,15 @@ def _scan_path_method_calls(
 
         # ── Case 2: standalone var.read_text() where var name indicates ──
         # ── user-originating path (e.g. args_path, input_file)          ──
-        m = _PATH_METHOD_RE.search(line)
-        if not m:
+        method_call = _extract_standalone_path_method_call(line)
+        if not method_call:
             continue
-        var_name = m.group(1)
+        var_name, method = method_call
 
         # Only flag if the variable name itself suggests user-derived origin
         if not _USER_DERIVED_VAR_RE.match(var_name):
             continue
 
-        method = m.group(2)
         detail = (
             f"{rel}:{lineno} — {var_name}.{method}() — "
             f"'{var_name}' may contain user-derived path; validate first"

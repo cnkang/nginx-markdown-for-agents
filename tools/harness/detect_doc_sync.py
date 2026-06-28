@@ -24,7 +24,6 @@ Exit codes:
   0 — always (advisory only, never blocks)
 """
 
-import os
 import re
 import sys
 from pathlib import Path
@@ -90,12 +89,26 @@ def check_installation_guide_current(project_root: Path) -> List[str]:
         content = install_guide.read_text(encoding='utf-8')
     except Exception:
         return warnings
-    
+
     # Check that it has version examples (not checking specific version)
-    if not re.search(r'v?\d+\.\d+\.\d+', content):
+    if not _has_version_example(content):
         warnings.append("INSTALLATION.md has no version examples")
-    
+
     return warnings
+
+
+def _has_version_example(content: str) -> bool:
+    """Return True when the text contains a dotted semantic version."""
+    for token in content.split():
+        candidate = token.strip("`*()[]{}<>,.;:\"'")
+        if candidate.startswith("v"):
+            candidate = candidate[1:]
+        parts = candidate.split(".")
+        if len(parts) != 3:
+            continue
+        if all(part.isdigit() for part in parts):
+            return True
+    return False
 
 
 def main():

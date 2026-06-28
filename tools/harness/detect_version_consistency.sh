@@ -154,4 +154,4 @@ main() {
     fi
 }
 
-main "$@"
+main
