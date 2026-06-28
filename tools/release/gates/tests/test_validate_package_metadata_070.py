@@ -455,6 +455,7 @@ class TestReleaseGateSnippetExpectations:
         )
         assert "container: almalinux:9" in snippets
         assert "ARG OS_BASE=almalinux:9" in snippets
-        assert "rustup-init.sh -y --default-toolchain none" in snippets
+        assert "install-verified-rustup.sh" in snippets
+        assert "--toolchain none" in snippets
         assert "COPY rust-toolchain.toml /src/rust-toolchain.toml" in snippets
         assert "rustup toolchain install" in snippets

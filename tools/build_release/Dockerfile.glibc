@@ -46,7 +46,7 @@ RUN set -eux; \
         /src/packaging/scripts/verify-checksum.sh; \
     /src/packaging/scripts/install-verified-rustup.sh \
         --arch "${rustup_arch}" \
-        --toolchain stable \
+        --toolchain none \
         --checksums /src/packaging/checksums.sha256
 ENV PATH="/root/.cargo/bin:${PATH}"
 
