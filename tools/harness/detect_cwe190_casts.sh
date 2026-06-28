@@ -25,6 +25,7 @@ set -euo pipefail
 
 readonly SRC_DIR="${1:-components/nginx-module/src}"
 readonly SCRIPT_NAME="$(basename "$0")"
+readonly NONE_FOUND_MSG="  (none found)"
 
 # Files where (size_t) NGX_ERROR is allowed (config handlers return
 # NGX_ERROR as size_t sentinel, which is intentional).
@@ -163,7 +164,7 @@ while IFS= read -r match; do
 done < <(grep -rnE 'ngx_parse_size.*\(size_t|\(size_t.*ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE ':\s*/\*|:\s*\*|:\s*//' || true)
 
 if [[ "$parse_size_hits" -eq 0 ]]; then
-    echo "  (none found)" >&2
+    echo "$NONE_FOUND_MSG" >&2
 fi
 echo "" >&2
 
@@ -251,7 +252,7 @@ while IFS= read -r match; do
 done < <(grep -rn '(size_t) NGX_ERROR' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
 
 if [[ "$narrow_hits" -eq 0 ]]; then
-    echo "  (none found)" >&2
+    echo "$NONE_FOUND_MSG" >&2
 fi
 echo "" >&2
 
@@ -326,7 +327,7 @@ while IFS= read -r match; do
 done < <(grep -rnE '\(size_t\)[[:space:]]*[A-Za-z_]' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
 
 if [[ "$ssize_hits" -eq 0 ]]; then
-    echo "  (none found)" >&2
+    echo "$NONE_FOUND_MSG" >&2
 fi
 echo "" >&2
 
@@ -425,7 +426,7 @@ while IFS= read -r match; do
 done < <(grep -rnE '\(size_t\)[[:space:]]*\([a-zA-Z_][a-zA-Z0-9_.>]*[[:space:]]*-[[:space:]]*[a-zA-Z_][a-zA-Z0-9_.>]*\)' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null || true)
 
 if [[ "$ptr_sub_hits" -eq 0 ]]; then
-    echo "  (none found)" >&2
+    echo "$NONE_FOUND_MSG" >&2
 fi
 echo "" >&2
 

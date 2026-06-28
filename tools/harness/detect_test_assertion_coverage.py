@@ -42,6 +42,43 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.path_validation import validate_read_path
 
 
+TEST_FUNCTION_PATTERN = re.compile(
+    r'#\[test\]\s*'
+    r'(?:#\[[^\]\n]*(?:\][^\[\n]*)?\]\s*)*'
+    r'fn\s+(\w+)\s*\([^)]*\)\s*(?:->\s*[^{]+)?\{',
+    re.MULTILINE,
+)
+
+
+def _is_escaped_quote(content: str, offset: int) -> bool:
+    return offset > 0 and content[offset - 1] == '\\'
+
+
+def _starts_raw_string(content: str, offset: int) -> bool:
+    return offset >= 2 and content[offset - 2:offset] == 'r#'
+
+
+def _ends_raw_string(content: str, offset: int) -> bool:
+    return offset + 1 < len(content) and content[offset + 1] == '#'
+
+
+def _advance_string_state(
+    content: str,
+    offset: int,
+    in_string: bool,
+    in_raw_string: bool,
+) -> tuple[bool, bool, bool]:
+    c = content[offset]
+    if in_string:
+        still_in_string = not (c == '"' and not _is_escaped_quote(content, offset))
+        return False, still_in_string, in_raw_string
+    if in_raw_string:
+        return False, in_string, not (c == '"' and _ends_raw_string(content, offset))
+    if c != '"' or _is_escaped_quote(content, offset):
+        return True, in_string, in_raw_string
+    return False, not _starts_raw_string(content, offset), _starts_raw_string(content, offset)
+
+
 def _find_test_function_end(content: str, brace_start: int) -> int | None:
     """Return the end offset for a test function body."""
     brace_count = 0
@@ -51,21 +88,16 @@ def _find_test_function_end(content: str, brace_start: int) -> int | None:
     i = brace_start
     while i < len(content):
         c = content[i]
+        count_brace, in_string, in_raw_string = _advance_string_state(
+            content,
+            i,
+            in_string,
+            in_raw_string,
+        )
 
-        if in_string:
-            if c == '"' and (i == 0 or content[i - 1] != '\\'):
-                in_string = False
-        elif in_raw_string:
-            if c == '"' and content[i - 1:i] == '#"':
-                in_raw_string = False
-        elif c == '"' and (i == 0 or content[i - 1] != '\\'):
-            if i >= 2 and content[i - 2:i] == 'r#':
-                in_raw_string = True
-            else:
-                in_string = True
-        elif c == '{':
+        if count_brace and c == '{':
             brace_count += 1
-        elif c == '}':
+        elif count_brace and c == '}':
             brace_count -= 1
             if brace_count == 0:
                 return i + 1
@@ -79,10 +111,7 @@ def extract_test_functions(content: str) -> List[Tuple[str, int, str, bool, bool
     """Extract test functions with their line numbers and bodies."""
     tests = []
 
-    # Match #[test] functions
-    test_pattern = r'#\[test\]\s*(?:#\[.*?\]\s*)*fn\s+(\w+)\s*\([^)]*\)\s*(?:->\s*[^{]+)?\{'
-
-    for match in re.finditer(test_pattern, content, re.MULTILINE | re.DOTALL):
+    for match in TEST_FUNCTION_PATTERN.finditer(content):
         func_name = match.group(1)
         start_pos = match.start()
         line_num = content[:start_pos].count('\n') + 1
