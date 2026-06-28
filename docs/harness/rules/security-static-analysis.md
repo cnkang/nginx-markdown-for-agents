@@ -26,7 +26,8 @@ Required:
   CodeQL query suites in supplemental workflows unless the new rule catches a
   concrete gap that CodeQL does not cover.
 - `security-static.yml` is the PR-blocking lightweight gate for workflow,
-  script, secret, Semgrep, and Rust dependency/license policy changes.
+  shell, Python tooling, secret, Semgrep, and Rust dependency/license policy
+  changes.
 - `actionlint` is mandatory for GitHub Actions workflow edits.
 - `shellcheck` is mandatory for shell script edits unless a finding is
   suppressed narrowly with a local justification.
@@ -39,8 +40,16 @@ Required:
   tracked-file materialization must omit tracked paths that are absent because
   they were deleted in the worktree and preserve unusual filenames with
   NUL-safe traversal.
-- Semgrep CE rules must stay high-confidence and repo-specific. Avoid broad
-  noisy packs as PR-blocking checks until findings are triaged and documented.
+- Semgrep CE rules must stay high-confidence and repo-specific. Focus them on
+  repository workflow, shell, Python tooling, and C module patterns. This
+  includes direct CLI-derived path I/O before harness validation helpers,
+  obvious subprocess misuse, unsafe libc APIs in the NGINX C module, and
+  exported Rust FFI functions that still contain panic/unwrap/expect paths.
+  Dockerfile rustup bootstrap paths that download and execute unverified
+  installers should also be covered.
+  Test-only panic injection blocks under `#[cfg(test)]` are not considered
+  production findings. Avoid broad noisy packs as PR-blocking checks until
+  findings are triaged and documented.
 - `cargo-deny` must check Rust advisories, license policy, bans, and sources for
   every checked-in Rust manifest. Do not allow GPL, AGPL, LGPL, SSPL, Commons
   Clause, or unknown licenses by default.
