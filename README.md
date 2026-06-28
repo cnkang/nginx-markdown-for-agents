@@ -211,7 +211,7 @@ Neither approach is universally better. Edge-layer conversion is a good fit when
 | Automatic decompression | Handles gzip, brotli, and deflate upstream responses |
 | Cache-aware variants | Generates ETags and supports conditional requests |
 | Failure policy control | Choose fail-open or fail-closed behavior |
-| Resource limits | Bound conversion size and time with NGINX directives |
+| Resource limits | Bound conversion size with `markdown_max_size` and time with NGINX directives |
 | Security hardening | Validates emitted links and base URLs, rejects unsafe forwarded-host inputs by default, bounds parser/decompression resources, and avoids executing external content |
 | Optional metadata | Supports token estimates and YAML front matter |
 | Metrics endpoint | Exposes module conversion counters for operations |
