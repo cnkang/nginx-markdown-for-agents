@@ -10,10 +10,15 @@ FROM ${NGINX_IMAGE} AS build
 ARG MODULE_REPO
 ARG MODULE_REF
 ARG MODULE_SHA
+ARG TARGETARCH
 
 ENV RUSTUP_HOME=/opt/rust/rustup
 ENV CARGO_HOME=/opt/rust/cargo
 ENV PATH=/opt/rust/cargo/bin:${PATH}
+
+COPY packaging/checksums.sha256 /tmp/rustup-bootstrap/checksums.sha256
+COPY packaging/scripts/install-verified-rustup.sh /tmp/rustup-bootstrap/install-verified-rustup.sh
+COPY packaging/scripts/verify-checksum.sh /tmp/rustup-bootstrap/verify-checksum.sh
 
 RUN set -eux; \
     if command -v apt-get >/dev/null 2>&1; then \
@@ -54,7 +59,19 @@ RUN --mount=type=cache,target=/opt/rust/rustup,sharing=locked \
     --mount=type=cache,target=/opt/rust/cargo/git,sharing=locked \
     set -eux; \
     if ! command -v rustup >/dev/null 2>&1; then \
-      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable; \
+      arch="${TARGETARCH:-$(uname -m)}"; \
+      case "${arch}" in \
+        amd64|x86_64) rustup_arch=amd64 ;; \
+        arm64|aarch64) rustup_arch=arm64 ;; \
+        *) echo "Unsupported Rust bootstrap architecture: ${arch}" >&2; exit 1 ;; \
+      esac; \
+      chmod +x /tmp/rustup-bootstrap/install-verified-rustup.sh \
+        /tmp/rustup-bootstrap/verify-checksum.sh; \
+      /tmp/rustup-bootstrap/install-verified-rustup.sh \
+        --arch "${rustup_arch}" \
+        --toolchain stable \
+        --checksums /tmp/rustup-bootstrap/checksums.sha256; \
+      rm -rf /tmp/rustup-bootstrap; \
     fi; \
     arch="$(uname -m)"; \
     if command -v apk >/dev/null 2>&1; then \
