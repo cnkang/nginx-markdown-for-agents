@@ -529,8 +529,13 @@ Current release line (0.8.x; latest patch 0.8.3):
 - Pre-commit safety: fallback to HTML if conversion error occurs before output is committed
 - Streaming release gate: `make release-gates-check-08x` (alias of `release-gates-check-080`) validates the 0.8.x release contract
 - Static security gate: `.github/workflows/security-static.yml` runs actionlint,
-  shellcheck, gitleaks, focused Semgrep, and cargo-deny for workflow, script,
-  secret, and Rust dependency policy changes
+  shellcheck, gitleaks, focused Semgrep, and cargo-deny for workflow, shell,
+  Python tooling, secret, and Rust dependency policy changes; the Semgrep
+  rules focus on obvious subprocess misuse, CLI-derived path I/O before
+  harness validation helpers, unsafe libc APIs in the C module, and exported
+  Rust FFI functions that still contain panic/unwrap/expect paths; Dockerfile
+  rustup bootstrap paths that download and execute unverified installers are
+  also covered
 - Supply-chain visibility: `.github/workflows/supply-chain.yml` runs
   report-oriented Trivy filesystem/IaC scans, SPDX SBOM generation, and OpenSSF
   Scorecard on PR, push, scheduled, and manual triggers
