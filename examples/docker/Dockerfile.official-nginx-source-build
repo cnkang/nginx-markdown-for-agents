@@ -60,6 +60,11 @@ RUN --mount=type=cache,target=/opt/rust/rustup,sharing=locked \
     set -eux; \
     if ! command -v rustup >/dev/null 2>&1; then \
       arch="${TARGETARCH:-$(uname -m)}"; \
+      if command -v apk >/dev/null 2>&1; then \
+        rustup_libc=musl; \
+      else \
+        rustup_libc=gnu; \
+      fi; \
       case "${arch}" in \
         amd64|x86_64) rustup_arch=amd64 ;; \
         arm64|aarch64) rustup_arch=arm64 ;; \
@@ -69,6 +74,7 @@ RUN --mount=type=cache,target=/opt/rust/rustup,sharing=locked \
         /tmp/rustup-bootstrap/verify-checksum.sh; \
       /tmp/rustup-bootstrap/install-verified-rustup.sh \
         --arch "${rustup_arch}" \
+        --libc "${rustup_libc}" \
         --toolchain stable \
         --checksums /tmp/rustup-bootstrap/checksums.sha256; \
       rm -rf /tmp/rustup-bootstrap; \

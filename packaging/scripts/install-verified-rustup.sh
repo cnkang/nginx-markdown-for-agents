@@ -2,15 +2,17 @@
 # install-verified-rustup.sh -- Install rustup-init after checksum verification.
 #
 # Usage:
-#   install-verified-rustup.sh --arch ARCH --toolchain TOOLCHAIN [--checksums FILE] [--version VER]
+#   install-verified-rustup.sh --arch ARCH --toolchain TOOLCHAIN [--libc LIBC] [--checksums FILE] [--version VER]
 #
 # ARCH accepts the package workflow architecture names amd64 and arm64
-# (mapped to x86_64-unknown-linux-gnu and aarch64-unknown-linux-gnu).
+# (mapped to x86_64/aarch64 Linux targets). LIBC accepts gnu or musl
+# and defaults to gnu for existing release workflow callers.
 
 set -euo pipefail
 
 RUSTUP_VERSION="1.28.2"
 ARCH=""
+LIBC="gnu"
 RUST_TOOLCHAIN=""
 CHECKSUMS_FILE=""
 
@@ -42,6 +44,13 @@ while [[ "$#" -gt 0 ]]; do
                 die "--toolchain requires a value"
             fi
             RUST_TOOLCHAIN="$2"
+            shift 2
+            ;;
+        --libc)
+            if [[ "$#" -lt 2 ]]; then
+                die "--libc requires a value"
+            fi
+            LIBC="$2"
             shift 2
             ;;
         --checksums)
@@ -77,6 +86,14 @@ if [[ -z "$RUST_TOOLCHAIN" ]]; then
     die "toolchain is required"
 fi
 
+case "$LIBC" in
+    gnu|musl)
+        ;;
+    *)
+        die "unsupported libc: $LIBC"
+        ;;
+esac
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -z "$CHECKSUMS_FILE" ]]; then
     CHECKSUMS_FILE="${SCRIPT_DIR}/../checksums.sha256"
@@ -84,10 +101,10 @@ fi
 
 case "$ARCH" in
     amd64|x86_64)
-        RUSTUP_TARGET="x86_64-unknown-linux-gnu"
+        RUSTUP_TARGET="x86_64-unknown-linux-${LIBC}"
         ;;
     arm64|aarch64)
-        RUSTUP_TARGET="aarch64-unknown-linux-gnu"
+        RUSTUP_TARGET="aarch64-unknown-linux-${LIBC}"
         ;;
     *)
         die "unsupported architecture: $ARCH"
