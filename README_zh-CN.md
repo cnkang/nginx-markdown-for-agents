@@ -210,7 +210,7 @@ Cloudflare 的 [Markdown for Agents](https://blog.cloudflare.com/markdown-for-ag
 | 自动解压 | 支持 gzip、brotli、deflate 上游响应 |
 | 缓存友好变体 | 支持 ETag 与条件请求 |
 | 失败策略可控 | 可选失败透传或失败拦截 |
-| 资源限制 | 可配置大小与超时上限 |
+| 资源限制 | 通过 `markdown_max_size` 等 NGINX 指令配置大小与超时上限 |
 | 安全加固 | 校验输出链接和 base URL，默认拒绝不安全的 forwarded-host 输入，限制解析/解压资源，并避免执行外部内容 |
 | 可选元数据 | 支持 token 估算与 YAML front matter |
 | 指标端点 | 提供转换计数等运行指标 |
