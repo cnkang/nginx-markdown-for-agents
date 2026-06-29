@@ -623,6 +623,9 @@ test_grow_output_buffer_direct(void)
                 "grow_output_buffer should call ngx_pfree on old buffer");
 
     /* Budget exceeded: used >= max_size */
+    initial_buf = ngx_pnalloc(r.pool, 400);
+    TEST_ASSERT(initial_buf != NULL,
+                "test setup should allocate budget-case pool buffer");
     output_data = initial_buf;
     output_size = 400;
     g_conf.decompress.max_size = 200;
@@ -630,8 +633,13 @@ test_grow_output_buffer_direct(void)
         &r, &g_conf, &output_data, &output_size, 250);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
                 "grow_output_buffer should fail when used >= max_size");
+    TEST_ASSERT(g_pfree_count == 1,
+                "budget failure should not free the fresh old buffer");
 
     /* Minimum growth: used * 2 < used + 4096, should use +4096 */
+    initial_buf = ngx_pnalloc(r.pool, 400);
+    TEST_ASSERT(initial_buf != NULL,
+                "test setup should allocate minimum-growth pool buffer");
     output_data = initial_buf;
     output_size = 400;
     g_conf.decompress.max_size = 10000;
@@ -641,8 +649,13 @@ test_grow_output_buffer_direct(void)
                 "grow_output_buffer should succeed for small used");
     TEST_ASSERT(output_size == 4196,
                 "grow_output_buffer should use used+4096 when 2*used < used+4096");
+    TEST_ASSERT(g_pfree_count == 2,
+                "minimum growth should free its own old buffer");
 
     /* Capped by max_size */
+    initial_buf = ngx_pnalloc(r.pool, 400);
+    TEST_ASSERT(initial_buf != NULL,
+                "test setup should allocate capped-growth pool buffer");
     output_data = initial_buf;
     output_size = 400;
     g_conf.decompress.max_size = 500;
@@ -652,8 +665,13 @@ test_grow_output_buffer_direct(void)
                 "grow_output_buffer should succeed when capped by max_size");
     TEST_ASSERT(output_size == 500,
                 "grow_output_buffer new_size should be capped at max_size");
+    TEST_ASSERT(g_pfree_count == 3,
+                "capped growth should free its own old buffer");
 
     /* Allocation failure */
+    initial_buf = ngx_pnalloc(r.pool, 400);
+    TEST_ASSERT(initial_buf != NULL,
+                "test setup should allocate allocation-failure pool buffer");
     output_data = initial_buf;
     output_size = 400;
     g_conf.decompress.max_size = 1500;
@@ -662,6 +680,8 @@ test_grow_output_buffer_direct(void)
         &r, &g_conf, &output_data, &output_size, 300);
     TEST_ASSERT(rc == NGX_ERROR,
                 "grow_output_buffer should fail on allocation failure");
+    TEST_ASSERT(g_pfree_count == 3,
+                "allocation failure should not free the old buffer");
 }
 
 /*

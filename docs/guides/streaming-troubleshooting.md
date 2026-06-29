@@ -1037,7 +1037,7 @@ Example output (streaming-relevant sections):
 
 ```json
 {
-  "version": "0.8.0",
+  "version": "0.8.3",
   "uptime_seconds": 86420,
   "worker_pid": 1234,
   "streaming_config": {

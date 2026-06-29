@@ -142,6 +142,56 @@ class TestGenerateManifest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Invalid semantic version", result.stderr)
 
+    def test_semver_prerelease_and_build_metadata(self):
+        self._write_package(
+            "nginx-module-markdown-for-agents_1.2.3-alpha+001_nginx-1.28.0_amd64.deb"
+        )
+        result = self._run_generate([
+            "--version", "1.2.3-alpha+001",
+            "--tag", "v1.2.3-alpha+001",
+            "--commit", "abc1234",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+        ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        manifest = json.loads(result.stdout)
+        self.assertEqual(manifest["version"], "1.2.3-alpha+001")
+        self.assertEqual(manifest["git"]["tag"], "v1.2.3-alpha+001")
+        self.assertEqual(manifest["packages"][0]["version"], "1.2.3-alpha+001")
+
+    def test_semver_core_version_leading_zero_fails(self):
+        self._write_package(
+            "nginx-module-markdown-for-agents_01.2.3_nginx-1.28.0_amd64.deb"
+        )
+        result = self._run_generate([
+            "--repo", "cnkang/nginx-markdown-for-agents",
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Invalid semantic version", result.stderr)
+
+    def test_version_tag_mismatch_fails(self):
+        self._write_package(
+            "nginx-module-markdown-for-agents_1.2.3-alpha+001_nginx-1.28.0_amd64.deb"
+        )
+        result = self._run_generate([
+            "--version", "1.2.3-alpha+001",
+            "--tag", "v1.2.3",
+            "--repo", "cnkang/nginx-markdown-for-agents",
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("does not match", result.stderr)
+
+    def test_artifact_dir_validation_error_is_controlled(self):
+        args = [
+            sys.executable, str(GENERATE_SCRIPT),
+            "-d", "../artifacts",
+            "--version", "0.8.3",
+        ]
+        result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ERROR:", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_no_source(self):
         self._write_package(
             "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
@@ -410,6 +460,20 @@ class TestValidateManifest(unittest.TestCase):
         for f in sorted(self.artifact_dir.iterdir()):
             entries.append(f"{sha256_bytes(f.read_bytes())}  {f.name}")
         self.sha256sums_path.write_text("\n".join(entries) + "\n")
+        errors = self._validate()
+        self.assertTrue(
+            any("CLI manifest differs" in e for e in errors),
+            f"Expected manifest consistency error, got: {errors}",
+        )
+
+    def test_cli_manifest_must_match_artifact_manifest_without_sha256sums(self):
+        """The -m manifest and artifact copy must match without SHA256SUMS."""
+        self._make_valid_manifest()
+        artifact_manifest = json.loads(self.manifest_path.read_text())
+        artifact_manifest["git"]["commit"] = "differentcommit"
+        (self.artifact_dir / "release-manifest.json").write_text(
+            json.dumps(artifact_manifest, indent=2) + "\n"
+        )
         errors = self._validate()
         self.assertTrue(
             any("CLI manifest differs" in e for e in errors),

@@ -255,31 +255,33 @@ def validate_manifest(
                     f"integrity.signed_file expected null for non-tag runs, got: {integrity.get('signed_file')}"
                 )
 
+    manifest_artifact = artifact_dir.resolve() / "release-manifest.json"
+    if manifest_artifact.exists():
+        try:
+            if manifest_path.resolve() != manifest_artifact.resolve():
+                artifact_text = manifest_artifact.read_text(encoding="utf-8")
+                if artifact_text != text:
+                    errors.append(
+                        "CLI manifest differs from artifact_dir/release-manifest.json"
+                    )
+        except Exception as e:
+            errors.append(
+                "Cannot compare CLI manifest with artifact_dir/release-manifest.json: "
+                f"{e}"
+            )
+
     # SHA256SUMS inclusion and digest consistency
     if sha256sums_path and sha256sums_path.exists():
         sha256_entries = parse_sha256sums(sha256sums_path, errors)
         if "release-manifest.json" not in sha256_entries:
             errors.append("release-manifest.json not found in SHA256SUMS")
 
-        manifest_artifact = artifact_dir.resolve() / "release-manifest.json"
         if "release-manifest.json" in sha256_entries:
             if not manifest_artifact.exists():
                 errors.append(
                     "release-manifest.json listed in SHA256SUMS but not found in artifacts"
                 )
             else:
-                try:
-                    if manifest_path.resolve() != manifest_artifact.resolve():
-                        artifact_text = manifest_artifact.read_text(encoding="utf-8")
-                        if artifact_text != text:
-                            errors.append(
-                                "CLI manifest differs from artifact_dir/release-manifest.json"
-                            )
-                except Exception as e:
-                    errors.append(
-                        "Cannot compare CLI manifest with artifact_dir/release-manifest.json: "
-                        f"{e}"
-                    )
                 actual_manifest_sha = sha256_file(manifest_artifact)
                 if sha256_entries["release-manifest.json"] != actual_manifest_sha:
                     errors.append(
