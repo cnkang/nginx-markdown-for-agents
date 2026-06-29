@@ -429,6 +429,10 @@ Follow evidence-first verification (no completion claim without fresh command ou
 - C module production source changes: `make coverage-c` (verify coverage bar)
 - Rust converter production source changes: `make coverage-rust` (verify coverage bar)
 - Streaming runtime/e2e changes: `make verify-chunked-native-e2e-smoke` (or stronger profile when required; requires `NGINX_BIN` pointing to a locally-compiled NGINX binary with the module loaded)
+- Python harness/tooling complexity changes:
+  `PYTHONPATH=. python3 tools/harness/detect_python_complexity.py`
+  and `python3 -m pytest tools/harness/tests/test_detect_python_complexity.py -q --tb=short`
+  (Rule 17)
 - C module volatile/atomic usage changes: `bash tools/harness/detect_volatile_atomic.sh` (Rule 42)
 - Workflow, shell, secret-scan, Semgrep, or Rust dependency policy changes:
   `make security-static` (Rule 48)
