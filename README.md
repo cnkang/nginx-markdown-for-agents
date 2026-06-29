@@ -583,7 +583,6 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 |---------|------|--------|---------|
 | 0.8.3 | 2026-06-26 | Kang | v0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |
 | 0.8.2 | 2026-06-25 | Kang | v0.8.2 release: streaming decompression hardening, FFI panic safety, implied-closure correctness, decompression budget enforcement, security scan scoping, release-line documentation closeout |
-| 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
 | 0.8.0 | 2026-06-16 | Codex | Synchronized English and Chinese README structure, Quick Start examples, local test commands, platform support heading, and v0.8.0 roadmap wording |
 | 0.8.0 | 2026-06-16 | Kang | v0.8.0 streaming release readiness: dual-engine model, auto mode default, bounded-memory conversion, pre-commit safety, 0.6.x compatibility removal, release-gates-check-080, migration guide, and rollout cookbook links |
 | 0.7.0 | 2026-06-03 | Kang | P0 correctness, Rust-first architecture, independent decompression budget, Accept negotiation, parse timeout/budget, DEB/RPM packaging, K8s examples, runtime diagnostics, dynconf dry-run/rollback |

@@ -145,22 +145,35 @@ would silently corrupt memory.
 
 **Deprecation protocol**:
 1. Mark the field with a `/* DEPRECATED since vX.Y.Z */` comment in the C
-   header and a `#[deprecated]` attribute in Rust.
+   header. When the field is read on the Rust side, add a Rust doc comment
+   documenting the deprecation; the generated C header comment (via cbindgen)
+   carries the deprecation note to C consumers.
 2. The `markdown_*_init()` helper sets the deprecated field to zero/null.
 3. The C consumer ignores the field (reads are no-ops, writes are discarded).
 4. The field remains at its original offset indefinitely.
 5. After two major versions, the field name may be renamed to `_reserved_N`
    but its offset and size must not change.
 
-**Example**:
+> **Note on `#[deprecated]`**: The example below uses `#[deprecated]` to
+> illustrate the *intended future protocol*. As of the 0.8.x release line no
+> FFI struct field in `components/rust-converter/src/ffi/abi.rs` carries a
+> `#[deprecated]` attribute. The normative requirement today is: a
+> deprecation comment in the C header, init-helper zeroing, layout tests
+> pinning the field's offset/size, and C consumer no-op behavior. Adopting
+> `#[deprecated]` on Rust FFI fields is a future hardening candidate tracked
+> in `docs/project/0.9.0-migration-tracking.md`, not a current ABI property.
+
+**Example** (illustrative — not a current struct definition):
 
 ```rust
 #[repr(C)]
 pub struct MarkdownResult {
     pub output: *const u8,
     pub output_len: usize,
+    // Hypothetical future deprecation showing the intended protocol.
+    // Today `MarkdownResult` does not contain a `legacy_error_code` field.
     #[deprecated(since = "0.8.0", note = "Use error_category instead")]
-    pub legacy_error_code: u32,   // offset preserved, always zeroed
+    pub legacy_error_code: u32,   // offset preserved, always zeroed by init
     pub error_category: u32,      // appended after legacy field
 }
 ```
