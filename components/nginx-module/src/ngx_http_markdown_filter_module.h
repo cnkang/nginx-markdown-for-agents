@@ -1307,9 +1307,6 @@ const ngx_str_t *ngx_http_markdown_reason_eligible_streaming_auto(void);
 const ngx_str_t *ngx_http_markdown_reason_eligible_fullbuffer_auto(void);
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
-const ngx_str_t *ngx_http_markdown_reason_ct_route_default(void);
-const ngx_str_t *ngx_http_markdown_reason_ct_route_configured(void);
-
 /*
  * Rust FFI reason code accessors (v0.7.0+)
  *
