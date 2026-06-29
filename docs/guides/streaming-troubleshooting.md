@@ -1147,3 +1147,4 @@ did not stream.
 | 0.8.0 | 2026-06-16 | Kang | Initial streaming troubleshooting guide with 5 diagnostic scenarios |
 | 0.8.0 | 2026-06-16 | Kang  | Added Log and Metrics Examples section with annotated log entries, JSON/Prometheus metrics examples (healthy and unhealthy), and diagnostics endpoint output |
 | 0.8.0 | 2026-06-16 | Kang  | Added Scenario 6 (fallback-disabled escalation), decision tree, concrete commands |
+| 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |

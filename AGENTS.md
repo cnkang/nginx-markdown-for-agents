@@ -118,7 +118,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 40 | nginx-idioms | Filter hash==0 (invalidated) headers in all lookup/iteration functions |
 | 41 | shell | Shell harness detect_*.sh scripts must use POSIX ERE ([[:space:]] not \s); grep -E for extended patterns |
 | 42 | c-safety | volatile only for single-threaded compiler barriers; direct aggregate __atomic_* usage is forbidden |
-| 43 | memory-budget | Resizable buffer backing store (ctx->buffer.data) uses ngx_alloc/ngx_free exclusively; never pool-allocate |
+| 43 | memory-budget | Resizable buffer backing store (ctx->buffer.data) uses ngx_alloc/ngx_free exclusively; fixed-size pool-lifetime decompression workspaces may use ngx_pnalloc/ngx_pfree |
 | 44 | encoding-charset | Streaming decompression uses raw deflate; truncated streams must be rejected; test payloads must match production format |
 | 45 | dynconf-snapshot | effective_conf NULL-safe access; cross-TU field visibility in shared headers; sentinel value consistency |
 | 46 | ffi-crosslang | FFI operations must validate NULL/empty key inputs; guards on both sides of FFI boundary; NULL/empty-input test coverage |
@@ -130,6 +130,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 52 | streaming-backpressure | Derived-state reconciliation on multi-context drain; ALL derived state reconciled for EVERY popped context |
 | 53 | ffi-crosslang | FFI fat-pointer safety; use as_mut_ptr + mem::forget for slice ownership transfer; empty results return NULL |
 | 54 | ci-gating | Release artifact path traversal protection; resolve and verify containment before accessing manifest filenames |
+| 55 | version-consistency | Keep source, chart, internal dependency, and documentation version references synchronized for the active release |
 
 ## Required Agent Workflow
 
@@ -185,7 +186,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 **Memory & Budget** (C, R)
 - All budgets enforced; auxiliary buffers freed on all exits [3]
 - No unbounded allocations; pool-preferred [Baseline]
-- Resizable buffers (buffer.data, decomp workspace, scratch) use ngx_alloc/ngx_free exclusively; never pool-allocate then ngx_free [43]
+- Resizable buffers (buffer.data, scratch, growable decompression buffers) use ngx_alloc/ngx_free exclusively; fixed-size pool-lifetime decompression workspaces may use ngx_pnalloc/ngx_pfree [43]
 - Every ngx_alloc-backed buffer has matching ngx_free on all exit paths [43]
 
 **Observability & Metrics** (C, R, D)
@@ -536,7 +537,6 @@ remediation:
 | 0.5.5 | 2026-04-24 | Codex | Added recent Git analysis remediation closeout rule |
 | 0.6.0 | 2026-05-02 | Kang | Comment/doc audit: Rust module docs, C function comments, Python docstrings, shell script headers; version 0.6.0 consistency fixes |
 | 0.6.1 | 2026-05-06 | Kang | Rules 27–31: Markdown escaping/injection prevention, full ngx_list_part_t iteration, flag clearing ordering, NUL-termination/EOF boundary, merge residual integrity; output-safety risk pack |
-| 0.8.3 | 2026-06-26 | Kang | Rules 52–54: derived-state reconciliation on multi-context drain (streaming), FFI fat-pointer safety and empty-result NULL convention, release artifact path traversal protection; updated Rule 15 (initialization-before-ownership-transfer), Rule 43 (pool-backed decompression exception); added release-manifest verification family to routing manifest |
 | 0.6.2 | 2026-05-07 | Kang | Rule 35: dynconf snapshot isolation (dynconf_enabled gate), reload retry contract (applied_mtime separation), unknown key atomic rejection, startup apply of existing dynconf file, harness-check-full includes harness-security-checks |
 | 0.6.2 | 2026-05-11 | Kang | Rule 36: require routing-manifest coverage and focused security family routing for recurring tooling path-safety fixes |
 | 0.6.6 | 2026-05-16 | Kang | Rule 38: fail-open replay buffer data integrity (init/append failure → precommit_error, failopen_completed state, delivery vs decision counter separation); Rule 2 cross-reference to Rule 38; Rule 8 delivery counter semantics; Rule 23 delivery vs decision counter guidance; C module checklist item 28 |
@@ -571,3 +571,4 @@ remediation:
 | 0.8.2 | 2026-06-23 | Kang | Strengthened Rule 15 with FFI panic safety (catch_unwind), Drop guards, enum repr layout safety, handle consumption contract, and cbindgen header drift CI gate; strengthened Rule 13 with Homebrew formula release integrity (SHA-256 from tag archive, version-before-sha256 ordering, nginx version from metadata, tap publish tag validation, audit standard alignment, cbindgen build dep); generalized Rule 43 for all resizable buffers (decomp workspace, scratch) not only buffer.data; strengthened Rule 24 with forward declaration ordering after typedefs; strengthened Rule 6 with streaming code fence language identifier buffering across text-event boundaries; added Rule 50 (Content-Type OWS/HTAB separator); added Rule 51 (auth Cache-Control commit failure handling); strengthened Rule 31 for organic duplicate code detection; strengthened detect_const_correctness.py with NGINX callback signature detection; extended check_third_party_notices.py with sub-workspace Cargo.lock existence check; added detect_pool_free.sh, detect_ffi_panic_safety.sh, detect_forward_decl_order.py, detect_duplicate_code.py, detect_open_without_path_validation.py |
 | 0.8.2 | 2026-06-24 | Kang | Strengthened Rule 8 with ngx_log_debugN / ngx_log_errorN argument count matching; strengthened Rule 15 with fail-closed fallback initialization and atomic write after catch pattern; strengthened Rule 24 with NOSONAR annotation discipline (reason + rule ref required, bare NOSONAR forbidden, only for NGINX API contract); strengthened Rule 46 with zero-length value boundary handling (value_len==0 → set NULL/0 not zero-length pool alloc); fixed detect_open_without_path_validation.py `_expr_derives_from_hardcoded` to ignore Path constructor function names and fix `_maybe_propagate_path_wrapper` target tracking; fixed detect_cwe22_paths.py to distinguish builtin open() from .open() method calls and keyword args from positional args; added SMALL_BLOCK_THRESHOLD=7 to detect_duplicate_code.py to downgrade short duplicates to advisory; narrowed FFI_VALIDATION_KEYWORDS to remove overly broad NULL/validate/guard; detect_forward_decl_order.py and detect_duplicate_code.py now validate own args.directory via validate_read_path |
 | 0.8.2 | 2026-06-24 | Kang | Strengthened Rule 31 with semantic-equivalence requirement for duplicate consolidation (branches with distinct error classification must not be collapsed); strengthened Rule 44 with Z_OK vs Z_BUF_ERROR inflate semantics distinction; strengthened Rule 33 with ValueError propagation trap for validate_read_path try/except; added detect_ngx_log_arg_count.sh (CI gate for ngx_log_debugN/errorN suffix-digit/argument-count mismatch); added detect_nosonar_discipline.sh (CI gate for bare NOSONAR without reason); refactored detect_cwe190_casts.sh allowlists from line-number-based to pattern-based matching to survive code edits that shift line numbers (26 stale warnings eliminated) |
+| 0.8.3 | 2026-06-26 | Kang | Rules 52–55: derived-state reconciliation on multi-context drain (streaming), FFI fat-pointer safety and empty-result NULL convention, release artifact path traversal protection, version consistency; updated Rule 15 (initialization-before-ownership-transfer), Rule 43 (pool-backed decompression exception); added release-manifest and version-consistency verification families to routing manifest |

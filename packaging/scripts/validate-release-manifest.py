@@ -268,6 +268,18 @@ def validate_manifest(
                     "release-manifest.json listed in SHA256SUMS but not found in artifacts"
                 )
             else:
+                try:
+                    if manifest_path.resolve() != manifest_artifact.resolve():
+                        artifact_text = manifest_artifact.read_text(encoding="utf-8")
+                        if artifact_text != text:
+                            errors.append(
+                                "CLI manifest differs from artifact_dir/release-manifest.json"
+                            )
+                except Exception as e:
+                    errors.append(
+                        "Cannot compare CLI manifest with artifact_dir/release-manifest.json: "
+                        f"{e}"
+                    )
                 actual_manifest_sha = sha256_file(manifest_artifact)
                 if sha256_entries["release-manifest.json"] != actual_manifest_sha:
                     errors.append(

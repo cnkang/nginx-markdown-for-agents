@@ -348,3 +348,4 @@ the module from source against your local NGINX installation.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.7.0 | 2026-05-18 | Kiro | Initial compatibility guide for prebuilt package release |
+| 0.8.3 | 2026-06-26 | Kang | Updated artifact naming examples to 0.8.3 |

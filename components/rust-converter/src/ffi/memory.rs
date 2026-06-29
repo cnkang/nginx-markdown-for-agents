@@ -42,6 +42,9 @@ use super::abi::{ConversionOutput, ERROR_SUCCESS, MarkdownResult};
 /// + [`Box::from_raw`] (see [`free_buffer`]).
 pub(crate) fn leak_boxed_slice_to_raw(mut buf: Box<[u8]>) -> (*mut u8, usize) {
     let len = buf.len();
+    if len == 0 {
+        return (ptr::null_mut(), 0);
+    }
     let ptr = buf.as_mut_ptr();
     std::mem::forget(buf);
     (ptr, len)
@@ -105,4 +108,17 @@ pub(crate) fn free_buffer(ptr_field: &mut *mut u8, len_field: &mut usize) {
     let _ = unsafe { Box::from_raw(raw) };
     *ptr_field = ptr::null_mut();
     *len_field = 0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::leak_boxed_slice_to_raw;
+
+    #[test]
+    fn leak_boxed_slice_to_raw_returns_null_for_empty_slice() {
+        let (ptr, len) = leak_boxed_slice_to_raw(Vec::new().into_boxed_slice());
+
+        assert!(ptr.is_null());
+        assert_eq!(len, 0);
+    }
 }

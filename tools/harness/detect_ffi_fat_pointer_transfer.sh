@@ -135,7 +135,7 @@ for rs_file in "${RS_FILES[@]}"; do
         # If we reach here, this is a non-comment, non-whitelisted
         # Box::into_raw usage — potential fat-pointer violation.
         rel_path="${rs_file#$REPO_ROOT/}"
-        echo "VIOLATION:${rel_path}:${line_num}: ${line_content}"
+        echo "VIOLATION:${rel_path}:${line_num}: ${line_content}" >&2
         violations=$((violations + 1))
     done < <(grep -n 'Box::into_raw' "$rs_file" 2>/dev/null || true)
 done
@@ -144,10 +144,10 @@ if [[ $violations -eq 0 ]]; then
     echo "OK: no fat-pointer transfer violations in ${SRC_DIR#$REPO_ROOT/}"
     exit 0
 else
-    echo ""
-    echo "FAIL: ${violations} fat-pointer transfer violation(s) found."
-    echo "Use ffi::memory::leak_boxed_slice_to_raw() instead of"
-    echo "Box::into_raw(boxed_slice) as *mut u8 for slice ownership transfer."
-    echo "Box::into_raw(Box::new(...)) is allowed for single-object handles."
+    echo "" >&2
+    echo "FAIL: ${violations} fat-pointer transfer violation(s) found." >&2
+    echo "Use ffi::memory::leak_boxed_slice_to_raw() instead of" >&2
+    echo "Box::into_raw(boxed_slice) as *mut u8 for slice ownership transfer." >&2
+    echo "Box::into_raw(Box::new(...)) is allowed for single-object handles." >&2
     exit 1
 fi

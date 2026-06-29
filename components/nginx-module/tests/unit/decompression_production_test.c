@@ -600,12 +600,15 @@ test_grow_output_buffer_direct(void)
     ngx_http_request_t r;
     u_char *output_data;
     size_t output_size;
-    u_char initial_buf[400];
+    u_char *initial_buf;
     ngx_int_t rc;
 
     init_request(&r);
 
     /* Normal growth: used < max_size, should succeed */
+    initial_buf = ngx_pnalloc(r.pool, 400);
+    TEST_ASSERT(initial_buf != NULL,
+                "test setup should allocate initial pool buffer");
     output_data = initial_buf;
     output_size = 400;
     g_conf.decompress.max_size = 1500;

@@ -1246,8 +1246,8 @@ fn test_zero_length_html() {
     assert_eq!(result.error_code, 0, "Zero-length input should succeed");
     assert_eq!(result.markdown_len, 0, "Markdown output should be empty");
     assert!(
-        !result.markdown.is_null(),
-        "Success result should carry an owned markdown buffer"
+        result.markdown.is_null(),
+        "Empty markdown output should use the NULL/0 FFI convention"
     );
 
     ffi_markdown_result_free(&mut result);
@@ -1292,8 +1292,8 @@ fn test_zero_length_html_with_null_pointer() {
     );
     assert_eq!(result.markdown_len, 0, "Markdown output should be empty");
     assert!(
-        !result.markdown.is_null(),
-        "Owned empty buffer should be returned"
+        result.markdown.is_null(),
+        "Empty markdown output should use the NULL/0 FFI convention"
     );
 
     ffi_markdown_result_free(&mut result);

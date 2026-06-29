@@ -174,11 +174,11 @@ Required:
   data into NGINX pool-owned structures.
 
 Verification:
-|- `grep -rn 'op_type\|operation_type' components/rust-converter/src/ffi/`
+- `grep -rn 'op_type\|operation_type' components/rust-converter/src/ffi/`
   — verify each FFI entry point validates key/name inputs.
-|- `grep -rn 'key\.data.*==.*NULL\|key_len.*==.*0\|\.is_null()' components/nginx-module/src/ components/rust-converter/src/`
+- `grep -rn 'key\.data.*==.*NULL\|key_len.*==.*0\|\.is_null()' components/nginx-module/src/ components/rust-converter/src/`
   — verify guards exist on both sides of the FFI boundary.
-|- `make test-rust` and `make test-nginx-unit` — NULL/empty-input FFI
+- `make test-rust` and `make test-nginx-unit` — NULL/empty-input FFI
   tests must pass.
 
 ---

@@ -83,8 +83,8 @@ pub struct StructuralStateMachine {
     budget: MemoryBudget,
     /// **Deprecated / dead field.** The [`IncrementalEmitter`](super::emitter::IncrementalEmitter)
     /// now manages block-separator state internally via its own `needs_block_separator`
-    /// tracking, making this field redundant. Retained to preserve struct layout and
-    /// ABI stability across FFI; safe to remove in the next breaking-change release.
+    /// tracking, making this field redundant. Retained for internal API
+    /// compatibility; safe to remove in the next breaking-change release.
     pub needs_block_separator: bool,
     /// Current list nesting depth (for indentation).
     pub list_depth: usize,
@@ -474,6 +474,7 @@ impl StructuralStateMachine {
             .rposition(|ctx| context_matches_tag(ctx, tag_name));
         if let Some(idx) = pos {
             let mut drained: Vec<StructuralContext> = self.stack.drain(idx..).collect();
+            // drain(idx..) returns outer-to-inner; callers need unwind order.
             drained.reverse();
             drained
         } else {
