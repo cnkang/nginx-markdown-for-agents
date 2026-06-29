@@ -687,3 +687,4 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 | 0.7.0 | 2026-06-03 | Kang | Version bump to 0.7.0; add Rust-first architecture, decompression budget, diagnostics, dynconf dry-run, DEB/RPM, K8s, FFI ABI verification, CI supply-chain hardening |
 | 0.8.0 | 2026-06-16 | Kang | Version bump to 0.8.0; true streaming contract, fallback state machine, streaming observability, streaming security enforcement, release matrix source of truth, streaming config directives |
 | 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
+| 0.8.3 | 2026-06-26 | Kang | 0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |

@@ -132,6 +132,16 @@ class TestGenerateManifest(unittest.TestCase):
         ])
         self.assertNotEqual(result.returncode, 0)
 
+    def test_invalid_deb_version_fails(self):
+        self._write_package(
+            "nginx-module-markdown-for-agents_..%2F..%2Fetc_nginx-1.28.0_amd64.deb"
+        )
+        result = self._run_generate([
+            "--repo", "cnkang/nginx-markdown-for-agents",
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Invalid semantic version", result.stderr)
+
     def test_no_source(self):
         self._write_package(
             "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
@@ -386,6 +396,24 @@ class TestValidateManifest(unittest.TestCase):
                 for e in errors
             ),
             f"Expected manifest digest mismatch, got: {errors}",
+        )
+
+    def test_cli_manifest_must_match_artifact_manifest(self):
+        """The -m manifest and artifact copy must contain identical JSON."""
+        self._make_valid_manifest()
+        artifact_manifest = json.loads(self.manifest_path.read_text())
+        artifact_manifest["git"]["commit"] = "differentcommit"
+        (self.artifact_dir / "release-manifest.json").write_text(
+            json.dumps(artifact_manifest, indent=2) + "\n"
+        )
+        entries = []
+        for f in sorted(self.artifact_dir.iterdir()):
+            entries.append(f"{sha256_bytes(f.read_bytes())}  {f.name}")
+        self.sha256sums_path.write_text("\n".join(entries) + "\n")
+        errors = self._validate()
+        self.assertTrue(
+            any("CLI manifest differs" in e for e in errors),
+            f"Expected manifest consistency error, got: {errors}",
         )
 
     def test_nontag_no_source_validates(self):

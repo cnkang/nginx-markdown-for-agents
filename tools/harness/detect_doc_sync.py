@@ -1,27 +1,25 @@
 #!/usr/bin/env python3
 """
-detect_doc_sync.py — Documentation Synchronization Detection (Advisory)
-                                                                        (Rule 9, 10)
+detect_doc_sync.py — Documentation Synchronization Detection (Rule 9, 10)
 
 Rule 9 (docs-tooling): Documentation must reflect the actual implementation.
 Rule 10 (docs-tooling): API documentation must be kept in sync with the API.
 
-This is an ADVISORY detector — it only produces warnings, never hard failures.
-It helps developers identify potential documentation drift but does not block CI.
+This detector blocks when it finds documentation drift. It is intentionally
+conservative to avoid false positives.
 
 Detection strategy:
   1. Check if CHANGELOG.md mentions recent features/fixes
   2. Check if README mentions key configuration directives
   3. Check if key public API types are referenced in docs
 
-This detector is intentionally conservative to avoid false positives.
-
 Usage:
   python3 tools/harness/detect_doc_sync.py [directory]
     directory defaults to project root
 
 Exit codes:
-  0 — always (advisory only, never blocks)
+  0 — no warnings found
+  1 — one or more warnings found
 """
 
 import re
@@ -120,8 +118,8 @@ def main():
         project_root = Path(__file__).parent.parent.parent
     
     if not project_root.exists():
-        print(f"Project directory not found: {project_root}")
-        sys.exit(0)
+        print(f"Project directory not found: {project_root}", file=sys.stderr)
+        sys.exit(1)
     
     all_warnings = []
     all_warnings.extend(check_changelog_exists(project_root))
@@ -129,14 +127,16 @@ def main():
     all_warnings.extend(check_installation_guide_current(project_root))
     
     if all_warnings:
-        print(f"Documentation sync advisory ({len(all_warnings)} warning(s)):")
+        print(
+            f"Documentation sync check failed ({len(all_warnings)} warning(s)):",
+            file=sys.stderr,
+        )
         for warning in all_warnings:
-            print(f"  WARNING: {warning}")
-        print("\nNote: This is advisory only. Manual review recommended.")
+            print(f"  WARNING: {warning}", file=sys.stderr)
+        sys.exit(1)
     else:
-        print("OK: Documentation synchronization checks passed (advisory)")
-    
-    # Always exit 0 — this is advisory only
+        print("OK: Documentation synchronization checks passed")
+
     sys.exit(0)
 
 

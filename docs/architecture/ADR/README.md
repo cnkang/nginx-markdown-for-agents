@@ -102,4 +102,5 @@ What other options were considered and why were they not chosen?
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.8.2 | 2026-06-25 | Kang | Promoted ADR-0011 through ADR-0014 from Proposed to Accepted (implemented in 0.8.0) |
+| 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
 | 0.7.0 | 2026-05-25 | Kang | Added ADR-0009 (Rust-first E2E), ADR-0010 (v0.7.0 Rust-first boundary evolution) |
