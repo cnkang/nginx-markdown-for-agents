@@ -34,7 +34,7 @@ while IFS= read -r -d '' file; do
         [[ -z "$content" ]] && continue
 
         # Skip comment-only lines, documentation, and case labels
-        echo "$content" | grep -qE '^\s*//|^\s*\*|@return|@param' && continue
+        echo "$content" | grep -qE '^[[:space:]]*//|^[[:space:]]*\*|@return|@param' && continue
         echo "$content" | grep -qE 'case.*:' && continue
 
         block_start=$((line_num - 30))
@@ -56,7 +56,7 @@ while IFS= read -r -d '' file; do
         if echo "$surrounding_code" | grep -qE 'fullbuffer\.(save|pending)'; then
             has_save=1
         fi
-        if echo "$surrounding_code" | grep -qE 'buffered\s+[|&]=|NGX_HTTP_MARKDOWN_BUFFERED'; then
+        if echo "$surrounding_code" | grep -qE 'buffered[[:space:]]+[|&]=|NGX_HTTP_MARKDOWN_BUFFERED'; then
             has_save=1
         fi
         if echo "$surrounding_code" | grep -qE 'main_terminal_sent|pending_output_bytes'; then
@@ -70,7 +70,7 @@ while IFS= read -r -d '' file; do
         # Extract function name
         func_name=$(echo "$surrounding_code" | grep -oE 'ngx_http_markdown_[a-zA-Z_0-9]+' | tail -1)
         if [[ -z "$func_name" ]]; then
-            func_name=$(echo "$surrounding_code" | grep -oE '^[a-zA-Z_][a-zA-Z0-9_]*\s+\b[a-zA-Z_][a-zA-Z0-9_]*\s*\(' | sed 's/.* //;s/(//' | tail -1)
+            func_name=$(echo "$surrounding_code" | grep -oE '^[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]+\b[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*\(' | sed 's/.* //;s/(//' | tail -1)
         fi
         [[ -z "$func_name" ]] && continue
 

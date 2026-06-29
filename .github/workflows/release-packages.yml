@@ -62,8 +62,9 @@ on:
         description: >-
           Optional version override (format: MAJOR.MINOR.PATCH, e.g. 0.7.0).
           Prerelease suffixes (e.g. 0.7.0-rc.1) are rejected because they are
-          incompatible with RPM versioning. If empty, version is derived from
-          the git ref.
+          incompatible with RPM versioning. If empty, tag runs derive the
+          version from the git ref; non-tag runs use the checked-in Cargo.toml
+          package version.
         required: false
         type: string
 
@@ -228,6 +229,11 @@ jobs:
           dnf clean all
         shell: bash
 
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+        with:
+          persist-credentials: false
+
       - name: Derive and validate version
         id: version
         env:
@@ -239,16 +245,17 @@ jobs:
           elif printf '%s' "${TAG_REF}" | grep -qE '^refs/tags/v'; then
             VERSION="${TAG_REF#refs/tags/v}"
           else
-            echo "ERROR: Cannot derive version — not a tag push and no version input provided" >&2
+            VERSION="$(
+              sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+                components/rust-converter/Cargo.toml | head -1
+            )"
+          fi
+          if [[ -z "${VERSION}" ]]; then
+            echo "ERROR: Cannot derive package version" >&2
             exit 1
           fi
           echo "raw_version=${VERSION}" >> "$GITHUB_OUTPUT"
         shell: bash
-
-      - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
-        with:
-          persist-credentials: false
 
       - name: Validate version
         env:
@@ -484,7 +491,13 @@ jobs:
           elif printf '%s' "${TAG_REF}" | grep -qE '^refs/tags/v'; then
             PKG_VERSION="${TAG_REF#refs/tags/v}"
           else
-            echo "ERROR: Cannot derive version — not a tag push and no version input provided" >&2
+            PKG_VERSION="$(
+              sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+                components/rust-converter/Cargo.toml | head -1
+            )"
+          fi
+          if [[ -z "${PKG_VERSION}" ]]; then
+            echo "ERROR: Cannot derive package version" >&2
             exit 1
           fi
 
@@ -776,15 +789,14 @@ jobs:
             SOURCE_URL="https://github.com/${GH_REPO}/archive/refs/tags/${TAG}.tar.gz"
             SOURCE_SHA="$(curl -fsSL "${SOURCE_URL}" | sha256sum | awk '{print $1}')"
             SOURCE_ARGS=(--source-url "${SOURCE_URL}" --source-sha "${SOURCE_SHA}")
+            VERSION_ARGS=(--version "${VERSION}")
           else
             TAG=""
-            VERSION="${GH_INPUT_VERSION}"
             SOURCE_ARGS=(--no-source)
-          fi
-
-          if [[ -z "${VERSION}" ]]; then
-            echo "ERROR: manifest version could not be determined" >&2
-            exit 1
+            VERSION_ARGS=()
+            if [[ -n "${GH_INPUT_VERSION}" ]]; then
+              VERSION_ARGS=(--version "${GH_INPUT_VERSION}")
+            fi
           fi
 
           TAG_ARGS=()
@@ -794,7 +806,7 @@ jobs:
 
           python3 packaging/scripts/generate-release-manifest.py \
             -d artifacts/ \
-            --version "${VERSION}" \
+            "${VERSION_ARGS[@]}" \
             "${TAG_ARGS[@]}" \
             --commit "${GH_SHA}" \
             --run-id "${GH_RUN_ID}" \

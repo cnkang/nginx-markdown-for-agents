@@ -7,6 +7,8 @@
 # ARCH accepts the package workflow architecture names amd64 and arm64
 # (mapped to x86_64/aarch64 Linux targets). LIBC accepts gnu or musl
 # and defaults to gnu for existing release workflow callers.
+# CHECKSUMS defaults to packaging/checksums.sha256.
+# VERSION defaults to rustup-init 1.28.2.
 
 set -euo pipefail
 
@@ -17,7 +19,7 @@ RUST_TOOLCHAIN=""
 CHECKSUMS_FILE=""
 
 usage() {
-    sed -n '2,7p' "$0" | sed 's/^#[[:space:]]\{0,1\}//' >&2
+    sed -n '2,9p' "$0" | sed 's/^#[[:space:]]\{0,1\}//' >&2
     return 0
 }
 

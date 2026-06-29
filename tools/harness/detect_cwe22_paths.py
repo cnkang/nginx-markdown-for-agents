@@ -493,10 +493,16 @@ def _resolve_open_first_arg(line: str) -> str | None:
     return _extract_method_open_first_arg(line)
 
 
+def _path_root(expr: str) -> str:
+    """Return the root identifier from a dotted path expression."""
+    return expr.split(".", 1)[0]
+
+
 def _scan_path_constructions(
     lines: list[str],
     rel: str,
     strict: bool,
+    validated_vars: set[str],
 ) -> tuple[list[str], list[str]]:
     """Scan for Path() construction from user input before validation.
 
@@ -521,6 +527,8 @@ def _scan_path_constructions(
 
         for m in _PATH_CONSTRUCTION_RE.finditer(line):
             user_expr = m.group(1)
+            if _path_root(user_expr) in validated_vars or user_expr in validated_vars:
+                continue
 
             msg_prefix = "WARNING" if not strict else "ERROR"
             detail = (
@@ -547,13 +555,13 @@ _CHAINED_PATH_METHOD_RE = re.compile(
 def _extract_standalone_path_method_call(line: str) -> tuple[str, str] | None:
     """Extract ``receiver.method`` for standalone Path method calls."""
     for method in ("read_text", "write_text"):
-        needle = f".{method}("
-        idx = line.find(needle)
-        if idx <= 0:
+        match = re.search(
+            rf"\b([A-Za-z_][A-Za-z0-9_]*)\.{method}\s*\(",
+            line,
+        )
+        if not match:
             continue
-        receiver = line[:idx].strip()
-        if receiver.isidentifier():
-            return receiver, method
+        return match.group(1), method
     return None
 
 
@@ -561,6 +569,7 @@ def _scan_path_method_calls(
     lines: list[str],
     rel: str,
     strict: bool,
+    validated_vars: set[str],
 ) -> tuple[list[str], list[str]]:
     """Scan for Path method calls on unvalidated user-derived variables.
 
@@ -592,7 +601,9 @@ def _scan_path_method_calls(
         if chain_m:
             chain_var = chain_m.group(1)
             # Extract the root variable from dotted expression (args.x → args)
-            root_var = chain_var.split('.')[0] if '.' in chain_var else chain_var
+            root_var = _path_root(chain_var)
+            if root_var in validated_vars or chain_var in validated_vars:
+                continue
             if _USER_DERIVED_VAR_RE.match(root_var):
                 method = chain_m.group(2)
                 detail = (
@@ -610,6 +621,8 @@ def _scan_path_method_calls(
         if not method_call:
             continue
         var_name, method = method_call
+        if var_name in validated_vars:
+            continue
 
         # Only flag if the variable name itself suggests user-derived origin
         if not _USER_DERIVED_VAR_RE.match(var_name):
@@ -667,14 +680,14 @@ def check_file(
     # Per commit 847479c: Path(user_input) before validate_read_path
     # enables path traversal even if validated later.
     path_errors, path_warnings = _scan_path_constructions(
-        lines, rel, strict,
+        lines, rel, strict, validated_vars,
     )
     errors.extend(path_errors)
     warnings.extend(path_warnings)
 
     # ── Pattern (e): Path.read_text() / write_text() on unvalidated vars ──
     method_errors, method_warnings = _scan_path_method_calls(
-        lines, rel, strict,
+        lines, rel, strict, validated_vars,
     )
     errors.extend(method_errors)
     warnings.extend(method_warnings)

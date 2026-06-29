@@ -500,6 +500,7 @@ v0.8.3 is a closeout hardening release for the 0.8.x line:
 - **Decompression buffer memory safety** — switched decompression workspace from `ngx_alloc`/`ngx_free` (heap) to `ngx_pnalloc`/`ngx_pfree` (pool-backed) to avoid mixing allocation lifetimes and prevent pool expansion side effects (Rule 43).
 - **Snapshot capacity increase** — raised the snapshot max from 4 to 8 entries in the stream commit path, supporting more complex multi-header mutation plans.
 - **FFI Box::into_raw correctness** — fixed a use-after-free pattern in converter handle allocation by ensuring `Box::into_raw` is called after initialization succeeds.
+- **Release manifest integrity** — `SHA256SUMS` entries are parsed and matched against package plus manifest digests; non-tag workflow manifests now describe unsigned checksum-only integrity explicitly.
 - **Version consistency detector (Rule 55)** — new harness detector validates version alignment across Cargo.toml, Chart.yaml, and internal dependencies to prevent version drift during releases.
 - **Full release gate validation** — all 0.8.x release gates pass: `make harness-check` (15/15), `make test-harness` (all detectors), `make release-gates-check-08x`, `make test-nginx-unit`, `make test-rust-fuzz-smoke`.
 

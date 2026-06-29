@@ -47,6 +47,12 @@ and 0.8.x release gate validation.
 - **Unit test `ngx_pfree` mock** — added missing `ngx_pfree` mock to
   `decompression_production_test.c` so decompression unit tests compile
   and link correctly.
+- **Release manifest integrity validation** — `validate-release-manifest.py`
+  now parses `SHA256SUMS` and verifies package plus manifest digests instead
+  of only checking filename presence. Non-tag workflow manifests now declare
+  unsigned checksum-only integrity explicitly, and `workflow_dispatch` package
+  runs can omit the optional version input by falling back to the checked-in
+  package version.
 
 ### Verified
 

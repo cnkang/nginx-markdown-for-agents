@@ -64,7 +64,7 @@ This detector is integrated into:
 - `make harness-check`: Validates harness synchronization (includes version consistency)
 
 ## Example Output
-```
+```text
 INFO: Checking version consistency...
 PASS: Main Cargo.toml version: 0.8.3
 PASS: Chart.yaml version: 0.8.3

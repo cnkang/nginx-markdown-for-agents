@@ -106,20 +106,38 @@ def main():
         src_dir = repo_root / 'components' / 'rust-converter' / 'src'
     
     if not src_dir.exists():
-        print(f"Source directory not found: {src_dir}")
-        sys.exit(0)
+        print(f"ERROR: Source directory not found: {src_dir}", file=sys.stderr)
+        sys.exit(1)
+    resolved_src_dir = src_dir.resolve()
     
     # Collect all Rust source content
     all_content = ""
+    read_errors: List[str] = []
+    scanned_files = 0
     for rust_file in src_dir.rglob('*.rs'):
         try:
-            all_content += rust_file.read_text(encoding='utf-8') + "\n"
-        except Exception:
+            resolved_rust_file = rust_file.resolve()
+            resolved_rust_file.relative_to(resolved_src_dir)
+        except (OSError, ValueError):
             continue
+        try:
+            all_content += resolved_rust_file.read_text(encoding='utf-8') + "\n"
+            scanned_files += 1
+        except Exception as exc:
+            read_errors.append(f"{resolved_rust_file}: {exc}")
+
+    if read_errors:
+        print("ERROR: Unable to read Rust source file(s):", file=sys.stderr)
+        for err in read_errors:
+            print(f"  {err}", file=sys.stderr)
+        sys.exit(1)
     
     if not all_content:
-        print(f"No Rust files found in {src_dir}")
-        sys.exit(0)
+        print(f"ERROR: No readable Rust files found in {src_dir}", file=sys.stderr)
+        sys.exit(1)
+    if scanned_files == 0:
+        print(f"ERROR: Rust source scan found no in-tree files in {src_dir}", file=sys.stderr)
+        sys.exit(1)
     
     # Run checks on the entire codebase (not per-file to reduce false positives)
     all_issues = []

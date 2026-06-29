@@ -71,7 +71,7 @@ rules:
       include:
         - /**/Dockerfile
         - /**/Dockerfile.*
-    pattern-regex: '(?s)https://sh\.rustup\.rs[^\n;]*\|\s*(sh|bash)\b|https://sh\.rustup\.rs[^\n;]*-o\s+[^\n;]*rustup-init\.sh[\s\S]*\b(sh|bash)\s+[^\n;]*rustup-init\.sh\b'
+    pattern-regex: '(?s)https://sh\.rustup\.rs(?:\\\s*|\s|[^;|])*?\|\s*(sh|bash)\b|https://sh\.rustup\.rs[^\n;]*-o\s+[^\n;]*rustup-init\.sh[\s\S]*\b(sh|bash)\s+[^\n;]*rustup-init\.sh\b'
 
   - id: python-unsafe-shell-subprocess
     languages:
