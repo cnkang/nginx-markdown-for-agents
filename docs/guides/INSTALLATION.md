@@ -1611,4 +1611,4 @@ If you encounter issues not covered in this guide:
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.3 | 2026-05-14 | Kang | Version bump to 0.6.3 and refresh release matrix for release |
 | 0.8.2 | 2026-06-21 | Kang | 0.8.x patch-line closeout: updated DEB/RPM install examples to VERSION=0.8.2 with replace-with-target-version note; refreshed SOP manual-download examples to reference v0.8.2 |
-| 0.8.3 | 2026-06-26 | Kang | Updated DEB/RPM install examples to VERSION=0.8.3 |
+| 0.8.3 | 2026-06-26 | Kang | 0.8.x release-line closeout: updated DEB/RPM and SOP manual-download examples to VERSION=0.8.3; refreshed release-line version references to current patch |
