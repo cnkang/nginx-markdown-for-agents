@@ -37,4 +37,4 @@ runtime semantics from canonical docs. They answer four practical questions:
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.2 | 2026-05-11 | Kang | Added tooling-path-security pack to generalize repeated tooling path-safety fixes |
 | 0.8.2 | 2026-06-13 | Codex | Added security-static-supply-chain pack for supplemental static security and supply-chain visibility gates |
-| 0.8.3 | 2026-06-26 | Kang | Added release-manifest and version-consistency packs |
+| 0.8.3 | 2026-06-26 | Kang | Added release-manifest and version-consistency verification families |
