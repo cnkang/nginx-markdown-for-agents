@@ -286,37 +286,43 @@ backlog of known C-side pure-logic functions).
 
 **Medium Priority** (v0.8.0–v0.9.0):
 
-| Category | Functions | Rationale |
-|----------|-----------|-----------|
-| Simple eligibility checks | #3, #4, #6, #9 | Trivial but part of decision chain; migrate when decision engine absorbs full eligibility |
-| Reason code accessors | #12–#15 | Migrate when reason codes become Rust-only enum |
-| Auth pattern matching | #24, #27 | Token/cookie validation is pure logic per §2.2 |
+| Category | Functions | Rationale | Tracking |
+|----------|-----------|-----------|----------|
+| Simple eligibility checks | #3, #4, #6, #9 | Trivial but part of decision chain; migrate when decision engine absorbs full eligibility | 0.9.0-tracking: ELIGIBILITY-MIGRATE |
+| Reason code accessors | #12–#15 | Migrate when reason codes become Rust-only enum | 0.9.0-tracking: REASON-REGISTRY |
+| Auth pattern matching | #24, #27 | Token/cookie validation is pure logic per §2.2 | 0.9.0-tracking: AUTH-PATTERN-MIGRATE |
 
 **Low Priority** (v0.9.0+):
 
-| Category | Functions | Rationale |
-|----------|-----------|-----------|
-| String utilities | #21, #22, #23, #25, #26, #28, #29 | Generic helpers; low risk staying in C |
-| Streaming reason accessors | #30 | Trivial; migrate with streaming engine consolidation |
-| Content-type route codes | #16, #17 | Trivial accessors with no drift risk |
+| Category | Functions | Rationale | Tracking |
+|----------|-----------|-----------|----------|
+| String utilities | #21, #22, #23, #25, #26, #28, #29 | Generic helpers; low risk staying in C | 0.9.0-tracking: C-RETAIN-STRING-UTILS |
+| Streaming reason accessors | #30 | Trivial; migrate with streaming engine consolidation | 0.9.0-tracking: STREAMING-CONSOLIDATE |
+| Content-type route codes | #16, #17 | Trivial accessors with no drift risk | 0.9.0-tracking: C-RETAIN-CT-ROUTE |
 
 ### Functions Confirmed as C-side Retained (Not Migration Candidates)
 
 These functions use NGINX APIs and correctly remain on the C side per §2.1:
 
-| Function | File | NGINX API Dependency |
-|----------|------|---------------------|
-| `ngx_http_markdown_should_convert` | `ngx_http_markdown_accept.c` | `ngx_list_part_t` iteration, `r->headers_in`, `ngx_log_debug` |
-| `ngx_http_markdown_handle_if_none_match` | `ngx_http_markdown_conditional.c` | `ngx_pcalloc`, `ngx_pfree`, FFI calls, `ngx_log_*` |
-| `ngx_http_markdown_send_304` | `ngx_http_markdown_conditional.c` | `ngx_list_push`, `ngx_pnalloc`, `ngx_http_send_header`, `ngx_http_finalize_request` |
-| `ngx_http_markdown_decompress_gzip` | `ngx_http_markdown_decompression.c` | `ngx_pnalloc`, `ngx_create_temp_buf`, `ngx_alloc_chain_link`, pool ops |
-| `ngx_http_markdown_decompress_brotli` | `ngx_http_markdown_decompression.c` | Same pool/chain NGINX APIs |
-| `ngx_http_markdown_decompress` | `ngx_http_markdown_decompression.c` | Dispatcher using NGINX logging |
-| `ngx_http_markdown_buffer_init` | `ngx_http_markdown_buffer.c` | `ngx_pool_cleanup_add` |
-| `ngx_http_markdown_buffer_append` | `ngx_http_markdown_buffer.c` | `ngx_alloc`/`ngx_free` (heap, not pool — but tied to pool cleanup) |
-| `ngx_http_markdown_add_private_cache_control_header` | `ngx_http_markdown_auth.c` | `ngx_list_push` |
-| `ngx_http_markdown_dynconf_snapshot_*` | `ngx_http_markdown_dynconf_snapshot.c` | `ngx_slprintf`, reads conf struct |
-| `ngx_http_markdown_diagnostics_*` | `ngx_http_markdown_diagnostics.c` | NGINX handler registration, pool alloc, chain construction |
+| Function | File | NGINX API Dependency | Tracking |
+|----------|------|---------------------|----------|
+| `ngx_http_markdown_should_convert` | `ngx_http_markdown_accept.c` | `ngx_list_part_t` iteration, `r->headers_in`, `ngx_log_debug` | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
+| `ngx_http_markdown_handle_if_none_match` | `ngx_http_markdown_conditional.c` | `ngx_pcalloc`, `ngx_pfree`, FFI calls, `ngx_log_*` | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
+| `ngx_http_markdown_send_304` | `ngx_http_markdown_conditional.c` | `ngx_list_push`, `ngx_pnalloc`, `ngx_http_send_header`, `ngx_http_finalize_request` | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
+| `ngx_http_markdown_decompress_gzip` | `ngx_http_markdown_decompression.c` | `ngx_pnalloc`, `ngx_create_temp_buf`, `ngx_alloc_chain_link`, pool ops | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
+| `ngx_http_markdown_decompress_brotli` | `ngx_http_markdown_decompression.c` | Same pool/chain NGINX APIs | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
+| `ngx_http_markdown_decompress` | `ngx_http_markdown_decompression.c` | Dispatcher using NGINX logging | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
+| `ngx_http_markdown_buffer_init` | `ngx_http_markdown_buffer.c` | `ngx_pool_cleanup_add` | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
+| `ngx_http_markdown_buffer_append` | `ngx_http_markdown_buffer.c` | `ngx_alloc`/`ngx_free` (heap, not pool — but tied to pool cleanup) | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
+| `ngx_http_markdown_add_private_cache_control_header` | `ngx_http_markdown_auth.c` | `ngx_list_push` | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
+| `ngx_http_markdown_dynconf_snapshot_*` | `ngx_http_markdown_dynconf_snapshot.c` | `ngx_slprintf`, reads conf struct | 0.9.0-tracking: DYNCONF-SNAPSHOT |
+| `ngx_http_markdown_diagnostics_*` | `ngx_http_markdown_diagnostics.c` | NGINX handler registration, pool alloc, chain construction | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
+
+> **Tracking reference**: Per-bucket tracking entries (format
+> `0.9.0-tracking: <ID>`) are resolved in
+> `docs/project/0.9.0-migration-tracking.md`. Low-priority buckets marked
+> `C-RETAIN-*` are explicitly *retained in C* (not migration candidates) and
+> must not be reclassified as "must migrate" without a new risk rationale.
 
 ### Extractable Pure Logic from Mixed Functions
 
@@ -376,3 +382,4 @@ extracted into Rust while the NGINX glue remains in C:
 | 0.7.0-audit | 2026-05-18 | kiro | C-side pure logic audit: 30 functions identified, prioritized for migration |
 | 0.7.0-b06.2 | 2026-05-18 | kiro | B06.2: Document C-side FFI accessor wrappers for Rust reason codes |
 | 0.7.0-a07.5 | 2026-05-18 | kiro | A07.5: Add zero/default initialization strategy section |
+| 0.8.5-track | 2026-06-29 | Kang | Add per-bucket 0.9.0 tracking references (resolved in docs/project/0.9.0-migration-tracking.md) |
