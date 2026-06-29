@@ -77,9 +77,7 @@ class _FunctionComplexityVisitor(ast.NodeVisitor):
         )
 
         for child in node.body:
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                self.visit(child)
-            elif isinstance(child, ast.ClassDef):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 self.visit(child)
 
 
