@@ -46,7 +46,7 @@ jobs:
           name: batch-fuzz-crashes
           path: ./out/artifacts
 
-      - uses: github/codeql-action/upload-sarif@84498526a009a99c875e83ef4821a8ba52de7c22  # codeql-bundle-v2.25.5
+      - uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.36.2
         if: always() && hashFiles('./out/*.sarif') != ''
         with:
           sarif_file: ./out/
