@@ -98,22 +98,20 @@ def check_nesting_depth_protection(codebase_content: str, src_dir: Path) -> List
     return issues
 
 
-def main():
+def _resolve_source_dir() -> Path:
     if len(sys.argv) > 1:
-        src_dir = Path(validate_read_path(sys.argv[1]))
-    else:
-        repo_root = Path(__file__).parent.parent.parent
-        src_dir = repo_root / 'components' / 'rust-converter' / 'src'
-    
-    if not src_dir.exists():
-        print(f"ERROR: Source directory not found: {src_dir}", file=sys.stderr)
-        sys.exit(1)
+        return Path(validate_read_path(sys.argv[1]))
+
+    repo_root = Path(__file__).parent.parent.parent
+    return repo_root / 'components' / 'rust-converter' / 'src'
+
+
+def _read_rust_sources(src_dir: Path) -> tuple[str, int, List[str]]:
     resolved_src_dir = src_dir.resolve()
-    
-    # Collect all Rust source content
     all_content = ""
     read_errors: List[str] = []
     scanned_files = 0
+
     for rust_file in src_dir.rglob('*.rs'):
         try:
             resolved_rust_file = rust_file.resolve()
@@ -126,10 +124,26 @@ def main():
         except Exception as exc:
             read_errors.append(f"{resolved_rust_file}: {exc}")
 
+    return all_content, scanned_files, read_errors
+
+
+def _print_read_errors(read_errors: List[str]) -> None:
+    print("ERROR: Unable to read Rust source file(s):", file=sys.stderr)
+    for err in read_errors:
+        print(f"  {err}", file=sys.stderr)
+
+
+def main():
+    src_dir = _resolve_source_dir()
+
+    if not src_dir.exists():
+        print(f"ERROR: Source directory not found: {src_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    all_content, scanned_files, read_errors = _read_rust_sources(src_dir)
+
     if read_errors:
-        print("ERROR: Unable to read Rust source file(s):", file=sys.stderr)
-        for err in read_errors:
-            print(f"  {err}", file=sys.stderr)
+        _print_read_errors(read_errors)
         sys.exit(1)
     
     if not all_content:

@@ -209,39 +209,59 @@ def check_test_assertions(func_name: str, line_num: int, func_body: str,
     return issues
 
 
-def main():
+def _resolve_test_dir() -> Path:
     if len(sys.argv) > 1:
-        test_dir = Path(validate_read_path(sys.argv[1]))
-    else:
-        repo_root = Path(__file__).parent.parent.parent
-        test_dir = repo_root / 'components' / 'rust-converter' / 'tests'
-    
+        return Path(validate_read_path(sys.argv[1]))
+
+    repo_root = Path(__file__).parent.parent.parent
+    return repo_root / 'components' / 'rust-converter' / 'tests'
+
+
+def _check_test_file(test_file: Path, test_root: Path) -> tuple[List[str], str | None]:
+    try:
+        content = test_file.read_text(encoding='utf-8')
+    except Exception as exc:
+        return [], f"{test_file}: {exc}"
+
+    tests = extract_test_functions(content)
+    all_issues: List[str] = []
+
+    for func_name, line_num, func_body, has_should_panic, is_property_test in tests:
+        issues = check_test_assertions(
+            func_name, line_num, func_body,
+            has_should_panic, is_property_test
+        )
+
+        if issues:
+            rel_path = test_file.relative_to(test_root)
+            all_issues.extend([f"{rel_path}: {issue}" for issue in issues])
+
+    return all_issues, None
+
+
+def _scan_test_dir(test_dir: Path) -> tuple[List[str], List[str]]:
+    all_issues = []
+    read_errors = []
+
+    for test_file in test_dir.rglob('*.rs'):
+        file_issues, read_error = _check_test_file(
+            test_file, test_dir.parent.parent,
+        )
+        all_issues.extend(file_issues)
+        if read_error:
+            read_errors.append(read_error)
+
+    return all_issues, read_errors
+
+
+def main():
+    test_dir = _resolve_test_dir()
+
     if not test_dir.exists():
         print(f"Test directory not found: {test_dir}")
         sys.exit(0)
-    
-    all_issues = []
-    read_errors = []
-    
-    # Process all Rust test files
-    for test_file in test_dir.rglob('*.rs'):
-        try:
-            content = test_file.read_text(encoding='utf-8')
-        except Exception as exc:
-            read_errors.append(f"{test_file}: {exc}")
-            continue
-        
-        tests = extract_test_functions(content)
-        
-        for func_name, line_num, func_body, has_should_panic, is_property_test in tests:
-            issues = check_test_assertions(
-                func_name, line_num, func_body, 
-                has_should_panic, is_property_test
-            )
-            
-            if issues:
-                rel_path = test_file.relative_to(test_dir.parent.parent)
-                all_issues.extend([f"{rel_path}: {issue}" for issue in issues])
+
+    all_issues, read_errors = _scan_test_dir(test_dir)
 
     if read_errors:
         all_issues.extend(

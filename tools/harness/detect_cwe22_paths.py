@@ -526,24 +526,39 @@ def _scan_path_constructions(
             continue
 
         for m in _PATH_CONSTRUCTION_RE.finditer(line):
-            user_expr = m.group(1)
-            if _path_root(user_expr) in validated_vars or user_expr in validated_vars:
-                continue
-
-            msg_prefix = "WARNING" if not strict else "ERROR"
-            detail = (
-                f"Path({user_expr}) from user input before validation — "
-                f"pass through validate_read_path() first "
-                f"(per commit 847479c / AGENTS.md Rule 33)"
+            _classify_path_construction_match(
+                m.group(1), rel, lineno, strict, validated_vars,
+                errors, warnings,
             )
-            full_msg = f"  {msg_prefix} {rel}:{lineno} — {detail}"
-
-            if strict:
-                errors.append(full_msg)
-            else:
-                warnings.append(full_msg)
 
     return errors, warnings
+
+
+def _classify_path_construction_match(
+    user_expr: str,
+    rel: str,
+    lineno: int,
+    strict: bool,
+    validated_vars: set[str],
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    """Append a finding for one Path(user_input) match when unvalidated."""
+    if _path_root(user_expr) in validated_vars or user_expr in validated_vars:
+        return
+
+    msg_prefix = "WARNING" if not strict else "ERROR"
+    detail = (
+        f"Path({user_expr}) from user input before validation — "
+        f"pass through validate_read_path() first "
+        f"(per commit 847479c / AGENTS.md Rule 33)"
+    )
+    full_msg = f"  {msg_prefix} {rel}:{lineno} — {detail}"
+
+    if strict:
+        errors.append(full_msg)
+    else:
+        warnings.append(full_msg)
 
 
 # Pattern (f): chained Path(args.x).read_text() — exploit in one line
@@ -594,49 +609,74 @@ def _scan_path_method_calls(
         if COMMENT_RE.match(line.lstrip()):
             continue
 
-        # ── Case 1: chained Path(source).read_text() on one line ──
-        # Only flag when the Path argument itself comes from user input
-        # (e.g. Path(args.x)); skip test fixtures like Path(path_a).
-        chain_m = _CHAINED_PATH_METHOD_RE.search(line)
-        if chain_m:
-            chain_var = chain_m.group(1)
-            # Extract the root variable from dotted expression (args.x → args)
-            root_var = _path_root(chain_var)
-            if root_var in validated_vars or chain_var in validated_vars:
-                continue
-            if _USER_DERIVED_VAR_RE.match(root_var):
-                method = chain_m.group(2)
-                detail = (
-                    f"{rel}:{lineno} — chained Path({chain_var}).{method}() — "
-                    f"validate path first (per AGENTS.md Rule 33)"
-                )
-                _emit_finding(strict, errors, warnings,
-                    f"  ERROR   {detail}",
-                    f"  WARNING {detail}")
+        if _classify_chained_path_method_call(
+            line, rel, lineno, strict, validated_vars, errors, warnings,
+        ):
             continue
 
-        # ── Case 2: standalone var.read_text() where var name indicates ──
-        # ── user-originating path (e.g. args_path, input_file)          ──
-        method_call = _extract_standalone_path_method_call(line)
-        if not method_call:
-            continue
-        var_name, method = method_call
-        if var_name in validated_vars:
-            continue
+        _classify_standalone_path_method_call(
+            line, rel, lineno, strict, validated_vars, errors, warnings,
+        )
 
-        # Only flag if the variable name itself suggests user-derived origin
-        if not _USER_DERIVED_VAR_RE.match(var_name):
-            continue
+    return errors, warnings
 
+
+def _classify_chained_path_method_call(
+    line: str,
+    rel: str,
+    lineno: int,
+    strict: bool,
+    validated_vars: set[str],
+    errors: list[str],
+    warnings: list[str],
+) -> bool:
+    """Classify Path(source).method() and return True when matched."""
+    chain_m = _CHAINED_PATH_METHOD_RE.search(line)
+    if not chain_m:
+        return False
+
+    chain_var = chain_m.group(1)
+    root_var = _path_root(chain_var)
+    if root_var in validated_vars or chain_var in validated_vars:
+        return True
+    if _USER_DERIVED_VAR_RE.match(root_var):
+        method = chain_m.group(2)
         detail = (
-            f"{rel}:{lineno} — {var_name}.{method}() — "
-            f"'{var_name}' may contain user-derived path; validate first"
+            f"{rel}:{lineno} — chained Path({chain_var}).{method}() — "
+            f"validate path first (per AGENTS.md Rule 33)"
         )
         _emit_finding(strict, errors, warnings,
             f"  ERROR   {detail}",
             f"  WARNING {detail}")
+    return True
 
-    return errors, warnings
+
+def _classify_standalone_path_method_call(
+    line: str,
+    rel: str,
+    lineno: int,
+    strict: bool,
+    validated_vars: set[str],
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    """Classify user-derived var.read_text()/write_text() calls."""
+    method_call = _extract_standalone_path_method_call(line)
+    if not method_call:
+        return
+    var_name, method = method_call
+    if var_name in validated_vars:
+        return
+    if not _USER_DERIVED_VAR_RE.match(var_name):
+        return
+
+    detail = (
+        f"{rel}:{lineno} — {var_name}.{method}() — "
+        f"'{var_name}' may contain user-derived path; validate first"
+    )
+    _emit_finding(strict, errors, warnings,
+        f"  ERROR   {detail}",
+        f"  WARNING {detail}")
 
 
 def check_file(
