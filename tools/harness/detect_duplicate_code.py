@@ -91,6 +91,17 @@ LOG_ONLY_KEYWORDS = (
     "ngx_log_error", "ngx_log_debug", "NGX_LOG_",
     "category=", "return NGX_ERROR",
 )
+SUMMARY_CATEGORY_PATTERNS = (
+    ("memory", "warnings", "[memory]"),
+    ("rollback", "warnings", "[rollback]"),
+    ("ffi", "warnings", "[ffi-validation]"),
+    ("postcommit", "warnings", "[postcommit]"),
+    ("adjacent", "warnings", "adjacent"),
+    ("state", "reviews", "[state-machine]"),
+    ("struct", "reviews", "[structural]"),
+    ("log", "infos", "[log-only]"),
+    ("sig", "infos", "[signature]"),
+)
 
 
 def _display_path(path: Path) -> str:
@@ -418,17 +429,20 @@ def _count_by_category(
     all_infos: list[str],
 ) -> dict[str, int]:
     """Count findings by risk-semantic category."""
-    return {
-        "memory": sum(1 for m in all_warnings if "[memory]" in m),
-        "rollback": sum(1 for m in all_warnings if "[rollback]" in m),
-        "ffi": sum(1 for m in all_warnings if "[ffi-validation]" in m),
-        "postcommit": sum(1 for m in all_warnings if "[postcommit]" in m),
-        "adjacent": len([w for w in all_warnings if "adjacent" in w]),
-        "state": sum(1 for m in all_reviews if "[state-machine]" in m),
-        "struct": sum(1 for m in all_reviews if "[structural]" in m),
-        "log": sum(1 for m in all_infos if "[log-only]" in m),
-        "sig": sum(1 for m in all_infos if "[signature]" in m),
+    buckets = {
+        "warnings": all_warnings,
+        "reviews": all_reviews,
+        "infos": all_infos,
     }
+    return {
+        name: _count_containing(buckets[bucket], pattern)
+        for name, bucket, pattern in SUMMARY_CATEGORY_PATTERNS
+    }
+
+
+def _count_containing(messages: list[str], pattern: str) -> int:
+    """Count messages that contain a summary marker."""
+    return sum(1 for message in messages if pattern in message)
 
 
 def _print_summary_and_verdict(
