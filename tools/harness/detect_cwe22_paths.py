@@ -146,7 +146,6 @@ _USER_DERIVED_VAR_RE = re.compile(
     r"^(args|options|cli_|user_|input_|untrusted_)",
 )
 
-
 def _display_path(path: Path) -> str:
     """Return a repo-relative display string for path."""
     try:
@@ -244,7 +243,35 @@ def _is_file_derived_assignment(line: str) -> bool:
         or "repo_root" in rhs
         or "REPO_ROOT" in rhs
         or "ROOT" in rhs
+        or "_DIR" in rhs
     )
+
+
+def _is_all_caps_path_constant(line: str) -> bool:
+    """Detect ALL_CAPS constants assigned to a filesystem path literal.
+
+    E.g. ``VERSION_PLANNING_PATH = PROJECT_ROOT / "docs/VERSION_PLANNING.md"``
+    or ``MODULE_CONFIG = REPO_ROOT / "Cargo.toml"``.
+    """
+    if "=" not in line:
+        return False
+    lhs = line.split("=", 1)[0].strip()
+    rhs = line.split("=", 1)[1]
+    # Variable name must be ALL_CAPS with possible underscores
+    if not re.match(r"^[A-Z_][A-Z0-9_]*$", lhs):
+        return False
+    # RHS must contain a quoted path segment
+    if '"' not in rhs and "'" not in rhs:
+        return False
+    # Either a / operator for path concatenation, or a path suffix in the name
+    has_path_op = "/" in rhs
+    has_path_suffix = lhs.endswith((
+        "_PATH", "_DIR", "_ROOT", "_FILE", "_SCRIPT", "_TOML",
+        "_YML", "_YAML", "_JSON", "_LOCK", "_MD", "_CARGO",
+        "_CONFIG", "_CHECKLIST", "_EVIDENCE", "_MANIFEST",
+        "_TEMPLATE", "_METRICS", "_GATE",
+    ))
+    return has_path_op or has_path_suffix
 
 
 def _is_tempfile_assignment(line: str) -> bool:
@@ -357,6 +384,9 @@ def _collect_hardcoded_vars(lines: list[str]) -> set[str]:
     _add_assignment_lhs_by_predicate(
         lines, _is_tempfile_assignment, hardcoded_vars,
     )
+    _add_assignment_lhs_by_predicate(
+        lines, _is_all_caps_path_constant, hardcoded_vars,
+    )
 
     for line in lines:
         for m in _PATH_WRAPPED_RE.finditer(line):
@@ -463,10 +493,16 @@ def _resolve_open_first_arg(line: str) -> str | None:
     return _extract_method_open_first_arg(line)
 
 
+def _path_root(expr: str) -> str:
+    """Return the root identifier from a dotted path expression."""
+    return expr.split(".", 1)[0]
+
+
 def _scan_path_constructions(
     lines: list[str],
     rel: str,
     strict: bool,
+    validated_vars: set[str],
 ) -> tuple[list[str], list[str]]:
     """Scan for Path() construction from user input before validation.
 
@@ -490,22 +526,157 @@ def _scan_path_constructions(
             continue
 
         for m in _PATH_CONSTRUCTION_RE.finditer(line):
-            user_expr = m.group(1)
-
-            msg_prefix = "WARNING" if not strict else "ERROR"
-            detail = (
-                f"Path({user_expr}) from user input before validation — "
-                f"pass through validate_read_path() first "
-                f"(per commit 847479c / AGENTS.md Rule 33)"
+            _classify_path_construction_match(
+                m.group(1), rel, lineno, strict, validated_vars,
+                errors, warnings,
             )
-            full_msg = f"  {msg_prefix} {rel}:{lineno} — {detail}"
-
-            if strict:
-                errors.append(full_msg)
-            else:
-                warnings.append(full_msg)
 
     return errors, warnings
+
+
+def _classify_path_construction_match(
+    user_expr: str,
+    rel: str,
+    lineno: int,
+    strict: bool,
+    validated_vars: set[str],
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    """Append a finding for one Path(user_input) match when unvalidated."""
+    if _path_root(user_expr) in validated_vars or user_expr in validated_vars:
+        return
+
+    msg_prefix = "WARNING" if not strict else "ERROR"
+    detail = (
+        f"Path({user_expr}) from user input before validation — "
+        f"pass through validate_read_path() first "
+        f"(per commit 847479c / AGENTS.md Rule 33)"
+    )
+    full_msg = f"  {msg_prefix} {rel}:{lineno} — {detail}"
+
+    if strict:
+        errors.append(full_msg)
+    else:
+        warnings.append(full_msg)
+
+
+# Pattern (f): chained Path(args.x).read_text() — exploit in one line
+_CHAINED_PATH_METHOD_RE = re.compile(
+    r"Path\s*\(\s*(\w[\w.]*)\s*\)\s*\.\s*(read_text|write_text|open)\s*\(",
+)
+
+
+def _extract_standalone_path_method_call(line: str) -> tuple[str, str] | None:
+    """Extract ``receiver.method`` for standalone Path method calls."""
+    for method in ("read_text", "write_text"):
+        match = re.search(
+            rf"\b([A-Za-z_][A-Za-z0-9_]*)\.{method}\s*\(",
+            line,
+        )
+        if not match:
+            continue
+        return match.group(1), method
+    return None
+
+
+def _scan_path_method_calls(
+    lines: list[str],
+    rel: str,
+    strict: bool,
+    validated_vars: set[str],
+) -> tuple[list[str], list[str]]:
+    """Scan for Path method calls on unvalidated user-derived variables.
+
+    Catches two exploitable patterns:
+
+    1. Chained: ``Path(args.x).read_text()`` — single-line exploit where
+       a Path() from user input is immediately used to read/write files.
+       (The ``Path(args.x)`` part is separately caught by pattern (d).)
+
+    2. Standalone: ``args_variable.read_text()`` — when the variable name
+       itself indicates user-derived origin (args, input, cli, etc.).
+
+    NOTE: Function parameters (``path.read_text()``) and test variables
+    (``p.write_text()``) are NOT flagged — the detector cannot determine
+    if their caller validates the path. Only variables whose NAMES suggest
+    external origin are flagged for standalone calls.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    for lineno, line in enumerate(lines, start=1):
+        if COMMENT_RE.match(line.lstrip()):
+            continue
+
+        if _classify_chained_path_method_call(
+            line, rel, lineno, strict, validated_vars, errors, warnings,
+        ):
+            continue
+
+        _classify_standalone_path_method_call(
+            line, rel, lineno, strict, validated_vars, errors, warnings,
+        )
+
+    return errors, warnings
+
+
+def _classify_chained_path_method_call(
+    line: str,
+    rel: str,
+    lineno: int,
+    strict: bool,
+    validated_vars: set[str],
+    errors: list[str],
+    warnings: list[str],
+) -> bool:
+    """Classify Path(source).method() and return True when matched."""
+    chain_m = _CHAINED_PATH_METHOD_RE.search(line)
+    if not chain_m:
+        return False
+
+    chain_var = chain_m.group(1)
+    root_var = _path_root(chain_var)
+    if root_var in validated_vars or chain_var in validated_vars:
+        return True
+    if _USER_DERIVED_VAR_RE.match(root_var):
+        method = chain_m.group(2)
+        detail = (
+            f"{rel}:{lineno} — chained Path({chain_var}).{method}() — "
+            f"validate path first (per AGENTS.md Rule 33)"
+        )
+        _emit_finding(strict, errors, warnings,
+            f"  ERROR   {detail}",
+            f"  WARNING {detail}")
+    return True
+
+
+def _classify_standalone_path_method_call(
+    line: str,
+    rel: str,
+    lineno: int,
+    strict: bool,
+    validated_vars: set[str],
+    errors: list[str],
+    warnings: list[str],
+) -> None:
+    """Classify user-derived var.read_text()/write_text() calls."""
+    method_call = _extract_standalone_path_method_call(line)
+    if not method_call:
+        return
+    var_name, method = method_call
+    if var_name in validated_vars:
+        return
+    if not _USER_DERIVED_VAR_RE.match(var_name):
+        return
+
+    detail = (
+        f"{rel}:{lineno} — {var_name}.{method}() — "
+        f"'{var_name}' may contain user-derived path; validate first"
+    )
+    _emit_finding(strict, errors, warnings,
+        f"  ERROR   {detail}",
+        f"  WARNING {detail}")
 
 
 def check_file(
@@ -549,10 +720,17 @@ def check_file(
     # Per commit 847479c: Path(user_input) before validate_read_path
     # enables path traversal even if validated later.
     path_errors, path_warnings = _scan_path_constructions(
-        lines, rel, strict,
+        lines, rel, strict, validated_vars,
     )
     errors.extend(path_errors)
     warnings.extend(path_warnings)
+
+    # ── Pattern (e): Path.read_text() / write_text() on unvalidated vars ──
+    method_errors, method_warnings = _scan_path_method_calls(
+        lines, rel, strict, validated_vars,
+    )
+    errors.extend(method_errors)
+    warnings.extend(method_warnings)
 
     return errors, warnings
 

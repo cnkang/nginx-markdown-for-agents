@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-06-26
+
+Closeout hardening release for the 0.8.x line: streaming state machine
+correctness, decompression buffer memory safety, FFI handle lifecycle,
+and 0.8.x release gate validation.
+
+### Added
+
+- **`release-manifest.json`** — new release asset for DEB/RPM package releases.
+  The manifest records git tag, commit SHA, package metadata, package SHA-256
+  hashes, source archive hash for tag releases, and GitHub Actions workflow
+  metadata.  It is generated before `SHA256SUMS`, included in `SHA256SUMS`,
+  and protected by the `SHA256SUMS.asc` GPG signature chain for tag releases.
+- **Version consistency detector (Rule 55)** — `detect_version_consistency.sh`
+  validates version alignment across Cargo.toml, Chart.yaml, and internal
+  dependencies. Integrated into `harness-security-checks` to prevent version
+  drift issues during release preparation.
+
+### Fixed
+
+- **Streaming `pop_contexts_up_to` return order** — corrected to return
+  innermost-first (pop order) instead of bottom-up (stack order), matching
+  HTML implied end tag semantics and fixing `test_misnested*` regressions
+  (Rule 6).
+- **Streaming `ol`/`ul` derived state** — added `CodeBlock` handling so
+  that `in_preformatted` is cleared correctly when misnested list closures
+  unwind an open code block (Rule 6).
+- **Streaming emitter `ExitMany`** — new action enables batch context
+  unwinding from mid-stack, fixing implied-closure ordering for nested
+  block elements (Rule 6).
+- **Decompression buffer memory safety** — switched to pool-backed allocation
+  (`ngx_pnalloc`/`ngx_pfree`) so the buffer lifetime matches the request pool
+  and avoids heap/pool ownership mixing (Rule 43).
+- **Snapshot capacity** — raised snapshot max from 4 to 8 entries in the
+  stream commit path, supporting more complex multi-header mutation plans
+  (Rule 39).
+- **FFI `Box::into_raw` correctness** — fixed use-after-free pattern in
+  converter handle allocation by ensuring `Box::into_raw` is called only
+  after initialization succeeds (Rule 15).
+- **Unit test `ngx_pfree` mock** — added missing `ngx_pfree` mock to
+  `decompression_production_test.c` so decompression unit tests compile
+  and link correctly.
+- **Release manifest integrity validation** — `validate-release-manifest.py`
+  now parses `SHA256SUMS` and verifies package plus manifest digests instead
+  of only checking filename presence. Non-tag workflow manifests now declare
+  unsigned checksum-only integrity explicitly, and `workflow_dispatch` package
+  runs can omit the optional version input by falling back to the checked-in
+  package version.
+
+### Verified
+
+- `make harness-check` — 15/15 PASS
+- `make test-harness` — all detector tests PASS
+- `RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 make release-gates-check-08x` — PASS
+- `make test-nginx-unit` — all C module unit tests PASS
+- `cargo test --workspace` — 1388 Rust tests PASS, 0 failed
+- `make test-rust-fuzz-smoke` — all fuzz smoke tests PASS
+- `detect_ffi_panic_safety.sh --strict` — PASS (0 flagged)
+- `detect_nosonar_discipline.sh` — PASS (10 annotations)
+- `detect_ngx_log_arg_count.sh` — PASS (90 calls)
+- `detect_volatile_atomic.sh` — PASS
+
 ## [0.8.2] - 2026-06-25
 
 Patch release for the 0.8.x line: streaming decompression hardening, FFI

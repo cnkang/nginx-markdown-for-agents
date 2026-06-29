@@ -71,6 +71,7 @@ ARG NGINX_INGRESS_IMAGE=nginx/nginx-ingress:3.7.2
 # Module source repository and ref (branch, tag, or commit SHA).
 ARG MODULE_REPO=https://github.com/cnkang/nginx-markdown-for-agents.git
 ARG MODULE_REF=main
+ARG TARGETARCH
 
 # ---------------------------------------------------------------------------
 # Stage 1: module-build — Compile the markdown module against target NGINX
@@ -80,6 +81,11 @@ FROM debian:bookworm-slim AS module-build
 ARG NGINX_VERSION
 ARG MODULE_REPO
 ARG MODULE_REF
+ARG TARGETARCH
+
+COPY packaging/checksums.sha256 /tmp/rustup-bootstrap/checksums.sha256
+COPY packaging/scripts/install-verified-rustup.sh /tmp/rustup-bootstrap/install-verified-rustup.sh
+COPY packaging/scripts/verify-checksum.sh /tmp/rustup-bootstrap/verify-checksum.sh
 
 # Install build dependencies
 RUN set -eux; \
@@ -103,8 +109,19 @@ ENV CARGO_HOME=/opt/rust/cargo
 ENV PATH=/opt/rust/cargo/bin:${PATH}
 
 RUN set -eux; \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-      | sh -s -- -y --profile minimal --default-toolchain stable; \
+    arch="${TARGETARCH:-$(uname -m)}"; \
+    case "${arch}" in \
+      amd64|x86_64) rustup_arch=amd64 ;; \
+      arm64|aarch64) rustup_arch=arm64 ;; \
+      *) echo "Unsupported Rust bootstrap architecture: ${arch}" >&2; exit 1 ;; \
+    esac; \
+    chmod +x /tmp/rustup-bootstrap/install-verified-rustup.sh \
+      /tmp/rustup-bootstrap/verify-checksum.sh; \
+    /tmp/rustup-bootstrap/install-verified-rustup.sh \
+      --arch "${rustup_arch}" \
+      --toolchain stable \
+      --checksums /tmp/rustup-bootstrap/checksums.sha256; \
+    rm -rf /tmp/rustup-bootstrap; \
     cargo install --locked cbindgen
 
 # Clone module source

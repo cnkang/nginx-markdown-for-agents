@@ -583,6 +583,12 @@ impl StreamingSanitizer {
     }
 
     /// Closes the nearest target unless an HTML scope boundary is encountered.
+    // Linear scan from the top of the open-element stack to find the
+    // nearest target or scope boundary.  The worst-case cost is O(n) but
+    // n is bounded by `max_nesting_depth` (default 1000).  This preserves
+    // correct HTML implied-end-tag semantics for malformed or
+    // optional-end-tag input.  Avoid replacing with a simpler pop-only
+    // path unless equivalent scope semantics are maintained.
     fn close_nearest_in_scope(&mut self, targets: &[&str], boundaries: &[&str]) {
         let close_index = self.nesting_stack.iter().rposition(|open| {
             targets.contains(&open.as_str()) || boundaries.contains(&open.as_str())
@@ -598,6 +604,13 @@ impl StreamingSanitizer {
 
     /// Removes an implicitly closed element and all of its open descendants.
     /// Returns the closed tag names in close order (innermost first).
+    ///
+    /// Uses `drain(index..)` which is O(n) in the number of elements from
+    /// `index` to the stack end.  This cost is bounded by
+    /// `max_nesting_depth`.  The linear truncation is required to unwind
+    /// implied closures (e.g. `<p>` closed by `<div>`) while preserving
+    /// correct scope semantics for nested lists, blockquotes, and other
+    /// structured elements.
     fn truncate_nesting_stack(&mut self, index: usize) -> Vec<String> {
         let mut closed_tags: Vec<String> = self.nesting_stack.drain(index..).collect();
         for tag in closed_tags.iter().rev() {

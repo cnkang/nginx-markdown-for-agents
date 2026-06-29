@@ -42,6 +42,19 @@ use crate::error::ConversionError;
 
 use super::{MetadataExtractor, PageMetadata};
 
+/// Maximum DOM nesting depth allowed during metadata traversal.
+///
+/// This is an independent structural ceiling, separate from the conversion
+/// timeout managed by `ConversionContext`.  The timeout bounds elapsed wall
+/// time and node-count progress; `MAX_METADATA_DEPTH` bounds the shape of
+/// the DOM tree itself.  A very deeply nested but computationally cheap
+/// document may hit this depth limit before the timeout triggers, which is
+/// intentional fail-closed behavior for metadata-only traversal.
+///
+/// This limit prevents pathological DOM structures from causing
+/// unbounded recursion depth or excessive structural complexity in the
+/// iterative metadata walk.  It is distinct from `parser_memory_budget`,
+/// which bounds html5ever parser working-set size at the FFI boundary.
 const MAX_METADATA_DEPTH: usize = 1000;
 
 impl MetadataExtractor {

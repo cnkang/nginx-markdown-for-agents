@@ -1,6 +1,6 @@
 ---
 domain: streaming-backpressure
-rules: [1, 2, 38, 47, 51]
+rules: [1, 2, 38, 47, 51, 52]
 paths:
   - "components/nginx-module/src/**"
   - "components/rust-converter/src/streaming/**"
@@ -160,7 +160,20 @@ Verification:
   — verify full ngx_list_part_t iteration and any_public-before-has_private
   ordering.
 - `make test-nginx-unit` — auth cache-control tests cover multi-header
-  and commit-failure scenarios.
+ and commit-failure scenarios.
+
+---
+
+### 52. Derived-state reconciliation on multi-context drain
+Historical issues: `c06397b1`.
+
+Required:
+- When an end tag drains multiple contexts from the stack (misnested HTML), ALL derived state (`list_depth`, `blockquote_depth`, `in_preformatted`, `ordered_list_counters`) must be reconciled for EVERY popped context, not just the matching one.
+- Historical issue `c06397b1` fixed a bug where `</ul>` or `</blockquote>` draining an inner `<ol>` left stale `ordered_list_counters`. The fix removed the `pop_ordered_counters` flag so `OrderedList` ALWAYS pops its counter regardless of which end tag triggered the drain.
+
+Verification:
+- `grep -rn 'pop_and_update_derived_state\|ordered_list_counters' components/rust-converter/src/streaming/`
+- For each pop path, verify that derived state is reconciled for every popped context.
 
 ## Required Agent Workflow
 

@@ -28,7 +28,7 @@ operations, architecture, and contributor-facing harness maintenance.
 ### Release 0.8.x Line (Current)
 
 **Status:** Current release line. The 0.8.x line began with 0.8.0 (true
-streaming contract) and continues with patch releases (0.8.1, 0.8.2) that
+streaming contract) and continues with patch releases (0.8.1, 0.8.2, 0.8.3) that
 harden stability, security, and release-gate consistency without introducing
 new user-visible features or breaking configuration changes.
 
@@ -60,7 +60,8 @@ section below for detailed goals, non-goals, and implementation status.
   - Rust layout tests for `MarkdownResult`, `FFIAcceptResult`, error/reason
     code uniqueness.
   - C `static_assert` for critical struct sizeof and offsetof.
-- DEB/RPM packaging pipeline with GPG signing and repository metadata.
+- DEB/RPM packaging pipeline with SHA256SUMS, mandatory tag-release GPG signing,
+  release-manifest.json traceability, and repository metadata.
 - Kubernetes deployment examples (Ingress Controller, Helm chart, manifests).
 - Runtime diagnostics endpoint (`/nginx-markdown/diagnostics`).
 - Dynconf dry-run and last-known-good rollback.
@@ -379,11 +380,33 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 ### Current Release Line (0.8.x)
 
 The 0.8.x release line is the current maintained line. The latest patch
-release is 0.8.2; 0.8.1 and 0.8.2 are patch releases that
+release is 0.8.3; 0.8.1 through 0.8.3 are patch releases that
 harden stability, security, and release-gate consistency without introducing
 new user-visible features or breaking configuration changes.
 
-#### 0.8.2 (latest patch)
+#### 0.8.3 (latest patch)
+
+- Streaming state machine correctness: corrected `pop_contexts_up_to`
+  return order (innermost-first) and added `CodeBlock` handling in
+  `ol`/`ul` derived state branches (Rule 6).
+- Streaming emitter `ExitMany` action for batch context unwinding from
+  mid-stack (Rule 6).
+- Decompression buffer memory safety: switched workspace from `ngx_alloc`/`ngx_free`
+  to `ngx_pnalloc`/`ngx_pfree` (Rule 43).
+- Snapshot capacity raised from 4 to 8 entries in stream commit path
+  (Rule 39).
+- FFI `Box::into_raw` correctness: fixed use-after-free in converter
+  handle allocation (Rule 15).
+- Added `ngx_pfree` mock to `decompression_production_test.c` for
+  unit test compilation.
+- Full release gate validation: all 0.8.x gates pass (harness-check
+  15/15, test-harness, release-gates-check-08x, test-nginx-unit,
+  test-rust-fuzz-smoke, FFI panic safety --strict, all detector tests).
+- Release integrity: `release-manifest.json` added as a release asset for
+  DEB/RPM packages, generated before `SHA256SUMS` and covered by the
+  `SHA256SUMS.asc` GPG signature chain for tag releases.
+
+#### 0.8.2
 
 - Streaming decompression hardening: eliminated heap leaks in `finish_zlib()`
   across all exit paths, hardened buffer expansion error paths, and enforced
@@ -401,7 +424,7 @@ new user-visible features or breaking configuration changes.
 - Security scan scoping: gitleaks scoped to tracked worktree content, skipping
   deleted paths and guarding against empty scan roots (Rule 48).
 - Synced "current release line" wording across project, README, installation,
-  and compatibility docs to 0.8.x (latest patch 0.8.2).
+  and compatibility docs to 0.8.x (latest patch 0.8.3).
 - Finalized RFC-0008 status from `Draft` to `Accepted / Implemented in 0.8.0`.
 - Narrowed `markdown_stream_flush_interval` commitment from "future 0.8.x" to
   "future release".
@@ -614,7 +637,7 @@ See `examples/docker/` for Docker build examples.
 ## Summary
 
 **NGINX Markdown for Agents** is on the 0.8.x release line (latest patch:
-0.8.2). The project provides
+0.8.3). The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 dual-engine model, with bounded-memory streaming as the default path and
 full-buffer conversion as the fallback. Version 0.8.0 formalizes the true
@@ -622,10 +645,10 @@ streaming contract (RFC 0008, ADR-0011), introduces the streaming fallback
 state machine (ADR-0012), aligns the auto-mode streaming policy with the true
 streaming contract definition (ADR-0013), and consolidates platform and
 version support declarations into a release matrix source of truth (ADR-0014).
-The 0.8.1 and 0.8.2 patch releases harden streaming atomicity, FFI cleanup,
+The 0.8.1 through 0.8.3 patch releases harden streaming atomicity, FFI cleanup,
 OWS compliance, backpressure resume, streaming decompression, implied-closure
 correctness, release-gate naming, and documentation
-consistency without changing the 0.8.x configuration contract. It also
+consistency without changing the 0.8.x configuration contract. They also
 includes streaming observability (metrics and tracing), streaming security
 enforcement (policy validation and alerts), streaming configuration directives, Prometheus-compatible
 metrics, decision reason codes, rollout and rollback guides, parity and

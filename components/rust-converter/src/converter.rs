@@ -35,9 +35,8 @@
 //! - **Headings (h1-h6)**: Converted to ATX-style headings (`#` to `######`)
 //! - **Paragraphs (p)**: Converted to plain text with blank line separation
 //! - **Text nodes**: Extracted and normalized (whitespace collapsed)
-//!
-//! Additional element handlers (links, images, lists, code, etc.) will be added in
-//! subsequent tasks to provide comprehensive HTML to Markdown conversion.
+//! - **Links, images, lists, code blocks, tables, blockquotes, emphasis**: Handled by
+//!   the [`blocks`] and [`inline`] sub-modules for comprehensive HTML to Markdown conversion.
 //!
 //! # Examples
 //!

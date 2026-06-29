@@ -254,6 +254,32 @@ else
 fi
 rm -f "${src_dir}/free.rs"
 
+# ── Fixture: free_helper_with_catch (catch_unwind wrapping drop) ──
+cat >"${src_dir}/free_catch.rs" <<'RUST'
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn md_free_with_catch(handle: *mut Handle) {
+    if handle.is_null() {
+        return;
+    }
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        unsafe { drop(Box::from_raw(handle)) };
+    }));
+}
+RUST
+
+out="${tmp_dir}/free_catch.out"
+rc=0
+run_detector "${src_dir}" "${out}" --strict || rc=$?
+# A *_free helper with catch_unwind wrapping drop should be classified
+# as direct_catch (or at least NOT flagged as free_helper_without_catch).
+if [[ "${rc}" -eq 0 ]] && ! grep -q "free_helper_without_catch" "${out}"; then
+    pass "strict mode treats catch_unwind-wrapped free helper as safe (not free_helper_without_catch)"
+else
+    fail "strict mode treats catch_unwind-wrapped free helper as safe (not free_helper_without_catch)" \
+        "exit=${rc}; output=$(tr '\n' ' ' <"${out}")"
+fi
+rm -f "${src_dir}/free_catch.rs"
+
 # ── Fixture: free_helper advisory mode → OK (no exit 1) ──
 cat >"${src_dir}/free2.rs" <<'RUST'
 #[unsafe(no_mangle)]

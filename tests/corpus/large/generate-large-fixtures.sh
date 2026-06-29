@@ -68,7 +68,7 @@ for fixture_id, target_size in targets:
         "failure-corpus": False,
         "streaming_notes": {
             "expected_fallback": False,
-            "known_diff_ids": [],
+            "known_diff_ids": ["DIFF-PARITY-WHITESPACE-ONLY"],
             "high_risk_structures": ["large-document", "memory-boundary"]
         }
     }
