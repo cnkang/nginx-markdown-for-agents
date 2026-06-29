@@ -42,16 +42,15 @@ if [[ ! -d "$SRC_DIR" ]]; then
 fi
 
 violations=0
-warnings=0
 
 # Find all .c and .h files
 source_files=()
-while IFS= read -r file; do
+while IFS= read -r -d '' file; do
     source_files+=("$file")
-done < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f)
+done < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f -print0)
 
 if [[ ${#source_files[@]} -eq 0 ]]; then
-    echo "No source files found in $SRC_DIR"
+    echo "No source files found in $SRC_DIR" >&2
     exit 0
 fi
 
@@ -114,7 +113,7 @@ for file in "${source_files[@]}"; do
 done
 
 if [[ $violations -gt 0 ]]; then
-    echo "ERROR: Found $violations violation(s) and $warnings warning(s)" >&2
+    echo "ERROR: Found $violations violation(s)" >&2
     exit 1
 else
     echo "OK: No decompression budget issues detected"

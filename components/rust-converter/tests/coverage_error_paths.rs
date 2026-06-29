@@ -79,8 +79,8 @@ fn test_error_code_internal_error() {
 #[test]
 fn test_error_is_std_error() {
     let err = ConversionError::Timeout;
-    /* Verify ConversionError implements std::error::Error */
-    let _: &dyn std::error::Error = &err;
+    let error: &dyn std::error::Error = &err;
+    assert!(error.source().is_none());
 }
 
 /// Verifies that `ConversionError` Debug format includes the variant name.

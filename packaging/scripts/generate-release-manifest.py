@@ -37,6 +37,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+from lib.path_validation import validate_read_path  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Filename parsing
 # ---------------------------------------------------------------------------
@@ -49,6 +52,14 @@ RPM_PATTERN = re.compile(
 )
 
 ARCH_NORMALIZE = {"x86_64": "amd64", "aarch64": "arm64"}
+SEMVER_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
+
+
+def validate_version(version: str, context: str) -> str:
+    if not SEMVER_PATTERN.match(version):
+        print(f"ERROR: Invalid semantic version in {context}: {version}", file=sys.stderr)
+        raise SystemExit(1)
+    return version
 
 
 def sha256_file(path: Path) -> str:
@@ -64,7 +75,7 @@ def parse_package(path: Path, expected_version: str | None = None) -> dict:
     name = path.name
     m = DEB_PATTERN.match(name)
     if m:
-        version = m.group("version")
+        version = validate_version(m.group("version"), name)
         nginx_version = m.group("nginx_version")
         arch = m.group("arch")
         fmt = "deb"
@@ -85,7 +96,7 @@ def parse_package(path: Path, expected_version: str | None = None) -> dict:
 
     m = RPM_PATTERN.match(name)
     if m:
-        version = m.group("version")
+        version = validate_version(m.group("version"), name)
         nginx_version = m.group("nginx_version")
         rpm_arch = m.group("rpm_arch")
         arch = ARCH_NORMALIZE.get(rpm_arch, rpm_arch)
@@ -192,6 +203,12 @@ def build_manifest(
     no_source: bool,
 ) -> dict:
     """Build the complete manifest."""
+    artifact_dir = Path(validate_read_path(artifact_dir, purpose="release artifact directory"))
+    if version:
+        version = validate_version(version, "--version")
+    if tag and tag.startswith("v"):
+        validate_version(tag[1:], "--tag")
+
     # Discover packages — sort all files globally for deterministic ordering
     # that matches the validator's global-filename-sort check.
     all_files = sorted(
@@ -227,6 +244,7 @@ def build_manifest(
         tag = tag_from_ref(ref)
     if version is None and tag:
         version = version_from_tag(tag)
+        validate_version(version, "tag")
     if version is None:
         version = detected_version
     # Do NOT synthesize tag = "v{version}" here.
@@ -312,7 +330,7 @@ def main() -> None:
     def _none_if_empty(val: str | None) -> str | None:
         return val if val else None
 
-    artifact_dir = Path(args.artifact_dir)
+    artifact_dir = Path(validate_read_path(args.artifact_dir, purpose="release artifact directory"))
     if not artifact_dir.is_dir():
         print(f"ERROR: Artifact directory not found: {artifact_dir}", file=sys.stderr)
         raise SystemExit(1)

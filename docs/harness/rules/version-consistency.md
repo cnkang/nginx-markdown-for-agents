@@ -1,3 +1,15 @@
+---
+domain: version-consistency
+rules: [55]
+paths:
+  - "components/rust-converter/Cargo.toml"
+  - "components/rust-converter/fuzz/Cargo.toml"
+  - "tools/corpus/test-corpus-conversion/Cargo.toml"
+  - "charts/nginx-markdown/Chart.yaml"
+  - "docs/**"
+  - "tools/harness/detect_version_consistency.sh"
+---
+
 # Version Consistency Rule
 
 ## Rule ID
@@ -77,8 +89,8 @@ PASS: All version checks passed
 ```
 
 ## Related Rules
-- **Rule 25**: Release gate validation (includes version consistency as part of release readiness)
-- **Rule 31**: Documentation accuracy (version examples must be current)
+- **Rule 9**: Documentation tooling accuracy (version examples must match the active release)
+- **Rule 13**: CI and release gate validation (release readiness includes version consistency)
 - **AGENTS.md**: Version bump procedures
 
 ## History

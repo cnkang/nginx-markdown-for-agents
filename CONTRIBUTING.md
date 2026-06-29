@@ -440,3 +440,4 @@ Thank you for contributing to NGINX Markdown for Agents!
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.3 | 2026-05-14 | Codex | Fix repository URL placeholder, update coverage tool to cargo llvm-cov |
+| 0.8.3 | 2026-06-26 | Kang | Updated Rust version requirement to 1.91.0+ |

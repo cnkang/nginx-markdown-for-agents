@@ -20,6 +20,8 @@ This page is the readable overlay, not the machine-owned truth.
 | `v070-gates` | focused semantic | `make release-gates-check-070`, `make test-rust`, `make check-headers` |
 | `v080-gates` | focused semantic | `make release-gates-check-080` |
 | `release-governance` | focused semantic | `make release-gates-check-080`, `make release-gates-check`, `make release-gates-check-strict`, `make release-gates-check-055` |
+| `release-manifest` | focused semantic | `python3 packaging/scripts/test_release_manifest.py`, `make release-gates-check` |
+| `version-consistency` | focused semantic | `bash tools/harness/detect_version_consistency.sh`, `make harness-security-checks` |
 | `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e` |
 | `release-quality` | umbrella | `make harness-check-full` |
 | `coverage-gate` | focused semantic | `make coverage-gate` |
@@ -99,3 +101,4 @@ Safety/engineering invariants always win; user-task controls scope and approach.
 | 0.7.0 | 2026-05-31 | Kiro | Added v070-gates verification family (release-gates-check-070, test-rust, check-headers) to sync with JSON manifest |
 | 0.8.0 | 2026-06-16 | Codex | Added v080-gates verification family for release-gates-check-080; added tools/harness/tests/ to tooling-path-security risk pack paths |
 | 0.8.2 | 2026-06-13 | Codex | Added security-static and supply-chain verification families plus the security-static-supply-chain risk pack |
+| 0.8.3 | 2026-06-26 | Kang | Added release-manifest and version-consistency verification families |

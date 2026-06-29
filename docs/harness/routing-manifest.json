@@ -143,6 +143,14 @@
       ],
       "notes": "Validates release-manifest.json generation, validation, and path traversal protection (Rule 54)"
     },
+    "version-consistency": {
+      "phase": "focused-semantic",
+      "commands": [
+        "bash tools/harness/detect_version_consistency.sh",
+        "make harness-security-checks"
+      ],
+      "notes": "Validates active release version consistency across source, chart, internal dependencies, and docs (Rule 55)"
+    },
     "runtime-e2e": {
       "phase": "umbrella",
       "commands": [
@@ -324,6 +332,7 @@
       "verification_families": [
         "harness-sync",
         "docs-tooling",
+        "version-consistency",
         "v070-gates",
         "v080-gates",
         "release-quality"

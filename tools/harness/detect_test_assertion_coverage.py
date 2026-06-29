@@ -177,7 +177,6 @@ def check_test_assertions(func_name: str, line_num: int, func_body: str,
         r'\bpanic!\s*\(',
         r'\.expect\s*\(',
         r'\.unwrap\s*\(\s*\)',
-        r'let\s+_\s*:\s*&dyn\s+',  # Type assertion (let _: &dyn Trait = ...)
     ]
     
     has_assertion = any(re.search(pattern, func_body) for pattern in assertion_patterns)
