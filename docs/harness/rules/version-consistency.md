@@ -6,6 +6,12 @@ paths:
   - "components/rust-converter/fuzz/Cargo.toml"
   - "tools/corpus/test-corpus-conversion/Cargo.toml"
   - "charts/nginx-markdown/Chart.yaml"
+  - "AGENTS.md"
+  - "CONTRIBUTING.md"
+  - "SECURITY.md"
+  - "README.md"
+  - "README_zh-CN.md"
+  - "packaging/README.md"
   - "docs/**"
   - "tools/harness/detect_version_consistency.sh"
 ---

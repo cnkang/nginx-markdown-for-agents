@@ -52,7 +52,19 @@ RPM_PATTERN = re.compile(
 )
 
 ARCH_NORMALIZE = {"x86_64": "amd64", "aarch64": "arm64"}
-SEMVER_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
+SEMVER_PATTERN = re.compile(
+    r"^(0|[1-9]\d*)\."
+    r"(0|[1-9]\d*)\."
+    r"(0|[1-9]\d*)"
+    r"(?:-("
+    r"(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*"
+    r"))?"
+    r"(?:\+("
+    r"[0-9A-Za-z-]+"
+    r"(?:\.[0-9A-Za-z-]+)*"
+    r"))?$"
+)
 
 
 def validate_version(version: str, context: str) -> str:
@@ -206,8 +218,6 @@ def build_manifest(
     artifact_dir = Path(validate_read_path(artifact_dir, purpose="release artifact directory"))
     if version:
         version = validate_version(version, "--version")
-    if tag and tag.startswith("v"):
-        validate_version(tag[1:], "--tag")
 
     # Discover packages — sort all files globally for deterministic ordering
     # that matches the validator's global-filename-sort check.
@@ -242,9 +252,17 @@ def build_manifest(
     # Tag / version
     if tag is None and ref:
         tag = tag_from_ref(ref)
+    tag_version = None
+    if tag:
+        tag_version = validate_version(version_from_tag(tag), "--tag")
+    if version and tag_version and version != tag_version:
+        print(
+            f"ERROR: --version {version} does not match --tag {tag}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     if version is None and tag:
-        version = version_from_tag(tag)
-        validate_version(version, "tag")
+        version = tag_version
     if version is None:
         version = detected_version
     # Do NOT synthesize tag = "v{version}" here.
@@ -330,7 +348,15 @@ def main() -> None:
     def _none_if_empty(val: str | None) -> str | None:
         return val if val else None
 
-    artifact_dir = Path(validate_read_path(args.artifact_dir, purpose="release artifact directory"))
+    try:
+        artifact_dir = Path(validate_read_path(
+            args.artifact_dir,
+            must_exist=False,
+            purpose="release artifact directory",
+        ))
+    except (OSError, ValueError) as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        raise SystemExit(1)
     if not artifact_dir.is_dir():
         print(f"ERROR: Artifact directory not found: {artifact_dir}", file=sys.stderr)
         raise SystemExit(1)
