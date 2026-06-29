@@ -55,6 +55,10 @@ pub enum StateMachineAction {
     Enter(StructuralContext),
     /// Pop the current context and finalize its emission.
     Exit(StructuralContext),
+    /// Pop all contexts from the stack top down to and including the
+    /// matching context.  Used for misnested HTML where the matching
+    /// tag is not at the top of the stack.
+    ExitMany(Vec<StructuralContext>),
     /// Emit text content within the current context.
     Text(String),
     /// An unsupported HTML structure was detected — signal fallback.
@@ -77,7 +81,10 @@ pub struct StructuralStateMachine {
     stack: Vec<StructuralContext>,
     /// Memory budget used for stack enforcement.
     budget: MemoryBudget,
-    /// Whether the previous block-level element needs a blank line separator.
+    /// **Deprecated / dead field.** The [`IncrementalEmitter`](super::emitter::IncrementalEmitter)
+    /// now manages block-separator state internally via its own `needs_block_separator`
+    /// tracking, making this field redundant. Retained to preserve struct layout and
+    /// ABI stability across FFI; safe to remove in the next breaking-change release.
     pub needs_block_separator: bool,
     /// Current list nesting depth (for indentation).
     pub list_depth: usize,
@@ -348,8 +355,8 @@ impl StructuralStateMachine {
     ///
     /// For matching contexts (e.g., headings, paragraphs, list items, pre/code, blockquotes,
     /// links, emphasis), this removes the nearest matching context from the stack, adjusts
-    /// list or blockquote depths or the preformatted flag as appropriate, sets
-    /// `needs_block_separator` for block-level elements, and returns `StateMachineAction::Exit`
+    /// list or blockquote depths or the preformatted flag as appropriate,
+    /// and returns `StateMachineAction::Exit` (or `ExitMany` for misnested HTML)
     /// with the popped context. Special-case behavior:
     /// - `ol` and `ul`: decrement `list_depth`; `ol` also pops the ordered-list counter.
     /// - `head`: sets `in_head` to `false` and does not modify the stack.
@@ -372,54 +379,59 @@ impl StructuralStateMachine {
     fn handle_end_tag(&mut self, name: &str) -> Result<StateMachineAction, ConversionError> {
         match name {
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p" | "li" | "pre" | "blockquote" | "a"
-            | "strong" | "b" | "em" | "i" | "code" => {
-                if let Some(ctx) = self.pop_matching_context(name) {
-                    // Update tracking state
-                    match &ctx {
-                        StructuralContext::OrderedList(_) | StructuralContext::UnorderedList => {
-                            self.list_depth = self.list_depth.saturating_sub(1);
-                        }
-                        StructuralContext::Blockquote => {
-                            self.blockquote_depth = self.blockquote_depth.saturating_sub(1);
-                        }
-                        StructuralContext::CodeBlock(_) => {
-                            self.in_preformatted = false;
-                        }
-                        _ => {}
-                    }
-                    // Mark that we need a block separator after block-level elements
-                    if is_block_level(name) {
-                        self.needs_block_separator = true;
-                    }
-                    Ok(StateMachineAction::Exit(ctx))
-                } else {
-                    Ok(StateMachineAction::None)
-                }
-            }
-            "ol" => {
-                if let Some(ctx) = self.pop_matching_context(name) {
-                    self.list_depth = self.list_depth.saturating_sub(1);
-                    self.ordered_list_counters.pop();
-                    self.needs_block_separator = true;
-                    Ok(StateMachineAction::Exit(ctx))
-                } else {
-                    Ok(StateMachineAction::None)
-                }
-            }
-            "ul" => {
-                if let Some(ctx) = self.pop_matching_context(name) {
-                    self.list_depth = self.list_depth.saturating_sub(1);
-                    self.needs_block_separator = true;
-                    Ok(StateMachineAction::Exit(ctx))
-                } else {
-                    Ok(StateMachineAction::None)
-                }
-            }
+            | "strong" | "b" | "em" | "i" | "code" => self.pop_and_update_derived_state(name),
+            "ol" | "ul" => self.pop_and_update_derived_state(name),
             "head" => {
                 self.in_head = false;
                 Ok(StateMachineAction::None)
             }
             _ => Ok(StateMachineAction::None),
+        }
+    }
+
+    /// Shared end-tag logic: pop contexts up to `tag_name`, reconcile
+    /// derived state for every popped context, and return the appropriate
+    /// exit action.
+    ///
+    /// For each `StructuralContext` drained from the stack:
+    /// - `OrderedList` → decrement `list_depth` and pop the counter
+    /// - `UnorderedList` → decrement `list_depth`
+    /// - `Blockquote` → decrement `blockquote_depth`
+    /// - `CodeBlock` → clear `in_preformatted`
+    ///
+    /// This ensures misnested HTML that implicitly closes an `OrderedList`
+    /// (e.g. `</ul>` or `</blockquote>` draining an inner `<ol>`) always
+    /// leaves `ordered_list_counters` consistent with the stack.
+    fn pop_and_update_derived_state(
+        &mut self,
+        tag_name: &str,
+    ) -> Result<StateMachineAction, ConversionError> {
+        let popped = self.pop_contexts_up_to(tag_name);
+        if popped.is_empty() {
+            return Ok(StateMachineAction::None);
+        }
+        for ctx in &popped {
+            match ctx {
+                StructuralContext::OrderedList(_) => {
+                    self.list_depth = self.list_depth.saturating_sub(1);
+                    self.ordered_list_counters.pop();
+                }
+                StructuralContext::UnorderedList => {
+                    self.list_depth = self.list_depth.saturating_sub(1);
+                }
+                StructuralContext::Blockquote => {
+                    self.blockquote_depth = self.blockquote_depth.saturating_sub(1);
+                }
+                StructuralContext::CodeBlock(_) => {
+                    self.in_preformatted = false;
+                }
+                _ => {}
+            }
+        }
+        if popped.len() == 1 {
+            Ok(StateMachineAction::Exit(popped.into_iter().next().unwrap()))
+        } else {
+            Ok(StateMachineAction::ExitMany(popped))
         }
     }
 
@@ -443,27 +455,29 @@ impl StructuralStateMachine {
         Ok(())
     }
 
-    /// Removes and returns the nearest (innermost) stacked `StructuralContext` that corresponds to the given HTML tag name.
+    /// Pops all contexts from the stack top down to and including the
+    /// nearest context matching `tag_name`, returning them in pop order
+    /// (innermost first).
     ///
-    /// The search scans the stack from top to bottom and, if a matching context is found, removes it from the stack and returns it. If no matching context exists, returns `None`.
+    /// For well-nested HTML the matching context is at the stack top, so
+    /// only one element is returned.  For misnested HTML (e.g. a `</ol>`
+    /// closing an ordered list that is not at the top), all intervening
+    /// contexts are implicitly closed first.  This preserves derived-state
+    /// consistency (`list_depth`, `blockquote_depth`, `in_preformatted`,
+    /// `ordered_list_counters`).
     ///
-    /// # Returns
-    ///
-    /// The removed `StructuralContext` if a match was found, `None` otherwise.
-    fn pop_matching_context(&mut self, tag_name: &str) -> Option<StructuralContext> {
-        // Find the matching context from the top of the stack
+    /// If no matching context exists, returns an empty `Vec`.
+    fn pop_contexts_up_to(&mut self, tag_name: &str) -> Vec<StructuralContext> {
         let pos = self
             .stack
             .iter()
             .rposition(|ctx| context_matches_tag(ctx, tag_name));
         if let Some(idx) = pos {
-            if idx + 1 == self.stack.len() {
-                self.stack.pop()
-            } else {
-                Some(self.stack.remove(idx))
-            }
+            let mut drained: Vec<StructuralContext> = self.stack.drain(idx..).collect();
+            drained.reverse();
+            drained
         } else {
-            None
+            Vec::new()
         }
     }
 
@@ -610,26 +624,6 @@ impl StructuralStateMachine {
         // Each StructuralContext is roughly 64 bytes.
         self.stack.len().saturating_mul(64)
     }
-}
-
-/// Determines whether an HTML tag name represents a block-level element.
-///
-/// # Returns
-///
-/// `true` if `tag` is a block-level element (`h1`–`h6`, `p`, `pre`, `blockquote`, `li`, `ol`, or `ul`), `false` otherwise.
-///
-/// # Examples
-///
-/// ```ignore
-/// assert!(is_block_level("p"));
-/// assert!(is_block_level("h3"));
-/// assert!(!is_block_level("span"));
-/// ```
-fn is_block_level(tag: &str) -> bool {
-    matches!(
-        tag,
-        "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p" | "pre" | "blockquote" | "li" | "ol" | "ul"
-    )
 }
 
 /// Determine whether a `StructuralContext` corresponds to the given HTML closing tag name.
@@ -802,7 +796,8 @@ mod tests {
             action,
             StateMachineAction::Exit(StructuralContext::Heading(1))
         );
-        assert!(sm.needs_block_separator);
+        // needs_block_separator is deprecated/dead on the state machine;
+        // the emitter manages its own copy independently.
     }
 
     #[test]
@@ -1149,5 +1144,220 @@ mod tests {
             .unwrap();
         assert_eq!(sm.next_ordered_item_number(), 5);
         assert_eq!(sm.next_ordered_item_number(), 6);
+    }
+
+    /// Regression: closing a tag that is not at the stack top must
+    /// implicitly close all intervening contexts and emit ExitMany.
+    #[test]
+    fn test_misnested_ol_not_at_top() {
+        let mut sm = default_sm();
+        // <ol><li><p>text</p></li></ol> — p and li are above ol
+        sm.process_event(&start_tag("ol")).unwrap();
+        sm.process_event(&start_tag("li")).unwrap();
+        sm.process_event(&start_tag("p")).unwrap();
+        sm.process_event(&text("text")).unwrap();
+
+        // Close </p> — matches top, single exit
+        let action = sm.process_event(&end_tag("p")).unwrap();
+        assert!(matches!(
+            action,
+            StateMachineAction::Exit(StructuralContext::Paragraph)
+        ));
+        assert_eq!(sm.depth(), 2); // ol, li still open
+
+        // Close </li> — matches top, single exit
+        let action = sm.process_event(&end_tag("li")).unwrap();
+        assert!(matches!(
+            action,
+            StateMachineAction::Exit(StructuralContext::ListItem)
+        ));
+        assert_eq!(sm.depth(), 1); // ol still open
+
+        // Close </ol> — matches the only remaining context
+        let action = sm.process_event(&end_tag("ol")).unwrap();
+        assert!(matches!(
+            action,
+            StateMachineAction::Exit(StructuralContext::OrderedList(_))
+        ));
+        assert_eq!(sm.depth(), 0);
+        assert_eq!(sm.list_depth, 0);
+    }
+
+    /// Regression: misnested HTML where `</ol>` closes an ordered list
+    /// that has other elements above it on the stack.  The state machine
+    /// must emit ExitMany and correctly update list_depth and counter state.
+    #[test]
+    fn test_misnested_ol_with_intervening_elements() {
+        let mut sm = default_sm();
+        // Misnested: <ol><li><strong>bold</ol>
+        // </ol> must close strong, li, and ol (3 contexts)
+        sm.process_event(&start_tag("ol")).unwrap();
+        sm.process_event(&start_tag("li")).unwrap();
+        sm.process_event(&start_tag("strong")).unwrap();
+        sm.process_event(&text("bold")).unwrap();
+        let action = sm.process_event(&end_tag("ol")).unwrap();
+        match action {
+            StateMachineAction::ExitMany(contexts) => {
+                assert_eq!(contexts.len(), 3);
+                assert!(matches!(contexts[0], StructuralContext::Bold));
+                assert!(matches!(contexts[1], StructuralContext::ListItem));
+                assert!(matches!(contexts[2], StructuralContext::OrderedList(_)));
+            }
+            _ => panic!("expected ExitMany, got {:?}", action),
+        }
+        assert_eq!(sm.depth(), 0);
+        assert_eq!(sm.list_depth, 0);
+        assert!(sm.ordered_list_counters.is_empty());
+    }
+
+    /// Regression: misnested HTML where `</blockquote>` closes an unordered
+    /// list that has a blockquote above it.  list_depth and blockquote_depth
+    /// must both be decremented correctly.
+    #[test]
+    fn test_misnested_ul_with_blockquote() {
+        let mut sm = default_sm();
+        // Misnested: <blockquote><ul><li>item</blockquote>
+        // </blockquote> closes li, ul, blockquote (3 contexts)
+        sm.process_event(&start_tag("blockquote")).unwrap();
+        sm.process_event(&start_tag("ul")).unwrap();
+        sm.process_event(&start_tag("li")).unwrap();
+        sm.process_event(&text("item")).unwrap();
+        let action = sm.process_event(&end_tag("blockquote")).unwrap();
+        match action {
+            StateMachineAction::ExitMany(contexts) => {
+                assert_eq!(contexts.len(), 3);
+                assert!(matches!(contexts[0], StructuralContext::ListItem));
+                assert!(matches!(contexts[1], StructuralContext::UnorderedList));
+                assert!(matches!(contexts[2], StructuralContext::Blockquote));
+            }
+            _ => panic!("expected ExitMany, got {:?}", action),
+        }
+        assert_eq!(sm.depth(), 0);
+        assert_eq!(sm.list_depth, 0);
+        assert_eq!(sm.blockquote_depth, 0);
+    }
+
+    /// Regression: misnested HTML where `</ul>` closes an unordered list
+    /// that has a preformatted code block above it.  Note: `<code>` inside
+    /// `<pre>` does NOT push a separate context, so the stack has 2 items
+    /// (ul + CodeBlock), not 3.
+    #[test]
+    fn test_misnested_ul_with_preformatted() {
+        let mut sm = default_sm();
+        // Misnested: <ul><pre><code>text</ul>
+        // code inside pre does NOT push a separate context
+        sm.process_event(&start_tag("ul")).unwrap();
+        sm.process_event(&start_tag("pre")).unwrap();
+        sm.process_event(&start_tag("code")).unwrap();
+        sm.process_event(&text("text")).unwrap();
+        // </ul> closes CodeBlock (pre), ul (2 contexts)
+        let action = sm.process_event(&end_tag("ul")).unwrap();
+        match action {
+            StateMachineAction::ExitMany(contexts) => {
+                assert_eq!(contexts.len(), 2);
+                assert!(matches!(contexts[0], StructuralContext::CodeBlock(_)));
+                assert!(matches!(contexts[1], StructuralContext::UnorderedList));
+            }
+            _ => panic!("expected ExitMany, got {:?}", action),
+        }
+        assert_eq!(sm.depth(), 0);
+        assert_eq!(sm.list_depth, 0);
+        assert!(!sm.in_preformatted);
+    }
+
+    /// Well-nested HTML must still produce a single Exit, not ExitMany.
+    #[test]
+    fn test_well_nested_still_single_exit() {
+        let mut sm = default_sm();
+        sm.process_event(&start_tag("ol")).unwrap();
+        sm.process_event(&start_tag("li")).unwrap();
+        sm.process_event(&text("item")).unwrap();
+
+        // </li> matches top
+        let action = sm.process_event(&end_tag("li")).unwrap();
+        assert!(matches!(
+            action,
+            StateMachineAction::Exit(StructuralContext::ListItem)
+        ));
+
+        // </ol> matches top
+        let action = sm.process_event(&end_tag("ol")).unwrap();
+        assert!(matches!(
+            action,
+            StateMachineAction::Exit(StructuralContext::OrderedList(_))
+        ));
+    }
+
+    // --- Misnested ordered-list counter regression tests (P1) ---
+
+    /// `</blockquote>` closing over `<ol><li>` must drain the OrderedList
+    /// and pop its counter so `ordered_list_counters` is empty afterwards.
+    #[test]
+    fn test_misnested_ordered_list_drained_by_blockquote_clears_counter() {
+        let mut sm = default_sm();
+        // Build: <blockquote><ol><li>x</blockquote>
+        sm.process_event(&start_tag("blockquote")).unwrap();
+        sm.process_event(&start_tag("ol")).unwrap();
+        sm.process_event(&start_tag("li")).unwrap();
+        sm.process_event(&text("x")).unwrap();
+
+        assert_eq!(sm.ordered_list_counters.len(), 1);
+        assert_eq!(sm.list_depth, 1);
+        assert_eq!(sm.blockquote_depth, 1);
+
+        // </blockquote> drains li, ol, blockquote (3 contexts)
+        let action = sm.process_event(&end_tag("blockquote")).unwrap();
+        match action {
+            StateMachineAction::ExitMany(contexts) => {
+                assert_eq!(contexts.len(), 3);
+                assert!(matches!(contexts[0], StructuralContext::ListItem));
+                assert!(matches!(contexts[1], StructuralContext::OrderedList(_)));
+                assert!(matches!(contexts[2], StructuralContext::Blockquote));
+            }
+            _ => panic!(
+                "expected ExitMany for misnested blockquote, got {:?}",
+                action
+            ),
+        }
+        assert_eq!(sm.depth(), 0);
+        assert_eq!(sm.list_depth, 0);
+        assert_eq!(sm.blockquote_depth, 0);
+        assert!(
+            sm.ordered_list_counters.is_empty(),
+            "ordered_list_counters must be empty after blockquote drains ol"
+        );
+    }
+
+    /// `</ul>` closing over `<ol><li>` must drain the OrderedList
+    /// and pop its counter so `ordered_list_counters` is empty afterwards.
+    #[test]
+    fn test_misnested_ordered_list_drained_by_ul_clears_counter() {
+        let mut sm = default_sm();
+        // Build: <ul><ol><li>x</ul>
+        sm.process_event(&start_tag("ul")).unwrap();
+        sm.process_event(&start_tag("ol")).unwrap();
+        sm.process_event(&start_tag("li")).unwrap();
+        sm.process_event(&text("x")).unwrap();
+
+        assert_eq!(sm.ordered_list_counters.len(), 1);
+        assert_eq!(sm.list_depth, 2);
+
+        // </ul> drains li, ol, ul (3 contexts)
+        let action = sm.process_event(&end_tag("ul")).unwrap();
+        match action {
+            StateMachineAction::ExitMany(contexts) => {
+                assert_eq!(contexts.len(), 3);
+                assert!(matches!(contexts[0], StructuralContext::ListItem));
+                assert!(matches!(contexts[1], StructuralContext::OrderedList(_)));
+                assert!(matches!(contexts[2], StructuralContext::UnorderedList));
+            }
+            _ => panic!("expected ExitMany for misnested ul, got {:?}", action),
+        }
+        assert_eq!(sm.depth(), 0);
+        assert_eq!(sm.list_depth, 0);
+        assert!(
+            sm.ordered_list_counters.is_empty(),
+            "ordered_list_counters must be empty after ul drains ol"
+        );
     }
 }

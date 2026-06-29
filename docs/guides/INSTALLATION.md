@@ -110,7 +110,7 @@ AUTO_DISABLE_STALE_MODULE=1 curl -sSL https://raw.githubusercontent.com/cnkang/n
 ```
 
 The script requires `sudo` (root privileges) to write the module binary and modify NGINX configuration files.
-By default, the installer enforces SHA-256 integrity checks and refuses unsigned artifacts.
+By default, the installer enforces SHA-256 integrity checks and refuses artifacts without an available SHA-256 digest.
 
 ### Auto-Wiring Behavior
 
@@ -179,12 +179,11 @@ operate your own package repository.
 
 ### DEB Artifacts (Ubuntu / Debian)
 
-Replace `VERSION` below with the release tag you are installing (latest patch
-on the 0.8.x line is `0.8.2`). `NGINX_VERSION` must match the NGINX ABI you
-run.
+Replace `VERSION` below with the release version you are installing, for
+example `0.8.3`.  `NGINX_VERSION` must match the NGINX ABI you run.
 
 ```bash
-VERSION=0.8.2  # replace with the release tag you are installing
+VERSION=0.8.3
 NGINX_VERSION=1.26.3
 ARCH=amd64
 
@@ -196,12 +195,11 @@ sudo apt install "./nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VE
 
 ### RPM Artifacts (AlmaLinux / Amazon Linux / RHEL)
 
-Replace `VERSION` below with the release tag you are installing (latest patch
-on the 0.8.x line is `0.8.2`). `NGINX_VERSION` must match the NGINX ABI you
-run.
+Replace `VERSION` below with the release version you are installing, for
+example `0.8.3`.  `NGINX_VERSION` must match the NGINX ABI you run.
 
 ```bash
-VERSION=0.8.2  # replace with the release tag you are installing
+VERSION=0.8.3
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 
@@ -1168,7 +1166,7 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    Manual download is intended only for air-gapped or troubleshooting scenarios — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # On a connected machine — substitute <release_tag>, <nginx_version>, <os_type>, and <arch>
-   # <release_tag> must match the current release (e.g. v0.8.2)
+   # <release_tag> must match the current release (e.g. v0.8.3)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
    ```
@@ -1190,7 +1188,7 @@ ERROR: SHA-256 checksum verification failed
 or:
 
 ```text
-Release asset does not provide a SHA256 digest; refusing to install unsigned artifact by default.
+Release asset does not provide a SHA256 digest; refusing to install without an available SHA-256 digest.
 ```
 
 **Root Cause:**
@@ -1206,7 +1204,7 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    Manual download is intended only for troubleshooting — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Download the binary and checksum file — substitute <release_tag>, <nginx_version>, <os_type>, <arch>
-   # <release_tag> must match the current release (e.g. v0.8.2)
+   # <release_tag> must match the current release (e.g. v0.8.3)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
 

@@ -40,6 +40,14 @@ Required:
 - Addition of two `size_t` values that will be used for memory allocation or
   buffer sizing must include an overflow guard:
   `if (a > (size_t)-1 - b) { /* saturate or error */ }`.
+- Casting the result of pointer subtraction to `(size_t)` (e.g.
+  `(size_t)(last - pos)`) is forbidden unless:
+  a. The subtraction appears in a comparison context (`>=`, `<=`, `==`) that
+     self-guards; or
+  b. A bounds check on the pointers (e.g. `if (last <= p)`) precedes the
+     cast; or
+  c. The safe wrapper `ngx_http_markdown_buf_len_safe(buf)` is used instead.
+  The `detect_cwe190_casts.sh` Pattern (d) flags all other cases.
 
 Verification:
 - `tools/harness/detect_cwe190_casts.sh components/nginx-module/src/`
@@ -90,6 +98,11 @@ Required:
   letting the trusted caller redirect it. Do not accept a caller-controlled
   output path when the Python process does not need filesystem ownership of
   the artifact.
+- **Path.read_text() / write_text() file access methods**: These are
+  equivalent to `open()` for path-traversal purposes.  Chained calls like
+  `Path(user_input).read_text()` (Pattern e) or standalone calls on
+  user-derived variable names like `args_path.read_text()` (Pattern f) are
+  flagged by `detect_cwe22_paths.py`.
 
 Verification:
 - `tools/harness/detect_cwe22_paths.py tools/`

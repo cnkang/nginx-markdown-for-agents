@@ -239,6 +239,7 @@ harness-security-checks:
 	bash tools/harness/detect_cwe190_casts.sh
 	PYTHONPATH=. python3 tools/harness/detect_cwe22_paths.py tools/ --strict
 	bash tools/harness/detect_live_conf_reads.sh
+	bash tools/harness/detect_ffi_fat_pointer_transfer.sh
 	bash tools/harness/detect_shell_hygiene.sh tools/
 	PYTHONPATH=. python3 tools/harness/detect_const_correctness.py components/nginx-module/src
 	bash tools/harness/detect_ci_supply_chain.sh
@@ -254,6 +255,13 @@ harness-security-checks:
 	PYTHONPATH=. python3 tools/harness/detect_forward_decl_order.py components/nginx-module/src --strict
 	PYTHONPATH=. python3 tools/harness/detect_duplicate_code.py components/nginx-module/src --strict
 	PYTHONPATH=. python3 tools/harness/detect_open_without_path_validation.py --path tools/ --strict
+	PYTHONPATH=. python3 tools/harness/detect_python_complexity.py
+	bash tools/harness/detect_version_consistency.sh
+	bash tools/harness/detect_backpressure_resume.sh
+	bash tools/harness/detect_decompression_budget.sh
+	PYTHONPATH=. python3 tools/harness/detect_test_assertion_coverage.py
+	PYTHONPATH=. python3 tools/harness/detect_html_sanitizer_invariants.py
+	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
 
 test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
@@ -265,6 +273,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_ngx_log_arg_count.sh
 	bash tools/harness/tests/test_detect_pool_free.sh
 	bash tools/harness/tests/test_detect_ffi_panic_safety.sh
+	bash tools/harness/tests/test_detect_ffi_fat_pointer_transfer.sh
 	bash tools/harness/tests/test_security_gitleaks_scope.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
@@ -554,7 +563,7 @@ release-gates-check-070:
 #                                           when NGINX source or lcov/cargo-llvm-cov
 #                                           is unavailable
 
-RELEASE_GATE_080_ACTIVE_VERSION ?= 0.8.2
+RELEASE_GATE_080_ACTIVE_VERSION ?= 0.8.3
 
 release-gates-check-080:
 	@echo "=== v0.8.x Release Gate: Starting ($(RELEASE_GATE_080_ACTIVE_VERSION)) ==="
@@ -815,7 +824,7 @@ help:
 	@echo "  test-benchmark-summary   - Generate PR benchmark summary from latest report"
 	@echo "  harness-check            - Validate harness truth surfaces and optional local adapters"
 	@echo "  harness-check-full       - Run full harness validation plus docs/release checks"
-	@echo "  harness-security-checks  - Run CWE-190/CWE-22/effective-conf/shell-hygiene/const-correctness detection"
+	@echo "  harness-security-checks  - Run local static harness/security detectors"
 	@echo "  security-static          - Run actionlint, shellcheck, gitleaks, Semgrep, and cargo-deny"
 	@echo "  supply-chain             - Run Trivy filesystem/IaC scan and generate a Syft SPDX SBOM"
 	@echo "  test-harness             - Run unit tests for harness detector scripts"

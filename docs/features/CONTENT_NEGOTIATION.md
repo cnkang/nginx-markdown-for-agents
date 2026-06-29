@@ -54,7 +54,7 @@ Accept: text/html, text/markdown;q=0.9
 Accept: text/html, application/json, text/markdown
 ```
 
-The module looks for `text/markdown` in the Accept header. Quality values (q-parameters) are currently not evaluated for preference ordering.
+The module looks for `text/markdown` in the Accept header. Quality values (q-parameters) are fully evaluated per RFC 9110 §12.5.1: the Rust negotiation engine (`markdown_negotiate_accept`) compares q-values across all listed media types and applies tie-break rules (specificity, source order) to determine preference ordering. For example, `Accept: text/html;q=0.8, text/markdown;q=0.9` correctly selects Markdown.
 
 ### Wildcard Handling
 
@@ -173,8 +173,10 @@ Not all requests are eligible for conversion. The module checks:
 - `image/png` → Not eligible
 
 ### Response Size
-- Within `markdown_max_size` → Eligible
-- Exceeds limit → Not eligible (passthrough)
+- The module uses a dual-engine routing strategy:
+  - **Full-buffer engine**: Responses within `markdown_max_size` are eligible for conversion.
+  - **Streaming engine**: Responses exceeding `markdown_stream_threshold` are routed to the streaming converter, which processes chunks incrementally and is bounded by streaming memory budgets rather than `markdown_max_size`.
+- Responses that exceed all applicable limits → Not eligible (passthrough)
 
 ### Other Conditions
 - Range requests → Not eligible (bypass)

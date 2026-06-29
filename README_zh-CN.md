@@ -210,7 +210,7 @@ Cloudflare 的 [Markdown for Agents](https://blog.cloudflare.com/markdown-for-ag
 | 自动解压 | 支持 gzip、brotli、deflate 上游响应 |
 | 缓存友好变体 | 支持 ETag 与条件请求 |
 | 失败策略可控 | 可选失败透传或失败拦截 |
-| 资源限制 | 可配置大小与超时上限 |
+| 资源限制 | 通过 `markdown_max_size` 等 NGINX 指令配置大小与超时上限 |
 | 安全加固 | 校验输出链接和 base URL，默认拒绝不安全的 forwarded-host 输入，限制解析/解压资源，并避免执行外部内容 |
 | 可选元数据 | 支持 token 估算与 YAML front matter |
 | 指标端点 | 提供转换计数等运行指标 |
@@ -482,6 +482,21 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - Rust URL 控制字符验证与 link 转义
 - FFI ABI 布局验证与 header 漂移检测
 
+## v0.8.3 新特性
+
+v0.8.3 是 0.8.x 版本线的收口加固发布：
+
+- **流式状态机修复** — 修正 `pop_contexts_up_to` 返回顺序（内层优先），并在 `ol`/`ul` 衍生状态分支中增加 `CodeBlock` 处理，防止标签汤回归。
+- **流式 emitter ExitMany** — 新增 `ExitMany` 动作，支持从栈中间批量解上下文，修复嵌套块级元素的隐式闭合排序问题。
+- **解压缓冲区内存安全** — 将解压工作区从 `ngx_alloc`/`ngx_free`（堆）切换到 `ngx_pnalloc`/`ngx_pfree`（池分配），避免混合分配生命周期并防止池扩展副作用（Rule 43）。
+- **快照容量提升** — 在流提交路径中将快照最大值从 4 提升到 8，支持更复杂的多 header 变更计划。
+- **FFI Box::into_raw 正确性** — 修复转换器句柄分配中的 use-after-free 模式，确保 `Box::into_raw` 在初始化成功后调用。
+- **Release manifest 完整性** — 解析 `SHA256SUMS` 并校验 package 与 manifest 摘要；非 tag workflow manifest 会明确声明未签名的 checksum-only 完整性语义。
+- **版本一致性检测器 (Rule 55)** — 新增 harness 检测器验证 Cargo.toml、Chart.yaml 和内部依赖的版本对齐，防止发布过程中的版本漂移问题。
+- **完整发布门禁验证** — 所有 0.8.x 发布门禁通过：`make harness-check`（15/15）、`make test-harness`（全部检测器）、`make release-gates-check-08x`、`make test-nginx-unit`、`make test-rust-fuzz-smoke`。
+
+完整变更列表见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## v0.8.2 新特性
 
 v0.8.2 是一个加固 0.8.x 流式线路的补丁版本：
@@ -498,16 +513,20 @@ v0.8.2 是一个加固 0.8.x 流式线路的补丁版本：
 
 ## 路线方向
 
-当前版本线 (0.8.x；最新 patch 0.8.2)：
+当前版本线 (0.8.x；最新 patch 0.8.3)：
 
 - 双引擎流式模型：全缓冲默认路径 + 面向大响应/chunked 响应的流式引擎
 - `auto` 模式作为默认 `markdown_streaming_engine` 设置
 - 基于 `markdown_stream_flush_min` 的有界内存流式转换与按大小 flush
 - 提交前安全回退：输出提交前发生转换错误时回退到 HTML
 - 流式发布门禁：`make release-gates-check-08x`（`release-gates-check-080` 的别名）验证 0.8.x 发布合约
-- 静态安全门禁：`.github/workflows/security-static.yml` 针对 workflow、脚本、
-  secret、Semgrep 规则与 Rust 依赖策略运行 actionlint、shellcheck、
-  gitleaks、聚焦 Semgrep 和 cargo-deny
+- 静态安全门禁：`.github/workflows/security-static.yml` 针对 workflow、shell、
+  Python 工具脚本、secret、Semgrep 规则与 Rust 依赖策略运行 actionlint、
+  shellcheck、gitleaks、聚焦 Semgrep 和 cargo-deny；Semgrep 规则重点覆盖
+  明显的 subprocess 误用，以及在 harness 验证 helper 之前直接使用
+  CLI 派生路径进行 I/O 的模式、NGINX C 模块里的不安全 libc API，
+  以及仍然包含 panic/unwrap/expect 路径的 Rust FFI 导出函数；
+  还会覆盖 Dockerfile 里下载后直接执行未验签 rustup 安装器的路径
 - 供应链可见性：`.github/workflows/supply-chain.yml` 在 PR、push、定时与
   手动触发时运行报告型 Trivy filesystem/IaC 扫描、SPDX SBOM 生成与
   OpenSSF Scorecard
@@ -552,6 +571,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.8.3 | 2026-06-26 | Kang | v0.8.3 收口：流式状态机修复、ExitMany 批量解上下文、解压缓冲区内存安全、快照容量提升、FFI Box::into_raw 修复、完整发布门禁验证 |
 | 0.8.2 | 2026-06-25 | Kang | v0.8.2 发布：流式解压加固、FFI panic 安全、隐式闭合正确性、解压预算强制执行、安全扫描范围限定、版本线文档收口 |
 | 0.8.2 | 2026-06-23 | Kang | 0.8.2 发布：流式解压加固、隐式闭合正确性、FFI panic 安全、解压预算强制执行、安全扫描范围限定、版本线文档收口 |
 | 0.8.0 | 2026-06-16 | Codex | 同步中英文 README 结构、Quick Start 示例、本地测试命令、平台支持标题和 v0.8.0 路线说明 |

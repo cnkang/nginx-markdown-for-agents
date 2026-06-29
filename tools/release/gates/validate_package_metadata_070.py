@@ -196,12 +196,15 @@ RELEASE_BUILD_GLIBC_SNIPPETS = {
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc": [
         "ARG OS_BASE=almalinux:9",
         "dnf install -y",
-        "rustup-init.sh -y --default-toolchain none",
+        "install-verified-rustup.sh",
+        "--toolchain none",
         "COPY rust-toolchain.toml /src/rust-toolchain.toml",
         "rustup toolchain install",
     ],
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.musl": [
-        "rustup-init.sh -y --default-toolchain none",
+        "install-verified-rustup.sh",
+        "--libc musl",
+        "--toolchain none",
         "COPY rust-toolchain.toml /src/rust-toolchain.toml",
         "rustup toolchain install",
     ],

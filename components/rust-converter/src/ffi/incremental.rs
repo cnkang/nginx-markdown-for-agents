@@ -387,13 +387,15 @@ pub unsafe extern "C" fn markdown_incremental_finalize(
                     .generate(md_bytes.as_ref())
                     .into_bytes()
                     .into_boxed_slice();
-                result_ref.etag_len = etag.len();
-                result_ref.etag = Box::into_raw(etag) as *mut u8;
+                let (ptr, len) = crate::ffi::memory::leak_boxed_slice_to_raw(etag);
+                result_ref.etag_len = len;
+                result_ref.etag = ptr;
             }
 
             result_ref.token_estimate = token_estimate;
-            result_ref.markdown_len = md_bytes.len();
-            result_ref.markdown = Box::into_raw(md_bytes) as *mut u8;
+            let (md_ptr, md_len) = crate::ffi::memory::leak_boxed_slice_to_raw(md_bytes);
+            result_ref.markdown_len = md_len;
+            result_ref.markdown = md_ptr;
             result_ref.error_code = ERROR_SUCCESS;
             ERROR_SUCCESS
         }

@@ -62,6 +62,112 @@ rules:
         - /examples/**/*.sh
     pattern-regex: '\beval\s+["'']?\$[{(]?[A-Za-z_][A-Za-z0-9_]*'
 
+  - id: dockerfile-unverified-rustup-bootstrap
+    languages:
+      - generic
+    severity: ERROR
+    message: Avoid bootstrapping rustup in Dockerfiles with an unverified download or pipe-to-shell; use the repository's verified installer or checksum-verified rustup-init instead.
+    paths:
+      include:
+        - /**/Dockerfile
+        - /**/Dockerfile.*
+    pattern-regex: '(?s)https://sh\.rustup\.rs(?:\\\s*|\s|[^;|])*?\|\s*(sh|bash)\b|https://sh\.rustup\.rs[^\n;]*-o\s+[^\n;]*rustup-init\.sh[\s\S]*\b(sh|bash)\s+[^\n;]*rustup-init\.sh\b'
+
+  - id: python-unsafe-shell-subprocess
+    languages:
+      - python
+    severity: ERROR
+    message: Avoid shell=True, os.system, and os.popen in repository tooling; pass argv lists to subprocess instead.
+    paths:
+      include:
+        - /tools/**/*.py
+        - /packaging/**/*.py
+        - /tests/**/*.py
+    pattern-either:
+      - pattern: subprocess.run(..., shell=True, ...)
+      - pattern: subprocess.call(..., shell=True, ...)
+      - pattern: subprocess.check_call(..., shell=True, ...)
+      - pattern: subprocess.check_output(..., shell=True, ...)
+      - pattern: subprocess.Popen(..., shell=True, ...)
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+
+  - id: python-cli-derived-path-io
+    languages:
+      - python
+    severity: ERROR
+    message: Resolve CLI-derived paths through validate_read_path() or validate_write_path_within_root() before opening or writing files.
+    paths:
+      include:
+        - /tools/**/*.py
+        - /packaging/**/*.py
+        - /tests/**/*.py
+    pattern-either:
+      - pattern: open(args.$X, ...)
+      - pattern: open(argv[$IDX], ...)
+      - pattern: open(sys.argv[$IDX], ...)
+      - pattern: open(Path(args.$X), ...)
+      - pattern: open(pathlib.Path(args.$X), ...)
+      - pattern: Path(args.$X).open(...)
+      - pattern: Path(args.$X).read_text(...)
+      - pattern: Path(args.$X).read_bytes(...)
+      - pattern: Path(args.$X).write_text(...)
+      - pattern: Path(args.$X).write_bytes(...)
+      - pattern: pathlib.Path(args.$X).open(...)
+      - pattern: pathlib.Path(args.$X).read_text(...)
+      - pattern: pathlib.Path(args.$X).read_bytes(...)
+      - pattern: pathlib.Path(args.$X).write_text(...)
+      - pattern: pathlib.Path(args.$X).write_bytes(...)
+
+  - id: c-unsafe-libc-apis
+    languages:
+      - c
+    severity: ERROR
+    message: Avoid unsafe libc string and shell APIs in NGINX module source; prefer ngx_snprintf, ngx_memcpy, or explicit process wrappers.
+    paths:
+      include:
+        - /components/nginx-module/src/**/*.c
+        - /components/nginx-module/src/**/*.h
+    pattern-either:
+      - pattern: strcpy(...)
+      - pattern: strcat(...)
+      - pattern: sprintf(...)
+      - pattern: gets(...)
+      - pattern: system(...)
+      - pattern: popen(...)
+
+  - id: rust-ffi-export-panics-and-expects
+    languages:
+      - rust
+    severity: ERROR
+    message: Avoid panic!, unwrap(), and expect() in exported Rust FFI functions.
+    paths:
+      include:
+        - /components/rust-converter/src/ffi/exports.rs
+        - /components/rust-converter/src/ffi/streaming.rs
+        - /components/rust-converter/src/ffi/incremental.rs
+    patterns:
+      - pattern-either:
+          - pattern: panic!(...)
+          - pattern: $X.unwrap()
+          - pattern: $X.expect(...)
+      - pattern-either:
+          - pattern-inside: |
+              #[unsafe(no_mangle)]
+              pub extern "C" fn $F(...) {
+                ...
+              }
+          - pattern-inside: |
+              #[unsafe(no_mangle)]
+              pub unsafe extern "C" fn $F(...) {
+                ...
+              }
+      - pattern-not-inside: |
+          #[cfg(test)]
+          if test_should_panic(...) {
+            ...
+          }
+
   - id: dockerfile-remote-add
     languages:
       - generic

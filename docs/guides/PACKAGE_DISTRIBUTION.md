@@ -61,14 +61,14 @@ Components:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| VERSION | Module semantic version | 0.8.2 |
+| VERSION | Module semantic version | 0.8.3 |
 | NGINX_VERSION | Target NGINX version (major.minor.patch) | 1.26.3 |
 | ARCH | CPU architecture (amd64, arm64) | amd64 |
 
 Example:
 
 ```text
-nginx-module-markdown-for-agents_0.8.2_nginx-1.26.3_amd64.deb
+nginx-module-markdown-for-agents_0.8.3_nginx-1.26.3_amd64.deb
 ```
 
 ### RPM Package Naming
@@ -83,14 +83,14 @@ Components:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| VERSION | Module semantic version | 0.8.2 |
+| VERSION | Module semantic version | 0.8.3 |
 | NGINX_VERSION | Target NGINX version (major.minor.patch) | 1.26.3 |
 | ARCH | CPU architecture (x86_64, aarch64) | x86_64 |
 
 Example:
 
 ```text
-nginx-module-markdown-for-agents-0.8.2-nginx1.26.3-1.x86_64.rpm
+nginx-module-markdown-for-agents-0.8.3-nginx1.26.3-1.x86_64.rpm
 ```
 
 ### Architecture Mapping
@@ -122,7 +122,7 @@ installation.
 Download `SHA256SUMS` from the same GitHub Release page as the package:
 
 ```bash
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.2/SHA256SUMS
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.3/SHA256SUMS
 ```
 
 ### Verifying a Downloaded Package
@@ -138,10 +138,10 @@ Or verify manually:
 
 ```bash
 # Compute the checksum of the downloaded file
-sha256sum nginx-module-markdown-for-agents_0.8.2_nginx-1.26.3_amd64.deb
+sha256sum nginx-module-markdown-for-agents_0.8.3_nginx-1.26.3_amd64.deb
 
 # Compare the output against the corresponding line in SHA256SUMS
-grep "nginx-module-markdown-for-agents_0.8.2_nginx-1.26.3_amd64.deb" SHA256SUMS
+grep "nginx-module-markdown-for-agents_0.8.3_nginx-1.26.3_amd64.deb" SHA256SUMS
 ```
 
 Both values must match exactly. If they differ, do not install the package
@@ -158,8 +158,33 @@ Each line in `SHA256SUMS` follows the standard format:
 Example:
 
 ```text
-a1b2c3d4...  nginx-module-markdown-for-agents_0.8.2_nginx-1.26.3_amd64.deb
-e5f6a7b8...  nginx-module-markdown-for-agents-0.8.2-nginx1.26.3-1.x86_64.rpm
+a1b2c3d4...  nginx-module-markdown-for-agents_0.8.3_nginx-1.26.3_amd64.deb
+e5f6a7b8...  nginx-module-markdown-for-agents-0.8.3-nginx1.26.3-1.x86_64.rpm
+f9a0b1c2...  release-manifest.json
+```
+
+## Release Manifest
+
+Every release includes a `release-manifest.json` providing structured metadata
+about the release: git tag, commit SHA, package filenames with SHA-256 hashes,
+source archive hash (for tag releases), and GitHub Actions workflow metadata.
+
+The manifest is generated during the `integrity-checksums` CI job and is
+included in `SHA256SUMS`. The `SHA256SUMS` file is then signed as
+`SHA256SUMS.asc` for tag releases, providing a chain of custody:
+
+```
+release-manifest.json → included in SHA256SUMS → signed as SHA256SUMS.asc
+```
+
+The manifest provides release asset traceability and checksum cross-reference.
+It does not by itself prove byte-for-byte reproducible builds.
+
+Download the manifest from the same GitHub Release page:
+
+```bash
+curl -fsSL -H "Accept: application/json" -o release-manifest.json \
+  https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.3/release-manifest.json
 ```
 
 ## GPG Signature Verification
@@ -204,23 +229,26 @@ the associated packages.
 The recommended verification sequence:
 
 ```bash
-# 1. Download the package, checksums, and signature
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.2/SHA256SUMS
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.2/SHA256SUMS.asc
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.2/<package-file>
+# 1. Download the package, checksums, signature, and manifest
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.3/SHA256SUMS
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.3/SHA256SUMS.asc
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.3/<package-file>
+curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.8.3/release-manifest.json
 
 # 2. Verify GPG signature on the checksum file
 gpg --verify SHA256SUMS.asc SHA256SUMS
 
-# 3. Verify the package checksum
+# 3. Verify the package and manifest checksums
 sha256sum --check --ignore-missing SHA256SUMS
 ```
 
-If both steps succeed, the package is authentic and intact.
+If all steps succeed, the package and manifest are authentic and intact.
+The manifest (`release-manifest.json`) is included in `SHA256SUMS` and therefore
+covered by the GPG signature on `SHA256SUMS`.
 
 ## Security Policy
 
-- Packages are GPG-signed with a project key.
+- Release checksums are GPG-signed with the project release key (`SHA256SUMS.asc` signs `SHA256SUMS`). Package authenticity is verified by first verifying the signed checksum file, then checking the downloaded package against `SHA256SUMS`.
 - The default `postinst` script does NOT add `load_module` to `nginx.conf`.
 - Operators must explicitly enable the module, ensuring intentional activation.
 - Module is loaded as a dynamic module (`--add-dynamic-module`), not compiled in.

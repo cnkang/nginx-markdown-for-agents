@@ -42,7 +42,10 @@
  * (Vary, ETag, Cache-Control).  Snapshot fails before Phase 1 mutation
  * when a header has more matching entries, preserving Rule 39 atomicity.
  */
-#define NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX  4
+/* Increased from 4 to 8 to accommodate responses with many Vary/ETag
+ * entries.  Safety failure (returns NGX_ERROR before Phase 1 mutation)
+ * is preserved. */
+#define NGX_HTTP_MARKDOWN_COMMIT_SNAPSHOT_MAX  8
 
 /*
  * Per-header snapshot: records the original state of a header entry

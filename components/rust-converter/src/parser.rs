@@ -74,6 +74,17 @@ use crate::error::ConversionError;
 /// Returns `Ok(RcDom)` containing the parsed DOM tree on success.
 /// Returns `Err(ConversionError)` if parsing fails or encoding is invalid.
 ///
+/// # Preconditions
+///
+/// The caller **must** enforce an input size limit before calling this
+/// function.  The parser's memory usage is proportional to the document
+/// size (html5ever does not expose internal memory tracking).  In the
+/// NGINX/FFI main path, `parser_memory_budget` is checked before
+/// invoking this function, and `parse_budget_exceeded` is returned
+/// when the budget is exceeded.  Standalone callers should enforce
+/// their own size limit or use the FFI `markdown_convert` entry
+/// point which applies the budget automatically.
+///
 /// # Errors
 ///
 /// This function returns an error in the following cases:
