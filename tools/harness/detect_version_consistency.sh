@@ -32,7 +32,7 @@ log_error() {
 
 log_pass() {
     local msg="$1"
-    echo -e "${GREEN}PASS:${NC} ${msg}"
+    echo -e "${GREEN}PASS:${NC} ${msg}" >&2
     return 0
 }
 
@@ -144,7 +144,7 @@ main() {
     fi
 
     # Summary
-    echo ""
+    echo "" >&2
     if [[ $ERRORS -eq 0 ]]; then
         log_pass "All version checks passed"
         return 0

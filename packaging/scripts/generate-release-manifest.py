@@ -253,6 +253,24 @@ def build_manifest(
     if ref_type:
         workflow["ref_type"] = ref_type
 
+    signature_available = (ref_type == "tag") or bool(tag)
+    if signature_available:
+        integrity = {
+            "checksums": "SHA256SUMS",
+            "signature": "SHA256SUMS.asc",
+            "signature_available": True,
+            "signature_type": "gpg-detached-ascii-armored",
+            "signed_file": "SHA256SUMS",
+        }
+    else:
+        integrity = {
+            "checksums": "SHA256SUMS",
+            "signature": None,
+            "signature_available": False,
+            "signature_type": None,
+            "signed_file": None,
+        }
+
     manifest = {
         "schema_version": 1,
         "project": "nginx-markdown-for-agents",
@@ -264,12 +282,7 @@ def build_manifest(
         },
         "source": source,
         "packages": packages,
-        "integrity": {
-            "checksums": "SHA256SUMS",
-            "signature": "SHA256SUMS.asc",
-            "signature_type": "gpg-detached-ascii-armored",
-            "signed_file": "SHA256SUMS",
-        },
+        "integrity": integrity,
         "workflow": workflow,
     }
 

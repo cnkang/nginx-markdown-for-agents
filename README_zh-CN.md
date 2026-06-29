@@ -491,6 +491,7 @@ v0.8.3 是 0.8.x 版本线的收口加固发布：
 - **解压缓冲区内存安全** — 将解压工作区从 `ngx_alloc`/`ngx_free`（堆）切换到 `ngx_pnalloc`/`ngx_pfree`（池分配），避免混合分配生命周期并防止池扩展副作用（Rule 43）。
 - **快照容量提升** — 在流提交路径中将快照最大值从 4 提升到 8，支持更复杂的多 header 变更计划。
 - **FFI Box::into_raw 正确性** — 修复转换器句柄分配中的 use-after-free 模式，确保 `Box::into_raw` 在初始化成功后调用。
+- **Release manifest 完整性** — 解析 `SHA256SUMS` 并校验 package 与 manifest 摘要；非 tag workflow manifest 会明确声明未签名的 checksum-only 完整性语义。
 - **版本一致性检测器 (Rule 55)** — 新增 harness 检测器验证 Cargo.toml、Chart.yaml 和内部依赖的版本对齐，防止发布过程中的版本漂移问题。
 - **完整发布门禁验证** — 所有 0.8.x 发布门禁通过：`make harness-check`（15/15）、`make test-harness`（全部检测器）、`make release-gates-check-08x`、`make test-nginx-unit`、`make test-rust-fuzz-smoke`。
 

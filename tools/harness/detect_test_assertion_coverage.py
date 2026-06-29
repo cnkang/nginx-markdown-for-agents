@@ -54,45 +54,62 @@ def _is_escaped_quote(content: str, offset: int) -> bool:
     return offset > 0 and content[offset - 1] == '\\'
 
 
-def _starts_raw_string(content: str, offset: int) -> bool:
-    return offset >= 2 and content[offset - 2:offset] == 'r#'
+def _raw_string_hash_count(content: str, offset: int) -> int:
+    """Return raw-string hash count for a quote offset, or -1 if not raw."""
+    idx = offset - 1
+    hashes = 0
+    while idx >= 0 and content[idx] == '#':
+        hashes += 1
+        idx -= 1
+    if idx >= 0 and content[idx] == 'r':
+        return hashes
+    return -1
 
 
-def _ends_raw_string(content: str, offset: int) -> bool:
-    return offset + 1 < len(content) and content[offset + 1] == '#'
+def _ends_raw_string(content: str, offset: int, hashes: int) -> bool:
+    if hashes < 0:
+        return False
+    end = offset + 1 + hashes
+    return (
+        end <= len(content)
+        and content[offset + 1:end] == ("#" * hashes)
+    )
 
 
 def _advance_string_state(
     content: str,
     offset: int,
     in_string: bool,
-    in_raw_string: bool,
-) -> tuple[bool, bool, bool]:
+    raw_string_hashes: int,
+) -> tuple[bool, bool, int]:
     c = content[offset]
     if in_string:
         still_in_string = not (c == '"' and not _is_escaped_quote(content, offset))
-        return False, still_in_string, in_raw_string
-    if in_raw_string:
-        return False, in_string, not (c == '"' and _ends_raw_string(content, offset))
+        return False, still_in_string, raw_string_hashes
+    if raw_string_hashes >= 0:
+        if c == '"' and _ends_raw_string(content, offset, raw_string_hashes):
+            return False, in_string, -1
+        return False, in_string, raw_string_hashes
     if c != '"' or _is_escaped_quote(content, offset):
-        return True, in_string, in_raw_string
-    return False, not _starts_raw_string(content, offset), _starts_raw_string(content, offset)
+        return True, in_string, raw_string_hashes
+    raw_hashes = _raw_string_hash_count(content, offset)
+    return False, raw_hashes < 0, raw_hashes
 
 
 def _find_test_function_end(content: str, brace_start: int) -> int | None:
     """Return the end offset for a test function body."""
     brace_count = 0
     in_string = False
-    in_raw_string = False
+    raw_string_hashes = -1
 
     i = brace_start
     while i < len(content):
         c = content[i]
-        count_brace, in_string, in_raw_string = _advance_string_state(
+        count_brace, in_string, raw_string_hashes = _advance_string_state(
             content,
             i,
             in_string,
-            in_raw_string,
+            raw_string_hashes,
         )
 
         if count_brace and c == '{':
@@ -204,12 +221,14 @@ def main():
         sys.exit(0)
     
     all_issues = []
+    read_errors = []
     
     # Process all Rust test files
     for test_file in test_dir.rglob('*.rs'):
         try:
             content = test_file.read_text(encoding='utf-8')
-        except Exception:
+        except Exception as exc:
+            read_errors.append(f"{test_file}: {exc}")
             continue
         
         tests = extract_test_functions(content)
@@ -223,6 +242,11 @@ def main():
             if issues:
                 rel_path = test_file.relative_to(test_dir.parent.parent)
                 all_issues.extend([f"{rel_path}: {issue}" for issue in issues])
+
+    if read_errors:
+        all_issues.extend(
+            [f"Harness could not read Rust test file: {err}" for err in read_errors]
+        )
     
     if all_issues:
         print(f"Found {len(all_issues)} test assertion coverage issue(s):")

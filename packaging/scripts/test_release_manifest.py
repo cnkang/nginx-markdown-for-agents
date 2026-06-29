@@ -55,7 +55,7 @@ class TestGenerateManifest(unittest.TestCase):
             sys.executable, str(GENERATE_SCRIPT),
             "-d", str(self.artifact_dir),
         ] + extra_args
-        return subprocess.run(args, capture_output=True, text=True)
+        return subprocess.run(args, capture_output=True, text=True, timeout=30)
 
     def test_single_deb(self):
         expected_sha = self._write_package(
@@ -79,6 +79,7 @@ class TestGenerateManifest(unittest.TestCase):
         self.assertEqual(manifest["packages"][0]["sha256"], expected_sha)
         self.assertEqual(manifest["integrity"]["checksums"], "SHA256SUMS")
         self.assertEqual(manifest["integrity"]["signature"], "SHA256SUMS.asc")
+        self.assertTrue(manifest["integrity"]["signature_available"])
 
     def test_deb_and_rpm(self):
         self._write_package(
@@ -187,6 +188,9 @@ class TestGenerateManifest(unittest.TestCase):
         self.assertIsNone(manifest["git"]["tag"],
                           "Non-tag dispatch invented git.tag")
         self.assertEqual(manifest["workflow"]["ref_type"], "branch")
+        self.assertIsNone(manifest["integrity"]["signature"])
+        self.assertFalse(manifest["integrity"]["signature_available"])
+        self.assertIsNone(manifest["integrity"]["signed_file"])
 
 
 class TestValidateManifest(unittest.TestCase):
@@ -234,6 +238,7 @@ class TestValidateManifest(unittest.TestCase):
             "integrity": {
                 "checksums": "SHA256SUMS",
                 "signature": "SHA256SUMS.asc",
+                "signature_available": True,
                 "signature_type": "gpg-detached-ascii-armored",
                 "signed_file": "SHA256SUMS",
             },
@@ -263,7 +268,7 @@ class TestValidateManifest(unittest.TestCase):
             args.extend(["--sha256sums", str(self.sha256sums_path)])
         for k, v in kwargs.items():
             args.extend([f"--{k.replace('_', '-')}", str(v)])
-        result = subprocess.run(args, capture_output=True, text=True)
+        result = subprocess.run(args, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
             # Extract errors from stderr
             errors = [
@@ -336,6 +341,53 @@ class TestValidateManifest(unittest.TestCase):
         errors = self._validate()
         self.assertTrue(any("release-manifest.json" in e and "sha256sums" in e.lower() for e in errors))
 
+    def test_sha256sums_package_digest_mismatch_fails(self):
+        """SHA256SUMS package digest must match manifest and actual file."""
+        manifest = self._make_valid_manifest()
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        pkg = manifest["packages"][0]
+        entries = [
+            f"{'0' * 64}  {pkg['filename']}",
+            f"{sha256_bytes((self.artifact_dir / 'release-manifest.json').read_bytes())}  release-manifest.json",
+        ]
+        self.sha256sums_path.write_text("\n".join(entries) + "\n")
+        errors = self._validate()
+        self.assertTrue(
+            any(
+                "sha256sums digest mismatch" in e.lower()
+                and pkg["filename"] in e
+                for e in errors
+            ),
+            f"Expected SHA256SUMS package digest mismatch, got: {errors}",
+        )
+
+    def test_sha256sums_manifest_digest_mismatch_fails(self):
+        """SHA256SUMS release-manifest.json digest must match the artifact."""
+        self._make_valid_manifest()
+        (self.artifact_dir / "release-manifest.json").write_text(
+            self.manifest_path.read_text()
+        )
+        entries = []
+        for f in sorted(self.artifact_dir.iterdir()):
+            digest = (
+                "0" * 64
+                if f.name == "release-manifest.json"
+                else sha256_bytes(f.read_bytes())
+            )
+            entries.append(f"{digest}  {f.name}")
+        self.sha256sums_path.write_text("\n".join(entries) + "\n")
+        errors = self._validate()
+        self.assertTrue(
+            any(
+                "release-manifest.json" in e
+                and "digest mismatch" in e.lower()
+                for e in errors
+            ),
+            f"Expected manifest digest mismatch, got: {errors}",
+        )
+
     def test_nontag_no_source_validates(self):
         """Non-tag manifest with --no-source should pass validation."""
         fname = "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
@@ -362,9 +414,10 @@ class TestValidateManifest(unittest.TestCase):
             ],
             "integrity": {
                 "checksums": "SHA256SUMS",
-                "signature": "SHA256SUMS.asc",
-                "signature_type": "gpg-detached-ascii-armored",
-                "signed_file": "SHA256SUMS",
+                "signature": None,
+                "signature_available": False,
+                "signature_type": None,
+                "signed_file": None,
             },
             "workflow": {
                 "provider": "github-actions",
@@ -415,6 +468,7 @@ class TestValidateManifest(unittest.TestCase):
             "integrity": {
                 "checksums": "SHA256SUMS",
                 "signature": "SHA256SUMS.asc",
+                "signature_available": True,
                 "signature_type": "gpg-detached-ascii-armored",
                 "signed_file": "SHA256SUMS",
             },
@@ -461,6 +515,7 @@ class TestValidateManifest(unittest.TestCase):
             "integrity": {
                 "checksums": "SHA256SUMS",
                 "signature": "SHA256SUMS.asc",
+                "signature_available": True,
                 "signature_type": "gpg-detached-ascii-armored",
                 "signed_file": "SHA256SUMS",
             },

@@ -161,7 +161,7 @@ while IFS= read -r match; do
         fi
     fi
     parse_size_hits=$((parse_size_hits + 1))
-done < <(grep -rnE 'ngx_parse_size.*\(size_t|\(size_t.*ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE ':\s*/\*|:\s*\*|:\s*//' || true)
+done < <(grep -rnE 'ngx_parse_size.*\(size_t|\(size_t.*ngx_parse_size' "$SRC_DIR" --include='*.c' --include='*.h' 2>/dev/null | grep -vE ':[[:space:]]*/\*|:[[:space:]]*\*|:[[:space:]]*//' || true)
 
 if [[ "$parse_size_hits" -eq 0 ]]; then
     echo "$NONE_FOUND_MSG" >&2
@@ -380,23 +380,6 @@ while IFS= read -r match; do
         continue
     fi
 
-    # Self-guarding: used in a comparison context (>=, <=, ==)
-    if echo "$content_line" | grep -qE '>=|<=|!=\s*\(|==\s*\(|==\s+[0-9]'; then
-        echo "  OK      ${file}:${line} — pointer subtraction in comparison context (self-guarding)" >&2
-        allowlisted=1
-    fi
-
-    # Self-guarding: used as condition in if/while (e.g. `if ((size_t)(x - y))`)
-    if echo "$content_line" | grep -qE '^\s*if\s*\(|^\s*} else if\s*\(|^\s*while\s*\('; then
-        echo "  OK      ${file}:${line} — pointer subtraction in condition (self-guarding)" >&2
-        allowlisted=1
-    fi
-
-    if [[ "$allowlisted" -eq 1 ]]; then
-        ptr_sub_hits=$((ptr_sub_hits + 1))
-        continue
-    fi
-
     # Check for guard in preceding 5 lines
     context_start=$((line - 5))
     if [[ "$context_start" -lt 1 ]]; then
@@ -405,15 +388,7 @@ while IFS= read -r match; do
     context_block="$(sed -n "${context_start},${line}p" "$file" 2>/dev/null)"
     has_guard=0
     # Guard: explicit <=/</>=/> comparison on pointer variables
-    if echo "$context_block" | grep -qiE '(last|p|pos|ptr|end|start|src|dst|buf|cur|begin)\s*[<>]=?\s*(last|p|pos|ptr|end|start|src|dst|buf|cur|begin)'; then
-        has_guard=1
-    fi
-    # Guard: buf_len_safe or validated length function
-    if echo "$context_block" | grep -qiE 'buf_len_safe'; then
-        has_guard=1
-    fi
-    # Guard: non-negative or error-check against the pointer pair
-    if echo "$context_block" | grep -qiE '< 0|>= 0|!= NGX_ERROR|== NGX_ERROR'; then
+    if echo "$context_block" | grep -qiE '(last|p|pos|ptr|end|start|src|dst|buf|cur|begin)[[:space:]]*[<>]=?[[:space:]]*(last|p|pos|ptr|end|start|src|dst|buf|cur|begin)'; then
         has_guard=1
     fi
     if [[ "$has_guard" -eq 1 ]]; then

@@ -85,6 +85,26 @@ else
          "got exit $rc, output: $(cat "${out}")"
 fi
 
+# ── Test 1b: Allowed single-object handle assigned before into_raw ──
+td="${BASE_TMP}/t1b"
+ffi="$(make_ffi_dir "${td}")"
+cat >"${ffi}/assigned_handle.rs" <<'RUST'
+#[unsafe(no_mangle)]
+pub extern "C" fn create_handle() -> *mut Handle {
+    let handle = Box::new(Handle::new());
+    Box::into_raw(handle)
+}
+RUST
+out="${td}/out.txt"
+rc=0
+run_detector "${ffi}" "${out}" || rc=$?
+if [[ $rc -eq 0 ]]; then
+    pass "Box::new handle variable passed to Box::into_raw is exempt"
+else
+    fail "Box::new handle variable passed to Box::into_raw is exempt" \
+         "got exit $rc, output: $(cat "${out}")"
+fi
+
 # ── Test 2: SAFETY/doc comment referencing Box::into_raw ──
 td="${BASE_TMP}/t2"
 ffi="$(make_ffi_dir "${td}")"

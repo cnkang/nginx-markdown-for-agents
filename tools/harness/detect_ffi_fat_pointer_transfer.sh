@@ -95,8 +95,8 @@ for rs_file in "${RS_FILES[@]}"; do
             continue
         fi
 
-        # Trim leading whitespace for comment detection
-        trimmed="${line_content##+([[:space:]])}"
+        # Trim leading whitespace for comment detection (macOS bash 3.2 safe).
+        trimmed="${line_content#"${line_content%%[![:space:]]*}"}"
 
         # Skip doc-comment and comment-only lines
         if [[ "$trimmed" == "///"* || "$trimmed" == "//!"* || "$trimmed" == "// "* ]]; then
@@ -109,6 +109,18 @@ for rs_file in "${RS_FILES[@]}"; do
 
         # Skip single-object handle pattern: Box::into_raw(Box::new(
         if [[ "$trimmed" == *'Box::into_raw(Box::new('* ]]; then
+            continue
+        fi
+
+        # Skip single-object handle pattern split across statements:
+        # let handle = Box::new(...);
+        # Box::into_raw(handle)
+        boxed_var="$(
+            printf '%s\n' "$trimmed" \
+                | sed -n 's/.*Box::into_raw(\([A-Za-z_][A-Za-z0-9_]*\)).*/\1/p'
+        )"
+        if [[ -n "$boxed_var" ]] && sed -n "1,${line_num}p" "$rs_file" \
+            | grep -qE "let[[:space:]]+(mut[[:space:]]+)?${boxed_var}[[:space:]]*=[[:space:]]*Box::new[[:space:]]*\\("; then
             continue
         fi
 

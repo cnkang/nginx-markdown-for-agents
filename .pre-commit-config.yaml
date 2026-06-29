@@ -35,7 +35,7 @@ repos:
         entry: tools/harness/detect_version_consistency.sh
         language: script
         pass_filenames: false
-        files: ^(Cargo\.toml|charts/|docs/guides/INSTALLATION\.md)
+        files: ^(components/rust-converter/Cargo\.toml|charts/nginx-markdown/Chart\.yaml|components/rust-converter/fuzz/Cargo\.toml|tools/corpus/test-corpus-conversion/Cargo\.toml|docs/guides/INSTALLATION\.md)$
   
   # FFI header synchronization
   - repo: local

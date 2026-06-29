@@ -27,7 +27,7 @@
 #     directory defaults to components/nginx-module/src
 #
 # Exit codes:
-#   0 — no violations found (or only warnings)
+#   0 — no violations found
 #   1 — one or more violations detected
 
 set -euo pipefail
@@ -45,7 +45,10 @@ violations=0
 warnings=0
 
 # Find all .c and .h files
-mapfile -t source_files < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f)
+source_files=()
+while IFS= read -r file; do
+    source_files+=("$file")
+done < <(find "$SRC_DIR" \( -name "*.c" -o -name "*.h" \) -type f)
 
 if [[ ${#source_files[@]} -eq 0 ]]; then
     echo "No source files found in $SRC_DIR"
@@ -103,19 +106,16 @@ for file in "${source_files[@]}"; do
         fi
         
         if [[ $has_budget_check -eq 0 ]]; then
-            echo "WARNING: $file:$line_num: Function '$func_name' allocates memory but may lack budget enforcement" >&2
-            warnings=$((warnings + 1))
+            echo "ERROR: $file:$line_num: Function '$func_name' allocates memory but may lack budget enforcement" >&2
+            violations=$((violations + 1))
         fi
         
-    done < <(grep -n "ngx_palloc\|ngx_alloc\|ngx_pnalloc" "$file" | cut -d: -f1)
+    done < <(grep -nE "ngx_palloc|ngx_alloc|ngx_pnalloc" "$file" | cut -d: -f1)
 done
 
 if [[ $violations -gt 0 ]]; then
     echo "ERROR: Found $violations violation(s) and $warnings warning(s)" >&2
     exit 1
-elif [[ $warnings -gt 0 ]]; then
-    echo "WARNING: Found $warnings potential issue(s) — manual review recommended" >&2
-    exit 0
 else
     echo "OK: No decompression budget issues detected"
     exit 0

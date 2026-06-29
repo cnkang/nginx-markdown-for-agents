@@ -45,6 +45,39 @@ def check_no_placeholders(value: str, field_path: str, errors: list[str]) -> Non
             return
 
 
+def parse_sha256sums(path: Path, errors: list[str]) -> dict[str, str]:
+    """Parse SHA256SUMS as 'digest  filename' records."""
+    entries: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception as e:
+        errors.append(f"Cannot read SHA256SUMS: {e}")
+        return entries
+
+    for line_no, line in enumerate(lines, start=1):
+        if not line:
+            continue
+        parts = line.split("  ", 1)
+        if len(parts) != 2:
+            errors.append(f"SHA256SUMS line {line_no} has invalid format")
+            continue
+        digest, filename = parts
+        if not re.match(r"^[0-9a-f]{64}$", digest):
+            errors.append(
+                f"SHA256SUMS line {line_no} digest is not a 64-char hex string"
+            )
+            continue
+        if not filename:
+            errors.append(f"SHA256SUMS line {line_no} filename is empty")
+            continue
+        if filename in entries:
+            errors.append(f"Duplicate file in SHA256SUMS: {filename}")
+            continue
+        entries[filename] = digest
+
+    return entries
+
+
 def validate_manifest(
     manifest_path: Path,
     artifact_dir: Path,
@@ -89,7 +122,10 @@ def validate_manifest(
 
     # git
     git = manifest["git"]
-    is_tag_release = manifest.get("workflow", {}).get("ref_type") == "tag"
+    is_tag_release = (
+        manifest.get("workflow", {}).get("ref_type") == "tag"
+        or (isinstance(git, dict) and bool(git.get("tag")))
+    )
     if not isinstance(git, dict):
         errors.append("git must be an object")
     else:
@@ -191,32 +227,77 @@ def validate_manifest(
     if isinstance(integrity, dict):
         if integrity.get("checksums") != "SHA256SUMS":
             errors.append(f"integrity.checksums expected SHA256SUMS, got: {integrity.get('checksums')}")
-        if integrity.get("signature") != "SHA256SUMS.asc":
-            errors.append(f"integrity.signature expected SHA256SUMS.asc, got: {integrity.get('signature')}")
-        if integrity.get("signed_file") != "SHA256SUMS":
-            errors.append(f"integrity.signed_file expected SHA256SUMS, got: {integrity.get('signed_file')}")
+        if is_tag_release:
+            if integrity.get("signature") != "SHA256SUMS.asc":
+                errors.append(f"integrity.signature expected SHA256SUMS.asc, got: {integrity.get('signature')}")
+            if integrity.get("signature_available") is not True:
+                errors.append("integrity.signature_available must be true for tag releases")
+            if integrity.get("signature_type") != "gpg-detached-ascii-armored":
+                errors.append(
+                    "integrity.signature_type expected gpg-detached-ascii-armored, "
+                    f"got: {integrity.get('signature_type')}"
+                )
+            if integrity.get("signed_file") != "SHA256SUMS":
+                errors.append(f"integrity.signed_file expected SHA256SUMS, got: {integrity.get('signed_file')}")
+        else:
+            if integrity.get("signature") is not None:
+                errors.append(
+                    f"integrity.signature expected null for non-tag runs, got: {integrity.get('signature')}"
+                )
+            if integrity.get("signature_available") is not False:
+                errors.append("integrity.signature_available must be false for non-tag runs")
+            if integrity.get("signature_type") is not None:
+                errors.append(
+                    f"integrity.signature_type expected null for non-tag runs, got: {integrity.get('signature_type')}"
+                )
+            if integrity.get("signed_file") is not None:
+                errors.append(
+                    f"integrity.signed_file expected null for non-tag runs, got: {integrity.get('signed_file')}"
+                )
 
-    # SHA256SUMS inclusion
+    # SHA256SUMS inclusion and digest consistency
     if sha256sums_path and sha256sums_path.exists():
-        sha256_text = sha256sums_path.read_text(encoding="utf-8")
-        if "release-manifest.json" not in sha256_text:
+        sha256_entries = parse_sha256sums(sha256sums_path, errors)
+        if "release-manifest.json" not in sha256_entries:
             errors.append("release-manifest.json not found in SHA256SUMS")
-        # Verify each package in manifest is in SHA256SUMS
+
+        manifest_artifact = artifact_dir.resolve() / "release-manifest.json"
+        if "release-manifest.json" in sha256_entries:
+            if not manifest_artifact.exists():
+                errors.append(
+                    "release-manifest.json listed in SHA256SUMS but not found in artifacts"
+                )
+            else:
+                actual_manifest_sha = sha256_file(manifest_artifact)
+                if sha256_entries["release-manifest.json"] != actual_manifest_sha:
+                    errors.append(
+                        "SHA256SUMS digest mismatch for release-manifest.json: "
+                        f"sha256sums={sha256_entries['release-manifest.json']}, "
+                        f"actual={actual_manifest_sha}"
+                    )
+
+        allowed_sha256_names = set(manifest_filenames)
+        allowed_sha256_names.add("release-manifest.json")
+
         for pkg in packages:
-            if "filename" in pkg and pkg["filename"] not in sha256_text:
-                errors.append(f"Package {pkg['filename']} not found in SHA256SUMS")
+            if "filename" not in pkg:
+                continue
+            fname = pkg["filename"]
+            sums_sha = sha256_entries.get(fname)
+            if sums_sha is None:
+                errors.append(f"Package {fname} not found in SHA256SUMS")
+                continue
+            if "sha256" in pkg and sums_sha != pkg["sha256"]:
+                errors.append(
+                    f"SHA256SUMS digest mismatch for {fname}: "
+                    f"sha256sums={sums_sha}, manifest={pkg['sha256']}"
+                )
+
+        for fname in sorted(sha256_entries):
+            if fname not in allowed_sha256_names:
+                errors.append(f"Unexpected file in SHA256SUMS: {fname}")
     elif sha256sums_path:
         errors.append(f"SHA256SUMS file not found: {sha256sums_path}")
-
-    # Check no extra files in SHA256SUMS that aren't packages or manifest
-    if sha256sums_path and sha256sums_path.exists():
-        sha256_text = sha256sums_path.read_text(encoding="utf-8")
-        for line in sha256_text.strip().splitlines():
-            parts = line.split("  ", 1)
-            if len(parts) == 2:
-                fname = parts[1]
-                if not (fname.endswith(".deb") or fname.endswith(".rpm") or fname == "release-manifest.json"):
-                    errors.append(f"Unexpected file in SHA256SUMS: {fname}")
 
     # Check packages are sorted deterministically
     if packages:
