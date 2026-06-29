@@ -34,7 +34,7 @@
 #     in the Protected Environment "release-signing" with required reviewers.
 #     Tag releases ALWAYS run the signing job; no repository variable needed.
 #
-# GPG Signing Policy (v0.8.0):
+# GPG Signing Policy (0.8.x release line):
 #   Tag releases: signing is MANDATORY. The integrity-signing job always runs
 #   for tag pushes and the publish job requires signing to succeed. If GPG
 #   secrets are missing, the pipeline fails early with a clear preflight error.
@@ -431,7 +431,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # Package Job: Generate .deb/.rpm via nFPM (matrix)
   # Consumes the compiled .so from the build job and produces distribution
-  # packages following 0.8.0 release package naming and layout conventions.
+  # packages following 0.8.x release package naming and layout conventions.
   # ─────────────────────────────────────────────────────────────────────────────
   package:
     name: Package - nginx-${{ matrix.nginx_version }} - ${{ matrix.arch }}
@@ -515,7 +515,7 @@ jobs:
               ;;
           esac
 
-          # Artifact filenames per 0.8.0 release package naming and layout conventions
+          # Artifact filenames per 0.8.x release package naming and layout conventions
           DEB_FILENAME="nginx-module-markdown-for-agents_${PKG_VERSION}_nginx-${NGINX_VERSION}_${NFPM_ARCH}.deb"
           RPM_FILENAME="nginx-module-markdown-for-agents-${PKG_VERSION}-nginx${NGINX_VERSION}-1.${RPM_ARCH}.rpm"
 
@@ -713,12 +713,12 @@ jobs:
         env:
           RELEASE_GATE_EXPECTED_CARGO_VERSION: "0.8.3"
         run: |
-          # Run the v0.8.0 release gate validators that are not already covered
+          # Run the 0.8.x release gate validators that are not already covered
           # by the build/package/smoke-test jobs above. The full
           # release-gates-check-080 target includes build/test/fuzz which are
           # redundant here (the build and smoke-test jobs already verified
           # those), but we must run the Python gate validators and package
-          # layout checks to ensure complete v0.8.0 gate coverage. Do not run
+          # layout checks to ensure complete 0.8.x gate coverage. Do not run
           # legacy local-spec validators here; tag release CI checkouts do not
           # include user-local Kiro spec directories.
           python3 tools/release/gates/validate_naming.py
