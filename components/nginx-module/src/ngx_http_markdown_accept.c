@@ -126,6 +126,23 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
         return 0;
     }
 
+    /*
+     * markdown_accept force: convert regardless of the Accept header,
+     * including when no Accept header is present.  This short-circuits
+     * before the header lookup so a missing Accept still converts.
+     */
+    if (conf->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_FORCE) {
+        if (out_reason != NULL) {
+            *out_reason = NEGOTIATE_REASON_CONVERT;
+        }
+        if (r != NULL) {
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                         "markdown: Accept negotiation: convert "
+                         "(accept_policy=force)");
+        }
+        return 1;
+    }
+
     accept_header = ngx_http_markdown_get_accept_header(r);
     if (accept_header == NULL || accept_header->value.len == 0) {
         if (out_reason != NULL) {
@@ -134,7 +151,8 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
         return 0;
     }
 
-    on_wildcard = (uint8_t) ((conf->on_wildcard != 0) ? 1 : 0);
+    on_wildcard = (uint8_t)
+        ((conf->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD) ? 1 : 0);
 
     markdown_negotiate_accept(
         accept_header->value.data,
@@ -149,9 +167,9 @@ ngx_http_markdown_should_convert(ngx_http_request_t *r,
     if (result.should_convert) {
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                      "markdown: Accept negotiation: convert, "
-                     "reason=%ud, on_wildcard=%ud",
+                     "reason=%ud, accept_policy=%ud",
                      (ngx_uint_t) result.reason,
-                     (ngx_uint_t) conf->on_wildcard);
+                     (ngx_uint_t) conf->accept_policy);
         return 1;
     }
 

@@ -544,7 +544,7 @@ test_merge_conf(void)
     parent.flavor = NGX_HTTP_MARKDOWN_FLAVOR_GFM;
     parent.token_estimate = 1;
     parent.front_matter = 1;
-    parent.on_wildcard = 1;
+    parent.accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD;
     parent.policy.auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY;
     parent.policy.generate_etag = 0;
     parent.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
@@ -580,7 +580,7 @@ test_merge_conf(void)
     child.flavor = NGX_CONF_UNSET_UINT;
     child.token_estimate = NGX_CONF_UNSET;
     child.front_matter = NGX_CONF_UNSET;
-    child.on_wildcard = NGX_CONF_UNSET;
+    child.accept_policy = NGX_CONF_UNSET_UINT;
     child.policy.auth_policy = NGX_CONF_UNSET_UINT;
     child.policy.auth_cookies = NGX_CONF_UNSET_PTR;
     child.policy.generate_etag = NGX_CONF_UNSET;
@@ -644,7 +644,7 @@ test_merge_conf(void)
     child.flavor = NGX_CONF_UNSET_UINT;
     child.token_estimate = NGX_CONF_UNSET;
     child.front_matter = NGX_CONF_UNSET;
-    child.on_wildcard = NGX_CONF_UNSET;
+    child.accept_policy = NGX_CONF_UNSET_UINT;
     child.policy.auth_policy = NGX_CONF_UNSET_UINT;
     child.policy.auth_cookies = NGX_CONF_UNSET_PTR;
     child.policy.generate_etag = NGX_CONF_UNSET;
@@ -1069,7 +1069,7 @@ test_merge_conf_double_unset(void)
     child.flavor = NGX_CONF_UNSET_UINT;
     child.token_estimate = NGX_CONF_UNSET;
     child.front_matter = NGX_CONF_UNSET;
-    child.on_wildcard = NGX_CONF_UNSET;
+    child.accept_policy = NGX_CONF_UNSET_UINT;
     child.policy.auth_policy = NGX_CONF_UNSET_UINT;
     child.policy.auth_cookies = NGX_CONF_UNSET_PTR;
     child.policy.generate_etag = NGX_CONF_UNSET;

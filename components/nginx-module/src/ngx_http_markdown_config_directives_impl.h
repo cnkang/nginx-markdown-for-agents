@@ -58,6 +58,54 @@ static ngx_conf_enum_t
     { ngx_null_string, 0 }
 };
 
+/*
+ * Enum table for markdown_accept directive (Config V2, 0.9.0).
+ *
+ * Replaces the removed markdown_on_wildcard on|off directive.
+ * Invalid values are rejected by ngx_conf_set_enum_slot.
+ */
+static ngx_conf_enum_t
+    ngx_http_markdown_accept_enum[] = {
+    { ngx_string("strict"),    NGX_HTTP_MARKDOWN_ACCEPT_STRICT },
+    { ngx_string("wildcard"),  NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD },
+    { ngx_string("force"),     NGX_HTTP_MARKDOWN_ACCEPT_FORCE },
+    { ngx_null_string, 0 }
+};
+
+
+/*
+ * Reject-only setter for legacy directives removed in 0.9.0 (Config V2).
+ *
+ * 0.9.0 is a breaking release with no alias compatibility.  Removed
+ * directives keep a parser entry whose only behavior is to fail
+ * "nginx -t" with an actionable migration hint, because NGINX's own
+ * unknown-directive handling cannot point the operator at the
+ * replacement.  The migration hint is carried in the ngx_command_t.post
+ * field as a NUL-terminated C string.
+ *
+ * Parameters:
+ *   cf   - configuration context
+ *   cmd  - directive definition (cmd->name = legacy name,
+ *          cmd->post = migration hint string)
+ *   conf - unused
+ *
+ * Returns:
+ *   Always NGX_CONF_ERROR.
+ */
+static char *
+ngx_http_markdown_reject_removed_directive(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf) /* NOSONAR: cmd/conf must match ngx_command_t.set signature */
+{
+    (void) conf;
+
+    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+        "\"%V\" directive has been removed in 0.9.0; %s "
+        "(see docs/guides/MIGRATION-0.9.md)",
+        &cmd->name, (char *) cmd->post);
+
+    return NGX_CONF_ERROR;
+}
+
 
 /*
  * Custom directive handler for markdown_diagnostics_allow.
@@ -268,22 +316,40 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_on_wildcard on|off
+     * markdown_accept strict|wildcard|force   (Config V2, 0.9.0)
      *
-     * Convert when Accept header contains wildcards (star/slash-star or text slash star).
-     * Default: off (only convert on explicit text/markdown)
+     * Accept-header negotiation policy. Replaces the removed
+     * markdown_on_wildcard on|off directive.
+     *   strict   - convert only on an explicit text/markdown match (default)
+     *   wildcard - also convert on wildcard Accept (equivalent to the old
+     *              "markdown_on_wildcard on")
+     *   force    - convert regardless of the Accept header (dangerous)
      * Context: http, server, location
      *
      * Example:
-     *   markdown_on_wildcard on;
+     *   markdown_accept wildcard;
+     */
+    {
+        ngx_string("markdown_accept"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_enum_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, accept_policy),
+        &ngx_http_markdown_accept_enum
+    },
+
+    /*
+     * markdown_on_wildcard  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * Migrated to markdown_accept strict|wildcard|force.
      */
     {
         ngx_string("markdown_on_wildcard"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, on_wildcard),
-        NULL
+        0,
+        (void *) "use \"markdown_accept strict|wildcard|force\" instead"
     },
 
     /*
