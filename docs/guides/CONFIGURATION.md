@@ -653,6 +653,45 @@ automatically routed to streaming or full-buffer based on Content-Length
 and `markdown_stream_threshold`. Use `markdown_stream_threshold` for
 auto-mode threshold control.
 
+#### markdown_streaming
+
+**Syntax:** `markdown_streaming off | auto | force;`
+**Default:** `auto`
+**Context:** http, server, location
+
+Streaming *enablement* policy (Config V2, 0.9.0). This is the selector that
+decides **whether** streaming is attempted; it is distinct from
+`markdown_streaming_engine`, which selects **which** streaming backend
+implementation is used. The two are independent and both remain first-class
+directives — `markdown_streaming` is not an alias for
+`markdown_streaming_engine`.
+
+- `off` — never stream; always use the full-buffer path.
+- `auto` — stream large responses (Content-Length at or above
+  `markdown_stream_threshold`), full-buffer small ones (default).
+- `force` — always stream, subject to runtime hard blocks (`Range`,
+  `Cache-Control: no-transform`, `HEAD`, `304`, upstream `Content-Encoding`,
+  and `markdown_cache_validation full`).
+
+**Conflict with `markdown_cache_validation` (spec 49):**
+
+| Combination | `nginx -t` | Runtime |
+|-------------|-----------|---------|
+| `markdown_cache_validation full` + `markdown_streaming force` | **error** | n/a (config rejected) |
+| `markdown_cache_validation full` + `markdown_streaming auto` | **warning** | streaming blocked (`streaming_block_full_cache_validation`); request falls back to full-buffer, preserving full cache validation |
+
+A streaming response never carries an ETag (headers commit before the
+transformed body is known), so full cache validation requires the
+full-buffer path. Use `markdown_cache_validation ims_only` to allow
+streaming alongside `If-Modified-Since` handling.
+
+**Example:**
+```nginx
+# Large docs stream; small ones buffer (ETag only via ims_only/off)
+markdown_cache_validation ims_only;
+markdown_streaming auto;
+```
+
 #### markdown_streaming_engine
 
 **Syntax:** `markdown_streaming_engine off | on | auto;`
