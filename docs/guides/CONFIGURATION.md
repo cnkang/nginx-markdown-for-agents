@@ -578,31 +578,70 @@ markdown_prune_protection_selectors "nav";
 
 ### Security Directives
 
-#### markdown_trust_forwarded_headers
+#### markdown_trusted_proxies
 
-**Syntax:** `markdown_trust_forwarded_headers on | off;`  
-**Default:** `off`  
-**Context:** http, server, location
+**Syntax:** `markdown_trusted_proxies <CIDR>... | off;`
+**Default:** unset (no forwarded headers honored)
+**Context:** http
 
-Controls whether `X-Forwarded-Proto` and `X-Forwarded-Host` request headers are used for base URL construction in the Markdown output.
+Defines the CIDR ranges of trusted reverse proxies. Forwarded headers
+(`Forwarded` per RFC 7239, `X-Forwarded-Proto`, `X-Forwarded-Host`) are honored
+for base-URL construction **only** when the request's direct source IP matches a
+configured CIDR. This replaces the removed boolean
+`markdown_trust_forwarded_headers` trust model (see
+[MIGRATION-0.9.md](MIGRATION-0.9.md)).
 
-When `off` (the default), only the NGINX request schema and server header are used. This prevents client-supplied header injection that could redirect all relative URLs in the Markdown output to an attacker-controlled domain.
+Key properties:
 
-When `on`, the module extracts and validates the `X-Forwarded-Host` value:
-
-1. **First-hop extraction:** If the header contains multiple comma-separated values (from a proxy chain), only the first (closest trusted proxy) is used.
-2. **Character validation:** The extracted host is rejected if it contains control characters, spaces, commas, or path separators (`/`, `\`).
-3. **IPv6 support:** Bracket-enclosed IPv6 literals (e.g. `[::1]`) are allowed and must be properly closed with `]`. An optional `:<port>` suffix is permitted after the closing bracket (e.g. `[::1]:8080`).
-4. **Fallback:** If validation fails, the module falls back to `r->headers_in.server` and logs a warning.
+1. **http context only.** The directive is not allowed in `server` or
+   `location` blocks; a misplaced directive fails `nginx -t` with a migration
+   hint. Per-location trust would create a local trust-bypass risk and is harder
+   to audit.
+2. **IPv4 and IPv6 CIDR** are both supported (`10.0.0.0/8`, `192.168.1.1`,
+   `2001:db8::/32`, `::1/128`). A bare address is treated as a host route
+   (`/32` or `/128`). CIDRs are parsed and validated at config time; an invalid
+   CIDR fails `nginx -t` with the offending value.
+3. **`off`** disables trust entirely — no forwarded headers are honored,
+   regardless of source IP.
+4. **Source IP** is taken from the direct connection peer
+   (`r->connection->addr_text`), already resolved by NGINX's `realip` module or
+   PROXY protocol when configured. The `X-Forwarded-For` header is **never**
+   used as the source IP (spoofing avoidance).
+5. **Strict validation.** Even for a trusted source, forwarded host/proto values
+   are strictly validated (control characters, comma chains, userinfo `@`, path
+   `/`/`?`, port range, IPv6 brackets, raw Unicode IDN). Invalid values fall back
+   to the `Host` header or a safe default. The `Forwarded` header takes
+   precedence over `X-Forwarded-*`; multi-hop comma chains use the left-most
+   (closest-to-client) value.
 
 **Example:**
 ```nginx
-# Only enable behind a trusted reverse proxy that sets/overwrites
-# X-Forwarded-Proto and X-Forwarded-Host from untrusted clients
-markdown_trust_forwarded_headers on;
+http {
+    # Honor forwarded headers only from these proxy ranges.
+    markdown_trusted_proxies 10.0.0.0/8 172.16.0.0/12 2001:db8::/32;
+}
 ```
 
-**Security Note:** Enable this directive only when NGINX sits behind a trusted reverse proxy. The proxy must strip or overwrite `X-Forwarded-*` headers from untrusted clients. Without this protection, a direct client can send `X-Forwarded-Host: evil.com` to poison all relative links in the Markdown output.
+**Deployment guidance:**
+
+- **`realip` module:** keep `markdown_trusted_proxies` consistent with your
+  `set_real_ip_from` ranges; the module trusts the realip-resolved source IP.
+- **PROXY protocol:** include the load balancer / CDN CIDRs so the
+  PROXY-protocol-resolved peer is recognized as trusted.
+- **Unix socket peers** are treated as untrusted (a Unix socket cannot match an
+  IP CIDR).
+
+**Security Note:** Configure `markdown_trusted_proxies` only with proxy ranges
+you control. A source outside every configured CIDR has its forwarded headers
+ignored, so a direct client cannot send `X-Forwarded-Host: evil.com` to poison
+relative links in the Markdown output.
+
+> **Removed in 0.9.0:** `markdown_trust_forwarded_headers` is a reject-only stub.
+> `markdown_trust_forwarded_headers on;` →
+> `markdown_trusted_proxies <CIDR>...;` (list your proxy ranges).
+> `markdown_trust_forwarded_headers off;` → omit `markdown_trusted_proxies`
+> (the default already ignores forwarded headers). See
+> [MIGRATION-0.9.md](MIGRATION-0.9.md).
 
 ---
 
