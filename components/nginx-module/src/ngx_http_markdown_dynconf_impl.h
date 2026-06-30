@@ -56,6 +56,27 @@
 #define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL  5
 
 /*
+ * Profile conflict detection and dynconf dry-run (spec 50, task 7.5).
+ *
+ * Profile conflict detection (markdown_detect_conflicts) runs only at
+ * config parse time (nginx -t / merge_conf).  The dynconf dry-run path
+ * does NOT need additional profile conflict checks because the
+ * dynconf-mutable fields (enabled, prune_noise, log_verbosity,
+ * memory_budget, streaming_budget) are NOT profile-relevant:
+ *
+ * - Profiles only force `streaming` and `cache_validation`, which are
+ *   static config and not dynconf-mutable.
+ * - The general conflict rules (Full+Force, Full+Auto, FailClosed+Force,
+ *   max_inflight==0) involve fields that are also static.
+ *
+ * Therefore, dynconf dry-run inherits the static profile conflict
+ * detection from config parse time.  If a future version adds
+ * profile-relevant dynconf-mutable fields, the dry-run validation in
+ * ngx_http_markdown_dynconf_reload_from_file() would need to call
+ * markdown_detect_conflicts with overlay values.
+ */
+
+/*
  * Rollback result codes.
  */
 #define NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK          0
