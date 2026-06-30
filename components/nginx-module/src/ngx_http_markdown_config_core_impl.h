@@ -24,6 +24,10 @@ void ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf,
 static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     const ngx_http_markdown_conf_t *conf);
 
+/* Forward-declare profile conflict detection (task 7.1, spec 50). */
+static char *ngx_http_markdown_check_profile_conflicts(ngx_conf_t *cf,
+    ngx_http_markdown_conf_t *conf);
+
 /*
  * Choose the RB-tree branch direction for a node vs an existing tree node.
  *
@@ -516,6 +520,165 @@ ngx_http_markdown_merge_advanced_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_value(conf->advanced.dynconf_dry_run, prev->advanced.dynconf_dry_run, 0);
 }
 
+/*
+ * Map the C-side conditional_requests constant to the FFI cache_validation
+ * discriminant (spec 50, task 7.1).
+ *
+ * C enum:  FULL_SUPPORT=0  IF_MODIFIED_SINCE=1  DISABLED=2
+ * FFI u8:  Off=0           ImsOnly=1            Full=2
+ *
+ * Parameters:
+ *   conditional_requests - NGX_HTTP_MARKDOWN_CONDITIONAL_* value
+ *
+ * Returns:
+ *   FFI cache_validation discriminant (0=off, 1=ims_only, 2=full)
+ */
+static uint8_t
+ngx_http_markdown_conditional_to_ffi_cache_validation(ngx_uint_t cond)
+{
+    switch (cond) {
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED:
+        return 0;  /* Off */
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE:
+        return 1;  /* ImsOnly */
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT:
+    default:
+        return 2;  /* Full */
+    }
+}
+
+/*
+ * Run Rust-side profile conflict detection after merge completes.
+ *
+ * Populates the FFI structs from the resolved conf and calls
+ * markdown_detect_conflicts.  Error-level conflicts emit EMERG and
+ * cause merge_conf to return NGX_CONF_ERROR; warning-level conflicts
+ * emit WARN but allow startup.
+ *
+ * This function only runs when a profile IS active (profile.name != NONE).
+ * When no profile is set, the existing C-side spec-49 conflict check
+ * (gated on policy_explicit) handles the general streaming/conditional
+ * conflict; the Rust detection adds profile forced-field checks and
+ * additional general rules.
+ *
+ * The effective config is already "cached" by the normal merge_conf
+ * semantics — once merge_conf finishes, the resolved values in `conf`
+ * are stable until the next `nginx -s reload`.  No additional caching
+ * struct is needed (task 7.3).
+ *
+ * Parameters:
+ *   cf   - config context for logging
+ *   conf - fully-merged location config
+ *
+ * Returns:
+ *   NGX_CONF_OK   - no errors (warnings may have been logged)
+ *   NGX_CONF_ERROR - at least one error-level conflict detected
+ */
+static char *
+ngx_http_markdown_check_profile_conflicts(ngx_conf_t *cf,
+    ngx_http_markdown_conf_t *conf)
+{
+    struct FFIExplicitConfig   explicit_cfg;
+    struct FFIEffectiveConfig  effective_cfg;
+    struct FFIConflictList     conflicts;
+    uintptr_t                  i;
+    ngx_flag_t                 has_error;
+    uint8_t                    ffi_cv;
+
+    /*
+     * Populate FFIExplicitConfig.
+     *
+     * Sentinel 255 means "not explicitly set" for u8 fields;
+     * UINT64_MAX / UINT32_MAX for integer fields.
+     *
+     * For streaming: stream.policy_explicit tracks operator-set.
+     * For cache_validation: profile.cache_validation_explicit tracks it.
+     * For accept, error_policy, diagnostics, limits: the create_conf
+     * initializes to NGX_CONF_UNSET* and merge replaces with default —
+     * there is no post-merge explicit flag.  We rely on the
+     * policy_explicit / cache_validation_explicit flags that ARE tracked
+     * for the profile-relevant critical fields (streaming +
+     * cache_validation).  Other fields use sentinel 255 (not set)
+     * because profiles do not force them (only streaming and
+     * cache_validation have forced fields in 0.9.0).
+     */
+    explicit_cfg.accept = 255;
+    explicit_cfg.cache_validation = 255;
+    explicit_cfg.streaming = 255;
+    explicit_cfg.limits_memory_bytes = UINT64_MAX;
+    explicit_cfg.limits_timeout_ms = UINT64_MAX;
+    explicit_cfg.limits_streaming_buffer_bytes = UINT64_MAX;
+    explicit_cfg.limits_max_inflight = UINT32_MAX;
+    explicit_cfg.error_policy = 255;
+    explicit_cfg.diagnostics = 255;
+
+    /* streaming: policy_explicit is true when the operator set it */
+    if (conf->stream.policy_explicit) {
+        explicit_cfg.streaming = (uint8_t) conf->stream.policy;
+    }
+
+    /* cache_validation: cache_validation_explicit tracks operator set */
+    if (conf->profile.cache_validation_explicit) {
+        ffi_cv = ngx_http_markdown_conditional_to_ffi_cache_validation(
+            conf->policy.conditional_requests);
+        explicit_cfg.cache_validation = ffi_cv;
+    }
+
+    /*
+     * Populate FFIEffectiveConfig from the fully-resolved conf values.
+     * All fields are concrete (no sentinels).
+     */
+    effective_cfg.accept = (uint8_t) conf->accept_policy;
+    effective_cfg.cache_validation =
+        ngx_http_markdown_conditional_to_ffi_cache_validation(
+            conf->policy.conditional_requests);
+    effective_cfg.streaming = (uint8_t) conf->stream.policy;
+    effective_cfg.limits_memory_bytes = (uint64_t) conf->max_size;
+    effective_cfg.limits_timeout_ms = (uint64_t) conf->timeout;
+    effective_cfg.limits_streaming_buffer_bytes =
+        (uint64_t) conf->stream.budget;
+    effective_cfg.limits_max_inflight =
+        (uint32_t) conf->max_inflight;
+    effective_cfg.error_policy = (uint8_t) conf->on_error;
+    effective_cfg.diagnostics =
+        (uint8_t) (conf->ops.diagnostics_enabled ? 1 : 0);
+
+    /* Call Rust conflict detection (task 7.4) */
+    conflicts = markdown_detect_conflicts(
+        (uint8_t) conf->profile.name,
+        &explicit_cfg,
+        &effective_cfg);
+
+    /* Process conflicts: emit log messages */
+    has_error = 0;
+
+    for (i = 0; i < conflicts.count; i++) {
+        if (conflicts.conflicts[i].level == 0) {
+            /* FFIConflictLevel::Error = 0 → EMERG, blocks startup */
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "markdown profile conflict: %*s",
+                conflicts.conflicts[i].message_len,
+                conflicts.conflicts[i].message);
+            has_error = 1;
+        } else {
+            /* FFIConflictLevel::Warning = 1 → WARN, advisory */
+            ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
+                "markdown profile warning: %*s",
+                conflicts.conflicts[i].message_len,
+                conflicts.conflicts[i].message);
+        }
+    }
+
+    /* Free the Rust-allocated conflict list */
+    markdown_free_conflicts(&conflicts);
+
+    if (has_error) {
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
+
 /**
  * Merge per-location markdown filter configuration with inheritance from parent.
  *
@@ -535,6 +698,17 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_http_markdown_conf_t *conf = child;
 
     ngx_http_markdown_merge_enabled(conf, prev);
+
+    /*
+     * Profile inheritance: if the child scope does not set a profile,
+     * inherit from the parent.  This runs before all other merges so
+     * that subsequent task 7 (effective-config integration) can use the
+     * resolved profile.name to supply profile defaults.
+     */
+    if (!conf->profile.set && prev->profile.set) {
+        conf->profile.name = prev->profile.name;
+        conf->profile.set = prev->profile.set;
+    }
 
     /*
      * Save whether max_size and streaming_budget were explicitly set at
@@ -646,6 +820,31 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                 "at runtime (reason streaming_block_full_cache_validation) "
                 "and each request falls back to the full-buffer path; use "
                 "\"markdown_cache_validation ims_only\" to allow streaming");
+        }
+    }
+
+    /*
+     * Profile conflict detection via Rust (spec 50, task 7.2/7.4).
+     *
+     * When a profile is active, run the Rust-side conflict detection
+     * which covers both profile forced-field conflicts (error) and
+     * general conflict rules (error/warning).  The Rust detection
+     * subsumes the spec-49 streaming/conditional check above for the
+     * profile case, but we keep the C check above for the no-profile
+     * case (where it is gated on policy_explicit to avoid spurious
+     * warnings on default configurations).
+     *
+     * Runs at nginx -t / config parse time (task 7.2).  The effective
+     * config values used here are naturally "cached" — once merge_conf
+     * finishes, the resolved values in conf are stable until the next
+     * nginx -s reload (task 7.3).
+     */
+    if (conf->profile.name != NGX_HTTP_MARKDOWN_PROFILE_NONE) {
+        char *rc;
+
+        rc = ngx_http_markdown_check_profile_conflicts(cf, conf);
+        if (rc != NGX_CONF_OK) {
+            return rc;
         }
     }
 

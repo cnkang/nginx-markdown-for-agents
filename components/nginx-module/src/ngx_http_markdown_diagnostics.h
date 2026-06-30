@@ -68,7 +68,7 @@ struct ngx_cycle_s;
  * must be updated.  Truncation is detected at runtime by build_json and
  * returns NGX_ERROR (500) rather than serving incomplete JSON.
  */
-#define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    33368
+#define NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE    34392
 #define NGX_HTTP_MARKDOWN_DIAG_JSON_DECISION_SIZE 128
 
 
