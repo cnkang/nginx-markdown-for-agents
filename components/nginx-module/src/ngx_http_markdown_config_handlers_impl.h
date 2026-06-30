@@ -332,43 +332,57 @@ ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
-/* Configuration directive handler: markdown_conditional_requests. */
+/* Configuration directive handler: markdown_cache_validation. */
 static char *
-ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_markdown_cache_validation(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-    static u_char             full_str[] = "full_support";
-    static u_char             ims_str[]  =
-        "if_modified_since_only";
-    static u_char             dis_str[]  = "disabled";
+    static u_char             off_str[]  = "off";
+    static u_char             ims_str[]  = "ims_only";
+    static u_char             full_str[] = "full";
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
 
     value = cf->args->elts;
 
+    /*
+     * markdown_cache_validation (Config V2, 0.9.0) consolidates the removed
+     * markdown_etag and markdown_conditional_requests directives.  It writes
+     * both backing fields (policy.generate_etag, policy.conditional_requests),
+     * which remain the runtime source of truth for the conversion and
+     * conditional-request paths.
+     *
+     *   off      - no ETag, no conditional request handling
+     *   ims_only - no ETag, If-Modified-Since only
+     *   full     - generate transformed ETag, If-None-Match + If-Modified-Since
+     */
     if (mcf->policy.conditional_requests != NGX_CONF_UNSET_UINT) {
         return "is duplicate";
     }
 
-    if (ngx_http_markdown_arg_equals(&value[1], full_str,
-                                     sizeof(full_str) - 1))
+    if (ngx_http_markdown_arg_equals(&value[1], off_str,
+                                     sizeof(off_str) - 1))
     {
+        mcf->policy.generate_etag = 0;
         mcf->policy.conditional_requests =
-            NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+            NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     } else if (ngx_http_markdown_arg_equals(
                    &value[1], ims_str,
                    sizeof(ims_str) - 1))
     {
+        mcf->policy.generate_etag = 0;
         mcf->policy.conditional_requests =
             NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
     } else if (ngx_http_markdown_arg_equals(
-                   &value[1], dis_str,
-                   sizeof(dis_str) - 1))
+                   &value[1], full_str,
+                   sizeof(full_str) - 1))
     {
-        mcf->policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
+        mcf->policy.generate_etag = 1;
+        mcf->policy.conditional_requests =
+            NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid value \"%V\" in \"%V\" directive, "
-                           "it must be \"full_support\", \"if_modified_since_only\", or \"disabled\"",
+                           "it must be \"off\", \"ims_only\", or \"full\"",
                            &value[1], &cmd->name);
         return NGX_CONF_ERROR;
     }

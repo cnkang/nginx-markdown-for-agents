@@ -1041,30 +1041,45 @@ test_conditional_and_log_verbosity_handlers(void)
     ngx_http_markdown_conf_t mcf;
     const char              *rc;
 
-    TEST_SUBSECTION("conditional_requests/log_verbosity handlers");
+    TEST_SUBSECTION("cache_validation/log_verbosity handlers");
 
     setup_cf(&cf, &args, values, 2);
     set_arg(&values[0], "directive");
 
     init_conf(&mcf);
-    set_arg(&cmd.name, "markdown_conditional_requests");
-    set_arg(&values[1], "if_modified_since_only");
-    rc = ngx_http_markdown_conditional_requests(&cf, &cmd, &mcf);
+    set_arg(&cmd.name, "markdown_cache_validation");
+    set_arg(&values[1], "ims_only");
+    rc = ngx_http_markdown_cache_validation(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "ims_only should parse");
     TEST_ASSERT(mcf.policy.conditional_requests
         == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE,
         "conditional mode should match");
+    TEST_ASSERT(mcf.policy.generate_etag == 0,
+        "ims_only should disable etag generation");
 
     init_conf(&mcf);
-    set_arg(&values[1], "disabled");
-    rc = ngx_http_markdown_conditional_requests(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "disabled should parse");
+    set_arg(&values[1], "full");
+    rc = ngx_http_markdown_cache_validation(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "full should parse");
+    TEST_ASSERT(mcf.policy.conditional_requests
+        == NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT,
+        "full should enable full conditional support");
+    TEST_ASSERT(mcf.policy.generate_etag == 1,
+        "full should enable etag generation");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "off");
+    rc = ngx_http_markdown_cache_validation(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "off should parse");
+    TEST_ASSERT(mcf.policy.conditional_requests
+        == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED,
+        "off should disable conditional support");
 
     init_conf(&mcf);
     set_arg(&values[1], "invalid");
-    rc = ngx_http_markdown_conditional_requests(&cf, &cmd, &mcf);
+    rc = ngx_http_markdown_cache_validation(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "invalid conditional mode should fail");
+        "invalid cache_validation mode should fail");
 
     init_conf(&mcf);
     set_arg(&cmd.name, "markdown_log_verbosity");

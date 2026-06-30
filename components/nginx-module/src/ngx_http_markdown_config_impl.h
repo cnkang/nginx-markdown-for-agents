@@ -44,8 +44,8 @@ static char *ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *
 static char *ngx_http_markdown_auth_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse configured auth-cookie patterns used by auth detection. */
 static char *ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-/* Parse conditional-requests mode (off/weak/strong semantics). */
-static char *ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse markdown_cache_validation off|ims_only|full (Config V2). */
+static char *ngx_http_markdown_cache_validation(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse module log verbosity mapping to nginx log levels. */
 static char *ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse streaming content types excluded from buffering/conversion. */

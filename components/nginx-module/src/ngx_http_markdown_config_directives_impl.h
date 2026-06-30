@@ -394,45 +394,53 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_etag on|off
+     * markdown_cache_validation off|ims_only|full   (Config V2, 0.9.0)
      *
-     * Generate ETag header for Markdown variants.
-     * ETags are computed from the Markdown output for proper caching.
-     * Default: on
+     * Cache-validation policy. Consolidates the removed markdown_etag and
+     * markdown_conditional_requests directives.
+     *   off      - no ETag, no conditional request handling
+     *   ims_only - no ETag, If-Modified-Since only
+     *   full     - transformed ETag + If-None-Match + If-Modified-Since (default)
      * Context: http, server, location
      *
      * Example:
-     *   markdown_etag off;
+     *   markdown_cache_validation full;
      */
     {
-        ngx_string("markdown_etag"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
+        ngx_string("markdown_cache_validation"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_markdown_cache_validation,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, policy.generate_etag),
+        0,
         NULL
     },
 
     /*
-     * markdown_conditional_requests full_support|if_modified_since_only|disabled
+     * markdown_etag  (REMOVED in 0.9.0 - reject-only stub)
      *
-     * Conditional request support mode:
-     * - full_support: Support If-None-Match and If-Modified-Since (default)
-     * - if_modified_since_only: Only support If-Modified-Since (performance)
-     * - disabled: No conditional request support for Markdown variants
-     * Default: full_support
-     * Context: http, server, location
+     * Migrated to markdown_cache_validation off|ims_only|full.
+     */
+    {
+        ngx_string("markdown_etag"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        (void *) "use \"markdown_cache_validation off|ims_only|full\" instead"
+    },
+
+    /*
+     * markdown_conditional_requests  (REMOVED in 0.9.0 - reject-only stub)
      *
-     * Example:
-     *   markdown_conditional_requests if_modified_since_only;
+     * Migrated to markdown_cache_validation off|ims_only|full.
      */
     {
         ngx_string("markdown_conditional_requests"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_http_markdown_conditional_requests,
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        NULL
+        (void *) "use \"markdown_cache_validation off|ims_only|full\" instead"
     },
 
     /*

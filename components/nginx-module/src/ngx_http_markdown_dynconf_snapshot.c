@@ -196,6 +196,29 @@ ngx_http_markdown_accept_policy_str(ngx_uint_t val)
 
 
 /*
+ * Map the effective cache-validation state to its Config V2 string
+ * representation (markdown_cache_validation off|ims_only|full).
+ *
+ * Derived from policy.conditional_requests, which markdown_cache_validation
+ * keeps consistent with policy.generate_etag.
+ */
+static const char *
+ngx_http_markdown_cache_validation_str(ngx_uint_t conditional_requests)
+{
+    switch (conditional_requests) {
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED:
+        return "off";
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE:
+        return "ims_only";
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT:
+        return "full";
+    default:
+        return "unknown";
+    }
+}
+
+
+/*
  * Map metrics_format enum to string representation.
  */
 static const char *
@@ -395,9 +418,11 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
         "markdown_log_verbosity",
         ngx_http_markdown_log_verbosity_str(conf->policy.log_verbosity), 1);
 
-    /* markdown_generate_etag (on/off) */
-    p = ngx_http_markdown_snapshot_flag(p, last,
-        "markdown_generate_etag", conf->policy.generate_etag, 1);
+    /* markdown_cache_validation (off|ims_only|full) */
+    p = ngx_http_markdown_snapshot_str(p, last,
+        "markdown_cache_validation",
+        ngx_http_markdown_cache_validation_str(conf->policy.conditional_requests),
+        1);
 
     /* markdown_metrics_format */
     p = ngx_http_markdown_snapshot_str(p, last,

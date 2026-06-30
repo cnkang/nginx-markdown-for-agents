@@ -279,6 +279,7 @@ test_default_config_all_keys_present(void)
     conf.advanced.dynconf_dry_run = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
     conf.policy.generate_etag = 1;
+    conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
     conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
     conf.ops.trust_forwarded_headers = 0;
     conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
@@ -330,8 +331,8 @@ test_default_config_all_keys_present(void)
         "should contain markdown_dynconf_dry_run key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_log_verbosity"),
         "should contain markdown_log_verbosity key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_generate_etag"),
-        "should contain markdown_generate_etag key");
+    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_cache_validation"),
+        "should contain markdown_cache_validation key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_metrics_format"),
         "should contain markdown_metrics_format key");
     TEST_ASSERT(output_contains_key(out_buf, out_len,
@@ -386,8 +387,8 @@ test_default_config_all_keys_present(void)
         "markdown_log_verbosity", "info"),
         "markdown_log_verbosity should be 'info'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_generate_etag", "on"),
-        "markdown_generate_etag should be 'on'");
+        "markdown_cache_validation", "full"),
+        "markdown_cache_validation should be 'full'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_metrics_format", "auto"),
         "markdown_metrics_format should be 'auto'");
@@ -444,6 +445,7 @@ test_custom_config_values_reflected(void)
     conf.advanced.dynconf_dry_run = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     conf.policy.generate_etag = 0;
+    conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
     conf.ops.trust_forwarded_headers = 1;
     conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
@@ -496,8 +498,8 @@ test_custom_config_values_reflected(void)
         "markdown_log_verbosity", "debug"),
         "markdown_log_verbosity should be 'debug'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_generate_etag", "off"),
-        "markdown_generate_etag should be 'off'");
+        "markdown_cache_validation", "off"),
+        "markdown_cache_validation should be 'off'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_metrics_format", "prometheus"),
         "markdown_metrics_format should be 'prometheus'");
