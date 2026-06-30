@@ -513,6 +513,82 @@ typedef struct FFIAcceptResult {
 } FFIAcceptResult;
 
 /**
+ * Borrowed byte string passed across the FFI boundary.
+ *
+ * Points to caller-owned memory that must remain valid for the duration of
+ * the call. `data` may be NULL only when `len == 0`.
+ */
+typedef struct FFIStr {
+  /**
+   * Pointer to the first byte (may be NULL when `len == 0`).
+   */
+  const uint8_t *data;
+  /**
+   * Number of bytes.
+   */
+  uintptr_t len;
+} FFIStr;
+
+/**
+ * Input snapshot for `markdown_decide_eligibility`.
+ *
+ * All fields are marshaled from `ngx_http_request_t` and the module
+ * configuration by the C caller. Array fields (`content_types`,
+ * `stream_types`) point to caller-owned arrays of [`FFIStr`] valid for the
+ * duration of the call; a NULL pointer with count 0 means "not configured".
+ */
+typedef struct FFIEligibilityInput {
+  /**
+   * 1 if `markdown_filter` is enabled for this request, else 0.
+   */
+  uint8_t filter_enabled;
+  /**
+   * 1 if the request method is GET or HEAD, else 0.
+   */
+  uint8_t method_get_or_head;
+  /**
+   * 1 if the request carried a `Range` header, else 0.
+   */
+  uint8_t has_range_header;
+  /**
+   * Response status code.
+   */
+  uint16_t status;
+  /**
+   * Response `Content-Type` value bytes (NULL/0 if absent).
+   */
+  const uint8_t *content_type;
+  /**
+   * Length of `content_type`.
+   */
+  uintptr_t content_type_len;
+  /**
+   * Configured `markdown_content_types` allowlist (NULL/0 = default html).
+   */
+  const struct FFIStr *content_types;
+  /**
+   * Number of entries in `content_types`.
+   */
+  uintptr_t content_types_count;
+  /**
+   * Configured `markdown_stream_types` exclusions (NULL/0 = none).
+   */
+  const struct FFIStr *stream_types;
+  /**
+   * Number of entries in `stream_types`.
+   */
+  uintptr_t stream_types_count;
+  /**
+   * Response `Content-Length`; negative means absent/unknown.
+   */
+  int64_t content_length;
+  /**
+   * Effective full-buffer body limit in bytes; 0 means unlimited.
+   */
+  uintptr_t body_limit;
+} FFIEligibilityInput;
+
+/**
  * Result of a conditional request check (If-None-Match / If-Modified-Since).
  *
  * Returned by `markdown_check_conditional` FFI function.
@@ -778,6 +854,31 @@ void markdown_negotiate_accept(const uint8_t *accept_header,
                                uintptr_t accept_header_len,
                                uint8_t on_wildcard,
                                struct FFIAcceptResult *result);
+
+/**
+ * Decide whether an upstream response is eligible for Markdown conversion.
+ *
+ * Single source of truth for the eligibility determination (method, status,
+ * Range, unbounded streaming, Content-Type allowlist, size limit). The C
+ * module marshals request/config fields into [`FFIEligibilityInput`] and
+ * casts the returned `u8` directly to `ngx_http_markdown_eligibility_t`
+ * (the codes match that enum's discriminants).
+ *
+ * Returns `FFI_ELIGIBILITY_INELIGIBLE_CONFIG` (skip conversion, the safe
+ * fail-open outcome) if `input` is NULL or on any caught panic.
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `input` is NULL or points to a valid [`FFIEligibilityInput`]
+ * - `content_type` points to `content_type_len` readable bytes (or is NULL
+ *   when `content_type_len == 0`)
+ * - `content_types`/`stream_types` point to `*_count` readable [`FFIStr`]
+ *   entries (or are NULL when the count is 0), each `FFIStr.data` pointing to
+ *   `FFIStr.len` readable bytes (or NULL when `len == 0`)
+ * - all referenced memory remains valid for the duration of the call
+ */
+uint8_t markdown_decide_eligibility(const struct FFIEligibilityInput *input);
 
 /**
  * Evaluate HTTP conditional request headers (If-None-Match / If-Modified-Since).
