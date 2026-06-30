@@ -322,6 +322,20 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1  /* fail-closed: return 502 error */
 
 /*
+ * Configuration constants for markdown_accept directive (Config V2, 0.9.0).
+ *
+ * markdown_accept strict|wildcard|force replaces the removed
+ * markdown_on_wildcard on|off directive.
+ *   strict   - convert only on an explicit text/markdown Accept match
+ *   wildcard - additionally convert on wildcard Accept (star/slash-star,
+ *              text/star); equivalent to the old "markdown_on_wildcard on"
+ *   force    - convert regardless of the Accept header (dangerous)
+ */
+#define NGX_HTTP_MARKDOWN_ACCEPT_STRICT    0  /* explicit text/markdown only */
+#define NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD  1  /* also wildcard Accept */
+#define NGX_HTTP_MARKDOWN_ACCEPT_FORCE     2  /* convert regardless of Accept */
+
+/*
  * Default streaming threshold for v0.8.0 stream.threshold field (1 MiB).
  * Responses with Content-Length >= this threshold use streaming mode.
  */
@@ -411,7 +425,7 @@ typedef enum {
  * - flavor: NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK
  * - token_estimate: NGX_CONF_UNSET (off by default)
  * - front_matter: NGX_CONF_UNSET (off by default)
- * - on_wildcard: NGX_CONF_UNSET (off by default)
+ * - accept_policy: NGX_CONF_UNSET_UINT (strict by default)
  * - auth_policy: NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW
  * - auth_cookies: NULL (no patterns configured)
  * - generate_etag: 1 (on by default)
@@ -480,7 +494,7 @@ typedef struct {
     ngx_uint_t   flavor;               /* markdown_flavor commonmark|gfm (default: commonmark) */
     ngx_flag_t   token_estimate;       /* markdown_token_estimate on|off (default: off) */
     ngx_flag_t   front_matter;         /* markdown_front_matter on|off (default: off) */
-    ngx_flag_t   on_wildcard;          /* markdown_on_wildcard on|off (default: off) */
+    ngx_uint_t   accept_policy;        /* markdown_accept strict|wildcard|force (default: strict) */
     ngx_http_markdown_policy_cfg_t policy;
     ngx_flag_t   buffer_chunked;       /* markdown_buffer_chunked on|off (default: on) */
     ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */

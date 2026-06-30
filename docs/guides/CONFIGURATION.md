@@ -103,7 +103,7 @@ See [DEPLOYMENT_EXAMPLES.md](DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user
 **Best Practices for Variable-Driven `markdown_filter`:**
 - Prefer regex matching for `Accept` header maps because real clients often send comma-separated values and q-factors.
 - Prefer `$uri` (normalized path without query string) over `$request_uri` when matching file extensions.
-- If your variable map enables conversion for `Accept: text/*` or `Accept: */*`, also set `markdown_on_wildcard on;`.
+- If your variable map enables conversion for `Accept: text/*` or `Accept: */*`, also set `markdown_accept wildcard;`.
 
 ---
 
@@ -297,23 +297,32 @@ url: "https://example.com/page"
 
 ### Content Negotiation
 
-#### markdown_on_wildcard
+#### markdown_accept
 
-**Syntax:** `markdown_on_wildcard on | off;`  
-**Default:** `off`  
+**Syntax:** `markdown_accept strict | wildcard | force;`  
+**Default:** `strict`  
 **Context:** http, server, location
 
-Convert when Accept header contains wildcards (`*/*` or `text/*`). By default, only explicit `text/markdown` triggers conversion.
+Accept-header negotiation policy. Replaces the removed
+`markdown_on_wildcard` directive (0.9.0 breaking change).
+
+- `strict` (default): only an explicit `Accept: text/markdown` match triggers
+  conversion.
+- `wildcard`: additionally convert when the `Accept` header contains wildcards
+  (`*/*` or `text/*`). Equivalent to the old `markdown_on_wildcard on`.
+- `force`: convert regardless of the `Accept` header, including when no
+  `Accept` header is present. Dangerous; use only for closed/internal traffic.
 
 **Example:**
 ```nginx
 # Enable conversion for wildcard Accept headers
-markdown_on_wildcard on;
+markdown_accept wildcard;
 ```
 
 **Behavior:**
-- `off` (default): Only `Accept: text/markdown` triggers conversion
-- `on`: `Accept: */*` or `Accept: text/*` also triggers conversion
+- `strict` (default): Only `Accept: text/markdown` triggers conversion
+- `wildcard`: `Accept: */*` or `Accept: text/*` also triggers conversion
+- `force`: conversion is attempted regardless of the `Accept` header
 
 ---
 
@@ -1788,7 +1797,7 @@ server {
 
     location / {
         proxy_pass http://backend;
-        markdown_on_wildcard on;
+        markdown_accept wildcard;
         markdown_filter $convert_html;
     }
 }
@@ -1797,7 +1806,7 @@ server {
 **Why this pattern is recommended:**
 - `map $http_accept` with exact string values is brittle; many clients send `Accept` with multiple values.
 - `$request_uri` includes query strings (for example `/index.html?x=1`) and can break extension matching.
-- `markdown_on_wildcard on` is required if you intentionally treat `text/*` as convertible.
+- `markdown_accept wildcard` is required if you intentionally treat `text/*` as convertible.
 
 ---
 

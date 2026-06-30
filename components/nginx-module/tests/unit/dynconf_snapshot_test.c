@@ -266,7 +266,7 @@ test_default_config_all_keys_present(void)
     conf.flavor = NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK;
     conf.token_estimate = 0;
     conf.front_matter = 0;
-    conf.on_wildcard = 0;
+    conf.accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_STRICT;
     conf.buffer_chunked = 1;
     conf.decompress.auto_decompress = 1;
     conf.decompress.max_size = 10 * 1024 * 1024;
@@ -308,8 +308,8 @@ test_default_config_all_keys_present(void)
         "should contain markdown_token_estimate key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_front_matter"),
         "should contain markdown_front_matter key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_on_wildcard"),
-        "should contain markdown_on_wildcard key");
+    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_accept"),
+        "should contain markdown_accept key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_buffer_chunked"),
         "should contain markdown_buffer_chunked key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_auto_decompress"),
@@ -431,7 +431,7 @@ test_custom_config_values_reflected(void)
     conf.flavor = NGX_HTTP_MARKDOWN_FLAVOR_GFM;
     conf.token_estimate = 1;
     conf.front_matter = 1;
-    conf.on_wildcard = 1;
+    conf.accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD;
     conf.buffer_chunked = 0;
     conf.decompress.auto_decompress = 0;
     conf.decompress.max_size = 5 * 1024 * 1024;
@@ -475,8 +475,8 @@ test_custom_config_values_reflected(void)
         "markdown_front_matter", "on"),
         "markdown_front_matter should be 'on'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_on_wildcard", "on"),
-        "markdown_on_wildcard should be 'on'");
+        "markdown_accept", "wildcard"),
+        "markdown_accept should be 'wildcard'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_buffer_chunked", "off"),
         "markdown_buffer_chunked should be 'off'");

@@ -177,6 +177,25 @@ ngx_http_markdown_flavor_str(ngx_uint_t val)
 
 
 /*
+ * Map markdown_accept policy enum to string representation (Config V2, 0.9.0).
+ */
+static const char *
+ngx_http_markdown_accept_policy_str(ngx_uint_t val)
+{
+    switch (val) {
+    case NGX_HTTP_MARKDOWN_ACCEPT_STRICT:
+        return "strict";
+    case NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD:
+        return "wildcard";
+    case NGX_HTTP_MARKDOWN_ACCEPT_FORCE:
+        return "force";
+    default:
+        return "unknown";
+    }
+}
+
+
+/*
  * Map metrics_format enum to string representation.
  */
 static const char *
@@ -330,9 +349,10 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     p = ngx_http_markdown_snapshot_flag(p, last,
         "markdown_front_matter", conf->front_matter, 1);
 
-    /* markdown_on_wildcard (on/off) */
-    p = ngx_http_markdown_snapshot_flag(p, last,
-        "markdown_on_wildcard", conf->on_wildcard, 1);
+    /* markdown_accept (strict|wildcard|force) */
+    p = ngx_http_markdown_snapshot_str(p, last,
+        "markdown_accept",
+        ngx_http_markdown_accept_policy_str(conf->accept_policy), 1);
 
     /* markdown_buffer_chunked (on/off) */
     p = ngx_http_markdown_snapshot_flag(p, last,

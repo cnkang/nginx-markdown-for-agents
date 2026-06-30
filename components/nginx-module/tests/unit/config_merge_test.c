@@ -23,7 +23,7 @@ typedef struct {
     size_t max_size;
     int on_error;
     int flavor;
-    int on_wildcard;
+    int accept_policy;
     int auto_decompress;
     const char *auth_cookie_patterns;
 } conf_t;
@@ -58,7 +58,7 @@ merge_conf(conf_t *child, const conf_t *parent)
     if (child->max_size == UNSET_SIZE) child->max_size = (parent->max_size == UNSET_SIZE) ? (10 * 1024 * 1024) : parent->max_size;
     if (child->on_error == UNSET_INT) child->on_error = (parent->on_error == UNSET_INT) ? 0 : parent->on_error;
     if (child->flavor == UNSET_INT) child->flavor = (parent->flavor == UNSET_INT) ? 0 : parent->flavor;
-    if (child->on_wildcard == UNSET_INT) child->on_wildcard = (parent->on_wildcard == UNSET_INT) ? 0 : parent->on_wildcard;
+    if (child->accept_policy == UNSET_INT) child->accept_policy = (parent->accept_policy == UNSET_INT) ? 0 : parent->accept_policy;
     if (child->auto_decompress == UNSET_INT) child->auto_decompress = (parent->auto_decompress == UNSET_INT) ? 1 : parent->auto_decompress;
     if (child->auth_cookie_patterns == NULL) child->auth_cookie_patterns = parent->auth_cookie_patterns;
 }
@@ -80,7 +80,7 @@ unset_conf(void)
     c.max_size = UNSET_SIZE;
     c.on_error = UNSET_INT;
     c.flavor = UNSET_INT;
-    c.on_wildcard = UNSET_INT;
+    c.accept_policy = UNSET_INT;
     c.auto_decompress = UNSET_INT;
     c.auth_cookie_patterns = NULL;
     return c;
@@ -104,7 +104,7 @@ test_inherit_from_parent(void)
     parent.max_size = 5 * 1024 * 1024;
     parent.on_error = 1;
     parent.flavor = 1;
-    parent.on_wildcard = 1;
+    parent.accept_policy = 1;
     parent.auto_decompress = 0;
     parent.auth_cookie_patterns = "session*";
 
@@ -115,7 +115,7 @@ test_inherit_from_parent(void)
     TEST_ASSERT(child.max_size == parent.max_size, "max_size should inherit");
     TEST_ASSERT(child.on_error == parent.on_error, "on_error should inherit");
     TEST_ASSERT(child.flavor == parent.flavor, "flavor should inherit");
-    TEST_ASSERT(child.on_wildcard == parent.on_wildcard, "on_wildcard should inherit");
+    TEST_ASSERT(child.accept_policy == parent.accept_policy, "accept_policy should inherit");
     TEST_ASSERT(child.auto_decompress == 0, "auto_decompress should inherit");
     TEST_ASSERT(STR_EQ(child.auth_cookie_patterns, "session*"), "auth cookies should inherit");
     TEST_PASS("Inheritance works");
@@ -172,7 +172,7 @@ test_defaults_when_both_unset(void)
     TEST_ASSERT(child.max_size == 10 * 1024 * 1024, "default max_size should be 10MB");
     TEST_ASSERT(child.on_error == 0, "default on_error should be pass");
     TEST_ASSERT(child.flavor == 0, "default flavor should be commonmark");
-    TEST_ASSERT(child.on_wildcard == 0, "default on_wildcard should be off");
+    TEST_ASSERT(child.accept_policy == 0, "default accept_policy should be strict");
     TEST_ASSERT(child.auto_decompress == 1, "default auto_decompress should be on");
     TEST_PASS("Defaults are correct");
 }

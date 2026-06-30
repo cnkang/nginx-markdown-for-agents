@@ -28,7 +28,7 @@ typedef struct {
     int markdown_flavor;
     int markdown_token_estimate;
     int markdown_front_matter;
-    int markdown_on_wildcard;
+    int markdown_accept;
     int markdown_auth_policy;
     int markdown_etag;
     int markdown_conditional_requests;
@@ -177,7 +177,7 @@ module_defaults(void)
     c.markdown_flavor = FLAVOR_COMMONMARK;
     c.markdown_token_estimate = 0;
     c.markdown_front_matter = 0;
-    c.markdown_on_wildcard = 0;
+    c.markdown_accept = 0;
     c.markdown_auth_policy = AUTH_ALLOW;
     c.markdown_etag = 1;
     c.markdown_conditional_requests = COND_FULL_SUPPORT;

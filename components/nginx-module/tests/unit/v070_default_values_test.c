@@ -550,8 +550,8 @@ test_06x_defaults_unchanged(void)
         "token_estimate should default to off");
     TEST_ASSERT(child->front_matter == 0,
         "front_matter should default to off");
-    TEST_ASSERT(child->on_wildcard == 0,
-        "on_wildcard should default to off");
+    TEST_ASSERT(child->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_STRICT,
+        "accept_policy should default to strict");
     TEST_ASSERT(child->buffer_chunked == 1,
         "buffer_chunked should default to on");
     TEST_ASSERT(child->decompress.auto_decompress == 1,

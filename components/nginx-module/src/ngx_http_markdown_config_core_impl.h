@@ -257,7 +257,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->flavor = NGX_CONF_UNSET_UINT;
     conf->token_estimate = NGX_CONF_UNSET;
     conf->front_matter = NGX_CONF_UNSET;
-    conf->on_wildcard = NGX_CONF_UNSET;
+    conf->accept_policy = NGX_CONF_UNSET_UINT;
     conf->policy.auth_policy = NGX_CONF_UNSET_UINT;
     conf->policy.auth_cookies = NGX_CONF_UNSET_PTR;
     conf->policy.generate_etag = NGX_CONF_UNSET;
@@ -389,7 +389,8 @@ ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
                               NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK);
     ngx_conf_merge_value(conf->token_estimate, prev->token_estimate, 0);
     ngx_conf_merge_value(conf->front_matter, prev->front_matter, 0);
-    ngx_conf_merge_value(conf->on_wildcard, prev->on_wildcard, 0);
+    ngx_conf_merge_uint_value(conf->accept_policy, prev->accept_policy,
+                              NGX_HTTP_MARKDOWN_ACCEPT_STRICT);
     ngx_conf_merge_uint_value(conf->policy.auth_policy, prev->policy.auth_policy,
                               NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW);
     ngx_conf_merge_value(conf->policy.generate_etag, prev->policy.generate_etag, 1);
@@ -1094,7 +1095,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        "enabled_source=%V max_size=%uz "
                        "timeout_ms=%M on_error=%V flavor=%V "
                        "token_estimate=%ui front_matter=%ui "
-                       "on_wildcard=%ui auth_policy=%V "
+                       "accept_policy=%ui auth_policy=%V "
                        "auth_cookie_patterns=%ui etag=%ui "
                        "conditional_requests=%V "
                        "log_verbosity=%V buffer_chunked=%ui "
@@ -1119,7 +1120,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        ngx_http_markdown_flavor_name(conf->flavor),
                        (ngx_uint_t) conf->token_estimate,
                        (ngx_uint_t) conf->front_matter,
-                       (ngx_uint_t) conf->on_wildcard,
+                       (ngx_uint_t) conf->accept_policy,
                        ngx_http_markdown_auth_policy_name(conf->policy.auth_policy),
                        auth_cookie_count,
                        (ngx_uint_t) conf->policy.generate_etag,
