@@ -356,6 +356,52 @@ pub const NEGOTIATE_WILDCARD_STRICT: u8 = 0;
 #[allow(dead_code)]
 pub const NEGOTIATE_WILDCARD_ALLOW: u8 = 1;
 
+/// Borrowed byte string passed across the FFI boundary.
+///
+/// Points to caller-owned memory that must remain valid for the duration of
+/// the call. `data` may be NULL only when `len == 0`.
+#[repr(C)]
+pub struct FFIStr {
+    /// Pointer to the first byte (may be NULL when `len == 0`).
+    pub data: *const u8,
+    /// Number of bytes.
+    pub len: usize,
+}
+
+/// Input snapshot for `markdown_decide_eligibility`.
+///
+/// All fields are marshaled from `ngx_http_request_t` and the module
+/// configuration by the C caller. Array fields (`content_types`,
+/// `stream_types`) point to caller-owned arrays of [`FFIStr`] valid for the
+/// duration of the call; a NULL pointer with count 0 means "not configured".
+#[repr(C)]
+pub struct FFIEligibilityInput {
+    /// 1 if `markdown_filter` is enabled for this request, else 0.
+    pub filter_enabled: u8,
+    /// 1 if the request method is GET or HEAD, else 0.
+    pub method_get_or_head: u8,
+    /// 1 if the request carried a `Range` header, else 0.
+    pub has_range_header: u8,
+    /// Response status code.
+    pub status: u16,
+    /// Response `Content-Type` value bytes (NULL/0 if absent).
+    pub content_type: *const u8,
+    /// Length of `content_type`.
+    pub content_type_len: usize,
+    /// Configured `markdown_content_types` allowlist (NULL/0 = default html).
+    pub content_types: *const FFIStr,
+    /// Number of entries in `content_types`.
+    pub content_types_count: usize,
+    /// Configured `markdown_stream_types` exclusions (NULL/0 = none).
+    pub stream_types: *const FFIStr,
+    /// Number of entries in `stream_types`.
+    pub stream_types_count: usize,
+    /// Response `Content-Length`; negative means absent/unknown.
+    pub content_length: i64,
+    /// Effective full-buffer body limit in bytes; 0 means unlimited.
+    pub body_limit: usize,
+}
+
 /// Result of a conditional request check (If-None-Match / If-Modified-Since).
 ///
 /// Returned by `markdown_check_conditional` FFI function.

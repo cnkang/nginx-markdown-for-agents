@@ -73,6 +73,22 @@ impl Eligibility {
     pub fn is_eligible(self) -> bool {
         matches!(self, Eligibility::Eligible)
     }
+
+    /// Stable u8 FFI code matching the C `ngx_http_markdown_eligibility_t`
+    /// enum discriminants, so the C caller can cast the return value directly.
+    pub fn ffi_code(self) -> u8 {
+        match self {
+            Eligibility::Eligible => 0,
+            Eligibility::IneligibleMethod => 1,
+            Eligibility::IneligibleStatus => 2,
+            Eligibility::IneligibleContentType => 3,
+            Eligibility::IneligibleSize => 4,
+            Eligibility::IneligibleStreaming => 5,
+            Eligibility::IneligibleAuth => 6,
+            Eligibility::IneligibleRange => 7,
+            Eligibility::IneligibleConfig => 8,
+        }
+    }
 }
 
 /// Input snapshot for the eligibility decision.

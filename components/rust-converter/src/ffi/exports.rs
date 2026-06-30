@@ -40,14 +40,15 @@ use crate::error::ConversionError;
 
 use super::abi::{
     DECOMP_CATEGORY_INVALID_ARGS, DECOMP_CATEGORY_IO_ERROR, ERROR_INTERNAL, FFIAcceptResult,
-    FFIConditionalResult, FFIDecisionResult, FFIDecompResult, FFIHeaderEntry, FFIHeaderPlan,
-    FFIHeaderPlanHandle, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
-    NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q,
-    NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
+    FFIConditionalResult, FFIDecisionResult, FFIDecompResult, FFIEligibilityInput, FFIHeaderEntry,
+    FFIHeaderPlan, FFIHeaderPlanHandle, FFIStr, MarkdownConverterHandle, MarkdownOptions,
+    MarkdownResult, NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT,
+    NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
 };
 use super::convert::convert_inner;
 use super::memory::{free_buffer, reset_result, set_error_result, set_success_result};
 use super::options::{required_bytes, required_ref};
+use crate::decision::eligibility::{Eligibility, EligibilityInput, decide_eligibility};
 
 #[cfg(test)]
 thread_local! {
@@ -268,6 +269,77 @@ pub unsafe extern "C" fn markdown_negotiate_accept(
         result_ref.should_convert = 0;
         result_ref.reason = NEGOTIATE_REASON_MALFORMED;
     }
+}
+
+/// Decide whether an upstream response is eligible for Markdown conversion.
+///
+/// Single source of truth for the eligibility determination (method, status,
+/// Range, unbounded streaming, Content-Type allowlist, size limit). The C
+/// module marshals request/config fields into [`FFIEligibilityInput`] and
+/// casts the returned `u8` directly to `ngx_http_markdown_eligibility_t`
+/// (the codes match that enum's discriminants).
+///
+/// Returns `FFI_ELIGIBILITY_INELIGIBLE_CONFIG` (skip conversion, the safe
+/// fail-open outcome) if `input` is NULL or on any caught panic.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `input` is NULL or points to a valid [`FFIEligibilityInput`]
+/// - `content_type` points to `content_type_len` readable bytes (or is NULL
+///   when `content_type_len == 0`)
+/// - `content_types`/`stream_types` point to `*_count` readable [`FFIStr`]
+///   entries (or are NULL when the count is 0), each `FFIStr.data` pointing to
+///   `FFIStr.len` readable bytes (or NULL when `len == 0`)
+/// - all referenced memory remains valid for the duration of the call
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_decide_eligibility(input: *const FFIEligibilityInput) -> u8 {
+    if input.is_null() {
+        return Eligibility::IneligibleConfig.ffi_code();
+    }
+
+    // Defense-in-depth: decide_eligibility is panic-free by construction, but a
+    // panic must never unwind into C. On panic we default to "ineligible
+    // (config)" which means skip conversion — the safe fail-open outcome.
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        let inp = unsafe { &*input };
+
+        let bytes = |ptr: *const u8, len: usize| -> &[u8] {
+            if ptr.is_null() || len == 0 {
+                &[]
+            } else {
+                unsafe { std::slice::from_raw_parts(ptr, len) }
+            }
+        };
+
+        let ffi_strs = |ptr: *const FFIStr, count: usize| -> Vec<&[u8]> {
+            if ptr.is_null() || count == 0 {
+                return Vec::new();
+            }
+            let entries = unsafe { std::slice::from_raw_parts(ptr, count) };
+            entries.iter().map(|e| bytes(e.data, e.len)).collect()
+        };
+
+        let content_type = bytes(inp.content_type, inp.content_type_len);
+        let content_types = ffi_strs(inp.content_types, inp.content_types_count);
+        let stream_types = ffi_strs(inp.stream_types, inp.stream_types_count);
+
+        let einput = EligibilityInput {
+            filter_enabled: inp.filter_enabled != 0,
+            method_get_or_head: inp.method_get_or_head != 0,
+            status: inp.status,
+            has_range_header: inp.has_range_header != 0,
+            content_type,
+            content_types: &content_types,
+            stream_types: &stream_types,
+            content_length: inp.content_length,
+            body_limit: inp.body_limit,
+        };
+
+        decide_eligibility(&einput).ffi_code()
+    }));
+
+    outcome.unwrap_or_else(|_| Eligibility::IneligibleConfig.ffi_code())
 }
 
 /// Evaluate HTTP conditional request headers (If-None-Match / If-Modified-Since).
@@ -1511,5 +1583,106 @@ mod tests {
         let url = b"https://example.com/";
         let rc = unsafe { markdown_validate_url(url.as_ptr(), url.len()) };
         assert_eq!(rc, 1, "valid URL should be marked safe (1)");
+    }
+
+    fn default_eligibility_input() -> FFIEligibilityInput {
+        FFIEligibilityInput {
+            filter_enabled: 1,
+            method_get_or_head: 1,
+            has_range_header: 0,
+            status: 200,
+            content_type: ptr::null(),
+            content_type_len: 0,
+            content_types: ptr::null(),
+            content_types_count: 0,
+            stream_types: ptr::null(),
+            stream_types_count: 0,
+            content_length: -1,
+            body_limit: 10 * 1024 * 1024,
+        }
+    }
+
+    #[test]
+    fn decide_eligibility_null_input_is_config_skip() {
+        let rc = unsafe { markdown_decide_eligibility(ptr::null()) };
+        // 8 == IneligibleConfig (safe fail-open: skip conversion).
+        assert_eq!(rc, 8);
+    }
+
+    #[test]
+    fn decide_eligibility_html_eligible() {
+        let ct = b"text/html";
+        let mut input = default_eligibility_input();
+        input.content_type = ct.as_ptr();
+        input.content_type_len = ct.len();
+        let rc = unsafe { markdown_decide_eligibility(&input) };
+        assert_eq!(rc, 0, "text/html with defaults should be eligible");
+    }
+
+    #[test]
+    fn decide_eligibility_non_html_content_type() {
+        let ct = b"application/json";
+        let mut input = default_eligibility_input();
+        input.content_type = ct.as_ptr();
+        input.content_type_len = ct.len();
+        let rc = unsafe { markdown_decide_eligibility(&input) };
+        assert_eq!(rc, 3, "non-html should be IneligibleContentType");
+    }
+
+    #[test]
+    fn decide_eligibility_marshals_content_types_array() {
+        let ct = b"application/xhtml+xml";
+        let entry = FFIStr {
+            data: ct.as_ptr(),
+            len: ct.len(),
+        };
+        let allow = [entry];
+        let mut input = default_eligibility_input();
+        input.content_type = ct.as_ptr();
+        input.content_type_len = ct.len();
+        input.content_types = allow.as_ptr();
+        input.content_types_count = allow.len();
+        let rc = unsafe { markdown_decide_eligibility(&input) };
+        assert_eq!(rc, 0, "configured allowlist entry should be eligible");
+    }
+
+    #[test]
+    fn decide_eligibility_marshals_stream_types_array() {
+        let ct = b"application/x-ndjson";
+        let entry = FFIStr {
+            data: ct.as_ptr(),
+            len: ct.len(),
+        };
+        let stream = [entry];
+        let mut input = default_eligibility_input();
+        input.content_type = ct.as_ptr();
+        input.content_type_len = ct.len();
+        input.stream_types = stream.as_ptr();
+        input.stream_types_count = stream.len();
+        let rc = unsafe { markdown_decide_eligibility(&input) };
+        assert_eq!(
+            rc, 5,
+            "configured stream type should be IneligibleStreaming"
+        );
+    }
+
+    #[test]
+    fn decide_eligibility_size_limit_exceeded() {
+        let ct = b"text/html";
+        let mut input = default_eligibility_input();
+        input.content_type = ct.as_ptr();
+        input.content_type_len = ct.len();
+        input.content_length = 8192;
+        input.body_limit = 4096;
+        let rc = unsafe { markdown_decide_eligibility(&input) };
+        assert_eq!(rc, 4, "oversized response should be IneligibleSize");
+    }
+
+    #[test]
+    fn decide_eligibility_disabled_filter_is_config() {
+        let mut input = default_eligibility_input();
+        input.filter_enabled = 0;
+        let rc = unsafe { markdown_decide_eligibility(&input) };
+        assert_eq!(rc, 8, "disabled filter should be IneligibleConfig");
     }
 }
