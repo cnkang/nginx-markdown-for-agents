@@ -139,18 +139,27 @@ ngx_http_markdown_snapshot_str(u_char *p, u_char *last,
 
 
 /*
- * Map on_error enum to string representation.
+ * Map the effective error policy to its Config V2 string representation
+ * (markdown_error_policy pass|fail_closed|status <code>).
+ *
+ * Derived from on_error (pass/reject) and error_status (the reject status
+ * code).  fail_closed is the canonical name for reject with the default 502.
  */
 static const char *
-ngx_http_markdown_on_error_str(ngx_uint_t val)
+ngx_http_markdown_error_policy_str(ngx_uint_t on_error, ngx_uint_t error_status)
 {
-    switch (val) {
-    case NGX_HTTP_MARKDOWN_ON_ERROR_PASS:
+    if (on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
         return "pass";
-    case NGX_HTTP_MARKDOWN_ON_ERROR_REJECT:
-        return "reject";
+    }
+
+    switch (error_status) {
+    case 429:
+        return "status_429";
+    case 503:
+        return "status_503";
+    case 502:
     default:
-        return "unknown";
+        return "fail_closed";
     }
 }
 
@@ -278,23 +287,6 @@ ngx_http_markdown_streaming_engine_str(ngx_uint_t engine)
         return "unknown";
     }
 }
-
-
-/*
- * Map streaming on_error enum to string representation.
- */
-static const char *
-ngx_http_markdown_streaming_on_error_str(ngx_uint_t val)
-{
-    switch (val) {
-    case NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS:
-        return "pass";
-    case NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT:
-        return "reject";
-    default:
-        return "unknown";
-    }
-}
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 
@@ -354,10 +346,11 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     p = ngx_http_markdown_snapshot_msec(p, last,
         "markdown_timeout", conf->timeout, 1);
 
-    /* markdown_on_error */
+    /* markdown_error_policy (pass|fail_closed|status_<code>) */
     p = ngx_http_markdown_snapshot_str(p, last,
-        "markdown_on_error",
-        ngx_http_markdown_on_error_str(conf->on_error), 1);
+        "markdown_error_policy",
+        ngx_http_markdown_error_policy_str(conf->on_error,
+                                           conf->error_status), 1);
 
     /* markdown_flavor */
     p = ngx_http_markdown_snapshot_str(p, last,
@@ -452,12 +445,6 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     /* markdown_streaming_budget */
     p = ngx_http_markdown_snapshot_size(p, last,
         "markdown_streaming_budget", conf->stream.budget, 1);
-
-    /* markdown_streaming_on_error */
-    p = ngx_http_markdown_snapshot_str(p, last,
-        "markdown_streaming_on_error",
-        ngx_http_markdown_streaming_on_error_str(
-            conf->stream.on_error), 1);
 
     /* markdown_streaming_shadow (on/off) */
     p = ngx_http_markdown_snapshot_flag(p, last,

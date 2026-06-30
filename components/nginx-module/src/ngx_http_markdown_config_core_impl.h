@@ -254,6 +254,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->decompress.max_size_explicit = 0;
     conf->timeout = NGX_CONF_UNSET_MSEC;
     conf->on_error = NGX_CONF_UNSET_UINT;
+    conf->error_status = NGX_CONF_UNSET_UINT;
     conf->flavor = NGX_CONF_UNSET_UINT;
     conf->token_estimate = NGX_CONF_UNSET;
     conf->front_matter = NGX_CONF_UNSET;
@@ -386,6 +387,8 @@ ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_msec_value(conf->timeout, prev->timeout, 5000);
     ngx_conf_merge_uint_value(conf->on_error, prev->on_error,
                               NGX_HTTP_MARKDOWN_ON_ERROR_PASS);
+    ngx_conf_merge_uint_value(conf->error_status, prev->error_status,
+                              NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT);
     ngx_conf_merge_uint_value(conf->flavor, prev->flavor,
                               NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK);
     ngx_conf_merge_value(conf->token_estimate, prev->token_estimate, 0);

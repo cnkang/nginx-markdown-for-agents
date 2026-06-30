@@ -843,32 +843,62 @@ test_simple_enum_handlers(void)
 {
     ngx_conf_t               cf;
     ngx_array_t              args;
-    ngx_str_t                values[2];
+    ngx_str_t                values[3];
     ngx_command_t            cmd;
     ngx_http_markdown_conf_t mcf;
     const char              *rc;
 
-    TEST_SUBSECTION("on_error/flavor/auth_policy handlers");
+    TEST_SUBSECTION("error_policy/flavor/auth_policy handlers");
 
     setup_cf(&cf, &args, values, 2);
 
     init_conf(&mcf);
-    set_arg(&cmd.name, "markdown_on_error");
-    set_arg(&values[0], "markdown_on_error");
+    set_arg(&cmd.name, "markdown_error_policy");
+    set_arg(&values[0], "markdown_error_policy");
     set_arg(&values[1], "pass");
-    rc = ngx_http_markdown_on_error(&cf, &cmd, &mcf);
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "pass should parse");
     TEST_ASSERT(mcf.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
-        "on_error should be pass");
-    rc = ngx_http_markdown_on_error(&cf, &cmd, &mcf);
+        "pass should map to on_error=PASS");
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
     TEST_ASSERT(strcmp(rc, "is duplicate") == 0,
-        "duplicate on_error should fail");
+        "duplicate error_policy should fail");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "fail_closed");
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "fail_closed should parse");
+    TEST_ASSERT(mcf.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT,
+        "fail_closed should map to on_error=REJECT");
+    TEST_ASSERT(mcf.error_status == 502,
+        "fail_closed should map to status 502");
 
     init_conf(&mcf);
     set_arg(&values[1], "bad");
-    rc = ngx_http_markdown_on_error(&cf, &cmd, &mcf);
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "invalid on_error should fail");
+        "invalid error_policy should fail");
+
+    /* status <code> takes two arguments */
+    setup_cf(&cf, &args, values, 3);
+    set_arg(&values[0], "markdown_error_policy");
+    init_conf(&mcf);
+    set_arg(&values[1], "status");
+    set_arg(&values[2], "503");
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "status 503 should parse");
+    TEST_ASSERT(mcf.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT,
+        "status should map to on_error=REJECT");
+    TEST_ASSERT(mcf.error_status == 503, "status 503 should store 503");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "status");
+    set_arg(&values[2], "418");
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "disallowed status code should fail");
+
+    setup_cf(&cf, &args, values, 2);
 
     init_conf(&mcf);
     set_arg(&cmd.name, "markdown_flavor");
