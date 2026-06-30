@@ -336,6 +336,13 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_ACCEPT_FORCE     2  /* convert regardless of Accept */
 
 /*
+ * Default for markdown_limits max_inflight (0.9.0 production protection
+ * default).  The value is parsed and stored in Config V2; enforcement is
+ * implemented by the worker inflight guard.  0 means unlimited.
+ */
+#define NGX_HTTP_MARKDOWN_MAX_INFLIGHT_DEFAULT  64
+
+/*
  * Default streaming threshold for v0.8.0 stream.threshold field (1 MiB).
  * Responses with Content-Length >= this threshold use streaming mode.
  */
@@ -500,6 +507,7 @@ typedef struct {
     ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
     ngx_array_t *content_types;        /* markdown_content_types allowlist (default: text/html) */
     size_t       large_body_threshold; /* markdown_large_body_threshold (NGX_HTTP_MARKDOWN_THRESHOLD_OFF = off) */
+    ngx_uint_t   max_inflight;         /* markdown_limits max_inflight (default: 64; enforced by the worker inflight guard) */
 
     /*
      * Decompression/parsing limits.

@@ -63,8 +63,8 @@ static char *ngx_http_markdown_stream_threshold_handler(ngx_conf_t *cf, ngx_comm
 static char *ngx_http_markdown_stream_flush_min_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse v0.8.0 markdown_stream_excluded_types MIME list. */
 static char *ngx_http_markdown_stream_excluded_types_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-/* Parse large body threshold for incremental path routing. */
-static char *ngx_http_markdown_large_body_threshold(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse markdown_limits multi-key block (Config V2). */
+static char *ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse metrics endpoint enablement and URI settings. */
 static char *ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Map module verbosity enum to nginx native log level constants. */

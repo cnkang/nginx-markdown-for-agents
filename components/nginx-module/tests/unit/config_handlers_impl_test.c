@@ -198,51 +198,6 @@ ngx_ascii_strncasecmp(const u_char *s1, const u_char *s2, size_t n)
 }
 
 /*
- * Null-terminated case-insensitive string comparison.
- *
- * Test-local reimplementation of the NGINX primitive because the
- * production symbol cannot be linked in the unit harness.
- *
- * Divergence risk: low — mirrors ngx_strcasecmp in
- * src/core/ngx_string.c; changes to the production early-exit or
- * NULL-handling semantics would require a corresponding update.
- *
- * Parameters:
- *   s1 - first null-terminated byte string.
- *   s2 - second null-terminated byte string.
- *
- * Return: NGX_ERROR if either pointer is NULL; otherwise 0 on
- *         equality, or the difference between the lowercased
- *         mismatching bytes.
- *
- * Side effects: none.
- */
-static ngx_int_t
-ngx_strcasecmp(u_char *s1, u_char *s2)
-{
-
-    if (s1 == NULL || s2 == NULL) {
-        return NGX_ERROR;
-    }
-
-    size_t i;
-    i = 0;
-    while (s1[i] != '\0' && s2[i] != '\0') {
-        ngx_int_t diff;
-
-        diff = ngx_ascii_strncasecmp(&s1[i], &s2[i], 1);
-        if (diff != 0) {
-            return diff;
-        }
-
-        i++;
-    }
-
-    return (ngx_int_t) tolower((unsigned char) s1[i])
-         - (ngx_int_t) tolower((unsigned char) s2[i]);
-}
-
-/*
  * Length-bounded case-insensitive comparison delegating to
  * ngx_ascii_strncasecmp.
  *
@@ -1174,90 +1129,109 @@ test_stream_types_handler(void)
 }
 
 /*
- * Verify large_body_threshold handler: off, size suffixes (k/m/g),
- * invalid token, and duplicate detection.
+ * Verify the markdown_limits multi-key handler: each key maps to its
+ * backing field, plus unknown-key, missing-'=', zero-value, malformed-value,
+ * size-overflow, and duplicate-key rejection.
  *
- * Semantic contract mirrored: ngx_http_markdown_large_body_threshold
- * maps "off" to 0, parses size tokens with optional k/K/m/M/g/G
- * suffixes via the shared production parser helper, rejects
- * duplicates, and returns NGX_CONF_ERROR for invalid tokens.
+ * Semantic contract mirrored: ngx_http_markdown_limits parses space-separated
+ * key=value tokens (memory|timeout|streaming_buffer|max_inflight), writes the
+ * corresponding backing field, and rejects duplicates/unknown/zero/malformed
+ * values at parse time.
  *
- * Return: void.
- *
- * Side effects: asserts on mcf.large_body_threshold.
+ * Return: void.  Side effects: asserts on mcf fields.
  */
 static void
-test_large_body_threshold_handler(void)
+test_limits_handler(void)
 {
     ngx_conf_t               cf;
     ngx_array_t              args;
-    ngx_str_t                values[2];
+    ngx_str_t                values[5];
     ngx_command_t            cmd;
     ngx_http_markdown_conf_t mcf;
     const char              *rc;
 
-    TEST_SUBSECTION("large_body_threshold handler");
+    TEST_SUBSECTION("limits handler");
 
+    set_arg(&cmd.name, "markdown_limits");
+
+    /* All four keys in one directive. */
+    init_conf(&mcf);
+    setup_cf(&cf, &args, values, 5);
+    set_arg(&values[0], "markdown_limits");
+    set_arg(&values[1], "memory=8m");
+    set_arg(&values[2], "timeout=2s");
+    set_arg(&values[3], "streaming_buffer=256k");
+    set_arg(&values[4], "max_inflight=64");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "full limits should parse");
+    TEST_ASSERT(mcf.max_size == 8 * 1024 * 1024,
+        "memory maps to max_size");
+    TEST_ASSERT(mcf.timeout == 2000, "timeout=2s maps to 2000ms");
+    TEST_ASSERT(mcf.stream.budget == 256 * 1024,
+        "streaming_buffer maps to stream.budget");
+    TEST_ASSERT(mcf.max_inflight == 64, "max_inflight maps");
+
+    /* Single-key tests reuse a 2-arg layout. */
     setup_cf(&cf, &args, values, 2);
-    set_arg(&values[0], "markdown_large_body_threshold");
-    set_arg(&cmd.name, "markdown_large_body_threshold");
+    set_arg(&values[0], "markdown_limits");
 
     init_conf(&mcf);
-    set_arg(&values[1], "off");
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "off should parse");
-    TEST_ASSERT(mcf.large_body_threshold == 0, "off should map to zero");
+    set_arg(&values[1], "timeout=500ms");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "ms timeout should parse");
+    TEST_ASSERT(mcf.timeout == 500, "timeout=500ms maps to 500");
 
     init_conf(&mcf);
-    set_arg(&values[1], "512k");
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "size token should parse");
-    TEST_ASSERT(mcf.large_body_threshold == 512 * 1024,
-        "512k should map correctly");
+    set_arg(&values[1], "bogus=1");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "unknown key should fail");
 
     init_conf(&mcf);
-    set_arg(&values[1], "1m");
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "1m should parse");
-    TEST_ASSERT(mcf.large_body_threshold == 1024 * 1024,
-        "1m should map correctly");
+    set_arg(&values[1], "memory");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "missing '=' should fail");
 
     init_conf(&mcf);
-    set_arg(&values[1], "1g");
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "1g should parse");
-    TEST_ASSERT(mcf.large_body_threshold == (size_t) 1024 * 1024 * 1024,
-        "1g should map correctly");
+    set_arg(&values[1], "memory=0");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "zero memory should fail");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "max_inflight=0");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "zero max_inflight should fail");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "memory=bad");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "malformed memory should fail");
 
     init_conf(&mcf);
     {
-        char overflow_token[32];
+        char overflow_token[40];
         size_t overflow_value;
 
         overflow_value = (NGX_MAX_SIZE_T_VALUE
                           / ((size_t) 1024 * 1024 * 1024)) + 1;
-        snprintf(overflow_token, sizeof(overflow_token), "%zuG",
+        snprintf(overflow_token, sizeof(overflow_token), "memory=%zuG",
             overflow_value);
         set_arg(&values[1], overflow_token);
+        rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+        TEST_ASSERT(rc == NGX_CONF_ERROR,
+            "overflow memory token should fail");
     }
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "overflow threshold token should fail");
 
+    /* Duplicate key within one directive. */
     init_conf(&mcf);
-    set_arg(&values[1], "bad");
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "invalid threshold token should fail");
+    setup_cf(&cf, &args, values, 3);
+    set_arg(&values[0], "markdown_limits");
+    set_arg(&values[1], "memory=8m");
+    set_arg(&values[2], "memory=4m");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(strcmp(rc, "has a duplicate \"memory\" key") == 0,
+        "duplicate memory key should fail");
 
-    init_conf(&mcf);
-    mcf.large_body_threshold = 1;
-    set_arg(&values[1], "off");
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(strcmp(rc, "is duplicate") == 0,
-        "duplicate threshold directive should fail");
-
-    TEST_PASS("large_body_threshold branches covered");
+    TEST_PASS("limits branches covered");
 }
 
 /*
@@ -1850,7 +1824,7 @@ main(void)
     test_auth_cookies_handler();
     test_conditional_and_log_verbosity_handlers();
     test_stream_types_handler();
-    test_large_body_threshold_handler();
+    test_limits_handler();
     test_metrics_handlers();
     test_streaming_engine_handler();
     test_v080_stream_directive_handlers();

@@ -271,6 +271,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     conf->decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     conf->large_body_threshold = NGX_CONF_UNSET_SIZE;
+    conf->max_inflight = NGX_CONF_UNSET_UINT;
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     conf->ops.metrics_per_path = NGX_CONF_UNSET;
@@ -467,6 +468,8 @@ ngx_http_markdown_merge_core_ptr_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_size_value(conf->large_body_threshold,
                               prev->large_body_threshold,
                               NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
+    ngx_conf_merge_uint_value(conf->max_inflight, prev->max_inflight,
+                              NGX_HTTP_MARKDOWN_MAX_INFLIGHT_DEFAULT);
     ngx_conf_merge_ptr_value(conf->policy.auth_cookies, prev->policy.auth_cookies, NULL);
     ngx_conf_merge_ptr_value(conf->stream_types, prev->stream_types, NULL);
     ngx_conf_merge_ptr_value(conf->content_types, prev->content_types, NULL);

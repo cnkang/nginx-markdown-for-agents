@@ -183,24 +183,38 @@ markdown_parser_budget 32m;
 ```
 
 
-#### markdown_timeout
+#### markdown_limits
 
-**Syntax:** `markdown_timeout <time>;`  
-**Default:** `5s`  
+**Syntax:** `markdown_limits memory=<size> timeout=<time> streaming_buffer=<size> max_inflight=<N>;`  
+**Default:** `memory=10m timeout=5s streaming_buffer=2m max_inflight=64`  
 **Context:** http, server, location
 
-Maximum time to spend on conversion. Conversions exceeding this timeout will be aborted and the configured failure strategy will be applied.
+Unified limits block (Config V2, 0.9.0). Consolidates the removed
+`markdown_max_size`, `markdown_timeout`, and `markdown_streaming_budget`
+directives. Any subset of keys may be given; unspecified keys inherit
+(per-key inheritance).
 
-**Valid Units:** `ms` (milliseconds), `s` (seconds), `m` (minutes)
+- `memory=<size>` — maximum response size to attempt conversion (was
+  `markdown_max_size`).
+- `timeout=<time>` — maximum conversion time (was `markdown_timeout`).
+- `streaming_buffer=<size>` — streaming memory budget (was
+  `markdown_streaming_budget`).
+- `max_inflight=<N>` — maximum concurrent in-flight conversions per worker
+  (0.9.0 production-protection default 64; enforced by the worker inflight
+  guard).
+
+`nginx -t` rejects duplicate keys, unknown keys, zero values, and malformed
+size/time/integer values.
 
 **Example:**
 ```nginx
-# 3 second timeout
-markdown_timeout 3s;
-
-# 500 millisecond timeout
-markdown_timeout 500ms;
+markdown_limits memory=8m timeout=2s streaming_buffer=256k max_inflight=64;
 ```
+
+**Migration:** `markdown_max_size 5m` -> `markdown_limits memory=5m`;
+`markdown_timeout 3s` -> `markdown_limits timeout=3s`;
+`markdown_streaming_budget 4m` -> `markdown_limits streaming_buffer=4m`.
+`markdown_large_body_threshold` is removed with no direct replacement.
 
 ---
 
@@ -622,6 +636,7 @@ markdown_streaming_engine off;
 **Syntax:** `markdown_streaming_budget <size>;`
 **Default:** `2m`
 **Context:** http, server, location
+**Status:** REMOVED in 0.9.0 — use `markdown_limits streaming_buffer=<size>`
 
 Sets the memory budget for streaming conversion, passed to the Rust streaming engine.
 The streaming engine enforces this budget to ensure bounded memory usage regardless
@@ -1401,6 +1416,7 @@ markdown_otel_export_timeout 10s;
 **Syntax:** `markdown_large_body_threshold off | <size>;`  
 **Default:** `off`  
 **Context:** http, server, location
+**Status:** REMOVED in 0.9.0 — no direct replacement
 
 Routes responses whose body size is at or above the configured threshold to the incremental processing path. When set to `off` (the default), all responses use the existing full-buffer path and behavior is identical to a build without this feature.
 
@@ -1657,17 +1673,17 @@ The following directives are deprecated and will be removed in a future major re
 **Syntax:** `markdown_max_size <size>;`
 **Default:** `10m`
 **Context:** http, server, location
-**Status:** Deprecated since 0.8.0 — use `markdown_memory_budget`
+**Status:** REMOVED in 0.9.0 — use `markdown_limits memory=<size>`
 
 Maximum response size to attempt conversion. Responses larger than this will not be converted.
 
 **Migration:**
 ```nginx
-# Before (deprecated)
+# Before (removed in 0.9.0)
 markdown_max_size 5m;
 
-# After (recommended)
-markdown_memory_budget 5m;
+# After
+markdown_limits memory=5m;
 ```
 
 ---
