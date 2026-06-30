@@ -324,6 +324,23 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_STREAMING_FORCE  2
 
 /*
+ * Production-profile constants (markdown_profile directive, 0.9.0).
+ *
+ * markdown_profile strict_cache|balanced|streaming_first selects a preset
+ * bundle of Config V2 defaults.  A profile only supplies DEFAULTS: an
+ * explicit directive (at the same or an inheriting scope) always overrides
+ * the profile value.  NONE means no markdown_profile is in effect, in which
+ * case the built-in Config V2 defaults apply unchanged.
+ *
+ * The names are frozen for the 1.0 stability contract; new profiles may be
+ * added after 1.0 but existing names/semantics must not change.
+ */
+#define NGX_HTTP_MARKDOWN_PROFILE_NONE             0
+#define NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE     1
+#define NGX_HTTP_MARKDOWN_PROFILE_BALANCED         2
+#define NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST  3
+
+/*
  * Threshold off sentinel — used in merge and path selection logic.
  */
 #define NGX_HTTP_MARKDOWN_THRESHOLD_OFF     0
@@ -513,6 +530,35 @@ typedef struct {
     ngx_flag_t   dynconf_dry_run;           /* markdown_dynconf_dry_run on|off (default: off) */
 } ngx_http_markdown_advanced_cfg_t;
 
+/*
+ * Resolved profile-default value bundle (markdown_profile, 0.9.0, spec 50).
+ *
+ * Pure config-time data: each field carries the default value a given
+ * profile contributes for the corresponding Config V2 directive.  The
+ * merge logic feeds these values as the fallback "default" argument of the
+ * standard ngx_conf_merge_* calls, so an explicit (or inherited-explicit)
+ * directive always wins over the profile, and the profile in turn wins over
+ * the built-in default.  For NGX_HTTP_MARKDOWN_PROFILE_NONE the fields equal
+ * the built-in Config V2 defaults, making profile expansion a no-op.
+ *
+ * The bundle is value data only; it adds no request-path decision branch.
+ */
+typedef struct {
+    ngx_uint_t   accept_policy;            /* markdown_accept */
+    ngx_uint_t   conditional_requests;     /* markdown_cache_validation mode */
+    ngx_flag_t   generate_etag;            /* markdown_cache_validation ETag */
+    ngx_uint_t   streaming_policy;         /* markdown_streaming */
+    ngx_uint_t   streaming_engine;         /* markdown_streaming_engine */
+    size_t       limits_memory;            /* markdown_limits memory= */
+    ngx_msec_t   limits_timeout;           /* markdown_limits timeout= */
+    size_t       limits_streaming_buffer;  /* markdown_limits streaming_buffer= */
+    ngx_uint_t   limits_max_inflight;      /* markdown_limits max_inflight= */
+    ngx_uint_t   error_policy;             /* markdown_error_policy (on_error) */
+    ngx_uint_t   auth_policy;              /* markdown_auth_policy */
+    ngx_uint_t   flavor;                   /* markdown_flavor */
+    ngx_flag_t   diagnostics;              /* markdown_diagnostics */
+} ngx_http_markdown_profile_defaults_t;
+
 typedef struct {
     ngx_flag_t   enabled;              /* markdown_filter static resolved value */
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
@@ -596,6 +642,20 @@ typedef struct {
      * Noise pruning configuration.
      */
     ngx_http_markdown_advanced_cfg_t advanced;
+
+    /*
+     * Production-profile selection (markdown_profile, 0.9.0, spec 50).
+     *
+     * Grouped into a sub-struct so the parent stays logically organized
+     * (sonarcloud-c:S1820 is already intentionally exceeded; see the
+     * struct-level note above).  The profile only supplies defaults; its
+     * values are fed as the fallback default of the standard merge calls.
+     */
+    struct {
+        ngx_uint_t   name;                      /* NGX_HTTP_MARKDOWN_PROFILE_* (default: NONE) */
+        ngx_flag_t   set;                       /* 1 if markdown_profile set at this scope (duplicate guard) */
+        ngx_flag_t   cache_validation_explicit; /* 1 if markdown_cache_validation set (this or ancestor) */
+    } profile;
 } ngx_http_markdown_conf_t;
 
 
