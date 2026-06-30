@@ -14,9 +14,9 @@
 #define FLAVOR_GFM 1
 #define AUTH_ALLOW 0
 #define AUTH_DENY 1
-#define COND_FULL_SUPPORT 0
-#define COND_IF_MODIFIED_SINCE_ONLY 1
-#define COND_DISABLED 2
+#define CACHE_VALIDATION_FULL 0
+#define CACHE_VALIDATION_IMS_ONLY 1
+#define CACHE_VALIDATION_OFF 2
 #define METRICS_FORMAT_AUTO 0
 #define METRICS_FORMAT_PROMETHEUS 1
 
@@ -30,8 +30,7 @@ typedef struct {
     int markdown_front_matter;
     int markdown_accept;
     int markdown_auth_policy;
-    int markdown_etag;
-    int markdown_conditional_requests;
+    int markdown_cache_validation;
     int markdown_buffer_chunked;
     int markdown_auto_decompress;
     int markdown_metrics_format;
@@ -179,8 +178,7 @@ module_defaults(void)
     c.markdown_front_matter = 0;
     c.markdown_accept = 0;
     c.markdown_auth_policy = AUTH_ALLOW;
-    c.markdown_etag = 1;
-    c.markdown_conditional_requests = COND_FULL_SUPPORT;
+    c.markdown_cache_validation = CACHE_VALIDATION_FULL;
     c.markdown_buffer_chunked = 1;
     c.markdown_auto_decompress = 1;
     c.markdown_metrics_format = METRICS_FORMAT_AUTO;
@@ -248,8 +246,7 @@ test_default_values(void)
     TEST_ASSERT(c.markdown_timeout_ms == 5000, "timeout default 5s");
     TEST_ASSERT(c.markdown_on_error == ON_ERROR_PASS, "on_error default pass");
     TEST_ASSERT(c.markdown_flavor == FLAVOR_COMMONMARK, "flavor default commonmark");
-    TEST_ASSERT(c.markdown_etag == 1, "etag default on");
-    TEST_ASSERT(c.markdown_conditional_requests == COND_FULL_SUPPORT, "conditional default full_support");
+    TEST_ASSERT(c.markdown_cache_validation == CACHE_VALIDATION_FULL, "cache_validation default full");
     TEST_ASSERT(c.markdown_buffer_chunked == 1, "buffer_chunked default on");
     TEST_ASSERT(c.markdown_auto_decompress == 1, "auto_decompress default on");
     TEST_ASSERT(c.markdown_metrics_format == METRICS_FORMAT_AUTO, "metrics_format default auto");

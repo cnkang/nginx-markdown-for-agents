@@ -373,47 +373,42 @@ markdown_auth_cookies session* auth_token PHPSESSID wordpress_logged_in_*;
 
 ### Caching and Conditional Requests
 
-#### markdown_etag
+#### markdown_cache_validation
 
-**Syntax:** `markdown_etag on | off;`  
-**Default:** `on`  
+**Syntax:** `markdown_cache_validation off | ims_only | full;`  
+**Default:** `full`  
 **Context:** http, server, location
 
-Generate ETag header for Markdown variants. ETags are computed from the Markdown output for proper caching.
+Cache-validation policy. Consolidates the removed `markdown_etag` and
+`markdown_conditional_requests` directives (0.9.0 breaking change).
 
-**Example:**
-```nginx
-# Disable ETag generation
-markdown_etag off;
-```
-
-**Response Header:**
-```
-ETag: "a1b2c3d4e5f6"
-```
-
----
-
-#### markdown_conditional_requests
-
-**Syntax:** `markdown_conditional_requests full_support | if_modified_since_only | disabled;`  
-**Default:** `full_support`  
-**Context:** http, server, location
-
-Conditional request support mode:
-- `full_support`: Support Markdown-variant `If-None-Match` (ETag) and preserve compatibility with upstream `Last-Modified` / `If-Modified-Since`
-- `if_modified_since_only`: Skip module-side `If-None-Match` processing (performance optimization); `If-Modified-Since` remains handled by standard NGINX conditional request processing
-- `disabled`: No conditional request support for Markdown variants
+- `off`: no Markdown-variant ETag and no conditional request handling.
+- `ims_only`: no module-side ETag; `If-Modified-Since` is handled by standard
+  NGINX conditional processing using the preserved upstream `Last-Modified`.
+- `full` (default): generate a transformed (Markdown-variant) ETag and support
+  both `If-None-Match` and `If-Modified-Since`.
 
 **Example:**
 ```nginx
 # Performance optimization: only support If-Modified-Since
-markdown_conditional_requests if_modified_since_only;
+markdown_cache_validation ims_only;
 ```
 
-**Performance Note:** `full_support` requires conversion to generate a Markdown-variant ETag for comparison, which has performance implications.
+**Performance Note:** `full` requires conversion to generate a Markdown-variant
+ETag for comparison, which has performance implications.
 
-**Implementation Note (Current Design):** `If-Modified-Since` evaluation is delegated to NGINX core (using preserved upstream `Last-Modified` semantics). The module focuses on Markdown-variant ETag handling.
+**Streaming interaction:** streaming responses do not carry an ETag (headers
+commit before the transformed body is known). `markdown_cache_validation full`
+with `markdown_streaming auto` blocks streaming at runtime and uses full-buffer
+so full validation is preserved; with `markdown_streaming force` it is a
+configuration error (see `markdown_streaming`).
+
+**Migration:** `markdown_etag off` -> `markdown_cache_validation off`;
+`markdown_etag on` -> `markdown_cache_validation full`;
+`markdown_conditional_requests if_modified_since_only` ->
+`markdown_cache_validation ims_only`;
+`markdown_conditional_requests disabled` -> `markdown_cache_validation off`;
+`markdown_conditional_requests full_support` -> `markdown_cache_validation full`.
 
 ---
 
