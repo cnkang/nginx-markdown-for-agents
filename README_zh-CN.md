@@ -123,6 +123,39 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 
 如果行为不符合预期，请查看安装指南里的 [Troubleshooting](docs/guides/INSTALLATION.md#10-troubleshooting) 小节。
 
+## Profiles（v0.9.0+）
+
+生产部署推荐使用 `markdown_profile` 指令，一行配置即可应用一组经过测试的默认值，
+无需逐一设置每个指令：
+
+```nginx
+http {
+    markdown_profile balanced;
+
+    server {
+        listen 80;
+        location /docs/ {
+            markdown_filter on;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+三个可用 profile：
+
+| Profile | 适用场景 |
+|---------|----------|
+| `balanced` | 通用部署（推荐起步选择） |
+| `strict_cache` | CDN / 缓存代理，需要完整 ETag 支持 |
+| `streaming_first` | AI Agent 工作负载，面向大文档 |
+
+合并优先级：显式指令 > profile 默认值 > 内置默认值。你可以在同一
+context 中用显式指令覆盖 profile 的任何非强制字段。
+
+完整的 profile 参考、默认值表和冲突规则见
+[docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md#profiles)。
+
 ## 针对特定 Bot 返回 Markdown
 
 大多数 AI 爬虫不会发送 `Accept: text/markdown`，它们使用和浏览器类似的 Accept 头。你可以用 NGINX 的 `map` 指令根据 User-Agent 改写 Accept 头，让匹配的 bot 自动收到 Markdown，而不需要 bot 自身做任何改变。

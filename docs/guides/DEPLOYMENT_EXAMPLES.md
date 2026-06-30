@@ -5,9 +5,10 @@ This document contains detailed NGINX configuration examples, verification steps
 ## Table of Contents
 
 1. [NGINX Configuration Examples](#nginx-configuration-examples)
-2. [Quick Verification (curl)](#quick-verification-curl)
-3. [Common Deployment Notes](#common-deployment-notes)
-4. [Common Issues Quick Reference](#common-issues-quick-reference)
+2. [Profile-Based Deployments](#profile-based-deployments-v090)
+3. [Quick Verification (curl)](#quick-verification-curl)
+4. [Common Deployment Notes](#common-deployment-notes)
+5. [Common Issues Quick Reference](#common-issues-quick-reference)
 
 ---
 
@@ -284,6 +285,135 @@ See [examples/nginx-configs/](../../examples/nginx-configs/) for copy-paste-read
 - [Production Full](../../examples/nginx-configs/04-production-full.conf)
 - [High Performance](../../examples/nginx-configs/05-high-performance.conf)
 
+### Profile-Based Deployments (v0.9.0+)
+
+Profiles provide production-tuned defaults. Pick a profile, then override only
+what your deployment requires.
+
+#### balanced — General-Purpose Deployment
+
+Recommended starting point for most sites. IMS-only caching avoids ETag
+computation overhead while streaming remains available for large responses.
+
+```nginx
+load_module modules/ngx_http_markdown_filter_module.so;
+
+http {
+    markdown_profile balanced;
+
+    upstream backend {
+        server 127.0.0.1:8080;
+    }
+
+    server {
+        listen 80;
+
+        location /docs/ {
+            markdown_filter on;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+#### strict_cache — CDN / Caching Proxy
+
+Full ETag-based conditional request support. Streaming is disabled (forced off)
+so the module can generate a transformed ETag for the complete Markdown output.
+
+```nginx
+load_module modules/ngx_http_markdown_filter_module.so;
+
+http {
+    markdown_profile strict_cache;
+    markdown_trusted_proxies 10.0.0.0/8 172.16.0.0/12;
+
+    upstream backend {
+        server 127.0.0.1:8080;
+    }
+
+    server {
+        listen 80;
+
+        location /docs/ {
+            markdown_filter on;
+            # Profile provides: cache_validation full, streaming off
+            # Override memory limit for large doc pages
+            markdown_limits memory=16m;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+#### streaming_first — AI Agent Workloads
+
+Optimized for large document conversion with AI agent consumers. Aggressive
+streaming, wildcard Accept negotiation, no caching overhead.
+
+```nginx
+load_module modules/ngx_http_markdown_filter_module.so;
+
+http {
+    markdown_profile streaming_first;
+
+    upstream backend {
+        server 127.0.0.1:8080;
+    }
+
+    server {
+        listen 80;
+
+        location /api/docs/ {
+            markdown_filter on;
+            # Profile provides: streaming force, cache_validation off,
+            #                    accept wildcard
+            markdown_limits streaming_buffer=512k;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+#### Mixed Profiles per Location
+
+Different paths can use different profiles via NGINX inheritance:
+
+```nginx
+load_module modules/ngx_http_markdown_filter_module.so;
+
+http {
+    markdown_profile balanced;
+
+    upstream docs_backend { server 127.0.0.1:8080; }
+    upstream api_backend  { server 127.0.0.1:9090; }
+
+    server {
+        listen 80;
+
+        # Public docs: full caching for CDN
+        location /docs/ {
+            markdown_profile strict_cache;
+            markdown_filter on;
+            proxy_pass http://docs_backend;
+        }
+
+        # API reference: streaming for large specs
+        location /api/reference/ {
+            markdown_profile streaming_first;
+            markdown_filter on;
+            proxy_pass http://api_backend;
+        }
+
+        # Blog: balanced (inherited from http)
+        location /blog/ {
+            markdown_filter on;
+            proxy_pass http://docs_backend;
+        }
+    }
+}
+```
+
 ---
 
 ## Quick Verification (curl)
@@ -423,3 +553,4 @@ Complete troubleshooting guide: [OPERATIONS.md](OPERATIONS.md#troubleshooting)
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.0 | 2026-06-28 | Kang | Added profile-based deployment examples (balanced, strict_cache, streaming_first, mixed profiles per location) |
