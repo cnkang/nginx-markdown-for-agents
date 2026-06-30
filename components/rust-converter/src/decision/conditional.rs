@@ -225,12 +225,8 @@ pub fn decide_conditional(input: &ConditionalInput) -> ConditionalDecision {
         // 4. ims_only: honor If-Modified-Since only; ignore If-None-Match.
         CacheValidation::ImsOnly => {
             if input.if_modified_since.is_some() {
-                let result = evaluate_conditional(
-                    None,
-                    None,
-                    input.if_modified_since,
-                    input.last_modified,
-                );
+                let result =
+                    evaluate_conditional(None, None, input.if_modified_since, input.last_modified);
                 ConditionalDecision {
                     outcome: outcome_from(result),
                     reason: ConditionalReason::ImsEvaluated,
@@ -249,24 +245,16 @@ pub fn decide_conditional(input: &ConditionalInput) -> ConditionalDecision {
         CacheValidation::Full => {
             if input.if_none_match.is_some() {
                 // Evaluate If-None-Match only (ignore IMS per RFC 7232 §6).
-                let result = evaluate_conditional(
-                    input.if_none_match,
-                    input.entity_etag,
-                    None,
-                    None,
-                );
+                let result =
+                    evaluate_conditional(input.if_none_match, input.entity_etag, None, None);
                 ConditionalDecision {
                     outcome: outcome_from(result),
                     reason: ConditionalReason::InmEvaluated,
                     evaluated_header: ConditionalHeader::IfNoneMatch,
                 }
             } else if input.if_modified_since.is_some() {
-                let result = evaluate_conditional(
-                    None,
-                    None,
-                    input.if_modified_since,
-                    input.last_modified,
-                );
+                let result =
+                    evaluate_conditional(None, None, input.if_modified_since, input.last_modified);
                 ConditionalDecision {
                     outcome: outcome_from(result),
                     reason: ConditionalReason::ImsEvaluated,

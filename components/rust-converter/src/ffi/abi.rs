@@ -700,6 +700,141 @@ pub struct FFIHeaderPlan {
     pub count: usize,
 }
 
+// ─── Profile FFI types (spec 50, 0.9.0) ──────────────────────────────────────
+
+/// FFI-safe profile selector.
+///
+/// Maps to the Rust `Profile` enum. The C side stores this as a `u8` field
+/// in the location config struct and passes it to `markdown_detect_conflicts`.
+///
+/// Discriminants are frozen for the 1.0 stability contract.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FFIProfile {
+    /// No profile active — use Config V2 built-in defaults.
+    None = 0,
+    /// CDN/caching proxy: full conditional requests, no streaming.
+    StrictCache = 1,
+    /// Recommended default: IMS-only caching, streaming on auto.
+    Balanced = 2,
+    /// AI agent workloads: aggressive streaming, no caching overhead.
+    StreamingFirst = 3,
+}
+
+/// Severity level for a detected configuration conflict (FFI-safe).
+///
+/// Mirrors `crate::config::conflict::ConflictLevel` with a stable `#[repr(u8)]`
+/// layout for the C side.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FFIConflictLevel {
+    /// Hard error — `nginx -t` must fail.
+    Error = 0,
+    /// Advisory warning — logged but does not block startup.
+    Warning = 1,
+}
+
+/// A single detected configuration conflict (FFI-safe).
+///
+/// Contains the severity level and a pointer to a UTF-8 message describing
+/// the incompatibility. The message bytes are owned by the containing
+/// [`FFIConflictList`] and remain valid until `markdown_free_conflicts`
+/// is called.
+#[repr(C)]
+pub struct FFIConflict {
+    /// Severity: error blocks startup, warning is advisory.
+    pub level: FFIConflictLevel,
+    /// Pointer to UTF-8 message bytes (NOT NUL-terminated).
+    pub message: *const u8,
+    /// Length of the message in bytes.
+    pub message_len: usize,
+}
+
+/// List of detected conflicts returned from `markdown_detect_conflicts`.
+///
+/// The caller must free this with `markdown_free_conflicts`. When `count == 0`,
+/// `conflicts` is NULL (Rule 53: empty results return NULL).
+#[repr(C)]
+pub struct FFIConflictList {
+    /// Pointer to array of `FFIConflict` entries (NULL when `count == 0`).
+    pub conflicts: *mut FFIConflict,
+    /// Number of entries in the array.
+    pub count: usize,
+}
+
+/// Explicit user-set configuration flags for conflict detection (FFI-safe).
+///
+/// Each field uses a sentinel value to indicate "not explicitly set":
+/// - Enum fields: `255` means not set (valid discriminants are 0..3).
+/// - Integer fields: `u64::MAX` / `u32::MAX` means not set.
+/// - Boolean fields: `255` means not set (0 = false, 1 = true).
+///
+/// The C side populates only fields that the user explicitly configured via
+/// `markdown_*` directives; all other fields remain at their sentinel values.
+#[repr(C)]
+pub struct FFIExplicitConfig {
+    /// `markdown_accept`: 0=strict, 1=wildcard, 2=force; 255=not set.
+    pub accept: u8,
+    /// `markdown_cache_validation`: 0=off, 1=ims_only, 2=full; 255=not set.
+    pub cache_validation: u8,
+    /// `markdown_streaming`: 0=off, 1=auto, 2=force; 255=not set.
+    pub streaming: u8,
+    /// `markdown_limits memory=` in bytes; `u64::MAX`=not set.
+    pub limits_memory_bytes: u64,
+    /// `markdown_limits timeout=` in milliseconds; `u64::MAX`=not set.
+    pub limits_timeout_ms: u64,
+    /// `markdown_limits streaming_buffer=` in bytes; `u64::MAX`=not set.
+    pub limits_streaming_buffer_bytes: u64,
+    /// `markdown_limits max_inflight=`; `u32::MAX`=not set.
+    pub limits_max_inflight: u32,
+    /// `markdown_error_policy`: 0=pass, 1=fail_closed; 255=not set.
+    pub error_policy: u8,
+    /// `markdown_diagnostics`: 0=off, 1=on; 255=not set.
+    pub diagnostics: u8,
+}
+
+/// Effective configuration after merge (FFI-safe).
+///
+/// All fields are concrete (no sentinels). This is the fully-resolved
+/// configuration the C side uses at runtime.
+#[repr(C)]
+pub struct FFIEffectiveConfig {
+    /// Effective accept mode: 0=strict, 1=wildcard, 2=force.
+    pub accept: u8,
+    /// Effective cache_validation: 0=off, 1=ims_only, 2=full.
+    pub cache_validation: u8,
+    /// Effective streaming: 0=off, 1=auto, 2=force.
+    pub streaming: u8,
+    /// Effective memory limit in bytes.
+    pub limits_memory_bytes: u64,
+    /// Effective timeout in milliseconds.
+    pub limits_timeout_ms: u64,
+    /// Effective streaming buffer size in bytes.
+    pub limits_streaming_buffer_bytes: u64,
+    /// Effective max inflight conversions.
+    pub limits_max_inflight: u32,
+    /// Effective error policy: 0=pass, 1=fail_closed.
+    pub error_policy: u8,
+    /// Effective diagnostics: 0=off, 1=on.
+    pub diagnostics: u8,
+}
+
+/// Sentinel value for "not set" in FFI enum fields (u8).
+pub const FFI_CONFIG_NOT_SET_U8: u8 = 255;
+/// Sentinel value for "not set" in FFI u64 fields.
+pub const FFI_CONFIG_NOT_SET_U64: u64 = u64::MAX;
+/// Sentinel value for "not set" in FFI u32 fields.
+pub const FFI_CONFIG_NOT_SET_U32: u32 = u32::MAX;
+
+/// Profile discriminant: no profile active (use built-in defaults).
+pub const FFI_PROFILE_NONE: u8 = 0;
+/// Profile discriminant: `strict_cache` (CDN/caching proxy).
+pub const FFI_PROFILE_STRICT_CACHE: u8 = 1;
+/// Profile discriminant: `balanced` (recommended default).
+pub const FFI_PROFILE_BALANCED: u8 = 2;
+/// Profile discriminant: `streaming_first` (AI agent workloads).
+pub const FFI_PROFILE_STREAMING_FIRST: u8 = 3;
+
 #[cfg(test)]
 mod layout_tests {
     use super::*;
