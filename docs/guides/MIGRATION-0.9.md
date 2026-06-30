@@ -13,7 +13,7 @@ spec lands; if a directive you use is not yet listed, consult the
 
 ---
 
-## Trusted proxies / forwarded headers (spec 47)
+## Trusted proxies / forwarded headers
 
 ### `markdown_trust_forwarded_headers` → `markdown_trusted_proxies`
 

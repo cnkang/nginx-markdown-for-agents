@@ -673,7 +673,7 @@ directives — `markdown_streaming` is not an alias for
   `Cache-Control: no-transform`, `HEAD`, `304`, upstream `Content-Encoding`,
   and `markdown_cache_validation full`).
 
-**Conflict with `markdown_cache_validation` (spec 49):**
+**Conflict with `markdown_cache_validation`:**
 
 | Combination | `nginx -t` | Runtime |
 |-------------|-----------|---------|
