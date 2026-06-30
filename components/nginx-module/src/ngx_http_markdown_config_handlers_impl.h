@@ -1559,4 +1559,74 @@ ngx_http_markdown_stream_excluded_types_handler(ngx_conf_t *cf,
     return NGX_CONF_OK;
 }
 
+/*
+ * Configuration directive handler: markdown_profile (spec 50, 0.9.0).
+ *
+ * Selects a production-profile preset that provides tuned Config V2
+ * defaults for a common operational scenario.  The profile only
+ * supplies DEFAULTS; explicit directives at the same or inheriting
+ * scope override the profile values.
+ *
+ *   strict_cache    - optimized for CDN / caching proxy
+ *   balanced        - recommended general-purpose default
+ *   streaming_first - optimized for AI agent workloads
+ *
+ * Duplicate detection: a second markdown_profile in the same context
+ * is rejected with NGX_CONF_ERROR.  Unknown profile names are rejected
+ * with a helpful error listing valid values.
+ *
+ * Parameters:
+ *   cf   - configuration context
+ *   cmd  - directive definition
+ *   conf - location configuration pointer
+ *
+ * Returns:
+ *   NGX_CONF_OK on success, NGX_CONF_ERROR on invalid/duplicate profile
+ */
+static char *
+ngx_http_markdown_set_profile(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf)
+{
+    static u_char             strict_str[]    = "strict_cache";
+    static u_char             balanced_str[]  = "balanced";
+    static u_char             streaming_str[] = "streaming_first";
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    (void) cmd;
+
+    value = cf->args->elts;
+
+    /* Duplicate detection: same context with >1 markdown_profile */
+    if (mcf->profile.set) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "\"markdown_profile\" directive is duplicate");
+        return NGX_CONF_ERROR;
+    }
+
+    if (ngx_http_markdown_arg_equals(&value[1], strict_str,
+                                     sizeof(strict_str) - 1))
+    {
+        mcf->profile.name = NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE;
+    } else if (ngx_http_markdown_arg_equals(&value[1], balanced_str,
+                                            sizeof(balanced_str) - 1))
+    {
+        mcf->profile.name = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
+    } else if (ngx_http_markdown_arg_equals(&value[1], streaming_str,
+                                            sizeof(streaming_str) - 1))
+    {
+        mcf->profile.name = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid markdown_profile \"%V\": valid profiles "
+            "are strict_cache, balanced, streaming_first",
+            &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->profile.set = 1;
+
+    return NGX_CONF_OK;
+}
+
 #endif /* NGX_HTTP_MARKDOWN_CONFIG_HANDLERS_IMPL_H */

@@ -177,6 +177,33 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
+     * markdown_profile strict_cache|balanced|streaming_first   (0.9.0, spec 50)
+     *
+     * Selects a production-profile preset providing tuned Config V2
+     * defaults for a common operational scenario.  The profile only
+     * supplies defaults; explicit directives override profile values.
+     *
+     *   strict_cache    - CDN / caching proxy (full ETag, no streaming)
+     *   balanced        - general-purpose (IMS-only, auto streaming)
+     *   streaming_first - AI agent workloads (no cache, forced streaming)
+     *
+     * Default: none (built-in Config V2 defaults apply)
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_profile balanced;
+     */
+    {
+        ngx_string("markdown_profile"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF
+            |NGX_CONF_TAKE1,
+        ngx_http_markdown_set_profile,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
      * markdown_limits memory=<size> timeout=<time>
      *                 streaming_buffer=<size> max_inflight=<N>   (Config V2)
      *
