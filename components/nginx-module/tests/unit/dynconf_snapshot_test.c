@@ -301,8 +301,8 @@ test_default_config_all_keys_present(void)
         "should contain markdown_max_size key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_timeout"),
         "should contain markdown_timeout key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_on_error"),
-        "should contain markdown_on_error key");
+    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_error_policy"),
+        "should contain markdown_error_policy key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_flavor"),
         "should contain markdown_flavor key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_token_estimate"),
@@ -344,8 +344,6 @@ test_default_config_all_keys_present(void)
         "should contain markdown_streaming_engine key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming_budget"),
         "should contain markdown_streaming_budget key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming_on_error"),
-        "should contain markdown_streaming_on_error key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming_shadow"),
         "should contain markdown_streaming_shadow key");
     TEST_ASSERT(output_contains_key(out_buf, out_len,
@@ -357,8 +355,8 @@ test_default_config_all_keys_present(void)
         "markdown_filter", "off"),
         "markdown_filter should be 'off'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_on_error", "pass"),
-        "markdown_on_error should be 'pass'");
+        "markdown_error_policy", "pass"),
+        "markdown_error_policy should be 'pass'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_flavor", "commonmark"),
         "markdown_flavor should be 'commonmark'");
@@ -395,9 +393,6 @@ test_default_config_all_keys_present(void)
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_streaming_engine", "auto"),
         "markdown_streaming_engine should be 'auto'");
-    TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_streaming_on_error", "pass"),
-        "markdown_streaming_on_error should be 'pass'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_streaming_shadow", "off"),
         "markdown_streaming_shadow should be 'off'");
@@ -465,8 +460,8 @@ test_custom_config_values_reflected(void)
         "markdown_filter", "on"),
         "markdown_filter should be 'on'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_on_error", "reject"),
-        "markdown_on_error should be 'reject'");
+        "markdown_error_policy", "fail_closed"),
+        "markdown_error_policy should be 'fail_closed'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_flavor", "gfm"),
         "markdown_flavor should be 'gfm'");
@@ -506,9 +501,6 @@ test_custom_config_values_reflected(void)
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_trust_forwarded_headers", "on"),
         "markdown_trust_forwarded_headers should be 'on'");
-    TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_streaming_on_error", "reject"),
-        "markdown_streaming_on_error should be 'reject'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_streaming_shadow", "on"),
         "markdown_streaming_shadow should be 'on'");

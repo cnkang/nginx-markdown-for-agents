@@ -470,14 +470,29 @@ ngx_http_markdown_filter(ngx_conf_t *cf,
     return NGX_CONF_OK;
 }
 
-/* Configuration directive handler: markdown_on_error (pass | reject). */
+/*
+ * Configuration directive handler: markdown_error_policy
+ * (pass | fail_closed | status <code>).
+ *
+ * Config V2 (0.9.0): unified error policy consolidating the removed
+ * markdown_on_error and markdown_streaming_on_error directives.  It writes
+ * the existing backing fields, which stay the runtime source of truth:
+ *   pass        -> on_error=PASS, stream.on_error=PASS
+ *   fail_closed -> on_error=REJECT, stream.on_error=REJECT, error_status=502
+ *   status <c>  -> on_error=REJECT, stream.on_error=REJECT, error_status=<c>
+ *
+ * Allowed status codes: 429, 502, 503 (validated at nginx -t).  stream.on_error
+ * uses the same 0=pass/1=reject encoding as on_error, so the unconditional
+ * ON_ERROR constants are used to avoid a streaming-only ifdef.
+ */
 static char *
-ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_markdown_error_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     static u_char             pass_str[]   = "pass";
-    static u_char             reject_str[] = "reject";
+    static u_char             closed_str[] = "fail_closed";
+    static u_char             status_str[] = "status";
     ngx_http_markdown_conf_t *mcf = conf;
-    const ngx_str_t          *value;
+    ngx_str_t                *value;
 
     value = cf->args->elts;
 
@@ -485,20 +500,44 @@ ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_http_markdown_arg_equals(&value[1], pass_str,
-                                     sizeof(pass_str) - 1))
+    if (cf->args->nelts == 2
+        && ngx_http_markdown_arg_equals(&value[1], pass_str,
+                                        sizeof(pass_str) - 1))
     {
         mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-    } else if (ngx_http_markdown_arg_equals(
-                   &value[1], reject_str,
-                   sizeof(reject_str) - 1))
+        mcf->stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    } else if (cf->args->nelts == 2
+               && ngx_http_markdown_arg_equals(&value[1], closed_str,
+                                               sizeof(closed_str) - 1))
     {
         mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+        mcf->stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+        mcf->error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+
+    } else if (cf->args->nelts == 3
+               && ngx_http_markdown_arg_equals(&value[1], status_str,
+                                               sizeof(status_str) - 1))
+    {
+        ngx_uint_t code;
+
+        code = ngx_http_markdown_parse_uint(&value[2]);
+        if (code != 429 && code != 502 && code != 503) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "invalid status code \"%V\" in \"%V\" directive, "
+                "it must be 429, 502, or 503",
+                &value[2], &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+        mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+        mcf->stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+        mcf->error_status = code;
+
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                           "invalid value \"%V\" in \"%V\" directive, "
-                           "it must be \"pass\" or \"reject\"",
-                           &value[1], &cmd->name);
+            "invalid value in \"%V\" directive, it must be "
+            "\"pass\", \"fail_closed\", or \"status <429|502|503>\"",
+            &cmd->name);
         return NGX_CONF_ERROR;
     }
 

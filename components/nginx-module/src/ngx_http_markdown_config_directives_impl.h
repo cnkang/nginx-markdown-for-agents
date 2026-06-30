@@ -20,22 +20,6 @@
  */
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-/*
- * Enum table for markdown_streaming_on_error directive.
- *
- * Used by ngx_conf_set_enum_slot to validate and map string
- * values to integer constants.  Invalid values are automatically
- * rejected by the NGINX configuration parser.
- */
-static ngx_conf_enum_t
-    ngx_http_markdown_streaming_on_error_enum[] = {
-    { ngx_string("pass"),
-      NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS },
-    { ngx_string("reject"),
-      NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT },
-    { ngx_null_string, 0 }
-};
-
 static ngx_conf_enum_t
     ngx_http_markdown_streaming_engine_enum[] = {
     { ngx_string("off"),
@@ -256,24 +240,54 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_on_error pass|reject
+     * markdown_error_policy pass|fail_closed|status <code>   (Config V2, 0.9.0)
      *
-     * Failure strategy when conversion fails:
-     * - pass: Return original HTML (fail-open, default)
-     * - reject: Return 502 Bad Gateway (fail-closed)
+     * Unified pre-commit error policy. Consolidates the removed
+     * markdown_on_error and markdown_streaming_on_error directives.
+     *   pass        - return original content on pre-commit error (fail-open)
+     *   fail_closed - return 502 on pre-commit error
+     *   status <c>  - return status code c (429, 502, or 503)
      * Default: pass
      * Context: http, server, location
      *
      * Example:
-     *   markdown_on_error reject;
+     *   markdown_error_policy status 503;
      */
     {
-        ngx_string("markdown_on_error"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_http_markdown_on_error,
+        ngx_string("markdown_error_policy"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE12,
+        ngx_http_markdown_error_policy,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
         NULL
+    },
+
+    /*
+     * markdown_on_error  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * Migrated to markdown_error_policy pass|fail_closed|status <code>.
+     */
+    {
+        ngx_string("markdown_on_error"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        (void *) "use \"markdown_error_policy pass|fail_closed|status <code>\" instead"
+    },
+
+    /*
+     * markdown_streaming_on_error  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * Migrated to markdown_error_policy pass|fail_closed|status <code>.
+     */
+    {
+        ngx_string("markdown_streaming_on_error"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        (void *) "use \"markdown_error_policy pass|fail_closed|status <code>\" instead"
     },
 
     /*
@@ -740,33 +754,6 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, stream.engine),
         &ngx_http_markdown_streaming_engine_enum
-    },
-
-    /*
-     * markdown_streaming_on_error pass|reject
-     *
-     * Failure strategy for streaming Pre_Commit_Phase errors:
-     * - pass: Fail-open, return original HTML (default)
-     * - reject: Fail-closed, return error
-     *
-     * This directive is independent of markdown_on_error which
-     * controls the full-buffer path.  Post_Commit_Phase errors
-     * are always fail-closed regardless of this setting.
-     *
-     * Default: pass
-     * Context: http, server, location
-     *
-     * Example:
-     *   markdown_streaming_on_error reject;
-     */
-    {
-        ngx_string("markdown_streaming_on_error"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_enum_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, stream.on_error),
-        &ngx_http_markdown_streaming_on_error_enum
     },
 
     /*

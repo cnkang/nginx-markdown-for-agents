@@ -319,7 +319,16 @@ typedef struct {
  * Configuration constants for on_error directive
  */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_PASS    0  /* fail-open: return original HTML */
-#define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1  /* fail-closed: return 502 error */
+#define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1  /* fail-closed: return error status */
+
+/*
+ * Default pre-commit error status for markdown_error_policy (Config V2).
+ *
+ * markdown_error_policy fail_closed uses this; markdown_error_policy
+ * status <code> overrides it with 429, 502, or 503.  Stored in
+ * conf->error_status; honored by the unified error-policy path.
+ */
+#define NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT  502
 
 /*
  * Configuration constants for markdown_accept directive (Config V2, 0.9.0).
@@ -497,7 +506,8 @@ typedef struct {
     ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable/complex expression */
     size_t       max_size;             /* markdown_max_size (default: 10MB) */
     ngx_msec_t   timeout;              /* markdown_timeout (default: 5000ms) */
-    ngx_uint_t   on_error;             /* markdown_on_error pass|reject (default: pass) */
+    ngx_uint_t   on_error;             /* markdown_error_policy pass|fail_closed|status (default: pass) */
+    ngx_uint_t   error_status;         /* markdown_error_policy status <code> (default: 502; honored on fail-closed) */
     ngx_uint_t   flavor;               /* markdown_flavor commonmark|gfm (default: commonmark) */
     ngx_flag_t   token_estimate;       /* markdown_token_estimate on|off (default: off) */
     ngx_flag_t   front_matter;         /* markdown_front_matter on|off (default: off) */

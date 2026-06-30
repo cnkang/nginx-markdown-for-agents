@@ -36,8 +36,8 @@ static char *ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *ch
 static ngx_int_t ngx_http_markdown_init_metrics_zone(ngx_shm_zone_t *shm_zone, void *data);
 /* Parse markdown_filter (on/off or complex value) directive payload. */
 static char *ngx_http_markdown_filter(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-/* Parse markdown_on_error enum and validate accepted values. */
-static char *ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse markdown_error_policy pass|fail_closed|status <code> (Config V2). */
+static char *ngx_http_markdown_error_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse markdown_flavor enum for converter output dialect selection. */
 static char *ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse authentication policy controlling conversion on authenticated traffic. */

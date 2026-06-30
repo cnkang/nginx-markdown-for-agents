@@ -218,24 +218,38 @@ markdown_limits memory=8m timeout=2s streaming_buffer=256k max_inflight=64;
 
 ---
 
-#### markdown_on_error
+#### markdown_error_policy
 
-**Syntax:** `markdown_on_error pass | reject;`  
+**Syntax:** `markdown_error_policy pass | fail_closed | status <code>;`  
 **Default:** `pass`  
 **Context:** http, server, location
 
-Failure strategy when conversion fails:
-- `pass`: Return original HTML (fail-open, recommended for production)
-- `reject`: Return 502 Bad Gateway (fail-closed)
+Unified pre-commit error policy. Consolidates the removed `markdown_on_error`
+and `markdown_streaming_on_error` directives (0.9.0 breaking change).
+
+- `pass` (default): return the original content on a pre-commit error
+  (fail-open, recommended for production).
+- `fail_closed`: return 502 on a pre-commit error.
+- `status <code>`: return the specified status code (`429`, `502`, or `503`).
+
+This applies to **pre-commit** errors only (headers not yet sent). Post-commit
+streaming errors cannot rewrite the status or pass original content; they stop
+output and close the connection (see the streaming sections).
 
 **Example:**
 ```nginx
 # Fail-open (default, recommended)
-markdown_on_error pass;
+markdown_error_policy pass;
 
-# Fail-closed (strict mode)
-markdown_on_error reject;
+# Return 503 on conversion failure
+markdown_error_policy status 503;
 ```
+
+**Migration:** `markdown_on_error pass` -> `markdown_error_policy pass`;
+`markdown_on_error reject` -> `markdown_error_policy fail_closed`;
+`markdown_streaming_on_error pass|reject` ->
+`markdown_error_policy pass|fail_closed` (the policy is now unified across the
+full-buffer and streaming paths).
 
 ---
 
@@ -665,6 +679,7 @@ markdown_streaming_budget 4m;
 **Syntax:** `markdown_streaming_on_error pass | reject;`
 **Default:** `pass`
 **Context:** http, server, location
+**Status:** REMOVED in 0.9.0 — use `markdown_error_policy pass|fail_closed|status <code>` (now unified across full-buffer and streaming)
 
 Controls the failure behavior during the streaming Pre-Commit Phase — the window
 between when streaming conversion starts and when the first Markdown chunk is sent
