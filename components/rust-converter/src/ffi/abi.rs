@@ -528,6 +528,99 @@ pub struct FFIDecisionResult {
     pub reason_code: u8,
 }
 
+/// Input snapshot for `markdown_decide_conditional` (spec 49).
+///
+/// All byte fields are borrowed from the C caller for the duration of the
+/// call (NULL with length 0 means "absent"). This struct exposes neither
+/// `ngx_http_request_t *` nor any NGINX pool; the C side marshals request
+/// headers, response metadata, and the effective `cache_validation` mode.
+#[repr(C)]
+pub struct FFIConditionalInput {
+    /// Effective `markdown_cache_validation` mode: 0 = off, 1 = ims_only,
+    /// 2 = full. Unknown values fall back to ims_only (safe default).
+    pub cache_validation: u8,
+    /// 1 if the request carried a `Range` header, else 0.
+    pub has_range: u8,
+    /// 1 if request or response carried `Cache-Control: no-transform`.
+    pub no_transform: u8,
+    /// `If-None-Match` header value bytes (NULL/0 if absent).
+    pub if_none_match: *const u8,
+    /// Length of `if_none_match`.
+    pub if_none_match_len: usize,
+    /// Transformed-representation entity ETag bytes (NULL/0 if none; always
+    /// absent on the streaming path).
+    pub entity_etag: *const u8,
+    /// Length of `entity_etag`.
+    pub entity_etag_len: usize,
+    /// `If-Modified-Since` header value bytes (NULL/0 if absent).
+    pub if_modified_since: *const u8,
+    /// Length of `if_modified_since`.
+    pub if_modified_since_len: usize,
+    /// Preserved upstream `Last-Modified` value bytes (NULL/0 if absent).
+    pub last_modified: *const u8,
+    /// Length of `last_modified`.
+    pub last_modified_len: usize,
+}
+
+/// Result of `markdown_decide_conditional` (spec 49).
+#[repr(C)]
+pub struct FFIConditionalDecision {
+    /// `ConditionalOutcome` discriminant: 0 = not_modified (send 304),
+    /// 1 = proceed, 2 = bypass (deliver upstream unmodified).
+    pub outcome: u8,
+    /// `ConditionalReason` discriminant (spec 53 alignment).
+    pub reason: u8,
+    /// `ConditionalHeader` discriminant: 0 = none, 1 = if_none_match,
+    /// 2 = if_modified_since.
+    pub evaluated_header: u8,
+}
+
+/// Input snapshot for `markdown_decide_streaming` (spec 49).
+///
+/// This struct exposes neither `ngx_http_request_t *` nor any NGINX pool;
+/// the C side marshals the policy/engine selectors, the effective
+/// `cache_validation` mode, request/response flags, and sizing fields.
+#[repr(C)]
+pub struct FFIStreamingInput {
+    /// `markdown_streaming` policy: 0 = off, 1 = auto, 2 = force.
+    pub policy: u8,
+    /// `markdown_streaming_engine`: 0 = off, 1 = auto, 2 = on.
+    pub engine: u8,
+    /// Effective `markdown_cache_validation` mode: 0 = off, 1 = ims_only,
+    /// 2 = full.
+    pub cache_validation: u8,
+    /// 1 if the request method is `HEAD`, else 0.
+    pub is_head: u8,
+    /// 1 if the conditional decision yielded `304 Not Modified`, else 0.
+    pub is_not_modified: u8,
+    /// 1 if the request carried a `Range` header, else 0.
+    pub has_range: u8,
+    /// 1 if request or response carried `Cache-Control: no-transform`.
+    pub no_transform: u8,
+    /// 1 if the upstream response carried a `Content-Encoding`, else 0.
+    pub has_content_encoding: u8,
+    /// 1 if the upstream `Content-Length` is known, else 0.
+    pub content_length_known: u8,
+    /// Upstream `Content-Length` in bytes (meaningful when known).
+    pub content_length: u64,
+    /// `markdown_stream_threshold` in bytes (auto-mode trigger).
+    pub streaming_threshold: u64,
+}
+
+/// `markdown_decide_streaming` sentinel: no block reason (request is
+/// streaming-eligible).
+pub const STREAMING_BLOCK_REASON_NONE: u8 = 255;
+
+/// Result of `markdown_decide_streaming` (spec 49).
+#[repr(C)]
+pub struct FFIStreamingDecision {
+    /// 1 if the request may take the streaming path, else 0.
+    pub eligible: u8,
+    /// `StreamingBlockReason` discriminant when `eligible == 0`, or
+    /// `STREAMING_BLOCK_REASON_NONE` (255) when `eligible == 1`.
+    pub block_reason: u8,
+}
+
 /// A single header operation in a header plan.
 ///
 /// Fields:

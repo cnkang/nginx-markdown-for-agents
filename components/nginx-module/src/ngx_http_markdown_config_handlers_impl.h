@@ -781,6 +781,60 @@ ngx_http_markdown_cache_validation(ngx_conf_t *cf, ngx_command_t *cmd, void *con
     return NGX_CONF_OK;
 }
 
+/* Configuration directive handler: markdown_streaming off|auto|force. */
+static char *
+ngx_http_markdown_streaming(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    static u_char             off_str[]   = "off";
+    static u_char             auto_str[]  = "auto";
+    static u_char             force_str[] = "force";
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    value = cf->args->elts;
+
+    /*
+     * markdown_streaming (Config V2, 0.9.0) is the streaming *enablement*
+     * selector and is distinct from markdown_streaming_engine (the
+     * implementation selector).  policy_explicit records that an operator
+     * set this directive so the cache-validation conflict check in
+     * merge_conf does not fire for default configurations.
+     *
+     *   off   - never stream
+     *   auto  - stream large responses, full-buffer small ones
+     *   force - always stream (subject to runtime hard blocks)
+     */
+    if (mcf->stream.policy != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    if (ngx_http_markdown_arg_equals(&value[1], off_str,
+                                     sizeof(off_str) - 1))
+    {
+        mcf->stream.policy = NGX_HTTP_MARKDOWN_STREAMING_OFF;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], auto_str,
+                   sizeof(auto_str) - 1))
+    {
+        mcf->stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], force_str,
+                   sizeof(force_str) - 1))
+    {
+        mcf->stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid value \"%V\" in \"%V\" directive, "
+                           "it must be \"off\", \"auto\", or \"force\"",
+                           &value[1], &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->stream.policy_explicit = 1;
+
+    return NGX_CONF_OK;
+}
+
 /* Configuration directive handler: markdown_log_verbosity. */
 static char *
 ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)

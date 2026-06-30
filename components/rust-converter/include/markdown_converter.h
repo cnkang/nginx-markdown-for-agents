@@ -225,6 +225,12 @@
  */
 #define DECIDE_BASE_URL_INVALID 1
 
+/**
+ * `markdown_decide_streaming` sentinel: no block reason (request is
+ * streaming-eligible).
+ */
+#define STREAMING_BLOCK_REASON_NONE 255
+
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
  * Maximum accumulated buffer size in bytes (64 MiB).
@@ -649,6 +655,153 @@ typedef struct FFIConditionalResult {
 } FFIConditionalResult;
 
 /**
+ * Input snapshot for `markdown_decide_conditional` (spec 49).
+ *
+ * All byte fields are borrowed from the C caller for the duration of the
+ * call (NULL with length 0 means "absent"). This struct exposes neither
+ * `ngx_http_request_t *` nor any NGINX pool; the C side marshals request
+ * headers, response metadata, and the effective `cache_validation` mode.
+ */
+typedef struct FFIConditionalInput {
+  /**
+   * Effective `markdown_cache_validation` mode: 0 = off, 1 = ims_only,
+   * 2 = full. Unknown values fall back to ims_only (safe default).
+   */
+  uint8_t cache_validation;
+  /**
+   * 1 if the request carried a `Range` header, else 0.
+   */
+  uint8_t has_range;
+  /**
+   * 1 if request or response carried `Cache-Control: no-transform`.
+   */
+  uint8_t no_transform;
+  /**
+   * `If-None-Match` header value bytes (NULL/0 if absent).
+   */
+  const uint8_t *if_none_match;
+  /**
+   * Length of `if_none_match`.
+   */
+  uintptr_t if_none_match_len;
+  /**
+   * Transformed-representation entity ETag bytes (NULL/0 if none; always
+   * absent on the streaming path).
+   */
+  const uint8_t *entity_etag;
+  /**
+   * Length of `entity_etag`.
+   */
+  uintptr_t entity_etag_len;
+  /**
+   * `If-Modified-Since` header value bytes (NULL/0 if absent).
+   */
+  const uint8_t *if_modified_since;
+  /**
+   * Length of `if_modified_since`.
+   */
+  uintptr_t if_modified_since_len;
+  /**
+   * Preserved upstream `Last-Modified` value bytes (NULL/0 if absent).
+   */
+  const uint8_t *last_modified;
+  /**
+   * Length of `last_modified`.
+   */
+  uintptr_t last_modified_len;
+} FFIConditionalInput;
+
+/**
+ * Result of `markdown_decide_conditional` (spec 49).
+ */
+typedef struct FFIConditionalDecision {
+  /**
+   * `ConditionalOutcome` discriminant: 0 = not_modified (send 304),
+   * 1 = proceed, 2 = bypass (deliver upstream unmodified).
+   */
+  uint8_t outcome;
+  /**
+   * `ConditionalReason` discriminant (spec 53 alignment).
+   */
+  uint8_t reason;
+  /**
+   * `ConditionalHeader` discriminant: 0 = none, 1 = if_none_match,
+   * 2 = if_modified_since.
+   */
+  uint8_t evaluated_header;
+} FFIConditionalDecision;
+
+/**
+ * Input snapshot for `markdown_decide_streaming` (spec 49).
+ *
+ * This struct exposes neither `ngx_http_request_t *` nor any NGINX pool;
+ * the C side marshals the policy/engine selectors, the effective
+ * `cache_validation` mode, request/response flags, and sizing fields.
+ */
+typedef struct FFIStreamingInput {
+  /**
+   * `markdown_streaming` policy: 0 = off, 1 = auto, 2 = force.
+   */
+  uint8_t policy;
+  /**
+   * `markdown_streaming_engine`: 0 = off, 1 = auto, 2 = on.
+   */
+  uint8_t engine;
+  /**
+   * Effective `markdown_cache_validation` mode: 0 = off, 1 = ims_only,
+   * 2 = full.
+   */
+  uint8_t cache_validation;
+  /**
+   * 1 if the request method is `HEAD`, else 0.
+   */
+  uint8_t is_head;
+  /**
+   * 1 if the conditional decision yielded `304 Not Modified`, else 0.
+   */
+  uint8_t is_not_modified;
+  /**
+   * 1 if the request carried a `Range` header, else 0.
+   */
+  uint8_t has_range;
+  /**
+   * 1 if request or response carried `Cache-Control: no-transform`.
+   */
+  uint8_t no_transform;
+  /**
+   * 1 if the upstream response carried a `Content-Encoding`, else 0.
+   */
+  uint8_t has_content_encoding;
+  /**
+   * 1 if the upstream `Content-Length` is known, else 0.
+   */
+  uint8_t content_length_known;
+  /**
+   * Upstream `Content-Length` in bytes (meaningful when known).
+   */
+  uint64_t content_length;
+  /**
+   * `markdown_stream_threshold` in bytes (auto-mode trigger).
+   */
+  uint64_t streaming_threshold;
+} FFIStreamingInput;
+
+/**
+ * Result of `markdown_decide_streaming` (spec 49).
+ */
+typedef struct FFIStreamingDecision {
+  /**
+   * 1 if the request may take the streaming path, else 0.
+   */
+  uint8_t eligible;
+  /**
+   * `StreamingBlockReason` discriminant when `eligible == 0`, or
+   * `STREAMING_BLOCK_REASON_NONE` (255) when `eligible == 1`.
+   */
+  uint8_t block_reason;
+} FFIStreamingDecision;
+
+/**
  * Result of a decision engine evaluation.
  *
  * Returned by `markdown_make_decision` FFI function.
@@ -1027,6 +1180,53 @@ void markdown_check_conditional(const uint8_t *if_none_match,
                                 const uint8_t *last_modified,
                                 uintptr_t last_modified_len,
                                 struct FFIConditionalResult *result);
+
+/**
+ * Decide the conditional-request outcome (spec 49): cache-validation mode,
+ * `If-None-Match` over `If-Modified-Since` precedence, and `Range` /
+ * `no-transform` bypass.
+ *
+ * This is the Rust single source of truth wrapping
+ * `crate::decision::conditional::decide_conditional`. The result is written
+ * through the `out` output parameter.
+ *
+ * On NULL `input`/`out` or on a caught panic, the output is left at the
+ * fail-open default (proceed, no headers evaluated) so a spurious 304 is
+ * never produced.
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `input` is NULL or points to a readable `FFIConditionalInput` whose
+ *   byte pointers each reference `*_len` readable bytes (or are NULL when
+ *   the length is 0)
+ * - `out` is NULL or points to writable storage for an
+ *   `FFIConditionalDecision`
+ * - all referenced memory remains valid for the duration of the call
+ */
+void markdown_decide_conditional(const struct FFIConditionalInput *input,
+                                 struct FFIConditionalDecision *out);
+
+/**
+ * Decide whether the request may take the streaming path (spec 49).
+ *
+ * This is the Rust single source of truth wrapping
+ * `crate::decision::streaming::decide_streaming`. The result is written
+ * through the `out` output parameter.
+ *
+ * On NULL `input`/`out` or on a caught panic, the output is the safe
+ * fallback: not eligible (the full-buffer path), with no block reason
+ * reported (`STREAMING_BLOCK_REASON_NONE`).
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `input` is NULL or points to a readable `FFIStreamingInput`
+ * - `out` is NULL or points to writable storage for an
+ *   `FFIStreamingDecision`
+ */
+void markdown_decide_streaming(const struct FFIStreamingInput *input,
+                               struct FFIStreamingDecision *out);
 
 /**
  * Evaluate the conversion decision engine.

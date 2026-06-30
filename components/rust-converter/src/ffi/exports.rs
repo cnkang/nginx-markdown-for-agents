@@ -50,10 +50,20 @@ use super::abi::{
     MarkdownResult, NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT,
     NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
 };
+use super::abi::{
+    FFIConditionalDecision, FFIConditionalInput, FFIStreamingDecision, FFIStreamingInput,
+    STREAMING_BLOCK_REASON_NONE,
+};
 use super::convert::convert_inner;
 use super::memory::{free_buffer, reset_result, set_error_result, set_success_result};
 use super::options::{required_bytes, required_ref};
+use crate::decision::conditional::{
+    CacheValidation, ConditionalInput, ConditionalOutcome, decide_conditional,
+};
 use crate::decision::eligibility::{Eligibility, EligibilityInput, decide_eligibility};
+use crate::decision::streaming::{
+    StreamingEngine, StreamingInput, StreamingPolicy, decide_streaming,
+};
 use crate::forwarded::{BaseUrlInput, decide_base_url, parse_cidr};
 
 #[cfg(test)]
@@ -398,6 +408,140 @@ pub unsafe extern "C" fn markdown_check_conditional(
             result_ref.result_code = 1;
             result_ref.matched_etag_len = 0;
         }
+    }
+}
+
+/// Decide the conditional-request outcome (spec 49): cache-validation mode,
+/// `If-None-Match` over `If-Modified-Since` precedence, and `Range` /
+/// `no-transform` bypass.
+///
+/// This is the Rust single source of truth wrapping
+/// `crate::decision::conditional::decide_conditional`. The result is written
+/// through the `out` output parameter.
+///
+/// On NULL `input`/`out` or on a caught panic, the output is left at the
+/// fail-open default (proceed, no headers evaluated) so a spurious 304 is
+/// never produced.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `input` is NULL or points to a readable `FFIConditionalInput` whose
+///   byte pointers each reference `*_len` readable bytes (or are NULL when
+///   the length is 0)
+/// - `out` is NULL or points to writable storage for an
+///   `FFIConditionalDecision`
+/// - all referenced memory remains valid for the duration of the call
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_decide_conditional(
+    input: *const FFIConditionalInput,
+    out: *mut FFIConditionalDecision,
+) {
+    if out.is_null() {
+        return;
+    }
+    let out_ref = unsafe { &mut *out };
+
+    // Fail-open default written before the catch_unwind block: proceed with
+    // no header evaluated. ConditionalReason::NoHeaders == 0,
+    // ConditionalOutcome::Proceed == 1, ConditionalHeader::None == 0.
+    out_ref.outcome = ConditionalOutcome::Proceed.as_u8();
+    out_ref.reason = 0;
+    out_ref.evaluated_header = 0;
+
+    if input.is_null() {
+        return;
+    }
+
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        let inp = unsafe { &*input };
+
+        let cinput = ConditionalInput {
+            cache_validation: CacheValidation::from_u8(inp.cache_validation),
+            has_range: inp.has_range != 0,
+            no_transform: inp.no_transform != 0,
+            if_none_match: unsafe {
+                optional_str(inp.if_none_match, inp.if_none_match_len)
+            },
+            entity_etag: unsafe { optional_str(inp.entity_etag, inp.entity_etag_len) },
+            if_modified_since: unsafe {
+                optional_str(inp.if_modified_since, inp.if_modified_since_len)
+            },
+            last_modified: unsafe {
+                optional_str(inp.last_modified, inp.last_modified_len)
+            },
+        };
+
+        decide_conditional(&cinput)
+    }));
+
+    if let Ok(decision) = outcome {
+        out_ref.outcome = decision.outcome.as_u8();
+        out_ref.reason = decision.reason.as_u8();
+        out_ref.evaluated_header = decision.evaluated_header.as_u8();
+    }
+}
+
+/// Decide whether the request may take the streaming path (spec 49).
+///
+/// This is the Rust single source of truth wrapping
+/// `crate::decision::streaming::decide_streaming`. The result is written
+/// through the `out` output parameter.
+///
+/// On NULL `input`/`out` or on a caught panic, the output is the safe
+/// fallback: not eligible (the full-buffer path), with no block reason
+/// reported (`STREAMING_BLOCK_REASON_NONE`).
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `input` is NULL or points to a readable `FFIStreamingInput`
+/// - `out` is NULL or points to writable storage for an
+///   `FFIStreamingDecision`
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_decide_streaming(
+    input: *const FFIStreamingInput,
+    out: *mut FFIStreamingDecision,
+) {
+    if out.is_null() {
+        return;
+    }
+    let out_ref = unsafe { &mut *out };
+
+    // Fail-safe default: full-buffer (not eligible), no block reason.
+    out_ref.eligible = 0;
+    out_ref.block_reason = STREAMING_BLOCK_REASON_NONE;
+
+    if input.is_null() {
+        return;
+    }
+
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        let inp = unsafe { &*input };
+
+        let sinput = StreamingInput {
+            policy: StreamingPolicy::from_u8(inp.policy),
+            engine: StreamingEngine::from_u8(inp.engine),
+            cache_validation: CacheValidation::from_u8(inp.cache_validation),
+            is_head: inp.is_head != 0,
+            is_not_modified: inp.is_not_modified != 0,
+            has_range: inp.has_range != 0,
+            no_transform: inp.no_transform != 0,
+            has_content_encoding: inp.has_content_encoding != 0,
+            content_length_known: inp.content_length_known != 0,
+            content_length: inp.content_length,
+            streaming_threshold: inp.streaming_threshold,
+        };
+
+        decide_streaming(&sinput)
+    }));
+
+    if let Ok(decision) = outcome {
+        out_ref.eligible = u8::from(decision.eligible);
+        out_ref.block_reason = match decision.block_reason {
+            Some(reason) => reason.as_u8(),
+            None => STREAMING_BLOCK_REASON_NONE,
+        };
     }
 }
 
@@ -2018,5 +2162,207 @@ mod tests {
         input.filter_enabled = 0;
         let rc = unsafe { markdown_decide_eligibility(&input) };
         assert_eq!(rc, 8, "disabled filter should be IneligibleConfig");
+    }
+
+    /* ---- markdown_decide_conditional (spec 49) ---- */
+
+    fn empty_conditional_input() -> FFIConditionalInput {
+        FFIConditionalInput {
+            cache_validation: 2, /* full */
+            has_range: 0,
+            no_transform: 0,
+            if_none_match: ptr::null(),
+            if_none_match_len: 0,
+            entity_etag: ptr::null(),
+            entity_etag_len: 0,
+            if_modified_since: ptr::null(),
+            if_modified_since_len: 0,
+            last_modified: ptr::null(),
+            last_modified_len: 0,
+        }
+    }
+
+    fn empty_conditional_decision() -> FFIConditionalDecision {
+        FFIConditionalDecision {
+            outcome: 7,
+            reason: 7,
+            evaluated_header: 7,
+        }
+    }
+
+    #[test]
+    fn decide_conditional_null_out_is_noop() {
+        let input = empty_conditional_input();
+        /* Must not panic / write through NULL. */
+        unsafe { markdown_decide_conditional(&input, ptr::null_mut()) };
+    }
+
+    #[test]
+    fn decide_conditional_null_input_fails_open_proceed() {
+        let mut out = empty_conditional_decision();
+        unsafe { markdown_decide_conditional(ptr::null(), &mut out) };
+        /* Proceed (1), NoHeaders (0), header None (0). */
+        assert_eq!(out.outcome, 1);
+        assert_eq!(out.reason, 0);
+        assert_eq!(out.evaluated_header, 0);
+    }
+
+    #[test]
+    fn decide_conditional_empty_input_proceeds() {
+        let input = empty_conditional_input();
+        let mut out = empty_conditional_decision();
+        unsafe { markdown_decide_conditional(&input, &mut out) };
+        assert_eq!(out.outcome, 1); /* proceed */
+        assert_eq!(out.reason, 0); /* conditional_no_headers */
+        assert_eq!(out.evaluated_header, 0);
+    }
+
+    #[test]
+    fn decide_conditional_inm_match_not_modified() {
+        let inm = b"\"abc\"";
+        let etag = b"\"abc\"";
+        let mut input = empty_conditional_input();
+        input.if_none_match = inm.as_ptr();
+        input.if_none_match_len = inm.len();
+        input.entity_etag = etag.as_ptr();
+        input.entity_etag_len = etag.len();
+        let mut out = empty_conditional_decision();
+        unsafe { markdown_decide_conditional(&input, &mut out) };
+        assert_eq!(out.outcome, 0); /* not_modified */
+        assert_eq!(out.reason, 1); /* conditional_inm_evaluated */
+        assert_eq!(out.evaluated_header, 1); /* if_none_match */
+    }
+
+    #[test]
+    fn decide_conditional_range_bypass() {
+        let mut input = empty_conditional_input();
+        input.has_range = 1;
+        let mut out = empty_conditional_decision();
+        unsafe { markdown_decide_conditional(&input, &mut out) };
+        assert_eq!(out.outcome, 2); /* bypass */
+        assert_eq!(out.reason, 3); /* bypass_range_request */
+    }
+
+    #[test]
+    fn decide_conditional_no_transform_bypass() {
+        let mut input = empty_conditional_input();
+        input.no_transform = 1;
+        let mut out = empty_conditional_decision();
+        unsafe { markdown_decide_conditional(&input, &mut out) };
+        assert_eq!(out.outcome, 2); /* bypass */
+        assert_eq!(out.reason, 4); /* bypass_no_transform */
+    }
+
+    #[test]
+    fn decide_conditional_ims_only_ignores_inm() {
+        let inm = b"\"abc\"";
+        let etag = b"\"abc\"";
+        let ims = b"Sun, 06 Nov 1994 08:49:37 GMT";
+        let lm = b"Fri, 04 Nov 1994 08:49:37 GMT";
+        let mut input = empty_conditional_input();
+        input.cache_validation = 1; /* ims_only */
+        input.if_none_match = inm.as_ptr();
+        input.if_none_match_len = inm.len();
+        input.entity_etag = etag.as_ptr();
+        input.entity_etag_len = etag.len();
+        input.if_modified_since = ims.as_ptr();
+        input.if_modified_since_len = ims.len();
+        input.last_modified = lm.as_ptr();
+        input.last_modified_len = lm.len();
+        let mut out = empty_conditional_decision();
+        unsafe { markdown_decide_conditional(&input, &mut out) };
+        /* IMS evaluated (not INM): lm earlier than ims -> not modified. */
+        assert_eq!(out.outcome, 0); /* not_modified */
+        assert_eq!(out.reason, 2); /* conditional_ims_evaluated */
+        assert_eq!(out.evaluated_header, 2); /* if_modified_since */
+    }
+
+    /* ---- markdown_decide_streaming (spec 49) ---- */
+
+    fn auto_streaming_input() -> FFIStreamingInput {
+        FFIStreamingInput {
+            policy: 1, /* auto */
+            engine: 1, /* auto */
+            cache_validation: 1, /* ims_only */
+            is_head: 0,
+            is_not_modified: 0,
+            has_range: 0,
+            no_transform: 0,
+            has_content_encoding: 0,
+            content_length_known: 1,
+            content_length: 1024 * 1024,
+            streaming_threshold: 256 * 1024,
+        }
+    }
+
+    fn empty_streaming_decision() -> FFIStreamingDecision {
+        FFIStreamingDecision {
+            eligible: 7,
+            block_reason: 7,
+        }
+    }
+
+    #[test]
+    fn decide_streaming_null_out_is_noop() {
+        let input = auto_streaming_input();
+        unsafe { markdown_decide_streaming(&input, ptr::null_mut()) };
+    }
+
+    #[test]
+    fn decide_streaming_null_input_fails_safe_full_buffer() {
+        let mut out = empty_streaming_decision();
+        unsafe { markdown_decide_streaming(ptr::null(), &mut out) };
+        assert_eq!(out.eligible, 0);
+        assert_eq!(out.block_reason, STREAMING_BLOCK_REASON_NONE);
+    }
+
+    #[test]
+    fn decide_streaming_auto_large_eligible() {
+        let input = auto_streaming_input();
+        let mut out = empty_streaming_decision();
+        unsafe { markdown_decide_streaming(&input, &mut out) };
+        assert_eq!(out.eligible, 1);
+        assert_eq!(out.block_reason, STREAMING_BLOCK_REASON_NONE);
+    }
+
+    #[test]
+    fn decide_streaming_full_cache_validation_blocks() {
+        let mut input = auto_streaming_input();
+        input.cache_validation = 2; /* full */
+        let mut out = empty_streaming_decision();
+        unsafe { markdown_decide_streaming(&input, &mut out) };
+        assert_eq!(out.eligible, 0);
+        assert_eq!(out.block_reason, 0); /* FullCacheValidation */
+    }
+
+    #[test]
+    fn decide_streaming_small_body_blocks() {
+        let mut input = auto_streaming_input();
+        input.content_length = 1024;
+        let mut out = empty_streaming_decision();
+        unsafe { markdown_decide_streaming(&input, &mut out) };
+        assert_eq!(out.eligible, 0);
+        assert_eq!(out.block_reason, 6); /* SmallBody */
+    }
+
+    #[test]
+    fn decide_streaming_head_blocks() {
+        let mut input = auto_streaming_input();
+        input.is_head = 1;
+        let mut out = empty_streaming_decision();
+        unsafe { markdown_decide_streaming(&input, &mut out) };
+        assert_eq!(out.eligible, 0);
+        assert_eq!(out.block_reason, 7); /* HeadRequest */
+    }
+
+    #[test]
+    fn decide_streaming_force_streams_small() {
+        let mut input = auto_streaming_input();
+        input.policy = 2; /* force */
+        input.engine = 2; /* on */
+        input.content_length = 1;
+        let mut out = empty_streaming_decision();
+        unsafe { markdown_decide_streaming(&input, &mut out) };
+        assert_eq!(out.eligible, 1);
     }
 }
