@@ -292,6 +292,8 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
 
     /* v0.8.0 streaming config */
     conf->stream.engine = NGX_CONF_UNSET_UINT;
+    conf->stream.policy = NGX_CONF_UNSET_UINT;
+    conf->stream.policy_explicit = -1;
     conf->stream.threshold = NGX_CONF_UNSET_SIZE;
     conf->stream.threshold_explicit = -1;
     conf->stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
@@ -603,6 +605,48 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
             "\"markdown_decompress_max_size\" must be greater "
             "than 0 when auto_decompress is enabled");
         return NGX_CONF_ERROR;
+    }
+
+    /*
+     * markdown_streaming vs markdown_cache_validation conflict (spec 49).
+     *
+     * full cache validation requires a buffered transformed representation
+     * so a transformed-representation ETag can be generated; the streaming
+     * path commits headers before the body is known and cannot emit one.
+     *
+     *   full + force => error  (mutually exclusive)
+     *   full + auto  => warning (runtime blocks streaming with reason
+     *                            streaming_block_full_cache_validation and
+     *                            falls back to the full-buffer path)
+     *
+     * The check is gated on policy_explicit so a default configuration
+     * (which carries cache_validation=full and streaming=auto defaults)
+     * never warns; only an operator who explicitly wrote markdown_streaming
+     * triggers it.  Cross-directive validation owned by spec 54 may extend
+     * this; the runtime block itself is enforced in Rust decide_streaming.
+     */
+    if (conf->stream.policy_explicit
+        && conf->policy.conditional_requests
+           == NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT)
+    {
+        if (conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "\"markdown_streaming force\" conflicts with "
+                "\"markdown_cache_validation full\": the streaming path "
+                "cannot generate a transformed-representation ETag; use "
+                "\"markdown_cache_validation ims_only\" (or off), or "
+                "\"markdown_streaming off|auto\"");
+            return NGX_CONF_ERROR;
+        }
+
+        if (conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_AUTO) {
+            ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
+                "\"markdown_streaming auto\" with "
+                "\"markdown_cache_validation full\": streaming is blocked "
+                "at runtime (reason streaming_block_full_cache_validation) "
+                "and each request falls back to the full-buffer path; use "
+                "\"markdown_cache_validation ims_only\" to allow streaming");
+        }
     }
 
     ngx_http_markdown_log_merged_conf(cf, conf);

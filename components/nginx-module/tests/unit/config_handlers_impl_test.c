@@ -696,6 +696,8 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->large_body_threshold = NGX_CONF_UNSET_SIZE;
     mcf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     mcf->stream.engine = NGX_CONF_UNSET_UINT;
+    mcf->stream.policy = NGX_CONF_UNSET_UINT;
+    mcf->stream.policy_explicit = -1;
     mcf->stream.threshold = NGX_CONF_UNSET_SIZE;
     mcf->stream.flush_min = NGX_CONF_UNSET_SIZE;
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;
@@ -1160,6 +1162,82 @@ test_conditional_and_log_verbosity_handlers(void)
         "invalid log verbosity should fail");
 
     TEST_PASS("conditional/log_verbosity branches covered");
+}
+
+/*
+ * Verify markdown_streaming off|auto|force handler (spec 49):
+ * valid enum tokens, duplicate detection, invalid token rejection,
+ * and that policy_explicit is recorded.
+ *
+ * Semantic contract mirrored: ngx_http_markdown_streaming maps a
+ * string token to the NGX_HTTP_MARKDOWN_STREAMING_* enum, rejects
+ * duplicates ("is duplicate"), returns NGX_CONF_ERROR for unknown
+ * tokens, and sets stream.policy_explicit on success.
+ *
+ * Return: void.
+ *
+ * Side effects: asserts on mcf->stream fields.
+ */
+static void
+test_streaming_policy_handler(void)
+{
+    ngx_conf_t               cf;
+    ngx_array_t              args;
+    ngx_str_t                values[2];
+    ngx_command_t            cmd;
+    ngx_http_markdown_conf_t mcf;
+    const char              *rc;
+
+    TEST_SUBSECTION("markdown_streaming policy handler (spec 49)");
+
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&values[0], "markdown_streaming");
+    set_arg(&cmd.name, "markdown_streaming");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "off");
+    rc = ngx_http_markdown_streaming(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "off should parse");
+    TEST_ASSERT(mcf.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
+        "policy should be OFF");
+    TEST_ASSERT(mcf.stream.policy_explicit == 1,
+        "policy_explicit should be recorded");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "auto");
+    rc = ngx_http_markdown_streaming(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "auto should parse");
+    TEST_ASSERT(mcf.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_AUTO,
+        "policy should be AUTO");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "force");
+    rc = ngx_http_markdown_streaming(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "force should parse");
+    TEST_ASSERT(mcf.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
+        "policy should be FORCE");
+    TEST_ASSERT(mcf.stream.policy_explicit == 1,
+        "policy_explicit should be recorded for force");
+
+    /* Duplicate detection: a second set on the same conf is rejected. */
+    set_arg(&values[1], "auto");
+    rc = ngx_http_markdown_streaming(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc != NGX_CONF_OK && rc != NGX_CONF_ERROR,
+        "second markdown_streaming should be \"is duplicate\"");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "on");   /* engine token, not a valid policy */
+    rc = ngx_http_markdown_streaming(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "invalid policy token \"on\" should fail");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "bogus");
+    rc = ngx_http_markdown_streaming(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "invalid policy token should fail");
+
+    TEST_PASS("markdown_streaming policy handler branches covered");
 }
 
 /*
@@ -2010,6 +2088,7 @@ main(void)
     test_simple_enum_handlers();
     test_auth_cookies_handler();
     test_conditional_and_log_verbosity_handlers();
+    test_streaming_policy_handler();
     test_stream_types_handler();
     test_limits_handler();
     test_metrics_handlers();

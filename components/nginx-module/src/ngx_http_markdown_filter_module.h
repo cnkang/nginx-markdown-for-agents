@@ -311,6 +311,19 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON    2
 
 /*
+ * Streaming policy mode constants (markdown_streaming directive, 0.9.0).
+ *
+ * markdown_streaming off|auto|force is the streaming *enablement* selector
+ * (Config V2, spec 49).  It is distinct from markdown_streaming_engine,
+ * which is the *implementation* selector (off|auto|on).  Do not conflate
+ * the two: policy decides whether streaming is attempted, engine decides
+ * which backend implementation is used.
+ */
+#define NGX_HTTP_MARKDOWN_STREAMING_OFF    0
+#define NGX_HTTP_MARKDOWN_STREAMING_AUTO   1
+#define NGX_HTTP_MARKDOWN_STREAMING_FORCE  2
+
+/*
  * Threshold off sentinel — used in merge and path selection logic.
  */
 #define NGX_HTTP_MARKDOWN_THRESHOLD_OFF     0
@@ -564,6 +577,8 @@ typedef struct {
      */
     struct {
         ngx_uint_t    engine;              /* markdown_streaming_engine off|auto|on */
+        ngx_uint_t    policy;              /* markdown_streaming off|auto|force */
+        ngx_flag_t    policy_explicit;     /* 1 if operator set markdown_streaming */
         size_t        threshold;           /* markdown_stream_threshold (default: 1m) */
         ngx_flag_t    threshold_explicit;  /* 1 if operator set markdown_stream_threshold */
         size_t        precommit_buffer;    /* markdown_stream_precommit_buffer (default: 256k) */
@@ -628,6 +643,9 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
 
     NGX_MD_MERGE_STREAM(engine, ngx_uint_t, -1,
                         NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO);
+    NGX_MD_MERGE_STREAM(policy, ngx_uint_t, -1,
+                        NGX_HTTP_MARKDOWN_STREAMING_AUTO);
+    NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0);
     NGX_MD_MERGE_STREAM(threshold, size_t, -1,
                         NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT);
     NGX_MD_MERGE_STREAM(threshold_explicit, ngx_flag_t, -1, 0);

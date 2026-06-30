@@ -453,6 +453,32 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
+     * markdown_streaming off|auto|force   (Config V2, 0.9.0)
+     *
+     * Streaming *enablement* policy.  Distinct from
+     * markdown_streaming_engine (the implementation selector).
+     *
+     *   off   - never stream
+     *   auto  - stream large responses, full-buffer small ones (default)
+     *   force - always stream (subject to runtime hard blocks)
+     *
+     * Conflict (spec 49): markdown_cache_validation full + force => error;
+     * full + auto => warning (runtime blocks streaming, falls back to
+     * full-buffer).  Enforced in merge_conf.
+     *
+     * Example:
+     *   markdown_streaming auto;
+     */
+    {
+        ngx_string("markdown_streaming"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_markdown_streaming,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
      * markdown_etag  (REMOVED in 0.9.0 - reject-only stub)
      *
      * Migrated to markdown_cache_validation off|ims_only|full.
