@@ -85,8 +85,11 @@ mod streaming;
 pub use abi::{
     ERROR_DECOMPRESSION_BUDGET_EXCEEDED, ERROR_ENCODING, ERROR_INTERNAL, ERROR_INVALID_INPUT,
     ERROR_MEMORY_LIMIT, ERROR_PARSE, ERROR_PARSE_BUDGET_EXCEEDED, ERROR_PARSE_TIMEOUT,
-    ERROR_SUCCESS, ERROR_TIMEOUT, FFIAcceptResult, FFIBaseUrlDecision, FFIBaseUrlInput,
-    FFIConditionalResult, FFIDecisionResult, FFIDecompResult, MarkdownConverterHandle,
+    ERROR_SUCCESS, ERROR_TIMEOUT, FFI_CONFIG_NOT_SET_U8, FFI_CONFIG_NOT_SET_U32,
+    FFI_CONFIG_NOT_SET_U64, FFI_PROFILE_BALANCED, FFI_PROFILE_NONE, FFI_PROFILE_STREAMING_FIRST,
+    FFI_PROFILE_STRICT_CACHE, FFIAcceptResult, FFIBaseUrlDecision, FFIBaseUrlInput,
+    FFIConditionalResult, FFIConflict, FFIConflictLevel, FFIConflictList, FFIDecisionResult,
+    FFIDecompResult, FFIEffectiveConfig, FFIExplicitConfig, FFIProfile, MarkdownConverterHandle,
     MarkdownOptions, MarkdownResult, MarkdownTrustedProxies, NEGOTIATE_REASON_CONVERT,
     NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED,
     NEGOTIATE_REASON_NO_ACCEPT, NEGOTIATE_WILDCARD_ALLOW, NEGOTIATE_WILDCARD_STRICT,
@@ -100,9 +103,9 @@ pub use abi::{
 pub use exports::{
     markdown_check_conditional, markdown_convert, markdown_converter_free, markdown_converter_new,
     markdown_decide_base_url, markdown_decomp_result_init, markdown_decompress_bounded,
-    markdown_decompress_free, markdown_make_decision, markdown_negotiate_accept,
-    markdown_result_free, markdown_trusted_proxies_free, markdown_trusted_proxies_new,
-    markdown_trusted_proxies_push,
+    markdown_decompress_free, markdown_detect_conflicts, markdown_free_conflicts,
+    markdown_make_decision, markdown_negotiate_accept, markdown_result_free,
+    markdown_trusted_proxies_free, markdown_trusted_proxies_new, markdown_trusted_proxies_push,
 };
 
 #[cfg(feature = "incremental")]

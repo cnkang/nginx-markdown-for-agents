@@ -231,12 +231,65 @@
  */
 #define STREAMING_BLOCK_REASON_NONE 255
 
+/**
+ * Sentinel value for "not set" in FFI enum fields (u8).
+ */
+#define FFI_CONFIG_NOT_SET_U8 255
+
+/**
+ * Sentinel value for "not set" in FFI u64 fields.
+ */
+#define FFI_CONFIG_NOT_SET_U64 UINT64_MAX
+
+/**
+ * Sentinel value for "not set" in FFI u32 fields.
+ */
+#define FFI_CONFIG_NOT_SET_U32 UINT32_MAX
+
+/**
+ * Profile discriminant: no profile active (use built-in defaults).
+ */
+#define FFI_PROFILE_NONE 0
+
+/**
+ * Profile discriminant: `strict_cache` (CDN/caching proxy).
+ */
+#define FFI_PROFILE_STRICT_CACHE 1
+
+/**
+ * Profile discriminant: `balanced` (recommended default).
+ */
+#define FFI_PROFILE_BALANCED 2
+
+/**
+ * Profile discriminant: `streaming_first` (AI agent workloads).
+ */
+#define FFI_PROFILE_STREAMING_FIRST 3
+
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
  * Maximum accumulated buffer size in bytes (64 MiB).
  */
 #define IncrementalConverter_MAX_BUFFER_SIZE ((64 * 1024) * 1024)
 #endif
+
+/**
+ * Severity level for a detected configuration conflict (FFI-safe).
+ *
+ * Mirrors `crate::config::conflict::ConflictLevel` with a stable `#[repr(u8)]`
+ * layout for the C side.
+ */
+enum FFIConflictLevel {
+  /**
+   * Hard error — `nginx -t` must fail.
+   */
+  Error = 0,
+  /**
+   * Advisory warning — logged but does not block startup.
+   */
+  Warning = 1,
+};
+typedef uint8_t FFIConflictLevel;
 
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
@@ -1017,6 +1070,141 @@ typedef struct FFIDecompResult {
 } FFIDecompResult;
 
 /**
+ * A single detected configuration conflict (FFI-safe).
+ *
+ * Contains the severity level and a pointer to a UTF-8 message describing
+ * the incompatibility. The message bytes are owned by the containing
+ * [`FFIConflictList`] and remain valid until `markdown_free_conflicts`
+ * is called.
+ */
+typedef struct FFIConflict {
+  /**
+   * Severity: error blocks startup, warning is advisory.
+   */
+  FFIConflictLevel level;
+  /**
+   * Pointer to UTF-8 message bytes (NOT NUL-terminated).
+   */
+  const uint8_t *message;
+  /**
+   * Length of the message in bytes.
+   */
+  uintptr_t message_len;
+} FFIConflict;
+
+/**
+ * List of detected conflicts returned from `markdown_detect_conflicts`.
+ *
+ * The caller must free this with `markdown_free_conflicts`. When `count == 0`,
+ * `conflicts` is NULL (Rule 53: empty results return NULL).
+ */
+typedef struct FFIConflictList {
+  /**
+   * Pointer to array of `FFIConflict` entries (NULL when `count == 0`).
+   */
+  struct FFIConflict *conflicts;
+  /**
+   * Number of entries in the array.
+   */
+  uintptr_t count;
+} FFIConflictList;
+
+/**
+ * Explicit user-set configuration flags for conflict detection (FFI-safe).
+ *
+ * Each field uses a sentinel value to indicate "not explicitly set":
+ * - Enum fields: `255` means not set (valid discriminants are 0..3).
+ * - Integer fields: `u64::MAX` / `u32::MAX` means not set.
+ * - Boolean fields: `255` means not set (0 = false, 1 = true).
+ *
+ * The C side populates only fields that the user explicitly configured via
+ * `markdown_*` directives; all other fields remain at their sentinel values.
+ */
+typedef struct FFIExplicitConfig {
+  /**
+   * `markdown_accept`: 0=strict, 1=wildcard, 2=force; 255=not set.
+   */
+  uint8_t accept;
+  /**
+   * `markdown_cache_validation`: 0=off, 1=ims_only, 2=full; 255=not set.
+   */
+  uint8_t cache_validation;
+  /**
+   * `markdown_streaming`: 0=off, 1=auto, 2=force; 255=not set.
+   */
+  uint8_t streaming;
+  /**
+   * `markdown_limits memory=` in bytes; `u64::MAX`=not set.
+   */
+  uint64_t limits_memory_bytes;
+  /**
+   * `markdown_limits timeout=` in milliseconds; `u64::MAX`=not set.
+   */
+  uint64_t limits_timeout_ms;
+  /**
+   * `markdown_limits streaming_buffer=` in bytes; `u64::MAX`=not set.
+   */
+  uint64_t limits_streaming_buffer_bytes;
+  /**
+   * `markdown_limits max_inflight=`; `u32::MAX`=not set.
+   */
+  uint32_t limits_max_inflight;
+  /**
+   * `markdown_error_policy`: 0=pass, 1=fail_closed; 255=not set.
+   */
+  uint8_t error_policy;
+  /**
+   * `markdown_diagnostics`: 0=off, 1=on; 255=not set.
+   */
+  uint8_t diagnostics;
+} FFIExplicitConfig;
+
+/**
+ * Effective configuration after merge (FFI-safe).
+ *
+ * All fields are concrete (no sentinels). This is the fully-resolved
+ * configuration the C side uses at runtime.
+ */
+typedef struct FFIEffectiveConfig {
+  /**
+   * Effective accept mode: 0=strict, 1=wildcard, 2=force.
+   */
+  uint8_t accept;
+  /**
+   * Effective cache_validation: 0=off, 1=ims_only, 2=full.
+   */
+  uint8_t cache_validation;
+  /**
+   * Effective streaming: 0=off, 1=auto, 2=force.
+   */
+  uint8_t streaming;
+  /**
+   * Effective memory limit in bytes.
+   */
+  uint64_t limits_memory_bytes;
+  /**
+   * Effective timeout in milliseconds.
+   */
+  uint64_t limits_timeout_ms;
+  /**
+   * Effective streaming buffer size in bytes.
+   */
+  uint64_t limits_streaming_buffer_bytes;
+  /**
+   * Effective max inflight conversions.
+   */
+  uint32_t limits_max_inflight;
+  /**
+   * Effective error policy: 0=pass, 1=fail_closed.
+   */
+  uint8_t error_policy;
+  /**
+   * Effective diagnostics: 0=off, 1=on.
+   */
+  uint8_t diagnostics;
+} FFIEffectiveConfig;
+
+/**
  * Get the string representation of a reason code by its numeric value.
  *
  * Returns a pointer to a static string and writes the length to `out_len`.
@@ -1545,6 +1733,48 @@ void markdown_decompress_free(struct FFIDecompResult *result);
  * for an `FFIDecompResult`.
  */
 void markdown_decomp_result_init(struct FFIDecompResult *result);
+
+/**
+ * Detect configuration conflicts between a profile, explicit directives, and
+ * the effective configuration.
+ *
+ * This is the primary FFI entry point for `nginx -t` validation. The C side
+ * calls this after computing the effective config via its own merge logic,
+ * passing the profile selector, the explicitly-set directive flags, and the
+ * fully-resolved effective config.
+ *
+ * Returns an [`FFIConflictList`] that the caller must free with
+ * [`markdown_free_conflicts`]. If no conflicts are detected, the returned
+ * list has `count == 0` and `conflicts == NULL` (Rule 53).
+ *
+ * On NULL input pointers or on a caught panic, returns an empty conflict list
+ * (the safe fail-open outcome: no spurious errors reported).
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `profile` is a valid `FFIProfile` discriminant (0–3)
+ * - `explicit` is NULL or points to a readable `FFIExplicitConfig`
+ * - `effective` is NULL or points to a readable `FFIEffectiveConfig`
+ */
+struct FFIConflictList markdown_detect_conflicts(uint8_t profile,
+                                                 const struct FFIExplicitConfig *explicit_,
+                                                 const struct FFIEffectiveConfig *effective);
+
+/**
+ * Free a conflict list returned by `markdown_detect_conflicts`.
+ *
+ * Releases all heap-allocated message buffers and the conflict array itself.
+ * Calling with a zeroed/empty list (`count == 0`, `conflicts == NULL`) is a
+ * safe no-op.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `list` points to a valid `FFIConflictList`
+ * previously returned by `markdown_detect_conflicts`, or is a zeroed struct.
+ * The list must not be used after this call.
+ */
+void markdown_free_conflicts(struct FFIConflictList *list);
 
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
