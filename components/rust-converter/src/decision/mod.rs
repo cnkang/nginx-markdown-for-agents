@@ -10,6 +10,7 @@
 //! the same result. No side effects, no I/O. The C caller provides
 //! context, the engine returns (decision, reason_code).
 
+pub mod eligibility;
 pub mod reason_code;
 
 /// Conversion decision result.
