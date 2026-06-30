@@ -286,4 +286,68 @@ _Static_assert(offsetof(FFIDecompResult, output_len) == 8,
 _Static_assert(offsetof(FFIDecompResult, error_category) == 16,
     "FFIDecompResult.error_category offset must be 16");
 
+/* ----------------------------------------------------------------
+ * FFIBaseUrlInput layout (96 bytes on LP64) - spec 47.
+ *   source_ip             : *const u8                     offset  0
+ *   source_ip_len         : usize                         offset  8
+ *   trusted               : *const MarkdownTrustedProxies offset 16
+ *   forwarded             : *const u8                     offset 24
+ *   forwarded_len         : usize                         offset 32
+ *   x_forwarded_proto     : *const u8                     offset 40
+ *   x_forwarded_proto_len : usize                         offset 48
+ *   x_forwarded_host      : *const u8                     offset 56
+ *   x_forwarded_host_len  : usize                         offset 64
+ *   host                  : *const u8                     offset 72
+ *   host_len              : usize                         offset 80
+ *   is_unix_socket        : u8                            offset 88
+ *   trusted_configured    : u8                            offset 89
+ *   (padding)                                             offset 90..95
+ * Total: 96 bytes, align 8
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIBaseUrlInput) == 96,
+    "FFIBaseUrlInput size must match Rust (96 bytes on 64-bit)");
+_Static_assert(offsetof(FFIBaseUrlInput, source_ip) == 0,
+    "FFIBaseUrlInput.source_ip offset must be 0");
+_Static_assert(offsetof(FFIBaseUrlInput, source_ip_len) == 8,
+    "FFIBaseUrlInput.source_ip_len offset must be 8");
+_Static_assert(offsetof(FFIBaseUrlInput, trusted) == 16,
+    "FFIBaseUrlInput.trusted offset must be 16");
+_Static_assert(offsetof(FFIBaseUrlInput, forwarded) == 24,
+    "FFIBaseUrlInput.forwarded offset must be 24");
+_Static_assert(offsetof(FFIBaseUrlInput, forwarded_len) == 32,
+    "FFIBaseUrlInput.forwarded_len offset must be 32");
+_Static_assert(offsetof(FFIBaseUrlInput, x_forwarded_proto) == 40,
+    "FFIBaseUrlInput.x_forwarded_proto offset must be 40");
+_Static_assert(offsetof(FFIBaseUrlInput, x_forwarded_proto_len) == 48,
+    "FFIBaseUrlInput.x_forwarded_proto_len offset must be 48");
+_Static_assert(offsetof(FFIBaseUrlInput, x_forwarded_host) == 56,
+    "FFIBaseUrlInput.x_forwarded_host offset must be 56");
+_Static_assert(offsetof(FFIBaseUrlInput, x_forwarded_host_len) == 64,
+    "FFIBaseUrlInput.x_forwarded_host_len offset must be 64");
+_Static_assert(offsetof(FFIBaseUrlInput, host) == 72,
+    "FFIBaseUrlInput.host offset must be 72");
+_Static_assert(offsetof(FFIBaseUrlInput, host_len) == 80,
+    "FFIBaseUrlInput.host_len offset must be 80");
+_Static_assert(offsetof(FFIBaseUrlInput, is_unix_socket) == 88,
+    "FFIBaseUrlInput.is_unix_socket offset must be 88");
+_Static_assert(offsetof(FFIBaseUrlInput, trusted_configured) == 89,
+    "FFIBaseUrlInput.trusted_configured offset must be 89");
+
+/* ----------------------------------------------------------------
+ * FFIBaseUrlDecision layout (16 bytes on LP64) - spec 47.
+ *   base_url_len : usize  offset 0
+ *   reason       : u8     offset 8
+ *   source       : u8     offset 9
+ *   (padding)            offset 10..15
+ * Total: 16 bytes, align 8
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIBaseUrlDecision) == 16,
+    "FFIBaseUrlDecision size must match Rust (16 bytes on 64-bit)");
+_Static_assert(offsetof(FFIBaseUrlDecision, base_url_len) == 0,
+    "FFIBaseUrlDecision.base_url_len offset must be 0");
+_Static_assert(offsetof(FFIBaseUrlDecision, reason) == 8,
+    "FFIBaseUrlDecision.reason offset must be 8");
+_Static_assert(offsetof(FFIBaseUrlDecision, source) == 9,
+    "FFIBaseUrlDecision.source offset must be 9");
+
 #endif /* NGX_HTTP_MARKDOWN_FFI_LAYOUT_CHECK_H */

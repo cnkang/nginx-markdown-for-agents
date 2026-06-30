@@ -663,6 +663,12 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
  * pointer lets worker startup bind the single global watcher to an
  * http, server, or location configuration after inheritance merges.
  */
+/* Forward declaration of the Rust-owned opaque trusted-proxy CIDR set
+ * (defined by cbindgen in markdown_converter.h, included after this header
+ * in the main translation unit).  A pointer to an incomplete type is all the
+ * main conf needs. */
+struct MarkdownTrustedProxies;
+
 typedef struct {
     ngx_shm_zone_t *metrics_shm_zone;  /* Shared-memory zone for cross-worker metrics */
     size_t          metrics_shm_size;  /* Configured metrics SHM size (default: 8 pages) */
@@ -671,6 +677,16 @@ typedef struct {
     /* Merged config that owns the unique dynconf path. */
     ngx_http_markdown_conf_t *dynconf_owner_conf;
     ngx_uint_t      metrics_per_path_cardinality; /* markdown_metrics_per_path_cardinality (default: 100, global) */
+    /*
+     * spec 47: http-only trusted-proxy CIDR set for forwarded-header trust.
+     * trusted_proxies is a Rust-owned opaque handle (NULL when the directive
+     * is absent or set to "off"); trusted_proxies_configured records whether
+     * the directive was present (so "off" can be distinguished from "unset"
+     * for reason-code selection).  The handle is freed by an NGINX pool
+     * cleanup handler, so it lives for the configuration cycle.
+     */
+    struct MarkdownTrustedProxies *trusted_proxies;
+    ngx_flag_t      trusted_proxies_configured;
 } ngx_http_markdown_main_conf_t;
 
 /* Return the merged config selected to own the per-worker dynconf watcher. */

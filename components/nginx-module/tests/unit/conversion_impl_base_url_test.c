@@ -6,6 +6,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <time.h>
+#include <sys/socket.h>
 
 #ifndef MARKDOWN_STREAMING_ENABLED
 #define MARKDOWN_STREAMING_ENABLED 1
@@ -85,6 +86,85 @@ struct MarkdownResult {
 };
 
 struct MarkdownConverterHandle;
+
+/*
+ * spec 47: local base-URL FFI ABI mirror + capturing stub.
+ *
+ * The C unit-test build does not link the Rust library, so the trusted-proxy
+ * decision (markdown_decide_base_url) is stubbed here.  The stub captures the
+ * marshaled FFIBaseUrlInput so tests can assert the thin wrapper marshaled
+ * every request/config field faithfully, and writes a test-controlled
+ * authority into the caller buffer.  The decision logic itself is covered by
+ * the Rust unit tests in forwarded.rs and the FFI tests in ffi/exports.rs.
+ */
+#ifndef DECIDE_BASE_URL_OK
+#define DECIDE_BASE_URL_OK 0
+#endif
+#ifndef DECIDE_BASE_URL_INVALID
+#define DECIDE_BASE_URL_INVALID 1
+#endif
+
+struct FFIBaseUrlInput {
+    const uint8_t                       *source_ip;
+    uintptr_t                            source_ip_len;
+    const struct MarkdownTrustedProxies *trusted;
+    const uint8_t                       *forwarded;
+    uintptr_t                            forwarded_len;
+    const uint8_t                       *x_forwarded_proto;
+    uintptr_t                            x_forwarded_proto_len;
+    const uint8_t                       *x_forwarded_host;
+    uintptr_t                            x_forwarded_host_len;
+    const uint8_t                       *host;
+    uintptr_t                            host_len;
+    uint8_t                              is_unix_socket;
+    uint8_t                              trusted_configured;
+};
+typedef struct FFIBaseUrlInput FFIBaseUrlInput;
+
+struct FFIBaseUrlDecision {
+    uintptr_t base_url_len;
+    uint8_t   reason;
+    uint8_t   source;
+};
+typedef struct FFIBaseUrlDecision FFIBaseUrlDecision;
+
+/* Stub control + capture state for markdown_decide_base_url. */
+static struct FFIBaseUrlInput g_captured_base_url_input;
+static ngx_uint_t             g_decide_base_url_calls;
+static const char            *g_stub_authority = "https://stub.example.com";
+static uint8_t                g_stub_decide_rc = DECIDE_BASE_URL_OK;
+static uint8_t                g_stub_decide_reason;
+static uint8_t                g_stub_decide_source;
+
+static uint8_t
+markdown_decide_base_url(const struct FFIBaseUrlInput *input,
+    uint8_t *out_buf, uintptr_t out_buf_cap,
+    struct FFIBaseUrlDecision *out) /* SONAR_NOTE: must match FFI signature */
+{
+    size_t  len;
+
+    g_decide_base_url_calls++;
+
+    if (input == NULL || out == NULL || out_buf == NULL || out_buf_cap == 0) {
+        return DECIDE_BASE_URL_INVALID;
+    }
+
+    g_captured_base_url_input = *input;
+
+    if (g_stub_decide_rc != DECIDE_BASE_URL_OK) {
+        return g_stub_decide_rc;
+    }
+
+    len = strlen(g_stub_authority);
+    if (len > out_buf_cap) {
+        return DECIDE_BASE_URL_INVALID;
+    }
+    memcpy(out_buf, g_stub_authority, len);
+    out->base_url_len = len;
+    out->reason = g_stub_decide_reason;
+    out->source = g_stub_decide_source;
+    return DECIDE_BASE_URL_OK;
+}
 
 /*
  * Test-controlled stub state.  Each global allows tests to inject
@@ -338,7 +418,9 @@ struct ngx_log_s {
 };
 
 struct ngx_connection_s {
-    ngx_log_t *log;
+    ngx_log_t       *log;
+    struct sockaddr *sockaddr;
+    ngx_str_t        addr_text;
 };
 
 struct ngx_pool_s {
@@ -381,6 +463,7 @@ struct ngx_http_request_s {
     ngx_str_t         uri;
     ngx_uint_t        buffered;
     struct ngx_http_request_s *main;
+    void             *main_conf;
     void             *loc_conf;
     void             *srv_conf;
 };
@@ -455,6 +538,10 @@ static volatile int g_metric_add_sink;
 #ifndef ngx_http_get_module_srv_conf
 #define ngx_http_get_module_srv_conf(r, module) \
     ((ngx_http_core_srv_conf_t *) ((r)->srv_conf))
+#endif
+#ifndef ngx_http_get_module_main_conf
+#define ngx_http_get_module_main_conf(r, module) \
+    ((ngx_http_markdown_main_conf_t *) ((r)->main_conf))
 #endif
 #ifndef ngx_tolower
 #define ngx_tolower(c) ((u_char) tolower((unsigned char) (c)))
@@ -917,291 +1004,219 @@ reset_stub_state(void)
     ngx_http_next_body_filter = test_next_body_filter;
 }
 
-static void
-test_forwarded_headers_priority(void)
-{
-    ngx_http_request_t r;
-    ngx_http_markdown_conf_t conf;
-    ngx_table_elt_t headers[2];
-    ngx_str_t scheme;
-    ngx_str_t host;
-    ngx_str_t base_url;
-
-    TEST_SUBSECTION("X-Forwarded headers win when trusted");
-
-    init_request(&r);
-    memset(&conf, 0, sizeof(conf));
-    conf.ops.trust_forwarded_headers = 1;
-
-    set_str(&r.schema, "http");
-    set_str(&r.headers_in.server, "origin.example.com");
-    set_str(&r.uri, "/articles/page.html");
-
-    set_str(&headers[0].key, "X-Forwarded-Proto");
-    set_str(&headers[0].value, "https");
-    headers[0].hash = 1;
-    set_str(&headers[1].key, "X-Forwarded-Host");
-    set_str(&headers[1].value, "proxy.example.com");
-    headers[1].hash = 1;
-    set_single_header_list(&r, headers, ARRAY_SIZE(headers));
-    r.loc_conf = &conf;
-
-    TEST_ASSERT(ngx_http_markdown_select_base_url_parts(&r, &scheme, &host) == NGX_OK,
-                "trusted forwarded headers should select base_url parts");
-    assert_str_eq(&scheme, "https", "forwarded proto should be selected");
-    assert_str_eq(&host, "proxy.example.com", "forwarded host should be selected");
-
-    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url) == NGX_OK,
-                "construct_base_url should succeed with forwarded headers");
-    assert_str_eq(&base_url, "https://proxy.example.com/articles/page.html",
-                  "base_url should be built from forwarded headers");
-    free(base_url.data);
-
-    TEST_PASS("Trusted forwarded-header path is correct");
-}
-
-
 /*
- * Test: X-Forwarded-* headers are ignored when trust is disabled.
- *
- * Verifies that with trust_forwarded_headers = 0, the base_url is
- * derived from the direct request schema/server even when
- * X-Forwarded-Proto and X-Forwarded-Host are present.
+ * Reset the base-URL decision stub to deterministic defaults.
  */
 static void
-test_untrusted_forwarded_headers_ignored(void)
+reset_base_url_stub(void)
 {
-    ngx_http_request_t r;
-    ngx_http_markdown_conf_t conf;
-    ngx_table_elt_t headers[2];
-    ngx_str_t scheme;
-    ngx_str_t host;
-    ngx_str_t base_url;
+    memset(&g_captured_base_url_input, 0, sizeof(g_captured_base_url_input));
+    g_decide_base_url_calls = 0;
+    g_stub_authority = "https://stub.example.com";
+    g_stub_decide_rc = DECIDE_BASE_URL_OK;
+    g_stub_decide_reason = 0;
+    g_stub_decide_source = 0;
+}
 
-    TEST_SUBSECTION("X-Forwarded headers ignored when untrusted");
+/*
+ * Test: the thin wrapper marshals every request/config field into the FFI
+ * input and appends the request URI to the FFI-produced authority.
+ *
+ * Validates spec 47 Requirement 10.4 (C is a thin wrapper that only
+ * marshals) and Requirement 4.2 (C-side responsibilities).
+ */
+static void
+test_base_url_marshals_request_fields(void)
+{
+    ngx_http_request_t            r;
+    ngx_http_markdown_conf_t      conf;
+    ngx_http_markdown_main_conf_t main_conf;
+    ngx_table_elt_t               headers[3];
+    ngx_str_t                     base_url;
+    struct MarkdownTrustedProxies *handle;
 
+    TEST_SUBSECTION("base_url thin wrapper marshals request/config fields");
+
+    reset_base_url_stub();
     init_request(&r);
     memset(&conf, 0, sizeof(conf));
-    conf.ops.trust_forwarded_headers = 0;
+    memset(&main_conf, 0, sizeof(main_conf));
 
-    set_str(&r.schema, "http");
-    set_str(&r.headers_in.server, "origin.example.com");
+    /* Non-NULL sentinel handle: the wrapper must pass it through verbatim. */
+    handle = (struct MarkdownTrustedProxies *) (uintptr_t) 0x1234;
+    main_conf.trusted_proxies = handle;
+    main_conf.trusted_proxies_configured = 1;
+
+    set_str(&r.connection->addr_text, "10.1.2.3");
     set_str(&r.uri, "/articles/page.html");
-
-    set_str(&headers[0].key, "X-Forwarded-Proto");
-    set_str(&headers[0].value, "https");
-    headers[0].hash = 1;
-    set_str(&headers[1].key, "X-Forwarded-Host");
-    set_str(&headers[1].value, "attacker.example.com");
-    headers[1].hash = 1;
-    set_single_header_list(&r, headers, ARRAY_SIZE(headers));
-    r.loc_conf = &conf;
-
-    TEST_ASSERT(ngx_http_markdown_select_base_url_parts(&r, &scheme, &host) == NGX_OK,
-                "untrusted forwarded headers should still produce base_url");
-    assert_str_eq(&scheme, "http",
-                  "scheme should come from request, not X-Forwarded-Proto");
-    assert_str_eq(&host, "origin.example.com",
-                  "host should come from request, not X-Forwarded-Host");
-
-    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url) == NGX_OK,
-                "construct_base_url should succeed ignoring forwarded headers");
-    assert_str_eq(&base_url, "http://origin.example.com/articles/page.html",
-                  "base_url should use direct request, not forwarded headers");
-    free(base_url.data);
-
-    TEST_PASS("Untrusted forwarded headers correctly ignored");
-}
-
-
-/* URI authority delimiters in a trusted forwarded host must be rejected. */
-static void
-test_forwarded_host_authority_delimiters_fall_back(void)
-{
-    static const char *invalid_hosts[] = {
-        "user@attacker.example",
-        "proxy.example#fragment",
-        "proxy.example?query"
-    };
-    ngx_http_request_t r;
-    ngx_http_markdown_conf_t conf;
-    ngx_table_elt_t headers[2];
-    ngx_str_t scheme;
-    ngx_str_t host;
-    ngx_str_t base_url;
-
-    TEST_SUBSECTION("X-Forwarded-Host authority delimiters are rejected");
-
-    for (size_t i = 0; i < ARRAY_SIZE(invalid_hosts); i++) {
-        init_request(&r);
-        memset(&conf, 0, sizeof(conf));
-        conf.ops.trust_forwarded_headers = 1;
-
-        set_str(&r.schema, "http");
-        set_str(&r.headers_in.server, "origin.example.com");
-        set_str(&r.uri, "/articles/page.html");
-
-        set_str(&headers[0].key, "X-Forwarded-Proto");
-        set_str(&headers[0].value, "https");
-        headers[0].hash = 1;
-        set_str(&headers[1].key, "X-Forwarded-Host");
-        set_str(&headers[1].value, invalid_hosts[i]);
-        headers[1].hash = 1;
-        set_single_header_list(&r, headers, ARRAY_SIZE(headers));
-        r.loc_conf = &conf;
-
-        TEST_ASSERT(ngx_http_markdown_select_base_url_parts(
-                        &r, &scheme, &host) == NGX_OK,
-                    "invalid forwarded authority should use direct fallback");
-        assert_str_eq(&scheme, "http", "fallback scheme should be direct");
-        assert_str_eq(&host, "origin.example.com",
-                      "invalid forwarded authority should not enter base_url");
-
-        TEST_ASSERT(ngx_http_markdown_construct_base_url(
-                        &r, r.pool, &base_url) == NGX_OK,
-                    "fallback base_url construction should succeed");
-        assert_str_eq(&base_url,
-                      "http://origin.example.com/articles/page.html",
-                      "base_url should retain direct request authority");
-        free(base_url.data);
-    }
-
-    TEST_PASS("Forwarded authority delimiters fall back safely");
-}
-
-
-static void
-test_direct_request_path(void)
-{
-    ngx_http_request_t r;
-    ngx_http_markdown_conf_t conf;
-    ngx_str_t scheme;
-    ngx_str_t host;
-    ngx_str_t base_url;
-
-    TEST_SUBSECTION("Direct request schema and server are used when forwarding is off");
-
-    init_request(&r);
-    memset(&conf, 0, sizeof(conf));
-
-    set_str(&r.schema, "http");
     set_str(&r.headers_in.server, "origin.example.com");
-    set_str(&r.uri, "/docs/index.html");
+
+    set_str(&headers[0].key, "Forwarded");
+    set_str(&headers[0].value, "host=fwd.example.com;proto=https");
+    headers[0].hash = 1;
+    set_str(&headers[1].key, "X-Forwarded-Proto");
+    set_str(&headers[1].value, "https");
+    headers[1].hash = 1;
+    set_str(&headers[2].key, "X-Forwarded-Host");
+    set_str(&headers[2].value, "xfwd.example.com");
+    headers[2].hash = 1;
+    set_single_header_list(&r, headers, ARRAY_SIZE(headers));
+
     r.loc_conf = &conf;
+    r.main_conf = (void *) &main_conf;
 
-    TEST_ASSERT(ngx_http_markdown_select_base_url_parts(&r, &scheme, &host) == NGX_OK,
-                "direct request path should select schema/server");
-    assert_str_eq(&scheme, "http", "request schema should be selected");
-    assert_str_eq(&host, "origin.example.com", "request server should be selected");
+    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
+                    == NGX_OK,
+                "construct_base_url should succeed via the FFI decision");
+    TEST_ASSERT(g_decide_base_url_calls == 1,
+                "wrapper should call markdown_decide_base_url exactly once");
 
-    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url) == NGX_OK,
-                "construct_base_url should succeed for direct requests");
-    assert_str_eq(&base_url, "http://origin.example.com/docs/index.html",
-                  "base_url should be built from the request");
+    /* Authority from the stub + the request URI. */
+    assert_str_eq(&base_url, "https://stub.example.com/articles/page.html",
+                  "base_url should be authority + request URI");
     free(base_url.data);
 
-    TEST_PASS("Direct-request base_url path is correct");
+    /* Marshaling assertions: every field reached the FFI input. */
+    TEST_ASSERT(g_captured_base_url_input.source_ip_len == 8
+        && memcmp(g_captured_base_url_input.source_ip, "10.1.2.3", 8) == 0,
+        "source IP must be marshaled from connection addr_text");
+    TEST_ASSERT(g_captured_base_url_input.trusted == handle,
+        "trusted-proxy handle must be passed through from main conf");
+    TEST_ASSERT(g_captured_base_url_input.trusted_configured == 1,
+        "trusted_configured must reflect main conf");
+    TEST_ASSERT(g_captured_base_url_input.is_unix_socket == 0,
+        "is_unix_socket must be 0 for a non-unix peer");
+    TEST_ASSERT(g_captured_base_url_input.forwarded_len
+            == sizeof("host=fwd.example.com;proto=https") - 1,
+        "Forwarded header must be marshaled");
+    TEST_ASSERT(g_captured_base_url_input.x_forwarded_proto_len == 5,
+        "X-Forwarded-Proto must be marshaled");
+    TEST_ASSERT(g_captured_base_url_input.x_forwarded_host_len
+            == sizeof("xfwd.example.com") - 1,
+        "X-Forwarded-Host must be marshaled");
+    TEST_ASSERT(g_captured_base_url_input.host_len
+            == sizeof("origin.example.com") - 1,
+        "Host must be marshaled from headers_in.server");
+
+    TEST_PASS("base_url wrapper marshals all request/config fields");
 }
 
+/*
+ * Test: a Unix-domain socket peer is marshaled as is_unix_socket = 1.
+ *
+ * Validates spec 47 Requirement 2.1 (Unix socket handling).
+ */
 static void
-test_server_name_fallback_path(void)
+test_base_url_unix_socket_flag(void)
 {
-    ngx_http_request_t r;
-    ngx_http_markdown_conf_t conf;
-    ngx_http_core_srv_conf_t cscf;
-    ngx_str_t scheme;
-    ngx_str_t host;
-    ngx_str_t base_url;
+    ngx_http_request_t            r;
+    ngx_http_markdown_conf_t      conf;
+    ngx_http_markdown_main_conf_t main_conf;
+    struct sockaddr               unix_sockaddr;
+    ngx_str_t                     base_url;
 
-    TEST_SUBSECTION("Server-name fallback is used when request values are empty");
+    TEST_SUBSECTION("base_url wrapper flags Unix-socket peers");
 
+    reset_base_url_stub();
     init_request(&r);
     memset(&conf, 0, sizeof(conf));
-    memset(&cscf, 0, sizeof(cscf));
+    memset(&main_conf, 0, sizeof(main_conf));
+    memset(&unix_sockaddr, 0, sizeof(unix_sockaddr));
+    unix_sockaddr.sa_family = AF_UNIX;
 
-    set_str(&r.schema, "");
-    set_str(&r.headers_in.server, "");
-    set_str(&r.uri, "/fallback/page.html");
-    set_str(&cscf.server_name, "fallback.example.org");
-
+    r.connection->sockaddr = &unix_sockaddr;
+    set_str(&r.connection->addr_text, "unix:");
+    set_str(&r.uri, "/x");
     r.loc_conf = &conf;
-    r.srv_conf = &cscf;
+    r.main_conf = (void *) &main_conf;
 
-    TEST_ASSERT(ngx_http_markdown_select_base_url_parts(&r, &scheme, &host) == NGX_OK,
-                "server_name fallback should produce base_url parts");
-    assert_str_eq(&scheme, "http", "fallback scheme should default to http");
-    assert_str_eq(&host, "fallback.example.org", "server_name should be selected");
-
-    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url) == NGX_OK,
-                "construct_base_url should succeed with server_name fallback");
-    assert_str_eq(&base_url, "http://fallback.example.org/fallback/page.html",
-                  "base_url should be built from server_name fallback");
+    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
+                    == NGX_OK,
+                "construct_base_url should succeed for a unix peer");
     free(base_url.data);
 
-    TEST_PASS("Server-name fallback path is correct");
+    TEST_ASSERT(g_captured_base_url_input.is_unix_socket == 1,
+        "AF_UNIX peer must set is_unix_socket");
+
+    /* Restore the shared connection for later tests. */
+    r.connection->sockaddr = NULL;
+
+    TEST_PASS("Unix-socket peers are flagged for the decision");
 }
 
+/*
+ * Test: when markdown_trusted_proxies is absent, trusted_configured is 0.
+ *
+ * Validates spec 47 Requirement 1.2 / reason-code selection input.
+ */
 static void
-test_host_with_comma_falls_back(void)
+test_base_url_not_configured_marshaled(void)
 {
-    ngx_http_request_t r;
-    ngx_http_markdown_conf_t conf;
-    ngx_http_core_srv_conf_t cscf;
-    ngx_str_t scheme;
-    ngx_str_t host;
+    ngx_http_request_t            r;
+    ngx_http_markdown_conf_t      conf;
+    ngx_http_markdown_main_conf_t main_conf;
+    ngx_str_t                     base_url;
 
-    TEST_SUBSECTION("Request Host containing comma falls back to server_name");
+    TEST_SUBSECTION("base_url wrapper marshals unconfigured trust state");
 
+    reset_base_url_stub();
     init_request(&r);
     memset(&conf, 0, sizeof(conf));
-    memset(&cscf, 0, sizeof(cscf));
+    memset(&main_conf, 0, sizeof(main_conf));
+    /* trusted_proxies_configured left 0; trusted_proxies left NULL. */
 
-    set_str(&r.schema, "https");
-    set_str(&r.headers_in.server, "good.example,evil.example");
-    set_str(&cscf.server_name, "fallback.example.org");
-
+    set_str(&r.connection->addr_text, "203.0.113.7");
+    set_str(&r.uri, "/p");
     r.loc_conf = &conf;
-    r.srv_conf = &cscf;
+    r.main_conf = (void *) &main_conf;
 
-    TEST_ASSERT(ngx_http_markdown_select_base_url_parts(&r, &scheme, &host) == NGX_OK,
-                "select_base_url_parts should succeed (via fallback)");
-    assert_str_eq(&scheme, "https", "scheme from request");
-    assert_str_eq(&host, "fallback.example.org",
-                  "comma-containing Host should fall back to server_name");
+    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
+                    == NGX_OK,
+                "construct_base_url should succeed when trust is unset");
+    free(base_url.data);
 
-    TEST_PASS("Comma-containing Host falls back to server_name");
+    TEST_ASSERT(g_captured_base_url_input.trusted_configured == 0,
+        "trusted_configured must be 0 when directive is absent");
+    TEST_ASSERT(g_captured_base_url_input.trusted == NULL,
+        "trusted handle must be NULL when directive is absent");
+
+    TEST_PASS("Unconfigured trust state is marshaled faithfully");
 }
 
+/*
+ * Test: an FFI decision failure propagates as NGX_ERROR without allocating.
+ */
 static void
-test_missing_base_url_inputs_fail(void)
+test_base_url_decision_failure_propagates(void)
 {
-    ngx_http_request_t r;
-    ngx_http_markdown_conf_t conf;
-    ngx_str_t scheme;
-    ngx_str_t host;
-    ngx_str_t base_url;
-    ngx_http_core_srv_conf_t cscf;
+    ngx_http_request_t            r;
+    ngx_http_markdown_conf_t      conf;
+    ngx_http_markdown_main_conf_t main_conf;
+    ngx_str_t                     base_url;
 
-    TEST_SUBSECTION("Missing scheme, server, and server_name fails cleanly");
+    TEST_SUBSECTION("base_url wrapper propagates FFI decision failure");
 
+    reset_base_url_stub();
     init_request(&r);
     memset(&conf, 0, sizeof(conf));
-    memset(&cscf, 0, sizeof(cscf));
+    memset(&main_conf, 0, sizeof(main_conf));
+    g_stub_decide_rc = DECIDE_BASE_URL_INVALID;
 
-    set_str(&r.schema, "");
-    set_str(&r.headers_in.server, "");
-    set_str(&r.uri, "/no-base-url");
-    set_str(&cscf.server_name, "");
+    set_str(&r.connection->addr_text, "10.0.0.1");
+    set_str(&r.uri, "/p");
     r.loc_conf = &conf;
-    r.srv_conf = &cscf;
+    r.main_conf = (void *) &main_conf;
 
-    TEST_ASSERT(ngx_http_markdown_select_base_url_parts(&r, &scheme, &host) == NGX_ERROR,
-                "base_url part selection should fail without scheme/host");
-    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url) == NGX_ERROR,
-                "construct_base_url should fail without any host source");
-    TEST_ASSERT(base_url.data == NULL, "failed construction should not allocate output");
+    TEST_ASSERT(ngx_http_markdown_construct_base_url(&r, r.pool, &base_url)
+                    == NGX_ERROR,
+                "construct_base_url should fail when the FFI rejects inputs");
+    TEST_ASSERT(base_url.data == NULL,
+                "failed construction should not allocate output");
 
-    TEST_PASS("Missing base_url inputs fail as expected");
+    /* Restore the stub so subsequent tests using construct_base_url pass. */
+    g_stub_decide_rc = DECIDE_BASE_URL_OK;
+
+    TEST_PASS("FFI decision failure propagates cleanly");
 }
 
 static void
@@ -1368,10 +1383,15 @@ test_prepare_conversion_options_no_base_url(void)
     r.loc_conf = &conf;
     r.srv_conf = &cscf;
 
+    /* Drive the trusted-proxy decision to fail so base_url stays unset. */
+    g_stub_decide_rc = DECIDE_BASE_URL_INVALID;
+
     TEST_ASSERT(ngx_http_markdown_prepare_conversion_options(&r, &conf, NULL, &options) == NGX_OK,
                 "prepare_conversion_options should succeed even without base_url");
     TEST_ASSERT(options.base_url == NULL, "base_url should be NULL on failure");
     TEST_ASSERT(options.base_url_len == 0, "base_url_len should be 0 on failure");
+
+    g_stub_decide_rc = DECIDE_BASE_URL_OK;
 
     TEST_PASS("prepare_conversion_options no base_url correct");
 }
@@ -1607,38 +1627,6 @@ test_shadow_compare_prepare_options_failure(void)
                 "shadow compare must not free streaming after option failure");
 
     TEST_PASS("shadow compare aborts on prepare options failure");
-}
-
-
-/*
- * Test: scheme_is_http_family validates http and https.
- */
-static void
-test_scheme_is_http_family(void)
-{
-    ngx_str_t http_scheme;
-    ngx_str_t https_scheme;
-    ngx_str_t ftp_scheme;
-    ngx_str_t empty_scheme;
-
-    TEST_SUBSECTION("scheme_is_http_family validation");
-
-    set_str(&http_scheme, "http");
-    set_str(&https_scheme, "https");
-    set_str(&ftp_scheme, "ftp");
-    empty_scheme.len = 0;
-    empty_scheme.data = NULL;
-
-    TEST_ASSERT(ngx_http_markdown_scheme_is_http_family(&http_scheme) == 1,
-                "http should be http family");
-    TEST_ASSERT(ngx_http_markdown_scheme_is_http_family(&https_scheme) == 1,
-                "https should be http family");
-    TEST_ASSERT(ngx_http_markdown_scheme_is_http_family(&ftp_scheme) == 0,
-                "ftp should not be http family");
-    TEST_ASSERT(ngx_http_markdown_scheme_is_http_family(&empty_scheme) == 0,
-                "empty should not be http family");
-
-    TEST_PASS("scheme_is_http_family validation correct");
 }
 
 
@@ -2167,13 +2155,10 @@ main(void)
     printf("conversion_impl_base_url Tests\n");
     printf("========================================\n");
 
-    test_forwarded_headers_priority();
-    test_untrusted_forwarded_headers_ignored();
-    test_forwarded_host_authority_delimiters_fall_back();
-    test_direct_request_path();
-    test_server_name_fallback_path();
-    test_host_with_comma_falls_back();
-    test_missing_base_url_inputs_fail();
+    test_base_url_marshals_request_fields();
+    test_base_url_unix_socket_flag();
+    test_base_url_not_configured_marshaled();
+    test_base_url_decision_failure_propagates();
     test_base_url_add_len_overflow_guard();
     test_prepare_conversion_options_basic();
     test_prepare_conversion_options_gfm();
@@ -2185,7 +2170,6 @@ main(void)
     test_prepare_conversion_options_prune_protection_selectors();
     test_prepare_conversion_options_schema_server_fallback();
     test_shadow_compare_prepare_options_failure();
-    test_scheme_is_http_family();
     test_find_request_header_multi_part();
     test_validate_conversion_result_paths();
     test_handle_conversion_failure_paths();

@@ -402,6 +402,98 @@ pub struct FFIEligibilityInput {
     pub body_limit: usize,
 }
 
+/// Opaque Rust-owned set of config-time-validated trusted-proxy CIDRs
+/// (spec 47).
+///
+/// The C side creates one handle per `markdown_trusted_proxies` directive via
+/// `markdown_trusted_proxies_new`, appends each CIDR with
+/// `markdown_trusted_proxies_push` (which validates at config time), and frees
+/// it with `markdown_trusted_proxies_free` (registered as an NGINX pool
+/// cleanup handler).  CIDR parsing happens once here; request-time matching is
+/// pure bitwise prefix comparison.  This type is intentionally **not**
+/// `#[repr(C)]` — cbindgen emits it as an opaque struct so the C side only
+/// ever holds a pointer and never inspects the layout.
+pub struct MarkdownTrustedProxies {
+    pub(crate) cidrs: Vec<crate::forwarded::Cidr>,
+}
+
+impl MarkdownTrustedProxies {
+    /// Create an empty trusted-proxy set.
+    pub(crate) fn new() -> Self {
+        Self { cidrs: Vec::new() }
+    }
+}
+
+impl Default for MarkdownTrustedProxies {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// `markdown_trusted_proxies_push` result: CIDR parsed and stored.
+pub const TRUSTED_PROXIES_PUSH_OK: u8 = 0;
+/// `markdown_trusted_proxies_push` result: CIDR string was invalid.
+pub const TRUSTED_PROXIES_PUSH_INVALID_CIDR: u8 = 1;
+/// `markdown_trusted_proxies_push` result: NULL handle or input.
+pub const TRUSTED_PROXIES_PUSH_NULL: u8 = 2;
+
+/// `markdown_decide_base_url` result: decision written successfully.
+pub const DECIDE_BASE_URL_OK: u8 = 0;
+/// `markdown_decide_base_url` result: NULL input/output or buffer too small.
+pub const DECIDE_BASE_URL_INVALID: u8 = 1;
+
+/// Input snapshot for `markdown_decide_base_url` (spec 47).
+///
+/// All byte fields are borrowed from the C caller for the duration of the
+/// call (NULL with length 0 means "absent").  `trusted` is a borrowed
+/// pointer to a [`MarkdownTrustedProxies`] handle (may be NULL when trust is
+/// not configured).  This struct intentionally exposes neither
+/// `ngx_http_request_t *` nor any NGINX pool.
+#[repr(C)]
+pub struct FFIBaseUrlInput {
+    /// Textual source IP (`r->connection->addr_text`), realip/PROXY resolved.
+    pub source_ip: *const u8,
+    /// Length of `source_ip`.
+    pub source_ip_len: usize,
+    /// Borrowed handle of config-time-validated trusted CIDRs (may be NULL).
+    pub trusted: *const MarkdownTrustedProxies,
+    /// `Forwarded` header value bytes (RFC 7239), NULL/0 if absent.
+    pub forwarded: *const u8,
+    /// Length of `forwarded`.
+    pub forwarded_len: usize,
+    /// `X-Forwarded-Proto` header value bytes, NULL/0 if absent.
+    pub x_forwarded_proto: *const u8,
+    /// Length of `x_forwarded_proto`.
+    pub x_forwarded_proto_len: usize,
+    /// `X-Forwarded-Host` header value bytes, NULL/0 if absent.
+    pub x_forwarded_host: *const u8,
+    /// Length of `x_forwarded_host`.
+    pub x_forwarded_host_len: usize,
+    /// `Host` header value bytes, NULL/0 if absent.
+    pub host: *const u8,
+    /// Length of `host`.
+    pub host_len: usize,
+    /// 1 if the source is a Unix-domain socket peer (forces untrusted).
+    pub is_unix_socket: u8,
+    /// 1 if `markdown_trusted_proxies` was configured (even as `off`).
+    pub trusted_configured: u8,
+}
+
+/// Result of `markdown_decide_base_url` (spec 47).
+///
+/// `base_url_len` bytes are written into the caller-provided output buffer.
+/// `reason` is a `BaseUrlReason` discriminant; `source` is a `BaseUrlSource`
+/// discriminant.
+#[repr(C)]
+pub struct FFIBaseUrlDecision {
+    /// Bytes written into the caller's output buffer.
+    pub base_url_len: usize,
+    /// `BaseUrlReason` discriminant.
+    pub reason: u8,
+    /// `BaseUrlSource` discriminant.
+    pub source: u8,
+}
+
 /// Result of a conditional request check (If-None-Match / If-Modified-Since).
 ///
 /// Returned by `markdown_check_conditional` FFI function.
@@ -630,6 +722,40 @@ mod layout_tests {
         assert_eq!(offset_of!(FFIDecompResult, output), 0);
         assert_eq!(offset_of!(FFIDecompResult, output_len), 8);
         assert_eq!(offset_of!(FFIDecompResult, error_category), 16);
+    }
+
+    #[test]
+    fn test_ffi_base_url_input_layout() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIBaseUrlInput>(), 96);
+        assert_eq!(align_of::<FFIBaseUrlInput>(), 8);
+
+        assert_eq!(offset_of!(FFIBaseUrlInput, source_ip), 0);
+        assert_eq!(offset_of!(FFIBaseUrlInput, source_ip_len), 8);
+        assert_eq!(offset_of!(FFIBaseUrlInput, trusted), 16);
+        assert_eq!(offset_of!(FFIBaseUrlInput, forwarded), 24);
+        assert_eq!(offset_of!(FFIBaseUrlInput, forwarded_len), 32);
+        assert_eq!(offset_of!(FFIBaseUrlInput, x_forwarded_proto), 40);
+        assert_eq!(offset_of!(FFIBaseUrlInput, x_forwarded_proto_len), 48);
+        assert_eq!(offset_of!(FFIBaseUrlInput, x_forwarded_host), 56);
+        assert_eq!(offset_of!(FFIBaseUrlInput, x_forwarded_host_len), 64);
+        assert_eq!(offset_of!(FFIBaseUrlInput, host), 72);
+        assert_eq!(offset_of!(FFIBaseUrlInput, host_len), 80);
+        assert_eq!(offset_of!(FFIBaseUrlInput, is_unix_socket), 88);
+        assert_eq!(offset_of!(FFIBaseUrlInput, trusted_configured), 89);
+    }
+
+    #[test]
+    fn test_ffi_base_url_decision_layout() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIBaseUrlDecision>(), 16);
+        assert_eq!(align_of::<FFIBaseUrlDecision>(), 8);
+
+        assert_eq!(offset_of!(FFIBaseUrlDecision, base_url_len), 0);
+        assert_eq!(offset_of!(FFIBaseUrlDecision, reason), 8);
+        assert_eq!(offset_of!(FFIBaseUrlDecision, source), 9);
     }
 
     #[test]

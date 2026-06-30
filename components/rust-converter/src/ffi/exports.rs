@@ -39,6 +39,11 @@ use std::ptr;
 use crate::error::ConversionError;
 
 use super::abi::{
+    DECIDE_BASE_URL_INVALID, DECIDE_BASE_URL_OK, FFIBaseUrlDecision, FFIBaseUrlInput,
+    MarkdownTrustedProxies, TRUSTED_PROXIES_PUSH_INVALID_CIDR, TRUSTED_PROXIES_PUSH_NULL,
+    TRUSTED_PROXIES_PUSH_OK,
+};
+use super::abi::{
     DECOMP_CATEGORY_INVALID_ARGS, DECOMP_CATEGORY_IO_ERROR, ERROR_INTERNAL, FFIAcceptResult,
     FFIConditionalResult, FFIDecisionResult, FFIDecompResult, FFIEligibilityInput, FFIHeaderEntry,
     FFIHeaderPlan, FFIHeaderPlanHandle, FFIStr, MarkdownConverterHandle, MarkdownOptions,
@@ -49,6 +54,7 @@ use super::convert::convert_inner;
 use super::memory::{free_buffer, reset_result, set_error_result, set_success_result};
 use super::options::{required_bytes, required_ref};
 use crate::decision::eligibility::{Eligibility, EligibilityInput, decide_eligibility};
+use crate::forwarded::{BaseUrlInput, decide_base_url, parse_cidr};
 
 #[cfg(test)]
 thread_local! {
@@ -795,6 +801,170 @@ pub unsafe extern "C" fn markdown_build_base_url(
     outcome.unwrap_or_default()
 }
 
+/// Allocate a new, empty trusted-proxy CIDR set (spec 47).
+///
+/// The handle accumulates config-time-validated CIDRs via
+/// `markdown_trusted_proxies_push` and is consumed at request time by
+/// `markdown_decide_base_url`.
+///
+/// # Safety
+///
+/// Returns a raw pointer that must eventually be freed with
+/// `markdown_trusted_proxies_free`.  Returns NULL only if allocation of the
+/// handle panics and that panic is caught.
+#[unsafe(no_mangle)]
+pub extern "C" fn markdown_trusted_proxies_new() -> *mut MarkdownTrustedProxies {
+    let result = panic::catch_unwind(|| Box::into_raw(Box::new(MarkdownTrustedProxies::new())));
+    result.unwrap_or(ptr::null_mut())
+}
+
+/// Validate a CIDR string and append it to a trusted-proxy set (config time).
+///
+/// Returns `TRUSTED_PROXIES_PUSH_OK` (0) on success,
+/// `TRUSTED_PROXIES_PUSH_INVALID_CIDR` (1) when the CIDR is malformed, or
+/// `TRUSTED_PROXIES_PUSH_NULL` (2) when `handle` or `cidr` is NULL/empty.
+///
+/// # Safety
+///
+/// The caller must ensure that `handle` points to a live set created by
+/// `markdown_trusted_proxies_new`, and that `cidr` either points to `cidr_len`
+/// readable bytes or is NULL when `cidr_len == 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_trusted_proxies_push(
+    handle: *mut MarkdownTrustedProxies,
+    cidr: *const u8,
+    cidr_len: usize,
+) -> u8 {
+    if handle.is_null() || cidr.is_null() || cidr_len == 0 {
+        return TRUSTED_PROXIES_PUSH_NULL;
+    }
+
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: caller guarantees `cidr` points to `cidr_len` readable bytes.
+        let bytes = unsafe { std::slice::from_raw_parts(cidr, cidr_len) };
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return TRUSTED_PROXIES_PUSH_INVALID_CIDR;
+        };
+        match parse_cidr(text) {
+            Ok(parsed) => {
+                // SAFETY: caller guarantees `handle` is a live set.
+                let set = unsafe { &mut *handle };
+                set.cidrs.push(parsed);
+                TRUSTED_PROXIES_PUSH_OK
+            }
+            Err(_) => TRUSTED_PROXIES_PUSH_INVALID_CIDR,
+        }
+    }));
+
+    outcome.unwrap_or(TRUSTED_PROXIES_PUSH_INVALID_CIDR)
+}
+
+/// Free a trusted-proxy set previously returned by
+/// `markdown_trusted_proxies_new`.
+///
+/// # Safety
+///
+/// `handle` must either be NULL or a pointer previously returned by
+/// `markdown_trusted_proxies_new` that has not already been freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_trusted_proxies_free(handle: *mut MarkdownTrustedProxies) {
+    if handle.is_null() {
+        return;
+    }
+    let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: `handle` was validated as non-NULL and is owned by Rust.
+        unsafe { drop(Box::from_raw(handle)) };
+    }));
+}
+
+/// Decide the trusted base URL for a request (spec 47 small API).
+///
+/// Marshals the borrowed request/config fields into the pure
+/// [`decide_base_url`] decision, writes the chosen base URL into the
+/// caller-provided `out_buf`, and fills `out` with the byte count, reason
+/// code, and source.  The decision logic (CIDR matching, forwarded-header
+/// precedence, multi-hop handling, host/proto validation, fallback) lives
+/// entirely in Rust.
+///
+/// Returns `DECIDE_BASE_URL_OK` (0) on success, or `DECIDE_BASE_URL_INVALID`
+/// (1) when `input`/`out`/`out_buf` is NULL, the output buffer is too small,
+/// or a panic is caught (fail-safe).
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `input` points to a valid `FFIBaseUrlInput`; every non-NULL byte field
+///   points to its stated length of readable bytes, and `trusted` is NULL or
+///   a live `MarkdownTrustedProxies` handle;
+/// - `out_buf` points to at least `out_buf_cap` writable bytes;
+/// - `out` points to writable storage for an `FFIBaseUrlDecision`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_decide_base_url(
+    input: *const FFIBaseUrlInput,
+    out_buf: *mut u8,
+    out_buf_cap: usize,
+    out: *mut FFIBaseUrlDecision,
+) -> u8 {
+    if input.is_null() || out.is_null() || out_buf.is_null() || out_buf_cap == 0 {
+        return DECIDE_BASE_URL_INVALID;
+    }
+
+    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        // SAFETY: caller guarantees `input` is a valid FFIBaseUrlInput.
+        let inp = unsafe { &*input };
+
+        let source_ip = unsafe { optional_str(inp.source_ip, inp.source_ip_len) }.unwrap_or("");
+        let forwarded = unsafe { optional_str(inp.forwarded, inp.forwarded_len) };
+        let x_forwarded_proto =
+            unsafe { optional_str(inp.x_forwarded_proto, inp.x_forwarded_proto_len) };
+        let x_forwarded_host =
+            unsafe { optional_str(inp.x_forwarded_host, inp.x_forwarded_host_len) };
+        let host = unsafe { optional_str(inp.host, inp.host_len) };
+
+        let cidrs: &[crate::forwarded::Cidr] = if inp.trusted.is_null() {
+            &[]
+        } else {
+            // SAFETY: caller guarantees `trusted` is a live handle when non-NULL.
+            unsafe { &(*inp.trusted).cidrs }
+        };
+
+        let decision_input = BaseUrlInput {
+            source_ip,
+            is_unix_socket: inp.is_unix_socket != 0,
+            trusted_configured: inp.trusted_configured != 0,
+            forwarded,
+            x_forwarded_proto,
+            x_forwarded_host,
+            host,
+        };
+
+        let decision = decide_base_url(&decision_input, cidrs);
+        let bytes = decision.base_url.as_bytes();
+        if bytes.len() > out_buf_cap {
+            return DECIDE_BASE_URL_INVALID;
+        }
+
+        // SAFETY: out_buf has at least out_buf_cap >= bytes.len() writable bytes.
+        unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len()) };
+
+        // SAFETY: `out` was validated as non-NULL writable storage.
+        unsafe {
+            ptr::write(
+                out,
+                FFIBaseUrlDecision {
+                    base_url_len: bytes.len(),
+                    reason: decision.reason.as_u8(),
+                    source: decision.source.as_u8(),
+                },
+            );
+        }
+
+        DECIDE_BASE_URL_OK
+    }));
+
+    outcome.unwrap_or(DECIDE_BASE_URL_INVALID)
+}
+
 /// Release a header plan previously returned by `markdown_build_header_plan`.
 ///
 /// # Safety
@@ -1325,6 +1495,170 @@ mod tests {
         assert!(len > 0);
         let url = std::str::from_utf8(&buf[..len]).unwrap();
         assert_eq!(url, "https://example.com");
+    }
+
+    /* ---- spec 47: trusted proxies + decide_base_url FFI ---- */
+
+    fn push_cidr(handle: *mut MarkdownTrustedProxies, cidr: &str) -> u8 {
+        unsafe { markdown_trusted_proxies_push(handle, cidr.as_ptr(), cidr.len()) }
+    }
+
+    fn empty_base_url_input() -> FFIBaseUrlInput {
+        FFIBaseUrlInput {
+            source_ip: ptr::null(),
+            source_ip_len: 0,
+            trusted: ptr::null(),
+            forwarded: ptr::null(),
+            forwarded_len: 0,
+            x_forwarded_proto: ptr::null(),
+            x_forwarded_proto_len: 0,
+            x_forwarded_host: ptr::null(),
+            x_forwarded_host_len: 0,
+            host: ptr::null(),
+            host_len: 0,
+            is_unix_socket: 0,
+            trusted_configured: 0,
+        }
+    }
+
+    fn empty_decision() -> FFIBaseUrlDecision {
+        FFIBaseUrlDecision {
+            base_url_len: 0,
+            reason: 0xff,
+            source: 0xff,
+        }
+    }
+
+    #[test]
+    fn trusted_proxies_push_validates_cidr() {
+        let handle = markdown_trusted_proxies_new();
+        assert!(!handle.is_null());
+        assert_eq!(push_cidr(handle, "10.0.0.0/8"), TRUSTED_PROXIES_PUSH_OK);
+        assert_eq!(push_cidr(handle, "2001:db8::/32"), TRUSTED_PROXIES_PUSH_OK);
+        assert_eq!(
+            push_cidr(handle, "not-a-cidr"),
+            TRUSTED_PROXIES_PUSH_INVALID_CIDR
+        );
+        assert_eq!(
+            push_cidr(handle, "10.0.0.0/33"),
+            TRUSTED_PROXIES_PUSH_INVALID_CIDR
+        );
+        unsafe { markdown_trusted_proxies_free(handle) };
+    }
+
+    #[test]
+    fn trusted_proxies_push_null_inputs() {
+        // NULL handle.
+        let rc =
+            unsafe { markdown_trusted_proxies_push(ptr::null_mut(), b"10.0.0.0/8".as_ptr(), 10) };
+        assert_eq!(rc, TRUSTED_PROXIES_PUSH_NULL);
+        // NULL cidr / zero len.
+        let handle = markdown_trusted_proxies_new();
+        let rc = unsafe { markdown_trusted_proxies_push(handle, ptr::null(), 0) };
+        assert_eq!(rc, TRUSTED_PROXIES_PUSH_NULL);
+        unsafe { markdown_trusted_proxies_free(handle) };
+    }
+
+    #[test]
+    fn decide_base_url_null_inputs_are_invalid() {
+        let mut buf = [0u8; 64];
+        let mut decision = empty_decision();
+        // NULL input.
+        let rc = unsafe {
+            markdown_decide_base_url(ptr::null(), buf.as_mut_ptr(), buf.len(), &mut decision)
+        };
+        assert_eq!(rc, DECIDE_BASE_URL_INVALID);
+        // NULL out.
+        let input = empty_base_url_input();
+        let rc = unsafe {
+            markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), ptr::null_mut())
+        };
+        assert_eq!(rc, DECIDE_BASE_URL_INVALID);
+        // NULL out_buf.
+        let rc = unsafe { markdown_decide_base_url(&input, ptr::null_mut(), 0, &mut decision) };
+        assert_eq!(rc, DECIDE_BASE_URL_INVALID);
+    }
+
+    #[test]
+    fn decide_base_url_trusted_uses_forwarded() {
+        let handle = markdown_trusted_proxies_new();
+        assert_eq!(push_cidr(handle, "10.0.0.0/8"), TRUSTED_PROXIES_PUSH_OK);
+
+        let src = b"10.1.2.3";
+        let xfh = b"api.example.com";
+        let xfp = b"https";
+        let host = b"origin.example.com";
+        let mut input = empty_base_url_input();
+        input.source_ip = src.as_ptr();
+        input.source_ip_len = src.len();
+        input.trusted = handle;
+        input.trusted_configured = 1;
+        input.x_forwarded_host = xfh.as_ptr();
+        input.x_forwarded_host_len = xfh.len();
+        input.x_forwarded_proto = xfp.as_ptr();
+        input.x_forwarded_proto_len = xfp.len();
+        input.host = host.as_ptr();
+        input.host_len = host.len();
+
+        let mut buf = [0u8; 128];
+        let mut decision = empty_decision();
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
+        assert_eq!(rc, DECIDE_BASE_URL_OK);
+        let url = std::str::from_utf8(&buf[..decision.base_url_len]).unwrap();
+        assert_eq!(url, "https://api.example.com");
+        // BaseUrlReason::ForwardedHeaderTrusted == 0
+        assert_eq!(decision.reason, 0);
+        // BaseUrlSource::XForwarded == 1
+        assert_eq!(decision.source, 1);
+
+        unsafe { markdown_trusted_proxies_free(handle) };
+    }
+
+    #[test]
+    fn decide_base_url_untrusted_source_ignores_forwarded() {
+        let handle = markdown_trusted_proxies_new();
+        assert_eq!(push_cidr(handle, "10.0.0.0/8"), TRUSTED_PROXIES_PUSH_OK);
+
+        let src = b"203.0.113.7";
+        let xfh = b"spoof.example.com";
+        let host = b"origin.example.com";
+        let mut input = empty_base_url_input();
+        input.source_ip = src.as_ptr();
+        input.source_ip_len = src.len();
+        input.trusted = handle;
+        input.trusted_configured = 1;
+        input.x_forwarded_host = xfh.as_ptr();
+        input.x_forwarded_host_len = xfh.len();
+        input.host = host.as_ptr();
+        input.host_len = host.len();
+
+        let mut buf = [0u8; 128];
+        let mut decision = empty_decision();
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
+        assert_eq!(rc, DECIDE_BASE_URL_OK);
+        let url = std::str::from_utf8(&buf[..decision.base_url_len]).unwrap();
+        assert_eq!(url, "http://origin.example.com");
+        // BaseUrlReason::ForwardedHeaderUntrusted == 1
+        assert_eq!(decision.reason, 1);
+        // BaseUrlSource::Host == 2
+        assert_eq!(decision.source, 2);
+
+        unsafe { markdown_trusted_proxies_free(handle) };
+    }
+
+    #[test]
+    fn decide_base_url_buffer_too_small() {
+        let mut input = empty_base_url_input();
+        let host = b"averylonghostname.example.com";
+        input.host = host.as_ptr();
+        input.host_len = host.len();
+        let mut buf = [0u8; 4];
+        let mut decision = empty_decision();
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
+        assert_eq!(rc, DECIDE_BASE_URL_INVALID);
     }
 
     #[test]
