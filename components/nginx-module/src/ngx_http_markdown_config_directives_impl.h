@@ -193,43 +193,66 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_max_size <size>
+     * markdown_limits memory=<size> timeout=<time>
+     *                 streaming_buffer=<size> max_inflight=<N>   (Config V2)
      *
-     * Maximum response size to attempt conversion (e.g., 10m, 5k).
-     * Responses larger than this will not be converted.
-     * Default: 10m (10 megabytes)
+     * Unified limits block. Consolidates the removed markdown_max_size,
+     * markdown_timeout, and markdown_streaming_budget directives. Any subset
+     * of keys may be given; unspecified keys inherit (per-key inheritance).
      * Context: http, server, location
      *
      * Example:
-     *   markdown_max_size 5m;
+     *   markdown_limits memory=8m timeout=2s streaming_buffer=256k max_inflight=64;
      */
     {
-        ngx_string("markdown_max_size"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_size_slot,
+        ngx_string("markdown_limits"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+        ngx_http_markdown_limits,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, max_size),
+        0,
         NULL
     },
 
     /*
-     * markdown_timeout <time>
+     * markdown_max_size  (REMOVED in 0.9.0 - reject-only stub)
      *
-     * Maximum time to spend on conversion (e.g., 5s, 1000ms).
-     * Conversions exceeding this timeout will be aborted.
-     * Default: 5s (5 seconds)
-     * Context: http, server, location
+     * Migrated to markdown_limits memory=<size>.
+     */
+    {
+        ngx_string("markdown_max_size"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        (void *) "use \"markdown_limits memory=<size>\" instead"
+    },
+
+    /*
+     * markdown_timeout  (REMOVED in 0.9.0 - reject-only stub)
      *
-     * Example:
-     *   markdown_timeout 3s;
+     * Migrated to markdown_limits timeout=<time>.
      */
     {
         ngx_string("markdown_timeout"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_msec_slot,
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, timeout),
-        NULL
+        0,
+        (void *) "use \"markdown_limits timeout=<time>\" instead"
+    },
+
+    /*
+     * markdown_streaming_budget  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * Migrated to markdown_limits streaming_buffer=<size>.
+     */
+    {
+        ngx_string("markdown_streaming_budget"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        (void *) "use \"markdown_limits streaming_buffer=<size>\" instead"
     },
 
     /*
@@ -556,25 +579,19 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_large_body_threshold off|<size>
+     * markdown_large_body_threshold  (REMOVED in 0.9.0 - reject-only stub)
      *
-     * Threshold for routing responses to the incremental
-     * processing path. Responses with Content-Length at or
-     * above this value use the incremental path.
-     * Default: off (all responses use full-buffer path)
-     * Context: http, server, location
-     *
-     * Example:
-     *   markdown_large_body_threshold 512k;
+     * No direct Config V2 equivalent; the incremental-path threshold knob is
+     * retired. See docs/guides/MIGRATION-0.9.md.
      */
     {
         ngx_string("markdown_large_body_threshold"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_http_markdown_large_body_threshold,
+            |NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        NULL
+        (void *) "it has been removed with no direct replacement"
     },
 
     /*
@@ -723,26 +740,6 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, stream.engine),
         &ngx_http_markdown_streaming_engine_enum
-    },
-
-    /*
-     * markdown_streaming_budget <size>
-     *
-     * Memory budget for streaming conversion (passed to Rust).
-     * Default: 2m (2 megabytes)
-     * Context: http, server, location
-     *
-     * Example:
-     *   markdown_streaming_budget 4m;
-     */
-    {
-        ngx_string("markdown_streaming_budget"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_size_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, stream.budget),
-        NULL
     },
 
     /*

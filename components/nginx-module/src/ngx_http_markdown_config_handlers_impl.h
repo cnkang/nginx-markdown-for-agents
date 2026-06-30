@@ -144,6 +144,256 @@ ngx_http_markdown_parse_size(const ngx_str_t *line)
 }
 
 /*
+ * Parse an ngx_str_t time token into milliseconds.
+ *
+ * Self-contained (libc only) so the directive parser is identical in the
+ * production module and in the standalone unit harness.  Supports the suffix
+ * families ms, s, m, h.  A bare number is interpreted as seconds (NGINX
+ * convention).  Returns the value in milliseconds, or (ngx_msec_t) NGX_ERROR
+ * on overflow or malformed input.
+ */
+static ngx_msec_t
+ngx_http_markdown_parse_time_ms(const ngx_str_t *line)
+{
+    char                 buf[64];
+    char                *endptr;
+    size_t               len;
+    size_t               suffix_len;
+    unsigned long long   raw;
+    unsigned long long   scale;
+
+    if (line == NULL || line->data == NULL || line->len == 0) {
+        return (ngx_msec_t) NGX_ERROR;
+    }
+
+    len = line->len;
+    if (len >= sizeof(buf)) {
+        return (ngx_msec_t) NGX_ERROR;
+    }
+
+    memcpy(buf, line->data, len);
+    buf[len] = '\0';
+
+    if (buf[0] == '-') {
+        return (ngx_msec_t) NGX_ERROR;
+    }
+
+    scale = 1000; /* bare number => seconds */
+    suffix_len = 0;
+
+    if (len >= 2 && buf[len - 2] == 'm' && buf[len - 1] == 's') {
+        scale = 1;
+        suffix_len = 2;
+    } else if (len >= 1) {
+        switch (buf[len - 1]) {
+        case 's': scale = 1000; suffix_len = 1; break;
+        case 'm': scale = 60ULL * 1000; suffix_len = 1; break;
+        case 'h': scale = 60ULL * 60 * 1000; suffix_len = 1; break;
+        default: break;
+        }
+    }
+
+    if (suffix_len > 0) {
+        buf[len - suffix_len] = '\0';
+    }
+
+    if (buf[0] == '\0') {
+        return (ngx_msec_t) NGX_ERROR;
+    }
+
+    errno = 0;
+    raw = strtoull(buf, &endptr, 10);
+    if (errno == ERANGE || endptr == buf || *endptr != '\0') {
+        return (ngx_msec_t) NGX_ERROR;
+    }
+
+    if (raw > (unsigned long long) NGX_MAX_SIZE_T_VALUE / scale) {
+        return (ngx_msec_t) NGX_ERROR;
+    }
+
+    return (ngx_msec_t) (raw * scale);
+}
+
+/*
+ * Parse an ngx_str_t positive-integer token.
+ *
+ * Self-contained (libc only).  Returns the parsed value, or
+ * (ngx_uint_t) NGX_ERROR on overflow or malformed input.  A leading sign or
+ * any non-digit character is rejected.
+ */
+static ngx_uint_t
+ngx_http_markdown_parse_uint(const ngx_str_t *line)
+{
+    char                 buf[32];
+    char                *endptr;
+    size_t               len;
+    unsigned long long   raw;
+
+    if (line == NULL || line->data == NULL || line->len == 0) {
+        return (ngx_uint_t) NGX_ERROR;
+    }
+
+    len = line->len;
+    if (len >= sizeof(buf)) {
+        return (ngx_uint_t) NGX_ERROR;
+    }
+
+    memcpy(buf, line->data, len);
+    buf[len] = '\0';
+
+    if (buf[0] < '0' || buf[0] > '9') {
+        return (ngx_uint_t) NGX_ERROR;
+    }
+
+    errno = 0;
+    raw = strtoull(buf, &endptr, 10);
+    if (errno == ERANGE || endptr == buf || *endptr != '\0'
+        || raw > (unsigned long long) NGX_MAX_SIZE_T_VALUE)
+    {
+        return (ngx_uint_t) NGX_ERROR;
+    }
+
+    return (ngx_uint_t) raw;
+}
+
+/*
+ * Configuration directive handler: markdown_limits (Config V2, 0.9.0).
+ *
+ * Unified limits block consolidating the removed markdown_max_size,
+ * markdown_timeout, and markdown_streaming_budget directives.  Grammar:
+ *
+ *   markdown_limits memory=<size> timeout=<time>
+ *                   streaming_buffer=<size> max_inflight=<N>;
+ *
+ * Keys are space-separated key=value tokens; any subset may be given and
+ * unspecified keys inherit via normal merge (per-key inheritance).  Each key
+ * writes its existing backing field, which stays the runtime source of truth:
+ *   memory           -> max_size
+ *   timeout          -> timeout
+ *   streaming_buffer -> stream.budget
+ *   max_inflight     -> max_inflight
+ *
+ * Validation (rejected at nginx -t):
+ *   - duplicate key within one directive
+ *   - unknown key
+ *   - zero value for any key (an invalid limit)
+ *   - malformed size/time/integer value
+ */
+static char *
+ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+    ngx_uint_t                seen_memory = 0;
+    ngx_uint_t                seen_timeout = 0;
+    ngx_uint_t                seen_streaming_buffer = 0;
+    ngx_uint_t                seen_max_inflight = 0;
+
+    value = cf->args->elts;
+
+    for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
+        u_char    *eq;
+        ngx_str_t  key;
+        ngx_str_t  val;
+        size_t     vlen;
+        size_t     sz;
+        ngx_msec_t ms;
+        ngx_uint_t n;
+
+        eq = ngx_strlchr(value[i].data, value[i].data + value[i].len, '=');
+        if (eq == NULL || eq == value[i].data
+            || (size_t) (eq - value[i].data) == value[i].len - 1)
+        {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "invalid value \"%V\" in \"%V\" directive, "
+                "each argument must be key=value "
+                "(memory|timeout|streaming_buffer|max_inflight)",
+                &value[i], &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+
+        key.data = value[i].data;
+        key.len = (size_t) (eq - value[i].data);
+        vlen = value[i].len - key.len - 1;
+        val.data = eq + 1;
+        val.len = vlen;
+
+        if (ngx_http_markdown_arg_equals(&key, (u_char *) "memory", 6)) {
+            if (seen_memory) {
+                return "has a duplicate \"memory\" key";
+            }
+            seen_memory = 1;
+            sz = ngx_http_markdown_parse_size(&val);
+            if (sz == (size_t) NGX_ERROR || sz == 0) {
+                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                    "invalid \"memory\" value \"%V\" in \"%V\"; "
+                    "must be a size greater than 0 (e.g. 8m)",
+                    &val, &cmd->name);
+                return NGX_CONF_ERROR;
+            }
+            mcf->max_size = sz;
+
+        } else if (ngx_http_markdown_arg_equals(&key,
+                       (u_char *) "timeout", 7)) {
+            if (seen_timeout) {
+                return "has a duplicate \"timeout\" key";
+            }
+            seen_timeout = 1;
+            ms = ngx_http_markdown_parse_time_ms(&val);
+            if (ms == (ngx_msec_t) NGX_ERROR || ms == 0) {
+                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                    "invalid \"timeout\" value \"%V\" in \"%V\"; "
+                    "must be a time greater than 0 (e.g. 2s, 500ms)",
+                    &val, &cmd->name);
+                return NGX_CONF_ERROR;
+            }
+            mcf->timeout = ms;
+
+        } else if (ngx_http_markdown_arg_equals(&key,
+                       (u_char *) "streaming_buffer", 16)) {
+            if (seen_streaming_buffer) {
+                return "has a duplicate \"streaming_buffer\" key";
+            }
+            seen_streaming_buffer = 1;
+            sz = ngx_http_markdown_parse_size(&val);
+            if (sz == (size_t) NGX_ERROR || sz == 0) {
+                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                    "invalid \"streaming_buffer\" value \"%V\" in \"%V\"; "
+                    "must be a size greater than 0 (e.g. 256k)",
+                    &val, &cmd->name);
+                return NGX_CONF_ERROR;
+            }
+            mcf->stream.budget = sz;
+
+        } else if (ngx_http_markdown_arg_equals(&key,
+                       (u_char *) "max_inflight", 12)) {
+            if (seen_max_inflight) {
+                return "has a duplicate \"max_inflight\" key";
+            }
+            seen_max_inflight = 1;
+            n = ngx_http_markdown_parse_uint(&val);
+            if (n == (ngx_uint_t) NGX_ERROR || n == 0) {
+                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                    "invalid \"max_inflight\" value \"%V\" in \"%V\"; "
+                    "must be a positive integer",
+                    &val, &cmd->name);
+                return NGX_CONF_ERROR;
+            }
+            mcf->max_inflight = n;
+
+        } else {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "unknown key \"%V\" in \"%V\" directive; valid keys are "
+                "memory, timeout, streaming_buffer, max_inflight",
+                &key, &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+    }
+
+    return NGX_CONF_OK;
+}
+
+/*
  * Configuration directive handler: markdown_filter
  *
  * Supported values:
@@ -659,60 +909,6 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                            type);
     }
 
-    return NGX_CONF_OK;
-}
-
-/**
- * Parse and set the markdown_large_body_threshold directive.
- *
- * Processes a single argument which must be either "off" or a byte size
- * optionally suffixed with "k" or "m". Sets the module configuration's
- * large_body_threshold to 0 for "off" (or an explicit "0"), or to the parsed
- * byte size for valid nonzero sizes.
- *
- * @param cf Configuration parsing context.
- * @param cmd Directive definition.
- * @param conf Pointer to the module location configuration (ngx_http_markdown_conf_t *).
- * @returns NGX_CONF_OK on success;
- *          NGX_CONF_ERROR if the argument is not "off" and cannot be parsed as a size (error logged);
- *          the string "is duplicate" if the directive was already set.
- */
-static char *
-ngx_http_markdown_large_body_threshold(ngx_conf_t *cf,
-    ngx_command_t *cmd,
-    void *conf)
-{
-    static u_char             off_str[] = "off";
-    ngx_http_markdown_conf_t *mcf = conf;
-    ngx_str_t                *value;
-
-    (void) cmd;
-
-    value = cf->args->elts;
-
-    if (mcf->large_body_threshold != NGX_CONF_UNSET_SIZE) {
-        return "is duplicate";
-    }
-
-    if (value[1].len == 3
-        && ngx_strcasecmp(value[1].data, off_str) == 0)
-    {
-        mcf->large_body_threshold = 0;
-        return NGX_CONF_OK;
-    }
-
-    mcf->large_body_threshold = ngx_http_markdown_parse_size(&value[1]);
-    if (mcf->large_body_threshold == (size_t) NGX_ERROR) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "invalid value \"%V\" in "
-            "\"markdown_large_body_threshold\" "
-            "directive, it must be \"off\" "
-            "or a size (e.g., 512k, 1m)",
-            &value[1]);
-        return NGX_CONF_ERROR;
-    }
-
-    /* Explicit "0" is treated as off and already normalized above. */
     return NGX_CONF_OK;
 }
 
