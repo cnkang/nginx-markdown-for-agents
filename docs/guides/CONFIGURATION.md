@@ -3,12 +3,13 @@
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Configuration Directives Reference](#configuration-directives-reference)
-3. [Configuration Examples](#configuration-examples)
-4. [Configuration Inheritance](#configuration-inheritance)
-5. [Security Best Practices](#security-best-practices)
-6. [Performance Tuning](#performance-tuning)
-7. [Configuration Templates](#configuration-templates)
+2. [Profiles](#profiles)
+3. [Configuration Directives Reference](#configuration-directives-reference)
+4. [Configuration Examples](#configuration-examples)
+5. [Configuration Inheritance](#configuration-inheritance)
+6. [Security Best Practices](#security-best-practices)
+7. [Performance Tuning](#performance-tuning)
+8. [Configuration Templates](#configuration-templates)
 
 ---
 
@@ -33,6 +34,118 @@ Directives can be used in different NGINX configuration contexts:
 - **location**: Settings for a specific URL path
 
 Configuration follows NGINX's standard inheritance model where inner scopes inherit from outer scopes and can override specific settings.
+
+---
+
+## Profiles
+
+Profiles are preset collections of Config V2 directive defaults. A single
+`markdown_profile` directive replaces many individual directive settings with a
+tested, coherent combination tuned for a specific deployment pattern.
+
+### Available Profiles
+
+| Profile | Target Scenario |
+|---------|-----------------|
+| `strict_cache` | CDN / caching proxy — full conditional request support, no streaming |
+| `balanced` | General-purpose (recommended starting point) — IMS-only caching, auto streaming |
+| `streaming_first` | AI agent workloads with large documents — aggressive streaming, no caching overhead |
+
+### Usage
+
+```nginx
+http {
+    # Recommended: balanced profile as starting point
+    markdown_profile balanced;
+
+    server {
+        listen 80;
+
+        location /docs/ {
+            markdown_filter on;
+            # Override a specific profile default
+            markdown_limits memory=16m;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+### Merge Order
+
+When a profile is active, the effective configuration is determined by
+(highest priority first):
+
+1. **Explicit directives** — values you write in `nginx.conf`.
+2. **Profile defaults** — the preset values from `markdown_profile`.
+3. **Built-in defaults** — Config V2 compile-time defaults.
+
+An explicit directive always wins over the profile default for the same field.
+
+### Profile Defaults Table
+
+| Directive | `strict_cache` | `balanced` | `streaming_first` | Built-in (no profile) |
+|-----------|:-:|:-:|:-:|:-:|
+| `markdown_accept` | strict | strict | wildcard | strict |
+| `markdown_cache_validation` | full | ims_only | off | full |
+| `markdown_streaming` | off | auto | force | auto |
+| `markdown_streaming_engine` | auto | auto | auto | auto |
+| `markdown_limits memory=` | 8m | 8m | 8m | 10m |
+| `markdown_limits timeout=` | 2s | 2s | 2s | 5s |
+| `markdown_limits streaming_buffer=` | — | 256k | 256k | 2m |
+| `markdown_limits max_inflight=` | 64 | 64 | 64 | 64 |
+| `markdown_error_policy` | pass | pass | pass | pass |
+| `markdown_auth_policy` | allow | allow | allow | allow |
+| `markdown_flavor` | commonmark | commonmark | commonmark | commonmark |
+| `markdown_diagnostics` | off | off | off | off |
+
+### Forced Fields and Conflicts
+
+Some profiles force specific field values that cannot be overridden. Setting an
+explicit directive that conflicts with a forced field causes `nginx -t` to
+fail with an error.
+
+| Profile | Forced Field | Forced Value | Conflicting Explicit Values |
+|---------|-------------|:---:|-----------|
+| `strict_cache` | `markdown_streaming` | off | `auto`, `force` → error |
+| `streaming_first` | `markdown_cache_validation` | off | `ims_only`, `full` → error |
+| `streaming_first` | `markdown_streaming` | force | `off` → error |
+
+`balanced` has no forced fields — all its defaults can be overridden.
+
+### Directive Reference
+
+#### markdown_profile
+
+**Syntax:** `markdown_profile strict_cache | balanced | streaming_first;`
+**Default:** none (Config V2 built-in defaults apply)
+**Context:** http, server, location
+
+Selects a configuration profile. Only one `markdown_profile` directive is
+allowed per context block; a duplicate in the same context causes
+`nginx -t` to fail.
+
+Inheritance follows standard NGINX rules: a `server` block inherits the
+`http`-level profile unless it declares its own; a `location` block inherits
+from `server`.
+
+**Example:**
+```nginx
+http {
+    markdown_profile balanced;
+
+    server {
+        # Inherits balanced from http
+
+        location /api/ {
+            # Override to streaming_first for this path
+            markdown_profile streaming_first;
+            markdown_filter on;
+            proxy_pass http://api_backend;
+        }
+    }
+}
+```
 
 ---
 
@@ -2920,3 +3033,4 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 | 0.8.0 | 2026-06-16 | Kang | Cross-reference audit: fixed stale `markdown_streaming_auto_threshold` reference in streaming section intro to use `markdown_stream_threshold` |
 | 0.8.0 | 2026-06-16 | Codex | Added missing directive documentation: `markdown_content_types`, `markdown_prune_noise`, `markdown_prune_selectors`, `markdown_prune_protection_selectors`, `markdown_llm_provider`, `markdown_chars_per_token`, OpenTelemetry family (`markdown_otel`, `markdown_otel_endpoint`, `markdown_otel_tracing`, `markdown_otel_metrics`, `markdown_otel_service_name`, `markdown_otel_span_buffer_size`, `markdown_otel_export_timeout`), `markdown_metrics_per_path`, `markdown_metrics_per_path_cardinality`; added deprecated directives section for `markdown_max_size` and `markdown_streaming_auto_threshold` |
 | 0.8.3 | 2026-06-26 | Kang | No configuration changes; version alignment with 0.8.3 release |
+| 0.9.0 | 2026-06-28 | Kang | Added Profiles section (`markdown_profile` directive, three profiles, merge order, forced fields, conflict rules) |

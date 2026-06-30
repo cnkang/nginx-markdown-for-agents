@@ -125,6 +125,40 @@ If something doesn't work as expected, see the [Troubleshooting](docs/guides/INS
 
 If you want a practical production-oriented configuration next, go straight to [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md).
 
+## Profiles (v0.9.0+)
+
+For production deployments, use `markdown_profile` to apply a tested set of
+defaults instead of configuring each directive individually:
+
+```nginx
+http {
+    markdown_profile balanced;
+
+    server {
+        listen 80;
+        location /docs/ {
+            markdown_filter on;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+Three profiles are available:
+
+| Profile | Use When |
+|---------|----------|
+| `balanced` | General-purpose (recommended starting point) |
+| `strict_cache` | CDN / caching proxy with full ETag support |
+| `streaming_first` | AI agent workloads with large documents |
+
+Merge order: explicit directives > profile defaults > built-in defaults. You
+can override any non-forced profile field with an explicit directive in the same
+context.
+
+For the full profile reference, defaults table, and conflict rules, see
+[docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md#profiles).
+
 ## Serve Markdown to Specific Bots
 
 Most AI crawlers do not send `Accept: text/markdown`. They use standard browser-like Accept headers. You can use NGINX's `map` directive to rewrite the Accept header for specific User-Agent strings, so matching bots receive Markdown without any changes on their side.
