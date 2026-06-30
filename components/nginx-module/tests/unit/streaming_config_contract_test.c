@@ -91,6 +91,15 @@ static char ngx_conf_error_val[] = "ERROR";
 #ifndef NGX_CONF_FLAG
 #define NGX_CONF_FLAG 0x00000200
 #endif
+#ifndef NGX_CONF_TAKE2
+#define NGX_CONF_TAKE2 0x00000004
+#endif
+#ifndef NGX_CONF_TAKE12
+#define NGX_CONF_TAKE12 (NGX_CONF_TAKE1|NGX_CONF_TAKE2)
+#endif
+#ifndef NGX_CONF_ANY
+#define NGX_CONF_ANY 0x00001000
+#endif
 #ifndef NGX_HTTP_MAIN_CONF_OFFSET
 #define NGX_HTTP_MAIN_CONF_OFFSET 0
 #endif
