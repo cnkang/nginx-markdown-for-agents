@@ -30,6 +30,7 @@ pub mod decompress;
 pub mod error;
 pub mod etag_generator;
 pub mod ffi;
+pub mod forwarded;
 pub mod header_plan;
 pub mod llm_adapter;
 pub mod metadata;

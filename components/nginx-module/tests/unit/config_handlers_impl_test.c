@@ -84,6 +84,7 @@ typedef struct {
 struct ngx_conf_s {
     ngx_pool_t  *pool;
     ngx_array_t *args;
+    ngx_uint_t   cmd_type;
 };
 
 struct ngx_command_s {
@@ -539,10 +540,83 @@ ngx_http_conf_get_module_main_conf(ngx_conf_t *cf, ngx_module_t module)
     return &g_main_conf;
 }
 
+/*
+ * spec 47: stubs for the trusted-proxy FFI used by the
+ * markdown_trusted_proxies directive handler.  The C unit-test build does not
+ * link the Rust library, so the CIDR set handle and validation are stubbed.
+ * g_trusted_push_rc lets a test force an invalid-CIDR rejection; the dummy
+ * handle is never dereferenced.
+ */
+#ifndef NGX_HTTP_MAIN_CONF
+#define NGX_HTTP_MAIN_CONF 0x02000000
+#endif
+#ifndef NGX_HTTP_SRV_CONF
+#define NGX_HTTP_SRV_CONF 0x04000000
+#endif
+#ifndef NGX_HTTP_LOC_CONF
+#define NGX_HTTP_LOC_CONF 0x08000000
+#endif
+#ifndef TRUSTED_PROXIES_PUSH_OK
+#define TRUSTED_PROXIES_PUSH_OK 0
+#endif
+#ifndef TRUSTED_PROXIES_PUSH_INVALID_CIDR
+#define TRUSTED_PROXIES_PUSH_INVALID_CIDR 1
+#endif
+#ifndef TRUSTED_PROXIES_PUSH_NULL
+#define TRUSTED_PROXIES_PUSH_NULL 2
+#endif
+
+typedef struct {
+    void  (*handler)(void *data);
+    void   *data;
+} ngx_pool_cleanup_t;
+
+static ngx_pool_cleanup_t g_trusted_cleanup;
+static uint8_t            g_trusted_push_rc = TRUSTED_PROXIES_PUSH_OK;
+static ngx_uint_t         g_trusted_new_calls;
+static ngx_uint_t         g_trusted_push_calls;
+static ngx_uint_t         g_trusted_free_calls;
+static struct MarkdownTrustedProxies *g_trusted_dummy =
+    (struct MarkdownTrustedProxies *) (uintptr_t) 0x1;
+
+static ngx_pool_cleanup_t *
+ngx_pool_cleanup_add(ngx_pool_t *p, size_t size)
+{
+    UNUSED(p);
+    UNUSED(size);
+    g_trusted_cleanup.handler = NULL;
+    g_trusted_cleanup.data = NULL;
+    return &g_trusted_cleanup;
+}
+
+struct MarkdownTrustedProxies *
+markdown_trusted_proxies_new(void) /* SONAR_NOTE: matches FFI signature */
+{
+    g_trusted_new_calls++;
+    return g_trusted_dummy;
+}
+
+uint8_t
+markdown_trusted_proxies_push(struct MarkdownTrustedProxies *handle,
+    const uint8_t *cidr, uintptr_t cidr_len) /* SONAR_NOTE: FFI signature */
+{
+    g_trusted_push_calls++;
+    if (handle == NULL || cidr == NULL || cidr_len == 0) {
+        return TRUSTED_PROXIES_PUSH_NULL;
+    }
+    return g_trusted_push_rc;
+}
+
+void
+markdown_trusted_proxies_free(struct MarkdownTrustedProxies *handle)
+{
+    UNUSED(handle);
+    g_trusted_free_calls++;
+}
+
 #include "../../src/ngx_http_markdown_config_handlers_impl.h"
 
 static ngx_pool_t g_pool;
-
 /*
  * Assign a C string literal to an ngx_str_t.  Casts through
  * uintptr_t for u_char* compatibility to avoid compiler warnings
@@ -1831,6 +1905,89 @@ test_markdown_content_types_handler(void)
 }
 
 /*
+ * spec 47: markdown_trusted_proxies directive handler.
+ *
+ * Covers the C thin-wrapper golden errors and marshaling: http-only context
+ * enforcement, "off", duplicate detection, valid CIDR push, and invalid-CIDR
+ * rejection.  The CIDR parsing itself lives in Rust (covered by Rust tests);
+ * here the FFI is stubbed so only the C wrapper behavior is exercised.
+ */
+static void
+test_trusted_proxies_handler(void)
+{
+    ngx_command_t cmd;
+    ngx_conf_t    cf;
+    ngx_array_t   args;
+    ngx_str_t     values[3];
+    char         *rc;
+
+    TEST_SUBSECTION("markdown_trusted_proxies directive handler");
+
+    set_arg(&cmd.name, "markdown_trusted_proxies");
+
+    /* http context, valid IPv4 + IPv6 CIDRs -> OK, pushes both. */
+    memset(&g_main_conf, 0, sizeof(g_main_conf));
+    g_trusted_push_rc = TRUSTED_PROXIES_PUSH_OK;
+    g_trusted_push_calls = 0;
+    set_arg(&values[0], "markdown_trusted_proxies");
+    set_arg(&values[1], "10.0.0.0/8");
+    set_arg(&values[2], "2001:db8::/32");
+    setup_cf(&cf, &args, values, 3);
+    cf.cmd_type = NGX_HTTP_MAIN_CONF;
+    rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "valid CIDRs in http context should pass");
+    TEST_ASSERT(g_main_conf.trusted_proxies_configured == 1,
+                "configured flag should be set");
+    TEST_ASSERT(g_main_conf.trusted_proxies != NULL,
+                "handle should be stored for non-off config");
+    TEST_ASSERT(g_trusted_push_calls == 2, "both CIDRs should be pushed");
+
+    /* server/location context -> golden error. */
+    memset(&g_main_conf, 0, sizeof(g_main_conf));
+    setup_cf(&cf, &args, values, 2);
+    cf.cmd_type = NGX_HTTP_SRV_CONF;
+    rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+                "server context should be rejected");
+    cf.cmd_type = NGX_HTTP_LOC_CONF;
+    rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+                "location context should be rejected");
+
+    /* "off" -> configured, no handle. */
+    memset(&g_main_conf, 0, sizeof(g_main_conf));
+    set_arg(&values[1], "off");
+    setup_cf(&cf, &args, values, 2);
+    cf.cmd_type = NGX_HTTP_MAIN_CONF;
+    rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "\"off\" should pass");
+    TEST_ASSERT(g_main_conf.trusted_proxies_configured == 1,
+                "\"off\" should set configured flag");
+    TEST_ASSERT(g_main_conf.trusted_proxies == NULL,
+                "\"off\" should not store a handle");
+
+    /* duplicate -> error. */
+    set_arg(&values[1], "10.0.0.0/8");
+    setup_cf(&cf, &args, values, 2);
+    cf.cmd_type = NGX_HTTP_MAIN_CONF;
+    rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
+    TEST_ASSERT(rc != NGX_CONF_OK, "duplicate directive should be rejected");
+
+    /* invalid CIDR -> golden error (push returns INVALID_CIDR). */
+    memset(&g_main_conf, 0, sizeof(g_main_conf));
+    g_trusted_push_rc = TRUSTED_PROXIES_PUSH_INVALID_CIDR;
+    set_arg(&values[1], "not-a-cidr");
+    setup_cf(&cf, &args, values, 2);
+    cf.cmd_type = NGX_HTTP_MAIN_CONF;
+    rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "invalid CIDR should be rejected");
+
+    g_trusted_push_rc = TRUSTED_PROXIES_PUSH_OK;
+
+    TEST_PASS("markdown_trusted_proxies handler correct");
+}
+
+/*
  * Entry point: run all config_handlers_impl unit tests.
  *
  * Return: 0 on success (all assertions pass).
@@ -1864,6 +2021,7 @@ main(void)
     test_diagnostics_handler();
     test_content_types_validation();
     test_markdown_content_types_handler();
+    test_trusted_proxies_handler();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

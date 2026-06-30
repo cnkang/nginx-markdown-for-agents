@@ -179,6 +179,8 @@ ngx_http_markdown_create_main_conf(ngx_conf_t *cf)
     conf->dynconf_first_path.len = 0;
     conf->dynconf_owner_conf = NULL;
     conf->metrics_per_path_cardinality = NGX_CONF_UNSET_UINT;
+    conf->trusted_proxies = NULL;
+    conf->trusted_proxies_configured = 0;
 
     return conf;
 }

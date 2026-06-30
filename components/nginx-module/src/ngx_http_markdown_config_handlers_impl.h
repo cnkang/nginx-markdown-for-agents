@@ -394,6 +394,108 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 /*
+ * Pool cleanup handler that frees the Rust-owned trusted-proxy CIDR set.
+ *
+ * Registered against the configuration pool so the handle lives for the
+ * configuration cycle and is released on reload/shutdown.
+ */
+static void
+ngx_http_markdown_trusted_proxies_cleanup(void *data)
+{
+    markdown_trusted_proxies_free(data);
+}
+
+/*
+ * Configuration directive handler: markdown_trusted_proxies (spec 47).
+ *
+ *   markdown_trusted_proxies <CIDR>...;
+ *   markdown_trusted_proxies off;
+ *
+ * Context: http only.  server/location context is rejected with a clear
+ * migration hint (no per-location trust to avoid local trust-bypass risk).
+ *
+ * Each CIDR is validated at config time by the Rust core
+ * (markdown_trusted_proxies_push); a malformed IPv4/IPv6 CIDR fails
+ * "nginx -t" with the offending value.  "off" disables trust entirely
+ * (configured, empty set).  CIDR parsing happens once here; request-time
+ * matching is performed in Rust.  The handle is stored on the main conf and
+ * freed by an NGINX pool cleanup handler.
+ */
+static char *
+ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf)
+{
+    static u_char                   off_str[] = "off";
+    ngx_http_markdown_main_conf_t  *mmcf = conf;
+    ngx_pool_cleanup_t             *cln;
+    struct MarkdownTrustedProxies  *set;
+    ngx_str_t                      *value;
+    uint8_t                         rc;
+
+    /*
+     * http context only.  With NGX_HTTP_MAIN_CONF_OFFSET the conf pointer is
+     * always the main conf, so detect a misplaced directive via cf->cmd_type
+     * to emit a custom golden error rather than NGINX's generic message.
+     */
+    if (!(cf->cmd_type & NGX_HTTP_MAIN_CONF)) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "\"%V\" directive is only valid in the http context, not in "
+            "server or location (see docs/guides/MIGRATION-0.9.md)",
+            &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    if (mmcf->trusted_proxies_configured) {
+        return "is duplicate";
+    }
+
+    value = cf->args->elts;
+
+    /* markdown_trusted_proxies off; -> configured, no trusted CIDRs. */
+    if (cf->args->nelts == 2
+        && ngx_http_markdown_arg_equals(&value[1], off_str,
+                                        sizeof(off_str) - 1))
+    {
+        mmcf->trusted_proxies_configured = 1;
+        mmcf->trusted_proxies = NULL;
+        return NGX_CONF_OK;
+    }
+
+    set = markdown_trusted_proxies_new();
+    if (set == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    /*
+     * Register the cleanup before pushing CIDRs so the handle is always
+     * released, including on a mid-loop validation failure.
+     */
+    cln = ngx_pool_cleanup_add(cf->pool, 0);
+    if (cln == NULL) {
+        markdown_trusted_proxies_free(set);
+        return NGX_CONF_ERROR;
+    }
+    cln->handler = ngx_http_markdown_trusted_proxies_cleanup;
+    cln->data = set;
+
+    for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
+        rc = markdown_trusted_proxies_push(set, value[i].data, value[i].len);
+        if (rc != TRUSTED_PROXIES_PUSH_OK) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "invalid CIDR \"%V\" in \"%V\" directive; expected an IPv4 "
+                "or IPv6 CIDR (e.g. 10.0.0.0/8, 2001:db8::/32) or \"off\"",
+                &value[i], &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+    }
+
+    mmcf->trusted_proxies = set;
+    mmcf->trusted_proxies_configured = 1;
+
+    return NGX_CONF_OK;
+}
+
+/*
  * Configuration directive handler: markdown_filter
  *
  * Supported values:

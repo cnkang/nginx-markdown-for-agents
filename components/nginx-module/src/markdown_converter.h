@@ -200,6 +200,31 @@
  */
 #define NEGOTIATE_WILDCARD_ALLOW 1
 
+/**
+ * `markdown_trusted_proxies_push` result: CIDR parsed and stored.
+ */
+#define TRUSTED_PROXIES_PUSH_OK 0
+
+/**
+ * `markdown_trusted_proxies_push` result: CIDR string was invalid.
+ */
+#define TRUSTED_PROXIES_PUSH_INVALID_CIDR 1
+
+/**
+ * `markdown_trusted_proxies_push` result: NULL handle or input.
+ */
+#define TRUSTED_PROXIES_PUSH_NULL 2
+
+/**
+ * `markdown_decide_base_url` result: decision written successfully.
+ */
+#define DECIDE_BASE_URL_OK 0
+
+/**
+ * `markdown_decide_base_url` result: NULL input/output or buffer too small.
+ */
+#define DECIDE_BASE_URL_INVALID 1
+
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
  * Maximum accumulated buffer size in bytes (64 MiB).
@@ -251,6 +276,21 @@ typedef struct IncrementalConverterHandle IncrementalConverterHandle;
  * when using a handle across multiple FFI calls.
  */
 typedef struct MarkdownConverterHandle MarkdownConverterHandle;
+
+/**
+ * Opaque Rust-owned set of config-time-validated trusted-proxy CIDRs
+ * (spec 47).
+ *
+ * The C side creates one handle per `markdown_trusted_proxies` directive via
+ * `markdown_trusted_proxies_new`, appends each CIDR with
+ * `markdown_trusted_proxies_push` (which validates at config time), and frees
+ * it with `markdown_trusted_proxies_free` (registered as an NGINX pool
+ * cleanup handler).  CIDR parsing happens once here; request-time matching is
+ * pure bitwise prefix comparison.  This type is intentionally **not**
+ * `#[repr(C)]` — cbindgen emits it as an opaque struct so the C side only
+ * ever holds a pointer and never inspects the layout.
+ */
+typedef struct MarkdownTrustedProxies MarkdownTrustedProxies;
 
 #if defined(MARKDOWN_STREAMING_ENABLED)
 /**
@@ -701,6 +741,92 @@ typedef struct FFIHeaderPlan {
 } FFIHeaderPlan;
 
 /**
+ * Input snapshot for `markdown_decide_base_url` (spec 47).
+ *
+ * All byte fields are borrowed from the C caller for the duration of the
+ * call (NULL with length 0 means "absent").  `trusted` is a borrowed
+ * pointer to a [`MarkdownTrustedProxies`] handle (may be NULL when trust is
+ * not configured).  This struct intentionally exposes neither
+ * `ngx_http_request_t *` nor any NGINX pool.
+ */
+typedef struct FFIBaseUrlInput {
+  /**
+   * Textual source IP (`r->connection->addr_text`), realip/PROXY resolved.
+   */
+  const uint8_t *source_ip;
+  /**
+   * Length of `source_ip`.
+   */
+  uintptr_t source_ip_len;
+  /**
+   * Borrowed handle of config-time-validated trusted CIDRs (may be NULL).
+   */
+  const struct MarkdownTrustedProxies *trusted;
+  /**
+   * `Forwarded` header value bytes (RFC 7239), NULL/0 if absent.
+   */
+  const uint8_t *forwarded;
+  /**
+   * Length of `forwarded`.
+   */
+  uintptr_t forwarded_len;
+  /**
+   * `X-Forwarded-Proto` header value bytes, NULL/0 if absent.
+   */
+  const uint8_t *x_forwarded_proto;
+  /**
+   * Length of `x_forwarded_proto`.
+   */
+  uintptr_t x_forwarded_proto_len;
+  /**
+   * `X-Forwarded-Host` header value bytes, NULL/0 if absent.
+   */
+  const uint8_t *x_forwarded_host;
+  /**
+   * Length of `x_forwarded_host`.
+   */
+  uintptr_t x_forwarded_host_len;
+  /**
+   * `Host` header value bytes, NULL/0 if absent.
+   */
+  const uint8_t *host;
+  /**
+   * Length of `host`.
+   */
+  uintptr_t host_len;
+  /**
+   * 1 if the source is a Unix-domain socket peer (forces untrusted).
+   */
+  uint8_t is_unix_socket;
+  /**
+   * 1 if `markdown_trusted_proxies` was configured (even as `off`).
+   */
+  uint8_t trusted_configured;
+} FFIBaseUrlInput;
+
+/**
+ * Result of `markdown_decide_base_url` (spec 47).
+ *
+ * `base_url_len` bytes are written into the caller-provided output buffer.
+ * `reason` is a `BaseUrlReason` discriminant; `source` is a `BaseUrlSource`
+ * discriminant.
+ */
+typedef struct FFIBaseUrlDecision {
+  /**
+   * Bytes written into the caller's output buffer.
+   */
+  uintptr_t base_url_len;
+  /**
+   * `BaseUrlReason` discriminant.
+   */
+  uint8_t reason;
+  /**
+   * `BaseUrlSource` discriminant.
+   */
+  uint8_t source;
+} FFIBaseUrlDecision;
+
+/**
  * Result of a bounded decompression operation.
  *
  * Returned by decompression FFI functions to communicate the output buffer,
@@ -987,6 +1113,77 @@ uintptr_t markdown_build_base_url(const uint8_t *x_forwarded_host,
                                   uintptr_t proto_len,
                                   uint8_t *out_buf,
                                   uintptr_t out_buf_cap);
+
+/**
+ * Allocate a new, empty trusted-proxy CIDR set (spec 47).
+ *
+ * The handle accumulates config-time-validated CIDRs via
+ * `markdown_trusted_proxies_push` and is consumed at request time by
+ * `markdown_decide_base_url`.
+ *
+ * # Safety
+ *
+ * Returns a raw pointer that must eventually be freed with
+ * `markdown_trusted_proxies_free`.  Returns NULL only if allocation of the
+ * handle panics and that panic is caught.
+ */
+struct MarkdownTrustedProxies *markdown_trusted_proxies_new(void);
+
+/**
+ * Validate a CIDR string and append it to a trusted-proxy set (config time).
+ *
+ * Returns `TRUSTED_PROXIES_PUSH_OK` (0) on success,
+ * `TRUSTED_PROXIES_PUSH_INVALID_CIDR` (1) when the CIDR is malformed, or
+ * `TRUSTED_PROXIES_PUSH_NULL` (2) when `handle` or `cidr` is NULL/empty.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `handle` points to a live set created by
+ * `markdown_trusted_proxies_new`, and that `cidr` either points to `cidr_len`
+ * readable bytes or is NULL when `cidr_len == 0`.
+ */
+uint8_t markdown_trusted_proxies_push(struct MarkdownTrustedProxies *handle,
+                                      const uint8_t *cidr,
+                                      uintptr_t cidr_len);
+
+/**
+ * Free a trusted-proxy set previously returned by
+ * `markdown_trusted_proxies_new`.
+ *
+ * # Safety
+ *
+ * `handle` must either be NULL or a pointer previously returned by
+ * `markdown_trusted_proxies_new` that has not already been freed.
+ */
+void markdown_trusted_proxies_free(struct MarkdownTrustedProxies *handle);
+
+/**
+ * Decide the trusted base URL for a request (spec 47 small API).
+ *
+ * Marshals the borrowed request/config fields into the pure
+ * [`decide_base_url`] decision, writes the chosen base URL into the
+ * caller-provided `out_buf`, and fills `out` with the byte count, reason
+ * code, and source.  The decision logic (CIDR matching, forwarded-header
+ * precedence, multi-hop handling, host/proto validation, fallback) lives
+ * entirely in Rust.
+ *
+ * Returns `DECIDE_BASE_URL_OK` (0) on success, or `DECIDE_BASE_URL_INVALID`
+ * (1) when `input`/`out`/`out_buf` is NULL, the output buffer is too small,
+ * or a panic is caught (fail-safe).
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `input` points to a valid `FFIBaseUrlInput`; every non-NULL byte field
+ *   points to its stated length of readable bytes, and `trusted` is NULL or
+ *   a live `MarkdownTrustedProxies` handle;
+ * - `out_buf` points to at least `out_buf_cap` writable bytes;
+ * - `out` points to writable storage for an `FFIBaseUrlDecision`.
+ */
+uint8_t markdown_decide_base_url(const struct FFIBaseUrlInput *input,
+                                 uint8_t *out_buf,
+                                 uintptr_t out_buf_cap,
+                                 struct FFIBaseUrlDecision *out);
 
 /**
  * Release a header plan previously returned by `markdown_build_header_plan`.

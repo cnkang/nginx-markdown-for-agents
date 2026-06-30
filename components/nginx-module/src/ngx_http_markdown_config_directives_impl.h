@@ -563,33 +563,57 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_trust_forwarded_headers on|off
+     * markdown_trusted_proxies <CIDR>... | off   (Config V2, 0.9.0, spec 47)
      *
-     * Controls whether X-Forwarded-Proto and X-Forwarded-Host headers
-     * are used for base URL construction in Markdown output.
+     * CIDR-based trusted-proxy list controlling whether forwarded headers
+     * (Forwarded / X-Forwarded-Proto / X-Forwarded-Host) are honored when
+     * deriving the base URL for relative-link resolution.  Replaces the
+     * removed boolean markdown_trust_forwarded_headers trust model.
      *
-     * Security: When off (default), only the NGINX request schema and
-     * server header are used, preventing client-supplied header injection
-     * that could poison relative URLs in the Markdown output.
-     *
-     * Enable this only when NGINX sits behind a trusted reverse proxy
-     * that sets and overwrites these headers. The proxy must strip
-     * X-Forwarded-* headers from untrusted clients.
-     *
-     * Default: off
-     * Context: http, server, location
+     * Context: http only.  server/location context is rejected with a
+     * migration hint to avoid per-location trust bypass.  CIDRs are
+     * validated at config time (IPv4 + IPv6); "off" disables trust entirely.
      *
      * Example:
-     *   # Only enable behind a trusted reverse proxy
-     *   markdown_trust_forwarded_headers on;
+     *   markdown_trusted_proxies 10.0.0.0/8 2001:db8::/32;
+     *   markdown_trusted_proxies off;
+     */
+    {
+        ngx_string("markdown_trusted_proxies"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+        ngx_http_markdown_trusted_proxies,
+        NGX_HTTP_MAIN_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
+     * markdown_trust_forwarded_headers  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * The boolean trust model is replaced by CIDR-based
+     * markdown_trusted_proxies (spec 47).  No alias, no fallback behavior.
      */
     {
         ngx_string("markdown_trust_forwarded_headers"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, ops.trust_forwarded_headers),
-        NULL
+        0,
+        (void *) "use \"markdown_trusted_proxies <CIDR>...\" instead"
+    },
+
+    /*
+     * markdown_forwarded_headers  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * Replaced by CIDR-based markdown_trusted_proxies (spec 47).
+     */
+    {
+        ngx_string("markdown_forwarded_headers"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        (void *) "use \"markdown_trusted_proxies <CIDR>...\" instead"
     },
 
     /*
