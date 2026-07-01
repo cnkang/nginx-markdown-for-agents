@@ -463,8 +463,8 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Cache-validation policy. Consolidates the removed markdown_etag and
      * markdown_conditional_requests directives.
      *   off      - no ETag, no conditional request handling
-     *   ims_only - no ETag, If-Modified-Since only
-     *   full     - transformed ETag + If-None-Match + If-Modified-Since (default)
+     *   ims_only - no ETag, If-Modified-Since only (default)
+     *   full     - transformed ETag + If-None-Match + If-Modified-Since
      * Context: http, server, location
      *
      * Example:
@@ -512,6 +512,20 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      */
     {
         ngx_string("markdown_etag"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        (void *) "use \"markdown_cache_validation off|ims_only|full\" instead"
+    },
+
+    /*
+     * markdown_etag_policy  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * Migrated to markdown_cache_validation off|ims_only|full.
+     */
+    {
+        ngx_string("markdown_etag_policy"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,

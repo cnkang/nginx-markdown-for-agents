@@ -15,7 +15,7 @@ Directives below are the **active** Config V2 directives registered in
 `ngx_http_markdown_config_directives_impl.h`. Legacy reject-only stubs
 (markdown_max_size, markdown_timeout, markdown_streaming_budget,
 markdown_on_error, markdown_streaming_on_error, markdown_etag,
-markdown_conditional_requests, markdown_on_wildcard,
+markdown_etag_policy, markdown_conditional_requests, markdown_on_wildcard,
 markdown_trust_forwarded_headers, markdown_forwarded_headers,
 markdown_large_body_threshold) are excluded — they emit
 `NGX_CONF_ERROR` with a migration hint and execute no behavior.

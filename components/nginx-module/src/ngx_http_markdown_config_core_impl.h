@@ -405,9 +405,9 @@ ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
                               NGX_HTTP_MARKDOWN_ACCEPT_STRICT);
     ngx_conf_merge_uint_value(conf->policy.auth_policy, prev->policy.auth_policy,
                               NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW);
-    ngx_conf_merge_value(conf->policy.generate_etag, prev->policy.generate_etag, 1);
+    ngx_conf_merge_value(conf->policy.generate_etag, prev->policy.generate_etag, 0);
     ngx_conf_merge_uint_value(conf->policy.conditional_requests, prev->policy.conditional_requests,
-                              NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT);
+                              NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE);
     ngx_conf_merge_uint_value(conf->policy.log_verbosity, prev->policy.log_verbosity,
                               NGX_HTTP_MARKDOWN_LOG_INFO);
     ngx_conf_merge_value(conf->buffer_chunked, prev->buffer_chunked, 1);
@@ -539,11 +539,11 @@ ngx_http_markdown_conditional_to_ffi_cache_validation(ngx_uint_t cond)
     switch (cond) {
     case NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED:
         return 0;  /* Off */
-    case NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE:
-        return 1;  /* ImsOnly */
     case NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT:
-    default:
         return 2;  /* Full */
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE:
+    default:
+        return 1;  /* ImsOnly (safe default) */
     }
 }
 
@@ -794,7 +794,7 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      *                            falls back to the full-buffer path)
      *
      * The check is gated on policy_explicit so a default configuration
-     * (which carries cache_validation=full and streaming=auto defaults)
+     * (which carries cache_validation=ims_only and streaming=auto defaults)
      * never warns; only an operator who explicitly wrote markdown_streaming
      * triggers it.  Cross-directive validation owned by spec 54 may extend
      * this; the runtime block itself is enforced in Rust decide_streaming.

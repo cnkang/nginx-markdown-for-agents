@@ -778,6 +778,8 @@ ngx_http_markdown_cache_validation(ngx_conf_t *cf, ngx_command_t *cmd, void *con
         return NGX_CONF_ERROR;
     }
 
+    mcf->profile.cache_validation_explicit = 1;
+
     return NGX_CONF_OK;
 }
 

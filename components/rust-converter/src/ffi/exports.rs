@@ -1191,7 +1191,7 @@ pub unsafe extern "C" fn markdown_options_init(result: *mut MarkdownOptions) {
     /* Set sensible non-zero defaults */
     let opts = unsafe { &mut *result };
     opts.timeout_ms = 5000;
-    opts.generate_etag = 1;
+    opts.generate_etag = 0;
 }
 
 /// Zero-initialize a MarkdownResult struct.
@@ -1807,7 +1807,7 @@ mod tests {
 
         /* Verify non-zero defaults */
         assert_eq!(opts.timeout_ms, 5000);
-        assert_eq!(opts.generate_etag, 1);
+        assert_eq!(opts.generate_etag, 0);
     }
 
     #[test]
