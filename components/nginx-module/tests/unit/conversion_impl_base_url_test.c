@@ -800,17 +800,17 @@ const ngx_str_t *
 ngx_http_markdown_error_category_string(
     ngx_http_markdown_error_category_t category)
 {
-    static u_char conversion_str_data[] = "FAIL_CONVERSION";
-    static u_char resource_str_data[] = "FAIL_RESOURCE_LIMIT";
-    static u_char system_str_data[] = "FAIL_SYSTEM";
+    static u_char conversion_str_data[] = "conversion_error";
+    static u_char resource_str_data[] = "memory_budget_exceeded";
+    static u_char system_str_data[] = "ffi_panic";
     static ngx_str_t conversion_str = {
-        sizeof("FAIL_CONVERSION") - 1, conversion_str_data
+        sizeof("conversion_error") - 1, conversion_str_data
     };
     static ngx_str_t resource_str = {
-        sizeof("FAIL_RESOURCE_LIMIT") - 1, resource_str_data
+        sizeof("memory_budget_exceeded") - 1, resource_str_data
     };
     static ngx_str_t system_str = {
-        sizeof("FAIL_SYSTEM") - 1, system_str_data
+        sizeof("ffi_panic") - 1, system_str_data
     };
     if (category == NGX_HTTP_MARKDOWN_ERROR_CONVERSION) {
         return &conversion_str;

@@ -62,29 +62,29 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         "\n",
         s->conversions_bypassed + s->results.failopen_count);
 
-    /* skips_total{reason=...} */
+    /* skips_total{reason=...} — schema v1 lowercase */
     PROM_WRITE(
         "# HELP nginx_markdown_skips_total "
         "Requests skipped by reason.\n"
         "# TYPE nginx_markdown_skips_total counter\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_METHOD\"} %lu\n"
+        "{reason=\"not_eligible\"} %lu\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_STATUS\"} %lu\n"
+        "{reason=\"not_eligible\"} %lu\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_CONTENT_TYPE\"} %lu\n"
+        "{reason=\"not_eligible\"} %lu\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_SIZE\"} %lu\n"
+        "{reason=\"not_eligible\"} %lu\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_STREAMING\"} %lu\n"
+        "{reason=\"not_eligible\"} %lu\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_AUTH\"} %lu\n"
+        "{reason=\"not_eligible\"} %lu\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_RANGE\"} %lu\n"
+        "{reason=\"not_eligible\"} %lu\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_ACCEPT\"} %lu\n"
+        "{reason=\"skipped_accept\"} %lu\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_CONFIG\"} %lu\n"
+        "{reason=\"disabled\"} %lu\n"
         "\n",
         s->skips.method,
         s->skips.status,
@@ -96,17 +96,17 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         s->skips.accept,
         s->skips.config);
 
-    /* failures_total{stage=...} */
+    /* failures_total{reason=...} — schema v1 lowercase */
     PROM_WRITE(
         "# HELP nginx_markdown_failures_total "
-        "Conversion failures by stage.\n"
+        "Conversion failures by reason.\n"
         "# TYPE nginx_markdown_failures_total counter\n"
         "nginx_markdown_failures_total"
-        "{stage=\"FAIL_CONVERSION\"} %lu\n"
+        "{reason=\"conversion_error\"} %lu\n"
         "nginx_markdown_failures_total"
-        "{stage=\"FAIL_RESOURCE_LIMIT\"} %lu\n"
+        "{reason=\"memory_budget_exceeded\"} %lu\n"
         "nginx_markdown_failures_total"
-        "{stage=\"FAIL_SYSTEM\"} %lu\n"
+        "{reason=\"ffi_panic\"} %lu\n"
         "\n",
         s->failures_conversion,
         s->failures_resource_limit,
@@ -257,15 +257,15 @@ static const char *metric_families[] = {
 /* ------------------------------------------------------------------ */
 
 static const char *reason_values[] = {
-    "SKIP_METHOD", "SKIP_STATUS", "SKIP_CONTENT_TYPE",
-    "SKIP_SIZE", "SKIP_STREAMING", "SKIP_AUTH",
-    "SKIP_RANGE", "SKIP_ACCEPT", "SKIP_CONFIG"
+    "not_eligible", "not_eligible", "not_eligible",
+    "not_eligible", "not_eligible", "not_eligible",
+    "not_eligible", "skipped_accept", "disabled"
 };
 #define NUM_REASONS 9
 
 static const char *stage_values[] = {
-    "FAIL_CONVERSION", "FAIL_RESOURCE_LIMIT",
-    "FAIL_SYSTEM"
+    "conversion_error", "memory_budget_exceeded",
+    "ffi_panic"
 };
 #define NUM_STAGES 3
 
@@ -374,12 +374,12 @@ test_known_values(void)
     TEST_ASSERT(
         contains(buf,
             "nginx_markdown_skips_total"
-            "{reason=\"SKIP_METHOD\"} 3"),
+            "{reason=\"not_eligible\"} 3"),
         "skips method should be 3");
     TEST_ASSERT(
         contains(buf,
             "nginx_markdown_failures_total"
-            "{stage=\"FAIL_CONVERSION\"} 4"),
+            "{reason=\"conversion_error\"} 4"),
         "failures conversion should be 4");
     TEST_ASSERT(
         contains(buf,
@@ -502,10 +502,10 @@ test_label_values(void)
                     "Missing reason label value");
     }
 
-    /* Check all stage labels present */
+    /* Check all stage/reason labels present (now uses reason= key) */
     for (size_t i = 0; i < NUM_STAGES; i++) {
         snprintf(label_str, sizeof(label_str),
-                 "stage=\"%s\"", stage_values[i]);
+                 "reason=\"%s\"", stage_values[i]);
         TEST_ASSERT(contains(buf, label_str),
                     "Missing stage label value");
     }

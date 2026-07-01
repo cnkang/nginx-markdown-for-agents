@@ -7,6 +7,8 @@
  * Rust-defined reason code enum.  Since unit tests do not link against
  * the Rust library, this file provides stub implementations of the
  * Rust FFI functions to verify the C wrapper logic.
+ *
+ * Updated for schema v1 (25 reason codes, lowercase snake_case).
  */
 
 #include "../include/test_common.h"
@@ -22,52 +24,66 @@
  * Stub implementations of the Rust FFI functions.
  *
  * These simulate the behavior of the real Rust functions defined in
- * components/rust-converter/src/decision/reason_code.rs.
+ * components/rust-converter/src/decision/reason_code.rs (schema v1).
  */
 
 static const char *stub_reason_strs[] = {
-    "CONVERTED",
-    "SKIPPED_ACCEPT",
-    "SKIPPED_NO_ACCEPT",
-    "SKIPPED_CONDITIONAL",
-    "FAILED_DECOMPRESSION",
-    "DECOMPRESSION_BUDGET_EXCEEDED",
-    "DECOMPRESSION_FORMAT_ERROR",
-    "DECOMPRESSION_TRUNCATED_INPUT",
-    "DECOMPRESSION_IO_ERROR",
-    "PARSE_TIMEOUT",
-    "PARSE_BUDGET_EXCEEDED",
-    "REPLAY_BUFFER_ERROR",
-    "SKIPPED_ACCEPT_REJECT",
-    "FFI_CALL_ERROR",
-    "NOT_ELIGIBLE",
-    "DISABLED",
-    "FAILED_OPEN",
-    "FAILED_CLOSED",
+    "converted",                     /* 0 */
+    "skipped_accept",                /* 1 */
+    "skipped_no_accept",             /* 2 */
+    "skipped_conditional",           /* 3 */
+    "decompression_error",           /* 4 */
+    "decompression_budget_exceeded", /* 5 */
+    "decompression_format_error",    /* 6 */
+    "decompression_truncated_input", /* 7 */
+    "decompression_io_error",        /* 8 */
+    "timeout",                       /* 9 */
+    "budget_exceeded",               /* 10 */
+    "replay_error",                  /* 11 */
+    "skipped_accept_reject",         /* 12 */
+    "ffi_panic",                     /* 13 */
+    "not_eligible",                  /* 14 */
+    "disabled",                      /* 15 */
+    "failed_open",                   /* 16 */
+    "failed_closed",                 /* 17 */
+    "conversion_error",              /* 18 */
+    "memory_budget_exceeded",        /* 19 */
+    "overload",                      /* 20 */
+    "invalid_dynconf",               /* 21 */
+    "degraded_snapshot",             /* 22 */
+    "header_plan_apply_error",       /* 23 */
+    "streaming_mid_flight_error",    /* 24 */
 };
 
 static const char *stub_metric_keys[] = {
-    "markdown_conversions_total",
-    "markdown_skipped_accept_total",
-    "markdown_skipped_no_accept_total",
-    "markdown_skipped_conditional_total",
-    "markdown_failed_decompression_total",
-    "markdown_decompression_budget_exceeded_total",
-    "markdown_decompression_format_error_total",
-    "markdown_decompression_truncated_input_total",
-    "markdown_decompression_io_error_total",
-    "markdown_parse_timeouts_total",
-    "markdown_parse_budget_exceeded_total",
-    "markdown_replay_buffer_errors_total",
-    "markdown_skipped_accept_reject_total",
-    "markdown_ffi_call_errors_total",
-    "markdown_skipped_not_eligible_total",
-    "markdown_skipped_disabled_total",
-    "markdown_failed_open_total",
-    "markdown_failed_closed_total",
+    "markdown_conversions_total",    /* 0 */
+    "markdown_skipped_total",        /* 1 */
+    "markdown_skipped_total",        /* 2 */
+    "markdown_skipped_total",        /* 3 */
+    "markdown_errors_total",         /* 4 */
+    "markdown_errors_total",         /* 5 */
+    "markdown_errors_total",         /* 6 */
+    "markdown_errors_total",         /* 7 */
+    "markdown_errors_total",         /* 8 */
+    "markdown_errors_total",         /* 9 */
+    "markdown_errors_total",         /* 10 */
+    "markdown_errors_total",         /* 11 */
+    "markdown_skipped_total",        /* 12 */
+    "markdown_errors_total",         /* 13 */
+    "markdown_skipped_total",        /* 14 */
+    "markdown_skipped_total",        /* 15 */
+    "markdown_failed_open_total",    /* 16 */
+    "markdown_failed_closed_total",  /* 17 */
+    "markdown_errors_total",         /* 18 */
+    "markdown_errors_total",         /* 19 */
+    "markdown_errors_total",         /* 20 */
+    "markdown_errors_total",         /* 21 */
+    "markdown_errors_total",         /* 22 */
+    "markdown_errors_total",         /* 23 */
+    "markdown_errors_total",         /* 24 */
 };
 
-#define STUB_REASON_CODE_COUNT 18
+#define STUB_REASON_CODE_COUNT 25
 
 const uint8_t *
 markdown_reason_code_str(uint32_t code, uintptr_t *out_len)
@@ -125,24 +141,34 @@ test_get_reason_code_str_valid(void)
 
     rc = ngx_http_markdown_get_reason_code_str(0, &str);
     TEST_ASSERT(rc == NGX_OK, "code 0 should return NGX_OK");
-    TEST_ASSERT(str.len == strlen("CONVERTED"),
-                "code 0 length should match CONVERTED");
-    TEST_ASSERT(memcmp(str.data, "CONVERTED", str.len) == 0,
-                "code 0 data should be CONVERTED");
+    TEST_ASSERT(str.len == strlen("converted"),
+                "code 0 length should match 'converted'");
+    TEST_ASSERT(memcmp(str.data, "converted", str.len) == 0,
+                "code 0 data should be 'converted'");
 
     rc = ngx_http_markdown_get_reason_code_str(9, &str);
     TEST_ASSERT(rc == NGX_OK, "code 9 should return NGX_OK");
-    TEST_ASSERT(str.len == strlen("PARSE_TIMEOUT"),
-                "code 9 length should match PARSE_TIMEOUT");
-    TEST_ASSERT(memcmp(str.data, "PARSE_TIMEOUT", str.len) == 0,
-                "code 9 data should be PARSE_TIMEOUT");
+    TEST_ASSERT(str.len == strlen("timeout"),
+                "code 9 length should match 'timeout'");
+    TEST_ASSERT(memcmp(str.data, "timeout", str.len) == 0,
+                "code 9 data should be 'timeout'");
 
     rc = ngx_http_markdown_get_reason_code_str(17, &str);
     TEST_ASSERT(rc == NGX_OK, "code 17 should return NGX_OK");
-    TEST_ASSERT(str.len == strlen("FAILED_CLOSED"),
-                "code 17 length should match FAILED_CLOSED");
-    TEST_ASSERT(memcmp(str.data, "FAILED_CLOSED", str.len) == 0,
-                "code 17 data should be FAILED_CLOSED");
+    TEST_ASSERT(str.len == strlen("failed_closed"),
+                "code 17 length should match 'failed_closed'");
+    TEST_ASSERT(memcmp(str.data, "failed_closed", str.len) == 0,
+                "code 17 data should be 'failed_closed'");
+
+    rc = ngx_http_markdown_get_reason_code_str(24, &str);
+    TEST_ASSERT(rc == NGX_OK, "code 24 should return NGX_OK");
+    TEST_ASSERT(str.len == strlen("streaming_mid_flight_error"),
+                "code 24 length should match "
+                "'streaming_mid_flight_error'");
+    TEST_ASSERT(memcmp(str.data, "streaming_mid_flight_error",
+                       str.len) == 0,
+                "code 24 data should be "
+                "'streaming_mid_flight_error'");
 
     TEST_PASS("Valid reason code strings returned correctly");
 }
@@ -166,9 +192,9 @@ test_get_reason_code_str_invalid(void)
     TEST_ASSERT(str.len == 0, "invalid code should zero len");
     TEST_ASSERT(str.data == NULL, "invalid code should NULL data");
 
-    rc = ngx_http_markdown_get_reason_code_str(18, &str);
+    rc = ngx_http_markdown_get_reason_code_str(25, &str);
     TEST_ASSERT(rc == NGX_DECLINED,
-                "code 18 (one past last) should return NGX_DECLINED");
+                "code 25 (one past last) should return NGX_DECLINED");
 
     TEST_PASS("Invalid reason codes handled correctly");
 }
@@ -207,15 +233,25 @@ test_get_reason_code_metric_key_valid(void)
     TEST_ASSERT(rc == NGX_OK, "code 0 metric key should return NGX_OK");
     TEST_ASSERT(str.len == strlen("markdown_conversions_total"),
                 "code 0 metric key length correct");
-    TEST_ASSERT(memcmp(str.data, "markdown_conversions_total", str.len) == 0,
+    TEST_ASSERT(memcmp(str.data, "markdown_conversions_total",
+                       str.len) == 0,
                 "code 0 metric key data correct");
 
     rc = ngx_http_markdown_get_reason_code_metric_key(5, &str);
     TEST_ASSERT(rc == NGX_OK, "code 5 metric key should return NGX_OK");
     TEST_ASSERT(memcmp(str.data,
-                       "markdown_decompression_budget_exceeded_total",
+                       "markdown_errors_total",
                        str.len) == 0,
                 "code 5 metric key data correct");
+
+    rc = ngx_http_markdown_get_reason_code_metric_key(16, &str);
+    TEST_ASSERT(rc == NGX_OK,
+                "code 16 metric key should return NGX_OK");
+    TEST_ASSERT(memcmp(str.data,
+                       "markdown_failed_open_total",
+                       str.len) == 0,
+                "code 16 metric key should be "
+                "markdown_failed_open_total");
 
     TEST_PASS("Valid metric keys returned correctly");
 }
@@ -243,7 +279,7 @@ test_get_reason_code_metric_key_invalid(void)
 
 
 /*
- * Test: total count accessor returns expected value
+ * Test: total count accessor returns expected value (25)
  */
 static void
 test_reason_code_total_count(void)
@@ -255,7 +291,7 @@ test_reason_code_total_count(void)
     count = ngx_http_markdown_reason_code_total_count();
     TEST_ASSERT(count == STUB_REASON_CODE_COUNT,
                 "total count should match REASON_CODE_COUNT");
-    TEST_ASSERT(count == 18, "total count should be 18");
+    TEST_ASSERT(count == 25, "total count should be 25");
 
     TEST_PASS("Total count accessor correct");
 }
@@ -278,8 +314,10 @@ test_all_codes_produce_strings(void)
 
     for (i = 0; i < count; i++) {
         rc = ngx_http_markdown_get_reason_code_str(i, &str);
-        TEST_ASSERT(rc == NGX_OK, "each valid code should return NGX_OK");
-        TEST_ASSERT(str.len > 0, "each valid code should have non-empty str");
+        TEST_ASSERT(rc == NGX_OK,
+                    "each valid code should return NGX_OK");
+        TEST_ASSERT(str.len > 0,
+                    "each valid code should have non-empty str");
         TEST_ASSERT(str.data != NULL,
                     "each valid code should have non-NULL data");
     }
@@ -294,7 +332,8 @@ test_all_codes_produce_strings(void)
                     "each valid code metric key should be non-NULL");
     }
 
-    TEST_PASS("All valid codes produce non-empty strings and metric keys");
+    TEST_PASS("All valid codes produce non-empty strings "
+              "and metric keys");
 }
 
 

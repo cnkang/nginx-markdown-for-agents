@@ -308,7 +308,7 @@ test_decision_path_struct_init(void)
     dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
     dp.conditional_result = NGX_HTTP_MARKDOWN_COND_PROCEED;
     dp.conversion_status = NGX_HTTP_MARKDOWN_CONV_SUCCESS;
-    dp.reason_code = "ELIGIBLE_CONVERTED";
+    dp.reason_code = "converted";
     dp.duration_ms = 42;
 
     TEST_ASSERT(
@@ -323,7 +323,7 @@ test_decision_path_struct_init(void)
         strcmp(dp.conversion_status,
                NGX_HTTP_MARKDOWN_CONV_SUCCESS) == 0,
         "conversion_status set correctly");
-    TEST_ASSERT(strcmp(dp.reason_code, "ELIGIBLE_CONVERTED") == 0,
+    TEST_ASSERT(strcmp(dp.reason_code, "converted") == 0,
         "reason_code set correctly");
     TEST_ASSERT(dp.duration_ms == 42,
         "duration_ms set correctly");
@@ -346,7 +346,7 @@ test_decision_path_struct_init(void)
     dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
     dp.conditional_result = NGX_HTTP_MARKDOWN_COND_NOT_MODIFIED;
     dp.conversion_status = NGX_HTTP_MARKDOWN_CONV_SKIPPED;
-    dp.reason_code = "ELIGIBLE_CONVERTED";
+    dp.reason_code = "converted";
     dp.duration_ms = 5;
 
     TEST_ASSERT(
