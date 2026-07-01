@@ -526,23 +526,22 @@ Skipping versions is not recommended.
 
 ## Installation Verification (doctor)
 
-The planned `nginx-markdown-doctor` tool (under development) will provide
-automated upgrade verification:
+The `nginx-markdown-doctor` tool provides automated installation diagnostics:
 
 ```bash
-# Planned usage (not yet available)
-nginx-markdown-doctor check --config /etc/nginx/nginx.conf
+# Human-readable output
+bash tools/doctor/nginx-markdown-doctor.sh
+
+# JSON output for scripting
+bash tools/doctor/nginx-markdown-doctor.sh --json
 ```
 
-Expected capabilities:
-- Detect deprecated/removed directives and suggest replacements
-- Validate CIDR syntax in `markdown_trusted_proxies`
-- Check profile + explicit directive interactions
-- Verify metrics endpoint accessibility
-- Confirm module version matches configuration expectations
+The tool checks:
+- NGINX version detection
+- Module `.so` file existence at expected paths
+- Basic configuration syntax validation
 
-Until `nginx-markdown-doctor` is available, use the manual verification steps
-in this guide and `nginx -t` as your primary validator.
+See [docs/guides/doctor.md](doctor.md) for full usage documentation.
 
 ---
 

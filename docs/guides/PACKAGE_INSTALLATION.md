@@ -151,3 +151,13 @@ install it locally.
 | `cannot open shared object file` | `load_module` path does not match package family | Use `/usr/lib/nginx/modules/...` for DEB and `/usr/lib64/nginx/modules/...` for RPM |
 | Checksum verification fails | Package and `SHA256SUMS` came from different releases or the download is corrupt | Re-download both files from the same GitHub Release |
 | Bare APT/YUM install fails | Public package repositories are not published yet | Use the GitHub Release artifact workflow above |
+
+
+## Automated Diagnostics
+
+Use [`nginx-markdown-doctor`](./doctor.md) for automated installation
+verification after installing a package:
+
+```bash
+bash tools/doctor/nginx-markdown-doctor.sh
+```
