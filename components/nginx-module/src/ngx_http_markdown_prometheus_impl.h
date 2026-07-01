@@ -627,6 +627,36 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->per_path.overflow_count);
 
+    /* inflight_current (gauge, per-worker) */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_inflight_current "
+        "Number of markdown conversions currently in-flight "
+        "in this worker.\n"
+        "# TYPE nginx_markdown_inflight_current gauge\n"
+        "nginx_markdown_inflight_current %uA\n"
+        "\n",
+        snapshot->inflight.current);
+
+    /* inflight_high_watermark (gauge, per-worker) */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_inflight_high_watermark "
+        "Peak number of concurrent in-flight conversions "
+        "observed in this worker.\n"
+        "# TYPE nginx_markdown_inflight_high_watermark gauge\n"
+        "nginx_markdown_inflight_high_watermark %uA\n"
+        "\n",
+        snapshot->inflight.high_watermark);
+
+    /* overload_total (counter, per-worker) */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_overload_total "
+        "Total requests rejected because the per-worker "
+        "inflight limit was reached.\n"
+        "# TYPE nginx_markdown_overload_total counter\n"
+        "nginx_markdown_overload_total %uA\n"
+        "\n",
+        snapshot->inflight.overload_total);
+
     /*
      * Per-path individual entries: walk the SHM RB-tree to emit
      * series with a "path" label for each tracked URI.

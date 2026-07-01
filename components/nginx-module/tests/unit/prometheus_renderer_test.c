@@ -132,6 +132,11 @@ typedef struct { /* SONAR_NOTE */
         ngx_atomic_t  path_conversion_time_sum_ms;
         ngx_atomic_t  overflow_count;
     } per_path;
+    struct {
+        ngx_atomic_t  current;
+        ngx_atomic_t  high_watermark;
+        ngx_atomic_t  overload_total;
+    } inflight;
 } ngx_http_markdown_metrics_snapshot_t;
 
 /* ── ngx_slprintf stub ────────────────────────────────────────────── */

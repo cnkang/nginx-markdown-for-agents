@@ -868,6 +868,76 @@ path_selected:
     }
 
     /*
+     * Per-worker inflight guard (spec 52).
+     *
+     * After eligibility passes and before Rust conversion begins,
+     * try to increment the inflight counter.  If the worker is at
+     * capacity (current >= max_inflight), apply the configured
+     * error policy (pass/status/fail_closed from spec 51).
+     *
+     * The cleanup handler registered by try_increment guarantees
+     * decrement on every exit path (normal, abort, timeout, error)
+     * via r->pool destruction.
+     */
+    {
+        ngx_int_t  inflight_rc;
+
+        inflight_rc = ngx_http_markdown_inflight_try_increment(
+            r, conf);
+
+        if (inflight_rc == NGX_DECLINED) {
+            /* Overloaded — apply error policy */
+            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
+
+            if (conf->on_error
+                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+            {
+                ngx_log_error(NGX_LOG_WARN,
+                    r->connection->log, 0,
+                    "markdown: inflight overload, "
+                    "rejecting (fail-closed)");
+                ngx_http_markdown_log_decision(
+                    r, conf, ctx->effective_conf,
+                    ngx_http_markdown_reason_failed_closed());
+                return NGX_HTTP_SERVICE_UNAVAILABLE;
+            }
+
+            /* fail-open: pass through original response */
+            ngx_http_markdown_metric_inc_failopen(conf);
+            ctx->eligible = 0;
+            ctx->headers_forwarded = 1;
+
+            ngx_log_error(NGX_LOG_WARN,
+                r->connection->log, 0,
+                "markdown: inflight overload, "
+                "returning original content "
+                "(fail-open)");
+            ngx_http_markdown_log_decision(
+                r, conf, ctx->effective_conf,
+                ngx_http_markdown_reason_failed_open());
+            return ngx_http_next_header_filter(r);
+
+        } else if (inflight_rc == NGX_ERROR) {
+            /* Cleanup alloc failed — treat as system error */
+            NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+
+            if (conf->on_error
+                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+            {
+                return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            }
+
+            ngx_http_markdown_metric_inc_failopen(conf);
+            ctx->eligible = 0;
+            ctx->headers_forwarded = 1;
+            return ngx_http_next_header_filter(r);
+        }
+
+        /* NGX_OK: inflight incremented, cleanup registered */
+    }
+
+    /*
      * Request in-memory buffers from upstream filters/modules.
      *
      * Static file responses may otherwise arrive as file-backed buffers
