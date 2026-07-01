@@ -39,6 +39,7 @@ use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 use crate::converter::ConversionContext;
 use crate::error::ConversionError;
+use crate::security::SecurityValidator;
 
 use super::{MetadataExtractor, PageMetadata};
 
@@ -81,9 +82,12 @@ impl MetadataExtractor {
         let canonical = self.extract_meta_tags_and_canonical(dom, &mut metadata, ctx)?;
 
         if let Some(canonical) = canonical {
-            metadata.url = Some(self.resolve_url(&canonical));
+            metadata.url = self.resolve_and_sanitize_url(&canonical);
         } else {
-            metadata.url = self.base_url.clone();
+            metadata.url = self
+                .base_url
+                .as_deref()
+                .and_then(Self::sanitize_metadata_url);
         }
 
         ctx.check_timeout()?;
@@ -180,10 +184,10 @@ impl MetadataExtractor {
                 metadata.description = Some(content);
             }
             Some("og:image") | Some("twitter:image") if metadata.image.is_none() => {
-                metadata.image = Some(self.resolve_url(&content));
+                metadata.image = self.resolve_and_sanitize_url(&content);
             }
             Some("og:url") if metadata.url.is_none() => {
-                metadata.url = Some(content);
+                metadata.url = Self::sanitize_metadata_url(&content);
             }
             Some("author") if metadata.author.is_none() => {
                 metadata.author = Some(content);
@@ -195,6 +199,20 @@ impl MetadataExtractor {
         }
 
         Ok(())
+    }
+
+    /// Apply the same dangerous URL filtering used by emitted body links.
+    fn sanitize_metadata_url(url: &str) -> Option<String> {
+        SecurityValidator::new()
+            .sanitize_url(url)
+            .map(ToOwned::to_owned)
+    }
+
+    /// Resolve a metadata URL when configured, then filter dangerous schemes.
+    fn resolve_and_sanitize_url(&self, url: &str) -> Option<String> {
+        Self::sanitize_metadata_url(url)?;
+        let resolved = self.resolve_url(url);
+        Self::sanitize_metadata_url(&resolved)
     }
 
     /// Return a tag attribute value by name when present.
