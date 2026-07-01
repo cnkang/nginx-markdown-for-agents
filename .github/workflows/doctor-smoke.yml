@@ -1,0 +1,55 @@
+name: Doctor Smoke
+
+on:
+  pull_request:
+    paths:
+      - 'tools/doctor/**'
+      - '.github/workflows/doctor-smoke.yml'
+  push:
+    branches: [main, 'dev/*']
+    paths:
+      - 'tools/doctor/**'
+      - '.github/workflows/doctor-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4.2.2
+
+      - name: Run doctor (human output)
+        run: bash tools/doctor/nginx-markdown-doctor.sh --nginx-bin "" || true
+
+      - name: Run doctor (JSON output)
+        run: bash tools/doctor/nginx-markdown-doctor.sh --json --nginx-bin "" 2>/dev/null | python3 -m json.tool
+
+      - name: Verify at least 3 checks
+        run: |
+          count=$(bash tools/doctor/nginx-markdown-doctor.sh --json --nginx-bin "" 2>/dev/null \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['summary']['total'])")
+          [[ "$count" -ge 3 ]] || { echo "FAIL: expected >= 3 checks, got $count"; exit 1; }
+
+      - name: Verify JSON schema structure
+        run: |
+          bash tools/doctor/nginx-markdown-doctor.sh --json --nginx-bin "" 2>/dev/null | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          assert 'schema_version' in data, 'missing schema_version'
+          assert 'tool_version' in data, 'missing tool_version'
+          assert 'timestamp' in data, 'missing timestamp'
+          assert 'checks' in data, 'missing checks'
+          assert 'summary' in data, 'missing summary'
+          assert isinstance(data['checks'], list), 'checks is not a list'
+          for check in data['checks']:
+              assert 'name' in check, 'check missing name'
+              assert 'status' in check, 'check missing status'
+              assert check['status'] in ('pass','fail','warn','skip'), f\"invalid status: {check['status']}\"
+              assert 'message' in check, 'check missing message'
+          s = data['summary']
+          assert s['total'] == s['passed'] + s['failed'] + s['warnings'] + s['skipped'], 'summary counts mismatch'
+          print('JSON schema validation passed')
+          "
