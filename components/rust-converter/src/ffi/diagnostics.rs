@@ -49,12 +49,13 @@ pub unsafe extern "C" fn markdown_get_diagnostics_schema(out_len: *mut usize) ->
             let bytes = json_string.into_bytes();
             let len = bytes.len();
 
-            // Allocate with trailing NUL for C convenience.
-            let mut buf = bytes.into_boxed_slice().into_vec();
-            buf.push(0); // NUL terminator
-
-            let ptr = buf.as_mut_ptr();
-            std::mem::forget(buf);
+            // Allocate as Box<[u8]> so the free side does not need to know a
+            // Vec capacity. The extra byte preserves the C convenience NUL.
+            let mut buf = bytes;
+            buf.push(0);
+            let mut boxed = buf.into_boxed_slice();
+            let ptr = boxed.as_mut_ptr();
+            std::mem::forget(boxed);
 
             // SAFETY: `out_len` was validated as non-NULL above.
             unsafe { *out_len = len };
@@ -85,13 +86,11 @@ pub unsafe extern "C" fn markdown_free_diagnostics(ptr: *mut u8, len: usize) {
         return;
     }
 
-    // Reconstruct the Vec that was forgotten in markdown_get_diagnostics_schema.
-    // The original Vec had `len` content bytes + 1 NUL byte = capacity len+1.
     let _ = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        // SAFETY: The pointer and capacity originate from a Vec that was
-        // forgotten in `markdown_get_diagnostics_schema`. The Vec had
-        // capacity = len + 1 (content bytes + NUL terminator).
-        let _ = unsafe { Vec::from_raw_parts(ptr, len + 1, len + 1) };
+        // SAFETY: The pointer originates from a Box<[u8]> with exactly
+        // `len + 1` bytes: content bytes plus the trailing NUL terminator.
+        let slice = std::ptr::slice_from_raw_parts_mut(ptr, len + 1);
+        let _ = unsafe { Box::from_raw(slice) };
     }));
 }
 
