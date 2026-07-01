@@ -1,4 +1,4 @@
-# Error Policy Architecture (spec 51)
+# Error Policy Architecture
 
 ## Overview
 
@@ -27,7 +27,7 @@ Allowed status codes: `429`, `502`, `503`.
 | `memory_budget_exceeded` | pre-commit | Yes | Memory budget exceeded |
 | `ffi_panic` | pre-commit | Yes | Rust FFI panic caught |
 | `decompression_error` | pre-commit | Yes | Decompression failed |
-| `overload` | pre-commit | Yes | Inflight limit exceeded (spec 52) |
+| `overload` | pre-commit | Yes | Inflight limit exceeded |
 | `invalid_dynconf` | pre-commit | Yes | Dynamic config invalid |
 | `degraded_snapshot` | pre-commit | Yes | Using last-known-good snapshot |
 | `header_plan_apply_error` | post-commit | **No** | HeaderPlan commit failed |
@@ -102,9 +102,9 @@ if (behavior.kind == FFI_ERROR_BEHAVIOR_PASS_THROUGH) {
 - Error class → reason code mapping: stable, additive-only after 1.0.
 - `markdown_error_policy` directive semantics: frozen at 1.0.
 
-## Related Specs
+## Related Documents
 
-- **Spec 45**: Config V2 directive syntax.
-- **Spec 48**: HeaderPlan (pre-commit/post-commit boundary).
-- **Spec 52**: Worker inflight guard (overload detection).
-- **Spec 53**: Reason code registry.
+- **Config V2**: Directive syntax (see [MIGRATION-0.9.md](../guides/MIGRATION-0.9.md)).
+- **HeaderPlan**: Pre-commit/post-commit boundary (see [header mutation inventory](header-mutation-inventory.md)).
+- **Worker Inflight Guard**: Overload detection.
+- **Reason Code Registry**: See [Observability Schema v1](observability-schema-v1.md).

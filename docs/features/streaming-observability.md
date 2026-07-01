@@ -1,5 +1,13 @@
 # Streaming Observability and Diagnostics
 
+> **0.9.0 Note**: The module-wide reason code registry has been renamed to
+> lowercase snake_case in 0.9.0. The streaming reason codes documented below
+> (numeric codes 0–13) are a **separate system** used internally by the
+> streaming engine for routing decisions. They are not part of the unified
+> `ReasonCode` enum. See the
+> [Observability Schema v1](../architecture/observability-schema-v1.md) for
+> the unified reason code registry.
+
 ## Overview
 
 The streaming observability feature adds comprehensive metrics, structured
