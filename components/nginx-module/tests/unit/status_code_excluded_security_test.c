@@ -18,6 +18,7 @@
 
 #include <ctype.h>
 #include <stdarg.h>
+#include <stdlib.h>
 
 #define MARKDOWN_STREAMING_ENABLED 1
 
@@ -109,6 +110,7 @@ struct ngx_http_headers_out_s {
 };
 
 struct ngx_http_request_s {
+    ngx_pool_t             *pool;
     ngx_uint_t              method;
     ngx_http_headers_out_t  headers_out;
     ngx_http_headers_in_t   headers_in;
@@ -167,12 +169,48 @@ ngx_strlchr(u_char *p, u_char *last, u_char c)
     return NULL;
 }
 
+static void *
+ngx_palloc(ngx_pool_t *pool, size_t size)
+{
+    (void) pool;
+    return malloc(size);
+}
+
 /*
  * Include the production eligibility source so we test the real
- * ngx_http_markdown_check_status() and ngx_http_markdown_check_eligibility()
- * functions.
+ * ngx_http_markdown_check_eligibility() function.
  */
 #include "../../src/ngx_http_markdown_eligibility.c"
+
+uint8_t
+markdown_decide_eligibility(const struct FFIEligibilityInput *input)
+{
+    if (input == NULL || !input->filter_enabled) {
+        return NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG;
+    }
+    if (!input->method_get_or_head) {
+        return NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD;
+    }
+    if (input->status != NGX_HTTP_OK) {
+        if (input->status == NGX_HTTP_PARTIAL_CONTENT) {
+            return NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE;
+        }
+        return NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS;
+    }
+    if (input->has_range_header) {
+        return NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE;
+    }
+    if (input->content_type == NULL || input->content_type_len == 0) {
+        return NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE;
+    }
+    if (input->content_length >= 0
+        && input->body_limit != NGX_MAX_SIZE_T_VALUE
+        && (uint64_t) input->content_length > input->body_limit)
+    {
+        return NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE;
+    }
+    return NGX_HTTP_MARKDOWN_ELIGIBLE;
+}
 
 /* ================================================================
  * Helper: set ngx_str_t from C string literal
@@ -191,7 +229,10 @@ set_ct(ngx_str_t *s, const char *val)
 static void
 init_eligible_request(ngx_http_request_t *r)
 {
+    static ngx_pool_t test_pool;
+
     memset(r, 0, sizeof(*r));
+    r->pool = &test_pool;
     r->method = NGX_HTTP_GET;
     r->headers_out.status = NGX_HTTP_OK;
     set_ct(&r->headers_out.content_type, "text/html");
@@ -231,10 +272,6 @@ test_status_200_eligible(void)
     init_eligible_request(&r);
     init_conf(&conf);
 
-    /* Direct check: ngx_http_markdown_check_status returns 1 for 200 */
-    TEST_ASSERT(ngx_http_markdown_check_status(&r) == 1,
-        "check_status(200) must return 1 (eligible)");
-
     /* Full eligibility: 200 passes through to eligible */
     TEST_ASSERT(ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
         == NGX_HTTP_MARKDOWN_ELIGIBLE,
@@ -265,10 +302,6 @@ test_status_206_ineligible_range(void)
 
     r.headers_out.status = NGX_HTTP_PARTIAL_CONTENT;
 
-    /* Direct check: check_status returns 0 for 206 */
-    TEST_ASSERT(ngx_http_markdown_check_status(&r) == 0,
-        "check_status(206) must return 0 (not OK)");
-
     /* Full eligibility: 206 routes to INELIGIBLE_RANGE */
     TEST_ASSERT(ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
         == NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE,
@@ -298,16 +331,12 @@ test_redirect_status_ineligible(void)
 
     /* 301 Moved Permanently */
     r.headers_out.status = 301;
-    TEST_ASSERT(ngx_http_markdown_check_status(&r) == 0,
-        "check_status(301) must return 0");
     TEST_ASSERT(ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
         == NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,
         "HTTP 301 must return INELIGIBLE_STATUS");
 
     /* 302 Found */
     r.headers_out.status = 302;
-    TEST_ASSERT(ngx_http_markdown_check_status(&r) == 0,
-        "check_status(302) must return 0");
     TEST_ASSERT(ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
         == NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,
         "HTTP 302 must return INELIGIBLE_STATUS");
@@ -335,8 +364,6 @@ test_status_304_ineligible(void)
 
     r.headers_out.status = 304;
 
-    TEST_ASSERT(ngx_http_markdown_check_status(&r) == 0,
-        "check_status(304) must return 0");
     TEST_ASSERT(ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
         == NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,
         "HTTP 304 must return INELIGIBLE_STATUS");
@@ -365,8 +392,6 @@ test_status_404_ineligible(void)
 
     r.headers_out.status = 404;
 
-    TEST_ASSERT(ngx_http_markdown_check_status(&r) == 0,
-        "check_status(404) must return 0");
     TEST_ASSERT(ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
         == NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,
         "HTTP 404 must return INELIGIBLE_STATUS");
@@ -395,8 +420,6 @@ test_status_500_ineligible(void)
 
     r.headers_out.status = 500;
 
-    TEST_ASSERT(ngx_http_markdown_check_status(&r) == 0,
-        "check_status(500) must return 0");
     TEST_ASSERT(ngx_http_markdown_check_eligibility(&r, &conf, 1, NULL)
         == NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS,
         "HTTP 500 must return INELIGIBLE_STATUS");

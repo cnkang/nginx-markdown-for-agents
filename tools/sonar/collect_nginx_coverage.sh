@@ -255,6 +255,7 @@ http {
     sendfile      on;
     keepalive_timeout  5;
     gzip_http_version 1.0;
+    markdown_trusted_proxies 127.0.0.1/32 ::1/128;
 
     # ── Primary server: full feature set ────────────────────────────
     server {
@@ -271,17 +272,14 @@ http {
         location / {
             root html;
             markdown_filter on;
-            markdown_on_wildcard on;
-            markdown_etag on;
+            markdown_accept wildcard;
+            markdown_cache_validation full;
             markdown_otel on;
             markdown_otel_tracing on;
-            markdown_conditional_requests full_support;
             markdown_log_verbosity debug;
             markdown_token_estimate on;
-            markdown_on_error pass;
-            markdown_max_size 1m;
-            markdown_timeout 5000;
-            markdown_trust_forwarded_headers on;
+            markdown_error_policy pass;
+            markdown_limits memory=1m timeout=5s;
             markdown_dynamic_config on;
             markdown_dynamic_config_path ${RUNTIME}/conf/markdown-dynconf.conf;
         }
@@ -317,36 +315,34 @@ http {
         location /reject-error {
             root html;
             markdown_filter on;
-            markdown_on_error reject;
+            markdown_error_policy fail_closed;
             markdown_log_verbosity warn;
         }
 
         location /ims-only {
             root html;
             markdown_filter on;
-            markdown_conditional_requests if_modified_since_only;
+            markdown_cache_validation ims_only;
         }
 
         location /no-conditional {
             root html;
             markdown_filter on;
-            markdown_conditional_requests disabled;
+            markdown_cache_validation off;
         }
 
-        # ETag disabled with full_support conditional requests; exercises the
-        # branch where If-None-Match is present but ETag comparison cannot
-        # proceed because markdown_etag is off.
+        # Cache validation disabled; exercises the branch where If-None-Match
+        # is present but module-side ETag comparison cannot proceed.
         location /no-etag {
             root html;
             markdown_filter on;
-            markdown_etag off;
-            markdown_conditional_requests full_support;
+            markdown_cache_validation off;
         }
 
         location /no-wildcard {
             root html;
             markdown_filter on;
-            markdown_on_wildcard off;
+            markdown_accept strict;
         }
 
         location /disabled {
@@ -390,7 +386,7 @@ http {
         location /small-limit {
             root html;
             markdown_filter on;
-            markdown_max_size 100;
+            markdown_limits memory=100;
         }
 
         location /log-error {
@@ -409,10 +405,10 @@ http {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_log_verbosity debug;
-            markdown_on_error pass;
-            markdown_max_size 1m;
+            markdown_error_policy pass;
+            markdown_limits memory=1m;
         }
 
         # Streaming + gzip proxy (exercises streaming decompression path)
@@ -420,13 +416,12 @@ http {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_streaming_engine on;
-            markdown_conditional_requests disabled;
-            markdown_streaming_on_error pass;
+            markdown_cache_validation off;
+            markdown_error_policy pass;
             markdown_log_verbosity debug;
-            markdown_on_error pass;
-            markdown_max_size 1m;
+            markdown_limits memory=1m;
         }
 
         # Streaming + gzip proxy + tiny budget + reject
@@ -434,14 +429,12 @@ http {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_streaming_engine on;
-            markdown_conditional_requests disabled;
-            markdown_streaming_budget 1;
-            markdown_streaming_on_error reject;
+            markdown_cache_validation off;
+            markdown_limits streaming_buffer=1 memory=1m;
+            markdown_error_policy fail_closed;
             markdown_log_verbosity debug;
-            markdown_on_error pass;
-            markdown_max_size 1m;
         }
 
         # Proxy to backend that advertises gzip without valid gzip payload
@@ -449,9 +442,9 @@ http {
         location /proxy-fake-gzip {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/fake-gzip/;
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_log_verbosity debug;
-            markdown_on_error pass;
+            markdown_error_policy pass;
         }
 
         # Proxy to backend that advertises brotli without valid brotli payload
@@ -459,9 +452,9 @@ http {
         location /proxy-fake-br {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/fake-br/;
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_log_verbosity debug;
-            markdown_on_error pass;
+            markdown_error_policy pass;
         }
 
         # Proxy to backend that advertises deflate without valid deflate payload
@@ -469,9 +462,9 @@ http {
         location /proxy-fake-deflate {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/fake-deflate/;
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_log_verbosity debug;
-            markdown_on_error pass;
+            markdown_error_policy pass;
         }
 
         # Proxy to backend with Cache-Control: public (exercises strip-public CC path)
@@ -511,7 +504,7 @@ http {
             root html;
             markdown_filter on;
             markdown_streaming_engine on;
-            markdown_conditional_requests disabled;
+            markdown_cache_validation off;
             markdown_log_verbosity debug;
         }
 
@@ -519,7 +512,7 @@ http {
             root html;
             markdown_filter on;
             markdown_streaming_engine auto;
-            markdown_conditional_requests disabled;
+            markdown_cache_validation off;
             markdown_log_verbosity debug;
         }
 
@@ -527,7 +520,7 @@ http {
             root html;
             markdown_filter on;
             markdown_streaming_engine off;
-            markdown_conditional_requests disabled;
+            markdown_cache_validation off;
             markdown_log_verbosity debug;
         }
 
@@ -535,7 +528,7 @@ http {
             root html;
             markdown_filter on;
             markdown_streaming_engine on;
-            markdown_conditional_requests full_support;
+            markdown_cache_validation full;
             markdown_log_verbosity debug;
         }
 
@@ -543,7 +536,7 @@ http {
             root html;
             markdown_filter on;
             markdown_streaming_engine on;
-            markdown_conditional_requests if_modified_since_only;
+            markdown_cache_validation ims_only;
             markdown_log_verbosity debug;
         }
 
@@ -552,37 +545,34 @@ http {
             root html;
             markdown_filter on;
             markdown_streaming_engine on;
-            markdown_conditional_requests disabled;
-            markdown_streaming_budget 1;
+            markdown_cache_validation off;
+            markdown_limits streaming_buffer=1;
             markdown_log_verbosity debug;
-            markdown_on_error pass;
+            markdown_error_policy pass;
         }
 
         location /streaming-reject-budget {
             root html;
             markdown_filter on;
             markdown_streaming_engine on;
-            markdown_conditional_requests disabled;
-            markdown_streaming_budget 1;
-            markdown_streaming_on_error reject;
+            markdown_cache_validation off;
+            markdown_limits streaming_buffer=1;
+            markdown_error_policy fail_closed;
             markdown_log_verbosity debug;
-            markdown_on_error pass;
         }
 
-        location /no-forwarded-trust {
+        location /forwarded-loopback-trust {
             root html;
             markdown_filter on;
-            markdown_trust_forwarded_headers off;
             markdown_log_verbosity debug;
         }
 
-        # Streaming with ETag + token estimate (exercises finalize metadata paths)
+        # Streaming with token estimate (exercises finalize metadata paths)
         location /streaming-etag-tokens {
             root html;
             markdown_filter on;
             markdown_streaming_engine on;
-            markdown_conditional_requests disabled;
-            markdown_etag on;
+            markdown_cache_validation off;
             markdown_token_estimate on;
             markdown_log_verbosity debug;
         }
@@ -592,7 +582,7 @@ http {
             root html;
             markdown_filter on;
             markdown_streaming_engine on;
-            markdown_conditional_requests disabled;
+            markdown_cache_validation off;
             markdown_front_matter on;
             markdown_log_verbosity debug;
         }
@@ -602,7 +592,7 @@ http {
             root html;
             markdown_filter on;
             markdown_streaming_engine on;
-            markdown_conditional_requests disabled;
+            markdown_cache_validation off;
             markdown_flavor gfm;
             markdown_log_verbosity debug;
         }
@@ -612,13 +602,11 @@ http {
             root html;
             markdown_filter on;
             markdown_streaming_engine on;
-            markdown_conditional_requests disabled;
-            markdown_streaming_budget 10m;
-            markdown_etag on;
+            markdown_cache_validation off;
+            markdown_limits streaming_buffer=10m memory=10m;
             markdown_token_estimate on;
             markdown_log_verbosity debug;
-            markdown_on_error pass;
-            markdown_max_size 10m;
+            markdown_error_policy pass;
         }
 
         # Streaming with on_error reject (exercises reject policy in streaming init)
@@ -626,8 +614,8 @@ http {
             root html;
             markdown_filter on;
             markdown_streaming_engine on;
-            markdown_conditional_requests disabled;
-            markdown_on_error reject;
+            markdown_cache_validation off;
+            markdown_error_policy fail_closed;
             markdown_log_verbosity debug;
         }
 
@@ -636,16 +624,13 @@ http {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_streaming_engine on;
-            markdown_conditional_requests disabled;
-            markdown_streaming_budget 10m;
-            markdown_streaming_on_error pass;
-            markdown_etag on;
+            markdown_cache_validation off;
+            markdown_limits streaming_buffer=10m memory=10m;
+            markdown_error_policy pass;
             markdown_token_estimate on;
             markdown_log_verbosity debug;
-            markdown_on_error pass;
-            markdown_max_size 10m;
         }
 
         # Streaming with warn verbosity (exercises verbosity gating)
@@ -653,7 +638,7 @@ http {
             root html;
             markdown_filter on;
             markdown_streaming_engine on;
-            markdown_conditional_requests disabled;
+            markdown_cache_validation off;
             markdown_log_verbosity warn;
         }
 
@@ -662,7 +647,7 @@ http {
             root html;
             markdown_filter on;
             markdown_streaming_engine on;
-            markdown_conditional_requests disabled;
+            markdown_cache_validation off;
             markdown_log_verbosity error;
         }
 
@@ -672,11 +657,10 @@ http {
             markdown_filter on;
             markdown_front_matter on;
             markdown_token_estimate on;
-            markdown_etag on;
+            markdown_cache_validation full;
             markdown_flavor gfm;
-            markdown_trust_forwarded_headers on;
             markdown_log_verbosity debug;
-            markdown_on_error pass;
+            markdown_error_policy pass;
         }
     }
 
@@ -751,7 +735,7 @@ for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditiona
               no-wildcard disabled gfm commonmark small-limit log-error \
               streaming streaming-auto streaming-off streaming-tiny-budget \
               streaming-fullsupport streaming-ims-only \
-              streaming-reject-budget no-forwarded-trust \
+              streaming-reject-budget forwarded-loopback-trust \
               streaming-etag-tokens streaming-front-matter streaming-gfm \
               streaming-large-budget streaming-on-error-reject \
               streaming-warn streaming-error-verbosity full-options; do
@@ -779,7 +763,7 @@ for subdir in auth auth-public-cc auth-allow reject-error ims-only no-conditiona
               no-wildcard disabled gfm commonmark log-error \
               streaming streaming-auto streaming-off streaming-tiny-budget \
               streaming-fullsupport streaming-ims-only \
-              streaming-reject-budget no-forwarded-trust \
+              streaming-reject-budget forwarded-loopback-trust \
               streaming-etag-tokens streaming-front-matter streaming-gfm \
               streaming-large-budget streaming-on-error-reject \
               streaming-warn streaming-error-verbosity full-options; do
@@ -1076,10 +1060,10 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 curl -sS -H "${ACCEPT_MARKDOWN}" -H "${HDR_X_FORWARDED_PROTO_HTTPS}" \
   "http://127.0.0.1:${PORT}/index.html" -o /dev/null -w "  X-Forwarded-Proto only: HTTP %{http_code}\n"
 
-# Forwarded headers ignored when trust_forwarded_headers=off
+# Forwarded headers accepted from loopback trusted proxy.
 curl -sS -H "${ACCEPT_MARKDOWN}" \
   -H "${HDR_X_FORWARDED_PROTO_HTTPS}" -H 'X-Forwarded-Host: ignored.example' \
-  "http://127.0.0.1:${PORT}/no-forwarded-trust/index.html" -o /dev/null -w "  X-Forwarded trust disabled: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/forwarded-loopback-trust/index.html" -o /dev/null -w "  X-Forwarded loopback trust: HTTP %{http_code}\n"
 
 # ── Streaming engine scenarios (exercises streaming code paths) ─────
 

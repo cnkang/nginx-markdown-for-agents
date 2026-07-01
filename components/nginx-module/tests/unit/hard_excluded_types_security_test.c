@@ -119,6 +119,7 @@ struct ngx_http_headers_out_s {
 
 struct ngx_http_request_s {
     ngx_uint_t              method;
+    ngx_pool_t             *pool;
     ngx_http_headers_out_t  headers_out;
     ngx_http_headers_in_t   headers_in;
 };
@@ -174,6 +175,13 @@ ngx_strlchr(u_char *p, u_char *last, u_char c)
         p++;
     }
     return NULL;
+}
+
+static void *
+ngx_palloc(ngx_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    return malloc(size);
 }
 
 /*
