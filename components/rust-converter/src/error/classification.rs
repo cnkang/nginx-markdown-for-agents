@@ -296,6 +296,59 @@ pub fn decide_error_behavior(class: ErrorClass, policy: ErrorPolicy) -> ErrorBeh
     }
 }
 
+/// Map a raw FFI error code to its `ErrorClass`.
+///
+/// Error codes are defined in `markdown_converter.h` (ERROR_PARSE=1,
+/// ERROR_ENCODING=2, etc.). This function is the single source of truth for
+/// the raw-error-code → error-class classification, replacing the
+/// independent C switch that previously lived in
+/// `ngx_http_markdown_classify_error()`.
+///
+/// # Arguments
+///
+/// * `error_code` — The numeric FFI error code from `MarkdownResult.error_code`.
+///
+/// # Returns
+///
+/// The [`ErrorClass`] corresponding to the given error code. Unknown codes
+/// map to [`ErrorClass::FfiPanic`] (the system/catchall category).
+///
+/// # Examples
+///
+/// ```
+/// use nginx_markdown_converter::error::classification::{ErrorClass, classify_error_code};
+///
+/// assert_eq!(classify_error_code(1), ErrorClass::ConversionError);  // ERROR_PARSE
+/// assert_eq!(classify_error_code(3), ErrorClass::Timeout);          // ERROR_TIMEOUT
+/// assert_eq!(classify_error_code(4), ErrorClass::MemoryBudgetExceeded); // ERROR_MEMORY_LIMIT
+/// assert_eq!(classify_error_code(99), ErrorClass::FfiPanic);        // ERROR_INTERNAL
+/// assert_eq!(classify_error_code(255), ErrorClass::FfiPanic);       // unknown
+/// ```
+pub fn classify_error_code(error_code: u32) -> ErrorClass {
+    match error_code {
+        /* Conversion errors: parse, encoding, invalid input,
+         * decompression format/truncated/IO errors */
+        1 | 2 | 5 | 12 | 13 | 14 => ErrorClass::ConversionError,
+
+        /* Timeout errors: conversion timeout, parse timeout */
+        3 | 10 => ErrorClass::Timeout,
+
+        /* Memory/budget exceeded: memory_limit, budget_exceeded,
+         * decompression_budget, parse_budget */
+        4 | 6 | 9 | 11 => ErrorClass::MemoryBudgetExceeded,
+
+        /* Streaming fallback: engine downgrade (pre-commit) */
+        7 => ErrorClass::ConversionError,
+
+        /* Post-commit: streaming mid-flight error */
+        8 => ErrorClass::StreamingMidFlightError,
+
+        /* Internal/unknown → system/panic */
+        99 => ErrorClass::FfiPanic,
+        _ => ErrorClass::FfiPanic,
+    }
+}
+
 /// Map an error class to its corresponding reason code.
 ///
 /// The mapping is stable (frozen at 0.9.0, additive-only after 1.0).
@@ -617,5 +670,72 @@ mod tests {
         assert_eq!(ErrorPolicy::Pass.as_str(), "pass");
         assert_eq!(ErrorPolicy::Status(429).as_str(), "status");
         assert_eq!(ErrorPolicy::FailClosed.as_str(), "fail_closed");
+    }
+
+    /* ====================================================================
+     * Task 5.5: classify_error_code tests
+     * ==================================================================== */
+
+    #[test]
+    fn test_classify_error_code_conversion_errors() {
+        /* ERROR_PARSE=1, ERROR_ENCODING=2, ERROR_INVALID_INPUT=5,
+         * ERROR_DECOMPRESSION_FORMAT_ERROR=12,
+         * ERROR_DECOMPRESSION_TRUNCATED_INPUT=13,
+         * ERROR_DECOMPRESSION_IO_ERROR=14,
+         * ERROR_STREAMING_FALLBACK=7 */
+        for code in [1, 2, 5, 7, 12, 13, 14] {
+            assert_eq!(
+                classify_error_code(code),
+                ErrorClass::ConversionError,
+                "Error code {} should classify as ConversionError",
+                code,
+            );
+        }
+    }
+
+    #[test]
+    fn test_classify_error_code_timeout_errors() {
+        /* ERROR_TIMEOUT=3, ERROR_PARSE_TIMEOUT=10 */
+        for code in [3, 10] {
+            assert_eq!(
+                classify_error_code(code),
+                ErrorClass::Timeout,
+                "Error code {} should classify as Timeout",
+                code,
+            );
+        }
+    }
+
+    #[test]
+    fn test_classify_error_code_memory_budget_errors() {
+        /* ERROR_MEMORY_LIMIT=4, ERROR_BUDGET_EXCEEDED=6,
+         * ERROR_DECOMPRESSION_BUDGET_EXCEEDED=9,
+         * ERROR_PARSE_BUDGET_EXCEEDED=11 */
+        for code in [4, 6, 9, 11] {
+            assert_eq!(
+                classify_error_code(code),
+                ErrorClass::MemoryBudgetExceeded,
+                "Error code {} should classify as MemoryBudgetExceeded",
+                code,
+            );
+        }
+    }
+
+    #[test]
+    fn test_classify_error_code_post_commit() {
+        /* ERROR_POST_COMMIT=8 */
+        assert_eq!(
+            classify_error_code(8),
+            ErrorClass::StreamingMidFlightError
+        );
+    }
+
+    #[test]
+    fn test_classify_error_code_internal_and_unknown() {
+        /* ERROR_INTERNAL=99, unknown codes */
+        assert_eq!(classify_error_code(99), ErrorClass::FfiPanic);
+        assert_eq!(classify_error_code(0), ErrorClass::FfiPanic);
+        assert_eq!(classify_error_code(100), ErrorClass::FfiPanic);
+        assert_eq!(classify_error_code(255), ErrorClass::FfiPanic);
     }
 }

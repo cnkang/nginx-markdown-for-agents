@@ -1669,7 +1669,8 @@ use super::abi::{
     FFI_ERROR_POLICY_STATUS, FFIErrorBehavior, FFIErrorPolicy,
 };
 use crate::error::classification::{
-    ErrorBehavior, ErrorClass, ErrorPolicy, decide_error_behavior, error_to_reason_code,
+    ErrorBehavior, ErrorClass, ErrorPolicy, classify_error_code, decide_error_behavior,
+    error_to_reason_code,
 };
 
 /// Decide error handling behavior for a given error class and policy (spec 51).
@@ -1774,6 +1775,25 @@ pub extern "C" fn markdown_error_to_reason_code(error_class: u8) -> u8 {
     }));
 
     result.unwrap_or(u8::MAX)
+}
+
+/// Classify a raw FFI error code into its `ErrorClass` discriminant.
+///
+/// This is the FFI entry point that maps the raw `ERROR_*` constants
+/// (defined in `markdown_converter.h`) to `ErrorClass` discriminants.
+/// The C side calls this to delegate error classification to Rust
+/// (single source of truth) instead of maintaining an independent switch.
+///
+/// Returns the `ErrorClass` discriminant (u8) for the given error code.
+/// Unknown error codes return `ErrorClass::FfiPanic` discriminant (3).
+///
+/// # Safety
+///
+/// No pointer parameters; always safe to call. The function is panic-free
+/// by construction (trivial match expression with no allocations).
+#[unsafe(no_mangle)]
+pub extern "C" fn markdown_classify_error_code(error_code: u32) -> u8 {
+    classify_error_code(error_code) as u8
 }
 
 #[cfg(test)]

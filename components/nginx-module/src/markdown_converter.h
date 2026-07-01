@@ -1923,6 +1923,24 @@ uint8_t markdown_decide_error_behavior(uint8_t error_class,
  */
 uint8_t markdown_error_to_reason_code(uint8_t error_class);
 
+/**
+ * Classify a raw FFI error code into its `ErrorClass` discriminant.
+ *
+ * This is the FFI entry point that maps the raw `ERROR_*` constants
+ * (defined in `markdown_converter.h`) to `ErrorClass` discriminants.
+ * The C side calls this to delegate error classification to Rust
+ * (single source of truth) instead of maintaining an independent switch.
+ *
+ * Returns the `ErrorClass` discriminant (u8) for the given error code.
+ * Unknown error codes return `ErrorClass::FfiPanic` discriminant (3).
+ *
+ * # Safety
+ *
+ * No pointer parameters; always safe to call. The function is panic-free
+ * by construction (trivial match expression with no allocations).
+ */
+uint8_t markdown_classify_error_code(uint32_t error_code);
+
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
  * Create a new incremental converter handle for incremental Markdown processing.

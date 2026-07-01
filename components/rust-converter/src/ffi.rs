@@ -106,12 +106,13 @@ pub use abi::{
 };
 pub use diagnostics::{markdown_free_diagnostics, markdown_get_diagnostics_schema};
 pub use exports::{
-    markdown_check_conditional, markdown_convert, markdown_converter_free, markdown_converter_new,
-    markdown_decide_base_url, markdown_decide_error_behavior, markdown_decomp_result_init,
-    markdown_decompress_bounded, markdown_decompress_free, markdown_detect_conflicts,
-    markdown_error_to_reason_code, markdown_free_conflicts, markdown_make_decision,
-    markdown_negotiate_accept, markdown_result_free, markdown_trusted_proxies_free,
-    markdown_trusted_proxies_new, markdown_trusted_proxies_push,
+    markdown_check_conditional, markdown_classify_error_code, markdown_convert,
+    markdown_converter_free, markdown_converter_new, markdown_decide_base_url,
+    markdown_decide_error_behavior, markdown_decomp_result_init, markdown_decompress_bounded,
+    markdown_decompress_free, markdown_detect_conflicts, markdown_error_to_reason_code,
+    markdown_free_conflicts, markdown_make_decision, markdown_negotiate_accept,
+    markdown_result_free, markdown_trusted_proxies_free, markdown_trusted_proxies_new,
+    markdown_trusted_proxies_push,
 };
 
 #[cfg(feature = "incremental")]
