@@ -835,6 +835,81 @@ pub const FFI_PROFILE_BALANCED: u8 = 2;
 /// Profile discriminant: `streaming_first` (AI agent workloads).
 pub const FFI_PROFILE_STREAMING_FIRST: u8 = 3;
 
+// ─── Error Classification FFI types (spec 51) ────────────────────────────────
+
+/// FFI-safe error class enum (spec 51).
+///
+/// Maps 1:1 to `crate::error::classification::ErrorClass`. The C side passes
+/// this to `markdown_decide_error_behavior` to identify the error category.
+///
+/// Discriminants are frozen for the 1.0 stability contract.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FFIErrorClass {
+    /// HTML-to-Markdown conversion failed.
+    ConversionError = 0,
+    /// Conversion exceeded configured timeout.
+    Timeout = 1,
+    /// Memory budget exceeded.
+    MemoryBudgetExceeded = 2,
+    /// Rust FFI panic caught by catch_unwind.
+    FfiPanic = 3,
+    /// Decompression of upstream response failed.
+    DecompressionError = 4,
+    /// Worker inflight limit exceeded (spec 52).
+    Overload = 5,
+    /// Dynamic configuration is invalid.
+    InvalidDynconf = 6,
+    /// Running with degraded (last-known-good) snapshot.
+    DegradedSnapshot = 7,
+    /// HeaderPlan apply failed after headers committed.
+    HeaderPlanApplyError = 8,
+    /// Streaming conversion failed mid-flight.
+    StreamingMidFlightError = 9,
+}
+
+/// FFI-safe error policy enum (spec 51).
+///
+/// The C side derives this from the `markdown_error_policy` directive value
+/// and passes it to `markdown_decide_error_behavior`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FFIErrorPolicy {
+    /// Policy kind: 0 = pass, 1 = status, 2 = fail_closed.
+    pub kind: u8,
+    /// HTTP status code (meaningful only when kind == 1).
+    pub status_code: u16,
+}
+
+/// FFI error policy kind: pass (fail-open, default).
+pub const FFI_ERROR_POLICY_PASS: u8 = 0;
+/// FFI error policy kind: return specified status code.
+pub const FFI_ERROR_POLICY_STATUS: u8 = 1;
+/// FFI error policy kind: fail_closed (return 502).
+pub const FFI_ERROR_POLICY_FAIL_CLOSED: u8 = 2;
+
+/// FFI-safe error behavior enum (spec 51).
+///
+/// Returned by `markdown_decide_error_behavior` to tell the C error handler
+/// what action to take.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FFIErrorBehavior {
+    /// Behavior kind: 0 = pass_through, 1 = return_status, 2 = terminate.
+    pub kind: u8,
+    /// HTTP status code (meaningful only when kind == 1).
+    pub status_code: u16,
+    /// 1 if behavior was forced (post-commit), 0 if policy-driven.
+    pub forced: u8,
+}
+
+/// FFI error behavior kind: pass through original response.
+pub const FFI_ERROR_BEHAVIOR_PASS_THROUGH: u8 = 0;
+/// FFI error behavior kind: return specified HTTP status code.
+pub const FFI_ERROR_BEHAVIOR_RETURN_STATUS: u8 = 1;
+/// FFI error behavior kind: terminate connection (post-commit).
+pub const FFI_ERROR_BEHAVIOR_TERMINATE: u8 = 2;
+
 #[cfg(test)]
 mod layout_tests {
     use super::*;
