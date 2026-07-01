@@ -1062,6 +1062,135 @@ mod layout_tests {
     }
 
     #[test]
+    fn test_spec_49_decision_abi_layouts() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIStr>(), 16);
+        assert_eq!(align_of::<FFIStr>(), 8);
+        assert_eq!(offset_of!(FFIStr, data), 0);
+        assert_eq!(offset_of!(FFIStr, len), 8);
+
+        assert_eq!(size_of::<FFIEligibilityInput>(), 72);
+        assert_eq!(align_of::<FFIEligibilityInput>(), 8);
+        assert_eq!(offset_of!(FFIEligibilityInput, filter_enabled), 0);
+        assert_eq!(offset_of!(FFIEligibilityInput, method_get_or_head), 1);
+        assert_eq!(offset_of!(FFIEligibilityInput, has_range_header), 2);
+        assert_eq!(offset_of!(FFIEligibilityInput, status), 4);
+        assert_eq!(offset_of!(FFIEligibilityInput, content_type), 8);
+        assert_eq!(offset_of!(FFIEligibilityInput, content_type_len), 16);
+        assert_eq!(offset_of!(FFIEligibilityInput, content_types), 24);
+        assert_eq!(offset_of!(FFIEligibilityInput, content_types_count), 32);
+        assert_eq!(offset_of!(FFIEligibilityInput, stream_types), 40);
+        assert_eq!(offset_of!(FFIEligibilityInput, stream_types_count), 48);
+        assert_eq!(offset_of!(FFIEligibilityInput, content_length), 56);
+        assert_eq!(offset_of!(FFIEligibilityInput, body_limit), 64);
+
+        assert_eq!(size_of::<FFIConditionalInput>(), 72);
+        assert_eq!(align_of::<FFIConditionalInput>(), 8);
+        assert_eq!(offset_of!(FFIConditionalInput, cache_validation), 0);
+        assert_eq!(offset_of!(FFIConditionalInput, has_range), 1);
+        assert_eq!(offset_of!(FFIConditionalInput, no_transform), 2);
+        assert_eq!(offset_of!(FFIConditionalInput, if_none_match), 8);
+        assert_eq!(offset_of!(FFIConditionalInput, if_none_match_len), 16);
+        assert_eq!(offset_of!(FFIConditionalInput, entity_etag), 24);
+        assert_eq!(offset_of!(FFIConditionalInput, entity_etag_len), 32);
+        assert_eq!(offset_of!(FFIConditionalInput, if_modified_since), 40);
+        assert_eq!(offset_of!(FFIConditionalInput, if_modified_since_len), 48);
+        assert_eq!(offset_of!(FFIConditionalInput, last_modified), 56);
+        assert_eq!(offset_of!(FFIConditionalInput, last_modified_len), 64);
+
+        assert_eq!(size_of::<FFIConditionalDecision>(), 3);
+        assert_eq!(align_of::<FFIConditionalDecision>(), 1);
+        assert_eq!(offset_of!(FFIConditionalDecision, outcome), 0);
+        assert_eq!(offset_of!(FFIConditionalDecision, reason), 1);
+        assert_eq!(offset_of!(FFIConditionalDecision, evaluated_header), 2);
+
+        assert_eq!(size_of::<FFIStreamingInput>(), 32);
+        assert_eq!(align_of::<FFIStreamingInput>(), 8);
+        assert_eq!(offset_of!(FFIStreamingInput, policy), 0);
+        assert_eq!(offset_of!(FFIStreamingInput, engine), 1);
+        assert_eq!(offset_of!(FFIStreamingInput, cache_validation), 2);
+        assert_eq!(offset_of!(FFIStreamingInput, is_head), 3);
+        assert_eq!(offset_of!(FFIStreamingInput, is_not_modified), 4);
+        assert_eq!(offset_of!(FFIStreamingInput, has_range), 5);
+        assert_eq!(offset_of!(FFIStreamingInput, no_transform), 6);
+        assert_eq!(offset_of!(FFIStreamingInput, has_content_encoding), 7);
+        assert_eq!(offset_of!(FFIStreamingInput, content_length_known), 8);
+        assert_eq!(offset_of!(FFIStreamingInput, content_length), 16);
+        assert_eq!(offset_of!(FFIStreamingInput, streaming_threshold), 24);
+
+        assert_eq!(size_of::<FFIStreamingDecision>(), 2);
+        assert_eq!(align_of::<FFIStreamingDecision>(), 1);
+        assert_eq!(offset_of!(FFIStreamingDecision, eligible), 0);
+        assert_eq!(offset_of!(FFIStreamingDecision, block_reason), 1);
+    }
+
+    #[test]
+    fn test_spec_50_profile_config_abi_layouts() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIConflictLevel>(), 1);
+        assert_eq!(align_of::<FFIConflictLevel>(), 1);
+
+        assert_eq!(size_of::<FFIConflict>(), 24);
+        assert_eq!(align_of::<FFIConflict>(), 8);
+        assert_eq!(offset_of!(FFIConflict, level), 0);
+        assert_eq!(offset_of!(FFIConflict, message), 8);
+        assert_eq!(offset_of!(FFIConflict, message_len), 16);
+
+        assert_eq!(size_of::<FFIConflictList>(), 16);
+        assert_eq!(align_of::<FFIConflictList>(), 8);
+        assert_eq!(offset_of!(FFIConflictList, conflicts), 0);
+        assert_eq!(offset_of!(FFIConflictList, count), 8);
+
+        assert_eq!(size_of::<FFIExplicitConfig>(), 40);
+        assert_eq!(align_of::<FFIExplicitConfig>(), 8);
+        assert_eq!(offset_of!(FFIExplicitConfig, accept), 0);
+        assert_eq!(offset_of!(FFIExplicitConfig, cache_validation), 1);
+        assert_eq!(offset_of!(FFIExplicitConfig, streaming), 2);
+        assert_eq!(offset_of!(FFIExplicitConfig, limits_memory_bytes), 8);
+        assert_eq!(offset_of!(FFIExplicitConfig, limits_timeout_ms), 16);
+        assert_eq!(
+            offset_of!(FFIExplicitConfig, limits_streaming_buffer_bytes),
+            24
+        );
+        assert_eq!(offset_of!(FFIExplicitConfig, limits_max_inflight), 32);
+        assert_eq!(offset_of!(FFIExplicitConfig, error_policy), 36);
+        assert_eq!(offset_of!(FFIExplicitConfig, diagnostics), 37);
+
+        assert_eq!(size_of::<FFIEffectiveConfig>(), 40);
+        assert_eq!(align_of::<FFIEffectiveConfig>(), 8);
+        assert_eq!(offset_of!(FFIEffectiveConfig, accept), 0);
+        assert_eq!(offset_of!(FFIEffectiveConfig, cache_validation), 1);
+        assert_eq!(offset_of!(FFIEffectiveConfig, streaming), 2);
+        assert_eq!(offset_of!(FFIEffectiveConfig, limits_memory_bytes), 8);
+        assert_eq!(offset_of!(FFIEffectiveConfig, limits_timeout_ms), 16);
+        assert_eq!(
+            offset_of!(FFIEffectiveConfig, limits_streaming_buffer_bytes),
+            24
+        );
+        assert_eq!(offset_of!(FFIEffectiveConfig, limits_max_inflight), 32);
+        assert_eq!(offset_of!(FFIEffectiveConfig, error_policy), 36);
+        assert_eq!(offset_of!(FFIEffectiveConfig, diagnostics), 37);
+    }
+
+    #[test]
+    fn test_spec_51_error_policy_abi_layouts() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIErrorPolicy>(), 4);
+        assert_eq!(align_of::<FFIErrorPolicy>(), 2);
+        assert_eq!(offset_of!(FFIErrorPolicy, kind), 0);
+        assert_eq!(offset_of!(FFIErrorPolicy, status_code), 2);
+
+        assert_eq!(size_of::<FFIErrorBehavior>(), 6);
+        assert_eq!(align_of::<FFIErrorBehavior>(), 2);
+        assert_eq!(offset_of!(FFIErrorBehavior, kind), 0);
+        assert_eq!(offset_of!(FFIErrorBehavior, status_code), 2);
+        assert_eq!(offset_of!(FFIErrorBehavior, forced), 4);
+    }
+
+    #[test]
     fn test_error_codes_distinct() {
         let codes = [
             ERROR_SUCCESS,
