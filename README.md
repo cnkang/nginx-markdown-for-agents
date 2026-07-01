@@ -125,6 +125,10 @@ If something doesn't work as expected, see the [Troubleshooting](docs/guides/INS
 
 If you want a practical production-oriented configuration next, go straight to [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md).
 
+For complete, ready-to-use production configurations covering all three profiles
+(balanced, strict_cache, streaming_first), see the
+[Production Examples](examples/production/) directory.
+
 ## Profiles (v0.9.0+)
 
 For production deployments, use `markdown_profile` to apply a tested set of
