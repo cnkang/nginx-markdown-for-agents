@@ -501,7 +501,7 @@ test_log_decision_path_verbosity_gating(void)
     path.accept_result = "CONVERT";
     path.conditional_result = "PROCEED";
     path.conversion_status = "SUCCESS";
-    path.reason_code = "ELIGIBLE_CONVERTED";
+    path.reason_code = "converted";
     path.duration_ms = 12;
 
     /* WARN verbosity + non-failure = suppressed */

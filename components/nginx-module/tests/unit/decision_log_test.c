@@ -79,7 +79,103 @@ is_failure_outcome(const ngx_str_t *reason_code)
         return 0;
     }
 
-    /* Check for "ELIGIBLE_FAILED" prefix (15 chars) */
+    /* Schema v1 lowercase: "failed_" prefix (7 chars) */
+    if (reason_code->len >= 7
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "failed_", 7) == 0)
+    {
+        return 1;
+    }
+
+    /* Schema v1 lowercase error codes by prefix */
+    if (reason_code->len >= 13
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "decompression", 13) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len >= 16
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "conversion_error", 16) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len >= 22
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "memory_budget_exceeded",
+                       22) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 9
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "ffi_panic", 9) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 7
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "timeout", 7) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 15
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "budget_exceeded", 15) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 12
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "replay_error", 12) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 8
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "overload", 8) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len >= 14
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "invalid_dynconf", 14) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len >= 17
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "degraded_snapshot", 17) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len >= 21
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "header_plan_apply_err",
+                       21) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len >= 24
+        && ngx_strncmp(reason_code->data,
+                       (u_char *) "streaming_mid_flight_err",
+                       24) == 0)
+    {
+        return 1;
+    }
+
+    /* Legacy: Check for "ELIGIBLE_FAILED" prefix (15 chars) */
     if (reason_code->len >= 15
         && ngx_strncmp(reason_code->data,
                        (u_char *) "ELIGIBLE_FAILED", 15) == 0)
@@ -87,7 +183,7 @@ is_failure_outcome(const ngx_str_t *reason_code)
         return 1;
     }
 
-    /* Check for "FAIL_" prefix (5 chars) */
+    /* Legacy: Check for "FAIL_" prefix (5 chars) */
     if (reason_code->len >= 5
         && ngx_strncmp(reason_code->data,
                        (u_char *) "FAIL_", 5) == 0)
@@ -191,30 +287,30 @@ should_emit(ngx_uint_t verbosity, const ngx_str_t *reason_code)
 }
 
 
-/* All 15 reason codes for iteration */
+/* All 15 reason codes for iteration — schema v1 lowercase */
 
-static ngx_str_t rc_skip_config = ngx_string("SKIP_CONFIG");
-static ngx_str_t rc_skip_method = ngx_string("SKIP_METHOD");
-static ngx_str_t rc_skip_status = ngx_string("SKIP_STATUS");
+static ngx_str_t rc_skip_config = ngx_string("disabled");
+static ngx_str_t rc_skip_method = ngx_string("not_eligible");
+static ngx_str_t rc_skip_status = ngx_string("not_eligible");
 static ngx_str_t rc_skip_content_type =
-    ngx_string("SKIP_CONTENT_TYPE");
-static ngx_str_t rc_skip_size = ngx_string("SKIP_SIZE");
+    ngx_string("not_eligible");
+static ngx_str_t rc_skip_size = ngx_string("not_eligible");
 static ngx_str_t rc_skip_streaming =
-    ngx_string("SKIP_STREAMING");
-static ngx_str_t rc_skip_auth = ngx_string("SKIP_AUTH");
-static ngx_str_t rc_skip_range = ngx_string("SKIP_RANGE");
-static ngx_str_t rc_skip_accept = ngx_string("SKIP_ACCEPT");
+    ngx_string("not_eligible");
+static ngx_str_t rc_skip_auth = ngx_string("not_eligible");
+static ngx_str_t rc_skip_range = ngx_string("not_eligible");
+static ngx_str_t rc_skip_accept = ngx_string("skipped_accept");
 static ngx_str_t rc_converted =
-    ngx_string("ELIGIBLE_CONVERTED");
+    ngx_string("converted");
 static ngx_str_t rc_failed_open =
-    ngx_string("ELIGIBLE_FAILED_OPEN");
+    ngx_string("failed_open");
 static ngx_str_t rc_failed_closed =
-    ngx_string("ELIGIBLE_FAILED_CLOSED");
+    ngx_string("failed_closed");
 static ngx_str_t rc_fail_conversion =
-    ngx_string("FAIL_CONVERSION");
+    ngx_string("conversion_error");
 static ngx_str_t rc_fail_resource =
-    ngx_string("FAIL_RESOURCE_LIMIT");
-static ngx_str_t rc_fail_system = ngx_string("FAIL_SYSTEM");
+    ngx_string("memory_budget_exceeded");
+static ngx_str_t rc_fail_system = ngx_string("ffi_panic");
 
 /* Streaming reason codes */
 static ngx_str_t rc_engine_streaming =
@@ -619,7 +715,7 @@ static void
 test_null_inputs(void)
 {
     ngx_str_t empty = ngx_null_string;
-    ngx_str_t reason = ngx_string("SKIP_CONFIG");
+    ngx_str_t reason = ngx_string("disabled");
 
     TEST_SUBSECTION("NULL and empty input handling");
 
