@@ -65,7 +65,8 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         harness-check harness-check-full harness-security-checks test-harness \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
-	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-08x release-gates-check-legacy release-gates-check-strict \
+	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-08x release-gates-check-090 release-gates-check-legacy release-gates-check-strict \
+        test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         verify-streaming-failure-cache-e2e \
@@ -659,6 +660,35 @@ release-gates-check-080:
 release-gates-check-08x: release-gates-check-080
 	@echo "  (release-gates-check-08x is an alias for release-gates-check-080, the 0.8.x patch-line gate)"
 
+# 0.9.0 Release Gates (additive on top of 0.8.0 gates)
+release-gates-check-090: release-gates-check-080
+	@echo "=== 0.9.0 Release Gates ==="
+	$(MAKE) test-rust
+	$(MAKE) test-nginx-unit
+	$(MAKE) check-headers
+	$(MAKE) docs-check
+	$(MAKE) test-production-examples-nginx-t
+	python3 tools/release/gates/validate_release_gates_090.py
+	@echo "=== 0.9.0 Release Gates: PASS ==="
+
+# Production Examples: validate all examples pass nginx -t (NEW)
+test-production-examples-nginx-t:
+	@echo "=== Production Examples nginx -t ==="
+	@if command -v nginx >/dev/null 2>&1; then \
+		for conf in examples/production/*.conf; do \
+			echo "  Testing: $$conf"; \
+			nginx -t -c "$$(pwd)/$$conf" 2>&1 || exit 1; \
+		done; \
+		echo "All production examples pass nginx -t"; \
+	else \
+		echo "SKIP: nginx binary not found (set NGINX_BIN or install nginx)"; \
+	fi
+
+# Production Examples: E2E smoke (requires running NGINX, deferred)
+test-production-examples-e2e-smoke:
+	@echo "=== Production Examples E2E Smoke ==="
+	@echo "SKIP: E2E smoke requires NGINX_BIN environment (deferred to CI)"
+
 release-gates-check-legacy:
 	python3 tools/release/legacy/validate_release_gates.py
 
@@ -836,8 +866,11 @@ help:
 	@echo "  release-gates-check-070  - Validate 0.7.0 release gates (runtime correctness, package compat, fuzz)"
 	@echo "  release-gates-check-080  - Validate 0.8.x release gates (streaming, coverage, matrix, harness boundary)"
 	@echo "  release-gates-check-08x  - Alias for release-gates-check-080 (0.8.x patch-line canonical entry)"
+	@echo "  release-gates-check-090  - Validate 0.9.0 release gates (additive on 0.8.0; production examples, gate validator)"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
+	@echo "  test-production-examples-nginx-t - Validate production example configs pass nginx -t"
+	@echo "  test-production-examples-e2e-smoke - Production examples E2E smoke (deferred to CI)"
 	@echo "  release-notes            - Generate release notes from release-matrix.json"
 	@echo "  coverage-c               - Generate C module e2e coverage (builds NGINX with --coverage)"
 	@echo "  coverage-rust            - Generate Rust test coverage (llvm-cov lcov)"

@@ -678,3 +678,29 @@ jobs:
         with:
           name: corpus-examples
           path: perf/reports/examples/
+
+  # ─── 0.9.0 Release Gate (Experimental / Non-blocking) ────────────────────────
+  # This job validates 0.9.0 release readiness. It is experimental and does not
+  # block PR merge. It becomes blocking at the actual 0.9.0 tag release.
+  release-gate-090:
+    name: Release Gate 0.9.0 (Experimental)
+    needs: [changes, rust-quality, nginx-c-tests]
+    if: >-
+      (needs.changes.outputs.rust == 'true' || needs.changes.outputs.nginx == 'true' ||
+       needs.changes.outputs.docs == 'true' || needs.changes.outputs.workflows == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.3'
+
+      - name: Run 0.9.0 gate validator
+        run: python3 tools/release/gates/validate_release_gates_090.py
