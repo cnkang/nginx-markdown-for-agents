@@ -19,7 +19,7 @@
  * This constant is used by the closure test to verify that all variants
  * are accounted for in the `ALL` array. Update this when adding variants.
  */
-#define REASON_CODE_COUNT 18
+#define REASON_CODE_COUNT 25
 
 /**
  * Number of error class variants.
@@ -1309,6 +1309,43 @@ const uint8_t *markdown_reason_code_metric_key(uint32_t code, uintptr_t *out_len
  * C callers can use this to verify they handle all variants.
  */
 uint32_t markdown_reason_code_count(void);
+
+/**
+ * Get a default diagnostics JSON schema v1 string.
+ *
+ * Returns a pointer to a heap-allocated JSON byte buffer and writes the
+ * byte length (excluding any NUL terminator) to `out_len`. The returned
+ * buffer is NUL-terminated for convenience but `out_len` does NOT include
+ * the terminator.
+ *
+ * On failure (NULL `out_len`, serialization error, or caught panic) returns
+ * NULL and sets `*out_len = 0`.
+ *
+ * The caller must free the returned buffer by calling
+ * [`markdown_free_diagnostics`] with the same pointer and length.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `out_len` either is NULL (in which case the
+ * function returns NULL immediately) or points to writable storage for a
+ * `usize`.
+ */
+uint8_t *markdown_get_diagnostics_schema(uintptr_t *out_len);
+
+/**
+ * Free a diagnostics JSON string previously returned by
+ * [`markdown_get_diagnostics_schema`].
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `ptr` was returned by `markdown_get_diagnostics_schema` and has not
+ *   already been freed
+ * - `len` is the value written to `out_len` by that call
+ *
+ * After this call, `ptr` is invalid and must not be dereferenced.
+ */
+void markdown_free_diagnostics(uint8_t *ptr, uintptr_t len);
 
 /**
  * Allocate a new converter handle for use across multiple FFI calls.

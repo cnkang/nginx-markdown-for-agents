@@ -23,6 +23,12 @@
 #include "ngx_http_markdown_dynconf_snapshot.h"
 #include "ngx_http_markdown_filter_module.h"
 
+/*
+ * Forward-declare the FFI wrapper for reason code string lookup.
+ */
+ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
+    ngx_str_t *out_str);
+
 
 /*
  * Static global diagnostics state for this worker process.
@@ -325,9 +331,37 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
         const char  *name;
         ngx_int_t    code;
     } map[] = {
+        /* New lowercase snake_case names (schema v1) */
+        { "converted",                     0 },
+        { "skipped_accept",                1 },
+        { "skipped_no_accept",             2 },
+        { "skipped_conditional",           3 },
+        { "decompression_error",           4 },
+        { "decompression_budget_exceeded", 5 },
+        { "decompression_format_error",    6 },
+        { "decompression_truncated_input", 7 },
+        { "decompression_io_error",        8 },
+        { "timeout",                       9 },
+        { "budget_exceeded",              10 },
+        { "replay_error",                 11 },
+        { "skipped_accept_reject",        12 },
+        { "ffi_panic",                    13 },
+        { "not_eligible",                 14 },
+        { "disabled",                     15 },
+        { "failed_open",                  16 },
+        { "failed_closed",                17 },
+        { "conversion_error",             18 },
+        { "memory_budget_exceeded",       19 },
+        { "overload",                     20 },
+        { "invalid_dynconf",              21 },
+        { "degraded_snapshot",            22 },
+        { "header_plan_apply_error",      23 },
+        { "streaming_mid_flight_error",   24 },
+        /* Legacy uppercase names (backward compatibility) */
         { "CONVERTED",                     0 },
         { "ELIGIBLE_CONVERTED",            0 },
         { "SKIPPED_ACCEPT",                1 },
+        { "SKIP_ACCEPT",                   1 },
         { "SKIPPED_NO_ACCEPT",             2 },
         { "SKIPPED_CONDITIONAL",           3 },
         { "FAILED_DECOMPRESSION",          4 },
@@ -346,6 +380,9 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
         { "ELIGIBLE_FAILED_OPEN",         16 },
         { "FAILED_CLOSED",                17 },
         { "ELIGIBLE_FAILED_CLOSED",       17 },
+        { "FAIL_CONVERSION",              18 },
+        { "FAIL_RESOURCE_LIMIT",          19 },
+        { "FAIL_SYSTEM",                  13 },
     };
     if (reason == NULL) {
         return -1;
@@ -1062,6 +1099,9 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     /* Opening brace */
     p = ngx_slprintf(p, last, "{\n");
 
+    /* --- schema_version (spec 53) --- */
+    p = ngx_slprintf(p, last, "  \"schema_version\": 1,\n");
+
     /* --- config_snapshot section --- */
     p = ngx_slprintf(p, last, "  \"config_snapshot\": {\n");
 
@@ -1100,6 +1140,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         ngx_uint_t                          idx;
         ngx_uint_t                          count;
         const ngx_http_markdown_diag_decision_t  *entry;
+        ngx_str_t                           reason_str;
 
         /*
          * Use the same centralized ring validation as json_size so
@@ -1126,13 +1167,33 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
                 p = ngx_slprintf(p, last, "\n");
             }
 
-            p = ngx_slprintf(p, last,
-                "    {\"timestamp\": %M, "
-                "\"reason_code\": %i, "
-                "\"duration_ms\": %M}",
-                entry->timestamp,
-                entry->reason_code,
-                entry->duration_ms);
+            /*
+             * Emit both numeric reason_code and string
+             * reason_code_str (schema v1).
+             */
+            if (ngx_http_markdown_get_reason_code_str(
+                    (uint32_t) entry->reason_code, &reason_str)
+                == NGX_OK)
+            {
+                p = ngx_slprintf(p, last,
+                    "    {\"timestamp\": %M, "
+                    "\"reason_code\": %i, "
+                    "\"reason_code_str\": \"%*s\", "
+                    "\"duration_ms\": %M}",
+                    entry->timestamp,
+                    entry->reason_code,
+                    reason_str.len, reason_str.data,
+                    entry->duration_ms);
+            } else {
+                p = ngx_slprintf(p, last,
+                    "    {\"timestamp\": %M, "
+                    "\"reason_code\": %i, "
+                    "\"reason_code_str\": null, "
+                    "\"duration_ms\": %M}",
+                    entry->timestamp,
+                    entry->reason_code,
+                    entry->duration_ms);
+            }
 
             if (i + 1 < count) {
                 p = ngx_slprintf(p, last, ",\n");

@@ -94,35 +94,35 @@ ngx_http_markdown_metrics_write_prometheus(
         snapshot->conversions_bypassed
             + snapshot->results.failopen_count);
 
-    /* skips_total{reason=...} */
+    /* skips_total{reason=...} — lowercase snake_case per schema v1 */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_skips_total "
         "Requests skipped by reason.\n"
         "# TYPE nginx_markdown_skips_total counter\n"
-        "nginx_markdown_skips_total{reason=\"SKIP_METHOD\"}"
+        "nginx_markdown_skips_total{reason=\"not_eligible\"}"
         " %uA\n"
-        "nginx_markdown_skips_total{reason=\"SKIP_STATUS\"}"
-        " %uA\n"
-        "nginx_markdown_skips_total"
-        "{reason=\"SKIP_CONTENT_TYPE\"} %uA\n"
-        "nginx_markdown_skips_total{reason=\"SKIP_SIZE\"}"
+        "nginx_markdown_skips_total{reason=\"not_eligible\"}"
         " %uA\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_STREAMING\"} %uA\n"
-        "nginx_markdown_skips_total{reason=\"SKIP_AUTH\"}"
-        " %uA\n"
-        "nginx_markdown_skips_total{reason=\"SKIP_RANGE\"}"
+        "{reason=\"not_eligible\"} %uA\n"
+        "nginx_markdown_skips_total{reason=\"not_eligible\"}"
         " %uA\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_ACCEPT\"} %uA\n"
+        "{reason=\"not_eligible\"} %uA\n"
+        "nginx_markdown_skips_total{reason=\"not_eligible\"}"
+        " %uA\n"
+        "nginx_markdown_skips_total{reason=\"not_eligible\"}"
+        " %uA\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_CONFIG\"} %uA\n"
+        "{reason=\"skipped_accept\"} %uA\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIPPED_NO_ACCEPT\"} %uA\n"
+        "{reason=\"disabled\"} %uA\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIPPED_CONDITIONAL\"} %uA\n"
+        "{reason=\"skipped_no_accept\"} %uA\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_COMPRESSION_PASSTHROUGH\"} %uA\n"
+        "{reason=\"skipped_conditional\"} %uA\n"
+        "nginx_markdown_skips_total"
+        "{reason=\"not_eligible\"} %uA\n"
         "\n",
         snapshot->skips.method,
         snapshot->skips.status,
@@ -137,17 +137,17 @@ ngx_http_markdown_metrics_write_prometheus(
         snapshot->skips.conditional,
         snapshot->skips.compression_passthrough);
 
-    /* failures_total{stage=...} */
+    /* failures_total{reason=...} — lowercase snake_case per schema v1 */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_failures_total "
-        "Conversion failures by stage.\n"
+        "Conversion failures by reason.\n"
         "# TYPE nginx_markdown_failures_total counter\n"
         "nginx_markdown_failures_total"
-        "{stage=\"FAIL_CONVERSION\"} %uA\n"
+        "{reason=\"conversion_error\"} %uA\n"
         "nginx_markdown_failures_total"
-        "{stage=\"FAIL_RESOURCE_LIMIT\"} %uA\n"
+        "{reason=\"memory_budget_exceeded\"} %uA\n"
         "nginx_markdown_failures_total"
-        "{stage=\"FAIL_SYSTEM\"} %uA\n"
+        "{reason=\"ffi_panic\"} %uA\n"
         "\n",
         snapshot->failures_conversion,
         snapshot->failures_resource_limit,

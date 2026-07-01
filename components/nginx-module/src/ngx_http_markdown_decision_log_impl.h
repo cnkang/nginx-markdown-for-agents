@@ -63,15 +63,22 @@ static void ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
  * Determine whether a reason code represents a failure outcome.
  *
  * Failure outcomes are reason codes matching any of:
- *   - "ELIGIBLE_FAILED" prefix (full-buffer conversion failures)
- *   - "FAIL_" prefix (legacy failure codes)
+ *   - "failed_open" or "failed_closed" (schema v1 fail-open/closed)
+ *   - "conversion_error", "memory_budget_exceeded", "ffi_panic",
+ *     "decompression_error", "decompression_budget_exceeded",
+ *     "decompression_format_error", "decompression_truncated_input",
+ *     "decompression_io_error", "timeout", "budget_exceeded",
+ *     "replay_error", "overload", "invalid_dynconf",
+ *     "degraded_snapshot", "header_plan_apply_error",
+ *     "streaming_mid_flight_error" (schema v1 error codes)
+ *   - Legacy: "ELIGIBLE_FAILED" prefix, "FAIL_" prefix
  *   - "STREAMING_FAIL_" substring (streaming post-commit failures)
  *   - "STREAMING_PRECOMMIT_" prefix (streaming pre-commit failures)
  *   - "STREAMING_BUDGET_" prefix (streaming budget exceeded)
  *   - "STREAMING_FALLBACK_" prefix (streaming degraded to fallback path)
  *
- * All other codes (SKIP_*, ELIGIBLE_CONVERTED, ENGINE_*,
- * STREAMING_CONVERT, STREAMING_SHADOW, STREAMING_SKIP_*)
+ * All other codes (skipped_*, converted, disabled, not_eligible,
+ * ENGINE_*, STREAMING_CONVERT, STREAMING_SHADOW, STREAMING_SKIP_*)
  * are non-failure outcomes.
  *
  * Parameters:
@@ -88,7 +95,109 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         return 0;
     }
 
-    /* Check for "ELIGIBLE_FAILED" prefix (15 chars) */
+    /* Schema v1 lowercase: "failed_" prefix (7 chars) */
+    if (reason_code->len >= 7
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "failed_", 7) == 0)
+    {
+        return 1;
+    }
+
+    /* Schema v1 lowercase error codes by prefix */
+    if (reason_code->len >= 13
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "decompression",
+                       13) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len >= 16
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "conversion_error",
+                       16) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len >= 22
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "memory_budget_exceeded",
+                       22) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 9
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "ffi_panic", 9) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 7
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "timeout", 7) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 15
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "budget_exceeded",
+                       15) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 12
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "replay_error",
+                       12) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 8
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "overload", 8) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len >= 14
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "invalid_dynconf",
+                       14) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len >= 17
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "degraded_snapshot",
+                       17) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len >= 22
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "header_plan_apply_err",
+                       21) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len >= 25
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "streaming_mid_flight_err",
+                       24) == 0)
+    {
+        return 1;
+    }
+
+    /* Legacy: Check for "ELIGIBLE_FAILED" prefix (15 chars) */
     if (reason_code->len >= 15
         && ngx_strncmp(reason_code->data,
                        (const u_char *) "ELIGIBLE_FAILED",
@@ -97,7 +206,7 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         return 1;
     }
 
-    /* Check for "FAIL_" prefix (5 chars) */
+    /* Legacy: Check for "FAIL_" prefix (5 chars) */
     if (reason_code->len >= 5
         && ngx_strncmp(reason_code->data,
                        (const u_char *) "FAIL_", 5) == 0)
