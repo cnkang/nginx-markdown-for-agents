@@ -689,7 +689,13 @@ test-production-examples-nginx-t:
 # Production Examples: E2E smoke (requires running NGINX, deferred)
 test-production-examples-e2e-smoke:
 	@echo "=== Production Examples E2E Smoke ==="
-	@echo "SKIP: E2E smoke requires NGINX_BIN environment (deferred to CI)"
+	@bash tools/e2e/verify_profile_smoke_e2e.sh || { \
+		rc=$$?; \
+		case "$$rc" in \
+			2) echo "SKIP: E2E smoke requires NGINX_BIN environment (deferred to CI)" ;; \
+			*) exit "$$rc" ;; \
+		esac; \
+	}
 
 release-gates-check-legacy:
 	python3 tools/release/legacy/validate_release_gates.py
