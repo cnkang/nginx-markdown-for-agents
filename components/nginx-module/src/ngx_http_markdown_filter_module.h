@@ -686,7 +686,8 @@ ngx_http_markdown_effective_body_buffer_limit(
 
 static ngx_inline void
 ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev)
+    const ngx_http_markdown_conf_t *prev,
+    const ngx_http_markdown_profile_defaults_t *profile_defaults)
 {
 /*
  * Helper macro: merge a single stream configuration field.
@@ -702,9 +703,9 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
     } while (0)
 
     NGX_MD_MERGE_STREAM(engine, ngx_uint_t, -1,
-                        NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO);
+                        profile_defaults->streaming_engine);
     NGX_MD_MERGE_STREAM(policy, ngx_uint_t, -1,
-                        NGX_HTTP_MARKDOWN_STREAMING_AUTO);
+                        profile_defaults->streaming_policy);
     NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0);
     NGX_MD_MERGE_STREAM(threshold, size_t, -1,
                         NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT);
@@ -719,10 +720,10 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
     }
 
     NGX_MD_MERGE_STREAM(on_error, ngx_uint_t, -1,
-                        NGX_HTTP_MARKDOWN_ON_ERROR_PASS);
+                        profile_defaults->error_policy);
     NGX_MD_MERGE_STREAM(on_error_explicit, ngx_flag_t, -1, 0);
     NGX_MD_MERGE_STREAM(budget, size_t, -1,
-                        NGX_HTTP_MARKDOWN_STREAM_BUDGET_DEFAULT);
+                        profile_defaults->limits_streaming_buffer);
     NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0);
     NGX_MD_MERGE_STREAM(shadow, ngx_flag_t, -1, 0);
     NGX_MD_MERGE_STREAM(shadow_explicit, ngx_flag_t, -1, 0);

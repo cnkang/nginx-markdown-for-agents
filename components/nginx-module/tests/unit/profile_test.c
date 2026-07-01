@@ -462,26 +462,60 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     memset(mcf, 0, sizeof(*mcf));
     mcf->enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
     mcf->enabled_complex = NULL;
+    mcf->enabled = NGX_CONF_UNSET;
+    mcf->max_size = NGX_CONF_UNSET_SIZE;
+    mcf->timeout = NGX_CONF_UNSET_MSEC;
     mcf->on_error = NGX_CONF_UNSET_UINT;
+    mcf->error_status = NGX_CONF_UNSET_UINT;
     mcf->flavor = NGX_CONF_UNSET_UINT;
+    mcf->token_estimate = NGX_CONF_UNSET;
+    mcf->front_matter = NGX_CONF_UNSET;
+    mcf->accept_policy = NGX_CONF_UNSET_UINT;
     mcf->policy.auth_policy = NGX_CONF_UNSET_UINT;
     mcf->policy.auth_cookies = NGX_CONF_UNSET_PTR;
+    mcf->policy.generate_etag = NGX_CONF_UNSET;
     mcf->content_types = NGX_CONF_UNSET_PTR;
     mcf->policy.conditional_requests = NGX_CONF_UNSET_UINT;
     mcf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
+    mcf->buffer_chunked = NGX_CONF_UNSET;
     mcf->stream_types = NGX_CONF_UNSET_PTR;
+    mcf->decompress.auto_decompress = NGX_CONF_UNSET;
+    mcf->decompress.max_size = NGX_CONF_UNSET_SIZE;
+    mcf->decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
+    mcf->decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     mcf->large_body_threshold = NGX_CONF_UNSET_SIZE;
+    mcf->max_inflight = NGX_CONF_UNSET_UINT;
+    mcf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     mcf->ops.metrics_format = NGX_CONF_UNSET_UINT;
+    mcf->ops.metrics_per_path = NGX_CONF_UNSET;
+    mcf->ops.diagnostics_enabled = NGX_CONF_UNSET;
+    mcf->ops.otel_enabled = NGX_CONF_UNSET;
+    mcf->ops.otel_tracing = NGX_CONF_UNSET;
+    mcf->ops.otel_metrics = NGX_CONF_UNSET;
+    mcf->ops.otel_span_buffer_size = NGX_CONF_UNSET_UINT;
+    mcf->ops.otel_export_timeout = NGX_CONF_UNSET_MSEC;
     mcf->stream.engine = NGX_CONF_UNSET_UINT;
     mcf->stream.policy = NGX_CONF_UNSET_UINT;
     mcf->stream.policy_explicit = -1;
     mcf->stream.threshold = NGX_CONF_UNSET_SIZE;
+    mcf->stream.threshold_explicit = -1;
+    mcf->stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
     mcf->stream.flush_min = NGX_CONF_UNSET_SIZE;
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;
-    mcf->max_size = NGX_CONF_UNSET_SIZE;
-    mcf->timeout = NGX_CONF_UNSET;
-    mcf->max_inflight = NGX_CONF_UNSET_UINT;
+    mcf->stream.on_error = NGX_CONF_UNSET_UINT;
+    mcf->stream.on_error_explicit = -1;
     mcf->stream.budget = NGX_CONF_UNSET_SIZE;
+    mcf->stream.budget_explicit = -1;
+    mcf->stream.shadow = -1;
+    mcf->stream.shadow_explicit = -1;
+    mcf->advanced.prune_noise = NGX_CONF_UNSET;
+    mcf->advanced.prune_selectors = NGX_CONF_UNSET_PTR;
+    mcf->advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
+    mcf->advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    mcf->advanced.llm_provider = NGX_CONF_UNSET_UINT;
+    mcf->advanced.chars_per_token_fixed = NGX_CONF_UNSET_UINT;
+    mcf->advanced.dynconf_enabled = NGX_CONF_UNSET;
+    mcf->advanced.dynconf_dry_run = NGX_CONF_UNSET;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -576,31 +610,131 @@ test_profile_parser_streaming_first(void)
 static void
 test_effective_config_explicit_wins(void)
 {
-    ngx_http_markdown_conf_t conf;
+    ngx_conf_t               cf;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char                    *rc;
 
     TEST_SUBSECTION("effective config: explicit wins over profile");
 
     /*
-     * Simulate balanced profile with explicit streaming=force override.
-     * After merge, effective value should be force (explicit wins).
+     * balanced profile defaults memory=8m and streaming=auto. Explicit
+     * directives at the same scope must override those profile defaults.
      */
-    init_conf(&conf);
-    conf.profile.name = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
-    conf.profile.set = 1;
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    init_conf(&parent);
+    init_conf(&child);
 
-    /* Set resolved values as if merge completed */
-    conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
-    conf.stream.policy_explicit = 1;
-    conf.accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_STRICT;
-    conf.policy.conditional_requests =
-        NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
+    child.profile.name = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
+    child.profile.set = 1;
+    child.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+    child.stream.policy_explicit = 1;
+    child.max_size = 64 * 1024 * 1024;
 
-    TEST_ASSERT(conf.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+
+    TEST_ASSERT(rc == NGX_CONF_OK, "merge should pass");
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
         "explicit streaming=force wins over profile default auto");
-    TEST_ASSERT(conf.stream.policy_explicit == 1,
+    TEST_ASSERT(child.stream.policy_explicit == 1,
         "policy_explicit flag correctly set");
+    TEST_ASSERT(child.max_size == 64 * 1024 * 1024,
+        "explicit memory limit wins over profile default 8m");
 
     TEST_PASS("explicit directive overrides profile default");
+}
+
+static void
+test_profile_defaults_strict_cache_merge(void)
+{
+    ngx_conf_t               cf;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char                    *rc;
+
+    TEST_SUBSECTION("effective config: strict_cache defaults apply");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    init_conf(&parent);
+    init_conf(&child);
+
+    child.profile.name = NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE;
+    child.profile.set = 1;
+
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+
+    TEST_ASSERT(rc == NGX_CONF_OK, "strict_cache merge should pass");
+    TEST_ASSERT(child.policy.generate_etag == 1,
+        "strict_cache enables generated ETag");
+    TEST_ASSERT(child.policy.conditional_requests ==
+        NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT,
+        "strict_cache enables full cache validation");
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
+        "strict_cache disables streaming policy");
+    TEST_ASSERT(child.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF,
+        "strict_cache disables streaming engine");
+    TEST_ASSERT(child.max_size == 8 * 1024 * 1024,
+        "strict_cache memory default is 8m");
+    TEST_ASSERT(child.timeout == 2000,
+        "strict_cache timeout default is 2s");
+    TEST_ASSERT(child.stream.budget == 0,
+        "strict_cache streaming buffer default is 0");
+    TEST_ASSERT(g_stub_conflict_called == 1,
+        "profile conflict detector sees effective strict_cache config");
+
+    TEST_PASS("strict_cache profile defaults are applied by C merge");
+}
+
+static void
+test_profile_defaults_streaming_first_merge(void)
+{
+    ngx_conf_t               cf;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char                    *rc;
+
+    TEST_SUBSECTION("effective config: streaming_first defaults apply");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    init_conf(&parent);
+    init_conf(&child);
+
+    child.profile.name = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+    child.profile.set = 1;
+
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+
+    TEST_ASSERT(rc == NGX_CONF_OK, "streaming_first merge should pass");
+    TEST_ASSERT(child.accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD,
+        "streaming_first accepts wildcard negotiation");
+    TEST_ASSERT(child.policy.generate_etag == 0,
+        "streaming_first disables generated ETag");
+    TEST_ASSERT(child.policy.conditional_requests ==
+        NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED,
+        "streaming_first disables cache validation");
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
+        "streaming_first forces streaming policy");
+    TEST_ASSERT(child.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
+        "streaming_first enables streaming engine");
+    TEST_ASSERT(child.stream.budget == 256 * 1024,
+        "streaming_first streaming buffer default is 256k");
+
+    TEST_PASS("streaming_first profile defaults are applied by C merge");
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -1031,6 +1165,8 @@ main(void)
 
     /* Task 9.5: Effective config (explicit wins) */
     test_effective_config_explicit_wins();
+    test_profile_defaults_strict_cache_merge();
+    test_profile_defaults_streaming_first_merge();
 
     /* Task 9.6: Conflict detection */
     test_conflict_detection_error();

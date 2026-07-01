@@ -22,6 +22,15 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
     int total = 0;
     char *p = buf;
     size_t rem = buf_len;
+    unsigned long not_eligible;
+
+    not_eligible = s->skips.method
+        + s->skips.status
+        + s->skips.content_type
+        + s->skips.size
+        + s->skips.streaming
+        + s->skips.auth
+        + s->skips.range;
 
 #define PROM_WRITE(...)                                     \
     do {                                                    \
@@ -70,29 +79,11 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         "nginx_markdown_skips_total"
         "{reason=\"not_eligible\"} %lu\n"
         "nginx_markdown_skips_total"
-        "{reason=\"not_eligible\"} %lu\n"
-        "nginx_markdown_skips_total"
-        "{reason=\"not_eligible\"} %lu\n"
-        "nginx_markdown_skips_total"
-        "{reason=\"not_eligible\"} %lu\n"
-        "nginx_markdown_skips_total"
-        "{reason=\"not_eligible\"} %lu\n"
-        "nginx_markdown_skips_total"
-        "{reason=\"not_eligible\"} %lu\n"
-        "nginx_markdown_skips_total"
-        "{reason=\"not_eligible\"} %lu\n"
-        "nginx_markdown_skips_total"
         "{reason=\"skipped_accept\"} %lu\n"
         "nginx_markdown_skips_total"
         "{reason=\"disabled\"} %lu\n"
         "\n",
-        s->skips.method,
-        s->skips.status,
-        s->skips.content_type,
-        s->skips.size,
-        s->skips.streaming,
-        s->skips.auth,
-        s->skips.range,
+        not_eligible,
         s->skips.accept,
         s->skips.config);
 
@@ -342,6 +333,7 @@ test_known_values(void)
     s.skips.status = 2;
     s.skips.content_type = 5;
     s.skips.accept = 1;
+    s.skips.config = 6;
     s.failures_conversion = 4;
     s.failures_resource_limit = 1;
     s.results.failopen_count = 3;
@@ -374,8 +366,13 @@ test_known_values(void)
     TEST_ASSERT(
         contains(buf,
             "nginx_markdown_skips_total"
-            "{reason=\"not_eligible\"} 3"),
-        "skips method should be 3");
+            "{reason=\"not_eligible\"} 10"),
+        "skips not_eligible should aggregate ineligible reasons");
+    TEST_ASSERT(
+        contains(buf,
+            "nginx_markdown_skips_total"
+            "{reason=\"disabled\"} 6"),
+        "skips disabled should be 6");
     TEST_ASSERT(
         contains(buf,
             "nginx_markdown_failures_total"

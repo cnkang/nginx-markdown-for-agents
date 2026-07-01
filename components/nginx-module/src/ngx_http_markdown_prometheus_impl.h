@@ -64,6 +64,17 @@ ngx_http_markdown_metrics_write_prometheus(
     u_char *end,
     const ngx_http_markdown_metrics_snapshot_t *snapshot)
 {
+    ngx_atomic_uint_t  not_eligible;
+
+    not_eligible = snapshot->skips.method
+        + snapshot->skips.status
+        + snapshot->skips.content_type
+        + snapshot->skips.size
+        + snapshot->skips.streaming
+        + snapshot->skips.auth
+        + snapshot->skips.range
+        + snapshot->skips.compression_passthrough;
+
     /* requests_total */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_requests_total "
@@ -99,43 +110,22 @@ ngx_http_markdown_metrics_write_prometheus(
         "# HELP nginx_markdown_skips_total "
         "Requests skipped by reason.\n"
         "# TYPE nginx_markdown_skips_total counter\n"
-        "nginx_markdown_skips_total{reason=\"not_eligible\"}"
-        " %uA\n"
-        "nginx_markdown_skips_total{reason=\"not_eligible\"}"
-        " %uA\n"
         "nginx_markdown_skips_total"
         "{reason=\"not_eligible\"} %uA\n"
-        "nginx_markdown_skips_total{reason=\"not_eligible\"}"
-        " %uA\n"
-        "nginx_markdown_skips_total"
-        "{reason=\"not_eligible\"} %uA\n"
-        "nginx_markdown_skips_total{reason=\"not_eligible\"}"
-        " %uA\n"
-        "nginx_markdown_skips_total{reason=\"not_eligible\"}"
-        " %uA\n"
         "nginx_markdown_skips_total"
         "{reason=\"skipped_accept\"} %uA\n"
-        "nginx_markdown_skips_total"
-        "{reason=\"disabled\"} %uA\n"
         "nginx_markdown_skips_total"
         "{reason=\"skipped_no_accept\"} %uA\n"
         "nginx_markdown_skips_total"
         "{reason=\"skipped_conditional\"} %uA\n"
         "nginx_markdown_skips_total"
-        "{reason=\"not_eligible\"} %uA\n"
+        "{reason=\"disabled\"} %uA\n"
         "\n",
-        snapshot->skips.method,
-        snapshot->skips.status,
-        snapshot->skips.content_type,
-        snapshot->skips.size,
-        snapshot->skips.streaming,
-        snapshot->skips.auth,
-        snapshot->skips.range,
+        not_eligible,
         snapshot->skips.accept,
-        snapshot->skips.config,
         snapshot->skips.no_accept,
         snapshot->skips.conditional,
-        snapshot->skips.compression_passthrough);
+        snapshot->skips.config);
 
     /* failures_total{reason=...} — lowercase snake_case per schema v1 */
     p = ngx_slprintf(p, end,
