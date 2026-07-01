@@ -123,6 +123,10 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 
 如果行为不符合预期，请查看安装指南里的 [Troubleshooting](docs/guides/INSTALLATION.md#10-troubleshooting) 小节。
 
+如果你想直接查看面向生产环境的完整配置示例，参见
+[生产示例](examples/production/) 目录（覆盖 balanced、strict_cache、
+streaming_first 三种 profile）。
+
 ## Profiles（v0.9.0+）
 
 生产部署推荐使用 `markdown_profile` 指令，一行配置即可应用一组经过测试的默认值，
