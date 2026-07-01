@@ -32,6 +32,7 @@ use crate::converter::ConversionOptions;
 use crate::error::ConversionError;
 use crate::ffi::clamp_chars_per_token;
 use crate::metadata::PageMetadata;
+use crate::security::SecurityValidator;
 use crate::streaming::budget::MemoryBudget;
 use crate::streaming::charset::CharsetState;
 use crate::streaming::emitter::IncrementalEmitter;
@@ -970,7 +971,7 @@ impl StreamingConverter {
                             && let Some((_, href)) = attrs.iter().find(|(k, _)| k == "href")
                         {
                             self.canonical_found = true;
-                            self.metadata.url = Some(self.resolve_url(href));
+                            self.metadata.url = self.resolve_and_sanitize_metadata_url(href);
                             // No href → skip this canonical, keep looking
                         }
                     }
@@ -1084,10 +1085,10 @@ impl StreamingConverter {
                 }
                 // OG/Twitter image: first-wins (resolve URL if configured)
                 "og:image" | "twitter:image" if self.metadata.image.is_none() => {
-                    self.metadata.image = Some(self.resolve_url(&content));
+                    self.metadata.image = self.resolve_and_sanitize_metadata_url(&content);
                 }
                 "og:url" if self.metadata.url.is_none() => {
-                    self.metadata.url = Some(content);
+                    self.metadata.url = Self::sanitize_metadata_url(&content);
                 }
                 "author" if self.metadata.author.is_none() => {
                     self.metadata.author = Some(content);
@@ -1098,6 +1099,18 @@ impl StreamingConverter {
                 _ => {}
             }
         }
+    }
+
+    fn sanitize_metadata_url(url: &str) -> Option<String> {
+        SecurityValidator::new()
+            .sanitize_url(url)
+            .map(ToOwned::to_owned)
+    }
+
+    fn resolve_and_sanitize_metadata_url(&self, url: &str) -> Option<String> {
+        Self::sanitize_metadata_url(url)?;
+        let resolved = self.resolve_url(url);
+        Self::sanitize_metadata_url(&resolved)
     }
 
     /// Resolve a possibly-relative URL against the converter's configured base URL.
@@ -1213,9 +1226,9 @@ impl StreamingConverter {
         base_url: &Option<String>,
     ) -> Option<String> {
         if canonical_found {
-            current_url.clone()
+            current_url.as_deref().and_then(Self::sanitize_metadata_url)
         } else {
-            base_url.clone()
+            base_url.as_deref().and_then(Self::sanitize_metadata_url)
         }
     }
 
@@ -1532,6 +1545,16 @@ mod tests {
     #[test]
     fn test_resolve_final_url_nothing() {
         let result = StreamingConverter::resolve_final_url(false, &None, &None);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_resolve_final_url_rejects_dangerous_base_url() {
+        let result = StreamingConverter::resolve_final_url(
+            false,
+            &Some("https://og.example.com".to_string()),
+            &Some("javascript:alert(1)".to_string()),
+        );
         assert_eq!(result, None);
     }
 
@@ -2376,6 +2399,49 @@ mod tests {
             conv.metadata().url.as_deref(),
             Some("https://example.com/page"),
         );
+    }
+
+    #[test]
+    fn test_canonical_link_rejects_dangerous_url() {
+        let mut conv = make_converter_with_metadata();
+        conv.feed_chunk(
+            b"<html><head>\
+              <link rel=\"canonical\" href=\"javascript:alert(1)\">\
+              </head><body><p>x</p></body></html>",
+        )
+        .unwrap();
+
+        assert_eq!(conv.metadata().url, None);
+    }
+
+    #[test]
+    fn test_metadata_image_rejects_dangerous_url_then_accepts_safe_url() {
+        let mut conv = make_converter_with_metadata();
+        conv.feed_chunk(
+            b"<html><head>\
+              <meta property=\"og:image\" content=\"javascript:alert(1)\">\
+              <meta property=\"og:image\" content=\"https://example.com/safe.png\">\
+              </head><body><p>x</p></body></html>",
+        )
+        .unwrap();
+
+        assert_eq!(
+            conv.metadata().image.as_deref(),
+            Some("https://example.com/safe.png")
+        );
+    }
+
+    #[test]
+    fn test_og_url_rejects_dangerous_url() {
+        let mut conv = make_converter_with_metadata();
+        conv.feed_chunk(
+            b"<html><head>\
+              <meta property=\"og:url\" content=\"data:text/html,<script>alert(1)</script>\">\
+              </head><body><p>x</p></body></html>",
+        )
+        .unwrap();
+
+        assert_eq!(conv.metadata().url, None);
     }
 
     #[test]
