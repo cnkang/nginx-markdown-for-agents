@@ -474,8 +474,8 @@ typedef enum {
  * - accept_policy: NGX_CONF_UNSET_UINT (strict by default)
  * - auth_policy: NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW
  * - auth_cookies: NULL (no patterns configured)
- * - generate_etag: 1 (on by default)
- * - conditional_requests: NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT
+ * - generate_etag: 0 (off by default — ims_only mode)
+ * - conditional_requests: NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE
  * - log_verbosity: NGX_HTTP_MARKDOWN_LOG_INFO
  * - buffer_chunked: 1 (on by default)
  * - stream_types: NULL (no exclusions by default)
