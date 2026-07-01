@@ -98,19 +98,22 @@ emit_check() {
     esac
 
     # Build JSON entry
-    local json_entry
+    local json_entry escaped_name escaped_status escaped_message
+    escaped_name=$(json_escape "$name")
+    escaped_status=$(json_escape "$status")
+    escaped_message=$(json_escape "$message")
     if [[ -n "$details" && -n "$hint" ]]; then
         json_entry=$(printf '{"name":"%s","status":"%s","message":"%s","details":%s,"hint":"%s"}' \
-            "$name" "$status" "$message" "$details" "$(json_escape "$hint")")
+            "$escaped_name" "$escaped_status" "$escaped_message" "$details" "$(json_escape "$hint")")
     elif [[ -n "$details" ]]; then
         json_entry=$(printf '{"name":"%s","status":"%s","message":"%s","details":%s}' \
-            "$name" "$status" "$message" "$details")
+            "$escaped_name" "$escaped_status" "$escaped_message" "$details")
     elif [[ -n "$hint" ]]; then
         json_entry=$(printf '{"name":"%s","status":"%s","message":"%s","hint":"%s"}' \
-            "$name" "$status" "$message" "$(json_escape "$hint")")
+            "$escaped_name" "$escaped_status" "$escaped_message" "$(json_escape "$hint")")
     else
         json_entry=$(printf '{"name":"%s","status":"%s","message":"%s"}' \
-            "$name" "$status" "$message")
+            "$escaped_name" "$escaped_status" "$escaped_message")
     fi
 
     if [[ -z "$CHECKS_JSON" ]]; then
