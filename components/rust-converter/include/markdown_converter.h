@@ -22,6 +22,11 @@
 #define REASON_CODE_COUNT 18
 
 /**
+ * Number of error class variants.
+ */
+#define ERROR_CLASS_COUNT 10
+
+/**
  * Success - no error occurred.
  */
 #define ERROR_SUCCESS 0
@@ -265,6 +270,36 @@
  * Profile discriminant: `streaming_first` (AI agent workloads).
  */
 #define FFI_PROFILE_STREAMING_FIRST 3
+
+/**
+ * FFI error policy kind: pass (fail-open, default).
+ */
+#define FFI_ERROR_POLICY_PASS 0
+
+/**
+ * FFI error policy kind: return specified status code.
+ */
+#define FFI_ERROR_POLICY_STATUS 1
+
+/**
+ * FFI error policy kind: fail_closed (return 502).
+ */
+#define FFI_ERROR_POLICY_FAIL_CLOSED 2
+
+/**
+ * FFI error behavior kind: pass through original response.
+ */
+#define FFI_ERROR_BEHAVIOR_PASS_THROUGH 0
+
+/**
+ * FFI error behavior kind: return specified HTTP status code.
+ */
+#define FFI_ERROR_BEHAVIOR_RETURN_STATUS 1
+
+/**
+ * FFI error behavior kind: terminate connection (post-commit).
+ */
+#define FFI_ERROR_BEHAVIOR_TERMINATE 2
 
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
@@ -1205,6 +1240,44 @@ typedef struct FFIEffectiveConfig {
 } FFIEffectiveConfig;
 
 /**
+ * FFI-safe error policy enum (spec 51).
+ *
+ * The C side derives this from the `markdown_error_policy` directive value
+ * and passes it to `markdown_decide_error_behavior`.
+ */
+typedef struct FFIErrorPolicy {
+  /**
+   * Policy kind: 0 = pass, 1 = status, 2 = fail_closed.
+   */
+  uint8_t kind;
+  /**
+   * HTTP status code (meaningful only when kind == 1).
+   */
+  uint16_t status_code;
+} FFIErrorPolicy;
+
+/**
+ * FFI-safe error behavior enum (spec 51).
+ *
+ * Returned by `markdown_decide_error_behavior` to tell the C error handler
+ * what action to take.
+ */
+typedef struct FFIErrorBehavior {
+  /**
+   * Behavior kind: 0 = pass_through, 1 = return_status, 2 = terminate.
+   */
+  uint8_t kind;
+  /**
+   * HTTP status code (meaningful only when kind == 1).
+   */
+  uint16_t status_code;
+  /**
+   * 1 if behavior was forced (post-commit), 0 if policy-driven.
+   */
+  uint8_t forced;
+} FFIErrorBehavior;
+
+/**
  * Get the string representation of a reason code by its numeric value.
  *
  * Returns a pointer to a static string and writes the length to `out_len`.
@@ -1775,6 +1848,43 @@ struct FFIConflictList markdown_detect_conflicts(uint8_t profile,
  * The list must not be used after this call.
  */
 void markdown_free_conflicts(struct FFIConflictList *list);
+
+/**
+ * Decide error handling behavior for a given error class and policy (spec 51).
+ *
+ * This is the FFI entry point for the unified error policy decision.
+ * The C error handler calls this to determine what action to take.
+ *
+ * # Parameters
+ *
+ * - `error_class`: The `FFIErrorClass` discriminant identifying the error.
+ * - `policy`: The `FFIErrorPolicy` derived from `markdown_error_policy`.
+ * - `out`: Output pointer for the resulting `FFIErrorBehavior`.
+ *
+ * # Returns
+ *
+ * `0` on success, `1` if `out` is NULL or `error_class` is invalid.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `out` is NULL or points to writable storage
+ * for an `FFIErrorBehavior`.
+ */
+uint8_t markdown_decide_error_behavior(uint8_t error_class,
+                                       struct FFIErrorPolicy policy,
+                                       struct FFIErrorBehavior *out);
+
+/**
+ * Map an error class to its reason code discriminant (spec 51).
+ *
+ * Returns the `ReasonCode` discriminant (u8) for the given error class.
+ * Returns `u8::MAX` (255) if the error class is invalid.
+ *
+ * # Safety
+ *
+ * No pointer parameters; always safe to call.
+ */
+uint8_t markdown_error_to_reason_code(uint8_t error_class);
 
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**

@@ -1661,6 +1661,121 @@ pub unsafe extern "C" fn markdown_free_conflicts(list: *mut FFIConflictList) {
     }));
 }
 
+// ─── Error Classification FFI (spec 51) ──────────────────────────────────────
+
+use super::abi::{
+    FFIErrorBehavior, FFIErrorPolicy, FFI_ERROR_BEHAVIOR_PASS_THROUGH,
+    FFI_ERROR_BEHAVIOR_RETURN_STATUS, FFI_ERROR_BEHAVIOR_TERMINATE, FFI_ERROR_POLICY_FAIL_CLOSED,
+    FFI_ERROR_POLICY_PASS, FFI_ERROR_POLICY_STATUS,
+};
+use crate::error::classification::{
+    ErrorBehavior, ErrorClass, ErrorPolicy, decide_error_behavior, error_to_reason_code,
+};
+
+/// Decide error handling behavior for a given error class and policy (spec 51).
+///
+/// This is the FFI entry point for the unified error policy decision.
+/// The C error handler calls this to determine what action to take.
+///
+/// # Parameters
+///
+/// - `error_class`: The `FFIErrorClass` discriminant identifying the error.
+/// - `policy`: The `FFIErrorPolicy` derived from `markdown_error_policy`.
+/// - `out`: Output pointer for the resulting `FFIErrorBehavior`.
+///
+/// # Returns
+///
+/// `0` on success, `1` if `out` is NULL or `error_class` is invalid.
+///
+/// # Safety
+///
+/// The caller must ensure that `out` is NULL or points to writable storage
+/// for an `FFIErrorBehavior`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn markdown_decide_error_behavior(
+    error_class: u8,
+    policy: FFIErrorPolicy,
+    out: *mut FFIErrorBehavior,
+) -> u8 {
+    if out.is_null() {
+        return 1;
+    }
+
+    /* Fail-safe default: terminate connection (most conservative). */
+    let out_ref = unsafe { &mut *out };
+    out_ref.kind = FFI_ERROR_BEHAVIOR_TERMINATE;
+    out_ref.status_code = 0;
+    out_ref.forced = 1;
+
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        let class = match ErrorClass::from_discriminant(error_class) {
+            Some(c) => c,
+            None => return Err(()),
+        };
+
+        let rust_policy = match policy.kind {
+            FFI_ERROR_POLICY_PASS => ErrorPolicy::Pass,
+            FFI_ERROR_POLICY_STATUS => ErrorPolicy::Status(policy.status_code),
+            FFI_ERROR_POLICY_FAIL_CLOSED => ErrorPolicy::FailClosed,
+            _ => ErrorPolicy::Pass, /* unknown → fail-open default */
+        };
+
+        let behavior = decide_error_behavior(class, rust_policy);
+
+        Ok(behavior)
+    }));
+
+    match result {
+        Ok(Ok(behavior)) => {
+            match behavior {
+                ErrorBehavior::PassThrough => {
+                    out_ref.kind = FFI_ERROR_BEHAVIOR_PASS_THROUGH;
+                    out_ref.status_code = 0;
+                    out_ref.forced = 0;
+                }
+                ErrorBehavior::ReturnStatus(code) => {
+                    out_ref.kind = FFI_ERROR_BEHAVIOR_RETURN_STATUS;
+                    out_ref.status_code = code;
+                    out_ref.forced = 0;
+                }
+                ErrorBehavior::TerminateConnection => {
+                    out_ref.kind = FFI_ERROR_BEHAVIOR_TERMINATE;
+                    out_ref.status_code = 0;
+                    out_ref.forced = 1;
+                }
+            }
+            0
+        }
+        Ok(Err(())) => 1, /* invalid error_class discriminant */
+        Err(_) => {
+            /* Panic caught — fail-safe TerminateConnection already set. */
+            0
+        }
+    }
+}
+
+/// Map an error class to its reason code discriminant (spec 51).
+///
+/// Returns the `ReasonCode` discriminant (u8) for the given error class.
+/// Returns `u8::MAX` (255) if the error class is invalid.
+///
+/// # Safety
+///
+/// No pointer parameters; always safe to call.
+#[unsafe(no_mangle)]
+pub extern "C" fn markdown_error_to_reason_code(error_class: u8) -> u8 {
+    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        let class = match ErrorClass::from_discriminant(error_class) {
+            Some(c) => c,
+            None => return u8::MAX,
+        };
+        let reason = error_to_reason_code(class);
+        reason.discriminant() as u8
+    }));
+
+    result.unwrap_or(u8::MAX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,6 +9,15 @@
 //! FFI error code (1–11, 99) that is shared across the Rust↔C boundary via
 //! `markdown_converter.h`.  Adding a new variant requires updating both this
 //! mapping and the C-side classification in `ngx_http_markdown_error.c`.
+//!
+//! ## Error Classification (spec 51)
+//!
+//! The [`classification`] submodule defines the unified error policy layer:
+//! error classes, policies, and behavior decisions that determine how each
+//! error type is handled at runtime (pass-through, return status, or
+//! terminate connection).
+
+pub mod classification;
 
 use std::fmt;
 
