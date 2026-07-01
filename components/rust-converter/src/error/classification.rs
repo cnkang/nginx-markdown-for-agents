@@ -309,15 +309,15 @@ pub fn decide_error_behavior(class: ErrorClass, policy: ErrorPolicy) -> ErrorBeh
 /// use nginx_markdown_converter::decision::reason_code::ReasonCode;
 ///
 /// assert_eq!(error_to_reason_code(ErrorClass::ConversionError), ReasonCode::FailedOpen);
-/// assert_eq!(error_to_reason_code(ErrorClass::Timeout), ReasonCode::ParseTimeout);
+/// assert_eq!(error_to_reason_code(ErrorClass::Timeout), ReasonCode::Timeout);
 /// ```
 pub fn error_to_reason_code(class: ErrorClass) -> ReasonCode {
     match class {
         ErrorClass::ConversionError => ReasonCode::FailedOpen,
-        ErrorClass::Timeout => ReasonCode::ParseTimeout,
-        ErrorClass::MemoryBudgetExceeded => ReasonCode::ParseBudgetExceeded,
-        ErrorClass::FfiPanic => ReasonCode::FfiCallError,
-        ErrorClass::DecompressionError => ReasonCode::FailedDecompression,
+        ErrorClass::Timeout => ReasonCode::Timeout,
+        ErrorClass::MemoryBudgetExceeded => ReasonCode::BudgetExceeded,
+        ErrorClass::FfiPanic => ReasonCode::FfiPanic,
+        ErrorClass::DecompressionError => ReasonCode::DecompressionError,
         ErrorClass::Overload => ReasonCode::FailedClosed,
         ErrorClass::InvalidDynconf => ReasonCode::FailedOpen,
         ErrorClass::DegradedSnapshot => ReasonCode::FailedOpen,
@@ -344,7 +344,12 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for class in &ALL_ERROR_CLASSES {
             let d = *class as u8;
-            assert!(seen.insert(d), "Duplicate discriminant {} for {:?}", d, class);
+            assert!(
+                seen.insert(d),
+                "Duplicate discriminant {} for {:?}",
+                d,
+                class
+            );
         }
     }
 
@@ -412,11 +417,7 @@ mod tests {
             ErrorClass::DegradedSnapshot,
         ];
         for class in &pre_commit {
-            assert!(
-                !class.is_post_commit(),
-                "{:?} should be pre-commit",
-                class
-            );
+            assert!(!class.is_post_commit(), "{:?} should be pre-commit", class);
         }
     }
 
@@ -554,19 +555,19 @@ mod tests {
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::Timeout),
-            ReasonCode::ParseTimeout
+            ReasonCode::Timeout
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::MemoryBudgetExceeded),
-            ReasonCode::ParseBudgetExceeded
+            ReasonCode::BudgetExceeded
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::FfiPanic),
-            ReasonCode::FfiCallError
+            ReasonCode::FfiPanic
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::DecompressionError),
-            ReasonCode::FailedDecompression
+            ReasonCode::DecompressionError
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::Overload),

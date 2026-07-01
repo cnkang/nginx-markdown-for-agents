@@ -578,7 +578,7 @@ pub unsafe extern "C" fn markdown_make_decision(
     // bytes. The normal path below overwrites both fields on success.
     use crate::decision::reason_code::ReasonCode;
     result_ref.decision = 1; /* skip */
-    result_ref.reason_code = ReasonCode::FfiCallError.discriminant() as u8;
+    result_ref.reason_code = ReasonCode::FfiPanic.discriminant() as u8;
 
     let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| -> (u8, u8) {
         #[cfg(test)]
@@ -620,9 +620,9 @@ pub unsafe extern "C" fn markdown_make_decision(
                     SkipReason::SkipAccept => ReasonCode::SkippedAccept,
                     SkipReason::SkipNoAccept => ReasonCode::SkippedNoAccept,
                     SkipReason::SkipConditional => ReasonCode::SkippedConditional,
-                    SkipReason::FailDecompression => ReasonCode::FailedDecompression,
-                    SkipReason::ParseTimeout => ReasonCode::ParseTimeout,
-                    SkipReason::ParseBudgetExceeded => ReasonCode::ParseBudgetExceeded,
+                    SkipReason::FailDecompression => ReasonCode::DecompressionError,
+                    SkipReason::ParseTimeout => ReasonCode::Timeout,
+                    SkipReason::ParseBudgetExceeded => ReasonCode::BudgetExceeded,
                     SkipReason::NotEligible => ReasonCode::NotEligible,
                     SkipReason::Disabled => ReasonCode::Disabled,
                 };
@@ -649,7 +649,7 @@ pub unsafe extern "C" fn markdown_make_decision(
         result_ref.decision = decision;
         result_ref.reason_code = reason_code;
     }
-    /* else: panic caught — the fail-open skip + FfiCallError fallback
+    /* else: panic caught — the fail-open skip + FfiPanic fallback
      * set above remains in place. Nothing else to write. */
 }
 
@@ -1664,9 +1664,9 @@ pub unsafe extern "C" fn markdown_free_conflicts(list: *mut FFIConflictList) {
 // ─── Error Classification FFI (spec 51) ──────────────────────────────────────
 
 use super::abi::{
-    FFIErrorBehavior, FFIErrorPolicy, FFI_ERROR_BEHAVIOR_PASS_THROUGH,
-    FFI_ERROR_BEHAVIOR_RETURN_STATUS, FFI_ERROR_BEHAVIOR_TERMINATE, FFI_ERROR_POLICY_FAIL_CLOSED,
-    FFI_ERROR_POLICY_PASS, FFI_ERROR_POLICY_STATUS,
+    FFI_ERROR_BEHAVIOR_PASS_THROUGH, FFI_ERROR_BEHAVIOR_RETURN_STATUS,
+    FFI_ERROR_BEHAVIOR_TERMINATE, FFI_ERROR_POLICY_FAIL_CLOSED, FFI_ERROR_POLICY_PASS,
+    FFI_ERROR_POLICY_STATUS, FFIErrorBehavior, FFIErrorPolicy,
 };
 use crate::error::classification::{
     ErrorBehavior, ErrorClass, ErrorPolicy, decide_error_behavior, error_to_reason_code,
@@ -2348,9 +2348,9 @@ mod tests {
         );
         assert_eq!(
             result.reason_code,
-            ReasonCode::FfiCallError.discriminant() as u8,
-            "panic fallback must set reason_code=FfiCallError ({}), got {}",
-            ReasonCode::FfiCallError.discriminant(),
+            ReasonCode::FfiPanic.discriminant() as u8,
+            "panic fallback must set reason_code=FfiPanic ({}), got {}",
+            ReasonCode::FfiPanic.discriminant(),
             result.reason_code
         );
     }

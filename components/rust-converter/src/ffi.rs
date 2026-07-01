@@ -69,6 +69,7 @@
 
 pub(crate) mod abi;
 mod convert;
+mod diagnostics;
 mod exports;
 mod memory;
 mod options;
@@ -103,6 +104,7 @@ pub use abi::{
     ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_STREAMING_FALLBACK, POST_COMMIT_ABORT,
     POST_COMMIT_SAFE_FINISH,
 };
+pub use diagnostics::{markdown_free_diagnostics, markdown_get_diagnostics_schema};
 pub use exports::{
     markdown_check_conditional, markdown_convert, markdown_converter_free, markdown_converter_new,
     markdown_decide_base_url, markdown_decide_error_behavior, markdown_decomp_result_init,
