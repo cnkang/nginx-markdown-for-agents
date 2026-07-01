@@ -154,6 +154,13 @@ typedef struct {
         ngx_atomic_uint_t path_conversion_time_sum_ms;
         ngx_atomic_uint_t overflow_count;
     } per_path;
+
+    /* Inflight guard metrics (spec 52, per-worker) */
+    struct {
+        ngx_atomic_uint_t current;
+        ngx_atomic_uint_t high_watermark;
+        ngx_atomic_uint_t overload_total;
+    } inflight;
 } ngx_http_markdown_metrics_snapshot_t;
 
 typedef struct {
@@ -376,6 +383,17 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->per_path.path_conversion_time_sum_ms;
     snapshot->per_path.overflow_count =
         metrics->per_path.overflow_count;
+
+    /*
+     * Inflight counter is per-worker (not in shared memory),
+     * so read directly from the global counter instance.
+     */
+    snapshot->inflight.current =
+        (ngx_atomic_uint_t) ngx_http_markdown_inflight_current();
+    snapshot->inflight.high_watermark =
+        (ngx_atomic_uint_t) ngx_http_markdown_inflight_high_watermark();
+    snapshot->inflight.overload_total =
+        (ngx_atomic_uint_t) ngx_http_markdown_inflight_overload_total();
 }
 
 static ngx_flag_t ngx_http_markdown_metrics_value_contains(
