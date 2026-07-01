@@ -1597,6 +1597,7 @@ If you encounter issues not covered in this guide:
 - [Project README](../../README.md)
 - [Documentation Index](../README.md)
 - [Configuration Guide](CONFIGURATION.md)
+- [Installation Diagnostics (doctor)](doctor.md)
 - [Build Instructions (Development)](BUILD_INSTRUCTIONS.md)
 - [System Architecture](../architecture/SYSTEM_ARCHITECTURE.md)
 - [NGINX Documentation](https://nginx.org/en/docs/)
