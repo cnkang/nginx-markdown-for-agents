@@ -358,21 +358,21 @@ ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_skip_no_accept());
         dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_NONE;
-        dp.reason_code = "SKIPPED_NO_ACCEPT";
+        dp.reason_code = "skipped_no_accept";
         break;
 
     case NEGOTIATE_REASON_EXPLICIT_REJECT:
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_skip_accept_reject());
         dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_REJECT;
-        dp.reason_code = "SKIPPED_ACCEPT_REJECT";
+        dp.reason_code = "skipped_accept_reject";
         break;
 
     default:
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_skip_accept());
         dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_SKIP;
-        dp.reason_code = "SKIPPED_ACCEPT";
+        dp.reason_code = "skipped_accept";
         break;
     }
 
@@ -970,7 +970,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                 NGX_HTTP_MARKDOWN_COND_NOT_MODIFIED;
             dp.conversion_status =
                 NGX_HTTP_MARKDOWN_CONV_SKIPPED;
-            dp.reason_code = "SKIPPED_CONDITIONAL";
+            dp.reason_code = "skipped_conditional";
             NGX_HTTP_MARKDOWN_METRIC_INC(skips.conditional);
             dp.duration_ms = elapsed_ms;
             ngx_http_markdown_log_decision_path(
@@ -993,8 +993,8 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                 NGX_HTTP_MARKDOWN_CONV_FAILED;
             dp.reason_code = (conf->on_error
                 == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? "ELIGIBLE_FAILED_CLOSED"
-                : "ELIGIBLE_FAILED_OPEN";
+                ? "failed_closed"
+                : "failed_open";
             dp.duration_ms = elapsed_ms;
             ngx_http_markdown_log_decision_path(
                 r, conf, ctx->effective_conf, &dp);
@@ -1020,8 +1020,8 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                     NGX_HTTP_MARKDOWN_CONV_FAILED;
                 dp.reason_code = (conf->on_error
                     == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                    ? "ELIGIBLE_FAILED_CLOSED"
-                    : "ELIGIBLE_FAILED_OPEN";
+                    ? "failed_closed"
+                    : "failed_open";
                 dp.duration_ms = elapsed_ms;
                 ngx_http_markdown_log_decision_path(
                     r, conf, ctx->effective_conf, &dp);
@@ -1050,7 +1050,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                 NGX_HTTP_MARKDOWN_COND_PROCEED;
             dp.conversion_status =
                 NGX_HTTP_MARKDOWN_CONV_SUCCESS;
-            dp.reason_code = "ELIGIBLE_CONVERTED";
+            dp.reason_code = "converted";
             dp.duration_ms = elapsed_ms;
             ngx_http_markdown_log_decision_path(
                 r, conf, ctx->effective_conf, &dp);
@@ -1075,8 +1075,8 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                 NGX_HTTP_MARKDOWN_CONV_FAILED;
             dp.reason_code = (conf->on_error
                 == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? "ELIGIBLE_FAILED_CLOSED"
-                : "ELIGIBLE_FAILED_OPEN";
+                ? "failed_closed"
+                : "failed_open";
             dp.duration_ms = elapsed_ms;
             ngx_http_markdown_log_decision_path(
                 r, conf, ctx->effective_conf, &dp);
