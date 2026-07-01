@@ -449,6 +449,24 @@ test_parse_line_memory_budget(void)
 }
 
 static void
+test_parse_line_schema_version(void)
+{
+    ngx_uint_t  key;
+    u_char     *value;
+    size_t      value_len;
+    ngx_int_t   rc;
+
+    u_char line[] = "schema_version=0.9";
+    rc = ngx_http_markdown_dynconf_parse_line(line, sizeof(line) - 1,
+                                              &key, &value, &value_len);
+    TEST_ASSERT(rc == NGX_OK, "schema_version=0.9 parses OK");
+    TEST_ASSERT(key == NGX_HTTP_MARKDOWN_DYNCONF_KEY_SCHEMA_VERSION,
+                "key is SCHEMA_VERSION");
+    TEST_ASSERT(value_len == 3, "value length is 3");
+    TEST_PASS("parse_line: schema_version=0.9");
+}
+
+static void
 test_parse_line_unknown_key(void)
 {
     ngx_uint_t  key;
@@ -1035,6 +1053,7 @@ test_start_success(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file for start");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "markdown_filter=on\n");
         fclose(f);
     }
@@ -1105,6 +1124,7 @@ test_start_applies_existing_file_on_startup(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file with runtime overrides");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "prune_noise=off\n");
         fprintf(f, "log_verbosity=debug\n");
         fclose(f);
@@ -1319,6 +1339,7 @@ test_timer_handler_change_detected(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file for timer handler");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "markdown_filter=on\n");
         fclose(f);
     }
@@ -1404,6 +1425,7 @@ test_reload_valid_file(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file for reload");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "markdown_filter=on\nprune_noise=off\n");
         fclose(f);
     }
@@ -1445,11 +1467,11 @@ test_reload_empty_file(void)
     watcher.active_snapshot.valid = 1;
 
     rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
-    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE,
-                "reload empty file returns NO_CHANGE");
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                "reload empty file returns INVALID_FILE (missing schema_version)");
 
     unlink(tmpfile);
-    TEST_PASS("reload: empty file");
+    TEST_PASS("reload: empty file rejected (missing schema_version)");
 }
 
 static void
@@ -1464,6 +1486,7 @@ test_reload_comments_and_blanks(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file with comments");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "# This is a comment\n\n  \nlog_verbosity=warn\n");
         fclose(f);
     }
@@ -1495,7 +1518,7 @@ test_reload_no_newline_at_eof(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file without trailing NL");
-        fprintf(f, "memory_budget=64k");
+        fprintf(f, "schema_version=0.9\nmemory_budget=64k");
         fclose(f);
     }
 
@@ -1547,6 +1570,7 @@ test_reload_all_keys(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file with all keys");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "markdown_filter=off\n");
         fprintf(f, "prune_noise=on\n");
         fprintf(f, "log_verbosity=error\n");
@@ -1588,6 +1612,7 @@ test_reload_filter_overrides_complex(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file for filter override");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "markdown_filter=off\n");
         fclose(f);
     }
@@ -1628,6 +1653,7 @@ test_reload_verbosity_module_enum(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file for verbosity enum test");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "log_verbosity=debug\n");
         fclose(f);
     }
@@ -1660,6 +1686,7 @@ test_reload_invalid_line_rejects_all(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file with invalid line");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "markdown_filter=on\n");
         fprintf(f, "prune_noise=yes\n");
         fprintf(f, "log_verbosity=warn\n");
@@ -1686,6 +1713,176 @@ test_reload_invalid_line_rejects_all(void)
     unlink(tmpfile);
     TEST_PASS("reload: invalid line rejects entire file (staged commit)");
 }
+
+
+/*
+ * schema_version validation tests (spec 45/53, task 2.8).
+ */
+
+static void
+test_reload_missing_schema_version_rejected(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("schema_version: missing → INVALID_FILE");
+
+    tmpfile = "/tmp/dynconf_test_no_schema_version.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create file without schema_version");
+        fprintf(f, "markdown_filter=on\n");
+        fprintf(f, "prune_noise=off\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                "missing schema_version → INVALID_FILE");
+    TEST_ASSERT(watcher.version == 0,
+                "version not incremented");
+
+    unlink(tmpfile);
+    TEST_PASS("schema_version: missing → rejected");
+}
+
+static void
+test_reload_unknown_schema_version_rejected(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("schema_version: unknown version → INVALID_FILE");
+
+    tmpfile = "/tmp/dynconf_test_bad_schema_version.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create file with unknown schema_version");
+        fprintf(f, "schema_version=1.0\n");
+        fprintf(f, "markdown_filter=on\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                "unknown schema_version=1.0 → INVALID_FILE");
+
+    unlink(tmpfile);
+    TEST_PASS("schema_version: unknown version → rejected");
+}
+
+static void
+test_reload_schema_version_08_rejected(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("schema_version: old version 0.8 → INVALID_FILE");
+
+    tmpfile = "/tmp/dynconf_test_old_schema_version.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create file with old schema_version");
+        fprintf(f, "schema_version=0.8\n");
+        fprintf(f, "markdown_filter=on\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE,
+                "schema_version=0.8 → INVALID_FILE");
+
+    unlink(tmpfile);
+    TEST_PASS("schema_version: old version 0.8 → rejected");
+}
+
+static void
+test_reload_schema_version_valid(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("schema_version: valid 0.9 → APPLIED");
+
+    tmpfile = "/tmp/dynconf_test_valid_schema_version.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create file with valid schema_version");
+        fprintf(f, "schema_version=0.9\n");
+        fprintf(f, "markdown_filter=off\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "schema_version=0.9 → APPLIED");
+    TEST_ASSERT(conf.enabled == 0, "markdown_filter=off applied");
+
+    unlink(tmpfile);
+    TEST_PASS("schema_version: valid 0.9 → accepted");
+}
+
+static void
+test_reload_schema_version_only(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("schema_version: only schema_version line → APPLIED");
+
+    tmpfile = "/tmp/dynconf_test_schema_version_only.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create file with only schema_version");
+        fprintf(f, "schema_version=0.9\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    /* schema_version counts as an applied key, so result is APPLIED
+     * even though no runtime fields are modified. */
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED,
+                "schema_version=0.9 only → APPLIED");
+
+    unlink(tmpfile);
+    TEST_PASS("schema_version: only schema_version line → accepted");
+}
+
 
 static void
 test_snapshot_from_conf_and_apply(void)
@@ -2033,6 +2230,7 @@ test_reload_lkg_preserved_on_success(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file for LKG test");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "markdown_filter=off\n");
         fclose(f);
     }
@@ -2146,6 +2344,7 @@ test_reload_lkg_successive_reloads(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create file for first reload");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "prune_noise=on\n");
         fclose(f);
     }
@@ -2164,6 +2363,7 @@ test_reload_lkg_successive_reloads(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create file for second reload");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "log_verbosity=debug\n");
         fclose(f);
     }
@@ -2213,6 +2413,7 @@ test_reload_lkg_preserved_after_failed_reload(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create file for success reload");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "prune_noise=on\n");
         fclose(f);
     }
@@ -2451,6 +2652,7 @@ test_dry_run_valid_file_returns_ok(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file for dry-run valid test");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "markdown_filter=on\nprune_noise=off\n");
         fclose(f);
     }
@@ -2567,6 +2769,7 @@ test_dry_run_off_applies_normally(void)
     {
         FILE *f = fopen(tmpfile, "w");
         TEST_ASSERT(f != NULL, "create temp file for dry-run off test");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "markdown_filter=on\nprune_noise=off\n");
         fclose(f);
     }
@@ -2620,6 +2823,7 @@ test_reload_concurrent_request_snapshot_consistency(void)
     {
         FILE *f = fopen(tmpfile_v1, "w");
         TEST_ASSERT(f != NULL, "create v1 config file");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "markdown_filter=on\n");
         fprintf(f, "prune_noise=off\n");
         fprintf(f, "log_verbosity=warn\n");
@@ -2675,6 +2879,7 @@ test_reload_concurrent_request_snapshot_consistency(void)
     {
         FILE *f = fopen(tmpfile_v2, "w");
         TEST_ASSERT(f != NULL, "create v2 config file");
+        fprintf(f, "schema_version=0.9\n");
         fprintf(f, "markdown_filter=off\n");
         fprintf(f, "prune_noise=on\n");
         fprintf(f, "log_verbosity=debug\n");
@@ -2773,6 +2978,7 @@ main(void)
     test_parse_line_log_verbosity();
     test_parse_line_streaming_budget();
     test_parse_line_memory_budget();
+    test_parse_line_schema_version();
     test_parse_line_unknown_key();
     test_parse_line_no_equals();
     test_parse_line_empty_value();
@@ -2846,6 +3052,14 @@ main(void)
     test_reload_filter_overrides_complex();
     test_reload_verbosity_module_enum();
     test_reload_invalid_line_rejects_all();
+
+    TEST_SECTION("dynconf_impl: schema_version validation (spec 45/53)");
+
+    test_reload_missing_schema_version_rejected();
+    test_reload_unknown_schema_version_rejected();
+    test_reload_schema_version_08_rejected();
+    test_reload_schema_version_valid();
+    test_reload_schema_version_only();
 
     TEST_SECTION("dynconf_impl: additional reload/start tests");
 

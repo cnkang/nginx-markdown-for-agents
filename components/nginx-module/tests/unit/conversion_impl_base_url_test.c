@@ -276,7 +276,7 @@ markdown_result_free(struct MarkdownResult *result) /* SONAR_NOTE: must match FF
 /*
  * FFI lifecycle stub for markdown_options_init.  Mirrors the Rust
  * implementation: zeroes all fields, then sets non-zero defaults
- * (timeout_ms=5000, generate_etag=1).  The production code must
+ * (timeout_ms=5000, generate_etag=0).  The production code must
  * call this instead of ngx_memzero to honour the FFI contract.
  */
 static void
@@ -287,7 +287,7 @@ markdown_options_init(struct MarkdownOptions *result)
     }
     memset(result, 0, sizeof(*result));
     result->timeout_ms = 5000;
-    result->generate_etag = 1;
+    result->generate_etag = 0;
 }
 
 /*

@@ -187,7 +187,7 @@ markdown_options_init(struct MarkdownOptions *result)
     if (result != NULL) {
         memset(result, 0, sizeof(*result));
         result->timeout_ms = 5000;
-        result->generate_etag = 1;
+        result->generate_etag = 0;
     }
 }
 
@@ -630,7 +630,7 @@ test_should_convert_out_reason_null(void)
 
 /*
  * Verify that the markdown_options_init stub exposes the same defaults
- * as the Rust implementation (timeout_ms=5000, generate_etag=1).
+ * as the Rust implementation (timeout_ms=5000, generate_etag=0).
  * This test ensures accept/production tests fail if the default FFI
  * contract ever drifts from the Rust implementation.
  */
@@ -646,8 +646,8 @@ test_markdown_options_init_defaults(void)
 
     TEST_ASSERT(options.timeout_ms == 5000,
         "markdown_options_init sets timeout_ms=5000");
-    TEST_ASSERT(options.generate_etag == 1,
-        "markdown_options_init sets generate_etag=1");
+    TEST_ASSERT(options.generate_etag == 0,
+        "markdown_options_init sets generate_etag=0");
     TEST_PASS("markdown_options_init production defaults verified");
 }
 

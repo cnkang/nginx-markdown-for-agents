@@ -556,8 +556,8 @@ test_06x_defaults_unchanged(void)
         "buffer_chunked should default to on");
     TEST_ASSERT(child->decompress.auto_decompress == 1,
         "auto_decompress should default to on");
-    TEST_ASSERT(child->policy.generate_etag == 1,
-        "generate_etag should default to on");
+    TEST_ASSERT(child->policy.generate_etag == 0,
+        "generate_etag should default to off (ims_only mode)");
     TEST_ASSERT(child->advanced.dynconf_enabled == 0,
         "dynconf_enabled should default to off");
     TEST_ASSERT(child->advanced.prune_noise == 1,
