@@ -178,7 +178,7 @@ module_defaults(void)
     c.markdown_front_matter = 0;
     c.markdown_accept = 0;
     c.markdown_auth_policy = AUTH_ALLOW;
-    c.markdown_cache_validation = CACHE_VALIDATION_FULL;
+    c.markdown_cache_validation = CACHE_VALIDATION_IMS_ONLY;
     c.markdown_buffer_chunked = 1;
     c.markdown_auto_decompress = 1;
     c.markdown_metrics_format = METRICS_FORMAT_AUTO;
@@ -246,7 +246,7 @@ test_default_values(void)
     TEST_ASSERT(c.markdown_timeout_ms == 5000, "timeout default 5s");
     TEST_ASSERT(c.markdown_on_error == ON_ERROR_PASS, "on_error default pass");
     TEST_ASSERT(c.markdown_flavor == FLAVOR_COMMONMARK, "flavor default commonmark");
-    TEST_ASSERT(c.markdown_cache_validation == CACHE_VALIDATION_FULL, "cache_validation default full");
+    TEST_ASSERT(c.markdown_cache_validation == CACHE_VALIDATION_IMS_ONLY, "cache_validation default ims_only");
     TEST_ASSERT(c.markdown_buffer_chunked == 1, "buffer_chunked default on");
     TEST_ASSERT(c.markdown_auto_decompress == 1, "auto_decompress default on");
     TEST_ASSERT(c.markdown_metrics_format == METRICS_FORMAT_AUTO, "metrics_format default auto");

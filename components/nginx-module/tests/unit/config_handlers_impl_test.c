@@ -89,6 +89,7 @@ struct ngx_conf_s {
 
 struct ngx_command_s {
     ngx_str_t  name;
+    void      *post;
 };
 
 struct ngx_module_s {
@@ -434,33 +435,94 @@ ngx_http_compile_complex_value(ngx_http_compile_complex_value_t *ccv)
 }
 
 /*
- * No-op stub for ngx_conf_log_error.  Consumes variadic args
- * without output, silencing configuration error logging in the
- * unit harness.
+ * Global buffer for capturing ngx_conf_log_error output.
+ * Tests can inspect this after calling handlers that emit
+ * configuration error messages.
+ */
+static char g_conf_log_buf[1024];
+static ngx_uint_t g_conf_log_level;
+
+/*
+ * Capturing stub for ngx_conf_log_error.  Formats the message
+ * into g_conf_log_buf so tests can assert on error content.
  *
  * Parameters:
- *   level - log level (unused).
+ *   level - log level (captured in g_conf_log_level).
  *   cf    - configuration context (unused).
  *   err   - error code (unused).
- *   fmt   - printf-style format string (consumed but not printed).
- *   ...   - format arguments (consumed but not printed).
+ *   fmt   - printf-style format string.
+ *   ...   - format arguments.
  *
  * Return: void.
  *
- * Side effects: none (va_start/va_end pair consumes args only).
+ * Side effects: writes to g_conf_log_buf and g_conf_log_level.
  */
 static void
 ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
     const char *fmt, ...)
 {
-    va_list ap;
+    va_list  ap;
+    char    *p;
+    char    *end;
 
-    UNUSED(level);
     UNUSED(cf);
     UNUSED(err);
 
+    g_conf_log_level = level;
+    p = g_conf_log_buf;
+    end = g_conf_log_buf + sizeof(g_conf_log_buf) - 1;
+
     va_start(ap, fmt);
+
+    /*
+     * Minimal format expansion supporting %V (ngx_str_t *) and %s.
+     * Sufficient for the reject-removed-directive handler and other
+     * simple config error messages.
+     */
+    while (*fmt && p < end) {
+        if (*fmt == '%' && *(fmt + 1) == 'V') {
+            ngx_str_t *s = va_arg(ap, ngx_str_t *);
+            size_t     n;
+
+            n = (size_t) (end - p);
+            if (n > s->len) {
+                n = s->len;
+            }
+            memcpy(p, s->data, n);
+            p += n;
+            fmt += 2;
+        } else if (*fmt == '%' && *(fmt + 1) == 's') {
+            const char *s = va_arg(ap, const char *);
+            size_t      slen;
+            size_t      n;
+
+            slen = strlen(s);
+            n = (size_t) (end - p);
+            if (n > slen) {
+                n = slen;
+            }
+            memcpy(p, s, n);
+            p += n;
+            fmt += 2;
+        } else if (*fmt == '%' && *(fmt + 1) == 'd') {
+            int  val = va_arg(ap, int);
+            int  written;
+
+            written = snprintf(p, (size_t) (end - p), "%d", val);
+            if (written > 0) {
+                p += written;
+            }
+            fmt += 2;
+        } else if (*fmt == '"' && *(fmt + 1) == '%') {
+            /* pass the literal quote character */
+            *p++ = *fmt++;
+        } else {
+            *p++ = *fmt++;
+        }
+    }
+
     va_end(ap);
+    *p = '\0';
 }
 
 /*
@@ -2066,6 +2128,121 @@ test_trusted_proxies_handler(void)
 }
 
 /*
+ * Reject-only stub handler for removed directives (spec 54).
+ *
+ * This is a test-local copy of the production function from
+ * ngx_http_markdown_config_directives_impl.h.  The production header
+ * cannot be included directly because it carries the full directive
+ * registry table with dependencies on types not available in the
+ * unit harness (ngx_conf_enum_t, ngx_null_command, etc.).
+ *
+ * Any change to the production function must be mirrored here.
+ *
+ * Parameters:
+ *   cf   - configuration context
+ *   cmd  - directive definition (cmd->name = legacy name,
+ *          cmd->post = migration hint string)
+ *   conf - unused
+ *
+ * Returns:
+ *   Always NGX_CONF_ERROR.
+ */
+static char *
+ngx_http_markdown_reject_removed_directive(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    (void) conf;
+
+    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+        "\"%V\" directive has been removed in 0.9.0; %s "
+        "(see docs/guides/MIGRATION-0.9.md)",
+        &cmd->name, (char *) cmd->post);
+
+    return NGX_CONF_ERROR;
+}
+
+/*
+ * Verify ngx_http_markdown_reject_removed_directive (spec 54):
+ * 1. Returns NGX_CONF_ERROR unconditionally.
+ * 2. Error message contains the directive name.
+ * 3. Error message contains "removed in 0.9.0".
+ * 4. Error message references the migration hint.
+ * 5. Error message references "docs/guides/MIGRATION-0.9.md".
+ * 6. Log level is NGX_LOG_EMERG.
+ *
+ * Return: void.
+ *
+ * Side effects: assertions; writes to g_conf_log_buf.
+ */
+static void
+test_reject_removed_directive(void)
+{
+    ngx_conf_t     cf;
+    ngx_array_t    args;
+    ngx_str_t      values[2];
+    ngx_command_t  cmd;
+    const char    *rc;
+    const char    *hint;
+
+    TEST_SUBSECTION("reject_removed_directive (spec 54)");
+
+    /* Set up mock objects. */
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&cmd.name, "markdown_on_error");
+    hint = "use \"markdown_error_policy pass|fail_closed|status <code>\" "
+           "instead";
+    cmd.post = (void *) hint;
+
+    memset(g_conf_log_buf, 0, sizeof(g_conf_log_buf));
+    g_conf_log_level = 0;
+
+    /* Invoke the handler. */
+    rc = ngx_http_markdown_reject_removed_directive(&cf, &cmd, NULL);
+
+    /* 1. Return value is NGX_CONF_ERROR. */
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "reject handler must return NGX_CONF_ERROR");
+
+    /* 2. Error message contains directive name. */
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_on_error") != NULL,
+        "error must contain the directive name");
+
+    /* 3. Error message contains "removed in 0.9.0". */
+    TEST_ASSERT(strstr(g_conf_log_buf, "removed in 0.9.0") != NULL,
+        "error must state removal in 0.9.0");
+
+    /* 4. Error message contains migration hint. */
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_error_policy") != NULL,
+        "error must reference the replacement directive");
+
+    /* 5. Error message references the migration guide. */
+    TEST_ASSERT(strstr(g_conf_log_buf, "docs/guides/MIGRATION-0.9.md")
+        != NULL,
+        "error must reference MIGRATION-0.9.md");
+
+    /* 6. Log level is EMERG. */
+    TEST_ASSERT(g_conf_log_level == NGX_LOG_EMERG,
+        "log level must be NGX_LOG_EMERG");
+
+    /* Second directive to confirm generality. */
+    set_arg(&cmd.name, "markdown_etag");
+    cmd.post = (void *) "use \"markdown_cache_validation\" instead";
+    memset(g_conf_log_buf, 0, sizeof(g_conf_log_buf));
+
+    rc = ngx_http_markdown_reject_removed_directive(&cf, &cmd, NULL);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "reject handler must always return NGX_CONF_ERROR");
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_etag") != NULL,
+        "error must contain second directive name");
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_cache_validation") != NULL,
+        "error must contain second replacement hint");
+    TEST_ASSERT(strstr(g_conf_log_buf, "MIGRATION-0.9.md") != NULL,
+        "error must reference migration guide for second directive");
+
+    TEST_PASS("reject_removed_directive golden error verified");
+}
+
+/*
  * Entry point: run all config_handlers_impl unit tests.
  *
  * Return: 0 on success (all assertions pass).
@@ -2101,6 +2278,7 @@ main(void)
     test_content_types_validation();
     test_markdown_content_types_handler();
     test_trusted_proxies_handler();
+    test_reject_removed_directive();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
