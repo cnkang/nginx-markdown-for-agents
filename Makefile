@@ -674,14 +674,16 @@ release-gates-check-090: release-gates-check-080
 # Production Examples: validate all examples pass nginx -t (NEW)
 test-production-examples-nginx-t:
 	@echo "=== Production Examples nginx -t ==="
-	@if command -v nginx >/dev/null 2>&1; then \
+	@nginx_bin="$${NGINX_BIN:-nginx}"; \
+	if command -v "$$nginx_bin" >/dev/null 2>&1; then \
 		for conf in examples/production/*.conf; do \
 			echo "  Testing: $$conf"; \
-			nginx -t -c "$$(pwd)/$$conf" 2>&1 || exit 1; \
+			"$$nginx_bin" -t -c "$$(pwd)/$$conf" 2>&1 || exit 1; \
 		done; \
 		echo "All production examples pass nginx -t"; \
 	else \
-		echo "SKIP: nginx binary not found (set NGINX_BIN or install nginx)"; \
+		echo "FAIL: nginx binary not found (set NGINX_BIN to a module-enabled nginx)" >&2; \
+		exit 1; \
 	fi
 
 # Production Examples: E2E smoke (requires running NGINX, deferred)

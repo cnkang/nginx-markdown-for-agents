@@ -21,21 +21,77 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4.2.2
 
+      - name: Prepare smoke fixtures
+        run: |
+          mkdir -p "$RUNNER_TEMP/doctor-bin" "$RUNNER_TEMP/doctor-modules"
+          cat > "$RUNNER_TEMP/doctor-bin/nginx" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          case "${1:-}" in
+            -v)
+              echo "nginx version: nginx/1.28.3" >&2
+              ;;
+            -V)
+              echo "nginx version: nginx/1.28.3" >&2
+              echo "configure arguments: --with-compat" >&2
+              ;;
+            -t)
+              exit 0
+              ;;
+            *)
+              echo "unexpected nginx smoke argument: ${1:-}" >&2
+              exit 2
+              ;;
+          esac
+          EOF
+          chmod +x "$RUNNER_TEMP/doctor-bin/nginx"
+          touch "$RUNNER_TEMP/doctor-modules/ngx_http_markdown_filter_module.so"
+
       - name: Run doctor (human output)
-        run: bash tools/doctor/nginx-markdown-doctor.sh --nginx-bin "" || true
+        run: >
+          bash tools/doctor/nginx-markdown-doctor.sh
+          --nginx-bin "$RUNNER_TEMP/doctor-bin/nginx"
+          --module-path "$RUNNER_TEMP/doctor-modules" || true
 
       - name: Run doctor (JSON output)
-        run: bash tools/doctor/nginx-markdown-doctor.sh --json --nginx-bin "" 2>/dev/null | python3 -m json.tool
+        run: >
+          bash tools/doctor/nginx-markdown-doctor.sh --json
+          --nginx-bin "$RUNNER_TEMP/doctor-bin/nginx"
+          --module-path "$RUNNER_TEMP/doctor-modules" 2>/dev/null
+          | python3 -m json.tool
 
       - name: Verify at least 3 checks
         run: |
-          count=$(bash tools/doctor/nginx-markdown-doctor.sh --json --nginx-bin "" 2>/dev/null \
+          count=$(bash tools/doctor/nginx-markdown-doctor.sh --json \
+            --nginx-bin "$RUNNER_TEMP/doctor-bin/nginx" \
+            --module-path "$RUNNER_TEMP/doctor-modules" 2>/dev/null \
             | python3 -c "import json,sys; print(json.load(sys.stdin)['summary']['total'])")
           [[ "$count" -ge 3 ]] || { echo "FAIL: expected >= 3 checks, got $count"; exit 1; }
 
+      - name: Verify required checks ran
+        run: |
+          bash tools/doctor/nginx-markdown-doctor.sh --json \
+            --nginx-bin "$RUNNER_TEMP/doctor-bin/nginx" \
+            --module-path "$RUNNER_TEMP/doctor-modules" 2>/dev/null | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          checks = {check['name']: check['status'] for check in data['checks']}
+          expected = {
+              'nginx_version': 'pass',
+              'module_exists': 'pass',
+              'config_valid': 'pass',
+          }
+          for name, status in expected.items():
+              actual = checks.get(name)
+              assert actual == status, f'{name} expected {status}, got {actual}'
+          print('required doctor checks ran')
+          "
+
       - name: Verify JSON schema structure
         run: |
-          bash tools/doctor/nginx-markdown-doctor.sh --json --nginx-bin "" 2>/dev/null | python3 -c "
+          bash tools/doctor/nginx-markdown-doctor.sh --json \
+            --nginx-bin "$RUNNER_TEMP/doctor-bin/nginx" \
+            --module-path "$RUNNER_TEMP/doctor-modules" 2>/dev/null | python3 -c "
           import json, sys
           data = json.load(sys.stdin)
           assert 'schema_version' in data, 'missing schema_version'

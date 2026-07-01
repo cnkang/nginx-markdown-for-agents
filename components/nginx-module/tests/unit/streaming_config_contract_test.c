@@ -179,6 +179,7 @@ struct ngx_http_request_s {
     ngx_uint_t              method;
     ngx_http_headers_out_t  headers_out;
     ngx_http_headers_in_t   headers_in;
+    ngx_pool_t             *pool;
 };
 
 struct ngx_http_complex_value_s {
@@ -194,6 +195,7 @@ typedef struct {
 struct ngx_conf_s {
     ngx_pool_t  *pool;
     ngx_array_t *args;
+    ngx_uint_t   cmd_type;
 };
 
 struct ngx_command_s {
@@ -227,6 +229,49 @@ static ngx_http_core_loc_conf_t *g_clcf;
 static ngx_int_t g_compile_complex_rc;
 static ngx_http_markdown_main_conf_t g_main_conf;
 static ngx_uint_t g_diagnostics_recording_requested;
+
+#ifndef TRUSTED_PROXIES_PUSH_OK
+#define TRUSTED_PROXIES_PUSH_OK 0
+#endif
+
+typedef struct {
+    void  (*handler)(void *data);
+    void   *data;
+} ngx_pool_cleanup_t;
+
+static ngx_pool_cleanup_t g_trusted_cleanup;
+
+static ngx_pool_cleanup_t *
+ngx_pool_cleanup_add(ngx_pool_t *p, size_t size)
+{
+    UNUSED(p);
+    UNUSED(size);
+    g_trusted_cleanup.handler = NULL;
+    g_trusted_cleanup.data = NULL;
+    return &g_trusted_cleanup;
+}
+
+struct MarkdownTrustedProxies *
+markdown_trusted_proxies_new(void)
+{
+    return (struct MarkdownTrustedProxies *) (uintptr_t) 0x1;
+}
+
+uint8_t
+markdown_trusted_proxies_push(struct MarkdownTrustedProxies *handle,
+    const uint8_t *cidr, uintptr_t cidr_len)
+{
+    UNUSED(handle);
+    UNUSED(cidr);
+    UNUSED(cidr_len);
+    return TRUSTED_PROXIES_PUSH_OK;
+}
+
+void
+markdown_trusted_proxies_free(struct MarkdownTrustedProxies *handle)
+{
+    UNUSED(handle);
+}
 
 static ngx_int_t
 ngx_http_markdown_metrics_handler(ngx_http_request_t *r)
@@ -997,12 +1042,20 @@ static void
 merge_stream_config(ngx_http_markdown_conf_t *child,
     const ngx_http_markdown_conf_t *parent)
 {
-    ngx_flag_t stream_threshold_set;
-    ngx_flag_t stream_budget_set;
+    ngx_flag_t                          stream_threshold_set;
+    ngx_flag_t                          stream_budget_set;
+    ngx_http_markdown_profile_defaults_t defaults;
 
     stream_threshold_set = (child->stream.threshold != NGX_CONF_UNSET_SIZE);
     stream_budget_set = (child->stream.budget != NGX_CONF_UNSET_SIZE);
-    ngx_http_markdown_merge_stream_values(child, parent);
+
+    defaults.streaming_policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
+    defaults.streaming_engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
+    defaults.limits_streaming_buffer =
+        NGX_HTTP_MARKDOWN_STREAM_BUDGET_DEFAULT;
+    defaults.error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    ngx_http_markdown_merge_stream_values(child, parent, &defaults);
     if (stream_threshold_set) {
         child->stream.threshold_explicit = 1;
     }

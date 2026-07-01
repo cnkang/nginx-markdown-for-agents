@@ -245,6 +245,31 @@ ngx_http_complex_value(ngx_http_request_t *r,
     return val->eval_rc;
 }
 
+#include "../../src/markdown_converter.h"
+
+struct FFIConflictList
+markdown_detect_conflicts(uint8_t profile,
+    const struct FFIExplicitConfig *explicit_,
+    const struct FFIEffectiveConfig *effective)
+{
+    struct FFIConflictList list;
+
+    UNUSED(profile);
+    UNUSED(explicit_);
+    UNUSED(effective);
+
+    list.conflicts = NULL;
+    list.count = 0;
+
+    return list;
+}
+
+void
+markdown_free_conflicts(struct FFIConflictList *list)
+{
+    UNUSED(list);
+}
+
 #include "../../src/ngx_http_markdown_config_core_impl.h"
 
 static ngx_pool_t g_pool;

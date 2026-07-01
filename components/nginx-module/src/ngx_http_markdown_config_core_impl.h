@@ -384,30 +384,98 @@ ngx_http_markdown_apply_memory_budget_override(ngx_http_markdown_conf_t *conf,
     }
 }
 
+
+/*
+ * Expand a 0.9.0 production profile into C-side merge defaults.
+ *
+ * These values mirror components/rust-converter/src/config/profile.rs so the
+ * parser/merge layer and Rust conflict detector reason about the same
+ * effective configuration.  Explicit directives still win via the normal
+ * ngx_conf_merge_* order: child value -> parent value -> profile default.
+ */
+static void
+ngx_http_markdown_profile_defaults(ngx_uint_t profile,
+    ngx_http_markdown_profile_defaults_t *defaults)
+{
+    defaults->accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_STRICT;
+    defaults->conditional_requests =
+        NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
+    defaults->generate_etag = 0;
+    defaults->streaming_policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
+    defaults->streaming_engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
+    defaults->limits_memory = 10 * 1024 * 1024;
+    defaults->limits_timeout = 5000;
+    defaults->limits_streaming_buffer =
+        NGX_HTTP_MARKDOWN_STREAM_BUDGET_DEFAULT;
+    defaults->limits_max_inflight = NGX_HTTP_MARKDOWN_MAX_INFLIGHT_DEFAULT;
+    defaults->error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    defaults->auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW;
+    defaults->flavor = NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK;
+    defaults->diagnostics = 0;
+
+    switch (profile) {
+    case NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE:
+        defaults->conditional_requests =
+            NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+        defaults->generate_etag = 1;
+        defaults->streaming_policy = NGX_HTTP_MARKDOWN_STREAMING_OFF;
+        defaults->streaming_engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF;
+        defaults->limits_memory = 8 * 1024 * 1024;
+        defaults->limits_timeout = 2000;
+        defaults->limits_streaming_buffer = 0;
+        break;
+
+    case NGX_HTTP_MARKDOWN_PROFILE_BALANCED:
+        defaults->limits_memory = 8 * 1024 * 1024;
+        defaults->limits_timeout = 2000;
+        defaults->limits_streaming_buffer = 256 * 1024;
+        break;
+
+    case NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST:
+        defaults->accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD;
+        defaults->conditional_requests =
+            NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
+        defaults->streaming_policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+        defaults->streaming_engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
+        defaults->limits_memory = 8 * 1024 * 1024;
+        defaults->limits_timeout = 2000;
+        defaults->limits_streaming_buffer = 256 * 1024;
+        break;
+
+    default:
+        break;
+    }
+}
+
 /*
  * Merge base conversion/runtime options and operational flags.
  */
 static void
 ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev)
+    const ngx_http_markdown_conf_t *prev,
+    const ngx_http_markdown_profile_defaults_t *profile_defaults)
 {
-    ngx_conf_merge_size_value(conf->max_size, prev->max_size, 10 * 1024 * 1024);
-    ngx_conf_merge_msec_value(conf->timeout, prev->timeout, 5000);
+    ngx_conf_merge_size_value(conf->max_size, prev->max_size,
+                              profile_defaults->limits_memory);
+    ngx_conf_merge_msec_value(conf->timeout, prev->timeout,
+                              profile_defaults->limits_timeout);
     ngx_conf_merge_uint_value(conf->on_error, prev->on_error,
-                              NGX_HTTP_MARKDOWN_ON_ERROR_PASS);
+                              profile_defaults->error_policy);
     ngx_conf_merge_uint_value(conf->error_status, prev->error_status,
                               NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT);
     ngx_conf_merge_uint_value(conf->flavor, prev->flavor,
-                              NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK);
+                              profile_defaults->flavor);
     ngx_conf_merge_value(conf->token_estimate, prev->token_estimate, 0);
     ngx_conf_merge_value(conf->front_matter, prev->front_matter, 0);
     ngx_conf_merge_uint_value(conf->accept_policy, prev->accept_policy,
-                              NGX_HTTP_MARKDOWN_ACCEPT_STRICT);
+                              profile_defaults->accept_policy);
     ngx_conf_merge_uint_value(conf->policy.auth_policy, prev->policy.auth_policy,
-                              NGX_HTTP_MARKDOWN_AUTH_POLICY_ALLOW);
-    ngx_conf_merge_value(conf->policy.generate_etag, prev->policy.generate_etag, 0);
+                              profile_defaults->auth_policy);
+    ngx_conf_merge_value(conf->policy.generate_etag,
+                         prev->policy.generate_etag,
+                         profile_defaults->generate_etag);
     ngx_conf_merge_uint_value(conf->policy.conditional_requests, prev->policy.conditional_requests,
-                              NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE);
+                              profile_defaults->conditional_requests);
     ngx_conf_merge_uint_value(conf->policy.log_verbosity, prev->policy.log_verbosity,
                               NGX_HTTP_MARKDOWN_LOG_INFO);
     ngx_conf_merge_value(conf->buffer_chunked, prev->buffer_chunked, 1);
@@ -437,7 +505,8 @@ ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
  */
 static void
 ngx_http_markdown_merge_core_ops_values(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev)
+    const ngx_http_markdown_conf_t *prev,
+    const ngx_http_markdown_profile_defaults_t *profile_defaults)
 {
     ngx_conf_merge_value(conf->ops.trust_forwarded_headers,
                          prev->ops.trust_forwarded_headers, 0);
@@ -445,7 +514,8 @@ ngx_http_markdown_merge_core_ops_values(ngx_http_markdown_conf_t *conf,
                               NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO);
     ngx_conf_merge_value(conf->ops.metrics_per_path, prev->ops.metrics_per_path, 0);
     ngx_conf_merge_value(conf->ops.diagnostics_enabled,
-                         prev->ops.diagnostics_enabled, 0);
+                         prev->ops.diagnostics_enabled,
+                         profile_defaults->diagnostics);
 
     if (conf->ops.diagnostics_allow == NULL) {
         conf->ops.diagnostics_allow = prev->ops.diagnostics_allow;
@@ -474,13 +544,14 @@ ngx_http_markdown_merge_core_ops_values(ngx_http_markdown_conf_t *conf,
  */
 static void
 ngx_http_markdown_merge_core_ptr_values(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev)
+    const ngx_http_markdown_conf_t *prev,
+    const ngx_http_markdown_profile_defaults_t *profile_defaults)
 {
     ngx_conf_merge_size_value(conf->large_body_threshold,
                               prev->large_body_threshold,
                               NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
     ngx_conf_merge_uint_value(conf->max_inflight, prev->max_inflight,
-                              NGX_HTTP_MARKDOWN_MAX_INFLIGHT_DEFAULT);
+                              profile_defaults->limits_max_inflight);
     ngx_conf_merge_ptr_value(conf->policy.auth_cookies, prev->policy.auth_cookies, NULL);
     ngx_conf_merge_ptr_value(conf->stream_types, prev->stream_types, NULL);
     ngx_conf_merge_ptr_value(conf->content_types, prev->content_types, NULL);
@@ -491,11 +562,12 @@ ngx_http_markdown_merge_core_ptr_values(ngx_http_markdown_conf_t *conf,
  */
 static void
 ngx_http_markdown_merge_core_values(ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_conf_t *prev)
+    const ngx_http_markdown_conf_t *prev,
+    const ngx_http_markdown_profile_defaults_t *profile_defaults)
 {
-    ngx_http_markdown_merge_core_base_values(conf, prev);
-    ngx_http_markdown_merge_core_ops_values(conf, prev);
-    ngx_http_markdown_merge_core_ptr_values(conf, prev);
+    ngx_http_markdown_merge_core_base_values(conf, prev, profile_defaults);
+    ngx_http_markdown_merge_core_ops_values(conf, prev, profile_defaults);
+    ngx_http_markdown_merge_core_ptr_values(conf, prev, profile_defaults);
 }
 
 /*
@@ -694,8 +766,9 @@ ngx_http_markdown_check_profile_conflicts(ngx_conf_t *cf,
 static char *
 ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
 {
-    const ngx_http_markdown_conf_t *prev = parent;
-    ngx_http_markdown_conf_t *conf = child;
+    const ngx_http_markdown_conf_t      *prev = parent;
+    ngx_http_markdown_conf_t            *conf = child;
+    ngx_http_markdown_profile_defaults_t profile_defaults;
 
     ngx_http_markdown_merge_enabled(conf, prev);
 
@@ -709,6 +782,8 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         conf->profile.name = prev->profile.name;
         conf->profile.set = prev->profile.set;
     }
+    ngx_http_markdown_profile_defaults(conf->profile.name,
+                                       &profile_defaults);
 
     /*
      * Save whether max_size and streaming_budget were explicitly set at
@@ -730,9 +805,9 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         (conf->stream.budget != NGX_CONF_UNSET_SIZE);
 #endif
 
-    ngx_http_markdown_merge_core_values(conf, prev);
+    ngx_http_markdown_merge_core_values(conf, prev, &profile_defaults);
 
-    ngx_http_markdown_merge_stream_values(conf, prev);
+    ngx_http_markdown_merge_stream_values(conf, prev, &profile_defaults);
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     if (stream_on_error_set) {
