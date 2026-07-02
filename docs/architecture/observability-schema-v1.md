@@ -10,7 +10,7 @@
 The observability schema v1 defines the contract for all machine-readable
 observability surfaces in `nginx-markdown-for-agents` 0.9.0+:
 
-- **Reason codes** — 25 canonical decision outcomes
+- **Reason codes** — 26 canonical decision outcomes
 - **Metric families** — 5 unified Prometheus counter families with `reason` label
 - **Label whitelist** — 4 allowed metric labels (bounded cardinality)
 - **Diagnostics schema** — JSON v1 structure for the `/nginx-markdown/diagnostics` endpoint
@@ -24,7 +24,7 @@ no removals.
 
 ## Reason Code Registry
 
-All 25 reason codes are defined in a single Rust enum (`ReasonCode`, `#[repr(u8)]`).
+All 26 reason codes are defined in a single Rust enum (`ReasonCode`, `#[repr(u8)]`).
 C code accesses them via FFI. The `as_str()` values are lowercase snake_case.
 
 | # | Variant | `as_str()` | `metric_key()` | `log_callsite()` |
@@ -67,7 +67,7 @@ C code accesses them via FFI. The `as_str()` values are lowercase snake_case.
 |----------|---------|
 | `markdown_reason_code_str(code, out_len)` | Get `as_str()` by discriminant |
 | `markdown_reason_code_metric_key(code, out_len)` | Get `metric_key()` by discriminant |
-| `markdown_reason_code_count()` | Total reason code count (25) |
+| `markdown_reason_code_count()` | Total reason code count (26) |
 
 ---
 
