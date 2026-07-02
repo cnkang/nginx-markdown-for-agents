@@ -175,6 +175,9 @@ static ngx_int_t g_forward_headers_rc = 0;
 static ngx_int_t g_update_headers_rc = 0;
 static ngx_int_t g_failopen_rc = 0;
 static ngx_uint_t g_failopen_call_count = 0;
+static ngx_int_t g_bypass_failopen_rc = 0;
+static ngx_uint_t g_bypass_failopen_call_count = 0;
+static ngx_int_t g_conditional_return_rc = NGX_DECLINED;
 static ngx_int_t g_next_body_filter_rc = 0;
 static ngx_chain_t *g_next_body_filter_last_input = NULL;
 static ngx_uint_t g_next_body_filter_call_count = 0;
@@ -771,6 +774,24 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
 }
 
 /*
+ * Direct fail-open stub (bypass path).  Increments g_bypass_failopen_call_count
+ * and returns g_bypass_failopen_rc, allowing tests to verify that the bypass
+ * path calls fail_open directly, NOT reject_or_fail_open.
+ */
+static ngx_int_t
+ngx_http_markdown_fail_open_buffered_response(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const char *debug_message)
+{
+    UNUSED(r);
+    UNUSED(ctx);
+    UNUSED(debug_message);
+    g_bypass_failopen_call_count++;
+    return g_bypass_failopen_rc;
+}
+
+/*
  * Classify FFI error codes into semantic categories.  PARSE/ENCODING/
  * INVALID_INPUT map to CONVERSION, TIMEOUT/MEMORY_LIMIT map to
  * RESOURCE_LIMIT, all others map to SYSTEM.  Mirrors the production
@@ -850,7 +871,7 @@ ngx_http_markdown_handle_if_none_match(
     UNUSED(ctx);
     UNUSED(converter);
     UNUSED(result);
-    return NGX_DECLINED;
+    return g_conditional_return_rc;
 }
 
 ngx_int_t
@@ -982,6 +1003,9 @@ reset_stub_state(void)
     g_update_headers_rc = NGX_OK;
     g_failopen_rc = NGX_OK;
     g_failopen_call_count = 0;
+    g_bypass_failopen_rc = NGX_OK;
+    g_bypass_failopen_call_count = 0;
+    g_conditional_return_rc = NGX_DECLINED;
     g_next_body_filter_rc = NGX_OK;
     g_next_body_filter_last_input = NULL;
     g_next_body_filter_call_count = 0;
@@ -2147,6 +2171,57 @@ test_misc_conversion_helpers(void)
     TEST_PASS("misc conversion helpers covered");
 }
 
+/*
+ * P0 regression test: conditional bypass must NOT go through error_policy.
+ *
+ * When handle_if_none_match returns NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT,
+ * resolve_conditional_result must call fail_open_buffered_response directly,
+ * NOT reject_or_fail_open_buffered_response.  This ensures that even when
+ * markdown_error_policy is set to fail_closed/status, a bypass (Range or
+ * no-transform) still delivers the original upstream response unmodified
+ * instead of returning an error.
+ */
+static void
+test_conditional_bypass_bypasses_error_policy(void)
+{
+    ngx_http_request_t        r;
+    ngx_http_markdown_ctx_t   ctx;
+    ngx_http_markdown_conf_t  conf;
+    struct MarkdownResult     result;
+    ngx_msec_t                elapsed_ms;
+    ngx_flag_t                has_result;
+    ngx_int_t                 rc;
+
+    TEST_SUBSECTION("bypass does not go through error_policy");
+
+    reset_stub_state();
+    init_request(&r);
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&result, 0, sizeof(result));
+
+    /* Simulate bypass outcome from handle_if_none_match */
+    g_conditional_return_rc = NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT;
+    g_bypass_failopen_rc = NGX_OK;
+
+    /* Set error_policy to REJECT — bypass must NOT honor this */
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+
+    elapsed_ms = 0;
+    has_result = 0;
+    rc = ngx_http_markdown_resolve_conditional_result(
+        &r, &ctx, &conf, &result, &elapsed_ms, &has_result);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "bypass with REJECT policy still returns NGX_OK (original)");
+    TEST_ASSERT(g_bypass_failopen_call_count == 1,
+                "bypass calls fail_open_buffered_response directly");
+    TEST_ASSERT(g_failopen_call_count == 0,
+                "bypass does NOT call reject_or_fail_open (error_policy)");
+
+    TEST_PASS("bypass bypasses error_policy");
+}
+
 
 int
 main(void)
@@ -2178,6 +2253,7 @@ main(void)
     test_fullbuffer_resume_does_not_resubmit_pending_chain();
     test_fullbuffer_resume_pending_lifecycle();
     test_misc_conversion_helpers();
+    test_conditional_bypass_bypasses_error_policy();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
