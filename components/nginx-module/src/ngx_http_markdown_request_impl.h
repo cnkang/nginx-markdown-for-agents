@@ -899,7 +899,7 @@ path_selected:
                 ngx_http_markdown_log_decision(
                     r, conf, ctx->effective_conf,
                     ngx_http_markdown_reason_failed_closed());
-                return NGX_HTTP_SERVICE_UNAVAILABLE;
+                return conf->error_status;
             }
 
             /* fail-open: pass through original response */
