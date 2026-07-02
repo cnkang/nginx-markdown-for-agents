@@ -403,7 +403,7 @@ http {
 |-----------|-------------|-----|
 | `markdown_trust_forwarded_headers on` | → `markdown_trusted_proxies <CIDR>...` | CIDR-gated trust prevents header spoofing from untrusted sources |
 | `markdown_on_error pass` | → `markdown_error_policy pass` | Renamed; `reject` becomes `fail_closed` for clarity |
-| `markdown_max_size` + timeout + budget | → `markdown_limits memory=64m timeout=5s max_inflight=64` | Consolidated key-value limits directive |
+| `markdown_max_size` / `markdown_memory_budget` + timeout + budget | → `markdown_limits memory=64m timeout=5s max_inflight=64` | Consolidated key-value limits directive |
 | `markdown_on_wildcard` | → `markdown_accept wildcard` | New directive syntax for Accept matching control |
 | _(none)_ | + `markdown_profile balanced` | Profile system provides tested production defaults |
 | Metrics queries | Use `markdown_skipped_total{reason="..."}` | Per-reason counters consolidated into unified families |
