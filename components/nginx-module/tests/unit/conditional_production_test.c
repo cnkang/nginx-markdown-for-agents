@@ -29,6 +29,10 @@ struct MarkdownConverterHandle { int dummy; };
 #define NGX_HTTP_NOT_MODIFIED 304
 #endif
 
+#ifndef NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT
+#define NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT (-104)
+#endif
+
 #ifndef NGX_LOG_ERR
 #define NGX_LOG_ERR 3
 #endif
@@ -58,6 +62,13 @@ struct MarkdownConverterHandle { int dummy; };
 #define ngx_log_debug2(level, log, err, fmt, arg1, arg2)        \
     do { (void)(level); (void)(log); (void)(err);               \
          (void)(arg1); (void)(arg2); } while (0)
+
+#ifdef ngx_log_debug3
+#undef ngx_log_debug3
+#endif
+#define ngx_log_debug3(level, log, err, fmt, arg1, arg2, arg3)  \
+    do { (void)(level); (void)(log); (void)(err);               \
+         (void)(arg1); (void)(arg2); (void)(arg3); } while (0)
 
 #ifdef ngx_log_error
 #undef ngx_log_error
@@ -134,6 +145,7 @@ struct ngx_http_request_s {
         ngx_list_t headers;
         ngx_table_elt_t *etag;
         off_t      content_length_n;
+        time_t     last_modified_time;
     } headers_out;
 };
 
@@ -183,6 +195,26 @@ ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
         return (s1 == s2) ? 0 : (s1 == NULL) ? -1 : 1;
     }
     return (ngx_int_t) strncasecmp((const char *)s1, (const char *)s2, n);
+}
+
+/*
+ * Minimal ngx_http_time stub: formats a time_t as a fixed RFC 1123
+ * string.  The real NGINX function uses gmtime + snprintf; this stub
+ * produces a constant date string for testing.  The exact value does
+ * not matter for unit tests — only that a non-empty string is produced
+ * when last_modified_time is valid.
+ */
+u_char *
+ngx_http_time(u_char *buf, time_t t)
+{
+    static const u_char  fmt[] = "Wed, 21 Oct 2015 07:28:00 GMT";
+
+    if (buf == NULL || t == (time_t) -1) {
+        return buf;
+    }
+
+    memcpy(buf, fmt, sizeof(fmt) - 1);
+    return buf + (sizeof(fmt) - 1);
 }
 
 ngx_table_elt_t *
@@ -338,6 +370,12 @@ markdown_decide_conditional(const struct FFIConditionalInput *input,
     if (input->has_range) {
         out->outcome = 2;
         out->reason = 3;
+        return;
+    }
+
+    if (input->no_transform) {
+        out->outcome = 2;
+        out->reason = 4;
         return;
     }
 
@@ -1070,6 +1108,206 @@ test_handle_inm_with_ims_header(void)
     TEST_PASS("with If-Modified-Since header");
 }
 
+/* ── Bypass outcome tests ────────────────────────────────────── */
+
+/*
+ * P0 regression test: Range header with conditional headers present
+ * must return Bypass, not proceed to conversion.
+ */
+static void
+test_handle_bypass_range_request(void)
+{
+    g_pool_offset = 0;
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    add_header(&r->headers_in.headers, "If-Modified-Since",
+        "Wed, 21 Oct 2015 07:28:00 GMT");
+    add_header(&r->headers_in.headers, "Range", "bytes=0-1023");
+    add_header(&r->headers_out.headers, "Last-Modified",
+        "Wed, 21 Oct 2015 07:28:00 GMT");
+
+    ngx_http_markdown_conf_t conf;
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.conditional_requests =
+        NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
+
+    ngx_http_markdown_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+
+    struct MarkdownResult *result = NULL;
+    ngx_int_t rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, NULL, &result);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT,
+        "Range request returns Bypass result code");
+    TEST_ASSERT(result == NULL,
+        "Bypass does not allocate conversion result");
+    TEST_PASS("Range bypass returns BYPASS, not DECLINED");
+}
+
+/*
+ * P0 regression test: Cache-Control: no-transform with conditional
+ * headers present must return Bypass, not proceed to conversion.
+ */
+static void
+test_handle_bypass_no_transform(void)
+{
+    g_pool_offset = 0;
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    add_header(&r->headers_in.headers, "If-Modified-Since",
+        "Wed, 21 Oct 2015 07:28:00 GMT");
+    add_header(&r->headers_out.headers, "Cache-Control", "no-transform");
+    add_header(&r->headers_out.headers, "Last-Modified",
+        "Wed, 21 Oct 2015 07:28:00 GMT");
+
+    ngx_http_markdown_conf_t conf;
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.conditional_requests =
+        NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
+
+    ngx_http_markdown_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+
+    struct MarkdownResult *result = NULL;
+    ngx_int_t rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, NULL, &result);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT,
+        "no-transform response returns Bypass result code");
+    TEST_ASSERT(result == NULL,
+        "Bypass does not allocate conversion result");
+    TEST_PASS("no-transform bypass returns BYPASS, not DECLINED");
+}
+
+/*
+ * P0 regression test: has_no_transform detects no-transform in a
+ * comma-separated Cache-Control value.
+ */
+static void
+test_has_no_transform_in_comma_separated_list(void)
+{
+    g_pool_offset = 0;
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    add_header(&r->headers_out.headers, "Cache-Control",
+        "public, max-age=3600, no-transform");
+
+    ngx_flag_t result = ngx_http_markdown_has_no_transform(r);
+    TEST_ASSERT(result == 1,
+        "no-transform detected in comma-separated list");
+    TEST_PASS("has_no_transform finds directive in list");
+}
+
+/*
+ * P0 regression test: has_no_transform returns 0 when no-transform
+ * is absent.
+ */
+static void
+test_has_no_transform_absent(void)
+{
+    g_pool_offset = 0;
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    add_header(&r->headers_out.headers, "Cache-Control",
+        "public, max-age=3600");
+
+    ngx_flag_t result = ngx_http_markdown_has_no_transform(r);
+    TEST_ASSERT(result == 0, "no-transform absent returns 0");
+    TEST_PASS("has_no_transform absent");
+}
+
+/*
+ * P0 regression test: has_no_transform returns 0 when no Cache-Control
+ * header at all.
+ */
+static void
+test_has_no_transform_no_cache_control(void)
+{
+    g_pool_offset = 0;
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    ngx_flag_t result = ngx_http_markdown_has_no_transform(r);
+    TEST_ASSERT(result == 0, "No Cache-Control returns 0");
+    TEST_PASS("has_no_transform no header");
+}
+
+/* ── last_modified_time fallback tests ──────────────────────── */
+
+/*
+ * P1 regression test: IMS-only with only r->headers_out.last_modified_time
+ * set (no Last-Modified list header) must produce a valid Last-Modified
+ * string for the Rust conditional decision, enabling a 304 match.
+ */
+static void
+test_handle_ims_only_last_modified_time_fallback(void)
+{
+    g_pool_offset = 0;
+    g_cond_result_code = 0;  /* NotModified */
+
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    add_header(&r->headers_in.headers, "If-Modified-Since",
+        "Wed, 21 Oct 2015 07:28:00 GMT");
+    /* No Last-Modified list header — only the dedicated field. */
+    r->headers_out.last_modified_time = 1445412480;
+
+    ngx_http_markdown_conf_t conf;
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.conditional_requests =
+        NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
+    conf.policy.generate_etag = 0;
+
+    ngx_http_markdown_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+
+    struct MarkdownResult *result = NULL;
+    ngx_int_t rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, NULL, &result);
+    TEST_ASSERT(rc == NGX_HTTP_NOT_MODIFIED,
+        "IMS-only with last_modified_time fallback returns 304");
+    TEST_ASSERT(result == NULL,
+        "IMS-only path does not allocate result");
+    TEST_PASS("ims_only last_modified_time fallback to 304");
+}
+
+/*
+ * P1 regression test: IMS-only with last_modified_time == -1 (unset)
+ * and no Last-Modified list header must NOT produce a 304.
+ */
+static void
+test_handle_ims_only_no_last_modified_at_all(void)
+{
+    g_pool_offset = 0;
+    g_cond_result_code = 0;
+
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    add_header(&r->headers_in.headers, "If-Modified-Since",
+        "Wed, 21 Oct 2015 07:28:00 GMT");
+    /* No Last-Modified list header and last_modified_time == -1. */
+    r->headers_out.last_modified_time = (time_t) -1;
+
+    ngx_http_markdown_conf_t conf;
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.conditional_requests =
+        NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
+    conf.policy.generate_etag = 0;
+
+    ngx_http_markdown_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+
+    struct MarkdownResult *result = NULL;
+    ngx_int_t rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, NULL, &result);
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "IMS-only with no Last-Modified at all returns DECLINED");
+    TEST_PASS("ims_only no last_modified falls through");
+}
+
 int
 main(void)
 {
@@ -1102,6 +1340,15 @@ main(void)
     test_handle_inm_etag_match_304();
     test_handle_inm_etag_mismatch();
     test_handle_inm_with_ims_header();
+
+    test_handle_bypass_range_request();
+    test_handle_bypass_no_transform();
+    test_has_no_transform_in_comma_separated_list();
+    test_has_no_transform_absent();
+    test_has_no_transform_no_cache_control();
+
+    test_handle_ims_only_last_modified_time_fallback();
+    test_handle_ims_only_no_last_modified_at_all();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
