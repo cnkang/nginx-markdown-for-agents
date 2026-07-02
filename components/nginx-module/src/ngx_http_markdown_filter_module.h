@@ -1429,6 +1429,9 @@ const ngx_str_t *ngx_http_markdown_reason_skip_accept_reject(void);
 /* Return the SKIPPED_CONDITIONAL reason code (304 Not Modified) */
 const ngx_str_t *ngx_http_markdown_reason_skip_conditional(void);
 
+/* Return the BYPASS_NO_TRANSFORM reason code (RFC 9111 §5.2.2.6) */
+const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
+
 #ifdef MARKDOWN_STREAMING_ENABLED
 /* Streaming reason code accessors */
 const ngx_str_t *ngx_http_markdown_reason_engine_streaming(void);

@@ -54,6 +54,12 @@ ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
 #define REASON_FAILED_CLOSED            17
 #define REASON_CONVERSION_ERROR         18
 #define REASON_MEMORY_BUDGET_EXCEEDED   19
+#define REASON_OVERLOAD                 20
+#define REASON_INVALID_DYNCONF          21
+#define REASON_DEGRADED_SNAPSHOT        22
+#define REASON_HEADER_PLAN_APPLY_ERROR  23
+#define REASON_STREAMING_MID_FLIGHT_ERROR 24
+#define REASON_BYPASS_NO_TRANSFORM      25
 
 
 /*
@@ -75,6 +81,7 @@ static ngx_str_t  reason_str_failed_closed;
 static ngx_str_t  reason_str_conversion_error;
 static ngx_str_t  reason_str_memory_budget_exceeded;
 static ngx_str_t  reason_str_ffi_panic;
+static ngx_str_t  reason_str_bypass_no_transform;
 
 static ngx_flag_t reason_strs_initialized = 0;
 
@@ -116,6 +123,8 @@ ngx_http_markdown_reason_init_strs(void)
         &reason_str_memory_budget_exceeded);
     ngx_http_markdown_get_reason_code_str(REASON_FFI_PANIC,
         &reason_str_ffi_panic);
+    ngx_http_markdown_get_reason_code_str(REASON_BYPASS_NO_TRANSFORM,
+        &reason_str_bypass_no_transform);
 
     reason_strs_initialized = 1;
 }
@@ -336,6 +345,23 @@ ngx_http_markdown_reason_skip_conditional(void)
 {
     ngx_http_markdown_reason_init_strs();
     return &reason_str_skipped_conditional;
+}
+
+
+/*
+ * Return the "bypass_no_transform" reason code.
+ *
+ * Used when Cache-Control: no-transform bypasses conversion entirely
+ * (RFC 9111 §5.2.2.6).
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "bypass_no_transform"
+ */
+const ngx_str_t *
+ngx_http_markdown_reason_bypass_no_transform(void)
+{
+    ngx_http_markdown_reason_init_strs();
+    return &reason_str_bypass_no_transform;
 }
 
 
