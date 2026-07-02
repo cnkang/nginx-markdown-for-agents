@@ -319,6 +319,52 @@ markdown_check_conditional(const uint8_t *if_none_match,
 }
 
 void
+markdown_decide_conditional(const struct FFIConditionalInput *input,
+    struct FFIConditionalDecision *out)
+{
+    if (out == NULL) {
+        return;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->outcome = 1;
+    out->reason = 0;
+    out->evaluated_header = 0;
+
+    if (input == NULL || input->cache_validation == 0) {
+        return;
+    }
+
+    if (input->has_range) {
+        out->outcome = 2;
+        out->reason = 3;
+        return;
+    }
+
+    if (input->cache_validation == 1) {
+        if (input->if_modified_since_len > 0 && input->last_modified_len > 0) {
+            out->outcome = (uint8_t) g_cond_result_code;
+            out->reason = 2;
+            out->evaluated_header = 2;
+        }
+        return;
+    }
+
+    if (input->if_none_match_len > 0) {
+        out->outcome = (uint8_t) g_cond_result_code;
+        out->reason = 1;
+        out->evaluated_header = 1;
+        return;
+    }
+
+    if (input->if_modified_since_len > 0 && input->last_modified_len > 0) {
+        out->outcome = (uint8_t) g_cond_result_code;
+        out->reason = 2;
+        out->evaluated_header = 2;
+    }
+}
+
+void
 markdown_result_free(struct MarkdownResult *result)
 {
     if (result != NULL) {
@@ -717,6 +763,39 @@ test_handle_inm_if_modified_since_only(void)
 }
 
 static void
+test_handle_ims_only_not_modified_without_conversion(void)
+{
+    g_pool_offset = 0;
+    g_prepare_options_rc = NGX_ERROR;
+    g_cond_result_code = 0;
+
+    ngx_http_request_t *r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+    add_header(&r->headers_in.headers, "If-None-Match", "\"ignored\"");
+    add_header(&r->headers_in.headers, "If-Modified-Since",
+        "Wed, 21 Oct 2015 07:28:00 GMT");
+    add_header(&r->headers_out.headers, "Last-Modified",
+        "Wed, 21 Oct 2015 07:28:00 GMT");
+
+    ngx_http_markdown_conf_t conf;
+    memset(&conf, 0, sizeof(conf));
+    conf.policy.conditional_requests =
+        NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
+    conf.policy.generate_etag = 0;
+
+    ngx_http_markdown_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+
+    struct MarkdownResult *result = NULL;
+    ngx_int_t rc = ngx_http_markdown_handle_if_none_match(
+        r, &conf, &ctx, NULL, &result);
+    TEST_ASSERT(rc == NGX_HTTP_NOT_MODIFIED,
+        "IMS-only matching date returns 304 without conversion");
+    TEST_ASSERT(result == NULL, "IMS-only path does not allocate result");
+    TEST_PASS("ims_only uses Rust conditional decision without ETag");
+}
+
+static void
 test_handle_inm_no_inm_header(void)
 {
     g_pool_offset = 0;
@@ -1012,6 +1091,7 @@ main(void)
 
     test_handle_inm_disabled();
     test_handle_inm_if_modified_since_only();
+    test_handle_ims_only_not_modified_without_conversion();
     test_handle_inm_no_inm_header();
     test_handle_inm_etag_disabled();
     test_handle_inm_buffer_not_initialized();
