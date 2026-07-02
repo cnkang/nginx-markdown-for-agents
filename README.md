@@ -512,6 +512,35 @@ v0.9.0 is a **breaking release** — the last breaking opportunity before 1.0.0 
 
 For upgrade guidance from 0.8.x, see the [Migration Guide](docs/guides/MIGRATION-0.9.md).
 
+## What's New in v0.8.3
+
+v0.8.3 is a closeout hardening release for the 0.8.x line:
+
+- **Streaming state machine fixes** — corrected `pop_contexts_up_to` return order (innermost-first) and added `CodeBlock` handling in `ol`/`ul` derived state branches to prevent tag soup regressions.
+- **Streaming emitter ExitMany** — new `ExitMany` action enables batch context unwinding from mid-stack, fixing implied-closure ordering for nested block elements.
+- **Decompression buffer memory safety** — switched decompression workspace from `ngx_alloc`/`ngx_free` (heap) to `ngx_pnalloc`/`ngx_pfree` (pool-backed) to avoid mixing allocation lifetimes and prevent pool expansion side effects (Rule 43).
+- **Snapshot capacity increase** — raised the snapshot max from 4 to 8 entries in the stream commit path, supporting more complex multi-header mutation plans.
+- **FFI Box::into_raw correctness** — fixed a use-after-free pattern in converter handle allocation by ensuring `Box::into_raw` is called after initialization succeeds.
+- **Release manifest integrity** — `SHA256SUMS` entries are parsed and matched against package plus manifest digests; non-tag workflow manifests now describe unsigned checksum-only integrity explicitly.
+- **Version consistency detector (Rule 55)** — new harness detector validates version alignment across Cargo.toml, Chart.yaml, and internal dependencies to prevent version drift during releases.
+- **Full release gate validation** — all 0.8.x release gates pass: `make harness-check` (15/15), `make test-harness` (all detectors), `make release-gates-check-08x`, `make test-nginx-unit`, `make test-rust-fuzz-smoke`.
+
+For the full list, see [CHANGELOG.md](CHANGELOG.md).
+
+## What's New in v0.8.2
+
+v0.8.2 is a patch release hardening the 0.8.x streaming line:
+
+- **Streaming decompression budget enforcement** — the streaming decompression path now enforces the configured decompression budget and tracks streaming memory consumption against the module memory budget (Rule 3, Rule 44).
+- **FFI panic safety** — all FFI exports are now wrapped in `catch_unwind` so a Rust panic returns an error code instead of undefined behavior; fallback paths initialize output structs to safe defaults (fail-closed).
+- **Implied closure correctness** — structural closures now unwind inner-to-outer before enclosing block state, fixing HTML sanitizer implied-closure ordering (Rule 6).
+- **C module deduplication** — extracted shared helpers across five C source files to reduce duplication and improve maintainability (Rule 31).
+- **Inflate decompression semantics** — separated `Z_OK` and `Z_BUF_ERROR` handling in the inflate loop so partial-fill buffer conditions are no longer conflated with successful output (Rule 44).
+- **Harness detector improvements** — new `detect_ngx_log_arg_count.sh` and `detect_nosonar_discipline.sh` detectors with `--strict` mode support; improved AST/CWE-22 detectors and path validation.
+- **Security scan scoping** — gitleaks now covers Git-tracked worktree content while excluding ignored adapter state and caches (Rule 48).
+
+For the full list, see [CHANGELOG.md](CHANGELOG.md).
+
 ## What's New in v0.8.0
 
 v0.8.0 introduces true streaming conversion — bounded-memory HTML-to-Markdown processing for large and chunked responses:
@@ -546,35 +575,6 @@ Additional changes:
 - Rust header mutation plan module
 - Rust URL control character validation and link escaping
 - FFI ABI layout verification and header drift detection
-
-## What's New in v0.8.3
-
-v0.8.3 is a closeout hardening release for the 0.8.x line:
-
-- **Streaming state machine fixes** — corrected `pop_contexts_up_to` return order (innermost-first) and added `CodeBlock` handling in `ol`/`ul` derived state branches to prevent tag soup regressions.
-- **Streaming emitter ExitMany** — new `ExitMany` action enables batch context unwinding from mid-stack, fixing implied-closure ordering for nested block elements.
-- **Decompression buffer memory safety** — switched decompression workspace from `ngx_alloc`/`ngx_free` (heap) to `ngx_pnalloc`/`ngx_pfree` (pool-backed) to avoid mixing allocation lifetimes and prevent pool expansion side effects (Rule 43).
-- **Snapshot capacity increase** — raised the snapshot max from 4 to 8 entries in the stream commit path, supporting more complex multi-header mutation plans.
-- **FFI Box::into_raw correctness** — fixed a use-after-free pattern in converter handle allocation by ensuring `Box::into_raw` is called after initialization succeeds.
-- **Release manifest integrity** — `SHA256SUMS` entries are parsed and matched against package plus manifest digests; non-tag workflow manifests now describe unsigned checksum-only integrity explicitly.
-- **Version consistency detector (Rule 55)** — new harness detector validates version alignment across Cargo.toml, Chart.yaml, and internal dependencies to prevent version drift during releases.
-- **Full release gate validation** — all 0.8.x release gates pass: `make harness-check` (15/15), `make test-harness` (all detectors), `make release-gates-check-08x`, `make test-nginx-unit`, `make test-rust-fuzz-smoke`.
-
-For the full list, see [CHANGELOG.md](CHANGELOG.md).
-
-## What's New in v0.8.2
-
-v0.8.2 is a patch release hardening the 0.8.x streaming line:
-
-- **Streaming decompression budget enforcement** — the streaming decompression path now enforces the configured decompression budget and tracks streaming memory consumption against the module memory budget (Rule 3, Rule 44).
-- **FFI panic safety** — all FFI exports are now wrapped in `catch_unwind` so a Rust panic returns an error code instead of undefined behavior; fallback paths initialize output structs to safe defaults (fail-closed).
-- **Implied closure correctness** — structural closures now unwind inner-to-outer before enclosing block state, fixing HTML sanitizer implied-closure ordering (Rule 6).
-- **C module deduplication** — extracted shared helpers across five C source files to reduce duplication and improve maintainability (Rule 31).
-- **Inflate decompression semantics** — separated `Z_OK` and `Z_BUF_ERROR` handling in the inflate loop so partial-fill buffer conditions are no longer conflated with successful output (Rule 44).
-- **Harness detector improvements** — new `detect_ngx_log_arg_count.sh` and `detect_nosonar_discipline.sh` detectors with `--strict` mode support; improved AST/CWE-22 detectors and path validation.
-- **Security scan scoping** — gitleaks now covers Git-tracked worktree content while excluding ignored adapter state and caches (Rule 48).
-
-For the full list, see [CHANGELOG.md](CHANGELOG.md).
 
 ## Roadmap
 
