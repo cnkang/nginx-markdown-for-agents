@@ -46,11 +46,11 @@ def check_reason_code_count(repo: Path) -> dict:
         return {"name": "reason_code_count", "status": "fail",
                 "message": "REASON_CODE_COUNT not found in reason_code.rs"}
     count = int(match.group(1))
-    if count >= 25:
+    if count >= 26:
         return {"name": "reason_code_count", "status": "pass",
                 "details": {"count": count}}
     return {"name": "reason_code_count", "status": "fail",
-            "message": f"Expected >= 25, got {count}"}
+            "message": f"Expected >= 26, got {count}"}
 
 
 def check_diagnostics_schema_version(repo: Path) -> dict:
@@ -271,7 +271,56 @@ def check_conditional_bypass_header_filter(repo: Path) -> dict:
     if "no-transform" not in content:
         return {"name": "conditional_bypass_header_filter", "status": "fail",
                 "message": "header filter missing no-transform bypass logic"}
+    if "ngx_http_markdown_reason_bypass_no_transform" not in content:
+        return {"name": "conditional_bypass_header_filter", "status": "fail",
+                "message": "header filter uses generic reason instead of bypass_no_transform"}
     return {"name": "conditional_bypass_header_filter", "status": "pass"}
+
+
+def check_conditional_bypass_no_error_policy(repo: Path) -> dict:
+    """Verify conditional bypass path does not go through error_policy."""
+    conversion_impl = (
+        repo / "components/nginx-module/src/ngx_http_markdown_conversion_impl.h"
+    )
+    if not conversion_impl.exists():
+        return {"name": "conditional_bypass_no_error_policy", "status": "fail",
+                "message": "conversion_impl.h not found"}
+    content = conversion_impl.read_text()
+    # Find the BYPASS_RESULT block and check it uses fail_open, not reject_or_fail_open
+    bypass_idx = content.find("NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT")
+    if bypass_idx < 0:
+        return {"name": "conditional_bypass_no_error_policy", "status": "fail",
+                "message": "BYPASS_RESULT handling not found"}
+    # Look at the block around bypass handling (1500 chars for the full comment + code)
+    block = content[bypass_idx:bypass_idx + 1500]
+    # Check for actual function CALL (not comment references).
+    # Filter out C comment lines: lines starting with *, /*, or ending with */
+    code_lines = []
+    in_comment = False
+    for line in block.split('\n'):
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith('/*'):
+            in_comment = True
+            if s.endswith('*/'):
+                in_comment = False
+            continue
+        if in_comment:
+            if '*/' in s:
+                in_comment = False
+            continue
+        if s.startswith('*'):
+            continue
+        code_lines.append(s)
+    code_text = ' '.join(code_lines)
+    if "reject_or_fail_open" in code_text:
+        return {"name": "conditional_bypass_no_error_policy", "status": "fail",
+                "message": "bypass path still calls reject_or_fail_open (error_policy)"}
+    if "fail_open_buffered_response" not in code_text:
+        return {"name": "conditional_bypass_no_error_policy", "status": "fail",
+                "message": "bypass path does not call fail_open_buffered_response"}
+    return {"name": "conditional_bypass_no_error_policy", "status": "pass"}
 
 
 def check_conditional_bypass_tests(repo: Path) -> dict:
@@ -358,6 +407,7 @@ def main():
     results.append(check_config_v2_removed_directives(repo))
     results.append(check_conditional_runtime_path(repo))
     results.append(check_conditional_bypass_header_filter(repo))
+    results.append(check_conditional_bypass_no_error_policy(repo))
     results.append(check_conditional_bypass_tests(repo))
     results.append(check_last_modified_time_fallback(repo))
     results.append(check_profile_explicit_inheritance(repo))
