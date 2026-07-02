@@ -942,30 +942,18 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_memory_budget <size>
+     * markdown_memory_budget  (REMOVED in 0.9.0 - reject-only stub)
      *
-     * Unified memory budget for both streaming and full-buffer
-     * conversion engines. When set, this value is used as the
-     * memory limit for both paths unless overridden by the
-     * path-specific directives (markdown_max_size for
-     * full-buffer, markdown_streaming_budget for streaming).
-     *
-     * Priority: explicit path-specific > unified > default
-     *
-     * Default: unset (use path-specific defaults)
-     * Context: http, server, location
-     *
-     * Example:
-     *   markdown_memory_budget 8m;
+     * Migrated to markdown_limits memory=<size>.
      */
     {
         ngx_string("markdown_memory_budget"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_size_slot,
+            |NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, advanced.memory_budget),
-        NULL
+        0,
+        (void *) "use \"markdown_limits memory=<size>\" instead"
     },
 
     /*

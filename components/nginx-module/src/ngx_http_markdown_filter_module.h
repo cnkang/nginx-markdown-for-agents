@@ -522,7 +522,7 @@ typedef struct {
     ngx_flag_t   prune_noise;               /* markdown_prune_noise on|off (default: on) */
     ngx_str_t   *prune_selectors;           /* markdown_prune_selectors (default: built-in list) */
     ngx_str_t   *prune_protection_selectors; /* markdown_prune_protection_selectors (default: empty) */
-    size_t       memory_budget;             /* markdown_memory_budget (default: NGX_CONF_UNSET_SIZE) */
+    size_t       memory_budget;             /* internal/dynconf memory budget (static directive removed in 0.9.0) */
     ngx_uint_t   llm_provider;              /* markdown_llm_provider (default: 0=default) */
     ngx_uint_t   chars_per_token_fixed;     /* markdown_chars_per_token (default: 0=use provider) */
     ngx_flag_t   dynconf_enabled;           /* markdown_dynamic_config on|off (default: off) */
