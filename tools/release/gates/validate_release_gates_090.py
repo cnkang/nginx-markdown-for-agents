@@ -10,6 +10,8 @@ Exit codes:
 """
 
 import re
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -100,12 +102,39 @@ def check_migration_guide(repo: Path) -> dict:
 
 
 def check_doctor_tool(repo: Path) -> dict:
-    """Verify doctor tool exists and is executable."""
+    """Verify doctor tool exists and produces parseable JSON output."""
     doctor = repo / "tools/doctor/nginx-markdown-doctor.sh"
     if not doctor.exists():
         return {"name": "doctor_tool", "status": "fail",
                 "message": "tools/doctor/nginx-markdown-doctor.sh not found"}
-    return {"name": "doctor_tool", "status": "pass"}
+    try:
+        completed = subprocess.run(
+            ["bash", str(doctor), "--json", "--nginx-bin", ""],
+            cwd=repo,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"name": "doctor_tool", "status": "fail",
+                "message": f"doctor smoke failed to run: {exc}"}
+    if completed.returncode != 0:
+        return {"name": "doctor_tool", "status": "fail",
+                "message": "doctor smoke returned non-zero exit",
+                "details": {"exit_code": completed.returncode,
+                            "stderr": completed.stderr[-400:]}}
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        return {"name": "doctor_tool", "status": "fail",
+                "message": f"doctor smoke emitted invalid JSON: {exc}"}
+    if "checks" not in payload or "summary" not in payload:
+        return {"name": "doctor_tool", "status": "fail",
+                "message": "doctor JSON missing checks or summary"}
+    return {"name": "doctor_tool", "status": "pass",
+            "details": {"checks": len(payload["checks"])}}
 
 
 def check_label_whitelist(repo: Path) -> dict:
@@ -135,14 +164,105 @@ def check_error_policy(repo: Path) -> dict:
 
 
 def check_inflight_guard(repo: Path) -> dict:
-    """Verify inflight guard C implementation exists."""
+    """Verify inflight guard C implementation exists and honors status."""
     inflight = (
         repo / "components/nginx-module/src/ngx_http_markdown_inflight_impl.h"
+    )
+    request_impl = (
+        repo / "components/nginx-module/src/ngx_http_markdown_request_impl.h"
     )
     if not inflight.exists():
         return {"name": "inflight_guard", "status": "fail",
                 "message": "inflight_impl.h not found"}
+    if not request_impl.exists():
+        return {"name": "inflight_guard", "status": "fail",
+                "message": "request_impl.h not found"}
+    content = request_impl.read_text()
+    if "return conf->error_status;" not in content:
+        return {"name": "inflight_guard", "status": "fail",
+                "message": "inflight overload does not return error_status"}
     return {"name": "inflight_guard", "status": "pass"}
+
+
+def check_config_v2_removed_directives(repo: Path) -> dict:
+    """Verify removed Config V2 directives are reject-only stubs."""
+    directives = (
+        repo /
+        "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
+    )
+    migration = repo / "docs/guides/MIGRATION-0.9.md"
+    if not directives.exists():
+        return {"name": "config_v2_removed_directives", "status": "fail",
+                "message": "config_directives_impl.h not found"}
+    content = directives.read_text()
+    removed = [
+        "markdown_max_size",
+        "markdown_memory_budget",
+        "markdown_timeout",
+        "markdown_streaming_budget",
+    ]
+    missing = []
+    for name in removed:
+        idx = content.find(f'ngx_string("{name}")')
+        if idx < 0:
+            missing.append(f"{name}: directive missing")
+            continue
+        block = content[idx:idx + 700]
+        if "ngx_http_markdown_reject_removed_directive" not in block:
+            missing.append(f"{name}: not reject-only")
+    if migration.exists():
+        migration_text = migration.read_text()
+        if "markdown_memory_budget" not in migration_text:
+            missing.append("markdown_memory_budget: migration guide missing")
+    else:
+        missing.append("MIGRATION-0.9.md missing")
+    if missing:
+        return {"name": "config_v2_removed_directives", "status": "fail",
+                "message": "; ".join(missing)}
+    return {"name": "config_v2_removed_directives", "status": "pass"}
+
+
+def check_conditional_runtime_path(repo: Path) -> dict:
+    """Verify C conditional handling delegates to Rust decide_conditional."""
+    conditional = (
+        repo / "components/nginx-module/src/ngx_http_markdown_conditional.c"
+    )
+    if not conditional.exists():
+        return {"name": "conditional_runtime_path", "status": "fail",
+                "message": "conditional.c not found"}
+    content = conditional.read_text()
+    required = [
+        "markdown_decide_conditional(&cond_input",
+        "FFIConditionalInput",
+        "cond_input.cache_validation",
+        "cond_input.if_none_match",
+        "cond_input.if_modified_since",
+        "cond_input.has_range",
+        "cond_input.last_modified",
+    ]
+    missing = [item for item in required if item not in content]
+    if missing:
+        return {"name": "conditional_runtime_path", "status": "fail",
+                "message": f"missing runtime fields: {missing}"}
+    return {"name": "conditional_runtime_path", "status": "pass"}
+
+
+def check_profile_explicit_inheritance(repo: Path) -> dict:
+    """Verify profile cache_validation_explicit is inherited across scopes."""
+    merge_impl = (
+        repo / "components/nginx-module/src/ngx_http_markdown_config_core_impl.h"
+    )
+    test_file = repo / "components/nginx-module/tests/unit/profile_test.c"
+    if not merge_impl.exists() or not test_file.exists():
+        return {"name": "profile_explicit_inheritance", "status": "fail",
+                "message": "merge implementation or profile test missing"}
+    merge_content = merge_impl.read_text()
+    test_content = test_file.read_text()
+    if ("prev->profile.cache_validation_explicit" not in merge_content or
+            "test_cache_validation_explicit_inheritance" not in test_content):
+        return {"name": "profile_explicit_inheritance", "status": "fail",
+                "message": "cache_validation_explicit inheritance unguarded"}
+    return {"name": "profile_explicit_inheritance", "status": "pass"}
 
 
 def check_changelog_090(repo: Path) -> dict:
@@ -168,6 +288,9 @@ def main():
     results.append(check_label_whitelist(repo))
     results.append(check_error_policy(repo))
     results.append(check_inflight_guard(repo))
+    results.append(check_config_v2_removed_directives(repo))
+    results.append(check_conditional_runtime_path(repo))
+    results.append(check_profile_explicit_inheritance(repo))
     results.append(check_production_examples(repo))
     results.append(check_migration_guide(repo))
     results.append(check_doctor_tool(repo))

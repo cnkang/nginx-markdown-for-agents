@@ -66,7 +66,11 @@ def check_readme_mentions_key_features(project_root: Path) -> List[str]:
             continue
         
         # Check for key configuration directives
-        key_directives = ['markdown_filter', 'markdown_max_size']
+        key_directives = [
+            'markdown_filter',
+            'markdown_limits',
+            'markdown_profile',
+        ]
         for directive in key_directives:
             if directive not in content:
                 warnings.append(
