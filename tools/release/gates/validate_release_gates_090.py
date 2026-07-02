@@ -244,7 +244,74 @@ def check_conditional_runtime_path(repo: Path) -> dict:
     if missing:
         return {"name": "conditional_runtime_path", "status": "fail",
                 "message": f"missing runtime fields: {missing}"}
+    # P0: Bypass outcome must be explicitly handled, not treated as Proceed.
+    bypass_required = [
+        "cond_decision.outcome == 2",
+        "NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT",
+    ]
+    bypass_missing = [item for item in bypass_required if item not in content]
+    if bypass_missing:
+        return {"name": "conditional_runtime_path", "status": "fail",
+                "message": f"Bypass outcome not handled: {bypass_missing}"}
     return {"name": "conditional_runtime_path", "status": "pass"}
+
+
+def check_conditional_bypass_header_filter(repo: Path) -> dict:
+    """Verify header filter checks Cache-Control: no-transform before conversion."""
+    request_impl = (
+        repo / "components/nginx-module/src/ngx_http_markdown_request_impl.h"
+    )
+    if not request_impl.exists():
+        return {"name": "conditional_bypass_header_filter", "status": "fail",
+                "message": "request_impl.h not found"}
+    content = request_impl.read_text()
+    if "ngx_http_markdown_has_no_transform" not in content:
+        return {"name": "conditional_bypass_header_filter", "status": "fail",
+                "message": "header filter does not call has_no_transform"}
+    if "no-transform" not in content:
+        return {"name": "conditional_bypass_header_filter", "status": "fail",
+                "message": "header filter missing no-transform bypass logic"}
+    return {"name": "conditional_bypass_header_filter", "status": "pass"}
+
+
+def check_conditional_bypass_tests(repo: Path) -> dict:
+    """Verify unit tests cover Bypass outcome (Range + no-transform)."""
+    test_file = (
+        repo / "components/nginx-module/tests/unit/conditional_production_test.c"
+    )
+    if not test_file.exists():
+        return {"name": "conditional_bypass_tests", "status": "fail",
+                "message": "conditional_production_test.c not found"}
+    content = test_file.read_text()
+    required_tests = [
+        "test_handle_bypass_range_request",
+        "test_handle_bypass_no_transform",
+        "test_has_no_transform",
+        "NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT",
+    ]
+    missing = [t for t in required_tests if t not in content]
+    if missing:
+        return {"name": "conditional_bypass_tests", "status": "fail",
+                "message": f"missing bypass tests: {missing}"}
+    return {"name": "conditional_bypass_tests", "status": "pass"}
+
+
+def check_last_modified_time_fallback(repo: Path) -> dict:
+    """Verify IMS-only uses last_modified_time when no list header exists."""
+    conditional = (
+        repo / "components/nginx-module/src/ngx_http_markdown_conditional.c"
+    )
+    if not conditional.exists():
+        return {"name": "last_modified_time_fallback", "status": "fail",
+                "message": "conditional.c not found"}
+    content = conditional.read_text()
+    if "ngx_http_time" not in content:
+        return {"name": "last_modified_time_fallback", "status": "fail",
+                "message": "ngx_http_time not used for last_modified_time fallback"}
+    if "last_modified_time" not in content:
+        return {"name": "last_modified_time_fallback", "status": "fail",
+                "message": "last_modified_time field not checked"}
+    return {"name": "last_modified_time_fallback", "status": "pass"}
 
 
 def check_profile_explicit_inheritance(repo: Path) -> dict:
@@ -290,6 +357,9 @@ def main():
     results.append(check_inflight_guard(repo))
     results.append(check_config_v2_removed_directives(repo))
     results.append(check_conditional_runtime_path(repo))
+    results.append(check_conditional_bypass_header_filter(repo))
+    results.append(check_conditional_bypass_tests(repo))
+    results.append(check_last_modified_time_fallback(repo))
     results.append(check_profile_explicit_inheritance(repo))
     results.append(check_production_examples(repo))
     results.append(check_migration_guide(repo))
