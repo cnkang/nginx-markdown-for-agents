@@ -19,7 +19,7 @@
  * This constant is used by the closure test to verify that all variants
  * are accounted for in the `ALL` array. Update this when adding variants.
  */
-#define REASON_CODE_COUNT 25
+#define REASON_CODE_COUNT 26
 
 /**
  * Number of error class variants.
@@ -461,7 +461,7 @@ typedef struct MarkdownOptions {
    *
    * When non-zero, the streaming converter uses this value as the
    * total memory budget instead of the compiled-in default (2 MiB).
-   * Populated from the `markdown_streaming_budget` NGINX directive.
+   * Populated from `markdown_limits streaming_buffer=<size>` (Config V2).
    */
   uint64_t streaming_budget;
   /**
@@ -506,7 +506,7 @@ typedef struct MarkdownOptions {
    * max_size when no explicit markdown_max_size is set. Rust
    * currently enforces this budget only for streaming/incremental
    * paths; full-buffer relies on NGINX-side buffering limits.
-   * Populated from the `markdown_memory_budget` NGINX directive.
+   * Populated from `markdown_limits memory=<size>` (Config V2).
    */
   uint64_t memory_budget;
   /**
