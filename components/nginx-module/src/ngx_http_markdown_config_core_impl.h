@@ -711,7 +711,9 @@ ngx_http_markdown_check_profile_conflicts(ngx_conf_t *cf,
         (uint64_t) conf->stream.budget;
     effective_cfg.limits_max_inflight =
         (uint32_t) conf->max_inflight;
-    effective_cfg.error_policy = (uint8_t) conf->on_error;
+    effective_cfg.error_policy =
+        ngx_http_markdown_on_error_to_ffi(conf->on_error,
+                                          conf->error_status);
     effective_cfg.diagnostics =
         (uint8_t) (conf->ops.diagnostics_enabled ? 1 : 0);
 
@@ -986,6 +988,45 @@ ngx_http_markdown_on_error_name(ngx_uint_t value)
         default:
             return &unknown;
     }
+}
+
+
+/*
+ * Translate C on_error + error_status to FFI error_policy kind.
+ *
+ * The C model uses a two-field encoding:
+ *   on_error = PASS(0) or REJECT(1)
+ *   error_status = actual HTTP code (429/502/503)
+ *
+ * The Rust FFI uses a three-value kind:
+ *   0 = pass, 1 = status, 2 = fail_closed
+ *
+ * Translation:
+ *   PASS(0)                             → 0 (pass)
+ *   REJECT(1) + error_status != 502     → 1 (status)
+ *   REJECT(1) + error_status == 502     → 2 (fail_closed)
+ *
+ * Parameters:
+ *   on_error     - NGX_HTTP_MARKDOWN_ON_ERROR_PASS or _REJECT
+ *   error_status - HTTP status code (default: 502)
+ *
+ * Returns:
+ *   FFI error policy kind (0, 1, or 2)
+ */
+static ngx_inline uint8_t
+ngx_http_markdown_on_error_to_ffi(ngx_uint_t on_error,
+    ngx_uint_t error_status)
+{
+    if (on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
+        return 0;  /* FFI_ERROR_POLICY_PASS */
+    }
+
+    /* REJECT mode: distinguish status vs fail_closed */
+    if (error_status != NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT) {
+        return 1;  /* FFI_ERROR_POLICY_STATUS */
+    }
+
+    return 2;  /* FFI_ERROR_POLICY_FAIL_CLOSED */
 }
 
 /*

@@ -346,7 +346,18 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_THRESHOLD_OFF     0
 
 /*
- * Configuration constants for on_error directive
+ * Configuration constants for on_error / error_policy directive.
+ *
+ * The C runtime uses a two-field model:
+ *   conf->on_error  = PASS (0) or REJECT (1)
+ *   conf->error_status = actual HTTP status code (429/502/503)
+ *
+ * The Rust FFI uses a three-value kind (FFI_ERROR_POLICY_*):
+ *   0 = pass, 1 = status, 2 = fail_closed
+ *
+ * An explicit adapter (ngx_http_markdown_error_policy_to_ffi) must
+ * translate from the C model to FFIErrorPolicy when crossing the boundary.
+ * See ngx_http_markdown_config_core_impl.h for the adapter function.
  */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_PASS    0  /* fail-open: return original HTML */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1  /* fail-closed: return error status */
