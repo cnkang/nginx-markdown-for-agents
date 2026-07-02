@@ -957,8 +957,33 @@ ngx_http_markdown_diagnostics_fmt_effective_config(
         conf->accept_policy);
     cache_str = ngx_http_markdown_diagnostics_cache_validation_str(
         conf->policy.conditional_requests);
-    streaming_str = ngx_http_markdown_diagnostics_streaming_str(
-        conf->stream.policy);
+
+    /* ponytail: profile forced-field + default override — the effective config
+     * shown to operators must reflect profile defaults and forced fields, not
+     * just the raw C conf (which uses builtin defaults when the operator didn't
+     * set a directive). Mirrors the Rust merge_config three-layer precedence. */
+    {
+        ngx_uint_t  effective_streaming = conf->stream.policy;
+        ngx_uint_t  effective_conditional = conf->policy.conditional_requests;
+
+        if (conf->profile.name == NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE) {
+            /* forced: streaming=off; default: cache_validation=full */
+            effective_streaming = NGX_HTTP_MARKDOWN_STREAMING_OFF;
+            if (!conf->profile.cache_validation_explicit) {
+                effective_conditional = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+            }
+        } else if (conf->profile.name == NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST) {
+            /* forced: streaming=force, cache_validation=off */
+            effective_streaming = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+            effective_conditional = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
+        }
+
+        streaming_str = ngx_http_markdown_diagnostics_streaming_str(
+            effective_streaming);
+        cache_str = ngx_http_markdown_diagnostics_cache_validation_str(
+            effective_conditional);
+    }
+
     error_str = ngx_http_markdown_diagnostics_error_policy_str(
         conf->on_error, conf->error_status);
     limits_memory = conf->max_size;

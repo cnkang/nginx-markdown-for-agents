@@ -28,6 +28,13 @@ static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
 static char *ngx_http_markdown_check_profile_conflicts(ngx_conf_t *cf,
     ngx_http_markdown_conf_t *conf);
 
+/* ponytail: forward-declare — effective-config builder calls this before its
+ * static definition at line ~1017; without this, C99 -Wimplicit-function-declaration
+ * fails the e2e native NGINX compile. */
+static ngx_inline uint8_t
+ngx_http_markdown_on_error_to_ffi(ngx_uint_t on_error,
+    ngx_uint_t error_status);
+
 /*
  * Choose the RB-tree branch direction for a node vs an existing tree node.
  *

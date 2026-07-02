@@ -301,6 +301,10 @@ check_config_valid() {
         return
     }
 
+    # ponytail: cleanup helper called at every return path — RETURN trap
+    # leaks to caller on bash 3.2 (macOS default), so use explicit helper.
+    _check_config_valid_cleanup() { rm -f "$tmp_conf"; }
+
     # Write minimal config that tests basic module loading
     if ! cat > "$tmp_conf" <<'CONF'
 daemon off;
@@ -314,7 +318,7 @@ http {
 }
 CONF
     then
-        rm -f "$tmp_conf"
+        _check_config_valid_cleanup
         emit_check "config_valid" "fail" "could not write temp config file"
         return
     fi
@@ -324,8 +328,7 @@ CONF
     local test_rc=0
     test_output=$("$nginx_bin" -t -c "$tmp_conf" 2>&1) || test_rc=$?
 
-    # Clean up temp file
-    rm -f "$tmp_conf"
+    _check_config_valid_cleanup
 
     if [[ $test_rc -eq 0 ]]; then
         emit_check "config_valid" "pass" "nginx config syntax OK (minimal test config)"
