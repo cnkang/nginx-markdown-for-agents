@@ -121,7 +121,10 @@ ngx_http_markdown_inflight_try_increment(ngx_http_request_t *r,
 
     cur = ngx_http_markdown_g_inflight.current;
 
-    if ((ngx_uint_t) cur >= conf->max_inflight) {
+    /* max_inflight == 0 means unlimited (no enforcement) */
+    if (conf->max_inflight == 0) {
+        /* Fall through to CAS increment without limit check */
+    } else if ((ngx_uint_t) cur >= conf->max_inflight) {
         /* Overload: reject */
         (void) ngx_atomic_fetch_add(
             &ngx_http_markdown_g_inflight.overload_total, 1);
