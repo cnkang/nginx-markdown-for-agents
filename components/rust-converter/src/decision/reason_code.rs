@@ -28,7 +28,7 @@
 ///
 /// This constant is used by the closure test to verify that all variants
 /// are accounted for in the `ALL` array. Update this when adding variants.
-pub const REASON_CODE_COUNT: usize = 25;
+pub const REASON_CODE_COUNT: usize = 26;
 
 /// Compile-time guard: all discriminants must fit in a `u8` because the
 /// FFI boundary (`FFIDecisionResult.reason_code`) transports them as `u8`.
@@ -183,6 +183,11 @@ pub enum ReasonCode {
     ///
     /// **log_decision() callsite**: body_filter: streaming mid-flight error.
     StreamingMidFlightError = 24,
+
+    /// Skipped: Cache-Control: no-transform bypasses conversion (RFC 9111).
+    ///
+    /// **log_decision() callsite**: header_filter: no-transform bypass.
+    BypassNoTransform = 25,
 }
 
 /// Array of all reason code variants for exhaustive iteration.
@@ -217,6 +222,7 @@ pub const ALL: [ReasonCode; REASON_CODE_COUNT] = [
     ReasonCode::DegradedSnapshot,
     ReasonCode::HeaderPlanApplyError,
     ReasonCode::StreamingMidFlightError,
+    ReasonCode::BypassNoTransform,
 ];
 
 impl ReasonCode {
@@ -260,6 +266,7 @@ impl ReasonCode {
             ReasonCode::DegradedSnapshot => "degraded_snapshot",
             ReasonCode::HeaderPlanApplyError => "header_plan_apply_error",
             ReasonCode::StreamingMidFlightError => "streaming_mid_flight_error",
+            ReasonCode::BypassNoTransform => "bypass_no_transform",
         }
     }
 
@@ -294,7 +301,8 @@ impl ReasonCode {
             | ReasonCode::SkippedConditional
             | ReasonCode::SkippedAcceptReject
             | ReasonCode::NotEligible
-            | ReasonCode::Disabled => "markdown_skipped_total",
+            | ReasonCode::Disabled
+            | ReasonCode::BypassNoTransform => "markdown_skipped_total",
             ReasonCode::DecompressionError
             | ReasonCode::DecompressionBudgetExceeded
             | ReasonCode::DecompressionFormatError
@@ -377,6 +385,7 @@ impl ReasonCode {
             ReasonCode::DegradedSnapshot => "header_filter: degraded dynconf snapshot",
             ReasonCode::HeaderPlanApplyError => "header_filter: header plan apply error",
             ReasonCode::StreamingMidFlightError => "body_filter: streaming mid-flight error",
+            ReasonCode::BypassNoTransform => "header_filter: no-transform bypass",
         }
     }
 
@@ -437,6 +446,7 @@ impl ReasonCode {
             22 => Some(ReasonCode::DegradedSnapshot),
             23 => Some(ReasonCode::HeaderPlanApplyError),
             24 => Some(ReasonCode::StreamingMidFlightError),
+            25 => Some(ReasonCode::BypassNoTransform),
             _ => None,
         }
     }

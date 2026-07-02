@@ -37,7 +37,7 @@ fn test_all_reason_codes_have_log_callsite() {
 #[test]
 fn test_reason_code_count_consistency() {
     assert_eq!(ALL.len(), REASON_CODE_COUNT);
-    assert_eq!(ALL.len(), 25);
+    assert_eq!(ALL.len(), 26);
 }
 
 /// All reason code strings are valid as normalized label values

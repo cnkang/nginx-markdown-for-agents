@@ -735,10 +735,7 @@ mod tests {
     #[test]
     fn test_classify_error_code_post_commit() {
         /* ERROR_POST_COMMIT=8 */
-        assert_eq!(
-            classify_error_code(8),
-            ErrorClass::StreamingMidFlightError
-        );
+        assert_eq!(classify_error_code(8), ErrorClass::StreamingMidFlightError);
     }
 
     #[test]
