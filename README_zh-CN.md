@@ -417,6 +417,7 @@ make supply-chain
 | 查看部署示例 | [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md) |
 | 运维与排障 | [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md) |
 | 0.7.x → 0.8.0 升级 | [docs/guides/MIGRATION-0.8.md](docs/guides/MIGRATION-0.8.md) |
+| 0.8.x → 0.9.0 升级 | [docs/guides/MIGRATION-0.9.md](docs/guides/MIGRATION-0.9.md) |
 | 流式转换上线指南 | [docs/guides/streaming-rollout-cookbook.md](docs/guides/streaming-rollout-cookbook.md) |
 | 报告漏洞或查看安全支持范围 | [SECURITY.md](SECURITY.md) |
 | 了解架构与设计取舍 | [docs/architecture/README.md](docs/architecture/README.md) |
@@ -483,6 +484,21 @@ Makefile               顶层构建与测试入口
    `AGENTS.md`、`docs/harness/`、`tools/harness/`、`Makefile`、CI wiring
 2. 运行 `make harness-check`
 3. 在结束更广义的文档或 release-gate 改动前，运行 `make harness-check-full`
+
+## v0.9.0 新特性
+
+v0.9.0 是**破坏性版本**——1.0.0 API 冻结前最后一次破坏性变更机会：
+
+- **Reason code 命名**：所有 reason code 字符串从 UPPERCASE_SNAKE_CASE 改为 lowercase_snake_case（如 `PARSE_TIMEOUT` → `timeout`、`FFI_CALL_ERROR` → `ffi_panic`）。影响 Prometheus 标签、结构化日志和诊断端点。
+- **指令移除/改名**：`markdown_on_error` → `markdown_error_policy`；`markdown_trust_forwarded_headers` → `markdown_trusted_proxies <CIDR>...`；`markdown_on_wildcard` → `markdown_accept wildcard`。旧名称在 `nginx -t` 时会被拒绝。
+- **Profile 系统**：`markdown_profile` 一行配置应用生产默认值（`balanced`、`strict_cache`、`streaming_first`）。
+- **并发保护**：`markdown_limits max_inflight=N` 提供每 worker 并发上限保护，reason code 为 `overload`。`max_inflight=0` 表示无限制。
+- **指标合并**：按 reason 分别的计数器替换为 5 个统一指标族 + `reason` 标签。标签白名单防止高基数序列。
+- **Cache-Control no-transform bypass**：带 `Cache-Control: no-transform` 的条件请求跳过转换，返回原始 HTML（reason code 为 `bypass_no_transform`）。
+- **诊断 schema v1**：版本化 JSON 输出，含结构化分区（decision、inflight、error、streaming、conditional、etag）。
+- **`nginx-markdown-doctor` 工具**：完整诊断检查（配置快照、模块健康、FFI 版本对齐、profile smoke）。
+
+0.8.x 升级指引见 [迁移指南](docs/guides/MIGRATION-0.9.md)。
 
 ## v0.8.0 新特性
 
@@ -608,6 +624,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.0 | 2026-07-02 | Kang | Doc review: 新增 v0.9.0 新特性段落、MIGRATION-0.9 链接、reason code 数量修正、CHANGELOG 同步分支提交 |
 | 0.8.3 | 2026-06-26 | Kang | v0.8.3 收口：流式状态机修复、ExitMany 批量解上下文、解压缓冲区内存安全、快照容量提升、FFI Box::into_raw 修复、完整发布门禁验证 |
 | 0.8.2 | 2026-06-25 | Kang | v0.8.2 发布：流式解压加固、FFI panic 安全、隐式闭合正确性、解压预算强制执行、安全扫描范围限定、版本线文档收口 |
 | 0.8.0 | 2026-06-16 | Codex | 同步中英文 README 结构、Quick Start 示例、本地测试命令、平台支持标题和 v0.8.0 路线说明 |

@@ -50,6 +50,7 @@ AI bot (by User-Agent)                 -> Markdown (via NGINX config)
 | Agent-friendly content from an existing site | Markdown negotiated from your current HTML responses |
 | Minimal application change | NGINX-side enablement with per-path control |
 | Safe rollout | Fail-open mode, size limits, timeouts, and shared aggregate metrics |
+| Bounded-memory streaming | Dual-engine model — `auto` mode routes large responses to bounded-memory streaming |
 | Cache-aware behavior | Variant `ETag`, `Vary: Accept`, and conditional-request support |
 | Flexible configuration | Variable-driven per-request control, User-Agent targeting, and authentication policies |
 
@@ -226,6 +227,7 @@ This project is a strong fit if you:
 It is a weaker fit if you:
 
 - already have a purpose-built Markdown or JSON content API
+- require streaming to be always-on and cannot use the `auto` threshold mode
 - want transformation logic completely outside the request path
 
 ## How This Compares to Edge-Layer Conversion
@@ -419,6 +421,7 @@ make supply-chain
 | Build from source | [docs/guides/BUILD_INSTRUCTIONS.md](docs/guides/BUILD_INSTRUCTIONS.md) |
 | Configure directives | [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
 | Upgrade from 0.7.x to 0.8.0 | [docs/guides/MIGRATION-0.8.md](docs/guides/MIGRATION-0.8.md) |
+| Upgrade from 0.8.x to 0.9.0 | [docs/guides/MIGRATION-0.9.md](docs/guides/MIGRATION-0.9.md) |
 | Roll out streaming safely | [docs/guides/streaming-rollout-cookbook.md](docs/guides/streaming-rollout-cookbook.md) |
 | Start from deployment examples | [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md) |
 | Operate and troubleshoot | [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md) |
@@ -493,6 +496,21 @@ add the harness workflow to your default path:
    `AGENTS.md`, `docs/harness/`, `tools/harness/`, `Makefile`, CI wiring
 2. Run `make harness-check`
 3. Run `make harness-check-full` before closing broader docs or release-gate work
+
+## What's New in v0.9.0
+
+v0.9.0 is a **breaking release** — the last breaking opportunity before 1.0.0 API freeze:
+
+- **Reason code naming**: all reason code strings renamed from UPPERCASE_SNAKE_CASE to lowercase_snake_case (e.g., `PARSE_TIMEOUT` → `timeout`, `FFI_CALL_ERROR` → `ffi_panic`). Affects Prometheus labels, structured logs, and diagnostics endpoint.
+- **Directive removals/renames**: `markdown_on_error` → `markdown_error_policy`; `markdown_trust_forwarded_headers` → `markdown_trusted_proxies <CIDR>...`; `markdown_on_wildcard` → `markdown_accept wildcard`. Old names are rejected at `nginx -t`.
+- **Profile system**: `markdown_profile` introduces one-line production defaults (`balanced`, `strict_cache`, `streaming_first`).
+- **Inflight guard**: `markdown_limits max_inflight=N` provides per-worker concurrency protection with `overload` reason code. `max_inflight=0` means unlimited.
+- **Metrics consolidation**: per-reason counters replaced by 5 unified metric families with a `reason` label. Label whitelist prevents high-cardinality series.
+- **Cache-Control no-transform bypass**: conditional requests with `Cache-Control: no-transform` bypass conversion and return original HTML (`bypass_no_transform` reason code).
+- **Diagnostics schema v1**: versioned JSON output with structured sections (decision, inflight, error, streaming, conditional, etag).
+- **`nginx-markdown-doctor` tool**: full diagnostic checks for config snapshot, module health, FFI version alignment, and profile smoke.
+
+For upgrade guidance from 0.8.x, see the [Migration Guide](docs/guides/MIGRATION-0.9.md).
 
 ## What's New in v0.8.0
 
@@ -619,6 +637,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.0 | 2026-07-02 | Kang | Doc review: added What's New v0.9.0 section, MIGRATION-0.9 link, reason code count fix, CHANGELOG sync with branch commits |
 | 0.8.3 | 2026-06-26 | Kang | v0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |
 | 0.8.2 | 2026-06-25 | Kang | v0.8.2 release: streaming decompression hardening, FFI panic safety, implied-closure correctness, decompression budget enforcement, security scan scoping, release-line documentation closeout |
 | 0.8.0 | 2026-06-16 | Codex | Synchronized English and Chinese README structure, Quick Start examples, local test commands, platform support heading, and v0.8.0 roadmap wording |

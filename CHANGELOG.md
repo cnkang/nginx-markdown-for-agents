@@ -38,14 +38,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `markdown_limits` directive with key-value syntax (`memory`, `timeout`,
   `max_inflight`).
 - `markdown_accept wildcard` for wildcard Accept header matching.
-- 7 new reason codes: `conversion_error`, `memory_budget_exceeded`,
+- 8 new reason codes: `conversion_error`, `memory_budget_exceeded`,
   `overload`, `invalid_dynconf`, `degraded_snapshot`,
-  `header_plan_apply_error`, `streaming_mid_flight_error`.
+  `header_plan_apply_error`, `streaming_mid_flight_error`,
+  `bypass_no_transform` (Cache-Control no-transform bypass for conditional
+  requests).
 - Diagnostics schema v1 with versioned JSON output.
 - Label whitelist enforcement for Prometheus metrics.
 - Production configuration examples (`examples/production/`): blog-balanced,
   docs-strict-cache, rag-streaming-first, private-internal.
 - Complete 0.8.x → 0.9.0 migration guide (`docs/guides/MIGRATION-0.9.md`).
+- `nginx-markdown-doctor` tool with full diagnostic checks (config snapshot,
+  module health, FFI version alignment, profile smoke).
+- Cache-Control no-transform detection: conditional requests with
+  `Cache-Control: no-transform` bypass conversion and return original HTML.
+- `markdown_error_policy` C→FFI translation: C-side `on_error`/`error_status`
+  mapped to Rust FFI `error_policy` kind.
+- Per-worker inflight guard (`markdown_limits max_inflight=N`) wired into
+  filter path; `max_inflight=0` means unlimited.
+- `cache_validation_explicit` flag inherited across config scopes for
+  correct profile merge semantics.
+- ADR-0017: HeaderPlan atomic scope boundary documentation.
+
+### Fixed
+
+- `ConditionalOutcome::Bypass` correctly handled in C runtime (previously
+  misclassified as failure outcome).
+- `is_failure_outcome` strncmp length mismatches corrected.
+- `error_to_reason_code` aligned with specific `ReasonCode` variants instead
+  of coarse error categories.
+- Bypass path must not go through `error_policy`; uses
+  `bypass_no_transform` reason code instead.
+- `nginx-markdown-doctor` JSON escaping hardened for diagnostic fields.
+- Profile smoke test diagnostics hardened.
 
 ### Removed
 
