@@ -165,6 +165,89 @@ ngx_http_markdown_convert_for_conditional(
     return NGX_OK;
 }
 
+
+/*
+ * Check if the response carries Cache-Control: no-transform.
+ *
+ * Scans all Cache-Control response headers for the "no-transform"
+ * directive (RFC 9111 §5.2.2.6).  The check is case-insensitive
+ * per RFC.
+ *
+ * Parameters:
+ *   r - NGINX request (for response header access)
+ *
+ * Returns:
+ *   1 if no-transform is present, 0 otherwise
+ */
+static ngx_flag_t
+ngx_http_markdown_has_no_transform(ngx_http_request_t *r)
+{
+    static u_char       cc_name[] = "Cache-Control";
+    static u_char       directive[] = "no-transform";
+    ngx_list_part_t    *part;
+    ngx_table_elt_t    *headers;
+    ngx_uint_t          i;
+    u_char             *p;
+    u_char             *end;
+    size_t              directive_len;
+
+    directive_len = sizeof(directive) - 1;
+
+    for (part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        headers = part->elts;
+        for (i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
+            if (headers[i].key.len != sizeof(cc_name) - 1
+                || ngx_strncasecmp(headers[i].key.data, cc_name,
+                                   sizeof(cc_name) - 1) != 0)
+            {
+                continue;
+            }
+
+            /*
+             * Search for "no-transform" within the comma-separated
+             * directive list.  Match must be at word boundary (start
+             * of value, after comma/space, or end of value).
+             */
+            p = headers[i].value.data;
+            end = p + headers[i].value.len;
+
+            while (p < end) {
+                /* Skip leading whitespace and commas */
+                while (p < end && (*p == ' ' || *p == '\t'
+                       || *p == ','))
+                {
+                    p++;
+                }
+
+                if ((size_t)(end - p) >= directive_len
+                    && ngx_strncasecmp(p, directive,
+                                       directive_len) == 0)
+                {
+                    u_char *after = p + directive_len;
+                    if (after == end || *after == ','
+                        || *after == ' ' || *after == '\t')
+                    {
+                        return 1;
+                    }
+                }
+
+                /* Advance past current directive */
+                while (p < end && *p != ',') {
+                    p++;
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
 /**
  * Evaluate and handle a conditional request for a Markdown response.
  *
@@ -273,7 +356,8 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     cond_input.cache_validation = ngx_http_markdown_conditional_cache_validation(
         conf->policy.conditional_requests);
     cond_input.has_range = (range_header != NULL) ? 1 : 0;
-    cond_input.no_transform = 0;
+    cond_input.no_transform =
+        ngx_http_markdown_has_no_transform(r) ? 1 : 0;
     cond_input.if_none_match = inm_data;
     cond_input.if_none_match_len = inm_len;
     cond_input.if_modified_since = ims_data;
