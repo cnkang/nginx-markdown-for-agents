@@ -70,6 +70,7 @@ const ngx_str_t *ngx_http_markdown_reason_from_error_category(
     ngx_http_markdown_error_category_t category, ngx_log_t *log);
 const ngx_str_t *ngx_http_markdown_reason_converted(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
+const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
 const ngx_str_t *ngx_http_markdown_eligibility_string(
     ngx_http_markdown_eligibility_t eligibility);
 
@@ -571,9 +572,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
                       "bypassing conversion");
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
         ngx_http_markdown_log_decision(r, conf, &early_eff,
-            ngx_http_markdown_reason_from_eligibility(
-                NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
-                r->connection->log));
+            ngx_http_markdown_reason_bypass_no_transform());
         return ngx_http_next_header_filter(r);
     }
 

@@ -385,6 +385,12 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
          * here, it means conditional headers were present alongside a
          * bypass condition, and the Rust decision correctly returned
          * Bypass instead of Proceed.
+         *
+         * Bypass is a protocol/cache semantic, NOT a conversion error.
+         * It must NOT go through markdown_error_policy: even when
+         * on_error == REJECT, the original upstream response must be
+         * delivered unmodified.  Call fail_open directly, not
+         * reject_or_fail_open.
          */
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown: conditional bypass, delivering "
@@ -394,9 +400,13 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
             markdown_result_free(conditional_result);
         }
 
-        return ngx_http_markdown_reject_or_fail_open_buffered_response(
-            r, ctx, conf,
+        rc = ngx_http_markdown_fail_open_buffered_response(
+            r, ctx,
             "markdown: conditional bypass - returning original HTML");
+        if (rc == NGX_OK || rc == NGX_DONE) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
+        }
+        return rc;
     }
 
     if (rc == NGX_DECLINED && conditional_result != NULL) {
