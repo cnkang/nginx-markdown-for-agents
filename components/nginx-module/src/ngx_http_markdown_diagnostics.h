@@ -344,9 +344,11 @@ void ngx_http_markdown_diagnostics_get_dynconf_state(
 #define NGX_HTTP_MARKDOWN_ACCEPT_NONE      "NONE"
 
 /* conditional_result values */
+/* Conditional result string constants for diagnostics */
 #define NGX_HTTP_MARKDOWN_COND_NOT_MODIFIED "NOT_MODIFIED"
 #define NGX_HTTP_MARKDOWN_COND_PROCEED     "PROCEED"
 #define NGX_HTTP_MARKDOWN_COND_SKIPPED     "SKIPPED"
+#define NGX_HTTP_MARKDOWN_COND_BYPASS      "BYPASS"
 
 /* conversion_status values */
 #define NGX_HTTP_MARKDOWN_CONV_SUCCESS     "SUCCESS"

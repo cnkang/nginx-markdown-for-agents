@@ -179,7 +179,7 @@ ngx_http_markdown_convert_for_conditional(
  * Returns:
  *   1 if no-transform is present, 0 otherwise
  */
-static ngx_flag_t
+ngx_flag_t
 ngx_http_markdown_has_no_transform(ngx_http_request_t *r)
 {
     static u_char       cc_name[] = "Cache-Control";
@@ -287,6 +287,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     const u_char            *lm_data;
     size_t                   lm_len;
     ngx_flag_t               needs_entity_etag;
+    u_char                   lm_time_buf[32];
 
     if (conf->policy.conditional_requests == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -346,6 +347,28 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     if (lm_header != NULL) {
         lm_data = lm_header->value.data;
         lm_len = lm_header->value.len;
+    } else if (r->headers_out.last_modified_time != (time_t) -1) {
+        /*
+         * No Last-Modified list header, but the dedicated
+         * r->headers_out.last_modified_time field is set.  NGINX
+         * common paths (static files, upstream with last_modified)
+         * populate this field without always adding a list header.
+         * Format it as an RFC 1123 HTTP date string so the Rust
+         * conditional decision can compare it against
+         * If-Modified-Since.
+         */
+        u_char *end;
+
+        end = ngx_http_time(lm_time_buf,
+                            r->headers_out.last_modified_time);
+        lm_data = lm_time_buf;
+        lm_len = (size_t) (end - lm_time_buf);
+
+        ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: formatted last_modified_time=%T "
+                      "as \"%*s\"",
+                      r->headers_out.last_modified_time,
+                      (ngx_int_t) lm_len, lm_data);
     } else {
         lm_data = NULL;
         lm_len = 0;
@@ -374,6 +397,12 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         markdown_decide_conditional(&cond_input, &cond_decision);
         if (cond_decision.outcome == 0) {
             return NGX_HTTP_NOT_MODIFIED;
+        }
+        if (cond_decision.outcome == 2) {
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                          "markdown: conditional bypass (Range or "
+                          "no-transform), delivering upstream unmodified");
+            return NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT;
         }
         return NGX_DECLINED;
     }
@@ -449,6 +478,22 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         *result = conv_result;
 
         return NGX_HTTP_NOT_MODIFIED;
+    }
+
+    if (cond_decision.outcome == 2) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: conditional bypass after conversion "
+                      "(Range or no-transform), delivering upstream "
+                      "unmodified");
+
+        /*
+         * The conversion was performed to generate the ETag, but the
+         * conditional decision says Bypass.  Free the conversion result
+         * and signal bypass to the caller.
+         */
+        markdown_result_free(conv_result);
+
+        return NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT;
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,

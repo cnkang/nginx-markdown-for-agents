@@ -550,6 +550,33 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         return ngx_http_next_header_filter(r);
     }
 
+    /*
+     * Cache-Control: no-transform bypass (RFC 9111 §5.2.2.6).
+     *
+     * If the upstream response carries Cache-Control: no-transform, the
+     * response MUST NOT be transformed.  Bypass conversion entirely and
+     * deliver the upstream response unmodified.  This check runs in the
+     * header filter, before ctx creation and body buffering, so the
+     * request never enters the conversion path.
+     *
+     * Range requests are already handled by the eligibility check
+     * (INELIGIBLE_RANGE) above; this covers the no-transform case that
+     * the Rust conditional decision (ConditionalOutcome::Bypass) also
+     * flags but which the body-phase conditional check alone cannot
+     * catch when no conditional request headers are present.
+     */
+    if (ngx_http_markdown_has_no_transform(r)) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: Cache-Control: no-transform present, "
+                      "bypassing conversion");
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
+        ngx_http_markdown_log_decision(r, conf, &early_eff,
+            ngx_http_markdown_reason_from_eligibility(
+                NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
+                r->connection->log));
+        return ngx_http_next_header_filter(r);
+    }
+
     /* Check if client wants Markdown (Accept header) */
     should_convert = ngx_http_markdown_should_convert(
         r, conf, &accept_reason);

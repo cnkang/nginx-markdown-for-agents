@@ -374,6 +374,31 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
             "markdown: fail-open strategy - returning original HTML");
     }
 
+    if (rc == NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT) {
+        /*
+         * Conditional Bypass (Range or no-transform): deliver the
+         * upstream response unmodified.  The conversion result (if
+         * any) was already freed by handle_if_none_match.
+         *
+         * This path is a safety net — the header filter should have
+         * caught no-transform and Range before buffering.  If we reach
+         * here, it means conditional headers were present alongside a
+         * bypass condition, and the Rust decision correctly returned
+         * Bypass instead of Proceed.
+         */
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: conditional bypass, delivering "
+                      "original buffered response");
+
+        if (conditional_result != NULL) {
+            markdown_result_free(conditional_result);
+        }
+
+        return ngx_http_markdown_reject_or_fail_open_buffered_response(
+            r, ctx, conf,
+            "markdown: conditional bypass - returning original HTML");
+    }
+
     if (rc == NGX_DECLINED && conditional_result != NULL) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown: If-None-Match did not match, using existing conversion");

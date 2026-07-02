@@ -1541,6 +1541,22 @@ ngx_int_t ngx_http_markdown_send_304(ngx_http_request_t *r,
     const struct MarkdownResult *result);
 
 /*
+ * Check if the response carries Cache-Control: no-transform.
+ *
+ * Scans all Cache-Control response headers for the "no-transform"
+ * directive (RFC 9111 §5.2.2.6).  Used in the header filter to bypass
+ * conversion entirely when the upstream response must not be
+ * transformed.
+ *
+ * Parameters:
+ *   r - NGINX request (for response header access)
+ *
+ * Returns:
+ *   1 if no-transform is present, 0 otherwise
+ */
+ngx_flag_t ngx_http_markdown_has_no_transform(ngx_http_request_t *r);
+
+/*
  * Decompression functions
  *
  * These functions implement automatic decompression of upstream compressed content.
@@ -1586,6 +1602,15 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
 #define NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR     -101
 #define NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT  -102
 #define NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR         -103
+
+/*
+ * Internal return code for conditional-request Bypass outcome
+ * (ConditionalOutcome::Bypass = 2).  The C caller should deliver the
+ * upstream response unmodified.  Value -104 avoids collision with
+ * NGX_OK (0), NGX_ERROR (-1), NGX_AGAIN (-2), NGX_DONE (-4),
+ * NGX_DECLINED (-5), and the decomp codes above.
+ */
+#define NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT     -104
 
 /*
  * Safe buffer length helper.
