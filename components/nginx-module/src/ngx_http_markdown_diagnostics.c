@@ -826,14 +826,22 @@ ngx_http_markdown_diagnostics_streaming_str(ngx_uint_t val)
 
 /*
  * Map error_policy enum to string.
+ *
+ * The C model uses on_error=REJECT for both fail_closed and status modes.
+ * Distinguish them by error_status: the default (502) means fail_closed,
+ * any other code (429, 503) means explicit status mode.
  */
 static const char *
-ngx_http_markdown_diagnostics_error_policy_str(ngx_uint_t val)
+ngx_http_markdown_diagnostics_error_policy_str(ngx_uint_t val,
+    ngx_uint_t error_status)
 {
     switch (val) {
     case NGX_HTTP_MARKDOWN_ON_ERROR_PASS:
         return "pass";
     case NGX_HTTP_MARKDOWN_ON_ERROR_REJECT:
+        if (error_status != NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT) {
+            return "status";
+        }
         return "fail_closed";
     default:
         return "unknown";
@@ -952,7 +960,7 @@ ngx_http_markdown_diagnostics_fmt_effective_config(
     streaming_str = ngx_http_markdown_diagnostics_streaming_str(
         conf->stream.policy);
     error_str = ngx_http_markdown_diagnostics_error_policy_str(
-        conf->on_error);
+        conf->on_error, conf->error_status);
     limits_memory = conf->max_size;
     limits_timeout = conf->timeout;
     limits_streaming_buffer = conf->stream.precommit_buffer;
