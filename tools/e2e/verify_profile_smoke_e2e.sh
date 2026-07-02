@@ -237,6 +237,17 @@ echo "PORT=${PORT}" >&2
 
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf -t
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
+if [[ ! -s "${RUNTIME}/logs/nginx.pid" ]]; then
+    echo "ERROR: nginx did not create pid file after startup" >&2
+    sed -n '1,80p' "${RUNTIME}/logs/error.log" >&2 || true
+    exit 1
+fi
+nginx_pid="$(cat "${RUNTIME}/logs/nginx.pid")"
+if ! kill -0 "${nginx_pid}" >/dev/null 2>&1; then
+    echo "ERROR: nginx process ${nginx_pid} is not running after startup" >&2
+    sed -n '1,80p' "${RUNTIME}/logs/error.log" >&2 || true
+    exit 1
+fi
 markdown_wait_for_http "$(e2e_base_url)/balanced/diagnostics" \
     "profile diagnostics on ${PORT}" || exit 1
 

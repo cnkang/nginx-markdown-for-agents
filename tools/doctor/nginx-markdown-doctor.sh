@@ -144,14 +144,47 @@ ${human_line}"
     fi
 }
 
-# JSON-escape a string value (minimal: escape backslash, double-quote, newlines)
+# JSON-escape a string value.
 json_escape() {
     local s="$1"
-    s="${s//\\/\\\\}"
-    s="${s//\"/\\\"}"
-    s="${s//$'\n'/\\n}"
-    s="${s//$'\r'/}"
-    printf '%s' "$s"
+    local out="" ch ord i
+    local old_lc_all="${LC_ALL-__unset__}"
+
+    LC_ALL=C
+    for ((i = 0; i < ${#s}; i++)); do
+        ch="${s:i:1}"
+        case "$ch" in
+            "\\") out="${out}\\\\"
+                ;;
+            '"') out="${out}\\\""
+                ;;
+            $'\b') out="${out}\\b"
+                ;;
+            $'\f') out="${out}\\f"
+                ;;
+            $'\n') out="${out}\\n"
+                ;;
+            $'\r') out="${out}\\r"
+                ;;
+            $'\t') out="${out}\\t"
+                ;;
+            *)
+                ord=$(printf '%d' "'$ch")
+                if [[ "$ord" -lt 32 ]]; then
+                    out="${out}$(printf '\\u%04x' "$ord")"
+                else
+                    out="${out}${ch}"
+                fi
+                ;;
+        esac
+    done
+
+    if [[ "$old_lc_all" == "__unset__" ]]; then
+        unset LC_ALL
+    else
+        LC_ALL="$old_lc_all"
+    fi
+    printf '%s' "$out"
 }
 
 ##############################################################################
@@ -269,7 +302,7 @@ check_config_valid() {
     }
 
     # Write minimal config that tests basic module loading
-    cat > "$tmp_conf" <<'CONF'
+    if ! cat > "$tmp_conf" <<'CONF'
 daemon off;
 worker_processes 1;
 events { worker_connections 64; }
@@ -280,6 +313,11 @@ http {
     }
 }
 CONF
+    then
+        rm -f "$tmp_conf"
+        emit_check "config_valid" "fail" "could not write temp config file"
+        return
+    fi
 
     # Run nginx -t with the minimal config
     local test_output
