@@ -1572,6 +1572,12 @@ pub unsafe extern "C" fn markdown_detect_conflicts(
 
         // Each conflict's message is individually heap-allocated.
         // Freed one-by-one in markdown_free_conflicts.
+        //
+        // NOTE: If catch_unwind catches a panic after some messages have been
+        // Box::into_raw'd but before mem::forget(boxed), those message buffers
+        // would leak. This is acceptable because: (1) the closure is pure and
+        // allocation-only — panics here are practically impossible, and (2) the
+        // leak is bounded by conflict count (typically <5 short strings).
         let mut ffi_conflicts: Vec<FFIConflict> = Vec::with_capacity(count);
         for conflict in &conflicts {
             let level = match conflict.level {

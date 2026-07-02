@@ -337,7 +337,16 @@ pub fn classify_error_code(error_code: u32) -> ErrorClass {
          * decompression_budget, parse_budget */
         4 | 6 | 9 | 11 => ErrorClass::MemoryBudgetExceeded,
 
-        /* Streaming fallback: engine downgrade (pre-commit) */
+        /* Streaming fallback: engine downgrade (pre-commit).
+         * The streaming engine gave up and the module falls back to
+         * full-buffer.  Classified as ConversionError because from the
+         * streaming converter's perspective the conversion failed; the
+         * module then retries via full-buffer.  This is a pre-commit
+         * error: the response can be restarted.
+         *
+         * Historical note: prior to 0.9.0 this mapped to ERROR_SYSTEM
+         * in C.  Reclassified as ConversionError because it represents
+         * a converter-level failure mode, not a system-level fault. */
         7 => ErrorClass::ConversionError,
 
         /* Post-commit: streaming mid-flight error */
@@ -353,7 +362,9 @@ pub fn classify_error_code(error_code: u32) -> ErrorClass {
 ///
 /// The mapping is stable (frozen at 0.9.0, additive-only after 1.0).
 /// Each error class maps to exactly one reason code for metrics and
-/// diagnostics.
+/// diagnostics.  These mappings are the **single source of truth**,
+/// aligned with the C-side `ngx_http_markdown_reason.c` which sources
+/// reason code strings from the same Rust ReasonCode enum via FFI.
 ///
 /// # Examples
 ///
@@ -361,21 +372,21 @@ pub fn classify_error_code(error_code: u32) -> ErrorClass {
 /// use nginx_markdown_converter::error::classification::{ErrorClass, error_to_reason_code};
 /// use nginx_markdown_converter::decision::reason_code::ReasonCode;
 ///
-/// assert_eq!(error_to_reason_code(ErrorClass::ConversionError), ReasonCode::FailedOpen);
+/// assert_eq!(error_to_reason_code(ErrorClass::ConversionError), ReasonCode::ConversionError);
 /// assert_eq!(error_to_reason_code(ErrorClass::Timeout), ReasonCode::Timeout);
 /// ```
 pub fn error_to_reason_code(class: ErrorClass) -> ReasonCode {
     match class {
-        ErrorClass::ConversionError => ReasonCode::FailedOpen,
+        ErrorClass::ConversionError => ReasonCode::ConversionError,
         ErrorClass::Timeout => ReasonCode::Timeout,
-        ErrorClass::MemoryBudgetExceeded => ReasonCode::BudgetExceeded,
+        ErrorClass::MemoryBudgetExceeded => ReasonCode::MemoryBudgetExceeded,
         ErrorClass::FfiPanic => ReasonCode::FfiPanic,
         ErrorClass::DecompressionError => ReasonCode::DecompressionError,
-        ErrorClass::Overload => ReasonCode::FailedClosed,
-        ErrorClass::InvalidDynconf => ReasonCode::FailedOpen,
-        ErrorClass::DegradedSnapshot => ReasonCode::FailedOpen,
-        ErrorClass::HeaderPlanApplyError => ReasonCode::FailedClosed,
-        ErrorClass::StreamingMidFlightError => ReasonCode::FailedClosed,
+        ErrorClass::Overload => ReasonCode::Overload,
+        ErrorClass::InvalidDynconf => ReasonCode::InvalidDynconf,
+        ErrorClass::DegradedSnapshot => ReasonCode::DegradedSnapshot,
+        ErrorClass::HeaderPlanApplyError => ReasonCode::HeaderPlanApplyError,
+        ErrorClass::StreamingMidFlightError => ReasonCode::StreamingMidFlightError,
     }
 }
 
@@ -604,7 +615,7 @@ mod tests {
     fn test_error_to_reason_code_specific_mappings() {
         assert_eq!(
             error_to_reason_code(ErrorClass::ConversionError),
-            ReasonCode::FailedOpen
+            ReasonCode::ConversionError
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::Timeout),
@@ -612,7 +623,7 @@ mod tests {
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::MemoryBudgetExceeded),
-            ReasonCode::BudgetExceeded
+            ReasonCode::MemoryBudgetExceeded
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::FfiPanic),
@@ -624,23 +635,23 @@ mod tests {
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::Overload),
-            ReasonCode::FailedClosed
+            ReasonCode::Overload
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::InvalidDynconf),
-            ReasonCode::FailedOpen
+            ReasonCode::InvalidDynconf
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::DegradedSnapshot),
-            ReasonCode::FailedOpen
+            ReasonCode::DegradedSnapshot
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::HeaderPlanApplyError),
-            ReasonCode::FailedClosed
+            ReasonCode::HeaderPlanApplyError
         );
         assert_eq!(
             error_to_reason_code(ErrorClass::StreamingMidFlightError),
-            ReasonCode::FailedClosed
+            ReasonCode::StreamingMidFlightError
         );
     }
 
