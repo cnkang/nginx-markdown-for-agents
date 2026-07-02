@@ -1004,6 +1004,41 @@ test_profile_inheritance_child_wins(void)
     TEST_PASS("child profile overrides parent");
 }
 
+static void
+test_cache_validation_explicit_inheritance(void)
+{
+    ngx_conf_t               cf;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char                    *rc;
+
+    TEST_SUBSECTION("profile inheritance: explicit cache validation flag");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    init_conf(&parent);
+    init_conf(&child);
+
+    parent.profile.cache_validation_explicit = 1;
+    parent.policy.conditional_requests =
+        NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+
+    TEST_ASSERT(rc == NGX_CONF_OK, "merge should pass");
+    TEST_ASSERT(child.profile.cache_validation_explicit == 1,
+        "child inherits ancestor explicit cache validation flag");
+    TEST_ASSERT(child.policy.conditional_requests ==
+        NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT,
+        "child inherits ancestor cache validation value");
+
+    TEST_PASS("cache_validation_explicit inherits from parent");
+}
+
 /* ═══════════════════════════════════════════════════════════════════
  * Task 9.10: No-profile uses Config V2 built-in defaults
  * ═══════════════════════════════════════════════════════════════════ */
@@ -1182,6 +1217,7 @@ main(void)
     /* Task 9.9: Profile inheritance */
     test_profile_inheritance();
     test_profile_inheritance_child_wins();
+    test_cache_validation_explicit_inheritance();
 
     /* Task 9.10: No-profile built-in defaults */
     test_no_profile_builtin_defaults();
