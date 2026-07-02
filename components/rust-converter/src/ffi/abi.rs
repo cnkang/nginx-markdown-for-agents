@@ -160,7 +160,7 @@ pub struct MarkdownOptions {
     ///
     /// When non-zero, the streaming converter uses this value as the
     /// total memory budget instead of the compiled-in default (2 MiB).
-    /// Populated from the `markdown_streaming_budget` NGINX directive.
+    /// Populated from `markdown_limits streaming_buffer=<size>` (Config V2).
     pub streaming_budget: u64,
     /// Non-zero when noise region pruning is enabled at runtime.
     ///
@@ -193,7 +193,7 @@ pub struct MarkdownOptions {
     /// max_size when no explicit markdown_max_size is set. Rust
     /// currently enforces this budget only for streaming/incremental
     /// paths; full-buffer relies on NGINX-side buffering limits.
-    /// Populated from the `markdown_memory_budget` NGINX directive.
+    /// Populated from `markdown_limits memory=<size>` (Config V2).
     pub memory_budget: u64,
     /// LLM provider for token estimation (0=default, 1=openai-gpt, 2=anthropic-claude,
     /// 3=google-gemini, 4=meta-llama).

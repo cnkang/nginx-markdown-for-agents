@@ -13,5 +13,6 @@ ngx_int_t ngx_http_markdown_is_authenticated(const ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf);
 ngx_int_t ngx_http_markdown_modify_cache_control_for_auth(
     ngx_http_request_t *r);
+ngx_flag_t ngx_http_markdown_has_no_transform(ngx_http_request_t *r);
 
 #endif /* NGX_HTTP_MARKDOWN_EXPORTS_H */
