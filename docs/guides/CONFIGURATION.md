@@ -223,33 +223,23 @@ See [DEPLOYMENT_EXAMPLES.md](DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user
 #### markdown_memory_budget
 
 **Syntax:** `markdown_memory_budget <size>;`  
-**Default:** unset; path-specific defaults apply
+**Status:** REMOVED in 0.9.0 — use `markdown_limits memory=<size>`
 **Context:** http, server, location
 
-Unified memory/resource budget override for conversion paths. If set, it is
-used by full-buffer and streaming paths unless a path-specific directive such
-as `markdown_max_size` or `markdown_streaming_budget` is explicitly set.
-Responses that exceed the effective path limit are not converted (fail-open
-behavior).
-
-> **Compatibility:** `markdown_memory_budget` supersedes `markdown_max_size` (deprecated in 0.6.0). `markdown_max_size` is still accepted with a deprecation warning at `info` verbosity.
-
-**Valid Units:** `k` (kilobytes), `m` (megabytes)
+Config V2 consolidates resource limits in `markdown_limits`. In 0.9.0,
+`markdown_memory_budget` is a reject-only legacy directive so outdated
+configuration fails during `nginx -t` with a migration hint.
 
 **Example:**
 ```nginx
-# Limit to 5 megabytes
-markdown_memory_budget 5m;
-
-# Limit to 512 kilobytes
-markdown_memory_budget 512k;
+markdown_limits memory=5m;
 ```
 
 #### markdown_decompress_max_size
 
 **Syntax:** `markdown_decompress_max_size <size>;`
-**Default:** inherits the effective full-buffer size limit (`markdown_max_size`,
-after any `markdown_memory_budget` override resolution)
+**Default:** inherits the effective full-buffer size limit
+(`markdown_limits memory=<size>`)
 **Context:** http, server, location
 
 Independent budget for decompressed output size. When unset, it follows the
@@ -272,8 +262,8 @@ markdown_decompress_max_size 20m;
 Maximum time for the HTML parsing phase. The deadline is checked before and
 after parsing. The current parser path is not preemptively interrupted
 mid-parse; combine this directive with `markdown_parser_budget`,
-`markdown_memory_budget`, and `markdown_decompress_max_size` to bound resource
-exposure.
+`markdown_limits memory=<size>`, and `markdown_decompress_max_size` to bound
+resource exposure.
 
 **Example:**
 ```nginx
@@ -303,9 +293,9 @@ markdown_parser_budget 32m;
 **Context:** http, server, location
 
 Unified limits block (Config V2, 0.9.0). Consolidates the removed
-`markdown_max_size`, `markdown_timeout`, and `markdown_streaming_budget`
-directives. Any subset of keys may be given; unspecified keys inherit
-(per-key inheritance).
+`markdown_max_size`, `markdown_memory_budget`, `markdown_timeout`, and
+`markdown_streaming_budget` directives. Any subset of keys may be given;
+unspecified keys inherit (per-key inheritance).
 
 - `memory=<size>` — maximum response size to attempt conversion (was
   `markdown_max_size`).
@@ -324,7 +314,8 @@ size/time/integer values.
 markdown_limits memory=8m timeout=2s streaming_buffer=256k max_inflight=64;
 ```
 
-**Migration:** `markdown_max_size 5m` -> `markdown_limits memory=5m`;
+**Migration:** `markdown_max_size 5m` and `markdown_memory_budget 5m`
+-> `markdown_limits memory=5m`;
 `markdown_timeout 3s` -> `markdown_limits timeout=3s`;
 `markdown_streaming_budget 4m` -> `markdown_limits streaming_buffer=4m`.
 `markdown_large_body_threshold` is removed with no direct replacement.
@@ -864,7 +855,8 @@ markdown_streaming_budget 4m;
   parser state, sanitizer state, and output buffers.
 - When the budget is exceeded, the `nginx_markdown_streaming_budget_exceeded_total`
   Prometheus counter increments and the error is classified as a pre-commit failure.
-- The budget does not affect the full-buffer path, which uses `markdown_memory_budget` instead.
+- The budget does not affect the full-buffer path, which uses
+  `markdown_limits memory=<size>` instead.
 #### markdown_streaming_on_error
 
 **Syntax:** `markdown_streaming_on_error pass | reject;`
@@ -1263,7 +1255,7 @@ configured together.
 | Directive Pair | Interaction Summary |
 |----------------|---------------------|
 | `markdown_streaming_engine` + `markdown_filter` | Streaming only applies when `markdown_filter` is `on` (or resolves to a truthy value). If the filter is disabled, the streaming engine setting is irrelevant — no conversion of any kind occurs. |
-| `markdown_streaming_engine` + `markdown_memory_budget` | The unified `markdown_memory_budget` sets the ceiling for both engines unless a path-specific directive overrides it. For streaming, `markdown_streaming_budget` takes precedence when explicitly set; otherwise the unified budget applies. |
+| `markdown_streaming_engine` + `markdown_limits` | The unified `markdown_limits memory=<size>` sets the full-buffer ceiling, while `markdown_limits streaming_buffer=<size>` sets the streaming working-buffer ceiling. |
 | `markdown_streaming_engine` + `markdown_on_error` | These error policies are **independent**. `markdown_on_error` governs full-buffer failures; `markdown_streaming_on_error` governs streaming pre-commit failures. Changing one never affects the other. See the [error policy table](#relationship-between-markdown_on_error-and-markdown_streaming_on_error) above. |
 | `markdown_streaming_engine` + `markdown_etag` | ETags are generated from converted output. For full-buffer responses, the complete Markdown is available before headers are sent, so ETag generation works normally. For streaming responses that have crossed the commit boundary, response headers (including `Content-Type: text/markdown`) are already sent — ETag cannot be retroactively added. Streaming responses do **not** carry an ETag header. |
 | `markdown_streaming_engine` + `markdown_conditional_requests` | Conditional request handling (`If-None-Match` / 304) works for full-buffer responses where an ETag is available. Streaming responses bypass 304 logic because no ETag is produced. **Important:** when `markdown_conditional_requests` is `full_support` (the default), the streaming selector always selects full-buffer because full ETag support requires the complete converted output before headers. To actually activate streaming in `auto` mode, set `markdown_conditional_requests if_modified_since_only` or `disabled`. |
@@ -1279,10 +1271,10 @@ configured together.
    Consider setting `markdown_stream_threshold` high enough that commonly cached
    small responses stay on the full-buffer path.
 
-2. **Unified budget resolution order.** The effective streaming budget is:
-   `markdown_streaming_budget` (if set) → `markdown_memory_budget` (if set) →
-   built-in default (`2m`). An operator who sets only `markdown_memory_budget 1m`
-   may inadvertently lower the streaming budget below the `2m` default.
+2. **Unified budget resolution.** The effective streaming buffer is
+   `markdown_limits streaming_buffer=<size>` when set, otherwise the inherited
+   Config V2 default. The full-buffer response limit is
+   `markdown_limits memory=<size>`.
 
 3. **Excluded types are additive.** `markdown_stream_excluded_types` adds to
    the built-in hard exclusions (`text/event-stream`, `application/x-ndjson`,
@@ -1310,7 +1302,7 @@ configured together.
 ```nginx
 http {
     markdown_filter on;
-    markdown_memory_budget 4m;           # Applies to both paths
+    markdown_limits memory=4m;           # Applies to both paths
     markdown_streaming_engine auto;
     markdown_stream_threshold 1m;
     markdown_etag on;                    # Works for full-buffer only
@@ -1870,9 +1862,11 @@ location /nginx-markdown/diagnostics {
 
 ---
 
-### Deprecated Directives
+### Legacy Directives Removed in 0.9.0
 
-The following directives are deprecated and will be removed in a future major release. They are still accepted with info-level warnings to allow gradual migration.
+The following Config V1 directives are reject-only in 0.9.0. They are still
+recognized so `nginx -t` can fail with a direct migration hint instead of an
+ambiguous unknown-directive error.
 
 #### markdown_max_size
 
@@ -1926,7 +1920,7 @@ http {
     markdown_filter on;
     
     # Configure resource limits
-    markdown_memory_budget 10m;
+    markdown_limits memory=10m;
     markdown_timeout 5s;
     
     # Use fail-open strategy (recommended)
@@ -1969,7 +1963,7 @@ http {
         # Enable for blog content
         location /blog {
             markdown_filter on;
-            markdown_memory_budget 5m;  # Smaller limit for blog posts
+            markdown_limits memory=5m;  # Smaller limit for blog posts
             proxy_pass http://backend;
         }
         
@@ -2096,7 +2090,7 @@ http {
     markdown_auth_cookies session* auth_token PHPSESSID wordpress_logged_in_*;
     
     # Conservative resource limits
-    markdown_memory_budget 5m;
+    markdown_limits memory=5m;
     markdown_timeout 3s;
     
     # Fail-closed for critical applications
@@ -2142,7 +2136,7 @@ http {
     markdown_filter on;
     
     # Aggressive resource limits
-    markdown_memory_budget 2m;
+    markdown_limits memory=2m;
     markdown_timeout 1s;
     
     # Fail-open for availability
@@ -2189,7 +2183,7 @@ Configuration for multiple virtual hosts with different settings:
 http {
     # Global defaults
     markdown_filter on;
-    markdown_memory_budget 10m;
+    markdown_limits memory=10m;
     markdown_timeout 5s;
     markdown_on_error pass;
     
@@ -2225,7 +2219,7 @@ http {
         server_name blog-c.example.com;
         
         location / {
-            markdown_memory_budget 5m;  # Smaller limit
+            markdown_limits memory=5m;  # Smaller limit
             markdown_timeout 2s;   # Faster timeout
             markdown_conditional_requests if_modified_since_only;
             proxy_pass http://backend-c;
@@ -2266,17 +2260,17 @@ Configuration follows NGINX's standard inheritance model:
 ```nginx
 http {
     markdown_filter on;           # Inherited by all servers/locations
-    markdown_memory_budget 10m;        # Inherited by all servers/locations
+    markdown_limits memory=10m;        # Inherited by all servers/locations
     
     server {
         location /docs {
-            # Inherits: markdown_filter on, markdown_memory_budget 10m
+            # Inherits: markdown_filter on, markdown_limits memory=10m
         }
     }
 }
 ```
 
-**Result:** `/docs` has `markdown_filter on` and `markdown_memory_budget 10m`
+**Result:** `/docs` has `markdown_filter on` and `markdown_limits memory=10m`
 
 ---
 
@@ -2285,18 +2279,18 @@ http {
 ```nginx
 http {
     markdown_filter on;
-    markdown_memory_budget 10m;
+    markdown_limits memory=10m;
     
     server {
         location /docs {
-            markdown_memory_budget 5m;  # Override
+            markdown_limits memory=5m;  # Override
             # Inherits: markdown_filter on
         }
     }
 }
 ```
 
-**Result:** `/docs` has `markdown_filter on` and `markdown_memory_budget 5m` (overridden)
+**Result:** `/docs` has `markdown_filter on` and `markdown_limits memory=5m` (overridden)
 
 ---
 
@@ -2328,7 +2322,7 @@ http {
 ```nginx
 http {
     markdown_filter on;
-    markdown_memory_budget 10m;
+    markdown_limits memory=10m;
     markdown_timeout 5s;
     
     server {
@@ -2347,7 +2341,7 @@ http {
         location / {
             # Inherits: markdown_filter on (from http)
             # Inherits: markdown_timeout 3s (from server)
-            # Inherits: markdown_memory_budget 10m (from http)
+            # Inherits: markdown_limits memory=10m (from http)
         }
     }
 }
@@ -2360,7 +2354,7 @@ http {
 ```nginx
 http {
     markdown_filter on;
-    markdown_memory_budget 10m;
+    markdown_limits memory=10m;
     markdown_timeout 5s;
     markdown_flavor commonmark;
     
@@ -2369,7 +2363,7 @@ http {
          
         location /docs {
             markdown_flavor gfm;  # Override
-            markdown_memory_budget 5m; # Override
+            markdown_limits memory=5m; # Override
             # Inherits: markdown_filter on (from http)
             # Inherits: markdown_timeout 3s (from server)
         }
@@ -2401,7 +2395,7 @@ http {
 http {
     # Global defaults for all sites
     markdown_filter on;
-    markdown_memory_budget 10m;
+    markdown_limits memory=10m;
     markdown_timeout 5s;
     markdown_on_error pass;
     
@@ -2420,7 +2414,7 @@ http {
         
         location /blog {
             # Blog posts are typically smaller
-            markdown_memory_budget 5m;
+            markdown_limits memory=5m;
         }
     }
 }
@@ -2436,7 +2430,7 @@ Always configure resource limits to prevent resource exhaustion:
 
 ```nginx
 # Conservative limits for production
-markdown_memory_budget 5m;      # Limit response size
+markdown_limits memory=5m;      # Limit response size
 markdown_timeout 3s;       # Limit conversion time
 ```
 
@@ -2558,7 +2552,7 @@ Balance between functionality and performance:
 
 ```nginx
 # Aggressive limits for high-traffic sites
-markdown_memory_budget 2m;      # Smaller limit
+markdown_limits memory=2m;      # Smaller limit
 markdown_timeout 1s;       # Faster timeout
 ```
 
@@ -2710,7 +2704,7 @@ http {
     
     # Markdown filter global settings
     markdown_filter on;
-    markdown_memory_budget 10m;
+    markdown_limits memory=10m;
     markdown_timeout 5s;
     markdown_on_error pass;
     markdown_flavor commonmark;
@@ -2800,7 +2794,7 @@ http {
     
     # Markdown filter with verbose logging
     markdown_filter on;
-    markdown_memory_budget 10m;
+    markdown_limits memory=10m;
     markdown_timeout 10s;  # Longer timeout for debugging
     markdown_on_error pass;
     markdown_flavor gfm;
@@ -2850,7 +2844,7 @@ http {
     
     # Aggressive markdown filter settings
     markdown_filter on;
-    markdown_memory_budget 2m;
+    markdown_limits memory=2m;
     markdown_timeout 1s;
     markdown_on_error pass;
     markdown_flavor commonmark;
@@ -2962,7 +2956,7 @@ ab -n 1000 -c 10 -H "Accept: text/html" http://localhost/
 1. `markdown_filter on` is set
 2. Request has `Accept: text/markdown` header
 3. Response is eligible (GET/HEAD, 200, text/html)
-4. Response size within `markdown_memory_budget` limit
+4. Response size within `markdown_limits memory=<size>` limit
 
 **Debug:**
 ```bash
@@ -2996,7 +2990,7 @@ nginx -T | grep markdown
 ### Issue: Performance Degradation
 
 **Check:**
-1. `markdown_memory_budget` and `markdown_timeout` are appropriate
+1. `markdown_limits memory=<size>` and `markdown_limits timeout=<time>` are appropriate
 2. Caching is enabled
 3. Optional features are disabled if not needed
 

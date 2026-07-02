@@ -28,7 +28,7 @@ New consolidating directives (additive-only after 1.0):
 
 | Directive | Replaces | Grammar |
 |-----------|----------|---------|
-| `markdown_limits` | `markdown_max_size`, `markdown_timeout`, `markdown_streaming_budget`, `markdown_large_body_threshold` | `memory=<size> timeout=<time> streaming_buffer=<size> max_inflight=<N>` (space-separated keys; duplicate/unknown/zero key → error; per-key inheritance) |
+| `markdown_limits` | `markdown_max_size`, `markdown_memory_budget`, `markdown_timeout`, `markdown_streaming_budget`, `markdown_large_body_threshold` | `memory=<size> timeout=<time> streaming_buffer=<size> max_inflight=<N>` (space-separated keys; duplicate/unknown/zero key → error; per-key inheritance) |
 | `markdown_accept` | `markdown_on_wildcard` | `strict\|wildcard\|force` |
 | `markdown_cache_validation` | `markdown_conditional_requests`, `markdown_etag` | `off\|ims_only\|full` |
 | `markdown_streaming` | (policy split from engine) | `off\|auto\|force` |
@@ -60,7 +60,8 @@ Stub set: `markdown_on_wildcard`, `markdown_etag`,
 `markdown_conditional_requests`, `markdown_on_error`,
 `markdown_streaming_on_error`, `markdown_trust_forwarded_headers`,
 `markdown_forwarded_headers`, `markdown_etag_policy`, `markdown_max_size`,
-`markdown_timeout`, `markdown_streaming_budget`, `markdown_large_body_threshold`.
+`markdown_memory_budget`, `markdown_timeout`, `markdown_streaming_budget`,
+`markdown_large_body_threshold`.
 
 ### Cross-directive conflict rules (validated at `nginx -t`)
 
