@@ -600,12 +600,14 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     /*
      * Build header plan from Rust FFI.
      *
-     * The plan covers: Content-Type (set), Content-Encoding (delete-all),
+     * The plan covers the CORE wire-critical mutations:
+     * Content-Type (set), Content-Encoding (delete-all),
      * Content-Length (delete-all), and ETag (set-etag-placeholder or omit).
      *
-     * Content-Length deletion invalidates the stale original value.
-     * The correct post-conversion length is set below after the plan
-     * commits successfully.
+     * Post-plan operations (ETag set/clear, Vary: Accept, Content-Length
+     * set, X-Markdown-Tokens, Accept-Ranges, auth Cache-Control) are
+     * pre-send best-effort with hard abort — see ADR-0017 "Atomic scope
+     * boundary" for the rationale and failure handling contract.
      */
     markdown_header_plan_init(&plan);
     markdown_build_header_plan(

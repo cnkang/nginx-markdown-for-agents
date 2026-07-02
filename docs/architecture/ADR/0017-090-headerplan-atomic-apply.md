@@ -78,6 +78,43 @@ connection, log reason code `streaming_mid_flight_error` (ADR-0018), emit
 metrics. Forbidden: pass original content, return 200 with truncated body, or
 "reliably" rewrite HTTP status.
 
+### Atomic scope boundary (0.9.0 pragmatic contract)
+
+The HeaderPlan prepare/commit covers the **core** header mutations that
+directly affect wire-level correctness:
+
+- Content-Type (set via dedicated field + stale list-entry delete-all)
+- Content-Encoding (delete-all)
+- Content-Length (delete-all — stale original invalidated atomically)
+
+The following **post-plan operations** execute after the plan commits
+successfully. They are **pre-send best-effort with hard abort**: a failure in
+any of them returns `NGX_ERROR` before `ngx_http_send_header()` is called, so
+no partially-mutated headers reach the wire. However, they are not covered by
+the plan's rollback guarantee — a failure here leaves the already-committed
+core mutations in place (which is safe: Content-Type/Content-Encoding/old
+Content-Length are already correct, and the request will error out before
+headers are sent).
+
+| Post-plan operation | Failure handling |
+|---------------------|------------------|
+| ETag set/clear | `NGX_ERROR` — abort before send |
+| `Vary: Accept` add | `NGX_ERROR` — abort before send |
+| Content-Length set (new value) | Scalar assignment — cannot fail |
+| `X-Markdown-Tokens` header | `NGX_ERROR` — abort before send |
+| `Accept-Ranges` removal | Scalar assignment — cannot fail |
+| Auth `Cache-Control` modify | `NGX_ERROR` — abort before send |
+
+**Rationale**: Expanding the plan to cover these operations would require
+adding ETag set/clear, Vary add, and token header to the Rust
+`markdown_build_header_plan` FFI, increasing the FFI surface and coupling Rust
+to NGINX-specific list-push semantics. The current design keeps Rust
+plan-building pure (core wire-critical mutations only) and handles
+NGINX-lifecycle-specific header operations in C post-plan. This is a pragmatic
+0.9.0 contract; if future requirements demand full atomicity for these
+operations, they should be migrated into the Rust plan with corresponding FFI
+expansion.
+
 ## Consequences
 
 ### Positive
@@ -120,3 +157,4 @@ Kang
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.9.0 | 2026-06-30 | Kang | Initial ADR — prepare/commit split, special-field atomicity, exception table, post-commit boundary |
+| 0.9.0 | 2026-07-02 | Kang | Documented atomic scope boundary: core plan vs post-plan best-effort with hard abort |
