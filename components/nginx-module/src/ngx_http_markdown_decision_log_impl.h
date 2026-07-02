@@ -181,18 +181,18 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         return 1;
     }
 
-    if (reason_code->len >= 22
+    if (reason_code->len >= 24
         && ngx_strncmp(reason_code->data,
-                       (const u_char *) "header_plan_apply_err",
-                       21) == 0)
+                       (const u_char *) "header_plan_apply_error",
+                       23) == 0)
     {
         return 1;
     }
 
-    if (reason_code->len >= 25
+    if (reason_code->len >= 27
         && ngx_strncmp(reason_code->data,
-                       (const u_char *) "streaming_mid_flight_err",
-                       24) == 0)
+                       (const u_char *) "streaming_mid_flight_error",
+                       26) == 0)
     {
         return 1;
     }
