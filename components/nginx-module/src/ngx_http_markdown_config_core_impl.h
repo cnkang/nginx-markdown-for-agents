@@ -782,6 +782,12 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         conf->profile.name = prev->profile.name;
         conf->profile.set = prev->profile.set;
     }
+    if (!conf->profile.cache_validation_explicit
+        && prev->profile.cache_validation_explicit)
+    {
+        conf->profile.cache_validation_explicit =
+            prev->profile.cache_validation_explicit;
+    }
     ngx_http_markdown_profile_defaults(conf->profile.name,
                                        &profile_defaults);
 
