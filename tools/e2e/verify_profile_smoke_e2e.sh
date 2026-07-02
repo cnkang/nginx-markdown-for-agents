@@ -237,6 +237,13 @@ echo "PORT=${PORT}" >&2
 
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf -t
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
+
+# ponytail: poll for pid file — nginx master writes it asynchronously,
+# so an immediate -s check races on slow/busy hosts.
+for _i in $(seq 1 50); do
+    [[ -s "${RUNTIME}/logs/nginx.pid" ]] && break
+    sleep 0.1
+done
 if [[ ! -s "${RUNTIME}/logs/nginx.pid" ]]; then
     echo "ERROR: nginx did not create pid file after startup" >&2
     sed -n '1,80p' "${RUNTIME}/logs/error.log" >&2 || true

@@ -51,6 +51,7 @@
 
 #define NGX_HTTP_MARKDOWN_ON_ERROR_PASS    0
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1
+#define NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT  502
 
 #ifdef MARKDOWN_STREAMING_ENABLED
 #define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS    0
@@ -141,6 +142,7 @@ typedef struct ngx_http_markdown_conf_s {
     ngx_http_markdown_policy_cfg_t  policy;
     ngx_uint_t                      accept_policy;
     ngx_uint_t                      on_error;
+    ngx_uint_t                      error_status;
     size_t                          max_size;
     ngx_msec_t                      timeout;
     ngx_uint_t                      max_inflight;
