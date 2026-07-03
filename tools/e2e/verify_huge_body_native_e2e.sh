@@ -166,9 +166,8 @@ http {
         location /full/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
-            markdown_conditional_requests full_support;
-            # default max_size=10m should force size-based bypass for 100m/1g
+            markdown_cache_validation full;
+            # default memory=10m should force size-based bypass for 100m/1g
             markdown_log_verbosity warn;
         }
     }

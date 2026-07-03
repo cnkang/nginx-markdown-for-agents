@@ -184,8 +184,7 @@ http {
         location /full/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
-            markdown_conditional_requests full_support;
+            markdown_cache_validation full;
             markdown_log_verbosity warn;
         }
     }
