@@ -17,6 +17,16 @@ Required:
 - Flush charset decoders at EOF (`last=true`) so trailing buffered bytes are emitted or reported.
 - Do not rely on blanket lossy conversion before handling chunk-tail semantics.
 - When post-commit wrappers re-map errors, preserve original error classification/code for downstream handling and metrics.
+- html5ever's `discard_bom` flag strips U+FEFF at the start of **every**
+  `feed()` call, not just the first.  When a BOM's lead byte (0xEF) is split
+  into `utf8_tail` by `split_utf8_tail` and reassembled at the start of the
+  next `feed()`, html5ever strips it — diverging from single-chunk conversion
+  where the same BOM is mid-stream and preserved.  The streaming tokenizer
+  must set `discard_bom: false` and strip the stream-start BOM once in the
+  converter (after `utf8_tail` reassembly, so a split BOM is detected as a
+  complete 3-byte unit).  The `bom_stripped` flag must not be set prematurely
+  when the effective bytes start with 0xEF but are shorter than 3 bytes —
+  defer until the next chunk reassembles the full sequence.
 
 ---
 
