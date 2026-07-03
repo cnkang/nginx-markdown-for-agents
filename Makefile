@@ -680,7 +680,12 @@ test-production-examples-nginx-t:
 	@echo "=== Production Examples nginx -t ==="
 	@nginx_bin="$${NGINX_BIN:-nginx}"; \
 	if command -v "$$nginx_bin" >/dev/null 2>&1; then \
-		for conf in examples/production/*.conf; do \
+		set -- examples/production/*.conf; \
+		if [ "$$1" = 'examples/production/*.conf' ]; then \
+			echo "FAIL: no production example configs found in examples/production/" >&2; \
+			exit 1; \
+		fi; \
+		for conf in "$$@"; do \
 			echo "  Testing: $$conf"; \
 			"$$nginx_bin" -t -c "$$(pwd)/$$conf" 2>&1 || exit 1; \
 		done; \
