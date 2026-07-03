@@ -90,7 +90,8 @@ markdown:
   flavor: "commonmark"
   tokenEstimate: false
   etag: true
-  conditionalRequests: "full_support"
+  # Cache validation mode: off | ims_only | full
+  conditionalRequests: "ims_only"
   logVerbosity: "info"
   bufferChunked: true
   autoDecompress: true
@@ -103,7 +104,6 @@ markdown:
   streaming:
     engine: "auto"
     budget: "2m"
-    onError: "pass"
     threshold: "1m"
     shadow: false
 

@@ -28,22 +28,21 @@ data:
         listen 8080;
         {{- if .Values.markdown.enabled }}
         markdown_filter on;
-        markdown_memory_budget {{ .Values.markdown.maxSize }};
-        markdown_timeout {{ .Values.markdown.timeout }};
-        markdown_on_error {{ .Values.markdown.onError }};
+        markdown_limits memory={{ .Values.markdown.maxSize }} timeout={{ .Values.markdown.timeout }};
+        markdown_error_policy {{ .Values.markdown.onError }};
         markdown_flavor {{ .Values.markdown.flavor }};
         {{- if .Values.markdown.tokenEstimate }}
         markdown_token_estimate on;
         {{- end }}
         {{- if not .Values.markdown.etag }}
-        markdown_etag off;
+        markdown_cache_validation off;
+        {{- else }}
+        markdown_cache_validation {{ .Values.markdown.conditionalRequests }};
         {{- end }}
-        markdown_conditional_requests {{ .Values.markdown.conditionalRequests }};
         markdown_log_verbosity {{ .Values.markdown.logVerbosity }};
         {{- if .Values.markdown.streaming }}
         markdown_streaming_engine {{ .Values.markdown.streaming.engine }};
-        markdown_streaming_budget {{ .Values.markdown.streaming.budget }};
-        markdown_streaming_on_error {{ .Values.markdown.streaming.onError }};
+        markdown_limits streaming_buffer={{ .Values.markdown.streaming.budget }};
         markdown_stream_threshold {{ .Values.markdown.streaming.threshold }};
         {{- if .Values.markdown.streaming.shadow }}
         markdown_streaming_shadow on;
@@ -66,9 +65,6 @@ data:
         {{- end }}
         {{- if .Values.markdown.llm.charsPerToken }}
         markdown_chars_per_token {{ .Values.markdown.llm.charsPerToken }};
-        {{- end }}
-        {{- if .Values.markdown.memoryBudget }}
-        markdown_memory_budget {{ .Values.markdown.memoryBudget }};
         {{- end }}
         {{- end }}
         {{- if and .Values.markdown.enabled .Values.metrics.enabled }}
