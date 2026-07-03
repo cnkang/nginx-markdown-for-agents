@@ -291,6 +291,12 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
+    /*
+     * Iterate over directive arguments (skipping argv[0] = directive name).
+     * Each argument must be key=value; keys are matched case-insensitively
+     * and mapped to the corresponding conf field.  Duplicate keys, unknown
+     * keys, and zero/malformed values are rejected at nginx -t time.
+     */
     for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
         u_char    *eq;
         ngx_str_t  key;
@@ -300,6 +306,7 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         ngx_msec_t ms;
         ngx_uint_t n;
 
+        /* Split argument at '=' into key and value substrings. */
         eq = ngx_strlchr(value[i].data, value[i].data + value[i].len, '=');
         if (eq == NULL || eq == value[i].data
             || (size_t) (eq - value[i].data) == value[i].len - 1)
@@ -318,6 +325,7 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         val.data = eq + 1;
         val.len = vlen;
 
+        /* memory=<size> — max response size eligible for conversion. */
         if (ngx_http_markdown_arg_equals(&key, (u_char *) "memory", 6)) {
             if (seen_memory) {
                 return "has a duplicate \"memory\" key";
@@ -333,6 +341,7 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             }
             mcf->max_size = sz;
 
+        /* timeout=<time> — max conversion wall-clock time. */
         } else if (ngx_http_markdown_arg_equals(&key,
                        (u_char *) "timeout", 7)) {
             if (seen_timeout) {
@@ -349,6 +358,7 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             }
             mcf->timeout = ms;
 
+        /* streaming_buffer=<size> — streaming engine working-set budget. */
         } else if (ngx_http_markdown_arg_equals(&key,
                        (u_char *) "streaming_buffer", 16)) {
             if (seen_streaming_buffer) {
@@ -365,6 +375,7 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             }
             mcf->stream.budget = sz;
 
+        /* max_inflight=<N> — per-worker concurrent conversion cap. */
         } else if (ngx_http_markdown_arg_equals(&key,
                        (u_char *) "max_inflight", 12)) {
             if (seen_max_inflight) {
