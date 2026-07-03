@@ -895,7 +895,6 @@ ngx_http_markdown_diagnostics_fmt_profile(
                 p = ngx_slprintf(p, last, ", ");
             }
             p = ngx_slprintf(p, last, "\"cache_validation\"");
-            first = 0;
         }
     }
 
@@ -959,13 +958,13 @@ ngx_http_markdown_diagnostics_fmt_effective_config(
             ngx_uint_t  effective_conditional = conf->policy.conditional_requests;
 
         if (conf->profile.name == NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE) {
-            /* forced: streaming=off; default: cache_validation=full */
+            /* strict_cache forces streaming off and defaults cache_validation to full */
             effective_streaming = NGX_HTTP_MARKDOWN_STREAMING_OFF;
             if (!conf->profile.cache_validation_explicit) {
                 effective_conditional = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
             }
         } else if (conf->profile.name == NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST) {
-            /* forced: streaming=force, cache_validation=off */
+            /* streaming_first forces streaming on and cache_validation off */
             effective_streaming = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
             effective_conditional = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
         }

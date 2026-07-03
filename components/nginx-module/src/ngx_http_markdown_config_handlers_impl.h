@@ -369,7 +369,7 @@ ngx_http_markdown_apply_max_inflight_limit(ngx_conf_t *cf,
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
             "invalid \"max_inflight\" value \"%V\" in \"%V\"; "
             "must not exceed %u (FFI uint32_t limit)",
-            val, &cmd->name, (unsigned) UINT32_MAX);
+            val, &cmd->name, UINT32_MAX);
         return NGX_CONF_ERROR;
     }
 
@@ -1687,7 +1687,7 @@ ngx_http_markdown_stream_excluded_types_handler(ngx_conf_t *cf,
  *   NGX_CONF_OK on success, NGX_CONF_ERROR on invalid/duplicate profile
  */
 static char *
-ngx_http_markdown_set_profile(ngx_conf_t *cf, ngx_command_t *cmd,
+ngx_http_markdown_set_profile(ngx_conf_t *cf, ngx_command_t *cmd, /* NOSONAR: cmd must match ngx_command_t.set signature (Rule 24) */
     void *conf)
 {
     static u_char             strict_str[]    = "strict_cache";

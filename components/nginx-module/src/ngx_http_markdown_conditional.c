@@ -110,8 +110,8 @@ ngx_http_markdown_strncasecmp_const(const u_char *s1, const u_char *s2,
         u_char  c1;
         u_char  c2;
 
-        c1 = (u_char) ngx_tolower(*s1);
-        c2 = (u_char) ngx_tolower(*s2);
+        c1 = ngx_tolower(*s1);
+        c2 = ngx_tolower(*s2);
 
         if (c1 != c2) {
             return c1 - c2;
@@ -276,7 +276,77 @@ ngx_http_markdown_has_no_transform(ngx_http_request_t *r)
     return 0;
 }
 
-/**
+/*
+ * Gather conditional request headers and resolve the Last-Modified value.
+ *
+ * Reads If-None-Match, If-Modified-Since, Range from request headers, and
+ * Last-Modified from response headers (falling back to
+ * r->headers_out.last_modified_time formatted as RFC 1123).  Outputs are
+ * written through the caller-provided pointers.
+ */
+static void
+ngx_http_markdown_collect_conditional_headers(ngx_http_request_t *r,
+    const ngx_table_elt_t **inm_header, const ngx_table_elt_t **ims_header,
+    const ngx_table_elt_t **range_header,
+    const u_char **lm_data, size_t *lm_len, u_char *lm_time_buf)
+{
+    {
+        static u_char  if_none_match_name[] = "If-None-Match";
+        *inm_header = ngx_http_markdown_find_request_header(
+            r, if_none_match_name, sizeof(if_none_match_name) - 1);
+    }
+
+    {
+        static u_char  if_modified_since_name[] = "If-Modified-Since";
+        *ims_header = ngx_http_markdown_find_request_header(
+            r, if_modified_since_name, sizeof(if_modified_since_name) - 1);
+    }
+
+    {
+        static u_char  range_name[] = "Range";
+        *range_header = ngx_http_markdown_find_request_header(
+            r, range_name, sizeof(range_name) - 1);
+    }
+
+    {
+        const ngx_table_elt_t  *lm_header;
+        static u_char  last_modified_name[] = "Last-Modified";
+        lm_header = ngx_http_markdown_find_response_header(
+            r, last_modified_name, sizeof(last_modified_name) - 1);
+
+        if (lm_header != NULL) {
+            *lm_data = lm_header->value.data;
+            *lm_len = lm_header->value.len;
+        } else if (r->headers_out.last_modified_time != (time_t) -1) {
+            /*
+             * No Last-Modified list header, but the dedicated
+             * r->headers_out.last_modified_time field is set.  NGINX
+             * common paths (static files, upstream with last_modified)
+             * populate this field without always adding a list header.
+             * Format it as an RFC 1123 HTTP date string so the Rust
+             * conditional decision can compare it against
+             * If-Modified-Since.
+             */
+            const u_char *end;
+
+            end = ngx_http_time(lm_time_buf,
+                                r->headers_out.last_modified_time);
+            *lm_data = lm_time_buf;
+            *lm_len = (size_t) (end - lm_time_buf);
+
+            ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                          "markdown: formatted last_modified_time=%T "
+                          "as \"%*s\"",
+                          r->headers_out.last_modified_time,
+                          (ngx_int_t) *lm_len, *lm_data);
+        } else {
+            *lm_data = NULL;
+            *lm_len = 0;
+        }
+    }
+}
+
+/*
  * Evaluate and handle a conditional request for a Markdown response.
  *
  * When full cache validation needs an entity ETag, this function performs a
@@ -307,7 +377,6 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     const ngx_table_elt_t   *inm_header;
     const ngx_table_elt_t   *ims_header;
     const ngx_table_elt_t   *range_header;
-    const ngx_table_elt_t   *lm_header;
     const u_char            *inm_data;
     size_t                   inm_len;
     const u_char            *ims_data;
@@ -324,18 +393,9 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         return NGX_DECLINED;
     }
 
-    inm_header = NULL;
-    {
-        static u_char  if_none_match_name[] = "If-None-Match";
-        inm_header = ngx_http_markdown_find_request_header(
-            r, if_none_match_name, sizeof(if_none_match_name) - 1);
-    }
-
-    {
-        static u_char  if_modified_since_name[] = "If-Modified-Since";
-        ims_header = ngx_http_markdown_find_request_header(
-            r, if_modified_since_name, sizeof(if_modified_since_name) - 1);
-    }
+    ngx_http_markdown_collect_conditional_headers(
+        r, &inm_header, &ims_header, &range_header,
+        &lm_data, &lm_len, lm_time_buf);
 
     if (inm_header != NULL) {
         inm_data = inm_header->value.data;
@@ -357,49 +417,6 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                       "markdown: no conditional request headers");
         return NGX_DECLINED;
-    }
-
-    {
-        static u_char  range_name[] = "Range";
-        range_header = ngx_http_markdown_find_request_header(
-            r, range_name, sizeof(range_name) - 1);
-    }
-
-    lm_header = NULL;
-    {
-        static u_char  last_modified_name[] = "Last-Modified";
-        lm_header = ngx_http_markdown_find_response_header(
-            r, last_modified_name, sizeof(last_modified_name) - 1);
-    }
-
-    if (lm_header != NULL) {
-        lm_data = lm_header->value.data;
-        lm_len = lm_header->value.len;
-    } else if (r->headers_out.last_modified_time != (time_t) -1) {
-        /*
-         * No Last-Modified list header, but the dedicated
-         * r->headers_out.last_modified_time field is set.  NGINX
-         * common paths (static files, upstream with last_modified)
-         * populate this field without always adding a list header.
-         * Format it as an RFC 1123 HTTP date string so the Rust
-         * conditional decision can compare it against
-         * If-Modified-Since.
-         */
-        const u_char *end;
-
-        end = ngx_http_time(lm_time_buf,
-                            r->headers_out.last_modified_time);
-        lm_data = lm_time_buf;
-        lm_len = (size_t) (end - lm_time_buf);
-
-        ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown: formatted last_modified_time=%T "
-                      "as \"%*s\"",
-                      r->headers_out.last_modified_time,
-                      (ngx_int_t) lm_len, lm_data);
-    } else {
-        lm_data = NULL;
-        lm_len = 0;
     }
 
     memset(&cond_input, 0, sizeof(cond_input));
