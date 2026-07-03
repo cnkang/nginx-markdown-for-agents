@@ -955,8 +955,6 @@ ngx_http_markdown_diagnostics_fmt_effective_config(
 
     accept_str = ngx_http_markdown_diagnostics_accept_str(
         conf->accept_policy);
-    cache_str = ngx_http_markdown_diagnostics_cache_validation_str(
-        conf->policy.conditional_requests);
 
     /* ponytail: profile forced-field + default override — the effective config
      * shown to operators must reflect profile defaults and forced fields, not
