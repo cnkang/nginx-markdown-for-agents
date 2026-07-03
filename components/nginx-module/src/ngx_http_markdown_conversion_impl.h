@@ -205,6 +205,15 @@ ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    /* Defensive: Rust FFI guarantees base_url_len <= out_cap on OK,
+     * but guard the C boundary explicitly (Rule 46). */
+    if (decision.base_url_len > out_cap) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: base_url_len %uz exceeds out_cap %uz",
+                      (size_t) decision.base_url_len, out_cap);
+        return NGX_ERROR;
+    }
+
     *out_len = decision.base_url_len;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
