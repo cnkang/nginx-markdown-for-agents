@@ -292,7 +292,7 @@ http {
 
         location /md/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_max_size 10m;
             markdown_on_error pass;
             markdown_timeout 120000;
@@ -304,7 +304,7 @@ http {
 
         location /md-reject/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_max_size 10m;
             markdown_on_error reject;
             markdown_timeout 120000;
@@ -316,7 +316,7 @@ http {
 
         location /md-small/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_max_size 1k;
             markdown_on_error pass;
             markdown_timeout 120000;
