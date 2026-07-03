@@ -147,7 +147,12 @@ ngx_http_markdown_inflight_try_increment(ngx_http_request_t *r,
         if (new_val <= hw) {
             break;
         }
-        /* CAS loop for high_watermark update */
+        /* CAS loop for high_watermark update.
+         * high_watermark is ngx_atomic_t (volatile long) for consistency
+         * with current/overload_total which use ngx_atomic_fetch_add.
+         * ngx_atomic_cmp_set expects ngx_atomic_uint_t *, so the cast
+         * is required — this is the standard NGINX pattern for CAS on
+         * a signed atomic field. */
         if (ngx_atomic_cmp_set(
                 (ngx_atomic_uint_t *)
                     &ngx_http_markdown_g_inflight.high_watermark,

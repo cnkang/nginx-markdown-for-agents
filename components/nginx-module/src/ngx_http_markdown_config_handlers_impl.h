@@ -390,6 +390,13 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                     &val, &cmd->name);
                 return NGX_CONF_ERROR;
             }
+            if (n > UINT32_MAX) {
+                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                    "invalid \"max_inflight\" value \"%V\" in \"%V\"; "
+                    "must not exceed %u (FFI uint32_t limit)",
+                    &val, &cmd->name, (unsigned) UINT32_MAX);
+                return NGX_CONF_ERROR;
+            }
             mcf->max_inflight = n;
 
         } else {
