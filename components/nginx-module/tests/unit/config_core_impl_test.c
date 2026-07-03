@@ -319,56 +319,18 @@ ngx_http_complex_value(ngx_http_request_t *r,
 }
 
 /*
- * FFI type stubs for profile conflict detection.
+ * FFI stubs for profile conflict detection.
  *
  * The production header (config_core_impl.h) references Rust FFI types and
  * functions from markdown_converter.h.  The unit test does not link the Rust
- * library, so minimal struct definitions and no-op function stubs are provided
- * here.  The conflict detection returns "no conflicts" — the behavior being
- * tested in this file is the C configuration lifecycle, not the Rust conflict
- * logic.
+ * library, so we include the shared header for struct definitions and provide
+ * no-op function stubs.  The conflict detection returns "no conflicts" — the
+ * behavior being tested in this file is the C configuration lifecycle, not
+ * the Rust conflict logic.
  */
-typedef uint8_t FFIConflictLevel;
+#include "../../src/markdown_converter.h"
 
-typedef struct FFIConflict {
-    FFIConflictLevel  level;
-    const uint8_t    *message;
-    uintptr_t         message_len;
-} FFIConflict;
-
-typedef struct FFIConflictList {
-    struct FFIConflict  *conflicts;
-    uintptr_t            count;
-} FFIConflictList;
-
-typedef struct FFIExplicitConfig {
-    uint8_t   accept;
-    uint8_t   cache_validation;
-    uint8_t   streaming;
-    uint64_t  limits_memory_bytes;
-    uint64_t  limits_timeout_ms;
-    uint64_t  limits_streaming_buffer_bytes;
-    uint32_t  limits_max_inflight;
-    uint8_t   error_policy;
-    uint8_t   diagnostics;
-} FFIExplicitConfig;
-
-typedef struct FFIEffectiveConfig {
-    uint8_t   accept;
-    uint8_t   cache_validation;
-    uint8_t   streaming;
-    uint64_t  limits_memory_bytes;
-    uint64_t  limits_timeout_ms;
-    uint64_t  limits_streaming_buffer_bytes;
-    uint32_t  limits_max_inflight;
-    uint8_t   error_policy;
-    uint8_t   diagnostics;
-} FFIEffectiveConfig;
-
-/*
- * No-op stub: returns an empty conflict list (no conflicts detected).
- */
-static struct FFIConflictList
+struct FFIConflictList
 markdown_detect_conflicts(uint8_t profile,
     const struct FFIExplicitConfig *explicit_cfg,
     const struct FFIEffectiveConfig *effective_cfg)
@@ -387,7 +349,7 @@ markdown_detect_conflicts(uint8_t profile,
 /*
  * No-op stub: nothing to free in the test environment.
  */
-static void
+void
 markdown_free_conflicts(struct FFIConflictList *list)
 {
     UNUSED(list);

@@ -2756,6 +2756,58 @@ test_dry_run_invalid_file_returns_fail(void)
 }
 
 static void
+test_dry_run_missing_schema_version_returns_fail(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+    ngx_uint_t                           orig_version;
+
+    TEST_SUBSECTION("dry-run: missing schema_version returns DRY_RUN_FAIL");
+
+    tmpfile = "/tmp/dynconf_test_dryrun_no_schema_version.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL,
+                    "create temp file for dry-run missing schema_version");
+        fprintf(f, "markdown_filter=on\n");
+        fprintf(f, "prune_noise=off\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    conf.advanced.dynconf_dry_run = 1;
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 1;
+    watcher.active_snapshot.prune_noise = 1;
+    watcher.version = 5;
+    orig_version = watcher.version;
+    watcher.lkg_valid = 0;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL,
+                "reload returns DRY_RUN_FAIL for missing schema_version");
+
+    /* active_snapshot must NOT be modified */
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1,
+                "active_snapshot.enabled unchanged (still 1)");
+
+    /* version must NOT be incremented */
+    TEST_ASSERT(watcher.version == orig_version,
+                "version not incremented on dry-run failure");
+
+    /* validation result should have errors */
+    TEST_ASSERT(watcher.last_validation.total_errors > 0,
+                "last_validation.total_errors > 0");
+
+    unlink(tmpfile);
+    TEST_PASS("dry-run: missing schema_version returns DRY_RUN_FAIL");
+}
+
+static void
 test_dry_run_off_applies_normally(void)
 {
     const char                          *tmpfile;
@@ -3100,6 +3152,7 @@ main(void)
 
     test_dry_run_valid_file_returns_ok();
     test_dry_run_invalid_file_returns_fail();
+    test_dry_run_missing_schema_version_returns_fail();
     test_dry_run_off_applies_normally();
 
     TEST_SECTION("dynconf_impl: reload-request concurrency (E03.4)");

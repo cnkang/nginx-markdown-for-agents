@@ -1049,6 +1049,8 @@ merge_stream_config(ngx_http_markdown_conf_t *child,
     stream_threshold_set = (child->stream.threshold != NGX_CONF_UNSET_SIZE);
     stream_budget_set = (child->stream.budget != NGX_CONF_UNSET_SIZE);
 
+    /* Zero-initialize to avoid undefined fields if merge reads more later */
+    memset(&defaults, 0, sizeof(defaults));
     defaults.streaming_policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
     defaults.streaming_engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
     defaults.limits_streaming_buffer =
