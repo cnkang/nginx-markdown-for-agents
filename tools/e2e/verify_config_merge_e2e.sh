@@ -6,7 +6,7 @@ set -euo pipefail
 # Validates critical config-merge paths:
 #  1) http-level markdown_on_error pass + location-level override reject
 #  2) markdown_filter off location disables conversion despite Accept header
-#  3) markdown_on_wildcard on at server + off at location
+#  3) markdown_accept wildcard at server + strict at location
 #  4) markdown_etag off at server + on at location (location wins)
 #  5) markdown_conditional_requests disabled at server + if_modified_since_only at location
 #  6) markdown_flavor override at location level
@@ -353,7 +353,7 @@ http {
         server_name localhost;
 
         # server-level settings
-        markdown_on_wildcard on;
+        markdown_accept wildcard;
         markdown_etag off;
         markdown_conditional_requests disabled;
 
@@ -389,10 +389,10 @@ http {
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
-        # Case 4: on_wildcard off at location
+        # Case 4: markdown_accept strict at location
         location /no-wildcard/ {
             markdown_filter on;
-            markdown_on_wildcard off;
+            markdown_accept strict;
             markdown_max_size 10m;
             markdown_timeout 120000;
 

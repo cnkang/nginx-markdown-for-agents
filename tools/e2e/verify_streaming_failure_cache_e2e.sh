@@ -814,7 +814,7 @@ http {
         # 10.1: Streaming success + ETag on
         location /t01/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_streaming_engine on;
             markdown_conditional_requests if_modified_since_only;
@@ -832,7 +832,7 @@ http {
         # 10.2: Pre-commit failure + pass
         location /t02/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_streaming_engine on;
             markdown_streaming_on_error pass;
@@ -852,7 +852,7 @@ http {
         # 10.3: Pre-commit failure + reject
         location /t03/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_streaming_engine on;
             markdown_streaming_on_error reject;
@@ -872,7 +872,7 @@ http {
         # 10.4: Post-commit failure (upstream aborts mid-stream)
         location /t04/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_streaming_engine on;
             markdown_conditional_requests if_modified_since_only;
@@ -890,7 +890,7 @@ http {
         # 10.5: conditional_requests full_support + streaming on
         location /t05/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_streaming_engine on;
             markdown_conditional_requests full_support;
@@ -908,7 +908,7 @@ http {
         # 10.6: conditional_requests if_modified_since_only + streaming on
         location /t06/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_streaming_engine on;
             markdown_conditional_requests if_modified_since_only;
@@ -926,7 +926,7 @@ http {
         # 10.7: Streaming response headers (same as t01)
         location /t07/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_streaming_engine on;
             markdown_conditional_requests if_modified_since_only;
@@ -944,7 +944,7 @@ http {
         # 10.8: streaming_engine off + streaming_on_error reject
         location /t08/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             # streaming_engine defaults to off
             markdown_streaming_on_error reject;
@@ -963,7 +963,7 @@ http {
         # 10.9a: on_error pass + streaming_on_error reject
         location /t09a/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_streaming_engine on;
             markdown_on_error pass;
@@ -983,7 +983,7 @@ http {
         # 10.9b: on_error reject + streaming_on_error pass
         location /t09b/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_streaming_engine on;
             markdown_on_error reject;
@@ -1005,7 +1005,7 @@ http {
         # but HEAD must still skip the streaming body path entirely.
         location /t10/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_streaming_engine on;
             markdown_conditional_requests if_modified_since_only;
@@ -1025,7 +1025,7 @@ http {
         # revalidation that must produce 304 without entering streaming.
         location /t11/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_streaming_engine on;
             markdown_conditional_requests full_support;
@@ -1048,7 +1048,7 @@ http {
         # private.  Fail-open must bypass that rewrite.
         location /t12/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_streaming_engine on;
             markdown_streaming_on_error pass;
@@ -1070,7 +1070,7 @@ http {
         # 10.13: no-cache="public" quoted directive not treated as bare public
         location /t13/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_on_error pass;
             markdown_conditional_requests if_modified_since_only;

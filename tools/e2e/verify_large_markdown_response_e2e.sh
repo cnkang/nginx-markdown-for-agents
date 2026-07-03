@@ -183,7 +183,7 @@ http {
 
         location /full/ {
             markdown_filter on;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             markdown_etag on;
             markdown_conditional_requests full_support;
             markdown_log_verbosity warn;

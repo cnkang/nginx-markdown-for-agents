@@ -159,7 +159,7 @@ RUN set -eux; \
       '' \
       '        location / {' \
       '            markdown_filter on;' \
-      '            markdown_on_wildcard on;' \
+      '            markdown_accept wildcard;' \
       '            markdown_cache_validation full;' \
       '            markdown_cache_validation full;' \
       '        }' \
