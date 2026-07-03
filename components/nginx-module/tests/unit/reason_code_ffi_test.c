@@ -320,6 +320,8 @@ test_bypass_no_transform_metric_key(void)
     rc = ngx_http_markdown_get_reason_code_metric_key(25, &str);
     TEST_ASSERT(rc == NGX_OK,
                 "code 25 metric key should return NGX_OK");
+    TEST_ASSERT(str.len == sizeof("markdown_skipped_total") - 1,
+                "code 25 metric key length should match expected value");
     TEST_ASSERT(memcmp(str.data,
                        "markdown_skipped_total",
                        str.len) == 0,

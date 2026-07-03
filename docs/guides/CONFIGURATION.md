@@ -1207,7 +1207,7 @@ configured together.
 |----------------|---------------------|
 | `markdown_streaming_engine` + `markdown_filter` | Streaming only applies when `markdown_filter` is `on` (or resolves to a truthy value). If the filter is disabled, the streaming engine setting is irrelevant — no conversion of any kind occurs. |
 | `markdown_streaming_engine` + `markdown_limits` | The unified `markdown_limits memory=<size>` sets the full-buffer ceiling, while `markdown_limits streaming_buffer=<size>` sets the streaming working-buffer ceiling. |
-| `markdown_streaming_engine` + `markdown_error_policy` | The unified error policy applies to both full-buffer and streaming pre-commit failures. See the [error policy section](#error-policy-unified-0990) above. |
+| `markdown_streaming_engine` + `markdown_error_policy` | The unified error policy applies to both full-buffer and streaming pre-commit failures. See the [error policy section](#markdown_error_policy) above. |
 | `markdown_streaming_engine` + `markdown_cache_validation` | ETags are generated from converted output. For full-buffer responses, the complete Markdown is available before headers are sent, so ETag generation works normally. For streaming responses that have crossed the commit boundary, response headers (including `Content-Type: text/markdown`) are already sent — ETag cannot be retroactively added. Streaming responses do **not** carry an ETag header. When `markdown_cache_validation` is `full` (the `strict_cache` profile default), the streaming selector always selects full-buffer because full ETag support requires the complete converted output before headers. To actually activate streaming in `auto` mode, use `markdown_cache_validation ims_only` or `off` (the default for `balanced` and built-in). |
 | `markdown_stream_threshold` + `Content-Length` | When the upstream response includes a `Content-Length` header and the value is below `markdown_stream_threshold`, the response always uses the full-buffer path regardless of `markdown_streaming_engine on`. This is a size-based eligibility gate, not an error. |
 | `markdown_stream_excluded_types` + `markdown_content_types` | Both must permit the content type for streaming conversion. `markdown_content_types` controls whether the module processes a response at all (any path). `markdown_stream_excluded_types` is an additional filter that prevents specific types from entering the streaming path. A type excluded from streaming may still be converted via full-buffer if it passes the general eligibility checks. |
@@ -2445,7 +2445,7 @@ markdown_error_policy fail_closed;
 
 **Recommendations:**
 - Use `pass` (fail-open) for production to maintain availability
-- Use `reject` (fail-closed) for testing or strict compliance requirements
+- Use `fail_closed` for testing or strict compliance requirements
 - Monitor failure rates and investigate causes
 
 ---
