@@ -429,7 +429,7 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
 
     /* markdown_large_body_threshold */
     p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_large_body_threshold", conf->large_body_threshold,
+        "markdown_large_body_threshold", conf->routing.large_body_threshold,
 #ifdef MARKDOWN_STREAMING_ENABLED
         1);
 #else

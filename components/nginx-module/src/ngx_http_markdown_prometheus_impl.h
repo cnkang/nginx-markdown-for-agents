@@ -617,7 +617,6 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->per_path.overflow_count);
 
-    /* inflight_current (gauge, per-worker) */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_inflight_current "
         "Number of markdown conversions currently in-flight "
@@ -627,7 +626,6 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->inflight.current);
 
-    /* inflight_high_watermark (gauge, per-worker) */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_inflight_high_watermark "
         "Peak number of concurrent in-flight conversions "
@@ -637,7 +635,6 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->inflight.high_watermark);
 
-    /* overload_total (counter, per-worker) */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_overload_total "
         "Total requests rejected because the per-worker "

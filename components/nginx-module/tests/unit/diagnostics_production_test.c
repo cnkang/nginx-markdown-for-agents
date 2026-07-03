@@ -145,7 +145,9 @@ typedef struct ngx_http_markdown_conf_s {
     ngx_uint_t                      error_status;
     size_t                          max_size;
     ngx_msec_t                      timeout;
-    ngx_uint_t                      max_inflight;
+    struct {
+        ngx_uint_t                  max_inflight;
+    } routing;
     struct {
         ngx_uint_t    engine;
         ngx_uint_t    policy;

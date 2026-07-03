@@ -861,7 +861,7 @@ ngx_http_markdown_diagnostics_fmt_profile(
     u_char *p, u_char *last, const ngx_http_markdown_conf_t *conf)
 {
     ngx_uint_t   profile_name;
-    ngx_flag_t   first;
+    ngx_flag_t   first = 1;
 
     if (conf == NULL) {
         profile_name = NGX_HTTP_MARKDOWN_PROFILE_NONE;
@@ -880,8 +880,6 @@ ngx_http_markdown_diagnostics_fmt_profile(
     if (conf != NULL
         && profile_name != NGX_HTTP_MARKDOWN_PROFILE_NONE)
     {
-        first = 1;
-
         /* Check streaming policy explicit */
         if (conf->stream.policy_explicit) {
             if (!first) {
@@ -956,13 +954,9 @@ ngx_http_markdown_diagnostics_fmt_effective_config(
     accept_str = ngx_http_markdown_diagnostics_accept_str(
         conf->accept_policy);
 
-    /* ponytail: profile forced-field + default override — the effective config
-     * shown to operators must reflect profile defaults and forced fields, not
-     * just the raw C conf (which uses builtin defaults when the operator didn't
-     * set a directive). Mirrors the Rust merge_config three-layer precedence. */
-    {
-        ngx_uint_t  effective_streaming = conf->stream.policy;
-        ngx_uint_t  effective_conditional = conf->policy.conditional_requests;
+        {
+            ngx_uint_t  effective_streaming = conf->stream.policy;
+            ngx_uint_t  effective_conditional = conf->policy.conditional_requests;
 
         if (conf->profile.name == NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE) {
             /* forced: streaming=off; default: cache_validation=full */
@@ -987,7 +981,7 @@ ngx_http_markdown_diagnostics_fmt_effective_config(
     limits_memory = conf->max_size;
     limits_timeout = conf->timeout;
     limits_streaming_buffer = conf->stream.precommit_buffer;
-    limits_max_inflight = conf->max_inflight;
+    limits_max_inflight = conf->routing.max_inflight;
 
     p = ngx_slprintf(p, last,
         "  \"effective_config\": {\n"

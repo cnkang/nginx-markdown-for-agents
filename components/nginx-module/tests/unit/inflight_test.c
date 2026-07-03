@@ -87,9 +87,11 @@ typedef struct {
     ngx_connection_t  *connection;
 } ngx_http_request_t;
 
-/* Minimal conf struct — only needs max_inflight */
+/* Minimal conf struct -- only needs routing.max_inflight */
 typedef struct {
-    ngx_uint_t   max_inflight;
+    struct {
+        ngx_uint_t  max_inflight;
+    } routing;
 } ngx_http_markdown_conf_t;
 
 /* Pool cleanup add stub */
@@ -186,7 +188,7 @@ test_increment_below_limit(void)
     ngx_http_markdown_inflight_reset();
     setup_request(&r);
 
-    conf.max_inflight = 64;
+    conf.routing.max_inflight = 64;
     rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
 
     TEST_ASSERT(rc == NGX_OK, "increment should succeed below limit");
@@ -208,7 +210,7 @@ test_increment_rejects_at_limit(void)
     ngx_http_markdown_inflight_reset();
     setup_request(&r);
 
-    conf.max_inflight = 2;
+    conf.routing.max_inflight = 2;
 
     /* Fill to limit */
     rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
@@ -243,7 +245,7 @@ test_cleanup_handler_decrements(void)
     ngx_http_markdown_inflight_reset();
     setup_request(&r);
 
-    conf.max_inflight = 64;
+    conf.routing.max_inflight = 64;
 
     rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
     TEST_ASSERT(rc == NGX_OK, "increment should succeed");
@@ -270,7 +272,7 @@ test_cleanup_handler_idempotent(void)
     ngx_http_markdown_inflight_reset();
     setup_request(&r);
 
-    conf.max_inflight = 64;
+    conf.routing.max_inflight = 64;
 
     rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
     TEST_ASSERT(rc == NGX_OK, "increment should succeed");
@@ -301,7 +303,7 @@ test_high_watermark_updates(void)
     int                      i;
 
     ngx_http_markdown_inflight_reset();
-    conf.max_inflight = 10;
+    conf.routing.max_inflight = 10;
 
     /* Increment 5 times */
     for (i = 0; i < 5; i++) {
@@ -351,7 +353,7 @@ test_overload_counter_increments(void)
     int                      i;
 
     ngx_http_markdown_inflight_reset();
-    conf.max_inflight = 1;
+    conf.routing.max_inflight = 1;
 
     /* Fill to limit */
     setup_request(&r);
@@ -400,7 +402,7 @@ test_sequential_increment_decrement_returns_zero(void)
     int                      i;
 
     ngx_http_markdown_inflight_reset();
-    conf.max_inflight = 64;
+    conf.routing.max_inflight = 64;
 
     /* Simulate N requests, each incrementing and then cleaning up */
     for (i = 0; i < 20; i++) {
@@ -432,7 +434,7 @@ test_concurrent_inflight_all_cleanup(void)
     int                      i;
 
     ngx_http_markdown_inflight_reset();
-    conf.max_inflight = 10;
+    conf.routing.max_inflight = 10;
 
     conn.log = &log;
     r.connection = &conn;
@@ -471,7 +473,7 @@ test_cleanup_alloc_failure_returns_error(void)
 
     ngx_http_markdown_inflight_reset();
     setup_request(&r);
-    conf.max_inflight = 64;
+    conf.routing.max_inflight = 64;
 
     /* Exhaust the cleanup buffer so ngx_pool_cleanup_add returns NULL.
      * The buffer (cleanup_buf) is a fixed-size char array in the test

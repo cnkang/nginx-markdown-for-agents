@@ -474,17 +474,17 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->policy.auth_policy = NGX_CONF_UNSET_UINT;
     mcf->policy.auth_cookies = NGX_CONF_UNSET_PTR;
     mcf->policy.generate_etag = NGX_CONF_UNSET;
-    mcf->content_types = NGX_CONF_UNSET_PTR;
+    mcf->routing.content_types = NGX_CONF_UNSET_PTR;
     mcf->policy.conditional_requests = NGX_CONF_UNSET_UINT;
     mcf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
     mcf->buffer_chunked = NGX_CONF_UNSET;
-    mcf->stream_types = NGX_CONF_UNSET_PTR;
+    mcf->routing.stream_types = NGX_CONF_UNSET_PTR;
     mcf->decompress.auto_decompress = NGX_CONF_UNSET;
     mcf->decompress.max_size = NGX_CONF_UNSET_SIZE;
     mcf->decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     mcf->decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    mcf->large_body_threshold = NGX_CONF_UNSET_SIZE;
-    mcf->max_inflight = NGX_CONF_UNSET_UINT;
+    mcf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
+    mcf->routing.max_inflight = NGX_CONF_UNSET_UINT;
     mcf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     mcf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     mcf->ops.metrics_per_path = NGX_CONF_UNSET;
@@ -771,7 +771,7 @@ test_conflict_detection_error(void)
     conf.max_size = 8 * 1024 * 1024;
     conf.timeout = 2000;
     conf.stream.budget = 256 * 1024;
-    conf.max_inflight = 64;
+    conf.routing.max_inflight = 64;
     conf.on_error = 0;
     conf.ops.diagnostics_enabled = 0;
 
@@ -821,7 +821,7 @@ test_conflict_detection_warning_passes(void)
     conf.max_size = 8 * 1024 * 1024;
     conf.timeout = 2000;
     conf.stream.budget = 256 * 1024;
-    conf.max_inflight = 64;
+    conf.routing.max_inflight = 64;
     conf.on_error = 0;
     conf.ops.diagnostics_enabled = 0;
 
@@ -859,7 +859,7 @@ test_conflict_detection_no_conflicts(void)
     conf.max_size = 8 * 1024 * 1024;
     conf.timeout = 2000;
     conf.stream.budget = 256 * 1024;
-    conf.max_inflight = 64;
+    conf.routing.max_inflight = 64;
     conf.on_error = 0;
     conf.ops.diagnostics_enabled = 0;
 

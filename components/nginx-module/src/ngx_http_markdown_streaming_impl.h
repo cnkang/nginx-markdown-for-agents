@@ -470,16 +470,16 @@ ngx_http_markdown_is_excluded_stream_type(
 {
     ngx_str_t   *types;
 
-    if (conf->stream_types == NULL) {
+    if (conf->routing.stream_types == NULL) {
         return 0;
     }
 
-    types = conf->stream_types->elts;
+    types = conf->routing.stream_types->elts;
     if (r->headers_out.content_type.data == NULL) {
         return 0;
     }
 
-    for (ngx_uint_t i = 0; i < conf->stream_types->nelts; i++) {
+    for (ngx_uint_t i = 0; i < conf->routing.stream_types->nelts; i++) {
         if (r->headers_out.content_type.len
                 >= types[i].len
             && ngx_strncasecmp(
@@ -629,7 +629,7 @@ ngx_http_markdown_select_processing_path(
             NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE);
     }
 
-    /* Rule 7: stream_types exclusion list (legacy conf->stream_types)
+    /* Rule 7: stream_types exclusion list (legacy conf->routing.stream_types)
      * and v0.8.0 conf->stream.excluded_types + built-in hard exclusions */
     if (ngx_http_markdown_is_excluded_stream_type(
             r, conf)

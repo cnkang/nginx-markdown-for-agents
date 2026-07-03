@@ -334,8 +334,8 @@ static void
 init_conf(ngx_http_markdown_conf_t *conf)
 {
     memset(conf, 0, sizeof(*conf));
-    conf->content_types = NULL;
-    conf->stream_types = NULL;
+    conf->routing.content_types = NULL;
+    conf->routing.stream_types = NULL;
     conf->max_size = (size_t) -1;
 }
 
@@ -452,7 +452,7 @@ test_parity_content_type_custom_allowlist(void)
     ct_array.size = sizeof(ngx_str_t);
     ct_array.nalloc = 2;
     ct_array.pool = &g_pool;
-    conf.content_types = &ct_array;
+    conf.routing.content_types = &ct_array;
 
     init_base_request(&r);
     reset_ffi_capture();
@@ -529,7 +529,7 @@ test_parity_streaming_detection(void)
     st_array.size = sizeof(ngx_str_t);
     st_array.nalloc = 1;
     st_array.pool = &g_pool;
-    conf.stream_types = &st_array;
+    conf.routing.stream_types = &st_array;
 
     reset_ffi_capture();
     set_str(&r.headers_out.content_type, "application/x-ndjson\t;charset=utf-8");

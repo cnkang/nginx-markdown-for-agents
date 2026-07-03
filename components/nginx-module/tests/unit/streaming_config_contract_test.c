@@ -645,11 +645,11 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->flavor = NGX_CONF_UNSET_UINT;
     mcf->policy.auth_policy = NGX_CONF_UNSET_UINT;
     mcf->policy.auth_cookies = NGX_CONF_UNSET_PTR;
-    mcf->content_types = NGX_CONF_UNSET_PTR;
+    mcf->routing.content_types = NGX_CONF_UNSET_PTR;
     mcf->policy.conditional_requests = NGX_CONF_UNSET_UINT;
     mcf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
-    mcf->stream_types = NGX_CONF_UNSET_PTR;
-    mcf->large_body_threshold = NGX_CONF_UNSET_SIZE;
+    mcf->routing.stream_types = NGX_CONF_UNSET_PTR;
+    mcf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     mcf->ops.metrics_format = NGX_CONF_UNSET_UINT;
 
     /* v0.8.0 stream config fields */
