@@ -403,9 +403,13 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
         rc = ngx_http_markdown_fail_open_buffered_response(
             r, ctx,
             "markdown: conditional bypass - returning original HTML");
-        if (rc == NGX_OK || rc == NGX_DONE) {
-            NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
-        }
+        /*
+         * Bypass is a protocol/cache semantic, NOT a conversion failure
+         * or fail-open error. Do NOT increment failopen_count — that
+         * metric tracks delivery of failed conversions, not intentional
+         * bypasses. The bypass is already recorded via the
+         * bypass_no_transform reason code in the header filter.
+         */
         return rc;
     }
 

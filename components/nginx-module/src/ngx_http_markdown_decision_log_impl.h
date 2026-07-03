@@ -103,16 +103,54 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         return 1;
     }
 
-    /* Schema v1 lowercase error codes by prefix */
-    if (reason_code->len >= 13
+    /*
+     * Schema v1 lowercase error codes — use exact length matching to avoid
+     * prefix false positives (e.g. a hypothetical "decompression_something"
+     * that is not in the registry). The "failed_" prefix above is the only
+     * exception because schema v1 may add new failed_* variants additively.
+     */
+    /* "decompression_error" etc. — exact match for each known code */
+    if (reason_code->len == 19
         && ngx_strncmp(reason_code->data,
-                       (const u_char *) "decompression",
-                       13) == 0)
+                       (const u_char *) "decompression_error",
+                       19) == 0)
     {
         return 1;
     }
 
-    if (reason_code->len >= 16
+    if (reason_code->len == 27
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "decompression_budget_exceeded",
+                       27) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 25
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "decompression_format_error",
+                       25) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 28
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "decompression_truncated_input",
+                       28) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 23
+        && ngx_strncmp(reason_code->data,
+                       (const u_char *) "decompression_io_error",
+                       23) == 0)
+    {
+        return 1;
+    }
+
+    if (reason_code->len == 16
         && ngx_strncmp(reason_code->data,
                        (const u_char *) "conversion_error",
                        16) == 0)
@@ -120,7 +158,7 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         return 1;
     }
 
-    if (reason_code->len >= 22
+    if (reason_code->len == 22
         && ngx_strncmp(reason_code->data,
                        (const u_char *) "memory_budget_exceeded",
                        22) == 0)
@@ -165,7 +203,7 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         return 1;
     }
 
-    if (reason_code->len >= 15
+    if (reason_code->len == 15
         && ngx_strncmp(reason_code->data,
                        (const u_char *) "invalid_dynconf",
                        15) == 0)
@@ -173,7 +211,7 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         return 1;
     }
 
-    if (reason_code->len >= 17
+    if (reason_code->len == 17
         && ngx_strncmp(reason_code->data,
                        (const u_char *) "degraded_snapshot",
                        17) == 0)
@@ -181,7 +219,7 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         return 1;
     }
 
-    if (reason_code->len >= 23
+    if (reason_code->len == 23
         && ngx_strncmp(reason_code->data,
                        (const u_char *) "header_plan_apply_error",
                        23) == 0)
@@ -189,7 +227,7 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         return 1;
     }
 
-    if (reason_code->len >= 26
+    if (reason_code->len == 26
         && ngx_strncmp(reason_code->data,
                        (const u_char *) "streaming_mid_flight_error",
                        26) == 0)
@@ -197,7 +235,11 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         return 1;
     }
 
-    /* Legacy: Check for "ELIGIBLE_FAILED" prefix (15 chars) */
+    /*
+     * Legacy compatibility: "ELIGIBLE_FAILED" prefix (15 chars).
+     * Legacy reason codes used uppercase prefixes; keep prefix semantics
+     * for backward compatibility with pre-v1 decision logs.
+     */
     if (reason_code->len >= 15
         && ngx_strncmp(reason_code->data,
                        (const u_char *) "ELIGIBLE_FAILED",
@@ -206,7 +248,10 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         return 1;
     }
 
-    /* Legacy: Check for "FAIL_" prefix (5 chars) */
+    /*
+     * Legacy compatibility: "FAIL_" prefix (5 chars).
+     * Keep prefix semantics for backward compatibility with pre-v1 logs.
+     */
     if (reason_code->len >= 5
         && ngx_strncmp(reason_code->data,
                        (const u_char *) "FAIL_", 5) == 0)

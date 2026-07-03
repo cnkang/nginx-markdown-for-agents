@@ -277,9 +277,14 @@ mod tests {
 
     #[test]
     fn general_full_plus_auto_is_warning() {
-        // Builtin defaults are cache_validation=Full + streaming=Auto, so
-        // this triggers with no explicit config and no profile.
-        let explicit = ExplicitConfig::default();
+        // Default builtins are now ims_only + auto (no warning). Explicitly
+        // construct cache_validation=Full + streaming=Auto to trigger the
+        // streaming-blocked warning.
+        let explicit = ExplicitConfig {
+            cache_validation: Some(CacheValidation::Full),
+            streaming: Some(StreamingPolicy::Auto),
+            ..ExplicitConfig::default()
+        };
         let eff = effective(None, &explicit);
         let conflicts = detect_conflicts(None, &explicit, &eff);
         let warnings: Vec<_> = conflicts
@@ -289,6 +294,15 @@ mod tests {
             })
             .collect();
         assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn default_config_no_warning() {
+        // Default builtins (ims_only + auto) must NOT trigger any warning.
+        let explicit = ExplicitConfig::default();
+        let eff = effective(None, &explicit);
+        let conflicts = detect_conflicts(None, &explicit, &eff);
+        assert!(conflicts.is_empty());
     }
 
     #[test]

@@ -87,7 +87,7 @@ An explicit directive always wins over the profile default for the same field.
 | Directive | `strict_cache` | `balanced` | `streaming_first` | Built-in (no profile) |
 |-----------|:-:|:-:|:-:|:-:|
 | `markdown_accept` | strict | strict | wildcard | strict |
-| `markdown_cache_validation` | full | ims_only | off | full |
+| `markdown_cache_validation` | full | ims_only | off | ims_only |
 | `markdown_streaming` | off | auto | force | auto |
 | `markdown_streaming_engine` | auto | auto | auto | auto |
 | `markdown_limits memory=` | 8m | 8m | 8m | 10m |
@@ -278,7 +278,7 @@ markdown_parse_timeout 10s;
 
 Maximum memory the HTML parser may allocate. If the parser exceeds
 this budget, parsing is terminated and the request proceeds according
-to the `markdown_on_error` policy.
+to the `markdown_error_policy`.
 
 **Example:**
 ```nginx
@@ -508,17 +508,26 @@ markdown_auth_cookies session* auth_token PHPSESSID wordpress_logged_in_*;
 #### markdown_cache_validation
 
 **Syntax:** `markdown_cache_validation off | ims_only | full;`  
-**Default:** `full`  
+**Default:** `ims_only`  
 **Context:** http, server, location
 
 Cache-validation policy. Consolidates the removed `markdown_etag` and
 `markdown_conditional_requests` directives (0.9.0 breaking change).
 
 - `off`: no Markdown-variant ETag and no conditional request handling.
-- `ims_only`: no module-side ETag; `If-Modified-Since` is handled by standard
+- `ims_only` (default): no module-side ETag; `If-Modified-Since` is handled by standard
   NGINX conditional processing using the preserved upstream `Last-Modified`.
-- `full` (default): generate a transformed (Markdown-variant) ETag and support
-  both `If-None-Match` and `If-Modified-Since`.
+- `full`: generate a transformed (Markdown-variant) ETag and support
+  both `If-None-Match` and `If-Modified-Since`. Requires the full-buffer path.
+
+**Profile interaction:**
+- Built-in (no profile) and `balanced` profile both default to `ims_only`
+  with `markdown_streaming auto`.
+- `strict_cache` profile uses `full` and forces `markdown_streaming off`.
+- Manually setting `markdown_cache_validation full` with
+  `markdown_streaming auto` blocks streaming at runtime (warning);
+  with `markdown_streaming force` it is a configuration error (see
+  `markdown_streaming`).
 
 **Example:**
 ```nginx
@@ -527,7 +536,8 @@ markdown_cache_validation ims_only;
 ```
 
 **Performance Note:** `full` requires conversion to generate a Markdown-variant
-ETag for comparison, which has performance implications.
+ETag for comparison, which has performance implications and forces the
+full-buffer path.
 
 **Streaming interaction:** streaming responses do not carry an ETag (headers
 commit before the transformed body is known). `markdown_cache_validation full`
@@ -837,7 +847,7 @@ markdown_streaming_engine off;
 Sets the memory budget for streaming conversion, passed to the Rust streaming engine.
 The streaming engine enforces this budget to ensure bounded memory usage regardless
 of input size. If the budget is exceeded, the streaming engine reports a budget-exceeded
-error and the failure is handled according to `markdown_streaming_on_error`.
+error and the failure is handled according to `markdown_error_policy`.
 
 **Valid Units:** `k` (kilobytes), `m` (megabytes)
 
@@ -857,106 +867,59 @@ markdown_streaming_budget 4m;
   Prometheus counter increments and the error is classified as a pre-commit failure.
 - The budget does not affect the full-buffer path, which uses
   `markdown_limits memory=<size>` instead.
-#### markdown_streaming_on_error
+#### Error Policy (Unified, 0.9.0)
 
-**Syntax:** `markdown_streaming_on_error pass | reject;`
-**Default:** `pass`
-**Context:** http, server, location
-**Status:** REMOVED in 0.9.0 — use `markdown_error_policy pass|fail_closed|status <code>` (now unified across full-buffer and streaming)
+In 0.9.0, `markdown_on_error` and `markdown_streaming_on_error` are removed.
+Use `markdown_error_policy` (see above) for both the full-buffer and streaming
+pre-commit paths.
 
-Controls the failure behavior during the streaming Pre-Commit Phase — the window
-between when streaming conversion starts and when the first Markdown chunk is sent
-to the client.
-
-- `pass`: Fail-open. Abort the streaming conversion and serve the original HTML
-  response to the client. The client is unaware that streaming was attempted.
-- `reject`: Fail-closed. Abort the streaming conversion and return an HTTP error
-  to the client.
-
-This directive has no effect on Post-Commit Phase failures. Once the first Markdown
-chunk has been sent to the client (the Commit Boundary has been crossed), failures
-always result in fail-closed behavior: the response is truncated by sending an empty
-`last_buf`. This is not configurable because the response headers (including
-`Content-Type: text/markdown`) have already been sent and cannot be changed.
-
-**Example:**
-```nginx
-# Fail-open (default, recommended for production)
-markdown_streaming_on_error pass;
-
-# Fail-closed (strict mode)
-markdown_streaming_on_error reject;
-```
-
-#### Relationship Between `markdown_on_error` and `markdown_streaming_on_error`
-
-These two directives have completely independent scopes. Changing one never affects
-the behavior of the other.
-
-| Directive | Scope | Controls |
-|-----------|-------|----------|
-| `markdown_on_error` | Full-buffer path and incremental path | Failure behavior when full-buffer conversion fails |
-| `markdown_streaming_on_error` | Streaming path, Pre-Commit Phase only | Failure behavior when streaming pre-commit conversion fails |
-| *(not configurable)* | Streaming path, Post-Commit Phase | Always fail-closed (response truncated) |
+| Scope | Pre-0.9.0 directive | 0.9.0 replacement |
+|-------|---------------------|-------------------|
+| Full-buffer path | `markdown_on_error pass\|reject` | `markdown_error_policy pass\|fail_closed\|status <code>` |
+| Streaming pre-commit | `markdown_streaming_on_error pass\|reject` | `markdown_error_policy` (same directive) |
+| Streaming post-commit | *(not configurable)* | *(not configurable — always truncates)* |
 
 Key points for operators:
 
-- You can set `markdown_on_error reject` and `markdown_streaming_on_error pass`
-  (or any other combination) without conflict.
-- When `markdown_streaming_engine` is not set or is `auto` (the default), streaming is enabled for eligible responses. When explicitly set to `off`, `markdown_streaming_on_error`
-  is ignored entirely. All failure handling follows `markdown_on_error`.
-- Neither directive controls the `ERROR_STREAMING_FALLBACK` signal. When the Rust
-  engine determines that a capability requires full-buffer processing (e.g., table
-  conversion), the fallback to full-buffer always executes regardless of either
-  directive's value.
+- A single `markdown_error_policy` directive controls both paths. There is no
+  per-path override.
+- When `markdown_streaming_engine` is `off` (or resolves to off), the streaming
+  pre-commit path is never entered; `markdown_error_policy` applies only to the
+  full-buffer path.
+- Neither the pre-0.9.0 directives nor `markdown_error_policy` controls the
+  `ERROR_STREAMING_FALLBACK` signal. When the Rust engine determines that a
+  capability requires full-buffer processing (e.g., table conversion), the
+  fallback to full-buffer always executes regardless of the error policy.
 
 **Configuration Examples:**
 
 ```nginx
-# Example 1: Production — fail-open everywhere
-# Both full-buffer and streaming failures serve original HTML
-markdown_on_error pass;
-markdown_streaming_on_error pass;
+# Production — fail-open everywhere
+markdown_error_policy pass;
 ```
 
 ```nginx
-# Example 2: Strict mode — fail-closed everywhere
-# Both full-buffer and streaming failures return errors
-markdown_on_error reject;
-markdown_streaming_on_error reject;
+# Strict — fail-closed everywhere
+markdown_error_policy fail_closed;
 ```
 
 ```nginx
-# Example 3: Mixed — strict full-buffer, lenient streaming
-# Full-buffer failures return errors; streaming pre-commit failures
-# serve original HTML (streaming is newer, so be more lenient)
-markdown_on_error reject;
-markdown_streaming_on_error pass;
-```
-
-```nginx
-# Example 4: Full streaming setup with independent error policies
+# Per-location override
 http {
     markdown_filter on;
-    markdown_streaming_engine on;
-    markdown_on_error pass;
-    markdown_streaming_on_error pass;
+    markdown_error_policy pass;
 
     server {
         listen 80;
         server_name docs.example.com;
 
         location /api-docs {
-            # Strict mode for API documentation
-            markdown_on_error reject;
-            markdown_streaming_on_error reject;
+            markdown_error_policy fail_closed;
             proxy_pass http://backend;
         }
 
         location /blog {
-            # Lenient mode for blog content
-            markdown_on_error pass;
-            markdown_streaming_on_error pass;
+            markdown_error_policy pass;
             proxy_pass http://backend;
         }
     }
@@ -970,7 +933,7 @@ Use the metrics endpoint to monitor streaming-specific failure counters:
 | Metric | Meaning |
 |--------|---------|
 | `precommit_failopen_total` | Pre-commit failures handled by `pass` (fail-open) |
-| `precommit_reject_total` | Pre-commit failures handled by `reject` (fail-closed) |
+| `precommit_reject_total` | Pre-commit failures handled by `fail_closed` (fail-closed) |
 | `postcommit_error_total` | Post-commit failures (always fail-closed) |
 | `fallback_total` | Capability fallbacks to full-buffer (always executes) |
 
@@ -1069,7 +1032,7 @@ Size of the pre-commit replay buffer. During the streaming pre-commit phase, the
 module buffers converted output up to this size. If an error occurs before the
 commit boundary is crossed, the buffered content is discarded and the original
 HTML is replayed to the client (fail-open behavior controlled by
-`markdown_streaming_on_error`).
+`markdown_error_policy`).
 
 Setting this to `0` disables the pre-commit HTML fallback capability — errors
 during the pre-commit phase immediately trigger the configured error policy
@@ -1256,12 +1219,11 @@ configured together.
 |----------------|---------------------|
 | `markdown_streaming_engine` + `markdown_filter` | Streaming only applies when `markdown_filter` is `on` (or resolves to a truthy value). If the filter is disabled, the streaming engine setting is irrelevant — no conversion of any kind occurs. |
 | `markdown_streaming_engine` + `markdown_limits` | The unified `markdown_limits memory=<size>` sets the full-buffer ceiling, while `markdown_limits streaming_buffer=<size>` sets the streaming working-buffer ceiling. |
-| `markdown_streaming_engine` + `markdown_on_error` | These error policies are **independent**. `markdown_on_error` governs full-buffer failures; `markdown_streaming_on_error` governs streaming pre-commit failures. Changing one never affects the other. See the [error policy table](#relationship-between-markdown_on_error-and-markdown_streaming_on_error) above. |
-| `markdown_streaming_engine` + `markdown_etag` | ETags are generated from converted output. For full-buffer responses, the complete Markdown is available before headers are sent, so ETag generation works normally. For streaming responses that have crossed the commit boundary, response headers (including `Content-Type: text/markdown`) are already sent — ETag cannot be retroactively added. Streaming responses do **not** carry an ETag header. |
-| `markdown_streaming_engine` + `markdown_conditional_requests` | Conditional request handling (`If-None-Match` / 304) works for full-buffer responses where an ETag is available. Streaming responses bypass 304 logic because no ETag is produced. **Important:** when `markdown_conditional_requests` is `full_support` (the default), the streaming selector always selects full-buffer because full ETag support requires the complete converted output before headers. To actually activate streaming in `auto` mode, set `markdown_conditional_requests if_modified_since_only` or `disabled`. |
+| `markdown_streaming_engine` + `markdown_error_policy` | The unified error policy applies to both full-buffer and streaming pre-commit failures. See the [error policy section](#error-policy-unified-0990) above. |
+| `markdown_streaming_engine` + `markdown_cache_validation` | ETags are generated from converted output. For full-buffer responses, the complete Markdown is available before headers are sent, so ETag generation works normally. For streaming responses that have crossed the commit boundary, response headers (including `Content-Type: text/markdown`) are already sent — ETag cannot be retroactively added. Streaming responses do **not** carry an ETag header. When `markdown_cache_validation` is `full` (the `strict_cache` profile default), the streaming selector always selects full-buffer because full ETag support requires the complete converted output before headers. To actually activate streaming in `auto` mode, use `markdown_cache_validation ims_only` or `off` (the default for `balanced` and built-in). |
 | `markdown_stream_threshold` + `Content-Length` | When the upstream response includes a `Content-Length` header and the value is below `markdown_stream_threshold`, the response always uses the full-buffer path regardless of `markdown_streaming_engine on`. This is a size-based eligibility gate, not an error. |
 | `markdown_stream_excluded_types` + `markdown_content_types` | Both must permit the content type for streaming conversion. `markdown_content_types` controls whether the module processes a response at all (any path). `markdown_stream_excluded_types` is an additional filter that prevents specific types from entering the streaming path. A type excluded from streaming may still be converted via full-buffer if it passes the general eligibility checks. |
-| `markdown_stream_precommit_buffer` + `markdown_streaming_on_error` | The pre-commit buffer enables fail-open replay: if an error occurs before the commit boundary, the buffered original HTML is replayed to the client. When `markdown_stream_precommit_buffer 0` (replay disabled), any pre-commit error immediately triggers the `markdown_streaming_on_error` policy without replay capability. |
+| `markdown_stream_precommit_buffer` + `markdown_error_policy` | The pre-commit buffer enables fail-open replay: if an error occurs before the commit boundary, the buffered original HTML is replayed to the client. When `markdown_stream_precommit_buffer 0` (replay disabled), any pre-commit error immediately triggers the `markdown_error_policy` without replay capability. |
 | `markdown_streaming_engine auto` + explicit value | When `markdown_streaming_engine` is set to a fixed value (`off`, `on`, or `auto`), it applies for the entire request lifecycle. Use different values at different configuration levels (http/server/location) for per-path control. |
 
 **Non-obvious behaviors to watch for:**
@@ -1290,12 +1252,11 @@ configured together.
    Override with an explicit value (`off`, `on`, `auto`) in specific locations to
    exclude them from the inherited setting.
 
-6. **Default `auto` mode does not activate streaming.** When `markdown_conditional_requests`
-   is `full_support` (the default), the streaming selector always routes to full-buffer
-   because full ETag support requires the complete output before sending headers. This
-   means the default 0.8.0 configuration (`streaming_engine auto` + `conditional_requests
-   full_support`) never selects streaming. To activate streaming for large responses, set
-   `markdown_conditional_requests if_modified_since_only` or `disabled`.
+6. **Default `ims_only` allows streaming.** The default cache validation
+   mode is `ims_only` (both built-in and `balanced` profile), which permits
+   streaming in `auto` mode. Only `full` (the `strict_cache` profile default)
+   blocks streaming because full ETag support requires the complete output
+   before sending headers.
 
 **Example — interactions in practice:**
 
@@ -1305,16 +1266,16 @@ http {
     markdown_limits memory=4m;           # Applies to both paths
     markdown_streaming_engine auto;
     markdown_stream_threshold 1m;
-    markdown_etag on;                    # Works for full-buffer only
+    markdown_cache_validation ims_only;  # Allows streaming + IMS
 
     server {
         listen 80;
 
         location /docs {
-            # Responses < 1m: full-buffer path, ETag generated, 304 works
+            # Responses < 1m: full-buffer path, IMS revalidation works
             # Responses >= 1m: streaming path, no ETag, no 304
-            markdown_streaming_budget 3m;   # Overrides unified budget for streaming
-            markdown_streaming_on_error pass;
+            markdown_limits streaming_buffer=3m;  # Overrides unified budget for streaming
+            markdown_error_policy pass;
             proxy_pass http://backend;
         }
 
@@ -1638,7 +1599,7 @@ markdown_large_body_threshold off;
 - HEAD requests, 304 responses, and fail-open replays always use the full-buffer path regardless of the threshold setting.
 - Path selection is based on `Content-Length` when available; for chunked responses without `Content-Length`, the module buffers first and evaluates the threshold against the buffered size.
 - Path hit counters (`fullbuffer_path_hits`, `incremental_path_hits`) are exposed through the `markdown_metrics` endpoint.
-- **Hard Limit**: The Rust incremental converter enforces a strict 64 MiB (`64 * 1024 * 1024` bytes) maximum buffer limit. Responses exceeding this size will trigger a `MemoryLimit` error, resulting in the `markdown_on_error` policy being applied.
+- **Hard Limit**: The Rust incremental converter enforces a strict 64 MiB (`64 * 1024 * 1024` bytes) maximum buffer limit. Responses exceeding this size will trigger a `MemoryLimit` error, resulting in the `markdown_error_policy` policy being applied.
 
 
 For the design rationale and rollout guidance, see [LARGE_RESPONSE_DESIGN.md](../architecture/LARGE_RESPONSE_DESIGN.md) and [LARGE_RESPONSE_ROLLOUT.md](LARGE_RESPONSE_ROLLOUT.md).
@@ -1924,7 +1885,7 @@ http {
     markdown_timeout 5s;
     
     # Use fail-open strategy (recommended)
-    markdown_on_error pass;
+    markdown_error_policy pass;
     
     server {
         listen 80;
@@ -2047,7 +2008,7 @@ http {
     gzip_types text/markdown text/plain text/css application/javascript application/json;
 
     markdown_filter on;
-    markdown_on_error pass;
+    markdown_error_policy pass;
 
     server {
         listen 80;
@@ -2094,7 +2055,7 @@ http {
     markdown_timeout 3s;
     
     # Fail-closed for critical applications
-    markdown_on_error reject;
+    markdown_error_policy fail_closed;
     
     # Exclude streaming content
     markdown_stream_types text/event-stream application/x-ndjson;
@@ -2140,14 +2101,14 @@ http {
     markdown_timeout 1s;
     
     # Fail-open for availability
-    markdown_on_error pass;
+    markdown_error_policy pass;
     
     # Disable optional features for performance
     markdown_token_estimate off;
     markdown_front_matter off;
     
     # Optimize conditional requests
-    markdown_conditional_requests if_modified_since_only;
+    markdown_cache_validation ims_only;
     
     # Use CommonMark (faster than GFM)
     markdown_flavor commonmark;
@@ -2185,7 +2146,7 @@ http {
     markdown_filter on;
     markdown_limits memory=10m;
     markdown_timeout 5s;
-    markdown_on_error pass;
+    markdown_error_policy pass;
     
     # Tenant A: Public documentation site
     server {
@@ -2221,7 +2182,7 @@ http {
         location / {
             markdown_limits memory=5m;  # Smaller limit
             markdown_timeout 2s;   # Faster timeout
-            markdown_conditional_requests if_modified_since_only;
+            markdown_cache_validation ims_only;
             proxy_pass http://backend-c;
             
             # Aggressive caching
@@ -2397,7 +2358,7 @@ http {
     markdown_filter on;
     markdown_limits memory=10m;
     markdown_timeout 5s;
-    markdown_on_error pass;
+    markdown_error_policy pass;
     
     server {
         server_name example.com;
@@ -2488,10 +2449,10 @@ Choose appropriate failure strategy based on requirements:
 
 ```nginx
 # Fail-open (recommended for production)
-markdown_on_error pass;
+markdown_error_policy pass;
 
 # Fail-closed (strict mode)
-markdown_on_error reject;
+markdown_error_policy fail_closed;
 ```
 
 **Recommendations:**
@@ -2571,7 +2532,7 @@ Disable features not needed for your use case:
 # Minimal configuration for performance
 markdown_token_estimate off;
 markdown_front_matter off;
-markdown_conditional_requests if_modified_since_only;
+markdown_cache_validation ims_only;
 ```
 
 **Performance Impact:**
@@ -2706,7 +2667,7 @@ http {
     markdown_filter on;
     markdown_limits memory=10m;
     markdown_timeout 5s;
-    markdown_on_error pass;
+    markdown_error_policy pass;
     markdown_flavor commonmark;
     markdown_auth_policy allow;
     markdown_auth_cookies session* auth_token;
@@ -2796,7 +2757,7 @@ http {
     markdown_filter on;
     markdown_limits memory=10m;
     markdown_timeout 10s;  # Longer timeout for debugging
-    markdown_on_error pass;
+    markdown_error_policy pass;
     markdown_flavor gfm;
     markdown_token_estimate on;
     markdown_front_matter on;
@@ -2846,11 +2807,11 @@ http {
     markdown_filter on;
     markdown_limits memory=2m;
     markdown_timeout 1s;
-    markdown_on_error pass;
+    markdown_error_policy pass;
     markdown_flavor commonmark;
     markdown_token_estimate off;
     markdown_front_matter off;
-    markdown_conditional_requests if_modified_since_only;
+    markdown_cache_validation ims_only;
     markdown_buffer_chunked off;
     
     # Large cache

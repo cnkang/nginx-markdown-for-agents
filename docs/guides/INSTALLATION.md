@@ -616,7 +616,7 @@ http {
     # Safe defaults
     markdown_memory_budget 10m;
     markdown_timeout 5s;
-    markdown_on_error pass;  # Fail-open: return original HTML on conversion error
+    markdown_error_policy pass;  # Fail-open: return original HTML on conversion error
 
     server {
         listen 80;
@@ -902,7 +902,7 @@ Look for counters such as `conversions_attempted`, `conversions_succeeded`, `con
 
 ### Understanding Fail-Open Behavior
 
-The default configuration uses `markdown_on_error pass` (fail-open). This means:
+The default configuration uses `markdown_error_policy pass` (fail-open). This means:
 
 - If the module attempts a conversion and the conversion **fails** (e.g., timeout, converter error), the original HTML response is returned with `Content-Type: text/html`.
 - This is **distinct** from requests that were never eligible for conversion (e.g., wrong `Content-Type`, non-200 status, missing `Accept: text/markdown` header). Those are "skipped" requests, not "fail-open."
@@ -1575,7 +1575,7 @@ sudo tail -50 /var/log/nginx/error.log
 
 3. Use fail-open strategy:
    ```nginx
-   markdown_on_error pass;  # Return original HTML on timeout
+   markdown_error_policy pass;  # Return original HTML on timeout
    ```
 
 ---

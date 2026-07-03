@@ -534,7 +534,7 @@ v0.8.2 是一个加固 0.8.x 流式线路的补丁版本：
 v0.8.0 引入真正的流式转换——面向大响应和 chunked 响应的有界内存 HTML-to-Markdown 处理：
 
 - **双引擎模型** — 自 v0.5.0 起默认的全缓冲转换仍用于典型响应。新的流式引擎以有界内存处理大响应或 chunked 响应。`markdown_streaming_engine` 指令控制使用 `off`、`on` 还是 `auto`。
-- **`auto` 模式（默认）** — 设置为 `auto` 时，模块会自动把符合条件的大响应或 chunked 响应路由到流式引擎，其余响应保持全缓冲。**注意：**默认的 `markdown_conditional_requests full_support` 会阻止流式激活，因为完整 ETag 支持需要全缓冲路径。要在 `auto` 模式启用流式，请设置 `markdown_conditional_requests if_modified_since_only` 或 `disabled`。
+- **`auto` 模式（默认）** — 设置为 `auto` 时，模块会自动把符合条件的大响应或 chunked 响应路由到流式引擎，其余响应保持全缓冲。**注意（v0.8.0）：**默认的 `markdown_conditional_requests full_support` 会阻止流式激活，因为完整 ETag 支持需要全缓冲路径。**0.9.0 变更：**`markdown_conditional_requests` 已被 `markdown_cache_validation` 替换，默认值为 `ims_only`（built-in 和 `balanced` profile 均如此），允许 `auto` 模式启用流式。如需完整 ETag 支持，请使用 `markdown_cache_validation full`（`strict_cache` profile 默认值）。
 - **有界内存转换** — 流式引擎根据 `markdown_stream_flush_min`（大小阈值）分块 flush 已转换的 Markdown，无论响应多大都保持有界内存。
 - **提交前安全回退** — 如果转换错误发生在流式引擎向客户端提交输出之前，会回退为返回原始 HTML 响应，从而保持流式路径的 fail-open 语义。
 - **新流式控制项** — `markdown_stream_threshold`、`markdown_stream_precommit_buffer`、`markdown_stream_flush_min` 和 `markdown_stream_excluded_types` 让阈值选择、replay buffering、flush 和 content-type 排除规则显式化。

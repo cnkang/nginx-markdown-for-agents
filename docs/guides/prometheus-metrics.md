@@ -151,7 +151,7 @@ All metrics use the `nginx_markdown_` prefix. Counter metrics use the `_total` s
 | `nginx_markdown_requests_total` | counter | Total requests entering the module decision chain. This is the denominator for conversion rate calculations. |
 | `nginx_markdown_conversions_total` | counter | Successful HTML-to-Markdown conversions. |
 | `nginx_markdown_passthrough_total` | counter | Requests not converted (skipped or failed-open). Derived as the sum of all skip-reason counters plus fail-open count. |
-| `nginx_markdown_failopen_total` | counter | Conversions failed with original HTML served (`markdown_on_error pass`). |
+| `nginx_markdown_failopen_total` | counter | Conversions failed with original HTML served (`markdown_error_policy pass`). |
 | `nginx_markdown_large_response_path_total` | counter | Requests routed to the incremental processing path. |
 | `nginx_markdown_input_bytes_total` | counter | Cumulative HTML input bytes from successful conversions. |
 | `nginx_markdown_output_bytes_total` | counter | Cumulative Markdown output bytes from successful conversions. |
@@ -181,7 +181,7 @@ These metrics are only emitted when the module is compiled with `MARKDOWN_STREAM
 | Metric Name | Type | Description |
 |---|---|---|
 | `nginx_markdown_streaming_path_total` | counter | Requests routed to the streaming processing path. |
-| `nginx_markdown_streaming_budget_exceeded_total` | counter | Streaming memory budget exceeded count (auxiliary classification; terminal state depends on `markdown_streaming_on_error`). |
+| `nginx_markdown_streaming_budget_exceeded_total` | counter | Streaming memory budget exceeded count (auxiliary classification; terminal state depends on `markdown_error_policy`). |
 | `nginx_markdown_streaming_shadow_total` | counter | Shadow mode comparison attempts (incremented unconditionally at entry, including init/feed/finalize failures). |
 | `nginx_markdown_streaming_shadow_diff_total` | counter | Shadow mode comparisons where outputs differed. |
 | `nginx_markdown_streaming_candidate_total` | counter | Requests evaluated as true-streaming candidates. |
@@ -585,6 +585,11 @@ the original HTML. The **decision** to fail-open is recorded separately in
 the decision log at the time the decision is made. This separation ensures
 that metrics reflect actual delivery to clients, not just internal module
 state transitions.
+
+**Bypass is not fail-open:** Conditional bypass (`Cache-Control:
+no-transform`, Range requests) is a protocol/cache semantic, not a
+conversion failure. Bypass responses do NOT increment `failopen_count`; they
+are tracked via the `bypass_no_transform` reason code in the skip metrics.
 
 In backpressure scenarios (downstream returns `NGX_AGAIN`), the decision is
 recorded immediately but `failopen_count` is deferred until the pending

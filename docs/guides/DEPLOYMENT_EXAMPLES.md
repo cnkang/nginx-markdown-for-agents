@@ -45,7 +45,7 @@ load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
     markdown_filter off;
-    markdown_on_error pass;
+    markdown_error_policy pass;
 
     server {
         listen 8080;
@@ -79,7 +79,7 @@ load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
     markdown_filter on;
-    markdown_on_error pass;
+    markdown_error_policy pass;
 
     server {
         listen 8080;
@@ -104,7 +104,7 @@ load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
     markdown_filter on;
-    markdown_on_error pass;
+    markdown_error_policy pass;
 
     server {
         listen 8080;
@@ -130,7 +130,7 @@ http {
 
 Notes for the global-on pattern:
 
-- Start with `markdown_on_error pass;` (fail-open) to reduce rollout risk
+- Start with `markdown_error_policy pass;` (fail-open) to reduce rollout risk
 - Exclude API/static/media/download routes explicitly for clarity
 - Existing `.md` files usually do not need conversion (module only converts eligible `text/html` responses)
 - Keep using `Accept: text/markdown` for verification; browsers with normal `Accept` headers still get HTML
@@ -163,7 +163,7 @@ http {
         text/markdown;
 
     markdown_filter on;
-    markdown_on_error pass;
+    markdown_error_policy pass;
     markdown_max_size 10m;
     markdown_timeout 5s;
 
@@ -247,7 +247,7 @@ http {
 
         location / {
             markdown_filter on;
-            markdown_on_error pass;
+            markdown_error_policy pass;
             proxy_set_header Accept $final_accept;
             proxy_pass http://backend;
         }
