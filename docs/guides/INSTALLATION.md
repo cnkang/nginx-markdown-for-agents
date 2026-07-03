@@ -614,8 +614,7 @@ http {
     markdown_filter on;
 
     # Safe defaults
-    markdown_memory_budget 10m;
-    markdown_timeout 5s;
+    markdown_limits memory=10m timeout=5s;
     markdown_error_policy pass;  # Fail-open: return original HTML on conversion error
 
     server {
@@ -1232,9 +1231,9 @@ The eligibility requirements are:
 3. **Request `Accept` includes `text/markdown`** — the client request must include `text/markdown` in the `Accept` header. Without this, the module does not activate.
 4. **Response size within effective limits** — the upstream response body must
    not exceed the effective full-buffer or streaming limit. If
-   `markdown_memory_budget` is set, it acts as a unified override unless a
-   path-specific directive such as `markdown_max_size` or
-   `markdown_streaming_budget` is explicitly set.
+   `markdown_limits memory=<size>` is set, it acts as a unified override
+   unless a path-specific streaming buffer
+   (`markdown_limits streaming_buffer=<size>`) is explicitly set.
 
 **Resolution Steps:**
 
@@ -1489,7 +1488,7 @@ sudo nginx -s reload
 
 1. Module disabled — ensure `markdown_filter on;` is set.
 2. `Accept` header missing — ensure the request includes `Accept: text/markdown`.
-3. Response not eligible — status code must be 200, `Content-Type` must be `text/html`, response size must be within `markdown_memory_budget`.
+3. Response not eligible — status code must be 200, `Content-Type` must be `text/html`, response size must be within `markdown_limits memory=<size>`.
 4. Check NGINX error log for details:
    ```bash
    sudo tail -f /var/log/nginx/error.log
@@ -1502,10 +1501,10 @@ sudo nginx -s reload
 **Solution:**
 ```nginx
 # Increase timeout in nginx.conf
-markdown_timeout 10s;  # Increase from default 5s
+markdown_limits timeout=10s;  # Increase from default 5s
 
 # Or increase max size if large pages are timing out
-markdown_memory_budget 20m;  # Unified override; path-specific limits still win
+markdown_limits memory=20m;  # Unified override; path-specific limits still win
 ```
 
 ### Issue: High Memory Usage
@@ -1515,7 +1514,7 @@ markdown_memory_budget 20m;  # Unified override; path-specific limits still win
 **Solution:**
 ```nginx
 # Reduce max response size
-markdown_memory_budget 5m;
+markdown_limits memory=5m;
 
 # Disable conversion for large pages
 location /large-content {
@@ -1562,8 +1561,7 @@ sudo tail -50 /var/log/nginx/error.log
 
 1. Optimize resource limits:
    ```nginx
-   markdown_memory_budget 5m;
-   markdown_timeout 3s;
+   markdown_limits memory=5m timeout=3s;
    ```
 
 2. Disable for specific paths:

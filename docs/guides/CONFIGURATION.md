@@ -839,34 +839,22 @@ markdown_streaming_engine off;
 
 #### markdown_streaming_budget
 
-**Syntax:** `markdown_streaming_budget <size>;`
-**Default:** `2m`
+**Syntax:** `markdown_streaming_budget <size>;`  
+**Status:** REMOVED in 0.9.0 — use `markdown_limits streaming_buffer=<size>`  
 **Context:** http, server, location
-**Status:** REMOVED in 0.9.0 — use `markdown_limits streaming_buffer=<size>`
 
-Sets the memory budget for streaming conversion, passed to the Rust streaming engine.
-The streaming engine enforces this budget to ensure bounded memory usage regardless
-of input size. If the budget is exceeded, the streaming engine reports a budget-exceeded
-error and the failure is handled according to `markdown_error_policy`.
-
-**Valid Units:** `k` (kilobytes), `m` (megabytes)
+Config V2 consolidates resource limits in `markdown_limits`. In 0.9.0,
+`markdown_streaming_budget` is a reject-only legacy directive so outdated
+configuration fails during `nginx -t` with a migration hint.
 
 **Example:**
 ```nginx
-# Default budget (2 MB)
-markdown_streaming_budget 2m;
-
-# Larger budget for complex pages
-markdown_streaming_budget 4m;
+markdown_limits streaming_buffer=2m;
 ```
 
-**Behavior:**
-- The budget applies to the total working set of the streaming converter, including
-  parser state, sanitizer state, and output buffers.
-- When the budget is exceeded, the `nginx_markdown_streaming_budget_exceeded_total`
-  Prometheus counter increments and the error is classified as a pre-commit failure.
-- The budget does not affect the full-buffer path, which uses
-  `markdown_limits memory=<size>` instead.
+**Migration:** `markdown_streaming_budget 2m` ->
+`markdown_limits streaming_buffer=2m`.
+
 #### Error Policy (Unified, 0.9.0)
 
 In 0.9.0, `markdown_on_error` and `markdown_streaming_on_error` are removed.
@@ -994,7 +982,7 @@ markdown_streaming_shadow off;
 The following directives were introduced in v0.8.0 to give operators fine-grained
 control over which responses enter the streaming conversion path and how the
 streaming engine batches output. They complement `markdown_streaming_engine` and
-`markdown_streaming_budget` defined above.
+the streaming buffer setting in `markdown_limits` (see above).
 
 ##### markdown_stream_threshold
 
@@ -1244,8 +1232,8 @@ configured together.
 
 4. **Pre-commit buffer size vs. streaming budget.** The pre-commit buffer is
    drawn from the overall streaming budget. Setting `markdown_stream_precommit_buffer`
-   close to `markdown_streaming_budget` leaves little room for converter working
-   memory and may trigger budget-exceeded errors.
+   close to `markdown_limits streaming_buffer=<size>` leaves little room for
+   converter working memory and may trigger budget-exceeded errors.
 
 5. **Streaming engine configuration inheritance.** A `markdown_streaming_engine`
    directive at the `http` level is inherited by all `server`/`location` blocks.
