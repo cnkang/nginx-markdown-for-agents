@@ -134,6 +134,12 @@ pub struct StreamingConverter {
     parser_budget: u64,
     /// Cumulative input bytes fed to the converter (for parser budget enforcement).
     cumulative_input_bytes: u64,
+    /// Whether a leading UTF-8 BOM (U+FEFF) has been checked/stripped from the
+    /// first chunk.  The full-buffer path uses html5ever's `discard_bom: true`
+    /// to strip a BOM at stream start; the streaming path sets `discard_bom:
+    /// false` (to prevent mid-stream BOM stripping when a BOM's lead byte is
+    /// split across chunks) and instead strips a leading BOM here, once.
+    bom_stripped: bool,
 }
 
 impl StreamingConverter {
@@ -236,6 +242,7 @@ impl StreamingConverter {
             utf8_tail: Vec::new(),
             parser_budget: 0,
             cumulative_input_bytes: 0,
+            bom_stripped: false,
         }
     }
 
@@ -413,13 +420,42 @@ impl StreamingConverter {
         // an incomplete UTF-8 sequence, then split off any new incomplete
         // tail so multibyte characters spanning chunk boundaries are
         // preserved instead of being replaced with U+FFFD.
-        let effective = if self.utf8_tail.is_empty() {
+        let mut effective = if self.utf8_tail.is_empty() {
             std::borrow::Cow::Borrowed(transcoded.as_ref())
         } else {
             let mut combined = std::mem::take(&mut self.utf8_tail);
             combined.extend_from_slice(&transcoded);
             std::borrow::Cow::Owned(combined)
         };
+
+        // 3b. Strip a leading UTF-8 BOM (U+FEFF, 0xEF 0xBB 0xBF) from the
+        // first effective byte sequence, matching the full-buffer path's
+        // `discard_bom: true` behavior.  Done here (after utf8_tail
+        // reassembly) so that a BOM split across chunks is detected as a
+        // complete 3-byte unit.  The streaming tokenizer sets
+        // `discard_bom: false` to prevent mid-stream BOM stripping when a
+        // BOM's lead byte is reassembled at the start of a new feed() call,
+        // so the stream-start BOM is handled here instead.
+        //
+        // Only set bom_stripped when we can definitively determine BOM
+        // presence: if effective starts with 0xEF but is shorter than 3
+        // bytes, the incomplete sequence is deferred to utf8_tail and the
+        // check repeats on the next chunk's reassembled bytes.
+        if !self.bom_stripped && !effective.starts_with(&[0xEF]) {
+            // First byte is not 0xEF — definitely not a BOM.
+            self.bom_stripped = true;
+        } else if !self.bom_stripped && effective.len() >= 3 {
+            self.bom_stripped = true;
+            if effective.starts_with(b"\xEF\xBB\xBF") {
+                effective = match effective {
+                    std::borrow::Cow::Borrowed(rest) => std::borrow::Cow::Borrowed(&rest[3..]),
+                    std::borrow::Cow::Owned(mut rest) => {
+                        rest.drain(..3);
+                        std::borrow::Cow::Owned(rest)
+                    }
+                };
+            }
+        }
 
         // Find the last valid UTF-8 boundary. Any trailing bytes that
         // start a multibyte sequence but don't complete it are stashed
@@ -516,6 +552,15 @@ impl StreamingConverter {
         let mut final_bytes = std::mem::take(&mut self.utf8_tail);
         final_bytes.extend_from_slice(&remaining_charset);
         if !final_bytes.is_empty() {
+            // Strip a leading BOM if not already done (handles the case
+            // where all input was buffered in the charset sniff buffer and
+            // only emerges at finalize).
+            if !self.bom_stripped {
+                self.bom_stripped = true;
+                if final_bytes.starts_with(b"\xEF\xBB\xBF") {
+                    final_bytes = final_bytes[3..].to_vec();
+                }
+            }
             let utf8_cow = String::from_utf8_lossy(&final_bytes);
             let events = self
                 .tokenizer
@@ -3169,6 +3214,59 @@ mod tests {
             err.code(),
             8,
             "Post-commit parser budget error should be code 8"
+        );
+    }
+
+    /// Regression: a UTF-8 BOM (U+FEFF) whose lead byte (0xEF) is split
+    /// across chunk boundaries must not be stripped by html5ever.  The
+    /// streaming tokenizer sets `discard_bom: false` and the converter
+    /// strips a leading BOM once at stream start, so mid-stream BOMs are
+    /// preserved consistently between single-chunk and multi-chunk paths.
+    #[test]
+    fn test_bom_split_across_chunk_boundary() {
+        // Input contains a BOM (0xEF 0xBB 0xBF) at byte 79, split at 80.
+        let data: &[u8] = &[
+            0x0a, 0x0a, 0x05, 0x0a, 0x0a, 0x55, 0xbd, 0x21, 0x0a, 0x0a, 0x13, 0x0a, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x2c, 0xbf, 0xbd, 0x00, 0xbe, 0xbe, 0xbe, 0xbe, 0xbe, 0xbe, 0xbe,
+            0x3c, 0xbd, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0xbd, 0xef, 0xbf, 0xbd, 0xef, 0xbf, 0xbd, 0x94, 0x94, 0x0a, 0x94, 0x94,
+            0x96, 0x94, 0x00, 0x09, 0x94, 0x94, 0x94, 0x94, 0x94, 0xef, 0xbf, 0xbd, 0xef, 0xbf,
+            0xbd, 0x65, 0x38, 0x38, 0x38, 0x38, 0x75, 0xef, 0xbf, 0xbd, 0xef, 0xbb, 0xbf, 0xbd,
+            0x0a, 0xed,
+        ];
+        let html = &data[1..]; // skip seed byte
+        let single = convert_with_splits(html, &[html.len()]);
+        let chunked = convert_with_splits(html, &[80, 5]);
+        assert_eq!(
+            single, chunked,
+            "BOM split across chunk boundary must not change output"
+        );
+    }
+
+    /// Regression: a leading BOM at stream start must be stripped,
+    /// matching the full-buffer path's `discard_bom: true` behavior.
+    #[test]
+    fn test_leading_bom_stripped_at_stream_start() {
+        let html = b"\xEF\xBB\xBF<p>hello</p>";
+        let result = convert_with_splits(html, &[html.len()]);
+        let s = String::from_utf8_lossy(&result);
+        assert!(
+            !s.contains('\u{FEFF}'),
+            "Leading BOM should be stripped, got: {:?}",
+            s
+        );
+    }
+
+    /// Regression: a leading BOM split across chunks must still be stripped.
+    #[test]
+    fn test_leading_bom_split_across_chunks_stripped() {
+        let html = b"\xEF\xBB\xBF<p>hello</p>";
+        let single = convert_with_splits(html, &[html.len()]);
+        // Split inside the BOM: [0xEF] and [0xBB, 0xBF, <p>hello</p>]
+        let chunked = convert_with_splits(html, &[1, html.len() - 1]);
+        assert_eq!(
+            single, chunked,
+            "Leading BOM split across chunks must be stripped consistently"
         );
     }
 }

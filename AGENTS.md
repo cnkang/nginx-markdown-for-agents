@@ -177,7 +177,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - NGX_AGAIN resume honors chain ownership: module-owned chains persist; downstream-owned chains drain with NULL; last_buf never overwrites pending data [1]
 - Fail-open return codes correct; replay buffer init/append failure → precommit_error [2,38]
 - failopen_completed prevents duplicate finalize; failopen_count after downstream OK [38]
-- UTF-8 tails preserved across chunk boundaries; flush at EOF [4]
+- UTF-8 tails preserved across chunk boundaries; flush at EOF; streaming tokenizer discard_bom=false, strip stream-start BOM in converter [4]
 - Streaming decompression uses raw deflate; truncated streams rejected; test payloads match production format [44]
 - Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return [47]
 - Auth Cache-Control commit failure routes through precommit_error; multi-header aggregation checks any_public before has_private [51]
@@ -574,3 +574,4 @@ remediation:
 | 0.8.2 | 2026-06-24 | Kang | Strengthened Rule 31 with semantic-equivalence requirement for duplicate consolidation (branches with distinct error classification must not be collapsed); strengthened Rule 44 with Z_OK vs Z_BUF_ERROR inflate semantics distinction; strengthened Rule 33 with ValueError propagation trap for validate_read_path try/except; added detect_ngx_log_arg_count.sh (CI gate for ngx_log_debugN/errorN suffix-digit/argument-count mismatch); added detect_nosonar_discipline.sh (CI gate for bare NOSONAR without reason); refactored detect_cwe190_casts.sh allowlists from line-number-based to pattern-based matching to survive code edits that shift line numbers (26 stale warnings eliminated) |
 | 0.8.3 | 2026-06-26 | Kang | Rules 52–55: derived-state reconciliation on multi-context drain (streaming), FFI fat-pointer safety and empty-result NULL convention, release artifact path traversal protection, version consistency; updated Rule 15 (initialization-before-ownership-transfer), Rule 43 (pool-backed decompression exception); added release-manifest and version-consistency verification families to routing manifest |
 | 0.9.0 | 2026-06-27 | Kang | 0.9.0 release gate target (release-gates-check-090) with production examples validation, gate validator, CI experimental job; additive on 0.8.0 gates |
+| 0.9.0 | 2026-07-03 | Kang | Strengthened Rule 4 for streaming BOM handling: html5ever discard_bom=false, strip stream-start BOM in converter after utf8_tail reassembly, bom_stripped flag deferred for partial 0xEF sequences |
