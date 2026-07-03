@@ -454,7 +454,7 @@ grep "conversion failed" /var/log/nginx/error.log | \
 - **For resource_limit:**
   - Increase limits: `markdown_memory_budget 20m; markdown_timeout 10s;`
   - Optimize content: Reduce HTML size at source
-  - Use fail-open: `markdown_on_error pass;`
+  - Use fail-open: `markdown_error_policy pass;`
 
 - **For system_error:**
   - Check memory: `free -h`, `top`
@@ -779,7 +779,7 @@ markdown_memory_budget 5m;
 markdown_timeout 3s;
 
 # Enable fail-open
-markdown_on_error pass;
+markdown_error_policy pass;
 ```
 
 6. **Collect diagnostics:**
@@ -1007,8 +1007,8 @@ The table below maps each reason code to its internal enum, error category, requ
 | `SKIP_AUTH` | `NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH` | — | SKIPPED | Auth policy denies conversion for authenticated requests | Expected when `markdown_auth_policy deny` is configured. If you see it unexpectedly, check whether the request is authenticated and whether the location/server block should allow conversion. |
 | `SKIP_ACCEPT` | _(Accept negotiation)_ | — | SKIPPED | Accept header does not include `text/markdown` | Expected for normal browser traffic. If an AI agent triggers this, verify the client sends `Accept: text/markdown`. Check `markdown_on_wildcard` if using `*/*`. |
 | `ELIGIBLE_CONVERTED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | — | CONVERTED | All checks passed, conversion succeeded | No action needed — this is the success path. |
-| `ELIGIBLE_FAILED_OPEN` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; original HTML served (`markdown_on_error pass`) | Investigate the failure sub-classification (see below). The client received HTML, so no user impact. Review failure rate trends. |
-| `ELIGIBLE_FAILED_CLOSED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; 502 returned (`markdown_on_error reject`) | Urgent — clients are receiving errors. Switch to `markdown_on_error pass` or disable conversion for the affected scope. Investigate root cause. |
+| `ELIGIBLE_FAILED_OPEN` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; original HTML served (`markdown_error_policy pass`) | Investigate the failure sub-classification (see below). The client received HTML, so no user impact. Review failure rate trends. |
+| `ELIGIBLE_FAILED_CLOSED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; 502 returned (`markdown_error_policy fail_closed`) | Urgent — clients are receiving errors. Switch to `markdown_error_policy pass` or disable conversion for the affected scope. Investigate root cause. |
 
 #### Engine Selection Codes
 

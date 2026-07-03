@@ -50,9 +50,10 @@ static const char *stub_reason_strs[] = {
     "degraded_snapshot",             /* 22 */
     "header_plan_apply_error",       /* 23 */
     "streaming_mid_flight_error",    /* 24 */
+    "bypass_no_transform",           /* 25 */
 };
 
-#define STUB_REASON_CODE_COUNT 25
+#define STUB_REASON_CODE_COUNT 26
 
 ngx_int_t
 ngx_http_markdown_get_reason_code_str(uint32_t code, ngx_str_t *out_str)

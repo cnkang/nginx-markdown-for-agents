@@ -292,11 +292,11 @@ Follow the [Verification Steps](#verification-steps) section. Confirm that the e
 
 ### Method C: Restore Fail-Open Behavior
 
-If you changed `markdown_on_error` to `reject` and conversion failures are returning 502 errors to clients, switch back to `pass`. This restores fail-open behavior: failed conversions serve the original HTML instead of an error response. Conversion continues for requests that succeed.
+If you changed `markdown_error_policy` to `fail_closed` and conversion failures are returning 502 errors to clients, switch back to `pass`. This restores fail-open behavior: failed conversions serve the original HTML instead of an error response. Conversion continues for requests that succeed.
 
 #### When to Use
 
-- `markdown_on_error reject` is active and conversion failures are causing 502 responses
+- `markdown_error_policy fail_closed` is active and conversion failures are causing 502 responses
 - Most conversions succeed, but edge cases in certain HTML structures cause failures
 - You want to keep conversion running while investigating failures
 
@@ -311,7 +311,7 @@ server {
 
     location /docs {
         markdown_filter on;
-        markdown_on_error reject;
+        markdown_error_policy fail_closed;
         proxy_pass http://backend;
     }
 }
@@ -326,7 +326,7 @@ server {
 
     location /docs {
         markdown_filter on;
-        markdown_on_error pass;
+        markdown_error_policy pass;
         proxy_pass http://backend;
     }
 }

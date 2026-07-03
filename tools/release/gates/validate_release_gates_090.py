@@ -33,7 +33,11 @@ def check_file_exists(repo: Path, rel_path: str, description: str) -> dict:
 
 
 def check_reason_code_count(repo: Path) -> dict:
-    """Verify Rust reason code count is 25 (0.9.0 target)."""
+    """Verify Rust reason code count is 26 (0.9.0 frozen count).
+
+    0.9.0 freezes at exactly 26 reason codes. After 1.0.0, only additive
+    new codes are permitted. The gate uses == 26 to detect drift.
+    """
     rc_file = repo / "components/rust-converter/src/decision/reason_code.rs"
     if not rc_file.exists():
         return {"name": "reason_code_count", "status": "fail",
@@ -46,11 +50,11 @@ def check_reason_code_count(repo: Path) -> dict:
         return {"name": "reason_code_count", "status": "fail",
                 "message": "REASON_CODE_COUNT not found in reason_code.rs"}
     count = int(match.group(1))
-    if count >= 26:
+    if count == 26:
         return {"name": "reason_code_count", "status": "pass",
                 "details": {"count": count}}
     return {"name": "reason_code_count", "status": "fail",
-            "message": f"Expected >= 26, got {count}"}
+            "message": f"Expected exactly 26, got {count}"}
 
 
 def check_diagnostics_schema_version(repo: Path) -> dict:

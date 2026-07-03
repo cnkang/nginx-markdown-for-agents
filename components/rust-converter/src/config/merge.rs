@@ -36,7 +36,7 @@ use crate::decision::streaming::StreamingPolicy;
 pub struct BuiltinDefaults {
     /// Accept negotiation: `strict`.
     pub accept: AcceptMode,
-    /// Cache validation: `full`.
+    /// Cache validation: `ims_only`.
     pub cache_validation: CacheValidation,
     /// Streaming policy: `auto`.
     pub streaming: StreamingPolicy,
@@ -65,7 +65,7 @@ impl BuiltinDefaults {
     pub const fn new() -> Self {
         Self {
             accept: AcceptMode::Strict,
-            cache_validation: CacheValidation::Full,
+            cache_validation: CacheValidation::ImsOnly,
             streaming: StreamingPolicy::Auto,
             limits_memory_bytes: 10 * 1024 * 1024, // 10 MiB
             limits_timeout_ms: 5000,               // 5 seconds
@@ -287,7 +287,7 @@ mod tests {
         assert_eq!(eff.accept, AcceptMode::Wildcard);
         assert_eq!(eff.limits_timeout_ms, 10_000);
         // Non-explicit fields come from builtins
-        assert_eq!(eff.cache_validation, CacheValidation::Full);
+        assert_eq!(eff.cache_validation, CacheValidation::ImsOnly);
         assert_eq!(eff.limits_memory_bytes, 10 * 1024 * 1024);
     }
 
@@ -337,7 +337,7 @@ mod tests {
     fn builtin_defaults_match_inventory() {
         let b = BuiltinDefaults::new();
         assert_eq!(b.accept, AcceptMode::Strict);
-        assert_eq!(b.cache_validation, CacheValidation::Full);
+        assert_eq!(b.cache_validation, CacheValidation::ImsOnly);
         assert_eq!(b.streaming, StreamingPolicy::Auto);
         assert_eq!(b.limits_memory_bytes, 10 * 1024 * 1024);
         assert_eq!(b.limits_timeout_ms, 5000);

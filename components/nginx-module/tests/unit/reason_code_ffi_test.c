@@ -8,7 +8,7 @@
  * the Rust library, this file provides stub implementations of the
  * Rust FFI functions to verify the C wrapper logic.
  *
- * Updated for schema v1 (25 reason codes, lowercase snake_case).
+ * Updated for schema v1 (26 reason codes, lowercase snake_case).
  */
 
 #include "../include/test_common.h"
@@ -53,6 +53,7 @@ static const char *stub_reason_strs[] = {
     "degraded_snapshot",             /* 22 */
     "header_plan_apply_error",       /* 23 */
     "streaming_mid_flight_error",    /* 24 */
+    "bypass_no_transform",           /* 25 */
 };
 
 static const char *stub_metric_keys[] = {
@@ -81,9 +82,10 @@ static const char *stub_metric_keys[] = {
     "markdown_errors_total",         /* 22 */
     "markdown_errors_total",         /* 23 */
     "markdown_errors_total",         /* 24 */
+    "markdown_skipped_total",        /* 25 — bypass_no_transform */
 };
 
-#define STUB_REASON_CODE_COUNT 25
+#define STUB_REASON_CODE_COUNT 26
 
 const uint8_t *
 markdown_reason_code_str(uint32_t code, uintptr_t *out_len)
@@ -170,6 +172,13 @@ test_get_reason_code_str_valid(void)
                 "code 24 data should be "
                 "'streaming_mid_flight_error'");
 
+    rc = ngx_http_markdown_get_reason_code_str(25, &str);
+    TEST_ASSERT(rc == NGX_OK, "code 25 should return NGX_OK");
+    TEST_ASSERT(str.len == strlen("bypass_no_transform"),
+                "code 25 length should match 'bypass_no_transform'");
+    TEST_ASSERT(memcmp(str.data, "bypass_no_transform", str.len) == 0,
+                "code 25 data should be 'bypass_no_transform'");
+
     TEST_PASS("Valid reason code strings returned correctly");
 }
 
@@ -192,9 +201,9 @@ test_get_reason_code_str_invalid(void)
     TEST_ASSERT(str.len == 0, "invalid code should zero len");
     TEST_ASSERT(str.data == NULL, "invalid code should NULL data");
 
-    rc = ngx_http_markdown_get_reason_code_str(25, &str);
+    rc = ngx_http_markdown_get_reason_code_str(26, &str);
     TEST_ASSERT(rc == NGX_DECLINED,
-                "code 25 (one past last) should return NGX_DECLINED");
+                "code 26 (one past last) should return NGX_DECLINED");
 
     TEST_PASS("Invalid reason codes handled correctly");
 }
@@ -279,7 +288,7 @@ test_get_reason_code_metric_key_invalid(void)
 
 
 /*
- * Test: total count accessor returns expected value (25)
+ * Test: total count accessor returns expected value (26)
  */
 static void
 test_reason_code_total_count(void)
@@ -291,9 +300,32 @@ test_reason_code_total_count(void)
     count = ngx_http_markdown_reason_code_total_count();
     TEST_ASSERT(count == STUB_REASON_CODE_COUNT,
                 "total count should match REASON_CODE_COUNT");
-    TEST_ASSERT(count == 25, "total count should be 25");
+    TEST_ASSERT(count == 26, "total count should be 26");
 
     TEST_PASS("Total count accessor correct");
+}
+
+
+/*
+ * Test: code 25 (bypass_no_transform) metric key is markdown_skipped_total
+ */
+static void
+test_bypass_no_transform_metric_key(void)
+{
+    ngx_str_t  str;
+    ngx_int_t  rc;
+
+    TEST_SUBSECTION("bypass_no_transform metric key");
+
+    rc = ngx_http_markdown_get_reason_code_metric_key(25, &str);
+    TEST_ASSERT(rc == NGX_OK,
+                "code 25 metric key should return NGX_OK");
+    TEST_ASSERT(memcmp(str.data,
+                       "markdown_skipped_total",
+                       str.len) == 0,
+                "code 25 metric key should be markdown_skipped_total");
+
+    TEST_PASS("bypass_no_transform metric key correct");
 }
 
 
@@ -350,6 +382,7 @@ main(void)
     test_get_reason_code_metric_key_valid();
     test_get_reason_code_metric_key_invalid();
     test_reason_code_total_count();
+    test_bypass_no_transform_metric_key();
     test_all_codes_produce_strings();
 
     printf("\n========================================\n");

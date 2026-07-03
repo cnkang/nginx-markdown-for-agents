@@ -54,11 +54,12 @@ C code accesses them via FFI. The `as_str()` values are lowercase snake_case.
 | 22 | `DegradedSnapshot` | `degraded_snapshot` | `markdown_errors_total` | header_filter: degraded dynconf snapshot |
 | 23 | `HeaderPlanApplyError` | `header_plan_apply_error` | `markdown_errors_total` | header_filter: header plan apply error |
 | 24 | `StreamingMidFlightError` | `streaming_mid_flight_error` | `markdown_errors_total` | body_filter: streaming mid-flight error |
+| 25 | `BypassNoTransform` | `bypass_no_transform` | `markdown_skipped_total` | header_filter: no-transform bypass |
 
 ### Naming Convention
 
 - All `as_str()` values are **lowercase snake_case** (regex: `^[a-z][a-z0-9_]*$`).
-- Discriminants are contiguous `[0, 25)` with no gaps.
+- Discriminants are contiguous `[0, 26)` with no gaps.
 - The enum uses `#[repr(u8)]` for FFI safety.
 
 ### FFI Accessors
@@ -113,7 +114,7 @@ uses the `reason` label to distinguish individual reason codes.
 | Metric Family | Category | Reason Codes (by `reason` label) |
 |---------------|----------|----------------------------------|
 | `markdown_conversions_total` | Success | `converted` |
-| `markdown_skipped_total` | Skip | `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `skipped_accept_reject`, `not_eligible`, `disabled` |
+| `markdown_skipped_total` | Skip | `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `skipped_accept_reject`, `not_eligible`, `disabled`, `bypass_no_transform` |
 | `markdown_errors_total` | Error | `decompression_error`, `decompression_budget_exceeded`, `decompression_format_error`, `decompression_truncated_input`, `decompression_io_error`, `timeout`, `budget_exceeded`, `replay_error`, `ffi_panic`, `conversion_error`, `memory_budget_exceeded`, `overload`, `invalid_dynconf`, `degraded_snapshot`, `header_plan_apply_error`, `streaming_mid_flight_error` |
 | `markdown_failed_open_total` | Fail-Open | `failed_open` |
 | `markdown_failed_closed_total` | Fail-Closed | `failed_closed` |
