@@ -1705,7 +1705,8 @@ void markdown_header_plan_free(struct FFIHeaderPlan *plan);
  * Default values:
  * - `flavor`: 0 (CommonMark)
  * - `timeout_ms`: 5000 (5 seconds)
- * - `generate_etag`: 1 (enabled)
+ * - `generate_etag`: 0 (disabled — ETag generation is a config-layer
+ *   decision; the init helper only provides a safe ABI baseline)
  * - `estimate_tokens`: 0 (disabled)
  * - `front_matter`: 0 (disabled)
  * - `content_type` / `base_url` / selectors: NULL/0
