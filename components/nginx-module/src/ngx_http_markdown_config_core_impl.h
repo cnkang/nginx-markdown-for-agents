@@ -660,7 +660,6 @@ ngx_http_markdown_check_profile_conflicts(ngx_conf_t *cf,
     struct FFIExplicitConfig   explicit_cfg;
     struct FFIEffectiveConfig  effective_cfg;
     struct FFIConflictList     conflicts;
-    uintptr_t                  i;
     ngx_flag_t                 has_error;
     uint8_t                    ffi_cv;
 
@@ -733,7 +732,7 @@ ngx_http_markdown_check_profile_conflicts(ngx_conf_t *cf,
     /* Process conflicts: emit log messages */
     has_error = 0;
 
-    for (i = 0; i < conflicts.count; i++) {
+    for (uintptr_t i = 0; i < conflicts.count; i++) {
         if (conflicts.conflicts[i].level == 0) {
             /* FFIConflictLevel::Error = 0 → EMERG, blocks startup */
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
