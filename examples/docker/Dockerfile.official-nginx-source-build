@@ -161,7 +161,6 @@ RUN set -eux; \
       '            markdown_filter on;' \
       '            markdown_accept wildcard;' \
       '            markdown_cache_validation full;' \
-      '            markdown_cache_validation full;' \
       '        }' \
       '    }' \
       '}' \
