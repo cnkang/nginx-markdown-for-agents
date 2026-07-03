@@ -394,6 +394,11 @@ ngx_http_markdown_log_streaming_decision(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_ctx_t *ctx, const char *engine)
 {
+    (void) r;
+    (void) conf;
+    (void) ctx;
+    (void) engine;
+
     ngx_log_debug6(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
         "markdown: streaming decision: "
