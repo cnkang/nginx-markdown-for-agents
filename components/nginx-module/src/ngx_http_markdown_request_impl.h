@@ -380,10 +380,11 @@ ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
     ngx_http_markdown_log_decision_path(r, conf, eff, &dp);
 }
 
+#ifdef MARKDOWN_STREAMING_ENABLED
 /*
  * Log a streaming path selection decision at debug level.
  *
- * The same 5-argument debug log is emitted at three different streaming
+ * The same 6-argument debug log is emitted at three different streaming
  * decision points in the header filter; consolidating it here keeps the
  * filter function readable and avoids cognitive-complexity inflation from
  * repeated ternary sub-expressions.
@@ -411,6 +412,7 @@ ngx_http_markdown_log_streaming_decision(ngx_http_request_t *r,
          == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
             ? "pass" : "reject");
 }
+#endif /* MARKDOWN_STREAMING_ENABLED */
 
 static ngx_flag_t
 ngx_http_markdown_header_precheck(ngx_http_request_t *r,
@@ -490,6 +492,85 @@ ngx_http_markdown_header_precheck(ngx_http_request_t *r,
     return 0;
 }
 
+
+/*
+ * Per-worker inflight guard (spec 52).
+ *
+ * After eligibility passes and before Rust conversion begins,
+ * try to increment the inflight counter.  If the worker is at
+ * capacity (current >= max_inflight), apply the configured
+ * error policy (pass/status/fail_closed from spec 51).
+ *
+ * The cleanup handler registered by try_increment guarantees
+ * decrement on every exit path (normal, abort, timeout, error)
+ * via r->pool destruction.
+ *
+ * Returns NGX_OK on success, or a non-OK value that the caller
+ * should return directly from the header filter.
+ */
+static ngx_int_t
+ngx_http_markdown_check_inflight(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    ngx_int_t  inflight_rc;
+
+    inflight_rc = ngx_http_markdown_inflight_try_increment(
+        r, conf);
+
+    if (inflight_rc == NGX_DECLINED) {
+        /* Overloaded — apply error policy */
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
+
+        if (conf->on_error
+            == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+        {
+            ngx_log_error(NGX_LOG_WARN,
+                r->connection->log, 0,
+                "markdown: inflight overload, "
+                "rejecting (fail-closed)");
+            ngx_http_markdown_log_decision(
+                r, conf, ctx->effective_conf,
+                ngx_http_markdown_reason_failed_closed());
+            return conf->error_status;
+        }
+
+        /* fail-open: pass through original response */
+        ngx_http_markdown_metric_inc_failopen(conf);
+        ctx->eligible = 0;
+        ctx->headers_forwarded = 1;
+
+        ngx_log_error(NGX_LOG_WARN,
+            r->connection->log, 0,
+            "markdown: inflight overload, "
+            "returning original content "
+            "(fail-open)");
+        ngx_http_markdown_log_decision(
+            r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_failed_open());
+        return ngx_http_next_header_filter(r);
+    }
+
+    if (inflight_rc == NGX_ERROR) {
+        /* Cleanup alloc failed — treat as system error */
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+
+        if (conf->on_error
+            == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+        {
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+
+        ngx_http_markdown_metric_inc_failopen(conf);
+        ctx->eligible = 0;
+        ctx->headers_forwarded = 1;
+        return ngx_http_next_header_filter(r);
+    }
+
+    /* NGX_OK: inflight incremented, cleanup registered */
+    return NGX_OK;
+}
 
 /**
  * Determine whether the response should be converted and, if eligible,
@@ -854,74 +935,11 @@ path_selected:
         }
     }
 
-    /*
-     * Per-worker inflight guard (spec 52).
-     *
-     * After eligibility passes and before Rust conversion begins,
-     * try to increment the inflight counter.  If the worker is at
-     * capacity (current >= max_inflight), apply the configured
-     * error policy (pass/status/fail_closed from spec 51).
-     *
-     * The cleanup handler registered by try_increment guarantees
-     * decrement on every exit path (normal, abort, timeout, error)
-     * via r->pool destruction.
-     */
-    {
-        ngx_int_t  inflight_rc;
+    ngx_int_t  inflight_rc;
 
-        inflight_rc = ngx_http_markdown_inflight_try_increment(
-            r, conf);
-
-        if (inflight_rc == NGX_DECLINED) {
-            /* Overloaded — apply error policy */
-            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-
-            if (conf->on_error
-                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-            {
-                ngx_log_error(NGX_LOG_WARN,
-                    r->connection->log, 0,
-                    "markdown: inflight overload, "
-                    "rejecting (fail-closed)");
-                ngx_http_markdown_log_decision(
-                    r, conf, ctx->effective_conf,
-                    ngx_http_markdown_reason_failed_closed());
-                return conf->error_status;
-            }
-
-            /* fail-open: pass through original response */
-            ngx_http_markdown_metric_inc_failopen(conf);
-            ctx->eligible = 0;
-            ctx->headers_forwarded = 1;
-
-            ngx_log_error(NGX_LOG_WARN,
-                r->connection->log, 0,
-                "markdown: inflight overload, "
-                "returning original content "
-                "(fail-open)");
-            ngx_http_markdown_log_decision(
-                r, conf, ctx->effective_conf,
-                ngx_http_markdown_reason_failed_open());
-            return ngx_http_next_header_filter(r);
-
-        } else if (inflight_rc == NGX_ERROR) {
-            /* Cleanup alloc failed — treat as system error */
-            NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
-            NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
-
-            if (conf->on_error
-                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-            {
-                return NGX_HTTP_INTERNAL_SERVER_ERROR;
-            }
-
-            ngx_http_markdown_metric_inc_failopen(conf);
-            ctx->eligible = 0;
-            ctx->headers_forwarded = 1;
-            return ngx_http_next_header_filter(r);
-        }
-
-        /* NGX_OK: inflight incremented, cleanup registered */
+    inflight_rc = ngx_http_markdown_check_inflight(r, ctx, conf);
+    if (inflight_rc != NGX_OK) {
+        return inflight_rc;
     }
 
     /*
