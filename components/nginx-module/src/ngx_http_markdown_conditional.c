@@ -347,6 +347,29 @@ ngx_http_markdown_collect_conditional_headers(ngx_http_request_t *r,
 }
 
 /*
+ * Translate an early (non-entity-ETag) FFI conditional decision outcome
+ * into the NGINX return code the caller should return.  Encapsulated as a
+ * helper so the main function's cognitive complexity stays below threshold.
+ */
+static ngx_int_t
+ngx_http_markdown_conditional_early_outcome(ngx_http_request_t *r,
+    const struct FFIConditionalDecision *cond_decision)
+{
+    if (cond_decision->outcome == 0) {
+        return NGX_HTTP_NOT_MODIFIED;
+    }
+
+    if (cond_decision->outcome == 2) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: conditional bypass (Range or "
+                      "no-transform), delivering upstream unmodified");
+        return NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT;
+    }
+
+    return NGX_DECLINED;
+}
+
+/*
  * Evaluate and handle a conditional request for a Markdown response.
  *
  * When full cache validation needs an entity ETag, this function performs a
@@ -440,16 +463,8 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
 
     if (!needs_entity_etag) {
         markdown_decide_conditional(&cond_input, &cond_decision);
-        if (cond_decision.outcome == 0) {
-            return NGX_HTTP_NOT_MODIFIED;
-        }
-        if (cond_decision.outcome == 2) {
-            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                          "markdown: conditional bypass (Range or "
-                          "no-transform), delivering upstream unmodified");
-            return NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT;
-        }
-        return NGX_DECLINED;
+        return ngx_http_markdown_conditional_early_outcome(
+            r, &cond_decision);
     }
 
     if (!conf->policy.generate_etag) {
