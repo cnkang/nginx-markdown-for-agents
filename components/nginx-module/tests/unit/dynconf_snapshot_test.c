@@ -272,7 +272,7 @@ test_default_config_all_keys_present(void)
     conf.decompress.max_size = 10 * 1024 * 1024;
     conf.decompress.parse_timeout = 30000;
     conf.decompress.parser_budget = 64 * 1024 * 1024;
-    conf.large_body_threshold = 0;
+    conf.routing.large_body_threshold = 0;
     conf.advanced.prune_noise = 1;
     conf.advanced.memory_budget = 0;
     conf.advanced.dynconf_enabled = 0;
@@ -433,7 +433,7 @@ test_custom_config_values_reflected(void)
     conf.decompress.max_size = 5 * 1024 * 1024;
     conf.decompress.parse_timeout = 15000;
     conf.decompress.parser_budget = 32 * 1024 * 1024;
-    conf.large_body_threshold = 1024;
+    conf.routing.large_body_threshold = 1024;
     conf.advanced.prune_noise = 0;
     conf.advanced.memory_budget = 16 * 1024 * 1024;
     conf.advanced.dynconf_enabled = 1;

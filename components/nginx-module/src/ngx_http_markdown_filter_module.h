@@ -584,10 +584,13 @@ typedef struct {
     ngx_uint_t   accept_policy;        /* markdown_accept strict|wildcard|force (default: strict) */
     ngx_http_markdown_policy_cfg_t policy;
     ngx_flag_t   buffer_chunked;       /* markdown_buffer_chunked on|off (default: on) */
-    ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
-    ngx_array_t *content_types;        /* markdown_content_types allowlist (default: text/html) */
-    size_t       large_body_threshold; /* markdown_large_body_threshold (NGX_HTTP_MARKDOWN_THRESHOLD_OFF = off) */
-    ngx_uint_t   max_inflight;         /* markdown_limits max_inflight (default: 64; enforced by the worker inflight guard) */
+
+    struct {
+        ngx_array_t *stream_types;         /* markdown_stream_types exclusion list */
+        ngx_array_t *content_types;        /* markdown_content_types allowlist */
+        size_t       large_body_threshold; /* markdown_large_body_threshold */
+        ngx_uint_t   max_inflight;         /* markdown_limits max_inflight */
+    } routing;
 
     /*
      * Decompression/parsing limits.

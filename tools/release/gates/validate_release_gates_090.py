@@ -281,6 +281,26 @@ def check_conditional_bypass_header_filter(repo: Path) -> dict:
     return {"name": "conditional_bypass_header_filter", "status": "pass"}
 
 
+def iter_c_code_lines(block: str) -> list[str]:
+    """Return non-comment, non-empty C source lines from a short snippet."""
+    code_lines = []
+    in_comment = False
+    for line in block.split('\n'):
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith('/*'):
+            in_comment = not s.endswith('*/')
+            continue
+        if in_comment:
+            if '*/' in s:
+                in_comment = False
+            continue
+        if not s.startswith('*'):
+            code_lines.append(s)
+    return code_lines
+
+
 def check_conditional_bypass_no_error_policy(repo: Path) -> dict:
     """Verify conditional bypass path does not go through error_policy."""
     conversion_impl = (
@@ -299,25 +319,7 @@ def check_conditional_bypass_no_error_policy(repo: Path) -> dict:
     block = content[bypass_idx:bypass_idx + 1500]
     # Check for actual function CALL (not comment references).
     # Filter out C comment lines: lines starting with *, /*, or ending with */
-    code_lines = []
-    in_comment = False
-    for line in block.split('\n'):
-        s = line.strip()
-        if not s:
-            continue
-        if s.startswith('/*'):
-            in_comment = True
-            if s.endswith('*/'):
-                in_comment = False
-            continue
-        if in_comment:
-            if '*/' in s:
-                in_comment = False
-            continue
-        if s.startswith('*'):
-            continue
-        code_lines.append(s)
-    code_text = ' '.join(code_lines)
+    code_text = ' '.join(iter_c_code_lines(block))
     if "reject_or_fail_open" in code_text:
         return {"name": "conditional_bypass_no_error_policy", "status": "fail",
                 "message": "bypass path still calls reject_or_fail_open (error_policy)"}

@@ -247,8 +247,8 @@ static void
 init_conf(ngx_http_markdown_conf_t *conf)
 {
     memset(conf, 0, sizeof(*conf));
-    conf->content_types = NULL;
-    conf->stream_types = NULL;
+    conf->routing.content_types = NULL;
+    conf->routing.stream_types = NULL;
     conf->max_size = (size_t) -1;
     conf->stream.excluded_types = NULL;
 }

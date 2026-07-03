@@ -26,7 +26,7 @@ static void ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
 
 /* Forward-declare profile conflict detection (task 7.1, spec 50). */
 static char *ngx_http_markdown_check_profile_conflicts(ngx_conf_t *cf,
-    ngx_http_markdown_conf_t *conf);
+    const ngx_http_markdown_conf_t *conf);
 
 /* ponytail: forward-declare — effective-config builder calls this before its
  * static definition at line ~1017; without this, C99 -Wimplicit-function-declaration
@@ -278,14 +278,14 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->policy.conditional_requests = NGX_CONF_UNSET_UINT;
     conf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
     conf->buffer_chunked = NGX_CONF_UNSET;
-    conf->stream_types = NGX_CONF_UNSET_PTR;
-    conf->content_types = NGX_CONF_UNSET_PTR;
+    conf->routing.stream_types = NGX_CONF_UNSET_PTR;
+    conf->routing.content_types = NGX_CONF_UNSET_PTR;
     conf->decompress.auto_decompress = NGX_CONF_UNSET;
     conf->decompress.max_size = NGX_CONF_UNSET_SIZE;
     conf->decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     conf->decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    conf->large_body_threshold = NGX_CONF_UNSET_SIZE;
-    conf->max_inflight = NGX_CONF_UNSET_UINT;
+    conf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
+    conf->routing.max_inflight = NGX_CONF_UNSET_UINT;
     conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     conf->ops.metrics_per_path = NGX_CONF_UNSET;
@@ -554,14 +554,14 @@ ngx_http_markdown_merge_core_ptr_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev,
     const ngx_http_markdown_profile_defaults_t *profile_defaults)
 {
-    ngx_conf_merge_size_value(conf->large_body_threshold,
-                              prev->large_body_threshold,
+    ngx_conf_merge_size_value(conf->routing.large_body_threshold,
+                              prev->routing.large_body_threshold,
                               NGX_HTTP_MARKDOWN_THRESHOLD_OFF);
-    ngx_conf_merge_uint_value(conf->max_inflight, prev->max_inflight,
+    ngx_conf_merge_uint_value(conf->routing.max_inflight, prev->routing.max_inflight,
                               profile_defaults->limits_max_inflight);
     ngx_conf_merge_ptr_value(conf->policy.auth_cookies, prev->policy.auth_cookies, NULL);
-    ngx_conf_merge_ptr_value(conf->stream_types, prev->stream_types, NULL);
-    ngx_conf_merge_ptr_value(conf->content_types, prev->content_types, NULL);
+    ngx_conf_merge_ptr_value(conf->routing.stream_types, prev->routing.stream_types, NULL);
+    ngx_conf_merge_ptr_value(conf->routing.content_types, prev->routing.content_types, NULL);
 }
 
 /*
@@ -655,7 +655,7 @@ ngx_http_markdown_conditional_to_ffi_cache_validation(ngx_uint_t cond)
  */
 static char *
 ngx_http_markdown_check_profile_conflicts(ngx_conf_t *cf,
-    ngx_http_markdown_conf_t *conf)
+    const ngx_http_markdown_conf_t *conf)
 {
     struct FFIExplicitConfig   explicit_cfg;
     struct FFIEffectiveConfig  effective_cfg;
@@ -717,7 +717,7 @@ ngx_http_markdown_check_profile_conflicts(ngx_conf_t *cf,
     effective_cfg.limits_streaming_buffer_bytes =
         (uint64_t) conf->stream.budget;
     effective_cfg.limits_max_inflight =
-        (uint32_t) conf->max_inflight;
+        (uint32_t) conf->routing.max_inflight;
     effective_cfg.error_policy =
         ngx_http_markdown_on_error_to_ffi(conf->on_error,
                                           conf->error_status);
@@ -1448,8 +1448,8 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
 {
     ngx_uint_t log_level;
     ngx_uint_t auth_cookie_count = (conf->policy.auth_cookies != NULL) ? conf->policy.auth_cookies->nelts : 0;
-    ngx_uint_t stream_type_count = (conf->stream_types != NULL) ? conf->stream_types->nelts : 0;
-    ngx_uint_t content_type_count = (conf->content_types != NULL) ? conf->content_types->nelts : 0;
+    ngx_uint_t stream_type_count = (conf->routing.stream_types != NULL) ? conf->routing.stream_types->nelts : 0;
+    ngx_uint_t content_type_count = (conf->routing.content_types != NULL) ? conf->routing.content_types->nelts : 0;
 #ifdef MARKDOWN_STREAMING_ENABLED
     const char *streaming_engine_str;
 #endif
@@ -1500,7 +1500,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        ngx_http_markdown_flavor_name(conf->flavor),
                        (ngx_uint_t) conf->token_estimate,
                        (ngx_uint_t) conf->front_matter,
-                       (ngx_uint_t) conf->accept_policy,
+                       conf->accept_policy,
                        ngx_http_markdown_auth_policy_name(conf->policy.auth_policy),
                        auth_cookie_count,
                        (ngx_uint_t) conf->policy.generate_etag,
@@ -1509,7 +1509,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        (ngx_uint_t) conf->buffer_chunked,
                         stream_type_count,
                         content_type_count,
-                       conf->large_body_threshold,
+                       conf->routing.large_body_threshold,
                        (ngx_uint_t) conf->ops.trust_forwarded_headers,
                         ngx_http_markdown_metrics_format_name(
                             conf->ops.metrics_format)

@@ -256,6 +256,169 @@ ngx_http_markdown_parse_uint(const ngx_str_t *line)
     return (ngx_uint_t) raw;
 }
 
+typedef struct {
+    ngx_uint_t  memory;
+    ngx_uint_t  timeout;
+    ngx_uint_t  streaming_buffer;
+    ngx_uint_t  max_inflight;
+} ngx_http_markdown_limits_seen_t;
+
+static u_char  ngx_http_markdown_limit_key_memory[] = "memory";
+static u_char  ngx_http_markdown_limit_key_timeout[] = "timeout";
+static u_char  ngx_http_markdown_limit_key_streaming_buffer[] =
+    "streaming_buffer";
+static u_char  ngx_http_markdown_limit_key_max_inflight[] = "max_inflight";
+
+static char *
+ngx_http_markdown_apply_memory_limit(ngx_conf_t *cf, ngx_command_t *cmd,
+    ngx_http_markdown_conf_t *mcf, const ngx_str_t *val,
+    ngx_http_markdown_limits_seen_t *seen)
+{
+    size_t  sz;
+
+    if (seen->memory) {
+        return "has a duplicate \"memory\" key";
+    }
+
+    seen->memory = 1;
+    sz = ngx_http_markdown_parse_size(val);
+    if (sz == (size_t) NGX_ERROR || sz == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid \"memory\" value \"%V\" in \"%V\"; "
+            "must be a size greater than 0 (e.g. 8m)",
+            val, &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->max_size = sz;
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_http_markdown_apply_timeout_limit(ngx_conf_t *cf, ngx_command_t *cmd,
+    ngx_http_markdown_conf_t *mcf, const ngx_str_t *val,
+    ngx_http_markdown_limits_seen_t *seen)
+{
+    ngx_msec_t  ms;
+
+    if (seen->timeout) {
+        return "has a duplicate \"timeout\" key";
+    }
+
+    seen->timeout = 1;
+    ms = ngx_http_markdown_parse_time_ms(val);
+    if (ms == (ngx_msec_t) NGX_ERROR || ms == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid \"timeout\" value \"%V\" in \"%V\"; "
+            "must be a time greater than 0 (e.g. 2s, 500ms)",
+            val, &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->timeout = ms;
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_http_markdown_apply_streaming_buffer_limit(ngx_conf_t *cf,
+    ngx_command_t *cmd, ngx_http_markdown_conf_t *mcf,
+    const ngx_str_t *val, ngx_http_markdown_limits_seen_t *seen)
+{
+    size_t  sz;
+
+    if (seen->streaming_buffer) {
+        return "has a duplicate \"streaming_buffer\" key";
+    }
+
+    seen->streaming_buffer = 1;
+    sz = ngx_http_markdown_parse_size(val);
+    if (sz == (size_t) NGX_ERROR || sz == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid \"streaming_buffer\" value \"%V\" in \"%V\"; "
+            "must be a size greater than 0 (e.g. 256k)",
+            val, &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->stream.budget = sz;
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_http_markdown_apply_max_inflight_limit(ngx_conf_t *cf,
+    ngx_command_t *cmd, ngx_http_markdown_conf_t *mcf,
+    const ngx_str_t *val, ngx_http_markdown_limits_seen_t *seen)
+{
+    ngx_uint_t  n;
+
+    if (seen->max_inflight) {
+        return "has a duplicate \"max_inflight\" key";
+    }
+
+    seen->max_inflight = 1;
+    n = ngx_http_markdown_parse_uint(val);
+    if (n == (ngx_uint_t) NGX_ERROR || n == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid \"max_inflight\" value \"%V\" in \"%V\"; "
+            "must be a positive integer",
+            val, &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    if (n > UINT32_MAX) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid \"max_inflight\" value \"%V\" in \"%V\"; "
+            "must not exceed %u (FFI uint32_t limit)",
+            val, &cmd->name, (unsigned) UINT32_MAX);
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->routing.max_inflight = n;
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_http_markdown_apply_limit_arg(ngx_conf_t *cf, ngx_command_t *cmd,
+    ngx_http_markdown_conf_t *mcf, const ngx_str_t *key,
+    const ngx_str_t *val, ngx_http_markdown_limits_seen_t *seen)
+{
+    if (ngx_http_markdown_arg_equals(key, ngx_http_markdown_limit_key_memory,
+                                     sizeof(ngx_http_markdown_limit_key_memory)
+                                     - 1))
+    {
+        return ngx_http_markdown_apply_memory_limit(cf, cmd, mcf, val, seen);
+    }
+
+    if (ngx_http_markdown_arg_equals(key, ngx_http_markdown_limit_key_timeout,
+                                     sizeof(ngx_http_markdown_limit_key_timeout)
+                                     - 1))
+    {
+        return ngx_http_markdown_apply_timeout_limit(cf, cmd, mcf, val, seen);
+    }
+
+    if (ngx_http_markdown_arg_equals(
+            key, ngx_http_markdown_limit_key_streaming_buffer,
+            sizeof(ngx_http_markdown_limit_key_streaming_buffer) - 1))
+    {
+        return ngx_http_markdown_apply_streaming_buffer_limit(
+            cf, cmd, mcf, val, seen);
+    }
+
+    if (ngx_http_markdown_arg_equals(
+            key, ngx_http_markdown_limit_key_max_inflight,
+            sizeof(ngx_http_markdown_limit_key_max_inflight) - 1))
+    {
+        return ngx_http_markdown_apply_max_inflight_limit(
+            cf, cmd, mcf, val, seen);
+    }
+
+    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+        "unknown key \"%V\" in \"%V\" directive; valid keys are "
+        "memory, timeout, streaming_buffer, max_inflight",
+        key, &cmd->name);
+    return NGX_CONF_ERROR;
+}
+
 /*
  * Configuration directive handler: markdown_limits (Config V2, 0.9.0).
  *
@@ -284,11 +447,9 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
-    ngx_uint_t                seen_memory = 0;
-    ngx_uint_t                seen_timeout = 0;
-    ngx_uint_t                seen_streaming_buffer = 0;
-    ngx_uint_t                seen_max_inflight = 0;
+    ngx_http_markdown_limits_seen_t  seen;
 
+    ngx_memzero(&seen, sizeof(seen));
     value = cf->args->elts;
 
     /*
@@ -299,12 +460,10 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
      */
     for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
         u_char    *eq;
+        char      *rc;
         ngx_str_t  key;
         ngx_str_t  val;
         size_t     vlen;
-        size_t     sz;
-        ngx_msec_t ms;
-        ngx_uint_t n;
 
         /* Split argument at '=' into key and value substrings. */
         eq = ngx_strlchr(value[i].data, value[i].data + value[i].len, '=');
@@ -325,86 +484,10 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         val.data = eq + 1;
         val.len = vlen;
 
-        /* memory=<size> — max response size eligible for conversion. */
-        if (ngx_http_markdown_arg_equals(&key, (u_char *) "memory", 6)) {
-            if (seen_memory) {
-                return "has a duplicate \"memory\" key";
-            }
-            seen_memory = 1;
-            sz = ngx_http_markdown_parse_size(&val);
-            if (sz == (size_t) NGX_ERROR || sz == 0) {
-                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                    "invalid \"memory\" value \"%V\" in \"%V\"; "
-                    "must be a size greater than 0 (e.g. 8m)",
-                    &val, &cmd->name);
-                return NGX_CONF_ERROR;
-            }
-            mcf->max_size = sz;
-
-        /* timeout=<time> — max conversion wall-clock time. */
-        } else if (ngx_http_markdown_arg_equals(&key,
-                       (u_char *) "timeout", 7)) {
-            if (seen_timeout) {
-                return "has a duplicate \"timeout\" key";
-            }
-            seen_timeout = 1;
-            ms = ngx_http_markdown_parse_time_ms(&val);
-            if (ms == (ngx_msec_t) NGX_ERROR || ms == 0) {
-                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                    "invalid \"timeout\" value \"%V\" in \"%V\"; "
-                    "must be a time greater than 0 (e.g. 2s, 500ms)",
-                    &val, &cmd->name);
-                return NGX_CONF_ERROR;
-            }
-            mcf->timeout = ms;
-
-        /* streaming_buffer=<size> — streaming engine working-set budget. */
-        } else if (ngx_http_markdown_arg_equals(&key,
-                       (u_char *) "streaming_buffer", 16)) {
-            if (seen_streaming_buffer) {
-                return "has a duplicate \"streaming_buffer\" key";
-            }
-            seen_streaming_buffer = 1;
-            sz = ngx_http_markdown_parse_size(&val);
-            if (sz == (size_t) NGX_ERROR || sz == 0) {
-                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                    "invalid \"streaming_buffer\" value \"%V\" in \"%V\"; "
-                    "must be a size greater than 0 (e.g. 256k)",
-                    &val, &cmd->name);
-                return NGX_CONF_ERROR;
-            }
-            mcf->stream.budget = sz;
-
-        /* max_inflight=<N> — per-worker concurrent conversion cap. */
-        } else if (ngx_http_markdown_arg_equals(&key,
-                       (u_char *) "max_inflight", 12)) {
-            if (seen_max_inflight) {
-                return "has a duplicate \"max_inflight\" key";
-            }
-            seen_max_inflight = 1;
-            n = ngx_http_markdown_parse_uint(&val);
-            if (n == (ngx_uint_t) NGX_ERROR || n == 0) {
-                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                    "invalid \"max_inflight\" value \"%V\" in \"%V\"; "
-                    "must be a positive integer",
-                    &val, &cmd->name);
-                return NGX_CONF_ERROR;
-            }
-            if (n > UINT32_MAX) {
-                ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                    "invalid \"max_inflight\" value \"%V\" in \"%V\"; "
-                    "must not exceed %u (FFI uint32_t limit)",
-                    &val, &cmd->name, (unsigned) UINT32_MAX);
-                return NGX_CONF_ERROR;
-            }
-            mcf->max_inflight = n;
-
-        } else {
-            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                "unknown key \"%V\" in \"%V\" directive; valid keys are "
-                "memory, timeout, streaming_buffer, max_inflight",
-                &key, &cmd->name);
-            return NGX_CONF_ERROR;
+        rc = ngx_http_markdown_apply_limit_arg(
+            cf, cmd, mcf, &key, &val, &seen);
+        if (rc != NGX_CONF_OK) {
+            return rc;
         }
     }
 
@@ -931,12 +1014,12 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
-    if (mcf->content_types != NGX_CONF_UNSET_PTR) {
+    if (mcf->routing.content_types != NGX_CONF_UNSET_PTR) {
         return "is duplicate";
     }
 
-    mcf->content_types = ngx_array_create(cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
-    if (mcf->content_types == NULL) {
+    mcf->routing.content_types = ngx_array_create(cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
+    if (mcf->routing.content_types == NULL) {
         return NGX_CONF_ERROR;
     }
 
@@ -969,7 +1052,7 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
-        type = ngx_array_push(mcf->content_types);
+        type = ngx_array_push(mcf->routing.content_types);
         if (type == NULL) {
             return NGX_CONF_ERROR;
         }
@@ -1074,12 +1157,12 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
-    if (mcf->stream_types != NGX_CONF_UNSET_PTR) {
+    if (mcf->routing.stream_types != NGX_CONF_UNSET_PTR) {
         return "is duplicate";
     }
 
-    mcf->stream_types = ngx_array_create(cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
-    if (mcf->stream_types == NULL) {
+    mcf->routing.stream_types = ngx_array_create(cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
+    if (mcf->routing.stream_types == NULL) {
         return NGX_CONF_ERROR;
     }
 
@@ -1112,7 +1195,7 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
-        type = ngx_array_push(mcf->stream_types);
+        type = ngx_array_push(mcf->routing.stream_types);
         if (type == NULL) {
             return NGX_CONF_ERROR;
         }

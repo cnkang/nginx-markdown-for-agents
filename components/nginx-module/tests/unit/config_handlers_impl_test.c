@@ -751,11 +751,11 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->flavor = NGX_CONF_UNSET_UINT;
     mcf->policy.auth_policy = NGX_CONF_UNSET_UINT;
     mcf->policy.auth_cookies = NGX_CONF_UNSET_PTR;
-    mcf->content_types = NGX_CONF_UNSET_PTR;
+    mcf->routing.content_types = NGX_CONF_UNSET_PTR;
     mcf->policy.conditional_requests = NGX_CONF_UNSET_UINT;
     mcf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
-    mcf->stream_types = NGX_CONF_UNSET_PTR;
-    mcf->large_body_threshold = NGX_CONF_UNSET_SIZE;
+    mcf->routing.stream_types = NGX_CONF_UNSET_PTR;
+    mcf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     mcf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     mcf->stream.engine = NGX_CONF_UNSET_UINT;
     mcf->stream.policy = NGX_CONF_UNSET_UINT;
@@ -1309,7 +1309,7 @@ test_streaming_policy_handler(void)
  *
  * Semantic contract mirrored: ngx_http_markdown_stream_types
  * collects MIME type strings of the form "type/subtype" into an
- * ngx_array_t stored in mcf->stream_types; it rejects duplicates
+ * ngx_array_t stored in mcf->routing.stream_types; it rejects duplicates
  * and malformed type strings.
  *
  * Return: void.
@@ -1337,8 +1337,9 @@ test_stream_types_handler(void)
     set_arg(&values[2], "application/json");
     rc = ngx_http_markdown_stream_types(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "valid stream types should parse");
-    TEST_ASSERT(mcf.stream_types != NULL, "stream types array should exist");
-    TEST_ASSERT(mcf.stream_types->nelts == 2,
+    TEST_ASSERT(mcf.routing.stream_types != NULL,
+        "stream types array should exist");
+    TEST_ASSERT(mcf.routing.stream_types->nelts == 2,
         "two stream types should be stored");
 
     rc = ngx_http_markdown_stream_types(&cf, &cmd, &mcf);
@@ -1413,7 +1414,7 @@ test_limits_handler(void)
     TEST_ASSERT(mcf.timeout == 2000, "timeout=2s maps to 2000ms");
     TEST_ASSERT(mcf.stream.budget == 256 * 1024,
         "streaming_buffer maps to stream.budget");
-    TEST_ASSERT(mcf.max_inflight == 64, "max_inflight maps");
+    TEST_ASSERT(mcf.routing.max_inflight == 64, "max_inflight maps");
 
     /* Single-key tests reuse a 2-arg layout. */
     setup_cf(&cf, &args, values, 2);
@@ -2023,10 +2024,12 @@ test_markdown_content_types_handler(void)
 
     rc = ngx_http_markdown_content_types(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "valid content types should parse");
-    TEST_ASSERT(mcf.content_types != NULL, "content_types array allocated");
-    TEST_ASSERT(mcf.content_types->nelts == 2, "two content types stored");
+    TEST_ASSERT(mcf.routing.content_types != NULL,
+        "content_types array allocated");
+    TEST_ASSERT(mcf.routing.content_types->nelts == 2,
+        "two content types stored");
 
-    types = mcf.content_types->elts;
+    types = mcf.routing.content_types->elts;
     TEST_ASSERT(types != NULL, "content_types entries should be available");
     TEST_ASSERT(types[0].len == strlen("text/html"),
                 "first content type length should match");

@@ -58,6 +58,28 @@ typedef struct {
 /* Per-worker global counter instance. */
 static ngx_http_markdown_inflight_t  ngx_http_markdown_g_inflight;
 
+static void
+ngx_http_markdown_inflight_update_high_watermark(ngx_atomic_int_t new_val)
+{
+    for ( ;; ) {
+        ngx_atomic_int_t  hw;
+
+        hw = ngx_http_markdown_g_inflight.high_watermark;
+        if (new_val <= hw) {
+            return;
+        }
+
+        if (ngx_atomic_cmp_set(
+                (ngx_atomic_uint_t *)
+                    &ngx_http_markdown_g_inflight.high_watermark,
+                (ngx_atomic_uint_t) hw,
+                (ngx_atomic_uint_t) new_val))
+        {
+            return;
+        }
+    }
+}
+
 /*
  * Pool cleanup handler for inflight decrement.
  *
@@ -122,9 +144,9 @@ ngx_http_markdown_inflight_try_increment(ngx_http_request_t *r,
     cur = ngx_http_markdown_g_inflight.current;
 
     /* max_inflight == 0 means unlimited (no enforcement) */
-    if (conf->max_inflight == 0) {
+    if (conf->routing.max_inflight == 0) {
         /* Fall through to CAS increment without limit check */
-    } else if ((ngx_uint_t) cur >= conf->max_inflight) {
+    } else if ((ngx_uint_t) cur >= conf->routing.max_inflight) {
         /* Overload: reject */
         (void) ngx_atomic_fetch_add(
             &ngx_http_markdown_g_inflight.overload_total, 1);
@@ -132,7 +154,7 @@ ngx_http_markdown_inflight_try_increment(ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                       "markdown: inflight limit reached "
                       "(current=%d, max=%ui), rejecting request",
-                      (int) cur, conf->max_inflight);
+                      (int) cur, conf->routing.max_inflight);
 
         return NGX_DECLINED;
     }
@@ -141,27 +163,7 @@ ngx_http_markdown_inflight_try_increment(ngx_http_request_t *r,
     new_val = ngx_atomic_fetch_add(
         &ngx_http_markdown_g_inflight.current, 1) + 1;
 
-    /* Update high watermark if new peak */
-    for ( ;; ) {
-        ngx_atomic_int_t  hw = ngx_http_markdown_g_inflight.high_watermark;
-        if (new_val <= hw) {
-            break;
-        }
-        /* CAS loop for high_watermark update.
-         * high_watermark is ngx_atomic_t (volatile long) for consistency
-         * with current/overload_total which use ngx_atomic_fetch_add.
-         * ngx_atomic_cmp_set expects ngx_atomic_uint_t *, so the cast
-         * is required — this is the standard NGINX pattern for CAS on
-         * a signed atomic field. */
-        if (ngx_atomic_cmp_set(
-                (ngx_atomic_uint_t *)
-                    &ngx_http_markdown_g_inflight.high_watermark,
-                (ngx_atomic_uint_t) hw,
-                (ngx_atomic_uint_t) new_val))
-        {
-            break;
-        }
-    }
+    ngx_http_markdown_inflight_update_high_watermark(new_val);
 
     /* Register cleanup handler on r->pool */
     cln = ngx_pool_cleanup_add(r->pool, sizeof(*cd));
@@ -185,7 +187,7 @@ ngx_http_markdown_inflight_try_increment(ngx_http_request_t *r,
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "markdown: inflight increment "
                    "(current=%d, max=%ui)",
-                   (int) new_val, conf->max_inflight);
+                   (int) new_val, conf->routing.max_inflight);
 
     return NGX_OK;
 }

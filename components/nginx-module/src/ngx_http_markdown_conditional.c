@@ -103,6 +103,65 @@ ngx_http_markdown_find_response_header(ngx_http_request_t *r, u_char *name,
 }
 
 static ngx_int_t
+ngx_http_markdown_strncasecmp_const(const u_char *s1, const u_char *s2,
+    size_t n)
+{
+    while (n != 0) {
+        u_char  c1;
+        u_char  c2;
+
+        c1 = (u_char) ngx_tolower(*s1);
+        c2 = (u_char) ngx_tolower(*s2);
+
+        if (c1 != c2) {
+            return c1 - c2;
+        }
+
+        s1++;
+        s2++;
+        n--;
+    }
+
+    return 0;
+}
+
+static ngx_flag_t
+ngx_http_markdown_header_has_cache_directive(const ngx_table_elt_t *header,
+    const u_char *directive, size_t directive_len)
+{
+    const u_char  *p;
+    const u_char  *end;
+
+    p = header->value.data;
+    end = p + header->value.len;
+
+    while (p < end) {
+        while (p < end && (*p == ' ' || *p == '\t' || *p == ',')) {
+            p++;
+        }
+
+        if ((size_t)(end - p) >= directive_len
+            && ngx_http_markdown_strncasecmp_const(
+                   p, directive, directive_len) == 0)
+        {
+            const u_char *after = p + directive_len;
+
+            if (after == end || *after == ',' || *after == ' '
+                || *after == '\t')
+            {
+                return 1;
+            }
+        }
+
+        while (p < end && *p != ',') {
+            p++;
+        }
+    }
+
+    return 0;
+}
+
+static ngx_int_t
 ngx_http_markdown_convert_for_conditional(
     ngx_http_request_t *r,
     const ngx_http_markdown_ctx_t *ctx,
@@ -184,21 +243,18 @@ ngx_http_markdown_has_no_transform(ngx_http_request_t *r)
 {
     static u_char       cc_name[] = "Cache-Control";
     static u_char       directive[] = "no-transform";
-    ngx_list_part_t    *part;
-    ngx_table_elt_t    *headers;
-    ngx_uint_t          i;
-    u_char             *p;
-    u_char             *end;
     size_t              directive_len;
 
     directive_len = sizeof(directive) - 1;
 
-    for (part = &r->headers_out.headers.part;
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
          part != NULL;
          part = part->next)
     {
+        ngx_table_elt_t  *headers;
+
         headers = part->elts;
-        for (i = 0; i < part->nelts; i++) {
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
             if (headers[i].hash == 0) {
                 continue;
             }
@@ -209,38 +265,10 @@ ngx_http_markdown_has_no_transform(ngx_http_request_t *r)
                 continue;
             }
 
-            /*
-             * Search for "no-transform" within the comma-separated
-             * directive list.  Match must be at word boundary (start
-             * of value, after comma/space, or end of value).
-             */
-            p = headers[i].value.data;
-            end = p + headers[i].value.len;
-
-            while (p < end) {
-                /* Skip leading whitespace and commas */
-                while (p < end && (*p == ' ' || *p == '\t'
-                       || *p == ','))
-                {
-                    p++;
-                }
-
-                if ((size_t)(end - p) >= directive_len
-                    && ngx_strncasecmp(p, directive,
-                                       directive_len) == 0)
-                {
-                    u_char *after = p + directive_len;
-                    if (after == end || *after == ','
-                        || *after == ' ' || *after == '\t')
-                    {
-                        return 1;
-                    }
-                }
-
-                /* Advance past current directive */
-                while (p < end && *p != ',') {
-                    p++;
-                }
+            if (ngx_http_markdown_header_has_cache_directive(
+                    &headers[i], directive, directive_len))
+            {
+                return 1;
             }
         }
     }
@@ -357,7 +385,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
          * conditional decision can compare it against
          * If-Modified-Since.
          */
-        u_char *end;
+        const u_char *end;
 
         end = ngx_http_time(lm_time_buf,
                             r->headers_out.last_modified_time);

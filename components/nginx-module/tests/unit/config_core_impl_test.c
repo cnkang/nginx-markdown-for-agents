@@ -591,7 +591,7 @@ test_merge_conf(void)
     parent.decompress.max_size = 2048;
     parent.decompress.parse_timeout = 30000;
     parent.decompress.parser_budget = 64 * 1024 * 1024;
-    parent.large_body_threshold = 4096;
+    parent.routing.large_body_threshold = 4096;
     parent.ops.trust_forwarded_headers = 1;
     parent.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
     parent.ops.metrics_per_path = 1;
@@ -624,13 +624,13 @@ test_merge_conf(void)
     child.policy.conditional_requests = NGX_CONF_UNSET_UINT;
     child.policy.log_verbosity = NGX_CONF_UNSET_UINT;
     child.buffer_chunked = NGX_CONF_UNSET;
-    child.stream_types = NGX_CONF_UNSET_PTR;
-    child.content_types = NGX_CONF_UNSET_PTR;
+    child.routing.stream_types = NGX_CONF_UNSET_PTR;
+    child.routing.content_types = NGX_CONF_UNSET_PTR;
     child.decompress.auto_decompress = NGX_CONF_UNSET;
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    child.large_body_threshold = NGX_CONF_UNSET_SIZE;
+    child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
@@ -688,13 +688,13 @@ test_merge_conf(void)
     child.policy.conditional_requests = NGX_CONF_UNSET_UINT;
     child.policy.log_verbosity = NGX_CONF_UNSET_UINT;
     child.buffer_chunked = NGX_CONF_UNSET;
-    child.stream_types = NGX_CONF_UNSET_PTR;
-    child.content_types = NGX_CONF_UNSET_PTR;
+    child.routing.stream_types = NGX_CONF_UNSET_PTR;
+    child.routing.content_types = NGX_CONF_UNSET_PTR;
     child.decompress.auto_decompress = NGX_CONF_UNSET;
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    child.large_body_threshold = NGX_CONF_UNSET_SIZE;
+    child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
@@ -958,7 +958,7 @@ test_log_merged_conf(void)
 
     memset(&stream_types, 0, sizeof(stream_types));
     stream_types.nelts = 1;
-    conf.stream_types = &stream_types;
+    conf.routing.stream_types = &stream_types;
 
     ngx_http_markdown_log_merged_conf(NULL, &conf);
     ngx_http_markdown_log_merged_conf(&cf, &conf);
@@ -1113,13 +1113,13 @@ test_merge_conf_double_unset(void)
     child.policy.conditional_requests = NGX_CONF_UNSET_UINT;
     child.policy.log_verbosity = NGX_CONF_UNSET_UINT;
     child.buffer_chunked = NGX_CONF_UNSET;
-    child.stream_types = NGX_CONF_UNSET_PTR;
-    child.content_types = NGX_CONF_UNSET_PTR;
+    child.routing.stream_types = NGX_CONF_UNSET_PTR;
+    child.routing.content_types = NGX_CONF_UNSET_PTR;
     child.decompress.auto_decompress = NGX_CONF_UNSET;
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    child.large_body_threshold = NGX_CONF_UNSET_SIZE;
+    child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;

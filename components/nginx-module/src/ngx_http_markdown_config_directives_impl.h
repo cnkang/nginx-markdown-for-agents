@@ -56,6 +56,23 @@ static ngx_conf_enum_t
     { ngx_null_string, 0 }
 };
 
+static u_char ngx_http_markdown_hint_limits_memory[] =
+    "use \"markdown_limits memory=<size>\" instead";
+static u_char ngx_http_markdown_hint_limits_timeout[] =
+    "use \"markdown_limits timeout=<time>\" instead";
+static u_char ngx_http_markdown_hint_limits_streaming_buffer[] =
+    "use \"markdown_limits streaming_buffer=<size>\" instead";
+static u_char ngx_http_markdown_hint_error_policy[] =
+    "use \"markdown_error_policy pass|fail_closed|status <code>\" instead";
+static u_char ngx_http_markdown_hint_accept[] =
+    "use \"markdown_accept strict|wildcard|force\" instead";
+static u_char ngx_http_markdown_hint_cache_validation[] =
+    "use \"markdown_cache_validation off|ims_only|full\" instead";
+static u_char ngx_http_markdown_hint_trusted_proxies[] =
+    "use \"markdown_trusted_proxies <CIDR>...\" instead";
+static u_char ngx_http_markdown_hint_removed_no_replacement[] =
+    "it has been removed with no direct replacement";
+
 
 /*
  * Reject-only setter for legacy directives removed in 0.9.0 (Config V2).
@@ -235,7 +252,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        (void *) "use \"markdown_limits memory=<size>\" instead"
+        ngx_http_markdown_hint_limits_memory
     },
 
     /*
@@ -249,7 +266,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        (void *) "use \"markdown_limits timeout=<time>\" instead"
+        ngx_http_markdown_hint_limits_timeout
     },
 
     /*
@@ -263,7 +280,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        (void *) "use \"markdown_limits streaming_buffer=<size>\" instead"
+        ngx_http_markdown_hint_limits_streaming_buffer
     },
 
     /*
@@ -300,7 +317,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        (void *) "use \"markdown_error_policy pass|fail_closed|status <code>\" instead"
+        ngx_http_markdown_hint_error_policy
     },
 
     /*
@@ -314,7 +331,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        (void *) "use \"markdown_error_policy pass|fail_closed|status <code>\" instead"
+        ngx_http_markdown_hint_error_policy
     },
 
     /*
@@ -413,7 +430,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        (void *) "use \"markdown_accept strict|wildcard|force\" instead"
+        ngx_http_markdown_hint_accept
     },
 
     /*
@@ -516,7 +533,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        (void *) "use \"markdown_cache_validation off|ims_only|full\" instead"
+        ngx_http_markdown_hint_cache_validation
     },
 
     /*
@@ -530,7 +547,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        (void *) "use \"markdown_cache_validation off|ims_only|full\" instead"
+        ngx_http_markdown_hint_cache_validation
     },
 
     /*
@@ -544,7 +561,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        (void *) "use \"markdown_cache_validation off|ims_only|full\" instead"
+        ngx_http_markdown_hint_cache_validation
     },
 
     /*
@@ -666,7 +683,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        (void *) "use \"markdown_trusted_proxies <CIDR>...\" instead"
+        ngx_http_markdown_hint_trusted_proxies
     },
 
     /*
@@ -680,7 +697,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        (void *) "use \"markdown_trusted_proxies <CIDR>...\" instead"
+        ngx_http_markdown_hint_trusted_proxies
     },
 
     /*
@@ -696,7 +713,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        (void *) "it has been removed with no direct replacement"
+        ngx_http_markdown_hint_removed_no_replacement
     },
 
     /*
@@ -953,7 +970,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        (void *) "use \"markdown_limits memory=<size>\" instead"
+        ngx_http_markdown_hint_limits_memory
     },
 
     /*
