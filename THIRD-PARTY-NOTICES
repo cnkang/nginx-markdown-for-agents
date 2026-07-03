@@ -184,13 +184,33 @@ Section B: Rust Conversion Engine Dependencies
 
     Licensed under the BSD 3-Clause License or the MIT license, at your option.
 
+--------------------------------------------------------------------------------
+
+13. serde 1.0.228
+    https://github.com/serde-rs/serde
+    License: MIT OR Apache-2.0
+    Copyright (c) 2014 The serde-rs Developers
+
+    Licensed under the Apache License, Version 2.0 or the MIT license, at your
+    option.
+
+--------------------------------------------------------------------------------
+
+14. serde_json 1.0.150
+    https://github.com/serde-rs/json
+    License: MIT OR Apache-2.0
+    Copyright (c) 2014 The serde-rs Developers
+
+    Licensed under the Apache License, Version 2.0 or the MIT license, at your
+    option.
+
 ================================================================================
 
 Section C: Build-Time Tool Dependencies (not distributed in binary)
 
 ================================================================================
 
-13. cbindgen 0.29.2
+15. cbindgen 0.29.2
     https://github.com/mozilla/cbindgen
     License: MPL-2.0
     Copyright (c) Mozilla Corporation
