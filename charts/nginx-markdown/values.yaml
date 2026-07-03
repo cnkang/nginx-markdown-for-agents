@@ -121,9 +121,6 @@ markdown:
     provider: "default"
     charsPerToken: 0
 
-  # Unified memory budget
-  memoryBudget: ""
-
 # Metrics endpoint
 metrics:
   # Requires markdown.enabled=true because markdown_metrics* directives are
