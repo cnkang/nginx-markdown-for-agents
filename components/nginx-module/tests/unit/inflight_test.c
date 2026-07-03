@@ -461,6 +461,38 @@ test_concurrent_inflight_all_cleanup(void)
     TEST_PASS("concurrent inflight all cleanup returns to zero");
 }
 
+static void
+test_cleanup_alloc_failure_returns_error(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t                rc;
+    ngx_atomic_int_t         before;
+
+    ngx_http_markdown_inflight_reset();
+    setup_request(&r);
+    conf.max_inflight = 64;
+
+    /* Exhaust the cleanup buffer so ngx_pool_cleanup_add returns NULL.
+     * The buffer (cleanup_buf) is a fixed-size char array in the test
+     * pool stub; filling it with garbage past the used region forces
+     * the capacity check to fail. */
+    g_pool.cleanup_buf_used = sizeof(g_pool.cleanup_buf)
+        - sizeof(ngx_pool_cleanup_t) + 1;
+
+    before = ngx_http_markdown_inflight_current();
+
+    rc = ngx_http_markdown_inflight_try_increment(&r, &conf);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "should return NGX_ERROR when cleanup alloc fails");
+
+    /* Counter must be decremented back to avoid leak */
+    TEST_ASSERT(ngx_http_markdown_inflight_current() == before,
+        "current should be decremented back to prior value (no leak)");
+
+    TEST_PASS("cleanup alloc failure returns NGX_ERROR without leak");
+}
+
 /* ----------------------------------------------------------------
  * Main
  * ---------------------------------------------------------------- */
@@ -480,6 +512,7 @@ main(void)
     test_no_underflow();
     test_sequential_increment_decrement_returns_zero();
     test_concurrent_inflight_all_cleanup();
+    test_cleanup_alloc_failure_returns_error();
 
     printf("\n");
     TEST_PASS("inflight: all tests passed");
