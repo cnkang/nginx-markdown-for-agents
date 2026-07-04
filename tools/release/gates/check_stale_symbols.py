@@ -43,14 +43,8 @@ def _find_repo_root(start: Path) -> Path:
     raise RuntimeError(f"Unable to determine repository root starting from {start}")
 
 
-def run_stale_symbol_check(repo: Optional[Path] = None) -> tuple[int, str, str]:
-    """Return exit code, stdout, and stderr for the stale-symbol gate."""
-    if repo is None:
-        repo = _find_repo_root(Path(__file__).resolve())
-    findings = []
-    errors = []
-
-    # Use git ls-files to limit scope to tracked sources and avoid noise
+def _list_tracked_files(repo: Path) -> tuple[Optional[list[str]], str]:
+    """Return tracked files or an error message."""
     try:
         files_proc = subprocess.run(
             ["git", "ls-files"],
@@ -60,47 +54,98 @@ def run_stale_symbol_check(repo: Optional[Path] = None) -> tuple[int, str, str]:
             check=True,
             timeout=GIT_TIMEOUT_SECONDS,
         )
-        tracked_files = files_proc.stdout.splitlines()
+        return files_proc.stdout.splitlines(), ""
     except subprocess.TimeoutExpired:
-        return (
-            1,
-            "",
+        return None, (
             "Error listing tracked files: git ls-files timed out "
-            f"after {GIT_TIMEOUT_SECONDS}s",
+            f"after {GIT_TIMEOUT_SECONDS}s"
         )
     except Exception as e:
-        return 1, "", f"Error listing tracked files with git: {e}"
+        return None, f"Error listing tracked files with git: {e}"
 
-    # Pure-Python search over tracked files avoids grep dependency/noise.
+
+def _should_scan_file(path: str) -> bool:
+    """Return whether a tracked path is part of the 0.9 release gate surface."""
+    return path.startswith(SCAN_PATH_PREFIXES)
+
+
+def _find_symbol_leaks(path: str, lines: list[str], content: str) -> list[str]:
+    """Return stale full-symbol findings in one file."""
+    findings = []
+
+    for symbol in STALE_SYMBOLS:
+        if symbol not in content:
+            continue
+        for i, line in enumerate(lines, 1):
+            if symbol in line:
+                findings.append(f"{path}:{i}:{line.strip()}")
+
+    return findings
+
+
+def _find_field_leaks(path: str, lines: list[str], content: str) -> list[str]:
+    """Return stale naked-field findings in one file."""
+    findings = []
+
+    for prefix, fields in STALE_FIELDS.items():
+        if not path.startswith(prefix):
+            continue
+        for field in fields:
+            if field not in content:
+                continue
+            for i, line in enumerate(lines, 1):
+                if field in line:
+                    findings.append(f"{path}:{i}:{line.strip()} (stale field)")
+
+    return findings
+
+
+def _scan_tracked_file(repo: Path, path: str) -> tuple[list[str], str]:
+    """Return stale-symbol findings or a read error for one tracked file."""
+    f_path = repo / path
+    if not f_path.is_file():
+        return [], ""
+
+    try:
+        content = f_path.read_text(encoding='utf-8')
+    except Exception as e:
+        return [], f"Error reading {path}: {e}"
+
+    lines = content.splitlines()
+    findings = _find_symbol_leaks(path, lines, content)
+    findings.extend(_find_field_leaks(path, lines, content))
+    return findings, ""
+
+
+def _scan_tracked_files(repo: Path, tracked_files: list[str]) -> tuple[list[str], list[str]]:
+    """Return all stale-symbol findings and read errors."""
+    findings = []
+    errors = []
+
     for f_rel in tracked_files:
-        if not f_rel.startswith(SCAN_PATH_PREFIXES):
+        if not _should_scan_file(f_rel):
             continue
 
-        f_path = repo / f_rel
-        try:
-            # Only read text files.
-            if not f_path.is_file():
-                continue
-            content = f_path.read_text(encoding='utf-8')
-            lines = content.splitlines()
-            
-            # Check full symbols
-            for symbol in STALE_SYMBOLS:
-                if symbol in content:
-                    for i, line in enumerate(lines, 1):
-                        if symbol in line:
-                            findings.append(f"{f_rel}:{i}:{line.strip()}")
-            
-            # ponytail: check naked fields in specific paths
-            for prefix, fields in STALE_FIELDS.items():
-                if f_rel.startswith(prefix):
-                    for field in fields:
-                        if field in content:
-                            for i, line in enumerate(lines, 1):
-                                if field in line:
-                                    findings.append(f"{f_rel}:{i}:{line.strip()} (stale field)")
-        except Exception as e:
-            errors.append(f"Error reading {f_rel}: {e}")
+        file_findings, error = _scan_tracked_file(repo, f_rel)
+        findings.extend(file_findings)
+        if error:
+            errors.append(error)
+
+    return findings, errors
+
+
+def run_stale_symbol_check(repo: Optional[Path] = None) -> tuple[int, str, str]:
+    """Return exit code, stdout, and stderr for the stale-symbol gate."""
+    if repo is None:
+        repo = _find_repo_root(Path(__file__).resolve())
+
+    # Use git ls-files to limit scope to tracked sources and avoid noise.
+    tracked_files, error = _list_tracked_files(repo)
+    if error:
+        return 1, "", error
+
+    # Pure-Python search over tracked files avoids grep dependency/noise.
+    findings, errors = _scan_tracked_files(repo, tracked_files or [])
 
     if errors:
         return 1, "", "\n".join(errors)
