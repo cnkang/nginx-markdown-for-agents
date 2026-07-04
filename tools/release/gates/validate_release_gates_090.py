@@ -407,13 +407,15 @@ def main():
     # Stale symbol check (prevent regression to 0.8 directives)
     try:
         stale_check = subprocess.run(
-            ["bash", str(repo / "tools/release/gates/check_stale_symbols.py")],
+            [sys.executable, str(repo / "tools/release/gates/check_stale_symbols.py")],
             cwd=repo, check=False, capture_output=True, text=True
         )
+        # Use stdout + stderr and truncate by lines for better diagnostics
+        diag = (stale_check.stdout + "\n" + stale_check.stderr).strip()
         results.append({
             "name": "no_stale_symbols",
             "status": "pass" if stale_check.returncode == 0 else "fail",
-            "message": stale_check.stdout[-200:] if stale_check.returncode != 0 else ""
+            "message": "\n".join(diag.splitlines()[-5:]) if stale_check.returncode != 0 else ""
         })
     except Exception as e:
         results.append({"name": "no_stale_symbols", "status": "fail", "message": str(e)})
