@@ -40,24 +40,41 @@ def test_stale_symbol_check_fails_on_release_surface_leak(tmp_path):
 
 def test_stale_symbol_check_fails_when_git_is_missing(monkeypatch, tmp_path):
     """The gate should fail explicitly when git cannot be resolved."""
-    monkeypatch.setattr(check_stale_symbols.shutil, "which", lambda name: None)
+    def raise_missing_git(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(check_stale_symbols.subprocess, "run", raise_missing_git)
 
     exit_code, stdout, stderr = check_stale_symbols.run_stale_symbol_check(tmp_path)
 
     assert exit_code == 1
     assert stdout == ""
-    assert stderr == "Error listing tracked files: git executable not found"
+    assert "Error listing tracked files with git:" in stderr
+    assert "git" in stderr
+
+
+def test_stale_symbol_check_fails_on_harness_rule_field_leak(tmp_path):
+    """Naked old config field names in harness rules should fail."""
+    repo = tmp_path
+    (repo / "docs/harness/rules").mkdir(parents=True)
+    (repo / "docs/harness/rules/dynconf-snapshot.md").write_text(
+        "eligibility tests cover non-NULL eff memory_budget path\n"
+    )
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+
+    exit_code, stdout, stderr = check_stale_symbols.run_stale_symbol_check(repo)
+
+    assert exit_code == 1
+    assert "STALE SYMBOLS DETECTED" in stdout
+    assert "docs/harness/rules/dynconf-snapshot.md:1:" in stdout
+    assert "memory_budget" in stdout
+    assert "(stale field)" in stdout
+    assert stderr == ""
 
 
 def test_stale_symbol_check_fails_when_git_times_out(monkeypatch, tmp_path):
     """The gate should fail explicitly when git ls-files hangs."""
-    monkeypatch.setattr(
-        check_stale_symbols.shutil,
-        "which",
-        lambda name: "/usr/bin/git",
-    )
-    monkeypatch.setattr(check_stale_symbols.os, "access", lambda path, mode: True)
-
     def raise_timeout(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd=["git", "ls-files"], timeout=15)
 
