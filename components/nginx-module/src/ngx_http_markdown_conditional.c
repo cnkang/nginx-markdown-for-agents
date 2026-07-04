@@ -352,7 +352,7 @@ ngx_http_markdown_collect_conditional_headers(ngx_http_request_t *r,
  * helper so the main function's cognitive complexity stays below threshold.
  */
 static ngx_int_t
-ngx_http_markdown_conditional_early_outcome(const ngx_http_request_t *r,
+ngx_http_markdown_conditional_early_outcome(
     const struct FFIConditionalDecision *cond_decision)
 {
     if (cond_decision->outcome == 0) {
@@ -360,9 +360,6 @@ ngx_http_markdown_conditional_early_outcome(const ngx_http_request_t *r,
     }
 
     if (cond_decision->outcome == 2) {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown: conditional bypass (Range or "
-                      "no-transform), delivering upstream unmodified");
         return NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT;
     }
 
@@ -463,8 +460,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
 
     if (!needs_entity_etag) {
         markdown_decide_conditional(&cond_input, &cond_decision);
-        return ngx_http_markdown_conditional_early_outcome(
-            r, &cond_decision);
+        return ngx_http_markdown_conditional_early_outcome(&cond_decision);
     }
 
     if (!conf->policy.generate_etag) {

@@ -382,36 +382,26 @@ ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
 
 #ifdef MARKDOWN_STREAMING_ENABLED
 /*
- * Log a streaming path selection decision at debug level.
- *
- * The same 6-argument debug log is emitted at three different streaming
- * decision points in the header filter; consolidating it here keeps the
- * filter function readable and avoids cognitive-complexity inflation from
- * repeated ternary sub-expressions.
+ * Log a streaming path selection decision at debug level.  Keep this as a
+ * macro because ngx_log_debugN may compile away its arguments in non-debug
+ * builds; a function wrapper then looks like unused parameters to analyzers.
  */
-static void
-ngx_http_markdown_log_streaming_decision(const ngx_http_request_t *r,
-    const ngx_http_markdown_conf_t *conf,
-    const ngx_http_markdown_ctx_t *ctx, const char *engine)
-{
-    ngx_log_debug6(NGX_LOG_DEBUG_HTTP,
-        r->connection->log, 0,
-        "markdown: streaming decision: "
-        "engine=%s phase=header_filter "
-        "committed=0 fallback_available=1 "
-        "reason=%s content_type=%V "
-        "content_length_known=%d chunked=%d "
-        "markdown_on_error=%s",
-        engine,
-        ngx_http_markdown_stream_reason_str(
-            ctx->streaming.reason),
-        &r->headers_out.content_type,
-        (r->headers_out.content_length_n >= 0) ? 1 : 0,
-        (r->headers_out.content_length_n < 0) ? 1 : 0,
-        (conf->stream.on_error
-         == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
-            ? "pass" : "reject");
-}
+#define ngx_http_markdown_log_streaming_decision(r, conf, ctx, engine)       \
+    ngx_log_debug6(NGX_LOG_DEBUG_HTTP,                                      \
+        (r)->connection->log, 0,                                            \
+        "markdown: streaming decision: "                                    \
+        "engine=%s phase=header_filter "                                   \
+        "committed=0 fallback_available=1 "                                \
+        "reason=%s content_type=%V "                                       \
+        "content_length_known=%d chunked=%d "                              \
+        "markdown_on_error=%s",                                            \
+        (engine),                                                           \
+        ngx_http_markdown_stream_reason_str((ctx)->streaming.reason),       \
+        &(r)->headers_out.content_type,                                     \
+        ((r)->headers_out.content_length_n >= 0) ? 1 : 0,                   \
+        ((r)->headers_out.content_length_n < 0) ? 1 : 0,                    \
+        ((conf)->stream.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)        \
+            ? "pass" : "reject")
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 static ngx_flag_t
