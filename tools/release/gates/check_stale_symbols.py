@@ -41,7 +41,7 @@ def main():
         sys.exit(1)
 
     # Exclude paths for explanation purposes
-    exclude_paths = ["MIGRATION-0.9.md", "docs/harness/rules/"]
+    exclude_paths = ["MIGRATION-0.9.md", "docs/harness/rules/", "check_stale_symbols.py"]
     
     for symbol in STALE_SYMBOLS:
         # ponytail: pure-python search over tracked files to avoid grep dependency/noise
