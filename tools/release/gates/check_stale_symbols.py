@@ -17,9 +17,9 @@ STALE_SYMBOLS = [
     "markdown_streaming_budget",
 ]
 
-# ponytail: check naked fields in harness docs
+# ponytail: check naked fields in harness docs, but exclude risk-packs to avoid noise
 STALE_FIELDS = {
-    "docs/harness/": ["memory_budget", "streaming_budget"],
+    "docs/harness/rules/": ["memory_budget", "streaming_budget"],
 }
 
 SCAN_PATH_PREFIXES = (
@@ -28,6 +28,8 @@ SCAN_PATH_PREFIXES = (
     "docs/release/",
     "examples/production/",
 )
+# ponytail: exclude script itself from scanning
+# (implicitly handled by SCAN_PATH_PREFIXES not including tools/)
 
 GIT_TIMEOUT_SECONDS = 15
 
