@@ -404,6 +404,20 @@ def main():
     repo = find_repo_root()
     results = []
 
+    # Stale symbol check (prevent regression to 0.8 directives)
+    try:
+        stale_check = subprocess.run(
+            ["bash", str(repo / "tools/release/gates/check_stale_symbols.py")],
+            cwd=repo, check=False, capture_output=True, text=True
+        )
+        results.append({
+            "name": "no_stale_symbols",
+            "status": "pass" if stale_check.returncode == 0 else "fail",
+            "message": stale_check.stdout[-200:] if stale_check.returncode != 0 else ""
+        })
+    except Exception as e:
+        results.append({"name": "no_stale_symbols", "status": "fail", "message": str(e)})
+
     # Core deliverables
     results.append(check_reason_code_count(repo))
     results.append(check_diagnostics_schema_version(repo))
