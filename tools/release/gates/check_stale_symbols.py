@@ -3,8 +3,11 @@
 This gate is designed to stop the 'forgot to update directive' pattern.
 """
 import sys
+import os
+import shutil
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 STALE_SYMBOLS = [
     "markdown_on_wildcard",
@@ -13,6 +16,16 @@ STALE_SYMBOLS = [
     "markdown_memory_budget",
     "markdown_streaming_budget",
 ]
+
+SCAN_PATH_PREFIXES = (
+    ".github/workflows/",
+    "docs/harness/",
+    "docs/release/",
+    "examples/production/",
+)
+
+GIT_TIMEOUT_SECONDS = 15
+
 
 def _find_repo_root(start: Path) -> Path:
     """Determine the repository root by walking up the directory tree."""
@@ -24,57 +37,79 @@ def _find_repo_root(start: Path) -> Path:
             return candidate.parent
     raise RuntimeError(f"Unable to determine repository root starting from {start}")
 
-def main():
-    repo = _find_repo_root(Path(__file__).resolve())
+
+def run_stale_symbol_check(repo: Optional[Path] = None) -> tuple[int, str, str]:
+    """Return exit code, stdout, and stderr for the stale-symbol gate."""
+    if repo is None:
+        repo = _find_repo_root(Path(__file__).resolve())
     findings = []
     errors = []
-    
+
     # Use git ls-files to limit scope to tracked sources and avoid noise
+    git_bin = shutil.which("git")
+    if git_bin is None:
+        return 1, "", "Error listing tracked files: git executable not found"
+    if not os.access(git_bin, os.X_OK):
+        return 1, "", f"Error listing tracked files: git is not executable: {git_bin}"
+
     try:
         files_proc = subprocess.run(
-            ["git", "ls-files"],
-            cwd=repo, capture_output=True, text=True, check=True
+            [git_bin, "ls-files"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=GIT_TIMEOUT_SECONDS,
         )
         tracked_files = files_proc.stdout.splitlines()
+    except subprocess.TimeoutExpired:
+        return (
+            1,
+            "",
+            "Error listing tracked files: git ls-files timed out "
+            f"after {GIT_TIMEOUT_SECONDS}s",
+        )
     except Exception as e:
-        print(f"Error listing tracked files: {e}", file=sys.stderr)
-        sys.exit(1)
+        return 1, "", f"Error listing tracked files with git: {e}"
 
-    # Exclude paths for explanation purposes
-    exclude_paths = ["MIGRATION-0.9.md", "docs/harness/rules/", "check_stale_symbols.py"]
-    
-    for symbol in STALE_SYMBOLS:
-        # ponytail: pure-python search over tracked files to avoid grep dependency/noise
-        for f_rel in tracked_files:
-            if any(excl in f_rel for excl in exclude_paths):
+    # Pure-Python search over tracked files avoids grep dependency/noise.
+    for f_rel in tracked_files:
+        if not f_rel.startswith(SCAN_PATH_PREFIXES):
+            continue
+
+        f_path = repo / f_rel
+        try:
+            # Only read text files.
+            if not f_path.is_file():
                 continue
-            
-            f_path = repo / f_rel
-            try:
-                # Only read text files
-                if f_path.is_file():
-                    content = f_path.read_text(errors='ignore')
-                    if symbol in content:
-                        # Simple line extraction for reporting
-                        for i, line in enumerate(content.splitlines(), 1):
-                            if symbol in line:
-                                findings.append(f"{f_rel}:{i}:{line.strip()}")
-            except Exception as e:
-                errors.append(f"Error reading {f_rel}: {e}")
-            
+            content = f_path.read_text(errors='ignore')
+            lines = content.splitlines()
+            for symbol in STALE_SYMBOLS:
+                if symbol not in content:
+                    continue
+                # Simple line extraction for reporting.
+                for i, line in enumerate(lines, 1):
+                    if symbol in line:
+                        findings.append(f"{f_rel}:{i}:{line.strip()}")
+        except Exception as e:
+            errors.append(f"Error reading {f_rel}: {e}")
+
     if errors:
-        for err in errors:
-            print(err, file=sys.stderr)
-        sys.exit(1)
+        return 1, "", "\n".join(errors)
 
     if findings:
-        print("STALE SYMBOLS DETECTED:")
-        for f in findings:
-            print(f)
-        sys.exit(1)
-    
-    print("No stale 0.8 symbols found.")
-    sys.exit(0)
+        return 1, "STALE SYMBOLS DETECTED:\n" + "\n".join(findings), ""
+
+    return 0, "No stale 0.8 symbols found.", ""
+
+
+def main():
+    exit_code, stdout, stderr = run_stale_symbol_check()
+    if stdout:
+        print(stdout)
+    if stderr:
+        print(stderr, file=sys.stderr)
+    sys.exit(exit_code)
 
 if __name__ == "__main__":
     main()

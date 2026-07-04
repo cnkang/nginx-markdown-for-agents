@@ -15,6 +15,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    from tools.release.gates.check_stale_symbols import run_stale_symbol_check
+except ModuleNotFoundError:
+    from check_stale_symbols import run_stale_symbol_check
+
 
 def find_repo_root() -> Path:
     """Find repository root from script location."""
@@ -400,27 +405,28 @@ def check_changelog_090(repo: Path) -> dict:
             "message": "0.9.0 section not found in CHANGELOG"}
 
 
+def check_no_stale_symbols(repo: Path) -> dict:
+    """Verify removed 0.8 symbols do not reappear in tracked 0.9 sources."""
+    try:
+        exit_code, stdout, stderr = run_stale_symbol_check(repo)
+    except Exception as e:
+        return {"name": "no_stale_symbols", "status": "fail",
+                "message": str(e)}
+
+    diag = (stdout + "\n" + stderr).strip()
+    return {
+        "name": "no_stale_symbols",
+        "status": "pass" if exit_code == 0 else "fail",
+        "message": "\n".join(diag.splitlines()[-5:]) if exit_code != 0 else "",
+    }
+
+
 def main():
     repo = find_repo_root()
     results = []
 
-    # Stale symbol check (prevent regression to 0.8 directives)
-    try:
-        stale_check = subprocess.run(
-            [sys.executable, str(repo / "tools/release/gates/check_stale_symbols.py")],
-            cwd=repo, check=False, capture_output=True, text=True
-        )
-        # Use stdout + stderr and truncate by lines for better diagnostics
-        diag = (stale_check.stdout + "\n" + stale_check.stderr).strip()
-        results.append({
-            "name": "no_stale_symbols",
-            "status": "pass" if stale_check.returncode == 0 else "fail",
-            "message": "\n".join(diag.splitlines()[-5:]) if stale_check.returncode != 0 else ""
-        })
-    except Exception as e:
-        results.append({"name": "no_stale_symbols", "status": "fail", "message": str(e)})
-
     # Core deliverables
+    results.append(check_no_stale_symbols(repo))
     results.append(check_reason_code_count(repo))
     results.append(check_diagnostics_schema_version(repo))
     results.append(check_label_whitelist(repo))
