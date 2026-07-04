@@ -17,6 +17,11 @@ STALE_SYMBOLS = [
     "markdown_streaming_budget",
 ]
 
+# ponytail: check naked fields in harness docs
+STALE_FIELDS = {
+    "docs/harness/": ["memory_budget", "streaming_budget"],
+}
+
 SCAN_PATH_PREFIXES = (
     ".github/workflows/",
     "docs/harness/",
@@ -46,15 +51,9 @@ def run_stale_symbol_check(repo: Optional[Path] = None) -> tuple[int, str, str]:
     errors = []
 
     # Use git ls-files to limit scope to tracked sources and avoid noise
-    git_bin = shutil.which("git")
-    if git_bin is None:
-        return 1, "", "Error listing tracked files: git executable not found"
-    if not os.access(git_bin, os.X_OK):
-        return 1, "", f"Error listing tracked files: git is not executable: {git_bin}"
-
     try:
         files_proc = subprocess.run(
-            [git_bin, "ls-files"],
+            ["git", "ls-files"],
             cwd=repo,
             capture_output=True,
             text=True,
@@ -84,13 +83,22 @@ def run_stale_symbol_check(repo: Optional[Path] = None) -> tuple[int, str, str]:
                 continue
             content = f_path.read_text(encoding='utf-8')
             lines = content.splitlines()
+            
+            # Check full symbols
             for symbol in STALE_SYMBOLS:
-                if symbol not in content:
-                    continue
-                # Simple line extraction for reporting.
-                for i, line in enumerate(lines, 1):
-                    if symbol in line:
-                        findings.append(f"{f_rel}:{i}:{line.strip()}")
+                if symbol in content:
+                    for i, line in enumerate(lines, 1):
+                        if symbol in line:
+                            findings.append(f"{f_rel}:{i}:{line.strip()}")
+            
+            # ponytail: check naked fields in specific paths
+            for prefix, fields in STALE_FIELDS.items():
+                if f_rel.startswith(prefix):
+                    for field in fields:
+                        if field in content:
+                            for i, line in enumerate(lines, 1):
+                                if field in line:
+                                    findings.append(f"{f_rel}:{i}:{line.strip()} (stale field)")
         except Exception as e:
             errors.append(f"Error reading {f_rel}: {e}")
 

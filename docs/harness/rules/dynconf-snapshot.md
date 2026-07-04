@@ -144,5 +144,5 @@ Verification:
   can be called before snapshot binding.
 - `grep -rn 'effective_body_buffer_limit' components/nginx-module/src/`
   — verify declaration is in a shared header, not a source file.
-- `make test-nginx-unit` — eligibility tests cover non-NULL eff memory_budget
-  path and NULL-eff fallback.
+- `make test-nginx-unit` — eligibility tests cover non-NULL eff markdown_limits
+path and NULL-eff fallback.
