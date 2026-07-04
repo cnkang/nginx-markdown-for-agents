@@ -352,11 +352,9 @@ ngx_http_markdown_collect_conditional_headers(ngx_http_request_t *r,
  * helper so the main function's cognitive complexity stays below threshold.
  */
 static ngx_int_t
-ngx_http_markdown_conditional_early_outcome(ngx_http_request_t *r,
+ngx_http_markdown_conditional_early_outcome(const ngx_http_request_t *r,
     const struct FFIConditionalDecision *cond_decision)
 {
-    (void) r;
-
     if (cond_decision->outcome == 0) {
         return NGX_HTTP_NOT_MODIFIED;
     }
