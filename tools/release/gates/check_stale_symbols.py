@@ -82,7 +82,7 @@ def run_stale_symbol_check(repo: Optional[Path] = None) -> tuple[int, str, str]:
             # Only read text files.
             if not f_path.is_file():
                 continue
-            content = f_path.read_text(errors='ignore')
+            content = f_path.read_text(encoding='utf-8')
             lines = content.splitlines()
             for symbol in STALE_SYMBOLS:
                 if symbol not in content:
