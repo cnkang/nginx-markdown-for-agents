@@ -301,8 +301,7 @@ def iter_c_code_lines(block: str) -> list[str]:
             if '*/' in s:
                 in_comment = False
             continue
-        if not s.startswith('*'):
-            code_lines.append(s)
+        code_lines.append(s)
     return code_lines
 
 
@@ -409,7 +408,7 @@ def check_no_stale_symbols(repo: Path) -> dict:
     """Verify removed 0.8 symbols do not reappear in tracked 0.9 sources."""
     try:
         exit_code, stdout, stderr = run_stale_symbol_check(repo)
-    except Exception as e:
+    except RuntimeError as e:
         return {"name": "no_stale_symbols", "status": "fail",
                 "message": str(e)}
 

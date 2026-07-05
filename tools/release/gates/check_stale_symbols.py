@@ -2,6 +2,7 @@
 """Verify that no stale 0.8.0 directives/symbols have leaked into 0.9.0.
 This gate is designed to stop the 'forgot to update directive' pattern.
 """
+import shutil
 import sys
 import subprocess
 from pathlib import Path
@@ -43,11 +44,17 @@ def _find_repo_root(start: Path) -> Path:
     raise RuntimeError(f"Unable to determine repository root starting from {start}")
 
 
+def _git_cmd() -> list[str]:
+    """Return git command with a resolved absolute path."""
+    path = shutil.which("git")
+    return [path] if path else ["git"]
+
+
 def _list_tracked_files(repo: Path) -> tuple[Optional[list[str]], str]:
     """Return tracked files or an error message."""
     try:
         files_proc = subprocess.run(
-            ["git", "ls-files"],
+            _git_cmd() + ["ls-files"],
             cwd=repo,
             capture_output=True,
             text=True,

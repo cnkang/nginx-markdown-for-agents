@@ -3,6 +3,7 @@
 import subprocess
 
 from tools.release.gates import check_stale_symbols
+from tools.release.gates.check_stale_symbols import _git_cmd
 
 
 def test_stale_symbol_check_ignores_legacy_reference_docs(tmp_path):
@@ -12,8 +13,8 @@ def test_stale_symbol_check_ignores_legacy_reference_docs(tmp_path):
     (repo / "docs/release").mkdir(parents=True)
     (repo / "docs/guides/legacy.md").write_text("markdown_timeout\n")
     (repo / "docs/release/current.md").write_text("markdown_limits timeout=1s\n")
-    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
-    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(_git_cmd() + ["init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(_git_cmd() + ["add", "."], cwd=repo, check=True)
 
     exit_code, stdout, stderr = check_stale_symbols.run_stale_symbol_check(repo)
 
@@ -27,8 +28,8 @@ def test_stale_symbol_check_fails_on_release_surface_leak(tmp_path):
     repo = tmp_path
     (repo / "docs/release").mkdir(parents=True)
     (repo / "docs/release/current.md").write_text("markdown_timeout\n")
-    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
-    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(_git_cmd() + ["init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(_git_cmd() + ["add", "."], cwd=repo, check=True)
 
     exit_code, stdout, stderr = check_stale_symbols.run_stale_symbol_check(repo)
 
@@ -60,8 +61,8 @@ def test_stale_symbol_check_fails_on_harness_rule_field_leak(tmp_path):
     (repo / "docs/harness/rules/dynconf-snapshot.md").write_text(
         "eligibility tests cover non-NULL eff memory_budget path\n"
     )
-    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
-    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(_git_cmd() + ["init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(_git_cmd() + ["add", "."], cwd=repo, check=True)
 
     exit_code, stdout, stderr = check_stale_symbols.run_stale_symbol_check(repo)
 
