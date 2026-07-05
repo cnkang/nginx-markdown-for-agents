@@ -395,7 +395,7 @@ tail -100 /var/log/nginx/error.log | grep markdown
 - Extension/path map uses `$request_uri` and fails when query strings are present
 - `text/*` path in map enabled but `markdown_on_wildcard` is still `off`
 - Response not eligible (non-200 status, non-HTML content)
-- Response exceeds `markdown_memory_budget` limit
+- Response exceeds `markdown_limits memory=...` limit
 
 **Solutions:**
 - Enable filter: `markdown_filter on;`
@@ -403,7 +403,7 @@ tail -100 /var/log/nginx/error.log | grep markdown
 - For map-based config, use regex for `Accept` matching and prefer `$uri` for extension checks
 - Enable wildcard support when required: `markdown_on_wildcard on;`
 - Check backend returns 200 with `Content-Type: text/html`
-- Increase size limit if needed: `markdown_memory_budget 20m;`
+- Increase size limit if needed: `markdown_limits memory=20m;`
 
 ---
 
@@ -452,7 +452,7 @@ grep "conversion failed" /var/log/nginx/error.log | \
   - Report bug if HTML is valid but conversion fails
 
 - **For resource_limit:**
-  - Increase limits: `markdown_memory_budget 20m; markdown_timeout 10s;`
+  - Increase limits: `markdown_limits memory=20m timeout=10s;`
   - Optimize content: Reduce HTML size at source
   - Use fail-open: `markdown_error_policy pass;`
 
@@ -650,7 +650,7 @@ grep "conversion failed" /var/log/nginx/error.log | tail -50
    - Report bug if needed
 
    **If resource_limit:**
-   - Increase limits temporarily: `markdown_memory_budget 20m; markdown_timeout 10s;`
+   - Increase limits temporarily: `markdown_limits memory=20m timeout=10s;`
    - Reload NGINX: `nginx -s reload`
    - Investigate root cause
 
@@ -705,7 +705,7 @@ iostat -x 1 5
 4. **Take immediate action:**
 
    **If system overloaded:**
-   - Reduce timeout: `markdown_timeout 2s;`
+   - Reduce timeout: `markdown_limits timeout=2s;`
    - Enable rate limiting
    - Scale horizontally if possible
 
@@ -755,7 +755,7 @@ dmesg | tail -50
 
    **If out of memory:**
    - Check memory usage: `free -h`
-   - Reduce `markdown_memory_budget`
+   - Reduce `markdown_limits memory=` value
    - Add more RAM or swap
 
    **If segmentation fault:**
@@ -775,8 +775,7 @@ systemctl restart nginx
 5. **Prevent recurrence:**
 ```nginx
 # Reduce resource limits
-markdown_memory_budget 5m;
-markdown_timeout 3s;
+    markdown_limits memory=5m timeout=3s;
 
 # Enable fail-open
 markdown_error_policy pass;
@@ -1003,7 +1002,7 @@ The table below maps each reason code to its internal enum, error category, requ
 | `SKIP_RANGE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE` | — | SKIPPED | Client sent a Range request header or upstream returned 206 Partial Content | Expected behavior — partial content cannot be converted. No action needed. |
 | `SKIP_STREAMING` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING` | — | SKIPPED | Response matches `markdown_stream_types` (unbounded streaming) | Expected for SSE/streaming endpoints. If a static page triggers this, check your `markdown_stream_types` configuration. |
 | `SKIP_CONTENT_TYPE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE` | — | SKIPPED | Upstream Content-Type is not `text/html` | Expected for JSON, XML, image, and other non-HTML responses. If an HTML page triggers this, check the upstream `Content-Type` header. |
-| `SKIP_SIZE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE` | — | SKIPPED | Response body exceeds `markdown_memory_budget` | Increase `markdown_memory_budget` if the page should be converted, or exclude oversized pages from conversion scope. |
+| `SKIP_SIZE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE` | — | SKIPPED | Response body exceeds `markdown_limits memory=...` | Increase `markdown_limits memory=...` if the page should be converted, or exclude oversized pages from conversion scope. |
 | `SKIP_AUTH` | `NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH` | — | SKIPPED | Auth policy denies conversion for authenticated requests | Expected when `markdown_auth_policy deny` is configured. If you see it unexpectedly, check whether the request is authenticated and whether the location/server block should allow conversion. |
 | `SKIP_ACCEPT` | _(Accept negotiation)_ | — | SKIPPED | Accept header does not include `text/markdown` | Expected for normal browser traffic. If an AI agent triggers this, verify the client sends `Accept: text/markdown`. Check `markdown_on_wildcard` if using `*/*`. |
 | `ELIGIBLE_CONVERTED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | — | CONVERTED | All checks passed, conversion succeeded | No action needed — this is the success path. |
@@ -1040,7 +1039,7 @@ When conversion fails (`ELIGIBLE_FAILED_OPEN` or `ELIGIBLE_FAILED_CLOSED`), the 
 | Failure Code | Error Category Enum | Description | Suggested Operator Action |
 |---|---|---|---|
 | `FAIL_CONVERSION` | `NGX_HTTP_MARKDOWN_ERROR_CONVERSION` | HTML parse or conversion error | Inspect the failing HTML with `curl`. Check if the upstream changed its HTML structure. Report a bug if the HTML is valid. |
-| `FAIL_RESOURCE_LIMIT` | `NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT` | Timeout (`markdown_timeout` exceeded) or memory limit reached | Increase `markdown_timeout` or `markdown_memory_budget`, or exclude large/complex pages from conversion scope. |
+| `FAIL_RESOURCE_LIMIT` | `NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT` | Timeout (`markdown_limits timeout=...` exceeded) or memory limit reached | Increase `markdown_limits timeout=...` or `markdown_limits memory=...`, or exclude large/complex pages from conversion scope. |
 | `FAIL_SYSTEM` | `NGX_HTTP_MARKDOWN_ERROR_SYSTEM` | Internal or system error | This should not occur in normal operation. Check system resources (`free -h`, `dmesg`). If persistent, report a bug with logs. |
 
 ### Request States

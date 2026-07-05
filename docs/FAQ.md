@@ -106,7 +106,7 @@ location /api/ {
 
 ### What happens if conversion fails?
 
-By default, the module uses a fail-open strategy (`markdown_on_error pass;`), so the original eligible HTML response is returned. If you want strict behavior instead, `markdown_on_error reject;` makes failures fail-closed.
+By default, the module uses a fail-open strategy (`markdown_error_policy pass;`), so the original eligible HTML response is returned. If you want strict behavior instead, `markdown_error_policy fail_closed;` makes failures fail-closed.
 
 For the canonical directive behavior, see [Configuration Guide](guides/CONFIGURATION.md). For the exact runtime branches, see [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md).
 
@@ -115,8 +115,7 @@ For the canonical directive behavior, see [Configuration Guide](guides/CONFIGURA
 Use these directives:
 
 ```nginx
-markdown_memory_budget 10m;    # Maximum response size
-markdown_timeout 5s;      # Maximum conversion time
+markdown_limits memory=10m timeout=5s;
 ```
 
 For defaults, examples, and tradeoffs, see [Configuration Guide](guides/CONFIGURATION.md) and [Configuration to Behavior Map](architecture/CONFIG_BEHAVIOR_MAP.md).
@@ -139,7 +138,7 @@ The current design buffers the full eligible response before conversion, so larg
 ### How can I improve performance?
 
 1. **Enable caching**: Cache converted responses
-2. **Reduce limits**: Lower `markdown_memory_budget` and `markdown_timeout`
+2. **Reduce limits**: Lower `markdown_limits memory=...` and `markdown_limits timeout=...`
 3. **Disable optional features**: Turn off token estimation and front matter if not needed
 4. **Use CommonMark**: Faster than GFM flavor
 
@@ -238,9 +237,9 @@ Common causes:
    - Exact `map $http_accept` strings often miss real-world multi-value `Accept` headers
    - Use regex map rules for `Accept` matching
    - Prefer `$uri` over `$request_uri` for extension checks (query strings can break matches)
-   - If map includes `text/*`, enable `markdown_on_wildcard on;`
+    - If map includes `text/*`, enable `markdown_accept wildcard;`
 4. **Response not eligible**: Must be 200 status with `text/html` content type
-5. **Size limit exceeded**: Response larger than `markdown_memory_budget`
+5. **Size limit exceeded**: Response larger than `markdown_limits memory=...`
 
 If you need to trace the decision path rather than just the checklist, use [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [Configuration to Behavior Map](architecture/CONFIG_BEHAVIOR_MAP.md).
 
