@@ -204,7 +204,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation full;
-            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=600000;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=600s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
         }

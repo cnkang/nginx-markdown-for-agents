@@ -314,8 +314,7 @@ http {
         location / {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
-            markdown_conditional_requests full_support;
+            markdown_cache_validation full;
             markdown_log_verbosity info;
 
             proxy_pass https://127.0.0.1:${BACKEND_PORT};
