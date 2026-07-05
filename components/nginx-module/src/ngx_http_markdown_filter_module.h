@@ -524,8 +524,8 @@ typedef enum {
 typedef struct {
     ngx_uint_t   auth_policy;          /* markdown_auth_policy allow|deny (default: allow) */
     ngx_array_t *auth_cookies;         /* markdown_auth_cookies patterns (default: NULL) */
-    ngx_flag_t   generate_etag;        /* markdown_etag on|off (default: on) */
-    ngx_uint_t   conditional_requests; /* markdown_conditional_requests mode (default: full_support) */
+    ngx_flag_t   generate_etag;        /* markdown_cache_validation (etag component) */
+    ngx_uint_t   conditional_requests; /* markdown_cache_validation (conditional component) */
     ngx_uint_t   log_verbosity;        /* markdown_log_verbosity error|warn|info|debug (default: info) */
 } ngx_http_markdown_policy_cfg_t;
 
@@ -574,8 +574,8 @@ typedef struct {
     ngx_flag_t   enabled;              /* markdown_filter static resolved value */
     ngx_uint_t   enabled_source;       /* markdown_filter source (static|complex|unset) */
     ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable/complex expression */
-    size_t       max_size;             /* markdown_max_size (default: 10MB) */
-    ngx_msec_t   timeout;              /* markdown_timeout (default: 5000ms) */
+    size_t       max_size;             /* markdown_limits memory (default: 10MB) */
+    ngx_msec_t   timeout;              /* markdown_limits timeout (default: 5000ms) */
     ngx_uint_t   on_error;             /* markdown_error_policy pass|fail_closed|status (default: pass) */
     ngx_uint_t   error_status;         /* markdown_error_policy status <code> (default: 502; honored on fail-closed) */
     ngx_uint_t   flavor;               /* markdown_flavor commonmark|gfm (default: commonmark) */
@@ -604,7 +604,7 @@ typedef struct {
         size_t       max_size;             /* markdown_decompress_max_size (default: same as max_size) */
         ngx_msec_t   parse_timeout;        /* markdown_parse_timeout (default: 30000ms) */
         size_t       parser_budget;        /* markdown_parser_budget (default: 64MB) */
-        ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_max_size at this or parent level */
+        ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_limits memory at this or parent level */
     } decompress;
 
     /*
@@ -644,10 +644,10 @@ typedef struct {
         size_t        precommit_buffer;    /* markdown_stream_precommit_buffer (default: 256k) */
         size_t        flush_min;           /* markdown_stream_flush_min (default: 16k) */
         ngx_array_t  *excluded_types;      /* markdown_stream_excluded_types (default: NULL) */
-        ngx_uint_t    on_error;            /* markdown_streaming_on_error pass|reject */
-        ngx_flag_t    on_error_explicit;   /* 1 if operator set streaming_on_error */
-        size_t        budget;              /* markdown_streaming_budget (default: 2m) */
-        ngx_flag_t    budget_explicit;     /* 1 if operator set streaming_budget */
+        ngx_uint_t    on_error;            /* markdown_error_policy (streaming component) pass|reject */
+        ngx_flag_t    on_error_explicit;   /* 1 if operator set streaming error_policy */
+        size_t        budget;              /* markdown_limits streaming_buffer (default: 2m) */
+        ngx_flag_t    budget_explicit;     /* 1 if operator set streaming_buffer */
         ngx_flag_t    shadow;              /* markdown_streaming_shadow on|off */
         ngx_flag_t    shadow_explicit;     /* 1 if operator set streaming_shadow */
     } stream;

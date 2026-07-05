@@ -139,6 +139,7 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         ngx_http_markdown_literal("timeout"),
         ngx_http_markdown_literal("budget_exceeded"),
         ngx_http_markdown_literal("replay_error"),
+        /* Indices 20-24: reserved for future reason codes (not yet production-used) */
         ngx_http_markdown_literal("overload"),
         ngx_http_markdown_literal("invalid_dynconf"),
         ngx_http_markdown_literal("degraded_snapshot"),
