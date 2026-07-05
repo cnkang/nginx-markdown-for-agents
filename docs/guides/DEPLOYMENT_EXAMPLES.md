@@ -164,8 +164,7 @@ http {
 
     markdown_filter on;
     markdown_error_policy pass;
-    markdown_max_size 10m;
-    markdown_timeout 5s;
+    markdown_limits memory=10m timeout=5s;
 
     server {
         listen 80;

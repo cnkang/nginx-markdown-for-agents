@@ -10,8 +10,8 @@ operator documentation, and harness reports.
 | Full-buffer path | Conversion path that buffers the complete response before calling Rust. | Do not call this "legacy" unless discussing historical behavior. |
 | Incremental path | Large-response path backed by the Rust incremental API. | Use only for `markdown_large_body_threshold` routing. |
 | Streaming path | Chunked conversion path enabled by `MARKDOWN_STREAMING_ENABLED`. | Use for Pre-Commit/Post-Commit, backpressure, and streaming budget behavior. |
-| Fail-open | Error policy that serves original HTML after conversion cannot complete. | Pair with `markdown_on_error pass` or `markdown_streaming_on_error pass`. |
-| Fail-closed | Error policy that returns an error response instead of original HTML. | Pair with `markdown_on_error reject` or `markdown_streaming_on_error reject`. |
+| Fail-open | Error policy that serves original HTML after conversion cannot complete. | Pair with `markdown_error_policy pass`. |
+| Fail-closed | Error policy that returns an error response instead of original HTML. | Pair with `markdown_error_policy fail_closed`. |
 | Pre-Commit | Streaming phase before Markdown bytes are sent downstream. | Use for fallback and fail-open paths that can still replay original HTML. |
 | Post-Commit | Streaming phase after Markdown bytes have been sent downstream. | Use for truncated-response risks and post-commit error metrics. |
 | Decision chain | The ordered request/response checks that produce a reason code. | Use for eligibility, reason-code, and operator troubleshooting docs. |

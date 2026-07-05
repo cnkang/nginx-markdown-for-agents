@@ -188,7 +188,7 @@ lowercase_snake_case. This affects:
 
 ### New Reason Codes in 0.9.0
 
-These 7 codes are new — they have no 0.8.x equivalent:
+These 8 codes are new — they have no 0.8.x equivalent:
 
 | # | `as_str()` | Category | Description |
 |--:|-----------|----------|-------------|
@@ -199,6 +199,7 @@ These 7 codes are new — they have no 0.8.x equivalent:
 | 22 | `degraded_snapshot` | Error | Degraded dynconf snapshot |
 | 23 | `header_plan_apply_error` | Error | Header plan commit failure |
 | 24 | `streaming_mid_flight_error` | Error | Streaming mid-flight error |
+| 25 | `bypass_no_transform` | Skip | No-Transform directive bypass |
 
 ### Metric Family Consolidation: 0.8.x → 0.9.0
 
@@ -260,7 +261,7 @@ sed -i 's/markdown_parse_timeouts_total/markdown_errors_total{reason="timeout"}/
 2. **Metrics consolidated**: individual error counters → `markdown_errors_total{reason="..."}`
 3. **Wildcard matching**: use `markdown_errors_total` without a `reason` filter
    to catch all errors regardless of type
-4. **New errors**: 7 new reason codes may trigger on `markdown_errors_total`
+4. **New errors**: 8 new reason codes may trigger on `markdown_errors_total`
    that didn't exist in 0.8.x
 
 ### Reference
@@ -287,10 +288,10 @@ sed -i 's/markdown_parse_timeouts_total/markdown_errors_total{reason="timeout"}/
 
 | Setting | `balanced` | `strict_cache` | `streaming_first` |
 |---------|-----------|---------------|-------------------|
-| Error policy | `pass` | `fail_closed` | `pass` |
-| Conditional requests | `full_support` | `full_support` | `if_modified_since_only` |
+| Error policy | `pass` | `pass` | `pass` |
+| Conditional requests | `ims_only` | `full_support` | `off` |
 | Streaming engine | `auto` | `off` | `on` |
-| Cache validation | `etag` | `full` | `disabled` |
+| Cache validation | `off` | `full` | `off` |
 | Max inflight | 64 | 32 | 128 |
 
 ---
@@ -382,7 +383,7 @@ http {
 
         location /docs/ {
             markdown_filter on;
-            # Conditional requests controlled by profile (full_support)
+            # Conditional requests controlled by profile (ims_only)
             proxy_set_header Accept-Encoding "";
             proxy_pass http://backend;
         }
