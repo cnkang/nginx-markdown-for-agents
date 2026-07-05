@@ -56,10 +56,7 @@ def _list_tracked_files(repo: Path) -> tuple[Optional[list[str]], str]:
         )
         return files_proc.stdout.splitlines(), ""
     except subprocess.TimeoutExpired:
-        return None, (
-            "Error listing tracked files: git ls-files timed out "
-            f"after {GIT_TIMEOUT_SECONDS}s"
-        )
+        return None, f"Error listing tracked files: git ls-files timed out after {GIT_TIMEOUT_SECONDS}s"
     except Exception as e:
         return None, f"Error listing tracked files with git: {e}"
 
