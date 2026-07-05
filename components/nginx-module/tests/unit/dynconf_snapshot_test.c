@@ -142,7 +142,6 @@ test_vslprintf(u_char *buf, u_char *last, const char *fmt, va_list ap)
     oi = 0;
     while (fmt[fi] != '\0' && oi < sizeof(rewritten) - 8) {
         if (fmt[fi] == '%') {
-            size_t start = oi;
             rewritten[oi++] = fmt[fi++];
 
             /* Copy optional width/flags */
@@ -169,7 +168,6 @@ test_vslprintf(u_char *buf, u_char *last, const char *fmt, va_list ap)
                 /* Standard specifier, copy as-is */
                 rewritten[oi++] = fmt[fi++];
             }
-            UNUSED(start);
         } else {
             rewritten[oi++] = fmt[fi++];
         }
