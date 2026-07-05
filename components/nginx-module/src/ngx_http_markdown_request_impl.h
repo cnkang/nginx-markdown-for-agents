@@ -914,6 +914,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     /* Record path hit metric (only for eligible requests) */
 #ifdef MARKDOWN_STREAMING_ENABLED
 path_selected:
+    ;
 #endif
 
     ngx_int_t  inflight_rc;
