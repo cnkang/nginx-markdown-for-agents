@@ -4,8 +4,8 @@ set -euo pipefail
 # Native-only E2E validation for chunked/streaming upstream responses.
 #
 # Validates six critical paths:
-#  1) Chunked body below markdown_max_size converts successfully to Markdown.
-#  2) Chunked body above markdown_max_size triggers fail-open without truncation.
+#  1) Chunked body below markdown_limits memory converts successfully to Markdown.
+#  2) Chunked body above markdown_limits memory triggers fail-open without truncation.
 #  3) Streaming + gzip decompression converts to Markdown and strips
 #     Content-Encoding.
 #  4) Streaming + deflate decompression converts to Markdown and strips
@@ -753,7 +753,7 @@ fi
 echo "Chunked/streaming summary:"
 echo "  nginx_version=${NGINX_VERSION}"
 echo "  arch=$(uname -m)"
-echo "  markdown_max_size=${MARKDOWN_MAX_SIZE}"
+echo "  markdown_limits_memory=${MARKDOWN_MAX_SIZE}"
 echo "  profile=${PROFILE}"
 echo "  small_expected_html_bytes=${SMALL_LEN}"
 echo "  small_result=$(cat "${RAW_DIR}/small.metrics")"

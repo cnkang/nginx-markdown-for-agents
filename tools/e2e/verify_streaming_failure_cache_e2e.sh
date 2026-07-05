@@ -4,16 +4,16 @@ set -euo pipefail
 # Streaming failure semantics, cache behavior, and conditional request E2E tests.
 #
 # Validates sub-spec #15 end-to-end:
-#   10.1  Streaming success + ETag on: no ETag in response headers, ETag in logs
+#   10.1  Streaming success + cache_validation full: no ETag in response headers, ETag in logs
 #   10.1b Streaming strips upstream ETag from proxied response
-#   10.2  Streaming pre-commit failure + streaming_on_error pass: client gets HTML
-#   10.3  Streaming pre-commit failure + streaming_on_error reject: client gets error
+#   10.2  Streaming pre-commit failure + error_policy pass: client gets HTML
+#   10.3  Streaming pre-commit failure + error_policy fail_closed: client gets error
 #   10.4  Streaming post-commit failure: client gets truncated Markdown
-#   10.5  conditional_requests full_support + streaming_engine on: full-buffer path
-#   10.6  conditional_requests if_modified_since_only + streaming_engine on: streaming
+#   10.5  cache_validation full + streaming_engine on: full-buffer path
+#   10.6  cache_validation ims_only + streaming_engine on: streaming
 #   10.7  Streaming response headers: no Content-Length, chunked transfer
-#   10.8  streaming_engine off + streaming_on_error config: 0.4.0 behavior
-#   10.9  markdown_on_error vs markdown_streaming_on_error independence
+#   10.8  streaming_engine off + cache_validation full: 0.4.0 behavior
+#   10.9  error_policy independence (pass vs fail_closed for streaming pre-commit)
 #   10.10 HEAD request does not enter streaming path
 #   10.11 304 response does not enter streaming path
 #   10.12 Fail-open preserves Cache-Control and ETag (authenticated request)
@@ -83,7 +83,7 @@ Options:
   --plan                   Print test plan and exit 0 (no NGINX_BIN required)
   --port PORT              NGINX listen port (default: ${PORT})
   --upstream-port PORT     Upstream server port (default: ${UPSTREAM_PORT})
-  --markdown-max-size SIZE markdown_max_size value (default: ${MARKDOWN_MAX_SIZE})
+  --markdown-max-size SIZE markdown_limits memory value (default: ${MARKDOWN_MAX_SIZE})
   -h, --help               Show this help
 
 Test cases:
@@ -405,21 +405,21 @@ echo "${SEPARATOR}"
 echo "Streaming Failure/Cache E2E Test Plan"
 echo "${SEPARATOR}"
 echo ""
-echo "10.1 Streaming success + ETag on"
-echo "  - streaming_engine on, etag on"
+echo "10.1 Streaming success + cache_validation full"
+echo "  - streaming_engine on, cache_validation full"
 echo "  - Verify: no ETag in response headers, ETag in debug log"
 echo ""
 echo "10.1b Streaming strips upstream ETag"
-echo "  - streaming_engine on, etag on, upstream sends ETag header"
+echo "  - streaming_engine on, cache_validation full, upstream sends ETag header"
 echo "  - Verify: upstream ETag stripped from response headers"
 echo ""
-echo "10.2 Streaming pre-commit failure + streaming_on_error pass"
-echo "  - streaming_engine on, streaming_on_error pass"
+echo "10.2 Streaming pre-commit failure + error_policy pass"
+echo "  - streaming_engine on, error_policy pass"
 echo "  - Trigger pre-commit failure (oversize input)"
 echo "  - Verify: HTTP 200, Content-Type text/html, complete original HTML"
 echo ""
-echo "10.3 Streaming pre-commit failure + streaming_on_error reject"
-echo "  - streaming_engine on, streaming_on_error reject"
+echo "10.3 Streaming pre-commit failure + error_policy fail_closed"
+echo "  - streaming_engine on, error_policy fail_closed"
 echo "  - Trigger pre-commit failure (oversize input)"
 echo "  - Verify: HTTP non-success response, no partial Markdown"
 echo ""
@@ -428,11 +428,11 @@ echo "  - streaming_engine on"
 echo "  - Upstream aborts mid-stream after commit boundary"
 echo "  - Verify: truncated Markdown, STREAMING_FAIL_POSTCOMMIT in log"
 echo ""
-echo "10.5 conditional_requests full_support + streaming_engine on"
+echo "10.5 cache_validation full + streaming_engine on"
 echo "  - Forces full-buffer path"
 echo "  - Verify: ETag present, Content-Length present"
 echo ""
-echo "10.6 conditional_requests if_modified_since_only + streaming_engine on"
+echo "10.6 cache_validation ims_only + streaming_engine on"
 echo "  - Allows streaming path"
 echo "  - Verify: no Content-Length, chunked transfer"
 echo ""
@@ -440,14 +440,14 @@ echo "10.7 Streaming response headers"
 echo "  - Verify: no Content-Length, Transfer-Encoding chunked"
 echo "  - Verify: Content-Type text/markdown, Vary Accept"
 echo ""
-echo "10.8 streaming_engine off + streaming_on_error config"
-echo "  - streaming_engine off (default), streaming_on_error reject"
+echo "10.8 streaming_engine off + cache_validation full"
+echo "  - streaming_engine off (default), cache_validation full"
 echo "  - Verify: full-buffer path, Content-Length present, 0.4.0 behavior"
 echo ""
 echo "10.9 Directive independence"
-echo "  - Cross-config: on_error pass + streaming_on_error reject"
-echo "  - Cross-config: on_error reject + streaming_on_error pass"
-echo "  - Verify: each directive controls only its own path"
+echo "  - Cross-config: error_policy pass + streaming pre-commit failure"
+echo "  - Cross-config: error_policy fail_closed + streaming pre-commit failure"
+echo "  - Verify: each error policy controls only its own path"
 echo ""
 echo "10.10 HEAD request does not enter streaming path"
 echo "  - streaming_engine on + HEAD request"
@@ -458,7 +458,7 @@ echo "  - Capture ETag from full-buffer location"
 echo "  - Re-request with If-None-Match and verify HTTP 304 + empty body"
 echo ""
 echo "10.12 Fail-open preserves Cache-Control and ETag (authenticated)"
-echo "  - streaming_engine on, streaming_on_error pass, auth_policy allow"
+echo "  - streaming_engine on, error_policy pass, auth_policy allow"
 echo "  - Trigger pre-commit failure (budget exceeded) with authenticated request"
 echo "  - Verify: Cache-Control preserved as 'public, max-age=600' (not rewritten to private)"
 echo "  - Verify: ETag preserved as upstream value"
@@ -811,16 +811,14 @@ http {
         listen 127.0.0.1:${PORT};
         server_name localhost;
 
-        # 10.1: Streaming success + ETag on
+        # 10.1: Streaming success + cache_validation full
         location /t01/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
+            markdown_cache_validation full;
             markdown_streaming_engine on;
-            markdown_conditional_requests if_modified_since_only;
-            markdown_max_size ${MARKDOWN_MAX_SIZE};
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_error_policy pass;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -833,14 +831,10 @@ http {
         location /t02/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
+            markdown_cache_validation full;
             markdown_streaming_engine on;
-            markdown_streaming_on_error pass;
-            markdown_conditional_requests if_modified_since_only;
-            markdown_max_size 20m;
-            markdown_streaming_budget 1k;
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_limits memory=20m streaming_buffer=1k timeout=120s;
+            markdown_error_policy pass;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -849,18 +843,14 @@ http {
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
-        # 10.3: Pre-commit failure + reject
+        # 10.3: Pre-commit failure + fail_closed
         location /t03/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
+            markdown_cache_validation full;
             markdown_streaming_engine on;
-            markdown_streaming_on_error reject;
-            markdown_conditional_requests if_modified_since_only;
-            markdown_max_size 20m;
-            markdown_streaming_budget 1k;
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_limits memory=20m streaming_buffer=1k timeout=120s;
+            markdown_error_policy fail_closed;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -873,12 +863,10 @@ http {
         location /t04/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
+            markdown_cache_validation full;
             markdown_streaming_engine on;
-            markdown_conditional_requests if_modified_since_only;
-            markdown_max_size ${MARKDOWN_MAX_SIZE};
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_error_policy pass;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -887,16 +875,14 @@ http {
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
-        # 10.5: conditional_requests full_support + streaming on
+        # 10.5: cache_validation full + streaming on
         location /t05/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
+            markdown_cache_validation full;
             markdown_streaming_engine on;
-            markdown_conditional_requests full_support;
-            markdown_max_size ${MARKDOWN_MAX_SIZE};
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_error_policy pass;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -905,16 +891,14 @@ http {
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
-        # 10.6: conditional_requests if_modified_since_only + streaming on
+        # 10.6: cache_validation ims_only + streaming on
         location /t06/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
+            markdown_cache_validation ims_only;
             markdown_streaming_engine on;
-            markdown_conditional_requests if_modified_since_only;
-            markdown_max_size ${MARKDOWN_MAX_SIZE};
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_error_policy pass;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -927,12 +911,10 @@ http {
         location /t07/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
+            markdown_cache_validation ims_only;
             markdown_streaming_engine on;
-            markdown_conditional_requests if_modified_since_only;
-            markdown_max_size ${MARKDOWN_MAX_SIZE};
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_error_policy pass;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -941,17 +923,14 @@ http {
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
-        # 10.8: streaming_engine off + streaming_on_error reject
+        # 10.8: streaming_engine off + cache_validation full
         location /t08/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
+            markdown_cache_validation full;
             # streaming_engine defaults to off
-            markdown_streaming_on_error reject;
-            markdown_conditional_requests full_support;
-            markdown_max_size ${MARKDOWN_MAX_SIZE};
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_error_policy pass;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -960,18 +939,14 @@ http {
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
-        # 10.9a: on_error pass + streaming_on_error reject
+        # 10.9a: error_policy pass (streaming pre-commit failure → fail-open)
         location /t09a/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
+            markdown_cache_validation ims_only;
             markdown_streaming_engine on;
-            markdown_on_error pass;
-            markdown_streaming_on_error reject;
-            markdown_conditional_requests if_modified_since_only;
-            markdown_max_size 20m;
-            markdown_streaming_budget 1k;
-            markdown_timeout 120000;
+            markdown_limits memory=20m streaming_buffer=1k timeout=120s;
+            markdown_error_policy pass;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -980,18 +955,14 @@ http {
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
-        # 10.9b: on_error reject + streaming_on_error pass
+        # 10.9b: error_policy fail_closed (streaming pre-commit failure → reject)
         location /t09b/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
+            markdown_cache_validation ims_only;
             markdown_streaming_engine on;
-            markdown_on_error reject;
-            markdown_streaming_on_error pass;
-            markdown_conditional_requests if_modified_since_only;
-            markdown_max_size 20m;
-            markdown_streaming_budget 1k;
-            markdown_timeout 120000;
+            markdown_limits memory=20m streaming_buffer=1k timeout=120s;
+            markdown_error_policy fail_closed;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -1001,17 +972,15 @@ http {
         }
 
         # 10.10: HEAD request should bypass streaming body processing
-        # Uses if_modified_since_only so streaming is eligible for GET,
+        # Uses ims_only so streaming is eligible for GET,
         # but HEAD must still skip the streaming body path entirely.
         location /t10/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
+            markdown_cache_validation ims_only;
             markdown_streaming_engine on;
-            markdown_conditional_requests if_modified_since_only;
-            markdown_max_size ${MARKDOWN_MAX_SIZE};
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_error_policy pass;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -1021,17 +990,15 @@ http {
         }
 
         # 10.11: 304 should bypass streaming path selection
-        # Uses full_support so ETag is generated, enabling If-None-Match
+        # Uses cache_validation full so ETag is generated, enabling If-None-Match
         # revalidation that must produce 304 without entering streaming.
         location /t11/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
+            markdown_cache_validation full;
             markdown_streaming_engine on;
-            markdown_conditional_requests full_support;
-            markdown_max_size ${MARKDOWN_MAX_SIZE};
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_error_policy pass;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -1041,24 +1008,20 @@ http {
         }
 
         # 10.12: Fail-open preserves Cache-Control and ETag (authenticated)
-        # Uses auth_policy ALLOW so the request enters conversion/streaming,
-        # then streaming_budget 1k triggers pre-commit failure -> fail-open.
+        # Uses auth_policy allow so the request enters conversion/streaming,
+        # then streaming_buffer=1k triggers pre-commit failure -> fail-open.
         # With auth_policy allow + auth_cookies "session*" + Cookie header,
         # the normal (non-fail-open) path would rewrite Cache-Control to
         # private.  Fail-open must bypass that rewrite.
         location /t12/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
+            markdown_cache_validation ims_only;
             markdown_streaming_engine on;
-            markdown_streaming_on_error pass;
-            markdown_on_error pass;
-            markdown_conditional_requests if_modified_since_only;
-            markdown_max_size 20m;
-            markdown_streaming_budget 1k;
+            markdown_limits memory=20m streaming_buffer=1k timeout=120s;
+            markdown_error_policy pass;
             markdown_auth_policy allow;
             markdown_auth_cookies "session*";
-            markdown_timeout 120000;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -1071,13 +1034,11 @@ http {
         location /t13/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_etag on;
-            markdown_on_error pass;
-            markdown_conditional_requests if_modified_since_only;
-            markdown_max_size ${MARKDOWN_MAX_SIZE};
+            markdown_cache_validation ims_only;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_error_policy pass;
             markdown_auth_policy allow;
             markdown_auth_cookies "session*";
-            markdown_timeout 120000;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -1105,7 +1066,7 @@ echo ""
 # ---------------------------------------------------------------------------
 # 10.1 Streaming success + ETag on
 # ---------------------------------------------------------------------------
-echo "==> 10.1 Streaming success + ETag on"
+echo "==> 10.1 Streaming success + cache_validation full"
 curl -sS -D "${RAW_DIR}/t01.hdr" -o "${RAW_DIR}/t01.body" \
     -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 30 \
     "http://127.0.0.1:${PORT}/t01/simple"
@@ -1163,7 +1124,7 @@ fi
 # ---------------------------------------------------------------------------
 # 10.2 Streaming pre-commit failure + pass
 # ---------------------------------------------------------------------------
-echo "==> 10.2 Pre-commit failure + streaming_on_error pass"
+echo "==> 10.2 Pre-commit failure + error_policy pass"
 curl -sS -D "${RAW_DIR}/t02.hdr" -o "${RAW_DIR}/t02.body" \
     -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 60 \
     "http://127.0.0.1:${PORT}/t02/oversize"
@@ -1186,7 +1147,7 @@ fi
 # ---------------------------------------------------------------------------
 # 10.3 Streaming pre-commit failure + reject
 # ---------------------------------------------------------------------------
-echo "==> 10.3 Pre-commit failure + streaming_on_error reject"
+echo "==> 10.3 Pre-commit failure + error_policy fail_closed"
 if curl -sS -D "${RAW_DIR}/t03.hdr" -o "${RAW_DIR}/t03.body" \
     -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 60 \
     "http://127.0.0.1:${PORT}/t03/oversize"; then
@@ -1257,7 +1218,7 @@ fi
 # ---------------------------------------------------------------------------
 # 10.5 conditional_requests full_support + streaming on
 # ---------------------------------------------------------------------------
-echo "==> 10.5 conditional_requests full_support forces full-buffer"
+echo "==> 10.5 cache_validation full forces full-buffer"
 curl -sS -D "${RAW_DIR}/t05.hdr" -o "${RAW_DIR}/t05.body" \
     -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 30 \
     "http://127.0.0.1:${PORT}/t05/simple"
@@ -1276,15 +1237,15 @@ assert_body_contains "${RAW_DIR}/t05.body" "${EXPECTED_HEADING}" "10.5" \
     t05_pass "${MSG_MISSING_CONVERTED_HEADING}"
 
 if [[ ${t05_pass} -eq 1 ]]; then
-    report_case "10.5" "PASS" "full_support forces full-buffer path"
+    report_case "10.5" "PASS" "cache_validation full forces full-buffer path"
 else
-    report_case "10.5" "FAIL" "full_support forces full-buffer path"
+    report_case "10.5" "FAIL" "cache_validation full forces full-buffer path"
 fi
 
 # ---------------------------------------------------------------------------
 # 10.6 conditional_requests if_modified_since_only + streaming on
 # ---------------------------------------------------------------------------
-echo "==> 10.6 conditional_requests if_modified_since_only allows streaming"
+echo "==> 10.6 cache_validation ims_only allows streaming"
 curl -sS -D "${RAW_DIR}/t06.hdr" -o "${RAW_DIR}/t06.body" \
     -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 30 \
     "http://127.0.0.1:${PORT}/t06/simple"
@@ -1305,9 +1266,9 @@ assert_body_contains "${RAW_DIR}/t06.body" "${EXPECTED_HEADING}" "10.6" \
     t06_pass "${MSG_MISSING_CONVERTED_HEADING}"
 
 if [[ ${t06_pass} -eq 1 ]]; then
-    report_case "10.6" "PASS" "if_modified_since_only allows streaming"
+    report_case "10.6" "PASS" "ims_only allows streaming"
 else
-    report_case "10.6" "FAIL" "if_modified_since_only allows streaming"
+    report_case "10.6" "FAIL" "ims_only allows streaming"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1342,7 +1303,7 @@ fi
 # ---------------------------------------------------------------------------
 # 10.8 streaming_engine off + streaming_on_error config
 # ---------------------------------------------------------------------------
-echo "==> 10.8 streaming_engine off ignores streaming_on_error"
+echo "==> 10.8 streaming_engine off ignores streaming config"
 curl -sS -D "${RAW_DIR}/t08.hdr" -o "${RAW_DIR}/t08.body" \
     -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 30 \
     "http://127.0.0.1:${PORT}/t08/simple"
@@ -1371,8 +1332,7 @@ fi
 # ---------------------------------------------------------------------------
 echo "==> 10.9 Directive independence (cross-configuration)"
 
-# 10.9a: on_error pass + streaming_on_error reject
-# Streaming pre-commit failure should return error (reject)
+# 10.9a: error_policy pass → streaming pre-commit failure → fail-open (HTML)
 if curl -sS -D "${RAW_DIR}/t09a.hdr" -o "${RAW_DIR}/t09a.body" \
     -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 60 \
     "http://127.0.0.1:${PORT}/t09a/oversize"; then
@@ -1383,32 +1343,40 @@ if [[ -z "${t09a_code}" ]]; then
     t09a_code="000"
 fi
 
-# 10.9b: on_error reject + streaming_on_error pass
-# Streaming pre-commit failure should return HTML (pass/fail-open)
-curl -sS -D "${RAW_DIR}/t09b.hdr" -o "${RAW_DIR}/t09b.body" \
+# 10.9b: error_policy fail_closed → streaming pre-commit failure → reject
+if curl -sS -D "${RAW_DIR}/t09b.hdr" -o "${RAW_DIR}/t09b.body" \
     -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 60 \
-    "http://127.0.0.1:${PORT}/t09b/oversize"
+    "http://127.0.0.1:${PORT}/t09b/oversize"; then
+    :
+fi
+t09b_code="$(awk 'NR==1 {print $2}' "${RAW_DIR}/t09b.hdr" 2>/dev/null || true)"
+if [[ -z "${t09b_code}" ]]; then
+    t09b_code="000"
+fi
 
 t09_pass=1
 
-# 10.9a: streaming_on_error=reject should produce error
+# 10.9a: error_policy pass → fail-open → HTTP 200 with HTML body
 if [[ "${t09a_code}" == "000" ]]; then
     echo "  10.9a INFO: transport close (connection reset = implicit reject)" >&2
-elif [[ "${t09a_code}" -lt 400 ]]; then
-    echo "  10.9a FAIL: expected error (streaming_on_error=reject)," \
+elif [[ "${t09a_code}" -ge 400 ]]; then
+    echo "  10.9a FAIL: expected HTTP 200 (error_policy fail-open)," \
          "got ${t09a_code}" >&2
     t09_pass=0
 else
-    echo "  10.9a INFO: streaming_on_error=reject returned ${t09a_code}" >&2
+    echo "  10.9a INFO: error_policy pass returned ${t09a_code}" >&2
 fi
 
-# 10.9b: streaming_on_error=pass should produce HTML pass-through
-assert_http_200 "${RAW_DIR}/t09b.hdr" "10.9b" t09_pass \
-    "expected HTTP 200 for streaming_on_error=pass"
-assert_has_header "${RAW_DIR}/t09b.hdr" "${PATTERN_CT_HTML}" "10.9b" t09_pass \
-    "expected text/html for streaming_on_error=pass"
-assert_body_contains "${RAW_DIR}/t09b.body" "${OVERSIZE_END_TOKEN}" "10.9b" \
-    t09_pass "missing end token (possible truncation)"
+# 10.9b: error_policy fail_closed → reject → connection close / empty reply
+if [[ "${t09b_code}" == "000" ]]; then
+    echo "  10.9b INFO: transport close (connection reset = implicit reject)" >&2
+elif [[ "${t09b_code}" -ge 400 ]]; then
+    echo "  10.9b INFO: error_policy fail_closed returned ${t09b_code}" >&2
+else
+    echo "  10.9b FAIL: expected reject (error_policy fail_closed)," \
+         "got ${t09b_code}" >&2
+    t09_pass=0
+fi
 
 if [[ ${t09_pass} -eq 1 ]]; then
     report_case "10.9" "PASS" "Directive independence verified"
@@ -1497,7 +1465,7 @@ fi
 #   - markdown_auth_policy allow + auth_cookies "session*" + Cookie header
 #     means the request is authenticated and would normally get
 #     Cache-Control rewritten to private on the success path.
-#   - markdown_streaming_budget 1k triggers pre-commit failure
+#   - markdown_limits streaming_buffer=1k triggers pre-commit failure
 #   - Fail-open MUST bypass the auth Cache-Control rewrite.
 #   - We assert: Cache-Control preserved, ETag preserved, and the
 #     decision log contains a streaming fail-open reason code.
@@ -1627,7 +1595,7 @@ echo "  failed=${FAIL_COUNT}"
 echo "  skipped=${SKIP_COUNT}"
 echo "  nginx_bin=${NGINX_BIN}"
 echo "  arch=$(uname -m)"
-echo "  markdown_max_size=${MARKDOWN_MAX_SIZE}"
+echo "  markdown_limits_memory=${MARKDOWN_MAX_SIZE}"
 echo "  artifacts=${BUILDROOT}"
 echo ""
 

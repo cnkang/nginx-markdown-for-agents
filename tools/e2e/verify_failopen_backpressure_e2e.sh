@@ -61,7 +61,7 @@ Options:
   --plan                   Print test plan and exit 0 (no NGINX_BIN required)
   --port PORT              NGINX listen port (default: ${PORT})
   --upstream-port PORT     Upstream server port (default: ${UPSTREAM_PORT})
-  --markdown-max-size SIZE markdown_max_size value (default: ${MARKDOWN_MAX_SIZE})
+  --markdown-max-size SIZE markdown_limits memory value (default: ${MARKDOWN_MAX_SIZE})
   -h, --help               Show this help
 EOF
     return 0
@@ -193,7 +193,7 @@ NGINX_EXECUTABLE="${NGINX_BIN}"
 RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/failopen-e2e.XXXXXXXX")"
 mkdir -p "${RUNTIME}/logs" "${RUNTIME}/html" "${RUNTIME}/conf"
 
-# Generate a large HTML file that exceeds markdown_max_size to trigger fail-open
+# Generate a large HTML file that exceeds markdown_limits memory to trigger fail-open
 LARGE_HTML_SIZE=2048
 python3 -c "
 import sys
@@ -210,7 +210,7 @@ cat > "${RUNTIME}/html/failopen.html" <<'HTML'
 <head><title>Fail-open Test</title></head>
 <body>
 <h1>Fail-open Test Page</h1>
-<p>This page has enough content to exceed the configured markdown_max_size
+<p>This page has enough content to exceed the configured markdown_limits memory
 limit, which will trigger the fail-open passthrough path in the streaming
 engine. The module should deliver the original HTML unchanged.</p>
 <p>Additional paragraph to ensure we exceed the budget limit configured
@@ -218,7 +218,7 @@ for this test scenario. More content follows to pad the response.</p>
 <p>Third paragraph with more padding content to ensure the response body
 is large enough to trigger the budget-exceeded pre-commit error path.</p>
 <p>Fourth paragraph. The streaming engine should detect that the response
-exceeds markdown_max_size and fall back to passthrough mode.</p>
+exceeds markdown_limits memory and fall back to passthrough mode.</p>
 <p>Fifth paragraph. After fail-open, the original HTML must be delivered
 intact without any truncation or data corruption.</p>
 </body>
@@ -271,7 +271,7 @@ fi
 
 LOAD_MODULE_LINE="load_module ${MODULE_PATH};"
 
-# Write NGINX config with small markdown_max_size to force fail-open
+# Write NGINX config with small markdown_limits memory to force fail-open
 cat > "${RUNTIME}/conf/nginx.conf" <<EOF
 worker_processes 1;
 error_log ${RUNTIME}/logs/error.log debug;
@@ -295,10 +295,9 @@ http {
             proxy_http_version 1.1;
 
             markdown_filter on;
-            markdown_max_size ${MARKDOWN_MAX_SIZE};
-            markdown_on_error pass;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_error_policy pass;
             markdown_streaming_engine on;
-            markdown_streaming_on_error pass;
         }
     }
 }

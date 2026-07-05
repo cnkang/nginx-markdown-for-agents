@@ -4,12 +4,12 @@ set -euo pipefail
 # E2E validation for error handling and fail-open behavior.
 #
 # Validates critical error paths:
-#  1) markdown_on_error pass: conversion failure returns original HTML
+#  1) markdown_error_policy pass: conversion failure returns original HTML
 #  2) Empty response body does not crash
 #  3) Malformed HTML input does not crash
 #  4) Upstream 5xx errors are not converted
 #  5) 206 Partial Content is not converted
-#  6) markdown_max_size boundary: exactly at limit converts, over limit fail-opens
+#  6) markdown_limits memory= boundary: exactly at limit converts, over limit fail-opens
 #  7) Metrics endpoint is reachable
 
 NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
@@ -293,9 +293,8 @@ http {
         location /md/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_max_size 10m;
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_limits memory=10m timeout=120s;
+            markdown_error_policy pass;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";
@@ -305,9 +304,8 @@ http {
         location /md-reject/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_max_size 10m;
-            markdown_on_error reject;
-            markdown_timeout 120000;
+            markdown_limits memory=10m timeout=120s;
+            markdown_error_policy fail_closed;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";
@@ -317,9 +315,8 @@ http {
         location /md-small/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_max_size 1k;
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_limits memory=1k timeout=120s;
+            markdown_error_policy pass;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";

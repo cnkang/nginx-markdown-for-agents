@@ -4,11 +4,11 @@ set -euo pipefail
 # E2E validation for NGINX configuration merging across http/server/location levels.
 #
 # Validates critical config-merge paths:
-#  1) http-level markdown_on_error pass + location-level override reject
+#  1) http-level markdown_error_policy pass + location-level override fail_closed
 #  2) markdown_filter off location disables conversion despite Accept header
 #  3) markdown_accept wildcard at server + strict at location
-#  4) markdown_etag off at server + on at location (location wins)
-#  5) markdown_conditional_requests disabled at server + if_modified_since_only at location
+#  4) markdown_cache_validation off at server + full at location (location wins)
+#  5) markdown_cache_validation off at server + ims_only at location
 #  6) markdown_flavor override at location level
 
 NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
@@ -112,11 +112,11 @@ Options:
   -h, --help             Show this help message
 
 Checks:
-  1) http-level on_error pass + location-level reject override
+  1) http-level error_policy pass + location-level fail_closed override
   2) markdown_filter off disables conversion
-  3) on_wildcard on at server + off at location
-  4) etag off at server + on at location
-  5) conditional_requests disabled + if_modified_since_only override
+  3) markdown_accept wildcard at server + strict at location
+  4) cache_validation off at server + full at location
+  5) cache_validation off at server + ims_only at location
   6) markdown_flavor override at location
 
 Set NGINX_BIN to reuse an existing module-enabled nginx binary and skip rebuilding.
@@ -346,7 +346,7 @@ http {
     keepalive_timeout 5;
 
     # http-level defaults
-    markdown_on_error pass;
+    markdown_error_policy pass;
 
     server {
         listen 127.0.0.1:${PORT};
@@ -354,26 +354,23 @@ http {
 
         # server-level settings
         markdown_accept wildcard;
-        markdown_etag off;
-        markdown_conditional_requests disabled;
+        markdown_cache_validation off;
 
-        # Case 1: location overrides on_error to reject
+        # Case 1: location overrides error_policy to fail_closed
         location /md/reject/ {
             markdown_filter on;
-            markdown_on_error reject;
-            markdown_max_size 1k;
-            markdown_timeout 120000;
+            markdown_error_policy fail_closed;
+            markdown_limits memory=1k timeout=120s;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
-        # Case 1b: location inherits on_error pass from http level
+        # Case 1b: location inherits error_policy pass from http level
         location /md/pass/ {
             markdown_filter on;
-            markdown_max_size 10m;
-            markdown_timeout 120000;
+            markdown_limits memory=10m timeout=120s;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";
@@ -393,32 +390,29 @@ http {
         location /no-wildcard/ {
             markdown_filter on;
             markdown_accept strict;
-            markdown_max_size 10m;
-            markdown_timeout 120000;
+            markdown_limits memory=10m timeout=120s;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
-        # Case 5: etag on at location overrides server off
+        # Case 5: cache_validation full at location overrides server off
         location /etag-on/ {
             markdown_filter on;
-            markdown_etag on;
-            markdown_max_size 10m;
-            markdown_timeout 120000;
+            markdown_cache_validation full;
+            markdown_limits memory=10m timeout=120s;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
-        # Case 6: conditional_requests override at location
+        # Case 6: cache_validation ims_only override at location
         location /cond-ims/ {
             markdown_filter on;
-            markdown_conditional_requests if_modified_since_only;
-            markdown_max_size 10m;
-            markdown_timeout 120000;
+            markdown_cache_validation ims_only;
+            markdown_limits memory=10m timeout=120s;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";
@@ -429,8 +423,7 @@ http {
         location /flavor/ {
             markdown_filter on;
             markdown_flavor gfm;
-            markdown_max_size 10m;
-            markdown_timeout 120000;
+            markdown_limits memory=10m timeout=120s;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";
@@ -444,8 +437,8 @@ echo "==> Starting NGINX on 127.0.0.1:${PORT}" >&2
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
 markdown_wait_for_http "http://127.0.0.1:${PORT}/md/pass/html" "NGINX on ${PORT}" || exit 1
 
-# --- Case 1: location-level on_error reject overrides http-level pass ---
-echo "==> Case 1: location-level on_error reject overrides http-level pass" >&2
+# --- Case 1: location-level error_policy fail_closed overrides http-level pass ---
+echo "==> Case 1: location-level error_policy fail_closed overrides http-level pass" >&2
 # With reject, a malformed response should return an error, not pass-through
 curl -sS -D "${RAW_DIR}/case1.hdr" -o "${RAW_DIR}/case1.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
@@ -454,8 +447,8 @@ assert_header_contains "Case 1 status" "${RAW_DIR}/case1.hdr" "${PATTERN_HTTP_20
 assert_header_contains "Case 1 content-type" "${RAW_DIR}/case1.hdr" "${PATTERN_CT_MARKDOWN}"
 echo "  PASS: Valid HTML converts with on_error reject" >&2
 
-# --- Case 1b: http-level on_error pass inherited ---
-echo "==> Case 1b: http-level on_error pass inherited at location" >&2
+# --- Case 1b: http-level error_policy pass inherited ---
+echo "==> Case 1b: http-level error_policy pass inherited at location" >&2
 curl -sS -D "${RAW_DIR}/case1b.hdr" -o "${RAW_DIR}/case1b.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/pass/html" >/dev/null
@@ -463,8 +456,8 @@ assert_header_contains "Case 1b status" "${RAW_DIR}/case1b.hdr" "${PATTERN_HTTP_
 assert_header_contains "Case 1b content-type" "${RAW_DIR}/case1b.hdr" "${PATTERN_CT_MARKDOWN}"
 echo "  PASS: http-level on_error pass inherited correctly" >&2
 
-# --- Case 1c: oversize input skips conversion before on_error handling ---
-echo "==> Case 1c: oversize input skips conversion before on_error handling" >&2
+# --- Case 1c: oversize input skips conversion before error_policy handling ---
+echo "==> Case 1c: oversize input skips conversion before error_policy handling" >&2
 curl -sS -D "${RAW_DIR}/case1c.hdr" -o "${RAW_DIR}/case1c.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/reject/large" >/dev/null
@@ -472,8 +465,8 @@ assert_header_contains "Case 1c status" "${RAW_DIR}/case1c.hdr" "${PATTERN_HTTP_
 assert_header_contains "Case 1c content-type" "${RAW_DIR}/case1c.hdr" "${PATTERN_CT_HTML}"
 echo "  PASS: oversize input is skipped as passthrough HTML (size gate)" >&2
 
-# --- Case 1d: on_error pass + malformed input returns successful response ---
-echo "==> Case 1d: on_error pass with malformed input (no crash)" >&2
+# --- Case 1d: error_policy pass + malformed input returns successful response ---
+echo "==> Case 1d: error_policy pass with malformed input (no crash)" >&2
 curl -sS -D "${RAW_DIR}/case1d.hdr" -o "${RAW_DIR}/case1d.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/pass/malformed" >/dev/null
@@ -493,39 +486,39 @@ assert_header_contains "Case 3 status" "${RAW_DIR}/case3.hdr" "${PATTERN_HTTP_20
 assert_header_contains "Case 3 content-type" "${RAW_DIR}/case3.hdr" "${PATTERN_CT_HTML}"
 echo "  PASS: markdown_filter off preserves HTML" >&2
 
-# --- Case 4: on_wildcard off at location overrides server on ---
-echo "==> Case 4: on_wildcard off at location overrides server on" >&2
+# --- Case 4: markdown_accept strict at location overrides server wildcard ---
+echo "==> Case 4: markdown_accept strict at location overrides server wildcard" >&2
 curl -sS -D "${RAW_DIR}/case4.hdr" -o "${RAW_DIR}/case4.body" \
   -H 'Accept: */*' --max-time 30 \
   "http://127.0.0.1:${PORT}/no-wildcard/html" >/dev/null
 assert_header_contains "Case 4 status" "${RAW_DIR}/case4.hdr" "${PATTERN_HTTP_200}"
 assert_header_contains "Case 4 content-type" "${RAW_DIR}/case4.hdr" "${PATTERN_CT_HTML}"
-echo "  PASS: on_wildcard off at location overrides server on" >&2
+echo "  PASS: markdown_accept strict at location overrides server wildcard" >&2
 
-# --- Case 5: etag on at location overrides server off ---
-echo "==> Case 5: etag on at location overrides server off" >&2
+# --- Case 5: cache_validation full at location overrides server off ---
+echo "==> Case 5: cache_validation full at location overrides server off" >&2
 curl -sS -D "${RAW_DIR}/case5.hdr" -o "${RAW_DIR}/case5.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/etag-on/html" >/dev/null
 assert_header_contains "Case 5 status" "${RAW_DIR}/case5.hdr" "${PATTERN_HTTP_200}"
 grep -qi '^ETag:' "${RAW_DIR}/case5.hdr" || {
-  echo "FAIL: Case 5 - expected ETag header when etag on at location" >&2
+  echo "FAIL: Case 5 - expected ETag header when cache_validation full at location" >&2
   exit 1
 }
-echo "  PASS: ETag present when etag on at location overrides server off" >&2
+echo "  PASS: ETag present when cache_validation full at location overrides server off" >&2
 
-# Verify server-level etag off behavior: the /md/pass/ location inherits server off
+# Verify server-level cache_validation off behavior: the /md/pass/ location inherits server off
 curl -sS -D "${RAW_DIR}/case5b.hdr" -o "${RAW_DIR}/case5b.body" \
   -H "${ACCEPT_MARKDOWN}" --max-time 30 \
   "http://127.0.0.1:${PORT}/md/pass/html" >/dev/null
 if grep -qi '^ETag:' "${RAW_DIR}/case5b.hdr"; then
-  echo "FAIL: Case 5b - ETag present despite server-level etag off being inherited" >&2
+  echo "FAIL: Case 5b - ETag present despite server-level cache_validation off being inherited" >&2
   exit 1
 fi
-echo "  PASS: No ETag when server-level etag off inherited" >&2
+echo "  PASS: No ETag when server-level cache_validation off inherited" >&2
 
-# --- Case 6: conditional_requests override at location ---
-echo "==> Case 6: conditional_requests if_modified_since_only at location" >&2
+# --- Case 6: cache_validation ims_only override at location ---
+echo "==> Case 6: cache_validation ims_only at location" >&2
 curl -sS -D "${RAW_DIR}/case6.hdr" -o "${RAW_DIR}/case6.body" \
   -H "${ACCEPT_MARKDOWN}" \
   -H 'If-Modified-Since: Mon, 01 Jan 2030 00:00:00 GMT' \
@@ -533,7 +526,7 @@ curl -sS -D "${RAW_DIR}/case6.hdr" -o "${RAW_DIR}/case6.body" \
   "http://127.0.0.1:${PORT}/cond-ims/html" >/dev/null
 assert_header_contains "Case 6 status" "${RAW_DIR}/case6.hdr" "${PATTERN_HTTP_200}"
 assert_header_contains "Case 6 content-type" "${RAW_DIR}/case6.hdr" "${PATTERN_CT_MARKDOWN}"
-echo "  PASS: if_modified_since_only override is accepted and conversion succeeds" >&2
+echo "  PASS: ims_only override is accepted and conversion succeeds" >&2
 
 # --- Case 7: flavor override at location ---
 echo "==> Case 7: flavor override at location level" >&2
