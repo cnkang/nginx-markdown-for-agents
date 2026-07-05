@@ -551,12 +551,18 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         if (conf->on_error
             == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
         {
+            ngx_http_markdown_log_decision(
+                r, conf, ctx->effective_conf,
+                ngx_http_markdown_reason_failed_closed());
             return NGX_HTTP_INTERNAL_SERVER_ERROR;
         }
 
         ngx_http_markdown_metric_inc_failopen(conf);
         ctx->eligible = 0;
         ctx->headers_forwarded = 1;
+        ngx_http_markdown_log_decision(
+            r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_failed_open());
         return ngx_http_next_header_filter(r);
     }
 
@@ -909,6 +915,14 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
 #ifdef MARKDOWN_STREAMING_ENABLED
 path_selected:
 #endif
+
+    ngx_int_t  inflight_rc;
+
+    inflight_rc = ngx_http_markdown_check_inflight(r, ctx, conf);
+    if (inflight_rc != NGX_OK) {
+        return inflight_rc;
+    }
+
     if (ctx->eligible) {
 #ifdef MARKDOWN_STREAMING_ENABLED
         if (ctx->processing_path
@@ -925,13 +939,6 @@ path_selected:
         } else {
             NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.fullbuffer);
         }
-    }
-
-    ngx_int_t  inflight_rc;
-
-    inflight_rc = ngx_http_markdown_check_inflight(r, ctx, conf);
-    if (inflight_rc != NGX_OK) {
-        return inflight_rc;
     }
 
     /*

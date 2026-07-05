@@ -59,6 +59,10 @@ typedef struct {
 #define ngx_http_markdown_literal(text)                                          \
     { (const u_char *) text, sizeof(text) - 1 }
 
+#define ngx_http_markdown_reason_has_prefix_literal(reason, text)                \
+    ngx_http_markdown_reason_has_prefix(                                         \
+        reason, (const u_char *) (text), sizeof(text) - 1)
+
 static void ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff,
@@ -146,20 +150,20 @@ ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
         return 0;
     }
 
-    if (ngx_http_markdown_reason_has_prefix(
-            reason_code, (const u_char *) "failed_", 7)
-        || ngx_http_markdown_reason_has_prefix(
-            reason_code, (const u_char *) "ELIGIBLE_FAILED", 15)
-        || ngx_http_markdown_reason_has_prefix(
-            reason_code, (const u_char *) "FAIL_", 5)
-        || ngx_http_markdown_reason_has_prefix(
-            reason_code, (const u_char *) "STREAMING_FAIL_", 15)
-        || ngx_http_markdown_reason_has_prefix(
-            reason_code, (const u_char *) "STREAMING_PRECOMMIT_", 20)
-        || ngx_http_markdown_reason_has_prefix(
-            reason_code, (const u_char *) "STREAMING_BUDGET_", 17)
-        || ngx_http_markdown_reason_has_prefix(
-            reason_code, (const u_char *) "STREAMING_FALLBACK_", 19))
+    if (ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "failed_")
+        || ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "ELIGIBLE_FAILED")
+        || ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "FAIL_")
+        || ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "STREAMING_FAIL_")
+        || ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "STREAMING_PRECOMMIT_")
+        || ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "STREAMING_BUDGET_")
+        || ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "STREAMING_FALLBACK_"))
     {
         return 1;
     }
