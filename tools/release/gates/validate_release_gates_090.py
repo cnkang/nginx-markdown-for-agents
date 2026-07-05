@@ -209,6 +209,15 @@ def check_config_v2_removed_directives(repo: Path) -> dict:
         "markdown_memory_budget",
         "markdown_timeout",
         "markdown_streaming_budget",
+        "markdown_on_error",
+        "markdown_streaming_on_error",
+        "markdown_on_wildcard",
+        "markdown_etag",
+        "markdown_etag_policy",
+        "markdown_conditional_requests",
+        "markdown_trust_forwarded_headers",
+        "markdown_forwarded_headers",
+        "markdown_large_body_threshold",
     ]
     missing = []
     for name in removed:
@@ -229,6 +238,38 @@ def check_config_v2_removed_directives(repo: Path) -> dict:
         return {"name": "config_v2_removed_directives", "status": "fail",
                 "message": "; ".join(missing)}
     return {"name": "config_v2_removed_directives", "status": "pass"}
+
+
+def check_e2e_stale_symbols(repo: Path) -> dict:
+    """Scan tools/e2e/ and tests/e2e/ for stale 0.8.x directive names."""
+    stale = [
+        "markdown_max_size", "markdown_timeout", "markdown_memory_budget",
+        "markdown_streaming_budget", "markdown_on_error", "markdown_streaming_on_error",
+        "markdown_etag", "markdown_etag_policy", "markdown_conditional_requests",
+        "markdown_on_wildcard", "markdown_trust_forwarded_headers",
+        "markdown_forwarded_headers", "markdown_large_body_threshold",
+    ]
+    scan_dirs = ["tools/e2e", "tests/e2e", "examples/production", "docs/guides", "docs/operations", "charts"]
+    findings = []
+    for d in scan_dirs:
+        dirpath = repo / d
+        if not dirpath.is_dir():
+            continue
+        for f in dirpath.rglob("*"):
+            if not f.is_file() or f.suffix in ('.pyc', '.lock', '.so'):
+                continue
+            try:
+                content = f.read_text(encoding='utf-8')
+            except Exception:
+                continue
+            for sym in stale:
+                if sym in content:
+                    rel = str(f.relative_to(repo))
+                    findings.append(f"{rel}: contains {sym}")
+    if findings:
+        return {"name": "e2e_stale_symbols", "status": "fail",
+                "message": "; ".join(findings[:5])}
+    return {"name": "e2e_stale_symbols", "status": "pass"}
 
 
 def check_conditional_runtime_path(repo: Path) -> dict:
@@ -432,6 +473,7 @@ def main():
     results.append(check_error_policy(repo))
     results.append(check_inflight_guard(repo))
     results.append(check_config_v2_removed_directives(repo))
+    results.append(check_e2e_stale_symbols(repo))
     results.append(check_conditional_runtime_path(repo))
     results.append(check_conditional_bypass_header_filter(repo))
     results.append(check_conditional_bypass_no_error_policy(repo))

@@ -14,6 +14,14 @@ STALE_SYMBOLS = [
     "markdown_timeout",
     "markdown_memory_budget",
     "markdown_streaming_budget",
+    "markdown_on_error",
+    "markdown_streaming_on_error",
+    "markdown_etag",
+    "markdown_etag_policy",
+    "markdown_conditional_requests",
+    "markdown_trust_forwarded_headers",
+    "markdown_forwarded_headers",
+    "markdown_large_body_threshold",
 ]
 
 # ponytail: check naked fields in harness docs, but exclude risk-packs to avoid noise
@@ -21,11 +29,23 @@ STALE_FIELDS = {
     "docs/harness/rules/": ["memory_budget", "streaming_budget"],
 }
 
+# Paths allowed to contain stale symbols (migration docs, changelogs, ADRs)
+WHITELIST_PATH_PREFIXES = (
+    "docs/guides/MIGRATION-",
+    "CHANGELOG.md",
+    "docs/architecture/ADR/",
+)
+
 SCAN_PATH_PREFIXES = (
     ".github/workflows/",
     "docs/harness/",
     "docs/release/",
+    "docs/guides/",
+    "docs/operations/",
     "examples/production/",
+    "charts/",
+    "tools/e2e/",
+    "tests/e2e/",
 )
 # ponytail: exclude script itself from scanning
 # (implicitly handled by SCAN_PATH_PREFIXES not including tools/)
@@ -70,7 +90,13 @@ def _list_tracked_files(repo: Path) -> tuple[Optional[list[str]], str]:
 
 def _should_scan_file(path: str) -> bool:
     """Return whether a tracked path is part of the 0.9 release gate surface."""
-    return path.startswith(SCAN_PATH_PREFIXES)
+    if not path.startswith(SCAN_PATH_PREFIXES):
+        return False
+    # Allow migration docs and changelogs to reference old directive names
+    for wl in WHITELIST_PATH_PREFIXES:
+        if path.startswith(wl):
+            return False
+    return True
 
 
 def _find_symbol_leaks(path: str, lines: list[str], content: str) -> list[str]:
