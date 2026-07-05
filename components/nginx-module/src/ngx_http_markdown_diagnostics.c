@@ -352,6 +352,7 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
         { "failed_closed",                17 },
         { "conversion_error",             18 },
         { "memory_budget_exceeded",       19 },
+        /* Indices 20-24: reserved for future reason codes (not yet production-used) */
         { "overload",                     20 },
         { "invalid_dynconf",              21 },
         { "degraded_snapshot",            22 },
@@ -979,7 +980,7 @@ ngx_http_markdown_diagnostics_fmt_effective_config(
         conf->on_error, conf->error_status);
     limits_memory = conf->max_size;
     limits_timeout = conf->timeout;
-    limits_streaming_buffer = conf->stream.precommit_buffer;
+    limits_streaming_buffer = conf->stream.budget;
     limits_max_inflight = conf->routing.max_inflight;
 
     p = ngx_slprintf(p, last,

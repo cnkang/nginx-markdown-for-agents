@@ -54,11 +54,7 @@ ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
 #define REASON_FAILED_CLOSED            17
 #define REASON_CONVERSION_ERROR         18
 #define REASON_MEMORY_BUDGET_EXCEEDED   19
-#define REASON_OVERLOAD                 20
-#define REASON_INVALID_DYNCONF          21
-#define REASON_DEGRADED_SNAPSHOT        22
-#define REASON_HEADER_PLAN_APPLY_ERROR  23
-#define REASON_STREAMING_MID_FLIGHT_ERROR 24
+/* Indices 20-24 reserved for future reason codes (not yet production-used) */
 #define REASON_BYPASS_NO_TRANSFORM      25
 
 

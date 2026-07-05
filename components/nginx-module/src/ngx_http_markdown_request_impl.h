@@ -395,7 +395,7 @@ ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
             "committed=0 fallback_available=1 "                            \
             "reason=%s content_type=%V "                                   \
             "content_length_known=%d chunked=%d "                          \
-            "markdown_on_error=%s",                                        \
+            "error_policy=%s",                                             \
             (engine),                                                       \
             ngx_http_markdown_stream_reason_str((ctx)->streaming.reason),   \
             &(r)->headers_out.content_type,                                 \
