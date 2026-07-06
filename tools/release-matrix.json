@@ -409,5 +409,128 @@
       "release_blocking": false,
       "owner_workflow": ".github/workflows/ci.yml"
     }
+  ],
+  "updated_at": "2026-07-06T16:20:06Z",
+  "matrix": [
+    {
+      "nginx": "1.24.0",
+      "os_type": "glibc",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.24.0",
+      "os_type": "glibc",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.24.0",
+      "os_type": "musl",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.24.0",
+      "os_type": "musl",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.26.3",
+      "os_type": "glibc",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.26.3",
+      "os_type": "glibc",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.26.3",
+      "os_type": "musl",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.26.3",
+      "os_type": "musl",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.28.3",
+      "os_type": "glibc",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.28.3",
+      "os_type": "glibc",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.28.3",
+      "os_type": "musl",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.28.3",
+      "os_type": "musl",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.30.3",
+      "os_type": "glibc",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.30.3",
+      "os_type": "glibc",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.30.3",
+      "os_type": "musl",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.30.3",
+      "os_type": "musl",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.31.2",
+      "os_type": "glibc",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.31.2",
+      "os_type": "glibc",
+      "arch": "x86_64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.31.2",
+      "os_type": "musl",
+      "arch": "aarch64",
+      "support_tier": "full"
+    },
+    {
+      "nginx": "1.31.2",
+      "os_type": "musl",
+      "arch": "x86_64",
+      "support_tier": "full"
+    }
   ]
 }
