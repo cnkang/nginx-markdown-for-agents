@@ -380,7 +380,10 @@ def _validate_manual_entries(manual_entries: list[dict], path: Path) -> None:
     seen_keys: dict[tuple[str, str, str], int] = {}
     duplicates: list[tuple[str, str, str]] = []
     for entry in manual_entries:
-        key = (entry["nginx"], entry["os_type"], entry["arch"])
+        version = entry.get("nginx_version") or entry.get("nginx")
+        os_type = entry.get("os_type") or entry.get("os") or entry.get("libc")
+        arch = entry.get("arch")
+        key = (version, os_type, arch)
         if key in seen_keys:
             duplicates.append(key)
         else:
