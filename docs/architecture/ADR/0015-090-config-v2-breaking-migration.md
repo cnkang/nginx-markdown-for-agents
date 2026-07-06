@@ -32,7 +32,7 @@ New consolidating directives (additive-only after 1.0):
 | `markdown_accept` | `markdown_on_wildcard` | `strict\|wildcard\|force` |
 | `markdown_cache_validation` | `markdown_conditional_requests`, `markdown_etag` | `off\|ims_only\|full` |
 | `markdown_streaming` | (policy split from engine) | `off\|auto\|force` |
-| `markdown_error_policy` | `markdown_on_error`, `markdown_streaming_on_error` | `pass\|fail_closed\|status <code>` (codes 429/502/503 only) |
+| `markdown_error_policy` | `markdown_on_error`, `markdown_streaming_on_error` | `pass\|fail_closed\|status <code>` (codes 429/503 only; `status 502` rejected, use `fail_closed`) |
 | `markdown_trusted_proxies` | `markdown_trust_forwarded_headers`, `markdown_forwarded_headers` | `<CIDR>...\|off`, **http context only** (see ADR-0016) |
 | `markdown_profile` | (new) | `strict_cache\|balanced\|streaming_first` |
 

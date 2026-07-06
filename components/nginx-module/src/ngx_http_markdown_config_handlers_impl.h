@@ -684,7 +684,7 @@ ngx_http_markdown_filter(ngx_conf_t *cf,
  *   fail_closed -> on_error=REJECT, stream.on_error=REJECT, error_status=502
  *   status <c>  -> on_error=REJECT, stream.on_error=REJECT, error_status=<c>
  *
- * Allowed status codes: 429, 502, 503 (validated at nginx -t).  stream.on_error
+ * Allowed status codes: 429, 503 (502 rejected; use fail_closed instead).  stream.on_error
  * uses the same 0=pass/1=reject encoding as on_error, so the unconditional
  * ON_ERROR constants are used to avoid a streaming-only ifdef.
  */
@@ -746,7 +746,7 @@ ngx_http_markdown_error_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
             "invalid value in \"%V\" directive, it must be "
-            "\"pass\", \"fail_closed\", or \"status <429|502|503>\"",
+            "\"pass\", \"fail_closed\", or \"status <429|503>\"",
             &cmd->name);
         return NGX_CONF_ERROR;
     }

@@ -350,7 +350,7 @@ typedef struct {
  *
  * The C runtime uses a two-field model:
  *   conf->on_error  = PASS (0) or REJECT (1)
- *   conf->error_status = actual HTTP status code (429/502/503)
+ *   conf->error_status = actual HTTP status code (429/503; 502 is fail_closed default)
  *
  * The Rust FFI uses a three-value kind (FFI_ERROR_POLICY_*):
  *   0 = pass, 1 = status, 2 = fail_closed
@@ -365,8 +365,8 @@ typedef struct {
 /*
  * Default pre-commit error status for markdown_error_policy (Config V2).
  *
- * markdown_error_policy fail_closed uses this; markdown_error_policy
- * status <code> overrides it with 429, 502, or 503.  Stored in
+ * markdown_error_policy fail_closed uses this (default: 502);
+ * markdown_error_policy status <code> overrides it with 429 or 503.  Stored in
  * conf->error_status; honored by the unified error-policy path.
  */
 #define NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT  502

@@ -16,7 +16,7 @@ markdown_error_policy status 503;      # Recommended for overload (with spec 52)
 markdown_error_policy fail_closed;     # Return 502, never leak original content
 ```
 
-Allowed status codes: `429`, `502`, `503`.
+Allowed status codes: `429`, `503` (`502` is the `fail_closed` default; use `fail_closed` instead of `status 502`).
 
 ## Error Classes
 
