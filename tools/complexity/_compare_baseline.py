@@ -25,6 +25,12 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.path_validation import (  # noqa: E402
+    validate_read_path,
+    validate_write_path_within_root,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _LIZARD_WARNING_RE = re.compile(
@@ -40,12 +46,21 @@ def _relpath(p: str) -> str:
         return p
 
 
+def _read_text_safe(path: str | None) -> str | None:
+    """Validate and read a text file, returning None if path is None."""
+    if not path:
+        return None
+    validated = validate_read_path(path, purpose="complexity input")
+    return validated.read_text()
+
+
 def parse_lizard_warnings(path: str | None) -> list[dict]:
     """Parse lizard -w output into list of violation dicts."""
-    if not path or not Path(path).exists():
+    text = _read_text_safe(path)
+    if text is None:
         return []
     violations: list[dict] = []
-    for line in Path(path).read_text().splitlines():
+    for line in text.splitlines():
         m = _LIZARD_WARNING_RE.match(line.strip())
         if m:
             violations.append({
@@ -59,6 +74,27 @@ def parse_lizard_warnings(path: str | None) -> list[dict]:
     return violations
 
 
+def _parse_complexipy_line(
+    stripped: str, current_file: str | None
+) -> dict | None:
+    """Parse a single complexipy output line into a violation dict or None."""
+    if current_file is None or "FAILED" not in stripped:
+        return None
+    parts = stripped.split()
+    if len(parts) < 3:
+        return None
+    func_name = parts[0]
+    try:
+        score = int(parts[1])
+    except ValueError:
+        return None
+    return {
+        "file": current_file,
+        "function": func_name,
+        "cognitive_complexity": score,
+    }
+
+
 def parse_complexipy_output(path: str | None) -> list[dict]:
     """Parse complexipy --failed output into list of violation dicts.
 
@@ -66,11 +102,12 @@ def parse_complexipy_output(path: str | None) -> list[dict]:
         tools/ci/check_third_party_notices.py
             main 16  ❌ FAILED
     """
-    if not path or not Path(path).exists():
+    text = _read_text_safe(path)
+    if text is None:
         return []
     violations: list[dict] = []
     current_file: str | None = None
-    for line in Path(path).read_text().splitlines():
+    for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("─") or stripped.startswith("Failed"):
             continue
@@ -78,26 +115,82 @@ def parse_complexipy_output(path: str | None) -> list[dict]:
         if not line.startswith(" ") and stripped.endswith(".py"):
             current_file = _relpath(stripped)
             continue
-        # Function line: indented, contains " N " and "FAILED"
-        if current_file and "FAILED" in stripped:
-            parts = stripped.split()
-            if len(parts) >= 3:
-                func_name = parts[0]
-                try:
-                    score = int(parts[1])
-                except ValueError:
-                    continue
-                violations.append({
-                    "file": current_file,
-                    "function": func_name,
-                    "cognitive_complexity": score,
-                })
+        entry = _parse_complexipy_line(stripped, current_file)
+        if entry is not None:
+            violations.append(entry)
     return violations
 
 
 def _make_key(entry: dict) -> tuple:
     """Stable key for matching violations to baseline entries."""
     return (entry["file"], entry["function"])
+
+
+def _compare_lizard_violation(
+    v: dict, baseline_map: dict[tuple, dict]
+) -> tuple[str | None, str | None]:
+    """Compare a single lizard violation against baseline.
+
+    Returns (error_msg, worsened_msg) — at most one is non-None.
+    """
+    key = _make_key(v)
+    if key not in baseline_map:
+        return (
+            f"NEW: {v['file']}:{v['line']} {v['function']} "
+            f"CCN={v['ccn']} length={v['length']} params={v['params']}",
+            None,
+        )
+    b = baseline_map[key]
+    if "ccn" not in b:
+        return (
+            f"NEW: {v['file']}:{v['line']} {v['function']} "
+            f"CCN={v['ccn']} length={v['length']} params={v['params']}",
+            None,
+        )
+    worsened_fields = []
+    if v.get("ccn", 0) > b.get("ccn", 0):
+        worsened_fields.append(f"CCN {b['ccn']}->{v['ccn']}")
+    if v.get("length", 0) > b.get("length", 0):
+        worsened_fields.append(f"length {b['length']}->{v['length']}")
+    if v.get("params", 0) > b.get("params", 0):
+        worsened_fields.append(f"params {b['params']}->{v['params']}")
+    if worsened_fields:
+        return (
+            None,
+            f"WORSENED: {v['file']}:{v['line']} {v['function']} "
+            f"({', '.join(worsened_fields)})",
+        )
+    return (None, None)
+
+
+def _compare_complexipy_violation(
+    v: dict, baseline_map: dict[tuple, dict]
+) -> tuple[str | None, str | None]:
+    """Compare a single complexipy violation against baseline.
+
+    Returns (error_msg, worsened_msg) — at most one is non-None.
+    """
+    key = _make_key(v)
+    if key not in baseline_map:
+        return (
+            f"NEW: {v['file']} {v['function']} "
+            f"cognitive_complexity={v['cognitive_complexity']}",
+            None,
+        )
+    b = baseline_map[key]
+    if "cognitive_complexity" not in b:
+        return (
+            f"NEW: {v['file']} {v['function']} "
+            f"cognitive_complexity={v['cognitive_complexity']}",
+            None,
+        )
+    if v.get("cognitive_complexity", 0) > b.get("cognitive_complexity", 0):
+        return (
+            None,
+            f"WORSENED: {v['file']} {v['function']} "
+            f"cognitive {b['cognitive_complexity']}->{v['cognitive_complexity']}",
+        )
+    return (None, None)
 
 
 def compare(
@@ -119,64 +212,24 @@ def compare(
         key = (entry["file"], entry["function"])
         baseline_map[key] = entry
 
-    # Check lizard violations
     for v in lizard_entries:
-        key = _make_key(v)
-        if key not in baseline_map:
-            new_errors.append(
-                f"NEW: {v['file']}:{v['line']} {v['function']} "
-                f"CCN={v['ccn']} length={v['length']} params={v['params']}"
-            )
-            continue
-        b = baseline_map[key]
-        # Only compare lizard fields if the baseline entry has them
-        if "ccn" not in b:
-            # Baseline entry is for complexipy, not lizard — treat as new
-            new_errors.append(
-                f"NEW: {v['file']}:{v['line']} {v['function']} "
-                f"CCN={v['ccn']} length={v['length']} params={v['params']}"
-            )
-            continue
-        worsened_fields = []
-        if v.get("ccn", 0) > b.get("ccn", 0):
-            worsened_fields.append(f"CCN {b['ccn']}->{v['ccn']}")
-        if v.get("length", 0) > b.get("length", 0):
-            worsened_fields.append(f"length {b['length']}->{v['length']}")
-        if v.get("params", 0) > b.get("params", 0):
-            worsened_fields.append(f"params {b['params']}->{v['params']}")
-        if worsened_fields:
-            worsened.append(
-                f"WORSENED: {v['file']}:{v['line']} {v['function']} "
-                f"({', '.join(worsened_fields)})"
-            )
+        err, wrn = _compare_lizard_violation(v, baseline_map)
+        if err:
+            new_errors.append(err)
+        elif wrn:
+            worsened.append(wrn)
         else:
             ok_msgs.append(
                 f"BASELINED: {v['file']} {v['function']} "
                 f"(CCN={v.get('ccn','?')} length={v.get('length','?')})"
             )
 
-    # Check complexipy violations
     for v in complexipy_entries:
-        key = _make_key(v)
-        if key not in baseline_map:
-            new_errors.append(
-                f"NEW: {v['file']} {v['function']} "
-                f"cognitive_complexity={v['cognitive_complexity']}"
-            )
-            continue
-        b = baseline_map[key]
-        # Only compare cognitive if the baseline entry has it
-        if "cognitive_complexity" not in b:
-            new_errors.append(
-                f"NEW: {v['file']} {v['function']} "
-                f"cognitive_complexity={v['cognitive_complexity']}"
-            )
-            continue
-        if v.get("cognitive_complexity", 0) > b.get("cognitive_complexity", 0):
-            worsened.append(
-                f"WORSENED: {v['file']} {v['function']} "
-                f"cognitive {b['cognitive_complexity']}->{v['cognitive_complexity']}"
-            )
+        err, wrn = _compare_complexipy_violation(v, baseline_map)
+        if err:
+            new_errors.append(err)
+        elif wrn:
+            worsened.append(wrn)
         else:
             ok_msgs.append(
                 f"BASELINED: {v['file']} {v['function']} "
@@ -186,34 +239,18 @@ def compare(
     return new_errors, worsened, ok_msgs
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Compare complexity output against baseline")
-    parser.add_argument("--baseline", required=True, help="Path to baseline.json")
-    parser.add_argument("--lizard-c", dest="lizard_c", help="C lizard warnings file")
-    parser.add_argument("--lizard-rust", dest="lizard_rust", help="Rust lizard warnings file")
-    parser.add_argument("--lizard-py", dest="lizard_py", help="Python lizard warnings file")
-    parser.add_argument("--complexipy", help="complexipy --failed output file")
-    parser.add_argument("--output", default="-", help="Report output file (default: stdout)")
-    args = parser.parse_args()
-
-    baseline_path = Path(args.baseline)
-    if not baseline_path.exists():
-        print(f"ERROR: baseline file not found: {args.baseline}", file=sys.stderr)
-        return 1
-
-    baseline = json.loads(baseline_path.read_text())
-
-    lizard_entries = []
-    lizard_entries.extend(parse_lizard_warnings(args.lizard_c))
-    lizard_entries.extend(parse_lizard_warnings(args.lizard_rust))
-    lizard_entries.extend(parse_lizard_warnings(args.lizard_py))
-
-    complexipy_entries = parse_complexipy_output(args.complexipy)
-
-    new_errors, worsened, ok_msgs = compare(baseline, lizard_entries, complexipy_entries)
-
+def _build_report(
+    args: argparse.Namespace,
+    baseline: dict,
+    lizard_entries: list[dict],
+    complexipy_entries: list[dict],
+    new_errors: list[str],
+    worsened: list[str],
+    ok_msgs: list[str],
+) -> str:
+    """Build the report text from comparison results."""
     lines: list[str] = []
-    lines.append(f"=== Complexity Baseline Report ===")
+    lines.append("=== Complexity Baseline Report ===")
     lines.append(f"Baseline: {args.baseline}")
     lines.append(f"Total baseline entries: {len(baseline.get('entries', []))}")
     lines.append(f"Current lizard violations: {len(lizard_entries)}")
@@ -241,12 +278,41 @@ def main() -> int:
     if not new_errors and not worsened and not ok_msgs:
         lines.append("No complexity violations detected. All clear.")
 
-    report = "\n".join(lines)
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Compare complexity output against baseline")
+    parser.add_argument("--baseline", required=True, help="Path to baseline.json")
+    parser.add_argument("--lizard-c", dest="lizard_c", help="C lizard warnings file")
+    parser.add_argument("--lizard-rust", dest="lizard_rust", help="Rust lizard warnings file")
+    parser.add_argument("--lizard-py", dest="lizard_py", help="Python lizard warnings file")
+    parser.add_argument("--complexipy", help="complexipy --failed output file")
+    parser.add_argument("--output", default="-", help="Report output file (default: stdout)")
+    args = parser.parse_args()
+
+    baseline_path = validate_read_path(args.baseline, purpose="baseline json")
+    baseline = json.loads(baseline_path.read_text())
+
+    lizard_entries = []
+    lizard_entries.extend(parse_lizard_warnings(args.lizard_c))
+    lizard_entries.extend(parse_lizard_warnings(args.lizard_rust))
+    lizard_entries.extend(parse_lizard_warnings(args.lizard_py))
+
+    complexipy_entries = parse_complexipy_output(args.complexipy)
+
+    new_errors, worsened, ok_msgs = compare(baseline, lizard_entries, complexipy_entries)
+
+    report = _build_report(
+        args, baseline, lizard_entries, complexipy_entries,
+        new_errors, worsened, ok_msgs,
+    )
 
     if args.output == "-":
         print(report)
     else:
-        Path(args.output).write_text(report)
+        out_path = validate_write_path_within_root(args.output, REPO_ROOT, purpose="baseline report")
+        out_path.write_text(report)
         print(report)
 
     if new_errors:
