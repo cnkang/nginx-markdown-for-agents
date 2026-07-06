@@ -311,8 +311,12 @@ def main() -> int:
     if args.output == "-":
         print(report)
     else:
-        out_path = validate_write_path_within_root(args.output, REPO_ROOT, purpose="baseline report")
-        out_path.write_text(report)
+        out_path = validate_write_path_within_root(
+            args.output, REPO_ROOT, purpose="baseline report",
+        )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open("w", encoding="utf-8") as fh:
+            fh.write(report)
         print(report)
 
     if new_errors:
