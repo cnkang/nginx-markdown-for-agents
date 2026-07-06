@@ -128,15 +128,18 @@ def _missing_required_keys(entry: dict, required_keys: tuple[str, ...]) -> list[
     """
     missing = []
     for key in required_keys:
-        # Normalize check: nginx -> nginx_version, os_type -> libc/os
-        if key == "nginx" and ("nginx" not in entry and "nginx_version" not in entry):
-            missing.append(key)
-        elif key == "os_type" and ("os_type" not in entry and "libc" not in entry and "os" not in entry):
-            missing.append(key)
-        elif key == "arch" and "arch" not in entry:
-            missing.append(key)
-        elif key not in entry:
-            missing.append(key)
+        if key == "nginx":
+            if "nginx" not in entry and "nginx_version" not in entry:
+                missing.append(key)
+        elif key == "os_type":
+            if "os_type" not in entry and "libc" not in entry and "os" not in entry:
+                missing.append(key)
+        elif key == "arch":
+            if "arch" not in entry:
+                missing.append(key)
+        else:
+            if key not in entry:
+                missing.append(key)
     return missing
 
 
@@ -560,24 +563,23 @@ def diff_matrix(current_auto: list[dict], desired_auto: list[dict]) -> MatrixDif
     """
 
     def _entry_key(e: dict) -> tuple[str, str, str, str]:
-        """Compute a stable sort key for a matrix entry.
-
-        Parameters:
-            e (dict): Matrix entry with nginx/os_type/arch and optional
-                support_tier.
+        """Internal helper for set-based diffing.
 
         Returns:
             tuple: ``(nginx, os_type, arch, support_tier)`` where missing
                 support_tier is represented as ``""``.
         """
-        return (e["nginx"], e["os_type"], e["arch"], e.get("support_tier", ""))
+        version = e.get("nginx_version") or e.get("nginx")
+        os_type = e.get("os_type") or e.get("os") or e.get("libc")
+        arch = e.get("arch")
+        return (version, os_type, arch, e.get("support_tier", ""))
 
-    current_set = {_entry_key(e) for e in current_auto}
-    desired_set = {_entry_key(e) for e in desired_auto}
+    current_set = { _entry_key(e) for e in current_auto }
+    desired_set = { _entry_key(e) for e in desired_auto }
 
     # Version-level summary for PR titles
-    current_versions = {e["nginx"] for e in current_auto}
-    desired_versions = {e["nginx"] for e in desired_auto}
+    current_versions = { (e.get("nginx_version") or e.get("nginx")) for e in current_auto }
+    desired_versions = { (e.get("nginx_version") or e.get("nginx")) for e in desired_auto }
 
     added = sorted(desired_versions - current_versions, key=version_tuple)
     removed = sorted(current_versions - desired_versions, key=version_tuple)
