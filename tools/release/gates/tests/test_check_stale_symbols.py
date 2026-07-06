@@ -6,13 +6,11 @@ from tools.release.gates import check_stale_symbols
 from tools.release.gates.check_stale_symbols import _git_cmd
 
 
-def test_stale_symbol_check_ignores_legacy_reference_docs(tmp_path):
-    """Historical docs outside the 0.9 gate surface should not fail the gate."""
+def test_stale_symbol_check_ignores_whitelisted_migration_docs(tmp_path):
+    """Whitelisted migration/reference docs should not fail the gate."""
     repo = tmp_path
     (repo / "docs/guides").mkdir(parents=True)
-    (repo / "docs/release").mkdir(parents=True)
-    (repo / "docs/guides/legacy.md").write_text("markdown_timeout\n")
-    (repo / "docs/release/current.md").write_text("markdown_limits timeout=1s\n")
+    (repo / "docs/guides/MIGRATION-0.9.md").write_text("markdown_timeout\n")
     subprocess.run(_git_cmd() + ["init"], cwd=repo, check=True, capture_output=True)
     subprocess.run(_git_cmd() + ["add", "."], cwd=repo, check=True)
 
@@ -20,6 +18,22 @@ def test_stale_symbol_check_ignores_legacy_reference_docs(tmp_path):
 
     assert exit_code == 0
     assert stdout == "No stale 0.8 symbols found."
+    assert stderr == ""
+
+
+def test_stale_symbol_check_fails_on_non_whitelisted_guide(tmp_path):
+    """Non-whitelisted guide docs with stale symbols should fail."""
+    repo = tmp_path
+    (repo / "docs/guides").mkdir(parents=True)
+    (repo / "docs/guides/legacy.md").write_text("markdown_timeout\n")
+    subprocess.run(_git_cmd() + ["init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(_git_cmd() + ["add", "."], cwd=repo, check=True)
+
+    exit_code, stdout, stderr = check_stale_symbols.run_stale_symbol_check(repo)
+
+    assert exit_code == 1
+    assert "STALE SYMBOLS DETECTED" in stdout
+    assert "docs/guides/legacy.md:1:markdown_timeout" in stdout
     assert stderr == ""
 
 
