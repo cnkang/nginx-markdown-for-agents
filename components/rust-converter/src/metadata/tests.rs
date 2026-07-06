@@ -209,7 +209,7 @@ fn test_metadata_extraction_times_out_during_traversal() {
 
     let dom = parse_html(html.as_bytes()).unwrap();
     let extractor = MetadataExtractor::new(None, false);
-    let mut ctx = ConversionContext::new(Duration::from_millis(1));
+    let mut ctx = ConversionContext::new(Duration::from_nanos(1));
 
     let result = extractor.extract_with_context(&dom, &mut ctx);
 

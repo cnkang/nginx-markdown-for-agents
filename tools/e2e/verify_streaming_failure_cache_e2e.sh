@@ -811,11 +811,11 @@ http {
         listen 127.0.0.1:${PORT};
         server_name localhost;
 
-        # 10.1: Streaming success + cache_validation full
+        # 10.1: Streaming success + cache_validation ims_only
         location /t01/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_cache_validation full;
+            markdown_cache_validation ims_only;
             markdown_streaming_engine on;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;
@@ -831,7 +831,7 @@ http {
         location /t02/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_cache_validation full;
+            markdown_cache_validation ims_only;
             markdown_streaming_engine on;
             markdown_limits memory=20m streaming_buffer=1k timeout=120s;
             markdown_error_policy pass;
@@ -847,7 +847,7 @@ http {
         location /t03/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_cache_validation full;
+            markdown_cache_validation ims_only;
             markdown_streaming_engine on;
             markdown_limits memory=20m streaming_buffer=1k timeout=120s;
             markdown_error_policy fail_closed;
@@ -863,7 +863,7 @@ http {
         location /t04/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_cache_validation full;
+            markdown_cache_validation ims_only;
             markdown_streaming_engine on;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;
@@ -1066,7 +1066,7 @@ echo ""
 # ---------------------------------------------------------------------------
 # 10.1 Streaming success + ETag on
 # ---------------------------------------------------------------------------
-echo "==> 10.1 Streaming success + cache_validation full"
+echo "==> 10.1 Streaming success + cache_validation ims_only"
 curl -sS -D "${RAW_DIR}/t01.hdr" -o "${RAW_DIR}/t01.body" \
     -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 30 \
     "http://127.0.0.1:${PORT}/t01/simple"

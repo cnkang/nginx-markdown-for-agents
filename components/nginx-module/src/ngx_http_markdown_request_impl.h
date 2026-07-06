@@ -71,6 +71,11 @@ const ngx_str_t *ngx_http_markdown_reason_from_error_category(
 const ngx_str_t *ngx_http_markdown_reason_converted(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
 const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
+const ngx_str_t *ngx_http_markdown_reason_overload(void);
+const ngx_str_t *ngx_http_markdown_reason_invalid_dynconf(void);
+const ngx_str_t *ngx_http_markdown_reason_degraded_snapshot(void);
+const ngx_str_t *ngx_http_markdown_reason_header_plan_apply_err(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_mid_flight_err(void);
 const ngx_str_t *ngx_http_markdown_eligibility_string(
     ngx_http_markdown_eligibility_t eligibility);
 
@@ -523,7 +528,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
                 "rejecting (fail-closed)");
             ngx_http_markdown_log_decision(
                 r, conf, ctx->effective_conf,
-                ngx_http_markdown_reason_failed_closed());
+                ngx_http_markdown_reason_overload());
             return conf->error_status;
         }
 
@@ -539,7 +544,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
             "(fail-open)");
         ngx_http_markdown_log_decision(
             r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_failed_open());
+            ngx_http_markdown_reason_overload());
         return ngx_http_next_header_filter(r);
     }
 

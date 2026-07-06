@@ -122,8 +122,8 @@ test: build
 
 test-rust:
 	cd $(RUST_DIR) && cargo build --locked --release --example perf_baseline
-	cd $(RUST_DIR) && cargo test --locked --all --all-features
-	cd $(RUST_DIR) && cargo test --locked --doc --all-features
+	cd $(RUST_DIR) && cargo test --locked --release --all --all-features
+	cd $(RUST_DIR) && cargo test --locked --release --doc --all-features
 
 test-rust-streaming:
 	cd $(RUST_DIR) && cargo test --locked --features streaming

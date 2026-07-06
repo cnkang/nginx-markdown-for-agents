@@ -92,7 +92,6 @@ impl HeaderPlan {
     ///
     /// Used when the module generates an error response (e.g., 429/502/503)
     /// before the conversion commit phase. The plan:
-    /// - Sets the HTTP status to the given error code
     /// - Sets Content-Type to the given value (e.g., "text/plain")
     /// - Removes Content-Length (will be set by the actual error body)
     /// - Removes ETag (error response has no entity ETag)
@@ -100,14 +99,9 @@ impl HeaderPlan {
     ///
     /// # Arguments
     ///
-    /// * `status` - HTTP error status code (e.g., 429, 502, 503)
     /// * `content_type` - Content-Type for the error response body
-    pub fn for_error_pre_commit(status: u16, content_type: &str) -> Self {
+    pub fn for_error_pre_commit(content_type: &str) -> Self {
         let mut plan = Self::new();
-        plan.ops.push(HeaderOp::Set {
-            name: ":status".to_string(),
-            value: status.to_string(),
-        });
         plan.set("Content-Type", content_type);
         plan.delete_all("Content-Length");
         plan.delete_all("ETag");
@@ -259,36 +253,29 @@ mod tests {
 
     #[test]
     fn test_for_error_pre_commit() {
-        let plan = HeaderPlan::for_error_pre_commit(503, "text/plain");
-        assert_eq!(plan.len(), 5);
+        let plan = HeaderPlan::for_error_pre_commit("text/plain");
+        assert_eq!(plan.len(), 4);
         assert_eq!(
             plan.ops[0],
-            HeaderOp::Set {
-                name: ":status".to_string(),
-                value: "503".to_string(),
-            }
-        );
-        assert_eq!(
-            plan.ops[1],
             HeaderOp::Set {
                 name: "Content-Type".to_string(),
                 value: "text/plain".to_string(),
             }
         );
         assert_eq!(
-            plan.ops[2],
+            plan.ops[1],
             HeaderOp::DeleteAll {
                 name: "Content-Length".to_string(),
             }
         );
         assert_eq!(
-            plan.ops[3],
+            plan.ops[2],
             HeaderOp::DeleteAll {
                 name: "ETag".to_string(),
             }
         );
         assert_eq!(
-            plan.ops[4],
+            plan.ops[3],
             HeaderOp::DeleteAll {
                 name: "Content-Encoding".to_string(),
             }
@@ -297,17 +284,10 @@ mod tests {
 
     #[test]
     fn test_for_error_pre_commit_429() {
-        let plan = HeaderPlan::for_error_pre_commit(429, "text/html; charset=utf-8");
-        assert_eq!(plan.len(), 5);
+        let plan = HeaderPlan::for_error_pre_commit("text/html; charset=utf-8");
+        assert_eq!(plan.len(), 4);
         assert_eq!(
             plan.ops[0],
-            HeaderOp::Set {
-                name: ":status".to_string(),
-                value: "429".to_string(),
-            }
-        );
-        assert_eq!(
-            plan.ops[1],
             HeaderOp::Set {
                 name: "Content-Type".to_string(),
                 value: "text/html; charset=utf-8".to_string(),
