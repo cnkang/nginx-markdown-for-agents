@@ -334,7 +334,7 @@ and `markdown_streaming_on_error` directives (0.9.0 breaking change).
 - `pass` (default): return the original content on a pre-commit error
   (fail-open, recommended for production).
 - `fail_closed`: return 502 on a pre-commit error.
-- `status <code>`: return the specified status code (`429`, `502`, or `503`).
+- `status <code>`: return the specified status code (`429` or `503`). Use `fail_closed` for 502.
 
 This applies to **pre-commit** errors only (headers not yet sent). Post-commit
 streaming errors cannot rewrite the status or pass original content; they stop

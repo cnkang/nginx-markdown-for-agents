@@ -162,14 +162,14 @@ impl ErrorClass {
 /// # Variants
 ///
 /// - `Pass`: Deliver the original upstream response (fail-open).
-/// - `Status(u16)`: Return the specified HTTP status code (429/502/503).
+/// - `Status(u16)`: Return the specified HTTP status code (429/503; 502 reserved for fail_closed).
 /// - `FailClosed`: Return 502 Bad Gateway, never leak original content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorPolicy {
     /// Deliver original upstream response on error (fail-open, default).
     Pass,
     /// Return the specified HTTP status code on error.
-    /// Allowed values: 429, 502, 503.
+    /// Allowed values: 429, 503 (502 reserved for fail_closed; C parser rejects it).
     Status(u16),
     /// Return 502 Bad Gateway; never leak original content.
     FailClosed,
