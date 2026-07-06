@@ -124,14 +124,20 @@ def _missing_required_keys(entry: dict, required_keys: tuple[str, ...]) -> list[
     """List required keys that are missing from the given mapping, preserving the order
     of `required_keys`.
 
-    Parameters:
-        entry (dict): Mapping to check for required keys.
-        required_keys (tuple[str, ...]): Sequence of keys to verify, in declaration order.
-
-    Returns:
-        list[str]: Missing keys from `required_keys`, in declaration order.
+    Handles canonical schema (nginx_version, libc) vs legacy (nginx, os_type).
     """
-    return [key for key in required_keys if key not in entry]
+    missing = []
+    for key in required_keys:
+        # Normalize check: nginx -> nginx_version, os_type -> libc/os
+        if key == "nginx" and ("nginx" not in entry and "nginx_version" not in entry):
+            missing.append(key)
+        elif key == "os_type" and ("os_type" not in entry and "libc" not in entry and "os" not in entry):
+            missing.append(key)
+        elif key == "arch" and "arch" not in entry:
+            missing.append(key)
+        elif key not in entry:
+            missing.append(key)
+    return missing
 
 
 def _resolve_repo_write_path(path: Path) -> Path:
