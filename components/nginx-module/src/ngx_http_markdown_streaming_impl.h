@@ -1000,7 +1000,7 @@ ngx_http_markdown_streaming_record_postcommit_failure(
             (r->headers_out.content_length_n < 0) ? 1 : 0,
              (conf->stream.on_error
               == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? "reject" : "pass");
+                ? "fail_closed" : "pass");
 
         ctx->streaming.completion.failure_recorded = 1;
     }
