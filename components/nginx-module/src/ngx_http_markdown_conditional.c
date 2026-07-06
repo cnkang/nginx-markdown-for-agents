@@ -2,8 +2,8 @@
  * NGINX Markdown Filter Module - Conditional Request Handling
  *
  * This file implements conditional request support (If-None-Match, If-Modified-Since)
- * for Markdown variants. ETag comparison is delegated to the Rust FFI
- * (markdown_check_conditional), while NGINX lifecycle operations
+ * for Markdown variants. Conditional decision policy is delegated to the Rust
+ * FFI (markdown_decide_conditional), while NGINX lifecycle operations
  * (triggering conversion to generate ETag, sending 304 responses)
  * remain on the C side.
  *
@@ -56,6 +56,109 @@ ngx_http_markdown_find_request_header(ngx_http_request_t *r, u_char *name, size_
     }
 
     return NULL;
+}
+
+static uint8_t
+ngx_http_markdown_conditional_cache_validation(ngx_uint_t mode)
+{
+    switch (mode) {
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED:
+        return 0;
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT:
+        return 2;
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE:
+    default:
+        return 1;
+    }
+}
+
+static ngx_table_elt_t *
+ngx_http_markdown_find_response_header(ngx_http_request_t *r, u_char *name,
+    size_t name_len)
+{
+    if (r->headers_out.headers.part.nelts == 0) {
+        return NULL;
+    }
+
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
+            if (headers[i].key.len == name_len
+                && ngx_strncasecmp(headers[i].key.data, name, name_len) == 0)
+            {
+                return &headers[i];
+            }
+        }
+    }
+
+    return NULL;
+}
+
+static ngx_int_t
+ngx_http_markdown_strncasecmp_const(const u_char *s1, const u_char *s2,
+    size_t n)
+{
+    while (n != 0) {
+        u_char  c1;
+        u_char  c2;
+
+        c1 = ngx_tolower(*s1);
+        c2 = ngx_tolower(*s2);
+
+        if (c1 != c2) {
+            return c1 - c2;
+        }
+
+        s1++;
+        s2++;
+        n--;
+    }
+
+    return 0;
+}
+
+static ngx_flag_t
+ngx_http_markdown_header_has_cache_directive(const ngx_table_elt_t *header,
+    const u_char *directive, size_t directive_len)
+{
+    const u_char  *p;
+    const u_char  *end;
+
+    p = header->value.data;
+    end = p + header->value.len;
+
+    while (p < end) {
+        while (p < end && (*p == ' ' || *p == '\t' || *p == ',')) {
+            p++;
+        }
+
+        if ((size_t)(end - p) >= directive_len
+            && ngx_http_markdown_strncasecmp_const(
+                   p, directive, directive_len) == 0)
+        {
+            const u_char *after = p + directive_len;
+
+            if (after == end || *after == ',' || *after == ' '
+                || *after == '\t')
+            {
+                return 1;
+            }
+        }
+
+        while (p < end && *p != ',') {
+            p++;
+        }
+    }
+
+    return 0;
 }
 
 static ngx_int_t
@@ -121,14 +224,155 @@ ngx_http_markdown_convert_for_conditional(
     return NGX_OK;
 }
 
-/**
- * Evaluate and handle an If-None-Match conditional request for a Markdown response.
+
+/*
+ * Check if the response carries Cache-Control: no-transform.
  *
- * When conditional request support is enabled, this function performs a
- * conversion to generate the Markdown variant ETag, then delegates ETag
- * comparison to the Rust FFI (markdown_check_conditional). If the result
- * is Not-Modified, the 304 response is sent; otherwise the conversion
- * result is stored for the normal response path.
+ * Scans all Cache-Control response headers for the "no-transform"
+ * directive (RFC 9111 §5.2.2.6).  The check is case-insensitive
+ * per RFC.
+ *
+ * Parameters:
+ *   r - NGINX request (for response header access)
+ *
+ * Returns:
+ *   1 if no-transform is present, 0 otherwise
+ */
+ngx_flag_t
+ngx_http_markdown_has_no_transform(ngx_http_request_t *r)
+{
+    static u_char       cc_name[] = "Cache-Control";
+    static u_char       directive[] = "no-transform";
+    size_t              directive_len;
+
+    directive_len = sizeof(directive) - 1;
+
+    for (ngx_list_part_t *part = &r->headers_out.headers.part;
+         part != NULL;
+         part = part->next)
+    {
+        ngx_table_elt_t  *headers;
+
+        headers = part->elts;
+        for (ngx_uint_t i = 0; i < part->nelts; i++) {
+            if (headers[i].hash == 0) {
+                continue;
+            }
+            if (headers[i].key.len != sizeof(cc_name) - 1
+                || ngx_strncasecmp(headers[i].key.data, cc_name,
+                                   sizeof(cc_name) - 1) != 0)
+            {
+                continue;
+            }
+
+            if (ngx_http_markdown_header_has_cache_directive(
+                    &headers[i], directive, directive_len))
+            {
+                return 1;
+            }
+        }
+    }
+
+    return 0;
+}
+
+/*
+ * Gather conditional request headers and resolve the Last-Modified value.
+ *
+ * Reads If-None-Match, If-Modified-Since, Range from request headers, and
+ * Last-Modified from response headers (falling back to
+ * r->headers_out.last_modified_time formatted as RFC 1123).  Outputs are
+ * written through the caller-provided pointers.
+ */
+static void
+ngx_http_markdown_collect_conditional_headers(ngx_http_request_t *r,
+    const ngx_table_elt_t **inm_header, const ngx_table_elt_t **ims_header,
+    const ngx_table_elt_t **range_header,
+    const u_char **lm_data, size_t *lm_len, u_char *lm_time_buf)
+{
+    {
+        static u_char  if_none_match_name[] = "If-None-Match";
+        *inm_header = ngx_http_markdown_find_request_header(
+            r, if_none_match_name, sizeof(if_none_match_name) - 1);
+    }
+
+    {
+        static u_char  if_modified_since_name[] = "If-Modified-Since";
+        *ims_header = ngx_http_markdown_find_request_header(
+            r, if_modified_since_name, sizeof(if_modified_since_name) - 1);
+    }
+
+    {
+        static u_char  range_name[] = "Range";
+        *range_header = ngx_http_markdown_find_request_header(
+            r, range_name, sizeof(range_name) - 1);
+    }
+
+    {
+        const ngx_table_elt_t  *lm_header;
+        static u_char  last_modified_name[] = "Last-Modified";
+        lm_header = ngx_http_markdown_find_response_header(
+            r, last_modified_name, sizeof(last_modified_name) - 1);
+
+        if (lm_header != NULL) {
+            *lm_data = lm_header->value.data;
+            *lm_len = lm_header->value.len;
+        } else if (r->headers_out.last_modified_time != (time_t) -1) {
+            /*
+             * No Last-Modified list header, but the dedicated
+             * r->headers_out.last_modified_time field is set.  NGINX
+             * common paths (static files, upstream with last_modified)
+             * populate this field without always adding a list header.
+             * Format it as an RFC 1123 HTTP date string so the Rust
+             * conditional decision can compare it against
+             * If-Modified-Since.
+             */
+            const u_char *end;
+
+            end = ngx_http_time(lm_time_buf,
+                                r->headers_out.last_modified_time);
+            *lm_data = lm_time_buf;
+            *lm_len = (size_t) (end - lm_time_buf);
+
+            ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                          "markdown: formatted last_modified_time=%T "
+                          "as \"%*s\"",
+                          r->headers_out.last_modified_time,
+                          (ngx_int_t) *lm_len, *lm_data);
+        } else {
+            *lm_data = NULL;
+            *lm_len = 0;
+        }
+    }
+}
+
+/*
+ * Translate an early (non-entity-ETag) FFI conditional decision outcome
+ * into the NGINX return code the caller should return.  Encapsulated as a
+ * helper so the main function's cognitive complexity stays below threshold.
+ */
+static ngx_int_t
+ngx_http_markdown_conditional_early_outcome(
+    const struct FFIConditionalDecision *cond_decision)
+{
+    if (cond_decision->outcome == 0) {
+        return NGX_HTTP_NOT_MODIFIED;
+    }
+
+    if (cond_decision->outcome == 2) {
+        return NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT;
+    }
+
+    return NGX_DECLINED;
+}
+
+/*
+ * Evaluate and handle a conditional request for a Markdown response.
+ *
+ * When full cache validation needs an entity ETag, this function performs a
+ * conversion to generate the Markdown variant ETag, then delegates the final
+ * decision to Rust FFI (markdown_decide_conditional). IMS-only and IMS fallback
+ * decisions do not need conversion and are also delegated to the same FFI path.
  *
  * @param r        The request structure.
  * @param conf     Module configuration controlling conditional request behavior and ETag generation.
@@ -148,13 +392,19 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
 {
     struct MarkdownOptions    options;
     struct MarkdownResult    *conv_result;
-    struct FFIConditionalResult cond_result;
+    struct FFIConditionalInput  cond_input;
+    struct FFIConditionalDecision cond_decision;
     const ngx_table_elt_t   *inm_header;
     const ngx_table_elt_t   *ims_header;
+    const ngx_table_elt_t   *range_header;
     const u_char            *inm_data;
     size_t                   inm_len;
     const u_char            *ims_data;
     size_t                   ims_len;
+    const u_char            *lm_data;
+    size_t                   lm_len;
+    ngx_flag_t               needs_entity_etag;
+    u_char                   lm_time_buf[32];
 
     if (conf->policy.conditional_requests == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -163,25 +413,54 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         return NGX_DECLINED;
     }
 
-    if (conf->policy.conditional_requests == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE) {
+    ngx_http_markdown_collect_conditional_headers(
+        r, &inm_header, &ims_header, &range_header,
+        &lm_data, &lm_len, lm_time_buf);
+
+    if (inm_header != NULL) {
+        inm_data = inm_header->value.data;
+        inm_len = inm_header->value.len;
+    } else {
+        inm_data = NULL;
+        inm_len = 0;
+    }
+
+    if (ims_header != NULL) {
+        ims_data = ims_header->value.data;
+        ims_len = ims_header->value.len;
+    } else {
+        ims_data = NULL;
+        ims_len = 0;
+    }
+
+    if (inm_header == NULL && ims_header == NULL) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown: if_modified_since_only mode, "
-                      "skipping If-None-Match");
+                      "markdown: no conditional request headers");
         return NGX_DECLINED;
     }
 
-    /* Check for If-None-Match header before performing conversion */
-    inm_header = NULL;
-    {
-        static u_char  if_none_match_name[] = "If-None-Match";
-        inm_header = ngx_http_markdown_find_request_header(
-            r, if_none_match_name, sizeof(if_none_match_name) - 1);
-    }
+    memset(&cond_input, 0, sizeof(cond_input));
+    memset(&cond_decision, 0, sizeof(cond_decision));
+    cond_input.cache_validation = ngx_http_markdown_conditional_cache_validation(
+        conf->policy.conditional_requests);
+    cond_input.has_range = (range_header != NULL) ? 1 : 0;
+    cond_input.no_transform =
+        ngx_http_markdown_has_no_transform(r) ? 1 : 0;
+    cond_input.if_none_match = inm_data;
+    cond_input.if_none_match_len = inm_len;
+    cond_input.if_modified_since = ims_data;
+    cond_input.if_modified_since_len = ims_len;
+    cond_input.last_modified = lm_data;
+    cond_input.last_modified_len = lm_len;
 
-    if (inm_header == NULL) {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown: no If-None-Match header");
-        return NGX_DECLINED;
+    needs_entity_etag =
+        (conf->policy.conditional_requests
+            == NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT
+         && inm_header != NULL);
+
+    if (!needs_entity_etag) {
+        markdown_decide_conditional(&cond_input, &cond_decision);
+        return ngx_http_markdown_conditional_early_outcome(&cond_decision);
     }
 
     if (!conf->policy.generate_etag) {
@@ -233,7 +512,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
 
     if (conv_result->error_code != 0) {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown: conversion failed during If-None-Match check: "
+                     "markdown: conversion failed during conditional check: "
                      "error_code=%ud message=\"%*s\"",
                      conv_result->error_code,
                      (conv_result->error_message != NULL) ? (ngx_int_t) conv_result->error_len : 0,
@@ -244,49 +523,37 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    /*
-     * Delegate ETag comparison to Rust FFI.
-     *
-     * markdown_check_conditional handles weak ETag comparison (W/ prefix
-     * stripping, quote normalization) per RFC 7232 §2.3.3 / §3.2.
-     * We pass the generated ETag and the If-None-Match / If-Modified-Since
-     * header values as raw byte slices.
-     */
-    inm_data = inm_header->value.data;
-    inm_len = inm_header->value.len;
+    cond_input.entity_etag = conv_result->etag;
+    cond_input.entity_etag_len = conv_result->etag_len;
+    markdown_decide_conditional(&cond_input, &cond_decision);
 
-    {
-        static u_char  if_modified_since_name[] = "If-Modified-Since";
-        ims_header = ngx_http_markdown_find_request_header(
-            r, if_modified_since_name, sizeof(if_modified_since_name) - 1);
-    }
-
-    if (ims_header != NULL) {
-        ims_data = ims_header->value.data;
-        ims_len = ims_header->value.len;
-    } else {
-        ims_data = NULL;
-        ims_len = 0;
-    }
-
-    markdown_check_conditional(
-        inm_data, inm_len,
-        conv_result->etag, conv_result->etag_len,
-        ims_data, ims_len,
-        NULL, 0,
-        &cond_result);
-
-    if (cond_result.result_code == 0) {
+    if (cond_decision.outcome == 0) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown: ETag match, returning 304 Not Modified");
+                      "markdown: conditional matched, returning 304 Not Modified");
 
         *result = conv_result;
 
         return NGX_HTTP_NOT_MODIFIED;
     }
 
+    if (cond_decision.outcome == 2) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: conditional bypass after conversion "
+                      "(Range or no-transform), delivering upstream "
+                      "unmodified");
+
+        /*
+         * The conversion was performed to generate the ETag, but the
+         * conditional decision says Bypass.  Free the conversion result
+         * and signal bypass to the caller.
+         */
+        markdown_result_free(conv_result);
+
+        return NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT;
+    }
+
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown: ETag mismatch, returning 200 with content");
+                  "markdown: conditional proceeded, returning 200 with content");
 
     *result = conv_result;
 

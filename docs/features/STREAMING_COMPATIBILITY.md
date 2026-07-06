@@ -3,7 +3,7 @@
 This document lists which module features are available in each conversion engine
 mode. Use it to understand behavioral differences before enabling streaming.
 
-> **Status**: Streaming is experimental in v0.8.0. Behavior may change in future
+> **Status**: Streaming is supported since v0.8.0. Behavior may change in future
 > releases.
 
 ## Compatibility Matrix
@@ -73,7 +73,7 @@ Use **streaming** when:
 - Time-to-first-byte matters more than conditional caching
 - You accept that post-commit errors produce truncated output
 
-Use **auto** (default in 0.8.0) to let the module choose based on response size
+Use **auto** (default since 0.8.0) to let the module choose based on response size
 thresholds.
 
 ## Related Documentation

@@ -69,6 +69,7 @@ struct ngx_array_s {
 
 struct ngx_http_request_s {
     ngx_uint_t                method;
+    ngx_pool_t               *pool;
     ngx_http_headers_out_t    headers_out;
     ngx_http_headers_in_t     headers_in;
 };
@@ -100,6 +101,13 @@ ngx_strlchr(u_char *p, u_char *last, u_char c)
     return NULL;
 }
 
+static void *
+ngx_palloc(ngx_pool_t *pool, size_t size)
+{
+    UNUSED(pool);
+    return malloc(size);
+}
+
 /* ── Include production source ──────────────────────────────────── */
 
 #include "../../src/ngx_http_markdown_eligibility.c"
@@ -117,8 +125,8 @@ static void
 init_conf(ngx_http_markdown_conf_t *conf)
 {
     memset(conf, 0, sizeof(*conf));
-    conf->content_types = NULL;
-    conf->stream_types = NULL;
+    conf->routing.content_types = NULL;
+    conf->routing.stream_types = NULL;
     conf->stream.excluded_types = NULL;
     conf->max_size = (size_t) -1;
 }

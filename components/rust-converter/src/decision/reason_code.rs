@@ -28,7 +28,7 @@
 ///
 /// This constant is used by the closure test to verify that all variants
 /// are accounted for in the `ALL` array. Update this when adding variants.
-pub const REASON_CODE_COUNT: usize = 18;
+pub const REASON_CODE_COUNT: usize = 26;
 
 /// Compile-time guard: all discriminants must fit in a `u8` because the
 /// FFI boundary (`FFIDecisionResult.reason_code`) transports them as `u8`.
@@ -77,9 +77,8 @@ pub enum ReasonCode {
 
     /// Failed: decompression error (generic).
     ///
-    /// **log_decision() callsite**: body_filter: decompression failed
-    /// (generic).
-    FailedDecompression = 4,
+    /// **log_decision() callsite**: body_filter: decompression error.
+    DecompressionError = 4,
 
     /// Failed: decompression output exceeded budget limit.
     ///
@@ -104,20 +103,18 @@ pub enum ReasonCode {
 
     /// Failed: HTML parsing exceeded the configured timeout.
     ///
-    /// **log_decision() callsite**: body_filter: parse timeout exceeded.
-    ParseTimeout = 9,
+    /// **log_decision() callsite**: body_filter: timeout.
+    Timeout = 9,
 
     /// Failed: parser memory allocation exceeded budget.
     ///
-    /// **log_decision() callsite**: body_filter: parser memory budget
-    /// exceeded.
-    ParseBudgetExceeded = 10,
+    /// **log_decision() callsite**: body_filter: budget exceeded.
+    BudgetExceeded = 10,
 
     /// Failed: replay buffer init or append error.
     ///
-    /// **log_decision() callsite**: body_filter: replay buffer init/append
-    /// failure.
-    ReplayBufferError = 11,
+    /// **log_decision() callsite**: body_filter: replay error.
+    ReplayError = 11,
 
     /// Skipped: Accept header explicitly rejects text/markdown (q=0).
     ///
@@ -125,11 +122,10 @@ pub enum ReasonCode {
     /// text/markdown (q=0).
     SkippedAcceptReject = 12,
 
-    /// Failed: FFI call error (Rust function returned unexpected error).
+    /// Failed: FFI panic (Rust function panicked across FFI boundary).
     ///
-    /// **log_decision() callsite**: body_filter: FFI function returned
-    /// unexpected error.
-    FfiCallError = 13,
+    /// **log_decision() callsite**: body_filter: FFI panic.
+    FfiPanic = 13,
 
     /// Skipped: response not eligible for conversion (method, status, etc.).
     ///
@@ -152,6 +148,46 @@ pub enum ReasonCode {
     ///
     /// **log_decision() callsite**: body_filter: fail-closed path triggered.
     FailedClosed = 17,
+
+    /// Failed: generic conversion failure.
+    ///
+    /// **log_decision() callsite**: body_filter: conversion error.
+    ConversionError = 18,
+
+    /// Failed: memory budget exceeded.
+    ///
+    /// **log_decision() callsite**: body_filter: memory budget exceeded.
+    MemoryBudgetExceeded = 19,
+
+    /// Failed: inflight guard triggered (overload).
+    ///
+    /// **log_decision() callsite**: header_filter: inflight guard overload.
+    Overload = 20,
+
+    /// Failed: invalid dynamic configuration.
+    ///
+    /// **log_decision() callsite**: header_filter: invalid dynconf.
+    InvalidDynconf = 21,
+
+    /// Failed: degraded dynamic configuration snapshot.
+    ///
+    /// **log_decision() callsite**: header_filter: degraded dynconf snapshot.
+    DegradedSnapshot = 22,
+
+    /// Failed: header plan commit failure.
+    ///
+    /// **log_decision() callsite**: header_filter: header plan apply error.
+    HeaderPlanApplyError = 23,
+
+    /// Failed: streaming mid-flight error.
+    ///
+    /// **log_decision() callsite**: body_filter: streaming mid-flight error.
+    StreamingMidFlightError = 24,
+
+    /// Skipped: Cache-Control: no-transform bypasses conversion (RFC 9111).
+    ///
+    /// **log_decision() callsite**: header_filter: no-transform bypass.
+    BypassNoTransform = 25,
 }
 
 /// Array of all reason code variants for exhaustive iteration.
@@ -165,24 +201,32 @@ pub const ALL: [ReasonCode; REASON_CODE_COUNT] = [
     ReasonCode::SkippedAccept,
     ReasonCode::SkippedNoAccept,
     ReasonCode::SkippedConditional,
-    ReasonCode::FailedDecompression,
+    ReasonCode::DecompressionError,
     ReasonCode::DecompressionBudgetExceeded,
     ReasonCode::DecompressionFormatError,
     ReasonCode::DecompressionTruncatedInput,
     ReasonCode::DecompressionIoError,
-    ReasonCode::ParseTimeout,
-    ReasonCode::ParseBudgetExceeded,
-    ReasonCode::ReplayBufferError,
+    ReasonCode::Timeout,
+    ReasonCode::BudgetExceeded,
+    ReasonCode::ReplayError,
     ReasonCode::SkippedAcceptReject,
-    ReasonCode::FfiCallError,
+    ReasonCode::FfiPanic,
     ReasonCode::NotEligible,
     ReasonCode::Disabled,
     ReasonCode::FailedOpen,
     ReasonCode::FailedClosed,
+    ReasonCode::ConversionError,
+    ReasonCode::MemoryBudgetExceeded,
+    ReasonCode::Overload,
+    ReasonCode::InvalidDynconf,
+    ReasonCode::DegradedSnapshot,
+    ReasonCode::HeaderPlanApplyError,
+    ReasonCode::StreamingMidFlightError,
+    ReasonCode::BypassNoTransform,
 ];
 
 impl ReasonCode {
-    /// Return the uppercase snake_case string representation.
+    /// Return the lowercase snake_case string representation.
     ///
     /// This string is used in structured logs, diagnostics endpoints,
     /// and as the label value in Prometheus metrics.
@@ -192,37 +236,48 @@ impl ReasonCode {
     /// ```
     /// use nginx_markdown_converter::decision::reason_code::ReasonCode;
     ///
-    /// assert_eq!(ReasonCode::Converted.as_str(), "CONVERTED");
-    /// assert_eq!(ReasonCode::ParseTimeout.as_str(), "PARSE_TIMEOUT");
+    /// assert_eq!(ReasonCode::Converted.as_str(), "converted");
+    /// assert_eq!(ReasonCode::Timeout.as_str(), "timeout");
     /// ```
     pub fn as_str(self) -> &'static str {
         match self {
-            ReasonCode::Converted => "CONVERTED",
-            ReasonCode::SkippedAccept => "SKIPPED_ACCEPT",
-            ReasonCode::SkippedNoAccept => "SKIPPED_NO_ACCEPT",
-            ReasonCode::SkippedConditional => "SKIPPED_CONDITIONAL",
-            ReasonCode::FailedDecompression => "FAILED_DECOMPRESSION",
-            ReasonCode::DecompressionBudgetExceeded => "DECOMPRESSION_BUDGET_EXCEEDED",
-            ReasonCode::DecompressionFormatError => "DECOMPRESSION_FORMAT_ERROR",
-            ReasonCode::DecompressionTruncatedInput => "DECOMPRESSION_TRUNCATED_INPUT",
-            ReasonCode::DecompressionIoError => "DECOMPRESSION_IO_ERROR",
-            ReasonCode::ParseTimeout => "PARSE_TIMEOUT",
-            ReasonCode::ParseBudgetExceeded => "PARSE_BUDGET_EXCEEDED",
-            ReasonCode::ReplayBufferError => "REPLAY_BUFFER_ERROR",
-            ReasonCode::SkippedAcceptReject => "SKIPPED_ACCEPT_REJECT",
-            ReasonCode::FfiCallError => "FFI_CALL_ERROR",
-            ReasonCode::NotEligible => "NOT_ELIGIBLE",
-            ReasonCode::Disabled => "DISABLED",
-            ReasonCode::FailedOpen => "FAILED_OPEN",
-            ReasonCode::FailedClosed => "FAILED_CLOSED",
+            ReasonCode::Converted => "converted",
+            ReasonCode::SkippedAccept => "skipped_accept",
+            ReasonCode::SkippedNoAccept => "skipped_no_accept",
+            ReasonCode::SkippedConditional => "skipped_conditional",
+            ReasonCode::DecompressionError => "decompression_error",
+            ReasonCode::DecompressionBudgetExceeded => "decompression_budget_exceeded",
+            ReasonCode::DecompressionFormatError => "decompression_format_error",
+            ReasonCode::DecompressionTruncatedInput => "decompression_truncated_input",
+            ReasonCode::DecompressionIoError => "decompression_io_error",
+            ReasonCode::Timeout => "timeout",
+            ReasonCode::BudgetExceeded => "budget_exceeded",
+            ReasonCode::ReplayError => "replay_error",
+            ReasonCode::SkippedAcceptReject => "skipped_accept_reject",
+            ReasonCode::FfiPanic => "ffi_panic",
+            ReasonCode::NotEligible => "not_eligible",
+            ReasonCode::Disabled => "disabled",
+            ReasonCode::FailedOpen => "failed_open",
+            ReasonCode::FailedClosed => "failed_closed",
+            ReasonCode::ConversionError => "conversion_error",
+            ReasonCode::MemoryBudgetExceeded => "memory_budget_exceeded",
+            ReasonCode::Overload => "overload",
+            ReasonCode::InvalidDynconf => "invalid_dynconf",
+            ReasonCode::DegradedSnapshot => "degraded_snapshot",
+            ReasonCode::HeaderPlanApplyError => "header_plan_apply_error",
+            ReasonCode::StreamingMidFlightError => "streaming_mid_flight_error",
+            ReasonCode::BypassNoTransform => "bypass_no_transform",
         }
     }
 
     /// Return the Prometheus metric key name for this reason code.
     ///
-    /// The metric key is used as the counter name suffix in Prometheus
-    /// exposition format. Each reason code maps to a specific metric
-    /// that tracks how often that decision path is taken.
+    /// The metric key uses unified bucket-style counter families:
+    /// - Success: `markdown_conversions_total`
+    /// - Skipped: `markdown_skipped_total`
+    /// - Errors: `markdown_errors_total`
+    /// - Failed Open: `markdown_failed_open_total`
+    /// - Failed Closed: `markdown_failed_closed_total`
     ///
     /// # Examples
     ///
@@ -235,31 +290,35 @@ impl ReasonCode {
     /// );
     /// assert_eq!(
     ///     ReasonCode::DecompressionBudgetExceeded.metric_key(),
-    ///     "markdown_decompression_budget_exceeded_total"
+    ///     "markdown_errors_total"
     /// );
     /// ```
     pub fn metric_key(self) -> &'static str {
         match self {
             ReasonCode::Converted => "markdown_conversions_total",
-            ReasonCode::SkippedAccept => "markdown_skipped_accept_total",
-            ReasonCode::SkippedNoAccept => "markdown_skipped_no_accept_total",
-            ReasonCode::SkippedConditional => "markdown_skipped_conditional_total",
-            ReasonCode::FailedDecompression => "markdown_failed_decompression_total",
-            ReasonCode::DecompressionBudgetExceeded => {
-                "markdown_decompression_budget_exceeded_total"
-            }
-            ReasonCode::DecompressionFormatError => "markdown_decompression_format_error_total",
-            ReasonCode::DecompressionTruncatedInput => {
-                "markdown_decompression_truncated_input_total"
-            }
-            ReasonCode::DecompressionIoError => "markdown_decompression_io_error_total",
-            ReasonCode::ParseTimeout => "markdown_parse_timeouts_total",
-            ReasonCode::ParseBudgetExceeded => "markdown_parse_budget_exceeded_total",
-            ReasonCode::ReplayBufferError => "markdown_replay_buffer_errors_total",
-            ReasonCode::SkippedAcceptReject => "markdown_skipped_accept_reject_total",
-            ReasonCode::FfiCallError => "markdown_ffi_call_errors_total",
-            ReasonCode::NotEligible => "markdown_skipped_not_eligible_total",
-            ReasonCode::Disabled => "markdown_skipped_disabled_total",
+            ReasonCode::SkippedAccept
+            | ReasonCode::SkippedNoAccept
+            | ReasonCode::SkippedConditional
+            | ReasonCode::SkippedAcceptReject
+            | ReasonCode::NotEligible
+            | ReasonCode::Disabled
+            | ReasonCode::BypassNoTransform => "markdown_skipped_total",
+            ReasonCode::DecompressionError
+            | ReasonCode::DecompressionBudgetExceeded
+            | ReasonCode::DecompressionFormatError
+            | ReasonCode::DecompressionTruncatedInput
+            | ReasonCode::DecompressionIoError
+            | ReasonCode::Timeout
+            | ReasonCode::BudgetExceeded
+            | ReasonCode::ReplayError
+            | ReasonCode::FfiPanic
+            | ReasonCode::ConversionError
+            | ReasonCode::MemoryBudgetExceeded
+            | ReasonCode::HeaderPlanApplyError
+            | ReasonCode::StreamingMidFlightError
+            | ReasonCode::InvalidDynconf
+            | ReasonCode::DegradedSnapshot
+            | ReasonCode::Overload => "markdown_errors_total",
             ReasonCode::FailedOpen => "markdown_failed_open_total",
             ReasonCode::FailedClosed => "markdown_failed_closed_total",
         }
@@ -299,26 +358,34 @@ impl ReasonCode {
             }
             ReasonCode::SkippedNoAccept => "header_filter: no Accept header present",
             ReasonCode::SkippedConditional => "header_filter: conditional request matched (304)",
-            ReasonCode::FailedDecompression => "body_filter: decompression failed (generic)",
+            ReasonCode::DecompressionError => "body_filter: decompression error",
             ReasonCode::DecompressionBudgetExceeded => {
                 "body_filter: decompression output exceeded budget"
             }
             ReasonCode::DecompressionFormatError => "body_filter: invalid compression format",
             ReasonCode::DecompressionTruncatedInput => "body_filter: truncated compressed input",
             ReasonCode::DecompressionIoError => "body_filter: decompression I/O error",
-            ReasonCode::ParseTimeout => "body_filter: parse timeout exceeded",
-            ReasonCode::ParseBudgetExceeded => "body_filter: parser memory budget exceeded",
-            ReasonCode::ReplayBufferError => "body_filter: replay buffer init/append failure",
+            ReasonCode::Timeout => "body_filter: timeout",
+            ReasonCode::BudgetExceeded => "body_filter: budget exceeded",
+            ReasonCode::ReplayError => "body_filter: replay error",
             ReasonCode::SkippedAcceptReject => {
                 "header_filter: Accept explicitly rejects text/markdown (q=0)"
             }
-            ReasonCode::FfiCallError => "body_filter: FFI function returned unexpected error",
+            ReasonCode::FfiPanic => "body_filter: FFI panic",
             ReasonCode::NotEligible => {
                 "header_filter: response not eligible (method/status/content-type)"
             }
             ReasonCode::Disabled => "header_filter: module disabled for this location",
             ReasonCode::FailedOpen => "body_filter: fail-open path triggered",
             ReasonCode::FailedClosed => "body_filter: fail-closed path triggered",
+            ReasonCode::ConversionError => "body_filter: conversion error",
+            ReasonCode::MemoryBudgetExceeded => "body_filter: memory budget exceeded",
+            ReasonCode::Overload => "header_filter: inflight guard overload",
+            ReasonCode::InvalidDynconf => "header_filter: invalid dynconf",
+            ReasonCode::DegradedSnapshot => "header_filter: degraded dynconf snapshot",
+            ReasonCode::HeaderPlanApplyError => "header_filter: header plan apply error",
+            ReasonCode::StreamingMidFlightError => "body_filter: streaming mid-flight error",
+            ReasonCode::BypassNoTransform => "header_filter: no-transform bypass",
         }
     }
 
@@ -333,7 +400,7 @@ impl ReasonCode {
     /// use nginx_markdown_converter::decision::reason_code::ReasonCode;
     ///
     /// assert_eq!(ReasonCode::Converted.discriminant(), 0);
-    /// assert_eq!(ReasonCode::ParseTimeout.discriminant(), 9);
+    /// assert_eq!(ReasonCode::Timeout.discriminant(), 9);
     /// ```
     pub fn discriminant(self) -> u32 {
         self as u32
@@ -349,7 +416,7 @@ impl ReasonCode {
     /// use nginx_markdown_converter::decision::reason_code::ReasonCode;
     ///
     /// assert_eq!(ReasonCode::from_discriminant(0), Some(ReasonCode::Converted));
-    /// assert_eq!(ReasonCode::from_discriminant(9), Some(ReasonCode::ParseTimeout));
+    /// assert_eq!(ReasonCode::from_discriminant(9), Some(ReasonCode::Timeout));
     /// assert_eq!(ReasonCode::from_discriminant(255), None);
     /// ```
     pub fn from_discriminant(value: u32) -> Option<Self> {
@@ -358,20 +425,28 @@ impl ReasonCode {
             1 => Some(ReasonCode::SkippedAccept),
             2 => Some(ReasonCode::SkippedNoAccept),
             3 => Some(ReasonCode::SkippedConditional),
-            4 => Some(ReasonCode::FailedDecompression),
+            4 => Some(ReasonCode::DecompressionError),
             5 => Some(ReasonCode::DecompressionBudgetExceeded),
             6 => Some(ReasonCode::DecompressionFormatError),
             7 => Some(ReasonCode::DecompressionTruncatedInput),
             8 => Some(ReasonCode::DecompressionIoError),
-            9 => Some(ReasonCode::ParseTimeout),
-            10 => Some(ReasonCode::ParseBudgetExceeded),
-            11 => Some(ReasonCode::ReplayBufferError),
+            9 => Some(ReasonCode::Timeout),
+            10 => Some(ReasonCode::BudgetExceeded),
+            11 => Some(ReasonCode::ReplayError),
             12 => Some(ReasonCode::SkippedAcceptReject),
-            13 => Some(ReasonCode::FfiCallError),
+            13 => Some(ReasonCode::FfiPanic),
             14 => Some(ReasonCode::NotEligible),
             15 => Some(ReasonCode::Disabled),
             16 => Some(ReasonCode::FailedOpen),
             17 => Some(ReasonCode::FailedClosed),
+            18 => Some(ReasonCode::ConversionError),
+            19 => Some(ReasonCode::MemoryBudgetExceeded),
+            20 => Some(ReasonCode::Overload),
+            21 => Some(ReasonCode::InvalidDynconf),
+            22 => Some(ReasonCode::DegradedSnapshot),
+            23 => Some(ReasonCode::HeaderPlanApplyError),
+            24 => Some(ReasonCode::StreamingMidFlightError),
+            25 => Some(ReasonCode::BypassNoTransform),
             _ => None,
         }
     }
@@ -481,40 +556,23 @@ mod tests {
         }
     }
 
-    /// Verify that every variant in ALL has a unique metric key.
+    /// Verify that all string representations are lowercase snake_case.
     #[test]
-    fn test_metric_keys_unique() {
-        let mut seen = HashSet::new();
-        for rc in &ALL {
-            let k = rc.metric_key();
-            assert!(seen.insert(k), "Duplicate metric key '{}' for {:?}", k, rc);
-        }
-    }
-
-    /// Verify that all string representations are uppercase snake_case.
-    #[test]
-    fn test_strings_are_uppercase_snake_case() {
+    fn test_strings_are_lowercase_snake_case() {
+        let re = regex::Regex::new(r"^[a-z][a-z0-9_]*$").unwrap();
         for rc in &ALL {
             let s = rc.as_str();
             assert!(!s.is_empty(), "{:?} has empty string", rc);
-            for ch in s.chars() {
-                assert!(
-                    ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_',
-                    "String '{}' for {:?} contains invalid char '{}'",
-                    s,
-                    rc,
-                    ch
-                );
-            }
             assert!(
-                s.chars().next().unwrap().is_ascii_uppercase(),
-                "String '{}' must start with uppercase letter",
-                s
+                re.is_match(s),
+                "String '{}' for {:?} does not match lowercase snake_case pattern",
+                s,
+                rc
             );
         }
     }
 
-    /// Verify that all metric keys follow Prometheus naming conventions.
+    /// Verify that metric keys follow Prometheus naming conventions.
     #[test]
     fn test_metric_keys_prometheus_format() {
         for rc in &ALL {
@@ -539,6 +597,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Verify that exactly 5 unified metric families are used.
+    #[test]
+    fn test_metric_keys_unified_families() {
+        let mut families: HashSet<&str> = HashSet::new();
+        for rc in &ALL {
+            families.insert(rc.metric_key());
+        }
+        assert_eq!(
+            families.len(),
+            5,
+            "Expected exactly 5 unified metric families, got {:?}",
+            families
+        );
+        assert!(families.contains("markdown_conversions_total"));
+        assert!(families.contains("markdown_skipped_total"));
+        assert!(families.contains("markdown_errors_total"));
+        assert!(families.contains("markdown_failed_open_total"));
+        assert!(families.contains("markdown_failed_closed_total"));
     }
 
     /// Verify round-trip: discriminant → from_discriminant → same variant.

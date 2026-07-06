@@ -51,10 +51,10 @@ Upstream response
 
 The full-buffer decompression path enforces the `markdown_decompress_max_size`
 budget. If decompressed output exceeds this limit, decompression terminates
-immediately and the configured `markdown_on_error` policy applies:
+immediately and the configured `markdown_error_policy` policy applies:
 
 - **pass** (default): original compressed response served to client unchanged.
-- **reject**: 502 Bad Gateway returned.
+- **fail_closed**: 502 Bad Gateway returned.
 
 This prevents decompression bombs from exhausting worker memory regardless of
 whether the response would have been a streaming or full-buffer candidate.
@@ -79,7 +79,7 @@ uncompressed responses (or operators configure `proxy_set_header
 Accept-Encoding ""` to disable upstream compression), so this routing covers
 the common case without risk.
 
-True streaming decompression is planned for a future 0.8.x release once the
+True streaming decompression is planned for a future release once the
 incremental decompression state machine is validated against the same safety
 properties.
 

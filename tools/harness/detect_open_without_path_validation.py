@@ -452,6 +452,11 @@ def _is_safe_attr_expr(
 
 _OPEN_CTOR_NAMES = {"open"}
 
+# Path methods that read/write file content — same trust boundary as open().
+# write_text / read_text / write_bytes / read_bytes all accept a path as the
+# receiver and must be validated the same way.
+_PATH_IO_METHODS = {"write_text", "read_text", "write_bytes", "read_bytes"}
+
 
 def _is_open_call(node: ast.Call) -> bool:
     """Return True if *node* is a builtin ``open(...)`` or a
@@ -463,8 +468,25 @@ def _is_open_call(node: ast.Call) -> bool:
     return isinstance(func, ast.Attribute) and func.attr in _OPEN_CTOR_NAMES
 
 
+def _is_path_io_call(node: ast.Call) -> bool:
+    """Return True if *node* is a Path IO method call.
+
+    Covers ``p.write_text(...)``, ``p.read_text(...)``,
+    ``p.write_bytes(...)``, ``p.read_bytes(...)`` — same trust
+    boundary as ``open()``.
+    """
+    func = node.func
+    return isinstance(func, ast.Attribute) and func.attr in _PATH_IO_METHODS
+
+
 _OPEN_DETAIL_TEMPLATE = (
     "open({expr}) — path not passed through "
+    "validate_read_path() / validate_write_path_within_root() "
+    "/ _resolve_repo_write_path()"
+)
+
+_PATH_IO_DETAIL_TEMPLATE = (
+    "{method}({expr}) — path not passed through "
     "validate_read_path() / validate_write_path_within_root() "
     "/ _resolve_repo_write_path()"
 )
@@ -476,6 +498,15 @@ def _build_open_finding(
     """Format a single open()-validation finding line."""
     level = "ERROR" if strict else "WARNING"
     detail = _OPEN_DETAIL_TEMPLATE.format(expr=expr_str)
+    return f"  {level}   {rel}:{lineno} — {detail}"
+
+
+def _build_path_io_finding(
+    rel: str, lineno: int, method: str, expr_str: str, strict: bool,
+) -> str:
+    """Format a single Path IO method validation finding line."""
+    level = "ERROR" if strict else "WARNING"
+    detail = _PATH_IO_DETAIL_TEMPLATE.format(method=method, expr=expr_str)
     return f"  {level}   {rel}:{lineno} — {detail}"
 
 
@@ -500,26 +531,64 @@ def _is_os_open_dir_fd(func: ast.AST, node: ast.Call) -> bool:
 
 
 def _resolve_path_arg(node: ast.Call) -> ast.expr | None:
-    """Return the expression that supplies the path for an open() call.
+    """Return the expression that supplies the path for an open() or Path IO call.
 
-    For method-style opens (``p.open()``) the path is the receiver.
+    For method-style calls (``p.open()``, ``p.write_text(...)``,
+    ``p.read_text(...)``) the path is the receiver.
     For builtin ``open(...)`` the path is the first positional argument.
     Returns ``None`` when no path argument can be determined.
     """
     func = node.func
-    is_method_open = (
-        isinstance(func, ast.Attribute)
-        and func.attr == "open"
-        and not (
+    if isinstance(func, ast.Attribute):
+        attr = func.attr
+        # Path IO methods: receiver IS the path
+        if attr in _PATH_IO_METHODS:
+            return func.value
+        # Method-style open: receiver IS the path (unless os.open)
+        if attr == "open" and not (
             isinstance(func.value, ast.Name)
             and func.value.id == "os"
-        )
-    )
-    if is_method_open:
-        return func.value
+        ):
+            return func.value
     if node.args:
         return node.args[0]
     return None
+
+
+def _check_single_call(
+    node: ast.Call,
+    validated_vars: dict[str, set[str]],
+    hardcoded_vars: set[str],
+    rel: str,
+    strict: bool,
+    parent_map: dict[int, ast.AST],
+) -> tuple[str | None, str | None]:
+    """Check one Call node; return (error, warning) — at most one non-None."""
+    is_open = _is_open_call(node)
+    is_path_io = _is_path_io_call(node)
+    if not is_open and not is_path_io:
+        return None, None
+
+    if is_open and _is_os_open_dir_fd(node.func, node):
+        return None, None
+
+    path_arg = _resolve_path_arg(node)
+    if path_arg is None:
+        return None, None
+
+    scope = _find_scope(node, parent_map)
+    if _is_safe_path_expr(path_arg, validated_vars, hardcoded_vars, scope, rel):
+        return None, None
+
+    if is_path_io:
+        method = node.func.attr  # type: ignore[attr-defined]
+        finding = _build_path_io_finding(rel, node.lineno, method, _unparse(path_arg), strict)
+        return None, finding  # Path IO always advisory
+    else:
+        finding = _build_open_finding(rel, node.lineno, _unparse(path_arg), strict)
+        if strict:
+            return finding, None
+        return None, finding
 
 
 def _find_open_calls(
@@ -529,10 +598,11 @@ def _find_open_calls(
     rel: str,
     strict: bool,
 ) -> tuple[list[str], list[str]]:
-    """Find all open() calls and classify their path argument.
+    """Find all open() and Path IO calls and classify their path argument.
 
-    Detects both builtin ``open(...)`` and ``Path(...).open(...)`` /
-    ``some_var.open(...)``.
+    Detects builtin ``open(...)``, ``Path(...).open(...)``,
+    ``p.write_text(...)``, ``p.read_text(...)``, ``p.write_bytes(...)``,
+    and ``p.read_bytes(...)``.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -540,26 +610,15 @@ def _find_open_calls(
     parent_map = _build_parent_map(tree)
 
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not _is_open_call(node):
+        if not isinstance(node, ast.Call):
             continue
-
-        if _is_os_open_dir_fd(node.func, node):
-            continue
-
-        path_arg = _resolve_path_arg(node)
-        if path_arg is None:
-            continue
-
-        scope = _find_scope(node, parent_map)
-
-        if _is_safe_path_expr(path_arg, validated_vars, hardcoded_vars, scope, rel):
-            continue
-
-        finding = _build_open_finding(rel, node.lineno, _unparse(path_arg), strict)
-        if strict:
-            errors.append(finding)
-        else:
-            warnings.append(finding)
+        err, wrn = _check_single_call(
+            node, validated_vars, hardcoded_vars, rel, strict, parent_map,
+        )
+        if err:
+            errors.append(err)
+        if wrn:
+            warnings.append(wrn)
 
     return errors, warnings
 

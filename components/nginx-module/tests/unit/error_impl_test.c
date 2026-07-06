@@ -15,6 +15,37 @@
 
 #include "../src/ngx_http_markdown_error.c"
 
+uint8_t
+markdown_classify_error_code(uint32_t error_code)
+{
+    switch (error_code) {
+    case ERROR_PARSE:
+    case ERROR_ENCODING:
+    case ERROR_INVALID_INPUT:
+    case ERROR_DECOMPRESSION_FORMAT_ERROR:
+    case ERROR_DECOMPRESSION_TRUNCATED_INPUT:
+    case ERROR_DECOMPRESSION_IO_ERROR:
+    case ERROR_STREAMING_FALLBACK:
+        return 0; /* ConversionError */
+
+    case ERROR_TIMEOUT:
+    case ERROR_PARSE_TIMEOUT:
+        return 1; /* Timeout */
+
+    case ERROR_MEMORY_LIMIT:
+    case ERROR_BUDGET_EXCEEDED:
+    case ERROR_DECOMPRESSION_BUDGET_EXCEEDED:
+    case ERROR_PARSE_BUDGET_EXCEEDED:
+        return 2; /* MemoryBudgetExceeded */
+
+    case ERROR_POST_COMMIT:
+        return 9; /* StreamingMidFlightError */
+
+    default:
+        return 3; /* FfiPanic/system fallback for unknown test inputs */
+    }
+}
+
 
 /*
  * Verify all base (non-streaming) FFI-defined error codes are
@@ -59,8 +90,8 @@ test_classify_all_defined_codes(void)
  * Tests ERROR_BUDGET_EXCEEDED (6), ERROR_STREAMING_FALLBACK (7),
  * and ERROR_POST_COMMIT (8).
  *
- * Expected: BUDGET_EXCEEDED -> RESOURCE_LIMIT, STREAMING_FALLBACK -> SYSTEM,
- * POST_COMMIT -> CONVERSION.
+ * Expected: BUDGET_EXCEEDED -> RESOURCE_LIMIT,
+ * STREAMING_FALLBACK -> CONVERSION, POST_COMMIT -> SYSTEM.
  */
 static void
 test_classify_streaming_specific_codes(void)
@@ -72,12 +103,12 @@ test_classify_streaming_specific_codes(void)
         "ERROR_BUDGET_EXCEEDED (6) -> RESOURCE_LIMIT (budget is a resource limit)");
 
     TEST_ASSERT(
-        ngx_http_markdown_classify_error(ERROR_STREAMING_FALLBACK) == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
-        "ERROR_STREAMING_FALLBACK (7) -> SYSTEM (engine downgrade)");
+        ngx_http_markdown_classify_error(ERROR_STREAMING_FALLBACK) == NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
+        "ERROR_STREAMING_FALLBACK (7) -> CONVERSION (engine downgrade)");
 
     TEST_ASSERT(
-        ngx_http_markdown_classify_error(ERROR_POST_COMMIT) == NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
-        "ERROR_POST_COMMIT (8) -> CONVERSION (post-commit is a conversion failure)");
+        ngx_http_markdown_classify_error(ERROR_POST_COMMIT) == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+        "ERROR_POST_COMMIT (8) -> SYSTEM (post-commit terminates connection)");
 
     TEST_PASS("Streaming-specific error codes classified correctly");
 }

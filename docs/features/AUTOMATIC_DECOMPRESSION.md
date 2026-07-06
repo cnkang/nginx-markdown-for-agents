@@ -20,10 +20,10 @@ Automatic decompression is the built-in fallback path for this scenario.
     (RFC 1951 only) for compatibility with older servers (Microsoft IIS,
     older Java servlets). The streaming path supports only zlib-wrapped
     deflate; raw deflate responses in streaming mode will trigger the
-    configured `markdown_on_error` strategy (fail-open by default).
+    the configured `markdown_error_policy` strategy (fail-open by default).
 - Supports `br` when Brotli support is compiled in.
 - Uses a fast path for uncompressed responses (no decompression work).
-- Applies `markdown_on_error` strategy on decompression failures.
+- Applies `markdown_error_policy` strategy on decompression failures.
 
 ## Request Flow
 
@@ -57,9 +57,9 @@ Decompression failures (corrupt data, resource limits, system errors):
 
 - Categorized and logged.
 - Counted in decompression metrics.
-- Controlled by `markdown_on_error`:
+- Controlled by `markdown_error_policy`:
   - `pass` returns the original eligible HTML response (fail-open).
-  - `reject` propagates an error response (fail-closed).
+  - `fail_closed` propagates an error response (fail-closed).
 
 ## Safety and Resource Controls
 
@@ -117,7 +117,7 @@ exhaustion from highly compressible (zip-bomb) upstream content.
 
 When decompressed output exceeds the budget, decompression terminates
 immediately. All auxiliary buffers are freed on every exit path.
-The `markdown_on_error` policy determines whether the original compressed
+The `markdown_error_policy` policy determines whether the original compressed
 response is served (fail-open) or an error is returned (fail-closed).
 
 ## Decompression Error Categories (v0.7.0)

@@ -123,6 +123,43 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 
 如果行为不符合预期，请查看安装指南里的 [Troubleshooting](docs/guides/INSTALLATION.md#10-troubleshooting) 小节。
 
+如果你想直接查看面向生产环境的完整配置示例，参见
+[生产示例](examples/production/) 目录（覆盖 balanced、strict_cache、
+streaming_first 三种 profile）。
+
+## Profiles（v0.9.0+）
+
+生产部署推荐使用 `markdown_profile` 指令，一行配置即可应用一组经过测试的默认值，
+无需逐一设置每个指令：
+
+```nginx
+http {
+    markdown_profile balanced;
+
+    server {
+        listen 80;
+        location /docs/ {
+            markdown_filter on;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+三个可用 profile：
+
+| Profile | 适用场景 |
+|---------|----------|
+| `balanced` | 通用部署（推荐起步选择） |
+| `strict_cache` | CDN / 缓存代理，需要完整 ETag 支持 |
+| `streaming_first` | AI Agent 工作负载，面向大文档 |
+
+合并优先级：显式指令 > profile 默认值 > 内置默认值。你可以在同一
+context 中用显式指令覆盖 profile 的任何非强制字段。
+
+完整的 profile 参考、默认值表和冲突规则见
+[docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md#profiles)。
+
 ## 针对特定 Bot 返回 Markdown
 
 大多数 AI 爬虫不会发送 `Accept: text/markdown`，它们使用和浏览器类似的 Accept 头。你可以用 NGINX 的 `map` 指令根据 User-Agent 改写 Accept 头，让匹配的 bot 自动收到 Markdown，而不需要 bot 自身做任何改变。
@@ -210,7 +247,7 @@ Cloudflare 的 [Markdown for Agents](https://blog.cloudflare.com/markdown-for-ag
 | 自动解压 | 支持 gzip、brotli、deflate 上游响应 |
 | 缓存友好变体 | 支持 ETag 与条件请求 |
 | 失败策略可控 | 可选失败透传或失败拦截 |
-| 资源限制 | 通过 `markdown_max_size` 等 NGINX 指令配置大小与超时上限 |
+| 资源限制 | 通过 `markdown_limits` 配置大小、超时、流式缓冲与并发上限 |
 | 安全加固 | 校验输出链接和 base URL，默认拒绝不安全的 forwarded-host 输入，限制解析/解压资源，并避免执行外部内容 |
 | 可选元数据 | 支持 token 估算与 YAML front matter |
 | 指标端点 | 提供转换计数等运行指标 |
@@ -380,6 +417,7 @@ make supply-chain
 | 查看部署示例 | [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md) |
 | 运维与排障 | [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md) |
 | 0.7.x → 0.8.0 升级 | [docs/guides/MIGRATION-0.8.md](docs/guides/MIGRATION-0.8.md) |
+| 0.8.x → 0.9.0 升级 | [docs/guides/MIGRATION-0.9.md](docs/guides/MIGRATION-0.9.md) |
 | 流式转换上线指南 | [docs/guides/streaming-rollout-cookbook.md](docs/guides/streaming-rollout-cookbook.md) |
 | 报告漏洞或查看安全支持范围 | [SECURITY.md](SECURITY.md) |
 | 了解架构与设计取舍 | [docs/architecture/README.md](docs/architecture/README.md) |
@@ -447,40 +485,20 @@ Makefile               顶层构建与测试入口
 2. 运行 `make harness-check`
 3. 在结束更广义的文档或 release-gate 改动前，运行 `make harness-check-full`
 
-## v0.8.0 新特性
+## v0.9.0 新特性
 
-v0.8.0 引入真正的流式转换——面向大响应和 chunked 响应的有界内存 HTML-to-Markdown 处理：
+v0.9.0 是**破坏性版本**——1.0.0 API 冻结前最后一次破坏性变更机会：
 
-- **双引擎模型** — 自 v0.5.0 起默认的全缓冲转换仍用于典型响应。新的流式引擎以有界内存处理大响应或 chunked 响应。`markdown_streaming_engine` 指令控制使用 `off`、`on` 还是 `auto`。
-- **`auto` 模式（默认）** — 设置为 `auto` 时，模块会自动把符合条件的大响应或 chunked 响应路由到流式引擎，其余响应保持全缓冲。**注意：**默认的 `markdown_conditional_requests full_support` 会阻止流式激活，因为完整 ETag 支持需要全缓冲路径。要在 `auto` 模式启用流式，请设置 `markdown_conditional_requests if_modified_since_only` 或 `disabled`。
-- **有界内存转换** — 流式引擎根据 `markdown_stream_flush_min`（大小阈值）分块 flush 已转换的 Markdown，无论响应多大都保持有界内存。
-- **提交前安全回退** — 如果转换错误发生在流式引擎向客户端提交输出之前，会回退为返回原始 HTML 响应，从而保持流式路径的 fail-open 语义。
-- **新流式控制项** — `markdown_stream_threshold`、`markdown_stream_precommit_buffer`、`markdown_stream_flush_min` 和 `markdown_stream_excluded_types` 让阈值选择、replay buffering、flush 和 content-type 排除规则显式化。
-- **破坏性变更：v0.6.x 兼容层已移除** — `markdown_streaming_auto_threshold` 已移除（非弃用），`nginx -t` 会因 "unknown directive" 报错。请改用 `markdown_stream_threshold`。`markdown_streaming_engine` 不再接受 `$variable`，仅支持 `off`/`auto`/`on`。
+- **Reason code 命名**：所有 reason code 字符串从 UPPERCASE_SNAKE_CASE 改为 lowercase_snake_case（如 `PARSE_TIMEOUT` → `timeout`、`FFI_CALL_ERROR` → `ffi_panic`）。影响 Prometheus 标签、结构化日志和诊断端点。
+- **指令移除/改名**：`markdown_on_error` → `markdown_error_policy`；`markdown_trust_forwarded_headers` → `markdown_trusted_proxies <CIDR>...`；`markdown_on_wildcard` → `markdown_accept wildcard`。旧名称在 `nginx -t` 时会被拒绝。
+- **Profile 系统**：`markdown_profile` 一行配置应用生产默认值（`balanced`、`strict_cache`、`streaming_first`）。
+- **并发保护**：`markdown_limits max_inflight=N` 提供每 worker 并发上限保护，reason code 为 `overload`。`max_inflight=0` 表示无限制。
+- **指标合并**：按 reason 分别的计数器替换为 5 个统一指标族 + `reason` 标签。标签白名单防止高基数序列。
+- **Cache-Control no-transform bypass**：带 `Cache-Control: no-transform` 的条件请求跳过转换，返回原始 HTML（reason code 为 `bypass_no_transform`）。
+- **诊断 schema v1**：版本化 JSON 输出，含结构化分区（decision、inflight、error、streaming、conditional、etag）。
+- **`nginx-markdown-doctor` 工具**：完整诊断检查（配置快照、模块健康、FFI 版本对齐、profile smoke）。
 
-0.7.x 升级指引见 [迁移指南](docs/guides/MIGRATION-0.8.md)。
-生产 rollout 步骤见 [Streaming Rollout Cookbook](docs/guides/streaming-rollout-cookbook.md)。
-
-## v0.7.0 新特性
-
-v0.7.0 是一个正确性、分发和可运维性版本：
-
-- **有界解压** — `markdown_decompress_max_size` 独立限制解压输出大小，防止 zip bomb 攻击（错误码 9: DecompressionBudgetExceeded）
-- **Accept 协商** — Rust 侧 RFC 9110 §12.5.1 q-value 比较（含 §12.4.2 quality value 语义），在 `text/markdown` 和 `text/html` 之间决定是否转换
-- **解析超时与预算** — `markdown_parse_timeout`（默认 30s）和 `markdown_parser_budget`（默认 64m）防止解析失控（错误码 10、11）
-- **DEB/RPM 包分发** — 预构建包覆盖 Ubuntu 22.04/24.04、Debian 12、AlmaLinux 9、Amazon Linux 2023，支持 amd64/arm64，并校验 canonical install layout
-- **Kubernetes 部署示例** — Helm chart、manifest 和 Ingress Controller 自定义镜像构建路径；默认适配 stock NGINX 镜像，启用模块时需要包含模块的镜像和显式 `markdown.loadModule`
-- **运行时诊断** — `/nginx-markdown/diagnostics` 端点暴露配置快照、最近决策和指标
-- **Dynconf dry-run 与回滚** — 验证配置变更但不应用；失败时回滚到 last-known-good
-
-其他变更：
-
-- P0 运行时正确性：NGX_AGAIN pending chain、fail-open 去重、安全输出排序
-- Rust 条件请求模块（If-None-Match、If-Modified-Since）
-- Rust 决策引擎与 reason code
-- Rust 响应头计划模块
-- Rust URL 控制字符验证与 link 转义
-- FFI ABI 布局验证与 header 漂移检测
+0.8.x 升级指引见 [迁移指南](docs/guides/MIGRATION-0.9.md)。
 
 ## v0.8.3 新特性
 
@@ -511,9 +529,44 @@ v0.8.2 是一个加固 0.8.x 流式线路的补丁版本：
 
 完整变更列表见 [CHANGELOG.md](CHANGELOG.md)。
 
+## v0.8.0 新特性
+
+v0.8.0 引入真正的流式转换——面向大响应和 chunked 响应的有界内存 HTML-to-Markdown 处理：
+
+- **双引擎模型** — 自 v0.5.0 起默认的全缓冲转换仍用于典型响应。新的流式引擎以有界内存处理大响应或 chunked 响应。`markdown_streaming_engine` 指令控制使用 `off`、`on` 还是 `auto`。
+- **`auto` 模式（默认）** — 设置为 `auto` 时，模块会自动把符合条件的大响应或 chunked 响应路由到流式引擎，其余响应保持全缓冲。**注意（v0.8.0）：**默认的 `markdown_conditional_requests full_support` 会阻止流式激活，因为完整 ETag 支持需要全缓冲路径。**0.9.0 变更：**`markdown_conditional_requests` 已被 `markdown_cache_validation` 替换，默认值为 `ims_only`（built-in 和 `balanced` profile 均如此），允许 `auto` 模式启用流式。如需完整 ETag 支持，请使用 `markdown_cache_validation full`（`strict_cache` profile 默认值）。
+- **有界内存转换** — 流式引擎根据 `markdown_stream_flush_min`（大小阈值）分块 flush 已转换的 Markdown，无论响应多大都保持有界内存。
+- **提交前安全回退** — 如果转换错误发生在流式引擎向客户端提交输出之前，会回退为返回原始 HTML 响应，从而保持流式路径的 fail-open 语义。
+- **新流式控制项** — `markdown_stream_threshold`、`markdown_stream_precommit_buffer`、`markdown_stream_flush_min` 和 `markdown_stream_excluded_types` 让阈值选择、replay buffering、flush 和 content-type 排除规则显式化。
+- **破坏性变更：v0.6.x 兼容层已移除** — `markdown_streaming_auto_threshold` 已移除（非弃用），`nginx -t` 会因 "unknown directive" 报错。请改用 `markdown_stream_threshold`。`markdown_streaming_engine` 不再接受 `$variable`，仅支持 `off`/`auto`/`on`。
+
+0.7.x 升级指引见 [迁移指南](docs/guides/MIGRATION-0.8.md)。
+生产 rollout 步骤见 [Streaming Rollout Cookbook](docs/guides/streaming-rollout-cookbook.md)。
+
+## v0.7.0 新特性
+
+v0.7.0 是一个正确性、分发和可运维性版本：
+
+- **有界解压** — `markdown_decompress_max_size` 独立限制解压输出大小，防止 zip bomb 攻击（错误码 9: DecompressionBudgetExceeded）
+- **Accept 协商** — Rust 侧 RFC 9110 §12.5.1 q-value 比较（含 §12.4.2 quality value 语义），在 `text/markdown` 和 `text/html` 之间决定是否转换
+- **解析超时与预算** — `markdown_parse_timeout`（默认 30s）和 `markdown_parser_budget`（默认 64m）防止解析失控（错误码 10、11）
+- **DEB/RPM 包分发** — 预构建包覆盖 Ubuntu 22.04/24.04、Debian 12、AlmaLinux 9、Amazon Linux 2023，支持 amd64/arm64，并校验 canonical install layout
+- **Kubernetes 部署示例** — Helm chart、manifest 和 Ingress Controller 自定义镜像构建路径；默认适配 stock NGINX 镜像，启用模块时需要包含模块的镜像和显式 `markdown.loadModule`
+- **运行时诊断** — `/nginx-markdown/diagnostics` 端点暴露配置快照、最近决策和指标
+- **Dynconf dry-run 与回滚** — 验证配置变更但不应用；失败时回滚到 last-known-good
+
+其他变更：
+
+- P0 运行时正确性：NGX_AGAIN pending chain、fail-open 去重、安全输出排序
+- Rust 条件请求模块（If-None-Match、If-Modified-Since）
+- Rust 决策引擎与 reason code
+- Rust 响应头计划模块
+- Rust URL 控制字符验证与 link 转义
+- FFI ABI 布局验证与 header 漂移检测
+
 ## 路线方向
 
-当前版本线 (0.8.x；最新 patch 0.8.3)：
+当前版本线 (0.9.x；最新 patch 0.9.0)：
 
 - 双引擎流式模型：全缓冲默认路径 + 面向大响应/chunked 响应的流式引擎
 - `auto` 模式作为默认 `markdown_streaming_engine` 设置
@@ -571,6 +624,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.0 | 2026-07-02 | Kang | Doc review: 新增 v0.9.0 新特性段落、MIGRATION-0.9 链接、reason code 数量修正、CHANGELOG 同步分支提交 |
 | 0.8.3 | 2026-06-26 | Kang | v0.8.3 收口：流式状态机修复、ExitMany 批量解上下文、解压缓冲区内存安全、快照容量提升、FFI Box::into_raw 修复、完整发布门禁验证 |
 | 0.8.2 | 2026-06-25 | Kang | v0.8.2 发布：流式解压加固、FFI panic 安全、隐式闭合正确性、解压预算强制执行、安全扫描范围限定、版本线文档收口 |
 | 0.8.0 | 2026-06-16 | Codex | 同步中英文 README 结构、Quick Start 示例、本地测试命令、平台支持标题和 v0.8.0 路线说明 |
@@ -578,4 +632,4 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 | 0.7.0 | 2026-06-03 | Kang | P0 正确性修复、Rust-first 架构、独立解压预算、Accept 协商、解析超时/预算、DEB/RPM 包分发、K8s 示例、运行时诊断、dynconf dry-run/回滚 |
 | 0.6.3 | 2026-05-14 | Kang | 版本号更新至 0.6.3，并补充 release matrix 与发布前最终加固说明 |
 | 0.6.2 | 2026-05-08 | Kang | 版本号更新至 0.6.2 以配合发布 |
-| 0.5.0 | 2026-04-21 | docs-standardization | Synchronized Quick Start steps between English and Chinese versions; added update tracking section |
+| 0.5.0 | 2026-04-21 | docs-standardization | 同步中英文 README 快速上手步骤；新增更新追踪段落 |

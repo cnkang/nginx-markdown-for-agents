@@ -17,17 +17,20 @@
     "p50-latency-ms": {
       "warning-pct": 15,
       "blocking-pct": 30,
-      "direction": "lower-is-better"
+      "direction": "lower-is-better",
+      "pass-delta-ms": 1.0
     },
     "p95-latency-ms": {
       "warning-pct": 20,
       "blocking-pct": 40,
-      "direction": "lower-is-better"
+      "direction": "lower-is-better",
+      "pass-delta-ms": 1.0
     },
     "p99-latency-ms": {
       "warning-pct": 20,
       "blocking-pct": 40,
-      "direction": "lower-is-better"
+      "direction": "lower-is-better",
+      "pass-delta-ms": 1.0
     }
   }
 }

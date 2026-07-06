@@ -92,7 +92,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 14 | testing-coverage | Every bug fix needs regression test; cross-boundary and malformed-input cases; parameterized tests must consume inputs |
 | 15 | ffi-crosslang | Rust FFI changes → update all boundaries; prefer helpers over literal init; read before free |
 | 16 | testing-coverage | No dead stores; loop vars in for; every var consumed by TEST_ASSERT |
-| 17 | complexity | Keep function complexity at/below threshold; extract helpers; prefer early-return |
+| 17 | complexity | Keep function complexity at/below threshold; extract helpers; prefer early-return; run `make complexity-check` for C/Rust/Python/Shell |
 | 18 | shell | case has default; `[[` over `[`; messages to stderr; explicit return; merge nested if; usage matches flags |
 | 19 | python-tooling | Binary prerequisites validate executability; harness checks affect pass/fail |
 | 20 | testing-coverage | Don't mark tasks complete without verification; generate artifacts and verify shape |
@@ -177,7 +177,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - NGX_AGAIN resume honors chain ownership: module-owned chains persist; downstream-owned chains drain with NULL; last_buf never overwrites pending data [1]
 - Fail-open return codes correct; replay buffer init/append failure → precommit_error [2,38]
 - failopen_completed prevents duplicate finalize; failopen_count after downstream OK [38]
-- UTF-8 tails preserved across chunk boundaries; flush at EOF [4]
+- UTF-8 tails preserved across chunk boundaries; flush at EOF; streaming tokenizer discard_bom=false, strip stream-start BOM in converter [4]
 - Streaming decompression uses raw deflate; truncated streams rejected; test payloads match production format [44]
 - Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return [47]
 - Auth Cache-Control commit failure routes through precommit_error; multi-header aggregation checks any_public before has_private [51]
@@ -421,6 +421,7 @@ Follow evidence-first verification (no completion claim without fresh command ou
 - Docs/tools changes: `make docs-check`
 - Release-gate tooling: `make release-gates-check`
 - Release gates 0.8.x: `make release-gates-check-08x` (canonical 0.8.x patch-line entry; `release-gates-check-080` is the compatible original name)
+- Release gates 0.9.0: `make release-gates-check-090` (additive on 0.8.0; production examples, gate validator)
 - Rust converter/streaming changes: `make test-rust`
 - Rust example/benchmark changes: `cargo check --all-targets` in the crate
   directory to catch edition-specific errors (examples are only compiled
@@ -434,6 +435,7 @@ Follow evidence-first verification (no completion claim without fresh command ou
   `PYTHONPATH=. python3 tools/harness/detect_python_complexity.py`
   and `python3 -m pytest tools/harness/tests/test_detect_python_complexity.py -q --tb=short`
   (Rule 17)
+- C, Rust, Python, or Shell source changes: `make complexity-check` (Rule 17)
 - C module volatile/atomic usage changes: `bash tools/harness/detect_volatile_atomic.sh` (Rule 42)
 - Workflow, shell, secret-scan, Semgrep, or Rust dependency policy changes:
   `make security-static` (Rule 48)
@@ -572,3 +574,5 @@ remediation:
 | 0.8.2 | 2026-06-24 | Kang | Strengthened Rule 8 with ngx_log_debugN / ngx_log_errorN argument count matching; strengthened Rule 15 with fail-closed fallback initialization and atomic write after catch pattern; strengthened Rule 24 with NOSONAR annotation discipline (reason + rule ref required, bare NOSONAR forbidden, only for NGINX API contract); strengthened Rule 46 with zero-length value boundary handling (value_len==0 → set NULL/0 not zero-length pool alloc); fixed detect_open_without_path_validation.py `_expr_derives_from_hardcoded` to ignore Path constructor function names and fix `_maybe_propagate_path_wrapper` target tracking; fixed detect_cwe22_paths.py to distinguish builtin open() from .open() method calls and keyword args from positional args; added SMALL_BLOCK_THRESHOLD=7 to detect_duplicate_code.py to downgrade short duplicates to advisory; narrowed FFI_VALIDATION_KEYWORDS to remove overly broad NULL/validate/guard; detect_forward_decl_order.py and detect_duplicate_code.py now validate own args.directory via validate_read_path |
 | 0.8.2 | 2026-06-24 | Kang | Strengthened Rule 31 with semantic-equivalence requirement for duplicate consolidation (branches with distinct error classification must not be collapsed); strengthened Rule 44 with Z_OK vs Z_BUF_ERROR inflate semantics distinction; strengthened Rule 33 with ValueError propagation trap for validate_read_path try/except; added detect_ngx_log_arg_count.sh (CI gate for ngx_log_debugN/errorN suffix-digit/argument-count mismatch); added detect_nosonar_discipline.sh (CI gate for bare NOSONAR without reason); refactored detect_cwe190_casts.sh allowlists from line-number-based to pattern-based matching to survive code edits that shift line numbers (26 stale warnings eliminated) |
 | 0.8.3 | 2026-06-26 | Kang | Rules 52–55: derived-state reconciliation on multi-context drain (streaming), FFI fat-pointer safety and empty-result NULL convention, release artifact path traversal protection, version consistency; updated Rule 15 (initialization-before-ownership-transfer), Rule 43 (pool-backed decompression exception); added release-manifest and version-consistency verification families to routing manifest |
+| 0.9.0 | 2026-06-27 | Kang | 0.9.0 release gate target (release-gates-check-090) with production examples validation, gate validator, CI experimental job; additive on 0.8.0 gates |
+| 0.9.0 | 2026-07-03 | Kang | Strengthened Rule 4 for streaming BOM handling: html5ever discard_bom=false, strip stream-start BOM in converter after utf8_tail reassembly, bom_stripped flag deferred for partial 0xEF sequences |

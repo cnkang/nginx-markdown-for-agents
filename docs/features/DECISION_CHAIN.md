@@ -49,7 +49,7 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 | 6 | Content-Type | Is the upstream `Content-Type` header `text/html` (with any charset parameter)? Non-HTML content types are not eligible. | `SKIP_CONTENT_TYPE` |
 | 7 | Response size | Is the response body size within the configured `markdown_memory_budget` limit? Oversized responses are not eligible. | `SKIP_SIZE` |
 | 8 | Auth policy | Is the request authenticated and `markdown_auth_policy` set to `deny`? Authenticated requests are detected through the existing `Authorization` header and auth-cookie checks. | `SKIP_AUTH` |
-| 9 | Accept negotiation | Does the `Accept` header contain `text/markdown`? When `markdown_on_wildcard` is `off` (default), only explicit `text/markdown` triggers conversion. When `on`, `text/*` and `*/*` also qualify. | `SKIP_ACCEPT` |
+| 9 | Accept negotiation | Does the `Accept` header contain `text/markdown`? When `markdown_accept` is `strict` (default), only explicit `text/markdown` triggers conversion. When `wildcard`, `text/*` and `*/*` also qualify. | `SKIP_ACCEPT` |
 | 10 | Conversion attempt | All checks passed. The module attempts HTML-to-Markdown conversion. | _(see outcome determination below)_ |
 
 ## First-Failing-Check Rule
@@ -62,23 +62,23 @@ This behavior is important for operators diagnosing why a request was skipped. T
 
 ## Outcome Determination
 
-When all ten eligibility checks pass (checks 1–10), the module attempts conversion. The outcome depends on whether conversion succeeds and, if it fails, on the `markdown_on_error` configuration:
+When all ten eligibility checks pass (checks 1–10), the module attempts conversion. The outcome depends on whether conversion succeeds and, if it fails, on the `markdown_error_policy` configuration:
 
 ### Success: ELIGIBLE_CONVERTED
 
 Conversion succeeded. The client receives the Markdown representation of the HTML response. The reason code is `ELIGIBLE_CONVERTED` and the request state is CONVERTED.
 
-### Failure with `markdown_on_error pass`: ELIGIBLE_FAILED_OPEN
+### Failure with `markdown_error_policy pass`: ELIGIBLE_FAILED_OPEN
 
-Conversion was attempted but failed (HTML parse error, timeout, resource limit, or system error). Because `markdown_on_error` is set to `pass` (the default), the module serves the original HTML response unchanged. The client is unaffected. The reason code is `ELIGIBLE_FAILED_OPEN` and the request state is FAILED.
+Conversion was attempted but failed (HTML parse error, timeout, resource limit, or system error). Because `markdown_error_policy` is set to `pass` (the default), the module serves the original HTML response unchanged. The client is unaffected. The reason code is `ELIGIBLE_FAILED_OPEN` and the request state is FAILED.
 
 This is the recommended configuration for production rollouts. Conversion failures never break client responses.
 
-### Failure with `markdown_on_error reject`: ELIGIBLE_FAILED_CLOSED
+### Failure with `markdown_error_policy fail_closed`: ELIGIBLE_FAILED_CLOSED
 
-Conversion was attempted but failed. Because `markdown_on_error` is set to `reject`, the module returns a `502 Bad Gateway` error. The reason code is `ELIGIBLE_FAILED_CLOSED` and the request state is FAILED.
+Conversion was attempted but failed. Because `markdown_error_policy` is set to `fail_closed`, the module returns a `502 Bad Gateway` error. The reason code is `ELIGIBLE_FAILED_CLOSED` and the request state is FAILED.
 
-Use `reject` only when you need strict guarantees that clients never receive HTML when they requested Markdown. This is not recommended during initial rollout.
+Use `fail_closed` only when you need strict guarantees that clients never receive HTML when they requested Markdown. This is not recommended during initial rollout.
 
 ## Failure Sub-Classification
 
@@ -90,7 +90,7 @@ When conversion fails (either `ELIGIBLE_FAILED_OPEN` or `ELIGIBLE_FAILED_CLOSED`
 | `FAIL_RESOURCE_LIMIT` | Timeout (`markdown_timeout` exceeded) or memory limit reached |
 | `FAIL_SYSTEM` | Internal or system error (unexpected condition) |
 
-These sub-classification codes appear in decision log entries as additional context. They do not change the primary outcome (`ELIGIBLE_FAILED_OPEN` or `ELIGIBLE_FAILED_CLOSED`), which is determined solely by the `markdown_on_error` setting.
+These sub-classification codes appear in decision log entries as additional context. They do not change the primary outcome (`ELIGIBLE_FAILED_OPEN` or `ELIGIBLE_FAILED_CLOSED`), which is determined solely by the `markdown_error_policy` setting.
 
 ## Request States
 
@@ -143,7 +143,7 @@ The complete mapping from reason codes to eligibility enums, error categories, r
 | `DECOMPRESSION_IO_ERROR` | I/O error during decompression operation; classified as `FAIL_SYSTEM` |
 | `PARSE_TIMEOUT` | Parser execution exceeded `markdown_parse_timeout` (default 30s); classified as `FAIL_RESOURCE_LIMIT` |
 | `PARSE_BUDGET_EXCEEDED` | Parser memory exceeded `markdown_parser_budget` (default 64m); classified as `FAIL_RESOURCE_LIMIT` |
-| `SKIPPED_NO_ACCEPT` | Sub-case of `SKIP_ACCEPT`: no Accept header present and `markdown_on_wildcard` is off |
+| `SKIPPED_NO_ACCEPT` | Sub-case of `SKIP_ACCEPT`: no Accept header present and `markdown_accept` is `strict` |
 | `SKIPPED_CONDITIONAL` | Conditional request matched (If-None-Match / If-Modified-Since) → 304 Not Modified |
 | Delivery vs Decision counter separation | `failopen_count` (delivery) increments only after downstream NGX_OK; decision counter increments on decision regardless of downstream status |
 

@@ -168,7 +168,7 @@ pub struct StreamingOptions {
     /// (token buffer, nesting stack, pending output, charset sniff).
     /// Exceeding this budget causes `feed` to return `ERROR_BUDGET_EXCEEDED`.
     ///
-    /// Populated from the `markdown_streaming_budget` NGINX directive.
+    /// Populated from `markdown_limits streaming_buffer=<size>` (Config V2).
     pub streaming_budget: u64,
 
     /// Flush threshold in bytes (0 = use default threshold).

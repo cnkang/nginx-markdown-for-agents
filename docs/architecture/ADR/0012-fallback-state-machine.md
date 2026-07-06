@@ -23,7 +23,7 @@ Implement a two-phase fallback state machine per RFC 0008 section 3:
 1. **Pre-commit phase**: no Markdown output has been flushed downstream. On
    error, the module MAY replay the original HTML response (fail-open) or
    reject the request (fail-closed), depending on the configured
-   `markdown_on_error` policy.
+   `markdown_error_policy` policy.
 2. **Post-commit phase**: Markdown output has been partially delivered. On
    error, the module MUST NOT attempt to replay the original HTML. The
    response is terminated with whatever Markdown was produced, and the error

@@ -83,12 +83,24 @@ def judge_metric_absolute(
 
 
 def judge_metric_percent(
-    pct_change: float, direction: str, warning_pct: float, blocking_pct: float
+    pct_change: float,
+    direction: str,
+    warning_pct: float,
+    blocking_pct: float,
+    abs_delta: float = 0.0,
+    pass_delta_ms: float | None = None,
 ) -> str:
     """Judge a metric using percentage-based thresholds.
 
     For lower-is-better: positive pct_change = regression.
+
+    When pass_delta_ms is set, absolute deltas below that floor are
+    treated as pass regardless of percentage — prevents false positives
+    on sub-3ms micro-benchmarks where CI runner noise dominates.
     """
+    if pass_delta_ms is not None and abs_delta < pass_delta_ms:
+        return "pass"
+
     if direction == "lower-is-better":
         if pct_change >= blocking_pct:
             return "fail"
@@ -125,12 +137,15 @@ def compare_metric(
             threshold_cfg["blocking-delta"],
         )
     else:
+        abs_delta = abs(compute_delta_absolute(current_val, baseline_val))
         delta = compute_delta_percent(current_val, baseline_val)
         verdict = judge_metric_percent(
             delta,
             direction,
             threshold_cfg["warning-pct"],
             threshold_cfg["blocking-pct"],
+            abs_delta=abs_delta,
+            pass_delta_ms=threshold_cfg.get("pass-delta-ms"),
         )
 
     return {

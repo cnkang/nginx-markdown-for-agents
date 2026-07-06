@@ -139,18 +139,27 @@ ngx_http_markdown_snapshot_str(u_char *p, u_char *last,
 
 
 /*
- * Map on_error enum to string representation.
+ * Map the effective error policy to its Config V2 string representation
+ * (markdown_error_policy pass|fail_closed|status <code>).
+ *
+ * Derived from on_error (pass/reject) and error_status (the reject status
+ * code).  fail_closed is the canonical name for reject with the default 502.
  */
 static const char *
-ngx_http_markdown_on_error_str(ngx_uint_t val)
+ngx_http_markdown_error_policy_str(ngx_uint_t on_error, ngx_uint_t error_status)
 {
-    switch (val) {
-    case NGX_HTTP_MARKDOWN_ON_ERROR_PASS:
+    if (on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
         return "pass";
-    case NGX_HTTP_MARKDOWN_ON_ERROR_REJECT:
-        return "reject";
+    }
+
+    switch (error_status) {
+    case 429:
+        return "status_429";
+    case 503:
+        return "status_503";
+    case 502:
     default:
-        return "unknown";
+        return "fail_closed";
     }
 }
 
@@ -170,6 +179,48 @@ ngx_http_markdown_flavor_str(ngx_uint_t val)
         return "mdx";
     case NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE:
         return "org-mode";
+    default:
+        return "unknown";
+    }
+}
+
+
+/*
+ * Map markdown_accept policy enum to string representation (Config V2, 0.9.0).
+ */
+static const char *
+ngx_http_markdown_accept_policy_str(ngx_uint_t val)
+{
+    switch (val) {
+    case NGX_HTTP_MARKDOWN_ACCEPT_STRICT:
+        return "strict";
+    case NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD:
+        return "wildcard";
+    case NGX_HTTP_MARKDOWN_ACCEPT_FORCE:
+        return "force";
+    default:
+        return "unknown";
+    }
+}
+
+
+/*
+ * Map the effective cache-validation state to its Config V2 string
+ * representation (markdown_cache_validation off|ims_only|full).
+ *
+ * Derived from policy.conditional_requests, which markdown_cache_validation
+ * keeps consistent with policy.generate_etag.
+ */
+static const char *
+ngx_http_markdown_cache_validation_str(ngx_uint_t conditional_requests)
+{
+    switch (conditional_requests) {
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED:
+        return "off";
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE:
+        return "ims_only";
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT:
+        return "full";
     default:
         return "unknown";
     }
@@ -236,23 +287,6 @@ ngx_http_markdown_streaming_engine_str(ngx_uint_t engine)
         return "unknown";
     }
 }
-
-
-/*
- * Map streaming on_error enum to string representation.
- */
-static const char *
-ngx_http_markdown_streaming_on_error_str(ngx_uint_t val)
-{
-    switch (val) {
-    case NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS:
-        return "pass";
-    case NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT:
-        return "reject";
-    default:
-        return "unknown";
-    }
-}
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 
@@ -312,10 +346,11 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     p = ngx_http_markdown_snapshot_msec(p, last,
         "markdown_timeout", conf->timeout, 1);
 
-    /* markdown_on_error */
+    /* markdown_error_policy (pass|fail_closed|status_<code>) */
     p = ngx_http_markdown_snapshot_str(p, last,
-        "markdown_on_error",
-        ngx_http_markdown_on_error_str(conf->on_error), 1);
+        "markdown_error_policy",
+        ngx_http_markdown_error_policy_str(conf->on_error,
+                                           conf->error_status), 1);
 
     /* markdown_flavor */
     p = ngx_http_markdown_snapshot_str(p, last,
@@ -330,9 +365,10 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     p = ngx_http_markdown_snapshot_flag(p, last,
         "markdown_front_matter", conf->front_matter, 1);
 
-    /* markdown_on_wildcard (on/off) */
-    p = ngx_http_markdown_snapshot_flag(p, last,
-        "markdown_on_wildcard", conf->on_wildcard, 1);
+    /* markdown_accept (strict|wildcard|force) */
+    p = ngx_http_markdown_snapshot_str(p, last,
+        "markdown_accept",
+        ngx_http_markdown_accept_policy_str(conf->accept_policy), 1);
 
     /* markdown_buffer_chunked (on/off) */
     p = ngx_http_markdown_snapshot_flag(p, last,
@@ -375,9 +411,11 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
         "markdown_log_verbosity",
         ngx_http_markdown_log_verbosity_str(conf->policy.log_verbosity), 1);
 
-    /* markdown_generate_etag (on/off) */
-    p = ngx_http_markdown_snapshot_flag(p, last,
-        "markdown_generate_etag", conf->policy.generate_etag, 1);
+    /* markdown_cache_validation (off|ims_only|full) */
+    p = ngx_http_markdown_snapshot_str(p, last,
+        "markdown_cache_validation",
+        ngx_http_markdown_cache_validation_str(conf->policy.conditional_requests),
+        1);
 
     /* markdown_metrics_format */
     p = ngx_http_markdown_snapshot_str(p, last,
@@ -391,7 +429,7 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
 
     /* markdown_large_body_threshold */
     p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_large_body_threshold", conf->large_body_threshold,
+        "markdown_large_body_threshold", conf->routing.large_body_threshold,
 #ifdef MARKDOWN_STREAMING_ENABLED
         1);
 #else
@@ -407,12 +445,6 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     /* markdown_streaming_budget */
     p = ngx_http_markdown_snapshot_size(p, last,
         "markdown_streaming_budget", conf->stream.budget, 1);
-
-    /* markdown_streaming_on_error */
-    p = ngx_http_markdown_snapshot_str(p, last,
-        "markdown_streaming_on_error",
-        ngx_http_markdown_streaming_on_error_str(
-            conf->stream.on_error), 1);
 
     /* markdown_streaming_shadow (on/off) */
     p = ngx_http_markdown_snapshot_flag(p, last,
@@ -431,7 +463,7 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     /* markdown_stream_flush_min */
     p = ngx_http_markdown_snapshot_size(p, last,
         "markdown_stream_flush_min",
-        conf->stream.flush_min, 1);
+        conf->stream.flush_min, 0);
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
     /*

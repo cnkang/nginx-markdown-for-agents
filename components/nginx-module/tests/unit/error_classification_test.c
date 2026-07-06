@@ -18,6 +18,45 @@
 
 #include "../src/ngx_http_markdown_error.c"
 
+uint8_t
+markdown_classify_error_code(uint32_t error_code)
+{
+    switch (error_code) {
+    case ERROR_PARSE:
+    case ERROR_ENCODING:
+    case ERROR_INVALID_INPUT:
+#if defined(MARKDOWN_STREAMING_ENABLED)
+    case ERROR_STREAMING_FALLBACK:
+#endif
+        return 0; /* ConversionError */
+
+    case ERROR_TIMEOUT:
+    case ERROR_PARSE_TIMEOUT:
+        return 1; /* Timeout */
+
+    case ERROR_MEMORY_LIMIT:
+    case ERROR_DECOMPRESSION_BUDGET_EXCEEDED:
+    case ERROR_PARSE_BUDGET_EXCEEDED:
+#if defined(MARKDOWN_STREAMING_ENABLED)
+    case ERROR_BUDGET_EXCEEDED:
+#endif
+        return 2; /* MemoryBudgetExceeded */
+
+    case ERROR_DECOMPRESSION_FORMAT_ERROR:
+    case ERROR_DECOMPRESSION_TRUNCATED_INPUT:
+    case ERROR_DECOMPRESSION_IO_ERROR:
+        return 4; /* DecompressionError */
+
+#if defined(MARKDOWN_STREAMING_ENABLED)
+    case ERROR_POST_COMMIT:
+        return 9; /* StreamingMidFlightError */
+#endif
+
+    default:
+        return 3; /* FfiPanic/system fallback for unknown test inputs */
+    }
+}
+
 
 static void
 test_conversion_errors(void)
@@ -41,11 +80,6 @@ test_conversion_errors(void)
     TEST_ASSERT(
         ngx_http_markdown_classify_error(ERROR_DECOMPRESSION_IO_ERROR) == NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
         "ERROR_DECOMPRESSION_IO_ERROR (14) -> CONVERSION");
-#if defined(MARKDOWN_STREAMING_ENABLED)
-    TEST_ASSERT(
-        ngx_http_markdown_classify_error(ERROR_POST_COMMIT) == NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
-        "ERROR_POST_COMMIT -> CONVERSION");
-#endif
     TEST_PASS("Conversion classification works");
 }
 
@@ -90,8 +124,11 @@ test_system_errors_and_strings(void)
         "Unknown error code -> SYSTEM");
 #if defined(MARKDOWN_STREAMING_ENABLED)
     TEST_ASSERT(
-        ngx_http_markdown_classify_error(ERROR_STREAMING_FALLBACK) == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
-        "ERROR_STREAMING_FALLBACK -> SYSTEM");
+        ngx_http_markdown_classify_error(ERROR_STREAMING_FALLBACK) == NGX_HTTP_MARKDOWN_ERROR_CONVERSION,
+        "ERROR_STREAMING_FALLBACK -> CONVERSION");
+    TEST_ASSERT(
+        ngx_http_markdown_classify_error(ERROR_POST_COMMIT) == NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
+        "ERROR_POST_COMMIT -> SYSTEM");
 #endif
 
     s = ngx_http_markdown_error_category_string(NGX_HTTP_MARKDOWN_ERROR_CONVERSION);

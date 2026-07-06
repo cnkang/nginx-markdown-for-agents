@@ -95,7 +95,7 @@ DYNCONF_FILE="${DYNCONF_FILE:-/tmp/nginx-markdown-dynconf-test.json}"
 
 cat > "$DYNCONF_FILE" <<'DYNCONF_VALID'
 {
-    "markdown_max_size": "2m",
+    "markdown_limits_memory": "2m",
     "markdown_decompression_budget": "10m"
 }
 DYNCONF_VALID
@@ -128,7 +128,7 @@ fi
 cat > "$DYNCONF_FILE" <<'DYNCONF_INVALID'
 {
     "unknown_key_that_does_not_exist": "should_fail",
-    "markdown_max_size": "invalid_not_a_size"
+    "markdown_limits_memory": "invalid_not_a_size"
 }
 DYNCONF_INVALID
 
@@ -154,7 +154,7 @@ fi
 
 cat > "$DYNCONF_FILE" <<'DYNCONF_ROLLBACK'
 {
-    "markdown_max_size": "1m"
+    "markdown_limits_memory": "1m"
 }
 DYNCONF_ROLLBACK
 

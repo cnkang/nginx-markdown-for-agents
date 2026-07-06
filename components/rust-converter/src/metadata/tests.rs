@@ -124,6 +124,46 @@ fn test_extract_canonical_rel_token_list_case_insensitive() {
 }
 
 #[test]
+fn test_metadata_canonical_rejects_dangerous_url() {
+    let html = b"<html><head>
+        <link rel=\"canonical\" href=\"javascript:alert(1)\" />
+    </head></html>";
+    let dom = parse_html(html).unwrap();
+    let extractor = MetadataExtractor::new(None, false);
+    let metadata = extractor.extract(&dom).unwrap();
+
+    assert_eq!(metadata.url, None);
+}
+
+#[test]
+fn test_metadata_og_url_rejects_dangerous_url() {
+    let html = b"<html><head>
+        <meta property=\"og:url\" content=\"data:text/html,<script>alert(1)</script>\" />
+    </head></html>";
+    let dom = parse_html(html).unwrap();
+    let extractor = MetadataExtractor::new(None, false);
+    let metadata = extractor.extract(&dom).unwrap();
+
+    assert_eq!(metadata.url, None);
+}
+
+#[test]
+fn test_metadata_image_rejects_dangerous_url_and_keeps_later_safe_url() {
+    let html = b"<html><head>
+        <meta property=\"og:image\" content=\"javascript:alert(1)\" />
+        <meta property=\"og:image\" content=\"/images/safe.png\" />
+    </head></html>";
+    let dom = parse_html(html).unwrap();
+    let extractor = MetadataExtractor::new(Some("https://example.com".to_string()), true);
+    let metadata = extractor.extract(&dom).unwrap();
+
+    assert_eq!(
+        metadata.image,
+        Some("https://example.com/images/safe.png".to_string())
+    );
+}
+
+#[test]
 fn test_metadata_extraction_rejects_excessive_depth_without_recursion() {
     let depth = 1_100;
     let mut html = String::with_capacity(depth * 11);
@@ -169,7 +209,7 @@ fn test_metadata_extraction_times_out_during_traversal() {
 
     let dom = parse_html(html.as_bytes()).unwrap();
     let extractor = MetadataExtractor::new(None, false);
-    let mut ctx = ConversionContext::new(Duration::from_millis(1));
+    let mut ctx = ConversionContext::new(Duration::from_nanos(1));
 
     let result = extractor.extract_with_context(&dom, &mut ctx);
 

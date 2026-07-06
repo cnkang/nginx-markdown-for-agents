@@ -1394,7 +1394,7 @@ test_select_processing_path(void)
     conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
     conf.stream.threshold = 1024;
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
-    conf.large_body_threshold = 1024;
+    conf.routing.large_body_threshold = 1024;
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
     r.headers_out.content_length_n = 2048;
 
@@ -1439,12 +1439,12 @@ test_select_processing_path(void)
     excluded[0] = (ngx_str_t) { 4, (u_char *) "text" };
     arr.elts = excluded;
     arr.nelts = 1;
-    conf.stream_types = &arr;
+    conf.routing.stream_types = &arr;
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
         "excluded stream_types should route full-buffer");
 
-    conf.stream_types = NULL;
+    conf.routing.stream_types = NULL;
     conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
@@ -1458,7 +1458,7 @@ test_select_processing_path(void)
     excluded[0] = (ngx_str_t) { 11, (u_char *) "application" };
     arr.elts = excluded;
     arr.nelts = 1;
-    conf.stream_types = &arr;
+    conf.routing.stream_types = &arr;
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
     selection = ngx_http_markdown_select_processing_path(&r, &conf, NULL);
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
@@ -1469,7 +1469,7 @@ test_select_processing_path(void)
     TEST_ASSERT(selection.path == NGX_HTTP_MARKDOWN_PATH_STREAMING,
         "NULL content-type data should not trigger exclusions");
 
-    conf.stream_types = NULL;
+    conf.routing.stream_types = NULL;
     r.headers_out.content_type = (ngx_str_t) { 9, (u_char *) "text/html" };
     conf.policy.conditional_requests =
         NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;

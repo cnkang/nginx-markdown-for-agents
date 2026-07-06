@@ -470,16 +470,16 @@ ngx_http_markdown_is_excluded_stream_type(
 {
     ngx_str_t   *types;
 
-    if (conf->stream_types == NULL) {
+    if (conf->routing.stream_types == NULL) {
         return 0;
     }
 
-    types = conf->stream_types->elts;
+    types = conf->routing.stream_types->elts;
     if (r->headers_out.content_type.data == NULL) {
         return 0;
     }
 
-    for (ngx_uint_t i = 0; i < conf->stream_types->nelts; i++) {
+    for (ngx_uint_t i = 0; i < conf->routing.stream_types->nelts; i++) {
         if (r->headers_out.content_type.len
                 >= types[i].len
             && ngx_strncasecmp(
@@ -629,7 +629,7 @@ ngx_http_markdown_select_processing_path(
             NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE);
     }
 
-    /* Rule 7: stream_types exclusion list (legacy conf->stream_types)
+    /* Rule 7: stream_types exclusion list (legacy conf->routing.stream_types)
      * and v0.8.0 conf->stream.excluded_types + built-in hard exclusions */
     if (ngx_http_markdown_is_excluded_stream_type(
             r, conf)
@@ -992,7 +992,7 @@ ngx_http_markdown_streaming_record_postcommit_failure(
             "committed=1 fallback_available=0 "
             "reason=%s content_type=%V "
             "content_length_known=%d chunked=%d "
-            "markdown_on_error=%s",
+            "error_policy=%s",
             ngx_http_markdown_stream_reason_str(
                 ctx->streaming.reason),
             &r->headers_out.content_type,
@@ -1000,7 +1000,7 @@ ngx_http_markdown_streaming_record_postcommit_failure(
             (r->headers_out.content_length_n < 0) ? 1 : 0,
              (conf->stream.on_error
               == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? "reject" : "pass");
+                ? "fail_closed" : "pass");
 
         ctx->streaming.completion.failure_recorded = 1;
     }
@@ -1358,7 +1358,7 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
         "reason=precommit_html_error "
         "content_type=%V "
         "content_length_known=%d "
-        "markdown_on_error=pass",
+        "error_policy=pass",
         &r->headers_out.content_type,
         (r->headers_out.content_length_n >= 0) ? 1 : 0);
 
@@ -1519,19 +1519,18 @@ ngx_http_markdown_streaming_precommit_reason(
 }
 
 /*
- * Pre-Commit error handler: apply streaming_on_error policy.
+ * Pre-Commit error handler: apply error_policy for streaming.
  *
  * Single entry point for all pre-commit streaming failures.
- * Routes based on error_code and the markdown_streaming_on_error
- * directive (not the full-buffer markdown_on_error).
+ * Routes based on error_code and the markdown_error_policy directive.
  *
  *   error_code == ERROR_STREAMING_FALLBACK:
  *     Capability fallback to full-buffer path, regardless of
- *     streaming_on_error setting.
+ *     error_policy setting.
  *
  *   error_code == 0 (or any non-FALLBACK value):
- *     streaming_on_error == pass  -> fail-open (original HTML)
- *     streaming_on_error == reject -> fail-closed (error)
+ *     error_policy == pass      -> fail-open (original HTML)
+ *     error_policy == fail_closed -> fail-closed (error)
  *
  * Every non-FALLBACK call unconditionally records the appropriate
  * reason code and increments the corresponding metrics counter so
@@ -1643,7 +1642,7 @@ ngx_http_markdown_streaming_precommit_error(
             "committed=0 fallback_available=0 "
             "reason=%s content_type=%V "
             "content_length_known=%d "
-            "markdown_on_error=reject",
+            "error_policy=fail_closed",
             ngx_http_markdown_stream_reason_str(
                 ctx->streaming.reason),
             &r->headers_out.content_type,
@@ -1666,7 +1665,7 @@ ngx_http_markdown_streaming_precommit_error(
         "committed=0 fallback_available=1 "
         "reason=%s content_type=%V "
         "content_length_known=%d "
-        "markdown_on_error=pass",
+        "error_policy=pass",
         ngx_http_markdown_stream_reason_str(
             ctx->streaming.reason),
         &r->headers_out.content_type,

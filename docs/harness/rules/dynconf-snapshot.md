@@ -14,9 +14,9 @@ Historical issues: P0 request-level consistency gap (snapshot bound but not cons
 P0 snapshot race (active_snapshot read twice in header_filter).
 
 Required:
-- In request-path code (body filter, conversion, logging, budget, streaming),
+- In request-path code (body filter, conversion, logging, limits, streaming),
   dynconf-mutable fields (`enabled`, `enabled_source`, `prune_noise`,
-  `log_verbosity`, `memory_budget`, `streaming_budget`) must be read through
+  `log_verbosity`, `markdown_limits`) must be read through
   `ctx->effective_conf` via the `ngx_http_markdown_effective_*()` helpers,
   not directly from `conf->`.
 - Direct `conf->` reads of mutable fields are only allowed in:
@@ -117,7 +117,7 @@ Historical issues: d91dd419, 7e1227a9, 31e017d9, 327bfe99, 4b97d0a7.
 
 Required:
 - When request-path code reads `ctx->effective_conf` fields (for example
-  `memory_budget`, `streaming_budget`), the code must handle the case where
+  `markdown_limits`), the code must handle the case where
   `effective_conf` is NULL.  This can occur in early header_filter paths
   before snapshot binding, or after allocation failure.  A NULL `effective_conf`
   must fall back to `conf->` with an explicit comment documenting why `eff` is
@@ -134,7 +134,7 @@ Required:
   `(size_t)-1` in some places and `NGX_CONF_UNSET_SIZE` in others — pick one
   form and use it uniformly within the effective_conf helper chain.
 - The eligibility check for streaming must guard against `effective_conf`
-  being NULL before dereferencing its `memory_budget` or `streaming_budget`
+  being NULL before dereferencing its `markdown_limits`
   fields.  When `eff` is NULL, the eligibility function must return the
   non-streaming (full-buffer) path, not dereference NULL.
 
@@ -144,5 +144,5 @@ Verification:
   can be called before snapshot binding.
 - `grep -rn 'effective_body_buffer_limit' components/nginx-module/src/`
   — verify declaration is in a shared header, not a source file.
-- `make test-nginx-unit` — eligibility tests cover non-NULL eff memory_budget
+- `make test-nginx-unit` — eligibility tests cover non-NULL eff markdown_limits
   path and NULL-eff fallback.

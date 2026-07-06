@@ -42,11 +42,22 @@ require hot-reload without restart.
 
 | Key | Value | Maps to |
 |-----|-------|---------|
+| `schema_version` | `0.9` | **mandatory** — file rejected if missing or unknown |
 | `markdown_filter` | `on` \| `off` | `conf->enabled` |
 | `prune_noise` | `on` \| `off` | `conf->prune_noise` |
 | `log_verbosity` | `error` \| `warn` \| `info` \| `debug` | `conf->log_verbosity` |
 | `streaming_budget` | `<size>` (e.g. `64k`, `4m`) | `conf->streaming_budget` |
 | `memory_budget` | `<size>` (e.g. `128k`) | `conf->memory_budget` |
+
+### Schema Version (0.9.0+)
+
+Every dynconf file **must** include `schema_version = 0.9`. This field
+enables the module to reject configuration files written for incompatible
+versions. Behavior:
+
+- **Missing `schema_version`** → entire file rejected (INVALID_FILE)
+- **Unknown version** (e.g. `1.0`, `0.8`) → entire file rejected
+- **Correct version** (`0.9`) → file parsed normally
 
 Structural directives (`markdown_content_types`, `markdown_stream_types`,
 auth policy, conditional requests) require `nginx -s reload`.
@@ -164,3 +175,4 @@ production environments where a bad dynconf file could affect traffic.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.7.0 | 2026-05-17 | Kang | Initial creation: LKG/rollback semantics, dry-run validation, reload behavior |
+| 0.9.0 | 2026-07-01 | Kang | Added mandatory schema_version field for version compatibility |

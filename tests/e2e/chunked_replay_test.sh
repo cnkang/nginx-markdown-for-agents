@@ -6,7 +6,7 @@
 #
 # Prerequisites:
 #   - NGINX running with markdown module enabled
-#   - markdown_max_size configured (e.g. 1m)
+#   - markdown_limits memory configured (e.g. 1m)
 #   - curl available
 #   - NGINX_URL environment variable set (default: http://localhost:8080)
 #   - A backend serving chunked HTML responses (or use BACKEND_URL)

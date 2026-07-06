@@ -191,6 +191,55 @@ ngx_http_markdown_otel_random_hex(u_char *dst, size_t byte_count,
 }
 
 
+static ngx_uint_t
+ngx_http_markdown_otel_is_hex(u_char ch)
+{
+    return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
+}
+
+
+static ngx_int_t
+ngx_http_markdown_otel_validate_hex_id(const u_char *p, size_t len)
+{
+    ngx_uint_t  nonzero;
+
+    nonzero = 0;
+
+    for (size_t i = 0; i < len; i++) {
+        if (!ngx_http_markdown_otel_is_hex(p[i])) {
+            return NGX_DECLINED;
+        }
+
+        if (p[i] != '0') {
+            nonzero = 1;
+        }
+    }
+
+    return nonzero ? NGX_OK : NGX_DECLINED;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_otel_parse_trace_flags(const u_char *p,
+    ngx_uint_t *flags)
+{
+    ngx_uint_t  value;
+
+    if (!ngx_http_markdown_otel_is_hex(p[0])
+        || !ngx_http_markdown_otel_is_hex(p[1]))
+    {
+        return NGX_DECLINED;
+    }
+
+    value = (p[0] <= '9') ? (p[0] - '0') : (p[0] - 'a' + 10);
+    value <<= 4;
+    value |= (p[1] <= '9') ? (p[1] - '0') : (p[1] - 'a' + 10);
+
+    *flags = value;
+    return NGX_OK;
+}
+
+
 /*
  * Parse the value portion of a W3C traceparent header.
  *
@@ -216,6 +265,12 @@ ngx_http_markdown_otel_parse_traceparent_value(const u_char *p,
 
     p += 3;
 
+    if (ngx_http_markdown_otel_validate_hex_id(
+            p, NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN) != NGX_OK)
+    {
+        return NGX_DECLINED;
+    }
+
     /* Copy trace_id (32 hex chars). */
     ngx_memcpy(span->trace_id, p,
                NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN);
@@ -227,6 +282,12 @@ ngx_http_markdown_otel_parse_traceparent_value(const u_char *p,
         return NGX_DECLINED;
     }
     p++;
+
+    if (ngx_http_markdown_otel_validate_hex_id(
+            p, NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN) != NGX_OK)
+    {
+        return NGX_DECLINED;
+    }
 
     /* Copy parent span_id (16 hex chars). */
     ngx_memcpy(span->parent_span_id, p,
@@ -241,16 +302,10 @@ ngx_http_markdown_otel_parse_traceparent_value(const u_char *p,
     p++;
 
     /* Parse trace-flags (2 hex chars). */
-    span->trace_flags = 0;
-    if (p[0] >= '0' && p[0] <= '9') {
-        span->trace_flags = (p[0] - '0') << 4;
-    } else if (p[0] >= 'a' && p[0] <= 'f') {
-        span->trace_flags = (p[0] - 'a' + 10) << 4;
-    }
-    if (p[1] >= '0' && p[1] <= '9') {
-        span->trace_flags |= (p[1] - '0');
-    } else if (p[1] >= 'a' && p[1] <= 'f') {
-        span->trace_flags |= (p[1] - 'a' + 10);
+    if (ngx_http_markdown_otel_parse_trace_flags(
+            p, &span->trace_flags) != NGX_OK)
+    {
+        return NGX_DECLINED;
     }
 
     span->has_parent = 1;
@@ -589,17 +644,24 @@ ngx_http_markdown_otel_render_json(const ngx_http_markdown_otel_span_t *span,
         "\"value\":{\"stringValue\":\"%s\"}}]},"
         "\"scopeSpans\":[{\"scope\":{"
         "\"name\":\"%s\"},\"spans\":[{"
-        "\"traceId\":\"%s\","
-        "\"spanId\":\"%s\",",
+        "\"traceId\":\"",
         NGX_HTTP_MARKDOWN_OTEL_SERVICE,
-        NGX_HTTP_MARKDOWN_OTEL_SERVICE,
-        span->trace_id,
-        span->span_id);
+        NGX_HTTP_MARKDOWN_OTEL_SERVICE);
+    p = ngx_http_markdown_otel_escape_json_string(
+            p, end,
+            span->trace_id, NGX_HTTP_MARKDOWN_OTEL_TRACE_ID_LEN);
+    p = ngx_slprintf(p, end, "\",\"spanId\":\"");
+    p = ngx_http_markdown_otel_escape_json_string(
+            p, end,
+            span->span_id, NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN);
+    p = ngx_slprintf(p, end, "\",");
 
     if (span->has_parent) {
-        p = ngx_slprintf(p, end,
-            "\"parentSpanId\":\"%s\",",
-            span->parent_span_id);
+        p = ngx_slprintf(p, end, "\"parentSpanId\":\"");
+        p = ngx_http_markdown_otel_escape_json_string(
+                p, end,
+                span->parent_span_id, NGX_HTTP_MARKDOWN_OTEL_SPAN_ID_LEN);
+        p = ngx_slprintf(p, end, "\",");
     }
 
     /*

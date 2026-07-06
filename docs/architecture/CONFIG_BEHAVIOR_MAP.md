@@ -23,7 +23,7 @@ Each directive is described in four dimensions:
 flowchart LR
     subgraph HeaderPhase["Header Filter Phase"]
         MF["markdown_filter"]
-        MW["markdown_on_wildcard"]
+        MW["markdown_accept"]
         AP["markdown_auth_policy"]
         AC["markdown_auth_cookies"]
         CT["markdown_conditional_requests"]
@@ -35,11 +35,11 @@ flowchart LR
     subgraph BodyPhase["Body Filter Phase"]
         MS["markdown_memory_budget"]
         TO["markdown_timeout"]
-        OE["markdown_on_error"]
+        OE["markdown_error_policy"]
         FL["markdown_flavor"]
         BC["markdown_buffer_chunked"]
         ST["markdown_stream_types"]
-        TF["markdown_trust_forwarded_headers"]
+        TF["markdown_trusted_proxies"]
         LBT["markdown_large_body_threshold"]
         SB["markdown_streaming_budget"]
         SOE["markdown_streaming_on_error"]
@@ -67,7 +67,7 @@ flowchart LR
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_eligibility.c` |
 | Practical note | This is the top-level switch. If it resolves to off in header phase, the body filter will not revisit that decision. Because `markdown_filter` accepts NGINX variables, operators can combine it with `map` directives to implement User-Agent-based bot targeting — for example, rewriting the Accept header for known AI crawlers so they receive Markdown automatically. See the bot-targeted conversion examples in [../guides/DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user-agent-based). |
 
-### `markdown_on_wildcard`
+### `markdown_accept`
 
 | Aspect | Detail |
 |--------|--------|
@@ -96,7 +96,7 @@ flowchart LR
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/rust-converter/src/ffi.rs`, `components/rust-converter/src/converter.rs` |
 | Practical note | A timeout is not a header-phase decision. It takes effect only after the request has already entered the conversion path. |
 
-### `markdown_on_error`
+### `markdown_error_policy`
 
 | Aspect | Detail |
 |--------|--------|
@@ -239,7 +239,7 @@ These are best understood through:
 Start with directives that affect entry and bypass:
 
 - `markdown_filter`
-- `markdown_on_wildcard`
+- `markdown_accept`
 - `markdown_auth_policy`
 - `markdown_stream_types`
 - `markdown_buffer_chunked`
@@ -250,7 +250,7 @@ Then move to [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md) and trace header-phase
 
 Start with:
 
-- `markdown_on_error`
+- `markdown_error_policy`
 - `markdown_memory_budget`
 - `markdown_timeout`
 - `markdown_conditional_requests`

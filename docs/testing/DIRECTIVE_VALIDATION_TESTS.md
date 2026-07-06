@@ -76,26 +76,26 @@ markdown_timeout;           # Error: missing value
 
 ---
 
-### 4. markdown_on_error (pass|reject)
+### 4. markdown_error_policy (pass|fail_closed)
 
 **Valid configurations:**
 ```nginx
-markdown_on_error pass;     # Fail-open: return original HTML
-markdown_on_error reject;   # Fail-closed: return 502 error
+markdown_error_policy pass;         # Fail-open: return original HTML
+markdown_error_policy fail_closed;   # Fail-closed: return 502 error
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_on_error fail;     # Error: invalid value, must be "pass" or "reject"
-markdown_on_error open;     # Error: invalid value, must be "pass" or "reject"
-markdown_on_error;          # Error: missing value
-markdown_on_error pass reject; # Error: too many arguments
+markdown_error_policy fail;             # Error: invalid value, must be "pass" or "fail_closed"
+markdown_error_policy open;             # Error: invalid value, must be "pass" or "fail_closed"
+markdown_error_policy;                   # Error: missing value
+markdown_error_policy pass fail_closed; # Error: too many arguments
 ```
 
 **Expected behavior:**
 - Default: pass (fail-open)
 - Context: http, server, location
-- Error message: "invalid value \"%s\" in \"markdown_on_error\" directive, it must be \"pass\" or \"reject\""
+- Error message: "invalid value \"%s\" in \"markdown_error_policy\" directive, it must be \"pass\" or \"fail_closed\""
 
 ---
 
@@ -166,19 +166,19 @@ markdown_front_matter;      # Error: missing value
 
 ---
 
-### 8. markdown_on_wildcard (on|off)
+### 8. markdown_accept (strict|wildcard)
 
 **Valid configurations:**
 ```nginx
-markdown_on_wildcard on;
-markdown_on_wildcard off;
+markdown_accept wildcard;
+markdown_accept strict;
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_on_wildcard yes;   # Error: invalid value, must be "on" or "off"
-markdown_on_wildcard 1;     # Error: invalid value, must be "on" or "off"
-markdown_on_wildcard;       # Error: missing value
+markdown_accept yes;       # Error: invalid value, must be "strict" or "wildcard"
+markdown_accept 1;         # Error: invalid value, must be "strict" or "wildcard"
+markdown_accept;           # Error: missing value
 ```
 
 **Expected behavior:**
@@ -359,14 +359,14 @@ http {
 http {
     markdown_filter on;
     markdown_timeout 10s;
-    markdown_on_error pass;
+    markdown_error_policy pass;
     
     server {
         markdown_timeout 5s;  # Overrides http level
-        # Inherits: markdown_filter on, markdown_on_error pass
+        # Inherits: markdown_filter on, markdown_error_policy pass
         
         location /docs {
-            markdown_on_error reject;  # Overrides server level
+            markdown_error_policy fail_closed;  # Overrides server level
             # Inherits: markdown_filter on, markdown_timeout 5s
         }
     }

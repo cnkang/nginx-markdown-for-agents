@@ -201,3 +201,12 @@ For Kubernetes and Helm deployments, see
 [`KUBERNETES_DEPLOYMENT.md`](./KUBERNETES_DEPLOYMENT.md); the Helm chart runs
 with stock NGINX by default and requires an explicit module-enabled image plus
 `markdown.loadModule` when markdown directives are enabled.
+
+### Automated Diagnostics
+
+For automated installation verification, use the
+[`nginx-markdown-doctor`](./doctor.md) tool:
+
+```bash
+bash tools/doctor/nginx-markdown-doctor.sh
+```

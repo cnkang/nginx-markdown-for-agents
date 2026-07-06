@@ -32,6 +32,27 @@
 #define NGX_HTTP_MARKDOWN_LOG_INFO   2
 #define NGX_HTTP_MARKDOWN_LOG_DEBUG  3
 
+#define NGX_HTTP_MARKDOWN_PROFILE_NONE             0
+#define NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE     1
+#define NGX_HTTP_MARKDOWN_PROFILE_BALANCED         2
+#define NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST  3
+
+#define NGX_HTTP_MARKDOWN_ACCEPT_STRICT    0
+#define NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD  1
+#define NGX_HTTP_MARKDOWN_ACCEPT_FORCE     2
+
+#define NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT         0
+#define NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE    1
+#define NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED             2
+
+#define NGX_HTTP_MARKDOWN_STREAMING_OFF    0
+#define NGX_HTTP_MARKDOWN_STREAMING_AUTO   1
+#define NGX_HTTP_MARKDOWN_STREAMING_FORCE  2
+
+#define NGX_HTTP_MARKDOWN_ON_ERROR_PASS    0
+#define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1
+#define NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT  502
+
 #ifdef MARKDOWN_STREAMING_ENABLED
 #define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS    0
 #define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT  1
@@ -113,13 +134,24 @@ typedef struct {
 
 typedef struct {
     ngx_uint_t  log_verbosity;
+    ngx_uint_t  conditional_requests;
 } ngx_http_markdown_policy_cfg_t;
 
 typedef struct ngx_http_markdown_conf_s {
     ngx_http_markdown_ops_cfg_t     ops;
     ngx_http_markdown_policy_cfg_t  policy;
+    ngx_uint_t                      accept_policy;
+    ngx_uint_t                      on_error;
+    ngx_uint_t                      error_status;
+    size_t                          max_size;
+    ngx_msec_t                      timeout;
+    struct {
+        ngx_uint_t                  max_inflight;
+    } routing;
     struct {
         ngx_uint_t    engine;
+        ngx_uint_t    policy;
+        ngx_flag_t    policy_explicit;
         size_t        threshold;
         ngx_flag_t    threshold_explicit;
         size_t        precommit_buffer;
@@ -132,6 +164,11 @@ typedef struct ngx_http_markdown_conf_s {
         ngx_flag_t    shadow;
         ngx_flag_t    shadow_explicit;
     } stream;
+    struct {
+        ngx_uint_t   name;
+        ngx_flag_t   set;
+        ngx_flag_t   cache_validation_explicit;
+    } profile;
 } ngx_http_markdown_conf_t;
 
 typedef struct ngx_http_markdown_effective_conf_s {
@@ -295,8 +332,6 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
 #define NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF   0
 #define NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO  1
 #define NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON    2
-#define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1
-
 #define NGX_HTTP_MARKDOWN_FILTER_MODULE_H
 #include "../src/ngx_http_markdown_diagnostics.c"
 
@@ -318,6 +353,17 @@ ngx_http_markdown_diagnostics_get_dynconf_state(
     out->config_version = 3;
     out->last_known_good_mtime = 90;
     out->lkg_valid = 1;
+}
+
+ngx_int_t
+ngx_http_markdown_get_reason_code_str(uint32_t code, ngx_str_t *out_str)
+{
+    static u_char reason[] = "converted";
+
+    UNUSED(code);
+    out_str->data = reason;
+    out_str->len = sizeof(reason) - 1;
+    return NGX_OK;
 }
 
 static void

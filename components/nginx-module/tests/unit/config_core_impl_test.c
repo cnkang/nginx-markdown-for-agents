@@ -318,6 +318,43 @@ ngx_http_complex_value(ngx_http_request_t *r,
     return val->eval_rc;
 }
 
+/*
+ * FFI stubs for profile conflict detection.
+ *
+ * The production header (config_core_impl.h) references Rust FFI types and
+ * functions from markdown_converter.h.  The unit test does not link the Rust
+ * library, so we include the shared header for struct definitions and provide
+ * no-op function stubs.  The conflict detection returns "no conflicts" — the
+ * behavior being tested in this file is the C configuration lifecycle, not
+ * the Rust conflict logic.
+ */
+#include "../../src/markdown_converter.h"
+
+struct FFIConflictList
+markdown_detect_conflicts(uint8_t profile,
+    const struct FFIExplicitConfig *explicit_cfg,
+    const struct FFIEffectiveConfig *effective_cfg)
+{
+    struct FFIConflictList list;
+
+    UNUSED(profile);
+    UNUSED(explicit_cfg);
+    UNUSED(effective_cfg);
+
+    list.conflicts = NULL;
+    list.count = 0;
+    return list;
+}
+
+/*
+ * No-op stub: nothing to free in the test environment.
+ */
+void
+markdown_free_conflicts(struct FFIConflictList *list)
+{
+    UNUSED(list);
+}
+
 #include "../../src/ngx_http_markdown_config_core_impl.h"
 
 static ngx_pool_t g_pool;
@@ -544,7 +581,7 @@ test_merge_conf(void)
     parent.flavor = NGX_HTTP_MARKDOWN_FLAVOR_GFM;
     parent.token_estimate = 1;
     parent.front_matter = 1;
-    parent.on_wildcard = 1;
+    parent.accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD;
     parent.policy.auth_policy = NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY;
     parent.policy.generate_etag = 0;
     parent.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
@@ -554,7 +591,7 @@ test_merge_conf(void)
     parent.decompress.max_size = 2048;
     parent.decompress.parse_timeout = 30000;
     parent.decompress.parser_budget = 64 * 1024 * 1024;
-    parent.large_body_threshold = 4096;
+    parent.routing.large_body_threshold = 4096;
     parent.ops.trust_forwarded_headers = 1;
     parent.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
     parent.ops.metrics_per_path = 1;
@@ -580,20 +617,20 @@ test_merge_conf(void)
     child.flavor = NGX_CONF_UNSET_UINT;
     child.token_estimate = NGX_CONF_UNSET;
     child.front_matter = NGX_CONF_UNSET;
-    child.on_wildcard = NGX_CONF_UNSET;
+    child.accept_policy = NGX_CONF_UNSET_UINT;
     child.policy.auth_policy = NGX_CONF_UNSET_UINT;
     child.policy.auth_cookies = NGX_CONF_UNSET_PTR;
     child.policy.generate_etag = NGX_CONF_UNSET;
     child.policy.conditional_requests = NGX_CONF_UNSET_UINT;
     child.policy.log_verbosity = NGX_CONF_UNSET_UINT;
     child.buffer_chunked = NGX_CONF_UNSET;
-    child.stream_types = NGX_CONF_UNSET_PTR;
-    child.content_types = NGX_CONF_UNSET_PTR;
+    child.routing.stream_types = NGX_CONF_UNSET_PTR;
+    child.routing.content_types = NGX_CONF_UNSET_PTR;
     child.decompress.auto_decompress = NGX_CONF_UNSET;
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    child.large_body_threshold = NGX_CONF_UNSET_SIZE;
+    child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
@@ -644,20 +681,20 @@ test_merge_conf(void)
     child.flavor = NGX_CONF_UNSET_UINT;
     child.token_estimate = NGX_CONF_UNSET;
     child.front_matter = NGX_CONF_UNSET;
-    child.on_wildcard = NGX_CONF_UNSET;
+    child.accept_policy = NGX_CONF_UNSET_UINT;
     child.policy.auth_policy = NGX_CONF_UNSET_UINT;
     child.policy.auth_cookies = NGX_CONF_UNSET_PTR;
     child.policy.generate_etag = NGX_CONF_UNSET;
     child.policy.conditional_requests = NGX_CONF_UNSET_UINT;
     child.policy.log_verbosity = NGX_CONF_UNSET_UINT;
     child.buffer_chunked = NGX_CONF_UNSET;
-    child.stream_types = NGX_CONF_UNSET_PTR;
-    child.content_types = NGX_CONF_UNSET_PTR;
+    child.routing.stream_types = NGX_CONF_UNSET_PTR;
+    child.routing.content_types = NGX_CONF_UNSET_PTR;
     child.decompress.auto_decompress = NGX_CONF_UNSET;
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    child.large_body_threshold = NGX_CONF_UNSET_SIZE;
+    child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
@@ -921,7 +958,7 @@ test_log_merged_conf(void)
 
     memset(&stream_types, 0, sizeof(stream_types));
     stream_types.nelts = 1;
-    conf.stream_types = &stream_types;
+    conf.routing.stream_types = &stream_types;
 
     ngx_http_markdown_log_merged_conf(NULL, &conf);
     ngx_http_markdown_log_merged_conf(&cf, &conf);
@@ -1069,20 +1106,20 @@ test_merge_conf_double_unset(void)
     child.flavor = NGX_CONF_UNSET_UINT;
     child.token_estimate = NGX_CONF_UNSET;
     child.front_matter = NGX_CONF_UNSET;
-    child.on_wildcard = NGX_CONF_UNSET;
+    child.accept_policy = NGX_CONF_UNSET_UINT;
     child.policy.auth_policy = NGX_CONF_UNSET_UINT;
     child.policy.auth_cookies = NGX_CONF_UNSET_PTR;
     child.policy.generate_etag = NGX_CONF_UNSET;
     child.policy.conditional_requests = NGX_CONF_UNSET_UINT;
     child.policy.log_verbosity = NGX_CONF_UNSET_UINT;
     child.buffer_chunked = NGX_CONF_UNSET;
-    child.stream_types = NGX_CONF_UNSET_PTR;
-    child.content_types = NGX_CONF_UNSET_PTR;
+    child.routing.stream_types = NGX_CONF_UNSET_PTR;
+    child.routing.content_types = NGX_CONF_UNSET_PTR;
     child.decompress.auto_decompress = NGX_CONF_UNSET;
     child.decompress.max_size = NGX_CONF_UNSET_SIZE;
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
-    child.large_body_threshold = NGX_CONF_UNSET_SIZE;
+    child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
@@ -1431,6 +1468,117 @@ test_decompress_max_size_zero_rejected(void)
     printf("  \xe2\x9c\x93 decompress_max_size=0 correctly rejected\n");
 }
 
+/*
+ * Verify the spec 49 streaming/cache-validation conflict in merge_conf:
+ *   markdown_cache_validation full + markdown_streaming force => error.
+ * Gated on policy_explicit so default configs are unaffected.
+ */
+static void
+test_streaming_full_force_conflict_rejected(void)
+{
+    ngx_conf_t cf;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char *rc;
+
+    TEST_SUBSECTION("streaming full + force conflict rejected");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+
+    memset(&parent, 0, sizeof(parent));
+    parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
+    parent.decompress.parse_timeout = 30000;
+    parent.decompress.parser_budget = 64 * 1024 * 1024;
+    parent.max_size = 10 * 1024 * 1024;
+    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+
+    memset(&child, 0, sizeof(child));
+    child.decompress.max_size = NGX_CONF_UNSET_SIZE;
+    child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
+    child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
+    child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
+    child.max_size = NGX_CONF_UNSET_SIZE;
+    child.timeout = NGX_CONF_UNSET_MSEC;
+    child.on_error = NGX_CONF_UNSET_UINT;
+    child.flavor = NGX_CONF_UNSET_UINT;
+    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.stream.budget = NGX_CONF_UNSET_SIZE;
+    child.stream.threshold = NGX_CONF_UNSET_SIZE;
+    child.advanced.prune_noise = NGX_CONF_UNSET;
+    child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
+    child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
+    child.advanced.dynconf_enabled = NGX_CONF_UNSET;
+    child.advanced.dynconf_dry_run = NGX_CONF_UNSET;
+
+    /* full cache validation + explicitly forced streaming = conflict. */
+    child.policy.conditional_requests =
+        NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+    child.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+    child.stream.policy_explicit = 1;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "cache_validation full + streaming force should be rejected");
+
+    printf("  \xe2\x9c\x93 full + force conflict correctly rejected\n");
+}
+
+/*
+ * Verify the spec 49 streaming/cache-validation soft conflict in merge_conf:
+ *   markdown_cache_validation full + markdown_streaming auto => warning only
+ *   (merge still succeeds; streaming is blocked at runtime by Rust).
+ */
+static void
+test_streaming_full_auto_warns_but_succeeds(void)
+{
+    ngx_conf_t cf;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char *rc;
+
+    TEST_SUBSECTION("streaming full + auto warns but succeeds");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+
+    memset(&parent, 0, sizeof(parent));
+    parent.decompress.max_size = NGX_CONF_UNSET_SIZE;
+    parent.decompress.parse_timeout = 30000;
+    parent.decompress.parser_budget = 64 * 1024 * 1024;
+    parent.max_size = 10 * 1024 * 1024;
+    parent.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+
+    memset(&child, 0, sizeof(child));
+    child.decompress.max_size = NGX_CONF_UNSET_SIZE;
+    child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
+    child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
+    child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_UNSET;
+    child.max_size = NGX_CONF_UNSET_SIZE;
+    child.timeout = NGX_CONF_UNSET_MSEC;
+    child.on_error = NGX_CONF_UNSET_UINT;
+    child.flavor = NGX_CONF_UNSET_UINT;
+    child.advanced.memory_budget = NGX_CONF_UNSET_SIZE;
+    child.stream.budget = NGX_CONF_UNSET_SIZE;
+    child.stream.threshold = NGX_CONF_UNSET_SIZE;
+    child.advanced.prune_noise = NGX_CONF_UNSET;
+    child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
+    child.advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
+    child.advanced.dynconf_enabled = NGX_CONF_UNSET;
+    child.advanced.dynconf_dry_run = NGX_CONF_UNSET;
+
+    child.policy.conditional_requests =
+        NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+    child.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
+    child.stream.policy_explicit = 1;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "cache_validation full + streaming auto should warn, not fail");
+
+    printf("  \xe2\x9c\x93 full + auto warns but merge succeeds\n");
+}
+
 int
 main(void)
 {
@@ -1453,6 +1601,8 @@ main(void)
     test_log_merged_conf();
     test_memory_budget_priority_chain();
     test_decompress_max_size_zero_rejected();
+    test_streaming_full_force_conflict_rejected();
+    test_streaming_full_auto_warns_but_succeeds();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
