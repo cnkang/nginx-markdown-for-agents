@@ -236,6 +236,7 @@ harness-check-full:
 	$(MAKE) harness-security-checks
 	$(MAKE) test-harness
 	$(MAKE) check-headers
+	$(MAKE) complexity-check
 
 harness-security-checks:
 	bash tools/harness/detect_cwe190_casts.sh
@@ -674,6 +675,7 @@ release-gates-check-090: release-gates-check-080
 	$(MAKE) docs-check
 	$(MAKE) test-production-examples-nginx-t
 	$(MAKE) test-production-examples-e2e-smoke
+	$(MAKE) complexity-check
 	python3 tools/release/gates/validate_release_gates_090.py
 	@echo "=== 0.9.0 Release Gates: PASS ==="
 
