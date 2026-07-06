@@ -414,15 +414,16 @@ def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
         print(f"Invalid JSON in {path}: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    if not isinstance(data, dict) or "matrix" not in data:
+    if not isinstance(data, dict) or ("matrix" not in data and "entries" not in data):
         print(
-            f"Invalid matrix structure in {path}: missing 'matrix' key", file=sys.stderr
+            f"Invalid matrix structure in {path}: missing 'matrix' or 'entries' key", file=sys.stderr
         )
         sys.exit(1)
 
-    if not isinstance(data["matrix"], list):
+    matrix_entries = data.get("entries") or data.get("matrix")
+    if not isinstance(matrix_entries, list):
         print(
-            f"Invalid matrix structure in {path}: 'matrix' must be a list",
+            f"Invalid matrix structure in {path}: matrix must be a list",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -430,7 +431,7 @@ def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
     auto_entries: list[dict] = []
     manual_entries: list[dict] = []
 
-    for i, entry in enumerate(data["matrix"]):
+    for i, entry in enumerate(matrix_entries):
         if not isinstance(entry, dict):
             print(
                 (
