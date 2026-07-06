@@ -19,11 +19,11 @@ typedef struct {
     ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable expression */
     size_t       max_size;             /* markdown_max_size (default: 10MB) */
     ngx_msec_t   timeout;              /* markdown_timeout (default: 5000ms) */
-    ngx_uint_t   on_error;             /* markdown_on_error pass|reject (default: pass) */
+    ngx_uint_t   on_error;             /* markdown_error_policy pass|fail_closed (default: pass) */
     ngx_uint_t   flavor;               /* markdown_flavor commonmark|gfm (default: commonmark) */
     ngx_flag_t   token_estimate;       /* markdown_token_estimate on|off (default: off) */
     ngx_flag_t   front_matter;         /* markdown_front_matter on|off (default: off) */
-    ngx_flag_t   on_wildcard;          /* markdown_on_wildcard on|off (default: off) */
+    ngx_uint_t   accept_mode;          /* markdown_accept strict|wildcard (default: strict) */
     ngx_uint_t   auth_policy;          /* markdown_auth_policy allow|deny (default: allow) */
     ngx_array_t *auth_cookies;         /* markdown_auth_cookies patterns (default: NULL) */
     ngx_flag_t   generate_etag;        /* markdown_etag on|off (default: on) */
@@ -51,7 +51,7 @@ typedef struct {
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `on_error` | `ngx_uint_t` | `PASS` | Failure strategy: pass (fail-open) or reject (fail-closed) |
+| `on_error` | `ngx_uint_t` | `PASS` | Failure strategy: pass (fail-open) or fail_closed (fail-closed) |
 
 ### Markdown Generation
 
@@ -65,7 +65,7 @@ typedef struct {
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `on_wildcard` | `ngx_flag_t` | `0` (off) | Convert on Accept: */* |
+| `accept_mode` | `ngx_uint_t` | `strict` | Accept negotiation: strict (text/markdown only) or wildcard (also text/*, */*) |
 
 ### Authentication & Security
 

@@ -393,7 +393,7 @@ tail -100 /var/log/nginx/error.log | grep markdown
 - Accept header missing or incorrect
 - `markdown_filter` variable map not matching real `Accept` header format
 - Extension/path map uses `$request_uri` and fails when query strings are present
-- `text/*` path in map enabled but `markdown_on_wildcard` is still `off`
+- `text/*` path in map enabled but `markdown_accept` is still `strict`
 - Response not eligible (non-200 status, non-HTML content)
 - Response exceeds `markdown_limits memory=...` limit
 
@@ -401,7 +401,7 @@ tail -100 /var/log/nginx/error.log | grep markdown
 - Enable filter: `markdown_filter on;`
 - Verify client sends `Accept: text/markdown`
 - For map-based config, use regex for `Accept` matching and prefer `$uri` for extension checks
-- Enable wildcard support when required: `markdown_on_wildcard on;`
+- Enable wildcard support when required: `markdown_accept wildcard;`
 - Check backend returns 200 with `Content-Type: text/html`
 - Increase size limit if needed: `markdown_limits memory=20m;`
 
@@ -545,7 +545,7 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 - `fullbuffer_path_hits` and `incremental_path_hits` have been moved to the end of `ngx_http_markdown_metrics_t`. If you use shared-memory metrics, a graceful reload is sufficient; no data migration is needed.
 - The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter to use the new `markdown_large_body_threshold` directive.
-- `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add `markdown_trust_forwarded_headers on;` to restore the previous behavior.
+- `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add `markdown_trusted_proxies on;` to restore the previous behavior.
 
 #### Upgrading to 0.2.x
 
@@ -1004,7 +1004,7 @@ The table below maps each reason code to its internal enum, error category, requ
 | `SKIP_CONTENT_TYPE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE` | — | SKIPPED | Upstream Content-Type is not `text/html` | Expected for JSON, XML, image, and other non-HTML responses. If an HTML page triggers this, check the upstream `Content-Type` header. |
 | `SKIP_SIZE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE` | — | SKIPPED | Response body exceeds `markdown_limits memory=...` | Increase `markdown_limits memory=...` if the page should be converted, or exclude oversized pages from conversion scope. |
 | `SKIP_AUTH` | `NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH` | — | SKIPPED | Auth policy denies conversion for authenticated requests | Expected when `markdown_auth_policy deny` is configured. If you see it unexpectedly, check whether the request is authenticated and whether the location/server block should allow conversion. |
-| `SKIP_ACCEPT` | _(Accept negotiation)_ | — | SKIPPED | Accept header does not include `text/markdown` | Expected for normal browser traffic. If an AI agent triggers this, verify the client sends `Accept: text/markdown`. Check `markdown_on_wildcard` if using `*/*`. |
+| `SKIP_ACCEPT` | _(Accept negotiation)_ | — | SKIPPED | Accept header does not include `text/markdown` | Expected for normal browser traffic. If an AI agent triggers this, verify the client sends `Accept: text/markdown`. Check `markdown_accept` if using `*/*`. |
 | `ELIGIBLE_CONVERTED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | — | CONVERTED | All checks passed, conversion succeeded | No action needed — this is the success path. |
 | `ELIGIBLE_FAILED_OPEN` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; original HTML served (`markdown_error_policy pass`) | Investigate the failure sub-classification (see below). The client received HTML, so no user impact. Review failure rate trends. |
 | `ELIGIBLE_FAILED_CLOSED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; 502 returned (`markdown_error_policy fail_closed`) | Urgent — clients are receiving errors. Switch to `markdown_error_policy pass` or disable conversion for the affected scope. Investigate root cause. |

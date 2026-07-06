@@ -120,7 +120,7 @@ failure short-circuits to passthrough.
 | What | RFC 7231 section 5.3.2 q-value comparison with RFC 9110 tie-break rules. Client must prefer `text/markdown` over `text/html`. |
 | On failure | Passthrough — `skips.accept++` with reason sub-codes: `NO_ACCEPT`, `LOWER_Q`, `EXPLICIT_REJECT`, `MALFORMED` |
 | Order | **Last** check before conversion attempt |
-| Directive | `markdown_on_wildcard on\|off` (controls `*/*` interpretation) |
+| Directive | `markdown_accept on\|off` (controls `*/*` interpretation) |
 
 ---
 
@@ -262,8 +262,8 @@ the above checks pass.
 
 | Directive | Value | Behavior |
 |-----------|-------|----------|
-| `markdown_on_error` | `pass` (default) | Conversion failure: return original HTML (fail-open) |
-| `markdown_on_error` | `reject` | Conversion failure: return 502 Bad Gateway |
+| `markdown_error_policy` | `pass` (default) | Conversion failure: return original HTML (fail-open) |
+| `markdown_error_policy` | `reject` | Conversion failure: return 502 Bad Gateway |
 
 These semantics apply to:
 - Buffer size exceeded
@@ -287,7 +287,7 @@ These semantics apply to:
 | 6 | Content-Type | eligibility.c | `markdown_content_types` | passthrough |
 | 7 | Size limit (header) | eligibility.c | `markdown_max_size` | passthrough |
 | 8 | Auth policy | auth.c + request_impl.h | `markdown_auth_policy`, `markdown_auth_cookies` | passthrough |
-| 9 | Accept negotiation | accept.c via Rust FFI | `markdown_on_wildcard` | passthrough |
+| 9 | Accept negotiation | accept.c via Rust FFI | `markdown_accept` | passthrough |
 | 10 | Content-Encoding | decompression.c | `markdown_auto_decompress` | fail-open/reject |
 | 11 | Body size (buffering) | payload_impl.h | `markdown_max_size` | fail-open/reject |
 | 12 | Decompression budget | decompression.c | `markdown_decompress_max_size` | fail-open/reject |

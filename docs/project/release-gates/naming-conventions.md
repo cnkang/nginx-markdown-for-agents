@@ -30,11 +30,11 @@ All 0.4.0 sub-specs must follow these conventions for any new operator-facing su
 | `markdown_filter`                      | Enable/disable the filter            |
 | `markdown_memory_budget`               | Maximum response size to convert     |
 | `markdown_timeout`                     | Conversion timeout                   |
-| `markdown_on_error`                    | Failure policy (pass / reject)       |
+| `markdown_error_policy`                | Failure policy (pass / fail_closed)  |
 | `markdown_flavor`                      | Markdown output flavor               |
 | `markdown_token_estimate`              | Token estimation metadata            |
 | `markdown_front_matter`               | YAML front matter injection          |
-| `markdown_on_wildcard`                 | Wildcard Accept handling             |
+| `markdown_accept`                     | Accept negotiation (strict/wildcard) |
 | `markdown_auth_policy`                 | Auth-based eligibility policy        |
 | `markdown_auth_cookies`                | Cookie forwarding for auth           |
 | `markdown_etag`                        | ETag generation                      |
@@ -42,7 +42,7 @@ All 0.4.0 sub-specs must follow these conventions for any new operator-facing su
 | `markdown_log_verbosity`              | Log verbosity level                  |
 | `markdown_buffer_chunked`              | Chunked buffering control            |
 | `markdown_stream_types`               | Eligible MIME types                  |
-| `markdown_trust_forwarded_headers`     | Trust X-Forwarded-* headers          |
+| `markdown_trusted_proxies`            | Trust X-Forwarded-* headers          |
 | `markdown_large_body_threshold`        | Large-body processing threshold      |
 | `markdown_metrics_shm_size`           | Shared memory zone size for metrics  |
 | `markdown_metrics`                     | Metrics endpoint enable/config       |

@@ -119,7 +119,7 @@ rate(nginx_markdown_decompression_truncated_input_total[5m])
 ## Fail-Open Behavior
 
 When any decompression error occurs, the module follows the fail-open strategy
-(unless `markdown_on_error reject` is configured for fail-closed):
+(unless `markdown_error_policy fail_closed` is configured for fail-closed):
 
 | Error Category | Fail-Open Behavior | Fail-Closed Behavior |
 |----------------|-------------------|---------------------|
