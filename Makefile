@@ -65,6 +65,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         harness-check harness-check-full harness-security-checks test-harness \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
+        complexity-check \
 	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-08x release-gates-check-090 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
@@ -263,6 +264,10 @@ harness-security-checks:
 	PYTHONPATH=. python3 tools/harness/detect_test_assertion_coverage.py
 	PYTHONPATH=. python3 tools/harness/detect_html_sanitizer_invariants.py
 	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
+
+complexity-check:
+	@echo "=== Complexity Check ==="
+	bash tools/complexity/check_complexity.sh
 
 test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
@@ -872,6 +877,7 @@ help:
 	@echo "  harness-check            - Validate harness truth surfaces and optional local adapters"
 	@echo "  harness-check-full       - Run full harness validation plus docs/release checks"
 	@echo "  harness-security-checks  - Run local static harness/security detectors"
+	@echo "  complexity-check         - Run complexity analysis (lizard + complexipy + shellcheck)"
 	@echo "  security-static          - Run actionlint, shellcheck, gitleaks, Semgrep, and cargo-deny"
 	@echo "  supply-chain             - Run Trivy filesystem/IaC scan and generate a Syft SPDX SBOM"
 	@echo "  test-harness             - Run unit tests for harness detector scripts"
