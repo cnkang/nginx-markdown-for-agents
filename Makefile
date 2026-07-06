@@ -66,7 +66,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
-	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-08x release-gates-check-090 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-090 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
@@ -666,8 +666,30 @@ release-gates-check-080:
 release-gates-check-08x: release-gates-check-080
 	@echo "  (release-gates-check-08x is an alias for release-gates-check-080, the 0.8.x patch-line gate)"
 
-# 0.9.0 Release Gates (additive on top of 0.8.0 gates)
-release-gates-check-090: release-gates-check-080
+# 0.8.0 regression subset — version-independent stable checks from 0.8 gate.
+# Skips RELEASE_GATE_EXPECTED_CARGO_VERSION-bound validators so 0.9+ branches
+# can inherit the 0.8 regression surface without a version-number conflict.
+release-gates-check-080-regression:
+	@echo "=== v0.8.x Regression Subset (version-independent) ==="
+	$(MAKE) build
+	$(MAKE) check-headers
+	$(MAKE) test-rust
+	$(MAKE) test-nginx-unit
+	$(MAKE) test-e2e-rust
+	$(MAKE) docs-check
+	python3 tools/release/matrix/validate_workflow_matrix_consumers.py
+	$(MAKE) harness-check
+	python3 tools/release/gates/validate_release_gates.py
+	python3 tools/release/gates/validate_naming.py
+	python3 tools/release/gates/validate_config_directives_080.py
+	@test -f docs/harness/routing-manifest.json
+	@test -d docs/harness/risk-packs
+	@test -f docs/harness/core.md
+	@test -f docs/harness/README.md
+	@echo "=== v0.8.x Regression Subset: ALL PASSED ==="
+
+# 0.9.0 Release Gates (additive on top of 0.8.0 regression subset)
+release-gates-check-090: release-gates-check-080-regression
 	@echo "=== 0.9.0 Release Gates ==="
 	$(MAKE) test-rust
 	$(MAKE) test-nginx-unit
@@ -890,6 +912,7 @@ help:
 	@echo "  release-gates-check-060  - Validate 0.6.0 release gates (streaming default, pruning, budget)"
 	@echo "  release-gates-check-070  - Validate 0.7.0 release gates (runtime correctness, package compat, fuzz)"
 	@echo "  release-gates-check-080  - Validate 0.8.x release gates (streaming, coverage, matrix, harness boundary)"
+	@echo "  release-gates-check-080-regression - 0.8.x version-independent regression subset (no Cargo version bind)"
 	@echo "  release-gates-check-08x  - Alias for release-gates-check-080 (0.8.x patch-line canonical entry)"
 	@echo "  release-gates-check-090  - Validate 0.9.0 release gates (additive on 0.8.0; production examples, gate validator)"
 	@echo "  release-gates-check-all  - Run current baseline and 0.9.0 release gates"
