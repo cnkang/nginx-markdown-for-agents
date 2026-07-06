@@ -95,7 +95,7 @@ All streaming decision logs include these fields:
 | `content_type` | Response Content-Type | e.g., text/html |
 | `content_length_known` | CL header present? | 0 (no), 1 (yes) |
 | `chunked` | Chunked transfer? | 0 (no), 1 (yes) |
-| `markdown_on_error` | Error policy | pass, reject |
+| `markdown_error_policy` | Error policy | pass, fail_closed |
 
 ### Log Levels
 

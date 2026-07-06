@@ -10,9 +10,9 @@ flowchart TD
     Continue --> Done{"Conversion Complete?"}
     Done -->|yes| Success["Return Markdown"]
     Done -->|no| Check
-    Fail --> OnError{"markdown_on_error?"}
+    Fail --> OnError{"markdown_error_policy?"}
     OnError -->|pass| FailOpen["Return Original HTML"]
-    OnError -->|reject| FailClosed["Return 502 Error"]
+    OnError -->|fail_closed| FailClosed["Return 502 Error"]
     
     style Success fill:#090,color:#fff
     style FailOpen fill:#f90,color:#000

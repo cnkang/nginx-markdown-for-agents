@@ -578,7 +578,7 @@ Additional changes:
 
 ## Roadmap
 
-Current release line (0.8.x; latest patch 0.8.3):
+**Current release line (0.9.x; latest patch 0.9.0)**
 
 - Dual-engine streaming model: full-buffer default + streaming engine for large/chunked responses
 - `auto` mode as the default `markdown_streaming_engine` setting

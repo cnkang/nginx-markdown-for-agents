@@ -7,9 +7,9 @@ flowchart TD
     Client["Client Request"] --> Accept{"Accept Header?"}
     Accept -->|"text/markdown"| Convert["Convert to Markdown"]
     Accept -->|"text/html"| PassHTML["Pass HTML Through"]
-    Accept -->|"*/*"| Wildcard{"markdown_on_wildcard?"}
-    Wildcard -->|on| Convert
-    Wildcard -->|off| PassHTML
+    Accept -->|"*/*"| Wildcard{"markdown_accept?"}
+    Wildcard -->|wildcard| Convert
+    Wildcard -->|strict| PassHTML
     Accept -->|"application/json"| PassHTML
     Convert --> Response["Response with<br/>Content-Type: text/markdown"]
     PassHTML --> Response2["Response with<br/>Content-Type: text/html"]
@@ -65,16 +65,16 @@ Accept: */*           → No conversion (returns HTML)
 Accept: text/*        → No conversion (returns HTML)
 ```
 
-To enable conversion for wildcards, use the `markdown_on_wildcard` directive:
+To enable conversion for wildcards, use the `markdown_accept` directive:
 
 ```nginx
 location /docs/ {
     markdown_filter on;
-    markdown_on_wildcard on;  # Enable wildcard conversion
+    markdown_accept wildcard;  # Enable wildcard conversion
 }
 ```
 
-With `markdown_on_wildcard on`:
+With `markdown_accept wildcard`:
 ```http
 Accept: */*           → Conversion enabled
 Accept: text/*        → Conversion enabled
@@ -219,11 +219,11 @@ Content-Type: text/html
 ### Test Wildcard Behavior
 
 ```bash
-# Without markdown_on_wildcard (default)
+# Without markdown_accept (default: strict)
 curl -H "Accept: */*" http://localhost/page.html
 # Returns HTML
 
-# With markdown_on_wildcard on
+# With markdown_accept wildcard
 curl -H "Accept: */*" http://localhost/page.html
 # Returns Markdown
 ```
@@ -297,7 +297,7 @@ Serve Markdown to agents, HTML to browsers:
 ```nginx
 location /docs/ {
     markdown_filter on;
-    markdown_on_wildcard off;  # Explicit opt-in only
+    markdown_accept strict;  # Explicit opt-in only
     proxy_pass http://docs-backend;
 }
 ```

@@ -11,7 +11,7 @@ steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.8.x)**, the project includes a dual-engine
+As of the **current release line (0.9.x)**, the project includes a dual-engine
 conversion model (streaming default with full-buffer fallback), Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
 logic, and header plan application, independent decompression budget with parse
@@ -27,14 +27,13 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Release 0.8.x Line (Current)
 
-**Status:** Current release line. The 0.8.x line began with 0.8.0 (true
-streaming contract) and continues with patch releases (0.8.1, 0.8.2, 0.8.3) that
-harden stability, security, and release-gate consistency without introducing
+**Status:** Previous release line. The 0.8.x line began with 0.8.0 (true
+streaming contract) and continued with patch releases (0.8.1, 0.8.2, 0.8.3) that
+hardened stability, security, and release-gate consistency without introducing
 new user-visible features or breaking configuration changes.
 
-Version 0.8.0 formalizes true streaming semantics as a first-class, verifiable
-contract. See the [Current Release Line 0.8.x](#current-release-line-08x)
-section below for detailed goals, non-goals, and implementation status.
+Version 0.8.0 formalized true streaming semantics as a first-class, verifiable
+contract. The current release line is 0.9.x — see [Current Release Line 0.9.x](#current-release-line-09x).
 
 ### Release 0.7.0 Updates
 
@@ -212,7 +211,7 @@ The 0.3.0 release includes:
 - Image conversion now preserves the `title` attribute in Markdown syntax; missing/blocked image URLs emit `alt` text as plain text
 - Media elements (`video`, `audio`) now have their `src` URL extracted as a Markdown link; video `poster` thumbnails extracted as Markdown images
 - Image map `<area>` elements now have their `href` extracted as Markdown links
-- X-Forwarded-Host/Proto headers are no longer trusted by default; added `markdown_trust_forwarded_headers on|off` directive (default: off)
+- X-Forwarded-Host/Proto headers are no longer trusted by default; added `markdown_trusted_proxies on|off` directive (default: off)
 - Decompression buffer estimation now logs a warning when the estimated output exceeds 50 MB
 - CI jobs for clang compiler and AddressSanitizer/UndefinedBehaviorSanitizer smoke tests
 - SonarCloud Quality Gate Status badge in both English and Chinese READMEs
@@ -299,7 +298,7 @@ The 0.3.0 release includes:
 - Authentication-aware caching (Cache-Control: private)
 - Variable-driven configuration support
 - Large response routing with `markdown_large_body_threshold` directive
-- Forwarded header trust control with `markdown_trust_forwarded_headers` directive
+- Forwarded header trust control with `markdown_trusted_proxies` directive
 
 ## Test Coverage
 
@@ -369,7 +368,7 @@ When deploying:
 1. **Start incrementally**: Enable on one location or path first
 2. **Monitor behavior**: Use the metrics endpoint to track conversions
 3. **Set appropriate limits**: Configure `markdown_memory_budget` and `markdown_timeout`
-4. **Choose failure mode**: Select `markdown_on_error` based on requirements
+4. **Choose failure mode**: Select `markdown_error_policy` based on requirements
 5. **Test caching**: Verify cache behavior with your CDN or caching layer
 6. **Review security**: Ensure authentication policies match your security model
 
@@ -377,14 +376,25 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ## Current Focus and Roadmap
 
-### Current Release Line (0.8.x)
+### Current Release Line (0.9.x)
 
-The 0.8.x release line is the current maintained line. The latest patch
-release is 0.8.3; 0.8.1 through 0.8.3 are patch releases that
-harden stability, security, and release-gate consistency without introducing
-new user-visible features or breaking configuration changes.
+The 0.9.x release line is the current maintained line. The initial release
+is 0.9.0 — a breaking release that consolidates the configuration surface
+and adds profile-based deployments, while preserving upgrade paths from 0.8.x.
 
-#### 0.8.3 (latest patch)
+#### 0.9.0 (current)
+
+- **Config V2 directives**: `markdown_error_policy`, `markdown_accept`,
+  `markdown_trusted_proxies`, `markdown_limits`, `markdown_cache_validation`
+  replace 0.8.x legacy directives.
+- **Profile system**: `markdown_profile` (strict_cache, balanced, streaming_first)
+  for one-line preset deployments.
+- **0.8.x migration**: All 0.8.x configs work unchanged; legacy aliases
+  silently remap to new directives.
+- Breaking: removed `markdown_max_size`, `markdown_timeout`,
+  `markdown_streaming_budget`, `markdown_conditional_requests` as standalone directives.
+
+#### 0.8.3 (last 0.8.x patch)
 
 - Streaming state machine correctness: corrected `pop_contexts_up_to`
   return order (innermost-first) and added `CodeBlock` handling in
@@ -636,8 +646,8 @@ See `examples/docker/` for Docker build examples.
 
 ## Summary
 
-**NGINX Markdown for Agents** is on the 0.8.x release line (latest patch:
-0.8.3). The project provides
+**NGINX Markdown for Agents** is on the 0.9.x release line (latest patch:
+0.9.0). The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 dual-engine model, with bounded-memory streaming as the default path and
 full-buffer conversion as the fallback. Version 0.8.0 formalizes the true

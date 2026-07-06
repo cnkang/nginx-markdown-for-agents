@@ -1038,12 +1038,12 @@ Example output (streaming-relevant sections):
 
 ```json
 {
-  "version": "0.8.3",
+  "version": "0.9.0",
   "uptime_seconds": 86420,
   "worker_pid": 1234,
   "streaming_config": {
     "engine": "auto",
-    "on_error": "pass",
+    "error_policy": "pass",
     "threshold": 1048576,
     "precommit_buffer": 262144,
     "flush_min": 4096,
