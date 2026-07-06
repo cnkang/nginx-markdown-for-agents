@@ -237,7 +237,7 @@ Common causes:
    - Exact `map $http_accept` strings often miss real-world multi-value `Accept` headers
    - Use regex map rules for `Accept` matching
    - Prefer `$uri` over `$request_uri` for extension checks (query strings can break matches)
-    - If map includes `text/*`, enable `markdown_accept wildcard;`
+   - If map includes `text/*`, enable `markdown_accept wildcard;`
 4. **Response not eligible**: Must be 200 status with `text/html` content type
 5. **Size limit exceeded**: Response larger than `markdown_limits memory=...`
 
