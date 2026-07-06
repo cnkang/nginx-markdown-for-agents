@@ -689,12 +689,9 @@ release-gates-check-080-regression:
 	@echo "=== v0.8.x Regression Subset: ALL PASSED ==="
 
 # 0.9.0 Release Gates (additive on top of 0.8.0 regression subset)
+# test-rust, test-nginx-unit, check-headers, docs-check already run by prereq
 release-gates-check-090: release-gates-check-080-regression
 	@echo "=== 0.9.0 Release Gates ==="
-	$(MAKE) test-rust
-	$(MAKE) test-nginx-unit
-	$(MAKE) check-headers
-	$(MAKE) docs-check
 	$(MAKE) test-production-examples-nginx-t
 	$(MAKE) test-production-examples-e2e-smoke
 	$(MAKE) complexity-check
