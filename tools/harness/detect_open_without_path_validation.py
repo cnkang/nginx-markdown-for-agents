@@ -555,6 +555,42 @@ def _resolve_path_arg(node: ast.Call) -> ast.expr | None:
     return None
 
 
+def _check_single_call(
+    node: ast.Call,
+    validated_vars: dict[str, set[str]],
+    hardcoded_vars: set[str],
+    rel: str,
+    strict: bool,
+    parent_map: dict[int, ast.AST],
+) -> tuple[str | None, str | None]:
+    """Check one Call node; return (error, warning) — at most one non-None."""
+    is_open = _is_open_call(node)
+    is_path_io = _is_path_io_call(node)
+    if not is_open and not is_path_io:
+        return None, None
+
+    if is_open and _is_os_open_dir_fd(node.func, node):
+        return None, None
+
+    path_arg = _resolve_path_arg(node)
+    if path_arg is None:
+        return None, None
+
+    scope = _find_scope(node, parent_map)
+    if _is_safe_path_expr(path_arg, validated_vars, hardcoded_vars, scope, rel):
+        return None, None
+
+    if is_path_io:
+        method = node.func.attr  # type: ignore[attr-defined]
+        finding = _build_path_io_finding(rel, node.lineno, method, _unparse(path_arg), strict)
+        return None, finding  # Path IO always advisory
+    else:
+        finding = _build_open_finding(rel, node.lineno, _unparse(path_arg), strict)
+        if strict:
+            return finding, None
+        return None, finding
+
+
 def _find_open_calls(
     tree: ast.AST,
     validated_vars: dict[str, set[str]],
@@ -576,37 +612,13 @@ def _find_open_calls(
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        is_open = _is_open_call(node)
-        is_path_io = _is_path_io_call(node)
-        if not is_open and not is_path_io:
-            continue
-
-        if is_open and _is_os_open_dir_fd(node.func, node):
-            continue
-
-        path_arg = _resolve_path_arg(node)
-        if path_arg is None:
-            continue
-
-        scope = _find_scope(node, parent_map)
-
-        if _is_safe_path_expr(path_arg, validated_vars, hardcoded_vars, scope, rel):
-            continue
-
-        if is_path_io:
-            method = node.func.attr  # type: ignore[attr-defined]
-            finding = _build_path_io_finding(rel, node.lineno, method, _unparse(path_arg), strict)
-            # Path IO methods are advisory-only — the AST tracker cannot
-            # follow data flow through function parameters, producing too
-            # many false positives for strict mode.  open() remains the
-            # strict-mode gate; Path IO findings are always warnings.
-            warnings.append(finding)
-        else:
-            finding = _build_open_finding(rel, node.lineno, _unparse(path_arg), strict)
-            if strict:
-                errors.append(finding)
-            else:
-                warnings.append(finding)
+        err, wrn = _check_single_call(
+            node, validated_vars, hardcoded_vars, rel, strict, parent_map,
+        )
+        if err:
+            errors.append(err)
+        if wrn:
+            warnings.append(wrn)
 
     return errors, warnings
 
