@@ -120,8 +120,9 @@ class TestParseLcovSummary(unittest.TestCase):
 
     def test_file_not_found(self) -> None:
         """Verify FileNotFoundError is raised for a nonexistent path."""
+        bad_path = Path("/nonexistent/file.lcov")
         with self.assertRaises(FileNotFoundError):
-            parse_lcov_summary(Path("/nonexistent/file.lcov"))
+            parse_lcov_summary(bad_path)
 
 
 class TestComputeFromRecords(unittest.TestCase):
