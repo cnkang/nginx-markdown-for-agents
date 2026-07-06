@@ -151,6 +151,13 @@
       ],
       "notes": "Validates active release version consistency across source, chart, internal dependencies, and docs (Rule 55)"
     },
+    "complexity": {
+      "phase": "cheap-blocker",
+      "commands": [
+        "make complexity-check"
+      ],
+      "notes": "Runs lizard (CCN/length/params) on C/Rust/Python, complexipy (cognitive) on Python, shellcheck on shell. Baseline-gated: new violations fail, existing baseline violations that worsen produce warnings. See docs/harness/rules/complexity.md."
+    },
     "runtime-e2e": {
       "phase": "umbrella",
       "commands": [

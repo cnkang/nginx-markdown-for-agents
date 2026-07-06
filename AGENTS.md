@@ -92,7 +92,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 14 | testing-coverage | Every bug fix needs regression test; cross-boundary and malformed-input cases; parameterized tests must consume inputs |
 | 15 | ffi-crosslang | Rust FFI changes → update all boundaries; prefer helpers over literal init; read before free |
 | 16 | testing-coverage | No dead stores; loop vars in for; every var consumed by TEST_ASSERT |
-| 17 | complexity | Keep function complexity at/below threshold; extract helpers; prefer early-return |
+| 17 | complexity | Keep function complexity at/below threshold; extract helpers; prefer early-return; run `make complexity-check` for C/Rust/Python/Shell |
 | 18 | shell | case has default; `[[` over `[`; messages to stderr; explicit return; merge nested if; usage matches flags |
 | 19 | python-tooling | Binary prerequisites validate executability; harness checks affect pass/fail |
 | 20 | testing-coverage | Don't mark tasks complete without verification; generate artifacts and verify shape |
@@ -435,6 +435,7 @@ Follow evidence-first verification (no completion claim without fresh command ou
   `PYTHONPATH=. python3 tools/harness/detect_python_complexity.py`
   and `python3 -m pytest tools/harness/tests/test_detect_python_complexity.py -q --tb=short`
   (Rule 17)
+- C, Rust, Python, or Shell source changes: `make complexity-check` (Rule 17)
 - C module volatile/atomic usage changes: `bash tools/harness/detect_volatile_atomic.sh` (Rule 42)
 - Workflow, shell, secret-scan, Semgrep, or Rust dependency policy changes:
   `make security-static` (Rule 48)
