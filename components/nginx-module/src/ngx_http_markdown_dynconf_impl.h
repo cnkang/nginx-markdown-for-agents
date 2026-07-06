@@ -1894,32 +1894,10 @@ ngx_http_markdown_dynconf_reload_dryrun(
                 sizeof("line too long") - 1);
             ngx_close_file(fd);
 
-            if (watcher->last_validation.total_errors > 0) {
-                /* At least the overflow error was recorded. */
-                watcher->last_validation.valid = 0;
-                ngx_http_markdown_dynconf_log_validation_errors(
-                    &watcher->last_validation, &watcher->path, log);
-                return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL;
-            }
-
-            /* No errors recorded (overflow was the only issue but
-               record_error may not have incremented); mark valid. */
-            watcher->last_validation.valid = 1;
-
-            if (applied > 0) {
-                ngx_log_error(NGX_LOG_INFO, log, 0,
-                              "markdown: dry-run validation passed "
-                              "for \"%V\" (%ui settings validated, "
-                              "not applied)",
-                              &watcher->path, applied);
-            } else {
-                ngx_log_error(NGX_LOG_INFO, log, 0,
-                              "markdown: dry-run validation passed "
-                              "for \"%V\" (0 effective keys, not applied)",
-                              &watcher->path);
-            }
-
-            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
+            watcher->last_validation.valid = 0;
+            ngx_http_markdown_dynconf_log_validation_errors(
+                &watcher->last_validation, &watcher->path, log);
+            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL;
         }
 
         /* Process complete lines within the chunk: parse each

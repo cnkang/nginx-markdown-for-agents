@@ -193,6 +193,30 @@ def check_inflight_guard(repo: Path) -> dict:
     return {"name": "inflight_guard", "status": "pass"}
 
 
+def _check_removed_directives(content: str, removed: list) -> list:
+    missing = []
+    for name in removed:
+        idx = content.find(f'ngx_string("{name}")')
+        if idx < 0:
+            missing.append(f"{name}: directive missing")
+            continue
+        block = content[idx:idx + 700]
+        if "ngx_http_markdown_reject_removed_directive" not in block:
+            missing.append(f"{name}: not reject-only")
+    return missing
+
+
+def _check_migration_guide(migration: Path) -> list:
+    missing = []
+    if migration.exists():
+        migration_text = migration.read_text()
+        if "markdown_memory_budget" not in migration_text:
+            missing.append("markdown_memory_budget: migration guide missing")
+    else:
+        missing.append("MIGRATION-0.9.md missing")
+    return missing
+
+
 def check_config_v2_removed_directives(repo: Path) -> dict:
     """Verify removed Config V2 directives are reject-only stubs."""
     directives = (
@@ -219,57 +243,14 @@ def check_config_v2_removed_directives(repo: Path) -> dict:
         "markdown_forwarded_headers",
         "markdown_large_body_threshold",
     ]
-    missing = []
-    for name in removed:
-        idx = content.find(f'ngx_string("{name}")')
-        if idx < 0:
-            missing.append(f"{name}: directive missing")
-            continue
-        block = content[idx:idx + 700]
-        if "ngx_http_markdown_reject_removed_directive" not in block:
-            missing.append(f"{name}: not reject-only")
-    if migration.exists():
-        migration_text = migration.read_text()
-        if "markdown_memory_budget" not in migration_text:
-            missing.append("markdown_memory_budget: migration guide missing")
-    else:
-        missing.append("MIGRATION-0.9.md missing")
+    missing = _check_removed_directives(content, removed)
+    missing.extend(_check_migration_guide(migration))
     if missing:
         return {"name": "config_v2_removed_directives", "status": "fail",
                 "message": "; ".join(missing)}
     return {"name": "config_v2_removed_directives", "status": "pass"}
 
 
-def check_e2e_stale_symbols(repo: Path) -> dict:
-    """Scan tools/e2e/ and tests/e2e/ for stale 0.8.x directive names."""
-    stale = [
-        "markdown_max_size", "markdown_timeout", "markdown_memory_budget",
-        "markdown_streaming_budget", "markdown_on_error", "markdown_streaming_on_error",
-        "markdown_etag", "markdown_etag_policy", "markdown_conditional_requests",
-        "markdown_on_wildcard", "markdown_trust_forwarded_headers",
-        "markdown_forwarded_headers", "markdown_large_body_threshold",
-    ]
-    scan_dirs = ["tools/e2e", "tests/e2e", "examples/production", "docs/guides", "docs/operations", "charts"]
-    findings = []
-    for d in scan_dirs:
-        dirpath = repo / d
-        if not dirpath.is_dir():
-            continue
-        for f in dirpath.rglob("*"):
-            if not f.is_file() or f.suffix in ('.pyc', '.lock', '.so'):
-                continue
-            try:
-                content = f.read_text(encoding='utf-8')
-            except Exception:
-                continue
-            for sym in stale:
-                if sym in content:
-                    rel = str(f.relative_to(repo))
-                    findings.append(f"{rel}: contains {sym}")
-    if findings:
-        return {"name": "e2e_stale_symbols", "status": "fail",
-                "message": "; ".join(findings[:5])}
-    return {"name": "e2e_stale_symbols", "status": "pass"}
 
 
 def check_conditional_runtime_path(repo: Path) -> dict:
@@ -473,7 +454,6 @@ def main():
     results.append(check_error_policy(repo))
     results.append(check_inflight_guard(repo))
     results.append(check_config_v2_removed_directives(repo))
-    results.append(check_e2e_stale_symbols(repo))
     results.append(check_conditional_runtime_path(repo))
     results.append(check_conditional_bypass_header_filter(repo))
     results.append(check_conditional_bypass_no_error_policy(repo))

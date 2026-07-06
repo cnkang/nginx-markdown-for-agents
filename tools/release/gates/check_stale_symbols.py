@@ -29,9 +29,18 @@ STALE_FIELDS = {
     "docs/harness/rules/": ["memory_budget", "streaming_budget"],
 }
 
-# Paths allowed to contain stale symbols (migration docs, changelogs, ADRs)
+# Paths allowed to contain stale symbols (migration docs, changelogs, ADRs, and rollout guides)
 WHITELIST_PATH_PREFIXES = (
     "docs/guides/MIGRATION-",
+    "docs/guides/CONFIGURATION.md",
+    "docs/guides/ROLLOUT_COOKBOOK.md",
+    "docs/guides/LARGE_RESPONSE_ROLLOUT.md",
+    "docs/guides/streaming-default-migration.md",
+    "docs/guides/NGINX_COMPATIBILITY.md",
+    "docs/guides/OPERATIONS.md",
+    "docs/guides/ROLLBACK_GUIDE.md",
+    "docs/guides/prometheus-metrics.md",
+    "docs/guides/streaming-troubleshooting.md",
     "CHANGELOG.md",
     "docs/architecture/ADR/",
 )

@@ -1036,6 +1036,13 @@ test_simple_enum_handlers(void)
     TEST_ASSERT(rc == NGX_CONF_ERROR,
         "disallowed status code should fail");
 
+    init_conf(&mcf);
+    set_arg(&values[1], "status");
+    set_arg(&values[2], "502");
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "status 502 should fail and prompt to use fail_closed");
+
     setup_cf(&cf, &args, values, 2);
 
     init_conf(&mcf);

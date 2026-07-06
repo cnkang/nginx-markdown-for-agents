@@ -725,10 +725,17 @@ ngx_http_markdown_error_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         ngx_uint_t code;
 
         code = ngx_http_markdown_parse_uint(&value[2]);
-        if (code != 429 && code != 502 && code != 503) {
+        if (code == 502) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "invalid status code \"502\" in \"%V\" directive, "
+                "please use \"fail_closed\" instead",
+                &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+        if (code != 429 && code != 503) {
             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                 "invalid status code \"%V\" in \"%V\" directive, "
-                "it must be 429, 502, or 503",
+                "it must be 429 or 503",
                 &value[2], &cmd->name);
             return NGX_CONF_ERROR;
         }

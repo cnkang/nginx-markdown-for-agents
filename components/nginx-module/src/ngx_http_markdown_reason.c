@@ -54,7 +54,11 @@ ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
 #define REASON_FAILED_CLOSED            17
 #define REASON_CONVERSION_ERROR         18
 #define REASON_MEMORY_BUDGET_EXCEEDED   19
-/* Indices 20-24 reserved for future reason codes (not yet production-used) */
+#define REASON_OVERLOAD                 20
+#define REASON_INVALID_DYNCONF          21
+#define REASON_DEGRADED_SNAPSHOT        22
+#define REASON_HEADER_PLAN_APPLY_ERR    23
+#define REASON_STREAMING_MID_FLIGHT_ERR 24
 #define REASON_BYPASS_NO_TRANSFORM      25
 
 
@@ -76,6 +80,11 @@ static ngx_str_t  reason_str_failed_open;
 static ngx_str_t  reason_str_failed_closed;
 static ngx_str_t  reason_str_conversion_error;
 static ngx_str_t  reason_str_memory_budget_exceeded;
+static ngx_str_t  reason_str_overload;
+static ngx_str_t  reason_str_invalid_dynconf;
+static ngx_str_t  reason_str_degraded_snapshot;
+static ngx_str_t  reason_str_header_plan_apply_err;
+static ngx_str_t  reason_str_streaming_mid_flight_err;
 static ngx_str_t  reason_str_ffi_panic;
 static ngx_str_t  reason_str_bypass_no_transform;
 
@@ -117,6 +126,16 @@ ngx_http_markdown_reason_init_strs(void)
         &reason_str_conversion_error);
     ngx_http_markdown_get_reason_code_str(REASON_MEMORY_BUDGET_EXCEEDED,
         &reason_str_memory_budget_exceeded);
+    ngx_http_markdown_get_reason_code_str(REASON_OVERLOAD,
+        &reason_str_overload);
+    ngx_http_markdown_get_reason_code_str(REASON_INVALID_DYNCONF,
+        &reason_str_invalid_dynconf);
+    ngx_http_markdown_get_reason_code_str(REASON_DEGRADED_SNAPSHOT,
+        &reason_str_degraded_snapshot);
+    ngx_http_markdown_get_reason_code_str(REASON_HEADER_PLAN_APPLY_ERR,
+        &reason_str_header_plan_apply_err);
+    ngx_http_markdown_get_reason_code_str(REASON_STREAMING_MID_FLIGHT_ERR,
+        &reason_str_streaming_mid_flight_err);
     ngx_http_markdown_get_reason_code_str(REASON_FFI_PANIC,
         &reason_str_ffi_panic);
     ngx_http_markdown_get_reason_code_str(REASON_BYPASS_NO_TRANSFORM,
@@ -341,6 +360,41 @@ ngx_http_markdown_reason_skip_conditional(void)
 {
     ngx_http_markdown_reason_init_strs();
     return &reason_str_skipped_conditional;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_overload(void)
+{
+    ngx_http_markdown_reason_init_strs();
+    return &reason_str_overload;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_invalid_dynconf(void)
+{
+    ngx_http_markdown_reason_init_strs();
+    return &reason_str_invalid_dynconf;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_degraded_snapshot(void)
+{
+    ngx_http_markdown_reason_init_strs();
+    return &reason_str_degraded_snapshot;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_header_plan_apply_err(void)
+{
+    ngx_http_markdown_reason_init_strs();
+    return &reason_str_header_plan_apply_err;
+}
+
+const ngx_str_t *
+ngx_http_markdown_reason_streaming_mid_flight_err(void)
+{
+    ngx_http_markdown_reason_init_strs();
+    return &reason_str_streaming_mid_flight_err;
 }
 
 

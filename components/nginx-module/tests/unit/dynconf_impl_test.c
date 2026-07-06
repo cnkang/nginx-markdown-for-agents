@@ -2756,6 +2756,59 @@ test_dry_run_invalid_file_returns_fail(void)
 }
 
 static void
+test_dry_run_line_too_long(void)
+{
+    const char                          *tmpfile;
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+    ngx_uint_t                           orig_version;
+
+    TEST_SUBSECTION("dry-run: line too long returns DRY_RUN_FAIL");
+
+    tmpfile = "/tmp/dynconf_test_dryrun_line_too_long.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create temp file for dry-run line too long test");
+        for (size_t j = 0; j < NGX_HTTP_MARKDOWN_DYNCONF_MAX_LINE + 100; j++) {
+            fputc('x', f);
+        }
+        fputc('\n', f);
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    conf.advanced.dynconf_dry_run = 1;
+    set_ngx_str(&watcher.path, tmpfile);
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 1;
+    watcher.active_snapshot.prune_noise = 1;
+    watcher.version = 6;
+    orig_version = watcher.version;
+    watcher.lkg_valid = 0;
+
+    rc = ngx_http_markdown_dynconf_reload(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL,
+                "reload returns DRY_RUN_FAIL for line too long in dry-run mode");
+
+    /* active_snapshot must NOT be modified */
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1,
+                "active_snapshot.enabled unchanged");
+
+    /* version must NOT be incremented */
+    TEST_ASSERT(watcher.version == orig_version,
+                "version not incremented");
+
+    /* validation result should have errors */
+    TEST_ASSERT(watcher.last_validation.total_errors > 0,
+                "last_validation.total_errors > 0");
+
+    unlink(tmpfile);
+    TEST_PASS("dry-run: line too long returns DRY_RUN_FAIL with errors recorded");
+}
+
+static void
 test_dry_run_missing_schema_version_returns_fail(void)
 {
     const char                          *tmpfile;
@@ -3152,6 +3205,7 @@ main(void)
 
     test_dry_run_valid_file_returns_ok();
     test_dry_run_invalid_file_returns_fail();
+    test_dry_run_line_too_long();
     test_dry_run_missing_schema_version_returns_fail();
     test_dry_run_off_applies_normally();
 
