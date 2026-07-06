@@ -479,7 +479,10 @@ def _entry_sort_key(entry: dict) -> tuple[tuple[int, ...], str, str]:
         tuple: ``(version_tuple, os_type, arch)`` where ``version_tuple``
             comes from ``entry["nginx"]``.
     """
-    return (version_tuple(entry["nginx"]), entry["os_type"], entry["arch"])
+    version = entry.get("nginx_version") or entry.get("nginx")
+    os_type = entry.get("os_type") or entry.get("os") or entry.get("libc")
+    arch = entry.get("arch")
+    return (version_tuple(version), os_type, arch)
 
 
 def compute_matrix(
