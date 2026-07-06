@@ -5,7 +5,8 @@ Reason-code validator for v0.7.0 release gates.
 Validates that all new v0.7.0 reason codes are properly defined and aligned
 across four surfaces:
 
-1. Rust enum — The reason code exists as a variant in
+1. Rust registry — The legacy v0.7.0 reason code maps to a current
+   ReasonCode variant/string/metric family in
    components/rust-converter/src/decision/reason_code.rs
 2. C define/constant — The reason code has a corresponding ERROR_* define
    in the C header (markdown_converter.h)
@@ -88,7 +89,7 @@ FILTER_MODULE_H = (
 
 # Reason code definitions: each entry specifies what to look for in each surface.
 # - rust_variant: the enum variant name in reason_code.rs
-# - rust_as_str: the string returned by as_str() (used in docs matching)
+# - rust_as_str: the current lowercase string returned by as_str()
 # - c_define: the ERROR_* define name in the C header (None if no separate define)
 # - doc_pattern: text pattern to find in DECISION_CHAIN.md
 # - metric_name: the full Prometheus metric name (nginx_markdown_ prefix)
@@ -97,92 +98,99 @@ REASON_CODES = [
     {
         "name": "DECOMPRESSION_BUDGET_EXCEEDED",
         "rust_variant": "DecompressionBudgetExceeded",
-        "rust_as_str": "DECOMPRESSION_BUDGET_EXCEEDED",
+        "rust_as_str": "decompression_budget_exceeded",
         "c_define": "ERROR_DECOMPRESSION_BUDGET_EXCEEDED",
         "doc_pattern": "DECOMPRESSION_BUDGET_EXCEEDED",
         "metric_name": "nginx_markdown_decompression_budget_exceeded_total",
+        "rust_metric_key": "markdown_errors_total",
         "metric_struct_field": "budget_exceeded_total",
         "description": "decompression output exceeded configured budget",
     },
     {
         "name": "DECOMPRESSION_FORMAT_ERROR",
         "rust_variant": "DecompressionFormatError",
-        "rust_as_str": "DECOMPRESSION_FORMAT_ERROR",
+        "rust_as_str": "decompression_format_error",
         "c_define": None,
         "doc_pattern": "DECOMPRESSION_FORMAT_ERROR",
         "metric_name": "nginx_markdown_decompression_format_error_total",
+        "rust_metric_key": "markdown_errors_total",
         "metric_struct_field": "format_error_total",
         "description": "decompression input has invalid format",
     },
     {
         "name": "DECOMPRESSION_TRUNCATED_INPUT",
         "rust_variant": "DecompressionTruncatedInput",
-        "rust_as_str": "DECOMPRESSION_TRUNCATED_INPUT",
+        "rust_as_str": "decompression_truncated_input",
         "c_define": None,
         "doc_pattern": "DECOMPRESSION_TRUNCATED_INPUT",
         "metric_name": "nginx_markdown_decompression_truncated_input_total",
+        "rust_metric_key": "markdown_errors_total",
         "metric_struct_field": "truncated_input_total",
         "description": "decompression input was truncated",
     },
     {
         "name": "DECOMPRESSION_IO_ERROR",
         "rust_variant": "DecompressionIoError",
-        "rust_as_str": "DECOMPRESSION_IO_ERROR",
+        "rust_as_str": "decompression_io_error",
         "c_define": None,
         "doc_pattern": "DECOMPRESSION_IO_ERROR",
         "metric_name": "nginx_markdown_decompression_io_error_total",
+        "rust_metric_key": "markdown_errors_total",
         "metric_struct_field": "io_error_total",
         "description": "decompression I/O error",
     },
     {
         "name": "PARSE_TIMEOUT",
-        "rust_variant": "ParseTimeout",
-        "rust_as_str": "PARSE_TIMEOUT",
+        "rust_variant": "Timeout",
+        "rust_as_str": "timeout",
         "c_define": "ERROR_PARSE_TIMEOUT",
         "doc_pattern": "PARSE_TIMEOUT",
         "metric_name": "nginx_markdown_parse_timeouts_total",
+        "rust_metric_key": "markdown_errors_total",
         "metric_struct_field": "parse_timeouts_total",
         "description": "HTML parsing exceeded configured timeout",
     },
     {
         "name": "PARSE_BUDGET_EXCEEDED",
-        "rust_variant": "ParseBudgetExceeded",
-        "rust_as_str": "PARSE_BUDGET_EXCEEDED",
+        "rust_variant": "BudgetExceeded",
+        "rust_as_str": "budget_exceeded",
         "c_define": "ERROR_PARSE_BUDGET_EXCEEDED",
         "doc_pattern": "PARSE_BUDGET_EXCEEDED",
         "metric_name": "nginx_markdown_parse_budget_exceeded_total",
+        "rust_metric_key": "markdown_errors_total",
         "metric_struct_field": "parse_budget_exceeded_total",
         "description": "parser memory allocation exceeded budget",
     },
     {
         "name": "REPLAY_BUFFER_ERROR",
-        "rust_variant": "ReplayBufferError",
-        "rust_as_str": "REPLAY_BUFFER_ERROR",
+        "rust_variant": "ReplayError",
+        "rust_as_str": "replay_error",
         "c_define": None,
         "doc_pattern": "REPLAY_BUFFER_ERROR",
         "metric_name": "nginx_markdown_replay_buffer_errors_total",
+        "rust_metric_key": "markdown_errors_total",
         "metric_struct_field": "replay_buffer_errors_total",
         "description": "replay buffer init or append failure",
     },
     {
         "name": "SKIPPED_NO_ACCEPT",
         "rust_variant": "SkippedNoAccept",
-        "rust_as_str": "SKIPPED_NO_ACCEPT",
+        "rust_as_str": "skipped_no_accept",
         "c_define": None,
         "doc_pattern": "SKIPPED_NO_ACCEPT",
-        "metric_name": "SKIPPED_NO_ACCEPT",
-        "rust_metric_key": "markdown_skipped_no_accept_total",
+        "metric_name": "nginx_markdown_skips_total",
+        "rust_metric_key": "markdown_skipped_total",
         "metric_struct_field": "no_accept",
         "description": "no Accept header present with on_wildcard off",
     },
     {
         "name": "SKIPPED_CONDITIONAL",
         "rust_variant": "SkippedConditional",
-        "rust_as_str": "SKIPPED_CONDITIONAL",
+        "rust_as_str": "skipped_conditional",
         "c_define": None,
         "doc_pattern": "SKIPPED_CONDITIONAL",
-        "metric_name": "SKIPPED_CONDITIONAL",
-        "rust_metric_key": "markdown_skipped_conditional_total",
+        "metric_name": "nginx_markdown_skips_total",
+        "rust_metric_key": "markdown_skipped_total",
         "metric_struct_field": "conditional",
         "description": "conditional request matched returning 304",
     },
@@ -260,13 +268,15 @@ def check_rust_metric_key(
     variant = code["rust_variant"]
     check_id = f"rust_metric:{code['name']}"
 
-    # Validate the specific match arm in ReasonCode::metric_key() instead of
-    # a global string search (which can be satisfied by as_str()).
+    # Validate the match arm in ReasonCode::metric_key(). Current 0.9.0 code
+    # intentionally groups multiple reasons into one metric family, so allow
+    # alternatives before the arm's `=>`.
     pattern = (
-        rf"ReasonCode::{re.escape(variant)}\s*=>\s*\{{?\s*"
+        rf"ReasonCode::{re.escape(variant)}"
+        rf"(?:(?!=>).)*=>\s*\{{?\s*"
         rf'"{re.escape(metric)}"'
     )
-    if re.search(pattern, rust_src):
+    if re.search(pattern, rust_src, re.DOTALL):
         result.pass_(check_id, f"metric_key() maps '{variant}' to '{metric}'")
     else:
         result.fail(

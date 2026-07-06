@@ -63,32 +63,28 @@ ngx_http_markdown_const_strncasecmp(const u_char *s1, const u_char *s2,
 }
 
 /*
- * Construct base URL for resolving relative URLs
+ * Construct base URL for resolving relative URLs (spec 47 thin wrapper).
  *
- * This function constructs the base URL using the following priority order:
- * 1. X-Forwarded-Proto + X-Forwarded-Host only when
- *    markdown_trust_forwarded_headers is enabled
- * 2. r->schema + r->headers_in.server (direct connection)
- * 3. server_name from configuration (fallback)
- *
- * The base_url is used by the Rust conversion engine to resolve relative URLs
- * in HTML to absolute URLs in the Markdown output.
+ * The trust decision (CIDR matching, Forwarded/X-Forwarded-* precedence,
+ * multi-hop handling, host/proto validation, and safe fallback) is a single
+ * source of truth in the Rust core, reached through the
+ * markdown_decide_base_url FFI.  The C side is glue only: it collects the
+ * source IP, request headers, and the http-level trusted-proxy handle, calls
+ * the FFI to obtain a validated "scheme://host" authority, and appends the
+ * request URI.  No forwarded-header parsing or host validation lives in C.
  *
  * Format: scheme://host/uri
  * Example: https://example.com/docs/page.html
  *
- * @param r     The request structure
- * @param pool  Memory pool for allocation
- * @param base_url  Output parameter for constructed base URL
- * @return      NGX_OK on success, NGX_ERROR on failure
- *
  * Covers: base URL construction from request headers and server config
- * Implements: base_url construction with guarded X-Forwarded headers
+ * Implements: base_url construction via the Rust trusted-proxy decision
  */
+static u_char ngx_http_markdown_hdr_forwarded[] = "Forwarded";
 static u_char ngx_http_markdown_hdr_x_forwarded_proto[] = "X-Forwarded-Proto";
 static u_char ngx_http_markdown_hdr_x_forwarded_host[] = "X-Forwarded-Host";
-static u_char ngx_http_markdown_scheme_http[] = "http";
-static u_char ngx_http_markdown_scheme_https[] = "https";
+
+/* Maximum scheme://host authority length written by the FFI decision. */
+#define NGX_HTTP_MARKDOWN_BASE_AUTHORITY_MAX  512
 
 /* Find a request header value by name in the generic linked-list storage. */
 static const ngx_str_t *
@@ -124,355 +120,107 @@ ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
     return NULL;
 }
 
-/* Return true if the scheme is "http" or "https" (case-insensitive). */
-static ngx_flag_t
-ngx_http_markdown_scheme_is_http_family(const ngx_str_t *scheme)
-{
-    return (scheme->len == sizeof(ngx_http_markdown_scheme_http) - 1
-            && ngx_strncasecmp(scheme->data,
-                               ngx_http_markdown_scheme_http,
-                               sizeof(ngx_http_markdown_scheme_http) - 1) == 0)
-        || (scheme->len == sizeof(ngx_http_markdown_scheme_https) - 1
-            && ngx_strncasecmp(scheme->data,
-                               ngx_http_markdown_scheme_https,
-                               sizeof(ngx_http_markdown_scheme_https) - 1) == 0);
-}
-
 /*
- * Validate characters in an extracted host value.
+ * Decide the validated "scheme://host" authority via the Rust trusted-proxy
+ * decision (markdown_decide_base_url).
  *
- * Rejects control characters (0x00-0x1F, 0x7F), spaces, commas, URI
- * authority delimiters (@, #, ?), and path separators (/,\).  For
- * non-IPv6 hosts, enforces digit-only
- * port after the first ':'.  For IPv6 bracket literals, only rejects
- * the structural danger characters (port is validated separately
- * after bracket matching).
+ * This is a thin wrapper: it marshals the realip/PROXY-resolved source IP
+ * (r->connection->addr_text and the AF_UNIX flag), the forwarded request
+ * headers, the request Host, and the http-level trusted-proxy CIDR handle
+ * into the FFI input, then copies the FFI-produced authority into out_buf.
+ * It contains no trust, CIDR-matching, or host-validation branches.
  *
- * @param host_data  Pointer to the host string (not NUL-terminated).
- * @param host_len   Length of the host string.
- * @param is_ipv6    Whether the host starts with '[' (IPv6 literal).
- * @returns 1 if valid, 0 if invalid.
- */
-static ngx_flag_t
-ngx_http_markdown_validate_host_chars(const u_char *host_data,
-                                      size_t host_len,
-                                      ngx_flag_t is_ipv6)
-{
-    ngx_flag_t  parsing_port = 0;
-
-    for (size_t i = 0; i < host_len; i++) {
-        u_char  c = host_data[i];
-
-        if (c < 0x20 || c == 0x7F) {
-            return 0;
-        }
-
-        if (parsing_port) {
-            if (c < '0' || c > '9') {
-                return 0;
-            }
-            continue;
-        }
-
-        if (c == '/' || c == '\\' || c == ' ' || c == ','
-            || c == '@' || c == '#' || c == '?')
-        {
-            return 0;
-        }
-
-        if (!is_ipv6 && c == ':') {
-            if (i == host_len - 1) {
-                return 0;
-            }
-            parsing_port = 1;
-        }
-    }
-
-    return 1;
-}
-
-/*
- * Validate the structure of an IPv6 bracket literal host.
+ * Parameters:
+ *   r        - HTTP request (NGINX glue source for IP/headers/config)
+ *   out_buf  - caller buffer receiving the "scheme://host" authority
+ *   out_cap  - capacity of out_buf in bytes
+ *   out_len  - set to the number of authority bytes written on success
  *
- * Requires a closing ']' and allows an optional :<port> suffix
- * after it (e.g. [::1]:8080).  Returns 1 if valid, 0 if invalid.
- *
- * @param host_data  Pointer to the host string starting with '['.
- * @param host_len   Length of the host string.
- * @returns 1 if valid, 0 if invalid.
- */
-static ngx_flag_t
-ngx_http_markdown_validate_ipv6_brackets(const u_char *host_data,
-                                         size_t host_len)
-{
-    size_t  bracket_end = 0;
-
-    for (size_t i = 1; i < host_len; i++) {
-        if (host_data[i] == ']') {
-            bracket_end = i;
-            break;
-        }
-    }
-
-    if (bracket_end == 0) {
-        return 0;
-    }
-
-    if (bracket_end + 1 < host_len) {
-        if (host_data[bracket_end + 1] != ':') {
-            return 0;
-        }
-        for (size_t i = bracket_end + 2; i < host_len; i++) {
-            if (host_data[i] < '0' || host_data[i] > '9') {
-                return 0;
-            }
-        }
-    }
-
-    return 1;
-}
-
-/*
- * Extract and validate the first-hop host from an X-Forwarded-Host value.
- *
- * The header may contain multiple comma-separated values from a chain
- * of proxies.  Only the first (closest trusted proxy) is used.
- * Leading and trailing whitespace is trimmed from the extracted value.
- *
- * On success, validated_host is populated and the function returns NGX_OK.
- * On failure, returns NGX_ERROR (caller should fall through to server name).
- *
- * @param xfh             The raw X-Forwarded-Host header value.
- * @param validated_host  Output: the extracted and validated host.
- * @returns NGX_OK on success, NGX_ERROR on invalid or empty host.
+ * Returns:
+ *   NGX_OK on success, NGX_ERROR when the FFI rejects the inputs.
  */
 static ngx_int_t
-ngx_http_markdown_extract_forwarded_host(const ngx_str_t *xfh,
-                                         ngx_str_t *validated_host)
+ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
+                                        u_char *out_buf,
+                                        size_t out_cap,
+                                        size_t *out_len)
 {
-    u_char    *host_data;
-    size_t     host_len;
-    ngx_flag_t is_ipv6;
+    const ngx_http_markdown_main_conf_t  *mmcf;
+    const ngx_str_t                      *forwarded;
+    const ngx_str_t                      *x_forwarded_proto;
+    const ngx_str_t                      *x_forwarded_host;
+    FFIBaseUrlInput                       input;
+    FFIBaseUrlDecision                    decision;
+    uint8_t                               rc;
 
-    /* Find first comma to extract first-hop value. */
-    host_len = xfh->len;
-    for (size_t i = 0; i < xfh->len; i++) {
-        if (xfh->data[i] == ',') {
-            host_len = i;
-            break;
+    mmcf = ngx_http_get_module_main_conf(r, ngx_http_markdown_filter_module);
+
+    forwarded = ngx_http_markdown_find_request_header_value(
+        r, ngx_http_markdown_hdr_forwarded,
+        sizeof(ngx_http_markdown_hdr_forwarded) - 1);
+    x_forwarded_proto = ngx_http_markdown_find_request_header_value(
+        r, ngx_http_markdown_hdr_x_forwarded_proto,
+        sizeof(ngx_http_markdown_hdr_x_forwarded_proto) - 1);
+    x_forwarded_host = ngx_http_markdown_find_request_header_value(
+        r, ngx_http_markdown_hdr_x_forwarded_host,
+        sizeof(ngx_http_markdown_hdr_x_forwarded_host) - 1);
+
+    ngx_memzero(&input, sizeof(input));
+
+    if (r->connection != NULL) {
+        input.source_ip = r->connection->addr_text.data;
+        input.source_ip_len = r->connection->addr_text.len;
+        if (r->connection->sockaddr != NULL
+            && r->connection->sockaddr->sa_family == AF_UNIX)
+        {
+            input.is_unix_socket = 1;
         }
     }
 
-    /* Trim leading whitespace from extracted host. */
-    host_data = xfh->data;
-    while (host_len > 0
-           && (*host_data == ' ' || *host_data == '\t'))
-    {
-        host_data++;
-        host_len--;
+    if (mmcf != NULL) {
+        input.trusted = mmcf->trusted_proxies;
+        input.trusted_configured =
+            mmcf->trusted_proxies_configured ? 1 : 0;
     }
 
-    /* Trim trailing whitespace from extracted host. */
-    while (host_len > 0
-           && (host_data[host_len - 1] == ' '
-               || host_data[host_len - 1] == '\t'))
-    {
-        host_len--;
+    if (forwarded != NULL) {
+        input.forwarded = forwarded->data;
+        input.forwarded_len = forwarded->len;
+    }
+    if (x_forwarded_proto != NULL) {
+        input.x_forwarded_proto = x_forwarded_proto->data;
+        input.x_forwarded_proto_len = x_forwarded_proto->len;
+    }
+    if (x_forwarded_host != NULL) {
+        input.x_forwarded_host = x_forwarded_host->data;
+        input.x_forwarded_host_len = x_forwarded_host->len;
+    }
+    if (r->headers_in.server.len > 0) {
+        input.host = r->headers_in.server.data;
+        input.host_len = r->headers_in.server.len;
     }
 
-    if (host_len == 0) {
+    rc = markdown_decide_base_url(&input, out_buf, out_cap, &decision);
+    if (rc != DECIDE_BASE_URL_OK) {
         return NGX_ERROR;
     }
 
-    /* Check for IPv6 bracket literal. */
-    is_ipv6 = (host_len >= 2 && host_data[0] == '[') ? 1 : 0;
-
-    /* Validate characters (control chars, spaces, path separators, port). */
-    if (!ngx_http_markdown_validate_host_chars(host_data, host_len,
-                                               is_ipv6))
-    {
+    /* Defensive: Rust FFI guarantees base_url_len <= out_cap on OK,
+     * but guard the C boundary explicitly (Rule 46). */
+    if (decision.base_url_len > out_cap) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown: base_url_len %uz exceeds out_cap %uz",
+                      (size_t) decision.base_url_len, out_cap);
         return NGX_ERROR;
     }
 
-    /* IPv6 literal: validate bracket structure and optional port. */
-    if (is_ipv6
-        && !ngx_http_markdown_validate_ipv6_brackets(host_data, host_len))
-    {
-        return NGX_ERROR;
-    }
+    *out_len = decision.base_url_len;
 
-    validated_host->data = host_data;
-    validated_host->len = host_len;
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: base_url trust decision reason=%ui",
+                  (ngx_uint_t) decision.reason);
+
     return NGX_OK;
-}
-
-
-/*
- * Validate a single Host value (not comma-separated).
- *
- * Unlike extract_forwarded_host(), this rejects any value containing
- * a comma — a plain Host header should never be comma-separated.
- * Used for r->headers_in.server before it enters base_url
- * construction.
- *
- * @param host             The host string to validate.
- * @param validated_host   Output: the validated host (same pointers).
- * @returns NGX_OK on success, NGX_ERROR on invalid host.
- */
-static ngx_int_t
-ngx_http_markdown_validate_single_host(const ngx_str_t *host,
-                                       ngx_str_t *validated_host)
-{
-    u_char    *host_data;
-    size_t     host_len;
-    ngx_flag_t is_ipv6;
-
-    host_data = host->data;
-    host_len = host->len;
-
-    if (host_len == 0) {
-        return NGX_ERROR;
-    }
-
-    /*
-     * Reject comma-separated values.  A plain Host header
-     * must contain exactly one host; commas indicate either
-     * a malformed value or X-Forwarded-Host leakage.
-     */
-    for (size_t i = 0; i < host_len; i++) {
-        if (host_data[i] == ',') {
-            return NGX_ERROR;
-        }
-    }
-
-    is_ipv6 = (host_len >= 2 && host_data[0] == '[') ? 1 : 0;
-
-    if (!ngx_http_markdown_validate_host_chars(host_data, host_len,
-                                               is_ipv6))
-    {
-        return NGX_ERROR;
-    }
-
-    if (is_ipv6
-        && !ngx_http_markdown_validate_ipv6_brackets(host_data, host_len))
-    {
-        return NGX_ERROR;
-    }
-
-    validated_host->data = host_data;
-    validated_host->len = host_len;
-    return NGX_OK;
-}
-
-/**
- * Selects the URL scheme and host to use when constructing a base URL for the request.
- *
- * Selection priority (highest to lowest): trusted X-Forwarded-Proto/Host (when enabled) >
- * request r->schema and r->headers_in.server > server_name from core server config.
- *
- * @param r The HTTP request to inspect.
- * @param scheme Out parameter set to the selected scheme string.
- * @param host Out parameter set to the selected host string (may include port or IPv6 brackets).
- * @returns `NGX_OK` if both `scheme` and `host` were successfully selected and written; `NGX_ERROR` otherwise.
- */
-static ngx_int_t
-ngx_http_markdown_select_base_url_parts(ngx_http_request_t *r,
-                                        ngx_str_t *scheme,
-                                        ngx_str_t *host)
-{
-    const ngx_str_t                 *x_forwarded_proto;
-    const ngx_str_t                 *x_forwarded_host;
-    const ngx_http_core_srv_conf_t *cscf;
-    const ngx_http_markdown_conf_t *conf;
-
-    conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
-
-    /*
-     * Security: Only trust X-Forwarded-* headers when explicitly enabled.
-     * Without this guard, a direct client can inject X-Forwarded-Host to
-     * redirect all relative URLs in the Markdown output to an attacker-
-     * controlled domain (C-01: link poisoning).
-     */
-    if (conf != NULL && conf->ops.trust_forwarded_headers) {
-        x_forwarded_proto = ngx_http_markdown_find_request_header_value(
-            r,
-            ngx_http_markdown_hdr_x_forwarded_proto,
-            sizeof(ngx_http_markdown_hdr_x_forwarded_proto) - 1);
-        x_forwarded_host = ngx_http_markdown_find_request_header_value(
-            r,
-            ngx_http_markdown_hdr_x_forwarded_host,
-            sizeof(ngx_http_markdown_hdr_x_forwarded_host) - 1);
-
-        if (x_forwarded_proto != NULL
-            && x_forwarded_host != NULL
-            && x_forwarded_proto->len > 0
-            && x_forwarded_host->len > 0
-            && ngx_http_markdown_scheme_is_http_family(x_forwarded_proto))
-        {
-            ngx_str_t  validated_host;
-
-            *scheme = *x_forwarded_proto;
-
-            if (ngx_http_markdown_extract_forwarded_host(
-                    x_forwarded_host, &validated_host) == NGX_OK)
-            {
-                *host = validated_host;
-                return NGX_OK;
-            }
-
-            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                          "markdown: X-Forwarded-Host "
-                          "value \"%V\" rejected (invalid host), "
-                          "falling back to server name",
-                          x_forwarded_host);
-        }
-    }
-
-    if (r->schema.len > 0 && r->headers_in.server.len > 0) {
-        ngx_str_t  validated_server;
-
-        *scheme = r->schema;
-
-        /*
-         * Validate the request Host with strict single-host
-         * semantics: reject comma-separated values (unlike
-         * X-Forwarded-Host which allows comma-delimited chains),
-         * control characters, and path separators to prevent
-         * injection into base_url construction.
-         *
-         * On validation failure, fall back to the core
-         * server_name which is operator-controlled.
-         */
-        if (ngx_http_markdown_validate_single_host(
-                &r->headers_in.server, &validated_server) == NGX_OK)
-        {
-            *host = validated_server;
-            return NGX_OK;
-        }
-
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                      "markdown: request Host "
-                      "\"%V\" rejected (invalid host), "
-                      "falling back to server_name",
-                      &r->headers_in.server);
-    }
-
-    cscf = ngx_http_get_module_srv_conf(r, ngx_http_core_module);
-    if (cscf != NULL && cscf->server_name.len > 0) {
-        if (r->schema.len > 0) {
-            *scheme = r->schema;
-        } else {
-            scheme->data = ngx_http_markdown_scheme_http;
-            scheme->len = sizeof(ngx_http_markdown_scheme_http) - 1;
-        }
-        *host = cscf->server_name;
-        return NGX_OK;
-    }
-
-    ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                 "markdown: unable to construct base_url, "
-                 "no valid scheme/host available");
-    return NGX_ERROR;
 }
 
 /* Overflow-safe addition helper for base URL length accumulation. */
@@ -496,8 +244,8 @@ ngx_int_t
 ngx_http_markdown_construct_base_url(ngx_http_request_t *r, ngx_pool_t *pool,
     ngx_str_t *base_url)
 {
-    ngx_str_t  scheme;
-    ngx_str_t  host;
+    u_char     authority[NGX_HTTP_MARKDOWN_BASE_AUTHORITY_MAX];
+    size_t     authority_len;
     u_char    *p;
     size_t     len;
 
@@ -505,29 +253,28 @@ ngx_http_markdown_construct_base_url(ngx_http_request_t *r, ngx_pool_t *pool,
     base_url->data = NULL;
     base_url->len = 0;
 
-    if (ngx_http_markdown_select_base_url_parts(r, &scheme, &host) != NGX_OK) {
+    authority_len = 0;
+    if (ngx_http_markdown_decide_base_authority(
+            r, authority, sizeof(authority), &authority_len) != NGX_OK)
+    {
         return NGX_ERROR;
     }
 
     len = 0;
-    if (ngx_http_markdown_base_url_add_len(r, &len, scheme.len, "scheme") != NGX_OK) {
-        return NGX_ERROR;
-    }
-    if (ngx_http_markdown_base_url_add_len(r, &len, sizeof("://") - 1, "delimiter") != NGX_OK) {
-        return NGX_ERROR;
-    }
-    if (ngx_http_markdown_base_url_add_len(r, &len, host.len, "host") != NGX_OK) {
+    if (ngx_http_markdown_base_url_add_len(r, &len, authority_len,
+                                           "authority") != NGX_OK)
+    {
         return NGX_ERROR;
     }
     if (ngx_http_markdown_base_url_add_len(r, &len, r->uri.len, "uri") != NGX_OK) {
         return NGX_ERROR;
     }
-    
+
     p = ngx_pnalloc(pool, len);
     if (p == NULL) {
         /*
          * Memory allocation failed for base_url - critical system error.
-         * 
+         *
          * Log level: NGX_LOG_CRIT (critical system failure)
          * Covers: base_url allocation failure handling
          */
@@ -537,21 +284,13 @@ ngx_http_markdown_construct_base_url(ngx_http_request_t *r, ngx_pool_t *pool,
     }
 
     base_url->data = p;
-    
-    /* Copy scheme */
-    p = ngx_cpymem(p, scheme.data, scheme.len);
-    
-    /* Add :// */
-    *p++ = ':';
-    *p++ = '/';
-    *p++ = '/';
-    
-    /* Copy host */
-    p = ngx_cpymem(p, host.data, host.len);
-    
+
+    /* Copy the validated scheme://host authority */
+    p = ngx_cpymem(p, authority, authority_len);
+
     /* Copy URI */
     p = ngx_cpymem(p, r->uri.data, r->uri.len);
-    
+
     base_url->len = p - base_url->data;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -642,6 +381,45 @@ ngx_http_markdown_resolve_conditional_result(ngx_http_request_t *r,
         return ngx_http_markdown_reject_or_fail_open_buffered_response(
             r, ctx, conf,
             "markdown: fail-open strategy - returning original HTML");
+    }
+
+    if (rc == NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT) {
+        /*
+         * Conditional Bypass (Range or no-transform): deliver the
+         * upstream response unmodified.  The conversion result (if
+         * any) was already freed by handle_if_none_match.
+         *
+         * This path is a safety net — the header filter should have
+         * caught no-transform and Range before buffering.  If we reach
+         * here, it means conditional headers were present alongside a
+         * bypass condition, and the Rust decision correctly returned
+         * Bypass instead of Proceed.
+         *
+         * Bypass is a protocol/cache semantic, NOT a conversion error.
+         * It must NOT go through markdown_error_policy: even when
+         * on_error == REJECT, the original upstream response must be
+         * delivered unmodified.  Call fail_open directly, not
+         * reject_or_fail_open.
+         */
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: conditional bypass, delivering "
+                      "original buffered response");
+
+        if (conditional_result != NULL) {
+            markdown_result_free(conditional_result);
+        }
+
+        rc = ngx_http_markdown_fail_open_buffered_response(
+            r, ctx,
+            "markdown: conditional bypass - returning original HTML");
+        /*
+         * Bypass is a protocol/cache semantic, NOT a conversion failure
+         * or fail-open error. Do NOT increment failopen_count — that
+         * metric tracks delivery of failed conversions, not intentional
+         * bypasses. The bypass is already recorded via the
+         * bypass_no_transform reason code in the header filter.
+         */
+        return rc;
     }
 
     if (rc == NGX_DECLINED && conditional_result != NULL) {

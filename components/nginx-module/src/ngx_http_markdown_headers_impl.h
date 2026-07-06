@@ -543,37 +543,41 @@ ngx_http_markdown_remove_accept_ranges(ngx_http_request_t *r)
  *
  * Atomic plan application with post-plan Content-Length:
  *
- *   The header plan (built by Rust) is applied atomically via
- *   ngx_http_markdown_apply_header_plan().  All plan operations
- *   succeed or all are rolled back.  The plan includes:
+ *   The header plan (built by Rust) is applied via the two-phase
+ *   prepare/commit model in ngx_http_markdown_apply_header_plan().
+ *   The prepare phase allocates and validates all operations; on any
+ *   failure the plan is aborted before commit — r->headers_out is
+ *   unchanged (aborted SET_NEW slots stay inert, hash==0).  The plan
+ *   includes:
  *
  *   - Content-Type (set to text/markdown; charset=utf-8)
  *   - Content-Encoding (delete-all)
  *   - Content-Length (delete-all — invalidates stale originals)
  *   - ETag (set-etag-placeholder, if configured)
  *
- *   After successful atomic plan application, the C side sets:
+ *   After successful plan commit, the C side sets:
  *
  *   - Content-Length (new value from result->markdown_len)
  *   - X-Markdown-Tokens (if enabled)
  *   - Accept-Ranges (delete)
  *   - Cache-Control (auth modification, if applicable)
  *
- *   This is safe because the plan already committed — if the plan
+ *   This is safe because the plan already committed — if prepare
  *   had failed, we would not reach the post-plan operations.
  *   The post-plan Content-Length set is guaranteed to execute only
  *   after successful plan application.
  *
- *   Atomicity scope: the *plan* operations are atomic (apply-all or
- *   rollback-all).  The post-plan operations (ETag, Vary, Content-Length,
- *   token header, Accept-Ranges removal, Cache-Control) are NOT covered by
- *   the rollback log; if one of them fails, earlier post-plan mutations
- *   remain.  This is safe in practice because the sole caller
- *   (ngx_http_markdown_execute_conversion) treats any NGX_ERROR from this
- *   function as a hard failure and returns BEFORE forwarding the response
- *   headers downstream — so a partially-mutated header set is never
- *   delivered to the client.  Do NOT call this function from a path that
- *   may forward headers after a non-NGX_OK return.
+ *   Atomicity scope: the *plan* operations are atomic (prepare-all
+ *   or abort-all with no mutation).  The post-plan operations (ETag,
+ *   Vary, Content-Length, token header, Accept-Ranges removal,
+ *   Cache-Control) are NOT covered by the prepare/commit guarantee;
+ *   if one of them fails, earlier post-plan mutations remain.  This
+ *   is safe in practice because the sole caller
+ *   (ngx_http_markdown_execute_conversion) treats any NGX_ERROR from
+ *   this function as a hard failure and returns BEFORE forwarding the
+ *   response headers downstream — so a partially-mutated header set
+ *   is never delivered to the client.  Do NOT call this function from
+ *   a path that may forward headers after a non-NGX_OK return.
  *
  * r      - current HTTP request
  * result - completed MarkdownResult from the Rust converter
@@ -600,12 +604,14 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
     /*
      * Build header plan from Rust FFI.
      *
-     * The plan covers: Content-Type (set), Content-Encoding (delete-all),
+     * The plan covers the CORE wire-critical mutations:
+     * Content-Type (set), Content-Encoding (delete-all),
      * Content-Length (delete-all), and ETag (set-etag-placeholder or omit).
      *
-     * Content-Length deletion invalidates the stale original value.
-     * The correct post-conversion length is set below after the plan
-     * commits successfully.
+     * Post-plan operations (ETag set/clear, Vary: Accept, Content-Length
+     * set, X-Markdown-Tokens, Accept-Ranges, auth Cache-Control) are
+     * pre-send best-effort with hard abort — see ADR-0017 "Atomic scope
+     * boundary" for the rationale and failure handling contract.
      */
     markdown_header_plan_init(&plan);
     markdown_build_header_plan(
@@ -617,16 +623,16 @@ ngx_http_markdown_update_headers(ngx_http_request_t *r,
         &plan);
 
     /*
-     * Apply the plan atomically.  On failure, all changes are
-     * rolled back and we return NGX_ERROR.  The plan is freed
-     * by ngx_http_markdown_apply_header_plan() in both success
-     * and failure paths.
+     * Apply the plan atomically.  On prepare failure, the plan is
+     * aborted before commit — r->headers_out is unchanged.  The plan
+     * is freed by ngx_http_markdown_apply_header_plan() in both
+     * success and failure paths.
      */
     rc = ngx_http_markdown_apply_header_plan(r, &plan);
     if (rc != NGX_OK) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-            "markdown: atomic header plan application "
-            "failed; all changes rolled back");
+            "markdown: header plan prepare aborted; "
+            "no mutations applied");
         return NGX_ERROR;
     }
 

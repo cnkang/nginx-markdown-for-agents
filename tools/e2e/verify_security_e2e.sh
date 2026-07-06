@@ -286,10 +286,9 @@ http {
 
         location /md/ {
             markdown_filter on;
-            markdown_on_wildcard on;
-            markdown_max_size 10m;
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_accept wildcard;
+            markdown_limits memory=10m timeout=120s;
+            markdown_error_policy pass;
 
             proxy_http_version 1.1;
             proxy_set_header Connection "";

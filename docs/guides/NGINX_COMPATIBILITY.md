@@ -181,6 +181,7 @@ prebuilt package for an nginx.org official build, or build from source with
 
 - [Package Compatibility Guide](../COMPATIBILITY.md) (full troubleshooting)
 - [Installation Guide](./INSTALLATION.md) (all installation methods)
+- [Installation Diagnostics (doctor)](./doctor.md) (automated checks)
 - [Package Installation Guide](./PACKAGE_INSTALLATION.md) (DEB/RPM details)
 - [NGINX Dynamic Modules documentation](https://nginx.org/en/docs/ngx_core_module.html#load_module)
 

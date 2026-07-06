@@ -16,7 +16,7 @@ Checks performed:
   8.  Environment-specific notes cover four environments
   9.  Installation guide references install-verify.yml CI workflow
   10. Installation guide documents SKIP_ROOT_CHECK=1
-  11. Fail-open explanation references markdown_on_error pass
+  11. Fail-open explanation references markdown_error_policy pass
   12. Compression SOP references proxy_set_header Accept-Encoding ""
   13. Content negotiation SOP explains eligibility requirements
   14. Minimal demo config exists
@@ -256,10 +256,10 @@ def check_skip_root_check(text: str) -> list[str]:
 
 
 def check_fail_open_reference(text: str) -> list[str]:
-    """Check 11: Fail-open explanation references markdown_on_error pass."""
-    if "markdown_on_error pass" not in text:
+    """Check 11: Fail-open explanation references markdown_error_policy pass."""
+    if "markdown_error_policy pass" not in text:
         return [
-            "Installation guide does not reference 'markdown_on_error pass' "
+            "Installation guide does not reference 'markdown_error_policy pass' "
             "in fail-open explanation"
         ]
     return []
@@ -289,7 +289,7 @@ _SOP7_REQUIRED_KEYWORDS: list[tuple[str, str]] = [
     ("200", "HTTP status 200"),
     ("text/html", "upstream Content-Type text/html"),
     ("text/markdown", "Accept header includes text/markdown"),
-    ("markdown_memory_budget", "response size within markdown_memory_budget"),
+    ("markdown_limits", "response size within markdown_limits memory=<size>"),
 ]
 
 

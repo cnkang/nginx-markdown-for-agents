@@ -180,10 +180,10 @@ operate your own package repository.
 ### DEB Artifacts (Ubuntu / Debian)
 
 Replace `VERSION` below with the release version you are installing, for
-example `0.8.3`.  `NGINX_VERSION` must match the NGINX ABI you run.
+example `0.9.0`.  `NGINX_VERSION` must match the NGINX ABI you run.
 
 ```bash
-VERSION=0.8.3
+VERSION=0.9.0
 NGINX_VERSION=1.26.3
 ARCH=amd64
 
@@ -196,10 +196,10 @@ sudo apt install "./nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VE
 ### RPM Artifacts (AlmaLinux / Amazon Linux / RHEL)
 
 Replace `VERSION` below with the release version you are installing, for
-example `0.8.3`.  `NGINX_VERSION` must match the NGINX ABI you run.
+example `0.9.0`.  `NGINX_VERSION` must match the NGINX ABI you run.
 
 ```bash
-VERSION=0.8.3
+VERSION=0.9.0
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 
@@ -614,9 +614,8 @@ http {
     markdown_filter on;
 
     # Safe defaults
-    markdown_memory_budget 10m;
-    markdown_timeout 5s;
-    markdown_on_error pass;  # Fail-open: return original HTML on conversion error
+    markdown_limits memory=10m timeout=5s;
+    markdown_error_policy pass;  # Fail-open: return original HTML on conversion error
 
     server {
         listen 80;
@@ -902,7 +901,7 @@ Look for counters such as `conversions_attempted`, `conversions_succeeded`, `con
 
 ### Understanding Fail-Open Behavior
 
-The default configuration uses `markdown_on_error pass` (fail-open). This means:
+The default configuration uses `markdown_error_policy pass` (fail-open). This means:
 
 - If the module attempts a conversion and the conversion **fails** (e.g., timeout, converter error), the original HTML response is returned with `Content-Type: text/html`.
 - This is **distinct** from requests that were never eligible for conversion (e.g., wrong `Content-Type`, non-200 status, missing `Accept: text/markdown` header). Those are "skipped" requests, not "fail-open."
@@ -1166,7 +1165,7 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    Manual download is intended only for air-gapped or troubleshooting scenarios — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # On a connected machine — substitute <release_tag>, <nginx_version>, <os_type>, and <arch>
-   # <release_tag> must match the current release (e.g. v0.8.3)
+   # <release_tag> must match the current release (e.g. v0.9.0)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
    ```
@@ -1204,7 +1203,7 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    Manual download is intended only for troubleshooting — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Download the binary and checksum file — substitute <release_tag>, <nginx_version>, <os_type>, <arch>
-   # <release_tag> must match the current release (e.g. v0.8.3)
+   # <release_tag> must match the current release (e.g. v0.9.0)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
 
@@ -1232,9 +1231,9 @@ The eligibility requirements are:
 3. **Request `Accept` includes `text/markdown`** — the client request must include `text/markdown` in the `Accept` header. Without this, the module does not activate.
 4. **Response size within effective limits** — the upstream response body must
    not exceed the effective full-buffer or streaming limit. If
-   `markdown_memory_budget` is set, it acts as a unified override unless a
-   path-specific directive such as `markdown_max_size` or
-   `markdown_streaming_budget` is explicitly set.
+   `markdown_limits memory=<size>` is set, it acts as a unified override
+   unless a path-specific streaming buffer
+   (`markdown_limits streaming_buffer=<size>`) is explicitly set.
 
 **Resolution Steps:**
 
@@ -1489,7 +1488,7 @@ sudo nginx -s reload
 
 1. Module disabled — ensure `markdown_filter on;` is set.
 2. `Accept` header missing — ensure the request includes `Accept: text/markdown`.
-3. Response not eligible — status code must be 200, `Content-Type` must be `text/html`, response size must be within `markdown_memory_budget`.
+3. Response not eligible — status code must be 200, `Content-Type` must be `text/html`, response size must be within `markdown_limits memory=<size>`.
 4. Check NGINX error log for details:
    ```bash
    sudo tail -f /var/log/nginx/error.log
@@ -1502,10 +1501,10 @@ sudo nginx -s reload
 **Solution:**
 ```nginx
 # Increase timeout in nginx.conf
-markdown_timeout 10s;  # Increase from default 5s
+markdown_limits timeout=10s;  # Increase from default 5s
 
 # Or increase max size if large pages are timing out
-markdown_memory_budget 20m;  # Unified override; path-specific limits still win
+markdown_limits memory=20m;  # Unified override; path-specific limits still win
 ```
 
 ### Issue: High Memory Usage
@@ -1515,7 +1514,7 @@ markdown_memory_budget 20m;  # Unified override; path-specific limits still win
 **Solution:**
 ```nginx
 # Reduce max response size
-markdown_memory_budget 5m;
+markdown_limits memory=5m;
 
 # Disable conversion for large pages
 location /large-content {
@@ -1562,8 +1561,7 @@ sudo tail -50 /var/log/nginx/error.log
 
 1. Optimize resource limits:
    ```nginx
-   markdown_memory_budget 5m;
-   markdown_timeout 3s;
+   markdown_limits memory=5m timeout=3s;
    ```
 
 2. Disable for specific paths:
@@ -1575,7 +1573,7 @@ sudo tail -50 /var/log/nginx/error.log
 
 3. Use fail-open strategy:
    ```nginx
-   markdown_on_error pass;  # Return original HTML on timeout
+   markdown_error_policy pass;  # Return original HTML on timeout
    ```
 
 ---
@@ -1597,6 +1595,7 @@ If you encounter issues not covered in this guide:
 - [Project README](../../README.md)
 - [Documentation Index](../README.md)
 - [Configuration Guide](CONFIGURATION.md)
+- [Installation Diagnostics (doctor)](doctor.md)
 - [Build Instructions (Development)](BUILD_INSTRUCTIONS.md)
 - [System Architecture](../architecture/SYSTEM_ARCHITECTURE.md)
 - [NGINX Documentation](https://nginx.org/en/docs/)

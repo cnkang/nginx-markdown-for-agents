@@ -84,10 +84,12 @@ typedef struct {
 struct ngx_conf_s {
     ngx_pool_t  *pool;
     ngx_array_t *args;
+    ngx_uint_t   cmd_type;
 };
 
 struct ngx_command_s {
     ngx_str_t  name;
+    void      *post;
 };
 
 struct ngx_module_s {
@@ -195,51 +197,6 @@ ngx_ascii_strncasecmp(const u_char *s1, const u_char *s2, size_t n)
     }
 
     return 0;
-}
-
-/*
- * Null-terminated case-insensitive string comparison.
- *
- * Test-local reimplementation of the NGINX primitive because the
- * production symbol cannot be linked in the unit harness.
- *
- * Divergence risk: low — mirrors ngx_strcasecmp in
- * src/core/ngx_string.c; changes to the production early-exit or
- * NULL-handling semantics would require a corresponding update.
- *
- * Parameters:
- *   s1 - first null-terminated byte string.
- *   s2 - second null-terminated byte string.
- *
- * Return: NGX_ERROR if either pointer is NULL; otherwise 0 on
- *         equality, or the difference between the lowercased
- *         mismatching bytes.
- *
- * Side effects: none.
- */
-static ngx_int_t
-ngx_strcasecmp(u_char *s1, u_char *s2)
-{
-
-    if (s1 == NULL || s2 == NULL) {
-        return NGX_ERROR;
-    }
-
-    size_t i;
-    i = 0;
-    while (s1[i] != '\0' && s2[i] != '\0') {
-        ngx_int_t diff;
-
-        diff = ngx_ascii_strncasecmp(&s1[i], &s2[i], 1);
-        if (diff != 0) {
-            return diff;
-        }
-
-        i++;
-    }
-
-    return (ngx_int_t) tolower((unsigned char) s1[i])
-         - (ngx_int_t) tolower((unsigned char) s2[i]);
 }
 
 /*
@@ -478,33 +435,94 @@ ngx_http_compile_complex_value(ngx_http_compile_complex_value_t *ccv)
 }
 
 /*
- * No-op stub for ngx_conf_log_error.  Consumes variadic args
- * without output, silencing configuration error logging in the
- * unit harness.
+ * Global buffer for capturing ngx_conf_log_error output.
+ * Tests can inspect this after calling handlers that emit
+ * configuration error messages.
+ */
+static char g_conf_log_buf[1024];
+static ngx_uint_t g_conf_log_level;
+
+/*
+ * Capturing stub for ngx_conf_log_error.  Formats the message
+ * into g_conf_log_buf so tests can assert on error content.
  *
  * Parameters:
- *   level - log level (unused).
+ *   level - log level (captured in g_conf_log_level).
  *   cf    - configuration context (unused).
  *   err   - error code (unused).
- *   fmt   - printf-style format string (consumed but not printed).
- *   ...   - format arguments (consumed but not printed).
+ *   fmt   - printf-style format string.
+ *   ...   - format arguments.
  *
  * Return: void.
  *
- * Side effects: none (va_start/va_end pair consumes args only).
+ * Side effects: writes to g_conf_log_buf and g_conf_log_level.
  */
 static void
 ngx_conf_log_error(ngx_uint_t level, ngx_conf_t *cf, ngx_err_t err,
     const char *fmt, ...)
 {
-    va_list ap;
+    va_list  ap;
+    char    *p;
+    char    *end;
 
-    UNUSED(level);
     UNUSED(cf);
     UNUSED(err);
 
+    g_conf_log_level = level;
+    p = g_conf_log_buf;
+    end = g_conf_log_buf + sizeof(g_conf_log_buf) - 1;
+
     va_start(ap, fmt);
+
+    /*
+     * Minimal format expansion supporting %V (ngx_str_t *) and %s.
+     * Sufficient for the reject-removed-directive handler and other
+     * simple config error messages.
+     */
+    while (*fmt && p < end) {
+        if (*fmt == '%' && *(fmt + 1) == 'V') {
+            ngx_str_t *s = va_arg(ap, ngx_str_t *);
+            size_t     n;
+
+            n = (size_t) (end - p);
+            if (n > s->len) {
+                n = s->len;
+            }
+            memcpy(p, s->data, n);
+            p += n;
+            fmt += 2;
+        } else if (*fmt == '%' && *(fmt + 1) == 's') {
+            const char *s = va_arg(ap, const char *);
+            size_t      slen;
+            size_t      n;
+
+            slen = strlen(s);
+            n = (size_t) (end - p);
+            if (n > slen) {
+                n = slen;
+            }
+            memcpy(p, s, n);
+            p += n;
+            fmt += 2;
+        } else if (*fmt == '%' && *(fmt + 1) == 'd') {
+            int  val = va_arg(ap, int);
+            int  written;
+
+            written = snprintf(p, (size_t) (end - p), "%d", val);
+            if (written > 0) {
+                p += written;
+            }
+            fmt += 2;
+        } else if (*fmt == '"' && *(fmt + 1) == '%') {
+            /* pass the literal quote character */
+            *p++ = *fmt++;
+        } else {
+            *p++ = *fmt++;
+        }
+    }
+
     va_end(ap);
+    *p = '\0';
 }
 
 /*
@@ -584,10 +602,83 @@ ngx_http_conf_get_module_main_conf(ngx_conf_t *cf, ngx_module_t module)
     return &g_main_conf;
 }
 
+/*
+ * spec 47: stubs for the trusted-proxy FFI used by the
+ * markdown_trusted_proxies directive handler.  The C unit-test build does not
+ * link the Rust library, so the CIDR set handle and validation are stubbed.
+ * g_trusted_push_rc lets a test force an invalid-CIDR rejection; the dummy
+ * handle is never dereferenced.
+ */
+#ifndef NGX_HTTP_MAIN_CONF
+#define NGX_HTTP_MAIN_CONF 0x02000000
+#endif
+#ifndef NGX_HTTP_SRV_CONF
+#define NGX_HTTP_SRV_CONF 0x04000000
+#endif
+#ifndef NGX_HTTP_LOC_CONF
+#define NGX_HTTP_LOC_CONF 0x08000000
+#endif
+#ifndef TRUSTED_PROXIES_PUSH_OK
+#define TRUSTED_PROXIES_PUSH_OK 0
+#endif
+#ifndef TRUSTED_PROXIES_PUSH_INVALID_CIDR
+#define TRUSTED_PROXIES_PUSH_INVALID_CIDR 1
+#endif
+#ifndef TRUSTED_PROXIES_PUSH_NULL
+#define TRUSTED_PROXIES_PUSH_NULL 2
+#endif
+
+typedef struct {
+    void  (*handler)(void *data);
+    void   *data;
+} ngx_pool_cleanup_t;
+
+static ngx_pool_cleanup_t g_trusted_cleanup;
+static uint8_t            g_trusted_push_rc = TRUSTED_PROXIES_PUSH_OK;
+static ngx_uint_t         g_trusted_new_calls;
+static ngx_uint_t         g_trusted_push_calls;
+static ngx_uint_t         g_trusted_free_calls;
+static struct MarkdownTrustedProxies *g_trusted_dummy =
+    (struct MarkdownTrustedProxies *) (uintptr_t) 0x1;
+
+static ngx_pool_cleanup_t *
+ngx_pool_cleanup_add(ngx_pool_t *p, size_t size)
+{
+    UNUSED(p);
+    UNUSED(size);
+    g_trusted_cleanup.handler = NULL;
+    g_trusted_cleanup.data = NULL;
+    return &g_trusted_cleanup;
+}
+
+struct MarkdownTrustedProxies *
+markdown_trusted_proxies_new(void) /* SONAR_NOTE: matches FFI signature */
+{
+    g_trusted_new_calls++;
+    return g_trusted_dummy;
+}
+
+uint8_t
+markdown_trusted_proxies_push(struct MarkdownTrustedProxies *handle,
+    const uint8_t *cidr, uintptr_t cidr_len) /* SONAR_NOTE: FFI signature */
+{
+    g_trusted_push_calls++;
+    if (handle == NULL || cidr == NULL || cidr_len == 0) {
+        return TRUSTED_PROXIES_PUSH_NULL;
+    }
+    return g_trusted_push_rc;
+}
+
+void
+markdown_trusted_proxies_free(struct MarkdownTrustedProxies *handle)
+{
+    UNUSED(handle);
+    g_trusted_free_calls++;
+}
+
 #include "../../src/ngx_http_markdown_config_handlers_impl.h"
 
 static ngx_pool_t g_pool;
-
 /*
  * Assign a C string literal to an ngx_str_t.  Casts through
  * uintptr_t for u_char* compatibility to avoid compiler warnings
@@ -660,13 +751,15 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->flavor = NGX_CONF_UNSET_UINT;
     mcf->policy.auth_policy = NGX_CONF_UNSET_UINT;
     mcf->policy.auth_cookies = NGX_CONF_UNSET_PTR;
-    mcf->content_types = NGX_CONF_UNSET_PTR;
+    mcf->routing.content_types = NGX_CONF_UNSET_PTR;
     mcf->policy.conditional_requests = NGX_CONF_UNSET_UINT;
     mcf->policy.log_verbosity = NGX_CONF_UNSET_UINT;
-    mcf->stream_types = NGX_CONF_UNSET_PTR;
-    mcf->large_body_threshold = NGX_CONF_UNSET_SIZE;
+    mcf->routing.stream_types = NGX_CONF_UNSET_PTR;
+    mcf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     mcf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     mcf->stream.engine = NGX_CONF_UNSET_UINT;
+    mcf->stream.policy = NGX_CONF_UNSET_UINT;
+    mcf->stream.policy_explicit = -1;
     mcf->stream.threshold = NGX_CONF_UNSET_SIZE;
     mcf->stream.flush_min = NGX_CONF_UNSET_SIZE;
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;
@@ -888,32 +981,69 @@ test_simple_enum_handlers(void)
 {
     ngx_conf_t               cf;
     ngx_array_t              args;
-    ngx_str_t                values[2];
+    ngx_str_t                values[3];
     ngx_command_t            cmd;
     ngx_http_markdown_conf_t mcf;
     const char              *rc;
 
-    TEST_SUBSECTION("on_error/flavor/auth_policy handlers");
+    TEST_SUBSECTION("error_policy/flavor/auth_policy handlers");
 
     setup_cf(&cf, &args, values, 2);
 
     init_conf(&mcf);
-    set_arg(&cmd.name, "markdown_on_error");
-    set_arg(&values[0], "markdown_on_error");
+    set_arg(&cmd.name, "markdown_error_policy");
+    set_arg(&values[0], "markdown_error_policy");
     set_arg(&values[1], "pass");
-    rc = ngx_http_markdown_on_error(&cf, &cmd, &mcf);
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "pass should parse");
     TEST_ASSERT(mcf.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
-        "on_error should be pass");
-    rc = ngx_http_markdown_on_error(&cf, &cmd, &mcf);
+        "pass should map to on_error=PASS");
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
     TEST_ASSERT(strcmp(rc, "is duplicate") == 0,
-        "duplicate on_error should fail");
+        "duplicate error_policy should fail");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "fail_closed");
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "fail_closed should parse");
+    TEST_ASSERT(mcf.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT,
+        "fail_closed should map to on_error=REJECT");
+    TEST_ASSERT(mcf.error_status == 502,
+        "fail_closed should map to status 502");
 
     init_conf(&mcf);
     set_arg(&values[1], "bad");
-    rc = ngx_http_markdown_on_error(&cf, &cmd, &mcf);
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "invalid on_error should fail");
+        "invalid error_policy should fail");
+
+    /* status <code> takes two arguments */
+    setup_cf(&cf, &args, values, 3);
+    set_arg(&values[0], "markdown_error_policy");
+    init_conf(&mcf);
+    set_arg(&values[1], "status");
+    set_arg(&values[2], "503");
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "status 503 should parse");
+    TEST_ASSERT(mcf.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT,
+        "status should map to on_error=REJECT");
+    TEST_ASSERT(mcf.error_status == 503, "status 503 should store 503");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "status");
+    set_arg(&values[2], "418");
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "disallowed status code should fail");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "status");
+    set_arg(&values[2], "502");
+    rc = ngx_http_markdown_error_policy(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "status 502 should fail and prompt to use fail_closed");
+
+    setup_cf(&cf, &args, values, 2);
 
     init_conf(&mcf);
     set_arg(&cmd.name, "markdown_flavor");
@@ -1041,30 +1171,45 @@ test_conditional_and_log_verbosity_handlers(void)
     ngx_http_markdown_conf_t mcf;
     const char              *rc;
 
-    TEST_SUBSECTION("conditional_requests/log_verbosity handlers");
+    TEST_SUBSECTION("cache_validation/log_verbosity handlers");
 
     setup_cf(&cf, &args, values, 2);
     set_arg(&values[0], "directive");
 
     init_conf(&mcf);
-    set_arg(&cmd.name, "markdown_conditional_requests");
-    set_arg(&values[1], "if_modified_since_only");
-    rc = ngx_http_markdown_conditional_requests(&cf, &cmd, &mcf);
+    set_arg(&cmd.name, "markdown_cache_validation");
+    set_arg(&values[1], "ims_only");
+    rc = ngx_http_markdown_cache_validation(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "ims_only should parse");
     TEST_ASSERT(mcf.policy.conditional_requests
         == NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE,
         "conditional mode should match");
+    TEST_ASSERT(mcf.policy.generate_etag == 0,
+        "ims_only should disable etag generation");
 
     init_conf(&mcf);
-    set_arg(&values[1], "disabled");
-    rc = ngx_http_markdown_conditional_requests(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "disabled should parse");
+    set_arg(&values[1], "full");
+    rc = ngx_http_markdown_cache_validation(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "full should parse");
+    TEST_ASSERT(mcf.policy.conditional_requests
+        == NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT,
+        "full should enable full conditional support");
+    TEST_ASSERT(mcf.policy.generate_etag == 1,
+        "full should enable etag generation");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "off");
+    rc = ngx_http_markdown_cache_validation(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "off should parse");
+    TEST_ASSERT(mcf.policy.conditional_requests
+        == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED,
+        "off should disable conditional support");
 
     init_conf(&mcf);
     set_arg(&values[1], "invalid");
-    rc = ngx_http_markdown_conditional_requests(&cf, &cmd, &mcf);
+    rc = ngx_http_markdown_cache_validation(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "invalid conditional mode should fail");
+        "invalid cache_validation mode should fail");
 
     init_conf(&mcf);
     set_arg(&cmd.name, "markdown_log_verbosity");
@@ -1089,13 +1234,89 @@ test_conditional_and_log_verbosity_handlers(void)
 }
 
 /*
+ * Verify markdown_streaming off|auto|force handler (spec 49):
+ * valid enum tokens, duplicate detection, invalid token rejection,
+ * and that policy_explicit is recorded.
+ *
+ * Semantic contract mirrored: ngx_http_markdown_streaming maps a
+ * string token to the NGX_HTTP_MARKDOWN_STREAMING_* enum, rejects
+ * duplicates ("is duplicate"), returns NGX_CONF_ERROR for unknown
+ * tokens, and sets stream.policy_explicit on success.
+ *
+ * Return: void.
+ *
+ * Side effects: asserts on mcf->stream fields.
+ */
+static void
+test_streaming_policy_handler(void)
+{
+    ngx_conf_t               cf;
+    ngx_array_t              args;
+    ngx_str_t                values[2];
+    ngx_command_t            cmd;
+    ngx_http_markdown_conf_t mcf;
+    const char              *rc;
+
+    TEST_SUBSECTION("markdown_streaming policy handler (spec 49)");
+
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&values[0], "markdown_streaming");
+    set_arg(&cmd.name, "markdown_streaming");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "off");
+    rc = ngx_http_markdown_streaming(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "off should parse");
+    TEST_ASSERT(mcf.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
+        "policy should be OFF");
+    TEST_ASSERT(mcf.stream.policy_explicit == 1,
+        "policy_explicit should be recorded");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "auto");
+    rc = ngx_http_markdown_streaming(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "auto should parse");
+    TEST_ASSERT(mcf.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_AUTO,
+        "policy should be AUTO");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "force");
+    rc = ngx_http_markdown_streaming(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "force should parse");
+    TEST_ASSERT(mcf.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
+        "policy should be FORCE");
+    TEST_ASSERT(mcf.stream.policy_explicit == 1,
+        "policy_explicit should be recorded for force");
+
+    /* Duplicate detection: a second set on the same conf is rejected. */
+    set_arg(&values[1], "auto");
+    rc = ngx_http_markdown_streaming(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc != NGX_CONF_OK && rc != NGX_CONF_ERROR,
+        "second markdown_streaming should be \"is duplicate\"");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "on");   /* engine token, not a valid policy */
+    rc = ngx_http_markdown_streaming(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "invalid policy token \"on\" should fail");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "bogus");
+    rc = ngx_http_markdown_streaming(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "invalid policy token should fail");
+
+    TEST_PASS("markdown_streaming policy handler branches covered");
+}
+
+/*
  * Verify stream_types handler: valid types, duplicate detection,
  * and format validation (no-slash, leading-slash, trailing-slash,
  * multiple-slashes).
  *
  * Semantic contract mirrored: ngx_http_markdown_stream_types
  * collects MIME type strings of the form "type/subtype" into an
- * ngx_array_t stored in mcf->stream_types; it rejects duplicates
+ * ngx_array_t stored in mcf->routing.stream_types; it rejects duplicates
  * and malformed type strings.
  *
  * Return: void.
@@ -1123,8 +1344,9 @@ test_stream_types_handler(void)
     set_arg(&values[2], "application/json");
     rc = ngx_http_markdown_stream_types(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "valid stream types should parse");
-    TEST_ASSERT(mcf.stream_types != NULL, "stream types array should exist");
-    TEST_ASSERT(mcf.stream_types->nelts == 2,
+    TEST_ASSERT(mcf.routing.stream_types != NULL,
+        "stream types array should exist");
+    TEST_ASSERT(mcf.routing.stream_types->nelts == 2,
         "two stream types should be stored");
 
     rc = ngx_http_markdown_stream_types(&cf, &cmd, &mcf);
@@ -1159,90 +1381,109 @@ test_stream_types_handler(void)
 }
 
 /*
- * Verify large_body_threshold handler: off, size suffixes (k/m/g),
- * invalid token, and duplicate detection.
+ * Verify the markdown_limits multi-key handler: each key maps to its
+ * backing field, plus unknown-key, missing-'=', zero-value, malformed-value,
+ * size-overflow, and duplicate-key rejection.
  *
- * Semantic contract mirrored: ngx_http_markdown_large_body_threshold
- * maps "off" to 0, parses size tokens with optional k/K/m/M/g/G
- * suffixes via the shared production parser helper, rejects
- * duplicates, and returns NGX_CONF_ERROR for invalid tokens.
+ * Semantic contract mirrored: ngx_http_markdown_limits parses space-separated
+ * key=value tokens (memory|timeout|streaming_buffer|max_inflight), writes the
+ * corresponding backing field, and rejects duplicates/unknown/zero/malformed
+ * values at parse time.
  *
- * Return: void.
- *
- * Side effects: asserts on mcf.large_body_threshold.
+ * Return: void.  Side effects: asserts on mcf fields.
  */
 static void
-test_large_body_threshold_handler(void)
+test_limits_handler(void)
 {
     ngx_conf_t               cf;
     ngx_array_t              args;
-    ngx_str_t                values[2];
+    ngx_str_t                values[5];
     ngx_command_t            cmd;
     ngx_http_markdown_conf_t mcf;
     const char              *rc;
 
-    TEST_SUBSECTION("large_body_threshold handler");
+    TEST_SUBSECTION("limits handler");
 
+    set_arg(&cmd.name, "markdown_limits");
+
+    /* All four keys in one directive. */
+    init_conf(&mcf);
+    setup_cf(&cf, &args, values, 5);
+    set_arg(&values[0], "markdown_limits");
+    set_arg(&values[1], "memory=8m");
+    set_arg(&values[2], "timeout=2s");
+    set_arg(&values[3], "streaming_buffer=256k");
+    set_arg(&values[4], "max_inflight=64");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "full limits should parse");
+    TEST_ASSERT(mcf.max_size == 8 * 1024 * 1024,
+        "memory maps to max_size");
+    TEST_ASSERT(mcf.timeout == 2000, "timeout=2s maps to 2000ms");
+    TEST_ASSERT(mcf.stream.budget == 256 * 1024,
+        "streaming_buffer maps to stream.budget");
+    TEST_ASSERT(mcf.routing.max_inflight == 64, "max_inflight maps");
+
+    /* Single-key tests reuse a 2-arg layout. */
     setup_cf(&cf, &args, values, 2);
-    set_arg(&values[0], "markdown_large_body_threshold");
-    set_arg(&cmd.name, "markdown_large_body_threshold");
+    set_arg(&values[0], "markdown_limits");
 
     init_conf(&mcf);
-    set_arg(&values[1], "off");
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "off should parse");
-    TEST_ASSERT(mcf.large_body_threshold == 0, "off should map to zero");
+    set_arg(&values[1], "timeout=500ms");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "ms timeout should parse");
+    TEST_ASSERT(mcf.timeout == 500, "timeout=500ms maps to 500");
 
     init_conf(&mcf);
-    set_arg(&values[1], "512k");
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "size token should parse");
-    TEST_ASSERT(mcf.large_body_threshold == 512 * 1024,
-        "512k should map correctly");
+    set_arg(&values[1], "bogus=1");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "unknown key should fail");
 
     init_conf(&mcf);
-    set_arg(&values[1], "1m");
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "1m should parse");
-    TEST_ASSERT(mcf.large_body_threshold == 1024 * 1024,
-        "1m should map correctly");
+    set_arg(&values[1], "memory");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "missing '=' should fail");
 
     init_conf(&mcf);
-    set_arg(&values[1], "1g");
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "1g should parse");
-    TEST_ASSERT(mcf.large_body_threshold == (size_t) 1024 * 1024 * 1024,
-        "1g should map correctly");
+    set_arg(&values[1], "memory=0");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "zero memory should fail");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "max_inflight=0");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "zero max_inflight should fail");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "memory=bad");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "malformed memory should fail");
 
     init_conf(&mcf);
     {
-        char overflow_token[32];
+        char overflow_token[40];
         size_t overflow_value;
 
         overflow_value = (NGX_MAX_SIZE_T_VALUE
                           / ((size_t) 1024 * 1024 * 1024)) + 1;
-        snprintf(overflow_token, sizeof(overflow_token), "%zuG",
+        snprintf(overflow_token, sizeof(overflow_token), "memory=%zuG",
             overflow_value);
         set_arg(&values[1], overflow_token);
+        rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+        TEST_ASSERT(rc == NGX_CONF_ERROR,
+            "overflow memory token should fail");
     }
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "overflow threshold token should fail");
 
+    /* Duplicate key within one directive. */
     init_conf(&mcf);
-    set_arg(&values[1], "bad");
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "invalid threshold token should fail");
+    setup_cf(&cf, &args, values, 3);
+    set_arg(&values[0], "markdown_limits");
+    set_arg(&values[1], "memory=8m");
+    set_arg(&values[2], "memory=4m");
+    rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
+    TEST_ASSERT(strcmp(rc, "has a duplicate \"memory\" key") == 0,
+        "duplicate memory key should fail");
 
-    init_conf(&mcf);
-    mcf.large_body_threshold = 1;
-    set_arg(&values[1], "off");
-    rc = ngx_http_markdown_large_body_threshold(&cf, &cmd, &mcf);
-    TEST_ASSERT(strcmp(rc, "is duplicate") == 0,
-        "duplicate threshold directive should fail");
-
-    TEST_PASS("large_body_threshold branches covered");
+    TEST_PASS("limits branches covered");
 }
 
 /*
@@ -1790,10 +2031,12 @@ test_markdown_content_types_handler(void)
 
     rc = ngx_http_markdown_content_types(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_OK, "valid content types should parse");
-    TEST_ASSERT(mcf.content_types != NULL, "content_types array allocated");
-    TEST_ASSERT(mcf.content_types->nelts == 2, "two content types stored");
+    TEST_ASSERT(mcf.routing.content_types != NULL,
+        "content_types array allocated");
+    TEST_ASSERT(mcf.routing.content_types->nelts == 2,
+        "two content types stored");
 
-    types = mcf.content_types->elts;
+    types = mcf.routing.content_types->elts;
     TEST_ASSERT(types != NULL, "content_types entries should be available");
     TEST_ASSERT(types[0].len == strlen("text/html"),
                 "first content type length should match");
@@ -1809,6 +2052,204 @@ test_markdown_content_types_handler(void)
                 "duplicate content_types should be rejected");
 
     TEST_PASS("content_types branches covered");
+}
+
+/*
+ * spec 47: markdown_trusted_proxies directive handler.
+ *
+ * Covers the C thin-wrapper golden errors and marshaling: http-only context
+ * enforcement, "off", duplicate detection, valid CIDR push, and invalid-CIDR
+ * rejection.  The CIDR parsing itself lives in Rust (covered by Rust tests);
+ * here the FFI is stubbed so only the C wrapper behavior is exercised.
+ */
+static void
+test_trusted_proxies_handler(void)
+{
+    ngx_command_t cmd;
+    ngx_conf_t    cf;
+    ngx_array_t   args;
+    ngx_str_t     values[3];
+    char         *rc;
+
+    TEST_SUBSECTION("markdown_trusted_proxies directive handler");
+
+    set_arg(&cmd.name, "markdown_trusted_proxies");
+
+    /* http context, valid IPv4 + IPv6 CIDRs -> OK, pushes both. */
+    memset(&g_main_conf, 0, sizeof(g_main_conf));
+    g_trusted_push_rc = TRUSTED_PROXIES_PUSH_OK;
+    g_trusted_push_calls = 0;
+    set_arg(&values[0], "markdown_trusted_proxies");
+    set_arg(&values[1], "10.0.0.0/8");
+    set_arg(&values[2], "2001:db8::/32");
+    setup_cf(&cf, &args, values, 3);
+    cf.cmd_type = NGX_HTTP_MAIN_CONF;
+    rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "valid CIDRs in http context should pass");
+    TEST_ASSERT(g_main_conf.trusted_proxies_configured == 1,
+                "configured flag should be set");
+    TEST_ASSERT(g_main_conf.trusted_proxies != NULL,
+                "handle should be stored for non-off config");
+    TEST_ASSERT(g_trusted_push_calls == 2, "both CIDRs should be pushed");
+
+    /* server/location context -> golden error. */
+    memset(&g_main_conf, 0, sizeof(g_main_conf));
+    setup_cf(&cf, &args, values, 2);
+    cf.cmd_type = NGX_HTTP_SRV_CONF;
+    rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+                "server context should be rejected");
+    cf.cmd_type = NGX_HTTP_LOC_CONF;
+    rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+                "location context should be rejected");
+
+    /* "off" -> configured, no handle. */
+    memset(&g_main_conf, 0, sizeof(g_main_conf));
+    set_arg(&values[1], "off");
+    setup_cf(&cf, &args, values, 2);
+    cf.cmd_type = NGX_HTTP_MAIN_CONF;
+    rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
+    TEST_ASSERT(rc == NGX_CONF_OK, "\"off\" should pass");
+    TEST_ASSERT(g_main_conf.trusted_proxies_configured == 1,
+                "\"off\" should set configured flag");
+    TEST_ASSERT(g_main_conf.trusted_proxies == NULL,
+                "\"off\" should not store a handle");
+
+    /* duplicate -> error. */
+    set_arg(&values[1], "10.0.0.0/8");
+    setup_cf(&cf, &args, values, 2);
+    cf.cmd_type = NGX_HTTP_MAIN_CONF;
+    rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
+    TEST_ASSERT(rc != NGX_CONF_OK, "duplicate directive should be rejected");
+
+    /* invalid CIDR -> golden error (push returns INVALID_CIDR). */
+    memset(&g_main_conf, 0, sizeof(g_main_conf));
+    g_trusted_push_rc = TRUSTED_PROXIES_PUSH_INVALID_CIDR;
+    set_arg(&values[1], "not-a-cidr");
+    setup_cf(&cf, &args, values, 2);
+    cf.cmd_type = NGX_HTTP_MAIN_CONF;
+    rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "invalid CIDR should be rejected");
+
+    g_trusted_push_rc = TRUSTED_PROXIES_PUSH_OK;
+
+    TEST_PASS("markdown_trusted_proxies handler correct");
+}
+
+/*
+ * Reject-only stub handler for removed directives (spec 54).
+ *
+ * This is a test-local copy of the production function from
+ * ngx_http_markdown_config_directives_impl.h.  The production header
+ * cannot be included directly because it carries the full directive
+ * registry table with dependencies on types not available in the
+ * unit harness (ngx_conf_enum_t, ngx_null_command, etc.).
+ *
+ * Any change to the production function must be mirrored here.
+ *
+ * Parameters:
+ *   cf   - configuration context
+ *   cmd  - directive definition (cmd->name = legacy name,
+ *          cmd->post = migration hint string)
+ *   conf - unused
+ *
+ * Returns:
+ *   Always NGX_CONF_ERROR.
+ */
+static char *
+ngx_http_markdown_reject_removed_directive(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    (void) conf;
+
+    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+        "\"%V\" directive has been removed in 0.9.0; %s "
+        "(see docs/guides/MIGRATION-0.9.md)",
+        &cmd->name, (char *) cmd->post);
+
+    return NGX_CONF_ERROR;
+}
+
+/*
+ * Verify ngx_http_markdown_reject_removed_directive (spec 54):
+ * 1. Returns NGX_CONF_ERROR unconditionally.
+ * 2. Error message contains the directive name.
+ * 3. Error message contains "removed in 0.9.0".
+ * 4. Error message references the migration hint.
+ * 5. Error message references "docs/guides/MIGRATION-0.9.md".
+ * 6. Log level is NGX_LOG_EMERG.
+ *
+ * Return: void.
+ *
+ * Side effects: assertions; writes to g_conf_log_buf.
+ */
+static void
+test_reject_removed_directive(void)
+{
+    ngx_conf_t     cf;
+    ngx_array_t    args;
+    ngx_str_t      values[2];
+    ngx_command_t  cmd;
+    const char    *rc;
+    const char    *hint;
+
+    TEST_SUBSECTION("reject_removed_directive (spec 54)");
+
+    /* Set up mock objects. */
+    setup_cf(&cf, &args, values, 2);
+    set_arg(&cmd.name, "markdown_on_error");
+    hint = "use \"markdown_error_policy pass|fail_closed|status <code>\" "
+           "instead";
+    cmd.post = (void *) hint;
+
+    memset(g_conf_log_buf, 0, sizeof(g_conf_log_buf));
+    g_conf_log_level = 0;
+
+    /* Invoke the handler. */
+    rc = ngx_http_markdown_reject_removed_directive(&cf, &cmd, NULL);
+
+    /* 1. Return value is NGX_CONF_ERROR. */
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "reject handler must return NGX_CONF_ERROR");
+
+    /* 2. Error message contains directive name. */
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_on_error") != NULL,
+        "error must contain the directive name");
+
+    /* 3. Error message contains "removed in 0.9.0". */
+    TEST_ASSERT(strstr(g_conf_log_buf, "removed in 0.9.0") != NULL,
+        "error must state removal in 0.9.0");
+
+    /* 4. Error message contains migration hint. */
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_error_policy") != NULL,
+        "error must reference the replacement directive");
+
+    /* 5. Error message references the migration guide. */
+    TEST_ASSERT(strstr(g_conf_log_buf, "docs/guides/MIGRATION-0.9.md")
+        != NULL,
+        "error must reference MIGRATION-0.9.md");
+
+    /* 6. Log level is EMERG. */
+    TEST_ASSERT(g_conf_log_level == NGX_LOG_EMERG,
+        "log level must be NGX_LOG_EMERG");
+
+    /* Second directive to confirm generality. */
+    set_arg(&cmd.name, "markdown_etag");
+    cmd.post = (void *) "use \"markdown_cache_validation\" instead";
+    memset(g_conf_log_buf, 0, sizeof(g_conf_log_buf));
+
+    rc = ngx_http_markdown_reject_removed_directive(&cf, &cmd, NULL);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "reject handler must always return NGX_CONF_ERROR");
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_etag") != NULL,
+        "error must contain second directive name");
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_cache_validation") != NULL,
+        "error must contain second replacement hint");
+    TEST_ASSERT(strstr(g_conf_log_buf, "MIGRATION-0.9.md") != NULL,
+        "error must reference migration guide for second directive");
+
+    TEST_PASS("reject_removed_directive golden error verified");
 }
 
 /*
@@ -1834,8 +2275,9 @@ main(void)
     test_simple_enum_handlers();
     test_auth_cookies_handler();
     test_conditional_and_log_verbosity_handlers();
+    test_streaming_policy_handler();
     test_stream_types_handler();
-    test_large_body_threshold_handler();
+    test_limits_handler();
     test_metrics_handlers();
     test_streaming_engine_handler();
     test_v080_stream_directive_handlers();
@@ -1845,6 +2287,8 @@ main(void)
     test_diagnostics_handler();
     test_content_types_validation();
     test_markdown_content_types_handler();
+    test_trusted_proxies_handler();
+    test_reject_removed_directive();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

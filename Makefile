@@ -65,7 +65,9 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         harness-check harness-check-full harness-security-checks test-harness \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
-	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-08x release-gates-check-legacy release-gates-check-strict \
+        complexity-check \
+	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-090 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+        test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
         verify-streaming-failure-cache-e2e \
@@ -121,8 +123,8 @@ test: build
 
 test-rust:
 	cd $(RUST_DIR) && cargo build --locked --release --example perf_baseline
-	cd $(RUST_DIR) && cargo test --locked --all --all-features
-	cd $(RUST_DIR) && cargo test --locked --doc --all-features
+	cd $(RUST_DIR) && cargo test --locked --release --all --all-features
+	cd $(RUST_DIR) && cargo test --locked --release --doc --all-features
 
 test-rust-streaming:
 	cd $(RUST_DIR) && cargo test --locked --features streaming
@@ -234,6 +236,7 @@ harness-check-full:
 	$(MAKE) harness-security-checks
 	$(MAKE) test-harness
 	$(MAKE) check-headers
+	$(MAKE) complexity-check
 
 harness-security-checks:
 	bash tools/harness/detect_cwe190_casts.sh
@@ -262,6 +265,10 @@ harness-security-checks:
 	PYTHONPATH=. python3 tools/harness/detect_test_assertion_coverage.py
 	PYTHONPATH=. python3 tools/harness/detect_html_sanitizer_invariants.py
 	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
+
+complexity-check:
+	@echo "=== Complexity Check ==="
+	bash tools/complexity/check_complexity.sh
 
 test-harness:
 	@echo "=== Harness Detector Unit Tests ==="
@@ -659,6 +666,72 @@ release-gates-check-080:
 release-gates-check-08x: release-gates-check-080
 	@echo "  (release-gates-check-08x is an alias for release-gates-check-080, the 0.8.x patch-line gate)"
 
+# 0.8.0 regression subset — version-independent stable checks from 0.8 gate.
+# Skips RELEASE_GATE_EXPECTED_CARGO_VERSION-bound validators so 0.9+ branches
+# can inherit the 0.8 regression surface without a version-number conflict.
+release-gates-check-080-regression:
+	@echo "=== v0.8.x Regression Subset (version-independent) ==="
+	$(MAKE) build
+	$(MAKE) check-headers
+	$(MAKE) test-rust
+	$(MAKE) test-nginx-unit
+	$(MAKE) test-e2e-rust
+	$(MAKE) docs-check
+	python3 tools/release/matrix/validate_workflow_matrix_consumers.py
+	$(MAKE) harness-check
+	python3 tools/release/gates/validate_release_gates.py
+	python3 tools/release/gates/validate_naming.py
+	python3 tools/release/gates/validate_config_directives_080.py
+	@test -f docs/harness/routing-manifest.json
+	@test -d docs/harness/risk-packs
+	@test -f docs/harness/core.md
+	@test -f docs/harness/README.md
+	@echo "=== v0.8.x Regression Subset: ALL PASSED ==="
+
+# 0.9.0 Release Gates (additive on top of 0.8.0 regression subset)
+# test-rust, test-nginx-unit, check-headers, docs-check already run by prereq
+release-gates-check-090: release-gates-check-080-regression
+	@echo "=== 0.9.0 Release Gates ==="
+	$(MAKE) test-production-examples-nginx-t
+	$(MAKE) test-production-examples-e2e-smoke
+	$(MAKE) complexity-check
+	python3 tools/release/gates/validate_release_gates_090.py
+	@echo "=== 0.9.0 Release Gates: PASS ==="
+
+release-gates-check-all: release-gates-check release-gates-check-090
+	@echo "=== Release Gates: ALL PASS ==="
+
+# Production Examples: validate all examples pass nginx -t (NEW)
+test-production-examples-nginx-t:
+	@echo "=== Production Examples nginx -t ==="
+	@nginx_bin="$${NGINX_BIN:-nginx}"; \
+	if command -v "$$nginx_bin" >/dev/null 2>&1; then \
+		set -- examples/production/*.conf; \
+		if [ "$$1" = 'examples/production/*.conf' ]; then \
+			echo "FAIL: no production example configs found in examples/production/" >&2; \
+			exit 1; \
+		fi; \
+		for conf in "$$@"; do \
+			echo "  Testing: $$conf"; \
+			"$$nginx_bin" -t -c "$$(pwd)/$$conf" 2>&1 || exit 1; \
+		done; \
+		echo "All production examples pass nginx -t"; \
+	else \
+		echo "FAIL: nginx binary not found (set NGINX_BIN to a module-enabled nginx)" >&2; \
+		exit 1; \
+	fi
+
+# Production Examples: E2E smoke (requires running NGINX, deferred)
+test-production-examples-e2e-smoke:
+	@echo "=== Production Examples E2E Smoke ==="
+	@bash tools/e2e/verify_profile_smoke_e2e.sh || { \
+		rc=$$?; \
+		case "$$rc" in \
+			2) echo "SKIP: E2E smoke requires NGINX_BIN environment (deferred to CI)" ;; \
+			*) exit "$$rc" ;; \
+		esac; \
+	}
+
 release-gates-check-legacy:
 	python3 tools/release/legacy/validate_release_gates.py
 
@@ -825,6 +898,7 @@ help:
 	@echo "  harness-check            - Validate harness truth surfaces and optional local adapters"
 	@echo "  harness-check-full       - Run full harness validation plus docs/release checks"
 	@echo "  harness-security-checks  - Run local static harness/security detectors"
+	@echo "  complexity-check         - Run complexity analysis (lizard + complexipy + shellcheck)"
 	@echo "  security-static          - Run actionlint, shellcheck, gitleaks, Semgrep, and cargo-deny"
 	@echo "  supply-chain             - Run Trivy filesystem/IaC scan and generate a Syft SPDX SBOM"
 	@echo "  test-harness             - Run unit tests for harness detector scripts"
@@ -835,9 +909,14 @@ help:
 	@echo "  release-gates-check-060  - Validate 0.6.0 release gates (streaming default, pruning, budget)"
 	@echo "  release-gates-check-070  - Validate 0.7.0 release gates (runtime correctness, package compat, fuzz)"
 	@echo "  release-gates-check-080  - Validate 0.8.x release gates (streaming, coverage, matrix, harness boundary)"
+	@echo "  release-gates-check-080-regression - 0.8.x version-independent regression subset (no Cargo version bind)"
 	@echo "  release-gates-check-08x  - Alias for release-gates-check-080 (0.8.x patch-line canonical entry)"
+	@echo "  release-gates-check-090  - Validate 0.9.0 release gates (additive on 0.8.0; production examples, gate validator)"
+	@echo "  release-gates-check-all  - Run current baseline and 0.9.0 release gates"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
+	@echo "  test-production-examples-nginx-t - Validate production example configs pass nginx -t"
+	@echo "  test-production-examples-e2e-smoke - Production examples E2E smoke (deferred to CI)"
 	@echo "  release-notes            - Generate release notes from release-matrix.json"
 	@echo "  coverage-c               - Generate C module e2e coverage (builds NGINX with --coverage)"
 	@echo "  coverage-rust            - Generate Rust test coverage (llvm-cov lcov)"

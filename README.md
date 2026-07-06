@@ -50,6 +50,7 @@ AI bot (by User-Agent)                 -> Markdown (via NGINX config)
 | Agent-friendly content from an existing site | Markdown negotiated from your current HTML responses |
 | Minimal application change | NGINX-side enablement with per-path control |
 | Safe rollout | Fail-open mode, size limits, timeouts, and shared aggregate metrics |
+| Bounded-memory streaming | Dual-engine model — `auto` mode routes large responses to bounded-memory streaming |
 | Cache-aware behavior | Variant `ETag`, `Vary: Accept`, and conditional-request support |
 | Flexible configuration | Variable-driven per-request control, User-Agent targeting, and authentication policies |
 
@@ -125,6 +126,44 @@ If something doesn't work as expected, see the [Troubleshooting](docs/guides/INS
 
 If you want a practical production-oriented configuration next, go straight to [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md).
 
+For complete, ready-to-use production configurations covering all three profiles
+(balanced, strict_cache, streaming_first), see the
+[Production Examples](examples/production/) directory.
+
+## Profiles (v0.9.0+)
+
+For production deployments, use `markdown_profile` to apply a tested set of
+defaults instead of configuring each directive individually:
+
+```nginx
+http {
+    markdown_profile balanced;
+
+    server {
+        listen 80;
+        location /docs/ {
+            markdown_filter on;
+            proxy_pass http://backend;
+        }
+    }
+}
+```
+
+Three profiles are available:
+
+| Profile | Use When |
+|---------|----------|
+| `balanced` | General-purpose (recommended starting point) |
+| `strict_cache` | CDN / caching proxy with full ETag support |
+| `streaming_first` | AI agent workloads with large documents |
+
+Merge order: explicit directives > profile defaults > built-in defaults. You
+can override any non-forced profile field with an explicit directive in the same
+context.
+
+For the full profile reference, defaults table, and conflict rules, see
+[docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md#profiles).
+
 ## Serve Markdown to Specific Bots
 
 Most AI crawlers do not send `Accept: text/markdown`. They use standard browser-like Accept headers. You can use NGINX's `map` directive to rewrite the Accept header for specific User-Agent strings, so matching bots receive Markdown without any changes on their side.
@@ -188,6 +227,7 @@ This project is a strong fit if you:
 It is a weaker fit if you:
 
 - already have a purpose-built Markdown or JSON content API
+- require streaming to be always-on and cannot use the `auto` threshold mode
 - want transformation logic completely outside the request path
 
 ## How This Compares to Edge-Layer Conversion
@@ -211,7 +251,7 @@ Neither approach is universally better. Edge-layer conversion is a good fit when
 | Automatic decompression | Handles gzip, brotli, and deflate upstream responses |
 | Cache-aware variants | Generates ETags and supports conditional requests |
 | Failure policy control | Choose fail-open or fail-closed behavior |
-| Resource limits | Bound conversion size with `markdown_max_size` and time with NGINX directives |
+| Resource limits | Bound conversion size, time, streaming buffers, and inflight work with `markdown_limits` |
 | Security hardening | Validates emitted links and base URLs, rejects unsafe forwarded-host inputs by default, bounds parser/decompression resources, and avoids executing external content |
 | Optional metadata | Supports token estimates and YAML front matter |
 | Metrics endpoint | Exposes module conversion counters for operations |
@@ -381,6 +421,7 @@ make supply-chain
 | Build from source | [docs/guides/BUILD_INSTRUCTIONS.md](docs/guides/BUILD_INSTRUCTIONS.md) |
 | Configure directives | [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
 | Upgrade from 0.7.x to 0.8.0 | [docs/guides/MIGRATION-0.8.md](docs/guides/MIGRATION-0.8.md) |
+| Upgrade from 0.8.x to 0.9.0 | [docs/guides/MIGRATION-0.9.md](docs/guides/MIGRATION-0.9.md) |
 | Roll out streaming safely | [docs/guides/streaming-rollout-cookbook.md](docs/guides/streaming-rollout-cookbook.md) |
 | Start from deployment examples | [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md) |
 | Operate and troubleshoot | [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md) |
@@ -456,40 +497,20 @@ add the harness workflow to your default path:
 2. Run `make harness-check`
 3. Run `make harness-check-full` before closing broader docs or release-gate work
 
-## What's New in v0.8.0
+## What's New in v0.9.0
 
-v0.8.0 introduces true streaming conversion — bounded-memory HTML-to-Markdown processing for large and chunked responses:
+v0.9.0 is a **breaking release** — the last breaking opportunity before 1.0.0 API freeze:
 
-- **Dual-engine model** — Full-buffer conversion (the default since v0.5.0) remains for typical responses. A new streaming engine handles large or chunked responses with bounded memory. The `markdown_streaming_engine` directive controls which engine is used (`off`, `on`, or `auto`).
-- **`auto` mode (default)** — When set to `auto`, the module automatically routes eligible large or chunked responses to the streaming engine while keeping full-buffer for everything else. **Note:** the default `markdown_conditional_requests full_support` setting prevents streaming from activating because full ETag support requires the full-buffer path. To enable streaming in `auto` mode, set `markdown_conditional_requests if_modified_since_only` or `disabled`.
-- **Bounded-memory conversion** — The streaming engine flushes converted Markdown in chunks based on `markdown_stream_flush_min` (size threshold), keeping memory usage bounded regardless of response size.
-- **Pre-commit safety** — If a conversion error occurs before the streaming engine has committed output to the client, it falls back to serving the original HTML response. This preserves fail-open semantics during streaming.
-- **New streaming controls** — `markdown_stream_threshold`, `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`, and `markdown_stream_excluded_types` make thresholding, replay buffering, flushing, and content-type exclusions explicit.
-- **Breaking: v0.6.x compat removed** — `markdown_streaming_auto_threshold` is removed (not deprecated); `nginx -t` will fail if it appears in configuration. Use `markdown_stream_threshold` instead. `markdown_streaming_engine` no longer accepts `$variable` — only `off`/`auto`/`on`.
+- **Reason code naming**: all reason code strings renamed from UPPERCASE_SNAKE_CASE to lowercase_snake_case (e.g., `PARSE_TIMEOUT` → `timeout`, `FFI_CALL_ERROR` → `ffi_panic`). Affects Prometheus labels, structured logs, and diagnostics endpoint.
+- **Directive removals/renames**: `markdown_on_error` → `markdown_error_policy`; `markdown_trust_forwarded_headers` → `markdown_trusted_proxies <CIDR>...`; `markdown_on_wildcard` → `markdown_accept wildcard`. Old names are rejected at `nginx -t`.
+- **Profile system**: `markdown_profile` introduces one-line production defaults (`balanced`, `strict_cache`, `streaming_first`).
+- **Inflight guard**: `markdown_limits max_inflight=N` provides per-worker concurrency protection with `overload` reason code. `max_inflight=0` means unlimited.
+- **Metrics consolidation**: per-reason counters replaced by 5 unified metric families with a `reason` label. Label whitelist prevents high-cardinality series.
+- **Cache-Control no-transform bypass**: conditional requests with `Cache-Control: no-transform` bypass conversion and return original HTML (`bypass_no_transform` reason code).
+- **Diagnostics schema v1**: versioned JSON output with structured sections (decision, inflight, error, streaming, conditional, etag).
+- **`nginx-markdown-doctor` tool**: full diagnostic checks for config snapshot, module health, FFI version alignment, and profile smoke.
 
-For upgrade guidance from 0.7.x, see the [Migration Guide](docs/guides/MIGRATION-0.8.md).
-For production rollout steps, see the [Streaming Rollout Cookbook](docs/guides/streaming-rollout-cookbook.md).
-
-## What's New in v0.7.0
-
-v0.7.0 is a correctness, distribution, and operability release:
-
-- **Bounded decompression** — `markdown_decompress_max_size` limits decompressed output independently, preventing zip-bomb attacks (error code 9: DecompressionBudgetExceeded)
-- **Accept negotiation** — Rust-side RFC 9110 §12.5.1 q-value comparison between `text/markdown` and `text/html` (with §12.4.2 quality value semantics) determines conversion eligibility
-- **Parse timeout and budget** — `markdown_parse_timeout` (default 30s) and `markdown_parser_budget` (default 64m) prevent runaway parsing (error codes 10, 11)
-- **DEB/RPM package artifacts** — v0.7.0+ release workflows build GitHub Release artifacts for Ubuntu 22.04/24.04, Debian 12, AlmaLinux 9, Amazon Linux 2023 across amd64/arm64 families, with canonical install layout checks
-- **Kubernetes deployment examples** — Helm chart, manifests, and Ingress Controller custom image build path with secure stock-image defaults; module-enabled Helm installs require an image containing the module and an explicit `markdown.loadModule`
-- **Runtime diagnostics** — `/nginx-markdown/diagnostics` endpoint exposes config snapshot, recent decisions, and metrics
-- **Dynconf dry-run and rollback** — Validate configuration changes without applying them; roll back to last-known-good on failure
-
-Additional changes:
-
-- P0 runtime correctness: pending chain on NGX_AGAIN, fail-open dedup, safe output ordering
-- Rust conditional request module (If-None-Match, If-Modified-Since)
-- Rust decision engine with reason codes
-- Rust header mutation plan module
-- Rust URL control character validation and link escaping
-- FFI ABI layout verification and header drift detection
+For upgrade guidance from 0.8.x, see the [Migration Guide](docs/guides/MIGRATION-0.9.md).
 
 ## What's New in v0.8.3
 
@@ -520,9 +541,44 @@ v0.8.2 is a patch release hardening the 0.8.x streaming line:
 
 For the full list, see [CHANGELOG.md](CHANGELOG.md).
 
+## What's New in v0.8.0
+
+v0.8.0 introduces true streaming conversion — bounded-memory HTML-to-Markdown processing for large and chunked responses:
+
+- **Dual-engine model** — Full-buffer conversion (the default since v0.5.0) remains for typical responses. A new streaming engine handles large or chunked responses with bounded memory. The `markdown_streaming_engine` directive controls which engine is used (`off`, `on`, or `auto`).
+- **`auto` mode (default)** — When set to `auto`, the module automatically routes eligible large or chunked responses to the streaming engine while keeping full-buffer for everything else. **Note (v0.8.0):** the default `markdown_conditional_requests full_support` setting prevented streaming from activating because full ETag support requires the full-buffer path. **Changed in 0.9.0:** `markdown_conditional_requests` is replaced by `markdown_cache_validation`, whose default is `ims_only` (both built-in and `balanced` profile), allowing streaming in `auto` mode. Use `markdown_cache_validation full` (the `strict_cache` profile default) if full ETag support is required.
+- **Bounded-memory conversion** — The streaming engine flushes converted Markdown in chunks based on `markdown_stream_flush_min` (size threshold), keeping memory usage bounded regardless of response size.
+- **Pre-commit safety** — If a conversion error occurs before the streaming engine has committed output to the client, it falls back to serving the original HTML response. This preserves fail-open semantics during streaming.
+- **New streaming controls** — `markdown_stream_threshold`, `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`, and `markdown_stream_excluded_types` make thresholding, replay buffering, flushing, and content-type exclusions explicit.
+- **Breaking: v0.6.x compat removed** — `markdown_streaming_auto_threshold` is removed (not deprecated); `nginx -t` will fail if it appears in configuration. Use `markdown_stream_threshold` instead. `markdown_streaming_engine` no longer accepts `$variable` — only `off`/`auto`/`on`.
+
+For upgrade guidance from 0.7.x, see the [Migration Guide](docs/guides/MIGRATION-0.8.md).
+For production rollout steps, see the [Streaming Rollout Cookbook](docs/guides/streaming-rollout-cookbook.md).
+
+## What's New in v0.7.0
+
+v0.7.0 is a correctness, distribution, and operability release:
+
+- **Bounded decompression** — `markdown_decompress_max_size` limits decompressed output independently, preventing zip-bomb attacks (error code 9: DecompressionBudgetExceeded)
+- **Accept negotiation** — Rust-side RFC 9110 §12.5.1 q-value comparison between `text/markdown` and `text/html` (with §12.4.2 quality value semantics) determines conversion eligibility
+- **Parse timeout and budget** — `markdown_parse_timeout` (default 30s) and `markdown_parser_budget` (default 64m) prevent runaway parsing (error codes 10, 11)
+- **DEB/RPM package artifacts** — v0.7.0+ release workflows build GitHub Release artifacts for Ubuntu 22.04/24.04, Debian 12, AlmaLinux 9, Amazon Linux 2023 across amd64/arm64 families, with canonical install layout checks
+- **Kubernetes deployment examples** — Helm chart, manifests, and Ingress Controller custom image build path with secure stock-image defaults; module-enabled Helm installs require an image containing the module and an explicit `markdown.loadModule`
+- **Runtime diagnostics** — `/nginx-markdown/diagnostics` endpoint exposes config snapshot, recent decisions, and metrics
+- **Dynconf dry-run and rollback** — Validate configuration changes without applying them; roll back to last-known-good on failure
+
+Additional changes:
+
+- P0 runtime correctness: pending chain on NGX_AGAIN, fail-open dedup, safe output ordering
+- Rust conditional request module (If-None-Match, If-Modified-Since)
+- Rust decision engine with reason codes
+- Rust header mutation plan module
+- Rust URL control character validation and link escaping
+- FFI ABI layout verification and header drift detection
+
 ## Roadmap
 
-Current release line (0.8.x; latest patch 0.8.3):
+**Current release line (0.9.x; latest patch 0.9.0)**
 
 - Dual-engine streaming model: full-buffer default + streaming engine for large/chunked responses
 - `auto` mode as the default `markdown_streaming_engine` setting
@@ -581,6 +637,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.0 | 2026-07-02 | Kang | Doc review: added What's New v0.9.0 section, MIGRATION-0.9 link, reason code count fix, CHANGELOG sync with branch commits |
 | 0.8.3 | 2026-06-26 | Kang | v0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |
 | 0.8.2 | 2026-06-25 | Kang | v0.8.2 release: streaming decompression hardening, FFI panic safety, implied-closure correctness, decompression budget enforcement, security scan scoping, release-line documentation closeout |
 | 0.8.0 | 2026-06-16 | Codex | Synchronized English and Chinese README structure, Quick Start examples, local test commands, platform support heading, and v0.8.0 roadmap wording |

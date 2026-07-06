@@ -144,6 +144,459 @@ ngx_http_markdown_parse_size(const ngx_str_t *line)
 }
 
 /*
+ * Parse an ngx_str_t time token into milliseconds.
+ *
+ * Self-contained (libc only) so the directive parser is identical in the
+ * production module and in the standalone unit harness.  Supports the suffix
+ * families ms, s, m, h.  A bare number is interpreted as seconds (NGINX
+ * convention).  Returns the value in milliseconds, or (ngx_msec_t) NGX_ERROR
+ * on overflow or malformed input.
+ */
+static ngx_msec_t
+ngx_http_markdown_parse_time_ms(const ngx_str_t *line)
+{
+    char                 buf[64];
+    char                *endptr;
+    size_t               len;
+    size_t               suffix_len;
+    unsigned long long   raw;
+    unsigned long long   scale;
+
+    if (line == NULL || line->data == NULL || line->len == 0) {
+        return (ngx_msec_t) NGX_ERROR;
+    }
+
+    len = line->len;
+    if (len >= sizeof(buf)) {
+        return (ngx_msec_t) NGX_ERROR;
+    }
+
+    memcpy(buf, line->data, len);
+    buf[len] = '\0';
+
+    if (buf[0] == '-') {
+        return (ngx_msec_t) NGX_ERROR;
+    }
+
+    scale = 1000; /* bare number => seconds */
+    suffix_len = 0;
+
+    if (len >= 2 && buf[len - 2] == 'm' && buf[len - 1] == 's') {
+        scale = 1;
+        suffix_len = 2;
+    } else if (len >= 1) {
+        switch (buf[len - 1]) {
+        case 's': scale = 1000; suffix_len = 1; break;
+        case 'm': scale = 60ULL * 1000; suffix_len = 1; break;
+        case 'h': scale = 60ULL * 60 * 1000; suffix_len = 1; break;
+        default: break;
+        }
+    }
+
+    if (suffix_len > 0) {
+        buf[len - suffix_len] = '\0';
+    }
+
+    if (buf[0] == '\0') {
+        return (ngx_msec_t) NGX_ERROR;
+    }
+
+    errno = 0;
+    raw = strtoull(buf, &endptr, 10);
+    if (errno == ERANGE || endptr == buf || *endptr != '\0') {
+        return (ngx_msec_t) NGX_ERROR;
+    }
+
+    if (raw > (unsigned long long) NGX_MAX_SIZE_T_VALUE / scale) {
+        return (ngx_msec_t) NGX_ERROR;
+    }
+
+    return (ngx_msec_t) (raw * scale);
+}
+
+/*
+ * Parse an ngx_str_t positive-integer token.
+ *
+ * Self-contained (libc only).  Returns the parsed value, or
+ * (ngx_uint_t) NGX_ERROR on overflow or malformed input.  A leading sign or
+ * any non-digit character is rejected.
+ */
+static ngx_uint_t
+ngx_http_markdown_parse_uint(const ngx_str_t *line)
+{
+    char                 buf[32];
+    char                *endptr;
+    size_t               len;
+    unsigned long long   raw;
+
+    if (line == NULL || line->data == NULL || line->len == 0) {
+        return (ngx_uint_t) NGX_ERROR;
+    }
+
+    len = line->len;
+    if (len >= sizeof(buf)) {
+        return (ngx_uint_t) NGX_ERROR;
+    }
+
+    memcpy(buf, line->data, len);
+    buf[len] = '\0';
+
+    if (buf[0] < '0' || buf[0] > '9') {
+        return (ngx_uint_t) NGX_ERROR;
+    }
+
+    errno = 0;
+    raw = strtoull(buf, &endptr, 10);
+    if (errno == ERANGE || endptr == buf || *endptr != '\0'
+        || raw > (unsigned long long) NGX_MAX_SIZE_T_VALUE)
+    {
+        return (ngx_uint_t) NGX_ERROR;
+    }
+
+    return (ngx_uint_t) raw;
+}
+
+typedef struct {
+    ngx_uint_t  memory;
+    ngx_uint_t  timeout;
+    ngx_uint_t  streaming_buffer;
+    ngx_uint_t  max_inflight;
+} ngx_http_markdown_limits_seen_t;
+
+static u_char  ngx_http_markdown_limit_key_memory[] = "memory";
+static u_char  ngx_http_markdown_limit_key_timeout[] = "timeout";
+static u_char  ngx_http_markdown_limit_key_streaming_buffer[] =
+    "streaming_buffer";
+static u_char  ngx_http_markdown_limit_key_max_inflight[] = "max_inflight";
+
+static char *
+ngx_http_markdown_apply_memory_limit(ngx_conf_t *cf, ngx_command_t *cmd,
+    ngx_http_markdown_conf_t *mcf, const ngx_str_t *val,
+    ngx_http_markdown_limits_seen_t *seen)
+{
+    size_t  sz;
+
+    if (seen->memory) {
+        return "has a duplicate \"memory\" key";
+    }
+
+    seen->memory = 1;
+    sz = ngx_http_markdown_parse_size(val);
+    if (sz == (size_t) NGX_ERROR || sz == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid \"memory\" value \"%V\" in \"%V\"; "
+            "must be a size greater than 0 (e.g. 8m)",
+            val, &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->max_size = sz;
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_http_markdown_apply_timeout_limit(ngx_conf_t *cf, ngx_command_t *cmd,
+    ngx_http_markdown_conf_t *mcf, const ngx_str_t *val,
+    ngx_http_markdown_limits_seen_t *seen)
+{
+    ngx_msec_t  ms;
+
+    if (seen->timeout) {
+        return "has a duplicate \"timeout\" key";
+    }
+
+    seen->timeout = 1;
+    ms = ngx_http_markdown_parse_time_ms(val);
+    if (ms == (ngx_msec_t) NGX_ERROR || ms == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid \"timeout\" value \"%V\" in \"%V\"; "
+            "must be a time greater than 0 (e.g. 2s, 500ms)",
+            val, &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->timeout = ms;
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_http_markdown_apply_streaming_buffer_limit(ngx_conf_t *cf,
+    ngx_command_t *cmd, ngx_http_markdown_conf_t *mcf,
+    const ngx_str_t *val, ngx_http_markdown_limits_seen_t *seen)
+{
+    size_t  sz;
+
+    if (seen->streaming_buffer) {
+        return "has a duplicate \"streaming_buffer\" key";
+    }
+
+    seen->streaming_buffer = 1;
+    sz = ngx_http_markdown_parse_size(val);
+    if (sz == (size_t) NGX_ERROR || sz == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid \"streaming_buffer\" value \"%V\" in \"%V\"; "
+            "must be a size greater than 0 (e.g. 256k)",
+            val, &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->stream.budget = sz;
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_http_markdown_apply_max_inflight_limit(ngx_conf_t *cf,
+    ngx_command_t *cmd, ngx_http_markdown_conf_t *mcf,
+    const ngx_str_t *val, ngx_http_markdown_limits_seen_t *seen)
+{
+    ngx_uint_t  n;
+
+    if (seen->max_inflight) {
+        return "has a duplicate \"max_inflight\" key";
+    }
+
+    seen->max_inflight = 1;
+    n = ngx_http_markdown_parse_uint(val);
+    if (n == (ngx_uint_t) NGX_ERROR || n == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid \"max_inflight\" value \"%V\" in \"%V\"; "
+            "must be a positive integer",
+            val, &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    if (n > UINT32_MAX) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid \"max_inflight\" value \"%V\" in \"%V\"; "
+            "must not exceed %u (FFI uint32_t limit)",
+            val, &cmd->name, UINT32_MAX);
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->routing.max_inflight = n;
+    return NGX_CONF_OK;
+}
+
+static char *
+ngx_http_markdown_apply_limit_arg(ngx_conf_t *cf, ngx_command_t *cmd,
+    ngx_http_markdown_conf_t *mcf, const ngx_str_t *key,
+    const ngx_str_t *val, ngx_http_markdown_limits_seen_t *seen)
+{
+    if (ngx_http_markdown_arg_equals(key, ngx_http_markdown_limit_key_memory,
+                                     sizeof(ngx_http_markdown_limit_key_memory)
+                                     - 1))
+    {
+        return ngx_http_markdown_apply_memory_limit(cf, cmd, mcf, val, seen);
+    }
+
+    if (ngx_http_markdown_arg_equals(key, ngx_http_markdown_limit_key_timeout,
+                                     sizeof(ngx_http_markdown_limit_key_timeout)
+                                     - 1))
+    {
+        return ngx_http_markdown_apply_timeout_limit(cf, cmd, mcf, val, seen);
+    }
+
+    if (ngx_http_markdown_arg_equals(
+            key, ngx_http_markdown_limit_key_streaming_buffer,
+            sizeof(ngx_http_markdown_limit_key_streaming_buffer) - 1))
+    {
+        return ngx_http_markdown_apply_streaming_buffer_limit(
+            cf, cmd, mcf, val, seen);
+    }
+
+    if (ngx_http_markdown_arg_equals(
+            key, ngx_http_markdown_limit_key_max_inflight,
+            sizeof(ngx_http_markdown_limit_key_max_inflight) - 1))
+    {
+        return ngx_http_markdown_apply_max_inflight_limit(
+            cf, cmd, mcf, val, seen);
+    }
+
+    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+        "unknown key \"%V\" in \"%V\" directive; valid keys are "
+        "memory, timeout, streaming_buffer, max_inflight",
+        key, &cmd->name);
+    return NGX_CONF_ERROR;
+}
+
+/*
+ * Configuration directive handler: markdown_limits (Config V2, 0.9.0).
+ *
+ * Unified limits block consolidating the removed markdown_max_size,
+ * markdown_timeout, and markdown_streaming_budget directives.  Grammar:
+ *
+ *   markdown_limits memory=<size> timeout=<time>
+ *                   streaming_buffer=<size> max_inflight=<N>;
+ *
+ * Keys are space-separated key=value tokens; any subset may be given and
+ * unspecified keys inherit via normal merge (per-key inheritance).  Each key
+ * writes its existing backing field, which stays the runtime source of truth:
+ *   memory           -> max_size
+ *   timeout          -> timeout
+ *   streaming_buffer -> stream.budget
+ *   max_inflight     -> max_inflight
+ *
+ * Validation (rejected at nginx -t):
+ *   - duplicate key within one directive
+ *   - unknown key
+ *   - zero value for any key (an invalid limit)
+ *   - malformed size/time/integer value
+ */
+static char *
+ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+    ngx_http_markdown_limits_seen_t  seen;
+
+    ngx_memzero(&seen, sizeof(seen));
+    value = cf->args->elts;
+
+    /*
+     * Iterate over directive arguments (skipping argv[0] = directive name).
+     * Each argument must be key=value; keys are matched case-insensitively
+     * and mapped to the corresponding conf field.  Duplicate keys, unknown
+     * keys, and zero/malformed values are rejected at nginx -t time.
+     */
+    for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
+        u_char    *eq;
+        char      *rc;
+        ngx_str_t  key;
+        ngx_str_t  val;
+        size_t     vlen;
+
+        /* Split argument at '=' into key and value substrings. */
+        eq = ngx_strlchr(value[i].data, value[i].data + value[i].len, '=');
+        if (eq == NULL || eq == value[i].data
+            || (size_t) (eq - value[i].data) == value[i].len - 1)
+        {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "invalid value \"%V\" in \"%V\" directive, "
+                "each argument must be key=value "
+                "(memory|timeout|streaming_buffer|max_inflight)",
+                &value[i], &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+
+        key.data = value[i].data;
+        key.len = (size_t) (eq - value[i].data);
+        vlen = value[i].len - key.len - 1;
+        val.data = eq + 1;
+        val.len = vlen;
+
+        rc = ngx_http_markdown_apply_limit_arg(
+            cf, cmd, mcf, &key, &val, &seen);
+        if (rc != NGX_CONF_OK) {
+            return rc;
+        }
+    }
+
+    return NGX_CONF_OK;
+}
+
+/*
+ * Pool cleanup handler that frees the Rust-owned trusted-proxy CIDR set.
+ *
+ * Registered against the configuration pool so the handle lives for the
+ * configuration cycle and is released on reload/shutdown.
+ */
+static void
+ngx_http_markdown_trusted_proxies_cleanup(void *data)
+{
+    markdown_trusted_proxies_free(data);
+}
+
+/*
+ * Configuration directive handler: markdown_trusted_proxies (spec 47).
+ *
+ *   markdown_trusted_proxies <CIDR>...;
+ *   markdown_trusted_proxies off;
+ *
+ * Context: http only.  server/location context is rejected with a clear
+ * migration hint (no per-location trust to avoid local trust-bypass risk).
+ *
+ * Each CIDR is validated at config time by the Rust core
+ * (markdown_trusted_proxies_push); a malformed IPv4/IPv6 CIDR fails
+ * "nginx -t" with the offending value.  "off" disables trust entirely
+ * (configured, empty set).  CIDR parsing happens once here; request-time
+ * matching is performed in Rust.  The handle is stored on the main conf and
+ * freed by an NGINX pool cleanup handler.
+ */
+static char *
+ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf)
+{
+    static u_char                   off_str[] = "off";
+    ngx_http_markdown_main_conf_t  *mmcf = conf;
+    ngx_pool_cleanup_t             *cln;
+    struct MarkdownTrustedProxies  *set;
+    ngx_str_t                      *value;
+    uint8_t                         rc;
+
+    /*
+     * http context only.  With NGX_HTTP_MAIN_CONF_OFFSET the conf pointer is
+     * always the main conf, so detect a misplaced directive via cf->cmd_type
+     * to emit a custom golden error rather than NGINX's generic message.
+     */
+    if (!(cf->cmd_type & NGX_HTTP_MAIN_CONF)) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "\"%V\" directive is only valid in the http context, not in "
+            "server or location (see docs/guides/MIGRATION-0.9.md)",
+            &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    if (mmcf->trusted_proxies_configured) {
+        return "is duplicate";
+    }
+
+    value = cf->args->elts;
+
+    /* markdown_trusted_proxies off; -> configured, no trusted CIDRs. */
+    if (cf->args->nelts == 2
+        && ngx_http_markdown_arg_equals(&value[1], off_str,
+                                        sizeof(off_str) - 1))
+    {
+        mmcf->trusted_proxies_configured = 1;
+        mmcf->trusted_proxies = NULL;
+        return NGX_CONF_OK;
+    }
+
+    set = markdown_trusted_proxies_new();
+    if (set == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    /*
+     * Register the cleanup before pushing CIDRs so the handle is always
+     * released, including on a mid-loop validation failure.
+     */
+    cln = ngx_pool_cleanup_add(cf->pool, 0);
+    if (cln == NULL) {
+        markdown_trusted_proxies_free(set);
+        return NGX_CONF_ERROR;
+    }
+    cln->handler = ngx_http_markdown_trusted_proxies_cleanup;
+    cln->data = set;
+
+    for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
+        rc = markdown_trusted_proxies_push(set, value[i].data, value[i].len);
+        if (rc != TRUSTED_PROXIES_PUSH_OK) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "invalid CIDR \"%V\" in \"%V\" directive; expected an IPv4 "
+                "or IPv6 CIDR (e.g. 10.0.0.0/8, 2001:db8::/32) or \"off\"",
+                &value[i], &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+    }
+
+    mmcf->trusted_proxies = set;
+    mmcf->trusted_proxies_configured = 1;
+
+    return NGX_CONF_OK;
+}
+
+/*
  * Configuration directive handler: markdown_filter
  *
  * Supported values:
@@ -220,14 +673,29 @@ ngx_http_markdown_filter(ngx_conf_t *cf,
     return NGX_CONF_OK;
 }
 
-/* Configuration directive handler: markdown_on_error (pass | reject). */
+/*
+ * Configuration directive handler: markdown_error_policy
+ * (pass | fail_closed | status <code>).
+ *
+ * Config V2 (0.9.0): unified error policy consolidating the removed
+ * markdown_on_error and markdown_streaming_on_error directives.  It writes
+ * the existing backing fields, which stay the runtime source of truth:
+ *   pass        -> on_error=PASS, stream.on_error=PASS
+ *   fail_closed -> on_error=REJECT, stream.on_error=REJECT, error_status=502
+ *   status <c>  -> on_error=REJECT, stream.on_error=REJECT, error_status=<c>
+ *
+ * Allowed status codes: 429, 503 (502 rejected; use fail_closed instead).  stream.on_error
+ * uses the same 0=pass/1=reject encoding as on_error, so the unconditional
+ * ON_ERROR constants are used to avoid a streaming-only ifdef.
+ */
 static char *
-ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_markdown_error_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     static u_char             pass_str[]   = "pass";
-    static u_char             reject_str[] = "reject";
+    static u_char             closed_str[] = "fail_closed";
+    static u_char             status_str[] = "status";
     ngx_http_markdown_conf_t *mcf = conf;
-    const ngx_str_t          *value;
+    ngx_str_t                *value;
 
     value = cf->args->elts;
 
@@ -235,20 +703,51 @@ ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return "is duplicate";
     }
 
-    if (ngx_http_markdown_arg_equals(&value[1], pass_str,
-                                     sizeof(pass_str) - 1))
+    if (cf->args->nelts == 2
+        && ngx_http_markdown_arg_equals(&value[1], pass_str,
+                                        sizeof(pass_str) - 1))
     {
         mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-    } else if (ngx_http_markdown_arg_equals(
-                   &value[1], reject_str,
-                   sizeof(reject_str) - 1))
+        mcf->stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    } else if (cf->args->nelts == 2
+               && ngx_http_markdown_arg_equals(&value[1], closed_str,
+                                               sizeof(closed_str) - 1))
     {
         mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+        mcf->stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+        mcf->error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+
+    } else if (cf->args->nelts == 3
+               && ngx_http_markdown_arg_equals(&value[1], status_str,
+                                               sizeof(status_str) - 1))
+    {
+        ngx_uint_t code;
+
+        code = ngx_http_markdown_parse_uint(&value[2]);
+        if (code == 502) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "invalid status code \"502\" in \"%V\" directive, "
+                "please use \"fail_closed\" instead",
+                &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+        if (code != 429 && code != 503) {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "invalid status code \"%V\" in \"%V\" directive, "
+                "it must be 429 or 503",
+                &value[2], &cmd->name);
+            return NGX_CONF_ERROR;
+        }
+        mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+        mcf->stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+        mcf->error_status = code;
+
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-                           "invalid value \"%V\" in \"%V\" directive, "
-                           "it must be \"pass\" or \"reject\"",
-                           &value[1], &cmd->name);
+            "invalid value in \"%V\" directive, it must be "
+            "\"pass\", \"fail_closed\", or \"status <429|503>\"",
+            &cmd->name);
         return NGX_CONF_ERROR;
     }
 
@@ -332,46 +831,116 @@ ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     return NGX_CONF_OK;
 }
 
-/* Configuration directive handler: markdown_conditional_requests. */
+/* Configuration directive handler: markdown_cache_validation. */
 static char *
-ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_markdown_cache_validation(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-    static u_char             full_str[] = "full_support";
-    static u_char             ims_str[]  =
-        "if_modified_since_only";
-    static u_char             dis_str[]  = "disabled";
+    static u_char             off_str[]  = "off";
+    static u_char             ims_str[]  = "ims_only";
+    static u_char             full_str[] = "full";
     ngx_http_markdown_conf_t *mcf = conf;
     ngx_str_t                *value;
 
     value = cf->args->elts;
 
+    /*
+     * markdown_cache_validation (Config V2, 0.9.0) consolidates the removed
+     * markdown_etag and markdown_conditional_requests directives.  It writes
+     * both backing fields (policy.generate_etag, policy.conditional_requests),
+     * which remain the runtime source of truth for the conversion and
+     * conditional-request paths.
+     *
+     *   off      - no ETag, no conditional request handling
+     *   ims_only - no ETag, If-Modified-Since only
+     *   full     - generate transformed ETag, If-None-Match + If-Modified-Since
+     */
     if (mcf->policy.conditional_requests != NGX_CONF_UNSET_UINT) {
         return "is duplicate";
     }
 
-    if (ngx_http_markdown_arg_equals(&value[1], full_str,
-                                     sizeof(full_str) - 1))
+    if (ngx_http_markdown_arg_equals(&value[1], off_str,
+                                     sizeof(off_str) - 1))
     {
+        mcf->policy.generate_etag = 0;
         mcf->policy.conditional_requests =
-            NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+            NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     } else if (ngx_http_markdown_arg_equals(
                    &value[1], ims_str,
                    sizeof(ims_str) - 1))
     {
+        mcf->policy.generate_etag = 0;
         mcf->policy.conditional_requests =
             NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
     } else if (ngx_http_markdown_arg_equals(
-                   &value[1], dis_str,
-                   sizeof(dis_str) - 1))
+                   &value[1], full_str,
+                   sizeof(full_str) - 1))
     {
-        mcf->policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
+        mcf->policy.generate_etag = 1;
+        mcf->policy.conditional_requests =
+            NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid value \"%V\" in \"%V\" directive, "
-                           "it must be \"full_support\", \"if_modified_since_only\", or \"disabled\"",
+                           "it must be \"off\", \"ims_only\", or \"full\"",
                            &value[1], &cmd->name);
         return NGX_CONF_ERROR;
     }
+
+    mcf->profile.cache_validation_explicit = 1;
+
+    return NGX_CONF_OK;
+}
+
+/* Configuration directive handler: markdown_streaming off|auto|force. */
+static char *
+ngx_http_markdown_streaming(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    static u_char             off_str[]   = "off";
+    static u_char             auto_str[]  = "auto";
+    static u_char             force_str[] = "force";
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    value = cf->args->elts;
+
+    /*
+     * markdown_streaming (Config V2, 0.9.0) is the streaming *enablement*
+     * selector and is distinct from markdown_streaming_engine (the
+     * implementation selector).  policy_explicit records that an operator
+     * set this directive so the cache-validation conflict check in
+     * merge_conf does not fire for default configurations.
+     *
+     *   off   - never stream
+     *   auto  - stream large responses, full-buffer small ones
+     *   force - always stream (subject to runtime hard blocks)
+     */
+    if (mcf->stream.policy != NGX_CONF_UNSET_UINT) {
+        return "is duplicate";
+    }
+
+    if (ngx_http_markdown_arg_equals(&value[1], off_str,
+                                     sizeof(off_str) - 1))
+    {
+        mcf->stream.policy = NGX_HTTP_MARKDOWN_STREAMING_OFF;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], auto_str,
+                   sizeof(auto_str) - 1))
+    {
+        mcf->stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], force_str,
+                   sizeof(force_str) - 1))
+    {
+        mcf->stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "invalid value \"%V\" in \"%V\" directive, "
+                           "it must be \"off\", \"auto\", or \"force\"",
+                           &value[1], &cmd->name);
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->stream.policy_explicit = 1;
 
     return NGX_CONF_OK;
 }
@@ -452,12 +1021,12 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
-    if (mcf->content_types != NGX_CONF_UNSET_PTR) {
+    if (mcf->routing.content_types != NGX_CONF_UNSET_PTR) {
         return "is duplicate";
     }
 
-    mcf->content_types = ngx_array_create(cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
-    if (mcf->content_types == NULL) {
+    mcf->routing.content_types = ngx_array_create(cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
+    if (mcf->routing.content_types == NULL) {
         return NGX_CONF_ERROR;
     }
 
@@ -490,7 +1059,7 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
-        type = ngx_array_push(mcf->content_types);
+        type = ngx_array_push(mcf->routing.content_types);
         if (type == NULL) {
             return NGX_CONF_ERROR;
         }
@@ -595,12 +1164,12 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
-    if (mcf->stream_types != NGX_CONF_UNSET_PTR) {
+    if (mcf->routing.stream_types != NGX_CONF_UNSET_PTR) {
         return "is duplicate";
     }
 
-    mcf->stream_types = ngx_array_create(cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
-    if (mcf->stream_types == NULL) {
+    mcf->routing.stream_types = ngx_array_create(cf->pool, cf->args->nelts - 1, sizeof(ngx_str_t));
+    if (mcf->routing.stream_types == NULL) {
         return NGX_CONF_ERROR;
     }
 
@@ -633,7 +1202,7 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
-        type = ngx_array_push(mcf->stream_types);
+        type = ngx_array_push(mcf->routing.stream_types);
         if (type == NULL) {
             return NGX_CONF_ERROR;
         }
@@ -645,60 +1214,6 @@ ngx_http_markdown_stream_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                            type);
     }
 
-    return NGX_CONF_OK;
-}
-
-/**
- * Parse and set the markdown_large_body_threshold directive.
- *
- * Processes a single argument which must be either "off" or a byte size
- * optionally suffixed with "k" or "m". Sets the module configuration's
- * large_body_threshold to 0 for "off" (or an explicit "0"), or to the parsed
- * byte size for valid nonzero sizes.
- *
- * @param cf Configuration parsing context.
- * @param cmd Directive definition.
- * @param conf Pointer to the module location configuration (ngx_http_markdown_conf_t *).
- * @returns NGX_CONF_OK on success;
- *          NGX_CONF_ERROR if the argument is not "off" and cannot be parsed as a size (error logged);
- *          the string "is duplicate" if the directive was already set.
- */
-static char *
-ngx_http_markdown_large_body_threshold(ngx_conf_t *cf,
-    ngx_command_t *cmd,
-    void *conf)
-{
-    static u_char             off_str[] = "off";
-    ngx_http_markdown_conf_t *mcf = conf;
-    ngx_str_t                *value;
-
-    (void) cmd;
-
-    value = cf->args->elts;
-
-    if (mcf->large_body_threshold != NGX_CONF_UNSET_SIZE) {
-        return "is duplicate";
-    }
-
-    if (value[1].len == 3
-        && ngx_strcasecmp(value[1].data, off_str) == 0)
-    {
-        mcf->large_body_threshold = 0;
-        return NGX_CONF_OK;
-    }
-
-    mcf->large_body_threshold = ngx_http_markdown_parse_size(&value[1]);
-    if (mcf->large_body_threshold == (size_t) NGX_ERROR) {
-        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "invalid value \"%V\" in "
-            "\"markdown_large_body_threshold\" "
-            "directive, it must be \"off\" "
-            "or a size (e.g., 512k, 1m)",
-            &value[1]);
-        return NGX_CONF_ERROR;
-    }
-
-    /* Explicit "0" is treated as off and already normalized above. */
     return NGX_CONF_OK;
 }
 
@@ -1150,6 +1665,76 @@ ngx_http_markdown_stream_excluded_types_handler(ngx_conf_t *cf,
 
         *type = value[i];
     }
+
+    return NGX_CONF_OK;
+}
+
+/*
+ * Configuration directive handler: markdown_profile (spec 50, 0.9.0).
+ *
+ * Selects a production-profile preset that provides tuned Config V2
+ * defaults for a common operational scenario.  The profile only
+ * supplies DEFAULTS; explicit directives at the same or inheriting
+ * scope override the profile values.
+ *
+ *   strict_cache    - optimized for CDN / caching proxy
+ *   balanced        - recommended general-purpose default
+ *   streaming_first - optimized for AI agent workloads
+ *
+ * Duplicate detection: a second markdown_profile in the same context
+ * is rejected with NGX_CONF_ERROR.  Unknown profile names are rejected
+ * with a helpful error listing valid values.
+ *
+ * Parameters:
+ *   cf   - configuration context
+ *   cmd  - directive definition
+ *   conf - location configuration pointer
+ *
+ * Returns:
+ *   NGX_CONF_OK on success, NGX_CONF_ERROR on invalid/duplicate profile
+ */
+static char *
+ngx_http_markdown_set_profile(ngx_conf_t *cf, ngx_command_t *cmd, /* NOSONAR: cmd must match ngx_command_t.set signature (Rule 24) */
+    void *conf)
+{
+    static u_char             strict_str[]    = "strict_cache";
+    static u_char             balanced_str[]  = "balanced";
+    static u_char             streaming_str[] = "streaming_first";
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+
+    (void) cmd;
+
+    value = cf->args->elts;
+
+    /* Duplicate detection: same context with >1 markdown_profile */
+    if (mcf->profile.set) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "\"markdown_profile\" directive is duplicate");
+        return NGX_CONF_ERROR;
+    }
+
+    if (ngx_http_markdown_arg_equals(&value[1], strict_str,
+                                     sizeof(strict_str) - 1))
+    {
+        mcf->profile.name = NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE;
+    } else if (ngx_http_markdown_arg_equals(&value[1], balanced_str,
+                                            sizeof(balanced_str) - 1))
+    {
+        mcf->profile.name = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
+    } else if (ngx_http_markdown_arg_equals(&value[1], streaming_str,
+                                            sizeof(streaming_str) - 1))
+    {
+        mcf->profile.name = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+    } else {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid markdown_profile \"%V\": valid profiles "
+            "are strict_cache, balanced, streaming_first",
+            &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->profile.set = 1;
 
     return NGX_CONF_OK;
 }

@@ -19,30 +19,17 @@ static ngx_str_t ngx_http_markdown_error_system_str = ngx_string("system");
 static ngx_str_t ngx_http_markdown_error_unknown_str = ngx_string("unknown");
 
 /*
- * Map Rust error code to error category
+ * Map Rust error code to error category via Rust FFI delegation
  *
  * This function classifies conversion failures into three categories:
  * - conversion: HTML parsing errors, invalid input, conversion logic failures
  * - resource_limit: Size limits exceeded, timeout exceeded
  * - system: Memory allocation failures, converter not initialized
  *
- * Error code mapping (from markdown_converter.h):
- * - ERROR_SUCCESS (0): Success - no error occurred
- * - ERROR_PARSE (1): HTML parsing failed (malformed HTML, invalid structure)
- * - ERROR_ENCODING (2): Character encoding error (invalid UTF-8, unsupported charset)
- * - ERROR_TIMEOUT (3): Conversion timeout exceeded
- * - ERROR_MEMORY_LIMIT (4): Memory limit exceeded during conversion
- * - ERROR_INVALID_INPUT (5): Invalid input data (NULL pointers, invalid parameters)
- * - ERROR_BUDGET_EXCEEDED (6): Streaming working-set budget exceeded
- * - ERROR_STREAMING_FALLBACK (7): Streaming engine fallback to full-buffer
- * - ERROR_POST_COMMIT (8): Post-commit failure after partial output
- * - ERROR_DECOMPRESSION_BUDGET_EXCEEDED (9): Decompression budget exceeded
- * - ERROR_PARSE_TIMEOUT (10): Parse timeout exceeded
- * - ERROR_PARSE_BUDGET_EXCEEDED (11): Parse budget exceeded
- * - ERROR_DECOMPRESSION_FORMAT_ERROR (12): Decompression format error
- * - ERROR_DECOMPRESSION_TRUNCATED_INPUT (13): Decompression truncated input
- * - ERROR_DECOMPRESSION_IO_ERROR (14): Decompression I/O error
- * - ERROR_INTERNAL (99): Internal error (unexpected condition, panic caught)
+ * The raw error code → ErrorClass mapping is performed by Rust
+ * (markdown_classify_error_code), which is the single source of truth.
+ * This function maps the resulting ErrorClass discriminant to the C
+ * error category enum.
  *
  * Parameters:
  *   error_code - Rust error code from MarkdownResult.error_code
@@ -53,45 +40,36 @@ static ngx_str_t ngx_http_markdown_error_unknown_str = ngx_string("unknown");
 ngx_http_markdown_error_category_t
 ngx_http_markdown_classify_error(uint32_t error_code)
 {
-    switch (error_code) {
-        /* Conversion errors: HTML parsing, encoding, invalid input,
-         * post-commit failure (partial output after streaming commit),
-         * decompression format/truncated/IO errors */
-        case ERROR_PARSE:
-        case ERROR_ENCODING:
-        case ERROR_INVALID_INPUT:
-        case ERROR_DECOMPRESSION_FORMAT_ERROR:
-        case ERROR_DECOMPRESSION_TRUNCATED_INPUT:
-        case ERROR_DECOMPRESSION_IO_ERROR:
-#if defined(MARKDOWN_STREAMING_ENABLED)
-        case ERROR_POST_COMMIT:
-#endif
-            return NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
+    uint8_t class_discriminant;
 
-        /* Resource limit errors: timeout, memory limit,
-         * budget exceeded (streaming working-set limit),
-         * decompression budget exceeded (decompress_max_size) */
-        case ERROR_TIMEOUT:
-        case ERROR_MEMORY_LIMIT:
-        case ERROR_DECOMPRESSION_BUDGET_EXCEEDED:
-        case ERROR_PARSE_TIMEOUT:
-        case ERROR_PARSE_BUDGET_EXCEEDED:
-#if defined(MARKDOWN_STREAMING_ENABLED)
-        case ERROR_BUDGET_EXCEEDED:
-#endif
-            return NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT;
+    class_discriminant = markdown_classify_error_code(error_code);
 
-        /* System errors: internal errors, unexpected conditions,
-         * streaming fallback (engine downgrade, not a resource limit) */
-#if defined(MARKDOWN_STREAMING_ENABLED)
-        case ERROR_STREAMING_FALLBACK:
-#endif
-        case ERROR_INTERNAL:
-            return NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+    /*
+     * Map Rust ErrorClass discriminants to C categories:
+     *   ErrorClass::ConversionError(0)        → CONVERSION
+     *   ErrorClass::Timeout(1)                → RESOURCE_LIMIT
+     *   ErrorClass::MemoryBudgetExceeded(2)   → RESOURCE_LIMIT
+     *   ErrorClass::FfiPanic(3)               → SYSTEM
+     *   ErrorClass::DecompressionError(4)     → CONVERSION
+     *   ErrorClass::Overload(5)               → RESOURCE_LIMIT
+     *   ErrorClass::InvalidDynconf(6)         → SYSTEM
+     *   ErrorClass::DegradedSnapshot(7)       → SYSTEM
+     *   ErrorClass::HeaderPlanApplyError(8)   → SYSTEM
+     *   ErrorClass::StreamingMidFlightError(9)→ SYSTEM
+     */
+    switch (class_discriminant) {
 
-        /* Default to system error for unknown error codes */
-        default:
-            return NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
+    case 0: /* ConversionError */
+    case 4: /* DecompressionError */
+        return NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
+
+    case 1: /* Timeout */
+    case 2: /* MemoryBudgetExceeded */
+    case 5: /* Overload */
+        return NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT;
+
+    default:
+        return NGX_HTTP_MARKDOWN_ERROR_SYSTEM;
     }
 }
 

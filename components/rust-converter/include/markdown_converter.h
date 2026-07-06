@@ -19,7 +19,12 @@
  * This constant is used by the closure test to verify that all variants
  * are accounted for in the `ALL` array. Update this when adding variants.
  */
-#define REASON_CODE_COUNT 18
+#define REASON_CODE_COUNT 26
+
+/**
+ * Number of error class variants.
+ */
+#define ERROR_CLASS_COUNT 10
 
 /**
  * Success - no error occurred.
@@ -200,12 +205,126 @@
  */
 #define NEGOTIATE_WILDCARD_ALLOW 1
 
+/**
+ * `markdown_trusted_proxies_push` result: CIDR parsed and stored.
+ */
+#define TRUSTED_PROXIES_PUSH_OK 0
+
+/**
+ * `markdown_trusted_proxies_push` result: CIDR string was invalid.
+ */
+#define TRUSTED_PROXIES_PUSH_INVALID_CIDR 1
+
+/**
+ * `markdown_trusted_proxies_push` result: NULL handle or input.
+ */
+#define TRUSTED_PROXIES_PUSH_NULL 2
+
+/**
+ * `markdown_decide_base_url` result: decision written successfully.
+ */
+#define DECIDE_BASE_URL_OK 0
+
+/**
+ * `markdown_decide_base_url` result: NULL input/output or buffer too small.
+ */
+#define DECIDE_BASE_URL_INVALID 1
+
+/**
+ * `markdown_decide_streaming` sentinel: no block reason (request is
+ * streaming-eligible).
+ */
+#define STREAMING_BLOCK_REASON_NONE 255
+
+/**
+ * Sentinel value for "not set" in FFI enum fields (u8).
+ */
+#define FFI_CONFIG_NOT_SET_U8 255
+
+/**
+ * Sentinel value for "not set" in FFI u64 fields.
+ */
+#define FFI_CONFIG_NOT_SET_U64 UINT64_MAX
+
+/**
+ * Sentinel value for "not set" in FFI u32 fields.
+ */
+#define FFI_CONFIG_NOT_SET_U32 UINT32_MAX
+
+/**
+ * Profile discriminant: no profile active (use built-in defaults).
+ */
+#define FFI_PROFILE_NONE 0
+
+/**
+ * Profile discriminant: `strict_cache` (CDN/caching proxy).
+ */
+#define FFI_PROFILE_STRICT_CACHE 1
+
+/**
+ * Profile discriminant: `balanced` (recommended default).
+ */
+#define FFI_PROFILE_BALANCED 2
+
+/**
+ * Profile discriminant: `streaming_first` (AI agent workloads).
+ */
+#define FFI_PROFILE_STREAMING_FIRST 3
+
+/**
+ * FFI error policy kind: pass (fail-open, default).
+ */
+#define FFI_ERROR_POLICY_PASS 0
+
+/**
+ * FFI error policy kind: return specified status code.
+ */
+#define FFI_ERROR_POLICY_STATUS 1
+
+/**
+ * FFI error policy kind: fail_closed (return 502).
+ */
+#define FFI_ERROR_POLICY_FAIL_CLOSED 2
+
+/**
+ * FFI error behavior kind: pass through original response.
+ */
+#define FFI_ERROR_BEHAVIOR_PASS_THROUGH 0
+
+/**
+ * FFI error behavior kind: return specified HTTP status code.
+ */
+#define FFI_ERROR_BEHAVIOR_RETURN_STATUS 1
+
+/**
+ * FFI error behavior kind: terminate connection (post-commit).
+ */
+#define FFI_ERROR_BEHAVIOR_TERMINATE 2
+
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
  * Maximum accumulated buffer size in bytes (64 MiB).
  */
 #define IncrementalConverter_MAX_BUFFER_SIZE ((64 * 1024) * 1024)
 #endif
+
+/**
+ * Severity level for a detected configuration conflict (FFI-safe).
+ *
+ * Mirrors `crate::config::conflict::ConflictLevel` with a stable `#[repr(u8)]`
+ * layout for the C side.
+ */
+enum FFIConflictLevel {
+  /**
+   * Hard error — `nginx -t` must fail.
+   */
+  Error = 0,
+  /**
+   * Advisory warning — logged but does not block startup.
+   */
+  Warning = 1,
+};
+typedef uint8_t FFIConflictLevel;
 
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
@@ -251,6 +370,21 @@ typedef struct IncrementalConverterHandle IncrementalConverterHandle;
  * when using a handle across multiple FFI calls.
  */
 typedef struct MarkdownConverterHandle MarkdownConverterHandle;
+
+/**
+ * Opaque Rust-owned set of config-time-validated trusted-proxy CIDRs
+ * (spec 47).
+ *
+ * The C side creates one handle per `markdown_trusted_proxies` directive via
+ * `markdown_trusted_proxies_new`, appends each CIDR with
+ * `markdown_trusted_proxies_push` (which validates at config time), and frees
+ * it with `markdown_trusted_proxies_free` (registered as an NGINX pool
+ * cleanup handler).  CIDR parsing happens once here; request-time matching is
+ * pure bitwise prefix comparison.  This type is intentionally **not**
+ * `#[repr(C)]` — cbindgen emits it as an opaque struct so the C side only
+ * ever holds a pointer and never inspects the layout.
+ */
+typedef struct MarkdownTrustedProxies MarkdownTrustedProxies;
 
 #if defined(MARKDOWN_STREAMING_ENABLED)
 /**
@@ -327,7 +461,7 @@ typedef struct MarkdownOptions {
    *
    * When non-zero, the streaming converter uses this value as the
    * total memory budget instead of the compiled-in default (2 MiB).
-   * Populated from the `markdown_streaming_budget` NGINX directive.
+   * Populated from `markdown_limits streaming_buffer=<size>` (Config V2).
    */
   uint64_t streaming_budget;
   /**
@@ -372,7 +506,7 @@ typedef struct MarkdownOptions {
    * max_size when no explicit markdown_max_size is set. Rust
    * currently enforces this budget only for streaming/incremental
    * paths; full-buffer relies on NGINX-side buffering limits.
-   * Populated from the `markdown_memory_budget` NGINX directive.
+   * Populated from `markdown_limits memory=<size>` (Config V2).
    */
   uint64_t memory_budget;
   /**
@@ -513,6 +647,82 @@ typedef struct FFIAcceptResult {
 } FFIAcceptResult;
 
 /**
+ * Borrowed byte string passed across the FFI boundary.
+ *
+ * Points to caller-owned memory that must remain valid for the duration of
+ * the call. `data` may be NULL only when `len == 0`.
+ */
+typedef struct FFIStr {
+  /**
+   * Pointer to the first byte (may be NULL when `len == 0`).
+   */
+  const uint8_t *data;
+  /**
+   * Number of bytes.
+   */
+  uintptr_t len;
+} FFIStr;
+
+/**
+ * Input snapshot for `markdown_decide_eligibility`.
+ *
+ * All fields are marshaled from `ngx_http_request_t` and the module
+ * configuration by the C caller. Array fields (`content_types`,
+ * `stream_types`) point to caller-owned arrays of [`FFIStr`] valid for the
+ * duration of the call; a NULL pointer with count 0 means "not configured".
+ */
+typedef struct FFIEligibilityInput {
+  /**
+   * 1 if `markdown_filter` is enabled for this request, else 0.
+   */
+  uint8_t filter_enabled;
+  /**
+   * 1 if the request method is GET or HEAD, else 0.
+   */
+  uint8_t method_get_or_head;
+  /**
+   * 1 if the request carried a `Range` header, else 0.
+   */
+  uint8_t has_range_header;
+  /**
+   * Response status code.
+   */
+  uint16_t status;
+  /**
+   * Response `Content-Type` value bytes (NULL/0 if absent).
+   */
+  const uint8_t *content_type;
+  /**
+   * Length of `content_type`.
+   */
+  uintptr_t content_type_len;
+  /**
+   * Configured `markdown_content_types` allowlist (NULL/0 = default html).
+   */
+  const struct FFIStr *content_types;
+  /**
+   * Number of entries in `content_types`.
+   */
+  uintptr_t content_types_count;
+  /**
+   * Configured `markdown_stream_types` exclusions (NULL/0 = none).
+   */
+  const struct FFIStr *stream_types;
+  /**
+   * Number of entries in `stream_types`.
+   */
+  uintptr_t stream_types_count;
+  /**
+   * Response `Content-Length`; negative means absent/unknown.
+   */
+  int64_t content_length;
+  /**
+   * Effective full-buffer body limit in bytes; 0 means unlimited.
+   */
+  uintptr_t body_limit;
+} FFIEligibilityInput;
+
+/**
  * Result of a conditional request check (If-None-Match / If-Modified-Since).
  *
  * Returned by `markdown_check_conditional` FFI function.
@@ -531,6 +741,153 @@ typedef struct FFIConditionalResult {
    */
   uint32_t matched_etag_len;
 } FFIConditionalResult;
+
+/**
+ * Input snapshot for `markdown_decide_conditional` (spec 49).
+ *
+ * All byte fields are borrowed from the C caller for the duration of the
+ * call (NULL with length 0 means "absent"). This struct exposes neither
+ * `ngx_http_request_t *` nor any NGINX pool; the C side marshals request
+ * headers, response metadata, and the effective `cache_validation` mode.
+ */
+typedef struct FFIConditionalInput {
+  /**
+   * Effective `markdown_cache_validation` mode: 0 = off, 1 = ims_only,
+   * 2 = full. Unknown values fall back to ims_only (safe default).
+   */
+  uint8_t cache_validation;
+  /**
+   * 1 if the request carried a `Range` header, else 0.
+   */
+  uint8_t has_range;
+  /**
+   * 1 if request or response carried `Cache-Control: no-transform`.
+   */
+  uint8_t no_transform;
+  /**
+   * `If-None-Match` header value bytes (NULL/0 if absent).
+   */
+  const uint8_t *if_none_match;
+  /**
+   * Length of `if_none_match`.
+   */
+  uintptr_t if_none_match_len;
+  /**
+   * Transformed-representation entity ETag bytes (NULL/0 if none; always
+   * absent on the streaming path).
+   */
+  const uint8_t *entity_etag;
+  /**
+   * Length of `entity_etag`.
+   */
+  uintptr_t entity_etag_len;
+  /**
+   * `If-Modified-Since` header value bytes (NULL/0 if absent).
+   */
+  const uint8_t *if_modified_since;
+  /**
+   * Length of `if_modified_since`.
+   */
+  uintptr_t if_modified_since_len;
+  /**
+   * Preserved upstream `Last-Modified` value bytes (NULL/0 if absent).
+   */
+  const uint8_t *last_modified;
+  /**
+   * Length of `last_modified`.
+   */
+  uintptr_t last_modified_len;
+} FFIConditionalInput;
+
+/**
+ * Result of `markdown_decide_conditional` (spec 49).
+ */
+typedef struct FFIConditionalDecision {
+  /**
+   * `ConditionalOutcome` discriminant: 0 = not_modified (send 304),
+   * 1 = proceed, 2 = bypass (deliver upstream unmodified).
+   */
+  uint8_t outcome;
+  /**
+   * `ConditionalReason` discriminant (spec 53 alignment).
+   */
+  uint8_t reason;
+  /**
+   * `ConditionalHeader` discriminant: 0 = none, 1 = if_none_match,
+   * 2 = if_modified_since.
+   */
+  uint8_t evaluated_header;
+} FFIConditionalDecision;
+
+/**
+ * Input snapshot for `markdown_decide_streaming` (spec 49).
+ *
+ * This struct exposes neither `ngx_http_request_t *` nor any NGINX pool;
+ * the C side marshals the policy/engine selectors, the effective
+ * `cache_validation` mode, request/response flags, and sizing fields.
+ */
+typedef struct FFIStreamingInput {
+  /**
+   * `markdown_streaming` policy: 0 = off, 1 = auto, 2 = force.
+   */
+  uint8_t policy;
+  /**
+   * `markdown_streaming_engine`: 0 = off, 1 = auto, 2 = on.
+   */
+  uint8_t engine;
+  /**
+   * Effective `markdown_cache_validation` mode: 0 = off, 1 = ims_only,
+   * 2 = full.
+   */
+  uint8_t cache_validation;
+  /**
+   * 1 if the request method is `HEAD`, else 0.
+   */
+  uint8_t is_head;
+  /**
+   * 1 if the conditional decision yielded `304 Not Modified`, else 0.
+   */
+  uint8_t is_not_modified;
+  /**
+   * 1 if the request carried a `Range` header, else 0.
+   */
+  uint8_t has_range;
+  /**
+   * 1 if request or response carried `Cache-Control: no-transform`.
+   */
+  uint8_t no_transform;
+  /**
+   * 1 if the upstream response carried a `Content-Encoding`, else 0.
+   */
+  uint8_t has_content_encoding;
+  /**
+   * 1 if the upstream `Content-Length` is known, else 0.
+   */
+  uint8_t content_length_known;
+  /**
+   * Upstream `Content-Length` in bytes (meaningful when known).
+   */
+  uint64_t content_length;
+  /**
+   * `markdown_stream_threshold` in bytes (auto-mode trigger).
+   */
+  uint64_t streaming_threshold;
+} FFIStreamingInput;
+
+/**
+ * Result of `markdown_decide_streaming` (spec 49).
+ */
+typedef struct FFIStreamingDecision {
+  /**
+   * 1 if the request may take the streaming path, else 0.
+   */
+  uint8_t eligible;
+  /**
+   * `StreamingBlockReason` discriminant when `eligible == 0`, or
+   * `STREAMING_BLOCK_REASON_NONE` (255) when `eligible == 1`.
+   */
+  uint8_t block_reason;
+} FFIStreamingDecision;
 
 /**
  * Result of a decision engine evaluation.
@@ -625,6 +982,92 @@ typedef struct FFIHeaderPlan {
 } FFIHeaderPlan;
 
 /**
+ * Input snapshot for `markdown_decide_base_url` (spec 47).
+ *
+ * All byte fields are borrowed from the C caller for the duration of the
+ * call (NULL with length 0 means "absent").  `trusted` is a borrowed
+ * pointer to a [`MarkdownTrustedProxies`] handle (may be NULL when trust is
+ * not configured).  This struct intentionally exposes neither
+ * `ngx_http_request_t *` nor any NGINX pool.
+ */
+typedef struct FFIBaseUrlInput {
+  /**
+   * Textual source IP (`r->connection->addr_text`), realip/PROXY resolved.
+   */
+  const uint8_t *source_ip;
+  /**
+   * Length of `source_ip`.
+   */
+  uintptr_t source_ip_len;
+  /**
+   * Borrowed handle of config-time-validated trusted CIDRs (may be NULL).
+   */
+  const struct MarkdownTrustedProxies *trusted;
+  /**
+   * `Forwarded` header value bytes (RFC 7239), NULL/0 if absent.
+   */
+  const uint8_t *forwarded;
+  /**
+   * Length of `forwarded`.
+   */
+  uintptr_t forwarded_len;
+  /**
+   * `X-Forwarded-Proto` header value bytes, NULL/0 if absent.
+   */
+  const uint8_t *x_forwarded_proto;
+  /**
+   * Length of `x_forwarded_proto`.
+   */
+  uintptr_t x_forwarded_proto_len;
+  /**
+   * `X-Forwarded-Host` header value bytes, NULL/0 if absent.
+   */
+  const uint8_t *x_forwarded_host;
+  /**
+   * Length of `x_forwarded_host`.
+   */
+  uintptr_t x_forwarded_host_len;
+  /**
+   * `Host` header value bytes, NULL/0 if absent.
+   */
+  const uint8_t *host;
+  /**
+   * Length of `host`.
+   */
+  uintptr_t host_len;
+  /**
+   * 1 if the source is a Unix-domain socket peer (forces untrusted).
+   */
+  uint8_t is_unix_socket;
+  /**
+   * 1 if `markdown_trusted_proxies` was configured (even as `off`).
+   */
+  uint8_t trusted_configured;
+} FFIBaseUrlInput;
+
+/**
+ * Result of `markdown_decide_base_url` (spec 47).
+ *
+ * `base_url_len` bytes are written into the caller-provided output buffer.
+ * `reason` is a `BaseUrlReason` discriminant; `source` is a `BaseUrlSource`
+ * discriminant.
+ */
+typedef struct FFIBaseUrlDecision {
+  /**
+   * Bytes written into the caller's output buffer.
+   */
+  uintptr_t base_url_len;
+  /**
+   * `BaseUrlReason` discriminant.
+   */
+  uint8_t reason;
+  /**
+   * `BaseUrlSource` discriminant.
+   */
+  uint8_t source;
+} FFIBaseUrlDecision;
+
+/**
  * Result of a bounded decompression operation.
  *
  * Returned by decompression FFI functions to communicate the output buffer,
@@ -662,6 +1105,179 @@ typedef struct FFIDecompResult {
 } FFIDecompResult;
 
 /**
+ * A single detected configuration conflict (FFI-safe).
+ *
+ * Contains the severity level and a pointer to a UTF-8 message describing
+ * the incompatibility. The message bytes are owned by the containing
+ * [`FFIConflictList`] and remain valid until `markdown_free_conflicts`
+ * is called.
+ */
+typedef struct FFIConflict {
+  /**
+   * Severity: error blocks startup, warning is advisory.
+   */
+  FFIConflictLevel level;
+  /**
+   * Pointer to UTF-8 message bytes (NOT NUL-terminated).
+   */
+  const uint8_t *message;
+  /**
+   * Length of the message in bytes.
+   */
+  uintptr_t message_len;
+} FFIConflict;
+
+/**
+ * List of detected conflicts returned from `markdown_detect_conflicts`.
+ *
+ * The caller must free this with `markdown_free_conflicts`. When `count == 0`,
+ * `conflicts` is NULL (Rule 53: empty results return NULL).
+ */
+typedef struct FFIConflictList {
+  /**
+   * Pointer to array of `FFIConflict` entries (NULL when `count == 0`).
+   */
+  struct FFIConflict *conflicts;
+  /**
+   * Number of entries in the array.
+   */
+  uintptr_t count;
+} FFIConflictList;
+
+/**
+ * Explicit user-set configuration flags for conflict detection (FFI-safe).
+ *
+ * Each field uses a sentinel value to indicate "not explicitly set":
+ * - Enum fields: `255` means not set (valid discriminants are 0..3).
+ * - Integer fields: `u64::MAX` / `u32::MAX` means not set.
+ * - Boolean fields: `255` means not set (0 = false, 1 = true).
+ *
+ * The C side populates only fields that the user explicitly configured via
+ * `markdown_*` directives; all other fields remain at their sentinel values.
+ */
+typedef struct FFIExplicitConfig {
+  /**
+   * `markdown_accept`: 0=strict, 1=wildcard, 2=force; 255=not set.
+   */
+  uint8_t accept;
+  /**
+   * `markdown_cache_validation`: 0=off, 1=ims_only, 2=full; 255=not set.
+   */
+  uint8_t cache_validation;
+  /**
+   * `markdown_streaming`: 0=off, 1=auto, 2=force; 255=not set.
+   */
+  uint8_t streaming;
+  /**
+   * `markdown_limits memory=` in bytes; `u64::MAX`=not set.
+   */
+  uint64_t limits_memory_bytes;
+  /**
+   * `markdown_limits timeout=` in milliseconds; `u64::MAX`=not set.
+   */
+  uint64_t limits_timeout_ms;
+  /**
+   * `markdown_limits streaming_buffer=` in bytes; `u64::MAX`=not set.
+   */
+  uint64_t limits_streaming_buffer_bytes;
+  /**
+   * `markdown_limits max_inflight=`; `u32::MAX`=not set.
+   */
+  uint32_t limits_max_inflight;
+  /**
+   * `markdown_error_policy`: 0=pass, 1=fail_closed; 255=not set.
+   */
+  uint8_t error_policy;
+  /**
+   * `markdown_diagnostics`: 0=off, 1=on; 255=not set.
+   */
+  uint8_t diagnostics;
+} FFIExplicitConfig;
+
+/**
+ * Effective configuration after merge (FFI-safe).
+ *
+ * All fields are concrete (no sentinels). This is the fully-resolved
+ * configuration the C side uses at runtime.
+ */
+typedef struct FFIEffectiveConfig {
+  /**
+   * Effective accept mode: 0=strict, 1=wildcard, 2=force.
+   */
+  uint8_t accept;
+  /**
+   * Effective cache_validation: 0=off, 1=ims_only, 2=full.
+   */
+  uint8_t cache_validation;
+  /**
+   * Effective streaming: 0=off, 1=auto, 2=force.
+   */
+  uint8_t streaming;
+  /**
+   * Effective memory limit in bytes.
+   */
+  uint64_t limits_memory_bytes;
+  /**
+   * Effective timeout in milliseconds.
+   */
+  uint64_t limits_timeout_ms;
+  /**
+   * Effective streaming buffer size in bytes.
+   */
+  uint64_t limits_streaming_buffer_bytes;
+  /**
+   * Effective max inflight conversions.
+   */
+  uint32_t limits_max_inflight;
+  /**
+   * Effective error policy: 0=pass, 1=fail_closed.
+   */
+  uint8_t error_policy;
+  /**
+   * Effective diagnostics: 0=off, 1=on.
+   */
+  uint8_t diagnostics;
+} FFIEffectiveConfig;
+
+/**
+ * FFI-safe error policy enum (spec 51).
+ *
+ * The C side derives this from the `markdown_error_policy` directive value
+ * and passes it to `markdown_decide_error_behavior`.
+ */
+typedef struct FFIErrorPolicy {
+  /**
+   * Policy kind: 0 = pass, 1 = status, 2 = fail_closed.
+   */
+  uint8_t kind;
+  /**
+   * HTTP status code (meaningful only when kind == 1).
+   */
+  uint16_t status_code;
+} FFIErrorPolicy;
+
+/**
+ * FFI-safe error behavior enum (spec 51).
+ *
+ * Returned by `markdown_decide_error_behavior` to tell the C error handler
+ * what action to take.
+ */
+typedef struct FFIErrorBehavior {
+  /**
+   * Behavior kind: 0 = pass_through, 1 = return_status, 2 = terminate.
+   */
+  uint8_t kind;
+  /**
+   * HTTP status code (meaningful only when kind == 1).
+   */
+  uint16_t status_code;
+  /**
+   * 1 if behavior was forced (post-commit), 0 if policy-driven.
+   */
+  uint8_t forced;
+} FFIErrorBehavior;
+
+/**
  * Get the string representation of a reason code by its numeric value.
  *
  * Returns a pointer to a static string and writes the length to `out_len`.
@@ -693,6 +1309,43 @@ const uint8_t *markdown_reason_code_metric_key(uint32_t code, uintptr_t *out_len
  * C callers can use this to verify they handle all variants.
  */
 uint32_t markdown_reason_code_count(void);
+
+/**
+ * Get a default diagnostics JSON schema v1 string.
+ *
+ * Returns a pointer to a heap-allocated JSON byte buffer and writes the
+ * byte length (excluding any NUL terminator) to `out_len`. The returned
+ * buffer is NUL-terminated for convenience but `out_len` does NOT include
+ * the terminator.
+ *
+ * On failure (NULL `out_len`, serialization error, or caught panic) returns
+ * NULL and sets `*out_len = 0`.
+ *
+ * The caller must free the returned buffer by calling
+ * [`markdown_free_diagnostics`] with the same pointer and length.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `out_len` either is NULL (in which case the
+ * function returns NULL immediately) or points to writable storage for a
+ * `usize`.
+ */
+uint8_t *markdown_get_diagnostics_schema(uintptr_t *out_len);
+
+/**
+ * Free a diagnostics JSON string previously returned by
+ * [`markdown_get_diagnostics_schema`].
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `ptr` was returned by `markdown_get_diagnostics_schema` and has not
+ *   already been freed
+ * - `len` is the value written to `out_len` by that call
+ *
+ * After this call, `ptr` is invalid and must not be dereferenced.
+ */
+void markdown_free_diagnostics(uint8_t *ptr, uintptr_t len);
 
 /**
  * Allocate a new converter handle for use across multiple FFI calls.
@@ -780,6 +1433,31 @@ void markdown_negotiate_accept(const uint8_t *accept_header,
                                struct FFIAcceptResult *result);
 
 /**
+ * Decide whether an upstream response is eligible for Markdown conversion.
+ *
+ * Single source of truth for the eligibility determination (method, status,
+ * Range, unbounded streaming, Content-Type allowlist, size limit). The C
+ * module marshals request/config fields into [`FFIEligibilityInput`] and
+ * casts the returned `u8` directly to `ngx_http_markdown_eligibility_t`
+ * (the codes match that enum's discriminants).
+ *
+ * Returns `FFI_ELIGIBILITY_INELIGIBLE_CONFIG` (skip conversion, the safe
+ * fail-open outcome) if `input` is NULL or on any caught panic.
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `input` is NULL or points to a valid [`FFIEligibilityInput`]
+ * - `content_type` points to `content_type_len` readable bytes (or is NULL
+ *   when `content_type_len == 0`)
+ * - `content_types`/`stream_types` point to `*_count` readable [`FFIStr`]
+ *   entries (or are NULL when the count is 0), each `FFIStr.data` pointing to
+ *   `FFIStr.len` readable bytes (or NULL when `len == 0`)
+ * - all referenced memory remains valid for the duration of the call
+ */
+uint8_t markdown_decide_eligibility(const struct FFIEligibilityInput *input);
+
+/**
  * Evaluate HTTP conditional request headers (If-None-Match / If-Modified-Since).
  *
  * Returns the conditional result through the `result` output parameter.
@@ -800,6 +1478,53 @@ void markdown_check_conditional(const uint8_t *if_none_match,
                                 const uint8_t *last_modified,
                                 uintptr_t last_modified_len,
                                 struct FFIConditionalResult *result);
+
+/**
+ * Decide the conditional-request outcome (spec 49): cache-validation mode,
+ * `If-None-Match` over `If-Modified-Since` precedence, and `Range` /
+ * `no-transform` bypass.
+ *
+ * This is the Rust single source of truth wrapping
+ * `crate::decision::conditional::decide_conditional`. The result is written
+ * through the `out` output parameter.
+ *
+ * On NULL `input`/`out` or on a caught panic, the output is left at the
+ * fail-open default (proceed, no headers evaluated) so a spurious 304 is
+ * never produced.
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `input` is NULL or points to a readable `FFIConditionalInput` whose
+ *   byte pointers each reference `*_len` readable bytes (or are NULL when
+ *   the length is 0)
+ * - `out` is NULL or points to writable storage for an
+ *   `FFIConditionalDecision`
+ * - all referenced memory remains valid for the duration of the call
+ */
+void markdown_decide_conditional(const struct FFIConditionalInput *input,
+                                 struct FFIConditionalDecision *out);
+
+/**
+ * Decide whether the request may take the streaming path (spec 49).
+ *
+ * This is the Rust single source of truth wrapping
+ * `crate::decision::streaming::decide_streaming`. The result is written
+ * through the `out` output parameter.
+ *
+ * On NULL `input`/`out` or on a caught panic, the output is the safe
+ * fallback: not eligible (the full-buffer path), with no block reason
+ * reported (`STREAMING_BLOCK_REASON_NONE`).
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `input` is NULL or points to a readable `FFIStreamingInput`
+ * - `out` is NULL or points to writable storage for an
+ *   `FFIStreamingDecision`
+ */
+void markdown_decide_streaming(const struct FFIStreamingInput *input,
+                               struct FFIStreamingDecision *out);
 
 /**
  * Evaluate the conversion decision engine.
@@ -888,6 +1613,77 @@ uintptr_t markdown_build_base_url(const uint8_t *x_forwarded_host,
                                   uintptr_t out_buf_cap);
 
 /**
+ * Allocate a new, empty trusted-proxy CIDR set (spec 47).
+ *
+ * The handle accumulates config-time-validated CIDRs via
+ * `markdown_trusted_proxies_push` and is consumed at request time by
+ * `markdown_decide_base_url`.
+ *
+ * # Safety
+ *
+ * Returns a raw pointer that must eventually be freed with
+ * `markdown_trusted_proxies_free`.  Returns NULL only if allocation of the
+ * handle panics and that panic is caught.
+ */
+struct MarkdownTrustedProxies *markdown_trusted_proxies_new(void);
+
+/**
+ * Validate a CIDR string and append it to a trusted-proxy set (config time).
+ *
+ * Returns `TRUSTED_PROXIES_PUSH_OK` (0) on success,
+ * `TRUSTED_PROXIES_PUSH_INVALID_CIDR` (1) when the CIDR is malformed, or
+ * `TRUSTED_PROXIES_PUSH_NULL` (2) when `handle` or `cidr` is NULL/empty.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `handle` points to a live set created by
+ * `markdown_trusted_proxies_new`, and that `cidr` either points to `cidr_len`
+ * readable bytes or is NULL when `cidr_len == 0`.
+ */
+uint8_t markdown_trusted_proxies_push(struct MarkdownTrustedProxies *handle,
+                                      const uint8_t *cidr,
+                                      uintptr_t cidr_len);
+
+/**
+ * Free a trusted-proxy set previously returned by
+ * `markdown_trusted_proxies_new`.
+ *
+ * # Safety
+ *
+ * `handle` must either be NULL or a pointer previously returned by
+ * `markdown_trusted_proxies_new` that has not already been freed.
+ */
+void markdown_trusted_proxies_free(struct MarkdownTrustedProxies *handle);
+
+/**
+ * Decide the trusted base URL for a request (spec 47 small API).
+ *
+ * Marshals the borrowed request/config fields into the pure
+ * [`decide_base_url`] decision, writes the chosen base URL into the
+ * caller-provided `out_buf`, and fills `out` with the byte count, reason
+ * code, and source.  The decision logic (CIDR matching, forwarded-header
+ * precedence, multi-hop handling, host/proto validation, fallback) lives
+ * entirely in Rust.
+ *
+ * Returns `DECIDE_BASE_URL_OK` (0) on success, or `DECIDE_BASE_URL_INVALID`
+ * (1) when `input`/`out`/`out_buf` is NULL, the output buffer is too small,
+ * or a panic is caught (fail-safe).
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `input` points to a valid `FFIBaseUrlInput`; every non-NULL byte field
+ *   points to its stated length of readable bytes, and `trusted` is NULL or
+ *   a live `MarkdownTrustedProxies` handle;
+ * - `out_buf` points to at least `out_buf_cap` writable bytes;
+ * - `out` points to writable storage for an `FFIBaseUrlDecision`.
+ */
+uint8_t markdown_decide_base_url(const struct FFIBaseUrlInput *input,
+                                 uint8_t *out_buf,
+                                 uintptr_t out_buf_cap,
+                                 struct FFIBaseUrlDecision *out);
+
+/**
  * Release a header plan previously returned by `markdown_build_header_plan`.
  *
  * # Safety
@@ -909,7 +1705,8 @@ void markdown_header_plan_free(struct FFIHeaderPlan *plan);
  * Default values:
  * - `flavor`: 0 (CommonMark)
  * - `timeout_ms`: 5000 (5 seconds)
- * - `generate_etag`: 1 (enabled)
+ * - `generate_etag`: 0 (disabled — ETag generation is a config-layer
+ *   decision; the init helper only provides a safe ABI baseline)
  * - `estimate_tokens`: 0 (disabled)
  * - `front_matter`: 0 (disabled)
  * - `content_type` / `base_url` / selectors: NULL/0
@@ -1047,6 +1844,103 @@ void markdown_decompress_free(struct FFIDecompResult *result);
  * for an `FFIDecompResult`.
  */
 void markdown_decomp_result_init(struct FFIDecompResult *result);
+
+/**
+ * Detect configuration conflicts between a profile, explicit directives, and
+ * the effective configuration.
+ *
+ * This is the primary FFI entry point for `nginx -t` validation. The C side
+ * calls this after computing the effective config via its own merge logic,
+ * passing the profile selector, the explicitly-set directive flags, and the
+ * fully-resolved effective config.
+ *
+ * Returns an [`FFIConflictList`] that the caller must free with
+ * [`markdown_free_conflicts`]. If no conflicts are detected, the returned
+ * list has `count == 0` and `conflicts == NULL` (Rule 53).
+ *
+ * On NULL input pointers or on a caught panic, returns an empty conflict list
+ * (the safe fail-open outcome: no spurious errors reported).
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `profile` is a valid `FFIProfile` discriminant (0–3)
+ * - `explicit` is NULL or points to a readable `FFIExplicitConfig`
+ * - `effective` is NULL or points to a readable `FFIEffectiveConfig`
+ */
+struct FFIConflictList markdown_detect_conflicts(uint8_t profile,
+                                                 const struct FFIExplicitConfig *explicit_,
+                                                 const struct FFIEffectiveConfig *effective);
+
+/**
+ * Free a conflict list returned by `markdown_detect_conflicts`.
+ *
+ * Releases all heap-allocated message buffers and the conflict array itself.
+ * Calling with a zeroed/empty list (`count == 0`, `conflicts == NULL`) is a
+ * safe no-op.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `list` points to a valid `FFIConflictList`
+ * previously returned by `markdown_detect_conflicts`, or is a zeroed struct.
+ * The list must not be used after this call.
+ */
+void markdown_free_conflicts(struct FFIConflictList *list);
+
+/**
+ * Decide error handling behavior for a given error class and policy (spec 51).
+ *
+ * This is the FFI entry point for the unified error policy decision.
+ * The C error handler calls this to determine what action to take.
+ *
+ * # Parameters
+ *
+ * - `error_class`: The `FFIErrorClass` discriminant identifying the error.
+ * - `policy`: The `FFIErrorPolicy` derived from `markdown_error_policy`.
+ * - `out`: Output pointer for the resulting `FFIErrorBehavior`.
+ *
+ * # Returns
+ *
+ * `0` on success, `1` if `out` is NULL or `error_class` is invalid.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `out` is NULL or points to writable storage
+ * for an `FFIErrorBehavior`.
+ */
+uint8_t markdown_decide_error_behavior(uint8_t error_class,
+                                       struct FFIErrorPolicy policy,
+                                       struct FFIErrorBehavior *out);
+
+/**
+ * Map an error class to its reason code discriminant (spec 51).
+ *
+ * Returns the `ReasonCode` discriminant (u8) for the given error class.
+ * Returns `u8::MAX` (255) if the error class is invalid.
+ *
+ * # Safety
+ *
+ * No pointer parameters; always safe to call.
+ */
+uint8_t markdown_error_to_reason_code(uint8_t error_class);
+
+/**
+ * Classify a raw FFI error code into its `ErrorClass` discriminant.
+ *
+ * This is the FFI entry point that maps the raw `ERROR_*` constants
+ * (defined in `markdown_converter.h`) to `ErrorClass` discriminants.
+ * The C side calls this to delegate error classification to Rust
+ * (single source of truth) instead of maintaining an independent switch.
+ *
+ * Returns the `ErrorClass` discriminant (u8) for the given error code.
+ * Unknown error codes return `ErrorClass::FfiPanic` discriminant (3).
+ *
+ * # Safety
+ *
+ * No pointer parameters; always safe to call. The function is panic-free
+ * by construction (trivial match expression with no allocations).
+ */
+uint8_t markdown_classify_error_code(uint32_t error_code);
 
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**

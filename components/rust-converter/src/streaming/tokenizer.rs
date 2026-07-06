@@ -184,6 +184,16 @@ impl StreamingTokenizer {
     pub fn new() -> Self {
         let sink = TokenSinkAdapter::new();
         let opts = TokenizerOpts {
+            // BOM (U+FEFF) at the start of a feed() call is stripped by
+            // html5ever when discard_bom is true (the default).  In streaming
+            // mode, a BOM whose lead byte (0xEF) was split into utf8_tail by
+            // the previous chunk gets reassembled at the start of the next
+            // feed(), causing html5ever to strip it — diverging from
+            // single-chunk conversion where the same BOM is mid-stream and
+            // preserved.  Disabling discard_bom ensures consistent BOM
+            // handling: the StreamingConverter strips a leading BOM once at
+            // stream start, so mid-stream BOMs reach the tokenizer intact.
+            discard_bom: false,
             ..Default::default()
         };
         let tokenizer = Tokenizer::new(sink, opts);

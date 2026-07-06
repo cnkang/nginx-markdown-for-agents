@@ -8,6 +8,7 @@
  */
 
 #include "ngx_http_markdown_filter_module.h"
+#include "markdown_converter.h"
 #include <strings.h>
 
 static ngx_str_t ngx_http_markdown_eligible_str = ngx_string("eligible");
@@ -30,264 +31,81 @@ static ngx_str_t ngx_http_markdown_ineligible_config_str =
 static ngx_str_t ngx_http_markdown_eligibility_unknown_str = ngx_string("unknown");
 
 /*
- * Check if request method is eligible for conversion
+ * Marshal an NGINX array of ngx_str_t into a borrowed FFIStr array.
  *
- * Only GET and HEAD methods are eligible per FR-02.1.
+ * The decision logic (method/status/content-type/size/streaming) lives in
+ * the Rust core (markdown_decide_eligibility); the C side only collects the
+ * request/config inputs.  Configured content-type/stream-type allowlists are
+ * stored as ngx_array_t of ngx_str_t whose memory layout differs from FFIStr
+ * (field order and the borrowed-slice contract), so they are copied into a
+ * pool-allocated FFIStr array that borrows the original byte data for the
+ * duration of the FFI call.  No NGINX object is exposed to Rust.
  *
  * Parameters:
- *   r - NGINX request structure
+ *   pool - request pool used for the borrowed FFIStr array
+ *   arr  - source array of ngx_str_t (caller guarantees nelts > 0)
  *
  * Returns:
- *   1 if method is GET or HEAD
- *   0 otherwise
+ *   Pointer to a pool-allocated FFIStr array, or NULL on allocation failure.
  */
-static ngx_int_t
-ngx_http_markdown_check_method(const ngx_http_request_t *r)
+static struct FFIStr *
+ngx_http_markdown_marshal_str_array(ngx_pool_t *pool, const ngx_array_t *arr)
 {
-    return (r->method == NGX_HTTP_GET || r->method == NGX_HTTP_HEAD);
+    struct FFIStr   *list;
+    const ngx_str_t *src;
+
+    list = ngx_palloc(pool, arr->nelts * sizeof(struct FFIStr));
+    if (list == NULL) {
+        return NULL;
+    }
+
+    src = arr->elts;
+
+    for (ngx_uint_t i = 0; i < arr->nelts; i++) {
+        list[i].data = src[i].data;
+        list[i].len = src[i].len;
+    }
+
+    return list;
 }
 
 /*
- * Check if response status is eligible for conversion
+ * Check response eligibility for Markdown conversion (thin FFI wrapper)
  *
- * Only 200 OK is eligible per FR-02.2.
- * Other status codes (1xx, 2xx except 200, 3xx, 4xx, 5xx) are not converted.
+ * The eligibility decision itself (method, status, Range, unbounded
+ * streaming, Content-Type allowlist, size limit, and their ordering) is a
+ * single source of truth in the Rust core, reached through the
+ * markdown_decide_eligibility FFI.  This C function is glue only: it
+ * collects request and configuration fields into an FFIEligibilityInput,
+ * calls the FFI, and casts the returned u8 back to the C enum.  The u8
+ * codes match the ngx_http_markdown_eligibility_t discriminants exactly,
+ * so the cast is direct.
  *
- * 206 Partial Content is handled separately in check_eligibility() where
- * it returns INELIGIBLE_RANGE, ensuring the correct reason code regardless
- * of whether the client sent a Range header.
+ * NGINX-lifecycle concerns stay in C:
+ *   - reading request/response fields (method, status, Range header,
+ *     Content-Type, Content-Length);
+ *   - resolving the effective full-buffer body limit via the shared
+ *     resolver (ngx_http_markdown_effective_body_buffer_limit) so that
+ *     eligibility and buffering apply the same precedence — this is a
+ *     config-precedence resolution over conf/effective-conf fields, not a
+ *     decision branch, and the actual size comparison is performed in Rust;
+ *   - marshalling the configured allowlists into borrowed FFIStr arrays.
  *
- * Parameters:
- *   r - NGINX request structure
+ * Range Requests: 206 Partial Content (with or without a Range header) and
+ * a Range request header both map to INELIGIBLE_RANGE.  This routing now
+ * lives in the Rust decision; the C side only reports whether a Range
+ * header was present and the response status.
  *
- * Returns:
- *   1 if status is 200
- *   0 otherwise
- */
-static ngx_int_t
-ngx_http_markdown_check_status(const ngx_http_request_t *r)
-{
-    return (r->headers_out.status == NGX_HTTP_OK);
-}
-
-/*
- * Check whether the request carries a Range header.
- *
- * Range requests must be excluded from markdown conversion because the
- * partial response body would not be valid HTML.
- *
- * Parameters:
- *   r  - HTTP request (must not be NULL)
- *
- * Returns:
- *   NGX_OK if Range header is present, NGX_DECLINED otherwise.
- */
-static ngx_int_t
-ngx_http_markdown_has_range_header(const ngx_http_request_t *r)
-{
-    return r->headers_in.range != NULL;
-}
-
-/*
- * Check if response Content-Type matches the configured allowlist.
- *
- * If markdown_content_types is configured, matches against that list
- * using prefix + boundary-char semantics (type/subtype must be followed
- * by ';', space, or end-of-string).  If not configured, defaults to
- * text/html only (backward compatible).
+ * Fail-open: a NULL request or configuration, or a marshalling allocation
+ * failure, yields INELIGIBLE_CONFIG (skip conversion, deliver the upstream
+ * response unmodified) — the safe outcome.  The Rust side independently
+ * treats a NULL input as INELIGIBLE_CONFIG (Rule 46).
  *
  * Parameters:
- *   r    - NGINX request structure
- *   conf - Module configuration
- *
- * Returns:
- *   1 if Content-Type matches the allowlist
- *   0 otherwise
- */
-static ngx_int_t
-ngx_http_markdown_check_content_type(const ngx_http_request_t *r,
-                                     const ngx_http_markdown_conf_t *conf)
-{
-    static u_char  text_html[] = "text/html";
-    const ngx_str_t     *content_type;
-    const ngx_str_t     *ct_entry;
-
-    if (r->headers_out.content_type.len == 0) {
-        return 0;
-    }
-
-    content_type = &r->headers_out.content_type;
-
-    if (conf->content_types != NULL) {
-        ct_entry = conf->content_types->elts;
-
-        for (ngx_uint_t i = 0; i < conf->content_types->nelts; i++) {
-            if (content_type->len >= ct_entry[i].len
-                && ngx_strncasecmp(content_type->data,
-                                   ct_entry[i].data,
-                                   ct_entry[i].len) == 0
-                && (content_type->len == ct_entry[i].len
-                    || content_type->data[ct_entry[i].len] == ';'
-                    || content_type->data[ct_entry[i].len] == ' '
-                    || content_type->data[ct_entry[i].len] == '\t'))
-            {
-                return 1;
-            }
-        }
-
-        return 0;
-    }
-
-    if (content_type->len >= 9
-        && ngx_strncasecmp(content_type->data,
-                           text_html, 9) == 0
-        && (content_type->len == 9
-            || content_type->data[9] == ';'
-            || content_type->data[9] == ' '
-            || content_type->data[9] == '\t'))
-    {
-        return 1;
-    }
-
-    return 0;
-}
-
-/*
- * Check if response size is within configured limit
- *
- * Enforces FR-10.1 resource protection by checking Content-Length.
- * If Content-Length is not present (e.g., chunked encoding), this check
- * passes and size will be enforced during buffering.
- *
- * Parameters:
- *   r    - NGINX request structure
- *   conf - Module configuration
- *
- * Returns:
- *   1 if size is within limit or Content-Length not present
- *   0 if size exceeds limit
- */
-static ngx_int_t
-ngx_http_markdown_check_size_limit(const ngx_http_request_t *r,
-                                   const ngx_http_markdown_conf_t *conf,
-                                   const ngx_http_markdown_effective_conf_t *eff)
-{
-    off_t  content_length;
-    size_t body_limit;
-
-    content_length = r->headers_out.content_length_n;
-
-    if (content_length < 0) {
-        return 1;
-    }
-
-    /*
-     * markdown_max_size 0 means unlimited, but a finite memory_budget still
-     * bounds the full-buffer path.  Use the shared resolver so eligibility
-     * and buffering apply the same precedence for both static and effective
-     * request configuration.
-     */
-    body_limit = ngx_http_markdown_effective_body_buffer_limit(eff, conf);
-    if (body_limit == 0) {
-        return 1;
-    }
-
-    if ((size_t) content_length > body_limit) {
-        return 0;
-    }
-
-    return 1;
-}
-
-/**
- * Detects unbounded streaming responses.
- *
- * Determines whether the response Content-Type indicates an unbounded streaming
- * type. Checks for the built-in text/event-stream type and configured streaming
- * type exclusions.
- *
- * @param r    The HTTP request structure.
- * @param conf Module configuration.
- *
- * @return 1 if the response is an unbounded streaming type, 0 otherwise.
- */
-static ngx_int_t
-ngx_http_markdown_is_streaming(const ngx_http_request_t *r,
-                               const ngx_http_markdown_conf_t *conf)
-{
-    static u_char  text_event_stream[] = "text/event-stream";
-    const ngx_str_t     *content_type;
-    const ngx_str_t     *stream_type;
-    
-    /* Get Content-Type header */
-    if (r->headers_out.content_type.len == 0) {
-        return 0;
-    }
-    
-    content_type = &r->headers_out.content_type;
-    
-    /* Check for text/event-stream (Server-Sent Events) */
-    if (content_type->len >= 17
-        && ngx_strncasecmp(content_type->data,
-                           text_event_stream, 17) == 0
-        && (content_type->len == 17
-            || content_type->data[17] == ';'
-            || content_type->data[17] == ' '
-            || content_type->data[17] == '\t'))
-    {
-        return 1;
-    }
-    
-    /* Check configured stream_types exclusion list */
-    if (conf->stream_types != NULL) {
-        stream_type = conf->stream_types->elts;
-        
-        for (ngx_uint_t i = 0; i < conf->stream_types->nelts; i++) {
-            /* Prefix + boundary match (same semantics as content_types). */
-            if (content_type->len >= stream_type[i].len &&
-                ngx_strncasecmp(content_type->data, stream_type[i].data,
-                               stream_type[i].len) == 0 &&
-                (content_type->len == stream_type[i].len
-                 || content_type->data[stream_type[i].len] == ';'
-                 || content_type->data[stream_type[i].len] == ' '
-                 || content_type->data[stream_type[i].len] == '\t'))
-            {
-                return 1;
-            }
-        }
-    }
-    
-    return 0;
-}
-
-/*
- * Check response eligibility for Markdown conversion
- *
- * This function performs all eligibility checks to determine if an upstream
- * response should be converted to Markdown. All conditions must be met:
- *
- * 1. Request method is GET or HEAD (FR-02.1)
- * 2. Response status is 200 (FR-02.2)
- * 3. No Range header in request (FR-07.2)
- * 4. Content-Type is text/html (FR-02.3)
- * 5. Response size within configured limit (FR-10.1)
- * 6. Not unbounded streaming (FR-02.8)
- * 7. Conversion enabled for this request (FR-02.6), as resolved by caller
- *
- * Note: Chunked Transfer-Encoding responses are ELIGIBLE per FR-02.7.
- * The module buffers all chunks before conversion. Only unbounded streaming
- * (e.g., Server-Sent Events) is ineligible.
- *
- * Range Requests: Per FR-07.1 and FR-07.2, range requests are not converted
- * because converting partial HTML content would produce invalid or incomplete
- * Markdown. This is detected by:
- * - 206 Partial Content status (explicit check returns INELIGIBLE_RANGE)
- * - Range header in request (explicit check returns INELIGIBLE_RANGE)
- *
- * Parameters:
- *   r    - NGINX request structure
+ *   r              - NGINX request structure
  *   conf           - Module configuration
  *   filter_enabled - Caller-resolved markdown_filter decision for this request
+ *   eff            - Effective per-request configuration snapshot (may be NULL)
  *
  * Returns:
  *   Eligibility enum indicating result and reason
@@ -298,58 +116,59 @@ ngx_http_markdown_check_eligibility(const ngx_http_request_t *r,
                                     ngx_flag_t filter_enabled,
                                     const ngx_http_markdown_effective_conf_t *eff)
 {
+    FFIEligibilityInput   input;
+    const struct FFIStr  *content_types;
+    const struct FFIStr  *stream_types;
+    uint8_t               code;
+
     /*
-     * markdown_filter enablement is resolved once by header filter to avoid
-     * repeated evaluation of dynamic expressions in the same request.
+     * Guard NULL here because marshalling dereferences r and conf.  A
+     * disabled filter is reported through filter_enabled and decided by the
+     * Rust core, but a missing request/config is the safe skip outcome.
      */
-    if (conf == NULL || !filter_enabled) {
+    if (r == NULL || conf == NULL) {
         return NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG;
     }
-    
-    /* Check request method (FR-02.1) */
-    if (!ngx_http_markdown_check_method(r)) {
-        return NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD;
-    }
-    
-    /* Check response status (FR-02.2) */
-    if (!ngx_http_markdown_check_status(r)) {
-        /*
-         * 206 Partial Content is routed to INELIGIBLE_RANGE
-         * rather than INELIGIBLE_STATUS so the reason code
-         * accurately reflects why the response was skipped.
-         * This covers bare 206 responses (no Range header)
-         * as well as normal range responses.
-         */
-        if (r->headers_out.status == NGX_HTTP_PARTIAL_CONTENT) {
-            return NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE;
+
+    content_types = NULL;
+    stream_types = NULL;
+
+    if (conf->routing.content_types != NULL && conf->routing.content_types->nelts > 0) {
+        content_types = ngx_http_markdown_marshal_str_array(
+            r->pool, conf->routing.content_types);
+        if (content_types == NULL) {
+            return NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG;
         }
-        return NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS;
     }
-    
-    /* Check for Range header in request (FR-07.2) */
-    /* Range requests should not be converted even if response is 200 */
-    /* because the client expects partial HTML, not Markdown */
-    if (ngx_http_markdown_has_range_header(r)) {
-        return NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE;
+
+    if (conf->routing.stream_types != NULL && conf->routing.stream_types->nelts > 0) {
+        stream_types = ngx_http_markdown_marshal_str_array(
+            r->pool, conf->routing.stream_types);
+        if (stream_types == NULL) {
+            return NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG;
+        }
     }
-    
-    /* Check for unbounded streaming BEFORE Content-Type check (FR-02.8) */
-    /* This allows us to reject streaming content types early */
-    if (ngx_http_markdown_is_streaming(r, conf)) {
-        return NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING;
-    }
-    
-    if (!ngx_http_markdown_check_content_type(r, conf)) {
-        return NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE;
-    }
-    
-    /* Check response size limit (FR-10.1) */
-    if (!ngx_http_markdown_check_size_limit(r, conf, eff)) {
-        return NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE;
-    }
-    
-    /* All checks passed - response is eligible */
-    return NGX_HTTP_MARKDOWN_ELIGIBLE;
+
+    input.filter_enabled = filter_enabled ? 1 : 0;
+    input.method_get_or_head =
+        (r->method == NGX_HTTP_GET || r->method == NGX_HTTP_HEAD) ? 1 : 0;
+    input.has_range_header = (r->headers_in.range != NULL) ? 1 : 0;
+    input.status = (uint16_t) r->headers_out.status;
+    input.content_type = r->headers_out.content_type.data;
+    input.content_type_len = r->headers_out.content_type.len;
+    input.content_types = content_types;
+    input.content_types_count =
+        (content_types != NULL) ? conf->routing.content_types->nelts : 0;
+    input.stream_types = stream_types;
+    input.stream_types_count =
+        (stream_types != NULL) ? conf->routing.stream_types->nelts : 0;
+    input.content_length = (int64_t) r->headers_out.content_length_n;
+    input.body_limit =
+        ngx_http_markdown_effective_body_buffer_limit(eff, conf);
+
+    code = markdown_decide_eligibility(&input);
+
+    return (ngx_http_markdown_eligibility_t) code;
 }
 
 /**

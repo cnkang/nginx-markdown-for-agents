@@ -15,7 +15,7 @@
 #   1. Accept: text/markdown → 200 with markdown content
 #   2. Accept: text/html → 200 with original HTML (no conversion)
 #   3. Accept: text/markdown;q=0.9, text/html;q=1.0 → no conversion
-#   4. Accept: */* with markdown_on_wildcard on → conversion
+#   4. Accept: */* with markdown_accept wildcard → conversion
 #   5. Accept: text/markdown;q=0 → no conversion (explicit reject)
 #   6. No Accept header → default behavior (no conversion)
 #   7. Accept: malformed → no conversion (skip, not 500)

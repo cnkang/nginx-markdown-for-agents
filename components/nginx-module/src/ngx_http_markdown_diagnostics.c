@@ -23,6 +23,12 @@
 #include "ngx_http_markdown_dynconf_snapshot.h"
 #include "ngx_http_markdown_filter_module.h"
 
+/*
+ * Forward-declare the FFI wrapper for reason code string lookup.
+ */
+ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
+    ngx_str_t *out_str);
+
 
 /*
  * Static global diagnostics state for this worker process.
@@ -325,9 +331,38 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
         const char  *name;
         ngx_int_t    code;
     } map[] = {
+        /* New lowercase snake_case names (schema v1) */
+        { "converted",                     0 },
+        { "skipped_accept",                1 },
+        { "skipped_no_accept",             2 },
+        { "skipped_conditional",           3 },
+        { "decompression_error",           4 },
+        { "decompression_budget_exceeded", 5 },
+        { "decompression_format_error",    6 },
+        { "decompression_truncated_input", 7 },
+        { "decompression_io_error",        8 },
+        { "timeout",                       9 },
+        { "budget_exceeded",              10 },
+        { "replay_error",                 11 },
+        { "skipped_accept_reject",        12 },
+        { "ffi_panic",                    13 },
+        { "not_eligible",                 14 },
+        { "disabled",                     15 },
+        { "failed_open",                  16 },
+        { "failed_closed",                17 },
+        { "conversion_error",             18 },
+        { "memory_budget_exceeded",       19 },
+        /* Indices 20-24: reserved for future reason codes (not yet production-used) */
+        { "overload",                     20 },
+        { "invalid_dynconf",              21 },
+        { "degraded_snapshot",            22 },
+        { "header_plan_apply_error",      23 },
+        { "streaming_mid_flight_error",   24 },
+        /* Legacy uppercase names (backward compatibility) */
         { "CONVERTED",                     0 },
         { "ELIGIBLE_CONVERTED",            0 },
         { "SKIPPED_ACCEPT",                1 },
+        { "SKIP_ACCEPT",                   1 },
         { "SKIPPED_NO_ACCEPT",             2 },
         { "SKIPPED_CONDITIONAL",           3 },
         { "FAILED_DECOMPRESSION",          4 },
@@ -346,6 +381,9 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
         { "ELIGIBLE_FAILED_OPEN",         16 },
         { "FAILED_CLOSED",                17 },
         { "ELIGIBLE_FAILED_CLOSED",       17 },
+        { "FAIL_CONVERSION",              18 },
+        { "FAIL_RESOURCE_LIMIT",          19 },
+        { "FAIL_SYSTEM",                  13 },
     };
     if (reason == NULL) {
         return -1;
@@ -711,6 +749,264 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
  * Returns:
  *   NGX_OK on success, NGX_ERROR on failure
  */
+/*
+ * Map profile enum to its canonical string name for JSON output.
+ */
+static const char *
+ngx_http_markdown_diagnostics_profile_name(ngx_uint_t profile)
+{
+    switch (profile) {
+    case NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE:
+        return "strict_cache";
+    case NGX_HTTP_MARKDOWN_PROFILE_BALANCED:
+        return "balanced";
+    case NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST:
+        return "streaming_first";
+    default:
+        return "none";
+    }
+}
+
+
+/*
+ * Map accept_policy enum to its Config V2 string for effective_config.
+ */
+static const char *
+ngx_http_markdown_diagnostics_accept_str(ngx_uint_t val)
+{
+    switch (val) {
+    case NGX_HTTP_MARKDOWN_ACCEPT_STRICT:
+        return "strict";
+    case NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD:
+        return "wildcard";
+    case NGX_HTTP_MARKDOWN_ACCEPT_FORCE:
+        return "force";
+    default:
+        return "unknown";
+    }
+}
+
+
+/*
+ * Map conditional_requests enum to cache_validation string.
+ */
+static const char *
+ngx_http_markdown_diagnostics_cache_validation_str(ngx_uint_t val)
+{
+    switch (val) {
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED:
+        return "off";
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE:
+        return "ims_only";
+    case NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT:
+        return "full";
+    default:
+        return "unknown";
+    }
+}
+
+
+/*
+ * Map streaming policy enum to string.
+ */
+static const char *
+ngx_http_markdown_diagnostics_streaming_str(ngx_uint_t val)
+{
+    switch (val) {
+    case NGX_HTTP_MARKDOWN_STREAMING_OFF:
+        return "off";
+    case NGX_HTTP_MARKDOWN_STREAMING_AUTO:
+        return "auto";
+    case NGX_HTTP_MARKDOWN_STREAMING_FORCE:
+        return "force";
+    default:
+        return "unknown";
+    }
+}
+
+
+/*
+ * Map error_policy enum to string.
+ *
+ * The C model uses on_error=REJECT for both fail_closed and status modes.
+ * Distinguish them by error_status: the default (502) means fail_closed,
+ * any other code (429, 503) means explicit status mode.
+ */
+static const char *
+ngx_http_markdown_diagnostics_error_policy_str(ngx_uint_t val,
+    ngx_uint_t error_status)
+{
+    switch (val) {
+    case NGX_HTTP_MARKDOWN_ON_ERROR_PASS:
+        return "pass";
+    case NGX_HTTP_MARKDOWN_ON_ERROR_REJECT:
+        if (error_status != NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT) {
+            return "status";
+        }
+        return "fail_closed";
+    default:
+        return "unknown";
+    }
+}
+
+
+/*
+ * Format the "profile" JSON section.
+ *
+ * Outputs profile name, overridden_fields array (fields where the user
+ * explicitly set a value that differs from the profile default), and
+ * forced_fields array (fields that the profile forces unconditionally).
+ */
+static u_char *
+ngx_http_markdown_diagnostics_fmt_profile(
+    u_char *p, u_char *last, const ngx_http_markdown_conf_t *conf)
+{
+    ngx_uint_t   profile_name;
+    ngx_flag_t   first = 1;
+
+    if (conf == NULL) {
+        profile_name = NGX_HTTP_MARKDOWN_PROFILE_NONE;
+    } else {
+        profile_name = conf->profile.name;
+    }
+
+    /* --- profile section --- */
+    p = ngx_slprintf(p, last,
+        "  \"profile\": \"%s\",\n",
+        ngx_http_markdown_diagnostics_profile_name(profile_name));
+
+    /* --- overridden_fields --- */
+    p = ngx_slprintf(p, last, "  \"overridden_fields\": [");
+
+    if (conf != NULL
+        && profile_name != NGX_HTTP_MARKDOWN_PROFILE_NONE)
+    {
+        /* Check streaming policy explicit */
+        if (conf->stream.policy_explicit) {
+            if (!first) {
+                p = ngx_slprintf(p, last, ", ");
+            }
+            p = ngx_slprintf(p, last, "\"streaming\"");
+            first = 0;
+        }
+
+        /* Check cache_validation explicit */
+        if (conf->profile.cache_validation_explicit) {
+            if (!first) {
+                p = ngx_slprintf(p, last, ", ");
+            }
+            p = ngx_slprintf(p, last, "\"cache_validation\"");
+        }
+    }
+
+    p = ngx_slprintf(p, last, "],\n");
+
+    /* --- forced_fields --- */
+    p = ngx_slprintf(p, last, "  \"forced_fields\": [");
+
+    switch (profile_name) {
+
+    case NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE:
+        p = ngx_slprintf(p, last, "\"streaming\"");
+        break;
+
+    case NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST:
+        p = ngx_slprintf(p, last,
+            "\"cache_validation\", \"streaming\"");
+        break;
+
+    default:
+        /* balanced and none: no forced fields */
+        break;
+    }
+
+    p = ngx_slprintf(p, last, "],\n");
+
+    return p;
+}
+
+
+/*
+ * Format the "effective_config" JSON section.
+ *
+ * Outputs the key resolved configuration values after merge
+ * (explicit > profile > builtin).
+ */
+static u_char *
+ngx_http_markdown_diagnostics_fmt_effective_config(
+    u_char *p, u_char *last, const ngx_http_markdown_conf_t *conf)
+{
+    const char  *accept_str;
+    const char  *cache_str;
+    const char  *streaming_str;
+    const char  *error_str;
+    size_t       limits_memory;
+    ngx_msec_t   limits_timeout;
+    size_t       limits_streaming_buffer;
+    ngx_uint_t   limits_max_inflight;
+
+    if (conf == NULL) {
+        p = ngx_slprintf(p, last,
+            "  \"effective_config\": null\n");
+        return p;
+    }
+
+    accept_str = ngx_http_markdown_diagnostics_accept_str(
+        conf->accept_policy);
+
+        {
+            ngx_uint_t  effective_streaming = conf->stream.policy;
+            ngx_uint_t  effective_conditional = conf->policy.conditional_requests;
+
+        if (conf->profile.name == NGX_HTTP_MARKDOWN_PROFILE_STRICT_CACHE) {
+            /* strict_cache forces streaming off and defaults cache_validation to full */
+            effective_streaming = NGX_HTTP_MARKDOWN_STREAMING_OFF;
+            if (!conf->profile.cache_validation_explicit) {
+                effective_conditional = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
+            }
+        } else if (conf->profile.name == NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST) {
+            /* streaming_first forces streaming on and cache_validation off */
+            effective_streaming = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+            effective_conditional = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
+        }
+
+        streaming_str = ngx_http_markdown_diagnostics_streaming_str(
+            effective_streaming);
+        cache_str = ngx_http_markdown_diagnostics_cache_validation_str(
+            effective_conditional);
+    }
+
+    error_str = ngx_http_markdown_diagnostics_error_policy_str(
+        conf->on_error, conf->error_status);
+    limits_memory = conf->max_size;
+    limits_timeout = conf->timeout;
+    limits_streaming_buffer = conf->stream.budget;
+    limits_max_inflight = conf->routing.max_inflight;
+
+    p = ngx_slprintf(p, last,
+        "  \"effective_config\": {\n"
+        "    \"accept\": \"%s\",\n"
+        "    \"cache_validation\": \"%s\",\n"
+        "    \"streaming\": \"%s\",\n"
+        "    \"limits_memory_bytes\": %uz,\n"
+        "    \"limits_timeout_ms\": %M,\n"
+        "    \"limits_streaming_buffer_bytes\": %uz,\n"
+        "    \"limits_max_inflight\": %ui,\n"
+        "    \"error_policy\": \"%s\"\n"
+        "  }\n",
+        accept_str,
+        cache_str,
+        streaming_str,
+        limits_memory,
+        limits_timeout,
+        limits_streaming_buffer,
+        limits_max_inflight,
+        error_str);
+
+    return p;
+}
+
+
 static u_char *
 ngx_http_markdown_diagnostics_fmt_streaming_config(
     u_char *p, u_char *last, const ngx_http_markdown_conf_t *conf)
@@ -772,13 +1068,13 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
         "    \"precommit_buffer\": %uz,\n"
         "    \"flush_min\": %uz,\n"
         "    \"threshold_explicit\": %s\n"
-        "  }\n",
+        "  },\n",
         engine_str, engine_source_str, on_error_str, threshold,
         precommit_buffer, flush_min,
         threshold_explicit_str);
 #else
     p = ngx_slprintf(p, last,
-        "  \"streaming_config\": null\n");
+        "  \"streaming_config\": null,\n");
 #endif
 
     return p;
@@ -828,6 +1124,9 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     /* Opening brace */
     p = ngx_slprintf(p, last, "{\n");
 
+    /* --- schema_version (spec 53) --- */
+    p = ngx_slprintf(p, last, "  \"schema_version\": 1,\n");
+
     /* --- config_snapshot section --- */
     p = ngx_slprintf(p, last, "  \"config_snapshot\": {\n");
 
@@ -866,6 +1165,7 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         ngx_uint_t                          idx;
         ngx_uint_t                          count;
         const ngx_http_markdown_diag_decision_t  *entry;
+        ngx_str_t                           reason_str;
 
         /*
          * Use the same centralized ring validation as json_size so
@@ -892,13 +1192,33 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
                 p = ngx_slprintf(p, last, "\n");
             }
 
-            p = ngx_slprintf(p, last,
-                "    {\"timestamp\": %M, "
-                "\"reason_code\": %i, "
-                "\"duration_ms\": %M}",
-                entry->timestamp,
-                entry->reason_code,
-                entry->duration_ms);
+            /*
+             * Emit both numeric reason_code and string
+             * reason_code_str (schema v1).
+             */
+            if (ngx_http_markdown_get_reason_code_str(
+                    (uint32_t) entry->reason_code, &reason_str)
+                == NGX_OK)
+            {
+                p = ngx_slprintf(p, last,
+                    "    {\"timestamp\": %M, "
+                    "\"reason_code\": %i, "
+                    "\"reason_code_str\": \"%*s\", "
+                    "\"duration_ms\": %M}",
+                    entry->timestamp,
+                    entry->reason_code,
+                    reason_str.len, reason_str.data,
+                    entry->duration_ms);
+            } else {
+                p = ngx_slprintf(p, last,
+                    "    {\"timestamp\": %M, "
+                    "\"reason_code\": %i, "
+                    "\"reason_code_str\": null, "
+                    "\"duration_ms\": %M}",
+                    entry->timestamp,
+                    entry->reason_code,
+                    entry->duration_ms);
+            }
 
             if (i + 1 < count) {
                 p = ngx_slprintf(p, last, ",\n");
@@ -964,6 +1284,13 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         dynconf.lkg_valid ? "true" : "false");
 
     p = ngx_http_markdown_diagnostics_fmt_streaming_config(
+            p, last, conf);
+
+    /* --- profile section (spec 50) --- */
+    p = ngx_http_markdown_diagnostics_fmt_profile(p, last, conf);
+
+    /* --- effective_config section (spec 50) --- */
+    p = ngx_http_markdown_diagnostics_fmt_effective_config(
             p, last, conf);
 
     /* Closing brace */

@@ -8,6 +8,7 @@ class NginxMarkdownModule < Formula
   # repository after a release: `homebrew-tap-publish.yml` rewrites both `url`
   # and `sha256` to the target release tag archive and pushes the result to the
   # tap, where it becomes the authoritative state users install from.
+  # Do not update this file manually for unreleased development branches.
   #
   # The values below are kept pinned to the latest 0.8.x tag (a real, verified
   # url/sha256 pair) so the gate and post-release verify workflows operate on a

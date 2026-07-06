@@ -5,6 +5,87 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-06
+
+**Breaking release.** Last breaking opportunity before 1.0.0 API freeze.
+
+### Breaking Changes
+
+- **Reason code naming**: all reason code strings renamed from
+  UPPERCASE_SNAKE_CASE to lowercase_snake_case (e.g., `PARSE_TIMEOUT` →
+  `timeout`, `FFI_CALL_ERROR` → `ffi_panic`). Affects Prometheus labels,
+  structured logs, and diagnostics endpoint.
+- **Directive removals/renames**:
+  - `markdown_on_error` → `markdown_error_policy` (`reject` → `fail_closed`)
+  - `markdown_trust_forwarded_headers` → `markdown_trusted_proxies <CIDR>...`
+  - `markdown_on_wildcard` → `markdown_accept wildcard`
+- **Profile system**: `markdown_profile` introduces one-line production
+  defaults (`balanced`, `strict_cache`, `streaming_first`).
+- **Inflight guard**: `markdown_limits max_inflight=N` provides per-worker
+  concurrency protection with `overload` reason code.
+- **Metrics consolidation**: per-reason counters replaced by 5 unified metric
+  families (`markdown_conversions_total`, `markdown_skipped_total`,
+  `markdown_errors_total`, `markdown_failed_open_total`,
+  `markdown_failed_closed_total`) with a `reason` label.
+
+### Added
+
+- `markdown_profile` directive with `balanced`, `strict_cache`, and
+  `streaming_first` presets.
+- `markdown_error_policy` directive (replaces `markdown_on_error`).
+- `markdown_trusted_proxies` directive with CIDR-based trust model
+  (http context only).
+- `markdown_limits` directive with key-value syntax (`memory`, `timeout`,
+  `max_inflight`).
+- `markdown_accept wildcard` for wildcard Accept header matching.
+- 8 new reason codes: `conversion_error`, `memory_budget_exceeded`,
+  `overload`, `invalid_dynconf`, `degraded_snapshot`,
+  `header_plan_apply_error`, `streaming_mid_flight_error`,
+  `bypass_no_transform` (Cache-Control no-transform bypass for conditional
+  requests).
+- Diagnostics schema v1 with versioned JSON output.
+- Label whitelist enforcement for Prometheus metrics.
+- Production configuration examples (`examples/production/`): blog-balanced,
+  docs-strict-cache, rag-streaming-first, private-internal.
+- Complete 0.8.x → 0.9.0 migration guide (`docs/guides/MIGRATION-0.9.md`).
+- `nginx-markdown-doctor` tool with full diagnostic checks (config snapshot,
+  module health, FFI version alignment, profile smoke).
+- Cache-Control no-transform detection: conditional requests with
+  `Cache-Control: no-transform` bypass conversion and return original HTML.
+- `markdown_error_policy` C→FFI translation: C-side `on_error`/`error_status`
+  mapped to Rust FFI `error_policy` kind.
+- Per-worker inflight guard (`markdown_limits max_inflight=N`) wired into
+  filter path; `max_inflight=0` means unlimited.
+- `cache_validation_explicit` flag inherited across config scopes for
+  correct profile merge semantics.
+- ADR-0017: HeaderPlan atomic scope boundary documentation.
+
+### Fixed
+
+- `ConditionalOutcome::Bypass` correctly handled in C runtime (previously
+  misclassified as failure outcome).
+- `is_failure_outcome` strncmp length mismatches corrected.
+- `error_to_reason_code` aligned with specific `ReasonCode` variants instead
+  of coarse error categories.
+- Bypass path must not go through `error_policy`; uses
+  `bypass_no_transform` reason code instead.
+- `nginx-markdown-doctor` JSON escaping hardened for diagnostic fields.
+- Profile smoke test diagnostics hardened.
+
+### Removed
+
+- `markdown_on_error` — use `markdown_error_policy`.
+- `markdown_trust_forwarded_headers` — use `markdown_trusted_proxies`.
+- `markdown_on_wildcard` — use `markdown_accept wildcard`.
+- Per-reason metric counters (e.g., `markdown_skipped_accept_total`) — use
+  unified families with `reason` label.
+
+### Migration
+
+See [docs/guides/MIGRATION-0.9.md](docs/guides/MIGRATION-0.9.md) for the
+complete upgrade guide including directive mapping table, config diff,
+common failure fixes, and rollback plan.
+
 ## [0.8.3] - 2026-06-26
 
 Closeout hardening release for the 0.8.x line: streaming state machine

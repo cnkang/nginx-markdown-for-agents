@@ -51,6 +51,18 @@ typedef struct {
     ngx_str_t *content_type;
 } ngx_http_markdown_decision_meta_t;
 
+typedef struct {
+    const u_char  *data;
+    size_t         len;
+} ngx_http_markdown_literal_t;
+
+#define ngx_http_markdown_literal(text)                                          \
+    { (const u_char *) text, sizeof(text) - 1 }
+
+#define ngx_http_markdown_reason_has_prefix_literal(reason, text)                \
+    ngx_http_markdown_reason_has_prefix(                                         \
+        reason, (const u_char *) (text), sizeof(text) - 1)
+
 static void ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff,
@@ -58,20 +70,51 @@ static void ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
     const ngx_str_t *error_category, ngx_uint_t log_level,
     ngx_http_markdown_decision_meta_t *meta);
 
+static ngx_int_t
+ngx_http_markdown_reason_has_prefix(const ngx_str_t *reason_code,
+    const u_char *prefix, size_t prefix_len)
+{
+    return (reason_code->len >= prefix_len
+            && ngx_strncmp(reason_code->data, prefix, prefix_len) == 0);
+}
+
+static ngx_int_t
+ngx_http_markdown_reason_is_exact(const ngx_str_t *reason_code,
+    const ngx_http_markdown_literal_t *codes, ngx_uint_t code_count)
+{
+    for (ngx_uint_t i = 0; i < code_count; i++) {
+        if (reason_code->len == codes[i].len
+            && ngx_strncmp(reason_code->data, codes[i].data,
+                           codes[i].len) == 0)
+        {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 
 /*
  * Determine whether a reason code represents a failure outcome.
  *
  * Failure outcomes are reason codes matching any of:
- *   - "ELIGIBLE_FAILED" prefix (full-buffer conversion failures)
- *   - "FAIL_" prefix (legacy failure codes)
+ *   - "failed_open" or "failed_closed" (schema v1 fail-open/closed)
+ *   - "conversion_error", "memory_budget_exceeded", "ffi_panic",
+ *     "decompression_error", "decompression_budget_exceeded",
+ *     "decompression_format_error", "decompression_truncated_input",
+ *     "decompression_io_error", "timeout", "budget_exceeded",
+ *     "replay_error", "overload", "invalid_dynconf",
+ *     "degraded_snapshot", "header_plan_apply_error",
+ *     "streaming_mid_flight_error" (schema v1 error codes)
+ *   - Legacy: "ELIGIBLE_FAILED" prefix, "FAIL_" prefix
  *   - "STREAMING_FAIL_" substring (streaming post-commit failures)
  *   - "STREAMING_PRECOMMIT_" prefix (streaming pre-commit failures)
  *   - "STREAMING_BUDGET_" prefix (streaming budget exceeded)
  *   - "STREAMING_FALLBACK_" prefix (streaming degraded to fallback path)
  *
- * All other codes (SKIP_*, ELIGIBLE_CONVERTED, ENGINE_*,
- * STREAMING_CONVERT, STREAMING_SHADOW, STREAMING_SKIP_*)
+ * All other codes (skipped_*, converted, disabled, not_eligible,
+ * ENGINE_*, STREAMING_CONVERT, STREAMING_SHADOW, STREAMING_SKIP_*)
  * are non-failure outcomes.
  *
  * Parameters:
@@ -84,85 +127,51 @@ static void ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
 static ngx_int_t
 ngx_http_markdown_is_failure_outcome(const ngx_str_t *reason_code)
 {
+    static const ngx_http_markdown_literal_t failure_codes[] = {
+        ngx_http_markdown_literal("decompression_error"),
+        ngx_http_markdown_literal("decompression_budget_exceeded"),
+        ngx_http_markdown_literal("decompression_format_error"),
+        ngx_http_markdown_literal("decompression_truncated_input"),
+        ngx_http_markdown_literal("decompression_io_error"),
+        ngx_http_markdown_literal("conversion_error"),
+        ngx_http_markdown_literal("memory_budget_exceeded"),
+        ngx_http_markdown_literal("ffi_panic"),
+        ngx_http_markdown_literal("timeout"),
+        ngx_http_markdown_literal("budget_exceeded"),
+        ngx_http_markdown_literal("replay_error"),
+        /* Indices 20-24: reserved for future reason codes (not yet production-used) */
+        ngx_http_markdown_literal("overload"),
+        ngx_http_markdown_literal("invalid_dynconf"),
+        ngx_http_markdown_literal("degraded_snapshot"),
+        ngx_http_markdown_literal("header_plan_apply_error"),
+        ngx_http_markdown_literal("streaming_mid_flight_error")
+    };
+
     if (reason_code == NULL || reason_code->len == 0) {
         return 0;
     }
 
-    /* Check for "ELIGIBLE_FAILED" prefix (15 chars) */
-    if (reason_code->len >= 15
-        && ngx_strncmp(reason_code->data,
-                       (const u_char *) "ELIGIBLE_FAILED",
-                       15) == 0)
+    if (ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "failed_")
+        || ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "ELIGIBLE_FAILED")
+        || ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "FAIL_")
+        || ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "STREAMING_FAIL_")
+        || ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "STREAMING_PRECOMMIT_")
+        || ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "STREAMING_BUDGET_")
+        || ngx_http_markdown_reason_has_prefix_literal(
+            reason_code, "STREAMING_FALLBACK_"))
     {
         return 1;
     }
 
-    /* Check for "FAIL_" prefix (5 chars) */
-    if (reason_code->len >= 5
-        && ngx_strncmp(reason_code->data,
-                       (const u_char *) "FAIL_", 5) == 0)
-    {
-        return 1;
-    }
-
-    /*
-     * Streaming failure codes use the "STREAMING_" prefix
-     * but not all STREAMING_* codes are failures.
-     *
-     * Failures:
-     *   STREAMING_FAIL_POSTCOMMIT
-     *   STREAMING_PRECOMMIT_FAILOPEN
-     *   STREAMING_PRECOMMIT_REJECT
-     *   STREAMING_BUDGET_EXCEEDED
-     *
-     * Non-failures (informational):
-     *   STREAMING_CONVERT
-     *   STREAMING_SHADOW
-     *   STREAMING_SKIP_UNSUPPORTED
-     */
-    if (reason_code->len >= 10
-        && ngx_strncmp(reason_code->data,
-                       (const u_char *) "STREAMING_",
-                       10) == 0)
-    {
-        /* "STREAMING_FAIL_" (15 chars) */
-        if (reason_code->len >= 15
-            && ngx_strncmp(reason_code->data,
-                           (const u_char *) "STREAMING_FAIL_",
-                           15) == 0)
-        {
-            return 1;
-        }
-
-        /* "STREAMING_PRECOMMIT_" (20 chars) */
-        if (reason_code->len >= 20
-            && ngx_strncmp(reason_code->data,
-                           (const u_char *) "STREAMING_PRECOMMIT_",
-                           20) == 0)
-        {
-            return 1;
-        }
-
-        /* "STREAMING_BUDGET_" (17 chars) */
-        if (reason_code->len >= 17
-            && ngx_strncmp(reason_code->data,
-                           (const u_char *) "STREAMING_BUDGET_",
-                           17) == 0)
-        {
-            return 1;
-        }
-
-        /* "STREAMING_FALLBACK_" (19 chars) */
-        if (reason_code->len >= 19
-            && ngx_strncmp(reason_code->data,
-                           (const u_char *) "STREAMING_FALLBACK_",
-                           19) == 0)
-        {
-            return 1;
-        }
-    }
-
-    return 0;
+    return ngx_http_markdown_reason_is_exact(
+        reason_code, failure_codes,
+        sizeof(failure_codes) / sizeof(failure_codes[0]));
 }
 
 

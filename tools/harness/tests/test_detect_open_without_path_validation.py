@@ -279,3 +279,89 @@ def f(path):
     )
     errors, warnings = det.check_file(bad, strict=True)
     assert len(errors) == 1
+
+
+def test_write_text_validated_receiver_pass(det):
+    """p.write_text() where p is validated — should be safe."""
+    src = """
+    from lib.path_validation import validate_write_path_within_root
+    def f(path):
+        safe = validate_write_path_within_root(path, "/root")
+        safe.write_text("content")
+    """
+    errors, warnings = _check_source(det, src)
+    assert errors == []
+    assert warnings == []
+
+
+def test_write_text_unvalidated_receiver_warns(det):
+    """p.write_text() where p is unvalidated — advisory warning."""
+    src = """
+    def f(path):
+        path.write_text("content")
+    """
+    errors, warnings = _check_source(det, src)
+    assert errors == []
+    assert len(warnings) == 1
+    assert "write_text" in warnings[0]
+
+
+def test_write_text_unvalidated_strict_still_warns(det):
+    """Path IO methods are advisory-only even in strict mode."""
+    src = """
+    def f(path):
+        path.write_text("content")
+    """
+    errors, warnings = _check_source(det, src, strict=True)
+    assert errors == []
+    assert len(warnings) == 1
+    assert "write_text" in warnings[0]
+
+
+def test_read_text_validated_receiver_pass(det):
+    """p.read_text() where p is validated — should be safe."""
+    src = """
+    from lib.path_validation import validate_read_path
+    def f(path):
+        safe = validate_read_path(path)
+        return safe.read_text()
+    """
+    errors, warnings = _check_source(det, src)
+    assert errors == []
+    assert warnings == []
+
+
+def test_read_text_unvalidated_receiver_warns(det):
+    """p.read_text() where p is unvalidated — advisory warning."""
+    src = """
+    def f(path):
+        return path.read_text()
+    """
+    errors, warnings = _check_source(det, src)
+    assert errors == []
+    assert len(warnings) == 1
+    assert "read_text" in warnings[0]
+
+
+def test_write_bytes_unvalidated_receiver_warns(det):
+    """p.write_bytes() where p is unvalidated — advisory warning."""
+    src = """
+    def f(path):
+        path.write_bytes(b"data")
+    """
+    errors, warnings = _check_source(det, src)
+    assert errors == []
+    assert len(warnings) == 1
+    assert "write_bytes" in warnings[0]
+
+
+def test_read_bytes_unvalidated_receiver_warns(det):
+    """p.read_bytes() where p is unvalidated — advisory warning."""
+    src = """
+    def f(path):
+        return path.read_bytes()
+    """
+    errors, warnings = _check_source(det, src)
+    assert errors == []
+    assert len(warnings) == 1
+    assert "read_bytes" in warnings[0]

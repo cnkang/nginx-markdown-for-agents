@@ -245,6 +245,31 @@ ngx_http_complex_value(ngx_http_request_t *r,
     return val->eval_rc;
 }
 
+#include "../../src/markdown_converter.h"
+
+struct FFIConflictList
+markdown_detect_conflicts(uint8_t profile,
+    const struct FFIExplicitConfig *explicit_,
+    const struct FFIEffectiveConfig *effective)
+{
+    struct FFIConflictList list;
+
+    UNUSED(profile);
+    UNUSED(explicit_);
+    UNUSED(effective);
+
+    list.conflicts = NULL;
+    list.count = 0;
+
+    return list;
+}
+
+void
+markdown_free_conflicts(struct FFIConflictList *list)
+{
+    UNUSED(list);
+}
+
 #include "../../src/ngx_http_markdown_config_core_impl.h"
 
 static ngx_pool_t g_pool;
@@ -550,14 +575,14 @@ test_06x_defaults_unchanged(void)
         "token_estimate should default to off");
     TEST_ASSERT(child->front_matter == 0,
         "front_matter should default to off");
-    TEST_ASSERT(child->on_wildcard == 0,
-        "on_wildcard should default to off");
+    TEST_ASSERT(child->accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_STRICT,
+        "accept_policy should default to strict");
     TEST_ASSERT(child->buffer_chunked == 1,
         "buffer_chunked should default to on");
     TEST_ASSERT(child->decompress.auto_decompress == 1,
         "auto_decompress should default to on");
-    TEST_ASSERT(child->policy.generate_etag == 1,
-        "generate_etag should default to on");
+    TEST_ASSERT(child->policy.generate_etag == 0,
+        "generate_etag should default to off (ims_only mode)");
     TEST_ASSERT(child->advanced.dynconf_enabled == 0,
         "dynconf_enabled should default to off");
     TEST_ASSERT(child->advanced.prune_noise == 1,

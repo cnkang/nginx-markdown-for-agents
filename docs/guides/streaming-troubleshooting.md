@@ -39,17 +39,17 @@ nginx -T 2>/dev/null | grep -i markdown_streaming_engine
 Expected: `markdown_streaming_engine auto;` or `on;` for the target location.
 If you see `off`, streaming is explicitly disabled.
 
-**Step 1b — Check conditional_requests setting:**
+**Step 1b — Check cache_validation setting:**
 
 ```bash
-nginx -T 2>/dev/null | grep -i markdown_conditional_requests
+nginx -T 2>/dev/null | grep -i markdown_cache_validation
 ```
 
-Default is `full_support`. When `markdown_conditional_requests` is
-`full_support`, the streaming selector always selects full-buffer because
-full ETag support requires the complete converted output before headers.
-To activate streaming in `auto` mode, set
-`markdown_conditional_requests if_modified_since_only` or `disabled`.
+Default is `ims_only` (built-in and `balanced` profile). When
+`markdown_cache_validation` is `full` (the `strict_cache` profile default),
+the streaming selector always selects full-buffer because full ETag support
+requires the complete converted output before headers. To activate streaming
+in `auto` mode, use `markdown_cache_validation ims_only` or `off`.
 
 **Step 2 — Check threshold vs response size:**
 
@@ -110,7 +110,7 @@ Look for the `streaming` section showing current configuration state.
 | Finding | Fix |
 |---------|-----|
 | Engine is `off` | Set `markdown_streaming_engine auto;` and reload |
-| `conditional_requests` is `full_support` (default) | Set `markdown_conditional_requests if_modified_since_only;` or `disabled;` to allow streaming |
+| `cache_validation` is `full` (`strict_cache` default) | Set `markdown_cache_validation ims_only;` or `off;` to allow streaming |
 | Response below threshold | Lower `markdown_stream_threshold` or accept full-buffer for small responses |
 | Content-Length below threshold | Expected behavior in `auto` mode; use `on` to force streaming regardless |
 | Content type excluded | Remove type from `markdown_stream_excluded_types` if streaming is desired |
@@ -316,10 +316,10 @@ metric is incrementing.
 ### What Happened
 
 The streaming engine encountered a pre-commit error, but the error policy is
-set to `reject` instead of the default `pass`:
+set to `fail_closed` instead of the default `pass`:
 
 ```text
-markdown_streaming_on_error reject;
+markdown_error_policy fail_closed;
 ```
 
 With `reject`, when a pre-commit error occurs (HTML parse failure, budget
@@ -332,8 +332,8 @@ outage.
 
 | Configuration | Pre-Commit Error | Client Sees |
 |---------------|-----------------|-------------|
-| `markdown_streaming_on_error pass;` (default) | Error triggers replay of buffered HTML | Original HTML (correct, safe) |
-| `markdown_streaming_on_error reject;` | Error triggers HTTP error | 500 Internal Server Error |
+| `markdown_error_policy pass;` (default) | Error triggers replay of buffered HTML | Original HTML (correct, safe) |
+| `markdown_error_policy fail_closed;` | Error triggers HTTP error | 500 Internal Server Error |
 
 The `reject` policy is intended for strict environments where serving
 unconverted HTML is unacceptable (e.g., API documentation endpoints that
@@ -345,7 +345,7 @@ into a client-facing outage.
 **Step 1 — Confirm reject policy is active:**
 
 ```bash
-nginx -T 2>/dev/null | grep -i markdown_streaming_on_error
+nginx -T 2>/dev/null | grep -i markdown_error_policy
 ```
 
 If you see `reject`, this is the cause.
@@ -398,7 +398,7 @@ grep -E 'STREAMING_PRECOMMIT_REJECT' /var/log/nginx/error.log | \
 ```bash
 # Change from reject to pass (restores HTML fallback for pre-commit errors)
 # Edit nginx.conf:
-#   markdown_streaming_on_error pass;
+#   markdown_error_policy pass;
 nginx -t && nginx -s reload
 ```
 
@@ -538,9 +538,10 @@ print(f'Post-commit failures (should stop growing): {failures}')
 **ACTION 2 — Switch to pass policy (pre-commit reject):**
 
 ```bash
-# 1. Change error policy to fail-open
-sed -i 's/markdown_streaming_on_error.*/markdown_streaming_on_error pass;/' /etc/nginx/nginx.conf
-# Or edit manually and set: markdown_streaming_on_error pass;
+# 1. Change error policy to fail-open (migrate from old directive if needed)
+sed -i 's/markdown_streaming_on_error.*/markdown_error_policy pass;/' /etc/nginx/nginx.conf
+sed -i 's/markdown_on_error.*/markdown_error_policy pass;/' /etc/nginx/nginx.conf
+# Or edit manually and set: markdown_error_policy pass;
 
 # 2. Validate and reload
 nginx -t && nginx -s reload
@@ -759,7 +760,7 @@ default during rollout).  They confirm normal streaming operation.
 #### Pre-commit fallback (safe)
 
 ```text
-2025/01/15 14:30:27 [info] 1234#0: *8902 markdown decision: reason=STREAMING_FALLBACK_PREBUFFER engine=full_buffer phase=precommit action=fallback content_type=text/html chunked=1 content_length_known=0 markdown_on_error=pass while sending to client, client: 10.0.0.8, server: docs.example.com, request: "GET /blog/complex-post HTTP/1.1", upstream: "http://127.0.0.1:8080/blog/complex-post", host: "docs.example.com"
+2025/01/15 14:30:27 [info] 1234#0: *8902 markdown decision: reason=STREAMING_FALLBACK_PREBUFFER engine=full_buffer phase=precommit action=fallback content_type=text/html chunked=1 content_length_known=0 markdown_error_policy=pass while sending to client, client: 10.0.0.8, server: docs.example.com, request: "GET /blog/complex-post HTTP/1.1", upstream: "http://127.0.0.1:8080/blog/complex-post", host: "docs.example.com"
 ```
 
 **Field breakdown:**
@@ -770,7 +771,7 @@ default during rollout).  They confirm normal streaming operation.
 | `engine=full_buffer` | Engine path | Fell back to full-buffer conversion |
 | `phase=precommit` | Phase | Decision made before headers were sent to client |
 | `action=fallback` | Outcome | Client will receive correct output via full-buffer |
-| `markdown_on_error=pass` | Error policy | On errors, pass original HTML through |
+| `markdown_error_policy=pass` | Error policy | On errors, pass original HTML through |
 
 **Action**: Monitor the rate.  A few fallbacks are expected; if this exceeds
 5% of candidates, investigate the content.
@@ -828,7 +829,7 @@ response stays in full-buffer.
 #### Pre-commit reject (clients receiving errors)
 
 ```text
-2025/01/15 14:31:08 [warn] 1234#0: *8920 markdown decision: reason=STREAMING_PRECOMMIT_REJECT engine=rejected phase=precommit action=reject committed=0 fallback_available=0 content_type=text/html markdown_on_error=reject while sending to client, client: 10.0.0.15, server: docs.example.com, request: "GET /api/docs HTTP/1.1", upstream: "http://127.0.0.1:8080/api/docs", host: "docs.example.com"
+2025/01/15 14:31:08 [warn] 1234#0: *8920 markdown decision: reason=STREAMING_PRECOMMIT_REJECT engine=rejected phase=precommit action=reject committed=0 fallback_available=0 content_type=text/html markdown_error_policy=fail_closed while sending to client, client: 10.0.0.15, server: docs.example.com, request: "GET /api/docs HTTP/1.1", upstream: "http://127.0.0.1:8080/api/docs", host: "docs.example.com"
 ```
 
 **Field breakdown:**
@@ -837,12 +838,12 @@ response stays in full-buffer.
 |-------|-------|---------|
 | `reason=STREAMING_PRECOMMIT_REJECT` | Reason code | Pre-commit error with reject policy |
 | `engine=rejected` | Engine path | Request rejected (error returned to client) |
-| `markdown_on_error=reject` | Error policy | Fail-closed: errors produce HTTP error responses |
+| `markdown_error_policy=fail_closed` | Error policy | Fail-closed: errors produce HTTP error responses |
 | `committed=0` | Headers sent? | No — but client still gets an error response |
 
 **Action**: **Urgent** — switch to fail-open policy or disable streaming:
 ```nginx
-markdown_streaming_on_error pass;
+markdown_error_policy pass;
 # or:
 markdown_streaming_engine off;
 ```
@@ -1037,12 +1038,12 @@ Example output (streaming-relevant sections):
 
 ```json
 {
-  "version": "0.8.3",
+  "version": "0.9.0",
   "uptime_seconds": 86420,
   "worker_pid": 1234,
   "streaming_config": {
     "engine": "auto",
-    "on_error": "pass",
+    "error_policy": "pass",
     "threshold": 1048576,
     "precommit_buffer": 262144,
     "flush_min": 4096,

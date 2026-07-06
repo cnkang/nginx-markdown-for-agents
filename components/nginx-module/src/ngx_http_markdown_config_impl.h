@@ -36,16 +36,19 @@ static char *ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *ch
 static ngx_int_t ngx_http_markdown_init_metrics_zone(ngx_shm_zone_t *shm_zone, void *data);
 /* Parse markdown_filter (on/off or complex value) directive payload. */
 static char *ngx_http_markdown_filter(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-/* Parse markdown_on_error enum and validate accepted values. */
-static char *ngx_http_markdown_on_error(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse markdown_error_policy pass|fail_closed|status <code> (Config V2). */
+static char *ngx_http_markdown_error_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse markdown_flavor enum for converter output dialect selection. */
 static char *ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse authentication policy controlling conversion on authenticated traffic. */
 static char *ngx_http_markdown_auth_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse configured auth-cookie patterns used by auth detection. */
 static char *ngx_http_markdown_auth_cookies(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-/* Parse conditional-requests mode (off/weak/strong semantics). */
-static char *ngx_http_markdown_conditional_requests(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse markdown_cache_validation off|ims_only|full (Config V2). */
+static char *ngx_http_markdown_cache_validation(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+
+/* Parse markdown_streaming off|auto|force enablement policy (Config V2). */
+static char *ngx_http_markdown_streaming(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse module log verbosity mapping to nginx log levels. */
 static char *ngx_http_markdown_log_verbosity(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse streaming content types excluded from buffering/conversion. */
@@ -63,8 +66,8 @@ static char *ngx_http_markdown_stream_threshold_handler(ngx_conf_t *cf, ngx_comm
 static char *ngx_http_markdown_stream_flush_min_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse v0.8.0 markdown_stream_excluded_types MIME list. */
 static char *ngx_http_markdown_stream_excluded_types_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
-/* Parse large body threshold for incremental path routing. */
-static char *ngx_http_markdown_large_body_threshold(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse markdown_limits multi-key block (Config V2). */
+static char *ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse metrics endpoint enablement and URI settings. */
 static char *ngx_http_markdown_metrics_directive(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Map module verbosity enum to nginx native log level constants. */

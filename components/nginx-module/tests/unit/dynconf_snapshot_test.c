@@ -142,7 +142,6 @@ test_vslprintf(u_char *buf, u_char *last, const char *fmt, va_list ap)
     oi = 0;
     while (fmt[fi] != '\0' && oi < sizeof(rewritten) - 8) {
         if (fmt[fi] == '%') {
-            size_t start = oi;
             rewritten[oi++] = fmt[fi++];
 
             /* Copy optional width/flags */
@@ -169,7 +168,6 @@ test_vslprintf(u_char *buf, u_char *last, const char *fmt, va_list ap)
                 /* Standard specifier, copy as-is */
                 rewritten[oi++] = fmt[fi++];
             }
-            UNUSED(start);
         } else {
             rewritten[oi++] = fmt[fi++];
         }
@@ -266,19 +264,20 @@ test_default_config_all_keys_present(void)
     conf.flavor = NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK;
     conf.token_estimate = 0;
     conf.front_matter = 0;
-    conf.on_wildcard = 0;
+    conf.accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_STRICT;
     conf.buffer_chunked = 1;
     conf.decompress.auto_decompress = 1;
     conf.decompress.max_size = 10 * 1024 * 1024;
     conf.decompress.parse_timeout = 30000;
     conf.decompress.parser_budget = 64 * 1024 * 1024;
-    conf.large_body_threshold = 0;
+    conf.routing.large_body_threshold = 0;
     conf.advanced.prune_noise = 1;
     conf.advanced.memory_budget = 0;
     conf.advanced.dynconf_enabled = 0;
     conf.advanced.dynconf_dry_run = 0;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
     conf.policy.generate_etag = 1;
+    conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
     conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
     conf.ops.trust_forwarded_headers = 0;
     conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
@@ -300,16 +299,16 @@ test_default_config_all_keys_present(void)
         "should contain markdown_max_size key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_timeout"),
         "should contain markdown_timeout key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_on_error"),
-        "should contain markdown_on_error key");
+    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_error_policy"),
+        "should contain markdown_error_policy key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_flavor"),
         "should contain markdown_flavor key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_token_estimate"),
         "should contain markdown_token_estimate key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_front_matter"),
         "should contain markdown_front_matter key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_on_wildcard"),
-        "should contain markdown_on_wildcard key");
+    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_accept"),
+        "should contain markdown_accept key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_buffer_chunked"),
         "should contain markdown_buffer_chunked key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_auto_decompress"),
@@ -330,8 +329,8 @@ test_default_config_all_keys_present(void)
         "should contain markdown_dynconf_dry_run key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_log_verbosity"),
         "should contain markdown_log_verbosity key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_generate_etag"),
-        "should contain markdown_generate_etag key");
+    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_cache_validation"),
+        "should contain markdown_cache_validation key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_metrics_format"),
         "should contain markdown_metrics_format key");
     TEST_ASSERT(output_contains_key(out_buf, out_len,
@@ -343,8 +342,6 @@ test_default_config_all_keys_present(void)
         "should contain markdown_streaming_engine key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming_budget"),
         "should contain markdown_streaming_budget key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming_on_error"),
-        "should contain markdown_streaming_on_error key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming_shadow"),
         "should contain markdown_streaming_shadow key");
     TEST_ASSERT(output_contains_key(out_buf, out_len,
@@ -356,8 +353,8 @@ test_default_config_all_keys_present(void)
         "markdown_filter", "off"),
         "markdown_filter should be 'off'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_on_error", "pass"),
-        "markdown_on_error should be 'pass'");
+        "markdown_error_policy", "pass"),
+        "markdown_error_policy should be 'pass'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_flavor", "commonmark"),
         "markdown_flavor should be 'commonmark'");
@@ -386,17 +383,14 @@ test_default_config_all_keys_present(void)
         "markdown_log_verbosity", "info"),
         "markdown_log_verbosity should be 'info'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_generate_etag", "on"),
-        "markdown_generate_etag should be 'on'");
+        "markdown_cache_validation", "full"),
+        "markdown_cache_validation should be 'full'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_metrics_format", "auto"),
         "markdown_metrics_format should be 'auto'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_streaming_engine", "auto"),
         "markdown_streaming_engine should be 'auto'");
-    TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_streaming_on_error", "pass"),
-        "markdown_streaming_on_error should be 'pass'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_streaming_shadow", "off"),
         "markdown_streaming_shadow should be 'off'");
@@ -431,19 +425,20 @@ test_custom_config_values_reflected(void)
     conf.flavor = NGX_HTTP_MARKDOWN_FLAVOR_GFM;
     conf.token_estimate = 1;
     conf.front_matter = 1;
-    conf.on_wildcard = 1;
+    conf.accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD;
     conf.buffer_chunked = 0;
     conf.decompress.auto_decompress = 0;
     conf.decompress.max_size = 5 * 1024 * 1024;
     conf.decompress.parse_timeout = 15000;
     conf.decompress.parser_budget = 32 * 1024 * 1024;
-    conf.large_body_threshold = 1024;
+    conf.routing.large_body_threshold = 1024;
     conf.advanced.prune_noise = 0;
     conf.advanced.memory_budget = 16 * 1024 * 1024;
     conf.advanced.dynconf_enabled = 1;
     conf.advanced.dynconf_dry_run = 1;
     conf.policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
     conf.policy.generate_etag = 0;
+    conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
     conf.ops.trust_forwarded_headers = 1;
     conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
@@ -463,8 +458,8 @@ test_custom_config_values_reflected(void)
         "markdown_filter", "on"),
         "markdown_filter should be 'on'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_on_error", "reject"),
-        "markdown_on_error should be 'reject'");
+        "markdown_error_policy", "fail_closed"),
+        "markdown_error_policy should be 'fail_closed'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_flavor", "gfm"),
         "markdown_flavor should be 'gfm'");
@@ -475,8 +470,8 @@ test_custom_config_values_reflected(void)
         "markdown_front_matter", "on"),
         "markdown_front_matter should be 'on'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_on_wildcard", "on"),
-        "markdown_on_wildcard should be 'on'");
+        "markdown_accept", "wildcard"),
+        "markdown_accept should be 'wildcard'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_buffer_chunked", "off"),
         "markdown_buffer_chunked should be 'off'");
@@ -496,17 +491,14 @@ test_custom_config_values_reflected(void)
         "markdown_log_verbosity", "debug"),
         "markdown_log_verbosity should be 'debug'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_generate_etag", "off"),
-        "markdown_generate_etag should be 'off'");
+        "markdown_cache_validation", "off"),
+        "markdown_cache_validation should be 'off'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_metrics_format", "prometheus"),
         "markdown_metrics_format should be 'prometheus'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_trust_forwarded_headers", "on"),
         "markdown_trust_forwarded_headers should be 'on'");
-    TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_streaming_on_error", "reject"),
-        "markdown_streaming_on_error should be 'reject'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_streaming_shadow", "on"),
         "markdown_streaming_shadow should be 'on'");

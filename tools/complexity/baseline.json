@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "description": "Baseline of known complexity violations at current thresholds. New violations not in this list will fail complexity-check. Existing violations that worsen (higher CCN, longer length, more params, higher cognitive complexity) will produce warnings.",
+  "thresholds": {
+    "c": { "ccn": 25, "length": 180, "params": 8 },
+    "rust": { "ccn": 25, "length": 200, "params": 8 },
+    "python_lizard": { "ccn": 15, "length": 200, "params": 8 },
+    "python_cognitive": 15
+  },
+  "entries": [
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_diagnostics.c",
+      "function": "ngx_http_markdown_diagnostics_build_json",
+      "ccn": 17, "length": 232, "params": 2,
+      "note": "JSON diagnostics builder — inherent complexity from multi-field serialization"
+    },
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h",
+      "function": "ngx_http_markdown_parse_size",
+      "ccn": 31, "length": 84, "params": 1,
+      "note": "Size parser with unit suffixes — many branches for each unit"
+    },
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_prometheus_impl.h",
+      "function": "ngx_http_markdown_metrics_write_prometheus",
+      "ccn": 10, "length": 664, "params": 3,
+      "note": "Prometheus text format renderer — long but structurally flat"
+    },
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_payload_impl.h",
+      "function": "ngx_http_markdown_decompress_via_rust",
+      "ccn": 20, "length": 200, "params": 5,
+      "note": "Decompression FFI bridge — error handling and buffer management"
+    },
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_request_impl.h",
+      "function": "ngx_http_markdown_header_filter",
+      "ccn": 27, "length": 374, "params": 1,
+      "note": "NGINX header filter — lifecycle, eligibility, config snapshot, conditional checks"
+    },
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_request_impl.h",
+      "function": "ngx_http_markdown_body_filter_convert_and_output",
+      "ccn": 16, "length": 187, "params": 3,
+      "note": "Body filter convert-and-output path — streaming, buffer management"
+    },
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_metrics_impl.h",
+      "function": "ngx_http_markdown_metrics_write_json",
+      "ccn": 12, "length": 279, "params": 7,
+      "note": "JSON metrics renderer — many metric fields"
+    },
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_metrics_impl.h",
+      "function": "ngx_http_markdown_metrics_write_text",
+      "ccn": 7, "length": 241, "params": 7,
+      "note": "Text metrics renderer — many metric fields"
+    },
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_streaming_impl.h",
+      "function": "ngx_http_markdown_streaming_resume_pending",
+      "ccn": 26, "length": 188, "params": 3,
+      "note": "Streaming resume — backpressure, replay, error paths"
+    },
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_streaming_impl.h",
+      "function": "ngx_http_markdown_streaming_finalize_request",
+      "ccn": 14, "length": 206, "params": 3,
+      "note": "Streaming finalize — cleanup, metrics, downstream finalization"
+    },
+    {
+      "file": "components/nginx-module/src/ngx_http_markdown_streaming_impl.h",
+      "function": "ngx_http_markdown_streaming_init_handle",
+      "ccn": 17, "length": 210, "params": 3,
+      "note": "Streaming init — handle setup, config binding, state init"
+    },
+    {
+      "file": "components/rust-converter/src/converter/traversal.rs",
+      "function": "handle_element_internal",
+      "ccn": 43, "length": 183, "params": 6,
+      "note": "HTML element handler — 100+ element types, each with specific conversion logic"
+    },
+    {
+      "file": "components/rust-converter/src/converter/tables.rs",
+      "function": "handle_table_with_context",
+      "ccn": 34, "length": 139, "params": 5,
+      "note": "Markdown table conversion — column alignment, cell formatting"
+    },
+    {
+      "file": "components/rust-converter/src/streaming/state_machine.rs",
+      "function": "is_safe_code_fence_language",
+      "ccn": 4, "length": 240, "params": 1,
+      "note": "Code fence language allowlist — long static match list, low CCN"
+    },
+    {
+      "file": "components/rust-converter/src/streaming/sanitizer.rs",
+      "function": "process_event",
+      "ccn": 44, "length": 224, "params": 2,
+      "note": "Streaming HTML sanitizer event processor — many element/attribute cases"
+    },
+    {
+      "file": "components/rust-converter/src/streaming/emitter.rs",
+      "function": "handle_exit",
+      "ccn": 28, "length": 105, "params": 3,
+      "note": "Streaming emitter exit handler — structural closure, block state"
+    },
+    {
+      "file": "components/rust-converter/src/ffi/exports.rs",
+      "function": "markdown_check_conditional",
+      "ccn": 4, "length": 41, "params": 9,
+      "note": "FFI export — many params from C struct fields"
+    },
+    {
+      "file": "components/rust-converter/src/ffi/exports.rs",
+      "function": "markdown_make_decision",
+      "ccn": 7, "length": 98, "params": 9,
+      "note": "FFI export — many params from C struct fields"
+    },
+    {
+      "file": "components/rust-converter/src/decision/reason_code.rs",
+      "function": "test_metric_keys_prometheus_format",
+      "ccn": 7, "length": 211, "params": 0,
+      "note": "Test function — exhaustive metric key validation"
+    },
+    {
+      "file": "components/rust-converter/src/error/classification.rs",
+      "function": "test_error_class_strings_are_snake_case",
+      "ccn": 11, "length": 299, "params": 0,
+      "note": "Test function — exhaustive error string validation"
+    },
+    {
+      "file": "components/rust-converter/src/converter.rs",
+      "function": "prop_html_entities_decode_to_expected_text",
+      "ccn": 1, "length": 212, "params": 3,
+      "note": "Proptest — many test cases, low CCN"
+    },
+    {
+      "file": "components/rust-converter/src/charset.rs",
+      "function": "extract_charset_from_content_type",
+      "ccn": 2, "length": 391, "params": 1,
+      "note": "Charset extraction — long static match table, low CCN"
+    },
+    {
+      "file": "tools/release/gates/validate_release_gates_070.py",
+      "function": "_workflow_uses_pinned_toolchain",
+      "ccn": 18, "length": 40, "params": 1,
+      "note": "CI workflow validation — many branch conditions"
+    },
+    {
+      "file": "tools/release/gates/validate_release_gates_070.py",
+      "function": "_gate_1_items",
+      "ccn": 8, "length": 22, "params": 10,
+      "note": "Gate item collector — many parameters from gate config"
+    },
+    {
+      "file": "tools/release/gates/validate_naming.py",
+      "function": "validate_names",
+      "ccn": 21, "length": 31, "params": 5,
+      "note": "Naming validator — many pattern checks"
+    },
+    {
+      "file": "tools/harness/detect_open_without_path_validation.py",
+      "function": "_classify_open_call",
+      "ccn": 5, "length": 46, "params": 10,
+      "note": "AST classifier — many parameters from AST node fields"
+    },
+    {
+      "file": "tools/render_release_matrix_docs.py",
+      "function": "_rn_generate_changes",
+      "ccn": 21, "length": 68, "params": 3,
+      "cognitive_complexity": 17,
+      "note": "Release notes generator — many version comparison branches"
+    },
+    {
+      "file": "tools/ci/check_third_party_notices.py",
+      "function": "main",
+      "cognitive_complexity": 16,
+      "note": "Third-party notice checker — multiple validation steps"
+    },
+    {
+      "file": "tools/docs/check_duplicate_docs.py",
+      "function": "normalize_markdown",
+      "cognitive_complexity": 16,
+      "note": "Markdown normalizer — multiple transformation steps"
+    },
+    {
+      "file": "tools/docs/check_packaging_consistency.py",
+      "function": "check_curl_consistency",
+      "cognitive_complexity": 16,
+      "note": "Packaging consistency checker — multiple validation branches"
+    },
+    {
+      "file": "tools/docs/validate_packaging_matrix.py",
+      "function": "validate",
+      "cognitive_complexity": 17,
+      "note": "Packaging matrix validator — many field checks"
+    },
+    {
+      "file": "tools/render_release_matrix_docs.py",
+      "function": "generate_release_notes",
+      "cognitive_complexity": 17,
+      "note": "Release notes entry point — orchestrates multiple generators"
+    },
+    {
+      "file": "tools/harness/detect_cwe22_paths.py",
+      "function": "_classify_open_call",
+      "ccn": 5, "length": 46, "params": 10,
+      "note": "AST classifier — many parameters from AST node fields"
+    },
+    {
+      "file": "tools/complexity/_compare_baseline.py",
+      "function": "main",
+      "cognitive_complexity": 16,
+      "note": "Baseline comparison entry point — multiple validation steps"
+    },
+    {
+      "file": "tools/complexity/_compare_baseline.py",
+      "function": "parse_complexipy_output",
+      "cognitive_complexity": 19,
+      "note": "Complexipy output parser — multiple parsing branches"
+    },
+    {
+      "file": "tools/complexity/_compare_baseline.py",
+      "function": "compare",
+      "cognitive_complexity": 23,
+      "note": "Baseline comparison logic — lizard + complexipy cross-referencing"
+    }
+  ]
+}

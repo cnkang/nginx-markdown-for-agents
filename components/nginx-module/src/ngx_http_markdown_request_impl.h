@@ -70,6 +70,12 @@ const ngx_str_t *ngx_http_markdown_reason_from_error_category(
     ngx_http_markdown_error_category_t category, ngx_log_t *log);
 const ngx_str_t *ngx_http_markdown_reason_converted(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
+const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
+const ngx_str_t *ngx_http_markdown_reason_overload(void);
+const ngx_str_t *ngx_http_markdown_reason_invalid_dynconf(void);
+const ngx_str_t *ngx_http_markdown_reason_degraded_snapshot(void);
+const ngx_str_t *ngx_http_markdown_reason_header_plan_apply_err(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_mid_flight_err(void);
 const ngx_str_t *ngx_http_markdown_eligibility_string(
     ngx_http_markdown_eligibility_t eligibility);
 
@@ -358,27 +364,216 @@ ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_skip_no_accept());
         dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_NONE;
-        dp.reason_code = "SKIPPED_NO_ACCEPT";
+        dp.reason_code = "skipped_no_accept";
         break;
 
     case NEGOTIATE_REASON_EXPLICIT_REJECT:
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_skip_accept_reject());
         dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_REJECT;
-        dp.reason_code = "SKIPPED_ACCEPT_REJECT";
+        dp.reason_code = "skipped_accept_reject";
         break;
 
     default:
         ngx_http_markdown_log_decision(r, conf, eff,
             ngx_http_markdown_reason_skip_accept());
         dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_SKIP;
-        dp.reason_code = "SKIPPED_ACCEPT";
+        dp.reason_code = "skipped_accept";
         break;
     }
 
     ngx_http_markdown_log_decision_path(r, conf, eff, &dp);
 }
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+/*
+ * Log a streaming path selection decision at debug level.  Keep this as a
+ * macro because ngx_log_debugN may compile away its arguments in non-debug
+ * builds; a function wrapper then looks like unused parameters to analyzers.
+ */
+#define ngx_http_markdown_log_streaming_decision(r, conf, ctx, engine)       \
+    do {                                                                    \
+        ngx_log_debug6(NGX_LOG_DEBUG_HTTP,                                  \
+            (r)->connection->log, 0,                                        \
+            "markdown: streaming decision: "                                \
+            "engine=%s phase=header_filter "                               \
+            "committed=0 fallback_available=1 "                            \
+            "reason=%s content_type=%V "                                   \
+            "content_length_known=%d chunked=%d "                          \
+            "error_policy=%s",                                             \
+            (engine),                                                       \
+            ngx_http_markdown_stream_reason_str((ctx)->streaming.reason),   \
+            &(r)->headers_out.content_type,                                 \
+            ((r)->headers_out.content_length_n >= 0) ? 1 : 0,               \
+            ((r)->headers_out.content_length_n < 0) ? 1 : 0,                \
+            ((conf)->stream.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)    \
+                ? "pass" : "reject");                                      \
+    } while (0)
+#endif /* MARKDOWN_STREAMING_ENABLED */
+
+static ngx_flag_t
+ngx_http_markdown_header_precheck(ngx_http_request_t *r,
+    const ngx_http_markdown_conf_t *conf,
+    const ngx_http_markdown_effective_conf_t *early_eff,
+    ngx_flag_t filter_enabled, ngx_int_t *rc)
+{
+    ngx_http_markdown_eligibility_t  eligibility;
+    ngx_uint_t                       accept_reason;
+
+    if (!filter_enabled) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(requests_entered);
+        ngx_http_markdown_metric_inc_skip(
+            NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
+        ngx_http_markdown_log_decision(r, conf, early_eff,
+            ngx_http_markdown_reason_from_eligibility(
+                NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
+                r->connection->log));
+        *rc = ngx_http_next_header_filter(r);
+        return 1;
+    }
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(requests_entered);
+
+    eligibility = ngx_http_markdown_check_eligibility(
+        r, conf, filter_enabled, early_eff);
+    if (eligibility != NGX_HTTP_MARKDOWN_ELIGIBLE) {
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
+                      r->connection->log, 0,
+                      "markdown: response not eligible: %V",
+                      ngx_http_markdown_eligibility_string(
+                          eligibility));
+        ngx_http_markdown_metric_inc_skip(eligibility);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
+        ngx_http_markdown_log_decision(r, conf, early_eff,
+            ngx_http_markdown_reason_from_eligibility(
+                eligibility, r->connection->log));
+        *rc = ngx_http_next_header_filter(r);
+        return 1;
+    }
+
+    if (conf->policy.auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY
+        && ngx_http_markdown_is_authenticated(r, conf))
+    {
+        ngx_http_markdown_metric_inc_skip(
+            NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
+        ngx_http_markdown_log_decision(r, conf, early_eff,
+            ngx_http_markdown_reason_from_eligibility(
+                NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH,
+                r->connection->log));
+        *rc = ngx_http_next_header_filter(r);
+        return 1;
+    }
+
+    if (ngx_http_markdown_has_no_transform(r)) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                      "markdown: Cache-Control: no-transform present, "
+                      "bypassing conversion");
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
+        ngx_http_markdown_log_decision(r, conf, early_eff,
+            ngx_http_markdown_reason_bypass_no_transform());
+        *rc = ngx_http_next_header_filter(r);
+        return 1;
+    }
+
+    if (!ngx_http_markdown_should_convert(r, conf, &accept_reason)) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.accept);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
+        ngx_http_markdown_log_accept_skip(r, conf, early_eff,
+            accept_reason);
+        *rc = ngx_http_next_header_filter(r);
+        return 1;
+    }
+
+    return 0;
+}
+
+
+/*
+ * Per-worker inflight guard (spec 52).
+ *
+ * After eligibility passes and before Rust conversion begins,
+ * try to increment the inflight counter.  If the worker is at
+ * capacity (current >= max_inflight), apply the configured
+ * error policy (pass/status/fail_closed from spec 51).
+ *
+ * The cleanup handler registered by try_increment guarantees
+ * decrement on every exit path (normal, abort, timeout, error)
+ * via r->pool destruction.
+ *
+ * Returns NGX_OK on success, or a non-OK value that the caller
+ * should return directly from the header filter.
+ */
+static ngx_int_t
+ngx_http_markdown_check_inflight(ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    ngx_int_t  inflight_rc;
+
+    inflight_rc = ngx_http_markdown_inflight_try_increment(
+        r, conf);
+
+    if (inflight_rc == NGX_DECLINED) {
+        /* Overloaded — apply error policy */
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
+
+        if (conf->on_error
+            == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+        {
+            ngx_log_error(NGX_LOG_WARN,
+                r->connection->log, 0,
+                "markdown: inflight overload, "
+                "rejecting (fail-closed)");
+            ngx_http_markdown_log_decision(
+                r, conf, ctx->effective_conf,
+                ngx_http_markdown_reason_overload());
+            return conf->error_status;
+        }
+
+        /* fail-open: pass through original response */
+        ngx_http_markdown_metric_inc_failopen(conf);
+        ctx->eligible = 0;
+        ctx->headers_forwarded = 1;
+
+        ngx_log_error(NGX_LOG_WARN,
+            r->connection->log, 0,
+            "markdown: inflight overload, "
+            "returning original content "
+            "(fail-open)");
+        ngx_http_markdown_log_decision(
+            r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_overload());
+        return ngx_http_next_header_filter(r);
+    }
+
+    if (inflight_rc == NGX_ERROR) {
+        /* Cleanup alloc failed — treat as system error */
+        NGX_HTTP_MARKDOWN_METRIC_INC(failures_system);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
+
+        if (conf->on_error
+            == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+        {
+            ngx_http_markdown_log_decision(
+                r, conf, ctx->effective_conf,
+                ngx_http_markdown_reason_failed_closed());
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+
+        ngx_http_markdown_metric_inc_failopen(conf);
+        ctx->eligible = 0;
+        ctx->headers_forwarded = 1;
+        ngx_http_markdown_log_decision(
+            r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_failed_open());
+        return ngx_http_next_header_filter(r);
+    }
+
+    /* NGX_OK: inflight incremented, cleanup registered */
+    return NGX_OK;
+}
 
 /**
  * Determine whether the response should be converted and, if eligible,
@@ -404,10 +599,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
 {
     ngx_http_markdown_ctx_t         *ctx;
     const ngx_http_markdown_conf_t  *conf;
-    ngx_http_markdown_eligibility_t  eligibility;
     ngx_flag_t                       filter_enabled;
-    ngx_int_t                        should_convert;
-    ngx_uint_t                       accept_reason;
+    ngx_int_t                        precheck_rc;
     ngx_http_markdown_dynconf_snapshot_t  snap_copy;
     ngx_http_markdown_effective_conf_t    early_eff;
 
@@ -486,90 +679,10 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * header/body inconsistencies for dynamic variables.
      */
     filter_enabled = ngx_http_markdown_is_enabled(r, conf, &early_eff);
-    if (!filter_enabled) {
-        /* Module disabled, pass through */
-        NGX_HTTP_MARKDOWN_METRIC_INC(requests_entered);
-        ngx_http_markdown_metric_inc_skip(
-            NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG);
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-        ngx_http_markdown_log_decision(r, conf, &early_eff,
-            ngx_http_markdown_reason_from_eligibility(
-                NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG,
-                r->connection->log));
-        return ngx_http_next_header_filter(r);
-    }
-
-    /*
-     * Decision chain entry point — requests_entered is now
-     * incremented above for config-disabled requests too,
-     * keeping the accounting invariant:
-     *   requests_entered >= conversions + passthrough
-     *   passthrough == sum(skips) + failopen
-     */
-    NGX_HTTP_MARKDOWN_METRIC_INC(requests_entered);
-
-    /*
-     * Check eligibility before Accept negotiation.
-     *
-     * The decision chain order (eligibility check ordering) is:
-     * scope -> method -> status -> range -> streaming ->
-     * content-type -> size -> auth -> Accept.
-     * Accept must be last before conversion attempt.
-     */
-    eligibility = ngx_http_markdown_check_eligibility(
-        r, conf, filter_enabled, &early_eff);
-    if (eligibility != NGX_HTTP_MARKDOWN_ELIGIBLE) {
-        /* Not eligible, pass through */
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
-                      r->connection->log, 0,
-                      "markdown: response not eligible: %V",
-                      ngx_http_markdown_eligibility_string(
-                          eligibility));
-        ngx_http_markdown_metric_inc_skip(eligibility);
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-        ngx_http_markdown_log_decision(r, conf, &early_eff,
-            ngx_http_markdown_reason_from_eligibility(
-                eligibility, r->connection->log));
-        return ngx_http_next_header_filter(r);
-    }
-
-    /*
-     * Auth policy check happens after the core eligibility checks and before
-     * Accept negotiation, matching the documented decision chain order.
-     */
-    if (conf->policy.auth_policy == NGX_HTTP_MARKDOWN_AUTH_POLICY_DENY
-        && ngx_http_markdown_is_authenticated(r, conf))
+    if (ngx_http_markdown_header_precheck(
+            r, conf, &early_eff, filter_enabled, &precheck_rc))
     {
-        ngx_http_markdown_metric_inc_skip(
-            NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH);
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-        ngx_http_markdown_log_decision(r, conf, &early_eff,
-            ngx_http_markdown_reason_from_eligibility(
-                NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH,
-                r->connection->log));
-        return ngx_http_next_header_filter(r);
-    }
-
-    /* Check if client wants Markdown (Accept header) */
-    should_convert = ngx_http_markdown_should_convert(
-        r, conf, &accept_reason);
-    if (!should_convert) {
-        /* Client doesn't want Markdown, pass through */
-        NGX_HTTP_MARKDOWN_METRIC_INC(skips.accept);
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_bypassed);
-
-        /*
-         * Map FFI reason to normalized reason code and accept_result.
-         *
-         * NEGOTIATE_REASON_NO_ACCEPT (1) → SKIPPED_NO_ACCEPT, NONE
-         * NEGOTIATE_REASON_LOWER_Q   (2) → SKIPPED_ACCEPT, SKIP
-         * NEGOTIATE_REASON_EXPLICIT_REJECT (3) → SKIPPED_ACCEPT_REJECT, REJECT
-         * NEGOTIATE_REASON_MALFORMED (4) → SKIPPED_ACCEPT, SKIP
-         */
-        ngx_http_markdown_log_accept_skip(r, conf, &early_eff,
-            accept_reason);
-
-        return ngx_http_next_header_filter(r);
+        return precheck_rc;
     }
 
     /* Create request context for buffering */
@@ -735,22 +848,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.engine_choice.full_buffer);
 
-        ngx_log_debug5(NGX_LOG_DEBUG_HTTP,
-            r->connection->log, 0,
-            "markdown: streaming decision: "
-            "engine=full_buffer phase=header_filter "
-            "committed=0 fallback_available=1 "
-            "reason=%s content_type=%V "
-            "content_length_known=%d chunked=%d "
-            "markdown_on_error=%s",
-            ngx_http_markdown_stream_reason_str(
-                ctx->streaming.reason),
-            &r->headers_out.content_type,
-            (r->headers_out.content_length_n >= 0) ? 1 : 0,
-            (r->headers_out.content_length_n < 0) ? 1 : 0,
-            (conf->stream.on_error
-             == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
-                ? "pass" : "reject");
+        ngx_http_markdown_log_streaming_decision(
+            r, conf, ctx, "full_buffer");
 
         ngx_http_markdown_log_decision(
             r, conf, ctx->effective_conf,
@@ -773,22 +872,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
         NGX_HTTP_MARKDOWN_METRIC_INC(
             streaming.selection.true_streaming_selected_total);
 
-        ngx_log_debug5(NGX_LOG_DEBUG_HTTP,
-            r->connection->log, 0,
-            "markdown: streaming decision: "
-            "engine=streaming phase=header_filter "
-            "committed=0 fallback_available=1 "
-            "reason=%s content_type=%V "
-            "content_length_known=%d chunked=%d "
-            "markdown_on_error=%s",
-            ngx_http_markdown_stream_reason_str(
-                ctx->streaming.reason),
-            &r->headers_out.content_type,
-            (r->headers_out.content_length_n >= 0) ? 1 : 0,
-            (r->headers_out.content_length_n < 0) ? 1 : 0,
-            (conf->stream.on_error
-             == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
-                ? "pass" : "reject");
+        ngx_http_markdown_log_streaming_decision(
+            r, conf, ctx, "streaming");
 
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_engine_streaming());
@@ -803,38 +888,24 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     NGX_HTTP_MARKDOWN_METRIC_INC(
         streaming.engine_choice.full_buffer);
 
-    ngx_log_debug5(NGX_LOG_DEBUG_HTTP,
-        r->connection->log, 0,
-        "markdown: streaming decision: "
-        "engine=full_buffer phase=header_filter "
-        "committed=0 fallback_available=1 "
-        "reason=%s content_type=%V "
-        "content_length_known=%d chunked=%d "
-        "markdown_on_error=%s",
-        ngx_http_markdown_stream_reason_str(
-            ctx->streaming.reason),
-        &r->headers_out.content_type,
-        (r->headers_out.content_length_n >= 0) ? 1 : 0,
-        (r->headers_out.content_length_n < 0) ? 1 : 0,
-        (conf->stream.on_error
-         == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)
-            ? "pass" : "reject");
+    ngx_http_markdown_log_streaming_decision(
+        r, conf, ctx, "full_buffer");
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 #ifdef MARKDOWN_INCREMENTAL_ENABLED
-    if (conf->large_body_threshold > 0
+    if (conf->routing.large_body_threshold > 0
         && r->method != NGX_HTTP_HEAD
         && r->headers_out.status != NGX_HTTP_NOT_MODIFIED
         && r->headers_out.content_length_n >= 0
         && (size_t) r->headers_out.content_length_n
-           >= conf->large_body_threshold)
+           >= conf->routing.large_body_threshold)
     {
         ctx->processing_path =
             NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
     }
     /* else: unknown Content-Length — path deferred to body filter */
 #else
-    if (conf->large_body_threshold > 0
+    if (conf->routing.large_body_threshold > 0
         && r->method != NGX_HTTP_HEAD
         && r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
     {
@@ -848,7 +919,16 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     /* Record path hit metric (only for eligible requests) */
 #ifdef MARKDOWN_STREAMING_ENABLED
 path_selected:
+    ;
 #endif
+
+    ngx_int_t  inflight_rc;
+
+    inflight_rc = ngx_http_markdown_check_inflight(r, ctx, conf);
+    if (inflight_rc != NGX_OK) {
+        return inflight_rc;
+    }
+
     if (ctx->eligible) {
 #ifdef MARKDOWN_STREAMING_ENABLED
         if (ctx->processing_path
@@ -918,12 +998,12 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
      * Covers: deferred path selection for chunked/unknown-length responses
      */
 #ifdef MARKDOWN_INCREMENTAL_ENABLED
-    if (conf->large_body_threshold > 0
+    if (conf->routing.large_body_threshold > 0
         && ctx->processing_path
             == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER
         && r->method != NGX_HTTP_HEAD
         && r->headers_out.status != NGX_HTTP_NOT_MODIFIED
-        && ctx->buffer.size >= conf->large_body_threshold)
+        && ctx->buffer.size >= conf->routing.large_body_threshold)
     {
         ctx->processing_path =
             NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
@@ -970,7 +1050,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                 NGX_HTTP_MARKDOWN_COND_NOT_MODIFIED;
             dp.conversion_status =
                 NGX_HTTP_MARKDOWN_CONV_SKIPPED;
-            dp.reason_code = "SKIPPED_CONDITIONAL";
+            dp.reason_code = "skipped_conditional";
             NGX_HTTP_MARKDOWN_METRIC_INC(skips.conditional);
             dp.duration_ms = elapsed_ms;
             ngx_http_markdown_log_decision_path(
@@ -993,8 +1073,8 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                 NGX_HTTP_MARKDOWN_CONV_FAILED;
             dp.reason_code = (conf->on_error
                 == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? "ELIGIBLE_FAILED_CLOSED"
-                : "ELIGIBLE_FAILED_OPEN";
+                ? "failed_closed"
+                : "failed_open";
             dp.duration_ms = elapsed_ms;
             ngx_http_markdown_log_decision_path(
                 r, conf, ctx->effective_conf, &dp);
@@ -1020,8 +1100,8 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                     NGX_HTTP_MARKDOWN_CONV_FAILED;
                 dp.reason_code = (conf->on_error
                     == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                    ? "ELIGIBLE_FAILED_CLOSED"
-                    : "ELIGIBLE_FAILED_OPEN";
+                    ? "failed_closed"
+                    : "failed_open";
                 dp.duration_ms = elapsed_ms;
                 ngx_http_markdown_log_decision_path(
                     r, conf, ctx->effective_conf, &dp);
@@ -1050,7 +1130,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                 NGX_HTTP_MARKDOWN_COND_PROCEED;
             dp.conversion_status =
                 NGX_HTTP_MARKDOWN_CONV_SUCCESS;
-            dp.reason_code = "ELIGIBLE_CONVERTED";
+            dp.reason_code = "converted";
             dp.duration_ms = elapsed_ms;
             ngx_http_markdown_log_decision_path(
                 r, conf, ctx->effective_conf, &dp);
@@ -1075,8 +1155,8 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
                 NGX_HTTP_MARKDOWN_CONV_FAILED;
             dp.reason_code = (conf->on_error
                 == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? "ELIGIBLE_FAILED_CLOSED"
-                : "ELIGIBLE_FAILED_OPEN";
+                ? "failed_closed"
+                : "failed_open";
             dp.duration_ms = elapsed_ms;
             ngx_http_markdown_log_decision_path(
                 r, conf, ctx->effective_conf, &dp);

@@ -55,10 +55,10 @@ Architecture mapping:
 ## DEB Artifacts (Ubuntu, Debian)
 
 Replace `VERSION` below with the release version you are installing, for
-example `0.8.3`.  `NGINX_VERSION` must match the NGINX ABI you run.
+example `0.9.0`.  `NGINX_VERSION` must match the NGINX ABI you run.
 
 ```bash
-VERSION=0.8.3
+VERSION=0.9.0
 NGINX_VERSION=1.26.3
 ARCH=amd64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
@@ -73,10 +73,10 @@ sudo apt install "./${PKG}"
 ## RPM Artifacts (AlmaLinux, Amazon Linux, RHEL)
 
 Replace `VERSION` below with the release version you are installing, for
-example `0.8.3`.  `NGINX_VERSION` must match the NGINX ABI you run.
+example `0.9.0`.  `NGINX_VERSION` must match the NGINX ABI you run.
 
 ```bash
-VERSION=0.8.3
+VERSION=0.9.0
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
@@ -151,3 +151,13 @@ install it locally.
 | `cannot open shared object file` | `load_module` path does not match package family | Use `/usr/lib/nginx/modules/...` for DEB and `/usr/lib64/nginx/modules/...` for RPM |
 | Checksum verification fails | Package and `SHA256SUMS` came from different releases or the download is corrupt | Re-download both files from the same GitHub Release |
 | Bare APT/YUM install fails | Public package repositories are not published yet | Use the GitHub Release artifact workflow above |
+
+
+## Automated Diagnostics
+
+Use [`nginx-markdown-doctor`](./doctor.md) for automated installation
+verification after installing a package:
+
+```bash
+bash tools/doctor/nginx-markdown-doctor.sh
+```

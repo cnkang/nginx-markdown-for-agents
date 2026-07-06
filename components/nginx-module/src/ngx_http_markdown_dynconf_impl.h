@@ -56,6 +56,27 @@
 #define NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL  5
 
 /*
+ * Profile conflict detection and dynconf dry-run (spec 50, task 7.5).
+ *
+ * Profile conflict detection (markdown_detect_conflicts) runs only at
+ * config parse time (nginx -t / merge_conf).  The dynconf dry-run path
+ * does NOT need additional profile conflict checks because the
+ * dynconf-mutable fields (enabled, prune_noise, log_verbosity,
+ * memory_budget, streaming_budget) are NOT profile-relevant:
+ *
+ * - Profiles only force `streaming` and `cache_validation`, which are
+ *   static config and not dynconf-mutable.
+ * - The general conflict rules (Full+Force, Full+Auto, FailClosed+Force,
+ *   max_inflight==0) involve fields that are also static.
+ *
+ * Therefore, dynconf dry-run inherits the static profile conflict
+ * detection from config parse time.  If a future version adds
+ * profile-relevant dynconf-mutable fields, the dry-run validation in
+ * ngx_http_markdown_dynconf_reload_from_file() would need to call
+ * markdown_detect_conflicts with overlay values.
+ */
+
+/*
  * Rollback result codes.
  */
 #define NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK          0
@@ -782,6 +803,24 @@ ngx_http_markdown_dynconf_stop(ngx_http_markdown_dynconf_watcher_t *watcher,
 #define NGX_HTTP_MARKDOWN_DYNCONF_KEY_LOG_VERBOSITY   3
 #define NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET 4
 #define NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET   5
+#define NGX_HTTP_MARKDOWN_DYNCONF_KEY_SCHEMA_VERSION  6
+
+/*
+ * Required schema version string for 0.9.0.
+ * Missing or mismatched schema_version causes atomic file rejection.
+ */
+#define NGX_HTTP_MARKDOWN_DYNCONF_SCHEMA_VERSION_09  "0.9"
+
+/*
+ * File-scope flag tracking whether schema_version was seen during
+ * the current reload parse.  Reset at the start of each reload
+ * attempt, set by apply when schema_version is parsed.  Checked
+ * post-parse to enforce the mandatory-field requirement.
+ *
+ * Safe because NGINX workers are single-threaded and the dynconf
+ * timer handler is non-reentrant within a single worker.
+ */
+static ngx_uint_t ngx_http_markdown_dynconf_schema_version_seen;
 
 /*
  * Match a config key name against known keys.
@@ -806,6 +845,7 @@ ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
     static u_char  log_verbosity_key[] = "log_verbosity";
     static u_char  streaming_budget_key[] = "streaming_budget";
     static u_char  memory_budget_key[] = "memory_budget";
+    static u_char  schema_version_key[] = "schema_version";
     size_t  len;
 
     len = eq - p;
@@ -823,6 +863,8 @@ ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_STREAMING_BUDGET;
     } else if (len == 13 && ngx_strncasecmp(p, memory_budget_key, 13) == 0) {
         *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_MEMORY_BUDGET;
+    } else if (len == 14 && ngx_strncasecmp(p, schema_version_key, 14) == 0) {
+        *key = NGX_HTTP_MARKDOWN_DYNCONF_KEY_SCHEMA_VERSION;
     } else {
         return NGX_ERROR;
     }
@@ -836,6 +878,7 @@ ngx_http_markdown_dynconf_match_key(u_char *p, const u_char *eq,
  *
  * Lines starting with '#' are comments. Blank lines are skipped.
  * Supported keys:
+ *   schema_version <version_string>   (mandatory, must be "0.9")
  *   markdown_filter on|off
  *   prune_noise on|off
  *   log_verbosity error|warn|info|debug
@@ -1198,6 +1241,31 @@ ngx_http_markdown_dynconf_apply(ngx_http_markdown_dynconf_snapshot_t *snapshot,
                 return NGX_ERROR;
             }
             snapshot->memory_budget = budget;
+        }
+        break;
+
+    /* Validate the schema_version field (mandatory, must be "0.9").
+     * This key does not modify the snapshot — it is purely a
+     * compatibility gate.  If the value is not "0.9", the entire
+     * file is rejected.  The file-scope schema_version_seen flag
+     * is set so post-parse validation can detect a missing field. */
+    case NGX_HTTP_MARKDOWN_DYNCONF_KEY_SCHEMA_VERSION:
+        {
+            static u_char  expected[] = NGX_HTTP_MARKDOWN_DYNCONF_SCHEMA_VERSION_09;
+            size_t         expected_len = sizeof(NGX_HTTP_MARKDOWN_DYNCONF_SCHEMA_VERSION_09) - 1;
+
+            if (value_len != expected_len
+                || ngx_strncasecmp(value, expected, expected_len) != 0)
+            {
+                ngx_log_error(NGX_LOG_WARN, log, 0,
+                              "markdown: unsupported schema_version "
+                              "\"%*s\" (expected \""
+                              NGX_HTTP_MARKDOWN_DYNCONF_SCHEMA_VERSION_09
+                              "\")",
+                              (int) value_len, value);
+                return NGX_ERROR;
+            }
+            ngx_http_markdown_dynconf_schema_version_seen = 1;
         }
         break;
 
@@ -1645,7 +1713,7 @@ ngx_http_markdown_dynconf_try_line_dryrun(
      * Extract the key name for the error entry.
      *
      * key_names is indexed by (key - 1) where key is the
-     * NGX_HTTP_MARKDOWN_DYNCONF_KEY_* enum (1..5).
+     * NGX_HTTP_MARKDOWN_DYNCONF_KEY_* enum (1..6).
      */
     {
         static u_char  key_names[][20] = {
@@ -1653,14 +1721,15 @@ ngx_http_markdown_dynconf_try_line_dryrun(
             "prune_noise",
             "log_verbosity",
             "streaming_budget",
-            "memory_budget"
+            "memory_budget",
+            "schema_version"
         };
-        static size_t  key_name_lens[] = { 15, 11, 13, 16, 13 };
+        static size_t  key_name_lens[] = { 15, 11, 13, 16, 13, 14 };
 
         const u_char  *field_name;
         size_t         field_name_len;
 
-        if (key >= 1 && key <= 5) {
+        if (key >= 1 && key <= 6) {
             field_name = key_names[key - 1];
             field_name_len = key_name_lens[key - 1];
         } else {
@@ -1825,32 +1894,10 @@ ngx_http_markdown_dynconf_reload_dryrun(
                 sizeof("line too long") - 1);
             ngx_close_file(fd);
 
-            if (watcher->last_validation.total_errors > 0) {
-                /* At least the overflow error was recorded. */
-                watcher->last_validation.valid = 0;
-                ngx_http_markdown_dynconf_log_validation_errors(
-                    &watcher->last_validation, &watcher->path, log);
-                return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL;
-            }
-
-            /* No errors recorded (overflow was the only issue but
-               record_error may not have incremented); mark valid. */
-            watcher->last_validation.valid = 1;
-
-            if (applied > 0) {
-                ngx_log_error(NGX_LOG_INFO, log, 0,
-                              "markdown: dry-run validation passed "
-                              "for \"%V\" (%ui settings validated, "
-                              "not applied)",
-                              &watcher->path, applied);
-            } else {
-                ngx_log_error(NGX_LOG_INFO, log, 0,
-                              "markdown: dry-run validation passed "
-                              "for \"%V\" (0 effective keys, not applied)",
-                              &watcher->path);
-            }
-
-            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK;
+            watcher->last_validation.valid = 0;
+            ngx_http_markdown_dynconf_log_validation_errors(
+                &watcher->last_validation, &watcher->path, log);
+            return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL;
         }
 
         /* Process complete lines within the chunk: parse each
@@ -1884,6 +1931,23 @@ ngx_http_markdown_dynconf_reload_dryrun(
     /* Final validation: if any errors were accumulated across all
        lines, mark invalid and report; otherwise mark valid. */
     if (watcher->last_validation.total_errors > 0) {
+        watcher->last_validation.valid = 0;
+        ngx_http_markdown_dynconf_log_validation_errors(
+            &watcher->last_validation, &watcher->path, log);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL;
+    }
+
+    /* schema_version is mandatory (spec 45/53).  Record missing
+     * schema_version as a validation error in dry-run mode. */
+    if (!ngx_http_markdown_dynconf_schema_version_seen) {
+        ngx_http_markdown_dynconf_record_error(
+            &watcher->last_validation, 0,
+            (const u_char *) "schema_version",
+            sizeof("schema_version") - 1,
+            (const u_char *) "required field missing; expected "
+            NGX_HTTP_MARKDOWN_DYNCONF_SCHEMA_VERSION_09,
+            sizeof("required field missing; expected "
+                   NGX_HTTP_MARKDOWN_DYNCONF_SCHEMA_VERSION_09) - 1);
         watcher->last_validation.valid = 0;
         ngx_http_markdown_dynconf_log_validation_errors(
             &watcher->last_validation, &watcher->path, log);
@@ -1988,6 +2052,18 @@ ngx_http_markdown_dynconf_reload_normal(
                           &watcher->path);
             return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
         }
+    }
+
+    /* schema_version is mandatory (spec 45/53).  If missing, the
+     * entire file is rejected to prevent loading config files
+     * intended for a different module version. */
+    if (!ngx_http_markdown_dynconf_schema_version_seen) {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+                      "markdown: missing required \"schema_version\" "
+                      "in \"%V\"; expected schema_version = "
+                      NGX_HTTP_MARKDOWN_DYNCONF_SCHEMA_VERSION_09,
+                      &watcher->path);
+        return NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_INVALID_FILE;
     }
 
     if (applied > 0) {
@@ -2103,6 +2179,9 @@ ngx_http_markdown_dynconf_reload(
     }
 
     watcher->staging_snapshot = watcher->active_snapshot;
+
+    /* Reset per-reload schema_version tracking (spec 45/53). */
+    ngx_http_markdown_dynconf_schema_version_seen = 0;
 
     if (dry_run) {
         ngx_memzero(&watcher->last_validation,

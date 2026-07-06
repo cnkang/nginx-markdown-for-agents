@@ -370,12 +370,12 @@ test_decisions_array(void)
     memset(&dynconf, 0, sizeof(dynconf));
     dynconf.last_known_good_status = "none";
 
-    decisions[0].reason_code = "CONVERT";
+    decisions[0].reason_code = "converted";
     decisions[0].accept_result = "text/markdown";
     decisions[0].conversion_status = "success";
     decisions[0].timestamp = 1700000000;
 
-    decisions[1].reason_code = "SKIP_ACCEPT";
+    decisions[1].reason_code = "skipped_accept";
     decisions[1].accept_result = "text/html";
     decisions[1].conversion_status = "skipped";
     decisions[1].timestamp = 1700000001;
@@ -385,10 +385,11 @@ test_decisions_array(void)
         &dynconf);
 
     TEST_ASSERT(rc == NGX_OK, "build succeeds");
-    TEST_ASSERT(json_contains(buf, "\"reason_code\": \"CONVERT\""),
-        "first decision has CONVERT reason");
-    TEST_ASSERT(json_contains(buf, "\"reason_code\": \"SKIP_ACCEPT\""),
-        "second decision has SKIP_ACCEPT reason");
+    TEST_ASSERT(json_contains(buf, "\"reason_code\": \"converted\""),
+        "first decision has converted reason");
+    TEST_ASSERT(json_contains(buf,
+        "\"reason_code\": \"skipped_accept\""),
+        "second decision has skipped_accept reason");
     TEST_ASSERT(json_contains(buf, "\"accept_result\": \"text/markdown\""),
         "accept_result present");
     TEST_ASSERT(json_contains(buf, "\"conversion_status\": \"success\""),
@@ -544,12 +545,12 @@ test_ring_buffer_with_entries(void)
 
     TEST_SUBSECTION("Ring buffer serialization: entries produce [{...}]");
 
-    entries[0].reason_code = "CONVERT";
+    entries[0].reason_code = "converted";
     entries[0].accept_result = "text/markdown";
     entries[0].conversion_status = "success";
     entries[0].timestamp = 100;
 
-    entries[1].reason_code = "SKIP_ACCEPT";
+    entries[1].reason_code = "skipped_accept";
     entries[1].accept_result = "text/html";
     entries[1].conversion_status = "skipped";
     entries[1].timestamp = 101;
@@ -565,9 +566,10 @@ test_ring_buffer_with_entries(void)
     TEST_ASSERT(rc == NGX_OK, "serialize succeeds");
     TEST_ASSERT(buf[0] == '[', "starts with [");
     TEST_ASSERT(buf[strlen(buf) - 1] == ']', "ends with ]");
-    TEST_ASSERT(json_contains(buf, "{\"reason_code\":\"CONVERT\"}"),
+    TEST_ASSERT(json_contains(buf, "{\"reason_code\":\"converted\"}"),
         "first entry present");
-    TEST_ASSERT(json_contains(buf, "{\"reason_code\":\"SKIP_ACCEPT\"}"),
+    TEST_ASSERT(
+        json_contains(buf, "{\"reason_code\":\"skipped_accept\"}"),
         "second entry present");
     TEST_ASSERT(json_contains(buf, ", "),
         "entries separated by comma");

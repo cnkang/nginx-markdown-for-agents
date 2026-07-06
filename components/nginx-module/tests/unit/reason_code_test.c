@@ -8,18 +8,79 @@
  * actual production enum values and lookup functions.  It does not
  * cover NGINX runtime integration (pool allocation, logging) —
  * for that, see the e2e and integration test suites.
+ *
+ * As of v0.9.0, reason code strings are lowercase snake_case and
+ * sourced from the Rust FFI (via stubs in this test).
  */
 
 #include "../include/test_common.h"
 #include <ctype.h>
 
 #include <ngx_http_markdown_filter_module.h>
+
+
+/*
+ * Stub the FFI accessor for standalone unit testing.
+ * The real accessor lives in ngx_http_markdown_reason_ffi.c and
+ * calls into Rust.  For unit tests we provide a local stub.
+ */
+static const char *stub_reason_strs[] = {
+    "converted",                     /* 0 */
+    "skipped_accept",                /* 1 */
+    "skipped_no_accept",             /* 2 */
+    "skipped_conditional",           /* 3 */
+    "decompression_error",           /* 4 */
+    "decompression_budget_exceeded", /* 5 */
+    "decompression_format_error",    /* 6 */
+    "decompression_truncated_input", /* 7 */
+    "decompression_io_error",        /* 8 */
+    "timeout",                       /* 9 */
+    "budget_exceeded",               /* 10 */
+    "replay_error",                  /* 11 */
+    "skipped_accept_reject",         /* 12 */
+    "ffi_panic",                     /* 13 */
+    "not_eligible",                  /* 14 */
+    "disabled",                      /* 15 */
+    "failed_open",                   /* 16 */
+    "failed_closed",                 /* 17 */
+    "conversion_error",              /* 18 */
+    "memory_budget_exceeded",        /* 19 */
+    "overload",                      /* 20 */
+    "invalid_dynconf",               /* 21 */
+    "degraded_snapshot",             /* 22 */
+    "header_plan_apply_error",       /* 23 */
+    "streaming_mid_flight_error",    /* 24 */
+    "bypass_no_transform",           /* 25 */
+};
+
+#define STUB_REASON_CODE_COUNT 26
+
+ngx_int_t
+ngx_http_markdown_get_reason_code_str(uint32_t code, ngx_str_t *out_str)
+{
+    if (out_str == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (code >= STUB_REASON_CODE_COUNT) {
+        out_str->data = NULL;
+        out_str->len = 0;
+        return NGX_DECLINED;
+    }
+
+    out_str->data = (u_char *) stub_reason_strs[code];
+    out_str->len = strlen(stub_reason_strs[code]);
+    return NGX_OK;
+}
+
+
+/* Include the production implementation (uses our stub above) */
 #include "../src/ngx_http_markdown_reason.c"
 
 
 /* Function prototypes */
 
-static void test_snake_case_format(void);
+static void test_lowercase_snake_case_format(void);
 
 /*
  * Forward-declare reason code accessors so the compilation unit
@@ -36,26 +97,26 @@ const ngx_str_t *ngx_http_markdown_reason_skip_conditional(void);
 
 
 /*
- * Check if an ngx_str_t matches uppercase snake_case: ^[A-Z][A-Z0-9_]*$
+ * Check if an ngx_str_t matches lowercase snake_case: ^[a-z][a-z0-9_]*$
  *
  * Returns:
  *   1 if the string matches
  *   0 otherwise
  */
 static int
-matches_snake_case(const ngx_str_t *s)
+matches_lowercase_snake_case(const ngx_str_t *s)
 {
     if (s == NULL || s->data == NULL || s->len == 0) {
         return 0;
     }
 
-    if (!isupper((unsigned char) s->data[0])) {
+    if (!islower((unsigned char) s->data[0])) {
         return 0;
     }
 
     for (size_t i = 1; i < s->len; i++) {
         unsigned char ch = s->data[i];
-        if (!isupper(ch) && !isdigit(ch) && ch != '_') {
+        if (!islower(ch) && !isdigit(ch) && ch != '_') {
             return 0;
         }
     }
@@ -93,6 +154,9 @@ ngx_str_eq(const ngx_str_t *a, const char *expected)
 
 /*
  * Test: each eligibility enum value maps to the expected reason code
+ *
+ * In schema v1, all INELIGIBLE_* map to "not_eligible" except
+ * INELIGIBLE_CONFIG which maps to "disabled".
  */
 static void
 test_eligibility_reason_codes(void)
@@ -101,46 +165,56 @@ test_eligibility_reason_codes(void)
 
     TEST_SUBSECTION("Eligibility enum to reason code mapping");
 
-    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "SKIP_CONFIG"),
-                "INELIGIBLE_CONFIG -> SKIP_CONFIG");
+    rc = ngx_http_markdown_reason_from_eligibility(
+        NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "disabled"),
+                "INELIGIBLE_CONFIG -> disabled");
 
-    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "SKIP_METHOD"),
-                "INELIGIBLE_METHOD -> SKIP_METHOD");
+    rc = ngx_http_markdown_reason_from_eligibility(
+        NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "not_eligible"),
+                "INELIGIBLE_METHOD -> not_eligible");
 
-    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "SKIP_STATUS"),
-                "INELIGIBLE_STATUS -> SKIP_STATUS");
+    rc = ngx_http_markdown_reason_from_eligibility(
+        NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "not_eligible"),
+                "INELIGIBLE_STATUS -> not_eligible");
 
-    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "SKIP_CONTENT_TYPE"),
-                "INELIGIBLE_CONTENT_TYPE -> SKIP_CONTENT_TYPE");
+    rc = ngx_http_markdown_reason_from_eligibility(
+        NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "not_eligible"),
+                "INELIGIBLE_CONTENT_TYPE -> not_eligible");
 
-    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "SKIP_SIZE"),
-                "INELIGIBLE_SIZE -> SKIP_SIZE");
+    rc = ngx_http_markdown_reason_from_eligibility(
+        NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "not_eligible"),
+                "INELIGIBLE_SIZE -> not_eligible");
 
-    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "SKIP_STREAMING"),
-                "INELIGIBLE_STREAMING -> SKIP_STREAMING");
+    rc = ngx_http_markdown_reason_from_eligibility(
+        NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "not_eligible"),
+                "INELIGIBLE_STREAMING -> not_eligible");
 
-    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "SKIP_AUTH"),
-                "INELIGIBLE_AUTH -> SKIP_AUTH");
+    rc = ngx_http_markdown_reason_from_eligibility(
+        NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "not_eligible"),
+                "INELIGIBLE_AUTH -> not_eligible");
 
-    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "SKIP_RANGE"),
-                "INELIGIBLE_RANGE -> SKIP_RANGE");
+    rc = ngx_http_markdown_reason_from_eligibility(
+        NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "not_eligible"),
+                "INELIGIBLE_RANGE -> not_eligible");
 
-    rc = ngx_http_markdown_reason_from_eligibility(NGX_HTTP_MARKDOWN_ELIGIBLE, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "FAIL_SYSTEM"),
-                "ELIGIBLE -> FAIL_SYSTEM (log warning, returns fallback)");
+    rc = ngx_http_markdown_reason_from_eligibility(
+        NGX_HTTP_MARKDOWN_ELIGIBLE, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "ffi_panic"),
+                "ELIGIBLE -> ffi_panic (fallback)");
 
-    /* Unknown value falls back to FAIL_SYSTEM */
-    rc = ngx_http_markdown_reason_from_eligibility((ngx_http_markdown_eligibility_t) 999, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "FAIL_SYSTEM"),
-                "Unknown eligibility -> FAIL_SYSTEM");
+    /* Unknown value falls back to ffi_panic */
+    rc = ngx_http_markdown_reason_from_eligibility(
+        (ngx_http_markdown_eligibility_t) 999, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "ffi_panic"),
+                "Unknown eligibility -> ffi_panic");
 
     TEST_PASS("All eligibility reason codes correct");
 }
@@ -156,22 +230,26 @@ test_error_category_reason_codes(void)
 
     TEST_SUBSECTION("Error category to failure reason code mapping");
 
-    rc = ngx_http_markdown_reason_from_error_category(NGX_HTTP_MARKDOWN_ERROR_CONVERSION, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "FAIL_CONVERSION"),
-                "ERROR_CONVERSION -> FAIL_CONVERSION");
+    rc = ngx_http_markdown_reason_from_error_category(
+        NGX_HTTP_MARKDOWN_ERROR_CONVERSION, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "conversion_error"),
+                "ERROR_CONVERSION -> conversion_error");
 
-    rc = ngx_http_markdown_reason_from_error_category(NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "FAIL_RESOURCE_LIMIT"),
-                "ERROR_RESOURCE_LIMIT -> FAIL_RESOURCE_LIMIT");
+    rc = ngx_http_markdown_reason_from_error_category(
+        NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "memory_budget_exceeded"),
+                "ERROR_RESOURCE_LIMIT -> memory_budget_exceeded");
 
-    rc = ngx_http_markdown_reason_from_error_category(NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "FAIL_SYSTEM"),
-                "ERROR_SYSTEM -> FAIL_SYSTEM");
+    rc = ngx_http_markdown_reason_from_error_category(
+        NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "ffi_panic"),
+                "ERROR_SYSTEM -> ffi_panic");
 
-    /* Unknown value falls back to FAIL_SYSTEM */
-    rc = ngx_http_markdown_reason_from_error_category((ngx_http_markdown_error_category_t) 999, NULL);
-    TEST_ASSERT(ngx_str_eq(rc, "FAIL_SYSTEM"),
-                "Unknown error category -> FAIL_SYSTEM");
+    /* Unknown value falls back to ffi_panic */
+    rc = ngx_http_markdown_reason_from_error_category(
+        (ngx_http_markdown_error_category_t) 999, NULL);
+    TEST_ASSERT(ngx_str_eq(rc, "ffi_panic"),
+                "Unknown error category -> ffi_panic");
 
     TEST_PASS("All error category reason codes correct");
 }
@@ -188,23 +266,24 @@ test_eligible_outcome_codes(void)
     TEST_SUBSECTION("Eligible outcome reason codes");
 
     rc = ngx_http_markdown_reason_converted();
-    TEST_ASSERT(ngx_str_eq(rc, "ELIGIBLE_CONVERTED"),
-                "ngx_http_markdown_reason_converted() -> ELIGIBLE_CONVERTED");
+    TEST_ASSERT(ngx_str_eq(rc, "converted"),
+                "ngx_http_markdown_reason_converted() -> converted");
 
     rc = ngx_http_markdown_reason_failed_open();
-    TEST_ASSERT(ngx_str_eq(rc, "ELIGIBLE_FAILED_OPEN"),
-                "ngx_http_markdown_reason_failed_open() -> ELIGIBLE_FAILED_OPEN");
+    TEST_ASSERT(ngx_str_eq(rc, "failed_open"),
+                "ngx_http_markdown_reason_failed_open() -> failed_open");
 
     rc = ngx_http_markdown_reason_failed_closed();
-    TEST_ASSERT(ngx_str_eq(rc, "ELIGIBLE_FAILED_CLOSED"),
-                "ngx_http_markdown_reason_failed_closed() -> ELIGIBLE_FAILED_CLOSED");
+    TEST_ASSERT(ngx_str_eq(rc, "failed_closed"),
+                "ngx_http_markdown_reason_failed_closed() "
+                "-> failed_closed");
 
     TEST_PASS("All eligible outcome codes correct");
 }
 
 
 /*
- * Test: SKIP_ACCEPT reason code for Accept negotiation failure
+ * Test: skipped_accept reason code for Accept negotiation failure
  */
 static void
 test_skip_accept_code(void)
@@ -214,15 +293,16 @@ test_skip_accept_code(void)
     TEST_SUBSECTION("Accept skip reason code");
 
     rc = ngx_http_markdown_reason_skip_accept();
-    TEST_ASSERT(ngx_str_eq(rc, "SKIP_ACCEPT"),
-                "ngx_http_markdown_reason_skip_accept() -> SKIP_ACCEPT");
+    TEST_ASSERT(ngx_str_eq(rc, "skipped_accept"),
+                "ngx_http_markdown_reason_skip_accept() "
+                "-> skipped_accept");
 
-    TEST_PASS("SKIP_ACCEPT code correct");
+    TEST_PASS("skipped_accept code correct");
 }
 
 
 /*
- * Test: SKIPPED_NO_ACCEPT reason code for missing Accept header
+ * Test: skipped_no_accept reason code for missing Accept header
  */
 static void
 test_skip_no_accept_code(void)
@@ -232,16 +312,16 @@ test_skip_no_accept_code(void)
     TEST_SUBSECTION("No-Accept skip reason code");
 
     rc = ngx_http_markdown_reason_skip_no_accept();
-    TEST_ASSERT(ngx_str_eq(rc, "SKIPPED_NO_ACCEPT"),
+    TEST_ASSERT(ngx_str_eq(rc, "skipped_no_accept"),
                 "ngx_http_markdown_reason_skip_no_accept() "
-                "-> SKIPPED_NO_ACCEPT");
+                "-> skipped_no_accept");
 
-    TEST_PASS("SKIPPED_NO_ACCEPT code correct");
+    TEST_PASS("skipped_no_accept code correct");
 }
 
 
 /*
- * Test: SKIPPED_ACCEPT_REJECT reason code for explicit q=0 reject
+ * Test: skipped_accept_reject reason code for explicit q=0 reject
  */
 static void
 test_skip_accept_reject_code(void)
@@ -251,16 +331,16 @@ test_skip_accept_reject_code(void)
     TEST_SUBSECTION("Accept reject reason code");
 
     rc = ngx_http_markdown_reason_skip_accept_reject();
-    TEST_ASSERT(ngx_str_eq(rc, "SKIPPED_ACCEPT_REJECT"),
+    TEST_ASSERT(ngx_str_eq(rc, "skipped_accept_reject"),
                 "ngx_http_markdown_reason_skip_accept_reject() "
-                "-> SKIPPED_ACCEPT_REJECT");
+                "-> skipped_accept_reject");
 
-    TEST_PASS("SKIPPED_ACCEPT_REJECT code correct");
+    TEST_PASS("skipped_accept_reject code correct");
 }
 
 
 /*
- * Test: SKIPPED_CONDITIONAL reason code for 304 Not Modified
+ * Test: skipped_conditional reason code for 304 Not Modified
  */
 static void
 test_skip_conditional_code(void)
@@ -270,18 +350,18 @@ test_skip_conditional_code(void)
     TEST_SUBSECTION("Conditional skip reason code");
 
     rc = ngx_http_markdown_reason_skip_conditional();
-    TEST_ASSERT(ngx_str_eq(rc, "SKIPPED_CONDITIONAL"),
+    TEST_ASSERT(ngx_str_eq(rc, "skipped_conditional"),
                 "ngx_http_markdown_reason_skip_conditional() "
-                "-> SKIPPED_CONDITIONAL");
+                "-> skipped_conditional");
 
-    TEST_PASS("SKIPPED_CONDITIONAL code correct");
+    TEST_PASS("skipped_conditional code correct");
 }
 
 
 #ifdef MARKDOWN_STREAMING_ENABLED
 /*
  * Test: streaming reason code accessor functions return
- * expected strings.
+ * expected strings (still UPPERCASE for streaming-only codes).
  */
 static void
 test_streaming_reason_codes(void)
@@ -335,57 +415,57 @@ test_streaming_reason_codes(void)
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 
-/* All reason code string pointers for format validation */
-
-static const ngx_str_t *codes[] = {
-    &ngx_http_markdown_reason_skip_config_str,
-    &ngx_http_markdown_reason_skip_method_str,
-    &ngx_http_markdown_reason_skip_status_str,
-    &ngx_http_markdown_reason_skip_content_type_str,
-    &ngx_http_markdown_reason_skip_size_str,
-    &ngx_http_markdown_reason_skip_streaming_str,
-    &ngx_http_markdown_reason_skip_auth_str,
-    &ngx_http_markdown_reason_skip_range_str,
-    &ngx_http_markdown_reason_skip_accept_str,
-    &ngx_http_markdown_reason_skip_no_accept_str,
-    &ngx_http_markdown_reason_skip_accept_reject_str,
-    &ngx_http_markdown_reason_skip_conditional_str,
-    &ngx_http_markdown_reason_converted_str,
-    &ngx_http_markdown_reason_failed_open_str,
-    &ngx_http_markdown_reason_failed_closed_str,
-    &ngx_http_markdown_reason_fail_conversion_str,
-    &ngx_http_markdown_reason_fail_resource_limit_str,
-    &ngx_http_markdown_reason_fail_system_str,
-#ifdef MARKDOWN_STREAMING_ENABLED
-    &ngx_http_markdown_reason_engine_streaming_str,
-    &ngx_http_markdown_reason_streaming_convert_str,
-    &ngx_http_markdown_reason_streaming_fallback_str,
-    &ngx_http_markdown_reason_streaming_fail_postcommit_str,
-    &ngx_http_markdown_reason_streaming_skip_str,
-    &ngx_http_markdown_reason_streaming_budget_str,
-    &ngx_http_markdown_reason_streaming_precommit_failopen_str,
-    &ngx_http_markdown_reason_streaming_precommit_reject_str,
-    &ngx_http_markdown_reason_streaming_shadow_str,
-#endif
-};
-
-
 /*
- * Test: all reason code strings match uppercase snake_case ^[A-Z][A-Z0-9_]*$
+ * Test: all non-streaming reason code strings match lowercase
+ * snake_case ^[a-z][a-z0-9_]*$
  */
 static void
-test_snake_case_format(void)
+test_lowercase_snake_case_format(void)
 {
-    for (size_t i = 0; i < ARRAY_SIZE(codes); i++) {
-        TEST_ASSERT(codes[i] != NULL,
-                    "Reason code pointer should not be NULL");
-        TEST_ASSERT(codes[i]->len > 0,
-                    "Reason code string should not be empty");
-        TEST_ASSERT(matches_snake_case(codes[i]),
-                    "Reason code should match ^[A-Z][A-Z0-9_]*$");
-    }
+    const ngx_str_t *rc;
 
-    TEST_PASS("All reason codes match uppercase snake_case format");
+    TEST_SUBSECTION("Non-streaming reason codes are lowercase snake_case");
+
+    rc = ngx_http_markdown_reason_converted();
+    TEST_ASSERT(matches_lowercase_snake_case(rc),
+                "converted matches lowercase snake_case");
+
+    rc = ngx_http_markdown_reason_failed_open();
+    TEST_ASSERT(matches_lowercase_snake_case(rc),
+                "failed_open matches lowercase snake_case");
+
+    rc = ngx_http_markdown_reason_failed_closed();
+    TEST_ASSERT(matches_lowercase_snake_case(rc),
+                "failed_closed matches lowercase snake_case");
+
+    rc = ngx_http_markdown_reason_skip_accept();
+    TEST_ASSERT(matches_lowercase_snake_case(rc),
+                "skipped_accept matches lowercase snake_case");
+
+    rc = ngx_http_markdown_reason_skip_no_accept();
+    TEST_ASSERT(matches_lowercase_snake_case(rc),
+                "skipped_no_accept matches lowercase snake_case");
+
+    rc = ngx_http_markdown_reason_skip_accept_reject();
+    TEST_ASSERT(matches_lowercase_snake_case(rc),
+                "skipped_accept_reject matches lowercase snake_case");
+
+    rc = ngx_http_markdown_reason_skip_conditional();
+    TEST_ASSERT(matches_lowercase_snake_case(rc),
+                "skipped_conditional matches lowercase snake_case");
+
+    rc = ngx_http_markdown_reason_from_eligibility(
+        NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD, NULL);
+    TEST_ASSERT(matches_lowercase_snake_case(rc),
+                "not_eligible matches lowercase snake_case");
+
+    rc = ngx_http_markdown_reason_from_error_category(
+        NGX_HTTP_MARKDOWN_ERROR_CONVERSION, NULL);
+    TEST_ASSERT(matches_lowercase_snake_case(rc),
+                "conversion_error matches lowercase snake_case");
+
+    TEST_PASS("All non-streaming reason codes match lowercase "
+              "snake_case format");
 }
 
 
@@ -406,18 +486,21 @@ main(void)
 #ifdef MARKDOWN_STREAMING_ENABLED
     test_streaming_reason_codes();
 #endif
-    test_snake_case_format();
+    test_lowercase_snake_case_format();
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     TEST_SUBSECTION("streaming auto accessor");
     TEST_ASSERT(ngx_http_markdown_reason_eligible_streaming_auto() != NULL,
         "eligible_streaming_auto should return non-NULL");
-    TEST_ASSERT(ngx_http_markdown_reason_eligible_streaming_auto()->len > 0,
+    TEST_ASSERT(
+        ngx_http_markdown_reason_eligible_streaming_auto()->len > 0,
         "eligible_streaming_auto string should not be empty");
 
-    TEST_ASSERT(ngx_http_markdown_reason_eligible_fullbuffer_auto() != NULL,
+    TEST_ASSERT(
+        ngx_http_markdown_reason_eligible_fullbuffer_auto() != NULL,
         "eligible_fullbuffer_auto should return non-NULL");
-    TEST_ASSERT(ngx_http_markdown_reason_eligible_fullbuffer_auto()->len > 0,
+    TEST_ASSERT(
+        ngx_http_markdown_reason_eligible_fullbuffer_auto()->len > 0,
         "eligible_fullbuffer_auto string should not be empty");
 #endif
 

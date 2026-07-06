@@ -4,8 +4,8 @@ set -euo pipefail
 # Native-only E2E validation for chunked/streaming upstream responses.
 #
 # Validates six critical paths:
-#  1) Chunked body below markdown_max_size converts successfully to Markdown.
-#  2) Chunked body above markdown_max_size triggers fail-open without truncation.
+#  1) Chunked body below markdown_limits memory converts successfully to Markdown.
+#  2) Chunked body above markdown_limits memory triggers fail-open without truncation.
 #  3) Streaming + gzip decompression converts to Markdown and strips
 #     Content-Encoding.
 #  4) Streaming + deflate decompression converts to Markdown and strips
@@ -534,12 +534,10 @@ http {
 
         location /stream/ {
             markdown_filter on;
-            markdown_on_wildcard on;
-            markdown_etag on;
-            markdown_conditional_requests full_support;
-            markdown_max_size ${MARKDOWN_MAX_SIZE};
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_accept wildcard;
+            markdown_cache_validation full;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
+            markdown_error_policy pass;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -550,15 +548,12 @@ http {
 
         location /streaming/ {
             markdown_filter on;
-            markdown_on_wildcard on;
-            markdown_etag on;
+            markdown_accept wildcard;
+            markdown_streaming force;
             markdown_streaming_engine on;
-            markdown_streaming_on_error pass;
-            markdown_conditional_requests if_modified_since_only;
-            markdown_max_size ${MARKDOWN_MAX_SIZE};
-            markdown_streaming_budget 64m;
-            markdown_on_error pass;
-            markdown_timeout 120000;
+            markdown_cache_validation ims_only;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64m timeout=120s;
+            markdown_error_policy pass;
             markdown_log_verbosity info;
 
             proxy_http_version 1.1;
@@ -718,7 +713,7 @@ grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log" || {
 # internal diagnostics: decompression failure followed by pre-commit
 # conversion fail-open.
 decompress_failed_count="$(grep -Fc 'markdown: rust decompress failed' "${RUNTIME}/logs/error.log" || true)"
-conversion_failopen_count="$(grep -Fc 'reason=ELIGIBLE_FAILED_OPEN category=FAIL_CONVERSION' "${RUNTIME}/logs/error.log" || true)"
+conversion_failopen_count="$(grep -Fc 'reason=failed_open category=conversion_error' "${RUNTIME}/logs/error.log" || true)"
 if [[ "${decompress_failed_count}" -lt 2 ]]; then
   echo "missing Rust decompression failure logs for truncated gzip/deflate cases: ${decompress_failed_count}" >&2
   exit 1
@@ -758,7 +753,7 @@ fi
 echo "Chunked/streaming summary:"
 echo "  nginx_version=${NGINX_VERSION}"
 echo "  arch=$(uname -m)"
-echo "  markdown_max_size=${MARKDOWN_MAX_SIZE}"
+echo "  markdown_limits_memory=${MARKDOWN_MAX_SIZE}"
 echo "  profile=${PROFILE}"
 echo "  small_expected_html_bytes=${SMALL_LEN}"
 echo "  small_result=$(cat "${RAW_DIR}/small.metrics")"

@@ -307,6 +307,31 @@ ngx_snprintf(u_char *buf, size_t max, const char *fmt, ...)
 
 #include "../../src/ngx_http_markdown_otel_impl.h"
 
+static ngx_int_t
+parse_traceparent_literal(const char *value,
+    ngx_http_markdown_otel_span_t *span)
+{
+    ngx_http_request_t r;
+    ngx_table_elt_t    hdr;
+    ngx_list_part_t    part;
+
+    memset(&r, 0, sizeof(r));
+    memset(&hdr, 0, sizeof(hdr));
+    memset(&part, 0, sizeof(part));
+
+    hdr.key.data = (u_char *) "traceparent";
+    hdr.key.len = 11;
+    hdr.value.data = (u_char *) value;
+    hdr.value.len = strlen(value);
+
+    part.elts = &hdr;
+    part.nelts = 1;
+    part.next = NULL;
+    r.headers_in.headers.part = part;
+
+    return ngx_http_markdown_otel_parse_traceparent(&r, span);
+}
+
 static void
 test_otel_render_json_with_string_attr(void)
 {
@@ -349,6 +374,46 @@ test_otel_render_json_with_string_attr(void)
 }
 
 static void
+test_otel_render_json_escapes_trace_ids(void)
+{
+    ngx_http_markdown_otel_span_t span;
+    u_char                        out[2048];
+    size_t                        n;
+    const char                   *json;
+
+    TEST_SUBSECTION("OTel JSON render should escape trace identifiers");
+
+    memset(&span, 0, sizeof(span));
+    memset(span.trace_id, 'a', 32);
+    memset(span.span_id, 'b', 16);
+    memset(span.parent_span_id, 'c', 16);
+    span.trace_id[0] = '"';
+    span.span_id[0] = '\\';
+    span.parent_span_id[0] = '\n';
+    span.trace_id[32] = '\0';
+    span.span_id[16] = '\0';
+    span.parent_span_id[16] = '\0';
+    span.has_parent = 1;
+    span.start_ms = 100;
+    span.end_ms = 120;
+    span.start_epoch_nano = 1000000000LL;
+    span.end_epoch_nano = 1200000000LL;
+
+    n = ngx_http_markdown_otel_render_json(&span, out, sizeof(out), NULL);
+    TEST_ASSERT(n > 0, "JSON render should succeed");
+    TEST_ASSERT(n < sizeof(out), "JSON length should fit output buffer");
+    out[n] = '\0';
+
+    json = (const char *) out;
+    TEST_ASSERT(strstr(json, "\"traceId\":\"\\\"") != NULL,
+                "trace_id quote should be escaped");
+    TEST_ASSERT(strstr(json, "\"spanId\":\"\\\\") != NULL,
+                "span_id backslash should be escaped");
+    TEST_ASSERT(strstr(json, "\"parentSpanId\":\"\\n") != NULL,
+                "parent span newline should be escaped");
+}
+
+static void
 test_otel_parse_traceparent_invalid_version(void)
 {
     ngx_http_request_t r;
@@ -378,6 +443,68 @@ test_otel_parse_traceparent_invalid_version(void)
         "version 01 should be declined");
 
     TEST_PASS("invalid version returns DECLINED");
+}
+
+static void
+test_otel_parse_traceparent_invalid_trace_id_hex(void)
+{
+    ngx_http_markdown_otel_span_t span;
+
+    TEST_SUBSECTION("OTel parse_traceparent: invalid trace_id hex");
+
+    memset(&span, 0, sizeof(span));
+
+    TEST_ASSERT(
+        parse_traceparent_literal(
+            "00-4bf92f3577b34da6a3ce929d0e0e473g-00f067aa0ba902b7-01",
+            &span) == NGX_DECLINED,
+        "non-hex trace_id should be declined");
+
+    TEST_PASS("invalid trace_id hex returns DECLINED");
+}
+
+static void
+test_otel_parse_traceparent_zero_ids(void)
+{
+    ngx_http_markdown_otel_span_t span;
+
+    TEST_SUBSECTION("OTel parse_traceparent: zero trace/span ids");
+
+    memset(&span, 0, sizeof(span));
+
+    TEST_ASSERT(
+        parse_traceparent_literal(
+            "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
+            &span) == NGX_DECLINED,
+        "all-zero trace_id should be declined");
+
+    memset(&span, 0, sizeof(span));
+
+    TEST_ASSERT(
+        parse_traceparent_literal(
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
+            &span) == NGX_DECLINED,
+        "all-zero parent span_id should be declined");
+
+    TEST_PASS("zero trace/span ids return DECLINED");
+}
+
+static void
+test_otel_parse_traceparent_invalid_flags_hex(void)
+{
+    ngx_http_markdown_otel_span_t span;
+
+    TEST_SUBSECTION("OTel parse_traceparent: invalid flags hex");
+
+    memset(&span, 0, sizeof(span));
+
+    TEST_ASSERT(
+        parse_traceparent_literal(
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-0g",
+            &span) == NGX_DECLINED,
+        "non-hex flags should be declined");
+
+    TEST_PASS("invalid flags hex returns DECLINED");
 }
 
 static void
@@ -569,7 +696,11 @@ main(void)
 {
     TEST_SECTION("OTel Impl Regression Tests");
     test_otel_render_json_with_string_attr();
+    test_otel_render_json_escapes_trace_ids();
     test_otel_parse_traceparent_invalid_version();
+    test_otel_parse_traceparent_invalid_trace_id_hex();
+    test_otel_parse_traceparent_zero_ids();
+    test_otel_parse_traceparent_invalid_flags_hex();
     test_otel_parse_traceparent_missing_separator();
     test_otel_parse_traceparent_missing_flags_separator();
     test_otel_parse_traceparent_lowercase_flags();

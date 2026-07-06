@@ -160,7 +160,7 @@ pub struct MarkdownOptions {
     ///
     /// When non-zero, the streaming converter uses this value as the
     /// total memory budget instead of the compiled-in default (2 MiB).
-    /// Populated from the `markdown_streaming_budget` NGINX directive.
+    /// Populated from `markdown_limits streaming_buffer=<size>` (Config V2).
     pub streaming_budget: u64,
     /// Non-zero when noise region pruning is enabled at runtime.
     ///
@@ -193,7 +193,7 @@ pub struct MarkdownOptions {
     /// max_size when no explicit markdown_max_size is set. Rust
     /// currently enforces this budget only for streaming/incremental
     /// paths; full-buffer relies on NGINX-side buffering limits.
-    /// Populated from the `markdown_memory_budget` NGINX directive.
+    /// Populated from `markdown_limits memory=<size>` (Config V2).
     pub memory_budget: u64,
     /// LLM provider for token estimation (0=default, 1=openai-gpt, 2=anthropic-claude,
     /// 3=google-gemini, 4=meta-llama).
@@ -356,6 +356,144 @@ pub const NEGOTIATE_WILDCARD_STRICT: u8 = 0;
 #[allow(dead_code)]
 pub const NEGOTIATE_WILDCARD_ALLOW: u8 = 1;
 
+/// Borrowed byte string passed across the FFI boundary.
+///
+/// Points to caller-owned memory that must remain valid for the duration of
+/// the call. `data` may be NULL only when `len == 0`.
+#[repr(C)]
+pub struct FFIStr {
+    /// Pointer to the first byte (may be NULL when `len == 0`).
+    pub data: *const u8,
+    /// Number of bytes.
+    pub len: usize,
+}
+
+/// Input snapshot for `markdown_decide_eligibility`.
+///
+/// All fields are marshaled from `ngx_http_request_t` and the module
+/// configuration by the C caller. Array fields (`content_types`,
+/// `stream_types`) point to caller-owned arrays of [`FFIStr`] valid for the
+/// duration of the call; a NULL pointer with count 0 means "not configured".
+#[repr(C)]
+pub struct FFIEligibilityInput {
+    /// 1 if `markdown_filter` is enabled for this request, else 0.
+    pub filter_enabled: u8,
+    /// 1 if the request method is GET or HEAD, else 0.
+    pub method_get_or_head: u8,
+    /// 1 if the request carried a `Range` header, else 0.
+    pub has_range_header: u8,
+    /// Response status code.
+    pub status: u16,
+    /// Response `Content-Type` value bytes (NULL/0 if absent).
+    pub content_type: *const u8,
+    /// Length of `content_type`.
+    pub content_type_len: usize,
+    /// Configured `markdown_content_types` allowlist (NULL/0 = default html).
+    pub content_types: *const FFIStr,
+    /// Number of entries in `content_types`.
+    pub content_types_count: usize,
+    /// Configured `markdown_stream_types` exclusions (NULL/0 = none).
+    pub stream_types: *const FFIStr,
+    /// Number of entries in `stream_types`.
+    pub stream_types_count: usize,
+    /// Response `Content-Length`; negative means absent/unknown.
+    pub content_length: i64,
+    /// Effective full-buffer body limit in bytes; 0 means unlimited.
+    pub body_limit: usize,
+}
+
+/// Opaque Rust-owned set of config-time-validated trusted-proxy CIDRs
+/// (spec 47).
+///
+/// The C side creates one handle per `markdown_trusted_proxies` directive via
+/// `markdown_trusted_proxies_new`, appends each CIDR with
+/// `markdown_trusted_proxies_push` (which validates at config time), and frees
+/// it with `markdown_trusted_proxies_free` (registered as an NGINX pool
+/// cleanup handler).  CIDR parsing happens once here; request-time matching is
+/// pure bitwise prefix comparison.  This type is intentionally **not**
+/// `#[repr(C)]` — cbindgen emits it as an opaque struct so the C side only
+/// ever holds a pointer and never inspects the layout.
+pub struct MarkdownTrustedProxies {
+    pub(crate) cidrs: Vec<crate::forwarded::Cidr>,
+}
+
+impl MarkdownTrustedProxies {
+    /// Create an empty trusted-proxy set.
+    pub(crate) fn new() -> Self {
+        Self { cidrs: Vec::new() }
+    }
+}
+
+impl Default for MarkdownTrustedProxies {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// `markdown_trusted_proxies_push` result: CIDR parsed and stored.
+pub const TRUSTED_PROXIES_PUSH_OK: u8 = 0;
+/// `markdown_trusted_proxies_push` result: CIDR string was invalid.
+pub const TRUSTED_PROXIES_PUSH_INVALID_CIDR: u8 = 1;
+/// `markdown_trusted_proxies_push` result: NULL handle or input.
+pub const TRUSTED_PROXIES_PUSH_NULL: u8 = 2;
+
+/// `markdown_decide_base_url` result: decision written successfully.
+pub const DECIDE_BASE_URL_OK: u8 = 0;
+/// `markdown_decide_base_url` result: NULL input/output or buffer too small.
+pub const DECIDE_BASE_URL_INVALID: u8 = 1;
+
+/// Input snapshot for `markdown_decide_base_url` (spec 47).
+///
+/// All byte fields are borrowed from the C caller for the duration of the
+/// call (NULL with length 0 means "absent").  `trusted` is a borrowed
+/// pointer to a [`MarkdownTrustedProxies`] handle (may be NULL when trust is
+/// not configured).  This struct intentionally exposes neither
+/// `ngx_http_request_t *` nor any NGINX pool.
+#[repr(C)]
+pub struct FFIBaseUrlInput {
+    /// Textual source IP (`r->connection->addr_text`), realip/PROXY resolved.
+    pub source_ip: *const u8,
+    /// Length of `source_ip`.
+    pub source_ip_len: usize,
+    /// Borrowed handle of config-time-validated trusted CIDRs (may be NULL).
+    pub trusted: *const MarkdownTrustedProxies,
+    /// `Forwarded` header value bytes (RFC 7239), NULL/0 if absent.
+    pub forwarded: *const u8,
+    /// Length of `forwarded`.
+    pub forwarded_len: usize,
+    /// `X-Forwarded-Proto` header value bytes, NULL/0 if absent.
+    pub x_forwarded_proto: *const u8,
+    /// Length of `x_forwarded_proto`.
+    pub x_forwarded_proto_len: usize,
+    /// `X-Forwarded-Host` header value bytes, NULL/0 if absent.
+    pub x_forwarded_host: *const u8,
+    /// Length of `x_forwarded_host`.
+    pub x_forwarded_host_len: usize,
+    /// `Host` header value bytes, NULL/0 if absent.
+    pub host: *const u8,
+    /// Length of `host`.
+    pub host_len: usize,
+    /// 1 if the source is a Unix-domain socket peer (forces untrusted).
+    pub is_unix_socket: u8,
+    /// 1 if `markdown_trusted_proxies` was configured (even as `off`).
+    pub trusted_configured: u8,
+}
+
+/// Result of `markdown_decide_base_url` (spec 47).
+///
+/// `base_url_len` bytes are written into the caller-provided output buffer.
+/// `reason` is a `BaseUrlReason` discriminant; `source` is a `BaseUrlSource`
+/// discriminant.
+#[repr(C)]
+pub struct FFIBaseUrlDecision {
+    /// Bytes written into the caller's output buffer.
+    pub base_url_len: usize,
+    /// `BaseUrlReason` discriminant.
+    pub reason: u8,
+    /// `BaseUrlSource` discriminant.
+    pub source: u8,
+}
+
 /// Result of a conditional request check (If-None-Match / If-Modified-Since).
 ///
 /// Returned by `markdown_check_conditional` FFI function.
@@ -388,6 +526,99 @@ pub struct FFIDecisionResult {
     /// Canonical `ReasonCode` discriminant for the decision
     /// (`Converted` = 0 when `decision` == 0).
     pub reason_code: u8,
+}
+
+/// Input snapshot for `markdown_decide_conditional` (spec 49).
+///
+/// All byte fields are borrowed from the C caller for the duration of the
+/// call (NULL with length 0 means "absent"). This struct exposes neither
+/// `ngx_http_request_t *` nor any NGINX pool; the C side marshals request
+/// headers, response metadata, and the effective `cache_validation` mode.
+#[repr(C)]
+pub struct FFIConditionalInput {
+    /// Effective `markdown_cache_validation` mode: 0 = off, 1 = ims_only,
+    /// 2 = full. Unknown values fall back to ims_only (safe default).
+    pub cache_validation: u8,
+    /// 1 if the request carried a `Range` header, else 0.
+    pub has_range: u8,
+    /// 1 if request or response carried `Cache-Control: no-transform`.
+    pub no_transform: u8,
+    /// `If-None-Match` header value bytes (NULL/0 if absent).
+    pub if_none_match: *const u8,
+    /// Length of `if_none_match`.
+    pub if_none_match_len: usize,
+    /// Transformed-representation entity ETag bytes (NULL/0 if none; always
+    /// absent on the streaming path).
+    pub entity_etag: *const u8,
+    /// Length of `entity_etag`.
+    pub entity_etag_len: usize,
+    /// `If-Modified-Since` header value bytes (NULL/0 if absent).
+    pub if_modified_since: *const u8,
+    /// Length of `if_modified_since`.
+    pub if_modified_since_len: usize,
+    /// Preserved upstream `Last-Modified` value bytes (NULL/0 if absent).
+    pub last_modified: *const u8,
+    /// Length of `last_modified`.
+    pub last_modified_len: usize,
+}
+
+/// Result of `markdown_decide_conditional` (spec 49).
+#[repr(C)]
+pub struct FFIConditionalDecision {
+    /// `ConditionalOutcome` discriminant: 0 = not_modified (send 304),
+    /// 1 = proceed, 2 = bypass (deliver upstream unmodified).
+    pub outcome: u8,
+    /// `ConditionalReason` discriminant (spec 53 alignment).
+    pub reason: u8,
+    /// `ConditionalHeader` discriminant: 0 = none, 1 = if_none_match,
+    /// 2 = if_modified_since.
+    pub evaluated_header: u8,
+}
+
+/// Input snapshot for `markdown_decide_streaming` (spec 49).
+///
+/// This struct exposes neither `ngx_http_request_t *` nor any NGINX pool;
+/// the C side marshals the policy/engine selectors, the effective
+/// `cache_validation` mode, request/response flags, and sizing fields.
+#[repr(C)]
+pub struct FFIStreamingInput {
+    /// `markdown_streaming` policy: 0 = off, 1 = auto, 2 = force.
+    pub policy: u8,
+    /// `markdown_streaming_engine`: 0 = off, 1 = auto, 2 = on.
+    pub engine: u8,
+    /// Effective `markdown_cache_validation` mode: 0 = off, 1 = ims_only,
+    /// 2 = full.
+    pub cache_validation: u8,
+    /// 1 if the request method is `HEAD`, else 0.
+    pub is_head: u8,
+    /// 1 if the conditional decision yielded `304 Not Modified`, else 0.
+    pub is_not_modified: u8,
+    /// 1 if the request carried a `Range` header, else 0.
+    pub has_range: u8,
+    /// 1 if request or response carried `Cache-Control: no-transform`.
+    pub no_transform: u8,
+    /// 1 if the upstream response carried a `Content-Encoding`, else 0.
+    pub has_content_encoding: u8,
+    /// 1 if the upstream `Content-Length` is known, else 0.
+    pub content_length_known: u8,
+    /// Upstream `Content-Length` in bytes (meaningful when known).
+    pub content_length: u64,
+    /// `markdown_stream_threshold` in bytes (auto-mode trigger).
+    pub streaming_threshold: u64,
+}
+
+/// `markdown_decide_streaming` sentinel: no block reason (request is
+/// streaming-eligible).
+pub const STREAMING_BLOCK_REASON_NONE: u8 = 255;
+
+/// Result of `markdown_decide_streaming` (spec 49).
+#[repr(C)]
+pub struct FFIStreamingDecision {
+    /// 1 if the request may take the streaming path, else 0.
+    pub eligible: u8,
+    /// `StreamingBlockReason` discriminant when `eligible == 0`, or
+    /// `STREAMING_BLOCK_REASON_NONE` (255) when `eligible == 1`.
+    pub block_reason: u8,
 }
 
 /// A single header operation in a header plan.
@@ -468,6 +699,216 @@ pub struct FFIHeaderPlan {
     /// Number of entries.
     pub count: usize,
 }
+
+// ─── Profile FFI types (spec 50, 0.9.0) ──────────────────────────────────────
+
+/// FFI-safe profile selector.
+///
+/// Maps to the Rust `Profile` enum. The C side stores this as a `u8` field
+/// in the location config struct and passes it to `markdown_detect_conflicts`.
+///
+/// Discriminants are frozen for the 1.0 stability contract.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FFIProfile {
+    /// No profile active — use Config V2 built-in defaults.
+    None = 0,
+    /// CDN/caching proxy: full conditional requests, no streaming.
+    StrictCache = 1,
+    /// Recommended default: IMS-only caching, streaming on auto.
+    Balanced = 2,
+    /// AI agent workloads: aggressive streaming, no caching overhead.
+    StreamingFirst = 3,
+}
+
+/// Severity level for a detected configuration conflict (FFI-safe).
+///
+/// Mirrors `crate::config::conflict::ConflictLevel` with a stable `#[repr(u8)]`
+/// layout for the C side.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FFIConflictLevel {
+    /// Hard error — `nginx -t` must fail.
+    Error = 0,
+    /// Advisory warning — logged but does not block startup.
+    Warning = 1,
+}
+
+/// A single detected configuration conflict (FFI-safe).
+///
+/// Contains the severity level and a pointer to a UTF-8 message describing
+/// the incompatibility. The message bytes are owned by the containing
+/// [`FFIConflictList`] and remain valid until `markdown_free_conflicts`
+/// is called.
+#[repr(C)]
+pub struct FFIConflict {
+    /// Severity: error blocks startup, warning is advisory.
+    pub level: FFIConflictLevel,
+    /// Pointer to UTF-8 message bytes (NOT NUL-terminated).
+    pub message: *const u8,
+    /// Length of the message in bytes.
+    pub message_len: usize,
+}
+
+/// List of detected conflicts returned from `markdown_detect_conflicts`.
+///
+/// The caller must free this with `markdown_free_conflicts`. When `count == 0`,
+/// `conflicts` is NULL (Rule 53: empty results return NULL).
+#[repr(C)]
+pub struct FFIConflictList {
+    /// Pointer to array of `FFIConflict` entries (NULL when `count == 0`).
+    pub conflicts: *mut FFIConflict,
+    /// Number of entries in the array.
+    pub count: usize,
+}
+
+/// Explicit user-set configuration flags for conflict detection (FFI-safe).
+///
+/// Each field uses a sentinel value to indicate "not explicitly set":
+/// - Enum fields: `255` means not set (valid discriminants are 0..3).
+/// - Integer fields: `u64::MAX` / `u32::MAX` means not set.
+/// - Boolean fields: `255` means not set (0 = false, 1 = true).
+///
+/// The C side populates only fields that the user explicitly configured via
+/// `markdown_*` directives; all other fields remain at their sentinel values.
+#[repr(C)]
+pub struct FFIExplicitConfig {
+    /// `markdown_accept`: 0=strict, 1=wildcard, 2=force; 255=not set.
+    pub accept: u8,
+    /// `markdown_cache_validation`: 0=off, 1=ims_only, 2=full; 255=not set.
+    pub cache_validation: u8,
+    /// `markdown_streaming`: 0=off, 1=auto, 2=force; 255=not set.
+    pub streaming: u8,
+    /// `markdown_limits memory=` in bytes; `u64::MAX`=not set.
+    pub limits_memory_bytes: u64,
+    /// `markdown_limits timeout=` in milliseconds; `u64::MAX`=not set.
+    pub limits_timeout_ms: u64,
+    /// `markdown_limits streaming_buffer=` in bytes; `u64::MAX`=not set.
+    pub limits_streaming_buffer_bytes: u64,
+    /// `markdown_limits max_inflight=`; `u32::MAX`=not set.
+    pub limits_max_inflight: u32,
+    /// `markdown_error_policy`: 0=pass, 1=fail_closed; 255=not set.
+    pub error_policy: u8,
+    /// `markdown_diagnostics`: 0=off, 1=on; 255=not set.
+    pub diagnostics: u8,
+}
+
+/// Effective configuration after merge (FFI-safe).
+///
+/// All fields are concrete (no sentinels). This is the fully-resolved
+/// configuration the C side uses at runtime.
+#[repr(C)]
+pub struct FFIEffectiveConfig {
+    /// Effective accept mode: 0=strict, 1=wildcard, 2=force.
+    pub accept: u8,
+    /// Effective cache_validation: 0=off, 1=ims_only, 2=full.
+    pub cache_validation: u8,
+    /// Effective streaming: 0=off, 1=auto, 2=force.
+    pub streaming: u8,
+    /// Effective memory limit in bytes.
+    pub limits_memory_bytes: u64,
+    /// Effective timeout in milliseconds.
+    pub limits_timeout_ms: u64,
+    /// Effective streaming buffer size in bytes.
+    pub limits_streaming_buffer_bytes: u64,
+    /// Effective max inflight conversions.
+    pub limits_max_inflight: u32,
+    /// Effective error policy: 0=pass, 1=fail_closed.
+    pub error_policy: u8,
+    /// Effective diagnostics: 0=off, 1=on.
+    pub diagnostics: u8,
+}
+
+/// Sentinel value for "not set" in FFI enum fields (u8).
+pub const FFI_CONFIG_NOT_SET_U8: u8 = 255;
+/// Sentinel value for "not set" in FFI u64 fields.
+pub const FFI_CONFIG_NOT_SET_U64: u64 = u64::MAX;
+/// Sentinel value for "not set" in FFI u32 fields.
+pub const FFI_CONFIG_NOT_SET_U32: u32 = u32::MAX;
+
+/// Profile discriminant: no profile active (use built-in defaults).
+pub const FFI_PROFILE_NONE: u8 = 0;
+/// Profile discriminant: `strict_cache` (CDN/caching proxy).
+pub const FFI_PROFILE_STRICT_CACHE: u8 = 1;
+/// Profile discriminant: `balanced` (recommended default).
+pub const FFI_PROFILE_BALANCED: u8 = 2;
+/// Profile discriminant: `streaming_first` (AI agent workloads).
+pub const FFI_PROFILE_STREAMING_FIRST: u8 = 3;
+
+// ─── Error Classification FFI types (spec 51) ────────────────────────────────
+
+/// FFI-safe error class enum (spec 51).
+///
+/// Maps 1:1 to `crate::error::classification::ErrorClass`. The C side passes
+/// this to `markdown_decide_error_behavior` to identify the error category.
+///
+/// Discriminants are frozen for the 1.0 stability contract.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FFIErrorClass {
+    /// HTML-to-Markdown conversion failed.
+    ConversionError = 0,
+    /// Conversion exceeded configured timeout.
+    Timeout = 1,
+    /// Memory budget exceeded.
+    MemoryBudgetExceeded = 2,
+    /// Rust FFI panic caught by catch_unwind.
+    FfiPanic = 3,
+    /// Decompression of upstream response failed.
+    DecompressionError = 4,
+    /// Worker inflight limit exceeded (spec 52).
+    Overload = 5,
+    /// Dynamic configuration is invalid.
+    InvalidDynconf = 6,
+    /// Running with degraded (last-known-good) snapshot.
+    DegradedSnapshot = 7,
+    /// HeaderPlan apply failed after headers committed.
+    HeaderPlanApplyError = 8,
+    /// Streaming conversion failed mid-flight.
+    StreamingMidFlightError = 9,
+}
+
+/// FFI-safe error policy enum (spec 51).
+///
+/// The C side derives this from the `markdown_error_policy` directive value
+/// and passes it to `markdown_decide_error_behavior`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FFIErrorPolicy {
+    /// Policy kind: 0 = pass, 1 = status, 2 = fail_closed.
+    pub kind: u8,
+    /// HTTP status code (meaningful only when kind == 1).
+    pub status_code: u16,
+}
+
+/// FFI error policy kind: pass (fail-open, default).
+pub const FFI_ERROR_POLICY_PASS: u8 = 0;
+/// FFI error policy kind: return specified status code.
+pub const FFI_ERROR_POLICY_STATUS: u8 = 1;
+/// FFI error policy kind: fail_closed (return 502).
+pub const FFI_ERROR_POLICY_FAIL_CLOSED: u8 = 2;
+
+/// FFI-safe error behavior enum (spec 51).
+///
+/// Returned by `markdown_decide_error_behavior` to tell the C error handler
+/// what action to take.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FFIErrorBehavior {
+    /// Behavior kind: 0 = pass_through, 1 = return_status, 2 = terminate.
+    pub kind: u8,
+    /// HTTP status code (meaningful only when kind == 1).
+    pub status_code: u16,
+    /// 1 if behavior was forced (post-commit), 0 if policy-driven.
+    pub forced: u8,
+}
+
+/// FFI error behavior kind: pass through original response.
+pub const FFI_ERROR_BEHAVIOR_PASS_THROUGH: u8 = 0;
+/// FFI error behavior kind: return specified HTTP status code.
+pub const FFI_ERROR_BEHAVIOR_RETURN_STATUS: u8 = 1;
+/// FFI error behavior kind: terminate connection (post-commit).
+pub const FFI_ERROR_BEHAVIOR_TERMINATE: u8 = 2;
 
 #[cfg(test)]
 mod layout_tests {
@@ -584,6 +1025,169 @@ mod layout_tests {
         assert_eq!(offset_of!(FFIDecompResult, output), 0);
         assert_eq!(offset_of!(FFIDecompResult, output_len), 8);
         assert_eq!(offset_of!(FFIDecompResult, error_category), 16);
+    }
+
+    #[test]
+    fn test_ffi_base_url_input_layout() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIBaseUrlInput>(), 96);
+        assert_eq!(align_of::<FFIBaseUrlInput>(), 8);
+
+        assert_eq!(offset_of!(FFIBaseUrlInput, source_ip), 0);
+        assert_eq!(offset_of!(FFIBaseUrlInput, source_ip_len), 8);
+        assert_eq!(offset_of!(FFIBaseUrlInput, trusted), 16);
+        assert_eq!(offset_of!(FFIBaseUrlInput, forwarded), 24);
+        assert_eq!(offset_of!(FFIBaseUrlInput, forwarded_len), 32);
+        assert_eq!(offset_of!(FFIBaseUrlInput, x_forwarded_proto), 40);
+        assert_eq!(offset_of!(FFIBaseUrlInput, x_forwarded_proto_len), 48);
+        assert_eq!(offset_of!(FFIBaseUrlInput, x_forwarded_host), 56);
+        assert_eq!(offset_of!(FFIBaseUrlInput, x_forwarded_host_len), 64);
+        assert_eq!(offset_of!(FFIBaseUrlInput, host), 72);
+        assert_eq!(offset_of!(FFIBaseUrlInput, host_len), 80);
+        assert_eq!(offset_of!(FFIBaseUrlInput, is_unix_socket), 88);
+        assert_eq!(offset_of!(FFIBaseUrlInput, trusted_configured), 89);
+    }
+
+    #[test]
+    fn test_ffi_base_url_decision_layout() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIBaseUrlDecision>(), 16);
+        assert_eq!(align_of::<FFIBaseUrlDecision>(), 8);
+
+        assert_eq!(offset_of!(FFIBaseUrlDecision, base_url_len), 0);
+        assert_eq!(offset_of!(FFIBaseUrlDecision, reason), 8);
+        assert_eq!(offset_of!(FFIBaseUrlDecision, source), 9);
+    }
+
+    #[test]
+    fn test_spec_49_decision_abi_layouts() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIStr>(), 16);
+        assert_eq!(align_of::<FFIStr>(), 8);
+        assert_eq!(offset_of!(FFIStr, data), 0);
+        assert_eq!(offset_of!(FFIStr, len), 8);
+
+        assert_eq!(size_of::<FFIEligibilityInput>(), 72);
+        assert_eq!(align_of::<FFIEligibilityInput>(), 8);
+        assert_eq!(offset_of!(FFIEligibilityInput, filter_enabled), 0);
+        assert_eq!(offset_of!(FFIEligibilityInput, method_get_or_head), 1);
+        assert_eq!(offset_of!(FFIEligibilityInput, has_range_header), 2);
+        assert_eq!(offset_of!(FFIEligibilityInput, status), 4);
+        assert_eq!(offset_of!(FFIEligibilityInput, content_type), 8);
+        assert_eq!(offset_of!(FFIEligibilityInput, content_type_len), 16);
+        assert_eq!(offset_of!(FFIEligibilityInput, content_types), 24);
+        assert_eq!(offset_of!(FFIEligibilityInput, content_types_count), 32);
+        assert_eq!(offset_of!(FFIEligibilityInput, stream_types), 40);
+        assert_eq!(offset_of!(FFIEligibilityInput, stream_types_count), 48);
+        assert_eq!(offset_of!(FFIEligibilityInput, content_length), 56);
+        assert_eq!(offset_of!(FFIEligibilityInput, body_limit), 64);
+
+        assert_eq!(size_of::<FFIConditionalInput>(), 72);
+        assert_eq!(align_of::<FFIConditionalInput>(), 8);
+        assert_eq!(offset_of!(FFIConditionalInput, cache_validation), 0);
+        assert_eq!(offset_of!(FFIConditionalInput, has_range), 1);
+        assert_eq!(offset_of!(FFIConditionalInput, no_transform), 2);
+        assert_eq!(offset_of!(FFIConditionalInput, if_none_match), 8);
+        assert_eq!(offset_of!(FFIConditionalInput, if_none_match_len), 16);
+        assert_eq!(offset_of!(FFIConditionalInput, entity_etag), 24);
+        assert_eq!(offset_of!(FFIConditionalInput, entity_etag_len), 32);
+        assert_eq!(offset_of!(FFIConditionalInput, if_modified_since), 40);
+        assert_eq!(offset_of!(FFIConditionalInput, if_modified_since_len), 48);
+        assert_eq!(offset_of!(FFIConditionalInput, last_modified), 56);
+        assert_eq!(offset_of!(FFIConditionalInput, last_modified_len), 64);
+
+        assert_eq!(size_of::<FFIConditionalDecision>(), 3);
+        assert_eq!(align_of::<FFIConditionalDecision>(), 1);
+        assert_eq!(offset_of!(FFIConditionalDecision, outcome), 0);
+        assert_eq!(offset_of!(FFIConditionalDecision, reason), 1);
+        assert_eq!(offset_of!(FFIConditionalDecision, evaluated_header), 2);
+
+        assert_eq!(size_of::<FFIStreamingInput>(), 32);
+        assert_eq!(align_of::<FFIStreamingInput>(), 8);
+        assert_eq!(offset_of!(FFIStreamingInput, policy), 0);
+        assert_eq!(offset_of!(FFIStreamingInput, engine), 1);
+        assert_eq!(offset_of!(FFIStreamingInput, cache_validation), 2);
+        assert_eq!(offset_of!(FFIStreamingInput, is_head), 3);
+        assert_eq!(offset_of!(FFIStreamingInput, is_not_modified), 4);
+        assert_eq!(offset_of!(FFIStreamingInput, has_range), 5);
+        assert_eq!(offset_of!(FFIStreamingInput, no_transform), 6);
+        assert_eq!(offset_of!(FFIStreamingInput, has_content_encoding), 7);
+        assert_eq!(offset_of!(FFIStreamingInput, content_length_known), 8);
+        assert_eq!(offset_of!(FFIStreamingInput, content_length), 16);
+        assert_eq!(offset_of!(FFIStreamingInput, streaming_threshold), 24);
+
+        assert_eq!(size_of::<FFIStreamingDecision>(), 2);
+        assert_eq!(align_of::<FFIStreamingDecision>(), 1);
+        assert_eq!(offset_of!(FFIStreamingDecision, eligible), 0);
+        assert_eq!(offset_of!(FFIStreamingDecision, block_reason), 1);
+    }
+
+    #[test]
+    fn test_spec_50_profile_config_abi_layouts() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIConflictLevel>(), 1);
+        assert_eq!(align_of::<FFIConflictLevel>(), 1);
+
+        assert_eq!(size_of::<FFIConflict>(), 24);
+        assert_eq!(align_of::<FFIConflict>(), 8);
+        assert_eq!(offset_of!(FFIConflict, level), 0);
+        assert_eq!(offset_of!(FFIConflict, message), 8);
+        assert_eq!(offset_of!(FFIConflict, message_len), 16);
+
+        assert_eq!(size_of::<FFIConflictList>(), 16);
+        assert_eq!(align_of::<FFIConflictList>(), 8);
+        assert_eq!(offset_of!(FFIConflictList, conflicts), 0);
+        assert_eq!(offset_of!(FFIConflictList, count), 8);
+
+        assert_eq!(size_of::<FFIExplicitConfig>(), 40);
+        assert_eq!(align_of::<FFIExplicitConfig>(), 8);
+        assert_eq!(offset_of!(FFIExplicitConfig, accept), 0);
+        assert_eq!(offset_of!(FFIExplicitConfig, cache_validation), 1);
+        assert_eq!(offset_of!(FFIExplicitConfig, streaming), 2);
+        assert_eq!(offset_of!(FFIExplicitConfig, limits_memory_bytes), 8);
+        assert_eq!(offset_of!(FFIExplicitConfig, limits_timeout_ms), 16);
+        assert_eq!(
+            offset_of!(FFIExplicitConfig, limits_streaming_buffer_bytes),
+            24
+        );
+        assert_eq!(offset_of!(FFIExplicitConfig, limits_max_inflight), 32);
+        assert_eq!(offset_of!(FFIExplicitConfig, error_policy), 36);
+        assert_eq!(offset_of!(FFIExplicitConfig, diagnostics), 37);
+
+        assert_eq!(size_of::<FFIEffectiveConfig>(), 40);
+        assert_eq!(align_of::<FFIEffectiveConfig>(), 8);
+        assert_eq!(offset_of!(FFIEffectiveConfig, accept), 0);
+        assert_eq!(offset_of!(FFIEffectiveConfig, cache_validation), 1);
+        assert_eq!(offset_of!(FFIEffectiveConfig, streaming), 2);
+        assert_eq!(offset_of!(FFIEffectiveConfig, limits_memory_bytes), 8);
+        assert_eq!(offset_of!(FFIEffectiveConfig, limits_timeout_ms), 16);
+        assert_eq!(
+            offset_of!(FFIEffectiveConfig, limits_streaming_buffer_bytes),
+            24
+        );
+        assert_eq!(offset_of!(FFIEffectiveConfig, limits_max_inflight), 32);
+        assert_eq!(offset_of!(FFIEffectiveConfig, error_policy), 36);
+        assert_eq!(offset_of!(FFIEffectiveConfig, diagnostics), 37);
+    }
+
+    #[test]
+    fn test_spec_51_error_policy_abi_layouts() {
+        use std::mem::{align_of, offset_of, size_of};
+
+        assert_eq!(size_of::<FFIErrorPolicy>(), 4);
+        assert_eq!(align_of::<FFIErrorPolicy>(), 2);
+        assert_eq!(offset_of!(FFIErrorPolicy, kind), 0);
+        assert_eq!(offset_of!(FFIErrorPolicy, status_code), 2);
+
+        assert_eq!(size_of::<FFIErrorBehavior>(), 6);
+        assert_eq!(align_of::<FFIErrorBehavior>(), 2);
+        assert_eq!(offset_of!(FFIErrorBehavior, kind), 0);
+        assert_eq!(offset_of!(FFIErrorBehavior, status_code), 2);
+        assert_eq!(offset_of!(FFIErrorBehavior, forced), 4);
     }
 
     #[test]

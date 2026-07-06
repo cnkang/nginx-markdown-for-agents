@@ -286,4 +286,271 @@ _Static_assert(offsetof(FFIDecompResult, output_len) == 8,
 _Static_assert(offsetof(FFIDecompResult, error_category) == 16,
     "FFIDecompResult.error_category offset must be 16");
 
+/* ----------------------------------------------------------------
+ * FFIBaseUrlInput layout (96 bytes on LP64) - spec 47.
+ *   source_ip             : *const u8                     offset  0
+ *   source_ip_len         : usize                         offset  8
+ *   trusted               : *const MarkdownTrustedProxies offset 16
+ *   forwarded             : *const u8                     offset 24
+ *   forwarded_len         : usize                         offset 32
+ *   x_forwarded_proto     : *const u8                     offset 40
+ *   x_forwarded_proto_len : usize                         offset 48
+ *   x_forwarded_host      : *const u8                     offset 56
+ *   x_forwarded_host_len  : usize                         offset 64
+ *   host                  : *const u8                     offset 72
+ *   host_len              : usize                         offset 80
+ *   is_unix_socket        : u8                            offset 88
+ *   trusted_configured    : u8                            offset 89
+ *   (padding)                                             offset 90..95
+ * Total: 96 bytes, align 8
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIBaseUrlInput) == 96,
+    "FFIBaseUrlInput size must match Rust (96 bytes on 64-bit)");
+_Static_assert(offsetof(FFIBaseUrlInput, source_ip) == 0,
+    "FFIBaseUrlInput.source_ip offset must be 0");
+_Static_assert(offsetof(FFIBaseUrlInput, source_ip_len) == 8,
+    "FFIBaseUrlInput.source_ip_len offset must be 8");
+_Static_assert(offsetof(FFIBaseUrlInput, trusted) == 16,
+    "FFIBaseUrlInput.trusted offset must be 16");
+_Static_assert(offsetof(FFIBaseUrlInput, forwarded) == 24,
+    "FFIBaseUrlInput.forwarded offset must be 24");
+_Static_assert(offsetof(FFIBaseUrlInput, forwarded_len) == 32,
+    "FFIBaseUrlInput.forwarded_len offset must be 32");
+_Static_assert(offsetof(FFIBaseUrlInput, x_forwarded_proto) == 40,
+    "FFIBaseUrlInput.x_forwarded_proto offset must be 40");
+_Static_assert(offsetof(FFIBaseUrlInput, x_forwarded_proto_len) == 48,
+    "FFIBaseUrlInput.x_forwarded_proto_len offset must be 48");
+_Static_assert(offsetof(FFIBaseUrlInput, x_forwarded_host) == 56,
+    "FFIBaseUrlInput.x_forwarded_host offset must be 56");
+_Static_assert(offsetof(FFIBaseUrlInput, x_forwarded_host_len) == 64,
+    "FFIBaseUrlInput.x_forwarded_host_len offset must be 64");
+_Static_assert(offsetof(FFIBaseUrlInput, host) == 72,
+    "FFIBaseUrlInput.host offset must be 72");
+_Static_assert(offsetof(FFIBaseUrlInput, host_len) == 80,
+    "FFIBaseUrlInput.host_len offset must be 80");
+_Static_assert(offsetof(FFIBaseUrlInput, is_unix_socket) == 88,
+    "FFIBaseUrlInput.is_unix_socket offset must be 88");
+_Static_assert(offsetof(FFIBaseUrlInput, trusted_configured) == 89,
+    "FFIBaseUrlInput.trusted_configured offset must be 89");
+
+/* ----------------------------------------------------------------
+ * FFIBaseUrlDecision layout (16 bytes on LP64) - spec 47.
+ *   base_url_len : usize  offset 0
+ *   reason       : u8     offset 8
+ *   source       : u8     offset 9
+ *   (padding)            offset 10..15
+ * Total: 16 bytes, align 8
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIBaseUrlDecision) == 16,
+    "FFIBaseUrlDecision size must match Rust (16 bytes on 64-bit)");
+_Static_assert(offsetof(FFIBaseUrlDecision, base_url_len) == 0,
+    "FFIBaseUrlDecision.base_url_len offset must be 0");
+_Static_assert(offsetof(FFIBaseUrlDecision, reason) == 8,
+    "FFIBaseUrlDecision.reason offset must be 8");
+_Static_assert(offsetof(FFIBaseUrlDecision, source) == 9,
+    "FFIBaseUrlDecision.source offset must be 9");
+
+/* ----------------------------------------------------------------
+ * FFIStr layout (16 bytes on LP64) - shared borrowed string.
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIStr) == 16,
+    "FFIStr size must match Rust (16 bytes on 64-bit)");
+_Static_assert(offsetof(FFIStr, data) == 0,
+    "FFIStr.data offset must be 0");
+_Static_assert(offsetof(FFIStr, len) == 8,
+    "FFIStr.len offset must be 8");
+
+/* ----------------------------------------------------------------
+ * FFIEligibilityInput layout (72 bytes on LP64) - spec 49.
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIEligibilityInput) == 72,
+    "FFIEligibilityInput size must match Rust (72 bytes on 64-bit)");
+_Static_assert(offsetof(FFIEligibilityInput, filter_enabled) == 0,
+    "FFIEligibilityInput.filter_enabled offset must be 0");
+_Static_assert(offsetof(FFIEligibilityInput, method_get_or_head) == 1,
+    "FFIEligibilityInput.method_get_or_head offset must be 1");
+_Static_assert(offsetof(FFIEligibilityInput, has_range_header) == 2,
+    "FFIEligibilityInput.has_range_header offset must be 2");
+_Static_assert(offsetof(FFIEligibilityInput, status) == 4,
+    "FFIEligibilityInput.status offset must be 4");
+_Static_assert(offsetof(FFIEligibilityInput, content_type) == 8,
+    "FFIEligibilityInput.content_type offset must be 8");
+_Static_assert(offsetof(FFIEligibilityInput, content_type_len) == 16,
+    "FFIEligibilityInput.content_type_len offset must be 16");
+_Static_assert(offsetof(FFIEligibilityInput, content_types) == 24,
+    "FFIEligibilityInput.content_types offset must be 24");
+_Static_assert(offsetof(FFIEligibilityInput, content_types_count) == 32,
+    "FFIEligibilityInput.content_types_count offset must be 32");
+_Static_assert(offsetof(FFIEligibilityInput, stream_types) == 40,
+    "FFIEligibilityInput.stream_types offset must be 40");
+_Static_assert(offsetof(FFIEligibilityInput, stream_types_count) == 48,
+    "FFIEligibilityInput.stream_types_count offset must be 48");
+_Static_assert(offsetof(FFIEligibilityInput, content_length) == 56,
+    "FFIEligibilityInput.content_length offset must be 56");
+_Static_assert(offsetof(FFIEligibilityInput, body_limit) == 64,
+    "FFIEligibilityInput.body_limit offset must be 64");
+
+/* ----------------------------------------------------------------
+ * FFIConditionalInput layout (72 bytes on LP64) - spec 49.
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIConditionalInput) == 72,
+    "FFIConditionalInput size must match Rust (72 bytes on 64-bit)");
+_Static_assert(offsetof(FFIConditionalInput, cache_validation) == 0,
+    "FFIConditionalInput.cache_validation offset must be 0");
+_Static_assert(offsetof(FFIConditionalInput, has_range) == 1,
+    "FFIConditionalInput.has_range offset must be 1");
+_Static_assert(offsetof(FFIConditionalInput, no_transform) == 2,
+    "FFIConditionalInput.no_transform offset must be 2");
+_Static_assert(offsetof(FFIConditionalInput, if_none_match) == 8,
+    "FFIConditionalInput.if_none_match offset must be 8");
+_Static_assert(offsetof(FFIConditionalInput, if_none_match_len) == 16,
+    "FFIConditionalInput.if_none_match_len offset must be 16");
+_Static_assert(offsetof(FFIConditionalInput, entity_etag) == 24,
+    "FFIConditionalInput.entity_etag offset must be 24");
+_Static_assert(offsetof(FFIConditionalInput, entity_etag_len) == 32,
+    "FFIConditionalInput.entity_etag_len offset must be 32");
+_Static_assert(offsetof(FFIConditionalInput, if_modified_since) == 40,
+    "FFIConditionalInput.if_modified_since offset must be 40");
+_Static_assert(offsetof(FFIConditionalInput, if_modified_since_len) == 48,
+    "FFIConditionalInput.if_modified_since_len offset must be 48");
+_Static_assert(offsetof(FFIConditionalInput, last_modified) == 56,
+    "FFIConditionalInput.last_modified offset must be 56");
+_Static_assert(offsetof(FFIConditionalInput, last_modified_len) == 64,
+    "FFIConditionalInput.last_modified_len offset must be 64");
+
+/* ----------------------------------------------------------------
+ * FFIConditionalDecision layout (3 bytes) - spec 49.
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIConditionalDecision) == 3,
+    "FFIConditionalDecision size must match Rust (3 bytes)");
+_Static_assert(offsetof(FFIConditionalDecision, outcome) == 0,
+    "FFIConditionalDecision.outcome offset must be 0");
+_Static_assert(offsetof(FFIConditionalDecision, reason) == 1,
+    "FFIConditionalDecision.reason offset must be 1");
+_Static_assert(offsetof(FFIConditionalDecision, evaluated_header) == 2,
+    "FFIConditionalDecision.evaluated_header offset must be 2");
+
+/* ----------------------------------------------------------------
+ * FFIStreamingInput layout (32 bytes on LP64) - spec 49.
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIStreamingInput) == 32,
+    "FFIStreamingInput size must match Rust (32 bytes on 64-bit)");
+_Static_assert(offsetof(FFIStreamingInput, policy) == 0,
+    "FFIStreamingInput.policy offset must be 0");
+_Static_assert(offsetof(FFIStreamingInput, engine) == 1,
+    "FFIStreamingInput.engine offset must be 1");
+_Static_assert(offsetof(FFIStreamingInput, cache_validation) == 2,
+    "FFIStreamingInput.cache_validation offset must be 2");
+_Static_assert(offsetof(FFIStreamingInput, is_head) == 3,
+    "FFIStreamingInput.is_head offset must be 3");
+_Static_assert(offsetof(FFIStreamingInput, is_not_modified) == 4,
+    "FFIStreamingInput.is_not_modified offset must be 4");
+_Static_assert(offsetof(FFIStreamingInput, has_range) == 5,
+    "FFIStreamingInput.has_range offset must be 5");
+_Static_assert(offsetof(FFIStreamingInput, no_transform) == 6,
+    "FFIStreamingInput.no_transform offset must be 6");
+_Static_assert(offsetof(FFIStreamingInput, has_content_encoding) == 7,
+    "FFIStreamingInput.has_content_encoding offset must be 7");
+_Static_assert(offsetof(FFIStreamingInput, content_length_known) == 8,
+    "FFIStreamingInput.content_length_known offset must be 8");
+_Static_assert(offsetof(FFIStreamingInput, content_length) == 16,
+    "FFIStreamingInput.content_length offset must be 16");
+_Static_assert(offsetof(FFIStreamingInput, streaming_threshold) == 24,
+    "FFIStreamingInput.streaming_threshold offset must be 24");
+
+/* ----------------------------------------------------------------
+ * FFIStreamingDecision layout (2 bytes) - spec 49.
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIStreamingDecision) == 2,
+    "FFIStreamingDecision size must match Rust (2 bytes)");
+_Static_assert(offsetof(FFIStreamingDecision, eligible) == 0,
+    "FFIStreamingDecision.eligible offset must be 0");
+_Static_assert(offsetof(FFIStreamingDecision, block_reason) == 1,
+    "FFIStreamingDecision.block_reason offset must be 1");
+
+/* ----------------------------------------------------------------
+ * FFIConflict and FFIConflictList layouts - spec 50.
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIConflictLevel) == 1,
+    "FFIConflictLevel size must match Rust (1 byte)");
+_Static_assert(sizeof(FFIConflict) == 24,
+    "FFIConflict size must match Rust (24 bytes on 64-bit)");
+_Static_assert(offsetof(FFIConflict, level) == 0,
+    "FFIConflict.level offset must be 0");
+_Static_assert(offsetof(FFIConflict, message) == 8,
+    "FFIConflict.message offset must be 8");
+_Static_assert(offsetof(FFIConflict, message_len) == 16,
+    "FFIConflict.message_len offset must be 16");
+_Static_assert(sizeof(FFIConflictList) == 16,
+    "FFIConflictList size must match Rust (16 bytes on 64-bit)");
+_Static_assert(offsetof(FFIConflictList, conflicts) == 0,
+    "FFIConflictList.conflicts offset must be 0");
+_Static_assert(offsetof(FFIConflictList, count) == 8,
+    "FFIConflictList.count offset must be 8");
+
+/* ----------------------------------------------------------------
+ * FFIExplicitConfig and FFIEffectiveConfig layouts - spec 50.
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIExplicitConfig) == 40,
+    "FFIExplicitConfig size must match Rust (40 bytes on 64-bit)");
+_Static_assert(offsetof(FFIExplicitConfig, accept) == 0,
+    "FFIExplicitConfig.accept offset must be 0");
+_Static_assert(offsetof(FFIExplicitConfig, cache_validation) == 1,
+    "FFIExplicitConfig.cache_validation offset must be 1");
+_Static_assert(offsetof(FFIExplicitConfig, streaming) == 2,
+    "FFIExplicitConfig.streaming offset must be 2");
+_Static_assert(offsetof(FFIExplicitConfig, limits_memory_bytes) == 8,
+    "FFIExplicitConfig.limits_memory_bytes offset must be 8");
+_Static_assert(offsetof(FFIExplicitConfig, limits_timeout_ms) == 16,
+    "FFIExplicitConfig.limits_timeout_ms offset must be 16");
+_Static_assert(
+    offsetof(FFIExplicitConfig, limits_streaming_buffer_bytes) == 24,
+    "FFIExplicitConfig.limits_streaming_buffer_bytes offset must be 24");
+_Static_assert(offsetof(FFIExplicitConfig, limits_max_inflight) == 32,
+    "FFIExplicitConfig.limits_max_inflight offset must be 32");
+_Static_assert(offsetof(FFIExplicitConfig, error_policy) == 36,
+    "FFIExplicitConfig.error_policy offset must be 36");
+_Static_assert(offsetof(FFIExplicitConfig, diagnostics) == 37,
+    "FFIExplicitConfig.diagnostics offset must be 37");
+
+_Static_assert(sizeof(FFIEffectiveConfig) == 40,
+    "FFIEffectiveConfig size must match Rust (40 bytes on 64-bit)");
+_Static_assert(offsetof(FFIEffectiveConfig, accept) == 0,
+    "FFIEffectiveConfig.accept offset must be 0");
+_Static_assert(offsetof(FFIEffectiveConfig, cache_validation) == 1,
+    "FFIEffectiveConfig.cache_validation offset must be 1");
+_Static_assert(offsetof(FFIEffectiveConfig, streaming) == 2,
+    "FFIEffectiveConfig.streaming offset must be 2");
+_Static_assert(offsetof(FFIEffectiveConfig, limits_memory_bytes) == 8,
+    "FFIEffectiveConfig.limits_memory_bytes offset must be 8");
+_Static_assert(offsetof(FFIEffectiveConfig, limits_timeout_ms) == 16,
+    "FFIEffectiveConfig.limits_timeout_ms offset must be 16");
+_Static_assert(
+    offsetof(FFIEffectiveConfig, limits_streaming_buffer_bytes) == 24,
+    "FFIEffectiveConfig.limits_streaming_buffer_bytes offset must be 24");
+_Static_assert(offsetof(FFIEffectiveConfig, limits_max_inflight) == 32,
+    "FFIEffectiveConfig.limits_max_inflight offset must be 32");
+_Static_assert(offsetof(FFIEffectiveConfig, error_policy) == 36,
+    "FFIEffectiveConfig.error_policy offset must be 36");
+_Static_assert(offsetof(FFIEffectiveConfig, diagnostics) == 37,
+    "FFIEffectiveConfig.diagnostics offset must be 37");
+
+/* ----------------------------------------------------------------
+ * FFIErrorPolicy and FFIErrorBehavior layouts - spec 51.
+ * ---------------------------------------------------------------- */
+_Static_assert(sizeof(FFIErrorPolicy) == 4,
+    "FFIErrorPolicy size must match Rust (4 bytes)");
+_Static_assert(offsetof(FFIErrorPolicy, kind) == 0,
+    "FFIErrorPolicy.kind offset must be 0");
+_Static_assert(offsetof(FFIErrorPolicy, status_code) == 2,
+    "FFIErrorPolicy.status_code offset must be 2");
+_Static_assert(sizeof(FFIErrorBehavior) == 6,
+    "FFIErrorBehavior size must match Rust (6 bytes)");
+_Static_assert(offsetof(FFIErrorBehavior, kind) == 0,
+    "FFIErrorBehavior.kind offset must be 0");
+_Static_assert(offsetof(FFIErrorBehavior, status_code) == 2,
+    "FFIErrorBehavior.status_code offset must be 2");
+_Static_assert(offsetof(FFIErrorBehavior, forced) == 4,
+    "FFIErrorBehavior.forced offset must be 4");
+
 #endif /* NGX_HTTP_MARKDOWN_FFI_LAYOUT_CHECK_H */

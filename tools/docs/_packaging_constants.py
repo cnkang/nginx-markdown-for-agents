@@ -89,9 +89,8 @@ ENVIRONMENTS: list[tuple[str, str]] = [
 
 DEMO_DIRECTIVES_REQUIRING_COMMENTS: list[str] = [
     "markdown_filter",
-    "markdown_memory_budget",
-    "markdown_timeout",
-    "markdown_on_error",
+    "markdown_limits",
+    "markdown_error_policy",
 ]
 
 # ---------------------------------------------------------------------------

@@ -20,22 +20,6 @@
  */
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-/*
- * Enum table for markdown_streaming_on_error directive.
- *
- * Used by ngx_conf_set_enum_slot to validate and map string
- * values to integer constants.  Invalid values are automatically
- * rejected by the NGINX configuration parser.
- */
-static ngx_conf_enum_t
-    ngx_http_markdown_streaming_on_error_enum[] = {
-    { ngx_string("pass"),
-      NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS },
-    { ngx_string("reject"),
-      NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT },
-    { ngx_null_string, 0 }
-};
-
 static ngx_conf_enum_t
     ngx_http_markdown_streaming_engine_enum[] = {
     { ngx_string("off"),
@@ -57,6 +41,71 @@ static ngx_conf_enum_t
     { ngx_string("meta-llama"),        4 },
     { ngx_null_string, 0 }
 };
+
+/*
+ * Enum table for markdown_accept directive (Config V2, 0.9.0).
+ *
+ * Replaces the removed markdown_on_wildcard on|off directive.
+ * Invalid values are rejected by ngx_conf_set_enum_slot.
+ */
+static ngx_conf_enum_t
+    ngx_http_markdown_accept_enum[] = {
+    { ngx_string("strict"),    NGX_HTTP_MARKDOWN_ACCEPT_STRICT },
+    { ngx_string("wildcard"),  NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD },
+    { ngx_string("force"),     NGX_HTTP_MARKDOWN_ACCEPT_FORCE },
+    { ngx_null_string, 0 }
+};
+
+static u_char ngx_http_markdown_hint_limits_memory[] =
+    "use \"markdown_limits memory=<size>\" instead";
+static u_char ngx_http_markdown_hint_limits_timeout[] =
+    "use \"markdown_limits timeout=<time>\" instead";
+static u_char ngx_http_markdown_hint_limits_streaming_buffer[] =
+    "use \"markdown_limits streaming_buffer=<size>\" instead";
+static u_char ngx_http_markdown_hint_error_policy[] =
+    "use \"markdown_error_policy pass|fail_closed|status <code>\" instead";
+static u_char ngx_http_markdown_hint_accept[] =
+    "use \"markdown_accept strict|wildcard|force\" instead";
+static u_char ngx_http_markdown_hint_cache_validation[] =
+    "use \"markdown_cache_validation off|ims_only|full\" instead";
+static u_char ngx_http_markdown_hint_trusted_proxies[] =
+    "use \"markdown_trusted_proxies <CIDR>...\" instead";
+static u_char ngx_http_markdown_hint_removed_no_replacement[] =
+    "it has been removed with no direct replacement";
+
+
+/*
+ * Reject-only setter for legacy directives removed in 0.9.0 (Config V2).
+ *
+ * 0.9.0 is a breaking release with no alias compatibility.  Removed
+ * directives keep a parser entry whose only behavior is to fail
+ * "nginx -t" with an actionable migration hint, because NGINX's own
+ * unknown-directive handling cannot point the operator at the
+ * replacement.  The migration hint is carried in the ngx_command_t.post
+ * field as a NUL-terminated C string.
+ *
+ * Parameters:
+ *   cf   - configuration context
+ *   cmd  - directive definition (cmd->name = legacy name,
+ *          cmd->post = migration hint string)
+ *   conf - unused
+ *
+ * Returns:
+ *   Always NGX_CONF_ERROR.
+ */
+static char *
+ngx_http_markdown_reject_removed_directive(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf) /* NOSONAR: cmd/conf must match ngx_command_t.set signature */
+{
+    (void) conf;
+
+    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+        "\"%V\" directive has been removed in 0.9.0; %s "
+        "(see docs/guides/MIGRATION-0.9.md)",
+        &cmd->name, (char *) cmd->post);
+
+    return NGX_CONF_ERROR;
+}
 
 
 /*
@@ -145,64 +194,144 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_max_size <size>
+     * markdown_profile strict_cache|balanced|streaming_first   (0.9.0, spec 50)
      *
-     * Maximum response size to attempt conversion (e.g., 10m, 5k).
-     * Responses larger than this will not be converted.
-     * Default: 10m (10 megabytes)
+     * Selects a production-profile preset providing tuned Config V2
+     * defaults for a common operational scenario.  The profile only
+     * supplies defaults; explicit directives override profile values.
+     *
+     *   strict_cache    - CDN / caching proxy (full ETag, no streaming)
+     *   balanced        - general-purpose (IMS-only, auto streaming)
+     *   streaming_first - AI agent workloads (no cache, forced streaming)
+     *
+     * Default: none (built-in Config V2 defaults apply)
      * Context: http, server, location
      *
      * Example:
-     *   markdown_max_size 5m;
+     *   markdown_profile balanced;
+     */
+    {
+        ngx_string("markdown_profile"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF
+            |NGX_CONF_TAKE1,
+        ngx_http_markdown_set_profile,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
+     * markdown_limits memory=<size> timeout=<time>
+     *                 streaming_buffer=<size> max_inflight=<N>   (Config V2)
+     *
+     * Unified limits block. Consolidates the removed markdown_max_size,
+     * markdown_timeout, and markdown_streaming_budget directives. Any subset
+     * of keys may be given; unspecified keys inherit (per-key inheritance).
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_limits memory=8m timeout=2s streaming_buffer=256k max_inflight=64;
+     */
+    {
+        ngx_string("markdown_limits"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+        ngx_http_markdown_limits,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        NULL
+    },
+
+    /*
+     * markdown_max_size  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * Migrated to markdown_limits memory=<size>.
      */
     {
         ngx_string("markdown_max_size"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_size_slot,
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, max_size),
-        NULL
+        0,
+        ngx_http_markdown_hint_limits_memory
     },
 
     /*
-     * markdown_timeout <time>
+     * markdown_timeout  (REMOVED in 0.9.0 - reject-only stub)
      *
-     * Maximum time to spend on conversion (e.g., 5s, 1000ms).
-     * Conversions exceeding this timeout will be aborted.
-     * Default: 5s (5 seconds)
-     * Context: http, server, location
-     *
-     * Example:
-     *   markdown_timeout 3s;
+     * Migrated to markdown_limits timeout=<time>.
      */
     {
         ngx_string("markdown_timeout"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_msec_slot,
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, timeout),
-        NULL
+        0,
+        ngx_http_markdown_hint_limits_timeout
     },
 
     /*
-     * markdown_on_error pass|reject
+     * markdown_streaming_budget  (REMOVED in 0.9.0 - reject-only stub)
      *
-     * Failure strategy when conversion fails:
-     * - pass: Return original HTML (fail-open, default)
-     * - reject: Return 502 Bad Gateway (fail-closed)
+     * Migrated to markdown_limits streaming_buffer=<size>.
+     */
+    {
+        ngx_string("markdown_streaming_budget"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        ngx_http_markdown_hint_limits_streaming_buffer
+    },
+
+    /*
+     * markdown_error_policy pass|fail_closed|status <code>   (Config V2, 0.9.0)
+     *
+     * Unified pre-commit error policy. Consolidates the removed
+     * markdown_on_error and markdown_streaming_on_error directives.
+     *   pass        - return original content on pre-commit error (fail-open)
+     *   fail_closed - return 502 on pre-commit error
+     *   status <c>  - return status code c (429, 502, or 503)
      * Default: pass
      * Context: http, server, location
      *
      * Example:
-     *   markdown_on_error reject;
+     *   markdown_error_policy status 503;
      */
     {
-        ngx_string("markdown_on_error"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_http_markdown_on_error,
+        ngx_string("markdown_error_policy"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE12,
+        ngx_http_markdown_error_policy,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
         NULL
+    },
+
+    /*
+     * markdown_on_error  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * Migrated to markdown_error_policy pass|fail_closed|status <code>.
+     */
+    {
+        ngx_string("markdown_on_error"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        ngx_http_markdown_hint_error_policy
+    },
+
+    /*
+     * markdown_streaming_on_error  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * Migrated to markdown_error_policy pass|fail_closed|status <code>.
+     */
+    {
+        ngx_string("markdown_streaming_on_error"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        ngx_http_markdown_hint_error_policy
     },
 
     /*
@@ -268,22 +397,40 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_on_wildcard on|off
+     * markdown_accept strict|wildcard|force   (Config V2, 0.9.0)
      *
-     * Convert when Accept header contains wildcards (star/slash-star or text slash star).
-     * Default: off (only convert on explicit text/markdown)
+     * Accept-header negotiation policy. Replaces the removed
+     * markdown_on_wildcard on|off directive.
+     *   strict   - convert only on an explicit text/markdown match (default)
+     *   wildcard - also convert on wildcard Accept (equivalent to the old
+     *              "markdown_on_wildcard on")
+     *   force    - convert regardless of the Accept header (dangerous)
      * Context: http, server, location
      *
      * Example:
-     *   markdown_on_wildcard on;
+     *   markdown_accept wildcard;
+     */
+    {
+        ngx_string("markdown_accept"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_conf_set_enum_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, accept_policy),
+        &ngx_http_markdown_accept_enum
+    },
+
+    /*
+     * markdown_on_wildcard  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * Migrated to markdown_accept strict|wildcard|force.
      */
     {
         ngx_string("markdown_on_wildcard"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, on_wildcard),
-        NULL
+        0,
+        ngx_http_markdown_hint_accept
     },
 
     /*
@@ -328,45 +475,93 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_etag on|off
+     * markdown_cache_validation off|ims_only|full   (Config V2, 0.9.0)
      *
-     * Generate ETag header for Markdown variants.
-     * ETags are computed from the Markdown output for proper caching.
-     * Default: on
+     * Cache-validation policy. Consolidates the removed markdown_etag and
+     * markdown_conditional_requests directives.
+     *   off      - no ETag, no conditional request handling
+     *   ims_only - no ETag, If-Modified-Since only (default)
+     *   full     - transformed ETag + If-None-Match + If-Modified-Since
      * Context: http, server, location
      *
      * Example:
-     *   markdown_etag off;
+     *   markdown_cache_validation full;
      */
     {
-        ngx_string("markdown_etag"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
+        ngx_string("markdown_cache_validation"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+        ngx_http_markdown_cache_validation,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, policy.generate_etag),
+        0,
         NULL
     },
 
     /*
-     * markdown_conditional_requests full_support|if_modified_since_only|disabled
+     * markdown_streaming off|auto|force   (Config V2, 0.9.0)
      *
-     * Conditional request support mode:
-     * - full_support: Support If-None-Match and If-Modified-Since (default)
-     * - if_modified_since_only: Only support If-Modified-Since (performance)
-     * - disabled: No conditional request support for Markdown variants
-     * Default: full_support
-     * Context: http, server, location
+     * Streaming *enablement* policy.  Distinct from
+     * markdown_streaming_engine (the implementation selector).
+     *
+     *   off   - never stream
+     *   auto  - stream large responses, full-buffer small ones (default)
+     *   force - always stream (subject to runtime hard blocks)
+     *
+     * Conflict (spec 49): markdown_cache_validation full + force => error;
+     * full + auto => warning (runtime blocks streaming, falls back to
+     * full-buffer).  Enforced in merge_conf.
      *
      * Example:
-     *   markdown_conditional_requests if_modified_since_only;
+     *   markdown_streaming auto;
      */
     {
-        ngx_string("markdown_conditional_requests"),
+        ngx_string("markdown_streaming"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_http_markdown_conditional_requests,
+        ngx_http_markdown_streaming,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
         NULL
+    },
+
+    /*
+     * markdown_etag  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * Migrated to markdown_cache_validation off|ims_only|full.
+     */
+    {
+        ngx_string("markdown_etag"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        ngx_http_markdown_hint_cache_validation
+    },
+
+    /*
+     * markdown_etag_policy  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * Migrated to markdown_cache_validation off|ims_only|full.
+     */
+    {
+        ngx_string("markdown_etag_policy"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        ngx_http_markdown_hint_cache_validation
+    },
+
+    /*
+     * markdown_conditional_requests  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * Migrated to markdown_cache_validation off|ims_only|full.
+     */
+    {
+        ngx_string("markdown_conditional_requests"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        ngx_http_markdown_hint_cache_validation
     },
 
     /*
@@ -452,55 +647,73 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_trust_forwarded_headers on|off
+     * markdown_trusted_proxies <CIDR>... | off   (Config V2, 0.9.0, spec 47)
      *
-     * Controls whether X-Forwarded-Proto and X-Forwarded-Host headers
-     * are used for base URL construction in Markdown output.
+     * CIDR-based trusted-proxy list controlling whether forwarded headers
+     * (Forwarded / X-Forwarded-Proto / X-Forwarded-Host) are honored when
+     * deriving the base URL for relative-link resolution.  Replaces the
+     * removed boolean markdown_trust_forwarded_headers trust model.
      *
-     * Security: When off (default), only the NGINX request schema and
-     * server header are used, preventing client-supplied header injection
-     * that could poison relative URLs in the Markdown output.
-     *
-     * Enable this only when NGINX sits behind a trusted reverse proxy
-     * that sets and overwrites these headers. The proxy must strip
-     * X-Forwarded-* headers from untrusted clients.
-     *
-     * Default: off
-     * Context: http, server, location
+     * Context: http only.  server/location context is rejected with a
+     * migration hint to avoid per-location trust bypass.  CIDRs are
+     * validated at config time (IPv4 + IPv6); "off" disables trust entirely.
      *
      * Example:
-     *   # Only enable behind a trusted reverse proxy
-     *   markdown_trust_forwarded_headers on;
+     *   markdown_trusted_proxies 10.0.0.0/8 2001:db8::/32;
+     *   markdown_trusted_proxies off;
      */
     {
-        ngx_string("markdown_trust_forwarded_headers"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, ops.trust_forwarded_headers),
+        ngx_string("markdown_trusted_proxies"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+        ngx_http_markdown_trusted_proxies,
+        NGX_HTTP_MAIN_CONF_OFFSET,
+        0,
         NULL
     },
 
     /*
-     * markdown_large_body_threshold off|<size>
+     * markdown_trust_forwarded_headers  (REMOVED in 0.9.0 - reject-only stub)
      *
-     * Threshold for routing responses to the incremental
-     * processing path. Responses with Content-Length at or
-     * above this value use the incremental path.
-     * Default: off (all responses use full-buffer path)
-     * Context: http, server, location
+     * The boolean trust model is replaced by CIDR-based
+     * markdown_trusted_proxies (spec 47).  No alias, no fallback behavior.
+     */
+    {
+        ngx_string("markdown_trust_forwarded_headers"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        ngx_http_markdown_hint_trusted_proxies
+    },
+
+    /*
+     * markdown_forwarded_headers  (REMOVED in 0.9.0 - reject-only stub)
      *
-     * Example:
-     *   markdown_large_body_threshold 512k;
+     * Replaced by CIDR-based markdown_trusted_proxies (spec 47).
+     */
+    {
+        ngx_string("markdown_forwarded_headers"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        ngx_http_markdown_hint_trusted_proxies
+    },
+
+    /*
+     * markdown_large_body_threshold  (REMOVED in 0.9.0 - reject-only stub)
+     *
+     * No direct Config V2 equivalent; the incremental-path threshold knob is
+     * retired. See docs/guides/MIGRATION-0.9.md.
      */
     {
         ngx_string("markdown_large_body_threshold"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_http_markdown_large_body_threshold,
+            |NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        NULL
+        ngx_http_markdown_hint_removed_no_replacement
     },
 
     /*
@@ -652,53 +865,6 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_streaming_budget <size>
-     *
-     * Memory budget for streaming conversion (passed to Rust).
-     * Default: 2m (2 megabytes)
-     * Context: http, server, location
-     *
-     * Example:
-     *   markdown_streaming_budget 4m;
-     */
-    {
-        ngx_string("markdown_streaming_budget"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_size_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, stream.budget),
-        NULL
-    },
-
-    /*
-     * markdown_streaming_on_error pass|reject
-     *
-     * Failure strategy for streaming Pre_Commit_Phase errors:
-     * - pass: Fail-open, return original HTML (default)
-     * - reject: Fail-closed, return error
-     *
-     * This directive is independent of markdown_on_error which
-     * controls the full-buffer path.  Post_Commit_Phase errors
-     * are always fail-closed regardless of this setting.
-     *
-     * Default: pass
-     * Context: http, server, location
-     *
-     * Example:
-     *   markdown_streaming_on_error reject;
-     */
-    {
-        ngx_string("markdown_streaming_on_error"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_enum_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, stream.on_error),
-        &ngx_http_markdown_streaming_on_error_enum
-    },
-
-    /*
      * markdown_streaming_shadow on|off
      *
      * Enable shadow mode: run both full-buffer and streaming
@@ -793,30 +959,18 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_memory_budget <size>
+     * markdown_memory_budget  (REMOVED in 0.9.0 - reject-only stub)
      *
-     * Unified memory budget for both streaming and full-buffer
-     * conversion engines. When set, this value is used as the
-     * memory limit for both paths unless overridden by the
-     * path-specific directives (markdown_max_size for
-     * full-buffer, markdown_streaming_budget for streaming).
-     *
-     * Priority: explicit path-specific > unified > default
-     *
-     * Default: unset (use path-specific defaults)
-     * Context: http, server, location
-     *
-     * Example:
-     *   markdown_memory_budget 8m;
+     * Migrated to markdown_limits memory=<size>.
      */
     {
         ngx_string("markdown_memory_budget"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_size_slot,
+            |NGX_HTTP_LOC_CONF|NGX_CONF_ANY,
+        ngx_http_markdown_reject_removed_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, advanced.memory_budget),
-        NULL
+        0,
+        ngx_http_markdown_hint_limits_memory
     },
 
     /*

@@ -132,6 +132,11 @@ typedef struct { /* SONAR_NOTE */
         ngx_atomic_t  path_conversion_time_sum_ms;
         ngx_atomic_t  overflow_count;
     } per_path;
+    struct {
+        ngx_atomic_t  current;
+        ngx_atomic_t  high_watermark;
+        ngx_atomic_t  overload_total;
+    } inflight;
 } ngx_http_markdown_metrics_snapshot_t;
 
 /* ── ngx_slprintf stub ────────────────────────────────────────────── */
@@ -329,6 +334,9 @@ test_known_values(void)
     s.skips.status = 2;
     s.skips.content_type = 5;
     s.skips.accept = 1;
+    s.skips.no_accept = 4;
+    s.skips.conditional = 6;
+    s.skips.config = 7;
     s.conversion_latency.le_10ms = 80;
     s.conversion_latency.le_100ms = 50;
     s.conversion_latency.le_1000ms = 15;
@@ -415,13 +423,28 @@ test_known_values(void)
     TEST_ASSERT(
         contains((char *) buf,
             "nginx_markdown_skips_total"
-            "{reason=\"SKIP_METHOD\"} 3"),
-        "skips method should be 3");
+            "{reason=\"not_eligible\"} 10"),
+        "skips not_eligible should aggregate ineligible reasons");
     TEST_ASSERT(
         contains((char *) buf,
             "nginx_markdown_skips_total"
-            "{reason=\"SKIP_CONTENT_TYPE\"} 5"),
-        "skips content_type should be 5");
+            "{reason=\"skipped_accept\"} 1"),
+        "skips accept should be 1");
+    TEST_ASSERT(
+        contains((char *) buf,
+            "nginx_markdown_skips_total"
+            "{reason=\"skipped_no_accept\"} 4"),
+        "skips no_accept should be 4");
+    TEST_ASSERT(
+        contains((char *) buf,
+            "nginx_markdown_skips_total"
+            "{reason=\"skipped_conditional\"} 6"),
+        "skips conditional should be 6");
+    TEST_ASSERT(
+        contains((char *) buf,
+            "nginx_markdown_skips_total"
+            "{reason=\"disabled\"} 7"),
+        "skips disabled should be 7");
 
     TEST_PASS("Known-value snapshot renders correctly");
 }

@@ -64,6 +64,17 @@ ngx_http_markdown_metrics_write_prometheus(
     u_char *end,
     const ngx_http_markdown_metrics_snapshot_t *snapshot)
 {
+    ngx_atomic_uint_t  not_eligible;
+
+    not_eligible = snapshot->skips.method
+        + snapshot->skips.status
+        + snapshot->skips.content_type
+        + snapshot->skips.size
+        + snapshot->skips.streaming
+        + snapshot->skips.auth
+        + snapshot->skips.range
+        + snapshot->skips.compression_passthrough;
+
     /* requests_total */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_requests_total "
@@ -94,60 +105,39 @@ ngx_http_markdown_metrics_write_prometheus(
         snapshot->conversions_bypassed
             + snapshot->results.failopen_count);
 
-    /* skips_total{reason=...} */
+    /* skips_total{reason=...} — lowercase snake_case per schema v1 */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_skips_total "
         "Requests skipped by reason.\n"
         "# TYPE nginx_markdown_skips_total counter\n"
-        "nginx_markdown_skips_total{reason=\"SKIP_METHOD\"}"
-        " %uA\n"
-        "nginx_markdown_skips_total{reason=\"SKIP_STATUS\"}"
-        " %uA\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_CONTENT_TYPE\"} %uA\n"
-        "nginx_markdown_skips_total{reason=\"SKIP_SIZE\"}"
-        " %uA\n"
+        "{reason=\"not_eligible\"} %uA\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_STREAMING\"} %uA\n"
-        "nginx_markdown_skips_total{reason=\"SKIP_AUTH\"}"
-        " %uA\n"
-        "nginx_markdown_skips_total{reason=\"SKIP_RANGE\"}"
-        " %uA\n"
+        "{reason=\"skipped_accept\"} %uA\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_ACCEPT\"} %uA\n"
+        "{reason=\"skipped_no_accept\"} %uA\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIP_CONFIG\"} %uA\n"
+        "{reason=\"skipped_conditional\"} %uA\n"
         "nginx_markdown_skips_total"
-        "{reason=\"SKIPPED_NO_ACCEPT\"} %uA\n"
-        "nginx_markdown_skips_total"
-        "{reason=\"SKIPPED_CONDITIONAL\"} %uA\n"
-        "nginx_markdown_skips_total"
-        "{reason=\"SKIP_COMPRESSION_PASSTHROUGH\"} %uA\n"
+        "{reason=\"disabled\"} %uA\n"
         "\n",
-        snapshot->skips.method,
-        snapshot->skips.status,
-        snapshot->skips.content_type,
-        snapshot->skips.size,
-        snapshot->skips.streaming,
-        snapshot->skips.auth,
-        snapshot->skips.range,
+        not_eligible,
         snapshot->skips.accept,
-        snapshot->skips.config,
         snapshot->skips.no_accept,
         snapshot->skips.conditional,
-        snapshot->skips.compression_passthrough);
+        snapshot->skips.config);
 
-    /* failures_total{stage=...} */
+    /* failures_total{reason=...} — lowercase snake_case per schema v1 */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_failures_total "
-        "Conversion failures by stage.\n"
+        "Conversion failures by reason.\n"
         "# TYPE nginx_markdown_failures_total counter\n"
         "nginx_markdown_failures_total"
-        "{stage=\"FAIL_CONVERSION\"} %uA\n"
+        "{reason=\"conversion_error\"} %uA\n"
         "nginx_markdown_failures_total"
-        "{stage=\"FAIL_RESOURCE_LIMIT\"} %uA\n"
+        "{reason=\"memory_budget_exceeded\"} %uA\n"
         "nginx_markdown_failures_total"
-        "{stage=\"FAIL_SYSTEM\"} %uA\n"
+        "{reason=\"ffi_panic\"} %uA\n"
         "\n",
         snapshot->failures_conversion,
         snapshot->failures_resource_limit,
@@ -626,6 +616,33 @@ ngx_http_markdown_metrics_write_prometheus(
         "nginx_markdown_per_path_overflow_total %uA\n"
         "\n",
         snapshot->per_path.overflow_count);
+
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_inflight_current "
+        "Number of markdown conversions currently in-flight "
+        "in this worker.\n"
+        "# TYPE nginx_markdown_inflight_current gauge\n"
+        "nginx_markdown_inflight_current %uA\n"
+        "\n",
+        snapshot->inflight.current);
+
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_inflight_high_watermark "
+        "Peak number of concurrent in-flight conversions "
+        "observed in this worker.\n"
+        "# TYPE nginx_markdown_inflight_high_watermark gauge\n"
+        "nginx_markdown_inflight_high_watermark %uA\n"
+        "\n",
+        snapshot->inflight.high_watermark);
+
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_overload_total "
+        "Total requests rejected because the per-worker "
+        "inflight limit was reached.\n"
+        "# TYPE nginx_markdown_overload_total counter\n"
+        "nginx_markdown_overload_total %uA\n"
+        "\n",
+        snapshot->inflight.overload_total);
 
     /*
      * Per-path individual entries: walk the SHM RB-tree to emit

@@ -1,5 +1,11 @@
 # Prometheus Metrics Guide
 
+> ⚠️ **0.9.0 Breaking Change** — Reason code strings have been renamed from
+> UPPERCASE_SNAKE_CASE to lowercase_snake_case. Metrics are consolidated into
+> 5 unified families. See the [Migration Guide](MIGRATION-0.9.md) and the
+> [Observability Schema v1](../architecture/observability-schema-v1.md) for
+> the full schema specification.
+
 ## Table of Contents
 
 1. [Overview](#overview)
@@ -145,7 +151,7 @@ All metrics use the `nginx_markdown_` prefix. Counter metrics use the `_total` s
 | `nginx_markdown_requests_total` | counter | Total requests entering the module decision chain. This is the denominator for conversion rate calculations. |
 | `nginx_markdown_conversions_total` | counter | Successful HTML-to-Markdown conversions. |
 | `nginx_markdown_passthrough_total` | counter | Requests not converted (skipped or failed-open). Derived as the sum of all skip-reason counters plus fail-open count. |
-| `nginx_markdown_failopen_total` | counter | Conversions failed with original HTML served (`markdown_on_error pass`). |
+| `nginx_markdown_failopen_total` | counter | Conversions failed with original HTML served (`markdown_error_policy pass`). |
 | `nginx_markdown_large_response_path_total` | counter | Requests routed to the incremental processing path. |
 | `nginx_markdown_input_bytes_total` | counter | Cumulative HTML input bytes from successful conversions. |
 | `nginx_markdown_output_bytes_total` | counter | Cumulative Markdown output bytes from successful conversions. |
@@ -175,7 +181,7 @@ These metrics are only emitted when the module is compiled with `MARKDOWN_STREAM
 | Metric Name | Type | Description |
 |---|---|---|
 | `nginx_markdown_streaming_path_total` | counter | Requests routed to the streaming processing path. |
-| `nginx_markdown_streaming_budget_exceeded_total` | counter | Streaming memory budget exceeded count (auxiliary classification; terminal state depends on `markdown_streaming_on_error`). |
+| `nginx_markdown_streaming_budget_exceeded_total` | counter | Streaming memory budget exceeded count (auxiliary classification; terminal state depends on `markdown_error_policy`). |
 | `nginx_markdown_streaming_shadow_total` | counter | Shadow mode comparison attempts (incremented unconditionally at entry, including init/feed/finalize failures). |
 | `nginx_markdown_streaming_shadow_diff_total` | counter | Shadow mode comparisons where outputs differed. |
 | `nginx_markdown_streaming_candidate_total` | counter | Requests evaluated as true-streaming candidates. |
@@ -580,10 +586,105 @@ the decision log at the time the decision is made. This separation ensures
 that metrics reflect actual delivery to clients, not just internal module
 state transitions.
 
+**Bypass is not fail-open:** Conditional bypass (`Cache-Control:
+no-transform`, Range requests) is a protocol/cache semantic, not a
+conversion failure. Bypass responses do NOT increment `failopen_count`; they
+are tracked via the `bypass_no_transform` reason code in the skip metrics.
+
 In backpressure scenarios (downstream returns `NGX_AGAIN`), the decision is
 recorded immediately but `failopen_count` is deferred until the pending
 chain drains successfully. This prevents overcounting during retries.
 
+
+---
+
+## Unified Metric Families (0.9.0)
+
+Starting in 0.9.0, per-reason counters are consolidated into 5 unified
+families using the `reason` label. This replaces the per-reason metric
+approach (e.g., `markdown_skipped_accept_total` → `markdown_skipped_total{reason="skipped_accept"}`).
+
+| Metric Family | Category | Description |
+|---------------|----------|-------------|
+| `markdown_conversions_total` | Success | Successful conversions |
+| `markdown_skipped_total` | Skip | Requests skipped (with `reason` label) |
+| `markdown_errors_total` | Error | All error paths (with `reason` label) |
+| `markdown_failed_open_total` | Fail-Open | Fail-open deliveries |
+| `markdown_failed_closed_total` | Fail-Closed | Fail-closed rejections |
+
+All `reason` label values use lowercase snake_case. See the
+[Observability Schema v1](../architecture/observability-schema-v1.md) for the
+complete reason code registry.
+
+---
+
+## Label Whitelist
+
+0.9.0 introduces a label whitelist to prevent high-cardinality label explosion.
+Only 4 label keys are permitted in Prometheus metrics output.
+
+### Allowed Labels
+
+| Label Key | Description | Example Values |
+|-----------|-------------|----------------|
+| `reason` | Decision reason code | `converted`, `timeout`, `failed_open` |
+| `profile` | Active processing profile | `balanced`, `strict_cache` |
+| `path_mode` | Request processing path | `full_buffer`, `streaming` |
+| `cache_validation` | Cache validation setting | `off`, `ims_only`, `full` |
+
+### Blocked Labels
+
+The following labels are explicitly blocked and will never appear in metrics:
+
+`url`, `path`, `uri`, `host`, `ip`, `client_ip`, `remote_addr`,
+`user_agent`, `ua`, `request_id`, `trace_id`, `session_id`
+
+These labels are high-cardinality and would create unbounded time series.
+The whitelist is enforced at the Rust layer.
+
+---
+
+## PromQL Examples (0.9.0 Unified Families)
+
+These examples use the 0.9.0 unified metric families with the `reason` label.
+
+```promql
+# Conversion success rate (5m window)
+rate(markdown_conversions_total[5m])
+/ (
+    rate(markdown_conversions_total[5m])
+  + rate(markdown_skipped_total[5m])
+  + rate(markdown_errors_total[5m])
+)
+
+# Error rate by reason code
+rate(markdown_errors_total[5m])
+
+# Top error reasons
+topk(5, sum by (reason) (rate(markdown_errors_total[5m])))
+
+# Failed-open ratio
+rate(markdown_failed_open_total[5m])
+/ (
+    rate(markdown_conversions_total[5m])
+  + rate(markdown_failed_open_total[5m])
+)
+
+# Skip breakdown by reason
+sum by (reason) (rate(markdown_skipped_total[5m]))
+
+# Inflight current (from diagnostics endpoint, not Prometheus — future metric)
+# markdown_inflight_current (planned)
+```
+
+### Grafana Dashboard Tips
+
+- Use `sum by (reason)` to break down skips, errors, and fail-open by cause.
+- Set alert on `rate(markdown_errors_total[5m]) > 0` for any new error type.
+- Use `markdown_failed_open_total` as the primary safety indicator: a rising
+  rate means conversions are failing but traffic is unaffected.
+
+---
 
 ## Document Updates
 
@@ -592,3 +693,4 @@ chain drains successfully. This prevents overcounting during retries.
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 metrics (delivery_total, decision_total, decompression_budget_exceeded, parse_timeouts, parse_budget_exceeded, replay_buffer_errors) and delivery/decision counter semantics |
+| 0.9.0 | 2026-07-01 | Kang | Breaking: unified metric families, label whitelist, lowercase reason codes, PromQL examples for unified families |
