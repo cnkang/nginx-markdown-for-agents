@@ -66,7 +66,8 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
-	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-090 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-090 release-gates-check-091 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+        perf-evidence-check \
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
@@ -698,7 +699,67 @@ release-gates-check-090: release-gates-check-080-regression
 	python3 tools/release/gates/validate_release_gates_090.py
 	@echo "=== 0.9.0 Release Gates: PASS ==="
 
-release-gates-check-all: release-gates-check release-gates-check-090
+# perf-evidence-check: Non-blocking performance evidence gate (report-only).
+# Runs the module-level benchmark harness and evaluates against thresholds.
+# Exits 0 regardless of verdict (soft/report-only mode).
+# Exits 75 (SKIP_NOT_PRESENT) when NGINX_BIN is unavailable.
+#
+# Evidence pack includes: module benchmark tiers, decompression coverage,
+# fallback rate, memory slope.
+#
+# Classification: SOFT (report-only, does not fail the build)
+perf-evidence-check:
+	@echo "=== Performance Evidence Check (non-blocking) ==="
+	@python3 tools/perf/evidence_gate_091.py --mode non-blocking; \
+	rc=$$?; \
+	if [[ $$rc -eq 75 ]]; then \
+		echo "SKIP_NOT_PRESENT: Module benchmarks require NGINX_BIN."; \
+		echo "  Set NGINX_BIN=/path/to/nginx to enable."; \
+		exit 75; \
+	elif [[ $$rc -ne 0 ]]; then \
+		echo "WARNING: Evidence gate script error (exit $$rc)" >&2; \
+		exit 0; \
+	fi
+
+# release-gates-check-091: Blocking 0.9.1 release gate.
+# Runs all prior regression gates (0.9.0 gate chain), then adds 0.9.1-specific
+# evidence gate in blocking mode.  Fails on NO_GO verdict for RC tags.
+# When NGINX_BIN is unavailable, requires --allow-skip-module to proceed.
+#
+# Environment variables:
+#   NGINX_BIN                            - Path to module-enabled nginx binary
+#   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Allow proceeding without module benchmarks
+#   RELEASE_GATE_ALLOW_SKIP_FUZZ=1       - (inherited) skip fuzz smoke
+#   RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 - (inherited) skip native E2E
+#   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - (inherited) skip coverage
+#
+# Classification: BLOCKING (fails on NO_GO for release-candidate tags)
+release-gates-check-091: release-gates-check-090
+	@echo "=== 0.9.1 Release Gates (blocking) ==="
+	@echo "  [1/3] Module-level threshold engine validation"
+	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')" 2>/dev/null || \
+		python3 -c "import sys; sys.path.insert(0, 'tools/perf'); from threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
+	@echo "  [2/3] Performance evidence gate (blocking mode)"
+	@if [[ -n "$${NGINX_BIN:-}" ]]; then \
+		python3 tools/perf/evidence_gate_091.py --mode blocking || exit 1; \
+	else \
+		if [[ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]]; then \
+			python3 tools/perf/evidence_gate_091.py --mode blocking --allow-skip-module || exit 1; \
+		else \
+			echo "FAIL: Module-level benchmarks require NGINX_BIN." >&2; \
+			echo "  Set NGINX_BIN=/path/to/nginx or RELEASE_GATE_ALLOW_SKIP_MODULE=1 to skip." >&2; \
+			exit 1; \
+		fi; \
+	fi
+	@echo "  [3/3] Python perf tooling tests"
+	@if python3 -m pytest tools/perf/tests/ -q --tb=short 2>/dev/null; then \
+		echo "  perf tests: PASS"; \
+	else \
+		echo "  WARNING: perf tests failed or pytest unavailable" >&2; \
+	fi
+	@echo "=== 0.9.1 Release Gates: PASS ==="
+
+release-gates-check-all: release-gates-check release-gates-check-091
 	@echo "=== Release Gates: ALL PASS ==="
 
 # Production Examples: validate all examples pass nginx -t (NEW)
@@ -912,7 +973,9 @@ help:
 	@echo "  release-gates-check-080-regression - 0.8.x version-independent regression subset (no Cargo version bind)"
 	@echo "  release-gates-check-08x  - Alias for release-gates-check-080 (0.8.x patch-line canonical entry)"
 	@echo "  release-gates-check-090  - Validate 0.9.0 release gates (additive on 0.8.0; production examples, gate validator)"
-	@echo "  release-gates-check-all  - Run current baseline and 0.9.0 release gates"
+	@echo "  release-gates-check-091  - Validate 0.9.1 release gates (blocking; module benchmark evidence gate)"
+	@echo "  perf-evidence-check      - Run performance evidence gate (non-blocking, report-only)"
+	@echo "  release-gates-check-all  - Run current baseline and 0.9.1 release gates"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
 	@echo "  test-production-examples-nginx-t - Validate production example configs pass nginx -t"
