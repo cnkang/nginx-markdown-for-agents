@@ -656,6 +656,8 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
     switch (result->error_code) {
         case ERROR_DECOMPRESSION_BUDGET_EXCEEDED:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                perf.decompression_budget_exceeded_total);
             break;
         case ERROR_DECOMPRESSION_FORMAT_ERROR:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
@@ -1690,6 +1692,16 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
         ctx->fullbuffer.pending_output = out;
         ctx->fullbuffer.pending_has_data = 1;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+
+        /* Backpressure metric: body-filter output returned NGX_AGAIN */
+        NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
+
+        /* Watermark gauge: CAS loop for pending output high-water */
+        if (b->last > b->pos) {
+            NGX_HTTP_MARKDOWN_METRIC_WATERMARK(
+                perf.pending_output_high_watermark_bytes,
+                (ngx_atomic_t) (b->last - b->pos));
+        }
     }
 
     return rc;
@@ -1726,6 +1738,8 @@ ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
 
     if (rc == NGX_OK || rc == NGX_DONE) {
         NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
+        /* Backpressure resume: drain completed successfully */
+        NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_resume_total);
     }
 
     ctx->fullbuffer.pending_output = NULL;

@@ -18,6 +18,68 @@
 #include "ngx_http_markdown_streaming_decomp_impl.h"
 #include "ngx_http_markdown_stream_postcommit.h"
 #include "ngx_http_markdown_stream_commit.h"
+#include "ngx_http_markdown_zerocopy_buf.h"
+
+
+/*
+ * Hybrid output path decision result.
+ *
+ * Determines whether a streaming chunk is delivered via the
+ * zero-copy buffer factory (Rust memory referenced directly)
+ * or the existing pool-copy path (data copied into pool).
+ */
+typedef enum {
+    NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY  = 0,
+    NGX_HTTP_MARKDOWN_OUTPUT_ZERO_COPY  = 1
+} ngx_http_markdown_output_decision_t;
+
+
+/*
+ * Hybrid output decision function.
+ *
+ * Evaluates three guards to determine the output path for a
+ * streaming chunk.  Zero-copy is selected only when ALL guards
+ * are clear; any single guard active forces pool-copy.
+ *
+ * Decision matrix:
+ *   Feature OFF    -> POOL_COPY (Req 3.1)
+ *   Terminal chunk -> POOL_COPY (Req 3.3)
+ *   Backpressure  -> POOL_COPY (Req 3.4)
+ *   All clear     -> ZERO_COPY (Req 3.2)
+ *
+ * conf               - location configuration (for zero_copy flag)
+ * chunk_is_terminal  - 1 if this is a last_buf chunk
+ * backpressure_active - 1 if pending output exists
+ *
+ * Returns:
+ *   NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY or
+ *   NGX_HTTP_MARKDOWN_OUTPUT_ZERO_COPY
+ */
+static ngx_http_markdown_output_decision_t
+ngx_http_markdown_hybrid_output_decision(
+    const ngx_http_markdown_conf_t *conf,
+    ngx_flag_t chunk_is_terminal,
+    ngx_flag_t backpressure_active)
+{
+    /* Feature gate OFF -> pool-copy (Req 3.1) */
+    if (conf->stream.zero_copy != 1) {
+        return NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY;
+    }
+
+    /* Terminal chunk -> pool-copy (Req 3.3) */
+    if (chunk_is_terminal) {
+        return NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY;
+    }
+
+    /* Backpressure active -> pool-copy (Req 3.4) */
+    if (backpressure_active) {
+        return NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY;
+    }
+
+    /* All guards clear -> zero-copy (Req 3.2) */
+    return NGX_HTTP_MARKDOWN_OUTPUT_ZERO_COPY;
+}
+
 
 /* Forward declarations */
 static ngx_http_markdown_otel_span_t *ngx_http_markdown_otel_span_start(
@@ -805,6 +867,16 @@ ngx_http_markdown_streaming_save_pending(
     ctx->streaming.pending_output_bytes = len;
     r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 
+    /* Backpressure metric: streaming output returned NGX_AGAIN */
+    NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
+
+    /* Watermark gauge: CAS loop for pending output high-water */
+    if (len > 0) {
+        NGX_HTTP_MARKDOWN_METRIC_WATERMARK(
+            perf.pending_output_high_watermark_bytes,
+            (ngx_atomic_t) len);
+    }
+
     return NGX_AGAIN;
 }
 
@@ -1146,6 +1218,11 @@ ngx_http_markdown_streaming_resume_pending(
 
     ctx->streaming.pending_output = NULL;
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+
+    /* Backpressure resume: pending drain completed */
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_resume_total);
+    }
 
     /*
      * Pending output drained successfully.  If TTFB was not
@@ -1802,11 +1879,99 @@ ngx_http_markdown_streaming_handle_feed_result(
             ctx->streaming.total_output_bytes += out_len;
         }
 
-        rc = ngx_http_markdown_streaming_send_output(
-            r, ctx, out_data, out_len, /* last_buf */ 0);
+        /*
+         * Hybrid output path decision (Req 3.1-3.4).
+         *
+         * Evaluate zero-copy eligibility for this chunk.
+         * Zero-copy avoids the pool memcpy by referencing
+         * Rust memory directly; pool cleanup frees it later.
+         * Pool-copy is the safe fallback for terminal chunks,
+         * backpressure, or when the feature gate is OFF.
+         */
+        {
+            ngx_http_markdown_output_decision_t  decision;
+            ngx_flag_t  bp_active;
 
-        markdown_streaming_output_free(
-            out_data, out_len);
+            bp_active = (ctx->streaming.pending_output != NULL)
+                        ? 1 : 0;
+
+            decision = ngx_http_markdown_hybrid_output_decision(
+                conf, /* chunk_is_terminal */ 0, bp_active);
+
+            if (decision
+                == NGX_HTTP_MARKDOWN_OUTPUT_ZERO_COPY)
+            {
+                /*
+                 * Zero-copy path: buffer factory creates an
+                 * ngx_buf_t referencing Rust memory with pool
+                 * cleanup registered.  Caller does NOT free
+                 * the Rust buffer — pool cleanup handles it.
+                 */
+                ngx_buf_t    *zb;
+                ngx_chain_t  *zout;
+
+                zb = ngx_http_markdown_rust_buf_create(
+                    r->pool, out_data, out_len);
+                if (zb == NULL) {
+                    /*
+                     * Buffer factory failed (already freed
+                     * the Rust buffer internally).  Fall
+                     * through to error return.
+                     */
+                    return NGX_ERROR;
+                }
+
+                zb->flush = 1;
+                zb->last_buf = 0;
+                zb->last_in_chain = 0;
+
+                zout = ngx_alloc_chain_link(r->pool);
+                if (zout == NULL) {
+                    return NGX_ERROR;
+                }
+                zout->buf = zb;
+                zout->next = NULL;
+
+                rc = ngx_http_next_body_filter(r, zout);
+
+                if (rc == NGX_OK || rc == NGX_DONE) {
+                    ctx->streaming.flushes_sent++;
+                    ngx_http_markdown_streaming_record_ttfb(
+                        ctx);
+                    NGX_HTTP_MARKDOWN_METRIC_ADD(
+                        streaming.selection.output_bytes_total,
+                        (ngx_atomic_int_t) out_len);
+                    /* Delivery counter: zero-copy (Req 3.5) */
+                    NGX_HTTP_MARKDOWN_METRIC_INC(
+                        perf.zero_copy_output_total);
+                }
+
+                if (rc == NGX_AGAIN) {
+                    rc =
+                        ngx_http_markdown_streaming_save_pending(
+                            r, ctx, zout,
+                            out_data, out_len);
+                }
+            } else {
+                /*
+                 * Pool-copy path: existing send_output copies
+                 * data into pool memory.  Caller frees the
+                 * Rust buffer after return.
+                 */
+                rc = ngx_http_markdown_streaming_send_output(
+                    r, ctx, out_data, out_len,
+                    /* last_buf */ 0);
+
+                /* Delivery counter: pool-copy (Req 3.6) */
+                if (rc == NGX_OK || rc == NGX_DONE) {
+                    NGX_HTTP_MARKDOWN_METRIC_INC(
+                        perf.copied_output_total);
+                }
+
+                markdown_streaming_output_free(
+                    out_data, out_len);
+            }
+        }
 
         if (rc == NGX_AGAIN) {
             return ngx_http_markdown_streaming_handle_backpressure(
@@ -1830,6 +1995,8 @@ ngx_http_markdown_streaming_map_feed_decomp_error(ngx_int_t rc)
 {
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            perf.decompression_budget_exceeded_total);
         return ERROR_DECOMPRESSION_BUDGET_EXCEEDED;
     }
 
@@ -1854,6 +2021,8 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
 {
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            perf.decompression_budget_exceeded_total);
         return ERROR_DECOMPRESSION_BUDGET_EXCEEDED;
     }
 
@@ -2633,6 +2802,12 @@ ngx_http_markdown_streaming_init_handle(
             return ngx_http_markdown_streaming_precommit_error(
                 r, ctx, conf, 0);
         }
+
+        /*
+         * Note: decompression_streaming_total is incremented at
+         * path selection time in the header filter (Req 4.5),
+         * not here at decompressor initialization.
+         */
     }
 
     /* Initialize prebuffer for fallback.
@@ -2877,6 +3052,10 @@ ngx_http_markdown_streaming_send_failopen_chain(
         ctx->streaming.pending_has_data = 1;
         ctx->streaming.pending_failopen_delivery = (!ctx->eligible) ? 1 : 0;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+
+        /* Backpressure metric: fail-open output returned NGX_AGAIN */
+        NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
+
         return NGX_AGAIN;
     }
 

@@ -133,6 +133,16 @@ typedef struct { /* SONAR_NOTE */
         ngx_atomic_t  overflow_count;
     } per_path;
     struct {
+        ngx_atomic_t  backpressure_total;
+        ngx_atomic_t  backpressure_resume_total;
+        ngx_atomic_t  pending_output_high_watermark_bytes;
+        ngx_atomic_t  decompression_streaming_total;
+        ngx_atomic_t  decompression_fullbuffer_total;
+        ngx_atomic_t  decompression_budget_exceeded_total;
+        ngx_atomic_t  zero_copy_output_total;
+        ngx_atomic_t  copied_output_total;
+    } perf;
+    struct {
         ngx_atomic_t  current;
         ngx_atomic_t  high_watermark;
         ngx_atomic_t  overload_total;

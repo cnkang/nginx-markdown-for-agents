@@ -513,6 +513,7 @@ typedef enum {
  * - stream.precommit_buffer: 262144 (256k)
  * - stream.flush_min: 16384 (16k)
  * - stream.excluded_types: NULL
+ * - stream.zero_copy: 0 (off by default)
  */
 /* sonarcloud-c:S1820: intentionally exceeded; fields are already logically
  * grouped via the ops sub-struct and #ifdef-gated streaming section.  Further
@@ -650,6 +651,7 @@ typedef struct {
         ngx_flag_t    budget_explicit;     /* 1 if operator set streaming_buffer */
         ngx_flag_t    shadow;              /* markdown_streaming_shadow on|off */
         ngx_flag_t    shadow_explicit;     /* 1 if operator set streaming_shadow */
+        ngx_flag_t    zero_copy;           /* markdown_streaming_zero_copy on|off (default: off) */
     } stream;
 
     /*
@@ -741,6 +743,7 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
     NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0);
     NGX_MD_MERGE_STREAM(shadow, ngx_flag_t, -1, 0);
     NGX_MD_MERGE_STREAM(shadow_explicit, ngx_flag_t, -1, 0);
+    NGX_MD_MERGE_STREAM(zero_copy, ngx_flag_t, -1, 0);
 
 #undef NGX_MD_MERGE_STREAM
 }
@@ -1272,6 +1275,26 @@ typedef struct {
         ngx_atomic_t  parse_timeouts_total;
         ngx_atomic_t  parse_budget_exceeded_total;
     } parse_interrupts;
+
+    /*
+     * Performance metrics: backpressure, decompression path,
+     * and output delivery mode.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_metrics_t stays within the 20-field
+     * limit enforced by static analysis (SonarCloud rule
+     * c:S1820).
+     */
+    struct {
+        ngx_atomic_t  backpressure_total;
+        ngx_atomic_t  backpressure_resume_total;
+        ngx_atomic_t  pending_output_high_watermark_bytes;
+        ngx_atomic_t  decompression_streaming_total;
+        ngx_atomic_t  decompression_fullbuffer_total;
+        ngx_atomic_t  decompression_budget_exceeded_total;
+        ngx_atomic_t  zero_copy_output_total;
+        ngx_atomic_t  copied_output_total;
+    } perf;
 
     /*
      * Per-path metrics.

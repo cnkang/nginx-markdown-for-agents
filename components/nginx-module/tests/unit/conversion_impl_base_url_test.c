@@ -519,6 +519,13 @@ static volatile int g_metric_add_sink;
 #ifndef NGX_HTTP_MARKDOWN_METRIC_INC
 #define NGX_HTTP_MARKDOWN_METRIC_INC(name) (g_metric_inc_sink = 1)
 #endif
+#ifndef NGX_HTTP_MARKDOWN_METRIC_WATERMARK
+#define NGX_HTTP_MARKDOWN_METRIC_WATERMARK(field, value)                              \
+    do {                                                                              \
+        g_metric_add_sink = 1;                                                       \
+        UNUSED(value);                                                                \
+    } while (0)
+#endif
 #ifndef ngx_log_debug2
 #define ngx_log_debug2(level, log, err, fmt, arg1, arg2) \
     UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt); UNUSED(arg1); UNUSED(arg2)
