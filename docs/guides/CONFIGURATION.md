@@ -977,6 +977,42 @@ markdown_streaming_shadow on;
 markdown_streaming_shadow off;
 ```
 
+#### markdown_streaming_zero_copy (v0.9.1)
+
+**Syntax:** `markdown_streaming_zero_copy on | off;`
+**Default:** `off`
+**Context:** location
+
+Enables zero-copy output for streaming chunks. When enabled, non-terminal
+streaming output buffers reference Rust-owned memory directly via the buffer
+factory, avoiding an intermediate pool-copy. A pool cleanup handler ensures
+the Rust buffer is freed on request teardown.
+
+Terminal `last_buf` chunks and chunks produced during backpressure always use
+pool-copy regardless of this setting.
+
+**Rollback:** Set to `off` and reload (`nginx -s reload`). New requests
+immediately use the pool-copy path. See
+[Performance Rollout and Rollback Guide](performance-rollout-091.md) for details.
+
+**Metrics:**
+
+| Metric | Description |
+|--------|-------------|
+| `zero_copy_output_total` | Chunks delivered via zero-copy path |
+| `copied_output_total` | Chunks delivered via pool-copy path |
+
+**Example:**
+
+```nginx
+location /docs {
+    markdown_filter on;
+    markdown_streaming_engine on;
+    markdown_streaming_zero_copy on;
+    proxy_pass http://backend;
+}
+```
+
 #### Streaming Candidacy Directives (v0.8.0)
 
 The following directives were introduced in v0.8.0 to give operators fine-grained
@@ -2494,6 +2530,10 @@ server {
 ---
 
 ## Performance Tuning
+
+> For detailed performance profile comparison, tuning ranges per deployment
+> pattern, and production example configurations, see the
+> [Performance Profile Comparison and Tuning Guide](performance-profiles.md).
 
 ### 1. Optimize Resource Limits
 
