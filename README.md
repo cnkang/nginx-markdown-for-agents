@@ -268,18 +268,18 @@ Neither approach is universally better. Edge-layer conversion is a good fit when
 
 | NGINX | Channel | OS | libc | Arch | Artifact | Tier | Blocking |
 |-------|---------|-----|------|------|----------|------|----------|
-| 1.31.1 | mainline | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.31.1 | mainline | linux | musl | arm64 | dynamic-module | supported | No |
-| 1.31.1 | mainline | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.31.1 | mainline | linux | musl | amd64 | dynamic-module | supported | No |
-| 1.31.1 | mainline | debian12 | glibc | arm64 | docker-image | supported | Yes |
-| 1.31.1 | mainline | debian12 | glibc | amd64 | docker-image | supported | Yes |
-| 1.31.1 | mainline | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
-| 1.31.1 | mainline | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
-| 1.30.2 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.30.2 | stable | linux | musl | arm64 | dynamic-module | supported | No |
-| 1.30.2 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.30.2 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.31.2 | mainline | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.31.2 | mainline | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.31.2 | mainline | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.31.2 | mainline | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.31.2 | mainline | debian12 | glibc | arm64 | docker-image | supported | Yes |
+| 1.31.2 | mainline | debian12 | glibc | amd64 | docker-image | supported | Yes |
+| 1.31.2 | mainline | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
+| 1.31.2 | mainline | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
+| 1.30.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.30.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.30.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.30.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
 | 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
 | 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
 | 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |

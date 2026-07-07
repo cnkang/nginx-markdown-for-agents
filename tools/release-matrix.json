@@ -146,7 +146,7 @@
       "owner_workflow": ".github/workflows/release-binaries.yml"
     },
     {
-      "nginx_version": "1.30.2",
+      "nginx_version": "1.30.3",
       "nginx_channel": "stable",
       "os": "linux",
       "libc": "glibc",
@@ -158,7 +158,7 @@
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
-      "nginx_version": "1.30.2",
+      "nginx_version": "1.30.3",
       "nginx_channel": "stable",
       "os": "linux",
       "libc": "glibc",
@@ -170,7 +170,7 @@
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
-      "nginx_version": "1.30.2",
+      "nginx_version": "1.30.3",
       "nginx_channel": "stable",
       "os": "linux",
       "libc": "musl",
@@ -182,7 +182,7 @@
       "owner_workflow": ".github/workflows/release-binaries.yml"
     },
     {
-      "nginx_version": "1.30.2",
+      "nginx_version": "1.30.3",
       "nginx_channel": "stable",
       "os": "linux",
       "libc": "musl",
@@ -194,7 +194,7 @@
       "owner_workflow": ".github/workflows/release-binaries.yml"
     },
     {
-      "nginx_version": "1.31.1",
+      "nginx_version": "1.31.2",
       "nginx_channel": "mainline",
       "os": "linux",
       "libc": "glibc",
@@ -206,7 +206,7 @@
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
-      "nginx_version": "1.31.1",
+      "nginx_version": "1.31.2",
       "nginx_channel": "mainline",
       "os": "linux",
       "libc": "glibc",
@@ -218,7 +218,7 @@
       "owner_workflow": ".github/workflows/release-packages.yml"
     },
     {
-      "nginx_version": "1.31.1",
+      "nginx_version": "1.31.2",
       "nginx_channel": "mainline",
       "os": "linux",
       "libc": "musl",
@@ -230,7 +230,7 @@
       "owner_workflow": ".github/workflows/release-binaries.yml"
     },
     {
-      "nginx_version": "1.31.1",
+      "nginx_version": "1.31.2",
       "nginx_channel": "mainline",
       "os": "linux",
       "libc": "musl",
@@ -290,7 +290,7 @@
       "owner_workflow": ".github/workflows/official-nginx-docker.yml"
     },
     {
-      "nginx_version": "1.31.1",
+      "nginx_version": "1.31.2",
       "nginx_channel": "mainline",
       "os": "debian12",
       "libc": "glibc",
@@ -302,7 +302,7 @@
       "owner_workflow": ".github/workflows/official-nginx-docker.yml"
     },
     {
-      "nginx_version": "1.31.1",
+      "nginx_version": "1.31.2",
       "nginx_channel": "mainline",
       "os": "debian12",
       "libc": "glibc",
@@ -314,7 +314,7 @@
       "owner_workflow": ".github/workflows/official-nginx-docker.yml"
     },
     {
-      "nginx_version": "1.31.1",
+      "nginx_version": "1.31.2",
       "nginx_channel": "mainline",
       "os": "alpine3.20",
       "libc": "musl",
@@ -326,7 +326,7 @@
       "owner_workflow": ".github/workflows/official-nginx-docker.yml"
     },
     {
-      "nginx_version": "1.31.1",
+      "nginx_version": "1.31.2",
       "nginx_channel": "mainline",
       "os": "alpine3.20",
       "libc": "musl",

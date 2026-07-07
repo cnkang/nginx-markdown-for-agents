@@ -300,18 +300,18 @@ the module from source against your local NGINX installation.
 
 | NGINX Version | Channel | OS | libc | Arch | Artifact | Test Level | Tier | Blocking | Workflow |
 |---------------|---------|-----|------|------|----------|------------|------|----------|----------|
-| 1.31.1 | mainline | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.31.1 | mainline | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
-| 1.31.1 | mainline | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.31.1 | mainline | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
-| 1.31.1 | mainline | debian12 | glibc | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
-| 1.31.1 | mainline | debian12 | glibc | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
-| 1.31.1 | mainline | alpine3.20 | musl | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
-| 1.31.1 | mainline | alpine3.20 | musl | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
-| 1.30.2 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.30.2 | stable | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
-| 1.30.2 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
-| 1.30.2 | stable | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.31.2 | mainline | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.31.2 | mainline | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.31.2 | mainline | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.31.2 | mainline | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.31.2 | mainline | debian12 | glibc | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.2 | mainline | debian12 | glibc | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.2 | mainline | alpine3.20 | musl | arm64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.31.2 | mainline | alpine3.20 | musl | amd64 | docker-image | functional-check | supported | Yes | `.github/workflows/official-nginx-docker.yml` |
+| 1.30.3 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.3 | stable | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
+| 1.30.3 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
+| 1.30.3 | stable | linux | musl | amd64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
 | 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
 | 1.28.3 | stable | linux | musl | arm64 | dynamic-module | docker-validation | supported | No | `.github/workflows/release-binaries.yml` |
 | 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | smoke-test | supported | Yes | `.github/workflows/release-packages.yml` |
