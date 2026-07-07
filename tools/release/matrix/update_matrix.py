@@ -432,7 +432,7 @@ def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
         )
         sys.exit(1)
 
-    matrix_entries = data.get("entries") or data.get("matrix")
+    matrix_entries = data.get("matrix") or data.get("entries")
     if not isinstance(matrix_entries, list):
         print(
             f"Invalid matrix structure in {path}: matrix must be a list",
@@ -898,6 +898,24 @@ def _run_write_mode(
     # Update updated_at timestamp
     data["updated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     data["matrix"] = merged
+
+    # Update entries with the new version numbers if they exist
+    if "entries" in data and isinstance(data["entries"], list):
+        track_map = {}
+        for new_v in diff.added_versions:
+            track = ".".join(new_v.split(".")[:2])
+            track_map[track] = new_v
+        for entry in data["entries"]:
+            if "nginx_version" in entry:
+                old_v = entry["nginx_version"]
+                track = ".".join(old_v.split(".")[:2])
+                if track in track_map:
+                    entry["nginx_version"] = track_map[track]
+            if "nginx" in entry:
+                old_v = entry["nginx"]
+                track = ".".join(old_v.split(".")[:2])
+                if track in track_map:
+                    entry["nginx"] = track_map[track]
 
     # Write matrix via crash-safe temp+rename
     try:
