@@ -450,6 +450,10 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     p = ngx_http_markdown_snapshot_flag(p, last,
         "markdown_streaming_shadow", conf->stream.shadow, 1);
 
+    /* markdown_streaming_zero_copy (on/off) */
+    p = ngx_http_markdown_snapshot_flag(p, last,
+        "markdown_streaming_zero_copy", conf->stream.zero_copy, 1);
+
     /* markdown_stream_threshold (v0.8.0 directive name) */
     p = ngx_http_markdown_snapshot_size(p, last,
         "markdown_stream_threshold",
