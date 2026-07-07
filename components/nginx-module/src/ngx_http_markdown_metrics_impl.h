@@ -155,6 +155,18 @@ typedef struct {
         ngx_atomic_uint_t overflow_count;
     } per_path;
 
+    /* Performance metrics (backpressure, decompression path, output mode) */
+    struct {
+        ngx_atomic_uint_t backpressure_total;
+        ngx_atomic_uint_t backpressure_resume_total;
+        ngx_atomic_uint_t pending_output_high_watermark_bytes;
+        ngx_atomic_uint_t decompression_streaming_total;
+        ngx_atomic_uint_t decompression_fullbuffer_total;
+        ngx_atomic_uint_t decompression_budget_exceeded_total;
+        ngx_atomic_uint_t zero_copy_output_total;
+        ngx_atomic_uint_t copied_output_total;
+    } perf;
+
     /* Inflight guard metrics (spec 52, per-worker) */
     struct {
         ngx_atomic_uint_t current;
@@ -394,6 +406,24 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         (ngx_atomic_uint_t) ngx_http_markdown_inflight_high_watermark();
     snapshot->inflight.overload_total =
         (ngx_atomic_uint_t) ngx_http_markdown_inflight_overload_total();
+
+    /* Performance metrics (backpressure, decompression path, output mode) */
+    snapshot->perf.backpressure_total =
+        metrics->perf.backpressure_total;
+    snapshot->perf.backpressure_resume_total =
+        metrics->perf.backpressure_resume_total;
+    snapshot->perf.pending_output_high_watermark_bytes =
+        metrics->perf.pending_output_high_watermark_bytes;
+    snapshot->perf.decompression_streaming_total =
+        metrics->perf.decompression_streaming_total;
+    snapshot->perf.decompression_fullbuffer_total =
+        metrics->perf.decompression_fullbuffer_total;
+    snapshot->perf.decompression_budget_exceeded_total =
+        metrics->perf.decompression_budget_exceeded_total;
+    snapshot->perf.zero_copy_output_total =
+        metrics->perf.zero_copy_output_total;
+    snapshot->perf.copied_output_total =
+        metrics->perf.copied_output_total;
 }
 
 static ngx_flag_t ngx_http_markdown_metrics_value_contains(
@@ -987,12 +1017,32 @@ ngx_http_markdown_metrics_write_json(
     }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
-    /* Close the "paths" array, the "per_path" object, and the root object. */
+    /* Close the "paths" array and the "per_path" object. */
     p = ngx_slprintf(p, end,
         "\n"
         "    ]\n"
+        "  },\n"
+
+        /* Performance metrics: backpressure, decompression path, output mode */
+        "  \"perf\": {\n"
+        "    \"backpressure_total\": %uA,\n"
+        "    \"backpressure_resume_total\": %uA,\n"
+        "    \"pending_output_high_watermark_bytes\": %uA,\n"
+        "    \"decompression_streaming_total\": %uA,\n"
+        "    \"decompression_fullbuffer_total\": %uA,\n"
+        "    \"decompression_budget_exceeded_total\": %uA,\n"
+        "    \"zero_copy_output_total\": %uA,\n"
+        "    \"copied_output_total\": %uA\n"
         "  }\n"
-        "}");
+        "}",
+        snapshot->perf.backpressure_total,
+        snapshot->perf.backpressure_resume_total,
+        snapshot->perf.pending_output_high_watermark_bytes,
+        snapshot->perf.decompression_streaming_total,
+        snapshot->perf.decompression_fullbuffer_total,
+        snapshot->perf.decompression_budget_exceeded_total,
+        snapshot->perf.zero_copy_output_total,
+        snapshot->perf.copied_output_total);
 
     return p;
 }
@@ -1219,6 +1269,27 @@ ngx_http_markdown_metrics_write_text(
         snapshot->per_path.path_conversions,
         snapshot->per_path.path_conversion_time_sum_ms,
         snapshot->per_path.overflow_count);
+
+    /* Performance metrics section */
+    p = ngx_slprintf(p, end,
+        "\n"
+        "Performance Metrics:\n"
+        "- Backpressure Total: %uA\n"
+        "- Backpressure Resume Total: %uA\n"
+        "- Pending Output High Watermark (bytes): %uA\n"
+        "- Decompression Streaming Total: %uA\n"
+        "- Decompression Full-Buffer Total: %uA\n"
+        "- Decompression Budget Exceeded Total: %uA\n"
+        "- Zero-Copy Output Total: %uA\n"
+        "- Copied Output Total: %uA\n",
+        snapshot->perf.backpressure_total,
+        snapshot->perf.backpressure_resume_total,
+        snapshot->perf.pending_output_high_watermark_bytes,
+        snapshot->perf.decompression_streaming_total,
+        snapshot->perf.decompression_fullbuffer_total,
+        snapshot->perf.decompression_budget_exceeded_total,
+        snapshot->perf.zero_copy_output_total,
+        snapshot->perf.copied_output_total);
 
     /*
      * Per-path individual entries: walk the SHM RB-tree to emit

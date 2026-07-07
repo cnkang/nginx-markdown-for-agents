@@ -644,6 +644,100 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->inflight.overload_total);
 
+    /* backpressure_total */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_backpressure_total "
+        "Body-filter output returned NGX_AGAIN "
+        "(backpressure events).\n"
+        "# TYPE nginx_markdown_backpressure_total counter\n"
+        "nginx_markdown_backpressure_total %uA\n"
+        "\n",
+        snapshot->perf.backpressure_total);
+
+    /* backpressure_resume_total */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_backpressure_resume_total "
+        "Pending drain completed with NGX_OK "
+        "(backpressure resumes).\n"
+        "# TYPE nginx_markdown_backpressure_resume_total "
+        "counter\n"
+        "nginx_markdown_backpressure_resume_total %uA\n"
+        "\n",
+        snapshot->perf.backpressure_resume_total);
+
+    /* pending_output_high_watermark_bytes */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_pending_output_high_watermark_bytes "
+        "Peak pending output bytes observed (CAS gauge).\n"
+        "# TYPE "
+        "nginx_markdown_pending_output_high_watermark_bytes "
+        "gauge\n"
+        "nginx_markdown_pending_output_high_watermark_bytes"
+        " %uA\n"
+        "\n",
+        snapshot->perf.pending_output_high_watermark_bytes);
+
+    /* decompression_streaming_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_decompression_streaming_total "
+        "Decompression operations routed to streaming path.\n"
+        "# TYPE "
+        "nginx_markdown_decompression_streaming_total "
+        "counter\n"
+        "nginx_markdown_decompression_streaming_total %uA\n"
+        "\n",
+        snapshot->perf.decompression_streaming_total);
+
+    /* decompression_fullbuffer_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_decompression_fullbuffer_total "
+        "Decompression operations routed to "
+        "full-buffer path.\n"
+        "# TYPE "
+        "nginx_markdown_decompression_fullbuffer_total "
+        "counter\n"
+        "nginx_markdown_decompression_fullbuffer_total"
+        " %uA\n"
+        "\n",
+        snapshot->perf.decompression_fullbuffer_total);
+
+    /* perf decompression_budget_exceeded_total */
+    p = ngx_slprintf(p, end,
+        "# HELP "
+        "nginx_markdown_perf_decompression_budget_exceeded_total "
+        "Decompression budget exceeded triggering "
+        "fail-open (perf counter).\n"
+        "# TYPE "
+        "nginx_markdown_perf_decompression_budget_exceeded_total "
+        "counter\n"
+        "nginx_markdown_perf_decompression_budget_exceeded_total"
+        " %uA\n"
+        "\n",
+        snapshot->perf.decompression_budget_exceeded_total);
+
+    /* zero_copy_output_total */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_zero_copy_output_total "
+        "Output chains delivered via zero-copy on NGX_OK.\n"
+        "# TYPE nginx_markdown_zero_copy_output_total "
+        "counter\n"
+        "nginx_markdown_zero_copy_output_total %uA\n"
+        "\n",
+        snapshot->perf.zero_copy_output_total);
+
+    /* copied_output_total */
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_copied_output_total "
+        "Output chains delivered via buffer copy "
+        "on NGX_OK.\n"
+        "# TYPE nginx_markdown_copied_output_total counter\n"
+        "nginx_markdown_copied_output_total %uA\n"
+        "\n",
+        snapshot->perf.copied_output_total);
+
     /*
      * Per-path individual entries: walk the SHM RB-tree to emit
      * series with a "path" label for each tracked URI.

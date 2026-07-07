@@ -360,6 +360,16 @@ ngx_module_t ngx_http_markdown_filter_module = { 0 };
 #define NGX_HTTP_MARKDOWN_METRIC_INC(field)                                          \
     NGX_HTTP_MARKDOWN_METRIC_ADD(field, 1)
 
+#define NGX_HTTP_MARKDOWN_METRIC_WATERMARK(field, value)                             \
+    do {                                                                             \
+        if (ngx_http_markdown_metrics != NULL) {                                     \
+            ngx_atomic_t _wm_new = (ngx_atomic_t) (value);                          \
+            if (_wm_new > ngx_http_markdown_metrics->field) {                        \
+                ngx_http_markdown_metrics->field = _wm_new;                          \
+            }                                                                        \
+        }                                                                            \
+    } while (0)
+
 /*
  * Logging macros (no-op stubs).  Production NGINX logging is replaced with
  * macros that suppress all output and silence compiler warnings about
