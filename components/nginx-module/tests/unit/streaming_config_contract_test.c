@@ -665,6 +665,7 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->stream.budget_explicit = -1;
     mcf->stream.shadow = -1;
     mcf->stream.shadow_explicit = -1;
+    mcf->stream.zero_copy = NGX_CONF_UNSET;
 }
 
 /* ================================================================

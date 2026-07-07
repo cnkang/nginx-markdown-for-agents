@@ -316,6 +316,7 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->stream.budget_explicit = -1;
     conf->stream.shadow = -1;
     conf->stream.shadow_explicit = -1;
+    conf->stream.zero_copy = NGX_CONF_UNSET;
 
     conf->advanced.prune_noise = NGX_CONF_UNSET;
     conf->advanced.prune_selectors = NGX_CONF_UNSET_PTR;
@@ -1489,6 +1490,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                         " streaming_on_error=%V"
                         " streaming_shadow=%i"
                         " streaming_threshold=%uz"
+                        " streaming_zero_copy=%i"
 #endif
                        ,
                        (ngx_uint_t) conf->enabled,
@@ -1521,6 +1523,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                               conf->stream.on_error)
                          , (ngx_int_t) conf->stream.shadow
                          , conf->stream.threshold
+                         , (ngx_int_t) conf->stream.zero_copy
 #endif
                        );
 }
