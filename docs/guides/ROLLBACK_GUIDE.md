@@ -483,9 +483,33 @@ curl -sD - -o /dev/null \
 ```
 
 
+---
+
+## Performance Optimization Rollback (0.9.1)
+
+The 0.9.1 release introduces performance optimizations with independent
+rollback paths. For detailed rollback procedures specific to zero-copy
+streaming output, streaming decompression, and full-buffer copy reduction,
+see the dedicated [Performance Rollout and Rollback Guide](performance-rollout-091.md).
+
+### Quick Summary
+
+| Optimization | Rollback |
+|--------------|----------|
+| Zero-copy streaming output | `markdown_streaming_zero_copy off` + reload |
+| Streaming decompression | Switch profile from `streaming_first` to `balanced` or set `markdown_auto_decompress off` + reload |
+| Full-buffer copy reduction | Code revert + binary rebuild (no config toggle — internal implementation detail) |
+
+All config-based rollbacks take effect for new requests immediately after
+`nginx -s reload`. In-flight requests complete with their existing
+configuration.
+
+---
+
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-05 | Kiro | Added 0.9.1 performance optimization rollback cross-reference |
