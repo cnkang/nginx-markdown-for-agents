@@ -369,8 +369,8 @@ def _gate_2_items(
         ("delivery semantics tests", "delivery_counter_test.c" in unit_test_files),
         ("delivery_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in conversion or "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in payload),
         ("decision_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.decision_count)" in decision_log),
-        ("parse_timeouts_total metric write", "parse_interrupts.parse_timeouts_total" in conversion),
-        ("parse_budget_exceeded_total metric write", "parse_interrupts.parse_budget_exceeded_total" in conversion),
+        ("parse_timeouts_total metric write", "results.parse_interrupts.parse_timeouts_total" in conversion),
+        ("parse_budget_exceeded_total metric write", "results.parse_interrupts.parse_budget_exceeded_total" in conversion),
         ("header plan ffi integration", "markdown_build_header_plan" in headers and "ngx_http_markdown_apply_header_plan" in headers),
     ]
 

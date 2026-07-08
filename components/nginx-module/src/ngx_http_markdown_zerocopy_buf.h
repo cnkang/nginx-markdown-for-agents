@@ -45,7 +45,7 @@ ngx_http_markdown_rust_buf_cleanup(void *data)
 {
     ngx_http_markdown_rust_buf_cleanup_t  *ctx = data;
 
-    if (ctx->freed || ctx->rust_ptr == NULL) {
+    if (ctx == NULL || ctx->freed || ctx->rust_ptr == NULL) {
         return;
     }
 

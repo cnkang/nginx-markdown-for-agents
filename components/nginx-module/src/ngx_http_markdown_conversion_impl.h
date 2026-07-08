@@ -669,10 +669,12 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
             break;
         case ERROR_PARSE_TIMEOUT:
-            NGX_HTTP_MARKDOWN_METRIC_INC(parse_interrupts.parse_timeouts_total);
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                results.parse_interrupts.parse_timeouts_total);
             break;
         case ERROR_PARSE_BUDGET_EXCEEDED:
-            NGX_HTTP_MARKDOWN_METRIC_INC(parse_interrupts.parse_budget_exceeded_total);
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                results.parse_interrupts.parse_budget_exceeded_total);
             break;
         default:
             break;
