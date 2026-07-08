@@ -503,7 +503,7 @@ test_buffer_factory_buf_alloc_failure(void)
     TEST_ASSERT(pool.cleanups == NULL,
         "buf alloc failure: no cleanup on pool");
 
-    TEST_PASS("buf alloc failure: cleanup registered, pool frees Rust memory");
+    TEST_PASS("buf alloc failure: no cleanup registered; legacy wrapper frees Rust memory");
 }
 
 

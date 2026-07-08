@@ -40,9 +40,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.path_validation import validate_read_path, validate_write_path_within_root
+import re\nfrom lib.path_validation import validate_read_path, validate_write_path_within_root
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[2]\n_RC_RE = re.compile(r"""v?                  # optional 'v' prefix\n                           \d+\.\d+\.\d+       # version number (x.y.z)\n                           .*-rc[\\.\\d]*      # '-rc' suffix with optional '.N'""", re.VERBOSE)
 
 # Exit code for SKIP_NOT_PRESENT (matches run_module_benchmark.sh)
 EX_SKIP_NOT_PRESENT = 75
@@ -407,41 +407,50 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_nginx_unavailable(blocking, args)
 
     # --- Run benchmark or load existing report ---
-    report, err_code = _obtain_benchmark_report(args, blocking)
-    if err_code is not None:
-        return err_code
+    import re
+    from lib.path_validation import validate_read_path, validate_write_path_within_root
 
-    # --- Extract metrics and evaluate thresholds ---
-    return _evaluate_and_report(report, args, blocking)
+    REPO_ROOT = Path(__file__).resolve().parents[2]
+
+    # Exit code for SKIP_NOT_PRESENT (matches run_module_benchmark.sh)
+    EX_SKIP_NOT_PRESENT = 75
+
+    _RC_RE = re.compile(
+        r"""v?                # optional 'v' prefix
+            \d+\.\d+\.\d+     # version number (x.y.z)
+            .*-rc[\.\d]*      # '-rc' suffix with optional '.N'
+         """,
+        re.VERBOSE,
+    )
 
 
-def _is_rc_tag() -> bool:
-    """Detect whether the current git state is a release-candidate tag.
+    def _is_rc_tag() -> bool:
+        """Detect whether the current git state is a release-candidate tag.
 
-    Checks GITHUB_REF, CI_COMMIT_TAG, and local git describe for
-    patterns like v0.9.1-rc1, 0.9.1-rc.2, etc.
-    """
-    # Check CI environment variables first
-    for env_var in ("GITHUB_REF", "CI_COMMIT_TAG", "RELEASE_VERSION"):
-        val = os.environ.get(env_var, "")
-        if val and "rc" in val.lower():
-            return True
+        Checks GITHUB_REF, CI_COMMIT_TAG, and local git describe for
+        patterns like v0.9.1-rc1, 0.9.1-rc.2, etc.
+        """
+        # Check CI environment variables first
+        for env_var in ("GITHUB_REF", "CI_COMMIT_TAG", "RELEASE_VERSION"):
+            val = os.environ.get(env_var, "")
+            if val and _RC_RE.search(val):
+                return True
 
-    # Check local git describe
-    try:
-        result = subprocess.run(
-            ["git", "describe", "--tags", "--exact-match", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            cwd=str(REPO_ROOT),
-        )
-        if result.returncode == 0 and "rc" in result.stdout.strip().lower():
-            return True
-    except Exception:
-        pass
+        # Check local git describe
+        try:
+            result = subprocess.run(
+                ["git", "describe", "--tags", "--exact-match", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                cwd=str(REPO_ROOT),
+            )
+            if result.returncode == 0 and _RC_RE.search(result.stdout.strip()):
+                return True
+        except Exception:
+            pass
 
-    return False
+        return False
 
 
 def _handle_nginx_unavailable(blocking: bool, args: argparse.Namespace) -> int:
