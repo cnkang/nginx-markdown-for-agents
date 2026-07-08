@@ -713,8 +713,13 @@ grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log" || {
 # internal diagnostics: decompression failure followed by pre-commit
 # conversion fail-open.  Full-buffer and streaming paths use different
 # decompressor implementations, so accept either production log prefix.
-decompress_failed_count="$(grep -E -c 'markdown: (rust decompress failed|decompression failed)' "${RUNTIME}/logs/error.log" || true)"
-conversion_failopen_count="$(grep -Fc 'reason=failed_open category=conversion_error' "${RUNTIME}/logs/error.log" || true)"
+# Full-buffer logs "rust decompress failed" or "decompression failed";
+# streaming finalize logs "decomp_finish failed" or
+# "finish inflate incomplete stream" or "finish inflate error".
+decompress_failed_count="$(grep -E -c 'markdown: (rust decompress failed|decompression failed|decomp_finish failed|finish inflate (incomplete stream|error))' "${RUNTIME}/logs/error.log" || true)"
+# Full-buffer decision uses "reason=failed_open category=conversion_error";
+# streaming precommit uses "reason=STREAMING_PRECOMMIT_FAILOPEN" (no category).
+conversion_failopen_count="$(grep -E -c '(reason=failed_open category=conversion_error|reason=STREAMING_PRECOMMIT_FAILOPEN)' "${RUNTIME}/logs/error.log" || true)"
 if [[ "${decompress_failed_count}" -lt 2 ]]; then
   echo "missing decompression failure logs for truncated gzip/deflate cases: ${decompress_failed_count}" >&2
   exit 1
