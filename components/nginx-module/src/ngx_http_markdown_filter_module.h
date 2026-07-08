@@ -1008,6 +1008,9 @@ typedef struct {
         /* Pending output byte count (for deferred metric accounting) */
         size_t                            pending_output_bytes;
 
+        /* Pending output delivery mode for deferred perf accounting. */
+        ngx_flag_t                        pending_output_zero_copy;
+
         /* Pending output is a fail-open delivery; resume_pending should
            increment results.failopen_count on downstream success. */
         ngx_flag_t                        pending_failopen_delivery;
@@ -1269,12 +1272,12 @@ typedef struct {
         ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
         ngx_atomic_t  replay_buffer_errors_total;
-    } results;
 
-    struct {
-        ngx_atomic_t  parse_timeouts_total;
-        ngx_atomic_t  parse_budget_exceeded_total;
-    } parse_interrupts;
+        struct {
+            ngx_atomic_t  parse_timeouts_total;
+            ngx_atomic_t  parse_budget_exceeded_total;
+        } parse_interrupts;
+    } results;
 
     /*
      * Performance metrics: backpressure, decompression path,

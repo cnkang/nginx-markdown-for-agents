@@ -50,10 +50,6 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
         ngx_atomic_t  io_error_total;
     } decompressions;
     struct {
-        ngx_atomic_t  parse_timeouts_total;
-        ngx_atomic_t  parse_budget_exceeded_total;
-    } parse_interrupts;
-    struct {
         ngx_atomic_t  fullbuffer;
         ngx_atomic_t  incremental;
         ngx_atomic_t  streaming;
@@ -109,6 +105,10 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
         ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
         ngx_atomic_t  replay_buffer_errors_total;
+        struct {
+            ngx_atomic_t  parse_timeouts_total;
+            ngx_atomic_t  parse_budget_exceeded_total;
+        } parse_interrupts;
     } results;
     struct {
         ngx_atomic_t  path_entries;
@@ -125,12 +125,12 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
         ngx_atomic_t  decompression_budget_exceeded_total;
         ngx_atomic_t  zero_copy_output_total;
         ngx_atomic_t  copied_output_total;
+        struct {
+            ngx_atomic_t  current;
+            ngx_atomic_t  high_watermark;
+            ngx_atomic_t  overload_total;
+        } inflight;
     } perf;
-    struct {
-        ngx_atomic_t  current;
-        ngx_atomic_t  high_watermark;
-        ngx_atomic_t  overload_total;
-    } inflight;
 } ngx_http_markdown_metrics_snapshot_t;
 
 typedef struct ngx_rbtree_node_s  ngx_rbtree_node_t;

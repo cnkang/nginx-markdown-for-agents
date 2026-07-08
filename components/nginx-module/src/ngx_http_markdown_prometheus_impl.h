@@ -517,7 +517,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "# TYPE nginx_markdown_parse_timeouts_total counter\n"
         "nginx_markdown_parse_timeouts_total %uA\n"
         "\n",
-        snapshot->parse_interrupts.parse_timeouts_total);
+        snapshot->results.parse_interrupts.parse_timeouts_total);
 
     /* parse_budget_exceeded_total */
     p = ngx_slprintf(p, end,
@@ -526,7 +526,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "# TYPE nginx_markdown_parse_budget_exceeded_total counter\n"
         "nginx_markdown_parse_budget_exceeded_total %uA\n"
         "\n",
-        snapshot->parse_interrupts.parse_budget_exceeded_total);
+        snapshot->results.parse_interrupts.parse_budget_exceeded_total);
 
     /* delivery_total (separate from decision_total) */
     p = ngx_slprintf(p, end,
@@ -624,7 +624,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "# TYPE nginx_markdown_inflight_current gauge\n"
         "nginx_markdown_inflight_current %uA\n"
         "\n",
-        snapshot->inflight.current);
+        snapshot->perf.inflight.current);
 
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_inflight_high_watermark "
@@ -633,7 +633,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "# TYPE nginx_markdown_inflight_high_watermark gauge\n"
         "nginx_markdown_inflight_high_watermark %uA\n"
         "\n",
-        snapshot->inflight.high_watermark);
+        snapshot->perf.inflight.high_watermark);
 
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_overload_total "
@@ -642,7 +642,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "# TYPE nginx_markdown_overload_total counter\n"
         "nginx_markdown_overload_total %uA\n"
         "\n",
-        snapshot->inflight.overload_total);
+        snapshot->perf.inflight.overload_total);
 
     /* backpressure_total */
     p = ngx_slprintf(p, end,

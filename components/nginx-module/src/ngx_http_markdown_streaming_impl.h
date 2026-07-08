@@ -787,7 +787,8 @@ ngx_http_markdown_streaming_save_pending(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     ngx_chain_t *out,
-    const u_char *data, size_t len)
+    const u_char *data, size_t len,
+    ngx_flag_t zero_copy)
 {
     if (ctx->streaming.pending_output != NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -806,6 +807,7 @@ ngx_http_markdown_streaming_save_pending(
     ctx->streaming.pending_has_data =
         (data != NULL && len > 0) ? 1 : 0;
     ctx->streaming.pending_output_bytes = len;
+    ctx->streaming.pending_output_zero_copy = zero_copy;
     r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 
     /* Backpressure metric: streaming output returned NGX_AGAIN */
@@ -921,7 +923,7 @@ ngx_http_markdown_streaming_send_output(
 
     if (rc == NGX_AGAIN) {
         rc = ngx_http_markdown_streaming_save_pending(
-            r, ctx, out, data, len);
+            r, ctx, out, data, len, 0);
     }
 
     return rc;
@@ -1215,8 +1217,14 @@ ngx_http_markdown_streaming_resume_pending(
         NGX_HTTP_MARKDOWN_METRIC_ADD(
             streaming.selection.output_bytes_total,
             (ngx_atomic_int_t) ctx->streaming.pending_output_bytes);
+        if (ctx->streaming.pending_output_zero_copy) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(perf.zero_copy_output_total);
+        } else {
+            NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
+        }
     }
     ctx->streaming.pending_output_bytes = 0;
+    ctx->streaming.pending_output_zero_copy = 0;
 
     /*
      * If the drained pending chain carried a last_buf (closing
@@ -1891,7 +1899,7 @@ ngx_http_markdown_streaming_handle_feed_result(
                     rc =
                         ngx_http_markdown_streaming_save_pending(
                             r, ctx, zout,
-                            out_data, out_len);
+                            out_data, out_len, 1);
                 }
             } else {
                 /*
