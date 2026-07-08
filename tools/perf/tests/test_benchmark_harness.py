@@ -773,3 +773,9 @@ class TestNginxConfigGeneration:
         # 2. Verification of local mime.types removal and static types block addition
         assert "include       mime.types;" not in script_content, "Relative 'include mime.types;' should not be used in benchmark config"
         assert "types {" in script_content, "Explicit 'types' definition block is missing from benchmark config"
+        assert "markdown_streaming_zero_copy on;" in script_content, (
+            "streaming_first benchmark config should enable zero-copy"
+        )
+        assert '"$NGINX_BIN" -t -c "$conf_path" -p "$NGINX_WORKDIR"' in script_content, (
+            "generated benchmark nginx.conf should be validated with nginx -t"
+        )

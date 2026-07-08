@@ -194,7 +194,11 @@ ngx_http_markdown_streaming_decomp_create(
     switch (type) {
 
     case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
-        /* gzip: MAX_WBITS + 16 for automatic gzip header detection */
+        /*
+         * Deferred path for post-0.9.1. Header routing keeps gzip on
+         * full-buffer in 0.9.1, so this branch is intentionally
+         * unreachable for supported streaming decompression.
+         */
         if (ngx_http_markdown_streaming_decomp_init_zlib(
                 decomp, MAX_WBITS + 16)
             != NGX_OK)
@@ -225,6 +229,11 @@ ngx_http_markdown_streaming_decomp_create(
 
 #ifdef NGX_HTTP_BROTLI
     case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        /*
+         * Deferred path for post-0.9.1. Header routing keeps brotli on
+         * full-buffer in 0.9.1, so this branch is intentionally
+         * unreachable for supported streaming decompression.
+         */
         decomp->state.brotli =
             BrotliDecoderCreateInstance(NULL, NULL, NULL);
         if (decomp->state.brotli == NULL) {
