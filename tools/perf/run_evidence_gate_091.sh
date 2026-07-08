@@ -11,7 +11,7 @@ set -e
 if [[ $rc -eq 75 ]]; then
   echo "SKIP_NOT_PRESENT: Module benchmarks require NGINX_BIN." >&2
   echo "  Set NGINX_BIN=/path/to/nginx to enable." >&2
-  exit 75
+  exit 0
 fi
 
 if [[ $rc -ne 0 ]]; then

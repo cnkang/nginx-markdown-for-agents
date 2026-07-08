@@ -702,7 +702,7 @@ release-gates-check-090: release-gates-check-080-regression
 # perf-evidence-check: Non-blocking performance evidence gate (report-only).
 # Runs the module-level benchmark harness and evaluates against thresholds.
 # Exits 0 regardless of verdict (soft/report-only mode).
-# Exits 75 (SKIP_NOT_PRESENT) when NGINX_BIN is unavailable.
+# Reports SKIP_NOT_PRESENT and exits 0 when NGINX_BIN is unavailable.
 #
 # Evidence pack includes: module benchmark tiers, decompression coverage,
 # fallback rate, memory slope.

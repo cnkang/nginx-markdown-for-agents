@@ -887,6 +887,31 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NULL
     },
 
+    /*
+     * markdown_streaming_zero_copy on|off
+     *
+     * Enable zero-copy output path for streaming chunks.
+     * When enabled, non-terminal chunks with no active backpressure
+     * use ngx_buf_t referencing Rust-owned memory directly without
+     * intermediate pool-copy (freed via pool cleanup handler).
+     *
+     * Default: off (conservative; requires production soak)
+     * Context: http, server, location
+     * Togglable via HUP reload without binary rebuild.
+     *
+     * Example:
+     *   markdown_streaming_zero_copy on;
+     */
+    {
+        ngx_string("markdown_streaming_zero_copy"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, stream.zero_copy),
+        NULL
+    },
+
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
     /*
@@ -1483,31 +1508,6 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_stream_excluded_types_handler,
         NGX_HTTP_LOC_CONF_OFFSET,
         0,
-        NULL
-    },
-
-    /*
-     * markdown_streaming_zero_copy on|off
-     *
-     * Enable zero-copy output path for streaming chunks.
-     * When enabled, non-terminal chunks with no active backpressure
-     * use ngx_buf_t referencing Rust-owned memory directly without
-     * intermediate pool-copy (freed via pool cleanup handler).
-     *
-     * Default: off (conservative; requires production soak)
-     * Context: http, server, location
-     * Togglable via HUP reload without binary rebuild.
-     *
-     * Example:
-     *   markdown_streaming_zero_copy on;
-     */
-    {
-        ngx_string("markdown_streaming_zero_copy"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, stream.zero_copy),
         NULL
     },
 
