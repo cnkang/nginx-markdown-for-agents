@@ -992,8 +992,10 @@ typedef struct {
         ngx_uint_t                        chunks_processed;
         ngx_uint_t                        flushes_sent;
         size_t                            total_input_bytes;
-        size_t                            total_output_bytes;
-        unsigned                          total_output_bytes_overflowed:1;
+        struct {
+            size_t                        bytes;
+            unsigned                      overflowed:1;
+        } output;
         unsigned                          main_terminal_sent:1;
 
         /* TTFB tracking (from first feed to first non-empty output) */

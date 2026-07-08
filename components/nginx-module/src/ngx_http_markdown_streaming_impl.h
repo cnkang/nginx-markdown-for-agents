@@ -1087,7 +1087,7 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
                 (int64_t) ctx->streaming.total_input_bytes);
             ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
                 (const u_char *) "output_bytes", 12,
-                (int64_t) ctx->streaming.total_output_bytes);
+                (int64_t) ctx->streaming.output.bytes);
             ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
                 (const u_char *) "error_code", 10,
                 (int64_t) 0);
@@ -1107,6 +1107,103 @@ ngx_http_markdown_streaming_send_deferred_lastbuf(
     }
 
     return rc;
+}
+
+
+static ngx_flag_t
+ngx_http_markdown_streaming_delivery_ok(ngx_int_t rc)
+{
+    return (rc == NGX_OK || rc == NGX_DONE) ? 1 : 0;
+}
+
+
+static void
+ngx_http_markdown_streaming_record_pending_ttfb(
+    ngx_http_markdown_ctx_t *ctx, ngx_int_t rc)
+{
+    const ngx_time_t  *tp_ttfb;
+    ngx_msec_t        now_ms;
+    ngx_msec_t        elapsed_ms;
+
+    if (ctx->streaming.ttfb.recorded
+        || ctx->streaming.ttfb.feed_start_ms == 0
+        || ngx_http_markdown_metrics == NULL
+        || !ngx_http_markdown_streaming_delivery_ok(rc)
+        || !ctx->streaming.pending_has_data)
+    {
+        return;
+    }
+
+    tp_ttfb = ngx_timeofday();
+    now_ms = (ngx_msec_t) (tp_ttfb->sec * 1000 + tp_ttfb->msec);
+    elapsed_ms = (now_ms >= ctx->streaming.ttfb.feed_start_ms)
+        ? (now_ms - ctx->streaming.ttfb.feed_start_ms) : 0;
+
+    /* Gauge store: see send_output TTFB comment for rationale. */
+    ngx_http_markdown_metrics->streaming.last_ttfb_ms =
+        (ngx_atomic_t) elapsed_ms;
+    ctx->streaming.ttfb.recorded = 1;
+}
+
+
+static void
+ngx_http_markdown_streaming_account_pending_output(
+    ngx_http_markdown_ctx_t *ctx, ngx_int_t rc)
+{
+    if (ngx_http_markdown_streaming_delivery_ok(rc)
+        && ctx->streaming.pending_output_bytes > 0)
+    {
+        NGX_HTTP_MARKDOWN_METRIC_ADD(
+            streaming.selection.output_bytes_total,
+            (ngx_atomic_int_t) ctx->streaming.pending_output_bytes);
+        if (ctx->streaming.pending_output_zero_copy) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(perf.zero_copy_output_total);
+        } else {
+            NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
+        }
+    }
+
+    ctx->streaming.pending_output_bytes = 0;
+    ctx->streaming.pending_output_zero_copy = 0;
+}
+
+
+static void
+ngx_http_markdown_streaming_record_pending_terminal_success(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (!ctx->streaming.completion.pending_terminal_metrics) {
+        return;
+    }
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
+    NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
+    NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
+
+    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
+        ngx_http_markdown_reason_streaming_convert());
+
+    ngx_http_markdown_record_per_path_metrics(r, conf, 0);
+
+    if (ctx->otel_span != NULL) {
+        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+            (const u_char *) "input_bytes", 11,
+            (int64_t) ctx->streaming.total_input_bytes);
+        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+            (const u_char *) "output_bytes", 12,
+            (int64_t) ctx->streaming.output.bytes);
+        ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+            (const u_char *) "error_code", 10,
+            (int64_t) 0);
+        ngx_http_markdown_otel_span_end(ctx->otel_span);
+        ngx_http_markdown_otel_span_export(ctx->otel_span,
+            r->connection->log, r);
+        ctx->otel_span = NULL;
+    }
+
+    ctx->streaming.completion.pending_terminal_metrics = 0;
 }
 
 
@@ -1163,7 +1260,7 @@ ngx_http_markdown_streaming_resume_pending(
     r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 
     /* Backpressure resume: pending drain completed */
-    if (rc == NGX_OK || rc == NGX_DONE) {
+    if (ngx_http_markdown_streaming_delivery_ok(rc)) {
         NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_resume_total);
     }
 
@@ -1178,27 +1275,7 @@ ngx_http_markdown_streaming_resume_pending(
      * Using the explicit flag avoids undefined pointer comparison
      * (out->buf->last > out->buf->pos) when pos/last may be NULL.
      */
-    if (!ctx->streaming.ttfb.recorded
-        && ctx->streaming.ttfb.feed_start_ms > 0
-        && ngx_http_markdown_metrics != NULL
-        && (rc == NGX_OK || rc == NGX_DONE)
-        && ctx->streaming.pending_has_data)
-    {
-        const ngx_time_t  *tp_ttfb;
-        ngx_msec_t   now_ms;
-        ngx_msec_t   elapsed_ms;
-
-        tp_ttfb = ngx_timeofday();
-        now_ms = (ngx_msec_t) (tp_ttfb->sec * 1000
-            + tp_ttfb->msec);
-        elapsed_ms = (now_ms >= ctx->streaming.ttfb.feed_start_ms)
-            ? (now_ms - ctx->streaming.ttfb.feed_start_ms) : 0;
-
-        /* Gauge store: see send_output TTFB comment for rationale. */
-        ngx_http_markdown_metrics->streaming.last_ttfb_ms =
-            (ngx_atomic_t) elapsed_ms;
-        ctx->streaming.ttfb.recorded = 1;
-    }
+    ngx_http_markdown_streaming_record_pending_ttfb(ctx, rc);
 
     /*
      * Clear pending_has_data after TTFB sampling has consumed
@@ -1211,20 +1288,7 @@ ngx_http_markdown_streaming_resume_pending(
      * Account for deferred output bytes that were saved on
      * NGX_AGAIN in send_output and now confirmed delivered.
      */
-    if ((rc == NGX_OK || rc == NGX_DONE)
-        && ctx->streaming.pending_output_bytes > 0)
-    {
-        NGX_HTTP_MARKDOWN_METRIC_ADD(
-            streaming.selection.output_bytes_total,
-            (ngx_atomic_int_t) ctx->streaming.pending_output_bytes);
-        if (ctx->streaming.pending_output_zero_copy) {
-            NGX_HTTP_MARKDOWN_METRIC_INC(perf.zero_copy_output_total);
-        } else {
-            NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
-        }
-    }
-    ctx->streaming.pending_output_bytes = 0;
-    ctx->streaming.pending_output_zero_copy = 0;
+    ngx_http_markdown_streaming_account_pending_output(ctx, rc);
 
     /*
      * If the drained pending chain carried a last_buf (closing
@@ -1233,7 +1297,7 @@ ngx_http_markdown_streaming_resume_pending(
      * send_closing()/send_terminal() which defers the latch
      * on NGX_AGAIN.
      */
-    if ((rc == NGX_OK || rc == NGX_DONE) && pending_last_buf) {
+    if (ngx_http_markdown_streaming_delivery_ok(rc) && pending_last_buf) {
         ctx->streaming.main_terminal_sent = 1;
     }
 
@@ -1242,7 +1306,7 @@ ngx_http_markdown_streaming_resume_pending(
      * proceeding to deferred lastbuf, to avoid the failure
      * branch being short-circuited.
      */
-    if (rc != NGX_OK && rc != NGX_DONE) {
+    if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
         /*
          * Resume failed after draining pending output.
          * Clear any pending terminal metrics latch and failopen
@@ -1273,34 +1337,7 @@ ngx_http_markdown_streaming_resume_pending(
      * finalize(), record the success metrics now that the
      * drain has confirmed delivery.
      */
-    if (ctx->streaming.completion.pending_terminal_metrics) {
-        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
-        NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
-
-        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_streaming_convert());
-
-        ngx_http_markdown_record_per_path_metrics(r, conf, 0);
-
-        if (ctx->otel_span != NULL) {
-            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-                (const u_char *) "input_bytes", 11,
-                (int64_t) ctx->streaming.total_input_bytes);
-            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-                (const u_char *) "output_bytes", 12,
-                (int64_t) ctx->streaming.total_output_bytes);
-            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-                (const u_char *) "error_code", 10,
-                (int64_t) 0);
-            ngx_http_markdown_otel_span_end(ctx->otel_span);
-            ngx_http_markdown_otel_span_export(ctx->otel_span,
-                r->connection->log, r);
-            ctx->otel_span = NULL;
-        }
-
-        ctx->streaming.completion.pending_terminal_metrics = 0;
-    }
+    ngx_http_markdown_streaming_record_pending_terminal_success(r, ctx, conf);
 
     /*
      * Pending output drained successfully. If finalize deferred
@@ -1481,7 +1518,7 @@ ngx_http_markdown_streaming_handle_postcommit_error(
         r->connection->log, 0,
         "markdown: post-commit error, "
         "bytes_sent=%uz, error_code=%ui, chunks=%ui",
-        ctx->streaming.total_output_bytes,
+        ctx->streaming.output.bytes,
         (ngx_uint_t) error_code,
         ctx->streaming.chunks_processed);
 
@@ -1748,6 +1785,151 @@ ngx_http_markdown_streaming_commit(
 }
 
 
+static void
+ngx_http_markdown_streaming_add_output_bytes(
+    ngx_http_markdown_ctx_t *ctx, size_t out_len)
+{
+    if (ctx->streaming.output.overflowed) {
+        return;
+    }
+
+    if (out_len > (size_t) -1 - ctx->streaming.output.bytes) {
+        ctx->streaming.output.bytes = (size_t) -1;
+        ctx->streaming.output.overflowed = 1;
+        return;
+    }
+
+    ctx->streaming.output.bytes += out_len;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_streaming_send_zero_copy_feed_output(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    u_char *out_data,
+    size_t out_len)
+{
+    ngx_buf_t    *zb;
+    ngx_chain_t  *zout;
+    ngx_int_t     rc;
+
+    /*
+     * Zero-copy path: buffer factory creates an ngx_buf_t referencing
+     * Rust memory with pool cleanup registered.  Caller does NOT free
+     * the Rust buffer; pool cleanup handles it.
+     */
+    zb = ngx_http_markdown_rust_buf_create(r->pool, out_data, out_len);
+    if (zb == NULL) {
+        return NGX_ERROR;
+    }
+
+    zb->flush = 1;
+    zb->last_buf = 0;
+    zb->last_in_chain = 0;
+
+    zout = ngx_alloc_chain_link(r->pool);
+    if (zout == NULL) {
+        return NGX_ERROR;
+    }
+    zout->buf = zb;
+    zout->next = NULL;
+
+    rc = ngx_http_next_body_filter(r, zout);
+
+    if (ngx_http_markdown_streaming_delivery_ok(rc)) {
+        ctx->streaming.flushes_sent++;
+        ngx_http_markdown_streaming_record_ttfb(ctx);
+        NGX_HTTP_MARKDOWN_METRIC_ADD(
+            streaming.selection.output_bytes_total,
+            (ngx_atomic_int_t) out_len);
+        NGX_HTTP_MARKDOWN_METRIC_INC(perf.zero_copy_output_total);
+    }
+
+    if (rc == NGX_AGAIN) {
+        return ngx_http_markdown_streaming_save_pending(
+            r, ctx, zout, out_data, out_len, 1);
+    }
+
+    return rc;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_streaming_send_feed_output(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    u_char *out_data,
+    size_t out_len)
+{
+    ngx_http_markdown_output_decision_t  decision;
+    ngx_flag_t                          bp_active;
+    ngx_int_t                           rc;
+
+    bp_active = (ctx->streaming.pending_output != NULL) ? 1 : 0;
+
+    decision = ngx_http_markdown_hybrid_output_decision(
+        conf, /* chunk_is_terminal */ 0, bp_active);
+
+    if (decision == NGX_HTTP_MARKDOWN_OUTPUT_ZERO_COPY) {
+        return ngx_http_markdown_streaming_send_zero_copy_feed_output(
+            r, ctx, out_data, out_len);
+    }
+
+    /*
+     * Pool-copy path: existing send_output copies data into pool memory.
+     * Caller frees the Rust buffer after return.
+     */
+    rc = ngx_http_markdown_streaming_send_output(
+        r, ctx, out_data, out_len, /* last_buf */ 0);
+
+    if (ngx_http_markdown_streaming_delivery_ok(rc)) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
+    }
+
+    markdown_streaming_output_free(out_data, out_len);
+    return rc;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_streaming_handle_success_output(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    u_char *out_data,
+    size_t out_len)
+{
+    ngx_int_t  rc;
+
+    if (out_data == NULL || out_len == 0) {
+        if (out_data != NULL) {
+            markdown_streaming_output_free(out_data, out_len);
+        }
+        return NGX_OK;
+    }
+
+    if (ctx->streaming.commit_state == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE) {
+        rc = ngx_http_markdown_streaming_commit(r, ctx, conf);
+        if (rc != NGX_OK) {
+            markdown_streaming_output_free(out_data, out_len);
+            return rc;
+        }
+    }
+
+    ngx_http_markdown_streaming_add_output_bytes(ctx, out_len);
+
+    rc = ngx_http_markdown_streaming_send_feed_output(
+        r, ctx, conf, out_data, out_len);
+    if (rc == NGX_AGAIN) {
+        return ngx_http_markdown_streaming_handle_backpressure(r, ctx);
+    }
+
+    return rc;
+}
+
+
 /*
  * Handle the result of a streaming feed call.
  *
@@ -1767,8 +1949,6 @@ ngx_http_markdown_streaming_handle_feed_result(
     u_char *out_data,
     size_t out_len)
 {
-    ngx_int_t  rc;
-
     if (rc_ffi == ERROR_STREAMING_FALLBACK) {
         if (out_data != NULL) {
             markdown_streaming_output_free(
@@ -1803,140 +1983,8 @@ ngx_http_markdown_streaming_handle_feed_result(
             r, ctx, conf, rc_ffi);
     }
 
-    /* Success: handle output */
-    if (out_data != NULL && out_len > 0) {
-        if (ctx->streaming.commit_state
-            == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE)
-        {
-            rc = ngx_http_markdown_streaming_commit(
-                r, ctx, conf);
-            if (rc != NGX_OK) {
-                markdown_streaming_output_free(
-                    out_data, out_len);
-                return rc;
-            }
-        }
-
-        if (ctx->streaming.total_output_bytes_overflowed) {
-            /* latch is sticky: skip all further additions */
-        } else if (out_len > (size_t) -1
-                            - ctx->streaming.total_output_bytes)
-        {
-            ctx->streaming.total_output_bytes = (size_t) -1;
-            ctx->streaming.total_output_bytes_overflowed = 1;
-        } else {
-            ctx->streaming.total_output_bytes += out_len;
-        }
-
-        /*
-         * Hybrid output path decision (Req 3.1-3.4).
-         *
-         * Evaluate zero-copy eligibility for this chunk.
-         * Zero-copy avoids the pool memcpy by referencing
-         * Rust memory directly; pool cleanup frees it later.
-         * Pool-copy is the safe fallback for terminal chunks,
-         * backpressure, or when the feature gate is OFF.
-         */
-        {
-            ngx_http_markdown_output_decision_t  decision;
-            ngx_flag_t  bp_active;
-
-            bp_active = (ctx->streaming.pending_output != NULL)
-                        ? 1 : 0;
-
-            decision = ngx_http_markdown_hybrid_output_decision(
-                conf, /* chunk_is_terminal */ 0, bp_active);
-
-            if (decision
-                == NGX_HTTP_MARKDOWN_OUTPUT_ZERO_COPY)
-            {
-                /*
-                 * Zero-copy path: buffer factory creates an
-                 * ngx_buf_t referencing Rust memory with pool
-                 * cleanup registered.  Caller does NOT free
-                 * the Rust buffer — pool cleanup handles it.
-                 */
-                ngx_buf_t    *zb;
-                ngx_chain_t  *zout;
-
-                zb = ngx_http_markdown_rust_buf_create(
-                    r->pool, out_data, out_len);
-                if (zb == NULL) {
-                    /*
-                     * Buffer factory failed (already freed
-                     * the Rust buffer internally).  Fall
-                     * through to error return.
-                     */
-                    return NGX_ERROR;
-                }
-
-                zb->flush = 1;
-                zb->last_buf = 0;
-                zb->last_in_chain = 0;
-
-                zout = ngx_alloc_chain_link(r->pool);
-                if (zout == NULL) {
-                    return NGX_ERROR;
-                }
-                zout->buf = zb;
-                zout->next = NULL;
-
-                rc = ngx_http_next_body_filter(r, zout);
-
-                if (rc == NGX_OK || rc == NGX_DONE) {
-                    ctx->streaming.flushes_sent++;
-                    ngx_http_markdown_streaming_record_ttfb(
-                        ctx);
-                    NGX_HTTP_MARKDOWN_METRIC_ADD(
-                        streaming.selection.output_bytes_total,
-                        (ngx_atomic_int_t) out_len);
-                    /* Delivery counter: zero-copy (Req 3.5) */
-                    NGX_HTTP_MARKDOWN_METRIC_INC(
-                        perf.zero_copy_output_total);
-                }
-
-                if (rc == NGX_AGAIN) {
-                    rc =
-                        ngx_http_markdown_streaming_save_pending(
-                            r, ctx, zout,
-                            out_data, out_len, 1);
-                }
-            } else {
-                /*
-                 * Pool-copy path: existing send_output copies
-                 * data into pool memory.  Caller frees the
-                 * Rust buffer after return.
-                 */
-                rc = ngx_http_markdown_streaming_send_output(
-                    r, ctx, out_data, out_len,
-                    /* last_buf */ 0);
-
-                /* Delivery counter: pool-copy (Req 3.6) */
-                if (rc == NGX_OK || rc == NGX_DONE) {
-                    NGX_HTTP_MARKDOWN_METRIC_INC(
-                        perf.copied_output_total);
-                }
-
-                markdown_streaming_output_free(
-                    out_data, out_len);
-            }
-        }
-
-        if (rc == NGX_AGAIN) {
-            return ngx_http_markdown_streaming_handle_backpressure(
-                r, ctx);
-        }
-
-        return rc;
-    }
-
-    /* Empty output: free if non-NULL */
-    if (out_data != NULL) {
-        markdown_streaming_output_free(
-            out_data, out_len);
-    }
-
-    return NGX_OK;
+    return ngx_http_markdown_streaming_handle_success_output(
+        r, ctx, conf, out_data, out_len);
 }
 
 static uint32_t
@@ -2369,7 +2417,7 @@ ngx_http_markdown_streaming_handle_finalize_ffi_error(
             (int64_t) ctx->streaming.total_input_bytes);
         ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
             (const u_char *) "output_bytes", 12,
-            (int64_t) ctx->streaming.total_output_bytes);
+            (int64_t) ctx->streaming.output.bytes);
         ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
             (const u_char *) "error_code", 10,
             (int64_t) rc_ffi);
@@ -2408,15 +2456,15 @@ ngx_http_markdown_streaming_finalize_send_markdown(
         return NGX_OK;
     }
 
-    if (ctx->streaming.total_output_bytes_overflowed) {
+    if (ctx->streaming.output.overflowed) {
         /* latch is sticky: skip all further additions */
     } else if (result->markdown_len > (size_t) -1
-                - ctx->streaming.total_output_bytes)
+                - ctx->streaming.output.bytes)
     {
-        ctx->streaming.total_output_bytes = (size_t) -1;
-        ctx->streaming.total_output_bytes_overflowed = 1;
+        ctx->streaming.output.bytes = (size_t) -1;
+        ctx->streaming.output.overflowed = 1;
     } else {
-        ctx->streaming.total_output_bytes += result->markdown_len;
+        ctx->streaming.output.bytes += result->markdown_len;
     }
 
     if (ctx->streaming.commit_state
@@ -2530,7 +2578,7 @@ ngx_http_markdown_streaming_finalize_request(
             "out_bytes=%uz tokens=%ui",
             result.etag_len, result.etag,
             &r->uri,
-            ctx->streaming.total_output_bytes,
+            ctx->streaming.output.bytes,
             (ngx_uint_t) result.token_estimate);
     }
 
@@ -2554,7 +2602,7 @@ ngx_http_markdown_streaming_finalize_request(
         ctx->streaming.chunks_processed,
         ctx->streaming.flushes_sent,
         ctx->streaming.total_input_bytes,
-        ctx->streaming.total_output_bytes);
+        ctx->streaming.output.bytes);
 
     /*
      * Record peak memory estimate from Rust streaming stats.
@@ -2633,7 +2681,7 @@ ngx_http_markdown_streaming_finalize_request(
                 (int64_t) ctx->streaming.total_input_bytes);
             ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
                 (const u_char *) "output_bytes", 12,
-                (int64_t) ctx->streaming.total_output_bytes);
+                (int64_t) ctx->streaming.output.bytes);
             ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
                 (const u_char *) "error_code", 10,
                 (int64_t) 0);
