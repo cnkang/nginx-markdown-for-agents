@@ -32,10 +32,47 @@ from doctor_advice import (
     _evaluate_d07,
     compute_exit_code,
     evaluate_rules,
+    fetch_metrics_file,
+    fetch_metrics_http,
     format_json,
     format_text,
     DEFAULT_STREAMING_BUFFER_BUDGET,
 )
+
+
+# ---------------------------------------------------------------------------
+# Input validation
+# ---------------------------------------------------------------------------
+
+
+class TestInputValidation:
+    """CLI-controlled inputs are validated before network or filesystem use."""
+
+    def test_fetch_metrics_http_rejects_non_localhost(self, monkeypatch, capsys):
+        """Non-local endpoints are rejected before urllib is called."""
+        called = False
+
+        def fake_urlopen(*_args, **_kwargs):
+            nonlocal called
+            called = True
+            raise AssertionError("urlopen should not be called")
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+        with pytest.raises(SystemExit) as exc:
+            fetch_metrics_http("https://example.com/metrics.json")
+
+        assert exc.value.code == 2
+        assert not called
+        assert "host must be localhost" in capsys.readouterr().err
+
+    def test_fetch_metrics_file_rejects_traversal(self, capsys):
+        """Traversal markers in metrics paths are rejected."""
+        with pytest.raises(SystemExit) as exc:
+            fetch_metrics_file("../metrics.json")
+
+        assert exc.value.code == 2
+        assert "Invalid metrics file path" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

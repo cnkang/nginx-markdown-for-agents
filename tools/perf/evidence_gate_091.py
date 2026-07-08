@@ -40,7 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.path_validation import validate_read_path
+from lib.path_validation import validate_read_path, validate_write_path_within_root
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -572,7 +572,9 @@ def _write_output(evidence_pack: dict, output_path: str | None) -> None:
     if output_path is None:
         output_path = str(REPO_ROOT / "perf" / "reports" / "evidence-091.json")
 
-    out = Path(output_path)
+    out = validate_write_path_within_root(
+        output_path, REPO_ROOT, purpose="evidence output"
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         json.dumps(evidence_pack, indent=2, ensure_ascii=False) + "\n",

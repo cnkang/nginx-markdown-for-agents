@@ -31,12 +31,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.path_validation import validate_read_path
+
 
 # ---------------------------------------------------------------------------
 # Metric schema validation
 # ---------------------------------------------------------------------------
 
 _SCHEMA_RELATIVE_PATH = os.path.join("perf", "metrics-schema.json")
+_ALLOWED_ENDPOINT_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 
 def _find_schema_path() -> Optional[str]:
@@ -79,12 +83,24 @@ def _load_valid_metric_names() -> Optional[set]:
 
 def fetch_metrics_http(url: str) -> Dict[str, Any]:
     """Fetch metrics JSON from an HTTP(S) endpoint."""
-    scheme = urllib.parse.urlparse(url).scheme
+    parsed = urllib.parse.urlparse(url)
+    scheme = parsed.scheme
     if scheme not in ("http", "https"):
         print(
             "ERROR: --endpoint must use http or https scheme",
             file=sys.stderr,
         )
+        sys.exit(2)
+
+    if parsed.hostname not in _ALLOWED_ENDPOINT_HOSTS:
+        print(
+            "ERROR: --endpoint host must be localhost, 127.0.0.1, or ::1",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if parsed.username is not None or parsed.password is not None:
+        print("ERROR: --endpoint must not include credentials", file=sys.stderr)
         sys.exit(2)
 
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -103,10 +119,14 @@ def fetch_metrics_http(url: str) -> Dict[str, Any]:
 def fetch_metrics_file(path: str) -> Dict[str, Any]:
     """Read metrics JSON from a local file."""
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        validated_path = validate_read_path(path, purpose="metrics file")
+        with validated_path.open("r", encoding="utf-8") as fh:
             return json.load(fh)
     except OSError as exc:
         print(f"ERROR: Cannot read file {path}: {exc}", file=sys.stderr)
+        sys.exit(2)
+    except ValueError as exc:
+        print(f"ERROR: Invalid metrics file path {path}: {exc}", file=sys.stderr)
         sys.exit(2)
     except json.JSONDecodeError as exc:
         print(f"ERROR: Invalid JSON in {path}: {exc}", file=sys.stderr)
