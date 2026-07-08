@@ -2393,19 +2393,19 @@ test_commit_feed_and_finalize_core_paths(void)
 
     ctx.eligible = 1;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.total_output_bytes = NGX_MAX_SIZE_T_VALUE;
+    ctx.streaming.output.bytes = NGX_MAX_SIZE_T_VALUE;
     g_next_body_filter_rc = NGX_OK;
     rc = ngx_http_markdown_streaming_handle_feed_result(
         &r, &ctx, &conf, ERROR_SUCCESS, out_data, 1);
     TEST_ASSERT(rc == NGX_OK,
         "successful feed result should send output");
-    TEST_ASSERT(ctx.streaming.total_output_bytes == NGX_MAX_SIZE_T_VALUE,
+    TEST_ASSERT(ctx.streaming.output.bytes == NGX_MAX_SIZE_T_VALUE,
         "output byte counter should saturate on overflow");
 
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x14;
-    ctx.streaming.total_output_bytes = 0;
+    ctx.streaming.output.bytes = 0;
     g_next_body_filter_rc = NGX_AGAIN;
     rc = ngx_http_markdown_streaming_handle_feed_result(
         &r, &ctx, &conf, ERROR_SUCCESS, out_data, 2);
@@ -2951,7 +2951,7 @@ test_streaming_gap_branches(void)
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x33;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.total_output_bytes = NGX_MAX_SIZE_T_VALUE;
+    ctx.streaming.output.bytes = NGX_MAX_SIZE_T_VALUE;
     ctx.streaming.completion.failure_recorded = 0;
     ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_SUCCESS;
@@ -2964,7 +2964,7 @@ test_streaming_gap_branches(void)
     rc = ngx_http_markdown_streaming_finalize_request(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_ERROR,
         "finalize should propagate markdown send errors");
-    TEST_ASSERT(ctx.streaming.total_output_bytes == NGX_MAX_SIZE_T_VALUE,
+    TEST_ASSERT(ctx.streaming.output.bytes == NGX_MAX_SIZE_T_VALUE,
         "finalize markdown send should preserve saturated output counter");
     TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
         "finalize markdown send error should record failure");
@@ -3115,7 +3115,7 @@ test_streaming_gap_branches(void)
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x38;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
-    ctx.streaming.total_output_bytes = 0;
+    ctx.streaming.output.bytes = 0;
     ctx.streaming.pending_output = NULL;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = NULL;
