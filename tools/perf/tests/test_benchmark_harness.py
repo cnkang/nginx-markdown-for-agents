@@ -779,3 +779,20 @@ class TestNginxConfigGeneration:
         assert '"$NGINX_BIN" -t -c "$conf_path" -p "$NGINX_WORKDIR"' in script_content, (
             "generated benchmark nginx.conf should be validated with nginx -t"
         )
+
+    def test_scenario_results_are_collected_as_json_lines(self):
+        """Scenario JSON must not be split by delimiters that appear inside nested objects."""
+        assert BENCHMARK_SCRIPT.exists(), "Benchmark script not found"
+        script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+
+        assert "scenario-results.jsonl" in script_content
+        assert 'split("},{")' not in script_content
+
+    def test_gate_fallback_rate_uses_precommit_failopen(self):
+        """The hard fallback gate tracks fail-open events, not capability fallbacks."""
+        assert BENCHMARK_SCRIPT.exists(), "Benchmark script not found"
+        script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+
+        assert 'streaming_data.get("precommit_failopen_total", 0)' in script_content
+        assert "float(precommit_failopen_total) / requests_total" in script_content
+        assert '"streaming_fallback_total": fallback_total' in script_content
