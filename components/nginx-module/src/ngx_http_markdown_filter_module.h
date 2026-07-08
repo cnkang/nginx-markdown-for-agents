@@ -1013,10 +1013,6 @@ typedef struct {
         /* Pending output delivery mode for deferred perf accounting. */
         ngx_flag_t                        pending_output_zero_copy;
 
-        /* Pending output is a fail-open delivery; resume_pending should
-           increment results.failopen_count on downstream success. */
-        ngx_flag_t                        pending_failopen_delivery;
-
         /* Pre-Commit prebuffer for fallback */
         ngx_http_markdown_buffer_t        prebuffer;
         size_t                            prebuffer_limit;
@@ -1053,6 +1049,11 @@ typedef struct {
 
             /* Continue finalize() after tail-output backpressure drains. */
             ngx_flag_t                    finalize_after_pending;
+
+            /* Pending output is a fail-open delivery; resume_pending
+             * should increment results.failopen_count on downstream
+             * success (Rule 38). */
+            ngx_flag_t                    pending_failopen_delivery;
         } completion;
     } streaming;
 } ngx_http_markdown_ctx_t;
