@@ -5,8 +5,10 @@ Supports serving test corpus fixtures with configurable compression (gzip, defla
 and transfer encodings (identity with Content-Length, or chunked).
 """
 
+
 from __future__ import annotations
 
+import contextlib
 import gzip
 import http.server
 import os
@@ -80,10 +82,7 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
 
     def _send_chunked_response(self, body: bytes, content_encoding: str | None) -> None:
         """Send chunked HTTP response."""
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        if content_encoding:
-            self.send_header("Content-Encoding", content_encoding)
+        self._send_common_headers(content_encoding)
         self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
 
@@ -97,13 +96,17 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
         self, body: bytes, content_encoding: str | None
     ) -> None:
         """Send standard identity HTTP response with Content-Length."""
+        self._send_common_headers(content_encoding)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_common_headers(self, content_encoding: str | None) -> None:
+        """Send status line and shared headers common to all response modes."""
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         if content_encoding:
             self.send_header("Content-Encoding", content_encoding)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
 
 
 def main() -> None:
@@ -113,10 +116,8 @@ def main() -> None:
     httpd = http.server.ThreadingHTTPServer(server_address, MockUpstreamHandler)
     sys.stdout.write(f"Mock upstream starting on port {port}\n")
     sys.stdout.flush()
-    try:
-        httpd.serve_forever()  # NOSONAR: local benchmark fixture binds 127.0.0.1
-    except KeyboardInterrupt:
-        pass
+    with contextlib.suppress(KeyboardInterrupt):
+        httpd.serve_forever()  # NOSONAR(S5332) local benchmark fixture binds 127.0.0.1
 
 
 if __name__ == "__main__":

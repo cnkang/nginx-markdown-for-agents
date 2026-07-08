@@ -25,7 +25,6 @@ import json
 import os
 import sys
 import urllib.request
-import urllib.error
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
@@ -108,7 +107,7 @@ def fetch_metrics_http(url: str) -> Dict[str, Any]:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = resp.read()
             return json.loads(data)
-    except (urllib.error.URLError, OSError) as exc:
+    except OSError as exc:
         print(f"ERROR: Failed to fetch metrics from {url}: {exc}", file=sys.stderr)
         sys.exit(2)
     except json.JSONDecodeError as exc:
@@ -126,10 +125,7 @@ def fetch_metrics_file(path: str) -> Dict[str, Any]:
         print(f"ERROR: Cannot read file {path}: {exc}", file=sys.stderr)
         sys.exit(2)
     except ValueError as exc:
-        print(f"ERROR: Invalid metrics file path {path}: {exc}", file=sys.stderr)
-        sys.exit(2)
-    except json.JSONDecodeError as exc:
-        print(f"ERROR: Invalid JSON in {path}: {exc}", file=sys.stderr)
+        print(f"ERROR: Invalid metrics data in {path}: {exc}", file=sys.stderr)
         sys.exit(2)
 
 
