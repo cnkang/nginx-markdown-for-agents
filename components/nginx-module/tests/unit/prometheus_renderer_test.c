@@ -423,6 +423,10 @@ test_known_values(void)
         "backpressure_total should be 7");
     TEST_ASSERT(
         contains((char *) buf,
+            "nginx_markdown_backpressure_resume_total 3"),
+        "backpressure_resume_total should be 3");
+    TEST_ASSERT(
+        contains((char *) buf,
             "# TYPE nginx_markdown_pending_output_high_watermark_bytes "
             "gauge"),
         "pending output high watermark TYPE should be emitted");
@@ -534,6 +538,19 @@ test_help_and_type_lines(void)
         "nginx_markdown_decompressions_total",
         "nginx_markdown_decompression_failures_total",
         "nginx_markdown_conversion_duration_seconds",
+        "nginx_markdown_per_path_conversion_time_ms_total",
+        "nginx_markdown_per_path_overflow_total",
+        "nginx_markdown_inflight_current",
+        "nginx_markdown_inflight_high_watermark",
+        "nginx_markdown_overload_total",
+        "nginx_markdown_backpressure_total",
+        "nginx_markdown_backpressure_resume_total",
+        "nginx_markdown_pending_output_high_watermark_bytes",
+        "nginx_markdown_decompression_streaming_total",
+        "nginx_markdown_decompression_fullbuffer_total",
+        "nginx_markdown_perf_decompression_budget_exceeded_total",
+        "nginx_markdown_zero_copy_output_total",
+        "nginx_markdown_copied_output_total",
     };
 
     TEST_SUBSECTION("HELP and TYPE lines for all families");
