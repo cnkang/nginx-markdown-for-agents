@@ -415,6 +415,35 @@ def main(argv: list[str] | None = None) -> int:
     return _evaluate_and_report(report, args, blocking)
 
 
+def _is_rc_tag() -> bool:
+    """Detect whether the current git state is a release-candidate tag.
+
+    Checks GITHUB_REF, CI_COMMIT_TAG, and local git describe for
+    patterns like v0.9.1-rc1, 0.9.1-rc.2, etc.
+    """
+    # Check CI environment variables first
+    for env_var in ("GITHUB_REF", "CI_COMMIT_TAG", "RELEASE_VERSION"):
+        val = os.environ.get(env_var, "")
+        if val and "rc" in val.lower():
+            return True
+
+    # Check local git describe
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--exact-match", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=str(REPO_ROOT),
+        )
+        if result.returncode == 0 and "rc" in result.stdout.strip().lower():
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
 def _handle_nginx_unavailable(blocking: bool, args: argparse.Namespace) -> int:
     """Handle the case when NGINX_BIN is not available.
 
@@ -441,6 +470,14 @@ def _handle_nginx_unavailable(blocking: bool, args: argparse.Namespace) -> int:
 
     # Blocking mode
     if args.allow_skip_module:
+        if _is_rc_tag():
+            _stderr(
+                "FAIL: --allow-skip-module is not permitted for RC tags.\n"
+                "  RC releases require module benchmark evidence.\n"
+                "  Set NGINX_BIN=/path/to/nginx to provide benchmark evidence."
+            )
+            return 1
+
         _stderr(
             "WARNING: NGINX_BIN is not set — module benchmarks skipped.\n"
             "  Proceeding due to --allow-skip-module flag.\n"
@@ -531,6 +568,22 @@ def _evaluate_and_report(
         baseline_metrics = _extract_evidence_metrics(baseline_report)
         has_baseline = True
     else:
+        if blocking and _is_rc_tag():
+            _stderr(
+                "FAIL: No module baseline found and this is an RC tag.\n"
+                "  RC releases require a baseline for percentage threshold evaluation.\n"
+                "  Create a baseline with: cp perf/reports/module-benchmark-091.json "
+                "perf/baselines/module-baseline-091.json"
+            )
+            evidence_pack = _build_evidence_pack(
+                report=report,
+                verdict="MISSING_EVIDENCE",
+                breaches=[{"metric": "baseline", "reason": "no baseline for RC tag"}],
+                results=[],
+            )
+            _print_evidence_summary(evidence_pack)
+            _write_output(evidence_pack, args.output)
+            return 1
         _stderr("INFO: No module baseline found — percentage thresholds will be skipped (first run).")
         baseline_metrics = {}
         has_baseline = False
