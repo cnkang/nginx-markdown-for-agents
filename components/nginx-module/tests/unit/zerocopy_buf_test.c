@@ -215,6 +215,7 @@ test_pool_run_cleanups(ngx_pool_t *pool)
  * ---------------------------------------------------------------- */
 
 #define MARKDOWN_STREAMING_ENABLED
+#define NGX_HTTP_MARKDOWN_ZEROCOPY_BUF_TEST
 
 #include "../../src/ngx_http_markdown_zerocopy_buf.h"
 
@@ -458,12 +459,13 @@ test_pool_cleanup_on_pool_destruction(void)
 }
 
 /* ================================================================
- * Test 6: Buffer factory buf alloc failure (cleanup already registered)
+ * Test 6: Buffer factory buf alloc failure (no cleanup registered)
  *
  * Validates: Requirement 2.5, 2.6
- * When ngx_calloc_buf fails AFTER cleanup is registered, the buffer
- * factory returns NULL.  The Rust memory will be freed by the
- * already-registered pool cleanup handler on pool destroy.
+ * When ngx_calloc_buf fails, the factory returns NULL with
+ * owner_transferred=0.  The legacy wrapper (ngx_http_markdown_rust_buf_create)
+ * then frees the Rust buffer.  The caller retains ownership if using
+ * the _ex variant and can fallback to pool-copy.
  * ================================================================ */
 
 static void
@@ -490,24 +492,16 @@ test_buffer_factory_buf_alloc_failure(void)
 
     TEST_ASSERT(b == NULL,
         "buf alloc failure: buffer factory returns NULL");
-    TEST_ASSERT(g_free_call_count == 0,
-        "buf alloc failure: free NOT called (cleanup registered)");
-
-    /* Cleanup should still be registered on the pool */
-    TEST_ASSERT(pool.cleanups != NULL,
-        "buf alloc failure: cleanup is registered");
-    TEST_ASSERT(pool.cleanups->handler != NULL,
-        "buf alloc failure: cleanup handler is set");
-
-    /* Pool destruction should free the Rust memory */
-    test_pool_run_cleanups(&pool);
-
     TEST_ASSERT(g_free_call_count == 1,
-        "buf alloc failure: pool cleanup frees Rust memory");
+        "buf alloc failure: legacy wrapper frees Rust memory");
     TEST_ASSERT(g_free_last_ptr == rust_data,
-        "buf alloc failure: correct pointer freed by cleanup");
+        "buf alloc failure: correct pointer freed");
     TEST_ASSERT(g_free_last_len == rust_len,
-        "buf alloc failure: correct length freed by cleanup");
+        "buf alloc failure: correct length freed");
+
+    /* No cleanup should be registered since buf alloc failed first */
+    TEST_ASSERT(pool.cleanups == NULL,
+        "buf alloc failure: no cleanup on pool");
 
     TEST_PASS("buf alloc failure: cleanup registered, pool frees Rust memory");
 }

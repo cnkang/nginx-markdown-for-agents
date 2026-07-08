@@ -63,39 +63,53 @@ ngx_http_markdown_rust_buf_cleanup(void *data)
  * destruction, and returns the buffer with pos/last pointing
  * directly into Rust memory.
  *
- * On cleanup allocation failure, calls markdown_streaming_output_free
- * immediately to prevent a Rust memory leak and returns NULL.
+ * Ownership semantics on failure:
+ *   - NULL return means the factory could not produce a buffer.
+ *   - *owner_transferred is set to 1 if the factory has taken
+ *     ownership of the Rust buffer (cleanup registered or buffer
+ *     freed).  The caller must NOT free the buffer in this case.
+ *   - *owner_transferred is set to 0 if ownership was NOT taken.
+ *     The caller still owns rust_ptr and may fallback to pool-copy.
  *
- * pool     - request pool for buffer and cleanup allocation
- * rust_ptr - pointer to Rust-allocated output bytes
- * rust_len - length of the Rust-allocated buffer
+ * pool              - request pool for buffer and cleanup allocation
+ * rust_ptr          - pointer to Rust-allocated output bytes
+ * rust_len          - length of the Rust-allocated buffer
+ * owner_transferred - out-param: 1 if factory took ownership, 0 if caller retains
  *
  * Returns:
  *   non-NULL ngx_buf_t on success (memory=1, temporary=0)
- *   NULL on allocation failure (Rust buffer already freed)
+ *   NULL on allocation failure (check *owner_transferred)
  */
 static ngx_buf_t *
-ngx_http_markdown_rust_buf_create(ngx_pool_t *pool,
-    u_char *rust_ptr, size_t rust_len)
+ngx_http_markdown_rust_buf_create_ex(ngx_pool_t *pool,
+    u_char *rust_ptr, size_t rust_len, ngx_flag_t *owner_transferred)
 {
     ngx_buf_t                             *b;
     ngx_pool_cleanup_t                    *cln;
     ngx_http_markdown_rust_buf_cleanup_t  *ctx;
 
+    *owner_transferred = 0;
+
     /*
-     * Register pool cleanup BEFORE allocating the buffer.
-     * This ensures the Rust memory is always freed even if
-     * subsequent allocations fail.
+     * Allocate the buffer first.  If this fails, the caller
+     * still owns rust_ptr and can fallback to pool-copy.
+     */
+    b = ngx_calloc_buf(pool);
+    if (b == NULL) {
+        return NULL;
+    }
+
+    /*
+     * Register pool cleanup.  If this fails, the buffer struct
+     * is wasted (pool will reclaim it), but we must free the
+     * Rust memory now to prevent a leak since no cleanup handler
+     * can guarantee deallocation.
      */
     cln = ngx_pool_cleanup_add(pool,
         sizeof(ngx_http_markdown_rust_buf_cleanup_t));
     if (cln == NULL) {
-        /*
-         * Cleanup allocation failed.  Free the Rust buffer
-         * immediately to prevent a leak — the pool cannot
-         * guarantee deallocation without a cleanup handler.
-         */
         markdown_streaming_output_free(rust_ptr, rust_len);
+        *owner_transferred = 1;
         return NULL;
     }
 
@@ -105,15 +119,7 @@ ngx_http_markdown_rust_buf_create(ngx_pool_t *pool,
     ctx->freed = 0;
     cln->handler = ngx_http_markdown_rust_buf_cleanup;
 
-    b = ngx_calloc_buf(pool);
-    if (b == NULL) {
-        /*
-         * Buffer allocation failed.  The pool cleanup handler
-         * is already registered and will free the Rust memory
-         * on pool destruction — no explicit free needed here.
-         */
-        return NULL;
-    }
+    *owner_transferred = 1;
 
     b->pos = rust_ptr;
     b->last = rust_ptr + rust_len;
@@ -122,6 +128,36 @@ ngx_http_markdown_rust_buf_create(ngx_pool_t *pool,
 
     return b;
 }
+
+
+/*
+ * Legacy wrapper for callers that do not need fallback semantics.
+ *
+ * On failure, always frees the Rust buffer (backward-compatible behavior).
+ * Defined only for unit tests; production callers use _ex directly.
+ */
+#ifdef NGX_HTTP_MARKDOWN_ZEROCOPY_BUF_TEST
+static ngx_buf_t *
+ngx_http_markdown_rust_buf_create(ngx_pool_t *pool,
+    u_char *rust_ptr, size_t rust_len)
+{
+    ngx_buf_t   *b;
+    ngx_flag_t   transferred;
+
+    b = ngx_http_markdown_rust_buf_create_ex(pool, rust_ptr, rust_len,
+                                             &transferred);
+    if (b == NULL && !transferred) {
+        /*
+         * Factory failed before taking ownership.
+         * Free Rust buffer to maintain the legacy contract:
+         * "on NULL return, Rust buffer is already freed."
+         */
+        markdown_streaming_output_free(rust_ptr, rust_len);
+    }
+
+    return b;
+}
+#endif /* NGX_HTTP_MARKDOWN_ZEROCOPY_BUF_TEST */
 
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
