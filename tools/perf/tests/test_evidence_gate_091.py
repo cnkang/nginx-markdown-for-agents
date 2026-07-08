@@ -91,26 +91,24 @@ def _make_benchmark_report(scenarios=None):
         scenarios = [
             {
                 "name": "plain-small",
-                "results": {
-                    "p50_ms": 1.0,
-                    "p95_ms": 1.5,
-                    "ttfb_ms": 0.8,
-                    "total_requests": 1000,
-                    "fallback_count": 10,
-                    "input_bytes": 500,
-                    "peak_memory_bytes": 50000000,
+                "status": "completed",
+                "metrics": {
+                    "latency_p50_ms": 1.0,
+                    "latency_p95_ms": 1.5,
+                    "ttfb_p50_ms": 0.8,
+                    "fallback_rate": 0.01,
+                    "worker_rss_mb": 47.68,
                 },
             },
             {
                 "name": "gzip-large",
-                "results": {
-                    "p50_ms": 5.0,
-                    "p95_ms": 7.0,
-                    "ttfb_ms": 3.0,
-                    "total_requests": 500,
-                    "fallback_count": 5,
-                    "input_bytes": 1000000,
-                    "peak_memory_bytes": 80000000,
+                "status": "completed",
+                "metrics": {
+                    "latency_p50_ms": 5.0,
+                    "latency_p95_ms": 7.0,
+                    "ttfb_p50_ms": 3.0,
+                    "fallback_rate": 0.01,
+                    "worker_rss_mb": 76.29,
                 },
             },
         ]
@@ -306,6 +304,17 @@ class TestGracefulDegradation:
     def test_nginx_bin_available_returns_false_for_nonexistent_path(self, monkeypatch):
         """_nginx_bin_available returns False when NGINX_BIN points to nonexistent file."""
         monkeypatch.setenv("NGINX_BIN", "/nonexistent/nginx")
+        assert _nginx_bin_available() is False
+
+    def test_nginx_bin_available_returns_false_for_non_executable_file(
+        self, monkeypatch, tmp_path
+    ):
+        """_nginx_bin_available rejects present files without execute permission."""
+        nginx_bin = tmp_path / "nginx"
+        nginx_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+        nginx_bin.chmod(0o600)
+        monkeypatch.setenv("NGINX_BIN", str(nginx_bin))
+
         assert _nginx_bin_available() is False
 
 

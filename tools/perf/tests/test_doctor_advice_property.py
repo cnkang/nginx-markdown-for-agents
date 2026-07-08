@@ -114,6 +114,7 @@ def _build_triggering_metrics_d06() -> dict:
     # Default budget is 1MiB; use 90% of it
     return {
         "pending_output_high_watermark_bytes": DEFAULT_STREAMING_BUFFER_BUDGET * 0.90,
+        "streaming_buffer_budget": DEFAULT_STREAMING_BUFFER_BUDGET,
     }
 
 
