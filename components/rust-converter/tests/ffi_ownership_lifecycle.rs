@@ -153,15 +153,18 @@ proptest! {
 /// Verify specific buffer sizes that exercise allocation boundaries.
 #[test]
 fn ffi_ownership_deterministic_sizes() {
-    let sizes: &[usize] = &[1, 2, 7, 8, 15, 16, 63, 64, 127, 128, 255, 256,
-                             1023, 1024, 4096, 65535, 65536, 1_048_576];
+    let sizes: &[usize] = &[
+        1, 2, 7, 8, 15, 16, 63, 64, 127, 128, 255, 256, 1023, 1024, 4096, 65535, 65536, 1_048_576,
+    ];
 
     for &size in sizes {
         let mut buf: Box<[u8]> = vec![0x42u8; size].into_boxed_slice();
         let ptr = buf.as_mut_ptr();
         let len = buf.len();
         mem::forget(buf);
-        unsafe { markdown_streaming_output_free(ptr, len); }
+        unsafe {
+            markdown_streaming_output_free(ptr, len);
+        }
     }
 }
 
@@ -184,6 +187,8 @@ fn ffi_ownership_sequential_cycles() {
         let ptr = buf.as_mut_ptr();
         let len = buf.len();
         mem::forget(buf);
-        unsafe { markdown_streaming_output_free(ptr, len); }
+        unsafe {
+            markdown_streaming_output_free(ptr, len);
+        }
     }
 }

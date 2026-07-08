@@ -43,15 +43,6 @@ enum {
 };
 
 /* ----------------------------------------------------------------
- * Output decision enum (mirrors production)
- * ---------------------------------------------------------------- */
-
-typedef enum {
-    NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY  = 0,
-    NGX_HTTP_MARKDOWN_OUTPUT_ZERO_COPY  = 1
-} ngx_http_markdown_output_decision_t;
-
-/* ----------------------------------------------------------------
  * Minimal conf struct stub (only stream.zero_copy needed)
  * ---------------------------------------------------------------- */
 
@@ -62,39 +53,10 @@ typedef struct {
 } ngx_http_markdown_conf_t;
 
 /* ----------------------------------------------------------------
- * Production function under test (inlined from streaming_impl.h)
- *
- * This replicates the exact production logic:
- *   Feature OFF    -> POOL_COPY (Req 3.1)
- *   Terminal chunk -> POOL_COPY (Req 3.3)
- *   Backpressure  -> POOL_COPY (Req 3.4)
- *   All clear     -> ZERO_COPY (Req 3.2)
+ * Include real production decision helper
  * ---------------------------------------------------------------- */
 
-static ngx_http_markdown_output_decision_t
-ngx_http_markdown_hybrid_output_decision(
-    const ngx_http_markdown_conf_t *conf,
-    ngx_flag_t chunk_is_terminal,
-    ngx_flag_t backpressure_active)
-{
-    /* Feature gate OFF -> pool-copy (Req 3.1) */
-    if (conf->stream.zero_copy != 1) {
-        return NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY;
-    }
-
-    /* Terminal chunk -> pool-copy (Req 3.3) */
-    if (chunk_is_terminal) {
-        return NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY;
-    }
-
-    /* Backpressure active -> pool-copy (Req 3.4) */
-    if (backpressure_active) {
-        return NGX_HTTP_MARKDOWN_OUTPUT_POOL_COPY;
-    }
-
-    /* All guards clear -> zero-copy (Req 3.2) */
-    return NGX_HTTP_MARKDOWN_OUTPUT_ZERO_COPY;
-}
+#include "../../src/ngx_http_markdown_output_decision_impl.h"
 
 /* ----------------------------------------------------------------
  * Buffer retention context: models the production behavior on

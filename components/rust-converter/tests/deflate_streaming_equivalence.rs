@@ -17,7 +17,7 @@
 
 use flate2::write::DeflateEncoder;
 use flate2::{Compression, Decompress, FlushDecompress, Status};
-use nginx_markdown_converter::decompress::{decompress_bounded, Format};
+use nginx_markdown_converter::decompress::{Format, decompress_bounded};
 use proptest::prelude::*;
 use std::io::Write;
 
