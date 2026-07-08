@@ -21,10 +21,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import evidence_gate_091
 from evidence_gate_091 import (
     EX_SKIP_NOT_PRESENT,
     _extract_evidence_metrics,
     _nginx_bin_available,
+    _write_output,
     main,
     parse_args,
 )
@@ -265,6 +267,7 @@ class TestGracefulDegradation:
     def test_non_blocking_exits_75_when_nginx_bin_unset(self, monkeypatch, tmp_path):
         """Non-blocking mode exits with code 75 (SKIP_NOT_PRESENT) when NGINX_BIN unset."""
         monkeypatch.delenv("NGINX_BIN", raising=False)
+        monkeypatch.setattr(evidence_gate_091, "REPO_ROOT", tmp_path)
         output_path = tmp_path / "evidence.json"
 
         exit_code = main([
@@ -278,6 +281,7 @@ class TestGracefulDegradation:
     def test_non_blocking_skip_produces_evidence_pack(self, monkeypatch, tmp_path):
         """Skip produces an evidence pack JSON with skipped=true."""
         monkeypatch.delenv("NGINX_BIN", raising=False)
+        monkeypatch.setattr(evidence_gate_091, "REPO_ROOT", tmp_path)
         output_path = tmp_path / "evidence.json"
 
         main(["--mode", "non-blocking", "--output", str(output_path)])
@@ -328,6 +332,7 @@ class TestAllowSkipModule:
     def test_blocking_with_allow_skip_exits_0(self, monkeypatch, tmp_path):
         """Blocking mode with --allow-skip-module exits 0 when NGINX_BIN unset."""
         monkeypatch.delenv("NGINX_BIN", raising=False)
+        monkeypatch.setattr(evidence_gate_091, "REPO_ROOT", tmp_path)
         output_path = tmp_path / "evidence.json"
 
         exit_code = main([
@@ -341,6 +346,7 @@ class TestAllowSkipModule:
     def test_blocking_with_allow_skip_produces_skipped_evidence(self, monkeypatch, tmp_path):
         """Blocking + --allow-skip-module produces evidence pack with skipped=true."""
         monkeypatch.delenv("NGINX_BIN", raising=False)
+        monkeypatch.setattr(evidence_gate_091, "REPO_ROOT", tmp_path)
         output_path = tmp_path / "evidence.json"
 
         main([
@@ -364,6 +370,22 @@ class TestAllowSkipModule:
         """--allow-skip-module is True when explicitly provided."""
         args = parse_args(["--mode", "blocking", "--allow-skip-module"])
         assert args.allow_skip_module is True
+
+
+# ---------------------------------------------------------------------------
+# Test: Evidence pack output validation
+# ---------------------------------------------------------------------------
+
+
+class TestEvidenceOutputValidation:
+    """Output paths must stay within the repository tree."""
+
+    def test_write_output_rejects_path_outside_repo(self, tmp_path):
+        """Caller-controlled output path cannot escape the repo root."""
+        outside_path = tmp_path / "evidence.json"
+
+        with pytest.raises(ValueError):
+            _write_output({"verdict": "GO"}, str(outside_path))
 
 
 # ---------------------------------------------------------------------------

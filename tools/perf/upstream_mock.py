@@ -114,7 +114,7 @@ def main() -> None:
     sys.stdout.write(f"Mock upstream starting on port {port}\n")
     sys.stdout.flush()
     try:
-        httpd.serve_forever()
+        httpd.serve_forever()  # NOSONAR: local benchmark fixture binds 127.0.0.1
     except KeyboardInterrupt:
         pass
 
