@@ -1813,14 +1813,41 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
     ngx_buf_t    *zb;
     ngx_chain_t  *zout;
     ngx_int_t     rc;
+    ngx_flag_t    owner_transferred;
 
     /*
      * Zero-copy path: buffer factory creates an ngx_buf_t referencing
-     * Rust memory with pool cleanup registered.  Caller does NOT free
-     * the Rust buffer; pool cleanup handles it.
+     * Rust memory with pool cleanup registered.  On success, the pool
+     * cleanup owns the Rust buffer; caller does NOT free it.
+     *
+     * On failure, check owner_transferred to determine if we can
+     * fallback to pool-copy (caller still owns the buffer).
      */
-    zb = ngx_http_markdown_rust_buf_create(r->pool, out_data, out_len);
+    zb = ngx_http_markdown_rust_buf_create_ex(r->pool, out_data, out_len,
+                                              &owner_transferred);
     if (zb == NULL) {
+        if (!owner_transferred) {
+            /*
+             * Factory failed before taking ownership of the Rust
+             * buffer.  Fallback to pool-copy: copy data into pool
+             * memory, then free the Rust buffer ourselves.
+             */
+            rc = ngx_http_markdown_streaming_send_output(
+                r, ctx, out_data, out_len, /* last_buf */ 0);
+
+            if (ngx_http_markdown_streaming_delivery_ok(rc)) {
+                NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
+            }
+
+            markdown_streaming_output_free(out_data, out_len);
+            return rc;
+        }
+
+        /*
+         * Factory took ownership but still failed (cleanup alloc
+         * succeeded but something else went wrong, or it freed the
+         * buffer).  Cannot fallback — the data is gone.
+         */
         return NGX_ERROR;
     }
 
