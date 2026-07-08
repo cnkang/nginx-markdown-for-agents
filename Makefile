@@ -742,7 +742,7 @@ release-gates-check-091: release-gates-check-090
 		fi; \
 	fi
 	@echo "  [3/3] Python perf tooling tests"
-	@if python3 -m pytest --version >/dev/null 2>&1; then \
+	@if python3 -c "import pytest, hypothesis" >/dev/null 2>&1; then \
 		if python3 -m pytest tools/perf/tests/ -q --tb=short; then \
 			echo "  perf tests: PASS"; \
 		else \
@@ -750,7 +750,7 @@ release-gates-check-091: release-gates-check-090
 			exit 1; \
 		fi; \
 	else \
-		echo "FAIL: pytest is not installed. Please install it using: pip install pytest" >&2; \
+		echo "FAIL: pytest/hypothesis dependencies are missing. Please install them using: pip install -r requirements-dev.txt" >&2; \
 		exit 1; \
 	fi
 	@echo "=== 0.9.1 Release Gates: PASS ==="
