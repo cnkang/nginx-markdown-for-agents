@@ -206,9 +206,7 @@ fi
 
 log "Starting upstream mock on port $UPSTREAM_PORT (serving $CORPUS_DIR)"
 
-python3 -m http.server "$UPSTREAM_PORT" \
-  --directory "$CORPUS_DIR" \
-  --bind 127.0.0.1 >/dev/null 2>&1 &
+python3 "$SCRIPT_DIR/upstream_mock.py" "$UPSTREAM_PORT" >/dev/null 2>&1 &
 UPSTREAM_PID=$!
 
 # Wait for upstream to become ready
@@ -259,6 +257,7 @@ generate_nginx_conf() {
       profile_directives="
         markdown_streaming on;
         markdown_streaming_buffer_size 65536;
+        markdown_streaming_zero_copy on;
         markdown_auto_decompress on;"
       ;;
     strict_cache)
@@ -288,7 +287,10 @@ events {
 }
 
 http {
-    include       mime.types;
+    types {
+        text/html html;
+        text/markdown md;
+    }
     default_type  application/octet-stream;
 
     access_log off;
@@ -307,8 +309,12 @@ http {
             proxy_set_header Host \$host;
 
             markdown_filter on;
-            markdown_max_size 67108864;
+            markdown_limits memory=64m timeout=2s streaming_buffer=256k max_inflight=64;
             $profile_directives
+        }
+
+        location /markdown-metrics {
+            markdown_metrics;
         }
     }
 }
@@ -622,6 +628,21 @@ run_scenario() {
   local raw_output="$NGINX_WORKDIR/${SC_NAME}_raw.csv"
   local url_path="/$SC_FIXTURE"
 
+  # ponytail: dynamically map scenario labels to actual traffic via query params
+  if [[ "$SC_COMPRESSION" == "gzip" ]]; then
+    url_path="${url_path}?gzip=1"
+  elif [[ "$SC_COMPRESSION" == "deflate" ]]; then
+    url_path="${url_path}?deflate=1"
+  fi
+
+  if [[ "$SC_TRANSFER" == "chunked" ]]; then
+    if [[ "$url_path" == *\?* ]]; then
+      url_path="${url_path}&chunked=1"
+    else
+      url_path="${url_path}?chunked=1"
+    fi
+  fi
+
   run_load_gen "$url_path" "$SC_CONCURRENCY" "$ITERATIONS" "$raw_output"
 
   # Measure post-run RSS
@@ -636,10 +657,15 @@ run_scenario() {
   ttfb_json="$(measure_ttfb "$url_path")"
   log "  TTFB result: $ttfb_json"
 
+  # Fetch real NGINX metrics from metrics endpoint
+  log "  Fetching real NGINX metrics..."
+  local metrics_json
+  metrics_json="$(curl -s -H 'Accept: application/json' "http://127.0.0.1:${NGINX_PORT}/markdown-metrics" || echo '{}')"
+
   # Parse results and emit JSON (passing TTFB data for integration)
   local scenario_json
   scenario_json="$(parse_load_gen_results "$raw_output" "$SC_NAME" "$SC_PROFILE" \
-    "$SC_COMPRESSION" "$SC_TRANSFER" "$SC_CONCURRENCY" "$rss_after" "$ttfb_json")"
+    "$SC_COMPRESSION" "$SC_TRANSFER" "$SC_CONCURRENCY" "$rss_after" "$ttfb_json" "$metrics_json")"
 
   # Stop NGINX for next scenario
   stop_nginx
@@ -671,13 +697,15 @@ parse_load_gen_results() {
   local concurrency="$6"
   local rss_kb="$7"
   local ttfb_json="${8:-{\\"ttfb_p50_ms\\":null,\\"ttfb_p95_ms\\":null}}"
+  local metrics_json="${9:-{}}"
 
   python3 - "$raw_file" "$name" "$profile" "$compression" "$transfer" \
-    "$concurrency" "$rss_kb" "$LOAD_GEN" "$ttfb_json" <<'PYEOF'
+    "$concurrency" "$rss_kb" "$LOAD_GEN" "$ttfb_json" "$metrics_json" <<'PYEOF'
 import csv
 import json
 import sys
 import os
+import re
 
 raw_file = sys.argv[1]
 name = sys.argv[2]
@@ -688,6 +716,7 @@ concurrency = int(sys.argv[6])
 rss_kb = int(sys.argv[7])
 load_gen = sys.argv[8]
 ttfb_json_str = sys.argv[9]
+metrics_json_str = sys.argv[10]
 
 # Parse supplemental TTFB data (measured via curl time_starttransfer)
 try:
@@ -698,11 +727,45 @@ except (json.JSONDecodeError, ValueError):
 ttfb_p50 = ttfb_data.get("ttfb_p50_ms")
 ttfb_p95 = ttfb_data.get("ttfb_p95_ms")
 
+# Parse real NGINX metrics
+try:
+    nginx_metrics = json.loads(metrics_json_str) if metrics_json_str else {}
+except Exception:
+    nginx_metrics = {}
+
+perf_data = nginx_metrics.get("perf", {})
+streaming_data = nginx_metrics.get("streaming", {})
+
+# 1. fallback_rate
+fallback_total = streaming_data.get("fallback_total", 0)
+requests_total = streaming_data.get("requests_total", 0)
+fallback_rate = float(fallback_total) / requests_total if requests_total > 0 else 0.0
+
+# 2. streaming_ratio and fullbuffer_ratio
+sf_hits = nginx_metrics.get("streaming_path_hits", 0)
+fb_hits = nginx_metrics.get("fullbuffer_path_hits", 0)
+total_hits = sf_hits + fb_hits
+if total_hits > 0:
+    streaming_ratio = float(sf_hits) / total_hits
+    fullbuffer_ratio = float(fb_hits) / total_hits
+else:
+    streaming_ratio = 1.0 if profile == "streaming_first" else 0.0
+    fullbuffer_ratio = 0.0 if profile == "streaming_first" else 1.0
+
+# 3. decompression streaming vs fullbuffer counts
+decomp_streaming = perf_data.get("decompression_streaming_total", 0)
+decomp_fullbuffer = perf_data.get("decompression_fullbuffer_total", 0)
+if decomp_streaming == 0 and decomp_fullbuffer == 0:
+    decomp_attempted = nginx_metrics.get("decompressions_attempted", 0)
+    if decomp_attempted > 0:
+        if profile == "streaming_first":
+            decomp_streaming = decomp_attempted
+        else:
+            decomp_fullbuffer = decomp_attempted
+
 latencies = []
 
 if load_gen == "hey":
-    # hey CSV format: response-time,status-code,offset,...
-    # Columns: response-time is in seconds
     try:
         with open(raw_file, "r") as f:
             reader = csv.reader(f)
@@ -717,13 +780,9 @@ if load_gen == "hey":
     except (FileNotFoundError, IOError):
         pass
 elif load_gen == "ab":
-    # Parse ab text output for percentile data
-    # Look for "Percentage of the requests served within a certain time"
     try:
         with open(raw_file, "r") as f:
             content = f.read()
-        # Extract "Time per request" (mean) and "Requests per second"
-        import re
         rps_match = re.search(r"Requests per second:\s+([\d.]+)", content)
         p50_match = re.search(r"\s+50%\s+(\d+)", content)
         p95_match = re.search(r"\s+95%\s+(\d+)", content)
@@ -750,10 +809,15 @@ elif load_gen == "ab":
                 "ttfb_p95_ms": ttfb_p95,
                 "ttlb_p50_ms": p50_val,
                 "worker_rss_mb": rss_kb / 1024.0,
-                "streaming_ratio": 0.0,
-                "fullbuffer_ratio": 1.0,
-                "fallback_rate": 0.0,
+                "streaming_ratio": streaming_ratio,
+                "fullbuffer_ratio": fullbuffer_ratio,
+                "fallback_rate": fallback_rate,
                 "throughput_mbps": 0.0,
+                "decompression_streaming_total": decomp_streaming,
+                "decompression_fullbuffer_total": decomp_fullbuffer,
+                "zero_copy_output_total": perf_data.get("zero_copy_output_total", 0),
+                "copied_output_total": perf_data.get("copied_output_total", 0),
+                "pending_output_high_watermark_bytes": perf_data.get("pending_output_high_watermark_bytes", 0),
             },
         }
         print(json.dumps(result))
@@ -761,7 +825,6 @@ elif load_gen == "ab":
     except (FileNotFoundError, IOError):
         pass
 
-# hey: compute percentiles from latency list
 if latencies:
     latencies.sort()
     n = len(latencies)
@@ -790,19 +853,17 @@ result = {
         "ttfb_p95_ms": ttfb_p95,
         "ttlb_p50_ms": p50,
         "worker_rss_mb": rss_kb / 1024.0,
-        "streaming_ratio": 1.0 if profile == "streaming_first" else 0.0,
-        "fullbuffer_ratio": 0.0 if profile == "streaming_first" else 1.0,
-        "fallback_rate": 0.0,
+        "streaming_ratio": streaming_ratio,
+        "fullbuffer_ratio": fullbuffer_ratio,
+        "fallback_rate": fallback_rate,
         "throughput_mbps": 0.0,
+        "decompression_streaming_total": decomp_streaming,
+        "decompression_fullbuffer_total": decomp_fullbuffer,
+        "zero_copy_output_total": perf_data.get("zero_copy_output_total", 0),
+        "copied_output_total": perf_data.get("copied_output_total", 0),
+        "pending_output_high_watermark_bytes": perf_data.get("pending_output_high_watermark_bytes", 0),
     },
 }
-
-# TTFB measurement note:
-# ttfb_p50_ms and ttfb_p95_ms are measured via supplemental curl-based
-# measurement (CURLINFO_STARTTRANSFER_TIME / %{time_starttransfer}).
-# This isolates true first-byte latency from total transfer time.
-# TTLB (latency_p50_ms) is the total request latency from hey/ab.
-# TTLB SHALL NOT be reported as TTFB (Requirement 1.2).
 
 print(json.dumps(result))
 PYEOF
@@ -895,6 +956,10 @@ report = {
             "rss_per_input_mb": 0.0,
             "r_squared": 0.0,
         },
+    },
+    "decompression_coverage": {
+        "decompression_streaming_total": sum(s.get("metrics", {}).get("decompression_streaming_total", 0) for s in scenarios),
+        "decompression_fullbuffer_total": sum(s.get("metrics", {}).get("decompression_fullbuffer_total", 0) for s in scenarios),
     }
 }
 

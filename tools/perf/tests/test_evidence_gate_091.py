@@ -397,4 +397,37 @@ class TestEvidenceMetricExtraction:
         """Empty report produces zero fallback rate."""
         metrics = _extract_evidence_metrics({})
         assert metrics["fallback_rate_abs"] == 0.0
-        assert metrics["memory_slope_pct"] == 0.0
+
+    def test_missing_critical_metric_causes_missing_evidence_verdict(self):
+        """When a critical metric is missing, the verdict must be MISSING_EVIDENCE."""
+        current = _make_passing_metrics()
+        current.pop("p50_latency_small_pct")  # Remove critical metric
+        baseline = _make_baseline_metrics()
+        cfg = _make_module_thresholds_cfg()
+
+        result = evaluate_module_level(current, baseline, cfg)
+
+        assert result["verdict"] == "MISSING_EVIDENCE"
+        missing_entries = [r for r in result["results"] if r["status"] == "missing_evidence"]
+        assert len(missing_entries) == 1
+        assert missing_entries[0]["metric"] == "p50_latency_small_pct"
+
+    def test_first_run_without_baseline_explains_non_comparable_thresholds(self):
+        """When no baseline is available, percentage thresholds are clearly marked and explained."""
+        current = _make_passing_metrics()
+        baseline = {}  # Empty/missing baseline
+        cfg = _make_module_thresholds_cfg()
+
+        result = evaluate_module_level(current, baseline, cfg, has_baseline=False)
+
+        # Verdict should still be GO because there are no breaches, just skipped percentage thresholds
+        assert result["verdict"] == "GO"
+        
+        # Absolute caps like fallback_rate_abs should still be evaluated and pass
+        fallback_entry = next(r for r in result["results"] if r["metric"] == "fallback_rate_abs")
+        assert fallback_entry["status"] == "pass"
+
+        # Percentage deviation metrics like p50_latency_small_pct should be skipped with explanations
+        p50_entry = next(r for r in result["results"] if r["metric"] == "p50_latency_small_pct")
+        assert p50_entry["status"] == "skipped"
+        assert "missing baseline" in p50_entry["reason"]

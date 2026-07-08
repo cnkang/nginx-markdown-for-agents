@@ -712,13 +712,13 @@ perf-evidence-check:
 	@echo "=== Performance Evidence Check (non-blocking) ==="
 	@python3 tools/perf/evidence_gate_091.py --mode non-blocking; \
 	rc=$$?; \
-	if [[ $$rc -eq 75 ]]; then \
+	if [ $$rc -eq 75 ]; then \
 		echo "SKIP_NOT_PRESENT: Module benchmarks require NGINX_BIN."; \
 		echo "  Set NGINX_BIN=/path/to/nginx to enable."; \
 		exit 75; \
-	elif [[ $$rc -ne 0 ]]; then \
-		echo "WARNING: Evidence gate script error (exit $$rc)" >&2; \
-		exit 0; \
+	elif [ $$rc -ne 0 ]; then \
+		echo "FAIL: Evidence gate script error (exit $$rc)" >&2; \
+		exit 1; \
 	fi
 
 # release-gates-check-091: Blocking 0.9.1 release gate.
@@ -740,10 +740,10 @@ release-gates-check-091: release-gates-check-090
 	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')" 2>/dev/null || \
 		python3 -c "import sys; sys.path.insert(0, 'tools/perf'); from threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
 	@echo "  [2/3] Performance evidence gate (blocking mode)"
-	@if [[ -n "$${NGINX_BIN:-}" ]]; then \
+	@if [ -n "$${NGINX_BIN:-}" ]; then \
 		python3 tools/perf/evidence_gate_091.py --mode blocking || exit 1; \
 	else \
-		if [[ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]]; then \
+		if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
 			python3 tools/perf/evidence_gate_091.py --mode blocking --allow-skip-module || exit 1; \
 		else \
 			echo "FAIL: Module-level benchmarks require NGINX_BIN." >&2; \
@@ -752,10 +752,16 @@ release-gates-check-091: release-gates-check-090
 		fi; \
 	fi
 	@echo "  [3/3] Python perf tooling tests"
-	@if python3 -m pytest tools/perf/tests/ -q --tb=short 2>/dev/null; then \
-		echo "  perf tests: PASS"; \
+	@if python3 -m pytest --version >/dev/null 2>&1; then \
+		if python3 -m pytest tools/perf/tests/ -q --tb=short; then \
+			echo "  perf tests: PASS"; \
+		else \
+			echo "FAIL: perf tests failed" >&2; \
+			exit 1; \
+		fi; \
 	else \
-		echo "  WARNING: perf tests failed or pytest unavailable" >&2; \
+		echo "FAIL: pytest is not installed. Please install it using: pip install pytest" >&2; \
+		exit 1; \
 	fi
 	@echo "=== 0.9.1 Release Gates: PASS ==="
 
