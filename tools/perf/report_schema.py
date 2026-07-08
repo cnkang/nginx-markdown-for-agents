@@ -154,8 +154,10 @@ def validate_module_benchmark_091(report: dict) -> list[str]:
     else:
         _validate_module_scenarios(scenarios, errors)
 
-    ms = mb.get("memory_slope", {})
-    if isinstance(ms, dict):
+    if "memory_slope" in mb and not isinstance(mb["memory_slope"], dict):
+        errors.append("memory_slope must be a dict")
+    else:
+        ms = mb.get("memory_slope", {})
         required_ms = {"rss_per_input_mb", "r_squared"}
         errors.extend(validate_required_fields(ms, required_ms, "memory_slope"))
 

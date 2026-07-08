@@ -110,7 +110,7 @@ def main() -> None:
     """Start the mock upstream server on the designated port."""
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 19100
     server_address = ("127.0.0.1", port)
-    httpd = http.server.HTTPServer(server_address, MockUpstreamHandler)
+    httpd = http.server.ThreadingHTTPServer(server_address, MockUpstreamHandler)
     sys.stdout.write(f"Mock upstream starting on port {port}\n")
     sys.stdout.flush()
     try:
