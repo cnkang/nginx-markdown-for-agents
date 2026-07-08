@@ -85,11 +85,10 @@ fn decompress_deflate_streaming(
                 // Advance offset by consumed bytes
                 offset += consumed_now;
                 if consumed_now == 0 && produced_now == 0 {
-                    if offset >= compressed.len() {
-                        return Err(
-                            "deflate stream ended before final block (streaming)".to_string()
-                        );
-                    }
+                    return Err(
+                        "deflate stream made no progress before final block (streaming)"
+                            .to_string(),
+                    );
                 }
             }
         }
