@@ -9,8 +9,8 @@ rc=$?
 set -e
 
 if [[ $rc -eq 75 ]]; then
-  echo "SKIP_NOT_PRESENT: Module benchmarks require NGINX_BIN."
-  echo "  Set NGINX_BIN=/path/to/nginx to enable."
+  echo "SKIP_NOT_PRESENT: Module benchmarks require NGINX_BIN." >&2
+  echo "  Set NGINX_BIN=/path/to/nginx to enable." >&2
   exit 75
 fi
 
@@ -18,3 +18,5 @@ if [[ $rc -ne 0 ]]; then
   echo "FAIL: Evidence gate script error (exit $rc)" >&2
   exit 1
 fi
+
+exit 0

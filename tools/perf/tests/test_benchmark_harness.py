@@ -16,6 +16,8 @@ Run:
 **Validates: Requirements 1.1, 1.5, 1.7**
 """
 
+
+import contextlib
 import json
 import os
 import re
@@ -23,10 +25,11 @@ import shutil
 import signal
 import socket
 import subprocess
-import sys
 import tempfile
 import time
 from pathlib import Path
+
+import pytest
 
 from tools.perf.report_schema import validate_module_benchmark_091
 
@@ -37,8 +40,30 @@ from tools.perf.report_schema import validate_module_benchmark_091
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SCHEMA_PATH = REPO_ROOT / "perf" / "metrics-schema.json"
 BENCHMARK_SCRIPT = REPO_ROOT / "tools" / "perf" / "run_module_benchmark.sh"
-BASH_BIN = shutil.which("bash") or "/bin/bash"
+
+# Canonical allowlist for bash binary paths (Rule 33: CLI-derived executables
+# must match a fixed canonical allowlist before subprocess use).
+_BASH_ALLOWLIST = {
+    "/bin/bash",
+    "/usr/bin/bash",
+    "/usr/local/bin/bash",
+    "/opt/homebrew/bin/bash",
+}
+
+_resolved_bash = shutil.which("bash")
+if _resolved_bash and Path(_resolved_bash).resolve().as_posix() in _BASH_ALLOWLIST:
+    BASH_BIN = _resolved_bash
+elif Path("/bin/bash").exists():
+    BASH_BIN = "/bin/bash"
+else:
+    BASH_BIN = None  # Tests requiring bash will be skipped
+
 WORKDIR_RE = re.compile(r"Workdir: (?P<path>\S+)")
+
+requires_bash = pytest.mark.skipif(
+    BASH_BIN is None,
+    reason="bash not found in canonical allowlist",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -224,10 +249,9 @@ class TestSchemaWellFormedness:
     def test_report_schema_module_benchmark_properties(self):
         """module_benchmark properties in schema include version, timestamp, scenarios, memory_slope."""
         props = _load_schema()["module_benchmark"]["report_schema"]["properties"]["module_benchmark"]
-        assert props.get("type") == "object"
-        required = props.get("required", [])
-        assert "version" in required
-        assert "timestamp" in required
+        required = self._extracted_from_test_memory_slope_required_fields_4(
+            props, "version", "timestamp"
+        )
         assert "scenarios" in required
         assert "memory_slope" in required
 
@@ -237,10 +261,9 @@ class TestSchemaWellFormedness:
         scenarios = mb_props["properties"]["scenarios"]
         assert scenarios.get("type") == "array"
         items = scenarios.get("items", {})
-        assert items.get("type") == "object"
-        required = items.get("required", [])
-        assert "name" in required
-        assert "status" in required
+        required = self._extracted_from_test_memory_slope_required_fields_4(
+            items, "name", "status"
+        )
 
     def test_scenario_name_enum_values(self):
         """scenario name enum contains the 5 required scenario names."""
@@ -254,10 +277,17 @@ class TestSchemaWellFormedness:
         """memory_slope requires rss_per_input_mb and r_squared."""
         mb_props = _load_schema()["module_benchmark"]["report_schema"]["properties"]["module_benchmark"]
         ms = mb_props["properties"]["memory_slope"]
-        assert ms.get("type") == "object"
-        required = ms.get("required", [])
-        assert "rss_per_input_mb" in required
-        assert "r_squared" in required
+        required = self._extracted_from_test_memory_slope_required_fields_4(
+            ms, "rss_per_input_mb", "r_squared"
+        )
+
+    # TODO Rename this here and in `test_report_schema_module_benchmark_properties`, `test_scenarios_schema_structure` and `test_memory_slope_required_fields`
+    def _extracted_from_test_memory_slope_required_fields_4(self, arg0, arg1, arg2):
+        assert arg0.get("type") == "object"
+        result = arg0.get("required", [])
+        assert arg1 in result
+        assert arg2 in result
+        return result
 
     def test_metrics_properties_present(self):
         """scenario metrics object has expected numeric properties."""
@@ -280,6 +310,7 @@ class TestSchemaWellFormedness:
 # ---------------------------------------------------------------------------
 
 
+@requires_bash
 class TestGracefulExit:
     """Test that run_module_benchmark.sh exits with code 75 when NGINX_BIN is unset."""
 
@@ -465,21 +496,24 @@ class TestReportSchemaConformance:
 
     def test_profile_enum_values(self):
         """profile field enum covers all valid profiles."""
-        schema_props = self._get_schema_props()
-        items = schema_props["properties"]["scenarios"]["items"]
-        profile_prop = items["properties"].get("profile", {})
-        valid_profiles = set(profile_prop.get("enum", []))
-        expected = {"balanced", "streaming_first", "strict_cache"}
-        assert valid_profiles == expected
+        self._extracted_from_test_compression_enum_values_3(
+            "profile", "balanced", "streaming_first", "strict_cache"
+        )
 
     def test_compression_enum_values(self):
         """compression field enum covers all valid types."""
+        self._extracted_from_test_compression_enum_values_3(
+            "compression", "none", "gzip", "deflate"
+        )
+
+    # TODO Rename this here and in `test_profile_enum_values` and `test_compression_enum_values`
+    def _extracted_from_test_compression_enum_values_3(self, arg0, arg1, arg2, arg3):
         schema_props = self._get_schema_props()
         items = schema_props["properties"]["scenarios"]["items"]
-        comp_prop = items["properties"].get("compression", {})
-        valid_comp = set(comp_prop.get("enum", []))
-        expected = {"none", "gzip", "deflate"}
-        assert valid_comp == expected
+        profile_prop = items["properties"].get(arg0, {})
+        valid_profiles = set(profile_prop.get("enum", []))
+        expected = {arg1, arg2, arg3}
+        assert valid_profiles == expected
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +529,7 @@ def _port_in_use(port: int) -> bool:
         s.connect(("127.0.0.1", port))
         s.close()
         return True
-    except (ConnectionRefusedError, OSError):
+    except OSError:
         return False
     finally:
         s.close()
@@ -521,6 +555,7 @@ def _wait_for_port_free(port: int, timeout: float = 5.0) -> bool:
     return False
 
 
+@requires_bash
 class TestPortCleanupOnSignals:
     """Test trap-based cleanup kills spawned processes and removes temp files.
 
@@ -562,116 +597,87 @@ class TestPortCleanupOnSignals:
     def test_cleanup_on_sigterm(self):
         """SIGTERM triggers cleanup: upstream mock killed, ports freed."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-            stub = self._create_stub_nginx(tmpdir_path)
-
-            env = os.environ.copy()
-            env["NGINX_BIN"] = str(stub)
-            # Unset MODULE_SO to avoid attempting module load
-            env.pop("MODULE_SO", None)
-
-            # Start the benchmark harness
-            proc = subprocess.Popen(
-                [BASH_BIN, str(BENCHMARK_SCRIPT), "--iterations", "1"],
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                # Use process group so we can signal the whole group
-                preexec_fn=os.setsid,
-            )
-
+            proc = self._extracted_from_test_cleanup_removes_temp_directory_4(tmpdir)
             try:
-                # Wait for upstream mock to start (port 19100)
-                upstream_ready = _wait_for_port(19100, timeout=10.0)
-                if not upstream_ready:
-                    # Script may have failed early; check returncode
-                    proc.poll()
-                    if proc.returncode is not None:
-                            stderr = proc.stderr.read() if proc.stderr else b""
-                            raise AssertionError(
-                                "benchmark harness exited before upstream "
-                                f"readiness; stderr: {stderr.decode(errors='replace')}"
-                            )
-                    # Give it a bit more time
-                    time.sleep(1.0)
-
-                # Send SIGTERM to the process group
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-
-                # Wait for process to terminate
-                try:
-                    proc.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    # Force kill if stuck
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    proc.wait(timeout=5)
-
-                # Verify cleanup: port 19100 (upstream) should be freed
-                port_freed = _wait_for_port_free(19100, timeout=5.0)
-                assert port_freed, (
-                    "Port 19100 still in use after SIGTERM — upstream mock not cleaned up"
-                )
-
+                self._extracted_from_test_cleanup_on_sigterm_7(proc)
             finally:
                 # Safety: ensure process group is killed
-                try:
+                with contextlib.suppress(OSError):
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                except (OSError, ProcessLookupError):
-                    pass
                 proc.wait(timeout=5)
+
+    # TODO Rename this here and in `test_cleanup_on_sigterm`
+    def _extracted_from_test_cleanup_on_sigterm_7(self, proc):
+        # Wait for upstream mock to start (port 19100)
+        upstream_ready = _wait_for_port(19100, timeout=10.0)
+        if not upstream_ready:
+            # Script may have failed early; check returncode
+            proc.poll()
+            if proc.returncode is not None:
+                    stderr = proc.stderr.read() if proc.stderr else b""
+                    raise AssertionError(
+                        "benchmark harness exited before upstream "
+                        f"readiness; stderr: {stderr.decode(errors='replace')}"
+                    )
+            # Give it a bit more time
+            time.sleep(1.0)
+
+        # Send SIGTERM to the process group
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+
+        # Wait for process to terminate
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            # Force kill if stuck
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            proc.wait(timeout=5)
+
+        # Verify cleanup: port 19100 (upstream) should be freed
+        port_freed = _wait_for_port_free(19100, timeout=5.0)
+        assert port_freed, (
+            "Port 19100 still in use after SIGTERM — upstream mock not cleaned up"
+        )
 
     def test_cleanup_on_sigint(self):
         """SIGINT triggers cleanup: upstream mock killed, ports freed."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-            stub = self._create_stub_nginx(tmpdir_path)
-
-            env = os.environ.copy()
-            env["NGINX_BIN"] = str(stub)
-            env.pop("MODULE_SO", None)
-
-            proc = subprocess.Popen(
-                [BASH_BIN, str(BENCHMARK_SCRIPT), "--iterations", "1"],
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                preexec_fn=os.setsid,
-            )
-
+            proc = self._extracted_from_test_cleanup_removes_temp_directory_4(tmpdir)
             try:
-                # Wait for upstream mock to start
-                upstream_ready = _wait_for_port(19100, timeout=10.0)
-                if not upstream_ready:
-                    proc.poll()
-                    if proc.returncode is not None:
-                            stderr = proc.stderr.read() if proc.stderr else b""
-                            raise AssertionError(
-                                "benchmark harness exited before upstream "
-                                f"readiness; stderr: {stderr.decode(errors='replace')}"
-                            )
-                    time.sleep(1.0)
-
-                # Send SIGINT to the process group
-                os.killpg(os.getpgid(proc.pid), signal.SIGINT)
-
-                try:
-                    proc.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    proc.wait(timeout=5)
-
-                # Verify port 19100 is freed
-                port_freed = _wait_for_port_free(19100, timeout=5.0)
-                assert port_freed, (
-                    "Port 19100 still in use after SIGINT — upstream mock not cleaned up"
-                )
-
+                self._extracted_from_test_cleanup_on_sigint_7(proc)
             finally:
-                try:
+                with contextlib.suppress(OSError):
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                except (OSError, ProcessLookupError):
-                    pass
                 proc.wait(timeout=5)
+
+    # TODO Rename this here and in `test_cleanup_on_sigint`
+    def _extracted_from_test_cleanup_on_sigint_7(self, proc):
+        # Wait for upstream mock to start
+        upstream_ready = _wait_for_port(19100, timeout=10.0)
+        if not upstream_ready:
+            proc.poll()
+            if proc.returncode is not None:
+                    stderr = proc.stderr.read() if proc.stderr else b""
+                    raise AssertionError(
+                        "benchmark harness exited before upstream "
+                        f"readiness; stderr: {stderr.decode(errors='replace')}"
+                    )
+            time.sleep(1.0)
+
+        # Send SIGINT to the process group
+        os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            proc.wait(timeout=5)
+
+        # Verify port 19100 is freed
+        port_freed = _wait_for_port_free(19100, timeout=5.0)
+        assert port_freed, (
+            "Port 19100 still in use after SIGINT — upstream mock not cleaned up"
+        )
 
     def test_pid_file_removed_on_exit(self):
         """PID file is removed after script exits (normal or signal)."""
@@ -704,57 +710,59 @@ class TestPortCleanupOnSignals:
     def test_cleanup_removes_temp_directory(self):
         """Temp working directory is removed during cleanup."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-            stub = self._create_stub_nginx(tmpdir_path)
-
-            env = os.environ.copy()
-            env["NGINX_BIN"] = str(stub)
-            env.pop("MODULE_SO", None)
-
-            proc = subprocess.Popen(
-                [BASH_BIN, str(BENCHMARK_SCRIPT), "--iterations", "1"],
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                preexec_fn=os.setsid,
-            )
-
+            proc = self._extracted_from_test_cleanup_removes_temp_directory_4(tmpdir)
             try:
-                # Wait for upstream mock to start
-                upstream_ready = _wait_for_port(19100, timeout=10.0)
-                if not upstream_ready:
-                    proc.poll()
-                    if proc.returncode is not None:
-                        stderr = proc.stderr.read() if proc.stderr else b""
-                        raise AssertionError(
-                            "benchmark harness exited before upstream "
-                            f"readiness; stderr: {stderr.decode(errors='replace')}"
-                        )
-                    time.sleep(1.0)
-
-                # Send SIGTERM
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-
-                try:
-                    proc.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    proc.wait(timeout=5)
-
-                stderr = proc.stderr.read() if proc.stderr else b""
-                workdir = _extract_workdir(stderr)
-                # Give filesystem a moment to catch up
-                time.sleep(0.2)
-                assert not workdir.exists(), (
-                    f"Temp directory still exists after cleanup: {workdir}"
-                )
-
+                self._extracted_from_test_cleanup_removes_temp_directory_7(proc)
             finally:
-                try:
+                with contextlib.suppress(OSError):
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                except (OSError, ProcessLookupError):
-                    pass
                 proc.wait(timeout=5)
+
+    # TODO Rename this here and in `test_cleanup_removes_temp_directory`
+    def _extracted_from_test_cleanup_removes_temp_directory_7(self, proc):
+        # Wait for upstream mock to start
+        upstream_ready = _wait_for_port(19100, timeout=10.0)
+        if not upstream_ready:
+            proc.poll()
+            if proc.returncode is not None:
+                stderr = proc.stderr.read() if proc.stderr else b""
+                raise AssertionError(
+                    "benchmark harness exited before upstream "
+                    f"readiness; stderr: {stderr.decode(errors='replace')}"
+                )
+            time.sleep(1.0)
+
+        # Send SIGTERM
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            proc.wait(timeout=5)
+
+        stderr = proc.stderr.read() if proc.stderr else b""
+        workdir = _extract_workdir(stderr)
+        # Give filesystem a moment to catch up
+        time.sleep(0.2)
+        assert not workdir.exists(), (
+            f"Temp directory still exists after cleanup: {workdir}"
+        )
+
+    # TODO Rename this here and in `test_cleanup_on_sigterm`, `test_cleanup_on_sigint` and `test_cleanup_removes_temp_directory`
+    def _extracted_from_test_cleanup_removes_temp_directory_4(self, tmpdir):
+        tmpdir_path = Path(tmpdir)
+        stub = self._create_stub_nginx(tmpdir_path)
+        env = os.environ.copy()
+        env["NGINX_BIN"] = str(stub)
+        env.pop("MODULE_SO", None)
+        return subprocess.Popen(
+            [BASH_BIN, str(BENCHMARK_SCRIPT), "--iterations", "1"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            preexec_fn=os.setsid,
+        )
 
 
 class TestNginxConfigGeneration:
