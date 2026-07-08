@@ -465,10 +465,34 @@ ngx_conf_set_msec_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 static char *
 ngx_conf_set_flag_slot(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-    UNUSED(cf);
-    UNUSED(cmd);
-    UNUSED(conf);
-    return NGX_CONF_OK;
+    char       *p;
+    ngx_flag_t *fp;
+    ngx_str_t  *value;
+
+    p = conf;
+    fp = (ngx_flag_t *) (p + cmd->offset);
+
+    if (*fp != NGX_CONF_UNSET) {
+        return "is duplicate";
+    }
+
+    value = cf->args->elts;
+
+    if (value[1].len == 2
+        && ngx_strncasecmp(value[1].data, (u_char *) "on", 2) == 0)
+    {
+        *fp = 1;
+        return NGX_CONF_OK;
+    }
+
+    if (value[1].len == 3
+        && ngx_strncasecmp(value[1].data, (u_char *) "off", 3) == 0)
+    {
+        *fp = 0;
+        return NGX_CONF_OK;
+    }
+
+    return NGX_CONF_ERROR;
 }
 
 static char *
@@ -582,6 +606,31 @@ stream_engine_directive(void)
         "markdown_streaming_engine offset should target stream.engine");
     TEST_ASSERT(cmd->post == ngx_http_markdown_streaming_engine_enum,
         "markdown_streaming_engine post should use production enum table");
+
+    return cmd;
+}
+
+static ngx_command_t *
+streaming_zero_copy_directive(void)
+{
+    ngx_command_t *cmd;
+
+    cmd = find_directive("markdown_streaming_zero_copy");
+    TEST_ASSERT(cmd != NULL,
+        "markdown_streaming_zero_copy directive should be registered");
+    TEST_ASSERT(cmd->set == ngx_conf_set_flag_slot,
+        "markdown_streaming_zero_copy should use ngx_conf_set_flag_slot");
+    TEST_ASSERT((cmd->type & NGX_HTTP_MAIN_CONF) != 0,
+        "markdown_streaming_zero_copy should allow HTTP context");
+    TEST_ASSERT((cmd->type & NGX_HTTP_SRV_CONF) != 0,
+        "markdown_streaming_zero_copy should allow server context");
+    TEST_ASSERT((cmd->type & NGX_HTTP_LOC_CONF) != 0,
+        "markdown_streaming_zero_copy should allow location context");
+    TEST_ASSERT((cmd->type & NGX_CONF_FLAG) != 0,
+        "markdown_streaming_zero_copy should be an NGX_CONF_FLAG");
+    TEST_ASSERT(cmd->offset
+            == offsetof(ngx_http_markdown_conf_t, stream.zero_copy),
+        "markdown_streaming_zero_copy offset should target stream.zero_copy");
 
     return cmd;
 }
@@ -840,6 +889,41 @@ test_stream_engine_handler_valid(void)
     TEST_PASS("5.1b v0.8.0 stream_engine_handler accepts valid values");
 }
 
+static void
+test_streaming_zero_copy_flag_values(void)
+{
+    ngx_conf_t               cf;
+    ngx_array_t              args;
+    ngx_str_t                values[2];
+    ngx_command_t            *cmd;
+    ngx_http_markdown_conf_t mcf;
+    char                    *rc;
+
+    TEST_SUBSECTION("markdown_streaming_zero_copy flag values");
+
+    setup_cf(&cf, &args, values, 2);
+    cmd = streaming_zero_copy_directive();
+    set_arg(&values[0], "markdown_streaming_zero_copy");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "on");
+    rc = cmd->set(&cf, cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "markdown_streaming_zero_copy on should be accepted");
+    TEST_ASSERT(mcf.stream.zero_copy == 1,
+        "markdown_streaming_zero_copy on should set stream.zero_copy to 1");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "off");
+    rc = cmd->set(&cf, cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "markdown_streaming_zero_copy off should be accepted");
+    TEST_ASSERT(mcf.stream.zero_copy == 0,
+        "markdown_streaming_zero_copy off should set stream.zero_copy to 0");
+
+    TEST_PASS("markdown_streaming_zero_copy flag values parsed");
+}
+
 /* ================================================================
  * 5.2 Invalid values rejected
  * ================================================================ */
@@ -1002,6 +1086,39 @@ test_stream_engine_handler_rejection(void)
     TEST_PASS("5.2b v0.8.0 stream_engine_handler rejects invalid/duplicate");
 }
 
+static void
+test_streaming_zero_copy_rejects_invalid_value(void)
+{
+    ngx_conf_t               cf;
+    ngx_array_t              args;
+    ngx_str_t                values[2];
+    ngx_command_t            *cmd;
+    ngx_http_markdown_conf_t mcf;
+    char                    *rc;
+
+    TEST_SUBSECTION("markdown_streaming_zero_copy invalid value rejected");
+
+    setup_cf(&cf, &args, values, 2);
+    cmd = streaming_zero_copy_directive();
+    set_arg(&values[0], "markdown_streaming_zero_copy");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "yes");
+    rc = cmd->set(&cf, cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "markdown_streaming_zero_copy yes should be rejected");
+    TEST_ASSERT(mcf.stream.zero_copy == NGX_CONF_UNSET,
+        "invalid zero_copy value should leave stream.zero_copy unset");
+
+    init_conf(&mcf);
+    set_arg(&values[1], "invalid");
+    rc = cmd->set(&cf, cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "markdown_streaming_zero_copy invalid should be rejected");
+
+    TEST_PASS("markdown_streaming_zero_copy rejects invalid values");
+}
+
 /* ================================================================
  * 5.2c Allocation failure paths
  * ================================================================ */
@@ -1108,6 +1225,8 @@ test_default_inheritance(void)
         "default flush_min should be 16k (16384)");
     TEST_ASSERT(child.stream.excluded_types == NULL,
         "default excluded_types should be NULL");
+    TEST_ASSERT(child.stream.zero_copy == 0,
+        "default zero_copy should remain off after merge");
 
     /* Test 2: Parent sets value, child inherits */
     init_conf(&parent);
@@ -1116,6 +1235,7 @@ test_default_inheritance(void)
     parent.stream.threshold = 512 * 1024;
     parent.stream.precommit_buffer = 128 * 1024;
     parent.stream.flush_min = 32 * 1024;
+    parent.stream.zero_copy = 1;
     merge_stream_config(&child, &parent);
 
     TEST_ASSERT(child.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
@@ -1126,20 +1246,26 @@ test_default_inheritance(void)
         "child should inherit precommit_buffer from parent");
     TEST_ASSERT(child.stream.flush_min == 32 * 1024,
         "child should inherit flush_min from parent");
+    TEST_ASSERT(child.stream.zero_copy == 1,
+        "child should inherit zero_copy from parent");
 
     /* Test 3: Child overrides parent */
     init_conf(&parent);
     init_conf(&child);
     parent.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
     parent.stream.threshold = 2 * 1024 * 1024;
+    parent.stream.zero_copy = 1;
     child.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF;
     child.stream.threshold = 256 * 1024;
+    child.stream.zero_copy = 0;
     merge_stream_config(&child, &parent);
 
     TEST_ASSERT(child.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF,
         "child engine override should be preserved");
     TEST_ASSERT(child.stream.threshold == 256 * 1024,
         "child threshold override should be preserved");
+    TEST_ASSERT(child.stream.zero_copy == 0,
+        "child zero_copy override should be preserved");
 
     /* Verify default enum values match design doc */
     TEST_ASSERT(NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF == 0,
@@ -1428,9 +1554,11 @@ main(void)
 
     test_valid_values();
     test_stream_engine_handler_valid();
+    test_streaming_zero_copy_flag_values();
     test_dynconf_directives_support_published_contexts();
     test_invalid_values();
     test_stream_engine_handler_rejection();
+    test_streaming_zero_copy_rejects_invalid_value();
     test_allocation_failure();
     test_default_inheritance();
     test_reserved_directive_rejected();
