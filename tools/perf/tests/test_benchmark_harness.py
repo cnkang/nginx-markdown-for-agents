@@ -28,6 +28,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from tools.perf.report_schema import validate_module_benchmark_091
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -399,6 +401,15 @@ class TestReportSchemaConformance:
         assert isinstance(ms["rss_per_input_mb"], (int, float))
         assert isinstance(ms["r_squared"], (int, float))
         assert 0.0 <= ms["r_squared"] <= 1.0
+
+    def test_memory_slope_rejects_non_dict_value(self):
+        """memory_slope must be a dict when present."""
+        report = _build_valid_mock_report()
+        report["module_benchmark"]["memory_slope"] = "invalid"
+
+        errors = validate_module_benchmark_091(report)
+
+        assert "memory_slope must be a dict" in errors
 
     def test_valid_report_ttfb_nullable(self):
         """ttfb_p50_ms and ttfb_p95_ms accept null values per schema."""

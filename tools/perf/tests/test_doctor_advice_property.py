@@ -534,5 +534,9 @@ def test_property10_combined_trigger_and_skip(present_rules, absent_rules):
     # Verify: all findings have valid rule IDs and severities
     assert_findings_are_valid(findings)
 
+    # Verify: absent rules are reported as skipped.
+    skipped_rule_ids = {entry.split(" ", 1)[0] for entry in skipped}
+    assert set(absent_rules).issubset(skipped_rule_ids)
+
     # Verify: exit code equals max severity
     assert_exit_code_matches_findings(findings)
