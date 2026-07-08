@@ -246,14 +246,19 @@ class TestSchemaWellFormedness:
         assert "properties" in rs
         assert "module_benchmark" in rs["required"]
 
+    def _assert_object_has_required_fields(self, schema_object, *fields):
+        """Assert that a schema object is a valid object with the specified required fields."""
+        assert schema_object.get("type") == "object"
+        required_in_schema = schema_object.get("required", [])
+        for field in fields:
+            assert field in required_in_schema, f"Missing required field '{field}'"
+
     def test_report_schema_module_benchmark_properties(self):
         """module_benchmark properties in schema include version, timestamp, scenarios, memory_slope."""
         props = _load_schema()["module_benchmark"]["report_schema"]["properties"]["module_benchmark"]
-        required = self._extracted_from_test_memory_slope_required_fields_4(
-            props, "version", "timestamp"
+        self._assert_object_has_required_fields(
+            props, "version", "timestamp", "scenarios", "memory_slope"
         )
-        assert "scenarios" in required
-        assert "memory_slope" in required
 
     def test_scenarios_schema_structure(self):
         """scenarios is array of objects with required name and status fields."""
@@ -261,9 +266,7 @@ class TestSchemaWellFormedness:
         scenarios = mb_props["properties"]["scenarios"]
         assert scenarios.get("type") == "array"
         items = scenarios.get("items", {})
-        required = self._extracted_from_test_memory_slope_required_fields_4(
-            items, "name", "status"
-        )
+        self._assert_object_has_required_fields(items, "name", "status")
 
     def test_scenario_name_enum_values(self):
         """scenario name enum contains the 5 required scenario names."""
@@ -277,17 +280,7 @@ class TestSchemaWellFormedness:
         """memory_slope requires rss_per_input_mb and r_squared."""
         mb_props = _load_schema()["module_benchmark"]["report_schema"]["properties"]["module_benchmark"]
         ms = mb_props["properties"]["memory_slope"]
-        required = self._extracted_from_test_memory_slope_required_fields_4(
-            ms, "rss_per_input_mb", "r_squared"
-        )
-
-    # TODO Rename this here and in `test_report_schema_module_benchmark_properties`, `test_scenarios_schema_structure` and `test_memory_slope_required_fields`
-    def _extracted_from_test_memory_slope_required_fields_4(self, arg0, arg1, arg2):
-        assert arg0.get("type") == "object"
-        result = arg0.get("required", [])
-        assert arg1 in result
-        assert arg2 in result
-        return result
+        self._assert_object_has_required_fields(ms, "rss_per_input_mb", "r_squared")
 
     def test_metrics_properties_present(self):
         """scenario metrics object has expected numeric properties."""
