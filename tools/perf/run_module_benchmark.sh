@@ -261,10 +261,8 @@ generate_nginx_conf() {
   case "$profile" in
     streaming_first)
       profile_directives="
-        markdown_streaming on;
-        markdown_streaming_buffer_size 65536;
-        markdown_streaming_zero_copy on;
-        markdown_auto_decompress on;"
+        markdown_profile streaming_first;
+        markdown_streaming_zero_copy on;"
       ;;
     strict_cache)
       profile_directives="
