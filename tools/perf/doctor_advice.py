@@ -582,8 +582,22 @@ _RULES: List[Any] = [
 
 def evaluate_rules(
     metrics: Dict[str, Any],
+    *,
+    streaming_buffer_budget: Optional[int] = None,
 ) -> Tuple[List[Finding], List[str]]:
-    """Run all rules against metrics. Returns (findings, skipped_rules)."""
+    """Run all rules against metrics. Returns (findings, skipped_rules).
+
+    Parameters:
+        metrics: Metric data from the endpoint or file.
+        streaming_buffer_budget: Optional CLI override for D06 threshold.
+            When provided and the metrics payload does not contain
+            ``streaming_buffer_budget``, this value is injected.
+    """
+    # Inject CLI budget override if the metrics payload lacks one
+    if (streaming_buffer_budget is not None
+            and _get_metric(metrics, "streaming_buffer_budget") is None):
+        metrics = {**metrics, "streaming_buffer_budget": streaming_buffer_budget}
+
     findings: List[Finding] = []
     skipped: List[str] = []
 
@@ -788,7 +802,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         validation_warnings = validate_metric_names(metrics, valid_names)
 
     # Evaluate rules
-    findings, skipped = evaluate_rules(metrics)
+    findings, skipped = evaluate_rules(
+        metrics,
+        streaming_buffer_budget=args.streaming_buffer_budget,
+    )
 
     # Format output
     if args.format == "json":
