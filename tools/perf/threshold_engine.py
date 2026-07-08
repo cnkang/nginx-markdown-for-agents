@@ -578,7 +578,7 @@ def get_module_level_thresholds(thresholds_cfg):
     return {k: v for k, v in section.items() if isinstance(v, (int, float))}
 
 
-def evaluate_module_level(current_metrics, baseline_metrics, thresholds_cfg):
+def evaluate_module_level(current_metrics, baseline_metrics, thresholds_cfg, has_baseline=True):
     """
     Evaluate module-level benchmark metrics against thresholds.
 
@@ -595,10 +595,12 @@ def evaluate_module_level(current_metrics, baseline_metrics, thresholds_cfg):
             (same structure as current_metrics).
         thresholds_cfg (dict): Full thresholds configuration containing the
             optional "module_level" section.
+        has_baseline (bool): Whether a valid baseline report is available.
 
     Returns:
         dict: A verdict report with keys:
-            - "verdict" (str): "GO" if all metrics pass, "NO_GO" if any breach.
+            - "verdict" (str): "GO" if all metrics pass, "NO_GO" if any breach,
+              "MISSING_EVIDENCE" if any critical metric is missing.
             - "breaches" (list[dict]): List of threshold breaches, each with:
                 - "metric" (str): Metric name.
                 - "threshold" (float): The configured threshold.
@@ -610,18 +612,27 @@ def evaluate_module_level(current_metrics, baseline_metrics, thresholds_cfg):
     module_thresholds = get_module_level_thresholds(thresholds_cfg)
     breaches = []
     results = []
+    missing_evidence = []
 
     for metric_name, threshold_value in sorted(module_thresholds.items()):
         direction = _MODULE_LEVEL_DIRECTION.get(metric_name, "lower_is_better")
         entry = _evaluate_single_module_metric(
             metric_name, threshold_value, direction,
-            current_metrics, baseline_metrics,
+            current_metrics, baseline_metrics, has_baseline=has_baseline
         )
         results.append(entry)
         if entry.get("status") == "breach":
             breaches.append(entry)
+        elif entry.get("status") == "missing_evidence":
+            missing_evidence.append(entry)
 
-    verdict = "GO" if not breaches else "NO_GO"
+    if missing_evidence:
+        verdict = "MISSING_EVIDENCE"
+    elif breaches:
+        verdict = "NO_GO"
+    else:
+        verdict = "GO"
+
     return {
         "verdict": verdict,
         "breaches": breaches,
@@ -630,7 +641,7 @@ def evaluate_module_level(current_metrics, baseline_metrics, thresholds_cfg):
 
 
 def _evaluate_single_module_metric(metric_name, threshold_value, direction,
-                                   current_metrics, baseline_metrics):
+                                   current_metrics, baseline_metrics, has_baseline=True):
     """
     Evaluate a single module-level metric against its threshold.
 
@@ -640,66 +651,41 @@ def _evaluate_single_module_metric(metric_name, threshold_value, direction,
         direction (str): "absolute_cap" or "lower_is_better".
         current_metrics (dict): Current metric values.
         baseline_metrics (dict): Baseline metric values.
+        has_baseline (bool): Whether a valid baseline report is available.
 
     Returns:
-        dict: Result entry with status ("pass", "breach", or "skipped").
-    """
-    if direction == "absolute_cap":
-        return _evaluate_absolute_cap(metric_name, threshold_value, current_metrics)
-    return _evaluate_pct_deviation(metric_name, threshold_value, current_metrics, baseline_metrics)
-
-
-def _evaluate_absolute_cap(metric_name, threshold_value, current_metrics):
-    """
-    Evaluate a metric with an absolute cap threshold.
-
-    Parameters:
-        metric_name (str): The metric identifier.
-        threshold_value (float): The absolute cap value.
-        current_metrics (dict): Current metric values.
-
-    Returns:
-        dict: Result entry with pass/breach/skipped status.
+        dict: Result entry with status ("pass", "breach", "missing_evidence", or "skipped").
     """
     cur_val = current_metrics.get(metric_name)
     if cur_val is None:
         return {
             "metric": metric_name,
-            "status": "skipped",
-            "reason": "metric not present in current",
+            "status": "missing_evidence",
+            "reason": f"critical metric '{metric_name}' not present in current measurements",
         }
 
-    passed = cur_val <= threshold_value
-    return {
-        "metric": metric_name,
-        "status": "pass" if passed else "breach",
-        "threshold": threshold_value,
-        "actual": cur_val,
-        "baseline": None,
-        "current": cur_val,
-    }
+    if direction == "absolute_cap":
+        passed = cur_val <= threshold_value
+        return {
+            "metric": metric_name,
+            "status": "pass" if passed else "breach",
+            "threshold": threshold_value,
+            "actual": cur_val,
+            "baseline": None,
+            "current": cur_val,
+        }
 
-
-def _evaluate_pct_deviation(metric_name, threshold_value, current_metrics, baseline_metrics):
-    """
-    Evaluate a metric using percentage deviation against baseline.
-
-    Parameters:
-        metric_name (str): The metric identifier.
-        threshold_value (float): Maximum allowed deviation percentage.
-        current_metrics (dict): Current metric values.
-        baseline_metrics (dict): Baseline metric values.
-
-    Returns:
-        dict: Result entry with pass/breach/skipped status.
-    """
-    cur_val = current_metrics.get(metric_name)
-    base_val = baseline_metrics.get(metric_name)
-    if cur_val is None or base_val is None:
+    # percentage deviation
+    base_val = baseline_metrics.get(metric_name) if has_baseline else None
+    if not has_baseline or base_val is None:
         return {
             "metric": metric_name,
             "status": "skipped",
-            "reason": "metric not present in current or baseline",
+            "reason": "cannot evaluate percentage threshold: missing baseline",
+            "threshold": threshold_value,
+            "actual": None,
+            "baseline": None,
+            "current": cur_val,
         }
 
     deviation = compute_deviation(cur_val, base_val)

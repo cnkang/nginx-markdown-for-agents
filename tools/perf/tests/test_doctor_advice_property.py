@@ -460,6 +460,47 @@ def test_property10_no_findings_exit_zero():
 # Property 10: Combined property - all aspects together
 # ---------------------------------------------------------------------------
 
+def build_metrics_for_rules(present_rules):
+    """Build metrics for present rules only."""
+    metrics = {}
+    for rule_id in present_rules:
+        metrics.update(TRIGGER_BUILDERS[rule_id]())
+    return metrics
+
+
+def remove_absent_rule_metrics(metrics, present_rules, absent_rules):
+    """Remove metrics required by absent rules that aren't also required by present rules."""
+    present_required = set()
+    for rule_id in present_rules:
+        present_required.update(RULE_METRICS[rule_id]["required"])
+
+    for rule_id in absent_rules:
+        for metric_name in RULE_METRICS[rule_id]["required"]:
+            if metric_name not in present_required and metric_name in metrics:
+                del metrics[metric_name]
+
+
+def assert_findings_are_valid(findings):
+    """Verify: all findings have valid rule IDs and severities."""
+    for f in findings:
+        assert f.rule_id in ALL_RULE_IDS, (
+            f"Unknown rule ID in finding: {f.rule_id}"
+        )
+        assert f.severity in SEVERITY_ORDER, (
+            f"Unknown severity: {f.severity}"
+        )
+
+
+def assert_exit_code_matches_findings(findings):
+    """Verify: exit code equals max severity."""
+    exit_code = compute_exit_code(findings)
+    if findings:
+        expected_max = max(SEVERITY_ORDER[f.severity] for f in findings)
+        assert exit_code == expected_max
+    else:
+        assert exit_code == 0
+
+
 @given(
     present_rules=st.lists(
         st.sampled_from(ALL_RULE_IDS), min_size=0, max_size=7, unique=True
@@ -481,37 +522,16 @@ def test_property10_combined_trigger_and_skip(present_rules, absent_rules):
     absent_rules = [r for r in absent_rules if r not in present_rules]
 
     # Build metrics for present rules only
-    metrics = {}
-    for rule_id in present_rules:
-        metrics.update(TRIGGER_BUILDERS[rule_id]())
+    metrics = build_metrics_for_rules(present_rules)
 
-    # Remove metrics required by absent rules (that aren't also required
-    # by present rules)
-    present_required = set()
-    for rule_id in present_rules:
-        present_required.update(RULE_METRICS[rule_id]["required"])
-
-    for rule_id in absent_rules:
-        for metric_name in RULE_METRICS[rule_id]["required"]:
-            if metric_name not in present_required and metric_name in metrics:
-                del metrics[metric_name]
+    # Remove metrics required by absent rules
+    remove_absent_rule_metrics(metrics, present_rules, absent_rules)
 
     # Evaluate - must not crash
     findings, skipped = evaluate_rules(metrics)
 
     # Verify: all findings have valid rule IDs and severities
-    for f in findings:
-        assert f.rule_id in ALL_RULE_IDS, (
-            f"Unknown rule ID in finding: {f.rule_id}"
-        )
-        assert f.severity in SEVERITY_ORDER, (
-            f"Unknown severity: {f.severity}"
-        )
+    assert_findings_are_valid(findings)
 
     # Verify: exit code equals max severity
-    exit_code = compute_exit_code(findings)
-    if findings:
-        expected_max = max(SEVERITY_ORDER[f.severity] for f in findings)
-        assert exit_code == expected_max
-    else:
-        assert exit_code == 0
+    assert_exit_code_matches_findings(findings)
