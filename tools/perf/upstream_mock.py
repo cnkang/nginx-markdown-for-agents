@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from lib.path_validation import validate_read_path
+from tools.lib.path_validation import validate_read_path
 
 
 class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):

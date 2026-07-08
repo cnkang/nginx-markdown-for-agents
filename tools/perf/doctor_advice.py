@@ -26,6 +26,7 @@ import os
 import sys
 import urllib.request
 import urllib.error
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -78,6 +79,14 @@ def _load_valid_metric_names() -> Optional[set]:
 
 def fetch_metrics_http(url: str) -> Dict[str, Any]:
     """Fetch metrics JSON from an HTTP(S) endpoint."""
+    scheme = urllib.parse.urlparse(url).scheme
+    if scheme not in ("http", "https"):
+        print(
+            "ERROR: --endpoint must use http or https scheme",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -213,8 +222,10 @@ RULE_METRICS = {
     },
     "D06": {
         "required": ["pending_output_high_watermark_bytes"],
+        "optional": ["streaming_buffer_budget"],
         "metric_source": {
             "pending_output_high_watermark_bytes": _SOURCE_PERF_SPEC,
+            "streaming_buffer_budget": _SOURCE_EXISTING,
         },
     },
     "D07": {
@@ -584,7 +595,7 @@ def validate_metric_names(
     warnings: List[str] = []
     # Check all rule-referenced metrics are in schema
     for rule_id, spec in RULE_METRICS.items():
-        for metric_name in spec["required"]:
+        for metric_name in spec["required"] + spec.get("optional", []):
             if metric_name not in valid_names:
                 warnings.append(
                     f"Rule {rule_id} references '{metric_name}' "

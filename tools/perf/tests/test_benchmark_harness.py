@@ -18,6 +18,8 @@ Run:
 
 import json
 import os
+import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -33,6 +35,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SCHEMA_PATH = REPO_ROOT / "perf" / "metrics-schema.json"
 BENCHMARK_SCRIPT = REPO_ROOT / "tools" / "perf" / "run_module_benchmark.sh"
+BASH_BIN = shutil.which("bash") or "/bin/bash"
+WORKDIR_RE = re.compile(r"Workdir: (?P<path>\S+)")
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +178,13 @@ def _build_valid_mock_report():
     }
 
 
+def _extract_workdir(stderr: bytes) -> Path:
+    """Return the benchmark workdir reported by the harness."""
+    match = WORKDIR_RE.search(stderr.decode(errors="replace"))
+    assert match is not None, "benchmark stderr did not include Workdir"
+    return Path(match.group("path"))
+
+
 # ---------------------------------------------------------------------------
 # 1. Schema well-formedness tests
 # ---------------------------------------------------------------------------
@@ -277,7 +288,7 @@ class TestGracefulExit:
         env.pop("NGINX_BIN", None)
 
         result = subprocess.run(
-            ["bash", str(BENCHMARK_SCRIPT)],
+            [BASH_BIN, str(BENCHMARK_SCRIPT)],
             env=env,
             capture_output=True,
             timeout=10,
@@ -293,7 +304,7 @@ class TestGracefulExit:
         env.pop("NGINX_BIN", None)
 
         result = subprocess.run(
-            ["bash", str(BENCHMARK_SCRIPT)],
+            [BASH_BIN, str(BENCHMARK_SCRIPT)],
             env=env,
             capture_output=True,
             timeout=10,
@@ -550,7 +561,7 @@ class TestPortCleanupOnSignals:
 
             # Start the benchmark harness
             proc = subprocess.Popen(
-                ["bash", str(BENCHMARK_SCRIPT), "--iterations", "1"],
+                [BASH_BIN, str(BENCHMARK_SCRIPT), "--iterations", "1"],
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -565,9 +576,11 @@ class TestPortCleanupOnSignals:
                     # Script may have failed early; check returncode
                     proc.poll()
                     if proc.returncode is not None:
-                        # Script already exited (e.g., corpus not found) — that's
-                        # acceptable for verifying the cleanup concept
-                        return
+                            stderr = proc.stderr.read() if proc.stderr else b""
+                            raise AssertionError(
+                                "benchmark harness exited before upstream "
+                                f"readiness; stderr: {stderr.decode(errors='replace')}"
+                            )
                     # Give it a bit more time
                     time.sleep(1.0)
 
@@ -607,7 +620,7 @@ class TestPortCleanupOnSignals:
             env.pop("MODULE_SO", None)
 
             proc = subprocess.Popen(
-                ["bash", str(BENCHMARK_SCRIPT), "--iterations", "1"],
+                [BASH_BIN, str(BENCHMARK_SCRIPT), "--iterations", "1"],
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -620,7 +633,11 @@ class TestPortCleanupOnSignals:
                 if not upstream_ready:
                     proc.poll()
                     if proc.returncode is not None:
-                        return
+                            stderr = proc.stderr.read() if proc.stderr else b""
+                            raise AssertionError(
+                                "benchmark harness exited before upstream "
+                                f"readiness; stderr: {stderr.decode(errors='replace')}"
+                            )
                     time.sleep(1.0)
 
                 # Send SIGINT to the process group
@@ -653,30 +670,14 @@ class TestPortCleanupOnSignals:
         env.pop("NGINX_BIN", None)
 
         result = subprocess.run(
-            ["bash", str(BENCHMARK_SCRIPT)],
+            [BASH_BIN, str(BENCHMARK_SCRIPT)],
             env=env,
             capture_output=True,
             timeout=10,
         )
         assert result.returncode == 75
 
-        # Check no PID file matching the pattern remains
-        # The script uses /tmp/ngx_md_bench_$$.pid
-        import glob
-
-        pid_files = glob.glob("/tmp/ngx_md_bench_*.pid")
-        # Filter to only files created in the last few seconds (avoid false matches)
-        recent_pid_files = []
-        for pf in pid_files:
-            try:
-                age = time.time() - os.path.getmtime(pf)
-                if age < 5.0:
-                    recent_pid_files.append(pf)
-            except OSError:
-                continue
-        assert len(recent_pid_files) == 0, (
-            f"PID file(s) left behind after exit: {recent_pid_files}"
-        )
+        assert "Workdir:" not in result.stderr.decode(errors="replace")
 
     def test_trap_declaration_in_script(self):
         """Verify the script declares traps for EXIT, INT, and TERM signals."""
@@ -700,7 +701,7 @@ class TestPortCleanupOnSignals:
             env.pop("MODULE_SO", None)
 
             proc = subprocess.Popen(
-                ["bash", str(BENCHMARK_SCRIPT), "--iterations", "1"],
+                [BASH_BIN, str(BENCHMARK_SCRIPT), "--iterations", "1"],
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -713,11 +714,12 @@ class TestPortCleanupOnSignals:
                 if not upstream_ready:
                     proc.poll()
                     if proc.returncode is not None:
-                        return
+                        stderr = proc.stderr.read() if proc.stderr else b""
+                        raise AssertionError(
+                            "benchmark harness exited before upstream "
+                            f"readiness; stderr: {stderr.decode(errors='replace')}"
+                        )
                     time.sleep(1.0)
-
-                # Get the PID of the bash script (used for workdir name)
-                script_pid = proc.pid
 
                 # Send SIGTERM
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -728,9 +730,8 @@ class TestPortCleanupOnSignals:
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                     proc.wait(timeout=5)
 
-                # The script uses /tmp/ngx_md_bench_$$ as workdir
-                # After cleanup, this directory should not exist
-                workdir = Path(f"/tmp/ngx_md_bench_{script_pid}")
+                stderr = proc.stderr.read() if proc.stderr else b""
+                workdir = _extract_workdir(stderr)
                 # Give filesystem a moment to catch up
                 time.sleep(0.2)
                 assert not workdir.exists(), (

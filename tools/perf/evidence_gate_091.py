@@ -69,11 +69,12 @@ def _get_git_commit() -> str:
 
 
 def _nginx_bin_available() -> bool:
-    """Check whether NGINX_BIN environment variable is set and the binary exists."""
+    """Check whether NGINX_BIN points to an executable file."""
     nginx_bin = os.environ.get("NGINX_BIN", "")
     if not nginx_bin:
         return False
-    return Path(nginx_bin).is_file()
+    path = Path(nginx_bin)
+    return path.is_file() and os.access(path, os.X_OK)
 
 
 def _load_thresholds() -> dict:

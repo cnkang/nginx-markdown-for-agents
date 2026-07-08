@@ -711,11 +711,12 @@ grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log" || {
 }
 # Verify that the truncated compressed streams produced the expected
 # internal diagnostics: decompression failure followed by pre-commit
-# conversion fail-open.
-decompress_failed_count="$(grep -Fc 'markdown: rust decompress failed' "${RUNTIME}/logs/error.log" || true)"
+# conversion fail-open.  Full-buffer and streaming paths use different
+# decompressor implementations, so accept either production log prefix.
+decompress_failed_count="$(grep -E -c 'markdown: (rust decompress failed|decompression failed)' "${RUNTIME}/logs/error.log" || true)"
 conversion_failopen_count="$(grep -Fc 'reason=failed_open category=conversion_error' "${RUNTIME}/logs/error.log" || true)"
 if [[ "${decompress_failed_count}" -lt 2 ]]; then
-  echo "missing Rust decompression failure logs for truncated gzip/deflate cases: ${decompress_failed_count}" >&2
+  echo "missing decompression failure logs for truncated gzip/deflate cases: ${decompress_failed_count}" >&2
   exit 1
 fi
 if [[ "${conversion_failopen_count}" -lt 2 ]]; then

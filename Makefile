@@ -710,16 +710,7 @@ release-gates-check-090: release-gates-check-080-regression
 # Classification: SOFT (report-only, does not fail the build)
 perf-evidence-check:
 	@echo "=== Performance Evidence Check (non-blocking) ==="
-	@python3 tools/perf/evidence_gate_091.py --mode non-blocking; \
-	rc=$$?; \
-	if [ $$rc -eq 75 ]; then \
-		echo "SKIP_NOT_PRESENT: Module benchmarks require NGINX_BIN."; \
-		echo "  Set NGINX_BIN=/path/to/nginx to enable."; \
-		exit 75; \
-	elif [ $$rc -ne 0 ]; then \
-		echo "FAIL: Evidence gate script error (exit $$rc)" >&2; \
-		exit 1; \
-	fi
+	@tools/perf/run_evidence_gate_091.sh
 
 # release-gates-check-091: Blocking 0.9.1 release gate.
 # Runs all prior regression gates (0.9.0 gate chain), then adds 0.9.1-specific
@@ -737,8 +728,7 @@ perf-evidence-check:
 release-gates-check-091: release-gates-check-090
 	@echo "=== 0.9.1 Release Gates (blocking) ==="
 	@echo "  [1/3] Module-level threshold engine validation"
-	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')" 2>/dev/null || \
-		python3 -c "import sys; sys.path.insert(0, 'tools/perf'); from threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
+	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
 	@echo "  [2/3] Performance evidence gate (blocking mode)"
 	@if [ -n "$${NGINX_BIN:-}" ]; then \
 		python3 tools/perf/evidence_gate_091.py --mode blocking || exit 1; \

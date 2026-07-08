@@ -41,8 +41,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # Port range 19100-19199 for isolation (Requirement 1.5)
 readonly UPSTREAM_PORT=19100
 readonly NGINX_PORT=19101
-readonly PID_FILE="/tmp/ngx_md_bench_$$.pid"
-readonly NGINX_WORKDIR="/tmp/ngx_md_bench_$$"
+NGINX_WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/ngx_md_bench.XXXXXX")" \
+  || {
+    echo >&2 "[bench] ERROR: failed to create benchmark workdir"
+    exit 1
+  }
+readonly NGINX_WORKDIR
+readonly PID_FILE="$NGINX_WORKDIR/bench.pid"
 
 ###############################################################################
 # Usage
@@ -194,6 +199,7 @@ log "Load generator: $LOAD_GEN"
 mkdir -p "$NGINX_WORKDIR/logs"
 mkdir -p "$NGINX_WORKDIR/temp"
 echo "$$" > "$PID_FILE"
+log "Workdir: $NGINX_WORKDIR"
 
 ###############################################################################
 # Start upstream mock (Python http.server serving tests/corpus/)
@@ -433,9 +439,11 @@ get_worker_rss() {
     return 0
   fi
 
-  # Find worker child process (NGINX master spawns workers)
+  # Find worker child process (NGINX master spawns workers).
+  # Use portable ps output instead of GNU-only -ppid filtering.
   local worker_pid
-  worker_pid="$(ps -o pid= -ppid="$NGINX_PID" 2>/dev/null | head -1 | tr -d ' ')" || true
+  worker_pid="$(ps -axo pid=,ppid= 2>/dev/null \
+    | awk -v ppid="$NGINX_PID" '$2 == ppid { print $1; exit }')" || true
 
   if [[ -z "$worker_pid" ]]; then
     # Single process mode — use master PID
@@ -764,6 +772,7 @@ if decomp_streaming == 0 and decomp_fullbuffer == 0:
             decomp_fullbuffer = decomp_attempted
 
 latencies = []
+wall_end_s = 0.0
 
 if load_gen == "hey":
     try:
@@ -775,6 +784,10 @@ if load_gen == "hey":
                 try:
                     lat_s = float(row[0])
                     latencies.append(lat_s * 1000.0)  # convert to ms
+                    if len(row) > 6:
+                        end_s = float(row[6]) + lat_s
+                        if end_s > wall_end_s:
+                            wall_end_s = end_s
                 except (ValueError, IndexError):
                     continue
     except (FileNotFoundError, IOError):
@@ -831,7 +844,7 @@ if latencies:
     p50 = latencies[int(n * 0.50)]
     p95 = latencies[int(n * 0.95)]
     p99 = latencies[int(n * 0.99)]
-    total_time_s = sum(latencies) / 1000.0
+    total_time_s = wall_end_s if wall_end_s > 0 else sum(latencies) / 1000.0
     rps = n / total_time_s if total_time_s > 0 else 0.0
 else:
     p50 = p95 = p99 = 0.0

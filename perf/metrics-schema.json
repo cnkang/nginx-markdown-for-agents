@@ -122,6 +122,38 @@
       "description": "Rate of pre-commit fallback to full-buffer"
     },
     {
+      "name": "streaming_fallback_total",
+      "unit": "count",
+      "collection": "module_counter",
+      "aggregation": "sum",
+      "direction": "lower_is_better",
+      "description": "Total pre-commit streaming fallbacks"
+    },
+    {
+      "name": "streaming_requests_total",
+      "unit": "count",
+      "collection": "module_counter",
+      "aggregation": "sum",
+      "direction": "informational",
+      "description": "Total requests that entered the streaming path"
+    },
+    {
+      "name": "overload_total",
+      "unit": "count",
+      "collection": "module_counter",
+      "aggregation": "sum",
+      "direction": "lower_is_better",
+      "description": "Total requests rejected by the inflight guard"
+    },
+    {
+      "name": "streaming_buffer_budget",
+      "unit": "bytes",
+      "collection": "configuration",
+      "aggregation": "latest",
+      "direction": "informational",
+      "description": "Configured streaming output buffer budget"
+    },
+    {
       "name": "backpressure_total",
       "unit": "count",
       "collection": "module_counter",
@@ -425,10 +457,35 @@
                         "minimum": 0,
                         "maximum": 1,
                         "description": "Rate of streaming fallback to full-buffer"
+                      },
+                      "streaming_buffer_budget": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Configured streaming output buffer budget in bytes"
                       }
                     }
                   }
-                }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "status": { "const": "completed" }
+                      },
+                      "required": ["status"]
+                    },
+                    "then": { "required": ["metrics"] }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "status": { "const": "skipped" }
+                      },
+                      "required": ["status"]
+                    },
+                    "then": { "required": ["reason"] }
+                  }
+                ]
               }
             },
             "memory_slope": {
