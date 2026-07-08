@@ -1314,7 +1314,7 @@ ngx_http_markdown_streaming_resume_pending(
          * record failure metrics.
          */
         ctx->streaming.completion.pending_terminal_metrics = 0;
-        ctx->streaming.pending_failopen_delivery = 0;
+        ctx->streaming.completion.pending_failopen_delivery = 0;
         ngx_http_markdown_streaming_record_postcommit_failure(
             r, ctx, conf);
 
@@ -1326,9 +1326,9 @@ ngx_http_markdown_streaming_resume_pending(
      * fail-open delivery that was deferred by backpressure,
      * increment the delivery counter now (Rule 38).
      */
-    if (ctx->streaming.pending_failopen_delivery) {
+    if (ctx->streaming.completion.pending_failopen_delivery) {
         NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
-        ctx->streaming.pending_failopen_delivery = 0;
+        ctx->streaming.completion.pending_failopen_delivery = 0;
     }
 
     /*
@@ -3047,7 +3047,8 @@ ngx_http_markdown_streaming_send_failopen_chain(
 
         ctx->streaming.pending_output = out;
         ctx->streaming.pending_has_data = 1;
-        ctx->streaming.pending_failopen_delivery = (!ctx->eligible) ? 1 : 0;
+        ctx->streaming.completion.pending_failopen_delivery =
+            (!ctx->eligible) ? 1 : 0;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 
         /* Backpressure metric: fail-open output returned NGX_AGAIN */

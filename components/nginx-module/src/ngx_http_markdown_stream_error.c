@@ -250,7 +250,7 @@ ngx_http_markdown_stream_error_pass_html(ngx_http_request_t *r,
         ctx->streaming.pending_has_data =
             (ctx->stream_sm.replay_buf.size > 0) ? 1 : 0;
         ctx->streaming.pending_output_bytes = ctx->stream_sm.replay_buf.size;
-        ctx->streaming.pending_failopen_delivery = 1;
+        ctx->streaming.completion.pending_failopen_delivery = 1;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
         return NGX_AGAIN;
     }

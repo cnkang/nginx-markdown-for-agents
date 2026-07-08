@@ -3204,7 +3204,7 @@ test_failopen_passthrough_again_pending(void)
         "replay: pending_output must be set on NGX_AGAIN");
     TEST_ASSERT(ctx.streaming.pending_has_data == 1,
         "replay: pending_has_data must be 1 on NGX_AGAIN");
-    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 1,
+    TEST_ASSERT(ctx.streaming.completion.pending_failopen_delivery == 1,
         "replay: pending_failopen_delivery latch must be set on NGX_AGAIN");
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
         "replay: request buffered flag must be set on NGX_AGAIN");
@@ -3221,7 +3221,7 @@ test_failopen_passthrough_again_pending(void)
         "replay: pending_output must be NULL after successful resume");
     TEST_ASSERT(ctx.streaming.pending_has_data == 0,
         "replay: pending_has_data must be 0 after successful resume");
-    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 0,
+    TEST_ASSERT(ctx.streaming.completion.pending_failopen_delivery == 0,
         "replay: pending_failopen_delivery latch must be cleared after resume");
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
         "replay: buffered flag must be cleared after successful resume");
@@ -3266,7 +3266,7 @@ test_failopen_passthrough_again_pending(void)
         "no-replay: failopen_passthrough should return NGX_AGAIN");
     TEST_ASSERT(ctx.streaming.pending_output != NULL,
         "no-replay: pending_output must be set on NGX_AGAIN");
-    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 1,
+    TEST_ASSERT(ctx.streaming.completion.pending_failopen_delivery == 1,
         "no-replay: pending_failopen_delivery latch must be set on NGX_AGAIN");
     if (ngx_http_markdown_metrics != NULL) {
         TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 0,
@@ -3318,7 +3318,7 @@ test_failopen_passthrough_again_pending(void)
         "resume-failure: resume_pending should return NGX_ERROR on downstream error");
     TEST_ASSERT(ctx.streaming.pending_has_data == 0,
         "resume-failure: pending_has_data must be 0 after resume failure");
-    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 0,
+    TEST_ASSERT(ctx.streaming.completion.pending_failopen_delivery == 0,
         "resume-failure: pending_failopen_delivery latch must be cleared on failure");
     if (ngx_http_markdown_metrics != NULL) {
         TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 0,

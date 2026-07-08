@@ -103,8 +103,8 @@ struct ngx_http_request_s {
     ngx_uint_t              buffered;
 };
 
-/* Include the module header for types */
-#include "../../src/ngx_http_markdown_filter_module.h"
+/* Include the module header for types — must follow type/macro setup above */
+#include "../../src/ngx_http_markdown_filter_module.h" /* NOSONAR(S954) test include-after-setup pattern */
 
 static ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r,
     ngx_chain_t *in);
@@ -155,7 +155,8 @@ static void test_setup(void);
 
 /* Saved downstream body filter used by the production delegation helper. */
 static ngx_int_t
-test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+test_next_body_filter(ngx_http_request_t *r, /* NOSONAR(S995) NGINX filter signature */
+                      ngx_chain_t *in)
 {
     UNUSED(r);
     test_output_filter_called++;
@@ -165,7 +166,8 @@ test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
 /* Poison top filter: replay and postcommit output must bypass it. */
 ngx_int_t
-ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
+ngx_http_output_filter(ngx_http_request_t *r, /* NOSONAR(S995) NGINX API signature */
+                       ngx_chain_t *in) /* NOSONAR(S995) NGINX API signature */
 {
     UNUSED(r);
     UNUSED(in);
@@ -176,7 +178,7 @@ ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
 /* Mock: replay_chain */
 ngx_chain_t *
 ngx_http_markdown_stream_replay_chain(const ngx_http_markdown_ctx_t *ctx,
-                                       ngx_pool_t *pool)
+                                       ngx_pool_t *pool) /* NOSONAR(S995) match real signature */
 {
     UNUSED(ctx); UNUSED(pool);
     test_replay_chain_called++;
@@ -198,7 +200,7 @@ ngx_http_markdown_stream_replay_available(
 
 /* Mock: ngx_calloc_buf (for send_terminal) */
 ngx_buf_t *
-ngx_calloc_buf(ngx_pool_t *pool)
+ngx_calloc_buf(ngx_pool_t *pool) /* NOSONAR(S995) NGINX API signature */
 {
     UNUSED(pool);
     test_calloc_buf_called++;
@@ -210,7 +212,7 @@ ngx_calloc_buf(ngx_pool_t *pool)
 }
 
 void *
-ngx_palloc(ngx_pool_t *pool, size_t size)
+ngx_palloc(ngx_pool_t *pool, size_t size) /* NOSONAR(S995) NGINX API signature */
 {
     UNUSED(pool);
     test_palloc_called++;
@@ -224,23 +226,23 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
 }
 
 ngx_chain_t *
-ngx_alloc_chain_link(ngx_pool_t *pool)
+ngx_alloc_chain_link(ngx_pool_t *pool) /* NOSONAR(S995) NGINX API signature */
 {
     UNUSED(pool);
     memset(&test_chain_link_storage, 0, sizeof(test_chain_link_storage));
     return &test_chain_link_storage;
 }
 
-/* Stub: ngx_log_error_core */
+/* Stub: ngx_log_error_core — variadic matches NGINX core signature */
 void
-ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
+ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, /* NOSONAR(S923, S995) NGINX API: variadic + non-const */
                    ngx_err_t err, const char *fmt, ...)
 {
     UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);
 }
 
 uint32_t
-markdown_streaming_safe_finish(struct StreamingConverterHandle *handle,
+markdown_streaming_safe_finish(struct StreamingConverterHandle *handle, /* NOSONAR(S995) FFI signature */
     u_char **out_data, uintptr_t *out_len)
 {
     UNUSED(handle);
@@ -254,13 +256,13 @@ markdown_streaming_safe_finish(struct StreamingConverterHandle *handle,
 }
 
 void
-markdown_streaming_abort(struct StreamingConverterHandle *handle)
+markdown_streaming_abort(struct StreamingConverterHandle *handle) /* NOSONAR(S995) FFI signature */
 {
     UNUSED(handle);
 }
 
 void
-markdown_streaming_output_free(u_char *data, uintptr_t len)
+markdown_streaming_output_free(u_char *data, uintptr_t len) /* NOSONAR(S995) FFI signature */
 {
     UNUSED(data);
     UNUSED(len);
@@ -456,7 +458,7 @@ static void test_precommit_pass_replay_html_backpressure(void)
         "replay pending chain records data");
     TEST_ASSERT(ctx.streaming.pending_output_bytes == 100,
         "replay pending byte count preserved");
-    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 1,
+    TEST_ASSERT(ctx.streaming.completion.pending_failopen_delivery == 1,
         "fail-open delivery latch set for replay pending chain");
     TEST_ASSERT((test_request.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
         "request buffered flag set on replay backpressure");
@@ -793,7 +795,8 @@ static void test_content_type_restored(void)
 
     /* Set a different Content-Type before the call */
     test_request.headers_out.content_type_len = 30;
-    test_request.headers_out.content_type_lowcase = (u_char *) "something";
+    test_request.headers_out.content_type_lowcase =
+        (u_char *) test_palloc_storage;  /* mutable buffer avoids const-drop */
 
     fc.buf = &fb;
     fc.next = NULL;
