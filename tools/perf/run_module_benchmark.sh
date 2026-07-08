@@ -662,16 +662,20 @@ run_scenario() {
   local ttfb_json
   ttfb_json="$(measure_ttfb "$url_path")"
   log "  TTFB result: $ttfb_json"
+  local ttfb_file="$NGINX_WORKDIR/${SC_NAME}_ttfb.json"
+  printf '%s\n' "$ttfb_json" > "$ttfb_file"
 
   # Fetch real NGINX metrics from metrics endpoint
   log "  Fetching real NGINX metrics..."
   local metrics_json
   metrics_json="$(curl -s -H 'Accept: application/json' "http://127.0.0.1:${NGINX_PORT}/markdown-metrics" || echo '{}')"
+  local metrics_file="$NGINX_WORKDIR/${SC_NAME}_metrics.json"
+  printf '%s\n' "$metrics_json" > "$metrics_file"
 
   # Parse results and emit JSON (passing TTFB data for integration)
   local scenario_json
   scenario_json="$(parse_load_gen_results "$raw_output" "$SC_NAME" "$SC_PROFILE" \
-    "$SC_COMPRESSION" "$SC_TRANSFER" "$SC_CONCURRENCY" "$rss_after" "$ttfb_json" "$metrics_json")"
+    "$SC_COMPRESSION" "$SC_TRANSFER" "$SC_CONCURRENCY" "$rss_after" "$ttfb_file" "$metrics_file")"
 
   # Stop NGINX for next scenario
   stop_nginx
@@ -693,7 +697,8 @@ run_scenario() {
 #   $5 - transfer encoding
 #   $6 - concurrency
 #   $7 - worker RSS in KB
-#   $8 - TTFB JSON (from measure_ttfb, contains ttfb_p50_ms and ttfb_p95_ms)
+#   $8 - path to TTFB JSON (from measure_ttfb)
+#   $9 - path to NGINX metrics JSON
 parse_load_gen_results() {
   local raw_file="$1"
   local name="$2"
@@ -702,16 +707,26 @@ parse_load_gen_results() {
   local transfer="$5"
   local concurrency="$6"
   local rss_kb="$7"
-  local ttfb_json="${8:-{\\"ttfb_p50_ms\\":null,\\"ttfb_p95_ms\\":null}}"
-  local metrics_json="${9:-{}}"
+  local ttfb_file="${8:-}"
+  local metrics_file="${9:-}"
 
   python3 - "$raw_file" "$name" "$profile" "$compression" "$transfer" \
-    "$concurrency" "$rss_kb" "$LOAD_GEN" "$ttfb_json" "$metrics_json" <<'PYEOF'
+    "$concurrency" "$rss_kb" "$LOAD_GEN" "$ttfb_file" "$metrics_file" <<'PYEOF'
 import csv
 import json
 import sys
 import os
 import re
+
+
+def read_json_file(path, default):
+    if not path:
+        return default
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return default
 
 raw_file = sys.argv[1]
 name = sys.argv[2]
@@ -721,23 +736,20 @@ transfer = sys.argv[5]
 concurrency = int(sys.argv[6])
 rss_kb = int(sys.argv[7])
 load_gen = sys.argv[8]
-ttfb_json_str = sys.argv[9]
-metrics_json_str = sys.argv[10]
+ttfb_json_path = sys.argv[9]
+metrics_json_path = sys.argv[10]
 
 # Parse supplemental TTFB data (measured via curl time_starttransfer)
-try:
-    ttfb_data = json.loads(ttfb_json_str)
-except (json.JSONDecodeError, ValueError):
-    ttfb_data = {"ttfb_p50_ms": None, "ttfb_p95_ms": None}
+ttfb_data = read_json_file(
+    ttfb_json_path,
+    {"ttfb_p50_ms": None, "ttfb_p95_ms": None},
+)
 
 ttfb_p50 = ttfb_data.get("ttfb_p50_ms")
 ttfb_p95 = ttfb_data.get("ttfb_p95_ms")
 
 # Parse real NGINX metrics
-try:
-    nginx_metrics = json.loads(metrics_json_str) if metrics_json_str else {}
-except Exception:
-    nginx_metrics = {}
+nginx_metrics = read_json_file(metrics_json_path, {})
 
 perf_data = nginx_metrics.get("perf", {})
 streaming_data = nginx_metrics.get("streaming", {})
@@ -745,7 +757,12 @@ streaming_data = nginx_metrics.get("streaming", {})
 # 1. fallback_rate
 fallback_total = streaming_data.get("fallback_total", 0)
 requests_total = streaming_data.get("requests_total", 0)
-fallback_rate = float(fallback_total) / requests_total if requests_total > 0 else 0.0
+precommit_failopen_total = streaming_data.get("precommit_failopen_total", 0)
+fallback_rate = (
+    float(precommit_failopen_total) / requests_total
+    if requests_total > 0
+    else 0.0
+)
 
 # 2. streaming_ratio and fullbuffer_ratio
 sf_hits = nginx_metrics.get("streaming_path_hits", 0)
@@ -823,6 +840,9 @@ elif load_gen == "ab":
                 "streaming_ratio": streaming_ratio,
                 "fullbuffer_ratio": fullbuffer_ratio,
                 "fallback_rate": fallback_rate,
+                "streaming_fallback_total": fallback_total,
+                "streaming_requests_total": requests_total,
+                "precommit_failopen_total": precommit_failopen_total,
                 "throughput_mbps": 0.0,
                 "decompression_streaming_total": decomp_streaming,
                 "decompression_fullbuffer_total": decomp_fullbuffer,
@@ -867,6 +887,9 @@ result = {
         "streaming_ratio": streaming_ratio,
         "fullbuffer_ratio": fullbuffer_ratio,
         "fallback_rate": fallback_rate,
+        "streaming_fallback_total": fallback_total,
+        "streaming_requests_total": requests_total,
+        "precommit_failopen_total": precommit_failopen_total,
         "throughput_mbps": 0.0,
         "decompression_streaming_total": decomp_streaming,
         "decompression_fullbuffer_total": decomp_fullbuffer,
@@ -895,8 +918,9 @@ log "PID file: $PID_FILE"
 log "Iterations: $ITERATIONS"
 
 # Collect scenario results
-RESULTS=""
+RESULTS_FILE="$NGINX_WORKDIR/scenario-results.jsonl"
 SCENARIO_COUNT=0
+: > "$RESULTS_FILE"
 
 for scenario_def in "${SCENARIOS[@]}"; do
   parse_scenario "$scenario_def"
@@ -907,11 +931,7 @@ for scenario_def in "${SCENARIOS[@]}"; do
   fi
 
   result="$(run_scenario "$scenario_def")"
-  if [[ -n "$RESULTS" ]]; then
-    RESULTS="${RESULTS},${result}"
-  else
-    RESULTS="$result"
-  fi
+  printf '%s\n' "$result" >> "$RESULTS_FILE"
   SCENARIO_COUNT=$((SCENARIO_COUNT + 1))
 done
 
@@ -931,7 +951,7 @@ TIMESTAMP="$(python3 -c 'import datetime; print(datetime.datetime.utcnow().strft
 GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
 PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
 
-REPORT_JSON="$(python3 - "$TIMESTAMP" "$GIT_COMMIT" "$PLATFORM" "$LOAD_GEN" "$RESULTS" <<'PYEOF'
+REPORT_JSON="$(python3 - "$TIMESTAMP" "$GIT_COMMIT" "$PLATFORM" "$LOAD_GEN" "$RESULTS_FILE" <<'PYEOF'
 import json
 import sys
 
@@ -939,19 +959,15 @@ timestamp = sys.argv[1]
 git_commit = sys.argv[2]
 platform = sys.argv[3]
 load_gen = sys.argv[4]
-scenarios_raw = sys.argv[5]
+results_file = sys.argv[5]
 
-# Parse scenario results (comma-separated JSON objects)
 scenarios = []
-for part in scenarios_raw.split("},{"):
-    # Reconstruct valid JSON
-    s = part
-    if not s.startswith("{"):
-        s = "{" + s
-    if not s.endswith("}"):
-        s = s + "}"
+with open(results_file, encoding="utf-8") as handle:
+    lines = [line.strip() for line in handle if line.strip()]
+
+for line in lines:
     try:
-        scenarios.append(json.loads(s))
+        scenarios.append(json.loads(line))
     except json.JSONDecodeError:
         pass
 
