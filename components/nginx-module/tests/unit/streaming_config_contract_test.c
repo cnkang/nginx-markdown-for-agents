@@ -591,6 +591,8 @@ find_directive(const char *name)
     return NULL;
 }
 
+static int command_table_contains(const char *name);
+
 static ngx_command_t *
 stream_engine_directive(void)
 {
@@ -614,6 +616,9 @@ static ngx_command_t *
 streaming_zero_copy_directive(void)
 {
     ngx_command_t *cmd;
+
+    TEST_ASSERT(command_table_contains("markdown_streaming_zero_copy"),
+        "markdown_streaming_zero_copy should exist in production command table");
 
     cmd = find_directive("markdown_streaming_zero_copy");
     TEST_ASSERT(cmd != NULL,
