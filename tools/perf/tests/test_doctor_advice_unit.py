@@ -22,7 +22,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from doctor_advice import (
     Finding,
-    RuleResult,
     _evaluate_d01,
     _evaluate_d02,
     _evaluate_d03,
@@ -35,7 +34,6 @@ from doctor_advice import (
     fetch_metrics_file,
     fetch_metrics_http,
     format_json,
-    format_text,
     DEFAULT_STREAMING_BUFFER_BUDGET,
 )
 
@@ -96,37 +94,35 @@ class TestD01:
 
     def test_no_trigger_below_boundary(self):
         """Rate at exactly 10% does not trigger."""
-        metrics = {
-            "streaming_fallback_total": 10,
-            "streaming_requests_total": 100,
-        }
-        result = _evaluate_d01(metrics)
-        assert result.finding is None
-        assert not result.skipped
+        self._assert_no_finding(10, 100)
 
     def test_no_trigger_zero_requests(self):
         """Zero streaming requests is not applicable (no finding, no skip)."""
-        metrics = {
-            "streaming_fallback_total": 0,
-            "streaming_requests_total": 0,
-        }
+        self._assert_no_finding(0, 0)
+
+    def _assert_no_finding(self, fallback, requests):
+        metrics = {"streaming_fallback_total": fallback, "streaming_requests_total": requests}
         result = _evaluate_d01(metrics)
         assert result.finding is None
         assert not result.skipped
 
     def test_skipped_missing_fallback(self):
         """Missing streaming_fallback_total skips gracefully."""
-        metrics = {"streaming_requests_total": 100}
-        result = _evaluate_d01(metrics)
-        assert result.skipped
-        assert "streaming_fallback_total" in result.skip_reason
+        self._assert_skipped_missing(
+            "streaming_requests_total", 100, "streaming_fallback_total"
+        )
 
     def test_skipped_missing_requests(self):
         """Missing streaming_requests_total skips gracefully."""
-        metrics = {"streaming_fallback_total": 5}
+        self._assert_skipped_missing(
+            "streaming_fallback_total", 5, "streaming_requests_total"
+        )
+
+    def _assert_skipped_missing(self, present_key, present_val, missing_key):
+        metrics = {present_key: present_val}
         result = _evaluate_d01(metrics)
         assert result.skipped
-        assert "streaming_requests_total" in result.skip_reason
+        assert missing_key in result.skip_reason
 
 
 # ---------------------------------------------------------------------------
@@ -181,37 +177,35 @@ class TestD03:
 
     def test_no_trigger_at_boundary(self):
         """Rate at exactly 5% does not trigger."""
-        metrics = {
-            "backpressure_total": 5,
-            "streaming_requests_total": 100,
-        }
-        result = _evaluate_d03(metrics)
-        assert result.finding is None
-        assert not result.skipped
+        self._assert_no_finding(5, 100)
 
     def test_no_trigger_zero_requests(self):
         """Zero streaming requests is not applicable."""
-        metrics = {
-            "backpressure_total": 0,
-            "streaming_requests_total": 0,
-        }
+        self._assert_no_finding(0, 0)
+
+    def _assert_no_finding(self, backpressure, requests):
+        metrics = {"backpressure_total": backpressure, "streaming_requests_total": requests}
         result = _evaluate_d03(metrics)
         assert result.finding is None
         assert not result.skipped
 
     def test_skipped_missing_backpressure(self):
         """Missing backpressure_total skips gracefully."""
-        metrics = {"streaming_requests_total": 100}
-        result = _evaluate_d03(metrics)
-        assert result.skipped
-        assert "backpressure_total" in result.skip_reason
+        self._assert_skipped_missing(
+            "streaming_requests_total", 100, "backpressure_total"
+        )
 
     def test_skipped_missing_streaming_requests(self):
         """Missing streaming_requests_total skips gracefully."""
-        metrics = {"backpressure_total": 10}
+        self._assert_skipped_missing(
+            "backpressure_total", 10, "streaming_requests_total"
+        )
+
+    def _assert_skipped_missing(self, present_key, present_val, missing_key):
+        metrics = {present_key: present_val}
         result = _evaluate_d03(metrics)
         assert result.skipped
-        assert "streaming_requests_total" in result.skip_reason
+        assert missing_key in result.skip_reason
 
 
 # ---------------------------------------------------------------------------
@@ -245,36 +239,39 @@ class TestD04:
 
     def test_no_trigger_balanced_ratio(self):
         """Ratio at 10:1 does not trigger."""
-        metrics = {
-            "decompression_fullbuffer_total": 100,
-            "decompression_streaming_total": 10,
-        }
-        result = _evaluate_d04(metrics)
-        assert result.finding is None
+        self._assert_no_finding(100, 10)
 
     def test_no_trigger_both_zero(self):
         """Both zero is not applicable."""
+        result = self._assert_no_finding(0, 0)
+        assert not result.skipped
+
+    def _assert_no_finding(self, fullbuffer, streaming):
         metrics = {
-            "decompression_fullbuffer_total": 0,
-            "decompression_streaming_total": 0,
+            "decompression_fullbuffer_total": fullbuffer,
+            "decompression_streaming_total": streaming,
         }
         result = _evaluate_d04(metrics)
         assert result.finding is None
-        assert not result.skipped
+        return result
 
     def test_skipped_missing_fullbuffer(self):
         """Missing decompression_fullbuffer_total skips gracefully."""
-        metrics = {"decompression_streaming_total": 10}
-        result = _evaluate_d04(metrics)
-        assert result.skipped
-        assert "decompression_fullbuffer_total" in result.skip_reason
+        self._assert_skipped_missing(
+            "decompression_streaming_total", 10, "decompression_fullbuffer_total"
+        )
 
     def test_skipped_missing_streaming(self):
         """Missing decompression_streaming_total skips gracefully."""
-        metrics = {"decompression_fullbuffer_total": 100}
+        self._assert_skipped_missing(
+            "decompression_fullbuffer_total", 100, "decompression_streaming_total"
+        )
+
+    def _assert_skipped_missing(self, present_key, present_val, missing_key):
+        metrics = {present_key: present_val}
         result = _evaluate_d04(metrics)
         assert result.skipped
-        assert "decompression_streaming_total" in result.skip_reason
+        assert missing_key in result.skip_reason
 
 
 # ---------------------------------------------------------------------------
@@ -385,36 +382,36 @@ class TestD07:
 
     def test_no_trigger_balanced_ratio(self):
         """Ratio at 5:1 does not trigger."""
-        metrics = {
-            "copied_output_total": 50,
-            "zero_copy_output_total": 10,
-        }
-        result = _evaluate_d07(metrics)
-        assert result.finding is None
+        self._assert_no_finding(50, 10)
 
     def test_no_trigger_both_zero(self):
         """Both zero means feature not used — no finding."""
-        metrics = {
-            "copied_output_total": 0,
-            "zero_copy_output_total": 0,
-        }
+        result = self._assert_no_finding(0, 0)
+        assert not result.skipped
+
+    def _assert_no_finding(self, copied, zero_copy):
+        metrics = {"copied_output_total": copied, "zero_copy_output_total": zero_copy}
         result = _evaluate_d07(metrics)
         assert result.finding is None
-        assert not result.skipped
+        return result
 
     def test_skipped_missing_copied(self):
         """Missing copied_output_total skips gracefully."""
-        metrics = {"zero_copy_output_total": 10}
-        result = _evaluate_d07(metrics)
-        assert result.skipped
-        assert "copied_output_total" in result.skip_reason
+        self._assert_skipped_missing(
+            "zero_copy_output_total", 10, "copied_output_total"
+        )
 
     def test_skipped_missing_zero_copy(self):
         """Missing zero_copy_output_total skips gracefully."""
-        metrics = {"copied_output_total": 100}
+        self._assert_skipped_missing(
+            "copied_output_total", 100, "zero_copy_output_total"
+        )
+
+    def _assert_skipped_missing(self, present_key, present_val, missing_key):
+        metrics = {present_key: present_val}
         result = _evaluate_d07(metrics)
         assert result.skipped
-        assert "zero_copy_output_total" in result.skip_reason
+        assert missing_key in result.skip_reason
 
 
 # ---------------------------------------------------------------------------

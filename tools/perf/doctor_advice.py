@@ -52,9 +52,7 @@ def _find_schema_path() -> Optional[str]:
         return str(candidate)
     # Try current working directory
     cwd_candidate = Path.cwd() / _SCHEMA_RELATIVE_PATH
-    if cwd_candidate.is_file():
-        return str(cwd_candidate)
-    return None
+    return str(cwd_candidate) if cwd_candidate.is_file() else None
 
 
 def _load_valid_metric_names() -> Optional[set]:
@@ -67,8 +65,7 @@ def _load_valid_metric_names() -> Optional[set]:
             schema = json.load(fh)
         names = set()
         for entry in schema.get("metrics", []):
-            name = entry.get("name")
-            if name:
+            if name := entry.get("name"):
                 names.add(name)
         return names
     except (OSError, json.JSONDecodeError):
@@ -119,6 +116,10 @@ def fetch_metrics_file(path: str) -> Dict[str, Any]:
     """Read metrics JSON from a local file."""
     try:
         validated_path = validate_read_path(path, purpose="metrics file")
+    except ValueError as exc:
+        print(f"ERROR: Invalid metrics file path: {exc}", file=sys.stderr)
+        sys.exit(2)
+    try:
         with validated_path.open("r", encoding="utf-8") as fh:
             return json.load(fh)
     except OSError as exc:
@@ -143,12 +144,9 @@ def _get_metric(metrics: Dict[str, Any], name: str) -> Optional[float]:
     # Direct top-level lookup
     if name in metrics:
         val = metrics[name]
-        if isinstance(val, (int, float)):
-            return float(val)
-        return None
-
+        return float(val) if isinstance(val, (int, float)) else None
     # Search one level deep for nested metric objects
-    for _key, sub in metrics.items():
+    for sub in metrics.values():
         if isinstance(sub, dict) and name in sub:
             val = sub[name]
             if isinstance(val, (int, float)):
@@ -611,20 +609,15 @@ def validate_metric_names(
     warnings: List[str] = []
     # Check all rule-referenced metrics are in schema
     for rule_id, spec in RULE_METRICS.items():
-        for metric_name in spec["required"] + spec.get("optional", []):
-            if metric_name not in valid_names:
-                warnings.append(
-                    f"Rule {rule_id} references '{metric_name}' "
-                    f"not found in metrics-schema.json"
-                )
+        warnings.extend(
+            f"Rule {rule_id} references '{metric_name}' not found in metrics-schema.json"
+            for metric_name in spec["required"] + spec.get("optional", [])
+            if metric_name not in valid_names
+        )
     return warnings
 
 
 # ---------------------------------------------------------------------------
-# Output formatters
-# ---------------------------------------------------------------------------
-
-
 def format_text(
     findings: List[Finding],
     skipped: List[str],
@@ -632,37 +625,33 @@ def format_text(
     validation_warnings: Optional[List[str]] = None,
 ) -> str:
     """Format findings as human-readable text."""
-    lines: List[str] = []
-    lines.append("=== Performance Doctor Advice ===")
-    lines.append(f"Source: {source}")
-    lines.append(f"Time: {datetime.now(timezone.utc).isoformat()}")
-    lines.append("")
-
+    lines: List[str] = [
+        "=== Performance Doctor Advice ===",
+        f"Source: {source}",
+        f"Time: {datetime.now(timezone.utc).isoformat()}",
+        "",
+    ]
     if not findings and not skipped:
         lines.append("No findings. All checks passed.")
         return "\n".join(lines)
 
     if findings:
-        lines.append(f"Findings ({len(findings)}):")
-        lines.append("-" * 40)
+        lines.extend((f"Findings ({len(findings)}):", "-" * 40))
         for f in findings:
             tag = f"[{f.severity.upper()}]"
-            lines.append(f"  {tag} {f.rule_id}: {f.message}")
-            lines.append(f"         Advice: {f.advice}")
-            lines.append("")
-
+            lines.extend(
+                (
+                    f"  {tag} {f.rule_id}: {f.message}",
+                    f"         Advice: {f.advice}",
+                    "",
+                )
+            )
     if skipped:
-        lines.append(f"Skipped rules ({len(skipped)}):")
-        for s in skipped:
-            lines.append(f"  - {s}")
-        lines.append("")
-
+        _append_labeled_list(lines, 'Skipped rules (', skipped, '  - ')
     if validation_warnings:
-        lines.append(f"Schema validation warnings ({len(validation_warnings)}):")
-        for w in validation_warnings:
-            lines.append(f"  ! {w}")
-        lines.append("")
-
+        _append_labeled_list(
+            lines, 'Schema validation warnings (', validation_warnings, '  ! '
+        )
     # Summary
     summary = {"info": 0, "warn": 0, "critical": 0}
     for f in findings:
@@ -673,6 +662,13 @@ def format_text(
     )
 
     return "\n".join(lines)
+
+
+def _append_labeled_list(lines, header_prefix, items, item_prefix):
+    lines.append(f"{header_prefix}{len(items)}):")
+    for s in items:
+        lines.append(f"{item_prefix}{s}")
+    lines.append("")
 
 
 def format_json(
@@ -719,8 +715,7 @@ def compute_exit_code(findings: List[Finding]) -> int:
     """Determine exit code from max severity: 0=info, 1=warn, 2=critical."""
     if not findings:
         return 0
-    max_sev = max(SEVERITY_ORDER.get(f.severity, 0) for f in findings)
-    return max_sev
+    return max(SEVERITY_ORDER.get(f.severity, 0) for f in findings)
 
 
 # ---------------------------------------------------------------------------
