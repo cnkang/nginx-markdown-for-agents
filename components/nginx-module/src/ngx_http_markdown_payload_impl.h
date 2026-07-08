@@ -1123,76 +1123,12 @@ ngx_http_markdown_decompress_via_rust(
  *               failure); the error handler has already logged and
  *               incremented failure metrics
  */
-static ngx_int_t
-ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
-                                                   ngx_http_markdown_ctx_t *ctx,
-                                                   const ngx_http_markdown_conf_t *conf)
+static inline ngx_int_t
+ngx_http_markdown_handle_decompress_result(ngx_http_request_t *r,
+                                           ngx_http_markdown_ctx_t *ctx,
+                                           const ngx_http_markdown_conf_t *conf,
+                                           ngx_int_t decompress_rc)
 {
-    ngx_chain_t  *compressed_chain = NULL;
-    ngx_chain_t  *decompressed_chain = NULL;
-    ngx_int_t     decompress_rc;
-    ngx_int_t     rc;
-
-    /*
-     * Skip decompression entirely when no compressed content was
-     * detected (needed == 0) or when decompression already ran
-     * (done == 1).  The latter guards against double invocation
-     * if the body filter is re-entered.
-     */
-    if (!ctx->decompression.needed || ctx->decompression.done) {
-        return NGX_OK;
-    }
-
-    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown: starting decompression, "
-                  "type=%d, size=%uz bytes",
-                  ctx->decompression.type, ctx->buffer.size);
-
-    /*
-     * Contiguity assertion: after body-filter accumulation,
-     * ctx->buffer.data is always a single contiguous ngx_alloc-
-     * backed allocation (Rule 43 invariant).  Log at debug level
-     * to verify this invariant holds at runtime.
-     */
-    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown: buffer contiguity "
-                  "verified, data=%p, size=%uz "
-                  "(single ngx_alloc allocation)",
-                  ctx->buffer.data, ctx->buffer.size);
-
-    /*
-     * Record the attempt metric and snapshot the compressed size
-     * before the decompressor consumes the buffer, because the
-     * decompressor may reallocate or replace ctx->buffer.data.
-     * Increment decompression_fullbuffer_total at entry to the
-     * full-buffer decompression path (Req 4.6).
-     */
-    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.attempted);
-    NGX_HTTP_MARKDOWN_METRIC_INC(perf.decompression_fullbuffer_total);
-    ctx->decompression.compressed_size = ctx->buffer.size;
-
-    /*
-     * Phase 1: wrap ctx->buffer into a single-element chain that
-     * the Rust decompressor can consume.  The buffer is already
-     * contiguous (Rule 43), so the helper references it directly
-     * without a linearize copy.
-     */
-    rc = ngx_http_markdown_prepare_compressed_chain(
-        r, ctx, conf, &compressed_chain);
-    if (rc != NGX_OK) {
-        return rc;
-    }
-
-    /*
-     * Phase 2: invoke the bounded Rust FFI decompressor.
-     * The decompressor returns domain-specific error codes that
-     * classify the failure mode rather than mapping everything
-     * to NGX_ERROR, which allows us to pick the correct metric
-     * and error category for each failure path.
-     */
-    decompress_rc = ngx_http_markdown_decompress_via_rust(
-        r, ctx, conf, compressed_chain, &decompressed_chain);
-
     /*
      * NGX_DECLINED means the compression type is not supported
      * by the linked decompressor library.  Treat as a conversion
@@ -1295,12 +1231,89 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
             "- returning original content");
     }
 
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
+                                                   ngx_http_markdown_ctx_t *ctx,
+                                                   const ngx_http_markdown_conf_t *conf)
+{
+    ngx_chain_t  *compressed_chain = NULL;
+    ngx_chain_t  *decompressed_chain = NULL;
+    ngx_int_t     decompress_rc;
+    ngx_int_t     rc;
+
     /*
-     * Phase 3: success path -- copy the decompressed output back
-     * into ctx->buffer (replacing the compressed data) and record
-     * success metrics.  Both helpers log on failure and the caller
-     * propagates the return code directly.
+     * Skip decompression entirely when no compressed content was
+     * detected (needed == 0) or when decompression already ran
+     * (done == 1).  The latter guards against double invocation
+     * if the body filter is re-entered.
      */
+    if (!ctx->decompression.needed || ctx->decompression.done) {
+        return NGX_OK;
+    }
+
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: starting decompression, "
+                  "type=%d, size=%uz bytes",
+                  ctx->decompression.type, ctx->buffer.size);
+
+    /*
+     * Contiguity assertion: after body-filter accumulation,
+     * ctx->buffer.data is always a single contiguous ngx_alloc-
+     * backed allocation (Rule 43 invariant).  Log at debug level
+     * to verify this invariant holds at runtime.
+     */
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: buffer contiguity "
+                  "verified, data=%p, size=%uz "
+                  "(single ngx_alloc allocation)",
+                  ctx->buffer.data, ctx->buffer.size);
+
+    /*
+     * Record the attempt metric and snapshot the compressed size
+     * before the decompressor consumes the buffer, because the
+     * decompressor may reallocate or replace ctx->buffer.data.
+     * Increment decompression_fullbuffer_total at entry to the
+     * full-buffer decompression path (Req 4.6).
+     */
+    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.attempted);
+    NGX_HTTP_MARKDOWN_METRIC_INC(perf.decompression_fullbuffer_total);
+    ctx->decompression.compressed_size = ctx->buffer.size;
+
+    /*
+     * Phase 1: wrap ctx->buffer into a single-element chain that
+     * the Rust decompressor can consume.  The buffer is already
+     * contiguous (Rule 43), so the helper references it directly
+     * without a linearize copy.
+     */
+    rc = ngx_http_markdown_prepare_compressed_chain(
+        r, ctx, conf, &compressed_chain);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    /*
+     * Phase 2: invoke the bounded Rust FFI decompressor.
+     * The decompressor returns domain-specific error codes that
+     * classify the failure mode rather than mapping everything
+     * to NGX_ERROR, which allows us to pick the correct metric
+     * and error category for each failure path.
+     */
+    decompress_rc = ngx_http_markdown_decompress_via_rust(
+        r, ctx, conf, compressed_chain, &decompressed_chain);
+
+    /*
+     * Phase 3: result handling and success apply
+     */
+    rc = ngx_http_markdown_handle_decompress_result(
+        r, ctx, conf, decompress_rc);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
     rc = ngx_http_markdown_apply_decompressed_payload(
         r, ctx, conf, decompressed_chain);
     if (rc != NGX_OK) {

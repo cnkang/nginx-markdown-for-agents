@@ -126,6 +126,12 @@ decision logic unconditionally selects the pool-copy path for all output
 chunks, bypassing the buffer factory entirely. In-flight requests on old
 workers complete with their existing configuration; no request is interrupted.
 
+**Memory Lifecycle and Safety Invariants:**
+
+To prevent use-after-free and ensure absolute memory safety during asynchronous downstream transmissions, the Rust-owned memory buffers allocated for zero-copy streaming chunks are managed via NGINX request pool cleanup handlers. Consequently, *Rust-allocated buffers are not freed immediately after a single chunk is successfully delivered downstream*; rather, they persist in memory throughout the request duration and are released in batch when the NGINX request pool is destroyed upon request termination.
+
+For long-lived streaming responses with many chunks, this tail retention can cause memory usage to accumulate in the request pool, potentially resulting in a higher worker RSS peak. Due to this characteristic, `markdown_streaming_zero_copy` is kept **disabled by default**, serving as an opt-in optimization under explicit profile selection (such as `streaming_first`) where latency reduction is highly prioritized over strict request-lifetime RSS floors.
+
 **Scope:** Per-location. Different locations can independently enable or
 disable zero-copy output.
 

@@ -187,6 +187,18 @@ http {{\n\
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn runtime_mode_from_cli_resolves_correctly() {
+        let mode_some = RuntimeMode::from_cli(Some(PathBuf::from("/usr/bin/nginx")));
+        assert!(mode_some.is_reuse());
+        assert_eq!(mode_some.nginx_bin(), Some(Path::new("/usr/bin/nginx")));
+
+        let mode_none = RuntimeMode::from_cli(None);
+        assert!(!mode_none.is_reuse());
+        assert!(matches!(mode_none, RuntimeMode::Bootstrap));
+    }
 
     #[test]
     fn generated_nginx_conf_uses_runtime_log_and_pid_paths() -> Result<()> {
