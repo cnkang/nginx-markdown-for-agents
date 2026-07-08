@@ -11,6 +11,13 @@
  * Provides incremental (chunk-at-a-time) decompression for gzip, deflate,
  * and optionally brotli compressed upstream responses in the streaming
  * conversion path.
+ *
+ * ROUTING NOTE (0.9.1): Only raw deflate is currently routed to the
+ * streaming decompression path.  Gzip and brotli support is implemented
+ * here but gated by ngx_http_markdown_decomp_routing_decision() which
+ * routes non-deflate encodings to the full-buffer path.  The gzip/brotli
+ * code paths are retained for future enablement (planned post-0.9.1)
+ * without requiring a reimplementation.
  */
 
 #ifdef MARKDOWN_STREAMING_ENABLED
