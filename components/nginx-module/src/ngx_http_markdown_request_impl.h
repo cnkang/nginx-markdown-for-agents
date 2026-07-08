@@ -838,13 +838,15 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      *   (3) cache_validation NOT full (select_processing_path
      *       already forces full-buffer for full_support, so if
      *       we reach here streaming was selected → not full)
-     *   (4) encoding supported by streaming decompressor:
-     *       - raw deflate: always supported
-     *       - gzip: only if full gzip parser is available
-     *         (NOT available in 0.9.1 — route to full-buffer)
+     *   (4) encoding supported by the 0.9.1 streaming decompression
+     *       contract:
+     *       - raw deflate: supported
+     *       - gzip/brotli: deferred, route to full-buffer
      *
-     * Unsupported encodings in streaming (gzip without parser,
-     * brotli) fall back to full-buffer decompression.
+     * ngx_http_markdown_streaming_decomp_impl.h retains deferred
+     * gzip/brotli streaming implementation branches for future
+     * enablement, but this routing gate makes them unreachable for
+     * the 0.9.1 supported streaming path.
      *
      * This check runs after select_processing_path() so that
      * compression routing is enforced regardless of engine mode
@@ -859,9 +861,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
          * the streaming decompressor.
          *
          * For 0.9.1: only raw deflate is supported in streaming
-         * mode (Req 4.9).  Gzip requires a full gzip wrapper
-         * parser that is not yet implemented — route to
-         * full-buffer.  Brotli is not supported in streaming.
+         * mode (Req 4.9).  Gzip and brotli streaming branches are
+         * deferred/unreachable by contract and route to full-buffer.
          */
         if (ctx->decompression.type
             == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
@@ -884,9 +885,9 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
 
         } else {
             /*
-             * Encoding not supported in streaming mode
-             * (gzip without parser, brotli).  Route to
-             * full-buffer decompression (Req 4.2, 4.9).
+             * Encoding not supported in the 0.9.1 streaming mode
+             * contract (gzip/brotli deferred).  Route to full-buffer
+             * decompression (Req 4.2, 4.9).
              * decompression_fullbuffer_total is incremented
              * when full-buffer decompression actually runs
              * in the body filter (Req 4.6).
