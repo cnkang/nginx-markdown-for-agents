@@ -55,10 +55,10 @@ Architecture mapping:
 ## DEB Artifacts (Ubuntu, Debian)
 
 Replace `VERSION` below with the release version you are installing, for
-example `0.9.0`.  `NGINX_VERSION` must match the NGINX ABI you run.
+example `0.9.1`.  `NGINX_VERSION` must match the NGINX ABI you run.
 
 ```bash
-VERSION=0.9.0
+VERSION=0.9.1
 NGINX_VERSION=1.26.3
 ARCH=amd64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
@@ -73,10 +73,10 @@ sudo apt install "./${PKG}"
 ## RPM Artifacts (AlmaLinux, Amazon Linux, RHEL)
 
 Replace `VERSION` below with the release version you are installing, for
-example `0.9.0`.  `NGINX_VERSION` must match the NGINX ABI you run.
+example `0.9.1`.  `NGINX_VERSION` must match the NGINX ABI you run.
 
 ```bash
-VERSION=0.9.0
+VERSION=0.9.1
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"

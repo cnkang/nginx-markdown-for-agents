@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-07-08
+
+Patch release focused on performance readiness and release evidence for the
+0.9.x line.
+
+### Added
+
+- Hybrid zero-copy output path for streaming responses, with NGINX pool cleanup
+  ownership guarding Rust-backed buffers.
+- 0.9.1 performance evidence gate chain with module-level benchmark thresholds,
+  blocking release-gate integration, and deterministic perf tooling tests.
+- Performance rollout and rollback guidance for zero-copy output, streaming
+  decompression, and copy-reduction rollout stages.
+- Perf observability fields for backpressure and pending-output high-watermark
+  tracking across metrics renderers.
+
+### Fixed
+
+- JSON perf metrics rendering now uses a production helper covered by a direct
+  renderer unit test.
+- Module benchmark tooling now uses portable temporary files, executable
+  preflight checks, BSD-compatible worker lookup, and wall-clock RPS evidence.
+
 ## [0.9.0] - 2026-07-06
 
 **Breaking release.** Last breaking opportunity before 1.0.0 API freeze.
