@@ -498,18 +498,21 @@ else
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
   (
     cd "${BUILDROOT}/src"
+    configure_arg=""
     markdown_export_nginx_dependency_env
-    cc_opt="${CPPFLAGS:-}"
+    cc_opt="${NGINX_CC_OPT:-}"
+    cc_opt="${cc_opt:+${cc_opt} }${CPPFLAGS:-}"
     cc_opt="${cc_opt:+${cc_opt} }-DMARKDOWN_STREAMING_ENABLED"
+    ld_opt="${NGINX_LD_OPT:-}"
+    ld_opt="${ld_opt:+${ld_opt} }${LDFLAGS:-}"
     configure_args=(
       --without-http_rewrite_module
-      --with-cc-opt="${cc_opt}"
       --prefix="${RUNTIME}"
       --add-module="${WORKSPACE_ROOT}/components/nginx-module"
     )
-    if [[ -n "${LDFLAGS:-}" ]]; then
-      configure_args+=(--with-ld-opt="${LDFLAGS}")
-    fi
+    while IFS= read -r configure_arg; do
+      configure_args+=("${configure_arg}")
+    done < <(markdown_emit_nginx_configure_env "${cc_opt}" "${ld_opt}")
     if ! ./configure "${configure_args[@]}" > "${RAW_DIR}/nginx-build.log" 2>&1 \
       || ! make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >> "${RAW_DIR}/nginx-build.log" 2>&1 \
       || ! make install >> "${RAW_DIR}/nginx-build.log" 2>&1
