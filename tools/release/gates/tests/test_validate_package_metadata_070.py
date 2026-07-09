@@ -23,6 +23,8 @@ from tools.release.gates.validate_package_metadata_070 import (  # noqa: E402
     NFPM_POSTINSTALL_SNIPPETS,
     SMOKE_RPM_REPO_SNIPPETS,
     RELEASE_BUILD_GLIBC_SNIPPETS,
+    SIGN_AND_PUBLISH_FORBIDDEN_SNIPPETS,
+    SIGN_AND_PUBLISH_SECURITY_SNIPPETS,
     STANDALONE_DEB_SNIPPETS,
     STANDALONE_RPM_SPEC_SNIPPETS,
     STANDALONE_RPM_WORKFLOW_SNIPPETS,
@@ -420,6 +422,18 @@ class TestReleaseGateSnippetExpectations:
         validator = './packaging/scripts/validate-version.sh "${{ inputs.version }}"'
         assert validator in STANDALONE_DEB_SNIPPETS
         assert validator in STANDALONE_RPM_WORKFLOW_SNIPPETS
+
+    def test_sign_and_publish_uses_trusted_checkout_before_secrets(self) -> None:
+        """Ensure signing workflow scripts come from the default branch."""
+        assert "ref: ${{ github.event.repository.default_branch }}" in (
+            SIGN_AND_PUBLISH_SECURITY_SNIPPETS
+        )
+        assert "persist-credentials: false" in SIGN_AND_PUBLISH_SECURITY_SNIPPETS
+        assert "Validate release tag input" in SIGN_AND_PUBLISH_SECURITY_SNIPPETS
+
+    def test_sign_and_publish_forbids_caller_selected_ref_checkout(self) -> None:
+        """Ensure signing workflow cannot reintroduce caller-selected checkout."""
+        assert "ref: ${{ inputs.version }}" in SIGN_AND_PUBLISH_FORBIDDEN_SNIPPETS
 
     def test_nfpm_postinstall_doc_path_matches_installed_layout(self) -> None:
         """Ensure postinstall doc path matches the installed package layout."""

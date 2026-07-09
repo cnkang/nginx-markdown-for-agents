@@ -155,6 +155,20 @@ STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     'NGINX_VERSION_CEIL="${NGINX_MAJOR}.$((NGINX_MINOR + 1)).0"',
     "tools/release/gates/check_install_layout.sh dist/*.rpm",
 ]
+SIGN_AND_PUBLISH_SECURITY_SNIPPETS = [
+    "Checkout trusted workflow scripts",
+    "ref: ${{ github.event.repository.default_branch }}",
+    "fetch-depth: 0",
+    "persist-credentials: false",
+    "Validate release tag input",
+    'version="${{ inputs.version }}"',
+    '^v[0-9]+\\.[0-9]+\\.[0-9]+$',
+    './packaging/scripts/validate-version.sh "${package_version}"',
+    'git show-ref --verify --quiet "refs/tags/${version}"',
+]
+SIGN_AND_PUBLISH_FORBIDDEN_SNIPPETS = [
+    "ref: ${{ inputs.version }}",
+]
 STANDALONE_RPM_SPEC_SNIPPETS = [
     f"Name:           {CANONICAL_PACKAGE_NAME}",
     "Requires:       nginx >= 1:%{nginx_version_floor}",
@@ -770,6 +784,66 @@ def validate_release_artifact_flow(result: ValidationResult) -> None:
             "smoke-runner:arch",
             "release-packages smoke tests must use arch-matched runners",
         )
+    _validate_sign_and_publish_security(result)
+
+
+def _validate_sign_and_publish_security(result: ValidationResult) -> None:
+    """Ensure signing jobs do not execute caller-selected code with secrets."""
+    workflow = read_safe(SIGN_AND_PUBLISH_WORKFLOW)
+    if not workflow:
+        result.fail("sign-publish-security:exists", "sign-and-publish.yml not found")
+        return
+    _check_snippets(
+        workflow, SIGN_AND_PUBLISH_SECURITY_SNIPPETS, "sign-publish-security",
+        "sign-and-publish.yml", result,
+    )
+    for snippet in SIGN_AND_PUBLISH_FORBIDDEN_SNIPPETS:
+        sid = f"sign-publish-security:forbid:{snippet[:18]}"
+        if snippet in workflow:
+            result.fail(
+                sid,
+                f"sign-and-publish.yml must not contain {snippet}",
+            )
+        else:
+            result.pass_(
+                sid,
+                f"sign-and-publish.yml omits {snippet}",
+            )
+
+    validation_pos = workflow.find("Validate release tag input")
+    secret_pos = workflow.find("- name: Import GPG private key")
+    if validation_pos != -1 and secret_pos != -1 and validation_pos < secret_pos:
+        result.pass_(
+            "sign-publish-security:validation-before-secrets",
+            "release tag input validation runs before GPG secret import",
+        )
+    else:
+        result.fail(
+            "sign-publish-security:validation-before-secrets",
+            "release tag input validation must run before GPG secret import",
+        )
+    _check_minimum_count(
+        workflow, "ref: ${{ github.event.repository.default_branch }}", 2,
+        "sign-publish-security:trusted-checkout-count",
+        "both signing jobs checkout trusted workflow scripts", result,
+    )
+    _check_minimum_count(
+        workflow, "Validate release tag input", 2,
+        "sign-publish-security:validation-count",
+        "both signing jobs validate the release tag before secrets", result,
+    )
+
+
+def _check_minimum_count(
+    content: str, snippet: str, minimum: int, check_id: str, message: str,
+    result: ValidationResult,
+) -> None:
+    """Check that content contains a snippet at least the expected number of times."""
+    count = content.count(snippet)
+    if count >= minimum:
+        result.pass_(check_id, f"{message} ({count}/{minimum})")
+    else:
+        result.fail(check_id, f"{message} ({count}/{minimum})")
 
 
 def _validate_standalone_deb(result: ValidationResult) -> None:
