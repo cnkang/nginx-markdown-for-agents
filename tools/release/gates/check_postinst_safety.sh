@@ -39,8 +39,8 @@
 #   - Machine-readable results to stdout
 #
 # SEE ALSO:
-#   - .kiro/specs/31-0.7.0-release-package-compatibility/requirements.md §7
-#   - .kiro/specs/31-0.7.0-release-package-compatibility/design.md §Components 3
+#   - .kiro/specs/archive/31-0.7.0-release-package-compatibility/requirements.md §7
+#   - .kiro/specs/archive/31-0.7.0-release-package-compatibility/design.md §Components 3
 # ---------------------------------------------------------------------------
 
 set -e

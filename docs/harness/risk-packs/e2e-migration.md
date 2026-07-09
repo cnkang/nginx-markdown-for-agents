@@ -59,8 +59,8 @@ cargo test --manifest-path tools/e2e-harness/Cargo.toml --all-features
 
 - [../../../AGENTS.md](../../../AGENTS.md) (Rule 37)
 - [../../testing/E2E_TESTS.md](../../testing/E2E_TESTS.md)
-- [../../project/0.6.3-e2e-parity.md](../../project/0.6.3-e2e-parity.md)
-- [../../project/0.6.3-test-surface-audit.md](../../project/0.6.3-test-surface-audit.md)
+- [../../archive/project-history/0.6.3-e2e-parity.md](../../archive/project-history/0.6.3-e2e-parity.md)
+- [../../archive/project-history/0.6.3-test-surface-audit.md](../../archive/project-history/0.6.3-test-surface-audit.md)
 
 ## Document Updates
 

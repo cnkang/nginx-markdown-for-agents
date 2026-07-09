@@ -37,7 +37,10 @@ from lib.path_validation import validate_read_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
+# .kiro/specs is an optional local adapter surface (gitignored). Archived
+# sub-specs live under .kiro/specs/archive/, so both locations are checked.
 SPECS_DIR = PROJECT_ROOT / ".kiro" / "specs"
+ARCHIVE_SPECS_DIR = SPECS_DIR / "archive"
 
 SUBSPECS_055 = [
     "19-0.5.5-release-spec",
@@ -136,9 +139,15 @@ class ValidationResult:
 
 
 def check_subspecs_docs_exist(result: ValidationResult) -> None:
-    """Verify that each 0.5.5 sub-spec has requirements.md, design.md, tasks.md."""
+    """Verify that each 0.5.5 sub-spec has requirements.md, design.md, tasks.md.
+
+    Sub-specs live under .kiro/specs/ but archived ones have moved to
+    .kiro/specs/archive/. Resolve from either location.
+    """
     for name in SUBSPECS_055:
         spec_dir = SPECS_DIR / name
+        if not spec_dir.is_dir():
+            spec_dir = ARCHIVE_SPECS_DIR / name
         if not spec_dir.is_dir():
             result.failed(f"docs-exist:{name}", "sub-spec directory not found")
             continue
