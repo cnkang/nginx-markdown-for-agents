@@ -489,25 +489,22 @@ class TestReportSchemaConformance:
 
     def test_profile_enum_values(self):
         """profile field enum covers all valid profiles."""
-        self._extracted_from_test_compression_enum_values_3(
+        self._assert_schema_enum_values(
             "profile", "balanced", "streaming_first", "strict_cache"
         )
 
     def test_compression_enum_values(self):
         """compression field enum covers all valid types."""
-        self._extracted_from_test_compression_enum_values_3(
+        self._assert_schema_enum_values(
             "compression", "none", "gzip", "deflate"
         )
 
-    # TODO Rename this here and in `test_profile_enum_values` and `test_compression_enum_values`
-    def _extracted_from_test_compression_enum_values_3(self, arg0, arg1, arg2, arg3):
+    def _assert_schema_enum_values(self, prop_name, *expected_values):
         schema_props = self._get_schema_props()
         items = schema_props["properties"]["scenarios"]["items"]
-        profile_prop = items["properties"].get(arg0, {})
-        valid_profiles = set(profile_prop.get("enum", []))
-        expected = {arg1, arg2, arg3}
-        assert valid_profiles == expected
-
+        prop = items["properties"].get(prop_name, {})
+        valid_values = set(prop.get("enum", []))
+        assert valid_values == set(expected_values)
 
 # ---------------------------------------------------------------------------
 # 4. Port cleanup on EXIT/INT/TERM signals (Requirement 1.5)
@@ -590,17 +587,16 @@ class TestPortCleanupOnSignals:
     def test_cleanup_on_sigterm(self):
         """SIGTERM triggers cleanup: upstream mock killed, ports freed."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            proc = self._extracted_from_test_cleanup_removes_temp_directory_4(tmpdir)
+            proc = self._spawn_benchmark_process(tmpdir)
             try:
-                self._extracted_from_test_cleanup_on_sigterm_7(proc)
+                self._verify_sigterm_cleanup(proc)
             finally:
                 # Safety: ensure process group is killed
                 with contextlib.suppress(OSError):
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                 proc.wait(timeout=5)
 
-    # TODO Rename this here and in `test_cleanup_on_sigterm`
-    def _extracted_from_test_cleanup_on_sigterm_7(self, proc):
+    def _verify_sigterm_cleanup(self, proc):
         # Wait for upstream mock to start (port 19100)
         upstream_ready = _wait_for_port(19100, timeout=10.0)
         if not upstream_ready:
@@ -635,16 +631,15 @@ class TestPortCleanupOnSignals:
     def test_cleanup_on_sigint(self):
         """SIGINT triggers cleanup: upstream mock killed, ports freed."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            proc = self._extracted_from_test_cleanup_removes_temp_directory_4(tmpdir)
+            proc = self._spawn_benchmark_process(tmpdir)
             try:
-                self._extracted_from_test_cleanup_on_sigint_7(proc)
+                self._verify_sigint_cleanup(proc)
             finally:
                 with contextlib.suppress(OSError):
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                 proc.wait(timeout=5)
 
-    # TODO Rename this here and in `test_cleanup_on_sigint`
-    def _extracted_from_test_cleanup_on_sigint_7(self, proc):
+    def _verify_sigint_cleanup(self, proc):
         # Wait for upstream mock to start
         upstream_ready = _wait_for_port(19100, timeout=10.0)
         if not upstream_ready:
@@ -703,16 +698,15 @@ class TestPortCleanupOnSignals:
     def test_cleanup_removes_temp_directory(self):
         """Temp working directory is removed during cleanup."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            proc = self._extracted_from_test_cleanup_removes_temp_directory_4(tmpdir)
+            proc = self._spawn_benchmark_process(tmpdir)
             try:
-                self._extracted_from_test_cleanup_removes_temp_directory_7(proc)
+                self._verify_temp_dir_cleanup(proc)
             finally:
                 with contextlib.suppress(OSError):
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                 proc.wait(timeout=5)
 
-    # TODO Rename this here and in `test_cleanup_removes_temp_directory`
-    def _extracted_from_test_cleanup_removes_temp_directory_7(self, proc):
+    def _verify_temp_dir_cleanup(self, proc):
         # Wait for upstream mock to start
         upstream_ready = _wait_for_port(19100, timeout=10.0)
         if not upstream_ready:
@@ -742,8 +736,7 @@ class TestPortCleanupOnSignals:
             f"Temp directory still exists after cleanup: {workdir}"
         )
 
-    # TODO Rename this here and in `test_cleanup_on_sigterm`, `test_cleanup_on_sigint` and `test_cleanup_removes_temp_directory`
-    def _extracted_from_test_cleanup_removes_temp_directory_4(self, tmpdir):
+    def _spawn_benchmark_process(self, tmpdir):
         tmpdir_path = Path(tmpdir)
         stub = self._create_stub_nginx(tmpdir_path)
         env = os.environ.copy()
