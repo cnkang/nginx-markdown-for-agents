@@ -154,7 +154,7 @@ markdown_export_nginx_dependency_env() {
     return 0
   fi
 
-  for formula in openssl@3 pcre2 zlib; do
+  for formula in "$@"; do
     prefix="$(markdown_homebrew_prefix "${formula}" || true)"
     if [[ -z "${prefix}" ]]; then
       continue
@@ -166,6 +166,26 @@ markdown_export_nginx_dependency_env() {
       markdown_append_env_flag LDFLAGS "-L${prefix}/lib"
     fi
   done
+
+  return 0
+}
+
+markdown_emit_nginx_configure_env() {
+  local cc_opt="$1"
+  local ld_opt="$2"
+  local opt
+
+  if [[ -n "${NGINX_CONFIGURE_OPTS:-}" ]]; then
+    for opt in ${NGINX_CONFIGURE_OPTS}; do
+      printf '%s\n' "${opt}"
+    done
+  fi
+  if [[ -n "${cc_opt}" ]]; then
+    printf '%s\n' "--with-cc-opt=${cc_opt}"
+  fi
+  if [[ -n "${ld_opt}" ]]; then
+    printf '%s\n' "--with-ld-opt=${ld_opt}"
+  fi
 
   return 0
 }
