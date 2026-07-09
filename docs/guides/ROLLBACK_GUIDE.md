@@ -467,9 +467,9 @@ Copy-paste rollback sequence for the most common scenario (disable all conversio
 # 2. Test and reload
 nginx -t && nginx -s reload
 
-# 3. Verify: check for SKIP_CONFIG in logs
+# 3. Verify: check for disabled in logs
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep "reason=SKIP_CONFIG" | tail -5
+  grep "reason=disabled" | tail -5
 
 # 4. Verify: confirm conversion metrics stopped
 curl -s http://localhost/markdown-metrics | \
