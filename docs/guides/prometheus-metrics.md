@@ -31,7 +31,7 @@ flowchart LR
     Endpoint -->|"Accept: text/plain; version=0.0.4"| Prom["Prometheus Format"]
     Prom --> Prometheus["Prometheus Server<br/>(scrape)"]
     Prometheus --> Grafana["Grafana Dashboard"]
-    
+
     style SHM fill:#009639,color:#fff
     style Prom fill:#e6522c,color:#fff
 ```
@@ -520,7 +520,7 @@ All metrics listed in the [Metric Catalog](#metric-catalog) section are consider
 | `nginx_markdown_conversions_total` | counter | — | Stable |
 | `nginx_markdown_passthrough_total` | counter | — | Stable |
 | `nginx_markdown_skips_total` | counter | `reason` | Stable |
-| `nginx_markdown_failures_total` | counter | `stage` | Stable |
+| `nginx_markdown_failures_total` | counter | `reason` | Stable |
 | `nginx_markdown_failopen_total` | counter | — | Stable |
 | `nginx_markdown_large_response_path_total` | counter | — | Stable |
 | `nginx_markdown_input_bytes_total` | counter | — | Stable |
@@ -594,15 +594,15 @@ chain drains successfully. This prevents overcounting during retries.
 
 Starting in 0.9.0, per-reason counters are consolidated into 5 unified
 families using the `reason` label. This replaces the per-reason metric
-approach (e.g., `markdown_skipped_accept_total` → `markdown_skipped_total{reason="skipped_accept"}`).
+approach (e.g., `markdown_skipped_accept_total` → `nginx_markdown_skips_total{reason="skipped_accept"}`).
 
 | Metric Family | Category | Description |
 |---------------|----------|-------------|
-| `markdown_conversions_total` | Success | Successful conversions |
-| `markdown_skipped_total` | Skip | Requests skipped (with `reason` label) |
-| `markdown_errors_total` | Error | All error paths (with `reason` label) |
-| `markdown_failed_open_total` | Fail-Open | Fail-open deliveries |
-| `markdown_failed_closed_total` | Fail-Closed | Fail-closed rejections |
+| `nginx_markdown_conversions_total` | Success | Successful conversions |
+| `nginx_markdown_skips_total` | Skip | Requests skipped (with `reason` label) |
+| `nginx_markdown_failures_total` | Error | All error paths (with `reason` label) |
+| `nginx_markdown_failopen_total` | Fail-Open | Fail-open deliveries |
+| `nginx_markdown_failures_total{reason="failed_closed"}` | Fail-Closed | Fail-closed rejections |
 
 All `reason` label values use lowercase snake_case. See the
 [Observability Schema v1](../architecture/observability-schema-v1.md) for the
@@ -642,28 +642,28 @@ These examples use the 0.9.0 unified metric families with the `reason` label.
 
 ```promql
 # Conversion success rate (5m window)
-rate(markdown_conversions_total[5m])
+rate(nginx_markdown_conversions_total[5m])
 / (
-    rate(markdown_conversions_total[5m])
-  + rate(markdown_skipped_total[5m])
-  + rate(markdown_errors_total[5m])
+    rate(nginx_markdown_conversions_total[5m])
+  + rate(nginx_markdown_skips_total[5m])
+  + rate(nginx_markdown_failures_total[5m])
 )
 
 # Error rate by reason code
-rate(markdown_errors_total[5m])
+rate(nginx_markdown_failures_total[5m])
 
 # Top error reasons
-topk(5, sum by (reason) (rate(markdown_errors_total[5m])))
+topk(5, sum by (reason) (rate(nginx_markdown_failures_total[5m])))
 
 # Failed-open ratio
-rate(markdown_failed_open_total[5m])
+rate(nginx_markdown_failopen_total[5m])
 / (
-    rate(markdown_conversions_total[5m])
-  + rate(markdown_failed_open_total[5m])
+    rate(nginx_markdown_conversions_total[5m])
+  + rate(nginx_markdown_failopen_total[5m])
 )
 
 # Skip breakdown by reason
-sum by (reason) (rate(markdown_skipped_total[5m]))
+sum by (reason) (rate(nginx_markdown_skips_total[5m]))
 
 # Inflight current (from diagnostics endpoint, not Prometheus — future metric)
 # markdown_inflight_current (planned)
@@ -672,8 +672,8 @@ sum by (reason) (rate(markdown_skipped_total[5m]))
 ### Grafana Dashboard Tips
 
 - Use `sum by (reason)` to break down skips, errors, and fail-open by cause.
-- Set alert on `rate(markdown_errors_total[5m]) > 0` for any new error type.
-- Use `markdown_failed_open_total` as the primary safety indicator: a rising
+- Set alert on `rate(nginx_markdown_failures_total[5m]) > 0` for any new error type.
+- Use `nginx_markdown_failopen_total` as the primary safety indicator: a rising
   rate means conversions are failing but traffic is unaffected.
 
 ---

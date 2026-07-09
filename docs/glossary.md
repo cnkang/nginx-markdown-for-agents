@@ -15,7 +15,7 @@ operator documentation, and harness reports.
 | Pre-Commit | Streaming phase before Markdown bytes are sent downstream. | Use for fallback and fail-open paths that can still replay original HTML. |
 | Post-Commit | Streaming phase after Markdown bytes have been sent downstream. | Use for truncated-response risks and post-commit error metrics. |
 | Decision chain | The ordered request/response checks that produce a reason code. | Use for eligibility, reason-code, and operator troubleshooting docs. |
-| Reason code | Stable uppercase snake_case outcome string. | Use exact emitted values such as `SKIP_RANGE` and `STREAMING_CONVERT`. |
+| Reason code | Stable snake_case outcome string emitted by the module. | Decision-chain codes are lowercase (e.g., `not_eligible`, `converted`, `failed_open`); streaming engine codes are uppercase (e.g., `STREAMING_CONVERT`, `ENGINE_STREAMING`). Use the exact emitted value. |
 | Metrics endpoint | HTTP endpoint enabled by `markdown_metrics`. | Specify output format: plain text, JSON, or Prometheus. |
 | Evidence pack | JSON artifact produced by performance evidence tooling. | Use for release-gate evidence, not ad hoc benchmark output. |
 
@@ -23,8 +23,9 @@ operator documentation, and harness reports.
 
 - C functions, fields, and local variables use NGINX-style snake_case.
 - Rust public APIs use Rust naming conventions and Rustdoc comments.
-- Reason codes use uppercase snake_case and must match emitted log and metric
-  labels exactly.
+- Reason codes must match emitted log and metric labels exactly. Decision-chain
+  reason codes use lowercase snake_case; streaming engine reason codes use
+  uppercase snake_case.
 - JSON metric paths use dot notation in prose, for example
   `streaming.postcommit_error_total`.
 - Prometheus examples use the full series name and labels, for example

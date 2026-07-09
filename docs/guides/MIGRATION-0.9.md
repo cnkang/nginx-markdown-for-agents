@@ -53,7 +53,7 @@ The following breaking changes require configuration and/or tooling updates:
 
 6. **Metrics consolidation** — per-reason metric keys (e.g.,
    `markdown_skipped_accept_total`) are replaced by unified metric families
-   with a `reason` label (e.g., `markdown_skipped_total{reason="skipped_accept"}`).
+   with a `reason` label (e.g., `nginx_markdown_skips_total{reason="skipped_accept"}`).
 
 ---
 
