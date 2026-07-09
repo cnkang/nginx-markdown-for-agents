@@ -8,9 +8,9 @@
  * Feature: 0.9.1-performance-optimization
  * Validates: Requirements 4.1, 4.2, 4.3, 4.4, 4.8, 4.10
  *
- * For 0.9.1: gzip/brotli streaming is deferred.  These tests focus
- * on raw deflate streaming and confirm gzip/brotli are routed to
- * full-buffer when streaming would otherwise be selected.
+ * For 0.9.1: streaming decompression is limited to raw deflate.
+ * These tests confirm gzip/brotli are routed to full-buffer when
+ * streaming would otherwise be selected.
  *
  * The property tests (tasks 8.3, 8.4) cover routing and fail-open
  * exhaustively.  This unit test adds specific named examples for
@@ -288,8 +288,8 @@ test_routing_gzip_deferred_to_fullbuffer(void)
         NGX_HTTP_MARKDOWN_COMPRESSION_GZIP);
     TEST_ASSERT(
         result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
-        "gzip routes to FULLBUFFER (streaming gzip "
-        "deferred) (Req 4.8)");
+        "gzip routes to FULLBUFFER under streaming-selected "
+        "conditions (Req 4.8)");
     TEST_PASS("gzip deferred to full-buffer path");
 }
 
@@ -318,7 +318,7 @@ test_routing_gzip_and_brotli_streaming_selected_fullbuffer(void)
         "brotli with all non-encoding conditions met routes "
         "to FULLBUFFER");
 
-    TEST_PASS("gzip and brotli streaming stay deferred");
+    TEST_PASS("gzip and brotli route to full-buffer in 0.9.1");
 }
 
 static void

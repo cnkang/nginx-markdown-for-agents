@@ -109,6 +109,97 @@ markdown_export_native_build_env() {
   return 0
 }
 
+markdown_append_env_flag() {
+  local var_name="$1"
+  local flag_value="$2"
+  local current_value
+
+  eval "current_value=\"\${${var_name}:-}\""
+  case " ${current_value} " in
+    *" ${flag_value} "*) ;;
+    *) current_value="${current_value:+${current_value} }${flag_value}" ;;
+  esac
+
+  printf -v "${var_name}" '%s' "${current_value}"
+  export "${var_name?}"
+  return 0
+}
+
+markdown_homebrew_prefix() {
+  local formula="$1"
+  local prefix
+
+  if command -v brew >/dev/null 2>&1; then
+    prefix="$(brew --prefix "${formula}" 2>/dev/null || true)"
+    if [[ -n "${prefix}" && -d "${prefix}" ]]; then
+      printf '%s\n' "${prefix}"
+      return 0
+    fi
+  fi
+
+  for prefix in "/opt/homebrew/opt/${formula}" "/usr/local/opt/${formula}"; do
+    if [[ -d "${prefix}" ]]; then
+      printf '%s\n' "${prefix}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+markdown_export_nginx_dependency_env() {
+  local formula prefix
+
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    return 0
+  fi
+
+  for formula in openssl@3 pcre2 zlib; do
+    prefix="$(markdown_homebrew_prefix "${formula}" || true)"
+    if [[ -z "${prefix}" ]]; then
+      continue
+    fi
+    if [[ -d "${prefix}/include" ]]; then
+      markdown_append_env_flag CPPFLAGS "-I${prefix}/include"
+    fi
+    if [[ -d "${prefix}/lib" ]]; then
+      markdown_append_env_flag LDFLAGS "-L${prefix}/lib"
+    fi
+  done
+
+  return 0
+}
+
+markdown_print_nginx_build_failure_diagnostics() {
+  local buildroot="${1:-}"
+  local log_file="${2:-}"
+
+  echo "Native NGINX build failed." >&2
+  if [[ -n "${buildroot}" ]]; then
+    echo "Artifacts kept at: ${buildroot}" >&2
+  fi
+  if [[ -n "${log_file}" ]]; then
+    echo "Build log: ${log_file}" >&2
+  fi
+  echo "To reuse an existing module-enabled binary:" >&2
+  echo "  export NGINX_BIN=/path/to/compiled/nginx" >&2
+
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo "For Homebrew dependencies, install:" >&2
+    echo "  brew install pcre2 zlib openssl@3" >&2
+    echo "Homebrew prefixes checked: /opt/homebrew and /usr/local" >&2
+    echo "Current CPPFLAGS: ${CPPFLAGS:-<unset>}" >&2
+    echo "Current LDFLAGS: ${LDFLAGS:-<unset>}" >&2
+    echo "If auto-detection fails, pass paths explicitly, for example:" >&2
+    # shellcheck disable=SC2016
+    echo '  export CPPFLAGS="-I$(brew --prefix openssl@3)/include -I$(brew --prefix pcre2)/include -I$(brew --prefix zlib)/include ${CPPFLAGS:-}"' >&2
+    # shellcheck disable=SC2016
+    echo '  export LDFLAGS="-L$(brew --prefix openssl@3)/lib -L$(brew --prefix pcre2)/lib -L$(brew --prefix zlib)/lib ${LDFLAGS:-}"' >&2
+  fi
+
+  return 0
+}
+
 markdown_sync_converter_header() {
   local workspace_root="$1"
   local header_src="${workspace_root}/components/rust-converter/include/markdown_converter.h"

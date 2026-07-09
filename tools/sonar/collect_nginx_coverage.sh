@@ -411,7 +411,7 @@ http {
             markdown_limits memory=1m;
         }
 
-        # Streaming + gzip proxy (exercises streaming decompression path)
+        # Gzip under streaming-enabled location (full-buffer fallback path)
         location /streaming-proxy-gzip {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
             proxy_set_header Accept-Encoding gzip;
@@ -1026,14 +1026,14 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 curl -sS -H "${ACCEPT_MARKDOWN}" \
   "http://127.0.0.1:${PORT}/proxy-gzip/large.html" -o /dev/null -w "  gzip proxy large: HTTP %{http_code}\n"
 
-# Streaming + gzip proxy (exercises streaming_decomp_impl.h)
+# Gzip under streaming-enabled location (full-buffer fallback path)
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  "http://127.0.0.1:${PORT}/streaming-proxy-gzip/index.html" -o /dev/null -w "  streaming gzip proxy: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/streaming-proxy-gzip/index.html" -o /dev/null -w "  gzip full-buffer under streaming location: HTTP %{http_code}\n"
 
-# Streaming + gzip proxy + reject on pre-commit failure
+# Gzip under streaming-enabled location + reject on pre-commit failure
 curl -sS -H "${ACCEPT_MARKDOWN}" \
   "http://127.0.0.1:${PORT}/streaming-proxy-gzip-reject/large.html" \
-  -o /dev/null -w "  streaming gzip reject: HTTP %{http_code}\n" || true
+  -o /dev/null -w "  gzip full-buffer reject: HTTP %{http_code}\n" || true
 
 # Proxy with invalid/mislabeled compressed payloads
 # These exercise the decompression error/fail-open paths: the backend
@@ -1161,15 +1161,15 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 
 # ── Extended streaming decompression scenarios ──────────────────────
 
-# Streaming + gzip proxy with large content (exercises inflate_loop, expand_buf)
+# Gzip under streaming-enabled location with large content
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  "http://127.0.0.1:${PORT}/streaming-proxy-gzip/large.html" -o /dev/null -w "  streaming gzip large: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/streaming-proxy-gzip/large.html" -o /dev/null -w "  gzip full-buffer large: HTTP %{http_code}\n"
 
-# Streaming + gzip proxy with large budget (exercises full decomp + convert path)
+# Gzip under streaming-enabled location with large budget
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  "http://127.0.0.1:${PORT}/streaming-proxy-gzip-large/index.html" -o /dev/null -w "  streaming gzip large-budget: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/streaming-proxy-gzip-large/index.html" -o /dev/null -w "  gzip full-buffer large-budget: HTTP %{http_code}\n"
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  "http://127.0.0.1:${PORT}/streaming-proxy-gzip-large/large.html" -o /dev/null -w "  streaming gzip large-budget+large: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/streaming-proxy-gzip-large/large.html" -o /dev/null -w "  gzip full-buffer large-budget+large: HTTP %{http_code}\n"
 
 # ── Extended conversion_impl.h scenarios ────────────────────────────
 
@@ -1461,8 +1461,8 @@ if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
 fi
 
 echo "==> Running chunked streaming e2e coverage (smoke)"
-# Keep 10m so streaming gzip/deflate fixtures can validate decompression
-# behavior instead of tripping full-buffer size fail-open at 1m.
+# Keep 10m so gzip full-buffer and raw-deflate streaming fixtures can
+# validate decompression behavior instead of tripping size fail-open at 1m.
 if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
     bash "${WORKSPACE_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh" \
     --profile smoke \

@@ -248,30 +248,27 @@ else
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
   (
     cd "${BUILDROOT}/src"
-    EXTRA_CC_OPT=""
-    EXTRA_LD_OPT=""
-    if command -v brew >/dev/null 2>&1; then
-      openssl_prefix="$(brew --prefix openssl@3 2>/dev/null || true)"
-      if [[ -n "${openssl_prefix}" ]]; then
-        EXTRA_CC_OPT="-I${openssl_prefix}/include"
-        EXTRA_LD_OPT="-L${openssl_prefix}/lib"
-      fi
-    fi
+    markdown_export_nginx_dependency_env
     configure_args=(
       --with-http_ssl_module
       --without-http_rewrite_module
       --prefix="${RUNTIME}"
       --add-module="${WORKSPACE_ROOT}/components/nginx-module"
     )
-    if [[ -n "${EXTRA_CC_OPT}" ]]; then
-      configure_args+=(--with-cc-opt="${EXTRA_CC_OPT}")
+    if [[ -n "${CPPFLAGS:-}" ]]; then
+      configure_args+=(--with-cc-opt="${CPPFLAGS}")
     fi
-    if [[ -n "${EXTRA_LD_OPT}" ]]; then
-      configure_args+=(--with-ld-opt="${EXTRA_LD_OPT}")
+    if [[ -n "${LDFLAGS:-}" ]]; then
+      configure_args+=(--with-ld-opt="${LDFLAGS}")
     fi
-    ./configure "${configure_args[@]}" >/dev/null
-    make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null
-    make install >/dev/null
+    if ! ./configure "${configure_args[@]}" > "${RAW_DIR}/nginx-build.log" 2>&1 \
+      || ! make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >> "${RAW_DIR}/nginx-build.log" 2>&1 \
+      || ! make install >> "${RAW_DIR}/nginx-build.log" 2>&1
+    then
+      markdown_print_nginx_build_failure_diagnostics \
+        "${BUILDROOT}" "${RAW_DIR}/nginx-build.log"
+      exit 1
+    fi
   )
   NGINX_EXECUTABLE="${RUNTIME}/sbin/nginx"
 fi
