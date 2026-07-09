@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import evidence_gate_091
 from evidence_gate_091 import (
     EX_SKIP_NOT_PRESENT,
+    _RC_RE,
     _extract_evidence_metrics,
     _nginx_bin_available,
     _write_output,
@@ -386,6 +387,41 @@ class TestEvidenceOutputValidation:
 
         with pytest.raises(ValueError):
             _write_output({"verdict": "GO"}, str(outside_path))
+
+
+# ---------------------------------------------------------------------------
+# Test: Release-candidate tag detection
+# ---------------------------------------------------------------------------
+
+
+class TestReleaseCandidateTagPattern:
+    """Release-candidate tag matching stays bounded and explicit."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "0.9.1-rc",
+            "v0.9.1-rc",
+            "0.9.1-rc.1",
+            "refs/tags/v0.9.1-rc.1",
+        ],
+    )
+    def test_rc_tag_pattern_accepts_supported_forms(self, value):
+        """Supported release-candidate tag forms match."""
+        assert _RC_RE.search(value)
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "0.9.1",
+            "v0.9.1",
+            "refs/heads/dev/wip-0.9.1-rc.1",
+            "refs/tags/v0.9.1-rc.1-extra",
+        ],
+    )
+    def test_rc_tag_pattern_rejects_non_tags(self, value):
+        """Non-RC and non-tag-like strings do not match."""
+        assert _RC_RE.search(value) is None
 
 
 # ---------------------------------------------------------------------------

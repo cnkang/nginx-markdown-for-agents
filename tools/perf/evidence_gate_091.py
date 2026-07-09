@@ -47,9 +47,7 @@ from lib.path_validation import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-_RC_RE = re.compile(r"""v?                  # optional 'v' prefix
-                           \d+\.\d+\.\d+       # version number (x.y.z)
-                           .*-rc[\.\d]*       # '-rc' suffix with optional '.N'""", re.VERBOSE)
+_RC_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+-rc(?:\.\d+)?$")
 
 # Exit code for SKIP_NOT_PRESENT (matches run_module_benchmark.sh)
 EX_SKIP_NOT_PRESENT = 75
