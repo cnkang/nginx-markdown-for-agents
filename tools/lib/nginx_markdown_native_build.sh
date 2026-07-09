@@ -10,6 +10,8 @@
 #     copy, or unsupported-platform failures.
 #   - Callers must source this file; it is not intended to run as a script.
 
+readonly MARKDOWN_OS_DARWIN="Darwin"
+
 # Args:
 #   $1 - command name to find in PATH.
 # Stdout:
@@ -42,7 +44,7 @@ markdown_ensure_native_apple_silicon() {
   local script_path="$1"
   shift || true
 
-  if [[ "$(uname -s)" != "Darwin" ]]; then
+  if [[ "$(uname -s)" != "${MARKDOWN_OS_DARWIN}" ]]; then
     return 0
   fi
 
@@ -76,8 +78,8 @@ markdown_detect_rust_target() {
   fi
 
   case "${host_os}:${host_arch}:${libc_variant}" in
-    Darwin:arm64:*) echo "aarch64-apple-darwin" ;;
-    Darwin:x86_64:*) echo "x86_64-apple-darwin" ;;
+    "${MARKDOWN_OS_DARWIN}":arm64:*) echo "aarch64-apple-darwin" ;;
+    "${MARKDOWN_OS_DARWIN}":x86_64:*) echo "x86_64-apple-darwin" ;;
     Linux:x86_64:gnu) echo "x86_64-unknown-linux-gnu" ;;
     Linux:aarch64:gnu) echo "aarch64-unknown-linux-gnu" ;;
     Linux:x86_64:musl) echo "x86_64-unknown-linux-musl" ;;
@@ -97,7 +99,7 @@ markdown_default_macos_deployment_target() {
 }
 
 markdown_export_native_build_env() {
-  if [[ "$(uname -s)" != "Darwin" ]]; then
+  if [[ "$(uname -s)" != "${MARKDOWN_OS_DARWIN}" ]]; then
     return 0
   fi
 
@@ -150,7 +152,7 @@ markdown_homebrew_prefix() {
 markdown_export_nginx_dependency_env() {
   local formula prefix
 
-  if [[ "$(uname -s)" != "Darwin" ]]; then
+  if [[ "$(uname -s)" != "${MARKDOWN_OS_DARWIN}" ]]; then
     return 0
   fi
 
@@ -204,7 +206,7 @@ markdown_print_nginx_build_failure_diagnostics() {
   echo "To reuse an existing module-enabled binary:" >&2
   echo "  export NGINX_BIN=/path/to/compiled/nginx" >&2
 
-  if [[ "$(uname -s)" == "Darwin" ]]; then
+  if [[ "$(uname -s)" == "${MARKDOWN_OS_DARWIN}" ]]; then
     echo "For Homebrew dependencies, install:" >&2
     echo "  brew install pcre2 zlib openssl@3" >&2
     echo "Homebrew prefixes checked: /opt/homebrew and /usr/local" >&2
@@ -427,7 +429,7 @@ markdown_prepare_rust_converter_release() {
     }
     cargo build --target "${rust_target}" --release "$@"
 
-    if [[ "$(uname -s)" == "Darwin" ]]; then
+    if [[ "$(uname -s)" == "${MARKDOWN_OS_DARWIN}" ]]; then
       local archive_path="target/${rust_target}/release/libnginx_markdown_converter.a"
       local stale_member=""
       stale_member="$(markdown_find_newer_macos_archive_member "${archive_path}" "${MACOSX_DEPLOYMENT_TARGET}" || true)"
