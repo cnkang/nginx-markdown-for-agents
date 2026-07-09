@@ -96,8 +96,6 @@ internal behavior; C boundary tests remain separate by design.
 ## References
 
 - [../../testing/E2E_TESTS.md](../../testing/E2E_TESTS.md)
-- [../../archive/project-history/0.6.3-e2e-parity.md](../../archive/project-history/0.6.3-e2e-parity.md)
-- [../../archive/project-history/0.6.3-test-surface-audit.md](../../archive/project-history/0.6.3-test-surface-audit.md)
 - [../../testing/C_TEST_BOUNDARY.md](../../testing/C_TEST_BOUNDARY.md)
 - [0005-repo-owned-harness.md](0005-repo-owned-harness.md)
 - [0001-use-rust-for-conversion.md](0001-use-rust-for-conversion.md)
