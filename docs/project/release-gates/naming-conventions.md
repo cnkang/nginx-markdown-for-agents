@@ -69,7 +69,7 @@ New directives introduced in 0.4.0 must follow the same `markdown_` prefix and l
 | `nginx_markdown_conversion_duration_seconds`      | histogram | `le`            |
 | `nginx_markdown_input_bytes_total`                | counter   | —               |
 | `nginx_markdown_output_bytes_total`               | counter   | —               |
-| `nginx_markdown_failures_total`                   | counter   | `stage`         |
+| `nginx_markdown_failures_total`                   | counter   | `reason`        |
 | `nginx_markdown_decompressions_total`             | counter   | `format`        |
 
 ### Label cardinality rules
@@ -87,30 +87,46 @@ Labels must be low-cardinality.
 
 ## 3. Decision Reason Codes
 
-- **Format:** uppercase snake_case
-- **Regex:** `^[A-Z][A-Z0-9_]*$`
-- Used in both log messages and Prometheus metric label values. Codes must be consistent across both surfaces.
+Reason codes are emitted in both decision-log `reason=` fields and Prometheus
+metric label values, and must be consistent across both surfaces. Two tiers:
 
-### Reason code table
+- **Decision-chain reason codes** — lowercase snake_case. Returned by
+  `ngx_http_markdown_get_reason_code_str()` (resolved from the Rust
+  `ReasonCode` registry). Examples: `not_eligible`, `skipped_accept`,
+  `skipped_conditional`, `disabled`, `converted`, `failed_open`, `failed_closed`,
+  `bypass_no_transform`.
+- **Streaming engine reason codes** — uppercase snake_case. Examples:
+  `ENGINE_STREAMING`, `STREAMING_CONVERT`, `STREAMING_FALLBACK_PREBUFFER`,
+  `STREAMING_FAIL_POSTCOMMIT`, `STREAMING_SKIP_UNSUPPORTED`,
+  `STREAMING_BUDGET_EXCEEDED`, `STREAMING_PRECOMMIT_FAILOPEN`,
+  `STREAMING_PRECOMMIT_REJECT`, `STREAMING_SHADOW`.
 
-| Category | Code                      | Meaning                                              |
-|----------|---------------------------|------------------------------------------------------|
-| Eligible | `ELIGIBLE_CONVERTED`      | Eligible and successfully converted                  |
-| Eligible | `ELIGIBLE_FAILED_OPEN`    | Eligible, conversion failed, served original HTML    |
-| Eligible | `ELIGIBLE_FAILED_CLOSED`  | Eligible, conversion failed, returned error          |
-| Skip     | `SKIP_METHOD`             | Not GET/HEAD                                         |
-| Skip     | `SKIP_STATUS`             | Not 200/206                                          |
-| Skip     | `SKIP_CONTENT_TYPE`       | Not text/html                                        |
-| Skip     | `SKIP_SIZE`               | Exceeds `markdown_memory_budget`                     |
-| Skip     | `SKIP_STREAMING`          | Unbounded streaming response                         |
-| Skip     | `SKIP_AUTH`               | Auth policy denies                                   |
-| Skip     | `SKIP_RANGE`              | Range request                                        |
-| Skip     | `SKIP_CONFIG`             | Disabled by configuration                            |
-| Failure  | `FAIL_CONVERSION`         | HTML parse or conversion error                       |
-| Failure  | `FAIL_RESOURCE_LIMIT`     | Timeout or memory limit                              |
-| Failure  | `FAIL_SYSTEM`             | Internal/system error                                |
+The authoritative reason-code list is
+`components/rust-converter/src/decision/reason_code.rs` (decision-chain) plus
+the streaming accessors in
+`components/nginx-module/src/ngx_http_markdown_reason.c`.
 
-These codes map to the existing `ngx_http_markdown_eligibility_t` enum values and `ngx_http_markdown_error_category_t` categories.
+### Decision-chain reason code table (lowercase)
+
+| Category | Code                    | Meaning                                              |
+|----------|-------------------------|------------------------------------------------------|
+| Skipped  | `not_eligible`          | Not eligible (method, status, range, content-type, size, or auth) |
+| Skipped  | `skipped_accept`        | `Accept` present but does not request Markdown       |
+| Skipped  | `skipped_no_accept`     | No `Accept` header and `markdown_accept strict`      |
+| Skipped  | `skipped_accept_reject` | `Accept` explicitly rejects Markdown                 |
+| Skipped  | `skipped_conditional`   | Conditional request matched → 304                    |
+| Skipped  | `bypass_no_transform`   | `no-transform` Cache-Control present                 |
+| Disabled | `disabled`              | Module disabled for this scope                       |
+| Converted| `converted`             | All checks passed, conversion succeeded              |
+| Failed   | `failed_open`           | Conversion failed, original HTML served (`pass`)     |
+| Failed   | `failed_closed`         | Conversion failed, error returned (`fail_closed`)    |
+| Failed   | `conversion_error`      | HTML parse or conversion error                       |
+| Failed   | `memory_budget_exceeded`| Memory limit reached                                 |
+| Failed   | `timeout`               | Parser exceeded `markdown_parse_timeout`             |
+| Failed   | `ffi_panic`             | Internal/system error (Rust↔C panic)                 |
+
+These codes no longer use the legacy `ngx_http_markdown_eligibility_t` enum or
+`ngx_http_markdown_error_category_t` categories.
 
 ---
 

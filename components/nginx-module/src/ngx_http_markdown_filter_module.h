@@ -895,7 +895,7 @@ typedef struct {
         ngx_chain_t             *pending_output;
         ngx_flag_t               pending_has_data;
     } fullbuffer;
-    
+
     /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER or NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) */
     ngx_uint_t                   processing_path;
 
@@ -1186,7 +1186,7 @@ typedef struct {
      * Total requests that entered the decision chain.
      *
      * Incremented in the header filter when a request reaches the module
-     * decision chain, including requests later classified as SKIP_CONFIG.
+     * decision chain, including requests later classified as disabled.
      * This is the broad denominator for module decision-rate calculations.
      */
     ngx_atomic_t  requests_entered;

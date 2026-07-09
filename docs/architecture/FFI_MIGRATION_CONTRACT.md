@@ -251,10 +251,10 @@ backlog of known C-side pure-logic functions).
 | 9 | `ngx_http_markdown_eligibility_string` | `ngx_http_markdown_eligibility.c` | Returns human-readable string for eligibility enum | **Yes** — pure enum→string lookup | Medium | Low |
 | 10 | `ngx_http_markdown_reason_from_eligibility` | `ngx_http_markdown_reason.c` | Maps eligibility enum to reason code string | **Mixed** — pure mapping but uses `ngx_log_error` for unknown values | High | Low |
 | 11 | `ngx_http_markdown_reason_from_error_category` | `ngx_http_markdown_reason.c` | Maps error category to failure reason code string | **Mixed** — pure mapping but uses `ngx_log_error` for unknown values | High | Low |
-| 12 | `ngx_http_markdown_reason_converted` | `ngx_http_markdown_reason.c` | Returns "ELIGIBLE_CONVERTED" reason code | **Yes** — trivial accessor | Medium | Low |
-| 13 | `ngx_http_markdown_reason_failed_open` | `ngx_http_markdown_reason.c` | Returns "ELIGIBLE_FAILED_OPEN" reason code | **Yes** — trivial accessor | Medium | Low |
-| 14 | `ngx_http_markdown_reason_failed_closed` | `ngx_http_markdown_reason.c` | Returns "ELIGIBLE_FAILED_CLOSED" reason code | **Yes** — trivial accessor | Medium | Low |
-| 15 | `ngx_http_markdown_reason_skip_accept` | `ngx_http_markdown_reason.c` | Returns "SKIP_ACCEPT" reason code | **Yes** — trivial accessor | Medium | Low |
+| 12 | `ngx_http_markdown_reason_converted` | `ngx_http_markdown_reason.c` | Returns `converted` reason code (lowercase `as_str()`) | **Yes** — trivial accessor | Medium | Low |
+| 13 | `ngx_http_markdown_reason_failed_open` | `ngx_http_markdown_reason.c` | Returns `failed_open` reason code (lowercase `as_str()`) | **Yes** — trivial accessor | Medium | Low |
+| 14 | `ngx_http_markdown_reason_failed_closed` | `ngx_http_markdown_reason.c` | Returns `failed_closed` reason code (lowercase `as_str()`) | **Yes** — trivial accessor | Medium | Low |
+| 15 | `ngx_http_markdown_reason_skip_accept` | `ngx_http_markdown_reason.c` | Returns `skipped_accept` reason code (lowercase `as_str()`) | **Yes** — trivial accessor | Medium | Low |
 | 16 | `ngx_http_markdown_reason_ct_route_default` | `ngx_http_markdown_reason.c` | Returns "CT_ROUTE_DEFAULT" reason code | **Yes** — trivial accessor | Low | Low |
 | 17 | `ngx_http_markdown_reason_ct_route_configured` | `ngx_http_markdown_reason.c` | Returns "CT_ROUTE_CONFIGURED" reason code | **Yes** — trivial accessor | Low | Low |
 | 18 | `ngx_http_markdown_detect_compression` | `ngx_http_markdown_decompression.c` | Detects compression type from Content-Encoding header value | **Mixed** — reads `r->headers_out.content_encoding` then does pure string matching | High | Low |
