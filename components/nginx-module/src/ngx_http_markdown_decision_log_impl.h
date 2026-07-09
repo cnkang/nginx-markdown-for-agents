@@ -310,11 +310,11 @@ ngx_http_markdown_log_decision_debug(ngx_http_request_t *r,
  *   warn / error  — emit only for failure outcomes
  *
  * NGINX log level:
- *   NGX_LOG_INFO  for non-failure outcomes (SKIP_*, ELIGIBLE_CONVERTED,
- *                 STREAMING_CONVERT, STREAMING_SHADOW, etc.)
- *   NGX_LOG_WARN  for failure outcomes (ELIGIBLE_FAILED_*, FAIL_*,
- *                 STREAMING_FAIL_*, STREAMING_PRECOMMIT_*,
- *                 STREAMING_BUDGET_*)
+ *   NGX_LOG_INFO  for non-failure outcomes (disabled, not_eligible,
+ *                 skipped_accept, skipped_no_accept, converted,
+ *                 streaming outcomes, etc.)
+ *   NGX_LOG_WARN  for failure outcomes (failed_open, failed_closed,
+ *                 error reason codes, streaming errors, etc.)
  *
  * Parameters:
  *   r              - NGINX request structure

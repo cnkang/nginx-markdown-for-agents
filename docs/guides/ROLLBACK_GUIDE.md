@@ -168,7 +168,7 @@ nginx -t && nginx -s reload
 
 #### Verify
 
-Follow the [Verification Steps](#verification-steps) section. The key signal is `SKIP_CONFIG` appearing in decision logs for the affected traffic.
+Follow the [Verification Steps](#verification-steps) section. The key signal is `disabled` appearing in decision logs for the affected traffic.
 
 ---
 
@@ -286,7 +286,7 @@ nginx -t && nginx -s reload
 
 #### Verify
 
-Follow the [Verification Steps](#verification-steps) section. Confirm that the excluded path or host now produces `SKIP_CONFIG` in decision logs, while other paths continue converting.
+Follow the [Verification Steps](#verification-steps) section. Confirm that the excluded path or host now produces `disabled` in decision logs, while other paths continue converting.
 
 ---
 
@@ -340,7 +340,7 @@ nginx -t && nginx -s reload
 
 #### Verify
 
-Follow the [Verification Steps](#verification-steps) section. The key signal is that `ELIGIBLE_FAILED_CLOSED` entries stop appearing in decision logs and are replaced by `ELIGIBLE_FAILED_OPEN` entries. Clients receive original HTML instead of 502 errors when conversion fails.
+Follow the [Verification Steps](#verification-steps) section. The key signal is that `failed_closed` entries stop appearing in decision logs and are replaced by `failed_open` entries. Clients receive original HTML instead of 502 errors when conversion fails.
 
 ---
 
@@ -398,21 +398,21 @@ Any observation checkpoint result that does not meet the "safe to continue" crit
 
 After applying any rollback method, verify that the change took effect. Run these checks in order.
 
-### 1. Check Logs for SKIP_CONFIG
+### 1. Check Logs for `disabled`
 
-After disabling conversion (Methods A and B), the decision log should show `SKIP_CONFIG` for affected traffic:
+After disabling conversion (Methods A and B), the decision log should show `disabled` for affected traffic:
 
 ```bash
-# Watch for new SKIP_CONFIG entries after reload
+# Watch for new disabled entries after reload
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep "reason=SKIP_CONFIG" | tail -10
+  grep "reason=disabled" | tail -10
 ```
 
-For Method C (restoring fail-open), check that `ELIGIBLE_FAILED_CLOSED` entries stop and `ELIGIBLE_FAILED_OPEN` entries appear instead:
+For Method C (restoring fail-open), check that `failed_closed` entries stop and `failed_open` entries appear instead:
 
 ```bash
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep -E "reason=ELIGIBLE_FAILED_(OPEN|CLOSED)" | tail -10
+  grep -E "reason=failed_(open|closed)" | tail -10
 ```
 
 ### 2. Confirm Metrics Stop Incrementing
