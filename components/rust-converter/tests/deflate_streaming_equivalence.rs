@@ -4,8 +4,9 @@
 //!
 //! Property 6: Gzip Wrapper Handling Produces Correct Raw Deflate
 //!
-//! For 0.9.1, gzip streaming is DEFERRED. This property test applies ONLY to
-//! raw deflate payloads. It verifies that decompressing raw deflate data via
+//! For 0.9.1, module-level gzip streaming decompression is DEFERRED. This
+//! property test applies ONLY to raw deflate payloads. It verifies that
+//! decompressing raw deflate data via
 //! the full-buffer path (`decompress_bounded` with `Format::Deflate`) produces
 //! byte-identical output to incremental chunk-by-chunk decompression (the
 //! streaming decompression approach using `flate2::Decompress`).

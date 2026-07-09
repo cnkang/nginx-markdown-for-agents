@@ -6,12 +6,13 @@ set -euo pipefail
 # Validates six critical paths:
 #  1) Chunked body below markdown_limits memory converts successfully to Markdown.
 #  2) Chunked body above markdown_limits memory triggers fail-open without truncation.
-#  3) Streaming + gzip decompression converts to Markdown and strips
+#  3) Gzip under a streaming-enabled location routes through full-buffer
+#     decompression and strips Content-Encoding.
+#  4) Raw deflate streaming decompression converts to Markdown and strips
 #     Content-Encoding.
-#  4) Streaming + deflate decompression converts to Markdown and strips
-#     Content-Encoding.
-#  5) Truncated gzip stream triggers decomp finalize failure and fail-open.
-#  6) Truncated deflate stream triggers decomp finalize failure and fail-open.
+#  5) Truncated gzip full-buffer decompression fails open.
+#  6) Truncated raw deflate stream triggers decomp finalize failure and
+#     fail-open.
 
 NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
 PORT="${PORT:-18094}"
@@ -41,7 +42,7 @@ readonly PATTERN_TRANSFER_CHUNKED='^Transfer-Encoding:.*chunked'
 # Pattern matching Content-Length header; streaming responses must not
 # include this header (they use chunked transfer instead).
 readonly PATTERN_CONTENT_LENGTH='^Content-Length:'
-# Pattern matching Content-Encoding header; used to verify that streaming
+# Pattern matching Content-Encoding header; used to verify that successful
 # decompression strips the header from the downstream response.
 readonly PATTERN_CONTENT_ENCODING='^Content-Encoding:'
 # shellcheck disable=SC1090
@@ -497,13 +498,26 @@ else
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
   (
     cd "${BUILDROOT}/src"
-    ./configure \
-      --without-http_rewrite_module \
-      --with-cc-opt="-DMARKDOWN_STREAMING_ENABLED" \
-      --prefix="${RUNTIME}" \
-      --add-module="${WORKSPACE_ROOT}/components/nginx-module" >/dev/null
-    make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null
-    make install >/dev/null
+    markdown_export_nginx_dependency_env
+    cc_opt="${CPPFLAGS:-}"
+    cc_opt="${cc_opt:+${cc_opt} }-DMARKDOWN_STREAMING_ENABLED"
+    configure_args=(
+      --without-http_rewrite_module
+      --with-cc-opt="${cc_opt}"
+      --prefix="${RUNTIME}"
+      --add-module="${WORKSPACE_ROOT}/components/nginx-module"
+    )
+    if [[ -n "${LDFLAGS:-}" ]]; then
+      configure_args+=(--with-ld-opt="${LDFLAGS}")
+    fi
+    if ! ./configure "${configure_args[@]}" > "${RAW_DIR}/nginx-build.log" 2>&1 \
+      || ! make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >> "${RAW_DIR}/nginx-build.log" 2>&1 \
+      || ! make install >> "${RAW_DIR}/nginx-build.log" 2>&1
+    then
+      markdown_print_nginx_build_failure_diagnostics \
+        "${BUILDROOT}" "${RAW_DIR}/nginx-build.log"
+      exit 1
+    fi
   )
   NGINX_EXECUTABLE="${RUNTIME}/sbin/nginx"
 fi
@@ -630,7 +644,7 @@ grep -q "${DELAYED_END_TOKEN}" "${RAW_DIR}/delayed.body" || {
   exit 1
 }
 
-echo "==> Case 3: streaming gzip decompression should convert to Markdown"
+echo "==> Case 3: gzip under streaming location uses full-buffer decompression"
 gzip_line="$(curl -sS -D "${RAW_DIR}/gzip.hdr" -o "${RAW_DIR}/gzip.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/small-gzip" \
@@ -641,7 +655,7 @@ assert_streaming_markdown_response \
   "small-gzip" "${RAW_DIR}/gzip.hdr" "${RAW_DIR}/gzip.body" \
   "# Chunked Gzip" "${GZIP_END_TOKEN}" 0
 
-echo "==> Case 4: streaming deflate decompression should convert to Markdown"
+echo "==> Case 4: raw deflate streaming decompression should convert to Markdown"
 deflate_line="$(curl -sS -D "${RAW_DIR}/deflate.hdr" -o "${RAW_DIR}/deflate.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/small-deflate" \
@@ -652,7 +666,7 @@ assert_streaming_markdown_response \
   "small-deflate" "${RAW_DIR}/deflate.hdr" "${RAW_DIR}/deflate.body" \
   "# Chunked Deflate" "${DEFLATE_END_TOKEN}" 0
 
-echo "==> Case 5: truncated gzip should fail-open before Markdown commit"
+echo "==> Case 5: truncated gzip full-buffer path should fail open"
 # The upstream sends a gzip stream with the final 8 bytes removed, so
 # decompression fails before the compressed full-body path can commit
 # Markdown headers. The module must fail open by preserving the upstream
@@ -679,10 +693,9 @@ if [[ "${actual_trunc_gzip_bytes}" != "${TRUNCATED_GZIP_COMPRESSED_LEN}" ]]; the
   exit 1
 fi
 
-echo "==> Case 6: truncated deflate should fail-open before Markdown commit"
-# Same rationale as case 5 but for deflate: the fixture is cut in the
-# middle of the compressed stream so decompression fails before Markdown
-# headers are committed.
+echo "==> Case 6: truncated raw deflate streaming path should fail open"
+# The raw deflate fixture is cut in the middle of the compressed stream
+# so streaming decompression fails before Markdown headers are committed.
 trunc_deflate_line="$(curl -sS -D "${RAW_DIR}/trunc_deflate.hdr" -o "${RAW_DIR}/trunc_deflate.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/truncated-deflate" \

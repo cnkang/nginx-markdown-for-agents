@@ -277,8 +277,10 @@ and observable behavior. Rollback requires a code revert and binary rebuild:
 
 **Why no config toggle:**
 
-The copy reduction removes redundant `memcpy` operations in the internal
-decompression pipeline. The optimization preserves:
+The copy reduction removes the redundant apply-back copy in the internal
+decompression pipeline. Rust FFI output is still copied once into an
+`ngx_alloc` buffer; after budget checks, that buffer is swapped into
+`ctx->buffer.data`. The optimization preserves:
 - Identical fail-open semantics (original compressed buffer intact on failure)
 - Identical decompression budget enforcement
 - Identical output for all inputs
