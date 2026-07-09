@@ -1500,7 +1500,12 @@ markdown_chars_per_token 38;
 **Default:** `off`
 **Context:** http, server, location
 
-Enable OpenTelemetry span creation for conversion requests. When enabled, each conversion creates a span with attributes for flavor, engine, content_type, input/output bytes, and reason code.
+Enable OpenTelemetry span creation for conversion requests. When enabled, each
+conversion creates a span with attributes for flavor, engine, content_type,
+input/output bytes, and reason code. Spans do not include the full request URI
+by default. When a request URI is present, the module emits the low-cardinality
+`uri_route=redacted` label instead to avoid leaking private path data and to
+avoid high-cardinality trace attributes.
 
 **Example:**
 ```nginx

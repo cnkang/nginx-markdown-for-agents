@@ -330,6 +330,13 @@ static u_char *g_streaming_feed_out_data = NULL;
 static uintptr_t g_streaming_feed_out_len = 0;
 static uint32_t g_streaming_finalize_rc = ERROR_SUCCESS;
 static struct MarkdownResult g_streaming_finalize_result;
+static ngx_uint_t g_info_log_count = 0;
+static const char *g_last_info_log_fmt = NULL;
+static ngx_uint_t g_otel_span_start_calls = 0;
+static ngx_uint_t g_otel_str_attr_count = 0;
+static ngx_uint_t g_otel_uri_attr_seen = 0;
+static ngx_uint_t g_otel_uri_route_seen = 0;
+static ngx_uint_t g_otel_full_uri_seen = 0;
 
 /*
  * Production globals that must be defined for the streaming impl header to
@@ -381,6 +388,10 @@ ngx_module_t ngx_http_markdown_filter_module = { 0 };
 #endif
 #define ngx_log_error(level, log, err, fmt, ...)                                    \
     do {                                                                             \
+        if ((level) == NGX_LOG_INFO) {                                               \
+            g_info_log_count++;                                                      \
+            g_last_info_log_fmt = (fmt);                                             \
+        }                                                                            \
         UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);                        \
     } while (0)
 
@@ -1108,9 +1119,16 @@ static ngx_inline ngx_http_markdown_otel_span_t *
 ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf)
 {
+    static ngx_http_markdown_otel_span_t span;
+
     (void) r;
-    (void) conf;
-    return NULL;
+    if (conf == NULL || conf->ops.otel_enabled == 0) {
+        return NULL;
+    }
+
+    ngx_memzero(&span, sizeof(span));
+    g_otel_span_start_calls++;
+    return &span;
 }
 
 static ngx_inline void
@@ -1119,10 +1137,20 @@ ngx_http_markdown_otel_set_str_attr(ngx_http_markdown_otel_span_t *span,
     const u_char *val, size_t val_len)
 {
     (void) span;
-    (void) key;
-    (void) key_len;
-    (void) val;
-    (void) val_len;
+
+    g_otel_str_attr_count++;
+    if (key_len == 3 && ngx_memcmp(key, "uri", 3) == 0) {
+        g_otel_uri_attr_seen = 1;
+    }
+    if (key_len == 9 && ngx_memcmp(key, "uri_route", 9) == 0) {
+        g_otel_uri_route_seen = 1;
+    }
+    if (val_len == sizeof("/private/customer/12345?token=secret") - 1
+        && ngx_memcmp(val, "/private/customer/12345?token=secret",
+                      val_len) == 0)
+    {
+        g_otel_full_uri_seen = 1;
+    }
 }
 
 static ngx_inline void
@@ -1245,6 +1273,13 @@ reset_globals(void)
     g_streaming_finalize_rc = ERROR_SUCCESS;
     ngx_memzero(&g_streaming_finalize_result,
         sizeof(g_streaming_finalize_result));
+    g_info_log_count = 0;
+    g_last_info_log_fmt = NULL;
+    g_otel_span_start_calls = 0;
+    g_otel_str_attr_count = 0;
+    g_otel_uri_attr_seen = 0;
+    g_otel_uri_route_seen = 0;
+    g_otel_full_uri_seen = 0;
     /*
      * Tests frequently bind ngx_http_markdown_metrics to stack-local
      * storage; always clear it here so later tests cannot read a stale
@@ -2156,6 +2191,26 @@ test_init_handle_and_chunk_result_helpers(void)
         "init_handle should mark conversion attempted");
 
     ctx.streaming.handle = NULL;
+    ctx.streaming.prebuffer_initialized = 0;
+    ctx.streaming.failopen_replay_initialized = 0;
+    ctx.conversion.attempted = 0;
+    conf.ops.otel_enabled = 1;
+    r.uri.data = (u_char *) "/private/customer/12345?token=secret";
+    r.uri.len = sizeof("/private/customer/12345?token=secret") - 1;
+    rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "init_handle should succeed when OTel is enabled");
+    TEST_ASSERT(g_otel_span_start_calls == 1,
+        "OTel enabled should start a span");
+    TEST_ASSERT(g_otel_uri_route_seen == 1,
+        "OTel enabled should emit the redacted URI route label");
+    TEST_ASSERT(g_otel_uri_attr_seen == 0,
+        "OTel enabled should not emit a full URI attribute");
+    TEST_ASSERT(g_otel_full_uri_seen == 0,
+        "OTel enabled should not copy the full request URI");
+    conf.ops.otel_enabled = 0;
+
+    ctx.streaming.handle = NULL;
     g_prepare_options_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_DECLINED,
@@ -2448,10 +2503,15 @@ test_commit_feed_and_finalize_core_paths(void)
     g_streaming_finalize_rc = ERROR_SUCCESS;
     g_streaming_finalize_result.markdown = out_data;
     g_streaming_finalize_result.markdown_len = 3;
-    g_streaming_finalize_result.etag = (uint8_t *) "etag";
-    g_streaming_finalize_result.etag_len = 4;
+    g_streaming_finalize_result.etag = (uint8_t *) "secret-etag-value";
+    g_streaming_finalize_result.etag_len =
+        sizeof("secret-etag-value") - 1;
     g_streaming_finalize_result.token_estimate = 9;
     g_streaming_finalize_result.peak_memory_estimate = 128;
+    r.uri.data = (u_char *) "/private/customer/12345?token=secret";
+    r.uri.len = sizeof("/private/customer/12345?token=secret") - 1;
+    g_info_log_count = 0;
+    g_last_info_log_fmt = NULL;
     {
         ngx_int_t seq[] = { NGX_OK, NGX_OK };
         set_next_body_filter_sequence(seq, 2);
@@ -2463,6 +2523,18 @@ test_commit_feed_and_finalize_core_paths(void)
         "successful finalize should increment success metrics");
     TEST_ASSERT(metrics.streaming.last_peak_memory_bytes == 128,
         "finalize should store peak memory gauge from result");
+    TEST_ASSERT(g_info_log_count == 1,
+        "finalize should emit one info-level ETag summary");
+    TEST_ASSERT(g_last_info_log_fmt != NULL,
+        "finalize info log format should be captured");
+    TEST_ASSERT(strstr(g_last_info_log_fmt, "etag=%*s") == NULL,
+        "finalize info log must not format the full ETag");
+    TEST_ASSERT(strstr(g_last_info_log_fmt, "uri=%V") == NULL,
+        "finalize info log must not format the full URI");
+    TEST_ASSERT(strstr(g_last_info_log_fmt, "etag_len=%uz") != NULL,
+        "finalize info log should retain ETag length observability");
+    TEST_ASSERT(strstr(g_last_info_log_fmt, "uri_len=%uz") != NULL,
+        "finalize info log should retain URI length observability");
 
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x18;

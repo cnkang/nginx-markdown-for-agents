@@ -1349,8 +1349,8 @@ ngx_http_markdown_otel_start_conversion_span(
         engine_name->data, engine_name->len);
     if (r->uri.len > 0) {
         ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-            (const u_char *) "uri", 3,
-            r->uri.data, r->uri.len);
+            (const u_char *) "uri_route", 9,
+            (const u_char *) "redacted", 8);
     }
 }
 
