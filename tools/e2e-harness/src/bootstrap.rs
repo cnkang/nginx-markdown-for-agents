@@ -124,11 +124,19 @@ fn bridge_to_native_build(base_dir: &Path) -> Result<BootstrapResult> {
         let mut msg = format!("Bootstrap bridge failed: stdout={stdout}; stderr={stderr}");
         if cfg!(target_os = "macos") {
             msg.push_str("\n\n=== macOS E2E Bootstrap Diagnostics ===\n");
-            msg.push_str("If compilation/linking of NGINX failed due to missing PCRE2, zlib, or OpenSSL, install them via Homebrew:\n");
-            msg.push_str("  brew install pcre2 zlib openssl@3\n\n");
-            msg.push_str("Note: NGINX may require library search paths to locate Homebrew dependencies. Alternatively, compile NGINX with the module manually and set NGINX_BIN:\n");
+            msg.push_str("The native build requires OpenSSL (for --with-http_ssl_module).\n");
+            msg.push_str("Install via Homebrew if not present:\n");
+            msg.push_str("  brew install openssl@3\n\n");
+            msg.push_str("Homebrew on Apple Silicon: /opt/homebrew\n");
+            msg.push_str("Homebrew on Intel/Rosetta: /usr/local\n\n");
+            msg.push_str("The build script detects Homebrew paths automatically via\n");
+            msg.push_str("`brew --prefix openssl@3` and exports CPPFLAGS/LDFLAGS.\n");
+            msg.push_str("If linking still fails, pass paths explicitly:\n");
+            msg.push_str("  export CPPFLAGS=\"-I$(brew --prefix openssl@3)/include\"\n");
+            msg.push_str("  export LDFLAGS=\"-L$(brew --prefix openssl@3)/lib\"\n\n");
+            msg.push_str("Alternatively, compile NGINX with the module manually and set:\n");
             msg.push_str("  export NGINX_BIN=/path/to/compiled/nginx\n");
-            msg.push_str("======================================\n");
+            msg.push_str("========================================\n");
         }
         bail!(msg);
     }
