@@ -994,20 +994,18 @@ For the full decision chain model (check order, flowchart, and outcome determina
 
 The table below maps each reason code to its internal enum, error category, request state, description, and the action you should take when you see it.
 
-| Reason Code | Eligibility Enum | Error Category | Request State | Description | Suggested Operator Action |
-|---|---|---|---|---|---|
-| `SKIP_CONFIG` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONFIG` | — | NOT_ENABLED | Module disabled by configuration for this scope | Expected for scopes where you have not enabled conversion. If unexpected, check `markdown_filter` in the relevant `location`/`server` block. |
-| `SKIP_METHOD` | `NGX_HTTP_MARKDOWN_INELIGIBLE_METHOD` | — | SKIPPED | Request method is not GET or HEAD | Expected for POST/PUT/DELETE requests. No action needed. |
-| `SKIP_STATUS` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STATUS` | — | SKIPPED | Upstream response status is not 200 OK; 206 Partial Content maps to `SKIP_RANGE` | Check upstream health if you see many non-200 responses for pages you expect to convert. |
-| `SKIP_RANGE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_RANGE` | — | SKIPPED | Client sent a Range request header or upstream returned 206 Partial Content | Expected behavior — partial content cannot be converted. No action needed. |
-| `SKIP_STREAMING` | `NGX_HTTP_MARKDOWN_INELIGIBLE_STREAMING` | — | SKIPPED | Response matches `markdown_stream_types` (unbounded streaming) | Expected for SSE/streaming endpoints. If a static page triggers this, check your `markdown_stream_types` configuration. |
-| `SKIP_CONTENT_TYPE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_CONTENT_TYPE` | — | SKIPPED | Upstream Content-Type is not `text/html` | Expected for JSON, XML, image, and other non-HTML responses. If an HTML page triggers this, check the upstream `Content-Type` header. |
-| `SKIP_SIZE` | `NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE` | — | SKIPPED | Response body exceeds `markdown_limits memory=...` | Increase `markdown_limits memory=...` if the page should be converted, or exclude oversized pages from conversion scope. |
-| `SKIP_AUTH` | `NGX_HTTP_MARKDOWN_INELIGIBLE_AUTH` | — | SKIPPED | Auth policy denies conversion for authenticated requests | Expected when `markdown_auth_policy deny` is configured. If you see it unexpectedly, check whether the request is authenticated and whether the location/server block should allow conversion. |
-| `SKIP_ACCEPT` | _(Accept negotiation)_ | — | SKIPPED | Accept header does not include `text/markdown` | Expected for normal browser traffic. If an AI agent triggers this, verify the client sends `Accept: text/markdown`. Check `markdown_accept` if using `*/*`. |
-| `ELIGIBLE_CONVERTED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | — | CONVERTED | All checks passed, conversion succeeded | No action needed — this is the success path. |
-| `ELIGIBLE_FAILED_OPEN` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; original HTML served (`markdown_error_policy pass`) | Investigate the failure sub-classification (see below). The client received HTML, so no user impact. Review failure rate trends. |
-| `ELIGIBLE_FAILED_CLOSED` | `NGX_HTTP_MARKDOWN_ELIGIBLE` | _(any)_ | FAILED | Conversion attempted but failed; 502 returned (`markdown_error_policy fail_closed`) | Urgent — clients are receiving errors. Switch to `markdown_error_policy pass` or disable conversion for the affected scope. Investigate root cause. |
+| Reason Code | Request State | Description | Suggested Operator Action |
+|---|---|---|---|
+| `disabled` | NOT_ENABLED | Module disabled by configuration for this scope | Expected for scopes where you have not enabled conversion. If unexpected, check `markdown_filter` in the relevant `location`/`server` block. |
+| `not_eligible` | SKIPPED | Request not eligible (method not GET/HEAD, non-200/206 status, Range request, non-`text/html` Content-Type, exceeds `markdown_limits memory=`, or auth policy denies) | The individual failing check is in the structured log metadata. Most are expected (POST/PUT/DELETE, non-HTML, partial content). If an HTML GET page triggers this, check the failing check field in the log. |
+| `skipped_accept` | SKIPPED | `Accept` header present but does not request Markdown | Expected for normal browser traffic. If an AI agent triggers this, verify the client sends `Accept: text/markdown`. Check `markdown_accept` if using `*/*`. |
+| `skipped_no_accept` | SKIPPED | No `Accept` header and `markdown_accept` is `strict` | Expected when clients omit `Accept`. Relax `markdown_accept` to `wildcard` if you want to convert such traffic. |
+| `skipped_accept_reject` | SKIPPED | `Accept` explicitly rejects Markdown (`text/markdown;q=0` or wildcard with `q=0`) | Expected when a client signals it does not want Markdown. No action needed. |
+| `skipped_conditional` | SKIPPED | Conditional request matched (If-None-Match / If-Modified-Since) → 304 Not Modified | Expected for conditional revalidation. No action needed. |
+| `bypass_no_transform` | SKIPPED | `no-transform` Cache-Control directive present | Expected when upstream forbids transformation. No action needed. |
+| `converted` | CONVERTED | All checks passed, conversion succeeded | No action needed — this is the success path. |
+| `failed_open` | FAILED | Conversion attempted but failed; original HTML served (`markdown_error_policy pass`) | Investigate the failure sub-classification (see below). The client received HTML, so no user impact. Review failure rate trends. |
+| `failed_closed` | FAILED | Conversion attempted but failed; 502 returned (`markdown_error_policy fail_closed`) | Urgent — clients are receiving errors. Switch to `markdown_error_policy pass` or disable conversion for the affected scope. Investigate root cause. |
 
 #### Engine Selection Codes
 
@@ -1034,13 +1032,14 @@ When the streaming engine is active (`markdown_streaming_engine on`), the follow
 
 #### Failure Sub-Classification Codes
 
-When conversion fails (`ELIGIBLE_FAILED_OPEN` or `ELIGIBLE_FAILED_CLOSED`), the decision log also records a failure sub-classification that provides more detail:
+When conversion fails (`failed_open` or `failed_closed`), the decision log also records a failure sub-classification that provides more detail (the `reason` label on `nginx_markdown_failures_total`):
 
-| Failure Code | Error Category Enum | Description | Suggested Operator Action |
-|---|---|---|---|
-| `FAIL_CONVERSION` | `NGX_HTTP_MARKDOWN_ERROR_CONVERSION` | HTML parse or conversion error | Inspect the failing HTML with `curl`. Check if the upstream changed its HTML structure. Report a bug if the HTML is valid. |
-| `FAIL_RESOURCE_LIMIT` | `NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT` | Timeout (`markdown_limits timeout=...` exceeded) or memory limit reached | Increase `markdown_limits timeout=...` or `markdown_limits memory=...`, or exclude large/complex pages from conversion scope. |
-| `FAIL_SYSTEM` | `NGX_HTTP_MARKDOWN_ERROR_SYSTEM` | Internal or system error | This should not occur in normal operation. Check system resources (`free -h`, `dmesg`). If persistent, report a bug with logs. |
+| Failure Code | Description | Suggested Operator Action |
+|---|---|---|
+| `conversion_error` | HTML parse or conversion error | Inspect the failing HTML with `curl`. Check if the upstream changed its HTML structure. Report a bug if the HTML is valid. |
+| `memory_budget_exceeded` | Memory limit reached (`markdown_limits memory=...` or parser budget) | Increase `markdown_limits memory=...` or `markdown_parser_budget`, or exclude large/complex pages from conversion scope. |
+| `timeout` | Parser execution exceeded `markdown_parse_timeout` | Increase `markdown_parse_timeout` or exclude slow pages. |
+| `ffi_panic` | Internal/system error (Rust↔C panic) | Urgent — indicates an unexpected internal failure. Collect logs (`dmesg`) and report a bug. |
 
 ### Request States
 
@@ -1048,10 +1047,10 @@ Every request ends in one of four mutually exclusive states, derived from its re
 
 | Request State | Reason Codes | Meaning |
 |---|---|---|
-| NOT_ENABLED | `SKIP_CONFIG` | Module is disabled for this scope. The request was never evaluated. |
-| SKIPPED | `SKIP_METHOD`, `SKIP_STATUS`, `SKIP_RANGE`, `SKIP_STREAMING`, `SKIP_CONTENT_TYPE`, `SKIP_SIZE`, `SKIP_AUTH`, `SKIP_ACCEPT` | Module is enabled but the request did not pass an eligibility check. |
-| CONVERTED | `ELIGIBLE_CONVERTED` | All checks passed and conversion succeeded. |
-| FAILED | `ELIGIBLE_FAILED_OPEN`, `ELIGIBLE_FAILED_CLOSED` | All checks passed, conversion was attempted, but it did not succeed. |
+| NOT_ENABLED | `disabled` | Module is disabled for this scope. The request was never evaluated. |
+| SKIPPED | `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_accept_reject`, `skipped_conditional`, `bypass_no_transform` | Module is enabled but the request did not pass an eligibility check. |
+| CONVERTED | `converted` | All checks passed and conversion succeeded. |
+| FAILED | `failed_open`, `failed_closed` | All checks passed, conversion was attempted, but it did not succeed. |
 
 #### Deriving Request State Counts from Metrics
 

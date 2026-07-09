@@ -151,8 +151,8 @@ This release changes **two defaults** that affect behavior for configurations th
 
 | Directive | Status in 0.6.0 | Priority vs `markdown_memory_budget` | Earliest Removal |
 |-----------|-----------------|--------------------------------------|-----------------|
-| `markdown_max_size` | Supported, emits deprecation warning at `info` verbosity | Explicit `markdown_max_size` > `markdown_memory_budget` > compile-time default | 0.8.0 (two release grace period) |
-| `markdown_streaming_budget` | Supported, emits deprecation warning at `info` verbosity | Explicit `markdown_streaming_budget` > `markdown_memory_budget` > compile-time default | 0.8.0 (two release grace period) |
+| `markdown_max_size` | **Removed in 0.9.0** — `nginx -t` fails with a migration hint (`markdown_limits memory=<size>`) | N/A — use `markdown_limits memory=<size>` | Removed in 0.9.0 |
+| `markdown_streaming_budget` | **Removed in 0.9.0** — `nginx -t` fails with a migration hint (`markdown_limits streaming_buffer=<size>`) | N/A — use `markdown_limits streaming_buffer=<size>` | Removed in 0.9.0 |
 | `markdown_streaming_auto_threshold` | Removed in 0.8.0 — `nginx -t` will fail | N/A — use `markdown_stream_threshold` instead | Removed in 0.8.0 |
 | `markdown_memory_budget` | New in 0.6.0 | — | — |
 

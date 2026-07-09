@@ -162,8 +162,8 @@ All metrics use the `nginx_markdown_` prefix. Counter metrics use the `_total` s
 
 | Metric Name | Type | Label Key | Label Values | Description |
 |---|---|---|---|---|
-| `nginx_markdown_skips_total` | counter | `reason` | `SKIP_CONFIG`, `SKIP_METHOD`, `SKIP_STATUS`, `SKIP_CONTENT_TYPE`, `SKIP_SIZE`, `SKIP_STREAMING`, `SKIP_AUTH`, `SKIP_RANGE`, `SKIP_ACCEPT` | Requests skipped by reason. |
-| `nginx_markdown_failures_total` | counter | `stage` | `FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, `FAIL_SYSTEM` | Conversion failures by stage. |
+| `nginx_markdown_skips_total` | counter | `reason` | `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `disabled` | Requests skipped by reason. |
+| `nginx_markdown_failures_total` | counter | `reason` | `conversion_error`, `memory_budget_exceeded`, `ffi_panic` | Conversion failures by reason. |
 | `nginx_markdown_decompressions_total` | counter | `format` | `gzip`, `deflate`, `brotli` | Decompression operations by compression format. |
 
 ### Gauge Metrics (latency buckets)
@@ -231,8 +231,8 @@ resource limits.
 The endpoint produces exactly 28 base time series (always present):
 
 - 9 unlabeled counters (requests, conversions, passthrough, failopen, large response path, input bytes, output bytes, token savings, decompression failures)
-- 9 skip reason labels
-- 3 failure stage labels
+- 5 skip reason labels (`not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `disabled`)
+- 3 failure reason labels (`conversion_error`, `memory_budget_exceeded`, `ffi_panic`)
 - 3 decompression format labels
 - 4 latency bucket labels
 
@@ -319,24 +319,19 @@ nginx_markdown_conversions_total 1180
 # HELP nginx_markdown_passthrough_total Requests not converted (skipped or failed-open).
 # TYPE nginx_markdown_passthrough_total counter
 nginx_markdown_passthrough_total 70
-
 # HELP nginx_markdown_skips_total Requests skipped by reason.
 # TYPE nginx_markdown_skips_total counter
-nginx_markdown_skips_total{reason="SKIP_METHOD"} 10
-nginx_markdown_skips_total{reason="SKIP_STATUS"} 3
-nginx_markdown_skips_total{reason="SKIP_CONTENT_TYPE"} 20
-nginx_markdown_skips_total{reason="SKIP_SIZE"} 2
-nginx_markdown_skips_total{reason="SKIP_STREAMING"} 0
-nginx_markdown_skips_total{reason="SKIP_AUTH"} 8
-nginx_markdown_skips_total{reason="SKIP_RANGE"} 0
-nginx_markdown_skips_total{reason="SKIP_ACCEPT"} 15
-nginx_markdown_skips_total{reason="SKIP_CONFIG"} 5
+nginx_markdown_skips_total{reason="not_eligible"} 46
+nginx_markdown_skips_total{reason="skipped_accept"} 15
+nginx_markdown_skips_total{reason="skipped_no_accept"} 0
+nginx_markdown_skips_total{reason="skipped_conditional"} 0
+nginx_markdown_skips_total{reason="disabled"} 5
 
-# HELP nginx_markdown_failures_total Conversion failures by stage.
+# HELP nginx_markdown_failures_total Conversion failures by reason.
 # TYPE nginx_markdown_failures_total counter
-nginx_markdown_failures_total{stage="FAIL_CONVERSION"} 3
-nginx_markdown_failures_total{stage="FAIL_RESOURCE_LIMIT"} 4
-nginx_markdown_failures_total{stage="FAIL_SYSTEM"} 0
+nginx_markdown_failures_total{reason="conversion_error"} 3
+nginx_markdown_failures_total{reason="memory_budget_exceeded"} 4
+nginx_markdown_failures_total{reason="ffi_panic"} 0
 
 # HELP nginx_markdown_failopen_total Conversions failed with original HTML served (fail-open).
 # TYPE nginx_markdown_failopen_total counter
@@ -386,31 +381,28 @@ Prometheus metric label values use the same reason code strings as the module's 
 
 | Prometheus Label Value | Decision Log Reason | Meaning |
 |---|---|---|
-| `SKIP_CONFIG` | `SKIP_CONFIG` | Module disabled by configuration (`markdown_filter off`) |
-| `SKIP_METHOD` | `SKIP_METHOD` | Request method is not GET or HEAD |
-| `SKIP_STATUS` | `SKIP_STATUS` | Response status is not 200 OK; 206 maps to `SKIP_RANGE` |
-| `SKIP_CONTENT_TYPE` | `SKIP_CONTENT_TYPE` | Response Content-Type is not `text/html` |
-| `SKIP_SIZE` | `SKIP_SIZE` | Response exceeds `markdown_max_size` |
-| `SKIP_STREAMING` | `SKIP_STREAMING` | Content-Type matches `markdown_stream_types` |
-| `SKIP_AUTH` | `SKIP_AUTH` | Authenticated request with `markdown_auth_policy deny` |
-| `SKIP_RANGE` | `SKIP_RANGE` | Range request or 206 Partial Content |
-| `SKIP_ACCEPT` | `SKIP_ACCEPT` | Client Accept header does not include `text/markdown` |
+| `not_eligible` | `not_eligible` | Request not eligible (method, status, range, content-type, size, or auth) |
+| `disabled` | `disabled` | Module disabled by configuration (`markdown_filter off`) for this scope |
+| `skipped_accept` | `skipped_accept` | Client `Accept` header present but does not request Markdown |
+| `skipped_no_accept` | `skipped_no_accept` | No `Accept` header and `markdown_accept` is `strict` |
+| `skipped_accept_reject` | `skipped_accept_reject` | `Accept` explicitly rejects Markdown (`q=0`) |
+| `skipped_conditional` | `skipped_conditional` | Conditional request matched (304 Not Modified) |
 
-### Failure Stage Codes
+### Failure Reason Codes
 
 | Prometheus Label Value | Decision Log Reason | Meaning |
 |---|---|---|
-| `FAIL_CONVERSION` | `FAIL_CONVERSION` | HTML parsing or Markdown generation failed |
-| `FAIL_RESOURCE_LIMIT` | `FAIL_RESOURCE_LIMIT` | Size limit or timeout exceeded during conversion |
-| `FAIL_SYSTEM` | `FAIL_SYSTEM` | Memory allocation or system error |
+| `conversion_error` | `conversion_error` | HTML parsing or Markdown generation failed |
+| `memory_budget_exceeded` | `memory_budget_exceeded` | Size limit or timeout exceeded during conversion |
+| `ffi_panic` | `ffi_panic` | Internal/system error (Rust↔C panic) |
 
 ### Correlation Example
 
-If `nginx_markdown_skips_total{reason="SKIP_CONTENT_TYPE"}` spikes, search the decision log for entries with `reason=SKIP_CONTENT_TYPE` to identify which specific requests are being skipped and from which upstream paths.
+If `nginx_markdown_skips_total{reason="not_eligible"}` spikes, search the decision log for entries with `reason=not_eligible` to identify which specific requests are being skipped and from which upstream paths. The individual failing check (method, status, content-type, size, auth) is recorded in the structured log metadata.
 
 ```bash
 # Find decision log entries matching a specific reason code
-grep "SKIP_CONTENT_TYPE" /var/log/nginx/error.log | tail -20
+grep "reason=not_eligible" /var/log/nginx/error.log | tail -20
 ```
 
 ---
@@ -425,7 +417,7 @@ These patterns indicate normal, healthy operation:
 
 - **Conversion rate is stable.** `nginx_markdown_conversions_total / nginx_markdown_requests_total` remains consistent over time (typically 60–90% depending on traffic mix).
 - **Fail-open rate is near zero.** `nginx_markdown_failopen_total` grows slowly or not at all. A small number of fail-opens is acceptable; a sustained rate above 1% warrants investigation.
-- **Skip reasons are expected.** The dominant skip reasons match your deployment (e.g., `SKIP_ACCEPT` is high because most clients do not request Markdown).
+- **Skip reasons are expected.** The dominant skip reasons match your deployment (e.g., `skipped_accept` is high because most clients do not request Markdown).
 - **Latency is concentrated in fast buckets.** Most conversions fall in the `le="0.01"` and `le="0.1"` buckets. Few or no conversions in the `le="+Inf"` (>1s) bucket.
 - **Byte reduction is positive.** `nginx_markdown_output_bytes_total < nginx_markdown_input_bytes_total`, indicating Markdown output is smaller than HTML input.
 
@@ -433,11 +425,11 @@ These patterns indicate normal, healthy operation:
 
 These patterns indicate issues that may require action:
 
-- **Rising failure rate.** `sum(nginx_markdown_failures_total)` growing faster than `nginx_markdown_conversions_total`. Check the `stage` label breakdown to identify the failure category.
+- **Rising failure rate.** `sum(nginx_markdown_failures_total)` growing faster than `nginx_markdown_conversions_total`. Check the `reason` label breakdown to identify the failure category.
 - **Fail-open rate above 1%.** `nginx_markdown_failopen_total / nginx_markdown_requests_total > 0.01` sustained over 5 minutes. The module is silently serving HTML instead of Markdown.
 - **Latency drift to slow buckets.** Increasing counts in `le="1.0"` or `le="+Inf"` buckets. May indicate large documents, resource contention, or upstream slowness.
-- **Unexpected skip reason spikes.** A sudden increase in a specific skip reason (e.g., `SKIP_STATUS`) may indicate upstream issues returning non-200 responses.
-- **System errors.** Any non-zero `nginx_markdown_failures_total{stage="FAIL_SYSTEM"}` warrants immediate investigation — these indicate memory allocation or system-level failures.
+- **Unexpected skip reason spikes.** A sudden increase in `not_eligible` (or a specific `skipped_*` code, e.g., `skipped_accept`) may indicate upstream issues returning non-200 responses.
+- **System errors.** Any non-zero `nginx_markdown_failures_total{reason="ffi_panic"}` warrants immediate investigation — these indicate memory allocation or system-level failures.
 
 ### Recommended Alerting Thresholds
 

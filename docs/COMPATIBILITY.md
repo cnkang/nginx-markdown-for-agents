@@ -91,10 +91,10 @@ prevent accidental use of an incompatible package:
 Examples:
 
 ```
-nginx-module-markdown-for-agents_0.9.0_nginx-1.26.3_amd64.deb
-nginx-module-markdown-for-agents_0.9.0_nginx-1.26.3_arm64.deb
-nginx-module-markdown-for-agents-0.9.0-nginx1.26.3-1.x86_64.rpm
-nginx-module-markdown-for-agents-0.9.0-nginx1.26.3-1.aarch64.rpm
+nginx-module-markdown-for-agents_0.9.1_nginx-1.26.3_amd64.deb
+nginx-module-markdown-for-agents_0.9.1_nginx-1.26.3_arm64.deb
+nginx-module-markdown-for-agents-0.9.1-nginx1.26.3-1.x86_64.rpm
+nginx-module-markdown-for-agents-0.9.1-nginx1.26.3-1.aarch64.rpm
 ```
 
 Always select the package that matches both your NGINX version and CPU
