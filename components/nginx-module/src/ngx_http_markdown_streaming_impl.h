@@ -35,6 +35,9 @@ static void ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
 static void ngx_http_markdown_otel_span_export(
     ngx_http_markdown_otel_span_t *span, ngx_log_t *log,
     ngx_http_request_t *r);
+static void ngx_http_markdown_streaming_start_otel_span(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf);
 
 /*
  * Streaming body filter main entry point.
@@ -2600,11 +2603,11 @@ ngx_http_markdown_streaming_finalize_request(
          */
         ngx_log_error(NGX_LOG_INFO,
             r->connection->log, 0,
-            "markdown: etag=%*s "
-            "uri=%V "
+            "markdown: etag_len=%uz "
+            "uri_len=%uz "
             "out_bytes=%uz tokens=%ui",
-            result.etag_len, result.etag,
-            &r->uri,
+            result.etag_len,
+            r->uri.len,
             ctx->streaming.output.bytes,
             (ngx_uint_t) result.token_estimate);
     }
@@ -2736,6 +2739,56 @@ ngx_http_markdown_streaming_finalize_request(
     }
 
     return rc;
+}
+
+
+static void
+ngx_http_markdown_streaming_start_otel_span(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    static ngx_str_t  s_gfm = ngx_string("gfm");
+    static ngx_str_t  s_mdx = ngx_string("mdx");
+    static ngx_str_t  s_org = ngx_string("org-mode");
+    static ngx_str_t  s_cm = ngx_string("commonmark");
+
+    const ngx_str_t  *flavor;
+
+    ctx->otel_span = NULL;
+    if (conf->ops.otel_enabled == 0) {
+        return;
+    }
+
+    ctx->otel_span = ngx_http_markdown_otel_span_start(r, conf);
+    if (ctx->otel_span == NULL) {
+        return;
+    }
+
+    switch (conf->flavor) {
+    case NGX_HTTP_MARKDOWN_FLAVOR_GFM:
+        flavor = &s_gfm;
+        break;
+    case NGX_HTTP_MARKDOWN_FLAVOR_MDX:
+        flavor = &s_mdx;
+        break;
+    case NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE:
+        flavor = &s_org;
+        break;
+    default:
+        flavor = &s_cm;
+        break;
+    }
+
+    ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+        (const u_char *) "flavor", 6, flavor->data, flavor->len);
+    ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+        (const u_char *) "engine", 6, (const u_char *) "streaming", 9);
+
+    if (r->uri.len > 0) {
+        ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
+            (const u_char *) "uri_route", 9,
+            (const u_char *) "redacted", 8);
+    }
 }
 
 
@@ -2920,42 +2973,7 @@ ngx_http_markdown_streaming_init_handle(
     NGX_HTTP_MARKDOWN_METRIC_INC(
         streaming.requests_total);
 
-    ctx->otel_span = NULL;
-    if (conf->ops.otel_enabled) {
-        ctx->otel_span = ngx_http_markdown_otel_span_start(r, conf);
-        if (ctx->otel_span != NULL) {
-            /*
-             * Map flavor to OTel attribute string inline to avoid
-             * cross-impl-header dependency.  Keep in sync with
-             * ngx_http_markdown_otel_flavor_name() in
-             * ngx_http_markdown_conversion_impl.h.
-             */
-            static ngx_str_t  s_gfm = ngx_string("gfm");
-            static ngx_str_t  s_mdx = ngx_string("mdx");
-            static ngx_str_t  s_org = ngx_string("org-mode");
-            static ngx_str_t  s_cm  = ngx_string("commonmark");
-            const ngx_str_t  *fn;
-
-            switch (conf->flavor) {
-            case NGX_HTTP_MARKDOWN_FLAVOR_GFM:    fn = &s_gfm; break;
-            case NGX_HTTP_MARKDOWN_FLAVOR_MDX:    fn = &s_mdx; break;
-            case NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE: fn = &s_org; break;
-            default:                              fn = &s_cm;  break;
-            }
-
-            ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-                (const u_char *) "flavor", 6,
-                fn->data, fn->len);
-            ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-                (const u_char *) "engine", 6,
-                (const u_char *) "streaming", 9);
-            if (r->uri.len > 0) {
-                ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-                    (const u_char *) "uri", 3,
-                    r->uri.data, r->uri.len);
-            }
-        }
-    }
+    ngx_http_markdown_streaming_start_otel_span(r, ctx, conf);
 
     /* Sync streaming fallback state machine: handle initialized → PRE_COMMIT */
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
