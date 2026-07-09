@@ -33,8 +33,8 @@
 #   - Machine-readable pass/fail per file to stdout
 #
 # SEE ALSO:
-#   - .kiro/specs/31-0.7.0-release-package-compatibility/requirements.md §4
-#   - .kiro/specs/31-0.7.0-release-package-compatibility/design.md §Components 1
+#   - .kiro/specs/archive/31-0.7.0-release-package-compatibility/requirements.md §4
+#   - .kiro/specs/archive/31-0.7.0-release-package-compatibility/design.md §Components 1
 # ---------------------------------------------------------------------------
 
 set -e

@@ -37,8 +37,8 @@
 #   - Uses dpkg-deb --contents for .deb, rpm -qlp for .rpm
 #
 # SEE ALSO:
-#   - .kiro/specs/31-0.7.0-release-package-compatibility/requirements.md §5
-#   - .kiro/specs/31-0.7.0-release-package-compatibility/design.md §Components 2
+#   - .kiro/specs/archive/31-0.7.0-release-package-compatibility/requirements.md §5
+#   - .kiro/specs/archive/31-0.7.0-release-package-compatibility/design.md §Components 2
 # ---------------------------------------------------------------------------
 
 set -e

@@ -30,6 +30,13 @@ All five P0 sub-specs must ship in 0.4.0. The P1 sub-spec ships if ready; otherw
 | `go-no-go-template.md` | Go/No-Go decision record template |
 | `scope-evaluation-process.md` | Scope evaluation process for new proposals |
 
+The four `*-0-5-0` stamped templates (`dod-template-0-5-0.md`,
+`boundary-description-template-0-5-0.md`, `risk-register-template-0-5-0.md`,
+`scope-creep-evaluation-0-5-0.md`) were relocated here from `docs/project/` on
+2026-07-09 so that all release-gate artifacts colocate in one directory. They
+are retained for historical reference; the unstamped `*.md` templates above are
+the active ones consumed by tooling.
+
 ## Usage
 
 Each sub-spec consumes these artifacts during development and completion. Sub-spec owners use the templates to record DoD evaluations, risk registers, boundary descriptions, and test matrix coverage. The release checklist and Go/No-Go template are used at release time to verify all gates pass before shipping 0.4.0.
