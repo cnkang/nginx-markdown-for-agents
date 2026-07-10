@@ -207,14 +207,18 @@ The `Corpus Benchmark Gate` in `.github/workflows/ci.yml` is wired to run when a
 
 - `corpus_tools` maps to `tools/corpus/**`, ensuring changes to benchmark helper scripts (for example `tools/corpus/validate_corpus.sh` and `tools/corpus/test-corpus-conversion/**`) cannot bypass corpus benchmark validation in PR CI.
 
-### Quality-Only Gate in CI
+### Linux CI Baseline
 
-The committed corpus baseline (`perf/baselines/corpus-baseline.json`) uses `platform: "reference"` to be platform-agnostic. When the comparison script detects a platform mismatch between baseline and current report, it automatically skips latency metric comparisons (p50/p95/p99) and only evaluates quality metrics (fallback rate, token reduction). This is by design:
+The committed corpus baseline (`perf/baselines/corpus-baseline.json`) is generated
+on `linux-x86_64`, matching the GitHub Actions runner used by the Corpus
+Benchmark Gate. This keeps p50/p95/p99 comparisons active in PR CI while also
+checking platform-independent quality metrics such as fallback rate, token
+reduction, and conversion outcomes.
 
-- **Quality metrics** (fallback rate, token reduction, conversion outcomes) are platform-independent and reliably comparable across environments.
-- **Latency regression detection** is handled by the existing perf pipeline (`run_perf_baseline.sh` + `threshold_engine.py`), which uses platform-matched baselines stored per-platform in `perf/baselines/`.
-
-This separation avoids cross-platform latency noise in the corpus benchmark verdict while ensuring quality regressions are always caught.
+Local runs on a different platform still skip latency comparisons to avoid
+cross-platform noise; their quality metrics remain comparable. Regenerate the
+committed baseline on `linux-x86_64` whenever the corpus or converter baseline
+intentionally changes.
 
 ### Quality Thresholds
 

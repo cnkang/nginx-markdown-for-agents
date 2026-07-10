@@ -28,12 +28,60 @@ from evidence_gate_091 import (
     _RELEASE_TAG_RE,
     _check_skipped_scenarios,
     _extract_evidence_metrics,
+    _extract_memory_points,
     _nginx_bin_available,
     _write_output,
     main,
     parse_args,
 )
 from threshold_engine import evaluate_module_level
+
+
+def test_memory_points_require_measured_input_bytes():
+    scenarios = [
+        {"name": "plain-small", "metrics": {"worker_rss_mb": 12.0}},
+        {
+            "name": "large-body",
+            "metrics": {"worker_rss_mb": 24.0, "input_bytes": 1_048_516},
+        },
+    ]
+
+    assert _extract_memory_points(scenarios) == [
+        (1_048_516.0, 24.0 * 1024 * 1024),
+    ]
+
+
+def test_tag_release_job_supplies_module_enabled_nginx():
+    workflow = (
+        Path(__file__).resolve().parents[3]
+        / ".github"
+        / "workflows"
+        / "release-packages.yml"
+    ).read_text(encoding="utf-8")
+
+    assert 'cp "${NGINX_SRC}/objs/nginx" build/nginx' in workflow
+    assert "apache2-utils" in workflow
+    assert "pattern: module-so-*-x86_64" in workflow
+    assert "merge-multiple: true" in workflow
+    assert "NGINX_BIN: ${{ github.workspace }}/module-runtime/nginx" in workflow
+    assert "MODULE_SO: ${{ github.workspace }}/module-runtime/ngx_http_markdown_filter_module.so" in workflow
+    assert "python3 tools/perf/evidence_gate_091.py --mode blocking" in workflow
+    assert "evidence_gate_091.py --blocking" not in workflow
+
+
+def test_module_baseline_contains_measured_critical_scenarios():
+    baseline_path = (
+        Path(__file__).resolve().parents[3]
+        / "perf"
+        / "baselines"
+        / "module-baseline-091.json"
+    )
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    scenarios = baseline["module_benchmark"]["scenarios"]
+    by_name = {scenario["name"]: scenario for scenario in scenarios}
+    for name in ("plain-small", "large-body", "streaming-first"):
+        assert by_name[name]["status"] == "completed"
+        assert by_name[name]["metrics"]["input_bytes"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -556,7 +604,7 @@ class TestEvidenceMetricExtraction:
 
         # Verdict should still be GO because there are no breaches, just skipped percentage thresholds
         assert result["verdict"] == "GO"
-        
+
         # Absolute caps like fallback_rate_abs should still be evaluated and pass
         fallback_entry = next(r for r in result["results"] if r["metric"] == "fallback_rate_abs")
         assert fallback_entry["status"] == "pass"

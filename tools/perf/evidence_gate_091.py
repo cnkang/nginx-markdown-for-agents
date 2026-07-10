@@ -276,49 +276,37 @@ def _calc_fallback_rate(scenarios: list[dict]) -> float:
     return num / den if den > 0 else 0.0
 
 
+def _memory_point_for_scenario(scenario: dict) -> tuple[float, float] | None:
+    """Return one measured input/RSS point, or None when evidence is absent."""
+    metrics = scenario.get("metrics") or scenario.get("results") or scenario
+    rss_mb = metrics.get("worker_rss_mb")
+    input_bytes = metrics.get("input_bytes") or metrics.get("html_bytes")
+    if rss_mb is not None and rss_mb > 0:
+        if input_bytes is not None and input_bytes > 0:
+            return float(input_bytes), rss_mb * 1024 * 1024
+        return None
+
+    peak_rss = metrics.get("peak_memory_bytes") or metrics.get("worker_rss_bytes")
+    if input_bytes is None or input_bytes <= 0:
+        return None
+    if peak_rss is None or peak_rss <= 0:
+        return None
+    return float(input_bytes), float(peak_rss)
+
+
 def _extract_memory_points(scenarios: list[dict]) -> list[tuple[float, float]]:
-    """Extract memory data points for simple linear regression.
+    """Extract measured memory data points for simple linear regression.
 
-    Uses ``input_bytes`` from the benchmark report when available.
-    Falls back to scenario-name-based size estimates only when the
-    report does not include actual input sizes.
+    Uses measured ``input_bytes`` from the benchmark report. Scenarios
+    without an actual input size are excluded rather than assigned an
+    invented size that would corrupt the regression slope.
     """
-    memory_data_points = []
-    # Fallback sizes used only when the report lacks input_bytes
-    fallback_sizes = {
-        "plain-small": 0.005,
-        "chunked-medium": 0.05,
-        "gzip-large": 0.1,
-        "large-body": 1.0,
-        "streaming-first": 0.3
-    }
-
-    for s in scenarios:
-        s_name = s.get("name")
-        if s_name is None:
-            continue
-        m = s.get("metrics") or s.get("results") or s
-
-        # 0.9.1 schema: worker_rss_mb and input_bytes
-        rss_mb = m.get("worker_rss_mb")
-        if rss_mb is not None and rss_mb > 0:
-            # Prefer actual input_bytes from the report
-            input_bytes = m.get("input_bytes") or m.get("html_bytes")
-            if input_bytes is not None and input_bytes > 0:
-                memory_data_points.append((float(input_bytes), rss_mb * 1024 * 1024))
-            else:
-                # Fall back to scenario-name-based size estimate
-                input_size_mb = fallback_sizes.get(s_name)
-                if input_size_mb is not None:
-                    memory_data_points.append((input_size_mb * 1024 * 1024, rss_mb * 1024 * 1024))
-        else:
-            # Legacy format
-            input_bytes = m.get("input_bytes") or m.get("html_bytes")
-            peak_rss = m.get("peak_memory_bytes") or m.get("worker_rss_bytes")
-            if input_bytes is not None and peak_rss is not None and input_bytes > 0 and peak_rss > 0:
-                memory_data_points.append((float(input_bytes), float(peak_rss)))
-
-    return memory_data_points
+    return [
+        point
+        for scenario in scenarios
+        if scenario.get("name") is not None
+        if (point := _memory_point_for_scenario(scenario)) is not None
+    ]
 
 
 def _compute_memory_slope(data_points: list[tuple[float, float]]) -> float:
