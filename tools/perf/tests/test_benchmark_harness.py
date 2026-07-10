@@ -41,6 +41,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SCHEMA_PATH = REPO_ROOT / "perf" / "metrics-schema.json"
 BENCHMARK_SCRIPT = REPO_ROOT / "tools" / "perf" / "run_module_benchmark.sh"
 
+
+def test_module_benchmark_records_actual_fixture_bytes():
+    """Every scenario must report the actual fixture size for memory slope."""
+    source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+    assert 'fixture_bytes="$(wc -c < "$CORPUS_DIR/$SC_FIXTURE")"' in source
+    assert source.count('"input_bytes": input_bytes') == 2
+
 # Canonical allowlist for bash binary paths (Rule 33: CLI-derived executables
 # must match a fixed canonical allowlist before subprocess use).
 _BASH_ALLOWLIST = {

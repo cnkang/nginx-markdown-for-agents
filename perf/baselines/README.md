@@ -15,6 +15,8 @@ Each platform has a dedicated baseline file:
 - `darwin-arm64.json` - macOS on Apple Silicon
 - `linux-x86_64.json` - Linux on x86_64
 - `darwin-x86_64.json` - macOS on Intel
+- `corpus-baseline.json` - Linux x86_64 corpus quality and latency baseline
+- `module-baseline-091.json` - Linux x86_64 module-level 0.9.1 evidence baseline
 
 ## Running Benchmarks
 

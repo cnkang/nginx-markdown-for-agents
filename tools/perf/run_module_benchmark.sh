@@ -623,6 +623,8 @@ run_scenario() {
     echo "{\"name\":\"$SC_NAME\",\"status\":\"skipped\",\"reason\":\"fixture_not_found\"}"
     return 0
   fi
+  local fixture_bytes
+  fixture_bytes="$(wc -c < "$CORPUS_DIR/$SC_FIXTURE")"
 
   # Start NGINX with appropriate profile
   start_nginx "$SC_PROFILE" "128"
@@ -675,7 +677,8 @@ run_scenario() {
   # Parse results and emit JSON (passing TTFB data for integration)
   local scenario_json
   scenario_json="$(parse_load_gen_results "$raw_output" "$SC_NAME" "$SC_PROFILE" \
-    "$SC_COMPRESSION" "$SC_TRANSFER" "$SC_CONCURRENCY" "$rss_after" "$ttfb_file" "$metrics_file")"
+    "$SC_COMPRESSION" "$SC_TRANSFER" "$SC_CONCURRENCY" "$rss_after" \
+    "$ttfb_file" "$metrics_file" "$fixture_bytes")"
 
   # Stop NGINX for next scenario
   stop_nginx
@@ -699,6 +702,7 @@ run_scenario() {
 #   $7 - worker RSS in KB
 #   $8 - path to TTFB JSON (from measure_ttfb)
 #   $9 - path to NGINX metrics JSON
+#   $10 - actual input fixture size in bytes
 parse_load_gen_results() {
   local raw_file="$1"
   local name="$2"
@@ -709,9 +713,11 @@ parse_load_gen_results() {
   local rss_kb="$7"
   local ttfb_file="${8:-}"
   local metrics_file="${9:-}"
+  local input_bytes="${10:-0}"
 
   python3 - "$raw_file" "$name" "$profile" "$compression" "$transfer" \
-    "$concurrency" "$rss_kb" "$LOAD_GEN" "$ttfb_file" "$metrics_file" <<'PYEOF'
+    "$concurrency" "$rss_kb" "$LOAD_GEN" "$ttfb_file" "$metrics_file" \
+    "$input_bytes" <<'PYEOF'
 import csv
 import json
 import sys
@@ -738,6 +744,7 @@ rss_kb = int(sys.argv[7])
 load_gen = sys.argv[8]
 ttfb_json_path = sys.argv[9]
 metrics_json_path = sys.argv[10]
+input_bytes = int(sys.argv[11])
 
 # Parse supplemental TTFB data (measured via curl time_starttransfer)
 ttfb_data = read_json_file(
@@ -837,6 +844,7 @@ elif load_gen == "ab":
                 "ttfb_p95_ms": ttfb_p95,
                 "ttlb_p50_ms": p50_val,
                 "worker_rss_mb": rss_kb / 1024.0,
+                "input_bytes": input_bytes,
                 "streaming_ratio": streaming_ratio,
                 "fullbuffer_ratio": fullbuffer_ratio,
                 "fallback_rate": fallback_rate,
@@ -884,6 +892,7 @@ result = {
         "ttfb_p95_ms": ttfb_p95,
         "ttlb_p50_ms": p50,
         "worker_rss_mb": rss_kb / 1024.0,
+        "input_bytes": input_bytes,
         "streaming_ratio": streaming_ratio,
         "fullbuffer_ratio": fullbuffer_ratio,
         "fallback_rate": fallback_rate,
