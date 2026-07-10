@@ -1180,7 +1180,7 @@ merge_stream_config(ngx_http_markdown_conf_t *child,
         NGX_HTTP_MARKDOWN_STREAM_BUDGET_DEFAULT;
     defaults.error_policy = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
-    ngx_http_markdown_merge_stream_values(child, parent, &defaults);
+    ngx_http_markdown_merge_stream_values(child, parent, &defaults, 0);
     if (stream_threshold_set) {
         child->stream.threshold_explicit = 1;
     }
