@@ -1019,6 +1019,50 @@ test_profile_inheritance_child_wins(void)
 }
 
 static void
+test_hierarchical_profile_merge_child_defaults(void)
+{
+    ngx_conf_t               cf;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char                    *rc;
+
+    TEST_SUBSECTION("hierarchical merge: child profile defaults override parent profile values");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    init_conf(&parent);
+    init_conf(&child);
+
+    parent.profile.name = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
+    parent.profile.set = 1;
+
+    child.profile.name = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+    child.profile.set = 1;
+
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+
+    TEST_ASSERT(rc == NGX_CONF_OK, "merge should pass");
+
+    TEST_ASSERT(child.accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD,
+        "child streaming_first wildcard overrides parent balanced strict");
+    TEST_ASSERT(child.policy.conditional_requests ==
+        NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED,
+        "child streaming_first disabled cache validation overrides parent ims_only");
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
+        "child streaming_first force overrides parent balanced auto");
+    TEST_ASSERT(child.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
+        "child streaming_first engine_on overrides parent balanced auto");
+    TEST_ASSERT(child.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
+        "child streaming_first pass error policy overrides parent balanced pass");
+
+    TEST_PASS("hierarchical merge: child profile defaults win over parent profile values");
+}
+
+static void
 test_cache_validation_explicit_inheritance(void)
 {
     ngx_conf_t               cf;
@@ -1330,6 +1374,7 @@ main(void)
     /* Task 9.9: Profile inheritance */
     test_profile_inheritance();
     test_profile_inheritance_child_wins();
+    test_hierarchical_profile_merge_child_defaults();
     test_cache_validation_explicit_inheritance();
 
     /* Task 9.10: No-profile built-in defaults */

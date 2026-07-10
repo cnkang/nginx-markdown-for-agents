@@ -457,17 +457,56 @@ ngx_http_markdown_profile_defaults(ngx_uint_t profile,
 
 /*
  * Merge base conversion/runtime options and operational flags.
+ *
+ * When profile_differs is true (child has a different profile than parent),
+ * UNSET child fields take the child's profile default directly, bypassing
+ * parent inheritance.  This prevents parent profile defaults from shadowing
+ * child profile defaults (e.g. parent `balanced` strict → child
+ * `streaming_first` wildcard).
  */
 static void
 ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev,
-    const ngx_http_markdown_profile_defaults_t *profile_defaults)
+    const ngx_http_markdown_profile_defaults_t *profile_defaults,
+    ngx_flag_t profile_differs)
 {
-    ngx_conf_merge_size_value(conf->max_size, prev->max_size,
+#define ngx_conf_merge_uint_profile(conf_val, prev_val, dflt)                  \
+    do {                                                                        \
+        if (conf_val == NGX_CONF_UNSET_UINT) {                                  \
+            conf_val = (!profile_differs && prev_val != NGX_CONF_UNSET_UINT)    \
+                ? prev_val : (dflt);                                            \
+        }                                                                       \
+    } while (0)
+
+#define ngx_conf_merge_size_profile(conf_val, prev_val, dflt)                   \
+    do {                                                                        \
+        if (conf_val == NGX_CONF_UNSET_SIZE) {                                  \
+            conf_val = (!profile_differs && prev_val != NGX_CONF_UNSET_SIZE)    \
+                ? prev_val : (dflt);                                            \
+        }                                                                       \
+    } while (0)
+
+#define ngx_conf_merge_msec_profile(conf_val, prev_val, dflt)                   \
+    do {                                                                        \
+        if (conf_val == NGX_CONF_UNSET_MSEC) {                                  \
+            conf_val = (!profile_differs && prev_val != NGX_CONF_UNSET_MSEC)    \
+                ? prev_val : (dflt);                                            \
+        }                                                                       \
+    } while (0)
+
+#define ngx_conf_merge_flag_profile(conf_val, prev_val, dflt)                  \
+    do {                                                                        \
+        if (conf_val == NGX_CONF_UNSET) {                                       \
+            conf_val = (!profile_differs && prev_val != NGX_CONF_UNSET)        \
+                ? prev_val : (dflt);                                            \
+        }                                                                       \
+    } while (0)
+
+    ngx_conf_merge_size_profile(conf->max_size, prev->max_size,
                               profile_defaults->limits_memory);
-    ngx_conf_merge_msec_value(conf->timeout, prev->timeout,
+    ngx_conf_merge_msec_profile(conf->timeout, prev->timeout,
                               profile_defaults->limits_timeout);
-    ngx_conf_merge_uint_value(conf->on_error, prev->on_error,
+    ngx_conf_merge_uint_profile(conf->on_error, prev->on_error,
                               profile_defaults->error_policy);
     ngx_conf_merge_uint_value(conf->error_status, prev->error_status,
                               NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT);
@@ -475,15 +514,16 @@ ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
                               profile_defaults->flavor);
     ngx_conf_merge_value(conf->token_estimate, prev->token_estimate, 0);
     ngx_conf_merge_value(conf->front_matter, prev->front_matter, 0);
-    ngx_conf_merge_uint_value(conf->accept_policy, prev->accept_policy,
+    ngx_conf_merge_uint_profile(conf->accept_policy, prev->accept_policy,
                               profile_defaults->accept_policy);
     ngx_conf_merge_uint_value(conf->policy.auth_policy, prev->policy.auth_policy,
                               profile_defaults->auth_policy);
-    ngx_conf_merge_value(conf->policy.generate_etag,
+    ngx_conf_merge_flag_profile(conf->policy.generate_etag,
                          prev->policy.generate_etag,
                          profile_defaults->generate_etag);
-    ngx_conf_merge_uint_value(conf->policy.conditional_requests, prev->policy.conditional_requests,
-                              profile_defaults->conditional_requests);
+    ngx_conf_merge_uint_profile(conf->policy.conditional_requests,
+                         prev->policy.conditional_requests,
+                         profile_defaults->conditional_requests);
     ngx_conf_merge_uint_value(conf->policy.log_verbosity, prev->policy.log_verbosity,
                               NGX_HTTP_MARKDOWN_LOG_INFO);
     ngx_conf_merge_value(conf->buffer_chunked, prev->buffer_chunked, 1);
@@ -506,6 +546,11 @@ ngx_http_markdown_merge_core_base_values(ngx_http_markdown_conf_t *conf,
     ngx_conf_merge_size_value(conf->decompress.parser_budget,
                               prev->decompress.parser_budget,
                               64 * 1024 * 1024);
+
+#undef ngx_conf_merge_uint_profile
+#undef ngx_conf_merge_size_profile
+#undef ngx_conf_merge_msec_profile
+#undef ngx_conf_merge_flag_profile
 }
 
 /*
@@ -571,9 +616,11 @@ ngx_http_markdown_merge_core_ptr_values(ngx_http_markdown_conf_t *conf,
 static void
 ngx_http_markdown_merge_core_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev,
-    const ngx_http_markdown_profile_defaults_t *profile_defaults)
+    const ngx_http_markdown_profile_defaults_t *profile_defaults,
+    ngx_flag_t profile_differs)
 {
-    ngx_http_markdown_merge_core_base_values(conf, prev, profile_defaults);
+    ngx_http_markdown_merge_core_base_values(conf, prev, profile_defaults,
+                                             profile_differs);
     ngx_http_markdown_merge_core_ops_values(conf, prev, profile_defaults);
     ngx_http_markdown_merge_core_ptr_values(conf, prev, profile_defaults);
 }
@@ -801,6 +848,34 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
                                        &profile_defaults);
 
     /*
+     * When the child has a different profile than the parent (both set
+     * but with different names), profile-generated defaults from the
+     * parent must NOT shadow the child's own profile defaults.  Without
+     * this, a parent `profile balanced` resolves accept_policy to STRICT
+     * (a balanced default, not an explicit directive), and a child
+     * `profile streaming_first` inherits that STRICT instead of getting
+     * its own WILDCARD default.
+     *
+     * We resolve this by "unsetting" parent values that were produced by
+     * the parent's own profile defaults (not by explicit directives) so
+     * the merge falls through to the child's profile defaults.  In
+     * practice, the parent's merged values are indistinguishable from
+     * explicitly-set values after merge_conf completes, so we use a
+     * simpler heuristic: when profiles differ, child UNSET fields take
+     * the child profile default directly, bypassing parent inheritance.
+     *
+     * This is safe because an operator who sets an explicit directive at
+     * the parent level does so at the http or server level, and a child
+     * location with a different profile would also explicitly set any
+     * field it wants to override — the inherited parent value is only a
+     * fallback, and when profiles differ the child's profile default is
+     * the semantically correct fallback.
+     */
+    ngx_flag_t profile_differs =
+        (conf->profile.set && prev->profile.set
+         && conf->profile.name != prev->profile.name);
+
+    /*
      * Save whether max_size and streaming_budget were explicitly set at
      * this configuration level BEFORE ngx_conf_merge_size_value replaces
      * NGX_CONF_UNSET_SIZE with the inherited/default value.  This is
@@ -820,9 +895,11 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         (conf->stream.budget != NGX_CONF_UNSET_SIZE);
 #endif
 
-    ngx_http_markdown_merge_core_values(conf, prev, &profile_defaults);
+    ngx_http_markdown_merge_core_values(conf, prev, &profile_defaults,
+                                         profile_differs);
 
-    ngx_http_markdown_merge_stream_values(conf, prev, &profile_defaults);
+    ngx_http_markdown_merge_stream_values(conf, prev, &profile_defaults,
+                                           profile_differs);
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     if (stream_on_error_set) {
