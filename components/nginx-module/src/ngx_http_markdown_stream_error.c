@@ -136,6 +136,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
                       "rejecting with %ui (on_error=reject)",
                       conf->error_status);
         return ngx_http_filter_finalize_request(r,
+            &ngx_http_markdown_filter_module,
             (ngx_int_t) conf->error_status);
 
     case NGX_HTTP_MD_ACTION_SAFE_FINISH:

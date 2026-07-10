@@ -133,6 +133,7 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
          * error response.
          */
         return ngx_http_filter_finalize_request(r,
+            &ngx_http_markdown_filter_module,
             (ngx_int_t) conf->error_status);
     }
 

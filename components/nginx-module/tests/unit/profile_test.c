@@ -1079,8 +1079,9 @@ test_hierarchical_profile_merge_preserves_explicit_parent(void)
 
     parent.profile.name = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
     parent.profile.set = 1;
+    parent.max_size = 32 * 1024 * 1024;
 
-    /* Simulate parent merge so parent fields resolve to balanced defaults */
+    /* Simulate the real parse order: explicit fields are set before merge. */
     g_stub_conflicts.conflicts = NULL;
     g_stub_conflicts.count = 0;
     g_stub_conflict_called = 0;
@@ -1090,10 +1091,6 @@ test_hierarchical_profile_merge_preserves_explicit_parent(void)
         tmp_parent.profile.name = NGX_HTTP_MARKDOWN_PROFILE_NONE;
         ngx_http_markdown_merge_conf(&cf, &tmp_parent, &parent);
     }
-
-    /* Now set an explicit directive at parent level that differs from
-     * the balanced default: memory=32m (balanced default is 8m) */
-    parent.max_size = 32 * 1024 * 1024;
 
     child.profile.name = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
     child.profile.set = 1;
@@ -1115,6 +1112,83 @@ test_hierarchical_profile_merge_preserves_explicit_parent(void)
         "child streaming_first wildcard still applies for non-explicit fields");
 
     TEST_PASS("hierarchical merge: explicit parent directive preserved");
+}
+
+static void
+test_hierarchical_profile_merge_preserves_explicit_parent_default_value(void)
+{
+    ngx_conf_t               cf;
+    ngx_http_markdown_conf_t root;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char                    *rc;
+
+    TEST_SUBSECTION("hierarchical merge: explicit parent value equal to profile default");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    init_conf(&root);
+    init_conf(&parent);
+    init_conf(&child);
+
+    parent.profile.name = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
+    parent.profile.set = 1;
+    parent.accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_STRICT;
+
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &root, &parent);
+    TEST_ASSERT(rc == NGX_CONF_OK, "parent merge should pass");
+
+    child.profile.name = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+    child.profile.set = 1;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+    TEST_ASSERT(rc == NGX_CONF_OK, "child merge should pass");
+    TEST_ASSERT(child.accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_STRICT,
+        "explicit parent strict must survive even when it equals parent default");
+
+    TEST_PASS("explicit parent default-valued directive preserved");
+}
+
+static void
+test_child_profile_overrides_merged_builtin_parent_defaults(void)
+{
+    ngx_conf_t               cf;
+    ngx_http_markdown_conf_t root;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char                    *rc;
+
+    TEST_SUBSECTION("hierarchical merge: child profile replaces builtin parent defaults");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    init_conf(&root);
+    init_conf(&parent);
+    init_conf(&child);
+
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &root, &parent);
+    TEST_ASSERT(rc == NGX_CONF_OK, "builtin parent merge should pass");
+    TEST_ASSERT(parent.profile.set == 0, "parent profile remains unset");
+
+    child.profile.name = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+    child.profile.set = 1;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+    TEST_ASSERT(rc == NGX_CONF_OK, "child merge should pass");
+    TEST_ASSERT(child.accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD,
+        "child profile must replace inherited builtin accept default");
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
+        "child profile must replace inherited builtin streaming default");
+
+    TEST_PASS("child profile replaces builtin parent defaults");
 }
 
 static void
@@ -1431,6 +1505,8 @@ main(void)
     test_profile_inheritance_child_wins();
     test_hierarchical_profile_merge_child_defaults();
     test_hierarchical_profile_merge_preserves_explicit_parent();
+    test_hierarchical_profile_merge_preserves_explicit_parent_default_value();
+    test_child_profile_overrides_merged_builtin_parent_defaults();
     test_cache_validation_explicit_inheritance();
 
     /* Task 9.10: No-profile built-in defaults */

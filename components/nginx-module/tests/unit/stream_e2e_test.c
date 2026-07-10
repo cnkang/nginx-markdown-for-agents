@@ -121,6 +121,8 @@ struct ngx_http_request_s {
 /* Include the module header for types */
 #include "../../src/ngx_http_markdown_filter_module.h"
 
+ngx_module_t ngx_http_markdown_filter_module;
+
 static ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r,
     ngx_chain_t *in);
 #include "../../src/ngx_http_markdown_filter_chain_impl.h"
@@ -577,8 +579,10 @@ test_8_2_precommit_reject_502(void)
     rc = ngx_http_markdown_stream_on_error(&e2e_request, &ctx, &conf);
 
     /* Step 3: Verify final outcome */
-    TEST_ASSERT(rc == NGX_HTTP_BAD_GATEWAY,
-                "8.2: returns 502 (NGX_HTTP_BAD_GATEWAY)");
+    TEST_ASSERT(rc == NGX_ERROR,
+                "8.2: filter finalizer owns the configured response");
+    TEST_ASSERT(conf.error_status == NGX_HTTP_BAD_GATEWAY,
+                "8.2: filter finalizer receives configured 502 status");
     TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "8.2: final state is PASSTHROUGH");
     TEST_ASSERT(mock_replay_chain_called == 0,

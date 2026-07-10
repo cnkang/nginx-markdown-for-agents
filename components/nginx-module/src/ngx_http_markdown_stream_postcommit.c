@@ -27,12 +27,12 @@ static ngx_int_t
 ngx_http_markdown_stream_postcommit_send_terminal(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
 
+#ifdef MARKDOWN_STREAMING_ENABLED
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_send_closing(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const u_char *data, size_t len);
 
-#ifdef MARKDOWN_STREAMING_ENABLED
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_finish_via_rust(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx);
@@ -588,6 +588,7 @@ ngx_http_markdown_stream_postcommit_send_terminal(
  * Rust owns `data`; this helper copies it before sending so NGINX can retain
  * the output chain after the FFI buffer is released.
  */
+#ifdef MARKDOWN_STREAMING_ENABLED
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_send_closing(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
@@ -623,6 +624,7 @@ ngx_http_markdown_stream_postcommit_send_closing(
 
     return ngx_http_markdown_stream_postcommit_send_chain(r, ctx, b, 1, len);
 }
+#endif
 
 
 /*

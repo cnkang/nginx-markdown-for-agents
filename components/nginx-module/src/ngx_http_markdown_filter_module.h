@@ -340,6 +340,15 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_PROFILE_BALANCED         2
 #define NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST  3
 
+#define NGX_HTTP_MARKDOWN_EXPLICIT_LIMIT_MEMORY      0x0001
+#define NGX_HTTP_MARKDOWN_EXPLICIT_LIMIT_TIMEOUT     0x0002
+#define NGX_HTTP_MARKDOWN_EXPLICIT_ERROR_POLICY      0x0004
+#define NGX_HTTP_MARKDOWN_EXPLICIT_ACCEPT_POLICY     0x0008
+#define NGX_HTTP_MARKDOWN_EXPLICIT_CACHE_VALIDATION  0x0010
+#define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY     0x0020
+#define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_ENGINE     0x0040
+#define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET     0x0080
+
 /*
  * Threshold off sentinel — used in merge and path selection logic.
  */
@@ -671,6 +680,7 @@ typedef struct {
         ngx_uint_t   name;                      /* NGX_HTTP_MARKDOWN_PROFILE_* (default: NONE) */
         ngx_flag_t   set;                       /* 1 if markdown_profile set at this scope (duplicate guard) */
         ngx_flag_t   cache_validation_explicit; /* 1 if markdown_cache_validation set (this or ancestor) */
+        ngx_uint_t   explicit_mask;             /* profile-managed directives set here or by an ancestor */
     } profile;
 } ngx_http_markdown_conf_t;
 
@@ -704,7 +714,6 @@ static ngx_inline void
 ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev,
     const ngx_http_markdown_profile_defaults_t *profile_defaults,
-    const ngx_http_markdown_profile_defaults_t *prev_defaults,
     ngx_flag_t profile_differs)
 {
 /*
@@ -713,10 +722,9 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
  * the previous level or fall back to the profile/compile-time default.
  *
  * When profile_differs is true, the parent's profile-generated value
- * is bypassed unless it differs from the parent's own profile default
- * (i.e. the operator explicitly set it).
+ * is bypassed unless the parent explicit-mask records an operator directive.
  */
-#define NGX_MD_MERGE_STREAM(field, type, unset, dflt, prev_dflt)              \
+#define NGX_MD_MERGE_STREAM(field, type, unset, dflt, explicit_bit)           \
     do {                                                                      \
         if (conf->stream.field == (type) (unset)) {                          \
             if (!profile_differs) {                                          \
@@ -725,7 +733,8 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
             } else {                                                          \
                 conf->stream.field =                                          \
                     (prev->stream.field != (type) (unset)                     \
-                     && prev->stream.field != (type)(prev_dflt))              \
+                     && ((explicit_bit) == 0                                  \
+                         || (prev->profile.explicit_mask & (explicit_bit))))  \
                     ? prev->stream.field : (dflt);                           \
             }                                                                \
         }                                                                    \
@@ -733,17 +742,18 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
 
     NGX_MD_MERGE_STREAM(engine, ngx_uint_t, -1,
                         profile_defaults->streaming_engine,
-                        prev_defaults->streaming_engine);
+                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_ENGINE);
     NGX_MD_MERGE_STREAM(policy, ngx_uint_t, -1,
                         profile_defaults->streaming_policy,
-                        prev_defaults->streaming_policy);
-    NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0, 0);
+                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY);
+    NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0,
+                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY);
     NGX_MD_MERGE_STREAM(threshold, size_t, -1,
                         NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT,
-                        NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT);
+                        0);
     NGX_MD_MERGE_STREAM(threshold_explicit, ngx_flag_t, -1, 0, 0);
-    NGX_MD_MERGE_STREAM(precommit_buffer, size_t, -1, 262144, 262144);
-    NGX_MD_MERGE_STREAM(flush_min, size_t, -1, 16384, 16384);
+    NGX_MD_MERGE_STREAM(precommit_buffer, size_t, -1, 262144, 0);
+    NGX_MD_MERGE_STREAM(flush_min, size_t, -1, 16384, 0);
 
     if (conf->stream.excluded_types == (ngx_array_t *) -1) {
         conf->stream.excluded_types =
@@ -753,12 +763,14 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
 
     NGX_MD_MERGE_STREAM(on_error, ngx_uint_t, -1,
                         profile_defaults->error_policy,
-                        prev_defaults->error_policy);
-    NGX_MD_MERGE_STREAM(on_error_explicit, ngx_flag_t, -1, 0, 0);
+                        NGX_HTTP_MARKDOWN_EXPLICIT_ERROR_POLICY);
+    NGX_MD_MERGE_STREAM(on_error_explicit, ngx_flag_t, -1, 0,
+                        NGX_HTTP_MARKDOWN_EXPLICIT_ERROR_POLICY);
     NGX_MD_MERGE_STREAM(budget, size_t, -1,
                         profile_defaults->limits_streaming_buffer,
-                        prev_defaults->limits_streaming_buffer);
-    NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0, 0);
+                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET);
+    NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0,
+                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET);
     NGX_MD_MERGE_STREAM(shadow, ngx_flag_t, -1, 0, 0);
     NGX_MD_MERGE_STREAM(shadow_explicit, ngx_flag_t, -1, 0, 0);
     NGX_MD_MERGE_STREAM(zero_copy, ngx_flag_t, -1, 0, 0);
