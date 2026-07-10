@@ -733,6 +733,10 @@ jobs:
           python3 tools/release/gates/validate_k8s_manifests_070.py
           python3 tools/release/gates/validate_fuzz_packaging_070.py
           bash tools/release/gates/check_install_layout.sh dist/*.deb dist/*.rpm
+          # Run the 0.9.1 performance evidence gate in blocking mode.
+          # Tag releases require module benchmark evidence; the NGINX_BIN
+          # from the build job provides the module-enabled binary.
+          python3 tools/perf/evidence_gate_091.py --blocking
         shell: bash
 
   # ─────────────────────────────────────────────────────────────────────────────
