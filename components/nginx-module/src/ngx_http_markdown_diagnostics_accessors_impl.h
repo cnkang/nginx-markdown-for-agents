@@ -47,6 +47,10 @@ ngx_http_markdown_diagnostics_collect_metrics(
         ngx_http_markdown_metrics->requests_entered;
     out->failopen_total =
         ngx_http_markdown_metrics->results.failopen_count;
+    out->overload_total =
+        (ngx_atomic_uint_t) ngx_http_markdown_inflight_overload_total();
+    out->backpressure_total =
+        ngx_http_markdown_metrics->perf.backpressure_total;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     out->streaming_requests_total =

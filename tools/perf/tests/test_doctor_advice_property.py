@@ -77,22 +77,24 @@ def _build_triggering_metrics_d01(requests_total: float) -> dict:
     # fallback > 10% of requests_total
     fallback = requests_total * 0.15  # 15% fallback rate
     return {
-        "streaming_fallback_total": fallback,
-        "streaming_requests_total": requests_total,
+        "streaming_metrics": {
+            "fallback_total": fallback,
+            "requests_total": requests_total,
+        },
     }
 
 
 def _build_triggering_metrics_d02() -> dict:
     """Build metrics that trigger D02 (overload_total > 0)."""
-    return {"overload_total": 5.0}
+    return {"metrics_snapshot": {"overload_total": 5.0}}
 
 
 def _build_triggering_metrics_d03(requests_total: float) -> dict:
     """Build metrics that trigger D03 (backpressure rate > 5%)."""
     bp = requests_total * 0.10  # 10% backpressure rate
     return {
-        "backpressure_total": bp,
-        "streaming_requests_total": requests_total,
+        "metrics_snapshot": {"backpressure_total": bp},
+        "streaming_metrics": {"requests_total": requests_total},
     }
 
 
@@ -185,8 +187,10 @@ def test_property10_d01_varied_rates_correct_severity(requests_total, fallback_r
     D01 triggers with correct severity for any fallback rate > 10%.
     """
     metrics = {
-        "streaming_fallback_total": requests_total * fallback_rate,
-        "streaming_requests_total": requests_total,
+        "streaming_metrics": {
+            "fallback_total": requests_total * fallback_rate,
+            "requests_total": requests_total,
+        },
     }
 
     findings, skipped = evaluate_rules(metrics)
@@ -213,8 +217,8 @@ def test_property10_d03_varied_rates_correct_severity(requests_total, bp_rate):
     D03 triggers with correct severity for any backpressure rate > 5%.
     """
     metrics = {
-        "backpressure_total": requests_total * bp_rate,
-        "streaming_requests_total": requests_total,
+        "metrics_snapshot": {"backpressure_total": requests_total * bp_rate},
+        "streaming_metrics": {"requests_total": requests_total},
     }
 
     findings, skipped = evaluate_rules(metrics)

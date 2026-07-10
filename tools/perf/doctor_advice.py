@@ -202,10 +202,10 @@ _SOURCE_PERF_SPEC = "new (perf spec §6)"
 
 RULE_METRICS = {
     "D01": {
-        "required": ["streaming_fallback_total", "streaming_requests_total"],
+        "required": ["fallback_total", "requests_total"],
         "metric_source": {
-            "streaming_fallback_total": _SOURCE_EXISTING,
-            "streaming_requests_total": _SOURCE_EXISTING,
+            "fallback_total": _SOURCE_EXISTING,
+            "requests_total": _SOURCE_EXISTING,
         },
     },
     "D02": {
@@ -215,10 +215,10 @@ RULE_METRICS = {
         },
     },
     "D03": {
-        "required": ["backpressure_total", "streaming_requests_total"],
+        "required": ["backpressure_total", "requests_total"],
         "metric_source": {
             "backpressure_total": _SOURCE_PERF_SPEC,
-            "streaming_requests_total": _SOURCE_EXISTING,
+            "requests_total": _SOURCE_EXISTING,
         },
     },
     "D04": {
@@ -258,17 +258,22 @@ DEFAULT_STREAMING_BUFFER_BUDGET = 1048576  # 1 MiB
 def _evaluate_d01(metrics: Dict[str, Any]) -> RuleResult:
     """D01: High streaming fallback rate.
 
-    Pattern: streaming_fallback_total / streaming_requests_total > 10%
+    Pattern: fallback_total / requests_total > 10%
+
+    Reads from the production diagnostics JSON structure where these
+    counters live under the ``streaming_metrics`` object (e.g.
+    ``streaming_metrics.fallback_total``).  The ``_get_metric`` helper
+    searches one level deep in nested objects.
     """
-    fallback = _get_metric(metrics, "streaming_fallback_total")
-    requests = _get_metric(metrics, "streaming_requests_total")
+    fallback = _get_metric(metrics, "fallback_total")
+    requests = _get_metric(metrics, "requests_total")
 
     if fallback is None or requests is None:
         missing = []
         if fallback is None:
-            missing.append("streaming_fallback_total")
+            missing.append("fallback_total")
         if requests is None:
-            missing.append("streaming_requests_total")
+            missing.append("requests_total")
         return RuleResult(
             "D01", skipped=True, skip_reason=f"metric missing: {', '.join(missing)}"
         )
@@ -293,8 +298,8 @@ def _evaluate_d01(metrics: Dict[str, Any]) -> RuleResult:
                     "markdown_streaming_min_size thresholds."
                 ),
                 metrics_used={
-                    "streaming_fallback_total": fallback,
-                    "streaming_requests_total": requests,
+                    "fallback_total": fallback,
+                    "requests_total": requests,
                 },
             ),
         )
@@ -333,17 +338,21 @@ def _evaluate_d02(metrics: Dict[str, Any]) -> RuleResult:
 def _evaluate_d03(metrics: Dict[str, Any]) -> RuleResult:
     """D03: High backpressure rate.
 
-    Pattern: backpressure_total / streaming_requests_total > 5%
+    Pattern: backpressure_total / requests_total > 5%
+
+    ``backpressure_total`` is emitted in the ``metrics_snapshot`` object by
+    the C diagnostics JSON renderer.  ``requests_total`` for streaming is
+    emitted in the ``streaming_metrics`` object.
     """
     bp = _get_metric(metrics, "backpressure_total")
-    requests = _get_metric(metrics, "streaming_requests_total")
+    requests = _get_metric(metrics, "requests_total")
 
     if bp is None or requests is None:
         missing = []
         if bp is None:
             missing.append("backpressure_total")
         if requests is None:
-            missing.append("streaming_requests_total")
+            missing.append("requests_total")
         return RuleResult(
             "D03", skipped=True, skip_reason=f"metric missing: {', '.join(missing)}"
         )
