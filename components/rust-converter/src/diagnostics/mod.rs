@@ -3,6 +3,6 @@
 pub mod schema;
 
 pub use schema::{
-    ConfigSnapshot, DiagnosticsSchema, DynconfState, EffectiveConfig,
-    MetricsSnapshot, RecentDecision, StreamingConfig, StreamingMetrics,
+    ConfigSnapshot, DiagnosticsSchema, DynconfState, EffectiveConfig, MetricsSnapshot,
+    RecentDecision, StreamingConfig, StreamingMetrics,
 };

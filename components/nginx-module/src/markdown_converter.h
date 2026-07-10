@@ -1043,6 +1043,16 @@ typedef struct FFIBaseUrlInput {
    * 1 if `markdown_trusted_proxies` was configured (even as `off`).
    */
   uint8_t trusted_configured;
+  /**
+   * Direct connection scheme bytes from `r->schema` (e.g. "https"),
+   * NULL/0 if absent.  Used as the base URL scheme when falling back
+   * to the Host header so direct HTTPS requests preserve https://.
+   */
+  const uint8_t *direct_scheme;
+  /**
+   * Length of `direct_scheme`.
+   */
+  uintptr_t direct_scheme_len;
 } FFIBaseUrlInput;
 
 /**
