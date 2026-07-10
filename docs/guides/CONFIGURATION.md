@@ -306,8 +306,9 @@ unspecified keys inherit (per-key inheritance).
   (0.9.0 production-protection default 64; enforced by the worker inflight
   guard).
 
-`nginx -t` rejects duplicate keys, unknown keys, zero values, and malformed
-size/time/integer values.
+`nginx -t` rejects duplicate keys, unknown keys, zero values for `memory`,
+`timeout`, and `streaming_buffer`, and malformed size/time/integer values.
+A `max_inflight` value of `0` means unlimited (no enforcement).
 
 **Example:**
 ```nginx
