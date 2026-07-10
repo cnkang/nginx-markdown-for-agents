@@ -411,8 +411,8 @@ static void test_precommit_reject_uses_stream_on_error_policy(void)
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
-    TEST_ASSERT(rc == NGX_HTTP_BAD_GATEWAY,
-        "stream.on_error reject should reject even if top-level passes");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "stream.on_error reject finalizes with NGX_ERROR (error_status set)");
     TEST_ASSERT(test_output_filter_called == 0,
         "stream.on_error reject should not replay HTML");
     TEST_PASS("Pre-commit reject uses stream.on_error policy");
@@ -526,12 +526,12 @@ static void test_task_6_2_precommit_reject_502(void)
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
-    TEST_ASSERT(rc == NGX_HTTP_BAD_GATEWAY, "6.2: returns 502 (default error_status)");
+    TEST_ASSERT(rc == NGX_ERROR, "6.2: finalizer returns NGX_ERROR (error_status=502)");
     TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "6.2: state PASSTHROUGH");
     TEST_ASSERT(test_replay_chain_called == 0, "6.2: no replay");
     TEST_ASSERT(test_output_filter_called == 0, "6.2: no output_filter");
-    TEST_PASS("pre-commit reject: return configured error_status");
+    TEST_PASS("pre-commit reject: finalize with configured error_status");
 }
 
 /* --- post-commit pass: safe_finish --- */

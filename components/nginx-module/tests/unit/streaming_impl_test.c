@@ -1855,7 +1855,7 @@ test_fallback_to_fullbuffer_paths(void)
  * Test postcommit and precommit error policy branches.  Verifies:
  * - postcommit error sends terminal chunk and records failure once;
  *   memory-limit errors are classified as budget-exceeded
- * - precommit reject policy returns NGX_ERROR (fail-closed)
+ * - precommit reject policy finalizes with NGX_ERROR (error_status set)
  * - precommit pass policy returns NGX_DECLINED (fail-open) and marks
  *   request ineligible
  * - streaming fallback error routes through fallback path
@@ -1897,8 +1897,8 @@ test_postcommit_and_precommit_error_paths(void)
     conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
     rc = ngx_http_markdown_streaming_precommit_error(
         &r, &ctx, &conf, ERROR_INTERNAL);
-    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT,
-        "precommit reject policy returns configured error_status");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "precommit reject policy finalizes with NGX_ERROR (error_status set)");
     TEST_ASSERT(metrics.streaming.precommit_reject_total == 1,
         "precommit reject metric should increment");
 
@@ -2307,8 +2307,8 @@ test_init_handle_and_chunk_result_helpers(void)
     g_buffer_init_fail_after = 1;
     g_buffer_init_call_count = 0;
     rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
-    TEST_ASSERT(rc == (ngx_int_t) NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT,
-        "replay buffer init failure with reject policy should return configured error_status");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "replay buffer init failure with reject policy finalizes with NGX_ERROR");
     TEST_ASSERT(ctx.streaming.handle == NULL,
         "replay buffer init failure should abort handle");
     g_buffer_init_fail_after = 0;
@@ -2792,8 +2792,8 @@ test_process_chain_and_body_filter_deep_paths(void)
     g_buffer_append_rc = NGX_ERROR;
     rc = ngx_http_markdown_streaming_process_chain(
         &r, &ctx, &conf, &in, &last_buf, &fallback_cl);
-    TEST_ASSERT(rc == (ngx_int_t) NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT,
-        "replay append failure with reject policy should return configured error_status");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "replay append failure with reject policy finalizes with NGX_ERROR");
     g_buffer_append_rc = NGX_OK;
 
     /*

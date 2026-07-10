@@ -1063,6 +1063,61 @@ test_hierarchical_profile_merge_child_defaults(void)
 }
 
 static void
+test_hierarchical_profile_merge_preserves_explicit_parent(void)
+{
+    ngx_conf_t               cf;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char                    *rc;
+
+    TEST_SUBSECTION("hierarchical merge: explicit parent directive preserved across profile change");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    init_conf(&parent);
+    init_conf(&child);
+
+    parent.profile.name = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
+    parent.profile.set = 1;
+
+    /* Simulate parent merge so parent fields resolve to balanced defaults */
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+    {
+        ngx_http_markdown_conf_t tmp_parent;
+        init_conf(&tmp_parent);
+        tmp_parent.profile.name = NGX_HTTP_MARKDOWN_PROFILE_NONE;
+        ngx_http_markdown_merge_conf(&cf, &tmp_parent, &parent);
+    }
+
+    /* Now set an explicit directive at parent level that differs from
+     * the balanced default: memory=32m (balanced default is 8m) */
+    parent.max_size = 32 * 1024 * 1024;
+
+    child.profile.name = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+    child.profile.set = 1;
+
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+
+    TEST_ASSERT(rc == NGX_CONF_OK, "merge should pass");
+
+    /* Explicit parent directive (memory=32m) must be inherited */
+    TEST_ASSERT(child.max_size == 32 * 1024 * 1024,
+        "explicit parent memory=32m preserved across profile change");
+
+    /* But profile-managed fields still take child profile defaults */
+    TEST_ASSERT(child.accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD,
+        "child streaming_first wildcard still applies for non-explicit fields");
+
+    TEST_PASS("hierarchical merge: explicit parent directive preserved");
+}
+
+static void
 test_cache_validation_explicit_inheritance(void)
 {
     ngx_conf_t               cf;
@@ -1375,6 +1430,7 @@ main(void)
     test_profile_inheritance();
     test_profile_inheritance_child_wins();
     test_hierarchical_profile_merge_child_defaults();
+    test_hierarchical_profile_merge_preserves_explicit_parent();
     test_cache_validation_explicit_inheritance();
 
     /* Task 9.10: No-profile built-in defaults */
