@@ -1713,7 +1713,12 @@ ngx_http_markdown_streaming_precommit_error(
                 ctx->streaming.reason),
             &r->headers_out.content_type,
             (r->headers_out.content_length_n >= 0) ? 1 : 0);
-        return NGX_ERROR;
+        /*
+         * Return the configured error status (429/503/502) so the
+         * body filter finalizes the request with the operator-chosen
+         * code, not a generic 500 from NGX_ERROR.
+         */
+        return (ngx_int_t) conf->error_status;
     }
 
     /* Fail-open: pass original content */

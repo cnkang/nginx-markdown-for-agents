@@ -123,7 +123,14 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
     ngx_int_t  rc;
 
     if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
-        return NGX_ERROR;
+        /*
+         * Return the configured error status (429/503/502) so NGINX
+         * finalizes the request with the operator-chosen code.
+         * Returning NGX_ERROR would cause NGINX to send a generic 500,
+         * ignoring the error_status the operator configured via
+         * markdown_error_policy status <code>.
+         */
+        return (ngx_int_t) conf->error_status;
     }
 
     rc = ngx_http_markdown_fail_open_buffered_response(

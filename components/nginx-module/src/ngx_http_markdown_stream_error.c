@@ -10,7 +10,7 @@
  * action via the replay, commit, and post-commit modules.
  *
  * Pre-commit + on_error=pass  -> replay HTML via chain
- * Pre-commit + on_error=reject -> return 502
+ * Pre-commit + on_error=reject -> return conf->error_status (default 502)
  * Post-commit + on_error=pass  -> safe_finish (abort fallback)
  * Post-commit + on_error=reject -> abort
  *
@@ -43,7 +43,7 @@ ngx_http_markdown_stream_error_pass_html(ngx_http_request_t *r,
  *
  * Returns:
  *   NGX_OK               - Error handled (HTML replayed or finish/abort)
- *   NGX_HTTP_BAD_GATEWAY - 502 reject (pre-commit + on_error=reject)
+ *   conf->error_status   - reject (pre-commit + on_error=reject)
  *   NGX_ERROR            - Unrecoverable error
  */
 ngx_int_t
@@ -126,14 +126,17 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
 
     case NGX_HTTP_MD_ACTION_REJECT_502:
         /*
-         * Pre-commit with reject policy: return 502.
-         * Return NGX_HTTP_BAD_GATEWAY; the caller (body filter)
-         * uses this to finalize with 502.
+         * Pre-commit with reject policy: return the configured error status.
+         * The operator may have set a custom status (429/503) via
+         * markdown_error_policy status <code>; use conf->error_status
+         * instead of a hard-coded 502 so the client receives the
+         * configured rejection code.
          */
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                       "markdown stream on_error: "
-                      "rejecting with 502 (on_error=reject)");
-        return NGX_HTTP_BAD_GATEWAY;
+                      "rejecting with %ui (on_error=reject)",
+                      conf->error_status);
+        return (ngx_int_t) conf->error_status;
 
     case NGX_HTTP_MD_ACTION_SAFE_FINISH:
         /*
