@@ -725,8 +725,8 @@ Key properties:
    are strictly validated (control characters, comma chains, userinfo `@`, path
    `/`/`?`, port range, IPv6 brackets, raw Unicode IDN). Invalid values fall back
    to the `Host` header or a safe default. The `Forwarded` header takes
-   precedence over `X-Forwarded-*`; multi-hop comma chains use the left-most
-   (closest-to-client) value.
+   precedence over `X-Forwarded-*`; multi-hop comma chains use the right-most
+   (closest-to-trusted-proxy) value to prevent client-prepended spoofing.
 
 **Example:**
 ```nginx
