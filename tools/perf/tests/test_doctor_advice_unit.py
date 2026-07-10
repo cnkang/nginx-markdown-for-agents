@@ -147,6 +147,7 @@ class TestD02:
         assert result.finding is not None
         assert result.finding.severity == "warn"
         assert result.finding.rule_id == "D02"
+        assert "markdown_limits max_inflight=<N>" in result.finding.advice
 
     def test_no_trigger_zero(self):
         """overload_total == 0 produces no finding."""
@@ -232,6 +233,7 @@ class TestD04:
         assert result.finding is not None
         assert result.finding.severity == "info"
         assert result.finding.rule_id == "D04"
+        assert "markdown_auto_decompress on" in result.finding.advice
 
     def test_triggers_when_streaming_zero(self):
         """Fullbuffer > 0 with streaming == 0 triggers info."""
