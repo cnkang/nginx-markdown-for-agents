@@ -305,12 +305,21 @@ check_config_valid() {
     # leaks to caller on bash 3.2 (macOS default), so use explicit helper.
     _check_config_valid_cleanup() { rm -f "$tmp_conf"; }
 
-    # Write minimal config that tests basic module loading
-    if ! cat > "$tmp_conf" <<'CONF'
+    # Write a config that loads the markdown module if found,
+    # and includes a stable directive so the test validates that
+    # the module is actually loadable and parseable.
+    local module_dir=""
+    if [[ -n "$FOUND_MODULE_PATH" ]]; then
+        module_dir="$(dirname "$FOUND_MODULE_PATH")"
+    fi
+
+    if ! cat > "$tmp_conf" <<CONF
 daemon off;
 worker_processes 1;
 events { worker_connections 64; }
 http {
+$(if [[ -n "$module_dir" ]]; then echo "    load_module ${module_dir}/ngx_http_markdown_filter_module.so;"; fi)
+    markdown_filter on;
     server {
         listen 127.0.0.1:19999;
         location / { return 200 "ok"; }
@@ -331,7 +340,11 @@ CONF
     _check_config_valid_cleanup
 
     if [[ $test_rc -eq 0 ]]; then
-        emit_check "config_valid" "pass" "nginx config syntax OK (minimal test config)"
+        if [[ -n "$module_dir" ]]; then
+            emit_check "config_valid" "pass" "nginx config syntax OK (module loaded, directive parsed)"
+        else
+            emit_check "config_valid" "pass" "nginx config syntax OK (minimal config, module not found)"
+        fi
     else
         emit_check "config_valid" "fail" "nginx -t failed (exit ${test_rc})" \
             '{"exit_code":'"$test_rc"',"output":"'"$(json_escape "$test_output")"'"}' \

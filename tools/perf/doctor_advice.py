@@ -155,6 +155,25 @@ def _get_metric(metrics: Dict[str, Any], name: str) -> Optional[float]:
     return None
 
 
+def _get_metric_path(metrics: Dict[str, Any], *path: str) -> Optional[float]:
+    """Extract a numeric metric from an explicit dotted path.
+
+    For example ``_get_metric_path(metrics, "streaming_metrics", "requests_total")``
+    reads ``metrics["streaming_metrics"]["requests_total"]``.  This avoids
+    the ambiguity of ``_get_metric`` which returns the first matching key
+    at any level (the production diagnostics JSON emits ``requests_total``
+    in both ``metrics_snapshot`` and ``streaming_metrics``).
+    """
+    current: Any = metrics
+    for key in path:
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+    if isinstance(current, (int, float)):
+        return float(current)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Rule Engine — D01 through D07
 # ---------------------------------------------------------------------------
@@ -260,20 +279,19 @@ def _evaluate_d01(metrics: Dict[str, Any]) -> RuleResult:
 
     Pattern: fallback_total / requests_total > 10%
 
-    Reads from the production diagnostics JSON structure where these
-    counters live under the ``streaming_metrics`` object (e.g.
-    ``streaming_metrics.fallback_total``).  The ``_get_metric`` helper
-    searches one level deep in nested objects.
+    Uses explicit path lookup to read from the ``streaming_metrics`` object
+    in the production diagnostics JSON, avoiding ambiguity with the
+    ``metrics_snapshot.requests_total`` counter.
     """
-    fallback = _get_metric(metrics, "fallback_total")
-    requests = _get_metric(metrics, "requests_total")
+    fallback = _get_metric_path(metrics, "streaming_metrics", "fallback_total")
+    requests = _get_metric_path(metrics, "streaming_metrics", "requests_total")
 
     if fallback is None or requests is None:
         missing = []
         if fallback is None:
-            missing.append("fallback_total")
+            missing.append("streaming_metrics.fallback_total")
         if requests is None:
-            missing.append("requests_total")
+            missing.append("streaming_metrics.requests_total")
         return RuleResult(
             "D01", skipped=True, skip_reason=f"metric missing: {', '.join(missing)}"
         )
@@ -295,7 +313,7 @@ def _evaluate_d01(metrics: Dict[str, Any]) -> RuleResult:
                 advice=(
                     "High fallback rate suggests streaming eligibility issues. "
                     "Check response sizes, Content-Type patterns, and "
-                    "markdown_streaming_min_size thresholds."
+                    "markdown_stream_threshold thresholds."
                 ),
                 metrics_used={
                     "fallback_total": fallback,
@@ -327,7 +345,7 @@ def _evaluate_d02(metrics: Dict[str, Any]) -> RuleResult:
                 message=f"Overload rejection count: {int(overload)}",
                 advice=(
                     "Worker inflight limit was reached. Consider increasing "
-                    "markdown_max_inflight or adding more worker processes."
+                    "markdown_limits max_inflight or adding more worker processes."
                 ),
                 metrics_used={"overload_total": overload},
             ),
@@ -342,17 +360,19 @@ def _evaluate_d03(metrics: Dict[str, Any]) -> RuleResult:
 
     ``backpressure_total`` is emitted in the ``metrics_snapshot`` object by
     the C diagnostics JSON renderer.  ``requests_total`` for streaming is
-    emitted in the ``streaming_metrics`` object.
+    emitted in the ``streaming_metrics`` object.  Uses explicit path
+    lookup to avoid ambiguity (production JSON emits ``requests_total``
+    in both ``metrics_snapshot`` and ``streaming_metrics``).
     """
-    bp = _get_metric(metrics, "backpressure_total")
-    requests = _get_metric(metrics, "requests_total")
+    bp = _get_metric_path(metrics, "metrics_snapshot", "backpressure_total")
+    requests = _get_metric_path(metrics, "streaming_metrics", "requests_total")
 
     if bp is None or requests is None:
         missing = []
         if bp is None:
-            missing.append("backpressure_total")
+            missing.append("metrics_snapshot.backpressure_total")
         if requests is None:
-            missing.append("requests_total")
+            missing.append("streaming_metrics.requests_total")
         return RuleResult(
             "D03", skipped=True, skip_reason=f"metric missing: {', '.join(missing)}"
         )
