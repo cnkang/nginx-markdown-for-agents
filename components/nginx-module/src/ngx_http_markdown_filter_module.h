@@ -703,17 +703,22 @@ ngx_http_markdown_effective_body_buffer_limit(
 static ngx_inline void
 ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev,
-    const ngx_http_markdown_profile_defaults_t *profile_defaults)
+    const ngx_http_markdown_profile_defaults_t *profile_defaults,
+    ngx_flag_t profile_differs)
 {
 /*
  * Helper macro: merge a single stream configuration field.
  * If the current value equals the unset sentinel, inherit from
- * the previous level or fall back to the compile-time default.
+ * the previous level or fall back to the profile/compile-time default.
+ *
+ * When profile_differs is true, the parent's profile-generated value
+ * is bypassed so the child's own profile default is used instead.
  */
 #define NGX_MD_MERGE_STREAM(field, type, unset, dflt)                        \
     do {                                                                      \
         if (conf->stream.field == (type) (unset)) {                          \
-            conf->stream.field = (prev->stream.field != (type) (unset))      \
+            conf->stream.field =                                              \
+                (!profile_differs && prev->stream.field != (type) (unset))   \
                 ? prev->stream.field : (dflt);                               \
         }                                                                    \
     } while (0)
