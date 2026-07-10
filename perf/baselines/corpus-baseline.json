@@ -2,24 +2,24 @@
   "schema-version": "1.0.0",
   "metadata": {
     "corpus-version": "1.0.0",
-    "git-commit": "c1d4757f",
+    "git-commit": "9a28fe93",
     "platform": "darwin-arm64",
     "timestamp": "2026-07-10T10:22:46Z",
     "converter-version": "0.4.0",
     "token-approx-factor": 1.0
   },
   "summary": {
-    "total-fixtures": 51,
-    "converted-count": 51,
+    "total-fixtures": 49,
+    "converted-count": 49,
     "skipped-count": 0,
     "failed-open-count": 0,
     "fallback-rate": 0.0,
-    "token-reduction-percent": 28.1,
-    "input-bytes-total": 78726389,
-    "output-bytes-total": 56606214,
+    "token-reduction-percent": 30.57,
+    "input-bytes-total": 1131919,
+    "output-bytes-total": 785841,
     "p50-latency-ms": 4.62,
-    "p95-latency-ms": 24.16,
-    "p99-latency-ms": 1279.53
+    "p95-latency-ms": 7.73,
+    "p99-latency-ms": 24.71
   },
   "fixtures": [
     {
@@ -223,16 +223,6 @@
       "failure-corpus": false
     },
     {
-      "fixture-id": "large/large-10mb",
-      "page-type": "complex-common",
-      "conversion-result": "converted",
-      "input-bytes": 10485721,
-      "output-bytes": 7543230,
-      "latency-ms": 350.29,
-      "token-reduction-percent": 28.06,
-      "failure-corpus": false
-    },
-    {
       "fixture-id": "large/large-1mb",
       "page-type": "complex-common",
       "conversion-result": "converted",
@@ -240,16 +230,6 @@
       "output-bytes": 754220,
       "latency-ms": 38.04,
       "token-reduction-percent": 28.07,
-      "failure-corpus": false
-    },
-    {
-      "fixture-id": "large/large-64mb",
-      "page-type": "complex-common",
-      "conversion-result": "converted",
-      "input-bytes": 67108749,
-      "output-bytes": 48277143,
-      "latency-ms": 2208.77,
-      "token-reduction-percent": 28.06,
       "failure-corpus": false
     },
     {
