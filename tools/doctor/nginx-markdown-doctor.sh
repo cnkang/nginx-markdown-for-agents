@@ -53,6 +53,7 @@ DETECTED_ARCH=""
 DETECTED_LIBC=""
 DETECTED_LIBC_VERSION=""
 DETECTED_PKG_TYPE=""
+DETECTED_NGINX_VERSION=""
 RECOMMENDATION_JSON=""
 
 ##############################################################################
@@ -229,6 +230,8 @@ check_nginx_version() {
         return
     fi
 
+    DETECTED_NGINX_VERSION="$version"
+
     emit_check "nginx_version" "pass" "nginx version ${version} detected" \
         '{"version":"'"$version"'"}'
 }
@@ -308,18 +311,30 @@ check_config_valid() {
     # Write a config that loads the markdown module if found,
     # and includes a stable directive so the test validates that
     # the module is actually loadable and parseable.
-    local module_dir=""
+    local load_module_line=""
+    local markdown_directive=""
     if [[ -n "$FOUND_MODULE_PATH" ]]; then
-        module_dir="$(dirname "$FOUND_MODULE_PATH")"
+        if [[ "$FOUND_MODULE_PATH" == *$'\n'* \
+            || "$FOUND_MODULE_PATH" == *$'\r'* \
+            || "$FOUND_MODULE_PATH" == *'"'* \
+            || "$FOUND_MODULE_PATH" == *\\* ]]
+        then
+            _check_config_valid_cleanup
+            emit_check "config_valid" "fail" \
+                "module path contains characters unsafe for nginx config"
+            return
+        fi
+        load_module_line="load_module \"${FOUND_MODULE_PATH}\";"
+        markdown_directive="    markdown_filter on;"
     fi
 
     if ! cat > "$tmp_conf" <<CONF
+${load_module_line}
 daemon off;
 worker_processes 1;
 events { worker_connections 64; }
 http {
-$(if [[ -n "$module_dir" ]]; then echo "    load_module ${module_dir}/ngx_http_markdown_filter_module.so;"; fi)
-    markdown_filter on;
+${markdown_directive}
     server {
         listen 127.0.0.1:19999;
         location / { return 200 "ok"; }
@@ -340,7 +355,7 @@ CONF
     _check_config_valid_cleanup
 
     if [[ $test_rc -eq 0 ]]; then
-        if [[ -n "$module_dir" ]]; then
+        if [[ -n "$FOUND_MODULE_PATH" ]]; then
             emit_check "config_valid" "pass" "nginx config syntax OK (module loaded, directive parsed)"
         else
             emit_check "config_valid" "pass" "nginx config syntax OK (minimal config, module not found)"
@@ -646,35 +661,18 @@ check_package_type() {
 
 # Recommendation: suggest release artifact based on detected environment
 recommend_artifact() {
-    # Only recommend if we have OS and arch info
-    if [[ -z "$DETECTED_OS" || -z "$DETECTED_ARCH" ]]; then
+    # release-binaries.yml currently publishes Linux glibc/musl artifacts
+    # named with the target NGINX version, libc family, and architecture.
+    if [[ "$DETECTED_OS" != "linux"
+        || -z "$DETECTED_NGINX_VERSION"
+        || -z "$DETECTED_LIBC"
+        || -z "$DETECTED_ARCH" ]]
+    then
         return
     fi
 
-    local artifact_name=""
-    local artifact_suffix=""
-
-    case "$DETECTED_OS" in
-        linux)
-            artifact_suffix="linux-${DETECTED_ARCH}"
-            if [[ "$DETECTED_LIBC" == "musl" ]]; then
-                artifact_suffix="${artifact_suffix}-musl"
-            elif [[ -n "$DETECTED_LIBC_VERSION" ]]; then
-                artifact_suffix="${artifact_suffix}-glibc${DETECTED_LIBC_VERSION}"
-            fi
-            ;;
-        macos)
-            artifact_suffix="macos-${DETECTED_ARCH}"
-            ;;
-        freebsd)
-            artifact_suffix="freebsd-${DETECTED_ARCH}"
-            ;;
-        *)
-            return
-            ;;
-    esac
-
-    artifact_name="nginx-markdown-module-${artifact_suffix}.tar.gz"
+    local artifact_name
+    artifact_name="ngx_http_markdown_filter_module-${DETECTED_NGINX_VERSION}-${DETECTED_LIBC}-${DETECTED_ARCH}.tar.gz"
     RECOMMENDATION_JSON='{"artifact":"'"$(json_escape "$artifact_name")"'","os":"'"$DETECTED_OS"'","arch":"'"$DETECTED_ARCH"'"'
     if [[ -n "$DETECTED_LIBC" ]]; then
         RECOMMENDATION_JSON="${RECOMMENDATION_JSON}"',"libc":"'"$DETECTED_LIBC"'"'

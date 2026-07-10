@@ -68,7 +68,7 @@ nginx-markdown-doctor v0.9.1
   ✓ [pass] os_arch: linux/x86_64 (glibc 2.31)
   ✓ [pass] package_type: nginx installed via apt (1.28.0-1~jammy)
 
-  Recommended artifact: nginx-markdown-module-linux-x86_64-glibc2.31.tar.gz
+  Recommended artifact: ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz
 ─────────────────────────────────
 Summary: 8 passed, 0 failed, 0 warnings, 0 skipped (8 total)
 ```
@@ -137,7 +137,7 @@ Summary: 8 passed, 0 failed, 0 warnings, 0 skipped (8 total)
     "skipped": 0
   },
   "recommendation": {
-    "artifact": "nginx-markdown-module-linux-x86_64-glibc2.31.tar.gz",
+    "artifact": "ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz",
     "os": "linux",
     "arch": "x86_64",
     "libc": "glibc",

@@ -345,7 +345,7 @@ def _evaluate_d02(metrics: Dict[str, Any]) -> RuleResult:
                 message=f"Overload rejection count: {int(overload)}",
                 advice=(
                     "Worker inflight limit was reached. Consider increasing "
-                    "markdown_limits max_inflight or adding more worker processes."
+                    "markdown_limits max_inflight=<N> or adding more worker processes."
                 ),
                 metrics_used={"overload_total": overload},
             ),
@@ -449,7 +449,7 @@ def _evaluate_d04(metrics: Dict[str, Any]) -> RuleResult:
                 advice=(
                     "Most decompression uses the full-buffer path. If TTFB is "
                     "important, consider enabling streaming decompression via "
-                    "streaming_first profile with auto_decompress on."
+                    "streaming_first profile with markdown_auto_decompress on."
                 ),
                 metrics_used={
                     "decompression_fullbuffer_total": fullbuf,
