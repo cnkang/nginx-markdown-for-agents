@@ -1064,6 +1064,7 @@ pub unsafe extern "C" fn markdown_decide_base_url(
         let x_forwarded_host =
             unsafe { optional_str(inp.x_forwarded_host, inp.x_forwarded_host_len) };
         let host = unsafe { optional_str(inp.host, inp.host_len) };
+        let direct_scheme = unsafe { optional_str(inp.direct_scheme, inp.direct_scheme_len) };
 
         let cidrs: &[crate::forwarded::Cidr] = if inp.trusted.is_null() {
             &[]
@@ -1080,6 +1081,7 @@ pub unsafe extern "C" fn markdown_decide_base_url(
             x_forwarded_proto,
             x_forwarded_host,
             host,
+            direct_scheme,
         };
 
         let decision = decide_base_url(&decision_input, cidrs);
@@ -2030,6 +2032,8 @@ mod tests {
             host_len: 0,
             is_unix_socket: 0,
             trusted_configured: 0,
+            direct_scheme: ptr::null(),
+            direct_scheme_len: 0,
         }
     }
 

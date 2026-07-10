@@ -477,6 +477,12 @@ pub struct FFIBaseUrlInput {
     pub is_unix_socket: u8,
     /// 1 if `markdown_trusted_proxies` was configured (even as `off`).
     pub trusted_configured: u8,
+    /// Direct connection scheme bytes from `r->schema` (e.g. "https"),
+    /// NULL/0 if absent.  Used as the base URL scheme when falling back
+    /// to the Host header so direct HTTPS requests preserve https://.
+    pub direct_scheme: *const u8,
+    /// Length of `direct_scheme`.
+    pub direct_scheme_len: usize,
 }
 
 /// Result of `markdown_decide_base_url` (spec 47).
@@ -1031,7 +1037,7 @@ mod layout_tests {
     fn test_ffi_base_url_input_layout() {
         use std::mem::{align_of, offset_of, size_of};
 
-        assert_eq!(size_of::<FFIBaseUrlInput>(), 96);
+        assert_eq!(size_of::<FFIBaseUrlInput>(), 112);
         assert_eq!(align_of::<FFIBaseUrlInput>(), 8);
 
         assert_eq!(offset_of!(FFIBaseUrlInput, source_ip), 0);
@@ -1047,6 +1053,8 @@ mod layout_tests {
         assert_eq!(offset_of!(FFIBaseUrlInput, host_len), 80);
         assert_eq!(offset_of!(FFIBaseUrlInput, is_unix_socket), 88);
         assert_eq!(offset_of!(FFIBaseUrlInput, trusted_configured), 89);
+        assert_eq!(offset_of!(FFIBaseUrlInput, direct_scheme), 96);
+        assert_eq!(offset_of!(FFIBaseUrlInput, direct_scheme_len), 104);
     }
 
     #[test]

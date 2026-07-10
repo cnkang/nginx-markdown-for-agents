@@ -200,6 +200,17 @@ ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
         input.host_len = r->headers_in.server.len;
     }
 
+    /*
+     * Pass the direct connection scheme (r->schema) so Host header
+     * fallback uses the actual protocol.  Without this, a direct
+     * HTTPS request would get an http:// base URL, breaking relative
+     * link resolution.
+     */
+    if (r->schema.len > 0) {
+        input.direct_scheme = r->schema.data;
+        input.direct_scheme_len = r->schema.len;
+    }
+
     rc = markdown_decide_base_url(&input, out_buf, out_cap, &decision);
     if (rc != DECIDE_BASE_URL_OK) {
         return NGX_ERROR;
