@@ -26,7 +26,10 @@
 //! 3. Otherwise the trusted forwarded data is parsed and **strictly
 //!    validated** (trusted source is not blindly believed): the `Forwarded`
 //!    header (RFC 7239) takes precedence over `X-Forwarded-*`; multi-hop
-//!    comma chains take the left-most (closest to client) value.
+//!    comma chains take the **right-most** element (closest to the trusted
+//!    proxy) so a client-prepended malicious `host=` cannot poison the base
+//!    URL.  The left-most element is attacker-controlled when the client
+//!    pre-builds the header before the trusted proxy appends its own.
 //! 4. Invalid host/proto values fall back to the `Host` header or a safe
 //!    default with an explicit reason code.
 //!
@@ -264,7 +267,7 @@ pub fn is_trusted_source(source_ip: &str, trusted: &[Cidr]) -> bool {
     trusted.iter().any(|cidr| cidr.contains(ip))
 }
 
-/// Parsed view of the left-most element of an RFC 7239 `Forwarded` header.
+/// Parsed view of the right-most element of an RFC 7239 `Forwarded` header.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ForwardedHeader {
     /// `host=` parameter value (quotes stripped), if present.
@@ -273,21 +276,29 @@ pub struct ForwardedHeader {
     pub proto: Option<String>,
 }
 
-/// Parse the left-most element of an RFC 7239 `Forwarded` header.
+/// Parse the right-most element of an RFC 7239 `Forwarded` header.
 ///
 /// Multi-hop chains are comma-separated; trusted proxies append on the right,
-/// so the left-most element is the value closest to the original client.
+/// so the right-most element is the value set by the trusted proxy (the
+/// directly-connected source we validated).  The left-most element is
+/// closest to the original client and is attacker-controlled when the
+/// client pre-builds a `Forwarded` header before the trusted proxy appends
+/// its own.  Using the right-most element prevents the client from
+/// poisoning the base URL via a pre-pended malicious `host=`.
+///
 /// Each element is a list of `;`-separated `key=value` pairs.  Quoted values
 /// (`host="example.com:8080"`) are unquoted.  Returns `None` when the header
-/// is empty or the left-most element carries neither `host` nor `proto`.
+/// is empty or the right-most element carries neither `host` nor `proto`.
 pub fn parse_forwarded_header(s: &str) -> Option<ForwardedHeader> {
-    let first = s.split(',').next()?.trim();
-    if first.is_empty() {
+    // Use the right-most (last) comma-separated element: this is the value
+    // the trusted proxy appended.  The left-most is client-controlled.
+    let last = s.rsplit(',').next()?.trim();
+    if last.is_empty() {
         return None;
     }
 
     let mut result = ForwardedHeader::default();
-    for pair in first.split(';') {
+    for pair in last.split(';') {
         let pair = pair.trim();
         let Some((key, value)) = pair.split_once('=') else {
             continue;
@@ -534,9 +545,10 @@ fn decide_from_forwarded(input: &BaseUrlInput) -> Option<BaseUrlDecision> {
 
 /// Resolve the candidate (host, proto, source) from forwarded inputs.
 ///
-/// Prefers the RFC 7239 `Forwarded` header (left-most element); falls back to
-/// `X-Forwarded-Host` / `X-Forwarded-Proto`.  Returns `None` when neither is
-/// present.
+/// Prefers the RFC 7239 `Forwarded` header (right-most element, which is the
+/// value set by the trusted proxy — see [`parse_forwarded_header`] for the
+/// security rationale); falls back to `X-Forwarded-Host` /
+/// `X-Forwarded-Proto`.  Returns `None` when neither is present.
 fn resolve_forwarded_candidate(
     input: &BaseUrlInput,
 ) -> Option<(Option<String>, Option<String>, BaseUrlSource)> {
@@ -727,9 +739,12 @@ mod tests {
     }
 
     #[test]
-    fn forwarded_multi_hop_takes_leftmost() {
-        let p = parse_forwarded_header("host=client.example.com, host=proxy.internal").unwrap();
-        assert_eq!(p.host.as_deref(), Some("client.example.com"));
+    fn forwarded_multi_hop_takes_rightmost() {
+        // Trusted proxies append on the right; the right-most element is
+        // the one set by the trusted proxy.  The left-most is client-
+        // controlled and must not be used.
+        let p = parse_forwarded_header("host=client.evil.com, host=proxy.internal").unwrap();
+        assert_eq!(p.host.as_deref(), Some("proxy.internal"));
     }
 
     #[test]
@@ -876,14 +891,31 @@ mod tests {
     }
 
     #[test]
-    fn decide_forwarded_multi_hop_leftmost() {
+    fn decide_forwarded_multi_hop_rightmost() {
         let t = cidrs(&["10.0.0.0/8"]);
         let mut input = trusted_input("10.1.2.3");
-        input.forwarded = Some("host=client.example.com, host=proxy.internal");
+        input.forwarded = Some("host=client.evil.com, host=proxy.internal");
         let d = decide_base_url(&input, &t);
         assert_eq!(d.source, BaseUrlSource::Forwarded);
         // proto absent → defaults to https
-        assert_eq!(d.base_url, "https://client.example.com");
+        assert_eq!(d.base_url, "https://proxy.internal");
+    }
+
+    #[test]
+    fn decide_forwarded_client_prepend_rejected() {
+        // A client pre-builds a Forwarded header with a malicious host,
+        // then the trusted proxy appends its own element on the right.
+        // The module must use the right-most (proxy) element, not the
+        // client-prepended left-most one.
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.forwarded = Some(
+            "host=evil.com;proto=http, host=api.example.com;proto=https",
+        );
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.source, BaseUrlSource::Forwarded);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);
+        assert_eq!(d.base_url, "https://api.example.com");
     }
 
     #[test]
