@@ -155,12 +155,13 @@ STANDALONE_RPM_WORKFLOW_SNIPPETS = [
     'NGINX_VERSION_CEIL="${NGINX_MAJOR}.$((NGINX_MINOR + 1)).0"',
     "tools/release/gates/check_install_layout.sh dist/*.rpm",
 ]
+_VALIDATE_RELEASE_TAG_INPUT = "Validate release tag input"
 SIGN_AND_PUBLISH_SECURITY_SNIPPETS = [
     "Checkout trusted workflow scripts",
     "ref: ${{ github.event.repository.default_branch }}",
     "fetch-depth: 0",
     "persist-credentials: false",
-    "Validate release tag input",
+    _VALIDATE_RELEASE_TAG_INPUT,
     'version="${{ inputs.version }}"',
     '^v[0-9]+\\.[0-9]+\\.[0-9]+$',
     './packaging/scripts/validate-version.sh "${package_version}"',
@@ -810,7 +811,7 @@ def _validate_sign_and_publish_security(result: ValidationResult) -> None:
                 f"sign-and-publish.yml omits {snippet}",
             )
 
-    validation_pos = workflow.find("Validate release tag input")
+    validation_pos = workflow.find(_VALIDATE_RELEASE_TAG_INPUT)
     secret_pos = workflow.find("- name: Import GPG private key")
     if validation_pos != -1 and secret_pos != -1 and validation_pos < secret_pos:
         result.pass_(
@@ -828,7 +829,7 @@ def _validate_sign_and_publish_security(result: ValidationResult) -> None:
         "both signing jobs checkout trusted workflow scripts", result,
     )
     _check_minimum_count(
-        workflow, "Validate release tag input", 2,
+        workflow, _VALIDATE_RELEASE_TAG_INPUT, 2,
         "sign-publish-security:validation-count",
         "both signing jobs validate the release tag before secrets", result,
     )
