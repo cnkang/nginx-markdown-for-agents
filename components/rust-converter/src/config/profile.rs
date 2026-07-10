@@ -56,21 +56,28 @@ impl AcceptMode {
 ///
 /// Controls behavior when the conversion pipeline encounters a fatal error.
 ///
+/// The C side encodes this as a three-value kind via
+/// `ngx_http_markdown_on_error_to_ffi`:
+///   0 = pass, 1 = status, 2 = fail_closed
+///
 /// Discriminants are frozen for the 1.0 stability contract.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorPolicy {
     /// `pass` — deliver the upstream response unmodified (fail-open).
     Pass = 0,
-    /// `fail_closed` — return an error status to the client.
-    FailClosed = 1,
+    /// `status` — return a custom error status (429/503) to the client.
+    Status = 1,
+    /// `fail_closed` — return 502 Bad Gateway to the client.
+    FailClosed = 2,
 }
 
 impl ErrorPolicy {
     /// Construct from the FFI `u8`; unknown values fall back to `Pass`.
     pub fn from_u8(value: u8) -> Self {
         match value {
-            1 => ErrorPolicy::FailClosed,
+            1 => ErrorPolicy::Status,
+            2 => ErrorPolicy::FailClosed,
             _ => ErrorPolicy::Pass,
         }
     }
@@ -275,10 +282,21 @@ mod tests {
 
     #[test]
     fn error_policy_from_u8_roundtrip() {
-        for p in [ErrorPolicy::Pass, ErrorPolicy::FailClosed] {
+        for p in [ErrorPolicy::Pass, ErrorPolicy::Status, ErrorPolicy::FailClosed] {
             assert_eq!(ErrorPolicy::from_u8(p.as_u8()), p);
         }
         assert_eq!(ErrorPolicy::from_u8(99), ErrorPolicy::Pass);
+    }
+
+    #[test]
+    fn error_policy_ffi_discriminants_match_c_mapping() {
+        // C side: ngx_http_markdown_on_error_to_ffi maps
+        //   PASS(0)           → 0 (FFI_ERROR_POLICY_PASS)
+        //   REJECT + status   → 1 (FFI_ERROR_POLICY_STATUS)
+        //   REJECT + 502       → 2 (FFI_ERROR_POLICY_FAIL_CLOSED)
+        assert_eq!(ErrorPolicy::from_u8(0), ErrorPolicy::Pass);
+        assert_eq!(ErrorPolicy::from_u8(1), ErrorPolicy::Status);
+        assert_eq!(ErrorPolicy::from_u8(2), ErrorPolicy::FailClosed);
     }
 
     #[test]

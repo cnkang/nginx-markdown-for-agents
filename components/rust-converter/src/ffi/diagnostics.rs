@@ -114,9 +114,13 @@ mod tests {
         assert!(parsed["config_snapshot"].is_object());
         assert!(parsed["recent_decisions"].is_array());
         assert!(parsed["metrics_snapshot"].is_object());
+        assert!(parsed["streaming_metrics"].is_object());
         assert!(parsed["dynconf_state"].is_object());
         assert!(parsed["streaming_config"].is_object());
-        assert!(parsed["profile"].is_object());
+        assert!(parsed["profile"].is_string());
+        assert!(parsed["overridden_fields"].is_array());
+        assert!(parsed["forced_fields"].is_array());
+        assert!(parsed["effective_config"].is_object());
         assert!(parsed["effective_config"].is_object());
 
         // Clean up
