@@ -1714,11 +1714,14 @@ ngx_http_markdown_streaming_precommit_error(
             &r->headers_out.content_type,
             (r->headers_out.content_length_n >= 0) ? 1 : 0);
         /*
-         * Return the configured error status (429/503/502) so the
-         * body filter finalizes the request with the operator-chosen
-         * code, not a generic 500 from NGX_ERROR.
+         * Use ngx_http_filter_finalize_request so the configured error
+         * status (429/503/502) generates the correct error response.
+         * In the body filter, returning a positive status code directly
+         * is unreliable; the finalizer sets r->headers_out.status and
+         * routes through the proper error response generation path.
          */
-        return (ngx_int_t) conf->error_status;
+        return ngx_http_filter_finalize_request(r,
+            (ngx_int_t) conf->error_status);
     }
 
     /* Fail-open: pass original content */
@@ -3240,7 +3243,14 @@ ngx_http_markdown_streaming_handle_chunk_result(
         if (rc == NGX_DONE) {
             rc = NGX_OK;
         }
-        if (rc == NGX_OK || rc == NGX_AGAIN) {
+        /*
+         * Only set failopen_completed on successful downstream delivery
+         * (NGX_OK).  NGX_AGAIN means backpressure — pending output
+         * has been saved but not yet delivered; setting the latch
+         * here would cause the body filter to skip the resume path
+         * and the delivery counter would never increment.  (Rule 47)
+         */
+        if (rc == NGX_OK) {
             ctx->failopen_completed = 1;
         }
         return rc;
@@ -3473,7 +3483,8 @@ ngx_http_markdown_streaming_append_replay_chunk(
     if (rc == NGX_DECLINED && !ctx->eligible) {
         rc = ngx_http_markdown_streaming_failopen_passthrough(
             r, ctx, cl);
-        if (rc == NGX_OK || rc == NGX_AGAIN) {
+        /* Only set latch on successful delivery, not NGX_AGAIN (Rule 47) */
+        if (rc == NGX_OK) {
             ctx->failopen_completed = 1;
         }
     }
@@ -3637,14 +3648,18 @@ ngx_http_markdown_streaming_body_filter(
 
         if (rc == NGX_DECLINED && !ctx->eligible) {
             /*
-             * Mark failopen_completed on the context before
-             * forwarding, so any re-entry of body_filter
-             * (e.g. backpressure resume) skips duplicate
-             * finalize or passthrough.
+             * Call failopen_passthrough first; only set the latch
+             * after successful downstream delivery.  Setting the
+             * latch before the call would cause a backpressure
+             * (NGX_AGAIN) re-entry to skip the resume path and
+             * lose pending output.  (Rule 47)
              */
-            ctx->failopen_completed = 1;
-            return ngx_http_markdown_streaming_failopen_passthrough(
+            rc = ngx_http_markdown_streaming_failopen_passthrough(
                 r, ctx, in);
+            if (rc == NGX_OK) {
+                ctx->failopen_completed = 1;
+            }
+            return rc;
         }
 
         return rc;

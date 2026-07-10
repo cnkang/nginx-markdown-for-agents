@@ -215,7 +215,7 @@ ngx_http_markdown_handle_unsupported_compression(
             "rejecting (fail-closed)");
         ngx_http_markdown_log_failure_decision(
             r, ctx, conf);
-        return NGX_HTTP_BAD_GATEWAY;
+        return (ngx_int_t) conf->error_status;
     }
 
     ngx_http_markdown_metric_inc_failopen(conf);
@@ -270,13 +270,13 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
             r->connection->log, 0,
             "markdown: context allocation "
             "failed, rejecting (fail-closed)");
-        ngx_http_markdown_log_decision_with_category(
+            ngx_http_markdown_log_decision_with_category(
             r, conf, eff,
             ngx_http_markdown_reason_failed_closed(),
             ngx_http_markdown_reason_from_error_category(
                 NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
                 r->connection->log));
-        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        return (ngx_int_t) conf->error_status;
     }
 
     ngx_http_markdown_metric_inc_failopen(conf);
@@ -559,7 +559,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
             ngx_http_markdown_log_decision(
                 r, conf, ctx->effective_conf,
                 ngx_http_markdown_reason_failed_closed());
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            return (ngx_int_t) conf->error_status;
         }
 
         ngx_http_markdown_metric_inc_failopen(conf);

@@ -457,6 +457,7 @@ ngx_http_markdown_limits(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
      * Each argument must be key=value; keys are matched case-insensitively
      * and mapped to the corresponding conf field.  Duplicate keys, unknown
      * keys, and zero/malformed values are rejected at nginx -t time.
+     * Exception: max_inflight=0 means unlimited (accepted).
      */
     for (ngx_uint_t i = 1; i < cf->args->nelts; i++) {
         u_char    *eq;

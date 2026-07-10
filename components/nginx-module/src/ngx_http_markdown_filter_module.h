@@ -704,6 +704,7 @@ static ngx_inline void
 ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev,
     const ngx_http_markdown_profile_defaults_t *profile_defaults,
+    const ngx_http_markdown_profile_defaults_t *prev_defaults,
     ngx_flag_t profile_differs)
 {
 /*
@@ -712,27 +713,37 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
  * the previous level or fall back to the profile/compile-time default.
  *
  * When profile_differs is true, the parent's profile-generated value
- * is bypassed so the child's own profile default is used instead.
+ * is bypassed unless it differs from the parent's own profile default
+ * (i.e. the operator explicitly set it).
  */
-#define NGX_MD_MERGE_STREAM(field, type, unset, dflt)                        \
+#define NGX_MD_MERGE_STREAM(field, type, unset, dflt, prev_dflt)              \
     do {                                                                      \
         if (conf->stream.field == (type) (unset)) {                          \
-            conf->stream.field =                                              \
-                (!profile_differs && prev->stream.field != (type) (unset))   \
-                ? prev->stream.field : (dflt);                               \
+            if (!profile_differs) {                                          \
+                conf->stream.field = (prev->stream.field != (type) (unset))   \
+                    ? prev->stream.field : (dflt);                           \
+            } else {                                                          \
+                conf->stream.field =                                          \
+                    (prev->stream.field != (type) (unset)                     \
+                     && prev->stream.field != (type)(prev_dflt))              \
+                    ? prev->stream.field : (dflt);                           \
+            }                                                                \
         }                                                                    \
     } while (0)
 
     NGX_MD_MERGE_STREAM(engine, ngx_uint_t, -1,
-                        profile_defaults->streaming_engine);
+                        profile_defaults->streaming_engine,
+                        prev_defaults->streaming_engine);
     NGX_MD_MERGE_STREAM(policy, ngx_uint_t, -1,
-                        profile_defaults->streaming_policy);
-    NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0);
+                        profile_defaults->streaming_policy,
+                        prev_defaults->streaming_policy);
+    NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0, 0);
     NGX_MD_MERGE_STREAM(threshold, size_t, -1,
+                        NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT,
                         NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT);
-    NGX_MD_MERGE_STREAM(threshold_explicit, ngx_flag_t, -1, 0);
-    NGX_MD_MERGE_STREAM(precommit_buffer, size_t, -1, 262144);
-    NGX_MD_MERGE_STREAM(flush_min, size_t, -1, 16384);
+    NGX_MD_MERGE_STREAM(threshold_explicit, ngx_flag_t, -1, 0, 0);
+    NGX_MD_MERGE_STREAM(precommit_buffer, size_t, -1, 262144, 262144);
+    NGX_MD_MERGE_STREAM(flush_min, size_t, -1, 16384, 16384);
 
     if (conf->stream.excluded_types == (ngx_array_t *) -1) {
         conf->stream.excluded_types =
@@ -741,14 +752,16 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
     }
 
     NGX_MD_MERGE_STREAM(on_error, ngx_uint_t, -1,
-                        profile_defaults->error_policy);
-    NGX_MD_MERGE_STREAM(on_error_explicit, ngx_flag_t, -1, 0);
+                        profile_defaults->error_policy,
+                        prev_defaults->error_policy);
+    NGX_MD_MERGE_STREAM(on_error_explicit, ngx_flag_t, -1, 0, 0);
     NGX_MD_MERGE_STREAM(budget, size_t, -1,
-                        profile_defaults->limits_streaming_buffer);
-    NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0);
-    NGX_MD_MERGE_STREAM(shadow, ngx_flag_t, -1, 0);
-    NGX_MD_MERGE_STREAM(shadow_explicit, ngx_flag_t, -1, 0);
-    NGX_MD_MERGE_STREAM(zero_copy, ngx_flag_t, -1, 0);
+                        profile_defaults->limits_streaming_buffer,
+                        prev_defaults->limits_streaming_buffer);
+    NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0, 0);
+    NGX_MD_MERGE_STREAM(shadow, ngx_flag_t, -1, 0, 0);
+    NGX_MD_MERGE_STREAM(shadow_explicit, ngx_flag_t, -1, 0, 0);
+    NGX_MD_MERGE_STREAM(zero_copy, ngx_flag_t, -1, 0, 0);
 
 #undef NGX_MD_MERGE_STREAM
 }

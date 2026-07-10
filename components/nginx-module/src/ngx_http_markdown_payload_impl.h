@@ -124,13 +124,16 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
 
     if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
         /*
-         * Return the configured error status (429/503/502) so NGINX
-         * finalizes the request with the operator-chosen code.
-         * Returning NGX_ERROR would cause NGINX to send a generic 500,
-         * ignoring the error_status the operator configured via
-         * markdown_error_policy status <code>.
+         * Use ngx_http_filter_finalize_request to send the configured
+         * error status (429/503/502).  In the body filter, returning a
+         * positive HTTP status code directly is unreliable — NGINX's
+         * upstream body output path only special-cases NGX_ERROR.
+         * ngx_http_filter_finalize_request sets r->headers_out.status
+         * and routes through the finalizer to generate the correct
+         * error response.
          */
-        return (ngx_int_t) conf->error_status;
+        return ngx_http_filter_finalize_request(r,
+            (ngx_int_t) conf->error_status);
     }
 
     rc = ngx_http_markdown_fail_open_buffered_response(

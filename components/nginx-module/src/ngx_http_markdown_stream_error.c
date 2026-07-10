@@ -126,17 +126,17 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
 
     case NGX_HTTP_MD_ACTION_REJECT_502:
         /*
-         * Pre-commit with reject policy: return the configured error status.
-         * The operator may have set a custom status (429/503) via
-         * markdown_error_policy status <code>; use conf->error_status
-         * instead of a hard-coded 502 so the client receives the
-         * configured rejection code.
+         * Pre-commit with reject policy: finalize the request with the
+         * configured error status.  Use ngx_http_filter_finalize_request
+         * so NGINX generates the correct error response (the body filter
+         * does not reliably handle positive return codes).
          */
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                       "markdown stream on_error: "
                       "rejecting with %ui (on_error=reject)",
                       conf->error_status);
-        return (ngx_int_t) conf->error_status;
+        return ngx_http_filter_finalize_request(r,
+            (ngx_int_t) conf->error_status);
 
     case NGX_HTTP_MD_ACTION_SAFE_FINISH:
         /*
