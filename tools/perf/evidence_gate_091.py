@@ -547,6 +547,35 @@ def _obtain_benchmark_report(
             args.benchmark_report, purpose="benchmark report"
         )
         report = json.loads(report_path.read_text(encoding="utf-8"))
+        return report, None
+
+    output_path = Path(REPO_ROOT / "perf" / "reports" / "module-benchmark-091.json")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    _stderr("Running module-level benchmark harness...")
+    rc, stderr_output = _run_module_benchmark(output_path)
+    if rc != 0:
+        _stderr(f"Benchmark harness failed (exit {rc}):")
+        _stderr(stderr_output)
+        if not blocking:
+            _stderr("Non-blocking mode: reporting failure as evidence.")
+            evidence_pack = _build_evidence_pack(
+                report=None,
+                verdict="NO_GO",
+                breaches=[{"metric": "benchmark_run", "reason": f"harness exit {rc}"}],
+                results=[],
+            )
+            _print_evidence_summary(evidence_pack)
+            _write_output(evidence_pack, args.output)
+            return None, 0
+        return None, 1
+
+    if output_path.exists():
+        report = json.loads(output_path.read_text(encoding="utf-8"))
+    else:
+        _stderr("WARNING: Benchmark completed but no output file found.")
+        report = {}
+
     return report, None
 
 
@@ -577,35 +606,6 @@ def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
             reason = s.get("reason", "unknown")
             skipped.append((name, reason))
     return skipped
-
-    output_path = Path(REPO_ROOT / "perf" / "reports" / "module-benchmark-091.json")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    _stderr("Running module-level benchmark harness...")
-    rc, stderr_output = _run_module_benchmark(output_path)
-    if rc != 0:
-        _stderr(f"Benchmark harness failed (exit {rc}):")
-        _stderr(stderr_output)
-        if not blocking:
-            _stderr("Non-blocking mode: reporting failure as evidence.")
-            evidence_pack = _build_evidence_pack(
-                report=None,
-                verdict="NO_GO",
-                breaches=[{"metric": "benchmark_run", "reason": f"harness exit {rc}"}],
-                results=[],
-            )
-            _print_evidence_summary(evidence_pack)
-            _write_output(evidence_pack, args.output)
-            return None, 0
-        return None, 1
-
-    if output_path.exists():
-        report = json.loads(output_path.read_text(encoding="utf-8"))
-    else:
-        _stderr("WARNING: Benchmark completed but no output file found.")
-        report = {}
-
-    return report, None
 
 
 def _evaluate_and_report(
