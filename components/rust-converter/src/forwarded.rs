@@ -486,14 +486,20 @@ pub struct BaseUrlInput<'a> {
 pub fn decide_base_url(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecision {
     // 1. Trust not configured → ignore forwarded headers.
     if !input.trusted_configured {
-        return host_fallback(input.host, input.direct_scheme,
-                              BaseUrlReason::TrustedProxiesNotConfigured);
+        return host_fallback(
+            input.host,
+            input.direct_scheme,
+            BaseUrlReason::TrustedProxiesNotConfigured,
+        );
     }
 
     // 2. Untrusted source (including Unix socket) → ignore forwarded headers.
     if input.is_unix_socket || !is_trusted_source(input.source_ip, trusted) {
-        return host_fallback(input.host, input.direct_scheme,
-                              BaseUrlReason::ForwardedHeaderUntrusted);
+        return host_fallback(
+            input.host,
+            input.direct_scheme,
+            BaseUrlReason::ForwardedHeaderUntrusted,
+        );
     }
 
     // 3. Trusted source: still strictly validate the forwarded data.
@@ -503,8 +509,11 @@ pub fn decide_base_url(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecisio
     }
 
     // 4. No usable forwarded data → fall back to Host / default.
-    host_fallback(input.host, input.direct_scheme,
-                  BaseUrlReason::FallbackToHost)
+    host_fallback(
+        input.host,
+        input.direct_scheme,
+        BaseUrlReason::FallbackToHost,
+    )
 }
 
 /// Try to build a base URL from the trusted forwarded data.
@@ -524,12 +533,16 @@ fn decide_from_forwarded(input: &BaseUrlInput) -> Option<BaseUrlDecision> {
         // host as "fall through to Host header".
         if raw_host.is_some() {
             return Some(host_fallback(
-                input.host, input.direct_scheme,
+                input.host,
+                input.direct_scheme,
                 BaseUrlReason::ForwardedInvalidHost,
             ));
         }
-        return Some(host_fallback(input.host, input.direct_scheme,
-                                   BaseUrlReason::FallbackToHost));
+        return Some(host_fallback(
+            input.host,
+            input.direct_scheme,
+            BaseUrlReason::FallbackToHost,
+        ));
     };
 
     // Validate proto when provided; default to https when absent.
@@ -538,7 +551,8 @@ fn decide_from_forwarded(input: &BaseUrlInput) -> Option<BaseUrlDecision> {
             Some(s) => s,
             None => {
                 return Some(host_fallback(
-                    input.host, input.direct_scheme,
+                    input.host,
+                    input.direct_scheme,
                     BaseUrlReason::ForwardedInvalidProto,
                 ));
             }
@@ -595,8 +609,11 @@ fn resolve_forwarded_candidate(
 /// "http" for backward compatibility.  This preserves the actual connection
 /// protocol for direct HTTPS requests so relative links are not erroneously
 /// resolved as http://.
-fn host_fallback(host: Option<&str>, direct_scheme: Option<&str>,
-                 reason: BaseUrlReason) -> BaseUrlDecision {
+fn host_fallback(
+    host: Option<&str>,
+    direct_scheme: Option<&str>,
+    reason: BaseUrlReason,
+) -> BaseUrlDecision {
     let scheme = direct_scheme
         .map(str::trim)
         .filter(|s| !s.is_empty())

@@ -282,7 +282,11 @@ mod tests {
 
     #[test]
     fn error_policy_from_u8_roundtrip() {
-        for p in [ErrorPolicy::Pass, ErrorPolicy::Status, ErrorPolicy::FailClosed] {
+        for p in [
+            ErrorPolicy::Pass,
+            ErrorPolicy::Status,
+            ErrorPolicy::FailClosed,
+        ] {
             assert_eq!(ErrorPolicy::from_u8(p.as_u8()), p);
         }
         assert_eq!(ErrorPolicy::from_u8(99), ErrorPolicy::Pass);

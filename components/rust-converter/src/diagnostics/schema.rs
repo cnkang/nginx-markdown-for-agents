@@ -29,6 +29,8 @@
 //! This schema is a v1 DRAFT for 0.9.0. It will be frozen at 1.0.0.
 //! After freeze: additive-only changes (new optional fields), no removals.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 /// Diagnostics JSON output schema v1.
@@ -64,8 +66,7 @@ pub struct DiagnosticsSchema {
 }
 
 /// Configuration snapshot (dynconf snapshot).
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ConfigSnapshot {}
+pub type ConfigSnapshot = BTreeMap<String, serde_json::Value>;
 
 /// A single recent decision entry from the ring buffer.
 #[derive(Debug, Clone, Serialize)]
@@ -75,7 +76,7 @@ pub struct RecentDecision {
     /// Numeric reason code.
     pub reason_code: i32,
     /// Human-readable reason code string.
-    pub reason_code_str: String,
+    pub reason_code_str: Option<String>,
     /// Decision duration in milliseconds.
     pub duration_ms: i64,
 }
@@ -122,11 +123,11 @@ pub struct StreamingMetrics {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DynconfState {
     /// Active config file mtime.
-    pub active_mtime: String,
+    pub active_mtime: i64,
     /// Config version counter.
     pub config_version: u64,
     /// Last known good mtime.
-    pub last_known_good_mtime: String,
+    pub last_known_good_mtime: i64,
     /// Whether last known good is valid.
     pub lkg_valid: bool,
 }
@@ -134,16 +135,20 @@ pub struct DynconfState {
 /// Streaming configuration summary.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct StreamingConfig {
-    /// Streaming policy (off, auto, force).
-    pub policy: String,
     /// Streaming engine (off, on, auto).
     pub engine: String,
+    /// Whether the engine came from configuration or the default.
+    pub engine_source: String,
+    /// Streaming error handling policy (pass or reject).
+    pub on_error: String,
     /// Streaming threshold in bytes.
     pub threshold: u64,
-    /// Streaming buffer budget in bytes.
-    pub budget: u64,
-    /// Whether streaming shadow mode is enabled.
-    pub shadow: bool,
+    /// Bytes retained before the response is committed downstream.
+    pub precommit_buffer: u64,
+    /// Minimum output flush size in bytes.
+    pub flush_min: u64,
+    /// Whether the threshold was explicitly configured.
+    pub threshold_explicit: bool,
 }
 
 /// Resolved effective configuration.
@@ -297,6 +302,83 @@ mod tests {
         assert!(ec["limits_streaming_buffer_bytes"].is_u64());
         assert!(ec["limits_max_inflight"].is_u64());
         assert!(ec["error_policy"].is_string());
+    }
+
+    #[test]
+    fn test_streaming_config_matches_c_endpoint_shape() {
+        let parsed: serde_json::Value = serde_json::from_str(
+            &DiagnosticsSchema::default()
+                .to_json()
+                .expect("serialization should succeed"),
+        )
+        .expect("output should be valid JSON");
+        let sc = parsed["streaming_config"]
+            .as_object()
+            .expect("streaming_config should be an object");
+
+        let expected = [
+            "engine",
+            "engine_source",
+            "on_error",
+            "threshold",
+            "precommit_buffer",
+            "flush_min",
+            "threshold_explicit",
+        ];
+        assert_eq!(sc.len(), expected.len());
+        for key in expected {
+            assert!(sc.contains_key(key), "missing C endpoint key: {key}");
+        }
+        assert!(sc["engine"].is_string());
+        assert!(sc["engine_source"].is_string());
+        assert!(sc["on_error"].is_string());
+        assert!(sc["threshold"].is_u64());
+        assert!(sc["precommit_buffer"].is_u64());
+        assert!(sc["flush_min"].is_u64());
+        assert!(sc["threshold_explicit"].is_boolean());
+    }
+
+    #[test]
+    fn test_dynconf_state_mtimes_match_numeric_c_output() {
+        let parsed: serde_json::Value = serde_json::from_str(
+            &DiagnosticsSchema::default()
+                .to_json()
+                .expect("serialization should succeed"),
+        )
+        .expect("output should be valid JSON");
+        let state = &parsed["dynconf_state"];
+        assert!(state["active_mtime"].is_i64());
+        assert!(state["config_version"].is_u64());
+        assert!(state["last_known_good_mtime"].is_i64());
+        assert!(state["lkg_valid"].is_boolean());
+    }
+
+    #[test]
+    fn test_unknown_reason_serializes_as_null_like_c_endpoint() {
+        let decision = RecentDecision {
+            timestamp: 1,
+            reason_code: -1,
+            reason_code_str: None,
+            duration_ms: 2,
+        };
+        let value = serde_json::to_value(decision).expect("serialization succeeds");
+        assert!(value["reason_code_str"].is_null());
+    }
+
+    #[test]
+    fn test_config_snapshot_accepts_dynconf_keys() {
+        let mut schema = DiagnosticsSchema::default();
+        schema.config_snapshot.insert(
+            "markdown_limits_memory".to_string(),
+            serde_json::json!(8_388_608),
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(&schema.to_json().expect("serialization succeeds"))
+                .expect("valid JSON");
+        assert_eq!(
+            value["config_snapshot"]["markdown_limits_memory"],
+            8_388_608,
+        );
     }
 
     #[test]

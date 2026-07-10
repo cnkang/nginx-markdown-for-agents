@@ -287,7 +287,7 @@ _Static_assert(offsetof(FFIDecompResult, error_category) == 16,
     "FFIDecompResult.error_category offset must be 16");
 
 /* ----------------------------------------------------------------
- * FFIBaseUrlInput layout (96 bytes on LP64) - spec 47.
+ * FFIBaseUrlInput layout (112 bytes on LP64) - spec 47.
  *   source_ip             : *const u8                     offset  0
  *   source_ip_len         : usize                         offset  8
  *   trusted               : *const MarkdownTrustedProxies offset 16
@@ -302,10 +302,12 @@ _Static_assert(offsetof(FFIDecompResult, error_category) == 16,
  *   is_unix_socket        : u8                            offset 88
  *   trusted_configured    : u8                            offset 89
  *   (padding)                                             offset 90..95
- * Total: 96 bytes, align 8
+ *   direct_scheme         : *const u8                     offset 96
+ *   direct_scheme_len     : usize                         offset 104
+ * Total: 112 bytes, align 8
  * ---------------------------------------------------------------- */
-_Static_assert(sizeof(FFIBaseUrlInput) == 96,
-    "FFIBaseUrlInput size must match Rust (96 bytes on 64-bit)");
+_Static_assert(sizeof(FFIBaseUrlInput) == 112,
+    "FFIBaseUrlInput size must match Rust (112 bytes on 64-bit)");
 _Static_assert(offsetof(FFIBaseUrlInput, source_ip) == 0,
     "FFIBaseUrlInput.source_ip offset must be 0");
 _Static_assert(offsetof(FFIBaseUrlInput, source_ip_len) == 8,
@@ -332,6 +334,10 @@ _Static_assert(offsetof(FFIBaseUrlInput, is_unix_socket) == 88,
     "FFIBaseUrlInput.is_unix_socket offset must be 88");
 _Static_assert(offsetof(FFIBaseUrlInput, trusted_configured) == 89,
     "FFIBaseUrlInput.trusted_configured offset must be 89");
+_Static_assert(offsetof(FFIBaseUrlInput, direct_scheme) == 96,
+    "FFIBaseUrlInput.direct_scheme offset must be 96");
+_Static_assert(offsetof(FFIBaseUrlInput, direct_scheme_len) == 104,
+    "FFIBaseUrlInput.direct_scheme_len offset must be 104");
 
 /* ----------------------------------------------------------------
  * FFIBaseUrlDecision layout (16 bytes on LP64) - spec 47.

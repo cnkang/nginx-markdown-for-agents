@@ -116,6 +116,8 @@ struct FFIBaseUrlInput {
     uintptr_t                            x_forwarded_host_len;
     const uint8_t                       *host;
     uintptr_t                            host_len;
+    const uint8_t                       *direct_scheme;
+    uintptr_t                            direct_scheme_len;
     uint8_t                              is_unix_socket;
     uint8_t                              trusted_configured;
 };
