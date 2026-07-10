@@ -127,6 +127,8 @@ struct ngx_http_request_s {
 /* Include the module header for types */
 #include "../../src/ngx_http_markdown_filter_module.h"
 
+ngx_module_t ngx_http_markdown_filter_module;
+
 static ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r,
     ngx_chain_t *in);
 #include "../../src/ngx_http_markdown_filter_chain_impl.h"

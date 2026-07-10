@@ -1721,6 +1721,7 @@ ngx_http_markdown_streaming_precommit_error(
          * routes through the proper error response generation path.
          */
         return ngx_http_filter_finalize_request(r,
+            &ngx_http_markdown_filter_module,
             (ngx_int_t) conf->error_status);
     }
 

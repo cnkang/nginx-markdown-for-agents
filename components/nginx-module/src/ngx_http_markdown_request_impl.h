@@ -1293,6 +1293,24 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         return ngx_http_markdown_body_filter_resume_pending(r, ctx);
     }
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * A fail-open send can mark the request ineligible while downstream owns
+     * a pending streaming chain after NGX_AGAIN.  Drain that chain before the
+     * generic ineligible passthrough clears our buffered bit.  NGINX normally
+     * re-enters filters with NULL input; reject unexpected new input until the
+     * retained chain has drained so it cannot be overwritten or skipped.
+     */
+    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_STREAMING
+        && ctx->streaming.pending_has_data)
+    {
+        if (in != NULL) {
+            return NGX_AGAIN;
+        }
+        return ngx_http_markdown_streaming_body_filter(r, NULL);
+    }
+#endif
+
     /* If not eligible for conversion, pass through */
     if (!ctx->eligible) {
         r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;

@@ -13,9 +13,11 @@
  * the conf struct, not through the finalizer return value.
  */
 static ngx_inline ngx_int_t
-ngx_http_filter_finalize_request(ngx_http_request_t *r, ngx_int_t rc)
+ngx_http_filter_finalize_request(ngx_http_request_t *r, ngx_module_t *module,
+    ngx_int_t rc)
 {
     (void) r;
+    (void) module;
     (void) rc;
     return NGX_ERROR;
 }
