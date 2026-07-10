@@ -909,9 +909,7 @@ mod tests {
         // client-prepended left-most one.
         let t = cidrs(&["10.0.0.0/8"]);
         let mut input = trusted_input("10.1.2.3");
-        input.forwarded = Some(
-            "host=evil.com;proto=http, host=api.example.com;proto=https",
-        );
+        input.forwarded = Some("host=evil.com;proto=http, host=api.example.com;proto=https");
         let d = decide_base_url(&input, &t);
         assert_eq!(d.source, BaseUrlSource::Forwarded);
         assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);

@@ -2,24 +2,24 @@
   "schema-version": "1.0.0",
   "metadata": {
     "corpus-version": "1.0.0",
-    "git-commit": "1d021b0",
-    "platform": "linux-x86_64",
-    "timestamp": "2026-07-06T04:00:08Z",
+    "git-commit": "c1d4757f",
+    "platform": "darwin-arm64",
+    "timestamp": "2026-07-10T10:22:46Z",
     "converter-version": "0.4.0",
     "token-approx-factor": 1.0
   },
   "summary": {
-    "total-fixtures": 48,
-    "converted-count": 48,
+    "total-fixtures": 51,
+    "converted-count": 51,
     "skipped-count": 0,
     "failed-open-count": 0,
     "fallback-rate": 0.0,
-    "token-reduction-percent": 62.09,
-    "input-bytes-total": 83403,
-    "output-bytes-total": 31621,
-    "p50-latency-ms": 1.67,
-    "p95-latency-ms": 1.96,
-    "p99-latency-ms": 2.02
+    "token-reduction-percent": 28.1,
+    "input-bytes-total": 78726389,
+    "output-bytes-total": 56606214,
+    "p50-latency-ms": 4.62,
+    "p95-latency-ms": 24.16,
+    "p99-latency-ms": 1279.53
   },
   "fixtures": [
     {
@@ -28,7 +28,7 @@
       "conversion-result": "converted",
       "input-bytes": 6613,
       "output-bytes": 2261,
-      "latency-ms": 2.07,
+      "latency-ms": 4.04,
       "token-reduction-percent": 65.81,
       "failure-corpus": false
     },
@@ -38,7 +38,7 @@
       "conversion-result": "converted",
       "input-bytes": 4031,
       "output-bytes": 518,
-      "latency-ms": 1.97,
+      "latency-ms": 3.96,
       "token-reduction-percent": 87.15,
       "failure-corpus": false
     },
@@ -48,7 +48,7 @@
       "conversion-result": "converted",
       "input-bytes": 4219,
       "output-bytes": 546,
-      "latency-ms": 1.97,
+      "latency-ms": 3.59,
       "token-reduction-percent": 87.06,
       "failure-corpus": false
     },
@@ -58,7 +58,7 @@
       "conversion-result": "converted",
       "input-bytes": 5390,
       "output-bytes": 2503,
-      "latency-ms": 1.94,
+      "latency-ms": 3.89,
       "token-reduction-percent": 53.56,
       "failure-corpus": false
     },
@@ -68,7 +68,7 @@
       "conversion-result": "converted",
       "input-bytes": 3654,
       "output-bytes": 1469,
-      "latency-ms": 1.8,
+      "latency-ms": 3.94,
       "token-reduction-percent": 59.8,
       "failure-corpus": false
     },
@@ -78,7 +78,7 @@
       "conversion-result": "converted",
       "input-bytes": 2769,
       "output-bytes": 267,
-      "latency-ms": 1.72,
+      "latency-ms": 3.76,
       "token-reduction-percent": 90.36,
       "failure-corpus": false
     },
@@ -88,7 +88,7 @@
       "conversion-result": "converted",
       "input-bytes": 3522,
       "output-bytes": 1408,
-      "latency-ms": 1.79,
+      "latency-ms": 3.63,
       "token-reduction-percent": 60.02,
       "failure-corpus": false
     },
@@ -98,7 +98,7 @@
       "conversion-result": "converted",
       "input-bytes": 1517,
       "output-bytes": 89,
-      "latency-ms": 1.73,
+      "latency-ms": 3.69,
       "token-reduction-percent": 94.13,
       "failure-corpus": true
     },
@@ -108,7 +108,7 @@
       "conversion-result": "converted",
       "input-bytes": 203,
       "output-bytes": 21,
-      "latency-ms": 1.59,
+      "latency-ms": 3.91,
       "token-reduction-percent": 89.66,
       "failure-corpus": false
     },
@@ -118,7 +118,7 @@
       "conversion-result": "converted",
       "input-bytes": 588,
       "output-bytes": 206,
-      "latency-ms": 1.6,
+      "latency-ms": 3.66,
       "token-reduction-percent": 64.97,
       "failure-corpus": true
     },
@@ -128,7 +128,7 @@
       "conversion-result": "converted",
       "input-bytes": 504,
       "output-bytes": 14,
-      "latency-ms": 1.55,
+      "latency-ms": 3.52,
       "token-reduction-percent": 97.22,
       "failure-corpus": true
     },
@@ -138,7 +138,7 @@
       "conversion-result": "converted",
       "input-bytes": 1407,
       "output-bytes": 19,
-      "latency-ms": 1.58,
+      "latency-ms": 3.68,
       "token-reduction-percent": 98.65,
       "failure-corpus": true
     },
@@ -148,7 +148,7 @@
       "conversion-result": "converted",
       "input-bytes": 618,
       "output-bytes": 356,
-      "latency-ms": 1.67,
+      "latency-ms": 3.58,
       "token-reduction-percent": 42.39,
       "failure-corpus": false
     },
@@ -158,7 +158,7 @@
       "conversion-result": "converted",
       "input-bytes": 1179,
       "output-bytes": 461,
-      "latency-ms": 1.61,
+      "latency-ms": 8.45,
       "token-reduction-percent": 60.9,
       "failure-corpus": false
     },
@@ -168,7 +168,7 @@
       "conversion-result": "converted",
       "input-bytes": 1084,
       "output-bytes": 863,
-      "latency-ms": 1.69,
+      "latency-ms": 6.64,
       "token-reduction-percent": 20.39,
       "failure-corpus": false
     },
@@ -178,7 +178,7 @@
       "conversion-result": "converted",
       "input-bytes": 2041,
       "output-bytes": 997,
-      "latency-ms": 1.76,
+      "latency-ms": 5.69,
       "token-reduction-percent": 51.15,
       "failure-corpus": false
     },
@@ -188,7 +188,7 @@
       "conversion-result": "converted",
       "input-bytes": 3036,
       "output-bytes": 2008,
-      "latency-ms": 1.76,
+      "latency-ms": 4.18,
       "token-reduction-percent": 33.86,
       "failure-corpus": false
     },
@@ -198,7 +198,7 @@
       "conversion-result": "converted",
       "input-bytes": 2662,
       "output-bytes": 1773,
-      "latency-ms": 1.68,
+      "latency-ms": 4.06,
       "token-reduction-percent": 33.4,
       "failure-corpus": false
     },
@@ -208,7 +208,7 @@
       "conversion-result": "converted",
       "input-bytes": 604,
       "output-bytes": 263,
-      "latency-ms": 1.65,
+      "latency-ms": 3.87,
       "token-reduction-percent": 56.46,
       "failure-corpus": false
     },
@@ -218,8 +218,38 @@
       "conversion-result": "converted",
       "input-bytes": 2565,
       "output-bytes": 1896,
-      "latency-ms": 1.74,
+      "latency-ms": 3.76,
       "token-reduction-percent": 26.08,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "large/large-10mb",
+      "page-type": "complex-common",
+      "conversion-result": "converted",
+      "input-bytes": 10485721,
+      "output-bytes": 7543230,
+      "latency-ms": 350.29,
+      "token-reduction-percent": 28.06,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "large/large-1mb",
+      "page-type": "complex-common",
+      "conversion-result": "converted",
+      "input-bytes": 1048516,
+      "output-bytes": 754220,
+      "latency-ms": 38.04,
+      "token-reduction-percent": 28.07,
+      "failure-corpus": false
+    },
+    {
+      "fixture-id": "large/large-64mb",
+      "page-type": "complex-common",
+      "conversion-result": "converted",
+      "input-bytes": 67108749,
+      "output-bytes": 48277143,
+      "latency-ms": 2208.77,
+      "token-reduction-percent": 28.06,
       "failure-corpus": false
     },
     {
@@ -228,7 +258,7 @@
       "conversion-result": "converted",
       "input-bytes": 1493,
       "output-bytes": 194,
-      "latency-ms": 1.69,
+      "latency-ms": 10.27,
       "token-reduction-percent": 87.01,
       "failure-corpus": true
     },
@@ -238,7 +268,7 @@
       "conversion-result": "converted",
       "input-bytes": 1522,
       "output-bytes": 326,
-      "latency-ms": 1.88,
+      "latency-ms": 5.74,
       "token-reduction-percent": 78.58,
       "failure-corpus": true
     },
@@ -248,7 +278,7 @@
       "conversion-result": "converted",
       "input-bytes": 1417,
       "output-bytes": 580,
-      "latency-ms": 1.73,
+      "latency-ms": 5.14,
       "token-reduction-percent": 59.07,
       "failure-corpus": true
     },
@@ -258,7 +288,7 @@
       "conversion-result": "converted",
       "input-bytes": 719,
       "output-bytes": 509,
-      "latency-ms": 1.63,
+      "latency-ms": 4.71,
       "token-reduction-percent": 29.21,
       "failure-corpus": true
     },
@@ -268,7 +298,7 @@
       "conversion-result": "converted",
       "input-bytes": 1500,
       "output-bytes": 762,
-      "latency-ms": 1.71,
+      "latency-ms": 5.43,
       "token-reduction-percent": 49.2,
       "failure-corpus": true
     },
@@ -278,7 +308,7 @@
       "conversion-result": "converted",
       "input-bytes": 379,
       "output-bytes": 150,
-      "latency-ms": 1.56,
+      "latency-ms": 5.76,
       "token-reduction-percent": 60.42,
       "failure-corpus": false
     },
@@ -288,7 +318,7 @@
       "conversion-result": "converted",
       "input-bytes": 1261,
       "output-bytes": 734,
-      "latency-ms": 1.63,
+      "latency-ms": 5.37,
       "token-reduction-percent": 41.79,
       "failure-corpus": false
     },
@@ -298,7 +328,7 @@
       "conversion-result": "converted",
       "input-bytes": 1136,
       "output-bytes": 608,
-      "latency-ms": 1.65,
+      "latency-ms": 5.61,
       "token-reduction-percent": 46.48,
       "failure-corpus": false
     },
@@ -308,7 +338,7 @@
       "conversion-result": "converted",
       "input-bytes": 575,
       "output-bytes": 252,
-      "latency-ms": 1.63,
+      "latency-ms": 4.71,
       "token-reduction-percent": 56.17,
       "failure-corpus": false
     },
@@ -318,7 +348,7 @@
       "conversion-result": "converted",
       "input-bytes": 1024,
       "output-bytes": 498,
-      "latency-ms": 1.63,
+      "latency-ms": 4.54,
       "token-reduction-percent": 51.37,
       "failure-corpus": false
     },
@@ -328,7 +358,7 @@
       "conversion-result": "converted",
       "input-bytes": 1073,
       "output-bytes": 565,
-      "latency-ms": 1.63,
+      "latency-ms": 5.35,
       "token-reduction-percent": 47.34,
       "failure-corpus": false
     },
@@ -338,7 +368,7 @@
       "conversion-result": "converted",
       "input-bytes": 1092,
       "output-bytes": 401,
-      "latency-ms": 1.66,
+      "latency-ms": 5.61,
       "token-reduction-percent": 63.28,
       "failure-corpus": false
     },
@@ -348,7 +378,7 @@
       "conversion-result": "converted",
       "input-bytes": 1887,
       "output-bytes": 1025,
-      "latency-ms": 1.64,
+      "latency-ms": 5.2,
       "token-reduction-percent": 45.68,
       "failure-corpus": false
     },
@@ -358,7 +388,7 @@
       "conversion-result": "converted",
       "input-bytes": 2164,
       "output-bytes": 418,
-      "latency-ms": 1.71,
+      "latency-ms": 5.36,
       "token-reduction-percent": 80.68,
       "failure-corpus": false
     },
@@ -368,7 +398,7 @@
       "conversion-result": "converted",
       "input-bytes": 867,
       "output-bytes": 175,
-      "latency-ms": 1.69,
+      "latency-ms": 4.59,
       "token-reduction-percent": 79.82,
       "failure-corpus": false
     },
@@ -378,7 +408,7 @@
       "conversion-result": "converted",
       "input-bytes": 737,
       "output-bytes": 151,
-      "latency-ms": 1.6,
+      "latency-ms": 4.62,
       "token-reduction-percent": 79.51,
       "failure-corpus": false
     },
@@ -388,7 +418,7 @@
       "conversion-result": "converted",
       "input-bytes": 1030,
       "output-bytes": 350,
-      "latency-ms": 1.59,
+      "latency-ms": 4.52,
       "token-reduction-percent": 66.02,
       "failure-corpus": false
     },
@@ -398,7 +428,7 @@
       "conversion-result": "converted",
       "input-bytes": 1272,
       "output-bytes": 659,
-      "latency-ms": 1.57,
+      "latency-ms": 4.62,
       "token-reduction-percent": 48.19,
       "failure-corpus": false
     },
@@ -408,7 +438,7 @@
       "conversion-result": "converted",
       "input-bytes": 1018,
       "output-bytes": 110,
-      "latency-ms": 1.6,
+      "latency-ms": 4.54,
       "token-reduction-percent": 89.19,
       "failure-corpus": false
     },
@@ -418,7 +448,7 @@
       "conversion-result": "converted",
       "input-bytes": 4223,
       "output-bytes": 422,
-      "latency-ms": 1.76,
+      "latency-ms": 4.71,
       "token-reduction-percent": 90.01,
       "failure-corpus": false
     },
@@ -428,7 +458,7 @@
       "conversion-result": "converted",
       "input-bytes": 860,
       "output-bytes": 272,
-      "latency-ms": 1.61,
+      "latency-ms": 4.51,
       "token-reduction-percent": 68.37,
       "failure-corpus": false
     },
@@ -438,7 +468,7 @@
       "conversion-result": "converted",
       "input-bytes": 1507,
       "output-bytes": 436,
-      "latency-ms": 1.61,
+      "latency-ms": 4.43,
       "token-reduction-percent": 71.07,
       "failure-corpus": false
     },
@@ -448,7 +478,7 @@
       "conversion-result": "converted",
       "input-bytes": 779,
       "output-bytes": 195,
-      "latency-ms": 1.57,
+      "latency-ms": 4.53,
       "token-reduction-percent": 74.97,
       "failure-corpus": false
     },
@@ -458,7 +488,7 @@
       "conversion-result": "converted",
       "input-bytes": 1328,
       "output-bytes": 1029,
-      "latency-ms": 1.67,
+      "latency-ms": 4.66,
       "token-reduction-percent": 22.52,
       "failure-corpus": false
     },
@@ -468,7 +498,7 @@
       "conversion-result": "converted",
       "input-bytes": 1902,
       "output-bytes": 1500,
-      "latency-ms": 1.63,
+      "latency-ms": 4.68,
       "token-reduction-percent": 21.14,
       "failure-corpus": false
     },
@@ -478,7 +508,7 @@
       "conversion-result": "converted",
       "input-bytes": 631,
       "output-bytes": 317,
-      "latency-ms": 1.67,
+      "latency-ms": 4.78,
       "token-reduction-percent": 49.76,
       "failure-corpus": true
     },
@@ -488,7 +518,7 @@
       "conversion-result": "converted",
       "input-bytes": 702,
       "output-bytes": 582,
-      "latency-ms": 1.58,
+      "latency-ms": 4.92,
       "token-reduction-percent": 17.09,
       "failure-corpus": false
     },
@@ -498,7 +528,7 @@
       "conversion-result": "converted",
       "input-bytes": 1099,
       "output-bytes": 463,
-      "latency-ms": 1.68,
+      "latency-ms": 4.76,
       "token-reduction-percent": 57.87,
       "failure-corpus": false
     }
