@@ -67,6 +67,16 @@ typedef struct {
         } selection;
     } streaming;
 #endif
+    struct {
+        ngx_atomic_t  backpressure_total;
+        ngx_atomic_t  backpressure_resume_total;
+        ngx_atomic_t  pending_output_high_watermark_bytes;
+        ngx_atomic_t  decompression_streaming_total;
+        ngx_atomic_t  decompression_fullbuffer_total;
+        ngx_atomic_t  decompression_budget_exceeded_total;
+        ngx_atomic_t  zero_copy_output_total;
+        ngx_atomic_t  copied_output_total;
+    } perf;
 } ngx_http_markdown_metrics_t;
 
 /* Global metrics pointer (mirrors production) */
@@ -88,6 +98,16 @@ static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
 
 ngx_int_t ngx_http_markdown_dynconf_rollback(
     ngx_http_markdown_dynconf_watcher_t *watcher, ngx_log_t *log);
+
+/* ── Inflight overload stub ────────────────────────────────────── */
+
+static ngx_atomic_int_t g_inflight_overload_total;
+
+static ngx_inline ngx_atomic_int_t
+ngx_http_markdown_inflight_overload_total(void)
+{
+    return g_inflight_overload_total;
+}
 
 /* ── Production function headers and implementation ───────────── */
 

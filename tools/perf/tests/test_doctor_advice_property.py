@@ -353,11 +353,19 @@ def test_property10_removing_one_required_metric_skips_rule(
     # Build full triggering metrics for this rule
     metrics = TRIGGER_BUILDERS[rule_id]()
 
-    # Remove one of the required metrics
+    # Remove one of the required metrics (may be nested one level deep)
     required = RULE_METRICS[rule_id]["required"]
     idx = metric_to_remove_idx % len(required)
     removed_key = required[idx]
-    del metrics[removed_key]
+
+    if removed_key in metrics:
+        del metrics[removed_key]
+    else:
+        # Search one level deep in nested sub-dicts
+        for sub in metrics.values():
+            if isinstance(sub, dict) and removed_key in sub:
+                del sub[removed_key]
+                break
 
     # Should not crash
     findings, skipped = evaluate_rules(metrics)
