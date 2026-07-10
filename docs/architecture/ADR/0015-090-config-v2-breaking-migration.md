@@ -28,7 +28,7 @@ New consolidating directives (additive-only after 1.0):
 
 | Directive | Replaces | Grammar |
 |-----------|----------|---------|
-| `markdown_limits` | `markdown_max_size`, `markdown_memory_budget`, `markdown_timeout`, `markdown_streaming_budget`, `markdown_large_body_threshold` | `memory=<size> timeout=<time> streaming_buffer=<size> max_inflight=<N>` (space-separated keys; duplicate/unknown/zero key → error; per-key inheritance) |
+| `markdown_limits` | `markdown_max_size`, `markdown_memory_budget`, `markdown_timeout`, `markdown_streaming_budget`, `markdown_large_body_threshold` | `memory=<size> timeout=<time> streaming_buffer=<size> max_inflight=<N>` (space-separated keys; duplicate/unknown key → error; zero is rejected except `max_inflight=0`, which means unlimited; per-key inheritance) |
 | `markdown_accept` | `markdown_on_wildcard` | `strict\|wildcard\|force` |
 | `markdown_cache_validation` | `markdown_conditional_requests`, `markdown_etag` | `off\|ims_only\|full` |
 | `markdown_streaming` | (policy split from engine) | `off\|auto\|force` |
