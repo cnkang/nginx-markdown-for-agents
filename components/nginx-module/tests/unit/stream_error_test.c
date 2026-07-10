@@ -5,7 +5,7 @@
  * streaming error policy integration):
  *
  * 6.1: Pre-commit + on_error=pass  -> PASS_HTML (replay)
- * 6.2: Pre-commit + on_error=reject -> NGX_HTTP_BAD_GATEWAY
+ * 6.2: Pre-commit + on_error=reject -> conf->error_status (default 502)
  * 6.3: Post-commit + on_error=pass  -> safe_finish (abort fallback)
  * 6.4: Post-commit + on_error=reject -> abort
  *
@@ -403,6 +403,7 @@ static void test_precommit_reject_uses_stream_on_error_policy(void)
     ctx.stream_sm.replay_capacity = 1024;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
 
     fc.buf = &fb;
     fc.next = NULL;
@@ -503,7 +504,7 @@ static void test_precommit_pass_replay_preserves_existing_pending(void)
     TEST_PASS("Pre-commit replay backpressure preserves existing pending");
 }
 
-/* --- pre-commit reject: return 502 --- */
+/* --- pre-commit reject: return configured error_status --- */
 
 static void test_task_6_2_precommit_reject_502(void)
 {
@@ -521,15 +522,16 @@ static void test_task_6_2_precommit_reject_502(void)
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
     conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
-    TEST_ASSERT(rc == NGX_HTTP_BAD_GATEWAY, "6.2: returns 502");
+    TEST_ASSERT(rc == NGX_HTTP_BAD_GATEWAY, "6.2: returns 502 (default error_status)");
     TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "6.2: state PASSTHROUGH");
     TEST_ASSERT(test_replay_chain_called == 0, "6.2: no replay");
     TEST_ASSERT(test_output_filter_called == 0, "6.2: no output_filter");
-    TEST_PASS("pre-commit reject: return 502");
+    TEST_PASS("pre-commit reject: return configured error_status");
 }
 
 /* --- post-commit pass: safe_finish --- */
