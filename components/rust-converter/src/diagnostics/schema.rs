@@ -1,7 +1,27 @@
 //! Diagnostics JSON output schema v1.
 //!
-//! Defines the top-level [`DiagnosticsSchema`] and its sub-sections that form
-//! the contract for the `/nginx-markdown/diagnostics` endpoint response body.
+//! Defines the top-level [`DiagnosticsSchema`] that mirrors the actual
+//! sections emitted by the C diagnostics endpoint renderer
+//! (`ngx_http_markdown_diagnostics.c` → `build_json`).
+//!
+//! The C renderer is the single source of truth for the diagnostics
+//! endpoint output.  This Rust schema exists so the FFI export
+//! `markdown_get_diagnostics_schema` can return a JSON description of
+//! the endpoint contract for tooling and documentation.  Any structural
+//! change to the C renderer must be reflected here in the same changeset.
+//!
+//! # Actual C endpoint sections (in emission order)
+//!
+//! 1. `schema_version` — always 1
+//! 2. `config_snapshot` — dynconf snapshot object (may be empty)
+//! 3. `recent_decisions` — array of decision entries
+//! 4. `metrics_snapshot` — core metric counters
+//! 5. `streaming_metrics` — streaming-specific counters (when streaming
+//!    is compiled in)
+//! 6. `dynconf_state` — dynamic config watcher state
+//! 7. `streaming_config` — streaming configuration summary
+//! 8. `profile` — active profile name and forced fields
+//! 9. `effective_config` — resolved effective configuration
 //!
 //! # Schema Stability
 //!
@@ -12,8 +32,10 @@ use serde::Serialize;
 
 /// Diagnostics JSON output schema v1.
 ///
-/// This is the top-level structure returned by the `/nginx-markdown/diagnostics`
-/// endpoint. The `schema_version` field is always `1` for this version.
+/// This structure mirrors the top-level JSON returned by the
+/// `/nginx-markdown/diagnostics` endpoint as rendered by the C code in
+/// `ngx_http_markdown_diagnostics.c`.  The `schema_version` field is
+/// always `1` for this version.
 ///
 /// # Schema Stability
 ///
@@ -23,94 +45,115 @@ use serde::Serialize;
 pub struct DiagnosticsSchema {
     /// Schema version — always 1 for this version.
     pub schema_version: u32,
-    /// Decision diagnostics section.
-    pub decision: DecisionDiagnostics,
-    /// Inflight guard diagnostics section.
-    pub inflight: InflightDiagnostics,
-    /// Error diagnostics section.
-    pub error: ErrorDiagnostics,
-    /// Streaming diagnostics section.
-    pub streaming: StreamingDiagnostics,
-    /// Conditional request diagnostics section.
-    pub conditional: ConditionalDiagnostics,
-    /// ETag diagnostics section.
-    pub etag: EtagDiagnostics,
+    /// Configuration snapshot section (dynconf snapshot).
+    pub config_snapshot: ConfigSnapshot,
+    /// Recent decision entries (ring buffer, newest-first).
+    pub recent_decisions: Vec<RecentDecision>,
+    /// Core metrics snapshot.
+    pub metrics_snapshot: MetricsSnapshot,
+    /// Dynamic configuration watcher state.
+    pub dynconf_state: DynconfState,
+    /// Streaming configuration summary.
+    pub streaming_config: StreamingConfig,
+    /// Active profile section.
+    pub profile: ProfileSection,
+    /// Resolved effective configuration.
+    pub effective_config: EffectiveConfig,
 }
 
-/// Decision diagnostics — last decision state.
+/// Configuration snapshot (dynconf snapshot).
 #[derive(Debug, Clone, Default, Serialize)]
-pub struct DecisionDiagnostics {
-    /// Last reason code string (from `ReasonCode::as_str()`).
-    pub last_reason: String,
-    /// Active profile name.
-    pub profile: String,
-    /// Processing path mode (full_buffer or streaming).
-    pub path_mode: String,
+pub struct ConfigSnapshot {
+    /// Whether dynconf is enabled for this location.
+    pub enabled: bool,
+    /// Dynconf file path (empty when not configured).
+    pub path: String,
+}
+
+/// A single recent decision entry from the ring buffer.
+#[derive(Debug, Clone, Serialize)]
+pub struct RecentDecision {
+    /// Timestamp (ms since epoch or monotonic start).
+    pub timestamp: i64,
+    /// Numeric reason code.
+    pub reason_code: i32,
+    /// Human-readable reason code string.
+    pub reason_code_str: String,
+    /// Decision duration in milliseconds.
+    pub duration_ms: i64,
+}
+
+/// Core metrics snapshot.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct MetricsSnapshot {
+    /// Total conversions.
+    pub conversions_total: u64,
+    /// Total deliveries.
+    pub delivery_total: u64,
+    /// Total requests.
+    pub requests_total: u64,
+    /// Total fail-open deliveries.
+    pub failopen_total: u64,
+}
+
+/// Dynamic configuration watcher state.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DynconfState {
+    /// Active config file mtime.
+    pub active_mtime: String,
+    /// Config version counter.
+    pub config_version: u64,
+    /// Last known good mtime.
+    pub last_known_good_mtime: String,
+    /// Whether last known good is valid.
+    pub lkg_valid: bool,
+}
+
+/// Streaming configuration summary.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct StreamingConfig {
+    /// Streaming policy (off, auto, force).
+    pub policy: String,
+    /// Streaming engine (off, on, auto).
+    pub engine: String,
+    /// Streaming threshold in bytes.
+    pub threshold: u64,
+    /// Streaming buffer budget in bytes.
+    pub budget: u64,
+    /// Whether streaming shadow mode is enabled.
+    pub shadow: bool,
+}
+
+/// Active profile section.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ProfileSection {
+    /// Profile name (none, strict_cache, balanced, streaming_first).
+    pub name: String,
+    /// Whether the profile was explicitly set.
+    pub explicit: bool,
+}
+
+/// Resolved effective configuration.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct EffectiveConfig {
+    /// Accept policy (strict, wildcard).
+    pub accept: String,
     /// Cache validation mode (off, ims_only, full).
     pub cache_validation: String,
-    /// Total decisions made.
-    pub total_decisions: u64,
-}
-
-/// Inflight guard diagnostics.
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct InflightDiagnostics {
-    /// Current inflight count.
-    pub current: u32,
-    /// Configured maximum.
-    pub max: u32,
-    /// High watermark (peak since last reset).
-    pub high_watermark: u32,
-    /// Total overload rejections.
-    pub overload_total: u64,
-}
-
-/// Error diagnostics.
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ErrorDiagnostics {
-    /// Total errors.
-    pub total: u64,
-    /// Total failed-open deliveries.
-    pub failed_open_total: u64,
-    /// Total failed-closed rejections.
-    pub failed_closed_total: u64,
-    /// Last error reason code string.
-    pub last_error_reason: String,
-}
-
-/// Streaming diagnostics.
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct StreamingDiagnostics {
-    /// Whether streaming is eligible for this location.
-    pub eligible: bool,
-    /// If blocked, the reason.
-    pub block_reason: String,
-    /// Total streaming conversions.
-    pub streaming_total: u64,
-    /// Total streaming fallbacks.
-    pub fallback_total: u64,
-}
-
-/// Conditional request diagnostics.
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct ConditionalDiagnostics {
-    /// Last evaluated conditional header type (if-none-match, if-modified-since).
-    pub evaluated_header: String,
-    /// Last result (not_modified, proceed, skipped).
-    pub result: String,
-    /// Active cache validation mode.
-    pub cache_validation_mode: String,
-}
-
-/// ETag diagnostics.
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct EtagDiagnostics {
-    /// ETag generation policy (off, weak, strong).
-    pub policy: String,
-    /// Whether an ETag was generated for the last conversion.
-    pub generated: bool,
-    /// If not generated, the reason.
-    pub reason: String,
+    /// Streaming policy.
+    pub streaming: String,
+    /// Memory limit in bytes.
+    pub limits_memory: u64,
+    /// Timeout in milliseconds.
+    pub limits_timeout: u64,
+    /// Streaming buffer in bytes.
+    pub limits_streaming_buffer: u64,
+    /// Max inflight.
+    pub limits_max_inflight: u32,
+    /// Error policy (pass, fail_closed, status).
+    pub error_policy: String,
+    /// Diagnostics enabled.
+    pub diagnostics: bool,
 }
 
 impl DiagnosticsSchema {
@@ -118,12 +161,13 @@ impl DiagnosticsSchema {
     pub fn new() -> Self {
         Self {
             schema_version: 1,
-            decision: DecisionDiagnostics::default(),
-            inflight: InflightDiagnostics::default(),
-            error: ErrorDiagnostics::default(),
-            streaming: StreamingDiagnostics::default(),
-            conditional: ConditionalDiagnostics::default(),
-            etag: EtagDiagnostics::default(),
+            config_snapshot: ConfigSnapshot::default(),
+            recent_decisions: Vec::new(),
+            metrics_snapshot: MetricsSnapshot::default(),
+            dynconf_state: DynconfState::default(),
+            streaming_config: StreamingConfig::default(),
+            profile: ProfileSection::default(),
+            effective_config: EffectiveConfig::default(),
         }
     }
 
@@ -155,29 +199,28 @@ mod tests {
         let json = schema.to_json().expect("serialization should succeed");
         assert!(!json.is_empty());
 
-        // Verify it parses as valid JSON
         let parsed: serde_json::Value =
             serde_json::from_str(&json).expect("output should be valid JSON");
         assert!(parsed.is_object());
     }
 
     #[test]
-    fn test_schema_has_all_sections() {
+    fn test_schema_has_all_sections_matching_c_endpoint() {
         let schema = DiagnosticsSchema::default();
         let json = schema.to_json().expect("serialization should succeed");
         let parsed: serde_json::Value =
             serde_json::from_str(&json).expect("output should be valid JSON");
         let obj = parsed.as_object().expect("top-level should be an object");
 
-        // All 6 diagnostic sections plus schema_version
+        // Sections matching the C endpoint renderer output
         assert!(obj.contains_key("schema_version"));
-        assert!(obj.contains_key("decision"));
-        assert!(obj.contains_key("inflight"));
-        assert!(obj.contains_key("error"));
-        assert!(obj.contains_key("streaming"));
-        assert!(obj.contains_key("conditional"));
-        assert!(obj.contains_key("etag"));
-        assert_eq!(obj.len(), 7, "expected 7 top-level keys");
+        assert!(obj.contains_key("config_snapshot"));
+        assert!(obj.contains_key("recent_decisions"));
+        assert!(obj.contains_key("metrics_snapshot"));
+        assert!(obj.contains_key("dynconf_state"));
+        assert!(obj.contains_key("streaming_config"));
+        assert!(obj.contains_key("profile"));
+        assert!(obj.contains_key("effective_config"));
     }
 
     #[test]
@@ -187,7 +230,6 @@ mod tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&json).expect("output should be valid JSON");
 
-        // Recursively check all keys are snake_case
         fn check_snake_case(value: &serde_json::Value, path: &str) {
             match value {
                 serde_json::Value::Object(map) => {
@@ -197,7 +239,6 @@ mod tests {
                         } else {
                             format!("{path}.{key}")
                         };
-                        // snake_case: lowercase, may contain underscores and digits
                         assert!(
                             key.chars()
                                 .all(|c| c.is_ascii_lowercase() || c == '_' || c.is_ascii_digit()),
@@ -219,58 +260,28 @@ mod tests {
     }
 
     #[test]
-    fn test_inflight_diagnostics_default() {
-        let inflight = InflightDiagnostics::default();
-        assert_eq!(inflight.current, 0);
-        assert_eq!(inflight.max, 0);
-        assert_eq!(inflight.high_watermark, 0);
-        assert_eq!(inflight.overload_total, 0);
-    }
-
-    #[test]
     fn test_round_trip() {
         let mut schema = DiagnosticsSchema::new();
-        schema.decision.last_reason = "converted".to_string();
-        schema.decision.profile = "default".to_string();
-        schema.decision.path_mode = "full_buffer".to_string();
-        schema.decision.cache_validation = "full".to_string();
-        schema.decision.total_decisions = 42;
-        schema.inflight.current = 5;
-        schema.inflight.max = 100;
-        schema.inflight.high_watermark = 12;
-        schema.inflight.overload_total = 3;
-        schema.error.total = 7;
-        schema.error.failed_open_total = 2;
-        schema.error.failed_closed_total = 1;
-        schema.error.last_error_reason = "decompression_error".to_string();
-        schema.streaming.eligible = true;
-        schema.streaming.block_reason = String::new();
-        schema.streaming.streaming_total = 100;
-        schema.streaming.fallback_total = 5;
-        schema.conditional.evaluated_header = "if-none-match".to_string();
-        schema.conditional.result = "not_modified".to_string();
-        schema.conditional.cache_validation_mode = "full".to_string();
-        schema.etag.policy = "weak".to_string();
-        schema.etag.generated = true;
-        schema.etag.reason = String::new();
+        schema.metrics_snapshot.conversions_total = 42;
+        schema.metrics_snapshot.delivery_total = 40;
+        schema.metrics_snapshot.requests_total = 50;
+        schema.metrics_snapshot.failopen_total = 2;
+        schema.profile.name = "balanced".to_string();
+        schema.profile.explicit = true;
+        schema.effective_config.accept = "strict".to_string();
+        schema.effective_config.cache_validation = "ims_only".to_string();
+        schema.effective_config.streaming = "auto".to_string();
 
         let json = schema.to_json().expect("serialization should succeed");
         let parsed: serde_json::Value =
             serde_json::from_str(&json).expect("output should be valid JSON");
 
-        // Verify key fields survived serialization
         assert_eq!(parsed["schema_version"], 1);
-        assert_eq!(parsed["decision"]["last_reason"], "converted");
-        assert_eq!(parsed["decision"]["total_decisions"], 42);
-        assert_eq!(parsed["inflight"]["current"], 5);
-        assert_eq!(parsed["inflight"]["high_watermark"], 12);
-        assert_eq!(parsed["error"]["total"], 7);
-        assert_eq!(parsed["error"]["last_error_reason"], "decompression_error");
-        assert_eq!(parsed["streaming"]["eligible"], true);
-        assert_eq!(parsed["streaming"]["streaming_total"], 100);
-        assert_eq!(parsed["conditional"]["evaluated_header"], "if-none-match");
-        assert_eq!(parsed["conditional"]["result"], "not_modified");
-        assert_eq!(parsed["etag"]["policy"], "weak");
-        assert_eq!(parsed["etag"]["generated"], true);
+        assert_eq!(parsed["metrics_snapshot"]["conversions_total"], 42);
+        assert_eq!(parsed["metrics_snapshot"]["delivery_total"], 40);
+        assert_eq!(parsed["profile"]["name"], "balanced");
+        assert_eq!(parsed["effective_config"]["accept"], "strict");
+        assert_eq!(parsed["effective_config"]["cache_validation"], "ims_only");
+        assert_eq!(parsed["effective_config"]["streaming"], "auto");
     }
 }

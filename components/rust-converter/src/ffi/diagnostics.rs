@@ -111,12 +111,13 @@ mod tests {
         let parsed: serde_json::Value =
             serde_json::from_str(json_str).expect("should be valid JSON");
         assert_eq!(parsed["schema_version"], 1);
-        assert!(parsed["decision"].is_object());
-        assert!(parsed["inflight"].is_object());
-        assert!(parsed["error"].is_object());
-        assert!(parsed["streaming"].is_object());
-        assert!(parsed["conditional"].is_object());
-        assert!(parsed["etag"].is_object());
+        assert!(parsed["config_snapshot"].is_object());
+        assert!(parsed["recent_decisions"].is_array());
+        assert!(parsed["metrics_snapshot"].is_object());
+        assert!(parsed["dynconf_state"].is_object());
+        assert!(parsed["streaming_config"].is_object());
+        assert!(parsed["profile"].is_object());
+        assert!(parsed["effective_config"].is_object());
 
         // Clean up
         unsafe { markdown_free_diagnostics(ptr, len) };

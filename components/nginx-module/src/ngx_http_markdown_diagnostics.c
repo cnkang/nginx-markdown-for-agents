@@ -1238,12 +1238,16 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
         "    \"conversions_total\": %uA,\n"
         "    \"delivery_total\": %uA,\n"
         "    \"requests_total\": %uA,\n"
-        "    \"failopen_total\": %uA\n"
+        "    \"failopen_total\": %uA,\n"
+        "    \"overload_total\": %uA,\n"
+        "    \"backpressure_total\": %uA\n"
         "  },\n",
         metrics.conversions_total,
         metrics.delivery_total,
         metrics.requests_total,
-        metrics.failopen_total);
+        metrics.failopen_total,
+        metrics.overload_total,
+        metrics.backpressure_total);
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Streaming metrics JSON section */

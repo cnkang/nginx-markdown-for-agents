@@ -79,13 +79,15 @@ class TestInputValidation:
 
 
 class TestD01:
-    """D01: streaming_fallback_total / streaming_requests_total > 10%."""
+    """D01: fallback_total / requests_total > 10% (production streaming_metrics)."""
 
     def test_triggers_at_boundary(self):
         """Rate just above 10% triggers warn."""
         metrics = {
-            "streaming_fallback_total": 11,
-            "streaming_requests_total": 100,
+            "streaming_metrics": {
+                "fallback_total": 11,
+                "requests_total": 100,
+            },
         }
         result = _evaluate_d01(metrics)
         assert result.finding is not None
@@ -101,25 +103,30 @@ class TestD01:
         self._assert_no_finding(0, 0)
 
     def _assert_no_finding(self, fallback, requests):
-        metrics = {"streaming_fallback_total": fallback, "streaming_requests_total": requests}
+        metrics = {
+            "streaming_metrics": {
+                "fallback_total": fallback,
+                "requests_total": requests,
+            }
+        }
         result = _evaluate_d01(metrics)
         assert result.finding is None
         assert not result.skipped
 
     def test_skipped_missing_fallback(self):
-        """Missing streaming_fallback_total skips gracefully."""
+        """Missing fallback_total skips gracefully."""
         self._assert_skipped_missing(
-            "streaming_requests_total", 100, "streaming_fallback_total"
+            "requests_total", 100, "fallback_total"
         )
 
     def test_skipped_missing_requests(self):
-        """Missing streaming_requests_total skips gracefully."""
+        """Missing requests_total skips gracefully."""
         self._assert_skipped_missing(
-            "streaming_fallback_total", 5, "streaming_requests_total"
+            "fallback_total", 5, "requests_total"
         )
 
     def _assert_skipped_missing(self, present_key, present_val, missing_key):
-        metrics = {present_key: present_val}
+        metrics = {"streaming_metrics": {present_key: present_val}}
         result = _evaluate_d01(metrics)
         assert result.skipped
         assert missing_key in result.skip_reason
@@ -162,13 +169,13 @@ class TestD02:
 
 
 class TestD03:
-    """D03: backpressure_total / streaming_requests_total > 5%."""
+    """D03: backpressure_total / requests_total > 5% (production JSON)."""
 
     def test_triggers_at_boundary(self):
         """Rate just above 5% triggers warn."""
         metrics = {
-            "backpressure_total": 6,
-            "streaming_requests_total": 100,
+            "metrics_snapshot": {"backpressure_total": 6},
+            "streaming_metrics": {"requests_total": 100},
         }
         result = _evaluate_d03(metrics)
         assert result.finding is not None
@@ -184,28 +191,27 @@ class TestD03:
         self._assert_no_finding(0, 0)
 
     def _assert_no_finding(self, backpressure, requests):
-        metrics = {"backpressure_total": backpressure, "streaming_requests_total": requests}
+        metrics = {
+            "metrics_snapshot": {"backpressure_total": backpressure},
+            "streaming_metrics": {"requests_total": requests},
+        }
         result = _evaluate_d03(metrics)
         assert result.finding is None
         assert not result.skipped
 
     def test_skipped_missing_backpressure(self):
         """Missing backpressure_total skips gracefully."""
-        self._assert_skipped_missing(
-            "streaming_requests_total", 100, "backpressure_total"
-        )
-
-    def test_skipped_missing_streaming_requests(self):
-        """Missing streaming_requests_total skips gracefully."""
-        self._assert_skipped_missing(
-            "backpressure_total", 10, "streaming_requests_total"
-        )
-
-    def _assert_skipped_missing(self, present_key, present_val, missing_key):
-        metrics = {present_key: present_val}
+        metrics = {"streaming_metrics": {"requests_total": 100}}
         result = _evaluate_d03(metrics)
         assert result.skipped
-        assert missing_key in result.skip_reason
+        assert "backpressure_total" in result.skip_reason
+
+    def test_skipped_missing_requests(self):
+        """Missing requests_total skips gracefully."""
+        metrics = {"metrics_snapshot": {"backpressure_total": 10}}
+        result = _evaluate_d03(metrics)
+        assert result.skipped
+        assert "requests_total" in result.skip_reason
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,6 @@
 pub mod schema;
 
 pub use schema::{
-    ConditionalDiagnostics, DecisionDiagnostics, DiagnosticsSchema, ErrorDiagnostics,
-    EtagDiagnostics, InflightDiagnostics, StreamingDiagnostics,
+    ConfigSnapshot, DiagnosticsSchema, DynconfState, EffectiveConfig,
+    MetricsSnapshot, ProfileSection, RecentDecision, StreamingConfig,
 };

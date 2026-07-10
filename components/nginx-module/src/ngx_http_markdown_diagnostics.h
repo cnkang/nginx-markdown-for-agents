@@ -273,6 +273,8 @@ typedef struct {
     ngx_atomic_uint_t  delivery_total;
     ngx_atomic_uint_t  requests_total;
     ngx_atomic_uint_t  failopen_total;
+    ngx_atomic_uint_t  overload_total;
+    ngx_atomic_uint_t  backpressure_total;
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Streaming metrics (streaming observability) */
     ngx_atomic_uint_t  streaming_requests_total;
