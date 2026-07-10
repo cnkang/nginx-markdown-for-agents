@@ -25,6 +25,8 @@ import evidence_gate_091
 from evidence_gate_091 import (
     EX_SKIP_NOT_PRESENT,
     _RC_RE,
+    _RELEASE_TAG_RE,
+    _check_skipped_scenarios,
     _extract_evidence_metrics,
     _nginx_bin_available,
     _write_output,
@@ -424,6 +426,37 @@ class TestReleaseCandidateTagPattern:
         assert _RC_RE.search(value) is None
 
 
+class TestReleaseTagPattern:
+    """Formal release tag matching for evidence gate enforcement."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "0.9.1",
+            "v0.9.1",
+            "v0.8.3",
+            "refs/tags/v0.9.1",
+        ],
+    )
+    def test_release_tag_pattern_accepts_formal_tags(self, value):
+        """Supported formal release tag forms match."""
+        assert _RELEASE_TAG_RE.search(value)
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "0.9.1-rc",
+            "v0.9.1-rc.1",
+            "refs/heads/dev/wip-0.9.1",
+            "refs/tags/v0.9.1-rc.1",
+            "0.9.1-rc.1-extra",
+        ],
+    )
+    def test_release_tag_pattern_rejects_non_release(self, value):
+        """RC tags and non-release strings do not match formal release pattern."""
+        assert _RELEASE_TAG_RE.search(value) is None
+
+
 # ---------------------------------------------------------------------------
 # Test: Evidence metric extraction from benchmark reports
 # ---------------------------------------------------------------------------
@@ -498,3 +531,48 @@ class TestEvidenceMetricExtraction:
         p50_entry = next(r for r in result["results"] if r["metric"] == "p50_latency_small_pct")
         assert p50_entry["status"] == "skipped"
         assert "missing baseline" in p50_entry["reason"]
+
+
+class TestSkippedCriticalScenarios:
+    """Blocking mode must fail when critical scenarios are skipped."""
+
+    def test_skipped_large_body_detected(self):
+        """Skipped large-body scenario is detected."""
+        report = {
+            "scenarios": [
+                {"name": "plain-small", "status": "pass"},
+                {"name": "large-body", "status": "skipped", "reason": "fixture_not_found"},
+                {"name": "streaming-first", "status": "pass"},
+            ]
+        }
+        skipped = _check_skipped_scenarios(report)
+        assert len(skipped) == 1
+        assert skipped[0][0] == "large-body"
+        assert skipped[0][1] == "fixture_not_found"
+
+    def test_all_pass_no_skipped(self):
+        """No skipped critical scenarios returns empty list."""
+        report = {
+            "scenarios": [
+                {"name": "plain-small", "status": "pass"},
+                {"name": "large-body", "status": "pass"},
+                {"name": "streaming-first", "status": "pass"},
+            ]
+        }
+        assert _check_skipped_scenarios(report) == []
+
+    def test_non_critical_skipped_ignored(self):
+        """Skipped non-critical scenarios are not reported."""
+        report = {
+            "scenarios": [
+                {"name": "plain-small", "status": "pass"},
+                {"name": "chunked-medium", "status": "skipped", "reason": "fixture_not_found"},
+                {"name": "large-body", "status": "pass"},
+                {"name": "streaming-first", "status": "pass"},
+            ]
+        }
+        assert _check_skipped_scenarios(report) == []
+
+    def test_empty_report_no_skipped(self):
+        """Empty report has no skipped scenarios."""
+        assert _check_skipped_scenarios({}) == []

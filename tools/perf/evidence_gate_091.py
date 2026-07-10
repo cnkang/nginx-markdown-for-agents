@@ -48,6 +48,7 @@ from lib.path_validation import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _RC_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+-rc(?:\.\d+)?$")
+_RELEASE_TAG_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+(?:\.\d+)?$")
 
 # Exit code for SKIP_NOT_PRESENT (matches run_module_benchmark.sh)
 EX_SKIP_NOT_PRESENT = 75
@@ -98,6 +99,36 @@ def _is_rc_tag() -> bool:
             cwd=str(REPO_ROOT),
         )
         if result.returncode == 0 and _RC_RE.search(result.stdout.strip()):
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
+def _is_release_tag() -> bool:
+    """Detect whether the current git state is a release or RC tag.
+
+    Both formal release tags (e.g. v0.9.1) and RC tags (e.g. v0.9.1-rc.1)
+    require full module benchmark evidence and a baseline.  Non-release
+    builds (development branches, non-tagged commits) are exempt.
+    """
+    for env_var in ("GITHUB_REF", "CI_COMMIT_TAG", "RELEASE_VERSION"):
+        val = os.environ.get(env_var, "")
+        if val and _RELEASE_TAG_RE.search(val):
+            return True
+
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--exact-match", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=str(REPO_ROOT),
+        )
+        if result.returncode == 0 and _RELEASE_TAG_RE.search(
+            result.stdout.strip()
+        ):
             return True
     except Exception:
         pass
@@ -467,10 +498,10 @@ def _handle_nginx_unavailable(blocking: bool, args: argparse.Namespace) -> int:
 
     # Blocking mode
     if args.allow_skip_module:
-        if _is_rc_tag():
+        if _is_release_tag():
             _stderr(
-                "FAIL: --allow-skip-module is not permitted for RC tags.\n"
-                "  RC releases require module benchmark evidence.\n"
+                "FAIL: --allow-skip-module is not permitted for release tags.\n"
+                "  Release and RC tags require module benchmark evidence.\n"
                 "  Set NGINX_BIN=/path/to/nginx to provide benchmark evidence."
             )
             return 1
@@ -478,7 +509,7 @@ def _handle_nginx_unavailable(blocking: bool, args: argparse.Namespace) -> int:
         _stderr(
             "WARNING: NGINX_BIN is not set — module benchmarks skipped.\n"
             "  Proceeding due to --allow-skip-module flag.\n"
-            "  This is acceptable for development builds but NOT for RC tags."
+            "  This is acceptable for development builds but NOT for release tags."
         )
         evidence_pack = _build_evidence_pack(
             report=None,
@@ -494,10 +525,10 @@ def _handle_nginx_unavailable(blocking: bool, args: argparse.Namespace) -> int:
 
     _stderr(
         "FAIL: NGINX_BIN is not set and --allow-skip-module was not provided.\n"
-        "  In blocking mode, module benchmarks are required for RC tags.\n"
+        "  In blocking mode, module benchmarks are required for release tags.\n"
         "  Either:\n"
         "    1. Set NGINX_BIN=/path/to/nginx (module-enabled build), or\n"
-        "    2. Pass --allow-skip-module to explicitly skip (non-RC only)."
+        "    2. Pass --allow-skip-module to explicitly skip (non-release only)."
     )
     return 1
 
@@ -516,7 +547,36 @@ def _obtain_benchmark_report(
             args.benchmark_report, purpose="benchmark report"
         )
         report = json.loads(report_path.read_text(encoding="utf-8"))
-        return report, None
+    return report, None
+
+
+# Scenarios that must complete (not be skipped) in blocking mode.
+_CRITICAL_SCENARIOS = frozenset({
+    "plain-small",
+    "large-body",
+    "streaming-first",
+})
+
+
+def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
+    """Return [(name, reason)] for critical scenarios that were skipped.
+
+    A scenario is considered skipped when its status is "skipped" in
+    the report.  In blocking mode, a skipped critical scenario means
+    the evidence is incomplete and the gate must fail.
+    """
+    scenarios = report.get("module_benchmark", {}).get("scenarios", [])
+    if not scenarios:
+        scenarios = report.get("scenarios", [])
+
+    skipped = []
+    for s in scenarios:
+        name = s.get("name", "")
+        status = s.get("status", "")
+        if status == "skipped" and name in _CRITICAL_SCENARIOS:
+            reason = s.get("reason", "unknown")
+            skipped.append((name, reason))
+    return skipped
 
     output_path = Path(REPO_ROOT / "perf" / "reports" / "module-benchmark-091.json")
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -555,6 +615,31 @@ def _evaluate_and_report(
 
     Returns the appropriate exit code.
     """
+    # In blocking mode, verify that critical scenarios were not skipped.
+    if blocking:
+        skipped_critical = _check_skipped_scenarios(report or {})
+        if skipped_critical:
+            _stderr(
+                "FAIL: Critical benchmark scenarios were skipped (fixture missing):\n"
+                + "".join(f"  - {name}: {reason}\n"
+                           for name, reason in skipped_critical)
+                + "  Release tags require all critical scenarios to complete.\n"
+                "  Ensure the benchmark fixtures exist (run "
+                "tests/corpus/large/generate-large-fixtures.sh)."
+            )
+            evidence_pack = _build_evidence_pack(
+                report=report,
+                verdict="MISSING_EVIDENCE",
+                breaches=[
+                    {"metric": "scenario", "reason": f"skipped: {name}"}
+                    for name, _ in skipped_critical
+                ],
+                results=[],
+            )
+            _print_evidence_summary(evidence_pack)
+            _write_output(evidence_pack, args.output)
+            return 1
+
     current_metrics = _extract_evidence_metrics(report or {})
     thresholds_cfg = _load_thresholds()
 
@@ -565,17 +650,17 @@ def _evaluate_and_report(
         baseline_metrics = _extract_evidence_metrics(baseline_report)
         has_baseline = True
     else:
-        if blocking and _is_rc_tag():
+        if blocking and _is_release_tag():
             _stderr(
-                "FAIL: No module baseline found and this is an RC tag.\n"
-                "  RC releases require a baseline for percentage threshold evaluation.\n"
+                "FAIL: No module baseline found and this is a release tag.\n"
+                "  Release and RC tags require a baseline for percentage threshold evaluation.\n"
                 "  Create a baseline with: cp perf/reports/module-benchmark-091.json "
                 "perf/baselines/module-baseline-091.json"
             )
             evidence_pack = _build_evidence_pack(
                 report=report,
                 verdict="MISSING_EVIDENCE",
-                breaches=[{"metric": "baseline", "reason": "no baseline for RC tag"}],
+                breaches=[{"metric": "baseline", "reason": "no baseline for release tag"}],
                 results=[],
             )
             _print_evidence_summary(evidence_pack)
@@ -608,7 +693,7 @@ def _evaluate_and_report(
     if verdict in ("NO_GO", "MISSING_EVIDENCE"):
         _stderr(
             f"BLOCKING: Evidence gate verdict is {verdict}.\n"
-            "  Release-candidate tags require all module-level thresholds to pass and all critical evidence to be present.\n"
+            "  Release and RC tags require all module-level thresholds to pass and all critical evidence to be present.\n"
             "  Review breaches above and address performance regressions or missing measurements."
         )
         return 1

@@ -711,17 +711,18 @@ jobs:
 
       - name: Run tag release gates
         env:
-          RELEASE_GATE_EXPECTED_CARGO_VERSION: "0.8.3"
+          RELEASE_GATE_EXPECTED_CARGO_VERSION: "0.9.1"
         run: |
-          # Run the 0.8.x release gate validators that are not already covered
+          # Run the release gate validators that are not already covered
           # by the build/package/smoke-test jobs above. The full
-          # release-gates-check-080 target includes build/test/fuzz which are
+          # release-gates-check targets include build/test/fuzz which are
           # redundant here (the build and smoke-test jobs already verified
           # those), but we must run the Python gate validators and package
-          # layout checks to ensure complete 0.8.x gate coverage. Do not run
+          # layout checks to ensure complete gate coverage. Do not run
           # legacy local-spec validators here; tag release CI checkouts do not
           # include user-local Kiro spec directories.
           python3 tools/release/gates/validate_naming.py
+          python3 tools/release/gates/validate_release_gates_090.py
           python3 tools/release/gates/validate_release_gates_080.py
           python3 tools/release/gates/validate_config_directives_080.py
           python3 tools/release/gates/validate_release_gates_070.py --mode strict
