@@ -1451,7 +1451,9 @@ test_limits_handler(void)
     init_conf(&mcf);
     set_arg(&values[1], "max_inflight=0");
     rc = ngx_http_markdown_limits(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_ERROR, "zero max_inflight should fail");
+    TEST_ASSERT(rc == NGX_CONF_OK, "zero max_inflight is unlimited (valid)");
+    TEST_ASSERT(mcf.routing.max_inflight == 0,
+        "zero max_inflight stored as 0 (unlimited)");
 
     init_conf(&mcf);
     set_arg(&values[1], "memory=bad");

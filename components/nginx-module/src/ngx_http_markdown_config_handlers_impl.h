@@ -357,10 +357,10 @@ ngx_http_markdown_apply_max_inflight_limit(ngx_conf_t *cf,
 
     seen->max_inflight = 1;
     n = ngx_http_markdown_parse_uint(val);
-    if (n == (ngx_uint_t) NGX_ERROR || n == 0) {
+    if (n == (ngx_uint_t) NGX_ERROR) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
             "invalid \"max_inflight\" value \"%V\" in \"%V\"; "
-            "must be a positive integer",
+            "must be a non-negative integer (0 means unlimited)",
             val, &cmd->name);
         return NGX_CONF_ERROR;
     }
