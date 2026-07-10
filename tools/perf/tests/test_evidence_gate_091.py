@@ -457,6 +457,40 @@ class TestReleaseTagPattern:
         assert _RELEASE_TAG_RE.search(value) is None
 
 
+class TestRCAndReleaseTagEnforcement:
+    """Both RC and formal release tags must enforce evidence gate."""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "0.9.1-rc",
+            "v0.9.1-rc",
+            "0.9.1-rc.1",
+            "refs/tags/v0.9.1-rc.1",
+        ],
+    )
+    def test_rc_tag_rejected_by_release_tag_re(self, value):
+        """RC tags are NOT matched by _RELEASE_TAG_RE."""
+        assert _RELEASE_TAG_RE.search(value) is None
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "0.9.1-rc",
+            "v0.9.1-rc.1",
+            "refs/tags/v0.9.1-rc.1",
+            "0.9.1",
+            "v0.9.1",
+            "refs/tags/v0.9.1",
+        ],
+    )
+    def test_rc_and_release_tags_match_rc_re(self, value):
+        """RC tags must match _RC_RE, formal release tags must match _RELEASE_TAG_RE."""
+        is_rc = _RC_RE.search(value) is not None
+        is_release = _RELEASE_TAG_RE.search(value) is not None
+        assert is_rc or is_release, f"tag {value} matched neither RC nor release pattern"
+
+
 # ---------------------------------------------------------------------------
 # Test: Evidence metric extraction from benchmark reports
 # ---------------------------------------------------------------------------

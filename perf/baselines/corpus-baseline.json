@@ -6,7 +6,8 @@
     "platform": "darwin-arm64",
     "timestamp": "2026-07-10T10:22:46Z",
     "converter-version": "0.4.0",
-    "token-approx-factor": 1.0
+    "token-approx-factor": 1.0,
+    "note": "Baseline generated on darwin-arm64. CI runs on linux-x86_64; latency comparisons are skipped on platform mismatch (see compare_reports.py). Non-latency metrics (throughput, memory) are still compared. A linux-x86_64 baseline should be generated for full latency regression coverage."
   },
   "summary": {
     "total-fixtures": 49,
