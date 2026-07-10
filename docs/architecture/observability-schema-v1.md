@@ -1,6 +1,6 @@
 # Observability Schema v1 (DRAFT)
 
-**Status**: DRAFT (0.9.0) — will be frozen at 1.0.0  
+**Status**: DRAFT (0.9.0) — will be frozen at 1.0.0
 **Single Source of Truth**: `components/rust-converter/src/decision/reason_code.rs`
 
 ---

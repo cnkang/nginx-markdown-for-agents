@@ -288,8 +288,8 @@ markdown_parser_budget 32m;
 
 #### markdown_limits
 
-**Syntax:** `markdown_limits memory=<size> timeout=<time> streaming_buffer=<size> max_inflight=<N>;`  
-**Default:** `memory=10m timeout=5s streaming_buffer=2m max_inflight=64`  
+**Syntax:** `markdown_limits memory=<size> timeout=<time> streaming_buffer=<size> max_inflight=<N>;`
+**Default:** `memory=10m timeout=5s streaming_buffer=2m max_inflight=64`
 **Context:** http, server, location
 
 Unified limits block (Config V2, 0.9.0). Consolidates the removed
@@ -325,7 +325,7 @@ markdown_limits memory=8m timeout=2s streaming_buffer=256k max_inflight=64;
 
 #### markdown_error_policy
 
-**Syntax:** `markdown_error_policy pass | fail_closed | status <code>;`  
+**Syntax:** `markdown_error_policy pass | fail_closed | status <code>;`
 **Default:** `pass`  
 **Context:** http, server, location
 
@@ -432,8 +432,8 @@ url: "https://example.com/page"
 
 #### markdown_accept
 
-**Syntax:** `markdown_accept strict | wildcard | force;`  
-**Default:** `strict`  
+**Syntax:** `markdown_accept strict | wildcard | force;`
+**Default:** `strict`
 **Context:** http, server, location
 
 Accept-header negotiation policy. Replaces the removed
@@ -508,8 +508,8 @@ markdown_auth_cookies session* auth_token PHPSESSID wordpress_logged_in_*;
 
 #### markdown_cache_validation
 
-**Syntax:** `markdown_cache_validation off | ims_only | full;`  
-**Default:** `ims_only`  
+**Syntax:** `markdown_cache_validation off | ims_only | full;`
+**Default:** `ims_only`
 **Context:** http, server, location
 
 Cache-validation policy. Consolidates the removed `markdown_etag` and
@@ -840,8 +840,8 @@ markdown_streaming_engine off;
 
 #### markdown_streaming_budget
 
-**Syntax:** `markdown_streaming_budget <size>;`  
-**Status:** REMOVED in 0.9.0 — use `markdown_limits streaming_buffer=<size>`  
+**Syntax:** `markdown_streaming_budget <size>;`
+**Status:** REMOVED in 0.9.0 — use `markdown_limits streaming_buffer=<size>`
 **Context:** http, server, location
 
 Config V2 consolidates resource limits in `markdown_limits`. In 0.9.0,
