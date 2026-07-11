@@ -830,6 +830,79 @@ ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
 #endif /* !NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
 
 
+static ngx_int_t
+ngx_http_markdown_decompression_format(
+    ngx_http_markdown_compression_type_e type,
+    uint8_t *format)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        *format = 0;
+        return NGX_OK;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        *format = 1;
+        return NGX_OK;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        *format = 2;
+        return NGX_OK;
+    default:
+        return NGX_DECLINED;
+    }
+}
+
+
+static ngx_int_t
+ngx_http_markdown_decompression_input(
+    ngx_http_request_t *r,
+    const ngx_chain_t *compressed_chain,
+    u_char **input_buf,
+    size_t *input_size)
+{
+    if (compressed_chain->next == NULL
+        && compressed_chain->buf != NULL
+        && compressed_chain->buf->pos != NULL
+        && compressed_chain->buf->last != NULL
+        && (uintptr_t) compressed_chain->buf->last
+           >= (uintptr_t) compressed_chain->buf->pos)
+    {
+        *input_buf = compressed_chain->buf->pos;
+        *input_size = compressed_chain->buf->last
+                      - compressed_chain->buf->pos;
+        if (*input_size == 0) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "markdown: contiguous chain has zero-length buffer");
+            return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+        }
+
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+            "markdown: skipping linearize copy, buffer contiguous, "
+            "size=%uz", *input_size);
+        return NGX_OK;
+    }
+
+    return ngx_http_markdown_linearize_chain(
+        r, compressed_chain, input_buf, input_size);
+}
+
+
+static ngx_int_t
+ngx_http_markdown_decompression_error(uint32_t ffi_rc)
+{
+    switch (ffi_rc) {
+    case 101:
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    case 102:
+        return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+    case 103:
+        return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+    case 104:
+    case 105:
+    default:
+        return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
+    }
+}
+
+
 /*
  * Decompress via Rust FFI bounded decompressor.
  *
@@ -881,24 +954,16 @@ ngx_http_markdown_decompress_via_rust(
     u_char                *output_buf;
     ngx_buf_t             *b;
     ngx_chain_t           *cl;
-    ngx_int_t              rc_linear;
+    ngx_int_t              rc;
 
     /*
      * Map NGINX compression type to Rust format code:
      *   GZIP=1 -> 0, DEFLATE=2 -> 1, BROTLI=3 -> 2
      */
-    switch (ctx->decompression.type) {
-    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
-        format = 0;
-        break;
-    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
-        format = 1;
-        break;
-    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
-        format = 2;
-        break;
-    default:
-        return NGX_DECLINED;
+    rc = ngx_http_markdown_decompression_format(
+        ctx->decompression.type, &format);
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     /*
@@ -907,41 +972,10 @@ ngx_http_markdown_decompress_via_rust(
      * This is the common case after body-filter accumulation where
      * ctx->buffer.data is a single ngx_alloc allocation (Rule 43).
      */
-    if (compressed_chain->next == NULL
-        && compressed_chain->buf != NULL
-        && compressed_chain->buf->pos != NULL
-        && compressed_chain->buf->last != NULL
-        && (uintptr_t) compressed_chain->buf->last
-           >= (uintptr_t) compressed_chain->buf->pos)
-    {
-        input_buf = compressed_chain->buf->pos;
-        input_size = compressed_chain->buf->last
-                     - compressed_chain->buf->pos;
-
-        if (input_size == 0) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: contiguous chain "
-                         "has zero-length buffer");
-            return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
-        }
-
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
-                      r->connection->log, 0,
-                      "markdown: skipping linearize "
-                      "copy, buffer contiguous, "
-                      "size=%uz", input_size);
-    } else {
-        /*
-         * Multi-buffer chain: linearize into a contiguous allocation.
-         * This path is defensive and handles chains with multiple
-         * buffers, though after body-filter accumulation the chain
-         * is always single-buffer.
-         */
-        rc_linear = ngx_http_markdown_linearize_chain(
-            r, compressed_chain, &input_buf, &input_size);
-        if (rc_linear != NGX_OK) {
-            return rc_linear;
-        }
+    rc = ngx_http_markdown_decompression_input(
+        r, compressed_chain, &input_buf, &input_size);
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     /* Initialize the result struct before the FFI call. */
@@ -975,20 +1009,7 @@ ngx_http_markdown_decompress_via_rust(
                      "failed, rc=%ud, error_category=%ud",
                      ffi_rc, result.error_category);
 
-        switch (ffi_rc) {
-        case 101:
-            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
-        case 102:
-            return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
-        case 103:
-            return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
-        case 104:
-            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
-        case 105:
-            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
-        default:
-            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
-        }
+        return ngx_http_markdown_decompression_error(ffi_rc);
     }
 
     /*
