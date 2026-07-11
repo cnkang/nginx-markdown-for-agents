@@ -724,42 +724,122 @@ def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
     return skipped
 
 
+def _check_missing_scenarios(report: dict) -> list[str]:
+    """Return [name] for critical scenarios that are entirely absent.
+
+    A missing scenario means the benchmark harness did not even emit a
+    record for it — stronger than "skipped".  The evidence gate must
+    reject this as MISSING_EVIDENCE because there is no data at all.
+    """
+    scenarios = report.get("module_benchmark", {}).get("scenarios", [])
+    if not scenarios:
+        scenarios = report.get("scenarios", [])
+
+    by_name: dict[str, dict] = {}
+    for s in scenarios:
+        name = s.get("name", "")
+        if name:
+            by_name[name] = s
+
+    missing = []
+    for name in _CRITICAL_SCENARIOS:
+        if name not in by_name:
+            missing.append(name)
+    return missing
+
+
+def _check_scenario_completion(report: dict) -> list[tuple[str, str]]:
+    """Return [(name, status)] for critical scenarios that exist but are
+    not completed.
+
+    A scenario present with status != "completed" (and not "skipped",
+    which is handled by _check_skipped_scenarios) is incomplete evidence.
+    """
+    scenarios = report.get("module_benchmark", {}).get("scenarios", [])
+    if not scenarios:
+        scenarios = report.get("scenarios", [])
+
+    by_name: dict[str, dict] = {}
+    for s in scenarios:
+        name = s.get("name", "")
+        if name:
+            by_name[name] = s
+
+    incomplete = []
+    for name in _CRITICAL_SCENARIOS:
+        scenario = by_name.get(name)
+        if scenario is None:
+            continue
+        status = scenario.get("status", "")
+        if status != "completed":
+            incomplete.append((name, status or "empty"))
+    return incomplete
+
+
 def _validate_benchmark_evidence(
     report: dict, role: str,
 ) -> list[tuple[str, str]]:
     """Validate a benchmark report for evidence integrity.
 
     Applies the same checks to both current reports and baselines:
-      - critical scenarios not skipped
+      - critical scenarios must exist and be completed (not missing,
+        not skipped, not in any other non-completed status)
       - path-coverage invariants satisfied
       - nginx_version is present and not "unknown"
+      - memory evidence completeness: at least 2 valid memory points
 
     Returns a list of (check_name, reason) violations.  Empty list
     means the report passes all integrity checks.
     """
     violations: list[tuple[str, str]] = []
 
-    # 1. Critical scenarios must not be skipped
+    # 1. Critical scenarios must exist
+    missing = _check_missing_scenarios(report)
+    for name in missing:
+        violations.append(
+            (f"{role}.scenario", f"missing critical scenario: {name}")
+        )
+
+    # 2. Critical scenarios must be completed (not skipped, not other)
+    incomplete = _check_scenario_completion(report)
+    for name, status in incomplete:
+        violations.append(
+            (f"{role}.scenario", f"incomplete critical scenario: {name} status={status}")
+        )
+
+    # 3. Skipped critical scenarios (redundant with #2 but preserves the
+    #    existing skipped-with-reason message format for diagnostics)
     skipped = _check_skipped_scenarios(report)
     for name, reason in skipped:
         violations.append(
             (f"{role}.scenario", f"skipped: {name}: {reason}")
         )
 
-    # 2. Path-coverage invariants
+    # 4. Path-coverage invariants
     path_violations = _check_path_coverage(report)
     for name, metric, label in path_violations:
         violations.append(
             (f"{role}.path_coverage", f"{name}: {label} (metric={metric})")
         )
 
-    # 3. nginx_version must be present and not "unknown"
+    # 5. nginx_version must be present and not "unknown"
     nginx_version = (
         report.get("module_benchmark", {}).get("nginx_version", "")
     )
     if not nginx_version or nginx_version.startswith("unknown"):
         violations.append(
             (f"{role}.nginx_version", "missing or 'unknown' nginx_version")
+        )
+
+    # 6. Memory evidence completeness: at least 2 valid memory points
+    scenarios = report.get("module_benchmark", {}).get("scenarios", [])
+    if not scenarios:
+        scenarios = report.get("scenarios", [])
+    memory_points = _extract_memory_points(scenarios)
+    if len(memory_points) < 2:
+        violations.append(
+            (f"{role}.memory_evidence",
+             f"insufficient memory points: {len(memory_points)} (need >= 2)")
         )
 
     return violations
@@ -842,6 +922,37 @@ def _validate_baseline_evidence(
     )
 
 
+def _check_environment_compatibility(
+    current: dict, baseline: dict,
+) -> list[tuple[str, str]]:
+    """Return [(field, detail)] for environment mismatches.
+
+    The current and baseline benchmark reports must share the same:
+      - platform
+      - load_generator
+      - nginx_version
+
+    Comparing metrics across different environments produces
+    meaningless regression percentages and must be rejected as
+    MISSING_EVIDENCE in blocking mode.
+    """
+    violations: list[tuple[str, str]] = []
+
+    cur_mb = current.get("module_benchmark", {})
+    base_mb = baseline.get("module_benchmark", {})
+
+    for field in ("platform", "load_generator", "nginx_version"):
+        cur_val = cur_mb.get(field, "")
+        base_val = base_mb.get(field, "")
+        if cur_val != base_val:
+            violations.append(
+                (f"env.{field}",
+                 f"current={cur_val!r} vs baseline={base_val!r}")
+            )
+
+    return violations
+
+
 def _evaluate_and_report(
     report: dict | None, args: argparse.Namespace, blocking: bool,
 ) -> int:
@@ -869,6 +980,27 @@ def _evaluate_and_report(
 
         baseline_metrics = _extract_evidence_metrics(baseline_report)
         has_baseline = True
+
+        # Environment compatibility: current and baseline must share
+        # platform, load_generator, and nginx_version.  Without this,
+        # percentage regression comparisons are meaningless.
+        env_violations = _check_environment_compatibility(
+            report or {}, baseline_report,
+        )
+        if env_violations and blocking:
+            env_violation_strs = [
+                (f"env.{field}", detail)
+                for field, detail in env_violations
+            ]
+            return _report_integrity_failure(
+                report,
+                args,
+                env_violation_strs,
+                "FAIL: Current and baseline benchmark environments are incompatible:",
+                "  Regenerate the baseline on the same platform, load "
+                "generator, and NGINX version as the current run.\n"
+                "  Do not compare metrics across different environments.",
+            )
     else:
         if blocking and _is_release_tag():
             _stderr(
