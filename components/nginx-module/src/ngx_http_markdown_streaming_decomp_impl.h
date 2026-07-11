@@ -1043,6 +1043,90 @@ static ngx_int_t ngx_http_markdown_streaming_decomp_apply_limits(
     u_char **buf_ptr,
     ngx_log_t *log);
 
+
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_prepare_input(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    const u_char **in_data,
+    size_t *in_len,
+    u_char **combined_input,
+    ngx_flag_t *input_ready,
+    ngx_log_t *log)
+{
+    size_t  header_consumed;
+    size_t  combined_len;
+
+    *input_ready = 1;
+    if (!decomp->zlib_header_pending) {
+        return NGX_OK;
+    }
+
+    header_consumed = 0;
+    if (ngx_http_markdown_streaming_decomp_feed_header(
+            decomp, *in_data, *in_len, &header_consumed, log)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    if (decomp->zlib_header_pending) {
+        *input_ready = 0;
+        return NGX_OK;
+    }
+
+    *in_data += header_consumed;
+    *in_len -= header_consumed;
+    combined_len = 2 + *in_len;
+    *combined_input = ngx_alloc(combined_len, log);
+    if (*combined_input == NULL) {
+        return NGX_ERROR;
+    }
+
+    ngx_memcpy(*combined_input, decomp->pending_header, 2);
+    if (*in_len > 0) {
+        ngx_memcpy(*combined_input + 2, *in_data, *in_len);
+    }
+    *in_data = *combined_input;
+    *in_len = combined_len;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_workspace_size(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    size_t in_len,
+    size_t *buf_size)
+{
+    size_t  remaining;
+
+    if (in_len > (size_t) -1 / 4) {
+        *buf_size = (size_t) -1;
+    } else {
+        *buf_size = in_len * 4;
+    }
+    if (*buf_size < 4096) {
+        *buf_size = 4096;
+    }
+
+    if (decomp->max_decompressed_size == 0) {
+        return NGX_OK;
+    }
+    if (decomp->total_decompressed >= decomp->max_decompressed_size) {
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    }
+
+    remaining = decomp->max_decompressed_size
+                - decomp->total_decompressed;
+    if (*buf_size > remaining) {
+        *buf_size = remaining;
+    }
+
+    return NGX_OK;
+}
+
+
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_feed(
     ngx_http_markdown_streaming_decomp_t *decomp,
@@ -1057,6 +1141,8 @@ ngx_http_markdown_streaming_decomp_feed(
     size_t   buf_size;
     size_t   produced;
     u_char  *combined_input = NULL;
+    ngx_flag_t  input_ready;
+    ngx_int_t   rc;
     ngx_http_markdown_streaming_decomp_feed_ctx_t  feed_ctx;
 
     if (decomp == NULL || out_data == NULL || out_len == NULL)
@@ -1089,51 +1175,13 @@ ngx_http_markdown_streaming_decomp_feed(
      * are prepended to the current (or next) input chunk so inflate
      * sees the complete stream from the start.
      */
-    if (decomp->zlib_header_pending) {
-        size_t    header_consumed = 0;
-        ngx_int_t hdr_rc;
-
-        hdr_rc = ngx_http_markdown_streaming_decomp_feed_header(
-            decomp, in_data, in_len, &header_consumed, log);
-        if (hdr_rc != NGX_OK) {
-            return NGX_ERROR;
-        }
-
-        if (decomp->zlib_header_pending) {
-            /*
-             * Still need more header bytes.  All input was consumed
-             * as header bytes; nothing to decompress this round.
-             */
-            return NGX_OK;
-        }
-
-        /*
-         * Header resolved; now feed [pending_header][remaining_input]
-         * as a single contiguous chunk so inflate sees the full stream.
-         * Build a temporary combined buffer; freed at the end of
-         * this function or on any error path below.
-         */
-        in_data += header_consumed;
-        in_len -= header_consumed;
-
-        {
-            size_t  combined_len = 2 + in_len;
-
-            combined_input = ngx_alloc(combined_len, log);
-            if (combined_input == NULL) {
-                return NGX_ERROR;
-            }
-            ngx_memcpy(combined_input, decomp->pending_header, 2);
-            if (in_len > 0) {
-                ngx_memcpy(combined_input + 2, in_data, in_len);
-            }
-            in_data = combined_input;
-            in_len = combined_len;
-        }
-        /*
-         * Fall through to the normal inflate path; decomp->initialized
-         * is now 1.
-         */
+    rc = ngx_http_markdown_streaming_decomp_prepare_input(
+        decomp, &in_data, &in_len, &combined_input, &input_ready, log);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+    if (!input_ready) {
+        return NGX_OK;
     }
 
     if (!decomp->initialized) {
@@ -1141,33 +1189,11 @@ ngx_http_markdown_streaming_decomp_feed(
         return NGX_ERROR;
     }
 
-    /* Estimate transient output workspace: 4x input or 4KB minimum. */
-    if (in_len > (size_t) -1 / 4) {
-        buf_size = (size_t) -1;  /* saturate to max */
-    } else {
-        buf_size = in_len * 4;
-    }
-    if (buf_size < 4096) {
-        buf_size = 4096;
-    }
-
-    /* Clamp to remaining size budget */
-    if (decomp->max_decompressed_size > 0) {
-        size_t remaining;
-
-        if (decomp->total_decompressed
-            >= decomp->max_decompressed_size)
-        {
-            /* Budget already exhausted; output already cleared above */
-            ngx_http_markdown_streaming_decomp_free_heap(&combined_input);
-            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
-        }
-
-        remaining = decomp->max_decompressed_size
-                    - decomp->total_decompressed;
-        if (buf_size > remaining) {
-            buf_size = remaining;
-        }
+    rc = ngx_http_markdown_streaming_decomp_workspace_size(
+        decomp, in_len, &buf_size);
+    if (rc != NGX_OK) {
+        ngx_http_markdown_streaming_decomp_free_heap(&combined_input);
+        return rc;
     }
 
     /*
