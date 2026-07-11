@@ -5,6 +5,7 @@
     "git_commit": "cc0dd0e8",
     "platform": "linux-x86_64",
     "load_generator": "ab",
+    "nginx_version": "unknown (baseline generated before nginx_version capture; regenerate after path-coverage fix)",
     "scenarios": [
       {
         "name": "plain-small",
