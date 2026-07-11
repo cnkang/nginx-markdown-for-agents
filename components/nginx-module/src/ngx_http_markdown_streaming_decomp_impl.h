@@ -213,7 +213,7 @@ ngx_http_markdown_streaming_decomp_is_zlib_header(u_char cmf, u_char flg)
     }
 
     /* (CMF * 256 + FLG) must be a multiple of 31 */
-    if ((((u_int) cmf << 8) | flg) % 31 != 0) {
+    if ((((unsigned) cmf << 8) | flg) % 31 != 0) {
         return 0;
     }
 
@@ -252,13 +252,17 @@ ngx_http_markdown_streaming_decomp_resolve_deflate_header(
     {
         /* zlib-wrapped deflate (RFC 1950 / RFC 9110) */
         window_bits = MAX_WBITS;
+#ifdef NGX_LOG_DEBUG_HTTP
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, log, 0,
             "markdown: streaming deflate: zlib-wrapped header detected");
+#endif
     } else {
         /* raw deflate (RFC 1951) */
         window_bits = -MAX_WBITS;
+#ifdef NGX_LOG_DEBUG_HTTP
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, log, 0,
             "markdown: streaming deflate: raw deflate header detected");
+#endif
     }
 
     if (ngx_http_markdown_streaming_decomp_init_zlib(
