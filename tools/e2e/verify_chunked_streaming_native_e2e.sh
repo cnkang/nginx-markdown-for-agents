@@ -756,18 +756,88 @@ assert_streaming_markdown_response \
 #   - zero_copy_output_total does not increase
 #   - worker PID changes during a zero-copy request (master respawned a
 #     crashed worker)
-#   - error log contains worker signal/core dump entries
+#   - error log contains NGINX worker crash exit signatures
+
+# Helper: get the current worker PID.
+# nginx.pid stores the MASTER process PID, not the worker PID.
+# With worker_processes 1, the single worker is the child of the master.
+get_worker_pid() {
+  local master_pid=""
+  local wpid=""
+
+  if [[ -f "${RUNTIME}/logs/nginx.pid" ]]; then
+    master_pid="$(cat "${RUNTIME}/logs/nginx.pid" 2>/dev/null | tr -d '[:space:]')"
+  fi
+  if [[ -z "${master_pid}" ]]; then
+    echo ""
+    return
+  fi
+  # pgrep -P finds child processes of the master.  With worker_processes 1
+  # there should be exactly one.  Filter to the first match.
+  wpid="$(pgrep -P "${master_pid}" 2>/dev/null | head -1 | tr -d '[:space:]')"
+  echo "${wpid}"
+}
+
+# Helper: extract a numeric metric from the metrics endpoint.
+# Args: $1 = metric name (e.g. "zero_copy_output_total")
+get_perf_metric() {
+  local metric_name="$1"
+  local metrics_json
+
+  metrics_json="$(curl -s -H 'Accept: application/json' \
+    "http://127.0.0.1:${PORT}/markdown-metrics" 2>/dev/null || echo '{}')"
+  echo "${metrics_json}" | python3 -c \
+    "import sys, json; print(json.load(sys.stdin).get('perf', {}).get('${metric_name}', 0))" \
+    2>/dev/null || echo 0
+}
+
+# Helper: check for NGINX worker crash signatures in the error log.
+# Uses precise patterns matching NGINX source code exit logging:
+#   "%s %P exited on signal %d"
+#   "%s %P exited on signal %d (core dumped)"  (the "(core dumped)" is part of the format string in some builds)
+#   "%s %P exited with fatal code %d and cannot be respawned"
+#   "could not respawn worker process"
+# Only scans log lines appended after the given byte offset.
+# Args: $1 = byte offset to start scanning from
+check_worker_crash_log() {
+  local offset="$1"
+  local error_log="${RUNTIME}/logs/error.log"
+  local current_size
+  local new_bytes
+
+  if [[ ! -f "${error_log}" ]]; then
+    return 0
+  fi
+  current_size="$(wc -c < "${error_log}" | tr -d '[:space:]')"
+  if [[ "${current_size}" -le "${offset}" ]]; then
+    return 0
+  fi
+  # Extract only the log lines appended after the offset.
+  new_bytes=$((current_size - offset))
+  tail -c "${new_bytes}" "${error_log}" 2>/dev/null \
+    | grep -E -i \
+      'exited on signal|core dumped|exited with fatal code|could not respawn worker' \
+      > "${RAW_DIR}/zc_crash_matches" 2>/dev/null
+  if [[ -s "${RAW_DIR}/zc_crash_matches" ]]; then
+    return 1
+  fi
+  return 0
+}
 
 echo "==> Case 4c: zero-copy streaming should convert to Markdown with zero_copy_output_total > 0"
 
 zc_output_total=0
 
-# Capture the worker PID before the zero-copy request so we can detect
-# a crash + respawn.  NGINX writes the single worker PID to nginx.pid.
-zc_worker_pid_before=""
-if [[ -f "${RUNTIME}/logs/nginx.pid" ]]; then
-  zc_worker_pid_before="$(cat "${RUNTIME}/logs/nginx.pid" 2>/dev/null | tr -d '[:space:]')"
+# Record the error log byte offset before zero-copy tests so crash-log
+# scanning only examines lines appended during zero-copy cases.
+zc_log_offset_before=0
+if [[ -f "${RUNTIME}/logs/error.log" ]]; then
+  zc_log_offset_before="$(wc -c < "${RUNTIME}/logs/error.log" | tr -d '[:space:]')"
 fi
+
+# Capture the worker PID before the zero-copy request.
+# nginx.pid stores the MASTER PID; the worker is its child (worker_processes 1).
+zc_worker_pid_before="$(get_worker_pid)"
 
 zc_line="$(curl -sS -D "${RAW_DIR}/zc.hdr" -o "${RAW_DIR}/zc.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
@@ -786,11 +856,8 @@ assert_streaming_markdown_response \
   "zero-copy-small" "${RAW_DIR}/zc.hdr" "${RAW_DIR}/zc.body" \
   "# Chunked Small" "${SMALL_END_TOKEN}" 1
 
-# Detect worker crash + respawn by comparing the PID file before/after.
-zc_worker_pid_after=""
-if [[ -f "${RUNTIME}/logs/nginx.pid" ]]; then
-  zc_worker_pid_after="$(cat "${RUNTIME}/logs/nginx.pid" 2>/dev/null | tr -d '[:space:]')"
-fi
+# Detect worker crash + respawn by comparing the worker PID before/after.
+zc_worker_pid_after="$(get_worker_pid)"
 if [[ -n "${zc_worker_pid_before}" && -n "${zc_worker_pid_after}" \
       && "${zc_worker_pid_before}" != "${zc_worker_pid_after}" ]]; then
   echo "FAIL: worker PID changed during zero-copy request" >&2
@@ -801,76 +868,180 @@ fi
 
 # Verify that zero_copy_output_total > 0 in the metrics endpoint
 # after the zero-copy path was exercised.
-zc_metrics="$(curl -s -H 'Accept: application/json' \
-  "http://127.0.0.1:${PORT}/markdown-metrics" || echo '{}')"
-zc_output_total="$(echo "${zc_metrics}" | python3 -c \
-  "import sys, json; print(json.load(sys.stdin).get('perf', {}).get('zero_copy_output_total', 0))" 2>/dev/null || echo 0)"
+zc_output_total="$(get_perf_metric 'zero_copy_output_total')"
 if [[ "${zc_output_total}" -le 0 ]]; then
   echo "FAIL: zero-copy path did not produce zero-copy output (zero_copy_output_total=${zc_output_total})" >&2
   exit 1
 fi
 echo "  zero_copy_output_total=${zc_output_total} (verified > 0)"
 
-# Scan the error log for worker crash signatures.  This is checked after
-# all zero-copy requests so a crash during any of 4c/4d/4e is caught.
-zc_crash_log_marker="${RAW_DIR}/zc_crash_found"
-: > "${zc_crash_log_marker}"
+# Record metrics before Case 4d for backpressure assertions.
+zc_backpressure_before="$(get_perf_metric 'backpressure_total')"
+zc_backpressure_resume_before="$(get_perf_metric 'backpressure_resume_total')"
 
-echo "==> Case 4d: zero-copy with slow upstream (backpressure/NGX_AGAIN resume)"
-# The upstream /delayed-oversize endpoint sends chunks with 0.2s delays
-# between them, forcing the module to suspend (NGX_AGAIN) and resume.
-# The zero-copy path must handle this without corruption or loss.
-zc_slow_pid_before="${zc_worker_pid_after}"
-zc_slow_line="$(curl -sS -D "${RAW_DIR}/zc_slow.hdr" -o "${RAW_DIR}/zc_slow.body" \
-  -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 240 \
-  "http://127.0.0.1:${PORT}/streaming-zero-copy/delayed-oversize" \
-  -w "${CURL_METRICS_FMT}" || true)"
-# || true: the delayed-oversize response exceeds markdown_limits memory,
-# so the module fails open (pass-through HTML).  The key assertion is
-# that the response completed without a crash or hang.
-echo "${zc_slow_line}" | tee "${RAW_DIR}/zc_slow.metrics" >/dev/null
-echo "${zc_slow_line}" | grep -q "${PATTERN_HTTP_200}" || {
-  echo "FAIL: zero-copy slow upstream returned non-200: ${zc_slow_line}" >&2
-  exit 1
-}
-# The delayed-oversize payload exceeds the default 10m markdown_limits
-# memory, so the module must fail open to pass-through HTML.
-grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/zc_slow.hdr" || {
-  echo "FAIL: zero-copy slow upstream expected fail-open HTML Content-Type" >&2
-  exit 1
-}
-actual_zc_slow_bytes="$(wc -c < "${RAW_DIR}/zc_slow.body" | tr -d '[:space:]')"
-[[ "${actual_zc_slow_bytes}" == "${DELAYED_LEN}" ]] || {
-  echo "FAIL: zero-copy slow upstream body length mismatch: expected ${DELAYED_LEN}, got ${actual_zc_slow_bytes}" >&2
-  exit 1
-}
-echo "  zero-copy slow upstream: ${actual_zc_slow_bytes} bytes (fail-open, no crash)"
+echo "==> Case 4d: zero-copy with slow downstream client (backpressure/NGX_AGAIN resume)"
+# To force the module to suspend (NGX_AGAIN) and resume, we need
+# downstream write pressure — the client must read slowly enough that
+# NGINX's downstream send buffer fills and the zero-copy output chain
+# cannot be delivered immediately.  We use a Python slow-reader that:
+#   1. Sends the request with Accept: text/markdown
+#   2. Reads response headers
+#   3. Reads body in tiny increments with small sleeps
+#   4. Verifies the full Markdown content and tail token
+#
+# After the request, we assert:
+#   - zero_copy_output_total increased (zero-copy path was used)
+#   - backpressure_total increased (NGX_AGAIN occurred)
+#   - backpressure_resume_total increased (resume path executed)
+#   - worker PID unchanged (no crash)
+python3 - "${RAW_DIR}/zc_slow_reader.py" <<PYEOF > "${RAW_DIR}/zc_slow_reader.log" 2>&1
+import http.client
+import sys
+import time
 
-zc_slow_pid_after=""
-if [[ -f "${RUNTIME}/logs/nginx.pid" ]]; then
-  zc_slow_pid_after="$(cat "${RUNTIME}/logs/nginx.pid" 2>/dev/null | tr -d '[:space:]')"
+conn = http.client.HTTPConnection("127.0.0.1", int("${PORT}"), timeout=60)
+conn.request("GET", "/streaming-zero-copy/small-valid", headers={
+    "Accept": "text/markdown",
+})
+resp = conn.getresponse()
+
+if resp.status != 200:
+    print(f"FAIL: non-200 status: {resp.status}", file=sys.stderr)
+    sys.exit(1)
+
+ct = resp.getheader("Content-Type", "")
+if "text/markdown" not in ct:
+    print(f"FAIL: expected markdown Content-Type, got {ct}", file=sys.stderr)
+    sys.exit(1)
+
+body = b""
+total = 0
+while True:
+    chunk = resp.read(256)
+    if not chunk:
+        break
+    body += chunk
+    total += len(chunk)
+    # Small delay to create downstream backpressure without timing out
+    time.sleep(0.005)
+
+conn.close()
+
+if total == 0:
+    print("FAIL: zero-copy slow reader received 0 bytes", file=sys.stderr)
+    sys.exit(1)
+
+if b"# Chunked Small" not in body:
+    print("FAIL: zero-copy slow reader missing heading marker", file=sys.stderr)
+    sys.exit(1)
+
+if b"${SMALL_END_TOKEN}" not in body:
+    print("FAIL: zero-copy slow reader missing tail token", file=sys.stderr)
+    sys.exit(1)
+
+print(f"OK: zero-copy slow reader received {total} bytes with valid Markdown")
+PYEOF
+
+zc_slow_reader_rc=$?
+if [[ ${zc_slow_reader_rc} -ne 0 ]]; then
+  echo "FAIL: zero-copy slow downstream reader failed:" >&2
+  cat "${RAW_DIR}/zc_slow_reader.log" >&2
+  exit 1
 fi
-if [[ -n "${zc_slow_pid_before}" && -n "${zc_slow_pid_after}" \
-      && "${zc_slow_pid_before}" != "${zc_slow_pid_after}" ]]; then
-  echo "FAIL: worker PID changed during zero-copy slow upstream request" >&2
+cat "${RAW_DIR}/zc_slow_reader.log"
+
+# Assert backpressure metrics increased.
+zc_backpressure_after="$(get_perf_metric 'backpressure_total')"
+zc_backpressure_resume_after="$(get_perf_metric 'backpressure_resume_total')"
+if [[ "${zc_backpressure_after}" -le "${zc_backpressure_before}" ]]; then
+  echo "FAIL: backpressure_total did not increase during slow downstream (before=${zc_backpressure_before}, after=${zc_backpressure_after})" >&2
+  echo "  NGX_AGAIN resume path was not exercised — zero-copy backpressure is unproven" >&2
+  exit 1
+fi
+echo "  backpressure_total: ${zc_backpressure_before} -> ${zc_backpressure_after}"
+if [[ "${zc_backpressure_resume_after}" -le "${zc_backpressure_resume_before}" ]]; then
+  echo "FAIL: backpressure_resume_total did not increase (before=${zc_backpressure_resume_before}, after=${zc_backpressure_resume_after})" >&2
+  echo "  resume path was not executed — zero-copy backpressure is unproven" >&2
+  exit 1
+fi
+echo "  backpressure_resume_total: ${zc_backpressure_resume_before} -> ${zc_backpressure_resume_after}"
+
+# Verify worker PID unchanged after slow downstream.
+zc_slow_pid_after="$(get_worker_pid)"
+if [[ -n "${zc_worker_pid_after}" && -n "${zc_slow_pid_after}" \
+      && "${zc_worker_pid_after}" != "${zc_slow_pid_after}" ]]; then
+  echo "FAIL: worker PID changed during zero-copy slow downstream" >&2
   exit 1
 fi
 
 echo "==> Case 4e: zero-copy client abort during streaming (pool cleanup)"
-# Start a curl request to the zero-copy path with a very short timeout
-# so the client disconnects mid-stream.  The module must clean up the
-# zero-copy output buffers via pool cleanup without leaking or crashing.
-# We use /small-valid which is 2MB and should take >0.1s to transfer.
-zc_abort_pid_before="${zc_slow_pid_after}"
-( curl -sS -o /dev/null \
-    -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 0.1 \
-    "http://127.0.0.1:${PORT}/streaming-zero-copy/small-valid" \
-    2>/dev/null || true ) &
-zc_abort_pid=$!
-wait "${zc_abort_pid}" 2>/dev/null || true
-# The abort itself is expected to produce a curl error (exit 28).
-# The key is that NGINX does not crash — verify by making a subsequent
-# successful request to the same location.
+# Use a deterministic socket-level client that:
+#   1. Sends the request
+#   2. Waits for response headers and a small amount of body
+#   3. Closes the socket immediately (simulating client disconnect)
+# This guarantees the abort actually happens, unlike curl --max-time
+# which may complete before the timeout on fast loopback.
+zc_abort_worker_pid_before="$(get_worker_pid)"
+
+python3 - <<PYEOF > "${RAW_DIR}/zc_abort_client.log" 2>&1
+import socket
+import time
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.settimeout(10)
+sock.connect(("127.0.0.1", ${PORT}))
+
+request = (
+    "GET /streaming-zero-copy/small-valid HTTP/1.1\r\n"
+    "Host: localhost\r\n"
+    "Accept: text/markdown\r\n"
+    "Connection: close\r\n"
+    "\r\n"
+)
+sock.sendall(request.encode())
+
+# Read response headers and a small amount of body, then abort.
+received = b""
+try:
+    while len(received) < 4096:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        received += chunk
+        # Read just enough to confirm the response started, then close.
+        if b"\r\n\r\n" in received and len(received) > 1024:
+            break
+except socket.timeout:
+    pass
+
+sock.close()
+
+if len(received) == 0:
+    print("FAIL: abort client received no data before close", file=sys.stderr)
+    import sys
+    sys.exit(1)
+
+if b"HTTP/1.1 200" not in received[:64]:
+    print("FAIL: abort client did not receive 200 status", file=sys.stderr)
+    import sys
+    sys.exit(1)
+
+print(f"OK: abort client received {len(received)} bytes then closed socket")
+PYEOF
+
+zc_abort_rc=$?
+if [[ ${zc_abort_rc} -ne 0 ]]; then
+  echo "FAIL: zero-copy deterministic client abort failed:" >&2
+  cat "${RAW_DIR}/zc_abort_client.log" >&2
+  exit 1
+fi
+cat "${RAW_DIR}/zc_abort_client.log"
+
+# Wait briefly for NGINX to process the disconnect and run pool cleanup.
+sleep 0.5
+
+# The key assertion is that NGINX does not crash — verify by making a
+# subsequent successful request to the same location.
 zc_post_abort_line="$(curl -sS -D "${RAW_DIR}/zc_post_abort.hdr" \
   -o "${RAW_DIR}/zc_post_abort.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
@@ -887,27 +1058,20 @@ assert_streaming_markdown_response \
   "# Chunked Small" "${SMALL_END_TOKEN}" 1
 echo "  zero-copy post-abort: NGINX survived client abort, subsequent request OK"
 
-zc_abort_pid_after=""
-if [[ -f "${RUNTIME}/logs/nginx.pid" ]]; then
-  zc_abort_pid_after="$(cat "${RUNTIME}/logs/nginx.pid" 2>/dev/null | tr -d '[:space:]')"
-fi
-if [[ -n "${zc_abort_pid_before}" && -n "${zc_abort_pid_after}" \
-      && "${zc_abort_pid_before}" != "${zc_abort_pid_after}" ]]; then
+# Verify worker PID unchanged after abort.
+zc_abort_worker_pid_after="$(get_worker_pid)"
+if [[ -n "${zc_abort_worker_pid_before}" && -n "${zc_abort_worker_pid_after}" \
+      && "${zc_abort_worker_pid_before}" != "${zc_abort_worker_pid_after}" ]]; then
   echo "FAIL: worker PID changed during zero-copy client abort" >&2
   exit 1
 fi
 
-# Scan the error log for worker crash signatures (signal, core dump, alert).
-# These entries indicate the worker crashed during a zero-copy request.
-# We check this after all zero-copy cases so a crash in any of them is caught.
-if grep -E -i 'signal|core dump|alert|worker process' "${RUNTIME}/logs/error.log" 2>/dev/null \
-    | grep -v -E -i 'signal to stop|graceful|exiting normally|start worker processes' \
-    > "${zc_crash_log_marker}.matches" 2>/dev/null; then
-  if [[ -s "${zc_crash_log_marker}.matches" ]]; then
-    echo "FAIL: error log contains worker crash signature during zero-copy tests:" >&2
-    cat "${zc_crash_log_marker}.matches" >&2
-    exit 1
-  fi
+# Scan only the log lines appended during zero-copy tests for precise
+# NGINX worker crash exit signatures.
+if ! check_worker_crash_log "${zc_log_offset_before}"; then
+  echo "FAIL: error log contains NGINX worker crash signature during zero-copy tests:" >&2
+  cat "${RAW_DIR}/zc_crash_matches" >&2
+  exit 1
 fi
 
 echo "==> Case 5: truncated gzip full-buffer path should fail open"
@@ -1060,7 +1224,10 @@ echo "  truncated_deflate_zlib_compressed_bytes=${TRUNCATED_DEFLATE_ZLIB_COMPRES
 echo "  truncated_deflate_zlib_result=$(cat "${RAW_DIR}/trunc_deflate_zlib.metrics")"
 echo "  zero_copy_result=$(cat "${RAW_DIR}/zc.metrics" 2>/dev/null || echo "missing")"
 echo "  zero_copy_output_total=${zc_output_total:-0}"
-echo "  zero_copy_slow_result=$(cat "${RAW_DIR}/zc_slow.metrics" 2>/dev/null || echo "missing")"
+echo "  zero_copy_backpressure_total=${zc_backpressure_after:-0}"
+echo "  zero_copy_backpressure_resume_total=${zc_backpressure_resume_after:-0}"
+echo "  zero_copy_slow_reader_result=$(cat "${RAW_DIR}/zc_slow_reader.log" 2>/dev/null || echo "missing")"
+echo "  zero_copy_abort_client_result=$(cat "${RAW_DIR}/zc_abort_client.log" 2>/dev/null || echo "missing")"
 echo "  zero_copy_post_abort_result=$(cat "${RAW_DIR}/zc_post_abort.metrics" 2>/dev/null || echo "missing")"
 if [[ "${PROFILE}" == "stress" ]]; then
   echo "  stress_small_ab_rps=${small_rps:-unknown}"
