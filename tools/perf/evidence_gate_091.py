@@ -185,17 +185,19 @@ def _extract_evidence_metrics(report: dict) -> dict:
     _extract_large_latency(scenarios, metrics)
     _extract_streaming_and_fallback(scenarios, metrics)
 
-    # Compute memory slope or explicit memory evidence from RSS
+    # Compute memory slope from per-scenario RSS evidence.
     memory_data_points = _extract_memory_points(scenarios)
 
     if len(memory_data_points) >= 2:
         metrics["memory_slope_pct"] = _compute_memory_slope(memory_data_points)
     else:
-        # Check if the report has top-level memory_slope config
-        ms_section = report.get("module_benchmark", {}).get("memory_slope", {})
-        rss_per_mb = ms_section.get("rss_per_input_mb")
-        if rss_per_mb is not None:
-            metrics["memory_slope_pct"] = rss_per_mb
+        # Not enough measured data points to compute a slope.
+        # Leave memory_slope_pct absent — the threshold engine will
+        # treat it as MISSING_EVIDENCE.  We intentionally do NOT read
+        # a top-level memory_slope placeholder from the report, because
+        # a hardcoded 0.0 would mask missing evidence as "perfect 0
+        # slope".
+        pass
 
     return metrics
 
@@ -284,33 +286,40 @@ def _memory_point_for_scenario(scenario: dict) -> tuple[float, float] | None:
     This gives a slope with units of (RSS bytes / input bytes), which
     directly measures per-byte memory cost.
 
-    Falls back to worker_rss_mb (post-run) when peak/baseline are absent,
-    for backward compatibility with older reports.
+    When peak/baseline evidence is absent, returns None (NOT a fallback
+    to post-run worker_rss_mb).  Post-run RSS is a single sample taken
+    after load completion — it does not represent peak memory during
+    load and silently masking its absence as "evidence" defeats the
+    purpose of the memory regression gate.  The evidence gate will then
+    report MISSING_EVIDENCE for insufficient memory samples.
+
+    A peak == baseline delta of 0 is valid evidence (no growth) and
+    returns (input_bytes, 0.0) rather than None.
     """
     metrics = scenario.get("metrics") or scenario.get("results") or scenario
     input_bytes = metrics.get("input_bytes") or metrics.get("html_bytes")
     if input_bytes is None or input_bytes <= 0:
         return None
 
-    # Preferred: peak RSS delta from background sampling
+    # Required: peak RSS delta from background sampling
     peak_rss = metrics.get("peak_rss_bytes")
     baseline_rss = metrics.get("baseline_rss_bytes")
-    if peak_rss is not None and peak_rss > 0:
-        if baseline_rss is not None and baseline_rss >= 0:
-            delta = peak_rss - baseline_rss
-            if delta > 0:
-                return float(input_bytes), float(delta)
-
-    # Fallback: post-run RSS (legacy reports without peak sampling)
-    rss_mb = metrics.get("worker_rss_mb")
-    if rss_mb is not None and rss_mb > 0:
-        return float(input_bytes), rss_mb * 1024 * 1024
-
-    # Last resort: raw peak_memory_bytes
-    peak_rss = metrics.get("peak_memory_bytes") or metrics.get("worker_rss_bytes")
     if peak_rss is None or peak_rss <= 0:
+        # No peak RSS evidence — cannot compute a valid memory point.
+        # Do NOT fall back to worker_rss_mb; that would mask missing
+        # peak evidence as reliable memory data.
         return None
-    return float(input_bytes), float(peak_rss)
+
+    if baseline_rss is None or baseline_rss < 0:
+        return None
+
+    delta = peak_rss - baseline_rss
+    if delta < 0:
+        # peak < baseline is evidence of a sampler error; reject.
+        return None
+
+    # delta >= 0 is valid (including 0 = no growth)
+    return float(input_bytes), float(delta)
 
 
 def _extract_memory_points(scenarios: list[dict]) -> list[tuple[float, float]]:
@@ -715,6 +724,47 @@ def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
     return skipped
 
 
+def _validate_benchmark_evidence(
+    report: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Validate a benchmark report for evidence integrity.
+
+    Applies the same checks to both current reports and baselines:
+      - critical scenarios not skipped
+      - path-coverage invariants satisfied
+      - nginx_version is present and not "unknown"
+
+    Returns a list of (check_name, reason) violations.  Empty list
+    means the report passes all integrity checks.
+    """
+    violations: list[tuple[str, str]] = []
+
+    # 1. Critical scenarios must not be skipped
+    skipped = _check_skipped_scenarios(report)
+    for name, reason in skipped:
+        violations.append(
+            (f"{role}.scenario", f"skipped: {name}: {reason}")
+        )
+
+    # 2. Path-coverage invariants
+    path_violations = _check_path_coverage(report)
+    for name, metric, label in path_violations:
+        violations.append(
+            (f"{role}.path_coverage", f"{name}: {label} (metric={metric})")
+        )
+
+    # 3. nginx_version must be present and not "unknown"
+    nginx_version = (
+        report.get("module_benchmark", {}).get("nginx_version", "")
+    )
+    if not nginx_version or nginx_version.startswith("unknown"):
+        violations.append(
+            (f"{role}.nginx_version", "missing or 'unknown' nginx_version")
+        )
+
+    return violations
+
+
 def _evaluate_and_report(
     report: dict | None, args: argparse.Namespace, blocking: bool,
 ) -> int:
@@ -722,59 +772,27 @@ def _evaluate_and_report(
 
     Returns the appropriate exit code.
     """
-    # In blocking mode, verify that critical scenarios were not skipped.
+    # In blocking mode, validate the current report's evidence integrity.
     if blocking:
-        skipped_critical = _check_skipped_scenarios(report or {})
-        if skipped_critical:
+        current_violations = _validate_benchmark_evidence(
+            report or {}, role="current"
+        )
+        if current_violations:
             _stderr(
-                "FAIL: Critical benchmark scenarios were skipped (fixture missing):\n"
-                + "".join(f"  - {name}: {reason}\n"
-                           for name, reason in skipped_critical)
-                + "  Release tags require all critical scenarios to complete.\n"
-                "  Ensure the benchmark fixtures exist (run "
-                "tests/corpus/large/generate-large-fixtures.sh)."
-            )
-            evidence_pack = _build_evidence_pack(
-                report=report,
-                verdict="MISSING_EVIDENCE",
-                breaches=[
-                    {"metric": "scenario", "reason": f"skipped: {name}"}
-                    for name, _ in skipped_critical
-                ],
-                results=[],
-            )
-            _print_evidence_summary(evidence_pack)
-            _write_output(evidence_pack, args.output)
-            return 1
-
-        # Path-coverage invariants: a "completed" scenario must actually
-        # exercise the production path it claims to test.  If the target
-        # path was never hit (e.g. streaming-first with streaming_ratio=0
-        # and zero_copy_output_total=0), the latency numbers are not
-        # credible evidence for that path.
-        path_violations = _check_path_coverage(report or {})
-        if path_violations:
-            _stderr(
-                "FAIL: Path-coverage invariants violated — critical scenarios "
-                "did not exercise their target production paths:\n"
+                "FAIL: Current benchmark report failed evidence integrity "
+                "validation:\n"
                 + "".join(
-                    f"  - {name}: {label} (metric={metric})\n"
-                    for name, metric, label in path_violations
+                    f"  - {check}: {reason}\n"
+                    for check, reason in current_violations
                 )
-                + "  Release tags require critical scenarios to actually hit "
-                "their target paths, not just report 'completed'.\n"
-                "  Regenerate the baseline after fixing the benchmark runtime "
-                "so that streaming/zero-copy/decompression paths are exercised."
+                + "  Release tags require complete, credible evidence."
             )
             evidence_pack = _build_evidence_pack(
                 report=report,
                 verdict="MISSING_EVIDENCE",
                 breaches=[
-                    {
-                        "metric": "path_coverage",
-                        "reason": f"{name}: {label}",
-                    }
-                    for name, metric, label in path_violations
+                    {"metric": check, "reason": reason}
+                    for check, reason in current_violations
                 ],
                 results=[],
             )
@@ -789,6 +807,40 @@ def _evaluate_and_report(
     baseline_path = REPO_ROOT / "perf" / "baselines" / "module-baseline-091.json"
     if baseline_path.exists():
         baseline_report = json.loads(baseline_path.read_text(encoding="utf-8"))
+
+        # In blocking mode, validate the baseline with the same
+        # integrity checks as the current report.  A baseline with
+        # streaming_ratio=0 or an "unknown" nginx_version is not
+        # valid evidence and must not be used for threshold comparison.
+        if blocking:
+            baseline_violations = _validate_benchmark_evidence(
+                baseline_report, role="baseline"
+            )
+            if baseline_violations:
+                _stderr(
+                    "FAIL: Checked-in baseline failed evidence integrity "
+                    "validation:\n"
+                    + "".join(
+                        f"  - {check}: {reason}\n"
+                        for check, reason in baseline_violations
+                    )
+                    + "  The baseline must be regenerated by running a real "
+                    "benchmark after fixing the benchmark runtime.\n"
+                    "  Do not hand-edit baseline values."
+                )
+                evidence_pack = _build_evidence_pack(
+                    report=report,
+                    verdict="MISSING_EVIDENCE",
+                    breaches=[
+                        {"metric": check, "reason": reason}
+                        for check, reason in baseline_violations
+                    ],
+                    results=[],
+                )
+                _print_evidence_summary(evidence_pack)
+                _write_output(evidence_pack, args.output)
+                return 1
+
         baseline_metrics = _extract_evidence_metrics(baseline_report)
         has_baseline = True
     else:
