@@ -317,6 +317,11 @@ ngx_http_markdown_streaming_decomp_feed_header(
     return ngx_http_markdown_streaming_decomp_resolve_deflate_header(
         decomp, log);
 }
+
+
+/*
+ * Create a streaming decompressor for the given compression type.
+ *
  * Returns NULL on allocation failure or unsupported type.
  * Registers a pool cleanup handler for automatic teardown.
  */
