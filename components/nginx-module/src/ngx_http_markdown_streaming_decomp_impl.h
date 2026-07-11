@@ -246,25 +246,27 @@ ngx_http_markdown_streaming_decomp_resolve_deflate_header(
 {
     int  window_bits;
 
-    (void) log;
-
     if (ngx_http_markdown_streaming_decomp_is_zlib_header(
             decomp->pending_header[0],
             decomp->pending_header[1]))
     {
         /* zlib-wrapped deflate (RFC 1950 / RFC 9110) */
         window_bits = MAX_WBITS;
+        if (log != NULL) {
 #ifdef NGX_LOG_DEBUG_HTTP
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, log, 0,
-            "markdown: streaming deflate: zlib-wrapped header detected");
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, log, 0,
+                "markdown: streaming deflate: zlib-wrapped header detected");
 #endif
+        }
     } else {
         /* raw deflate (RFC 1951) */
         window_bits = -MAX_WBITS;
+        if (log != NULL) {
 #ifdef NGX_LOG_DEBUG_HTTP
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, log, 0,
-            "markdown: streaming deflate: raw deflate header detected");
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, log, 0,
+                "markdown: streaming deflate: raw deflate header detected");
 #endif
+        }
     }
 
     if (ngx_http_markdown_streaming_decomp_init_zlib(

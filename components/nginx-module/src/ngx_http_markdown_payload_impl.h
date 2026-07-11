@@ -827,7 +827,6 @@ ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
     *out_size = total;
     return NGX_OK;
 }
-#endif /* !NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
 
 
 static ngx_int_t
@@ -901,6 +900,7 @@ ngx_http_markdown_decompression_error(uint32_t ffi_rc)
         return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
     }
 }
+#endif /* !NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
 
 
 /*
