@@ -98,7 +98,7 @@ typedef struct {
  *   1. Profile is streaming_first (auto_decompress derived)
  *   2. Streaming engine is selected
  *   3. cache_validation is NOT full
- *   4. Encoding is supported (raw deflate in 0.9.1)
+ *   4. Encoding is supported (deflate — zlib-wrapped or raw — in 0.9.1)
  *
  * Profile switch from streaming_first to balanced/strict_cache
  * disables streaming decompression (Req 10.5).
@@ -150,7 +150,7 @@ ngx_http_markdown_decomp_routing_decision(
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }
 
-    /* Condition 4: encoding supported (raw deflate only in 0.9.1) */
+    /* Condition 4: encoding supported (deflate in 0.9.1) */
     if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }

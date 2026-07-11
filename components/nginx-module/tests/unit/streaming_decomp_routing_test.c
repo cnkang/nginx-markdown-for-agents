@@ -8,9 +8,10 @@
  * Feature: 0.9.1-performance-optimization
  * Validates: Requirements 4.1, 4.2, 4.3, 4.4, 4.8, 4.10
  *
- * For 0.9.1: streaming decompression is limited to raw deflate.
- * These tests confirm gzip/brotli are routed to full-buffer when
- * streaming would otherwise be selected.
+ * For 0.9.1: streaming decompression supports deflate (zlib-wrapped
+ * per RFC 9110, or raw deflate per RFC 1951) via deferred header
+ * sniffing.  These tests confirm gzip/brotli are routed to full-buffer
+ * when streaming would otherwise be selected.
  *
  * The property tests (tasks 8.3, 8.4) cover routing and fail-open
  * exhaustively.  This unit test adds specific named examples for
@@ -244,7 +245,7 @@ test_routing_raw_deflate_all_conditions_met(void)
     ngx_http_markdown_decomp_route_t result;
 
     TEST_SUBSECTION(
-        "raw deflate + all conditions met → STREAMING");
+        "deflate + all conditions met → STREAMING");
 
     result = ngx_http_markdown_decomp_routing_decision(
         1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
@@ -253,7 +254,7 @@ test_routing_raw_deflate_all_conditions_met(void)
         result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
         "deflate + auto_decompress=on + streaming + "
         "cache!=full → STREAMING (Req 4.1)");
-    TEST_PASS("raw deflate routes to STREAMING");
+    TEST_PASS("deflate routes to STREAMING");
 }
 
 static void
@@ -262,7 +263,7 @@ test_routing_raw_deflate_with_etag_cache(void)
     ngx_http_markdown_decomp_route_t result;
 
     TEST_SUBSECTION(
-        "raw deflate + cache_validation=etag → STREAMING");
+        "deflate + cache_validation=etag → STREAMING");
 
     result = ngx_http_markdown_decomp_routing_decision(
         1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_ETAG,
@@ -495,7 +496,7 @@ test_deflate_only_encoding_reaches_streaming(void)
     size_t i;
 
     TEST_SUBSECTION(
-        "only raw deflate reaches streaming in 0.9.1 "
+        "only deflate reaches streaming in 0.9.1 "
         "(Req 4.8)");
 
     /* Confirm deflate reaches streaming */
@@ -504,7 +505,7 @@ test_deflate_only_encoding_reaches_streaming(void)
         NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE);
     TEST_ASSERT(
         result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
-        "raw deflate reaches streaming path");
+        "deflate reaches streaming path");
 
     /* Confirm gzip and brotli do NOT */
     for (i = 0; i < ARRAY_SIZE(encodings); i++) {
@@ -520,6 +521,38 @@ test_deflate_only_encoding_reaches_streaming(void)
     TEST_PASS(
         "only deflate reaches streaming; gzip/brotli "
         "fall to full-buffer");
+}
+
+/*
+ * Test: streaming deflate now supports both zlib-wrapped (RFC 1950,
+ * RFC 9110-compliant) and raw deflate (RFC 1951) via deferred header
+ * sniffing.  The routing decision is the same for both — the format
+ * detection happens at the decompressor level, not the routing level.
+ */
+static void
+test_deflate_zlib_and_raw_both_route_streaming(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+
+    TEST_SUBSECTION(
+        "deflate routing is format-agnostic (zlib-wrapped "
+        "and raw both reach STREAMING)");
+
+    /*
+     * The routing decision only checks that the encoding is deflate;
+     * it does not distinguish zlib-wrapped from raw.  The decompressor
+     * sniffs the first 2 bytes to determine the format.  So both
+     * reach STREAMING at the routing level.
+     */
+    result = ngx_http_markdown_decomp_routing_decision(
+        1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+        NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE);
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+        "deflate (zlib-wrapped or raw) routes to STREAMING");
+    TEST_PASS(
+        "deflate routing is format-agnostic; header sniffing "
+        "happens at the decompressor");
 }
 
 /* ================================================================
@@ -990,8 +1023,9 @@ main(void)
     test_routing_no_encoding_bypass();
     test_routing_multiple_conditions_off();
 
-    /* Section 2: Raw deflate fallback */
+    /* Section 2: deflate routing (zlib-wrapped and raw) */
     test_deflate_only_encoding_reaches_streaming();
+    test_deflate_zlib_and_raw_both_route_streaming();
 
     /* Section 3: Truncated stream fail-open / safe-finish */
     test_truncated_stream_precommit_failopen();

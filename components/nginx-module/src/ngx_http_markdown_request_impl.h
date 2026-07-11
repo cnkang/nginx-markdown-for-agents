@@ -840,7 +840,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      *       we reach here streaming was selected → not full)
      *   (4) encoding supported by the 0.9.1 streaming decompression
      *       contract:
-     *       - raw deflate: supported
+     *       - deflate (zlib-wrapped per RFC 9110, or raw deflate):
+     *         supported via deferred header sniffing
      *       - gzip/brotli: deferred, route to full-buffer
      *
      * ngx_http_markdown_streaming_decomp_impl.h retains deferred
@@ -860,9 +861,10 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
          * Condition (4): check if the encoding is supported by
          * the streaming decompressor.
          *
-         * For 0.9.1: only raw deflate is supported in streaming
-         * mode (Req 4.9).  Gzip and brotli streaming branches are
-         * deferred/unreachable by contract and route to full-buffer.
+         * For 0.9.1: deflate (zlib-wrapped or raw) is supported in
+         * streaming mode via deferred header sniffing (Req 4.9).
+         * Gzip and brotli streaming branches are deferred/unreachable
+         * by contract and route to full-buffer.
          */
         if (ctx->decompression.type
             == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
@@ -870,7 +872,10 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             /*
              * All four conditions met: route to streaming
              * decompression.  The decompressor will be
-             * initialized during streaming_init_handle().
+             * initialized during streaming_init_handle()
+             * after sniffing the first 2 bytes to determine
+             * whether the stream is zlib-wrapped (MAX_WBITS)
+             * or raw deflate (-MAX_WBITS).
              * Increment metric at path selection (Req 4.5).
              */
             NGX_HTTP_MARKDOWN_METRIC_INC(
@@ -879,7 +884,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
             ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
                 r->connection->log, 0,
                 "markdown: streaming decompression "
-                "selected for raw deflate");
+                "selected for deflate");
 
             /* Fall through — keep PATH_STREAMING */
 
