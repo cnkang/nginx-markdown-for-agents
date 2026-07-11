@@ -20,6 +20,22 @@ typedef unsigned long ngx_atomic_uint_t;
 
 #define ngx_string(str) { sizeof(str) - 1, (u_char *) str }
 
+typedef struct {
+    ngx_atomic_uint_t backpressure_total;
+    ngx_atomic_uint_t backpressure_resume_total;
+    ngx_atomic_uint_t pending_output_high_watermark_bytes;
+    ngx_atomic_uint_t decompression_streaming_total;
+    ngx_atomic_uint_t decompression_fullbuffer_total;
+    ngx_atomic_uint_t decompression_budget_exceeded_total;
+    ngx_atomic_uint_t zero_copy_output_total;
+    ngx_atomic_uint_t copied_output_total;
+    struct {
+        ngx_atomic_uint_t current;
+        ngx_atomic_uint_t high_watermark;
+        ngx_atomic_uint_t overload_total;
+    } inflight;
+} ngx_http_markdown_metrics_perf_snapshot_t;
+
 typedef struct { /* SONAR_NOTE: mirrors production snapshot */
     ngx_atomic_t  conversions_attempted;
     ngx_atomic_t  conversions_succeeded;
@@ -116,21 +132,7 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
         ngx_atomic_t  path_conversion_time_sum_ms;
         ngx_atomic_t  overflow_count;
     } per_path;
-    struct {
-        ngx_atomic_t  backpressure_total;
-        ngx_atomic_t  backpressure_resume_total;
-        ngx_atomic_t  pending_output_high_watermark_bytes;
-        ngx_atomic_t  decompression_streaming_total;
-        ngx_atomic_t  decompression_fullbuffer_total;
-        ngx_atomic_t  decompression_budget_exceeded_total;
-        ngx_atomic_t  zero_copy_output_total;
-        ngx_atomic_t  copied_output_total;
-        struct {
-            ngx_atomic_t  current;
-            ngx_atomic_t  high_watermark;
-            ngx_atomic_t  overload_total;
-        } inflight;
-    } perf;
+    ngx_http_markdown_metrics_perf_snapshot_t perf;
 } ngx_http_markdown_metrics_snapshot_t;
 
 typedef struct ngx_rbtree_node_s  ngx_rbtree_node_t;
