@@ -459,6 +459,59 @@ get_worker_rss() {
   return 0
 }
 
+# get_worker_pid returns the PID of the NGINX worker process.
+get_worker_pid() {
+  if [[ -z "$NGINX_PID" ]]; then
+    echo ""
+    return 0
+  fi
+
+  local worker_pid
+  worker_pid="$(ps -axo pid=,ppid= 2>/dev/null \
+    | awk -v ppid="$NGINX_PID" '$2 == ppid { print $1; exit }')" || true
+
+  if [[ -z "$worker_pid" ]]; then
+    worker_pid="$NGINX_PID"
+  fi
+
+  echo "$worker_pid"
+  return 0
+}
+
+# sample_rss_background starts a background loop that periodically samples
+# the worker RSS and writes the maximum observed value to a file.
+# Arguments:
+#   $1 - output file for peak RSS (in KB)
+#   $2 - worker PID
+#   $3 - sample interval in seconds (default 0.1)
+sample_rss_background() {
+  local peak_file="$1"
+  local worker_pid="$2"
+  local interval="${3:-0.1}"
+
+  : > "$peak_file"
+  echo "0" > "$peak_file"
+
+  (
+    local peak=0
+    while true; do
+      if ! kill -0 "$worker_pid" 2>/dev/null; then
+        break
+      fi
+      local rss
+      rss="$(ps -o rss= -p "$worker_pid" 2>/dev/null | tr -d ' ')" || true
+      if [[ -n "$rss" ]] && [[ "$rss" =~ ^[0-9]+$ ]]; then
+        if [[ "$rss" -gt "$peak" ]]; then
+          peak="$rss"
+        fi
+      fi
+      sleep "$interval"
+    done
+    echo "$peak" > "$peak_file"
+  ) &
+  echo $!
+}
+
 ###############################################################################
 # Scenario definitions (Requirement 1.3)
 ###############################################################################
@@ -629,8 +682,21 @@ run_scenario() {
   # Start NGINX with appropriate profile
   start_nginx "$SC_PROFILE" "128"
 
-  # Measure pre-run RSS (reserved for memory slope calculation in task 1.2)
-  get_worker_rss >/dev/null
+  # Measure baseline RSS before load generation
+  local rss_baseline
+  rss_baseline="$(get_worker_rss)"
+
+  # Start background RSS sampler for peak tracking
+  local worker_pid
+  worker_pid="$(get_worker_pid)"
+  local peak_rss_file="$NGINX_WORKDIR/${SC_NAME}_peak_rss.txt"
+  local sampler_pid=""
+  if [[ -n "$worker_pid" ]]; then
+    sample_rss_background "$peak_rss_file" "$worker_pid" 0.1 &
+    sampler_pid=$!
+  else
+    echo "0" > "$peak_rss_file"
+  fi
 
   # Run load generation
   local raw_output="$NGINX_WORKDIR/${SC_NAME}_raw.csv"
@@ -652,6 +718,18 @@ run_scenario() {
   fi
 
   run_load_gen "$url_path" "$SC_CONCURRENCY" "$ITERATIONS" "$raw_output"
+
+  # Stop the background sampler and read peak RSS
+  if [[ -n "$sampler_pid" ]] && kill -0 "$sampler_pid" 2>/dev/null; then
+    kill "$sampler_pid" 2>/dev/null || true
+    wait "$sampler_pid" 2>/dev/null || true
+  fi
+
+  local rss_peak="0"
+  if [[ -f "$peak_rss_file" ]]; then
+    rss_peak="$(cat "$peak_rss_file" | tr -d '[:space:]')"
+    [[ "$rss_peak" =~ ^[0-9]+$ ]] || rss_peak="0"
+  fi
 
   # Measure post-run RSS
   local rss_after
@@ -678,7 +756,8 @@ run_scenario() {
   local scenario_json
   scenario_json="$(parse_load_gen_results "$raw_output" "$SC_NAME" "$SC_PROFILE" \
     "$SC_COMPRESSION" "$SC_TRANSFER" "$SC_CONCURRENCY" "$rss_after" \
-    "$ttfb_file" "$metrics_file" "$fixture_bytes")"
+    "$ttfb_file" "$metrics_file" "$fixture_bytes" \
+    "$rss_baseline" "$rss_peak")"
 
   # Stop NGINX for next scenario
   stop_nginx
@@ -693,16 +772,18 @@ run_scenario() {
 
 # parse_load_gen_results parses raw load-gen output into a JSON object.
 # Arguments:
-#   $1 - raw output file
-#   $2 - scenario name
-#   $3 - profile
-#   $4 - compression
-#   $5 - transfer encoding
-#   $6 - concurrency
-#   $7 - worker RSS in KB
-#   $8 - path to TTFB JSON (from measure_ttfb)
-#   $9 - path to NGINX metrics JSON
+#   $1  - raw output file
+#   $2  - scenario name
+#   $3  - profile
+#   $4  - compression
+#   $5  - transfer encoding
+#   $6  - concurrency
+#   $7  - worker RSS in KB (post-run)
+#   $8  - path to TTFB JSON (from measure_ttfb)
+#   $9  - path to NGINX metrics JSON
 #   $10 - actual input fixture size in bytes
+#   $11 - baseline worker RSS in KB (before load)
+#   $12 - peak worker RSS in KB (during load, sampled in background)
 parse_load_gen_results() {
   local raw_file="$1"
   local name="$2"
@@ -714,10 +795,15 @@ parse_load_gen_results() {
   local ttfb_file="${8:-}"
   local metrics_file="${9:-}"
   local input_bytes="${10:-0}"
+  local rss_baseline_kb="${11:-0}"
+  local rss_peak_kb="${12:-0}"
+  local ttfb_file="${8:-}"
+  local metrics_file="${9:-}"
+  local input_bytes="${10:-0}"
 
   python3 - "$raw_file" "$name" "$profile" "$compression" "$transfer" \
     "$concurrency" "$rss_kb" "$LOAD_GEN" "$ttfb_file" "$metrics_file" \
-    "$input_bytes" <<'PYEOF'
+    "$input_bytes" "$rss_baseline_kb" "$rss_peak_kb" <<'PYEOF'
 import csv
 import json
 import sys
@@ -745,6 +831,8 @@ load_gen = sys.argv[8]
 ttfb_json_path = sys.argv[9]
 metrics_json_path = sys.argv[10]
 input_bytes = int(sys.argv[11])
+rss_baseline_kb = int(sys.argv[12]) if len(sys.argv) > 12 else 0
+rss_peak_kb = int(sys.argv[13]) if len(sys.argv) > 13 else 0
 
 # Parse supplemental TTFB data (measured via curl time_starttransfer)
 ttfb_data = read_json_file(
@@ -844,6 +932,8 @@ elif load_gen == "ab":
                 "ttfb_p95_ms": ttfb_p95,
                 "ttlb_p50_ms": p50_val,
                 "worker_rss_mb": rss_kb / 1024.0,
+                "baseline_rss_bytes": rss_baseline_kb * 1024,
+                "peak_rss_bytes": rss_peak_kb * 1024,
                 "input_bytes": input_bytes,
                 "streaming_ratio": streaming_ratio,
                 "fullbuffer_ratio": fullbuffer_ratio,
@@ -892,6 +982,8 @@ result = {
         "ttfb_p95_ms": ttfb_p95,
         "ttlb_p50_ms": p50,
         "worker_rss_mb": rss_kb / 1024.0,
+        "baseline_rss_bytes": rss_baseline_kb * 1024,
+        "peak_rss_bytes": rss_peak_kb * 1024,
         "input_bytes": input_bytes,
         "streaming_ratio": streaming_ratio,
         "fullbuffer_ratio": fullbuffer_ratio,
@@ -960,7 +1052,13 @@ TIMESTAMP="$(python3 -c 'import datetime; print(datetime.datetime.utcnow().strft
 GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
 PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
 
-REPORT_JSON="$(python3 - "$TIMESTAMP" "$GIT_COMMIT" "$PLATFORM" "$LOAD_GEN" "$RESULTS_FILE" <<'PYEOF'
+# Capture the NGINX version for the benchmark environment identity
+NGINX_VERSION_INFO="unknown"
+if [[ -x "$NGINX_BIN" ]]; then
+  NGINX_VERSION_INFO="$("$NGINX_BIN" -v 2>&1 | head -1 || echo "unknown")"
+fi
+
+REPORT_JSON="$(python3 - "$TIMESTAMP" "$GIT_COMMIT" "$PLATFORM" "$LOAD_GEN" "$RESULTS_FILE" "$NGINX_VERSION_INFO" <<'PYEOF'
 import json
 import sys
 
@@ -969,6 +1067,7 @@ git_commit = sys.argv[2]
 platform = sys.argv[3]
 load_gen = sys.argv[4]
 results_file = sys.argv[5]
+nginx_version = sys.argv[6] if len(sys.argv) > 6 else "unknown"
 
 scenarios = []
 with open(results_file, encoding="utf-8") as handle:
@@ -987,6 +1086,7 @@ report = {
         "git_commit": git_commit,
         "platform": platform,
         "load_generator": load_gen,
+        "nginx_version": nginx_version,
         "scenarios": scenarios,
         "memory_slope": {
             "rss_per_input_mb": 0.0,
