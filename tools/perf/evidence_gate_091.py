@@ -436,7 +436,15 @@ def _print_evidence_summary(evidence_pack: dict) -> None:
         _stderr("")
         _stderr(f"  Threshold breaches: {len(breaches)}")
         for b in breaches:
-            _stderr(f"    - {b.get('metric')}: {b.get('actual')} > {b.get('threshold')}")
+            actual = b.get("actual")
+            threshold = b.get("threshold")
+            reason = b.get("reason")
+            if actual is not None and threshold is not None:
+                _stderr(f"    - {b.get('metric')}: actual={actual}, threshold={threshold}")
+            elif reason is not None:
+                _stderr(f"    - {b.get('metric')}: {reason}")
+            else:
+                _stderr(f"    - {b.get('metric')}")
 
     _stderr("")
 
@@ -822,14 +830,18 @@ def _validate_benchmark_evidence(
             (f"{role}.path_coverage", f"{name}: {label} (metric={metric})")
         )
 
-    # 5. nginx_version must be present and not "unknown"
-    nginx_version = (
-        report.get("module_benchmark", {}).get("nginx_version", "")
-    )
-    if not nginx_version or nginx_version.startswith("unknown"):
-        violations.append(
-            (f"{role}.nginx_version", "missing or 'unknown' nginx_version")
-        )
+    # 5. Environment identity fields must be present and non-empty
+    mb = report.get("module_benchmark", {})
+    for field in ("platform", "load_generator", "nginx_version"):
+        val = mb.get(field, "")
+        if not val:
+            violations.append(
+                (f"{role}.{field}", f"missing or empty {field}")
+            )
+        elif field == "nginx_version" and val.startswith("unknown"):
+            violations.append(
+                (f"{role}.nginx_version", "missing or 'unknown' nginx_version")
+            )
 
     # 6. Memory evidence completeness: at least 2 valid memory points
     scenarios = report.get("module_benchmark", {}).get("scenarios", [])
@@ -932,9 +944,13 @@ def _check_environment_compatibility(
       - load_generator
       - nginx_version
 
+    All three fields must be present and non-empty on both sides.
     Comparing metrics across different environments produces
     meaningless regression percentages and must be rejected as
-    MISSING_EVIDENCE in blocking mode.
+    MISSING_EVIDENCE in blocking mode.  Missing fields on both sides
+    (e.g. both empty) are also violations — the validator's per-report
+    check should have caught them already, but the compatibility check
+    must be defensive.
     """
     violations: list[tuple[str, str]] = []
 
@@ -944,9 +960,14 @@ def _check_environment_compatibility(
     for field in ("platform", "load_generator", "nginx_version"):
         cur_val = cur_mb.get(field, "")
         base_val = base_mb.get(field, "")
-        if cur_val != base_val:
+        if not cur_val or not base_val:
             violations.append(
-                (f"env.{field}",
+                (field,
+                 f"current={cur_val!r} baseline={base_val!r} (both must be non-empty)")
+            )
+        elif cur_val != base_val:
+            violations.append(
+                (field,
                  f"current={cur_val!r} vs baseline={base_val!r}")
             )
 

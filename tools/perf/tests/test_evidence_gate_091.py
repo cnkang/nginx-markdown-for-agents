@@ -1017,6 +1017,8 @@ class TestBaselineEvidenceIntegrity:
         report = {
             "module_benchmark": {
                 "nginx_version": "nginx/1.28.2",
+                "platform": "linux-x86_64",
+                "load_generator": "ab",
                 "scenarios": [
                     {
                         "name": "plain-small",
@@ -1350,3 +1352,133 @@ class TestEnvironmentCompatibility:
         }}
         violations = _check_environment_compatibility(current, baseline)
         assert any("nginx_version" in v[0] for v in violations)
+
+    def test_both_missing_platform_detected(self):
+        """Both sides missing platform → violation (not silently passing)."""
+        current = {"module_benchmark": {
+            "platform": "",
+            "load_generator": "ab",
+            "nginx_version": "nginx/1.28.2",
+        }}
+        baseline = {"module_benchmark": {
+            "platform": "",
+            "load_generator": "ab",
+            "nginx_version": "nginx/1.28.2",
+        }}
+        violations = _check_environment_compatibility(current, baseline)
+        assert any("platform" in v[0] for v in violations)
+
+    def test_both_missing_load_generator_detected(self):
+        """Both sides missing load_generator → violation."""
+        current = {"module_benchmark": {
+            "platform": "linux-x86_64",
+            "load_generator": "",
+            "nginx_version": "nginx/1.28.2",
+        }}
+        baseline = {"module_benchmark": {
+            "platform": "linux-x86_64",
+            "load_generator": "",
+            "nginx_version": "nginx/1.28.2",
+        }}
+        violations = _check_environment_compatibility(current, baseline)
+        assert any("load_generator" in v[0] for v in violations)
+
+    def test_validate_requires_platform_non_empty(self):
+        """_validate_benchmark_evidence flags missing platform."""
+        report = {
+            "module_benchmark": {
+                "nginx_version": "nginx/1.28.2",
+                "platform": "",
+                "load_generator": "ab",
+                "scenarios": [
+                    {
+                        "name": "plain-small",
+                        "status": "completed",
+                        "metrics": {
+                            "input_bytes": 100,
+                            "baseline_rss_bytes": 1000,
+                            "peak_rss_bytes": 1100,
+                            "streaming_ratio": 0.0,
+                            "fullbuffer_ratio": 1.0,
+                        },
+                    },
+                    {
+                        "name": "large-body",
+                        "status": "completed",
+                        "metrics": {
+                            "input_bytes": 200,
+                            "baseline_rss_bytes": 2000,
+                            "peak_rss_bytes": 2200,
+                        },
+                    },
+                    {
+                        "name": "streaming-first",
+                        "status": "completed",
+                        "metrics": {
+                            "streaming_ratio": 0.8,
+                            "fullbuffer_ratio": 0.2,
+                            "streaming_path_hits": 820,
+                            "zero_copy_output_total": 500,
+                            "input_bytes": 300,
+                            "baseline_rss_bytes": 3000,
+                            "peak_rss_bytes": 3300,
+                        },
+                    },
+                ],
+            }
+        }
+        violations = _validate_benchmark_evidence(report, role="current")
+        platform_violations = [
+            v for v in violations if "platform" in v[0]
+        ]
+        assert len(platform_violations) > 0
+
+    def test_validate_requires_load_generator_non_empty(self):
+        """_validate_benchmark_evidence flags missing load_generator."""
+        report = {
+            "module_benchmark": {
+                "nginx_version": "nginx/1.28.2",
+                "platform": "linux-x86_64",
+                "load_generator": "",
+                "scenarios": [
+                    {
+                        "name": "plain-small",
+                        "status": "completed",
+                        "metrics": {
+                            "input_bytes": 100,
+                            "baseline_rss_bytes": 1000,
+                            "peak_rss_bytes": 1100,
+                            "streaming_ratio": 0.0,
+                            "fullbuffer_ratio": 1.0,
+                        },
+                    },
+                    {
+                        "name": "large-body",
+                        "status": "completed",
+                        "metrics": {
+                            "input_bytes": 200,
+                            "baseline_rss_bytes": 2000,
+                            "peak_rss_bytes": 2200,
+                        },
+                    },
+                    {
+                        "name": "streaming-first",
+                        "status": "completed",
+                        "metrics": {
+                            "streaming_ratio": 0.8,
+                            "fullbuffer_ratio": 0.2,
+                            "streaming_path_hits": 820,
+                            "zero_copy_output_total": 500,
+                            "input_bytes": 300,
+                            "baseline_rss_bytes": 3000,
+                            "peak_rss_bytes": 3300,
+                        },
+                    },
+                ],
+            }
+        }
+        violations = _validate_benchmark_evidence(report, role="current")
+        load_generator_violations = [
+            v for v in violations if "load_generator" in v[0]
+        ]
+        assert len(load_generator_violations) > 0
