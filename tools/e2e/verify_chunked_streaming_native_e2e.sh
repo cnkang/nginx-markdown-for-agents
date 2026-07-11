@@ -763,6 +763,65 @@ if [[ "${zc_output_total}" -le 0 ]]; then
 fi
 echo "  zero_copy_output_total=${zc_output_total} (verified > 0)"
 
+echo "==> Case 4d: zero-copy with slow upstream (backpressure/NGX_AGAIN resume)"
+# The upstream /delayed-oversize endpoint sends chunks with 0.2s delays
+# between them, forcing the module to suspend (NGX_AGAIN) and resume.
+# The zero-copy path must handle this without corruption or loss.
+zc_slow_line="$(curl -sS -D "${RAW_DIR}/zc_slow.hdr" -o "${RAW_DIR}/zc_slow.body" \
+  -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 240 \
+  "http://127.0.0.1:${PORT}/streaming-zero-copy/delayed-oversize" \
+  -w "${CURL_METRICS_FMT}" || true)"
+# || true: the delayed-oversize response exceeds markdown_limits memory,
+# so the module fails open (pass-through HTML).  The key assertion is
+# that the response completed without a crash or hang.
+echo "${zc_slow_line}" | tee "${RAW_DIR}/zc_slow.metrics" >/dev/null
+echo "${zc_slow_line}" | grep -q "${PATTERN_HTTP_200}" || {
+  echo "zero-copy slow upstream failed: ${zc_slow_line}" >&2
+  exit 1
+}
+# The delayed-oversize payload exceeds the default 10m markdown_limits
+# memory, so the module must fail open to pass-through HTML.
+grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/zc_slow.hdr" || {
+  echo "zero-copy slow upstream expected fail-open HTML Content-Type" >&2
+  exit 1
+}
+actual_zc_slow_bytes="$(wc -c < "${RAW_DIR}/zc_slow.body" | tr -d '[:space:]')"
+[[ "${actual_zc_slow_bytes}" == "${DELAYED_LEN}" ]] || {
+  echo "zero-copy slow upstream body length mismatch: expected ${DELAYED_LEN}, got ${actual_zc_slow_bytes}" >&2
+  exit 1
+}
+echo "  zero-copy slow upstream: ${actual_zc_slow_bytes} bytes (fail-open, no crash)"
+
+echo "==> Case 4e: zero-copy client abort during streaming (pool cleanup)"
+# Start a curl request to the zero-copy path with a very short timeout
+# so the client disconnects mid-stream.  The module must clean up the
+# zero-copy output buffers via pool cleanup without leaking or crashing.
+# We use /small-valid which is 2MB and should take >0.1s to transfer.
+zc_abort_pid=""
+( curl -sS -o /dev/null \
+    -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 0.1 \
+    "http://127.0.0.1:${PORT}/streaming-zero-copy/small-valid" \
+    2>/dev/null || true ) &
+zc_abort_pid=$!
+wait "${zc_abort_pid}" 2>/dev/null || true
+# The abort itself is expected to produce a curl error (exit 28).
+# The key is that NGINX does not crash — verify by making a subsequent
+# successful request to the same location.
+zc_post_abort_line="$(curl -sS -D "${RAW_DIR}/zc_post_abort.hdr" \
+  -o "${RAW_DIR}/zc_post_abort.body" \
+  -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
+  "http://127.0.0.1:${PORT}/streaming-zero-copy/small-valid" \
+  -w "${CURL_METRICS_FMT}")"
+echo "${zc_post_abort_line}" | grep -q "${PATTERN_HTTP_200}" || {
+  echo "zero-copy post-abort request failed: ${zc_post_abort_line}" >&2
+  echo "  NGINX may have crashed after client abort on zero-copy path" >&2
+  exit 1
+}
+assert_streaming_markdown_response \
+  "zero-copy-post-abort" "${RAW_DIR}/zc_post_abort.hdr" "${RAW_DIR}/zc_post_abort.body" \
+  "# Chunked Small" "${SMALL_END_TOKEN}" 1
+echo "  zero-copy post-abort: NGINX survived client abort, subsequent request OK"
+
 echo "==> Case 5: truncated gzip full-buffer path should fail open"
 # The upstream sends a gzip stream with the final 8 bytes removed, so
 # decompression fails before the compressed full-body path can commit
@@ -913,6 +972,8 @@ echo "  truncated_deflate_zlib_compressed_bytes=${TRUNCATED_DEFLATE_ZLIB_COMPRES
 echo "  truncated_deflate_zlib_result=$(cat "${RAW_DIR}/trunc_deflate_zlib.metrics")"
 echo "  zero_copy_result=$(cat "${RAW_DIR}/zc.metrics")"
 echo "  zero_copy_output_total=${zc_output_total}"
+echo "  zero_copy_slow_result=$(cat "${RAW_DIR}/zc_slow.metrics")"
+echo "  zero_copy_post_abort_result=$(cat "${RAW_DIR}/zc_post_abort.metrics")"
 if [[ "${PROFILE}" == "stress" ]]; then
   echo "  stress_small_ab_rps=${small_rps:-unknown}"
   echo "  stress_oversize_ab_rps=${oversize_rps:-unknown}"
