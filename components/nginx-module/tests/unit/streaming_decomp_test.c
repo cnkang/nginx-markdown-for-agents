@@ -1025,7 +1025,7 @@ test_create_and_cleanup(void)
  * Branches covered:
  *   - ngx_pcalloc failure returns NULL
  *   - inflateInit2 failure for gzip returns NULL
- *   - inflateInit2 failure for deflate returns NULL
+ *   - deferred inflateInit2 failure for deflate makes feed return NGX_ERROR
  *   - cleanup with NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN type clears
  *     initialized (default switch arm)
  */
@@ -1035,6 +1035,9 @@ test_create_failure_paths_and_cleanup_default(void)
     test_pool_t                           tp;
     ngx_http_markdown_streaming_decomp_t *decomp;
     ngx_http_markdown_streaming_decomp_t  local;
+    u_char                               *out;
+    size_t                                out_len;
+    ngx_int_t                             rc;
 
     TEST_SUBSECTION("create failure paths and cleanup default switch arm");
 
@@ -1055,8 +1058,23 @@ test_create_failure_paths_and_cleanup_default(void)
     g_inflate_init_fail_once = 1;
     decomp = ngx_http_markdown_streaming_decomp_create(
         &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE, 1024);
-    TEST_ASSERT(decomp == NULL,
-        "deflate create should fail when inflateInit2 errors");
+    TEST_ASSERT(decomp != NULL,
+        "deflate create should defer inflateInit2 until feed");
+    TEST_ASSERT(decomp->zlib_header_pending == 1,
+        "deflate create should wait for header bytes");
+
+    out = (u_char *) 0x1;
+    out_len = 1;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, (const u_char *) "xx", 2, &out, &out_len,
+        &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "deflate feed should fail when deferred inflateInit2 errors");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "failed deferred initialization should not emit output");
+    TEST_ASSERT(decomp->initialized == 0,
+        "failed deferred initialization should remain uninitialized");
+    free(decomp);
 
     memset(&local, 0, sizeof(local));
     local.initialized = 1;
