@@ -71,11 +71,19 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
     def _apply_compression(
         self, body: bytes, is_gzip: bool, is_deflate: bool
     ) -> tuple[bytes, str | None]:
-        """Apply requested compression codec to response body."""
+        """Apply requested compression codec to response body.
+
+        For Content-Encoding: deflate, RFC 9110 defines the format as
+        zlib-wrapped deflate (RFC 1950).  The streaming decompressor
+        sniffs the first 2 bytes to distinguish zlib-wrapped from raw
+        deflate, so we send the standard-compliant zlib-wrapped form
+        here.
+        """
         if is_gzip:
             return gzip.compress(body), "gzip"
         if is_deflate:
-            compressor = zlib.compressobj(wbits=-15)
+            # zlib-wrapped deflate (RFC 1950, RFC 9110-compliant)
+            compressor = zlib.compressobj(wbits=zlib.MAX_WBITS)
             compressed = compressor.compress(body) + compressor.flush()
             return compressed, "deflate"
         return body, None

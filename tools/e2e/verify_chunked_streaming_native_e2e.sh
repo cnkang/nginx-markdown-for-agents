@@ -239,6 +239,7 @@ OVERSIZE_END_TOKEN = "OVERSIZE_STREAM_END_TOKEN"
 DELAYED_END_TOKEN = "DELAYED_OVERSIZE_STREAM_END_TOKEN"
 GZIP_END_TOKEN = "GZIP_STREAM_END_TOKEN"
 DEFLATE_END_TOKEN = "DEFLATE_STREAM_END_TOKEN"
+DEFLATE_ZLIB_END_TOKEN = "DEFLATE_ZLIB_STREAM_END_TOKEN"
 SMALL_TARGET = 2 * 1024 * 1024
 COMPRESSED_TARGET = 64 * 1024
 OVERSIZE_TARGET = 12 * 1024 * 1024
@@ -265,7 +266,11 @@ def compress_payload(body: bytes, mode: str) -> bytes:
     if mode == "gzip":
         wbits = zlib.MAX_WBITS | 16
     elif mode == "deflate":
+        # raw deflate (RFC 1951, no zlib wrapper)
         wbits = -zlib.MAX_WBITS
+    elif mode == "deflate-zlib":
+        # zlib-wrapped deflate (RFC 1950, RFC 9110-compliant)
+        wbits = zlib.MAX_WBITS
     else:
         raise ValueError(f"unsupported mode: {mode}")
 
@@ -283,10 +288,15 @@ GZIP_SOURCE_BODY = build_payload(
 DEFLATE_SOURCE_BODY = build_payload(
     "Chunked Deflate", COMPRESSED_TARGET, DEFLATE_END_TOKEN
 )
+DEFLATE_ZLIB_SOURCE_BODY = build_payload(
+    "Chunked Zlib Deflate", COMPRESSED_TARGET, DEFLATE_ZLIB_END_TOKEN
+)
 GZIP_BODY = compress_payload(GZIP_SOURCE_BODY, "gzip")
 DEFLATE_BODY = compress_payload(DEFLATE_SOURCE_BODY, "deflate")
+DEFLATE_ZLIB_BODY = compress_payload(DEFLATE_ZLIB_SOURCE_BODY, "deflate-zlib")
 TRUNCATED_GZIP_BODY = GZIP_BODY[:-8] if len(GZIP_BODY) > 8 else GZIP_BODY
 TRUNCATED_DEFLATE_BODY = DEFLATE_BODY[: max(1, len(DEFLATE_BODY) // 2)]
+TRUNCATED_DEFLATE_ZLIB_BODY = DEFLATE_ZLIB_BODY[: max(1, len(DEFLATE_ZLIB_BODY) // 2)]
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -353,12 +363,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/small-deflate":
             self._write_chunked(DEFLATE_BODY, content_encoding="deflate")
             return
+        if path == "/small-deflate-zlib":
+            self._write_chunked(DEFLATE_ZLIB_BODY, content_encoding="deflate")
+            return
         if path == "/truncated-gzip":
             self._write_chunked(TRUNCATED_GZIP_BODY, content_encoding="gzip")
             return
         if path == "/truncated-deflate":
             self._write_chunked(
                 TRUNCATED_DEFLATE_BODY, content_encoding="deflate"
+            )
+            return
+        if path == "/truncated-deflate-zlib":
+            self._write_chunked(
+                TRUNCATED_DEFLATE_ZLIB_BODY, content_encoding="deflate"
             )
             return
         self.send_response(404)
@@ -392,6 +410,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Encoding", "deflate")
             self.end_headers()
             return
+        if path == "/small-deflate-zlib":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=UTF-8")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Content-Encoding", "deflate")
+            self.end_headers()
+            return
         if path == "/truncated-gzip":
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=UTF-8")
@@ -400,6 +425,13 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if path == "/truncated-deflate":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=UTF-8")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Content-Encoding", "deflate")
+            self.end_headers()
+            return
+        if path == "/truncated-deflate-zlib":
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=UTF-8")
             self.send_header("Transfer-Encoding", "chunked")
@@ -426,16 +458,23 @@ def main():
         print(f"GZIP_COMPRESSED_LEN={len(GZIP_BODY)}")
         print(f"DEFLATE_SOURCE_LEN={len(DEFLATE_SOURCE_BODY)}")
         print(f"DEFLATE_COMPRESSED_LEN={len(DEFLATE_BODY)}")
+        print(f"DEFLATE_ZLIB_SOURCE_LEN={len(DEFLATE_ZLIB_SOURCE_BODY)}")
+        print(f"DEFLATE_ZLIB_COMPRESSED_LEN={len(DEFLATE_ZLIB_BODY)}")
         print(f"TRUNCATED_GZIP_COMPRESSED_LEN={len(TRUNCATED_GZIP_BODY)}")
         print(
             f"TRUNCATED_DEFLATE_COMPRESSED_LEN="
             f"{len(TRUNCATED_DEFLATE_BODY)}"
+        )
+        print(
+            f"TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN="
+            f"{len(TRUNCATED_DEFLATE_ZLIB_BODY)}"
         )
         print(f"SMALL_END_TOKEN={SMALL_END_TOKEN}")
         print(f"OVERSIZE_END_TOKEN={OVERSIZE_END_TOKEN}")
         print(f"DELAYED_END_TOKEN={DELAYED_END_TOKEN}")
         print(f"GZIP_END_TOKEN={GZIP_END_TOKEN}")
         print(f"DEFLATE_END_TOKEN={DEFLATE_END_TOKEN}")
+        print(f"DEFLATE_ZLIB_END_TOKEN={DEFLATE_ZLIB_END_TOKEN}")
         return
 
     if args.serve:
@@ -454,13 +493,13 @@ load_upstream_metrics() {
 
   while IFS='=' read -r key value; do
     case "${key}" in
-      SMALL_LEN|OVERSIZE_LEN|DELAYED_LEN|GZIP_SOURCE_LEN|GZIP_COMPRESSED_LEN|DEFLATE_SOURCE_LEN|DEFLATE_COMPRESSED_LEN|TRUNCATED_GZIP_COMPRESSED_LEN|TRUNCATED_DEFLATE_COMPRESSED_LEN)
+      SMALL_LEN|OVERSIZE_LEN|DELAYED_LEN|GZIP_SOURCE_LEN|GZIP_COMPRESSED_LEN|DEFLATE_SOURCE_LEN|DEFLATE_COMPRESSED_LEN|DEFLATE_ZLIB_SOURCE_LEN|DEFLATE_ZLIB_COMPRESSED_LEN|TRUNCATED_GZIP_COMPRESSED_LEN|TRUNCATED_DEFLATE_COMPRESSED_LEN|TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN)
         [[ "${value}" =~ ^[0-9]+$ ]] || {
           echo "invalid numeric upstream metric: ${key}=${value}" >&2
           return 1
         }
         ;;
-      SMALL_END_TOKEN|OVERSIZE_END_TOKEN|DELAYED_END_TOKEN|GZIP_END_TOKEN|DEFLATE_END_TOKEN)
+      SMALL_END_TOKEN|OVERSIZE_END_TOKEN|DELAYED_END_TOKEN|GZIP_END_TOKEN|DEFLATE_END_TOKEN|DEFLATE_ZLIB_END_TOKEN)
         [[ "${value}" =~ ^[A-Z0-9_]+$ ]] || {
           echo "invalid upstream token metric: ${key}=${value}" >&2
           return 1
@@ -578,6 +617,27 @@ http {
             proxy_set_header Connection "";
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
+
+        location /streaming-zero-copy/ {
+            markdown_filter on;
+            markdown_accept wildcard;
+            markdown_streaming force;
+            markdown_streaming_engine on;
+            markdown_streaming_zero_copy on;
+            markdown_cache_validation ims_only;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64m timeout=120s;
+            markdown_error_policy pass;
+            markdown_log_verbosity info;
+
+            proxy_http_version 1.1;
+            proxy_buffering off;
+            proxy_set_header Connection "";
+            proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
+        }
+
+        location /markdown-metrics {
+            markdown_metrics;
+        }
     }
 }
 EOF
@@ -669,6 +729,40 @@ assert_streaming_markdown_response \
   "small-deflate" "${RAW_DIR}/deflate.hdr" "${RAW_DIR}/deflate.body" \
   "# Chunked Deflate" "${DEFLATE_END_TOKEN}" 0
 
+echo "==> Case 4b: zlib-wrapped deflate (RFC 9110) streaming should convert to Markdown"
+deflate_zlib_line="$(curl -sS -D "${RAW_DIR}/deflate_zlib.hdr" -o "${RAW_DIR}/deflate_zlib.body" \
+  -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
+  "http://127.0.0.1:${PORT}/streaming/small-deflate-zlib" \
+  -w "${CURL_METRICS_FMT}")"
+echo "${deflate_zlib_line}" | tee "${RAW_DIR}/deflate_zlib.metrics" >/dev/null
+echo "${deflate_zlib_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "small-deflate-zlib failed: ${deflate_zlib_line}" >&2; exit 1; }
+assert_streaming_markdown_response \
+  "small-deflate-zlib" "${RAW_DIR}/deflate_zlib.hdr" "${RAW_DIR}/deflate_zlib.body" \
+  "# Chunked Zlib Deflate" "${DEFLATE_ZLIB_END_TOKEN}" 0
+
+echo "==> Case 4c: zero-copy streaming should convert to Markdown with zero_copy_output_total > 0"
+zc_line="$(curl -sS -D "${RAW_DIR}/zc.hdr" -o "${RAW_DIR}/zc.body" \
+  -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
+  "http://127.0.0.1:${PORT}/streaming-zero-copy/small-valid" \
+  -w "${CURL_METRICS_FMT}")"
+echo "${zc_line}" | tee "${RAW_DIR}/zc.metrics" >/dev/null
+echo "${zc_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "zero-copy small-valid failed: ${zc_line}" >&2; exit 1; }
+assert_streaming_markdown_response \
+  "zero-copy-small" "${RAW_DIR}/zc.hdr" "${RAW_DIR}/zc.body" \
+  "# Chunked Small" "${SMALL_END_TOKEN}" 1
+
+# Verify that zero_copy_output_total > 0 in the metrics endpoint
+# after the zero-copy path was exercised.
+zc_metrics="$(curl -s -H 'Accept: application/json' \
+  "http://127.0.0.1:${PORT}/markdown-metrics" || echo '{}')"
+zc_output_total="$(echo "${zc_metrics}" | python3 -c \
+  "import sys, json; print(json.load(sys.stdin).get('perf', {}).get('zero_copy_output_total', 0))" 2>/dev/null || echo 0)"
+if [[ "${zc_output_total}" -le 0 ]]; then
+  echo "zero-copy path did not produce zero-copy output (zero_copy_output_total=${zc_output_total})" >&2
+  exit 1
+fi
+echo "  zero_copy_output_total=${zc_output_total} (verified > 0)"
+
 echo "==> Case 5: truncated gzip full-buffer path should fail open"
 # The upstream sends a gzip stream with the final 8 bytes removed, so
 # decompression fails before the compressed full-body path can commit
@@ -720,6 +814,27 @@ if [[ "${actual_trunc_deflate_bytes}" != "${TRUNCATED_DEFLATE_COMPRESSED_LEN}" ]
   exit 1
 fi
 
+echo "==> Case 6b: truncated zlib-wrapped deflate streaming path should fail open"
+trunc_deflate_zlib_line="$(curl -sS -D "${RAW_DIR}/trunc_deflate_zlib.hdr" -o "${RAW_DIR}/trunc_deflate_zlib.body" \
+  -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
+  "http://127.0.0.1:${PORT}/streaming/truncated-deflate-zlib" \
+  -w "${CURL_METRICS_FMT}" || true)"
+echo "${trunc_deflate_zlib_line}" | tee "${RAW_DIR}/trunc_deflate_zlib.metrics" >/dev/null
+echo "${trunc_deflate_zlib_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "truncated-deflate-zlib failed: ${trunc_deflate_zlib_line}" >&2; exit 1; }
+grep -qi "${PATTERN_CT_HTML}" "${RAW_DIR}/trunc_deflate_zlib.hdr" || {
+  echo "truncated-deflate-zlib expected HTML Content-Type after fail-open" >&2
+  exit 1
+}
+grep -qi '^Content-Encoding: deflate' "${RAW_DIR}/trunc_deflate_zlib.hdr" || {
+  echo "truncated-deflate-zlib expected preserved deflate Content-Encoding" >&2
+  exit 1
+}
+actual_trunc_deflate_zlib_bytes="$(wc -c < "${RAW_DIR}/trunc_deflate_zlib.body" | tr -d '[:space:]')"
+if [[ "${actual_trunc_deflate_zlib_bytes}" != "${TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN}" ]]; then
+  echo "truncated-deflate-zlib compressed length mismatch: expected ${TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN}, got ${actual_trunc_deflate_zlib_bytes}" >&2
+  exit 1
+fi
+
 echo "==> Log sanity checks"
 grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log" || {
   echo "missing size-limit log for chunked oversize case" >&2
@@ -736,12 +851,12 @@ decompress_failed_count="$(grep -E -c 'markdown: (rust decompress failed|decompr
 # Full-buffer decision uses "reason=failed_open category=conversion_error";
 # streaming precommit uses "reason=STREAMING_PRECOMMIT_FAILOPEN" (no category).
 conversion_failopen_count="$(grep -E -c '(reason=failed_open category=conversion_error|reason=STREAMING_PRECOMMIT_FAILOPEN)' "${RUNTIME}/logs/error.log" || true)"
-if [[ "${decompress_failed_count}" -lt 2 ]]; then
-  echo "missing decompression failure logs for truncated gzip/deflate cases: ${decompress_failed_count}" >&2
+if [[ "${decompress_failed_count}" -lt 3 ]]; then
+  echo "missing decompression failure logs for truncated gzip/deflate/zlib-deflate cases: ${decompress_failed_count}" >&2
   exit 1
 fi
-if [[ "${conversion_failopen_count}" -lt 2 ]]; then
-  echo "missing conversion fail-open logs for truncated gzip/deflate cases: ${conversion_failopen_count}" >&2
+if [[ "${conversion_failopen_count}" -lt 3 ]]; then
+  echo "missing conversion fail-open logs for truncated gzip/deflate/zlib-deflate cases: ${conversion_failopen_count}" >&2
   exit 1
 fi
 
@@ -787,10 +902,17 @@ echo "  gzip_result=$(cat "${RAW_DIR}/gzip.metrics")"
 echo "  deflate_source_html_bytes=${DEFLATE_SOURCE_LEN}"
 echo "  deflate_compressed_bytes=${DEFLATE_COMPRESSED_LEN}"
 echo "  deflate_result=$(cat "${RAW_DIR}/deflate.metrics")"
+echo "  deflate_zlib_source_html_bytes=${DEFLATE_ZLIB_SOURCE_LEN}"
+echo "  deflate_zlib_compressed_bytes=${DEFLATE_ZLIB_COMPRESSED_LEN}"
+echo "  deflate_zlib_result=$(cat "${RAW_DIR}/deflate_zlib.metrics")"
 echo "  truncated_gzip_compressed_bytes=${TRUNCATED_GZIP_COMPRESSED_LEN}"
 echo "  truncated_gzip_result=$(cat "${RAW_DIR}/trunc_gzip.metrics")"
 echo "  truncated_deflate_compressed_bytes=${TRUNCATED_DEFLATE_COMPRESSED_LEN}"
 echo "  truncated_deflate_result=$(cat "${RAW_DIR}/trunc_deflate.metrics")"
+echo "  truncated_deflate_zlib_compressed_bytes=${TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN}"
+echo "  truncated_deflate_zlib_result=$(cat "${RAW_DIR}/trunc_deflate_zlib.metrics")"
+echo "  zero_copy_result=$(cat "${RAW_DIR}/zc.metrics")"
+echo "  zero_copy_output_total=${zc_output_total}"
 if [[ "${PROFILE}" == "stress" ]]; then
   echo "  stress_small_ab_rps=${small_rps:-unknown}"
   echo "  stress_oversize_ab_rps=${oversize_rps:-unknown}"
