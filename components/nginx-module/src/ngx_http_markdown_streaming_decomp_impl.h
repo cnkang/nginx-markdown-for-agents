@@ -242,7 +242,7 @@ ngx_http_markdown_streaming_decomp_is_zlib_header(u_char cmf, u_char flg)
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_resolve_deflate_header(
     ngx_http_markdown_streaming_decomp_t *decomp,
-    ngx_log_t *log)
+    const ngx_log_t *log)
 {
     int  window_bits;
 
@@ -254,7 +254,7 @@ ngx_http_markdown_streaming_decomp_resolve_deflate_header(
         window_bits = MAX_WBITS;
         if (log != NULL) {
 #ifdef NGX_LOG_DEBUG_HTTP
-            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, log, 0,
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, (ngx_log_t *) log, 0,
                 "markdown: streaming deflate: zlib-wrapped header detected");
 #endif
         }
@@ -263,7 +263,7 @@ ngx_http_markdown_streaming_decomp_resolve_deflate_header(
         window_bits = -MAX_WBITS;
         if (log != NULL) {
 #ifdef NGX_LOG_DEBUG_HTTP
-            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, log, 0,
+            ngx_log_debug0(NGX_LOG_DEBUG_HTTP, (ngx_log_t *) log, 0,
                 "markdown: streaming deflate: raw deflate header detected");
 #endif
         }
@@ -301,7 +301,7 @@ ngx_http_markdown_streaming_decomp_feed_header(
     const u_char *in_data,
     size_t in_len,
     size_t *consumed,
-    ngx_log_t *log)
+    const ngx_log_t *log)
 {
     size_t  needed;
     size_t  to_copy;
