@@ -27,6 +27,8 @@ from evidence_gate_091 import (
     _RC_RE,
     _RELEASE_TAG_RE,
     _check_skipped_scenarios,
+    _check_path_coverage,
+    _compute_memory_slope,
     _extract_evidence_metrics,
     _extract_memory_points,
     _nginx_bin_available,
@@ -51,6 +53,71 @@ def test_memory_points_require_measured_input_bytes():
     ]
 
 
+def test_memory_points_prefer_peak_rss_delta():
+    """Peak RSS delta is preferred over post-run RSS.
+
+    The point should be (input_bytes, peak - baseline), not
+    (input_bytes, worker_rss_mb * 1024 * 1024).
+    """
+    scenarios = [
+        {
+            "name": "large-body",
+            "metrics": {
+                "input_bytes": 1_048_516,
+                "baseline_rss_bytes": 10 * 1024 * 1024,
+                "peak_rss_bytes": 15 * 1024 * 1024,
+                "worker_rss_mb": 24.0,
+            },
+        },
+    ]
+
+    points = _extract_memory_points(scenarios)
+    assert len(points) == 1
+    assert points[0] == (1_048_516.0, 5 * 1024 * 1024)
+
+
+def test_memory_points_skip_zero_peak_delta():
+    """When peak == baseline (no growth), the point is excluded."""
+    scenarios = [
+        {
+            "name": "large-body",
+            "metrics": {
+                "input_bytes": 1_048_516,
+                "baseline_rss_bytes": 10 * 1024 * 1024,
+                "peak_rss_bytes": 10 * 1024 * 1024,
+                "worker_rss_mb": 10.0,
+            },
+        },
+    ]
+
+    # Falls back to worker_rss_mb since delta is 0
+    points = _extract_memory_points(scenarios)
+    assert len(points) == 1
+    assert points[0] == (1_048_516.0, 10.0 * 1024 * 1024)
+
+
+def test_memory_slope_is_rss_per_input_byte():
+    """Slope is ΔRSS_bytes / Δinput_bytes, not a dimensionless percentage.
+
+    For two points:
+      (1 MB input, 1 MB RSS) and (2 MB input, 1.5 MB RSS)
+    slope = (1.5 - 1.0) / (2.0 - 1.0) = 0.5 bytes RSS per byte input
+    """
+    points = [
+        (1_048_576.0, 1_048_576.0),
+        (2_097_152.0, 1_572_864.0),
+    ]
+    slope = _compute_memory_slope(points)
+    # 0.5 bytes RSS per input byte
+    assert abs(slope - 0.5) < 0.001
+
+
+def test_memory_slope_single_point_returns_zero():
+    """With fewer than 2 points, slope is 0.0 (insufficient data)."""
+    assert _compute_memory_slope([(1.0, 1.0)]) == 0.0
+    assert _compute_memory_slope([]) == 0.0
+
+
 def test_tag_release_job_supplies_module_enabled_nginx():
     workflow = (
         Path(__file__).resolve().parents[3]
@@ -59,12 +126,41 @@ def test_tag_release_job_supplies_module_enabled_nginx():
         / "release-packages.yml"
     ).read_text(encoding="utf-8")
 
+    # The build step must produce BOTH the nginx binary and the module .so.
+    # `make modules` alone does not produce objs/nginx; the workflow must
+    # invoke `make binary modules` (or equivalent) and verify both artifacts.
+    assert "make -j\"$(nproc)\" binary modules" in workflow, (
+        "Build step must run `make binary modules` to produce both "
+        "objs/nginx and objs/ngx_http_markdown_filter_module.so"
+    )
+    # Must verify artifacts exist before copying (prevents silent failures
+    # when only one target is built).
+    assert "Verify build artifacts exist" in workflow, (
+        "Build job must verify both nginx binary and module .so exist "
+        "before copying"
+    )
+    assert "test -x \"${NGINX_SRC}/objs/nginx\"" in workflow, (
+        "Build job must verify objs/nginx is executable"
+    )
     assert 'cp "${NGINX_SRC}/objs/nginx" build/nginx' in workflow
     assert "apache2-utils" in workflow
-    assert "pattern: module-so-*-x86_64" in workflow
-    assert "merge-multiple: true" in workflow
+    # The release gate must download a single canonical NGINX version's
+    # artifact by exact name, NOT use a wildcard pattern with merge-multiple
+    # (which causes filename collisions when multiple NGINX versions produce
+    # the same build/nginx and build/ngx_http_markdown_filter_module.so names).
+    assert "Determine canonical benchmark NGINX version" in workflow, (
+        "Release gate must explicitly select a canonical benchmark NGINX "
+        "version to avoid artifact filename collisions"
+    )
+    assert "module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-x86_64" in workflow, (
+        "Release gate must download the canonical benchmark NGINX artifact "
+        "by exact name, not a wildcard pattern with merge-multiple"
+    )
     assert "NGINX_BIN: ${{ github.workspace }}/module-runtime/nginx" in workflow
     assert "MODULE_SO: ${{ github.workspace }}/module-runtime/ngx_http_markdown_filter_module.so" in workflow
+    assert "BENCHMARK_NGINX_VERSION" in workflow, (
+        "Release gate must record the benchmark NGINX version for evidence"
+    )
     assert "python3 tools/perf/evidence_gate_091.py --mode blocking" in workflow
     assert "evidence_gate_091.py --blocking" not in workflow
 
@@ -82,6 +178,11 @@ def test_module_baseline_contains_measured_critical_scenarios():
     for name in ("plain-small", "large-body", "streaming-first"):
         assert by_name[name]["status"] == "completed"
         assert by_name[name]["metrics"]["input_bytes"] > 0
+    # The baseline must record the NGINX version used for the benchmark
+    # so that evidence comparisons are environment-consistent.
+    assert "nginx_version" in baseline["module_benchmark"], (
+        "Baseline must record nginx_version for environment identity"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -658,3 +759,132 @@ class TestSkippedCriticalScenarios:
     def test_empty_report_no_skipped(self):
         """Empty report has no skipped scenarios."""
         assert _check_skipped_scenarios({}) == []
+
+
+# ---------------------------------------------------------------------------
+# Path-coverage invariants (Requirement: critical scenarios must actually
+# exercise their target production paths, not just report "completed")
+# ---------------------------------------------------------------------------
+
+class TestPathCoverageInvariants:
+    """Blocking mode must reject evidence when target paths were not hit."""
+
+    def test_streaming_first_with_zero_streaming_ratio_is_violation(self):
+        """streaming-first with streaming_ratio=0 and zero_copy=0 is rejected."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [
+                    {
+                        "name": "streaming-first",
+                        "status": "completed",
+                        "metrics": {
+                            "streaming_ratio": 0.0,
+                            "fullbuffer_ratio": 1.0,
+                            "streaming_path_hits": 0,
+                            "zero_copy_output_total": 0,
+                        },
+                    },
+                ]
+            }
+        }
+        violations = _check_path_coverage(report)
+        # streaming_ratio, streaming_path_hits, fullbuffer_ratio, zero_copy
+        assert len(violations) == 4
+        names = {v[0] for v in violations}
+        assert names == {"streaming-first"}
+
+    def test_streaming_first_with_valid_path_is_not_violation(self):
+        """streaming-first with streaming_ratio>0 and zero_copy>0 passes."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [
+                    {
+                        "name": "streaming-first",
+                        "status": "completed",
+                        "metrics": {
+                            "streaming_ratio": 0.8,
+                            "fullbuffer_ratio": 0.2,
+                            "streaming_path_hits": 820,
+                            "zero_copy_output_total": 500,
+                        },
+                    },
+                ]
+            }
+        }
+        assert _check_path_coverage(report) == []
+
+    def test_gzip_large_without_decompression_is_violation(self):
+        """gzip-large must show decompression_fullbuffer_total > 0."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [
+                    {
+                        "name": "gzip-large",
+                        "status": "completed",
+                        "metrics": {
+                            "decompression_fullbuffer_total": 0,
+                        },
+                    },
+                ]
+            }
+        }
+        violations = _check_path_coverage(report)
+        assert len(violations) == 1
+        assert violations[0][0] == "gzip-large"
+
+    def test_gzip_large_with_decompression_is_not_violation(self):
+        """gzip-large with decompression_fullbuffer_total > 0 passes."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [
+                    {
+                        "name": "gzip-large",
+                        "status": "completed",
+                        "metrics": {
+                            "decompression_fullbuffer_total": 1030,
+                        },
+                    },
+                ]
+            }
+        }
+        assert _check_path_coverage(report) == []
+
+    def test_skipped_scenario_not_checked_for_path_coverage(self):
+        """Skipped scenarios are not subject to path-coverage checks."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [
+                    {
+                        "name": "streaming-first",
+                        "status": "skipped",
+                        "metrics": {},
+                    },
+                ]
+            }
+        }
+        assert _check_path_coverage(report) == []
+
+    def test_current_baseline_is_rejected_by_path_coverage(self):
+        """The checked-in baseline has streaming_ratio=0 — must be detected.
+
+        This is a regression guard: if someone regenerates the baseline
+        without fixing the benchmark runtime so streaming is actually
+        exercised, the path-coverage check must catch it.
+        """
+        baseline_path = (
+            Path(__file__).resolve().parents[3]
+            / "perf"
+            / "baselines"
+            / "module-baseline-091.json"
+        )
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+        violations = _check_path_coverage(baseline)
+        # The current baseline has streaming_ratio=0 for streaming-first,
+        # which must be detected as a path-coverage violation.
+        streaming_violations = [
+            v for v in violations if v[0] == "streaming-first"
+        ]
+        assert len(streaming_violations) > 0, (
+            "Checked-in baseline has streaming_ratio=0 for streaming-first; "
+            "path-coverage invariant must detect this as MISSING_EVIDENCE"
+        )

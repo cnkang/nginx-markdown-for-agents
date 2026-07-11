@@ -277,18 +277,37 @@ def _calc_fallback_rate(scenarios: list[dict]) -> float:
 
 
 def _memory_point_for_scenario(scenario: dict) -> tuple[float, float] | None:
-    """Return one measured input/RSS point, or None when evidence is absent."""
-    metrics = scenario.get("metrics") or scenario.get("results") or scenario
-    rss_mb = metrics.get("worker_rss_mb")
-    input_bytes = metrics.get("input_bytes") or metrics.get("html_bytes")
-    if rss_mb is not None and rss_mb > 0:
-        if input_bytes is not None and input_bytes > 0:
-            return float(input_bytes), rss_mb * 1024 * 1024
-        return None
+    """Return one measured input/RSS point, or None when evidence is absent.
 
-    peak_rss = metrics.get("peak_memory_bytes") or metrics.get("worker_rss_bytes")
+    Uses the peak RSS delta (peak_rss_bytes - baseline_rss_bytes) as the
+    dependent variable and input_bytes as the independent variable.
+    This gives a slope with units of (RSS bytes / input bytes), which
+    directly measures per-byte memory cost.
+
+    Falls back to worker_rss_mb (post-run) when peak/baseline are absent,
+    for backward compatibility with older reports.
+    """
+    metrics = scenario.get("metrics") or scenario.get("results") or scenario
+    input_bytes = metrics.get("input_bytes") or metrics.get("html_bytes")
     if input_bytes is None or input_bytes <= 0:
         return None
+
+    # Preferred: peak RSS delta from background sampling
+    peak_rss = metrics.get("peak_rss_bytes")
+    baseline_rss = metrics.get("baseline_rss_bytes")
+    if peak_rss is not None and peak_rss > 0:
+        if baseline_rss is not None and baseline_rss >= 0:
+            delta = peak_rss - baseline_rss
+            if delta > 0:
+                return float(input_bytes), float(delta)
+
+    # Fallback: post-run RSS (legacy reports without peak sampling)
+    rss_mb = metrics.get("worker_rss_mb")
+    if rss_mb is not None and rss_mb > 0:
+        return float(input_bytes), rss_mb * 1024 * 1024
+
+    # Last resort: raw peak_memory_bytes
+    peak_rss = metrics.get("peak_memory_bytes") or metrics.get("worker_rss_bytes")
     if peak_rss is None or peak_rss <= 0:
         return None
     return float(input_bytes), float(peak_rss)
@@ -310,10 +329,20 @@ def _extract_memory_points(scenarios: list[dict]) -> list[tuple[float, float]]:
 
 
 def _compute_memory_slope(data_points: list[tuple[float, float]]) -> float:
-    """Compute memory slope as percentage growth rate.
+    """Compute memory slope as RSS bytes per input byte.
 
-    Uses simple linear regression on (input_bytes, peak_rss) pairs.
-    Returns the slope as a percentage of the mean baseline RSS.
+    Uses simple linear regression on (input_bytes, rss_delta) pairs.
+    Returns the slope (ΔRSS_bytes / Δinput_bytes).  A slope of 0.0
+    means no measurable memory growth per input byte (ideal).
+
+    The slope has a clear physical meaning: how many bytes of RSS the
+    module consumes per byte of input processed.  This is directly
+    comparable across platforms and NGINX versions.
+
+    Previously this divided by mean RSS to produce a dimensionless
+    percentage, which was misleading (the dimension was 1/input_byte,
+    not a percentage growth rate).  The threshold engine compares
+    the slope value directly against the baseline slope.
     """
     n = len(data_points)
     if n < 2:
@@ -328,14 +357,7 @@ def _compute_memory_slope(data_points: list[tuple[float, float]]) -> float:
     if abs(denominator) < 1e-15:
         return 0.0
 
-    slope = (n * sum_xy - sum_x * sum_y) / denominator
-
-    # Express slope as percentage of mean RSS
-    mean_rss = sum_y / n
-    if mean_rss <= 0:
-        return 0.0
-
-    return (slope / mean_rss) * 100.0
+    return (n * sum_xy - sum_x * sum_y) / denominator
 
 
 def _build_evidence_pack(
@@ -588,6 +610,90 @@ _CRITICAL_SCENARIOS = frozenset({
 })
 
 
+# Path-coverage invariants: a "completed" scenario must actually exercise
+# the production path it claims to test.  If a scenario is marked
+# "completed" but its target path was never hit (e.g. streaming-first
+# with streaming_ratio=0), the evidence is not credible and the gate
+# must reject it as MISSING_EVIDENCE.
+#
+# Each entry maps a scenario name to a list of (metric, predicate, label)
+# tuples.  ``predicate`` is a callable taking the metric value and
+# returning True when the path was genuinely exercised.  ``label`` is
+# used in the breach/evidence message.
+def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
+    return [
+        {
+            "scenario": "streaming-first",
+            "checks": [
+                {
+                    "metric": "streaming_ratio",
+                    "predicate": lambda v: v is not None and v > 0.0,
+                    "label": "streaming_ratio > 0 (streaming path must be hit)",
+                },
+                {
+                    "metric": "streaming_path_hits",
+                    "predicate": lambda v: v is not None and v > 0,
+                    "label": "streaming_path_hits > 0",
+                },
+                {
+                    "metric": "fullbuffer_ratio",
+                    "predicate": lambda v: v is not None and v < 1.0,
+                    "label": "fullbuffer_ratio < 1 (not all requests fell back to full-buffer)",
+                },
+                {
+                    "metric": "zero_copy_output_total",
+                    "predicate": lambda v: v is not None and v > 0,
+                    "label": "zero_copy_output_total > 0 (zero-copy path must produce output)",
+                },
+            ],
+        },
+        {
+            "scenario": "gzip-large",
+            "checks": [
+                {
+                    "metric": "decompression_fullbuffer_total",
+                    "predicate": lambda v: v is not None and v > 0,
+                    "label": "decompression_fullbuffer_total > 0 (gzip full-buffer decompression must run)",
+                },
+            ],
+        },
+    ]
+
+
+def _check_path_coverage(report: dict) -> list[tuple[str, str, str]]:
+    """Return [(scenario, metric, label)] for path-coverage violations.
+
+    A violation occurs when a critical scenario is marked "completed"
+    but its target production path was never exercised (the invariant
+    metric predicate returned False).  Each violation is evidence that
+    the benchmark did not actually test the path it claims to cover.
+    """
+    scenarios = report.get("module_benchmark", {}).get("scenarios", [])
+    if not scenarios:
+        scenarios = report.get("scenarios", [])
+
+    by_name: dict[str, dict] = {}
+    for s in scenarios:
+        name = s.get("name", "")
+        if name:
+            by_name[name] = s
+
+    violations: list[tuple[str, str, str]] = []
+    for invariant in _path_coverage_invariants():
+        name = invariant["scenario"]
+        scenario = by_name.get(name)
+        if scenario is None:
+            continue
+        if scenario.get("status") != "completed":
+            continue
+        m = scenario.get("metrics") or scenario.get("results") or scenario
+        for check in invariant["checks"]:
+            value = m.get(check["metric"])
+            if not check["predicate"](value):
+                violations.append((name, check["metric"], check["label"]))
+    return violations
+
+
 def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
     """Return [(name, reason)] for critical scenarios that were skipped.
 
@@ -634,6 +740,41 @@ def _evaluate_and_report(
                 breaches=[
                     {"metric": "scenario", "reason": f"skipped: {name}"}
                     for name, _ in skipped_critical
+                ],
+                results=[],
+            )
+            _print_evidence_summary(evidence_pack)
+            _write_output(evidence_pack, args.output)
+            return 1
+
+        # Path-coverage invariants: a "completed" scenario must actually
+        # exercise the production path it claims to test.  If the target
+        # path was never hit (e.g. streaming-first with streaming_ratio=0
+        # and zero_copy_output_total=0), the latency numbers are not
+        # credible evidence for that path.
+        path_violations = _check_path_coverage(report or {})
+        if path_violations:
+            _stderr(
+                "FAIL: Path-coverage invariants violated — critical scenarios "
+                "did not exercise their target production paths:\n"
+                + "".join(
+                    f"  - {name}: {label} (metric={metric})\n"
+                    for name, metric, label in path_violations
+                )
+                + "  Release tags require critical scenarios to actually hit "
+                "their target paths, not just report 'completed'.\n"
+                "  Regenerate the baseline after fixing the benchmark runtime "
+                "so that streaming/zero-copy/decompression paths are exercised."
+            )
+            evidence_pack = _build_evidence_pack(
+                report=report,
+                verdict="MISSING_EVIDENCE",
+                breaches=[
+                    {
+                        "metric": "path_coverage",
+                        "reason": f"{name}: {label}",
+                    }
+                    for name, metric, label in path_violations
                 ],
                 results=[],
             )
