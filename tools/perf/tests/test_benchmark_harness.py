@@ -40,6 +40,20 @@ from tools.perf.report_schema import validate_module_benchmark_091
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SCHEMA_PATH = REPO_ROOT / "perf" / "metrics-schema.json"
 BENCHMARK_SCRIPT = REPO_ROOT / "tools" / "perf" / "run_module_benchmark.sh"
+MAKEFILE_PATH = REPO_ROOT / "Makefile"
+
+
+def test_corpus_benchmark_generates_large_fixtures_before_validation():
+    """The canonical benchmark target must materialize baseline fixtures."""
+    makefile = MAKEFILE_PATH.read_text(encoding="utf-8")
+    target = makefile.split("test-benchmark:", 1)[1].split(
+        "test-benchmark-compare:", 1
+    )[0]
+    generator = "tests/corpus/large/generate-large-fixtures.sh"
+    validator = "tools/corpus/validate_corpus.sh"
+
+    assert generator in target
+    assert target.index(generator) < target.index(validator)
 
 
 def test_module_benchmark_records_actual_fixture_bytes():
