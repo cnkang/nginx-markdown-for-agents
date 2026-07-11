@@ -575,6 +575,49 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+static ngx_flag_t
+ngx_http_markdown_route_streaming_compression(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (!ctx->decompression.needed
+        || ctx->processing_path != NGX_HTTP_MARKDOWN_PATH_STREAMING)
+    {
+        return 0;
+    }
+
+    if (ctx->decompression.type
+        == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
+    {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            perf.decompression_streaming_total);
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+            "markdown: streaming decompression selected for deflate");
+        return 0;
+    }
+
+    ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+    ctx->streaming.reason = NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED;
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        streaming.engine_choice.full_buffer);
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+        "markdown: streaming decompression not available for encoding %d, "
+        "routing to full-buffer", ctx->decompression.type);
+    ngx_http_markdown_log_streaming_decision(
+        r, conf, ctx, "full_buffer");
+    ngx_http_markdown_log_decision(
+        r, conf, ctx->effective_conf,
+        ngx_http_markdown_reason_streaming_skip_compressed());
+
+    return 1;
+}
+#endif
+
+
 /**
  * Determine whether the response should be converted and, if eligible,
  * initialize a per-request Markdown conversion context for body buffering.
@@ -853,74 +896,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      * compression routing is enforced regardless of engine mode
      * (on, auto, or variable-evaluated).
      */
-    if (ctx->decompression.needed
-        && ctx->processing_path
-           == NGX_HTTP_MARKDOWN_PATH_STREAMING)
-    {
-        /*
-         * Condition (4): check if the encoding is supported by
-         * the streaming decompressor.
-         *
-         * For 0.9.1: deflate (zlib-wrapped or raw) is supported in
-         * streaming mode via deferred header sniffing (Req 4.9).
-         * Gzip and brotli streaming branches are deferred/unreachable
-         * by contract and route to full-buffer.
-         */
-        if (ctx->decompression.type
-            == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
-        {
-            /*
-             * All four conditions met: route to streaming
-             * decompression.  The decompressor will be
-             * initialized during streaming_init_handle()
-             * after sniffing the first 2 bytes to determine
-             * whether the stream is zlib-wrapped (MAX_WBITS)
-             * or raw deflate (-MAX_WBITS).
-             * Increment metric at path selection (Req 4.5).
-             */
-            NGX_HTTP_MARKDOWN_METRIC_INC(
-                perf.decompression_streaming_total);
-
-            ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
-                r->connection->log, 0,
-                "markdown: streaming decompression "
-                "selected for deflate");
-
-            /* Fall through — keep PATH_STREAMING */
-
-        } else {
-            /*
-             * Encoding not supported in the 0.9.1 streaming mode
-             * contract (gzip/brotli deferred).  Route to full-buffer
-             * decompression (Req 4.2, 4.9).
-             * decompression_fullbuffer_total is incremented
-             * when full-buffer decompression actually runs
-             * in the body filter (Req 4.6).
-             */
-            ctx->processing_path =
-                NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
-            ctx->streaming.reason =
-                NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED;
-
-            NGX_HTTP_MARKDOWN_METRIC_INC(
-                streaming.engine_choice.full_buffer);
-
-            ngx_log_debug1(NGX_LOG_DEBUG_HTTP,
-                r->connection->log, 0,
-                "markdown: streaming decompression "
-                "not available for encoding %d, "
-                "routing to full-buffer",
-                ctx->decompression.type);
-
-            ngx_http_markdown_log_streaming_decision(
-                r, conf, ctx, "full_buffer");
-
-            ngx_http_markdown_log_decision(
-                r, conf, ctx->effective_conf,
-                ngx_http_markdown_reason_streaming_skip_compressed());
-
-            goto path_selected;
-        }
+    if (ngx_http_markdown_route_streaming_compression(r, ctx, conf)) {
+        goto path_selected;
     }
 
     if (ctx->processing_path
