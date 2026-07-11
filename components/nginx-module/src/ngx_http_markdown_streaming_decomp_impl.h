@@ -246,6 +246,8 @@ ngx_http_markdown_streaming_decomp_resolve_deflate_header(
 {
     int  window_bits;
 
+    (void) log;
+
     if (ngx_http_markdown_streaming_decomp_is_zlib_header(
             decomp->pending_header[0],
             decomp->pending_header[1]))
@@ -1095,7 +1097,7 @@ ngx_http_markdown_streaming_decomp_prepare_input(
 
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_workspace_size(
-    ngx_http_markdown_streaming_decomp_t *decomp,
+    const ngx_http_markdown_streaming_decomp_t *decomp,
     size_t in_len,
     size_t *buf_size)
 {
