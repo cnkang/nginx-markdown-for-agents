@@ -34,45 +34,57 @@ Required:
 Historical issues: e76c1584, 13189d71, b9e5fe4d.
 
 Required:
-- Streaming decompression must use raw deflate (no zlib/gzip wrapper), not
-  zlib-wrapped deflate.  The streaming decompressor feeds chunks to
-  `inflate()` with `windowBits = -15` (raw deflate).  Mixing zlib-wrapped
-  and raw deflate inputs causes silent data corruption or decompression
-  failures on chunk boundaries.
-- Truncated raw deflate streams must be explicitly rejected with a budget or
-  integrity error, not silently accepted.  When `inflate()` returns
-  `Z_BUF_ERROR` or `Z_DATA_ERROR` on a terminal chunk, the decompressor
-  must propagate a `DECOMP_CATEGORY_TRUNCATED` error rather than returning
-  partial output.
+- Streaming decompression must correctly handle both deflate formats.
+  The streaming decompressor defers `inflateInit2` until the first 2
+  bytes arrive, then sniffs the zlib wrapper:
+  - zlib-wrapped (RFC 1950, RFC 9110-compliant): `windowBits = 15`
+    (`MAX_WBITS`)
+  - raw deflate (RFC 1951): `windowBits = -15` (`-MAX_WBITS`)
+  Mixing the two formats without sniffing causes silent data corruption
+  or decompression failures on chunk boundaries.  The buffered path
+  retries on format mismatch; the streaming path cannot retry once
+  chunks are consumed, so the sniff is mandatory.
+- Truncated deflate streams (either format) must be explicitly rejected
+  with a budget or integrity error, not silently accepted.  When
+  `inflate()` returns `Z_BUF_ERROR` or `Z_DATA_ERROR` on a terminal
+  chunk, the decompressor must propagate a `DECOMP_CATEGORY_TRUNCATED`
+  error rather than returning partial output.
 - Test harnesses that produce compressed payloads for streaming
-  decompression tests must use raw deflate (for example
-  `CompressMode::Raw` / `windowBits = -15`), not zlib-wrapped deflate.
-  Mismatched compression modes between test payload and production
-  decompressor produce false passes or false failures.
+  decompression tests must use the correct deflate format matching
+  the test intent (raw deflate: `windowBits = -15`; zlib-wrapped:
+  `windowBits = 15`).  Mismatched compression modes between test
+  payload and production decompressor produce false passes or false
+  failures.
 - When the decompression path is shared between full-buffer and streaming,
-  both paths must use the same deflate format.  If full-buffer uses
+  both paths must handle the same deflate formats.  If full-buffer uses
   zlib-wrapped (gzip) decompression via `ngx_http_markdown_decompress_gzip`,
-  the streaming path must independently enforce raw deflate — do not assume
-  the two paths share format configuration.
+  the streaming path must independently sniff and handle both deflate
+  formats — do not assume the two paths share format configuration.
 
 - `Z_OK` and `Z_BUF_ERROR` have distinct semantics in `inflate()`:
   `Z_OK` means inflate made progress (consumed input and/or produced
   output); `Z_BUF_ERROR` means no progress was made.  When the output
   buffer is exhausted (`avail_out == 0`), both codes are recoverable by
   growing the buffer and retrying.  However, `Z_BUF_ERROR` with available
-  output space and remaining input is an unexpected stall (potential
-  format error), while `Z_OK` with `avail_out > 0` simply means more
-  data is available — loop again without intervention.  Never merge the
-  two branches into a single `if (zrc == Z_OK || zrc == Z_BUF_ERROR)`
-  without first checking `avail_out` to distinguish the recoverable stall
-  from the normal-progress case (see Rule 31: semantic-equivalence
-  requirement for duplicate consolidation).
+  output space, remaining input, and no change in `total_out` is an
+  unexpected stall (potential format error or malformed stream) — the
+  no-progress guard must return an error immediately rather than
+  re-calling inflate with the same state (infinite loop).  `Z_OK` with
+  `avail_out > 0` simply means more data is available — loop again
+  without intervention.  Never merge the two branches into a single
+  `if (zrc == Z_OK || zrc == Z_BUF_ERROR)` without first checking
+  `avail_out` to distinguish the recoverable stall from the
+  normal-progress case (see Rule 31: semantic-equivalence requirement
+  for duplicate consolidation).
 
 Verification:
-- `grep -rn 'windowBits\|Z_RAW\|inflateInit' components/nginx-module/src/ components/rust-converter/src/`
-- Verify streaming decompression uses raw deflate (`windowBits = -15` or
-  equivalent).
-- `grep -rn 'TRUNCATED\|truncated.*deflat\|Z_BUF_ERROR\|Z_DATA_ERROR' components/rust-converter/src/`
+- `grep -rn 'windowBits\|Z_RAW\|inflateInit\|zlib_header' components/nginx-module/src/ components/rust-converter/src/`
+- Verify streaming decompression sniffs the zlib header and selects
+  `MAX_WBITS` (zlib-wrapped) or `-MAX_WBITS` (raw deflate).
+- `grep -rn 'TRUNCATED\|truncated.*deflat\|Z_BUF_ERROR\|Z_DATA_ERROR\|no.progress' components/rust-converter/src/ components/nginx-module/src/`
 - Verify truncated-stream rejection propagates a budget/integrity error.
-- `make test-rust` — streaming decompression tests cover both raw deflate
-  and truncated-stream rejection.
+- Verify the no-progress guard detects `Z_BUF_ERROR` with no state change.
+- `make test-rust` — streaming decompression tests cover both deflate
+  formats and truncated-stream rejection.
+- `make test-nginx-unit` — C unit tests cover the no-progress guard via
+  `TEST_INFLATE_MODE_FEED_BUF_ERROR_NO_PROGRESS`.

@@ -224,7 +224,9 @@ Streaming decompression requires ALL FOUR conditions to be met:
 1. `auto_decompress on` (enabled by default)
 2. Streaming engine selected for the request
 3. `cache_validation` is NOT `full`
-4. Encoding supported by streaming decompressor (raw deflate only in 0.9.1)
+4. Encoding supported by streaming decompressor (deflate in 0.9.1: both
+   zlib-wrapped RFC 1950 and raw deflate RFC 1951 via header sniff;
+   gzip/brotli use full-buffer decompression)
 
 Switching the profile from `streaming_first` to `balanced` or `strict_cache`
 changes the streaming engine selection. The `balanced` profile uses
