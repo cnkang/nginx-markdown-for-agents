@@ -361,13 +361,39 @@ jobs:
             --add-dynamic-module="${GITHUB_WORKSPACE}/components/nginx-module"
         shell: bash
 
-      - name: Build module
+      - name: Build NGINX binary and dynamic module
         run: |
           cd "${NGINX_SRC}"
-          make modules
+          # NGINX's generated Makefile defines separate targets:
+          #   build: binary modules manpage
+          #   binary: objs/nginx
+          #   modules: objs/ngx_http_markdown_filter_module.so
+          # `make modules` alone does NOT produce objs/nginx, so we must
+          # build both targets explicitly before copying artifacts.
+          make -j"$(nproc)" binary modules
         shell: bash
 
-      - name: Copy .so to build directory
+      - name: Verify build artifacts exist
+        run: |
+          # Verify both artifacts were produced before copying.
+          # If either is missing, fail early with a clear error.
+          for artifact in \
+            "${NGINX_SRC}/objs/nginx" \
+            "${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so"; do
+            if [[ ! -f "${artifact}" ]]; then
+              echo "ERROR: Build artifact not found: ${artifact}" >&2
+              echo "  The build step may need a different make target." >&2
+              exit 1
+            fi
+          done
+          # Verify the nginx binary is executable.
+          test -x "${NGINX_SRC}/objs/nginx" || {
+            echo "ERROR: ${NGINX_SRC}/objs/nginx is not executable" >&2
+            exit 1
+          }
+        shell: bash
+
+      - name: Copy artifacts to build directory
         run: |
           mkdir -p build
           cp "${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so" build/
@@ -713,20 +739,52 @@ jobs:
           path: dist/
           merge-multiple: true
 
-      - name: Download module-enabled NGINX runtime
+      - name: Determine canonical benchmark NGINX version
+        id: bench-nginx
+        env:
+          NGINX_VERSIONS: ${{ needs.prepare.outputs.nginx_versions }}
+        run: |
+          # Select the oldest (first) release-blocking NGINX version as
+          # the canonical benchmark runtime.  Using a single, explicit
+          # version avoids the filename collision that occurs when
+          # multiple module-so-*-x86_64 artifacts are merged into the
+          # same directory (they all contain build/nginx and
+          # build/ngx_http_markdown_filter_module.so).
+          BENCH_VERSION="$(python3 -c "
+          import json, sys
+          versions = json.loads(sys.argv[1])
+          print(versions[0] if versions else '')
+          " "${NGINX_VERSIONS}")"
+          if [[ -z "${BENCH_VERSION}" ]]; then
+            echo "ERROR: No NGINX versions resolved for benchmark" >&2
+            exit 1
+          fi
+          echo "bench_nginx_version=${BENCH_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Using canonical benchmark NGINX version: ${BENCH_VERSION}" >&2
+        shell: bash
+
+      - name: Download canonical benchmark NGINX runtime
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: module-so-*-x86_64
+          # Download ONLY the canonical benchmark version's module+nginx
+          # artifact.  This avoids the filename collision from
+          # merge-multiple when multiple NGINX versions produce the same
+          # build/nginx and build/ngx_http_markdown_filter_module.so names.
+          name: module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-x86_64
           path: module-runtime
-          merge-multiple: true
 
       - name: Run tag release gates
         env:
           RELEASE_GATE_EXPECTED_CARGO_VERSION: "0.9.1"
           NGINX_BIN: ${{ github.workspace }}/module-runtime/nginx
           MODULE_SO: ${{ github.workspace }}/module-runtime/ngx_http_markdown_filter_module.so
+          BENCHMARK_NGINX_VERSION: ${{ steps.bench-nginx.outputs.bench_nginx_version }}
         run: |
           chmod +x "${NGINX_BIN}"
+          # Record the benchmark environment identity for evidence.
+          echo "Benchmark NGINX version: ${BENCHMARK_NGINX_VERSION}"
+          echo "Architecture: $(uname -m)"
+          "${NGINX_BIN}" -V 2>&1 | head -3
           # Run the release gate validators that are not already covered
           # by the build/package/smoke-test jobs above. The full
           # release-gates-check targets include build/test/fuzz which are
