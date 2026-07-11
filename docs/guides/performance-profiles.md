@@ -46,7 +46,7 @@ harness.
 | **Peak memory** | Response size × ~2 (buffer + converted output) | Same as strict_cache for small responses; bounded by `streaming_buffer` for large | Bounded by `streaming_buffer` regardless of response size (pending benchmark validation) |
 | **Cache correctness** | Full — ETag generation, If-None-Match, If-Modified-Since | Partial — If-Modified-Since only (IMS via upstream Last-Modified) | None — no conditional request support |
 | **Zero-copy output (0.9.1)** | Not applicable (no streaming) | Available when streaming active + opt-in | Available + opt-in via `markdown_streaming_zero_copy on` |
-| **Streaming decompression (0.9.1)** | Not applicable (no streaming) | Not active (requires `streaming_first` profile) | Active for raw deflate only; gzip/brotli use full-buffer decompression |
+| **Streaming decompression (0.9.1)** | Not applicable (no streaming) | Not active (requires `streaming_first` profile) | Active for deflate (zlib-wrapped + raw via header sniff); gzip/brotli use full-buffer decompression |
 | **Full-buffer copy reduction (0.9.1)** | Active (internal) | Active (internal) | Active (internal) |
 
 ### Profile Selection Guide
@@ -96,7 +96,7 @@ within the user-space constraint:
 | Optimization | What It Eliminates | What Remains |
 |--------------|-------------------|--------------|
 | Zero-copy output | Pool-copy of Rust-produced Markdown chunks into NGINX pool buffers | Rust parsing + conversion + output assembly |
-| Streaming decompression | Full-body buffering before raw-deflate decompression starts | Per-chunk decompression + conversion |
+| Streaming decompression | Full-body buffering before deflate decompression starts | Per-chunk decompression + conversion |
 | Full-buffer copy reduction | Extra apply-back copy after Rust FFI decompression output is copied into an `ngx_alloc` buffer | Decompression itself + one FFI-output copy + conversion |
 
 ### Practical Implications
@@ -446,7 +446,7 @@ All performance claims in this document are qualified as follows:
 | Peak memory reduction for streaming paths | Pending benchmark validation |
 | Full-buffer copy reduction latency benefit | Pending benchmark validation |
 | Zero-copy output reduced per-chunk overhead | Pending benchmark validation |
-| Streaming decompression TTFB benefit for raw deflate | Pending benchmark validation |
+| Streaming decompression TTFB benefit for deflate | Pending benchmark validation |
 
 Performance claims will be updated with concrete benchmark data once the
 module-level benchmark harness produces validated evidence packs. The evidence

@@ -609,7 +609,14 @@ ngx_http_markdown_streaming_decomp_inflate_step(
     int *using_heap_ptr,
     ngx_log_t *log)
 {
-    int  zrc;
+    int      zrc;
+    uInt     avail_in_before;
+    uInt     avail_out_before;
+    uLong    total_out_before;
+
+    avail_in_before = decomp->state.zlib.avail_in;
+    avail_out_before = decomp->state.zlib.avail_out;
+    total_out_before = decomp->state.zlib.total_out;
 
     zrc = inflate(&decomp->state.zlib, Z_SYNC_FLUSH);
 
@@ -624,6 +631,26 @@ ngx_http_markdown_streaming_decomp_inflate_step(
         ngx_log_error(NGX_LOG_ERR, log, 0,
             "markdown: "
             "inflate error %d", zrc);
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        return -1;
+    }
+
+    /*
+     * No-progress guard: if inflate returned Z_BUF_ERROR but neither
+     * input was consumed nor output was produced, continuing the loop
+     * would spin forever with the same state.  This can happen with
+     * malformed deflate streams that leave the decoder in a state
+     * where it cannot make progress but does not report a hard error.
+     * Detect the stuck condition and fail immediately.
+     */
+    if (zrc == Z_BUF_ERROR
+        && decomp->state.zlib.avail_in == avail_in_before
+        && decomp->state.zlib.avail_out == avail_out_before
+        && decomp->state.zlib.total_out == total_out_before)
+    {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+            "markdown: "
+            "inflate no-progress (Z_BUF_ERROR with no state change)");
         ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return -1;
     }

@@ -199,6 +199,7 @@ typedef enum {
     TEST_INFLATE_MODE_FEED_EXPAND_THEN_ERROR,
     TEST_INFLATE_MODE_FEED_EXPAND_THEN_BUDGET,
     TEST_INFLATE_MODE_FEED_EXPAND_THEN_DONE,
+    TEST_INFLATE_MODE_FEED_BUF_ERROR_NO_PROGRESS,
     TEST_INFLATE_MODE_FINISH_ERROR,
     TEST_INFLATE_MODE_FINISH_BUDGET,
     TEST_INFLATE_MODE_FINISH_CONTINUE_THEN_END,
@@ -520,6 +521,15 @@ test_inflate(z_streamp strm, int flush)
         }
         strm->avail_in = 0;
         return Z_OK;
+
+    case TEST_INFLATE_MODE_FEED_BUF_ERROR_NO_PROGRESS:
+        /*
+         * Simulate a malformed deflate stream where inflate returns
+         * Z_BUF_ERROR without consuming input or producing output.
+         * The no-progress guard in inflate_step must detect this and
+         * return an error instead of looping forever.
+         */
+        return Z_BUF_ERROR;
 
     case TEST_INFLATE_MODE_FINISH_ERROR:
         if (flush == Z_FINISH) {
@@ -1720,6 +1730,20 @@ test_feed_mocked_inflate_paths(void)
      */
     TEST_ASSERT(g_free_on_palloc_violation == 0,
         "post-decode overflow must not ngx_free() pool memory");
+    free(decomp);
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, 0);
+    TEST_ASSERT(decomp != NULL, "decompressor should be created");
+    g_inflate_mode = TEST_INFLATE_MODE_FEED_BUF_ERROR_NO_PROGRESS;
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, (const u_char *) "x", 1, &out, &out_len,
+        &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "feed should fail on Z_BUF_ERROR no-progress (stuck inflate)");
     free(decomp);
 
     TEST_PASS("feed mocked inflate branches covered");
