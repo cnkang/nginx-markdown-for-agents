@@ -252,6 +252,19 @@ test_cleanup_handler_null_ptr(void)
     TEST_PASS("cleanup handler with NULL rust_ptr is no-op");
 }
 
+static void
+test_cleanup_handler_null_context(void)
+{
+    g_free_call_count = 0;
+
+    ngx_http_markdown_rust_buf_cleanup(NULL);
+
+    TEST_ASSERT(g_free_call_count == 0,
+        "NULL cleanup context: free not called");
+
+    TEST_PASS("cleanup handler with NULL context is no-op");
+}
+
 /* ================================================================
  * Test 2: Double-call prevention via freed flag
  *
@@ -513,6 +526,7 @@ main(void)
     TEST_SECTION("zerocopy_buf tests (pool cleanup + buffer factory)");
 
     test_cleanup_handler_null_ptr();
+    test_cleanup_handler_null_context();
     test_cleanup_handler_double_free_prevention();
     test_buffer_factory_success();
     test_buffer_factory_cleanup_alloc_failure();
