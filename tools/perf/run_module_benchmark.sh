@@ -480,6 +480,16 @@ get_worker_pid() {
 
 # sample_rss_background starts a background loop that periodically samples
 # the worker RSS and writes the maximum observed value to a file.
+#
+# This function does NOT background itself — the caller must add `&`
+# and capture the PID via `$!`.  This avoids the double-background
+# problem where the caller's PID tracks an outer shell function that
+# exits immediately, not the inner sampling loop.
+#
+# The sampler writes the current peak to the file on EVERY iteration
+# (atomic single-line write), so the file is always up-to-date even if
+# the sampler is killed before the loop exits naturally.
+#
 # Arguments:
 #   $1 - output file for peak RSS (in KB)
 #   $2 - worker PID
@@ -492,24 +502,26 @@ sample_rss_background() {
   : > "$peak_file"
   echo "0" > "$peak_file"
 
-  (
-    local peak=0
-    while true; do
-      if ! kill -0 "$worker_pid" 2>/dev/null; then
-        break
+  local peak=0
+  while true; do
+    if ! kill -0 "$worker_pid" 2>/dev/null; then
+      break
+    fi
+    local rss
+    rss="$(ps -o rss= -p "$worker_pid" 2>/dev/null | tr -d ' ')" || true
+    if [[ -n "$rss" ]] && [[ "$rss" =~ ^[0-9]+$ ]]; then
+      if [[ "$rss" -gt "$peak" ]]; then
+        peak="$rss"
+        # Write immediately so the file is always up-to-date,
+        # even if the sampler is killed mid-loop.
+        echo "$peak" > "$peak_file"
       fi
-      local rss
-      rss="$(ps -o rss= -p "$worker_pid" 2>/dev/null | tr -d ' ')" || true
-      if [[ -n "$rss" ]] && [[ "$rss" =~ ^[0-9]+$ ]]; then
-        if [[ "$rss" -gt "$peak" ]]; then
-          peak="$rss"
-        fi
-      fi
-      sleep "$interval"
-    done
-    echo "$peak" > "$peak_file"
-  ) &
-  echo $!
+    fi
+    sleep "$interval"
+  done
+
+  # Final write to ensure the last peak is captured
+  echo "$peak" > "$peak_file"
 }
 
 ###############################################################################
@@ -725,6 +737,11 @@ run_scenario() {
     wait "$sampler_pid" 2>/dev/null || true
   fi
 
+  # The sampler writes the peak file on every iteration, so the
+  # file is up-to-date even after a kill.  A short wait ensures
+  # any pending I/O completes before reading.
+  sleep 0.1
+
   local rss_peak="0"
   if [[ -f "$peak_rss_file" ]]; then
     rss_peak="$(cat "$peak_rss_file" | tr -d '[:space:]')"
@@ -867,8 +884,12 @@ if total_hits > 0:
     streaming_ratio = float(sf_hits) / total_hits
     fullbuffer_ratio = float(fb_hits) / total_hits
 else:
-    streaming_ratio = 1.0 if profile == "streaming_first" else 0.0
-    fullbuffer_ratio = 0.0 if profile == "streaming_first" else 1.0
+    # No path-hit data from the metrics endpoint.  For release-blocking
+    # evidence, we must NOT synthesize path coverage from the profile
+    # name — that would claim a path was exercised without proof.
+    # Report None so the evidence gate returns MISSING_EVIDENCE.
+    streaming_ratio = None
+    fullbuffer_ratio = None
 
 # 3. decompression streaming vs fullbuffer counts
 decomp_streaming = perf_data.get("decompression_streaming_total", 0)
@@ -876,10 +897,11 @@ decomp_fullbuffer = perf_data.get("decompression_fullbuffer_total", 0)
 if decomp_streaming == 0 and decomp_fullbuffer == 0:
     decomp_attempted = nginx_metrics.get("decompressions_attempted", 0)
     if decomp_attempted > 0:
-        if profile == "streaming_first":
-            decomp_streaming = decomp_attempted
-        else:
-            decomp_fullbuffer = decomp_attempted
+        # Do NOT synthesize decompression path from the profile name.
+        # Report only what the metrics endpoint actually observed.
+        # The evidence gate will treat 0 as MISSING_EVIDENCE if the
+        # scenario requires decompression evidence.
+        pass
 
 latencies = []
 wall_end_s = 0.0
@@ -935,6 +957,8 @@ elif load_gen == "ab":
                 "baseline_rss_bytes": rss_baseline_kb * 1024,
                 "peak_rss_bytes": rss_peak_kb * 1024,
                 "input_bytes": input_bytes,
+                "streaming_path_hits": sf_hits,
+                "fullbuffer_path_hits": fb_hits,
                 "streaming_ratio": streaming_ratio,
                 "fullbuffer_ratio": fullbuffer_ratio,
                 "fallback_rate": fallback_rate,
@@ -985,6 +1009,8 @@ result = {
         "baseline_rss_bytes": rss_baseline_kb * 1024,
         "peak_rss_bytes": rss_peak_kb * 1024,
         "input_bytes": input_bytes,
+        "streaming_path_hits": sf_hits,
+        "fullbuffer_path_hits": fb_hits,
         "streaming_ratio": streaming_ratio,
         "fullbuffer_ratio": fullbuffer_ratio,
         "fallback_rate": fallback_rate,
@@ -1088,10 +1114,10 @@ report = {
         "load_generator": load_gen,
         "nginx_version": nginx_version,
         "scenarios": scenarios,
-        "memory_slope": {
-            "rss_per_input_mb": 0.0,
-            "r_squared": 0.0,
-        },
+        # memory_slope is intentionally omitted here — it is computed
+        # by the evidence gate from per-scenario baseline_rss_bytes and
+        # peak_rss_bytes.  A placeholder of 0.0 would mask missing
+        # evidence as "perfect 0 slope" and must never be written.
     },
     "decompression_coverage": {
         "decompression_streaming_total": sum(s.get("metrics", {}).get("decompression_streaming_total", 0) for s in scenarios),
