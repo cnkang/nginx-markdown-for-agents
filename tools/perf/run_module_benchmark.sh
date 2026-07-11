@@ -509,8 +509,7 @@ sample_rss_background() {
     fi
     local rss
     rss="$(ps -o rss= -p "$worker_pid" 2>/dev/null | tr -d ' ')" || true
-    if [[ -n "$rss" ]] && [[ "$rss" =~ ^[0-9]+$ ]] \
-      && [[ "$rss" -gt "$peak" ]]; then
+    if [[ -n "$rss" && "$rss" =~ ^[0-9]+$ && "$rss" -gt "$peak" ]]; then
       peak="$rss"
       # Write immediately so the file is always up-to-date,
       # even if the sampler is killed mid-loop.
