@@ -701,7 +701,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   release-gate:
     name: Release Gate (tag only)
-    needs: smoke-test
+    needs: [prepare, smoke-test]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
