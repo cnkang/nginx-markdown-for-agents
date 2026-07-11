@@ -754,7 +754,6 @@ ngx_http_markdown_metrics_write_json(
      * after this function returns.
      */
     p = ngx_slprintf(p, end,
-
         /* Conversion attempt and outcome counters */
         "{\n"
         "  \"conversions_attempted\": %uA,\n"
@@ -1003,18 +1002,10 @@ ngx_http_markdown_metrics_write_json(
     }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
-    /* Close the "paths" array and the "per_path" object. */
-    p = ngx_slprintf(p, end,
-        "\n"
-        "    ]\n"
-        "  },\n");
-
+    p = ngx_slprintf(p, end, "\n    ]\n  },\n");
     p = ngx_http_markdown_metrics_write_json_perf(
-            p, end, &snapshot->perf);
-
-    p = ngx_slprintf(p, end, "}");
-
-    return p;
+        p, end, &snapshot->perf);
+    return ngx_slprintf(p, end, "}");
 }
 
 
@@ -1033,6 +1024,34 @@ ngx_http_markdown_metrics_write_json(
  * @param output_bytes_avg Average output size in bytes per successful conversion.
  * @returns Pointer to the buffer position immediately after the written data; if the buffer was too small the pointer will be equal to `end`.
  */
+static u_char *
+ngx_http_markdown_metrics_write_text_perf(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_perf_snapshot_t *perf)
+{
+    return ngx_slprintf(p, end,
+        "\n"
+        "Performance Metrics:\n"
+        "- Backpressure Total: %uA\n"
+        "- Backpressure Resume Total: %uA\n"
+        "- Pending Output High Watermark (bytes): %uA\n"
+        "- Decompression Streaming Total: %uA\n"
+        "- Decompression Full-Buffer Total: %uA\n"
+        "- Decompression Budget Exceeded Total: %uA\n"
+        "- Zero-Copy Output Total: %uA\n"
+        "- Copied Output Total: %uA\n",
+        perf->backpressure_total,
+        perf->backpressure_resume_total,
+        perf->pending_output_high_watermark_bytes,
+        perf->decompression_streaming_total,
+        perf->decompression_fullbuffer_total,
+        perf->decompression_budget_exceeded_total,
+        perf->zero_copy_output_total,
+        perf->copied_output_total);
+}
+
+
 static u_char *
 ngx_http_markdown_metrics_write_text(
     u_char *p,
@@ -1057,7 +1076,6 @@ ngx_http_markdown_metrics_write_text(
      * after this function returns.
      */
     p = ngx_slprintf(p, end,
-
         /* Header and conversion outcome summary */
         "Markdown Filter Metrics\n"
         "=======================\n"
@@ -1240,27 +1258,7 @@ ngx_http_markdown_metrics_write_text(
         snapshot->per_path.path_conversion_time_sum_ms,
         snapshot->per_path.overflow_count);
 
-    /* Performance metrics section */
-    p = ngx_slprintf(p, end,
-        "\n"
-        "Performance Metrics:\n"
-        "- Backpressure Total: %uA\n"
-        "- Backpressure Resume Total: %uA\n"
-        "- Pending Output High Watermark (bytes): %uA\n"
-        "- Decompression Streaming Total: %uA\n"
-        "- Decompression Full-Buffer Total: %uA\n"
-        "- Decompression Budget Exceeded Total: %uA\n"
-        "- Zero-Copy Output Total: %uA\n"
-        "- Copied Output Total: %uA\n",
-        snapshot->perf.backpressure_total,
-        snapshot->perf.backpressure_resume_total,
-        snapshot->perf.pending_output_high_watermark_bytes,
-        snapshot->perf.decompression_streaming_total,
-        snapshot->perf.decompression_fullbuffer_total,
-        snapshot->perf.decompression_budget_exceeded_total,
-        snapshot->perf.zero_copy_output_total,
-        snapshot->perf.copied_output_total);
-
+    p = ngx_http_markdown_metrics_write_text_perf(p, end, &snapshot->perf);
     /*
      * Per-path individual entries: walk the SHM RB-tree to emit
      * each path as a plain-text line after the aggregate section.

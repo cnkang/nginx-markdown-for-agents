@@ -1081,6 +1081,56 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
 }
 
 static ngx_int_t
+ngx_http_markdown_diagnostics_fmt_metrics_snapshot(u_char **pos,
+    u_char *last)
+{
+    ngx_http_markdown_diag_metrics_t  metrics;
+
+    ngx_http_markdown_diagnostics_collect_metrics(&metrics);
+
+    *pos = ngx_slprintf(*pos, last,
+        "  \"metrics_snapshot\": {\n"
+        "    \"conversions_total\": %uA,\n"
+        "    \"delivery_total\": %uA,\n"
+        "    \"requests_total\": %uA,\n"
+        "    \"failopen_total\": %uA,\n"
+        "    \"overload_total\": %uA,\n"
+        "    \"backpressure_total\": %uA\n"
+        "  },\n",
+        metrics.conversions_total,
+        metrics.delivery_total,
+        metrics.requests_total,
+        metrics.failopen_total,
+        metrics.overload_total,
+        metrics.backpressure_total);
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    *pos = ngx_slprintf(*pos, last,
+        "  \"streaming_metrics\": {\n"
+        "    \"requests_total\": %uA,\n"
+        "    \"succeeded_total\": %uA,\n"
+        "    \"failed_total\": %uA,\n"
+        "    \"fallback_total\": %uA,\n"
+        "    \"candidate_total\": %uA,\n"
+        "    \"output_bytes_total\": %uA,\n"
+        "    \"engine_choice_streaming\": %uA,\n"
+        "    \"engine_choice_full_buffer\": %uA\n"
+        "  },\n",
+        metrics.streaming_requests_total,
+        metrics.streaming_succeeded_total,
+        metrics.streaming_failed_total,
+        metrics.streaming_fallback_total,
+        metrics.streaming_candidate_total,
+        metrics.streaming_output_bytes_total,
+        metrics.engine_choice_streaming,
+        metrics.engine_choice_full_buffer);
+#endif
+
+    return (*pos < last) ? NGX_OK : NGX_ERROR;
+}
+
+
+static ngx_int_t
 ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     ngx_buf_t *b)
 {
@@ -1093,7 +1143,6 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     size_t                               snap_len;
     ngx_int_t                            rc;
     const ngx_http_markdown_diag_state_t      *state;
-    ngx_http_markdown_diag_metrics_t     metrics;
     ngx_http_markdown_diag_dynconf_t     dynconf;
 
     state = ngx_http_markdown_diagnostics_get_state();
@@ -1230,47 +1279,11 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
 
     p = ngx_slprintf(p, last, "],\n");
 
-    /* --- metrics_snapshot section --- */
-    ngx_http_markdown_diagnostics_collect_metrics(&metrics);
-
-    p = ngx_slprintf(p, last,
-        "  \"metrics_snapshot\": {\n"
-        "    \"conversions_total\": %uA,\n"
-        "    \"delivery_total\": %uA,\n"
-        "    \"requests_total\": %uA,\n"
-        "    \"failopen_total\": %uA,\n"
-        "    \"overload_total\": %uA,\n"
-        "    \"backpressure_total\": %uA\n"
-        "  },\n",
-        metrics.conversions_total,
-        metrics.delivery_total,
-        metrics.requests_total,
-        metrics.failopen_total,
-        metrics.overload_total,
-        metrics.backpressure_total);
-
-#ifdef MARKDOWN_STREAMING_ENABLED
-    /* Streaming metrics JSON section */
-    p = ngx_slprintf(p, last,
-        "  \"streaming_metrics\": {\n"
-        "    \"requests_total\": %uA,\n"
-        "    \"succeeded_total\": %uA,\n"
-        "    \"failed_total\": %uA,\n"
-        "    \"fallback_total\": %uA,\n"
-        "    \"candidate_total\": %uA,\n"
-        "    \"output_bytes_total\": %uA,\n"
-        "    \"engine_choice_streaming\": %uA,\n"
-        "    \"engine_choice_full_buffer\": %uA\n"
-        "  },\n",
-        metrics.streaming_requests_total,
-        metrics.streaming_succeeded_total,
-        metrics.streaming_failed_total,
-        metrics.streaming_fallback_total,
-        metrics.streaming_candidate_total,
-        metrics.streaming_output_bytes_total,
-        metrics.engine_choice_streaming,
-        metrics.engine_choice_full_buffer);
-#endif
+    if (ngx_http_markdown_diagnostics_fmt_metrics_snapshot(&p, last)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
     /* --- dynconf_state section --- */
     ngx_http_markdown_diagnostics_get_dynconf_state(&dynconf);
