@@ -191,6 +191,8 @@ CORPUS_BASELINE := perf/baselines/corpus-baseline.json
 CORPUS_VERDICT := perf/reports/corpus-verdict.json
 
 test-benchmark:
+	@echo "Generating large corpus fixtures..."
+	tests/corpus/large/generate-large-fixtures.sh
 	@echo "Validating corpus metadata..."
 	tools/corpus/validate_corpus.sh
 	@echo "Building test-corpus-conversion binary..."
