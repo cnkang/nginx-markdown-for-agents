@@ -949,7 +949,6 @@ ngx_http_markdown_streaming_save_pending(
         (data != NULL && len > 0) ? 1 : 0;
     ctx->streaming.pending_output_bytes = len;
     ctx->streaming.pending_output_zero_copy = zero_copy;
-    r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 
     /* Backpressure metric: streaming output returned NGX_AGAIN */
     NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
@@ -960,6 +959,8 @@ ngx_http_markdown_streaming_save_pending(
             perf.pending_output_high_watermark_bytes,
             (ngx_atomic_t) len);
     }
+
+    ngx_http_markdown_streaming_sync_buffered(r, ctx);
 
     return NGX_AGAIN;
 }
@@ -1079,9 +1080,7 @@ ngx_http_markdown_streaming_handle_backpressure(
     ngx_http_request_t *r,
     const ngx_http_markdown_ctx_t *ctx)
 {
-    (void) ctx;
-
-    r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+    ngx_http_markdown_streaming_sync_buffered(r, ctx);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
@@ -1363,8 +1362,6 @@ ngx_http_markdown_streaming_resume_pending(
 
     out = ctx->streaming.pending_output;
     if (out == NULL) {
-        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
-
         /*
          * If finalize deferred the terminal last_buf due to
          * backpressure, send it now that the pending output
@@ -1375,6 +1372,7 @@ ngx_http_markdown_streaming_resume_pending(
                 r, ctx, conf);
         }
 
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
         return NGX_OK;
     }
 
@@ -1393,12 +1391,11 @@ ngx_http_markdown_streaming_resume_pending(
     rc = ngx_http_next_body_filter(r, NULL);
 
     if (rc == NGX_AGAIN) {
-        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
         return NGX_AGAIN;
     }
 
     ctx->streaming.pending_output = NULL;
-    r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
 
     /* Backpressure resume: pending drain completed */
     if (ngx_http_markdown_streaming_delivery_ok(rc)) {
@@ -1459,6 +1456,7 @@ ngx_http_markdown_streaming_resume_pending(
         ngx_http_markdown_streaming_record_postcommit_failure(
             r, ctx, conf);
 
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
         return rc;
     }
 
@@ -1489,6 +1487,7 @@ ngx_http_markdown_streaming_resume_pending(
             r, ctx, conf);
     }
 
+    ngx_http_markdown_streaming_sync_buffered(r, ctx);
     return rc;
 }
 
@@ -2373,6 +2372,17 @@ ngx_http_markdown_streaming_process_chunk(
         return NGX_OK;
     }
 
+    /*
+     * Default input disposition: CONSUMED.  Rust will eat this chunk;
+     * on downstream NGX_AGAIN the caller may safely advance buf->pos
+     * and enqueue cl->next to pending_input.
+     *
+     * Overridden to RETAIN by send_failopen_chain when the fail-open
+     * clone shares this ngx_buf_t (advancing pos would corrupt the
+     * pending fail-open output).
+     */
+    ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_CONSUMED;
+
     feed_len = ngx_http_markdown_buf_len_safe(buf);
     if (feed_len == 0) {
         return NGX_OK;
@@ -3241,11 +3251,19 @@ ngx_http_markdown_streaming_send_failopen_chain(
         ctx->streaming.pending_has_data = 1;
         ctx->streaming.completion.pending_failopen_delivery =
             (!ctx->eligible) ? 1 : 0;
-        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+
+        /*
+         * Set RETAIN disposition: the fail-open clone shares ngx_buf_t
+         * with the original upstream chain.  Advancing the source pos
+         * would corrupt the pending fail-open output's shared buffers.
+         * process_chain checks this to avoid advancing pos on RETAIN.
+         */
+        ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_RETAIN;
 
         /* Backpressure metric: fail-open output returned NGX_AGAIN */
         NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
 
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
         return NGX_AGAIN;
     }
 
@@ -3564,20 +3582,94 @@ ngx_http_markdown_streaming_handle_null_input(
     ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf)
 {
-    ngx_int_t  rc;
+    ngx_int_t      rc;
+    ngx_flag_t     last_buf;
+    ngx_chain_t   *fallback_cl;
+    ngx_chain_t   *input_chain;
 
+    /* Step 1: Drain pending output (backpressure recovery) */
     rc = ngx_http_markdown_streaming_resume_pending(
         r, ctx, conf);
-    if (rc != NGX_OK) {
+    if (rc == NGX_AGAIN || rc == NGX_ERROR) {
+        return rc;
+    }
+    /*
+     * P2 fix: NGX_DONE means delivery succeeded.  Both NGX_OK and
+     * NGX_DONE must continue to process pending_input and deferred
+     * finalize.  The old code (if rc != NGX_OK return rc) trapped
+     * NGX_DONE, skipping deferred finalize.
+     */
+    if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
         return rc;
     }
 
+    /* Step 2: Process pending input if any */
+    if (!ngx_http_markdown_streaming_pending_input_is_empty(ctx)) {
+        /*
+         * Detach the pending_input chain and feed it through
+         * process_chain.  process_chain will re-enqueue any remainder
+         * that hits NGX_AGAIN back to pending_input.
+         */
+        input_chain = ctx->streaming.pending_input.head;
+        ctx->streaming.pending_input.head = NULL;
+        ctx->streaming.pending_input.tail = NULL;
+        ctx->streaming.pending_input.bytes = 0;
+        ctx->streaming.pending_input.links = 0;
+        /* terminal_seen is preserved — not reset by detach */
+
+        rc = ngx_http_markdown_streaming_process_chain(
+            r, ctx, conf, input_chain, &last_buf, &fallback_cl);
+
+        if (rc == NGX_AGAIN) {
+            /* process_chain re-enqueued remainder + set terminal_seen */
+            ngx_http_markdown_streaming_sync_buffered(r, ctx);
+            return NGX_AGAIN;
+        }
+        if (rc == NGX_DONE) {
+            ngx_http_markdown_streaming_sync_buffered(r, ctx);
+            return ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
+                r, fallback_cl, last_buf);
+        }
+        if (rc != NGX_OK) {
+            ngx_http_markdown_streaming_sync_buffered(r, ctx);
+            return rc;
+        }
+        /* rc == NGX_OK: all pending_input consumed */
+    }
+
+    /*
+     * Step 3: Finalize if upstream terminal was seen and we are
+     * still eligible for streaming conversion.
+     *
+     * terminal_seen is set by pending_input enqueue from the
+     * original input chain.  It represents the upstream input EOF,
+     * not the downstream delivery state.  finalize only when all
+     * pending_input has been consumed.
+     */
+    if (ngx_http_markdown_streaming_pending_input_is_empty(ctx)
+        && ctx->streaming.pending_input.terminal_seen
+        && ctx->eligible)
+    {
+        ctx->streaming.pending_input.terminal_seen = 0;
+        return ngx_http_markdown_streaming_finalize_request(
+            r, ctx, conf);
+    }
+
+    /*
+     * Step 4: Legacy finalize_after_pending path.
+     *
+     * This is set by finalize_request itself (finalize_decomp
+     * NGX_AGAIN), not by process_chain.  When the finalize
+     * path's own output hits backpressure, it sets this latch
+     * so we re-enter finalize after the pending output drains.
+     */
     if (ctx->streaming.completion.finalize_after_pending) {
         ctx->streaming.completion.finalize_after_pending = 0;
         return ngx_http_markdown_streaming_finalize_request(
             r, ctx, conf);
     }
 
+    ngx_http_markdown_streaming_sync_buffered(r, ctx);
     return NGX_OK;
 }
 
@@ -3682,16 +3774,47 @@ ngx_http_markdown_streaming_process_chain(
 
         if (rc != NGX_OK) {
             if (rc == NGX_AGAIN) {
+                if (ctx->streaming.input_disposition
+                    == NGX_HTTP_MD_INPUT_RETAIN)
+                {
+                    /*
+                     * Fail-open shared ngx_buf_t: do NOT advance pos.
+                     * The fail-open clone (pending_output) references
+                     * the same buf and covers the full input chain.
+                     * Do NOT enqueue cl->next — the clone handles it.
+                     */
+                    ngx_http_markdown_streaming_sync_buffered(r, ctx);
+                    return NGX_AGAIN;
+                }
+
                 /*
-                 * markdown_streaming_feed consumed the complete input buffer;
-                 * only its generated output is pending downstream.  Advance
-                 * the upstream position so NGINX can release the busy buffer
-                 * and resume reading after the output chain drains.
+                 * CONSUMED: Rust ate this chunk.  Advance pos so NGINX
+                 * can release the busy buffer and resume reading.
                  */
                 cl->buf->pos = cl->buf->last;
-                if (*last_buf) {
-                    ctx->streaming.completion.finalize_after_pending = 1;
+
+                /*
+                 * Enqueue the remainder of the input chain (cl->next)
+                 * to pending_input so it is not stranded in u->busy_bufs.
+                 * NGINX does not re-submit busy buffers to the body
+                 * filter; without this, cl->next would be lost.
+                 */
+                if (cl->next != NULL) {
+                    rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+                        r, ctx, cl->next);
+                    if (rc != NGX_OK) {
+                        return rc;
+                    }
                 }
+
+                /*
+                 * terminal_seen was captured during enqueue (from
+                 * last_buf/last_in_chain on any remaining link).
+                 * Do NOT set finalize_after_pending here — it is now
+                 * handled by terminal_seen in handle_null_input.
+                 */
+                ngx_http_markdown_streaming_sync_buffered(r, ctx);
+                return NGX_AGAIN;
             }
             if (rc == NGX_DONE) {
                 *fallback_cl = cl;
