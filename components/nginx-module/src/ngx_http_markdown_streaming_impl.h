@@ -4114,7 +4114,7 @@ ngx_http_markdown_streaming_process_chain(
  */
 static ngx_flag_t
 ngx_http_markdown_streaming_chain_has_terminal(ngx_chain_t *in,
-    ngx_http_request_t *r)
+    const ngx_http_request_t *r)
 {
     for (ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
         if (cl->buf == NULL) {
