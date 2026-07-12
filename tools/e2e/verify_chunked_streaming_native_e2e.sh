@@ -933,7 +933,9 @@ import time
 port = int(sys.argv[1])
 header_path = sys.argv[2]
 body_path = sys.argv[3]
-rate_bytes_per_second = 128 * 1024
+# Keep the reader slow enough to sustain downstream pressure, but leave ample
+# headroom inside the 60-second deadline for the 8 MiB fixture on macOS CI.
+rate_bytes_per_second = 256 * 1024
 deadline = time.monotonic() + 60
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
