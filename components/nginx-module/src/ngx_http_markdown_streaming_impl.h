@@ -989,10 +989,10 @@ ngx_http_markdown_streaming_save_pending(
     }
 
     ctx->streaming.pending_output = out;
-    ctx->streaming.pending_has_data =
+    ctx->streaming.pending_meta.has_data =
         (data != NULL && len > 0) ? 1 : 0;
-    ctx->streaming.pending_output_bytes = len;
-    ctx->streaming.pending_output_zero_copy = zero_copy;
+    ctx->streaming.pending_meta.bytes = len;
+    ctx->streaming.pending_meta.zero_copy = zero_copy;
 
     /* Backpressure metric: streaming output returned NGX_AGAIN */
     NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
@@ -1313,7 +1313,7 @@ ngx_http_markdown_streaming_record_pending_ttfb(
         || ctx->streaming.ttfb.feed_start_ms == 0
         || ngx_http_markdown_metrics == NULL
         || !ngx_http_markdown_streaming_delivery_ok(rc)
-        || !ctx->streaming.pending_has_data)
+        || !ctx->streaming.pending_meta.has_data)
     {
         return;
     }
@@ -1335,20 +1335,20 @@ ngx_http_markdown_streaming_account_pending_output(
     ngx_http_markdown_ctx_t *ctx, ngx_int_t rc)
 {
     if (ngx_http_markdown_streaming_delivery_ok(rc)
-        && ctx->streaming.pending_output_bytes > 0)
+        && ctx->streaming.pending_meta.bytes > 0)
     {
         NGX_HTTP_MARKDOWN_METRIC_ADD(
             streaming.selection.output_bytes_total,
-            (ngx_atomic_int_t) ctx->streaming.pending_output_bytes);
-        if (ctx->streaming.pending_output_zero_copy) {
+            (ngx_atomic_int_t) ctx->streaming.pending_meta.bytes);
+        if (ctx->streaming.pending_meta.zero_copy) {
             NGX_HTTP_MARKDOWN_METRIC_INC(perf.zero_copy_output_total);
         } else {
             NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
         }
     }
 
-    ctx->streaming.pending_output_bytes = 0;
-    ctx->streaming.pending_output_zero_copy = 0;
+    ctx->streaming.pending_meta.bytes = 0;
+    ctx->streaming.pending_meta.zero_copy = 0;
 }
 
 
@@ -1464,7 +1464,7 @@ ngx_http_markdown_streaming_resume_pending(
      * the latch, so future re-entry does not observe a stale
      * flag from a prior send_output NGX_AGAIN.
      */
-    ctx->streaming.pending_has_data = 0;
+    ctx->streaming.pending_meta.has_data = 0;
 
     /*
      * Account for deferred output bytes that were saved on
@@ -3294,7 +3294,7 @@ ngx_http_markdown_streaming_send_failopen_chain(
         }
 
         ctx->streaming.pending_output = out;
-        ctx->streaming.pending_has_data = 1;
+        ctx->streaming.pending_meta.has_data = 1;
         ctx->streaming.completion.pending_failopen_delivery =
             (!ctx->eligible) ? 1 : 0;
 
