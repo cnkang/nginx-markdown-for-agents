@@ -318,6 +318,8 @@ static ngx_uint_t g_log_decision_calls = 0;
 static ngx_uint_t g_palloc_fail_once = 0;
 static ngx_uint_t g_pcalloc_fail_once = 0;
 static ngx_uint_t g_alloc_chain_fail_once = 0;
+static ngx_uint_t g_alloc_chain_fail_after = 0;
+static ngx_uint_t g_alloc_chain_call_count = 0;
 static ngx_uint_t g_calloc_buf_fail_once = 0;
 static ngx_uint_t g_pool_cleanup_fail_once = 0;
 static ngx_str_t g_complex_value = { 2, (u_char *) "on" };
@@ -595,6 +597,12 @@ ngx_alloc_chain_link(ngx_pool_t *pool)
     UNUSED(pool);
     if (g_alloc_chain_fail_once) {
         g_alloc_chain_fail_once = 0;
+        return NULL;
+    }
+    g_alloc_chain_call_count++;
+    if (g_alloc_chain_fail_after > 0
+        && g_alloc_chain_call_count == g_alloc_chain_fail_after)
+    {
         return NULL;
     }
     return calloc(1, sizeof(ngx_chain_t));
@@ -1260,6 +1268,8 @@ reset_globals(void)
     g_palloc_fail_once = 0;
     g_pcalloc_fail_once = 0;
     g_alloc_chain_fail_once = 0;
+    g_alloc_chain_fail_after = 0;
+    g_alloc_chain_call_count = 0;
     g_calloc_buf_fail_once = 0;
     g_pool_cleanup_fail_once = 0;
     g_complex_value = (ngx_str_t) { 2, (u_char *) "on" };
@@ -1759,11 +1769,13 @@ test_send_output_error_and_deferred_paths(void)
         "chain-link allocation failure must not latch terminal sent");
 
     r.buffered = 0;
+    ctx.streaming.pending_output = (ngx_chain_t *) (uintptr_t) 0x1;
     rc = ngx_http_markdown_streaming_handle_backpressure(&r, &ctx);
     TEST_ASSERT(rc == NGX_AGAIN,
         "backpressure helper should return NGX_AGAIN");
     TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
         "backpressure helper should set buffered flag");
+    ctx.streaming.pending_output = NULL;
 
     ctx.streaming.completion.failure_recorded = 0;
     g_next_body_filter_rc = NGX_AGAIN;
@@ -2864,6 +2876,8 @@ test_process_chain_and_body_filter_deep_paths(void)
         "process_chain should propagate output backpressure");
     TEST_ASSERT(in_buf.pos == in_buf.last,
         "consumed upstream input must advance when output returns NGX_AGAIN");
+    ctx.streaming.pending_output = NULL;
+    ctx.streaming.pending_has_data = 0;
 
     /*
      * Precise test: prebuffer append succeeds, replay append fails,
@@ -3435,6 +3449,140 @@ test_failopen_passthrough_again_pending(void)
 }
 
 /*
+ * Exercise the production input-lifecycle helpers added for generic
+ * downstream backpressure.  These assertions call the real static helpers
+ * from ngx_http_markdown_streaming_impl.h rather than simulating their state.
+ */
+static void
+test_pending_input_production_lifecycle(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_chain_t              current;
+    ngx_chain_t              future;
+    ngx_chain_t              future_tail;
+    ngx_chain_t              pending_output;
+    ngx_buf_t                current_buf;
+    ngx_buf_t                future_buf;
+    ngx_buf_t                future_tail_buf;
+    ngx_buf_t                pending_buf;
+    ngx_chain_t             *fallback_cl;
+    ngx_flag_t               last_buf;
+    ngx_int_t                rc;
+    u_char                   current_data[] = "terminal";
+    u_char                   future_data[] = "future";
+
+    TEST_SUBSECTION("production pending-input lifecycle");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+
+    ngx_memzero(&current, sizeof(current));
+    ngx_memzero(&future, sizeof(future));
+    ngx_memzero(&future_tail, sizeof(future_tail));
+    ngx_memzero(&pending_output, sizeof(pending_output));
+    ngx_memzero(&current_buf, sizeof(current_buf));
+    ngx_memzero(&future_buf, sizeof(future_buf));
+    ngx_memzero(&future_tail_buf, sizeof(future_tail_buf));
+    ngx_memzero(&pending_buf, sizeof(pending_buf));
+
+    current.buf = &current_buf;
+    current_buf.pos = current_data;
+    current_buf.last = current_data + sizeof(current_data) - 1;
+    current_buf.last_buf = 1;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x41;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    g_streaming_feed_rc = ERROR_SUCCESS;
+    g_streaming_feed_out_data = current_data;
+    g_streaming_feed_out_len = sizeof(current_data) - 1;
+    g_next_body_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_streaming_process_chain(
+        &r, &ctx, &conf, &current, &last_buf, &fallback_cl);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "terminal current link should propagate output backpressure");
+    TEST_ASSERT(current_buf.pos == current_buf.last,
+        "terminal current link should be consumed exactly once");
+    TEST_ASSERT(ctx.streaming.completion.upstream_terminal_seen == 1,
+        "current terminal must latch EOF without a queued remainder");
+
+    ctx.streaming.pending_input.bytes = 3;
+    ctx.streaming.pending_input.links = 1;
+    conf.max_size = 4;
+    future.buf = &future_buf;
+    future_buf.pos = future_data;
+    future_buf.last = future_data + sizeof(future_data) - 1;
+    rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+        &r, &ctx, &conf, &future);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "retained input beyond the effective body limit must fail");
+    TEST_ASSERT(ctx.streaming.pending_input.head == NULL
+                && ctx.streaming.pending_input.bytes == 3
+                && ctx.streaming.pending_input.links == 1,
+        "budget rejection must leave the pending queue unchanged");
+
+    ngx_http_markdown_streaming_pending_input_clear(&ctx);
+    conf.max_size = 0;
+    future.next = &future_tail;
+    future_tail.buf = &future_tail_buf;
+    future_tail_buf.pos = future_data;
+    future_tail_buf.last = future_data + 1;
+    g_alloc_chain_fail_after = 2;
+    g_alloc_chain_call_count = 0;
+    rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+        &r, &ctx, &conf, &future);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "a later chain-link allocation failure must reject the batch");
+    TEST_ASSERT(ctx.streaming.pending_input.head == NULL
+                && ctx.streaming.pending_input.tail == NULL
+                && ctx.streaming.pending_input.bytes == 0
+                && ctx.streaming.pending_input.links == 0,
+        "partial allocation failure must not publish a partial queue");
+    g_alloc_chain_fail_after = 0;
+    future.next = NULL;
+
+    ngx_http_markdown_streaming_pending_input_clear(&ctx);
+    conf.max_size = 0;
+    ctx.streaming.pending_output = &pending_output;
+    ctx.streaming.pending_has_data = 0;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x42;
+    future_buf.pos = future_data;
+    future_buf.last = future_data + sizeof(future_data) - 1;
+    rc = ngx_http_markdown_streaming_body_filter(&r, &future);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "an empty terminal pending output must still defer future input");
+    TEST_ASSERT(ctx.streaming.pending_input.head != NULL
+                && future_buf.pos != future_buf.last,
+        "future input must be retained without feeding while output is pending");
+
+    ctx.streaming.pending_output = NULL;
+    ngx_http_markdown_streaming_pending_input_clear(&ctx);
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x43;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    rc = ngx_http_markdown_streaming_handle_postcommit_error(
+        &r, &ctx, &conf, ERROR_POST_COMMIT);
+    TEST_ASSERT(ctx.streaming.input_disposition
+                == NGX_HTTP_MD_INPUT_TERMINAL,
+        "post-commit termination must select TERMINAL input disposition");
+    ctx.streaming.completion.upstream_terminal_seen = 1;
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "terminal pending output should complete after downstream drain");
+    TEST_ASSERT(ctx.streaming.completion.upstream_terminal_seen == 0,
+        "terminal drain must not re-enter upstream EOF finalization");
+
+    TEST_PASS("production pending-input lifecycle covered");
+}
+
+/*
  * Test entry point.  Runs all streaming_impl unit test functions in
  * sequence.  Prints a banner before and after the test run.  Returns 0
  * on success; individual test assertions abort via TEST_ASSERT on failure.
@@ -3460,6 +3608,7 @@ main(void)
     test_process_chain_and_body_filter_deep_paths();
     test_streaming_gap_branches();
     test_failopen_passthrough_again_pending();
+    test_pending_input_production_lifecycle();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

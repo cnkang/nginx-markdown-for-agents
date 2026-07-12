@@ -1116,6 +1116,10 @@ typedef struct {
             /* Deferred terminal last_buf (backpressure during finalize) */
             ngx_flag_t                    finalize_pending_lastbuf;
 
+            /* Upstream EOF survives output backpressure independently of
+             * whether any remainder was queued in pending_input. */
+            ngx_flag_t                    upstream_terminal_seen;
+
             /* Metrics deferred for terminal last_buf (backpressure on
              * terminal send — set when send_output(last_buf=1)
              * returns NGX_AGAIN, cleared when resume drain succeeds

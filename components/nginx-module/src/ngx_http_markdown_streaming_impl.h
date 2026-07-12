@@ -132,6 +132,19 @@ ngx_http_markdown_streaming_finalize_request(
     ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf);
 
+static void
+ngx_http_markdown_streaming_pending_input_clear(
+    ngx_http_markdown_ctx_t *ctx);
+
+static ngx_int_t
+ngx_http_markdown_streaming_process_chain(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_chain_t *in,
+    ngx_flag_t *last_buf,
+    ngx_chain_t **fallback_cl);
+
 /*
  * Pre-Commit fallback from streaming to full-buffer path.
  *
@@ -791,90 +804,121 @@ ngx_http_markdown_streaming_pending_input_is_empty(
     return (ctx->streaming.pending_input.head == NULL) ? 1 : 0;
 }
 
-/*
- * Enqueue a single chain link to pending_input.
- *
- * Copies the ngx_chain_t link (pool-allocated), shares the ngx_buf_t.
- * Does NOT advance buf->pos — the buffer stays busy in u->busy_bufs so
- * NGINX retains it.  Captures terminal_seen from last_buf/last_in_chain.
- *
- * Empty terminal buffers (size == 0) latch terminal_seen but are not
- * enqueued as links (no data to feed later).
- *
- * Returns NGX_OK on success, NGX_ERROR on allocation failure or budget
- * overflow (caller must route through the appropriate error path).
- */
-static ngx_int_t
-ngx_http_markdown_streaming_pending_input_enqueue_link(
-    ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
-    ngx_chain_t *cl)
+static void
+ngx_http_markdown_streaming_abandon_input(ngx_chain_t *in)
 {
-    size_t        buf_size;
-    ngx_chain_t  *link;
-
-    if (cl == NULL || cl->buf == NULL) {
-        return NGX_OK;
+    for (; in != NULL; in = in->next) {
+        if (in->buf != NULL) {
+            in->buf->pos = in->buf->last;
+        }
     }
-
-    /* Capture terminal signal regardless of buffer size */
-    if (cl->buf->last_buf
-        || (r != r->main && cl->buf->last_in_chain))
-    {
-        ctx->streaming.pending_input.terminal_seen = 1;
-    }
-
-    buf_size = ngx_buf_size(cl->buf);
-    if (buf_size == 0) {
-        return NGX_OK;
-    }
-
-    link = ngx_alloc_chain_link(r->pool);
-    if (link == NULL) {
-        return NGX_ERROR;
-    }
-
-    link->buf = cl->buf;
-    link->next = NULL;
-
-    if (ctx->streaming.pending_input.tail != NULL) {
-        ctx->streaming.pending_input.tail->next = link;
-    } else {
-        ctx->streaming.pending_input.head = link;
-    }
-    ctx->streaming.pending_input.tail = link;
-    ctx->streaming.pending_input.bytes += buf_size;
-    ctx->streaming.pending_input.links++;
-
-    return NGX_OK;
 }
 
 /*
  * Enqueue all chain links starting from `cl` (the remainder after
- * a CONSUMED + NGX_AGAIN chunk).  Each link is enqueued individually
- * so terminal_seen is captured from the correct node.
+ * a CONSUMED + NGX_AGAIN chunk).  The complete chain is preflighted and
+ * built off-queue, then appended atomically so failures cannot expose a
+ * partially retained continuation.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_pending_input_enqueue_remainder(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
     ngx_chain_t *cl)
 {
-    ngx_int_t  rc;
+    size_t        added_bytes;
+    size_t        buf_size;
+    size_t        limit;
+    ngx_uint_t    added_links;
+    ngx_flag_t    terminal_seen;
+    ngx_chain_t  *head;
+    ngx_chain_t  *link;
+    ngx_chain_t  *tail;
+
+    added_bytes = 0;
+    added_links = 0;
+    terminal_seen = 0;
+
+    for (ngx_chain_t *scan = cl; scan != NULL; scan = scan->next) {
+        if (scan->buf == NULL) {
+            continue;
+        }
+
+        if (scan->buf->last_buf
+            || (r != r->main && scan->buf->last_in_chain))
+        {
+            terminal_seen = 1;
+        }
+
+        buf_size = ngx_http_markdown_buf_len_safe(scan->buf);
+        if (buf_size == 0) {
+            continue;
+        }
+
+        if (buf_size > (size_t) -1 - added_bytes
+            || added_links == (ngx_uint_t) -1)
+        {
+            return NGX_ERROR;
+        }
+        added_bytes += buf_size;
+        added_links++;
+    }
+
+    limit = ngx_http_markdown_effective_body_buffer_limit(
+        ctx->effective_conf, conf);
+    if (added_bytes > (size_t) -1 - ctx->streaming.pending_input.bytes
+        || added_links > (ngx_uint_t) -1
+                         - ctx->streaming.pending_input.links
+        || (limit > 0
+            && (ctx->streaming.pending_input.bytes > limit
+                || added_bytes > limit
+                                 - ctx->streaming.pending_input.bytes)))
+    {
+        return NGX_ERROR;
+    }
+
+    head = NULL;
+    tail = NULL;
 
     for (; cl != NULL; cl = cl->next) {
-        rc = ngx_http_markdown_streaming_pending_input_enqueue_link(
-            r, ctx, cl);
-        if (rc != NGX_OK) {
-            return rc;
+        if (cl->buf == NULL
+            || ngx_http_markdown_buf_len_safe(cl->buf) == 0)
+        {
+            continue;
         }
+
+        link = ngx_alloc_chain_link(r->pool);
+        if (link == NULL) {
+            return NGX_ERROR;
+        }
+        link->buf = cl->buf;
+        link->next = NULL;
+
+        if (tail != NULL) {
+            tail->next = link;
+        } else {
+            head = link;
+        }
+        tail = link;
     }
+
+    if (ctx->streaming.pending_input.tail != NULL) {
+        ctx->streaming.pending_input.tail->next = head;
+    } else {
+        ctx->streaming.pending_input.head = head;
+    }
+    if (tail != NULL) {
+        ctx->streaming.pending_input.tail = tail;
+    }
+    ctx->streaming.pending_input.bytes += added_bytes;
+    ctx->streaming.pending_input.links += added_links;
+    ctx->streaming.pending_input.terminal_seen |= terminal_seen;
 
     return NGX_OK;
 }
 
-
- *
+/*
  * One-shot latch: only fires once, only when downstream confirmed
  * delivery (NGX_OK or NGX_DONE).
  */
@@ -1620,6 +1664,8 @@ ngx_http_markdown_streaming_handle_postcommit_error(
     uint32_t error_code)
 {
     ngx_int_t  rc;
+
+    ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
         "markdown: Post-Commit error, "
@@ -3496,6 +3542,10 @@ ngx_http_markdown_streaming_ensure_handle(
         return NGX_OK;
     }
 
+    if (ctx->streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
+        return NGX_ERROR;
+    }
+
     rc = ngx_http_markdown_streaming_init_handle(
         r, ctx, conf);
 
@@ -3603,6 +3653,13 @@ ngx_http_markdown_streaming_handle_null_input(
         return rc;
     }
 
+    if (ctx->streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
+        ctx->streaming.completion.upstream_terminal_seen = 0;
+        ngx_http_markdown_streaming_pending_input_clear(ctx);
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
+        return rc;
+    }
+
     /* Step 2: Process pending input if any */
     if (!ngx_http_markdown_streaming_pending_input_is_empty(ctx)) {
         /*
@@ -3647,9 +3704,10 @@ ngx_http_markdown_streaming_handle_null_input(
      * pending_input has been consumed.
      */
     if (ngx_http_markdown_streaming_pending_input_is_empty(ctx)
-        && ctx->streaming.pending_input.terminal_seen
+        && ctx->streaming.completion.upstream_terminal_seen
         && ctx->eligible)
     {
+        ctx->streaming.completion.upstream_terminal_seen = 0;
         ctx->streaming.pending_input.terminal_seen = 0;
         return ngx_http_markdown_streaming_finalize_request(
             r, ctx, conf);
@@ -3764,6 +3822,7 @@ ngx_http_markdown_streaming_process_chain(
             || (r != r->main && cl->buf->last_in_chain))
         {
             *last_buf = 1;
+            ctx->streaming.completion.upstream_terminal_seen = 1;
         }
 
         rc = ngx_http_markdown_streaming_process_chunk(
@@ -3771,6 +3830,15 @@ ngx_http_markdown_streaming_process_chain(
 
         rc = ngx_http_markdown_streaming_handle_chunk_result(
             r, ctx, in, rc);
+
+        if (ctx->streaming.input_disposition
+            == NGX_HTTP_MD_INPUT_TERMINAL)
+        {
+            ngx_http_markdown_streaming_abandon_input(cl);
+            ngx_http_markdown_streaming_pending_input_clear(ctx);
+            ngx_http_markdown_streaming_sync_buffered(r, ctx);
+            return rc;
+        }
 
         if (rc != NGX_OK) {
             if (rc == NGX_AGAIN) {
@@ -3801,7 +3869,7 @@ ngx_http_markdown_streaming_process_chain(
                  */
                 if (cl->next != NULL) {
                     rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
-                        r, ctx, cl->next);
+                        r, ctx, conf, cl->next);
                     if (rc != NGX_OK) {
                         return rc;
                     }
@@ -3882,11 +3950,46 @@ ngx_http_markdown_streaming_body_filter(
             r, ctx, conf);
     }
 
+    if (ctx->streaming.pending_output != NULL) {
+        if (ctx->streaming.input_disposition
+            == NGX_HTTP_MD_INPUT_TERMINAL)
+        {
+            ngx_http_markdown_streaming_abandon_input(in);
+            ngx_http_markdown_streaming_sync_buffered(r, ctx);
+            return NGX_AGAIN;
+        }
+        rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+            r, ctx, conf, in);
+        if (rc != NGX_OK) {
+            if (ctx->streaming.commit_state
+                == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+            {
+                rc = ngx_http_markdown_streaming_handle_postcommit_error(
+                    r, ctx, conf, ERROR_BUDGET_EXCEEDED);
+                ngx_http_markdown_streaming_abandon_input(in);
+                return rc;
+            }
+            rc = ngx_http_markdown_streaming_precommit_error(
+                r, ctx, conf, ERROR_BUDGET_EXCEEDED);
+            if (rc == NGX_DECLINED && !ctx->eligible) {
+                return ngx_http_markdown_streaming_failopen_passthrough(
+                    r, ctx, in);
+            }
+            return rc;
+        }
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
+        return NGX_AGAIN;
+    }
+
     /* Initialize streaming handle on first call */
     rc = ngx_http_markdown_streaming_ensure_handle(
         r, ctx, conf, in);
     if (rc != NGX_OK) {
         return rc;
+    }
+
+    if (ctx->streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
+        return NGX_OK;
     }
 
     if (!ctx->eligible || ctx->streaming.handle == NULL) {
@@ -3917,6 +4020,7 @@ ngx_http_markdown_streaming_body_filter(
 
     /* Handle last_buf: finalize */
     if (last_buf) {
+        ctx->streaming.completion.upstream_terminal_seen = 0;
         rc = ngx_http_markdown_streaming_finalize_request(
             r, ctx, conf);
 
