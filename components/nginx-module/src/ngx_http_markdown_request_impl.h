@@ -1279,14 +1279,28 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     /*
      * A fail-open send can mark the request ineligible while downstream owns
      * a pending streaming chain after NGX_AGAIN.  Drain that chain before the
-     * generic ineligible passthrough clears our buffered bit.  NGINX normally
-     * re-enters filters with NULL input; reject unexpected new input until the
-     * retained chain has drained so it cannot be overwritten or skipped.
+     * generic ineligible passthrough clears our buffered bit.
+     *
+     * When new non-NULL input arrives while pending output exists, enqueue
+     * it to pending_input instead of rejecting it.  Rejecting (returning
+     * NGX_AGAIN without retaining the chain) would strand the input in
+     * u->busy_bufs — the same lost-continuation bug as process_chain.
+     * The enqueue copies chain links (sharing ngx_buf_t) so NGINX keeps
+     * the busy buffers alive until we feed them to Rust after the
+     * pending output drains.
      */
     if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_STREAMING
         && ctx->streaming.pending_has_data)
     {
         if (in != NULL) {
+            ngx_int_t  enq_rc;
+
+            enq_rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+                r, ctx, in);
+            if (enq_rc != NGX_OK) {
+                return enq_rc;
+            }
+            ngx_http_markdown_streaming_sync_buffered(r, ctx);
             return NGX_AGAIN;
         }
         return ngx_http_markdown_streaming_body_filter(r, NULL);
