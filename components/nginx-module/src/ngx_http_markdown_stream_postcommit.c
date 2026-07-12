@@ -481,8 +481,8 @@ ngx_http_markdown_stream_postcommit_send_chain(
         }
 
         ctx->streaming.pending_output = out;
-        ctx->streaming.pending_has_data = pending_has_data;
-        ctx->streaming.pending_output_bytes = pending_output_bytes;
+        ctx->streaming.pending_meta.has_data = pending_has_data;
+        ctx->streaming.pending_meta.bytes = pending_output_bytes;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 #endif
     }

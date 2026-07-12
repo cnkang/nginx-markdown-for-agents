@@ -800,9 +800,9 @@ static void test_safe_finish_backpressure_preserves_pending_chain(void)
                 "backpressured send bypassed the poison top filter");
     TEST_ASSERT(ctx.streaming.pending_output == test_output_filter_chain,
                 "pending chain should be the pool-owned output chain");
-    TEST_ASSERT(ctx.streaming.pending_has_data == 1,
+    TEST_ASSERT(ctx.streaming.pending_meta.has_data == 1,
                 "pending chain should be marked as data-bearing");
-    TEST_ASSERT(ctx.streaming.pending_output_bytes == sizeof(closing) - 1,
+    TEST_ASSERT(ctx.streaming.pending_meta.bytes == sizeof(closing) - 1,
                 "pending byte count should match closing length");
     TEST_ASSERT((test_request.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
                 "request should be marked buffered on backpressure");
@@ -1274,7 +1274,7 @@ static void test_safe_finish_no_closing_bytes_backpressure(void)
                 "should propagate NGX_AGAIN");
     TEST_ASSERT(ctx.streaming.pending_output != NULL,
                 "pending_output should be set on backpressure");
-    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+    TEST_ASSERT(ctx.streaming.pending_meta.has_data == 0,
                 "pending_has_data should be 0 (terminal only)");
     TEST_ASSERT(
         (test_request.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,

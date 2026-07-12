@@ -1047,14 +1047,21 @@ typedef struct {
             ngx_flag_t                        recorded;
         } ttfb;
 
-        /* Pending output chain has non-empty data (for TTFB resume path) */
-        ngx_flag_t                        pending_has_data;
+        /*
+         * Pending-output metadata: auxiliary flags/counters describing the
+         * pending_output chain. Grouped into a sub-struct to keep the parent
+         * streaming struct below SonarCloud c:S1820 20-field limit.
+         */
+        struct {
+            /* Pending output chain has non-empty data (for TTFB resume path) */
+            ngx_flag_t                        has_data;
 
-        /* Pending output byte count (for deferred metric accounting) */
-        size_t                            pending_output_bytes;
+            /* Pending output byte count (for deferred metric accounting) */
+            size_t                            bytes;
 
-        /* Pending output delivery mode for deferred perf accounting. */
-        ngx_flag_t                        pending_output_zero_copy;
+            /* Pending output delivery mode for deferred perf accounting. */
+            ngx_flag_t                        zero_copy;
+        } pending_meta;
 
         /* Pre-Commit prebuffer for fallback */
         ngx_http_markdown_buffer_t        prebuffer;

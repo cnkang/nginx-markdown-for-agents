@@ -457,9 +457,9 @@ static void test_precommit_pass_replay_html_backpressure(void)
         "output filter should receive replay chain");
     TEST_ASSERT(ctx.streaming.pending_output == &fc,
         "replay chain saved as pending output");
-    TEST_ASSERT(ctx.streaming.pending_has_data == 1,
+    TEST_ASSERT(ctx.streaming.pending_meta.has_data == 1,
         "replay pending chain records data");
-    TEST_ASSERT(ctx.streaming.pending_output_bytes == 100,
+    TEST_ASSERT(ctx.streaming.pending_meta.bytes == 100,
         "replay pending byte count preserved");
     TEST_ASSERT(ctx.streaming.completion.pending_failopen_delivery == 1,
         "fail-open delivery latch set for replay pending chain");
