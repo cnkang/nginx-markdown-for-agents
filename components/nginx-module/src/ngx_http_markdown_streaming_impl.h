@@ -3782,6 +3782,55 @@ ngx_http_markdown_streaming_append_replay_chunk(
 }
 
 /*
+ * Handle NGX_AGAIN returned from process_chunk for a single chain link.
+ *
+ * RETAIN disposition: fail-open shared ngx_buf_t — do NOT advance pos.
+ * The fail-open clone (pending_output) references the same buf and covers
+ * the full input chain, so cl->next must NOT be enqueued separately.
+ *
+ * CONSUMED disposition: Rust ate this chunk. Advance pos so NGINX can
+ * release the busy buffer, then enqueue the remainder (cl->next) to
+ * pending_input so it is not stranded in u->busy_bufs (NGINX does not
+ * re-submit busy buffers to the body filter).
+ *
+ * terminal_seen is captured during enqueue (from last_buf/last_in_chain
+ * on any remaining link); finalize_after_pending is handled by
+ * terminal_seen in handle_null_input, not here.
+ *
+ * Returns NGX_AGAIN (after sync) or an enqueue error rc.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_handle_consumed_again(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_chain_t *cl)
+{
+    ngx_int_t  rc;
+
+    if (ctx->streaming.input_disposition
+        == NGX_HTTP_MD_INPUT_RETAIN)
+    {
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
+        return NGX_AGAIN;
+    }
+
+    /* CONSUMED: advance pos so NGINX releases the busy buffer. */
+    cl->buf->pos = cl->buf->last;
+
+    if (cl->next != NULL) {
+        rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+            r, ctx, conf, cl->next);
+        if (rc != NGX_OK) {
+            return rc;
+        }
+    }
+
+    ngx_http_markdown_streaming_sync_buffered(r, ctx);
+    return NGX_AGAIN;
+}
+
+/*
  * Process every buffer in an input chain through the streaming converter.
  *
  * Tracks terminal buffers, preserves Pre-Commit buffer positions for fail-open
@@ -3842,47 +3891,8 @@ ngx_http_markdown_streaming_process_chain(
 
         if (rc != NGX_OK) {
             if (rc == NGX_AGAIN) {
-                if (ctx->streaming.input_disposition
-                    == NGX_HTTP_MD_INPUT_RETAIN)
-                {
-                    /*
-                     * Fail-open shared ngx_buf_t: do NOT advance pos.
-                     * The fail-open clone (pending_output) references
-                     * the same buf and covers the full input chain.
-                     * Do NOT enqueue cl->next — the clone handles it.
-                     */
-                    ngx_http_markdown_streaming_sync_buffered(r, ctx);
-                    return NGX_AGAIN;
-                }
-
-                /*
-                 * CONSUMED: Rust ate this chunk.  Advance pos so NGINX
-                 * can release the busy buffer and resume reading.
-                 */
-                cl->buf->pos = cl->buf->last;
-
-                /*
-                 * Enqueue the remainder of the input chain (cl->next)
-                 * to pending_input so it is not stranded in u->busy_bufs.
-                 * NGINX does not re-submit busy buffers to the body
-                 * filter; without this, cl->next would be lost.
-                 */
-                if (cl->next != NULL) {
-                    rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
-                        r, ctx, conf, cl->next);
-                    if (rc != NGX_OK) {
-                        return rc;
-                    }
-                }
-
-                /*
-                 * terminal_seen was captured during enqueue (from
-                 * last_buf/last_in_chain on any remaining link).
-                 * Do NOT set finalize_after_pending here — it is now
-                 * handled by terminal_seen in handle_null_input.
-                 */
-                ngx_http_markdown_streaming_sync_buffered(r, ctx);
-                return NGX_AGAIN;
+                return ngx_http_markdown_streaming_handle_consumed_again(
+                    r, ctx, conf, cl);
             }
             if (rc == NGX_DONE) {
                 *fallback_cl = cl;
