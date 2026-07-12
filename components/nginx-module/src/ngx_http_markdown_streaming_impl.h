@@ -3765,6 +3765,41 @@ ngx_http_markdown_streaming_continue_failopen_input(
 }
 
 
+/* Terminate fail-open after older downstream-owned output has drained. */
+static ngx_int_t
+ngx_http_markdown_streaming_abort_failopen_after_pending(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    uint32_t  error_code;
+
+    error_code = ctx->streaming.completion.failopen_abort_error_code;
+    ctx->streaming.completion.failopen_abort_after_pending = 0;
+    ctx->streaming.completion.failopen_abort_error_code = ERROR_SUCCESS;
+    ctx->streaming.completion.upstream_terminal_seen = 0;
+    ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
+    ngx_http_markdown_streaming_pending_input_abandon_and_clear(ctx);
+    if (!ctx->streaming.completion.failure_recorded) {
+        if (error_code == ERROR_MEMORY_LIMIT
+            || error_code == ERROR_BUDGET_EXCEEDED)
+        {
+            ctx->streaming.reason =
+                NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_BUDGET_EXCEEDED;
+            NGX_HTTP_MARKDOWN_METRIC_INC(streaming.budget_exceeded_total);
+            NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
+            ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
+                ngx_http_markdown_reason_streaming_budget_exceeded());
+        } else {
+            NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
+        }
+    }
+    ngx_http_markdown_streaming_record_postcommit_failure(r, ctx, conf);
+    ngx_http_markdown_streaming_sync_buffered(r, ctx);
+    return NGX_ERROR;
+}
+
+
 /*
  * Resume pending output when the body filter is re-entered with NULL input.
  *
@@ -3815,33 +3850,8 @@ ngx_http_markdown_streaming_handle_null_input(
      * instead of allowing later input to bypass the missing chunk.
      */
     if (ctx->streaming.completion.failopen_abort_after_pending) {
-        uint32_t  error_code;
-
-        error_code = ctx->streaming.completion.failopen_abort_error_code;
-        ctx->streaming.completion.failopen_abort_after_pending = 0;
-        ctx->streaming.completion.failopen_abort_error_code = ERROR_SUCCESS;
-        ctx->streaming.completion.upstream_terminal_seen = 0;
-        ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
-        ngx_http_markdown_streaming_pending_input_abandon_and_clear(ctx);
-        if (!ctx->streaming.completion.failure_recorded) {
-            if (error_code == ERROR_MEMORY_LIMIT
-                || error_code == ERROR_BUDGET_EXCEEDED)
-            {
-                ctx->streaming.reason =
-                    NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_BUDGET_EXCEEDED;
-                NGX_HTTP_MARKDOWN_METRIC_INC(
-                    streaming.budget_exceeded_total);
-                NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
-                ngx_http_markdown_log_decision(r, conf,
-                    ctx->effective_conf,
-                    ngx_http_markdown_reason_streaming_budget_exceeded());
-            } else {
-                NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
-            }
-        }
-        ngx_http_markdown_streaming_record_postcommit_failure(r, ctx, conf);
-        ngx_http_markdown_streaming_sync_buffered(r, ctx);
-        return NGX_ERROR;
+        return ngx_http_markdown_streaming_abort_failopen_after_pending(
+            r, ctx, conf);
     }
 
     if (ctx->streaming.completion.failopen_active
