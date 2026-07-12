@@ -1290,14 +1290,36 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
      * pending output drains.
      */
     if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_STREAMING
-        && ctx->streaming.pending_has_data)
+        && ctx->streaming.pending_output != NULL)
     {
         if (in != NULL) {
             ngx_int_t  enq_rc;
 
+            if (ctx->streaming.input_disposition
+                == NGX_HTTP_MD_INPUT_TERMINAL)
+            {
+                ngx_http_markdown_streaming_abandon_input(in);
+                ngx_http_markdown_streaming_sync_buffered(r, ctx);
+                return NGX_AGAIN;
+            }
+
             enq_rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
-                r, ctx, in);
+                r, ctx, conf, in);
             if (enq_rc != NGX_OK) {
+                if (ctx->streaming.commit_state
+                    == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+                {
+                    enq_rc = ngx_http_markdown_streaming_handle_postcommit_error(
+                        r, ctx, conf, ERROR_BUDGET_EXCEEDED);
+                    ngx_http_markdown_streaming_abandon_input(in);
+                    return enq_rc;
+                }
+                enq_rc = ngx_http_markdown_streaming_precommit_error(
+                    r, ctx, conf, ERROR_BUDGET_EXCEEDED);
+                if (enq_rc == NGX_DECLINED && !ctx->eligible) {
+                    return ngx_http_markdown_streaming_failopen_passthrough(
+                        r, ctx, in);
+                }
                 return enq_rc;
             }
             ngx_http_markdown_streaming_sync_buffered(r, ctx);
