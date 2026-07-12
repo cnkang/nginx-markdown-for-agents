@@ -722,42 +722,12 @@ ngx_http_markdown_streaming_update_headers(
 
 
 /*
- * Free Rust-owned buffers in a pending chain.
- *
- * Iterates chain links, releasing any temporary buffer data
- * via markdown_streaming_output_free() and NULLing pointers
- * to prevent use-after-free.
- */
-static void
-ngx_http_markdown_streaming_free_pending_chain(ngx_chain_t *chain)
-{
-    for (ngx_chain_t *cl = chain; cl != NULL; cl = cl->next) {
-        if (cl->buf == NULL || !cl->buf->temporary) {
-            continue;
-        }
-
-        {
-            size_t  buf_len;
-
-            buf_len = ngx_http_markdown_buf_len_safe(cl->buf);
-            if (buf_len > 0) {
-                markdown_streaming_output_free(cl->buf->pos, buf_len);
-            }
-        }
-
-        cl->buf->pos = NULL;
-        cl->buf->last = NULL;
-    }
-}
-
-
-/*
  * Synchronize r->buffered with the full streaming pending state.
  *
- * Sets NGX_HTTP_MARKDOWN_BUFFERED when any of: pending_output, pending_input,
- * finalize_after_pending, or finalize_pending_lastbuf is active.  Clears it
- * otherwise.  This is the single authority for the buffered bit on the
- * streaming path — individual helpers must not set/clear it directly.
+ * Sets NGX_HTTP_MARKDOWN_BUFFERED when any output, input, finalize, or
+ * fail-open abort continuation remains pending.  Clears it otherwise.  This
+ * is the single authority for the buffered bit on the streaming path —
+ * individual helpers must not set/clear it directly.
  */
 static void
 ngx_http_markdown_streaming_sync_buffered(
@@ -767,7 +737,8 @@ ngx_http_markdown_streaming_sync_buffered(
     if (ctx->streaming.pending_output != NULL
         || ctx->streaming.pending_input.head != NULL
         || ctx->streaming.completion.finalize_after_pending
-        || ctx->streaming.completion.finalize_pending_lastbuf)
+        || ctx->streaming.completion.finalize_pending_lastbuf
+        || ctx->streaming.completion.failopen_abort_after_pending)
     {
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
     } else {
@@ -1036,13 +1007,13 @@ ngx_http_markdown_streaming_record_ttfb(
 /*
  * Save output chain as pending on downstream backpressure (NGX_AGAIN).
  *
- * Guards against unexpected re-entry by freeing any existing pending
- * chain before saving the new one.  Sets the buffered flag so NGINX
- * event machinery knows to retry the downstream write.
+ * Guards against unexpected re-entry without modifying the existing
+ * downstream-owned pending chain.  Sets the buffered flag so NGINX event
+ * machinery knows to retry the downstream write.
  *
  * Returns:
  *   NGX_AGAIN  - pending saved successfully
- *   NGX_ERROR  - re-entry detected (old chain freed, request aborted)
+ *   NGX_ERROR  - re-entry detected (old chain remains pending)
  */
 static ngx_int_t
 ngx_http_markdown_streaming_save_pending(
@@ -1058,10 +1029,7 @@ ngx_http_markdown_streaming_save_pending(
                       "re-entry detected, refusing to overwrite "
                       "existing pending chain");
 
-        ngx_http_markdown_streaming_free_pending_chain(
-            ctx->streaming.pending_output);
-        ctx->streaming.pending_output = NULL;
-
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
         return NGX_ERROR;
     }
 
@@ -3123,6 +3091,17 @@ ngx_http_markdown_streaming_init_handle(
     uint32_t                init_rc;
     ngx_int_t               rc;
 
+    /*
+     * Record the conversion attempt before any fallible initialization.
+     * precommit_error records the matching failure, so delaying this until
+     * setup completes would violate attempted >= failed.
+     */
+    if (!ctx->conversion.attempted) {
+        ctx->conversion.attempted = 1;
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_attempted);
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.requests_total);
+    }
+
     rc = ngx_http_markdown_prepare_conversion_options(
         r, conf, ctx->effective_conf, &options);
     if (rc != NGX_OK) {
@@ -3276,12 +3255,6 @@ ngx_http_markdown_streaming_init_handle(
         ctx->streaming.failopen_replay_initialized = 1;
     }
 
-    ctx->conversion.attempted = 1;
-    NGX_HTTP_MARKDOWN_METRIC_INC(
-        conversions_attempted);
-    NGX_HTTP_MARKDOWN_METRIC_INC(
-        streaming.requests_total);
-
     ngx_http_markdown_streaming_start_otel_span(r, ctx, conf);
 
     /* Sync streaming fallback state machine: handle initialized → PRE_COMMIT */
@@ -3399,10 +3372,7 @@ ngx_http_markdown_streaming_send_failopen_chain(
             "re-entry detected, refusing to submit new chain "
             "before old pending output drains (Rule 1)");
 
-        ngx_http_markdown_streaming_free_pending_chain(
-            ctx->streaming.pending_output);
-        ctx->streaming.pending_output = NULL;
-
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
         return NGX_ERROR;
     }
 
@@ -3827,6 +3797,24 @@ ngx_http_markdown_streaming_handle_null_input(
         ctx->streaming.completion.postcommit_error_code = ERROR_SUCCESS;
         return ngx_http_markdown_streaming_handle_postcommit_error(
             r, ctx, conf, error_code);
+    }
+
+    /*
+     * The input that triggered this latch could not be retained and was
+     * abandoned.  After the older downstream-owned output drains, terminate
+     * instead of allowing later input to bypass the missing chunk.
+     */
+    if (ctx->streaming.completion.failopen_abort_after_pending) {
+        ctx->streaming.completion.failopen_abort_after_pending = 0;
+        ctx->streaming.completion.upstream_terminal_seen = 0;
+        ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
+        ngx_http_markdown_streaming_pending_input_clear(ctx);
+        if (ctx->streaming.main_terminal_sent) {
+            ngx_http_markdown_streaming_sync_buffered(r, ctx);
+            return rc;
+        }
+        return ngx_http_markdown_streaming_send_output(
+            r, ctx, NULL, 0, /* last_buf */ 1);
     }
 
     if (ctx->streaming.completion.failopen_active
