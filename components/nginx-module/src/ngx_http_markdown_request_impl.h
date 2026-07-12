@@ -22,6 +22,8 @@
  * Forward declarations for streaming functions defined in
  * ngx_http_markdown_streaming_impl.h (included after this header).
  * Required so call sites in this header see proper prototypes.
+ * Also declared here (instead of the main .c file) so the .c file can
+ * keep all #include directives contiguous at the top (SonarCloud c:S954).
  */
 #ifdef MARKDOWN_STREAMING_ENABLED
 static ngx_http_markdown_path_selection_t
@@ -32,6 +34,20 @@ ngx_http_markdown_select_processing_path(
 static ngx_int_t
 ngx_http_markdown_streaming_body_filter(
     ngx_http_request_t *r, ngx_chain_t *in);
+static void ngx_http_markdown_streaming_sync_buffered(
+    ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx);
+static void ngx_http_markdown_streaming_abandon_input(ngx_chain_t *in);
+static ngx_int_t ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf, ngx_chain_t *cl);
+static ngx_int_t ngx_http_markdown_streaming_handle_postcommit_error(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf, uint32_t error_code);
+static ngx_int_t ngx_http_markdown_streaming_precommit_error(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf, uint32_t error_code);
+static ngx_int_t ngx_http_markdown_streaming_failopen_passthrough(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_chain_t *in);
 #endif
 
 /* Forward declarations for helpers defined in this file */
