@@ -920,11 +920,63 @@ echo "==> Case 4d: zero-copy with slow downstream client (backpressure/NGX_AGAIN
 #   - backpressure_total increased (NGX_AGAIN occurred)
 #   - backpressure_resume_total increased (resume path executed)
 #   - worker PID unchanged (no crash)
-if ! curl -sS --limit-rate 128k --max-time 60 \
-  -D "${RAW_DIR}/zc_slow.hdr" -o "${RAW_DIR}/zc_slow.body" \
-  -H "${ACCEPT_MARKDOWN_HEADER}" \
-  "http://127.0.0.1:${PORT}/streaming-zero-copy/zero-copy-valid" \
+if ! python3 - "${PORT}" "${RAW_DIR}/zc_slow.hdr" \
+  "${RAW_DIR}/zc_slow.body" <<'PYEOF' \
   > "${RAW_DIR}/zc_slow_reader.log" 2>&1
+import http.client
+import socket
+import sys
+import time
+
+port = int(sys.argv[1])
+header_path = sys.argv[2]
+body_path = sys.argv[3]
+rate_bytes_per_second = 128 * 1024
+deadline = time.monotonic() + 60
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+sock.settimeout(10)
+sock.connect(("127.0.0.1", port))
+request = (
+    "GET /streaming-zero-copy/zero-copy-valid HTTP/1.1\r\n"
+    "Host: localhost\r\n"
+    "Accept: text/markdown\r\n"
+    "Connection: close\r\n\r\n"
+)
+sock.sendall(request.encode("ascii"))
+
+# Let the deliberately small receive window fill before consuming headers.
+# This creates real downstream write pressure on fast loopback runners.
+time.sleep(1)
+response = http.client.HTTPResponse(sock)
+response.begin()
+
+with open(header_path, "w", encoding="iso-8859-1") as header_file:
+    header_file.write(f"HTTP/1.1 {response.status} {response.reason}\r\n")
+    for name, value in response.getheaders():
+        header_file.write(f"{name}: {value}\r\n")
+    header_file.write("\r\n")
+
+with open(body_path, "wb") as body_file:
+    while True:
+        if time.monotonic() >= deadline:
+            raise TimeoutError("slow reader exceeded 60-second deadline")
+        started = time.monotonic()
+        chunk = response.read(16 * 1024)
+        if not chunk:
+            break
+        body_file.write(chunk)
+        delay = (len(chunk) / rate_bytes_per_second) \
+            - (time.monotonic() - started)
+        if delay > 0:
+            time.sleep(delay)
+
+response.close()
+sock.close()
+if response.status != 200:
+    raise RuntimeError(f"unexpected HTTP status: {response.status}")
+PYEOF
 then
   echo "FAIL: zero-copy slow downstream reader failed:" >&2
   cat "${RAW_DIR}/zc_slow_reader.log" >&2
