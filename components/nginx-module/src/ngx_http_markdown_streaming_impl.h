@@ -823,7 +823,7 @@ ngx_http_markdown_streaming_abandon_input(ngx_chain_t *in)
  */
 static ngx_int_t
 ngx_http_markdown_streaming_preflight_chain_stats(
-    ngx_http_request_t *r,
+    const ngx_http_request_t *r,
     ngx_chain_t *cl,
     size_t *added_bytes,
     ngx_uint_t *added_links,
@@ -3708,12 +3708,11 @@ ngx_http_markdown_streaming_continue_failopen_input(
     ngx_http_markdown_ctx_t *ctx,
     ngx_chain_t *input_chain)
 {
-    ngx_chain_t  *cl;
     ngx_flag_t    last_buf;
     ngx_int_t     rc;
 
     last_buf = 0;
-    for (cl = input_chain; cl != NULL; cl = cl->next) {
+    for (ngx_chain_t *cl = input_chain; cl != NULL; cl = cl->next) {
         if (cl->buf != NULL
             && (cl->buf->last_buf
                 || (r != r->main && cl->buf->last_in_chain)))
