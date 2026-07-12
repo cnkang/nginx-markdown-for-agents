@@ -153,18 +153,27 @@ def classify_name(name: str) -> str | None:
     return None
 
 
+# Suffix → (regex, match_kind) dispatch table for _iter_names.
+# match_kind: "match" uses .match (anchored), "search" uses .search (unanchored).
+_SUFFIX_MATCHERS = {
+    ".py":    (PY_DEF_RE,    "match", 1),
+    ".rs":    (RUST_FN_RE,    "match", 1),
+    ".sh":    (SHELL_FUNC_RE, "search", None),
+    ".bash":  (SHELL_FUNC_RE, "search", None),
+}
+
+
 def _iter_names(content: str, suffix: str):
     """Yield (name, line_number) for every function/method def in *content*."""
+    entry = _SUFFIX_MATCHERS.get(suffix)
+    if entry is None:
+        return
+    regex, mode, group = entry
     for lineno, line in enumerate(content.splitlines(), start=1):
-        if suffix == ".py":
-            if m := PY_DEF_RE.match(line):
-                yield m.group(1), lineno
-        elif suffix == ".rs":
-            if m := RUST_FN_RE.match(line):
-                yield m.group(1), lineno
-        elif suffix in (".sh", ".bash"):
-            if m := SHELL_FUNC_RE.search(line):
-                yield (m.group(1) or m.group(2)), lineno
+        m = regex.match(line) if mode == "match" else regex.search(line)
+        if m is None:
+            continue
+        yield (m.group(group) if group is not None else (m.group(1) or m.group(2))), lineno
 
 
 def _scan_file(path: Path, strict: bool) -> tuple[list[str], list[str]]:
