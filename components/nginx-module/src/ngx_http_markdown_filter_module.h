@@ -1147,6 +1147,13 @@ typedef struct {
              * bypasses Rust and continues directly downstream. */
             ngx_flag_t                    failopen_active;
 
+            /* Fail-open mode selected and future input could not be
+             * retained behind pending output (budget/allocation).
+             * After pending output drains, terminate the request
+             * safely with an empty last_buf rather than submitting a
+             * new chain while downstream still owns the old one. */
+            ngx_flag_t                    failopen_abort_after_pending;
+
             /* Post-commit input failure waiting for older downstream-owned
              * output to drain before safe_finish is allowed to run. */
             ngx_flag_t                    postcommit_error_after_pending;
