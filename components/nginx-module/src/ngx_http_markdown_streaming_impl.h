@@ -454,6 +454,14 @@ ngx_http_markdown_streaming_cleanup(void *data)
         }
         ctx->streaming.pending_output = NULL;
     }
+
+    /*
+     * Clear pending input chain.  Links are pool-allocated and will be
+     * reclaimed when the request pool is destroyed.  The shared ngx_buf_t
+     * pointers are upstream-owned and managed by NGINX.  We only reset
+     * our tracking state.
+     */
+    ngx_http_markdown_streaming_pending_input_clear(ctx);
 }
 
 
@@ -731,7 +739,141 @@ ngx_http_markdown_streaming_free_pending_chain(ngx_chain_t *chain)
 
 
 /*
- * Record TTFB (time-to-first-byte) on first successful output.
+ * Synchronize r->buffered with the full streaming pending state.
+ *
+ * Sets NGX_HTTP_MARKDOWN_BUFFERED when any of: pending_output, pending_input,
+ * finalize_after_pending, or finalize_pending_lastbuf is active.  Clears it
+ * otherwise.  This is the single authority for the buffered bit on the
+ * streaming path — individual helpers must not set/clear it directly.
+ */
+static void
+ngx_http_markdown_streaming_sync_buffered(
+    ngx_http_request_t *r,
+    const ngx_http_markdown_ctx_t *ctx)
+{
+    if (ctx->streaming.pending_output != NULL
+        || ctx->streaming.pending_input.head != NULL
+        || ctx->streaming.completion.finalize_after_pending
+        || ctx->streaming.completion.finalize_pending_lastbuf)
+    {
+        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+    } else {
+        r->buffered &= ~NGX_HTTP_MARKDOWN_BUFFERED;
+    }
+}
+
+
+/*
+ * Pending input chain management.
+ *
+ * Retains unconsumed upstream ngx_chain_t links for re-feed after
+ * downstream backpressure clears.  Links are pool-allocated copies
+ * that share the original ngx_buf_t — no payload duplication.  NGINX
+ * keeps busy buffers alive while pos < last, so shared bufs remain
+ * valid until we advance pos after feeding them to Rust.
+ */
+
+static void
+ngx_http_markdown_streaming_pending_input_clear(
+    ngx_http_markdown_ctx_t *ctx)
+{
+    ctx->streaming.pending_input.head = NULL;
+    ctx->streaming.pending_input.tail = NULL;
+    ctx->streaming.pending_input.bytes = 0;
+    ctx->streaming.pending_input.links = 0;
+    ctx->streaming.pending_input.terminal_seen = 0;
+}
+
+static ngx_flag_t
+ngx_http_markdown_streaming_pending_input_is_empty(
+    const ngx_http_markdown_ctx_t *ctx)
+{
+    return (ctx->streaming.pending_input.head == NULL) ? 1 : 0;
+}
+
+/*
+ * Enqueue a single chain link to pending_input.
+ *
+ * Copies the ngx_chain_t link (pool-allocated), shares the ngx_buf_t.
+ * Does NOT advance buf->pos — the buffer stays busy in u->busy_bufs so
+ * NGINX retains it.  Captures terminal_seen from last_buf/last_in_chain.
+ *
+ * Empty terminal buffers (size == 0) latch terminal_seen but are not
+ * enqueued as links (no data to feed later).
+ *
+ * Returns NGX_OK on success, NGX_ERROR on allocation failure or budget
+ * overflow (caller must route through the appropriate error path).
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_pending_input_enqueue_link(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_chain_t *cl)
+{
+    size_t        buf_size;
+    ngx_chain_t  *link;
+
+    if (cl == NULL || cl->buf == NULL) {
+        return NGX_OK;
+    }
+
+    /* Capture terminal signal regardless of buffer size */
+    if (cl->buf->last_buf
+        || (r != r->main && cl->buf->last_in_chain))
+    {
+        ctx->streaming.pending_input.terminal_seen = 1;
+    }
+
+    buf_size = ngx_buf_size(cl->buf);
+    if (buf_size == 0) {
+        return NGX_OK;
+    }
+
+    link = ngx_alloc_chain_link(r->pool);
+    if (link == NULL) {
+        return NGX_ERROR;
+    }
+
+    link->buf = cl->buf;
+    link->next = NULL;
+
+    if (ctx->streaming.pending_input.tail != NULL) {
+        ctx->streaming.pending_input.tail->next = link;
+    } else {
+        ctx->streaming.pending_input.head = link;
+    }
+    ctx->streaming.pending_input.tail = link;
+    ctx->streaming.pending_input.bytes += buf_size;
+    ctx->streaming.pending_input.links++;
+
+    return NGX_OK;
+}
+
+/*
+ * Enqueue all chain links starting from `cl` (the remainder after
+ * a CONSUMED + NGX_AGAIN chunk).  Each link is enqueued individually
+ * so terminal_seen is captured from the correct node.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_chain_t *cl)
+{
+    ngx_int_t  rc;
+
+    for (; cl != NULL; cl = cl->next) {
+        rc = ngx_http_markdown_streaming_pending_input_enqueue_link(
+            r, ctx, cl);
+        if (rc != NGX_OK) {
+            return rc;
+        }
+    }
+
+    return NGX_OK;
+}
+
+
  *
  * One-shot latch: only fires once, only when downstream confirmed
  * delivery (NGX_OK or NGX_DONE).

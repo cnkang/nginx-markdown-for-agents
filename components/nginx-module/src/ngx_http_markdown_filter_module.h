@@ -88,6 +88,19 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
 #define NGX_HTTP_MARKDOWN_PATH_STREAMING    2  /* Streaming path */
 
 /*
+ * Input disposition constants for streaming backpressure lifecycle.
+ *
+ * Decouples downstream return code (NGX_AGAIN) from input ownership:
+ * CONSUMED means Rust ate the chunk (advance pos, enqueue remainder);
+ * RETAIN means the chunk's ngx_buf_t is shared with a pending fail-open
+ * clone and must not be advanced (would corrupt undelivered HTML);
+ * TERMINAL means the input is abandoned on post-commit fatal error.
+ */
+#define NGX_HTTP_MD_INPUT_CONSUMED   0
+#define NGX_HTTP_MD_INPUT_RETAIN     1
+#define NGX_HTTP_MD_INPUT_TERMINAL   2
+
+/*
  * Request-level buffered flag for this module while it is accumulating or
  * preserving output for a later retry.
  *
@@ -1057,6 +1070,41 @@ typedef struct {
          */
         ngx_http_markdown_buffer_t        failopen_replay_buf;
         ngx_flag_t                        failopen_replay_initialized;
+
+        /*
+         * Input disposition: decoupled from downstream return code.
+         *
+         * NGX_HTTP_MD_INPUT_CONSUMED (0) - Rust ate the input chunk;
+         *   advance buf->pos and enqueue remainder to pending_input.
+         * NGX_HTTP_MD_INPUT_RETAIN (1) - fail-open shared ngx_buf_t;
+         *   do NOT advance pos (would corrupt pending fail-open output).
+         * NGX_HTTP_MD_INPUT_TERMINAL (2) - post-commit fatal; input
+         *   abandoned, release upstream buffers.
+         */
+        ngx_uint_t                        input_disposition;
+
+        /*
+         * Module-owned pending input chain for backpressure continuation.
+         *
+         * When downstream returns NGX_AGAIN, the current chunk has been
+         * fed to Rust (CONSUMED) but the remaining links (cl->next) in
+         * the input chain must be retained so they are not stranded in
+         * u->busy_bufs.  Links are pool-allocated ngx_chain_t copies that
+         * share the original ngx_buf_t (no payload duplication).  NGINX
+         * keeps busy buffers alive while pos < last, so the shared bufs
+         * remain valid until we advance pos after feeding them to Rust.
+         *
+         * Also captures future non-NULL input arriving while pending
+         * output exists (the body-filter entry enqueues instead of
+         * rejecting).
+         */
+        struct {
+            ngx_chain_t              *head;
+            ngx_chain_t              *tail;
+            size_t                    bytes;
+            ngx_uint_t                links;
+            ngx_flag_t                terminal_seen;
+        } pending_input;
 
         /*
          * Finalize-path state latches.
