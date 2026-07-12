@@ -975,6 +975,74 @@ def _check_environment_compatibility(
     return violations
 
 
+def _resolve_baseline(
+    report: dict | None, args: argparse.Namespace, blocking: bool,
+) -> tuple[dict, bool, int | None]:
+    """Load and validate the module baseline.
+
+    Returns:
+        (baseline_metrics, has_baseline, exit_rc):
+            exit_rc is None on success; otherwise it is a terminal exit
+            code and the caller must return it immediately.
+    """
+    baseline_path = REPO_ROOT / "perf" / "baselines" / "module-baseline-091.json"
+    if not baseline_path.exists():
+        return _resolve_missing_baseline(report, args, blocking)
+
+    baseline_report = json.loads(baseline_path.read_text(encoding="utf-8"))
+
+    integrity_rc = _validate_baseline_evidence(
+        report, args, baseline_report, blocking
+    )
+    if integrity_rc is not None:
+        return {}, False, integrity_rc
+
+    env_violations = _check_environment_compatibility(
+        report or {}, baseline_report,
+    )
+    if env_violations and blocking:
+        env_violation_strs = [
+            (f"env.{field}", detail)
+            for field, detail in env_violations
+        ]
+        return {}, False, _report_integrity_failure(
+            report,
+            args,
+            env_violation_strs,
+            "FAIL: Current and baseline benchmark environments are incompatible:",
+            "  Regenerate the baseline on the same platform, load "
+            "generator, and NGINX version as the current run.\n"
+            "  Do not compare metrics across different environments.",
+        )
+
+    return _extract_evidence_metrics(baseline_report), True, None
+
+
+def _resolve_missing_baseline(
+    report: dict | None, args: argparse.Namespace, blocking: bool,
+) -> tuple[dict, bool, int | None]:
+    """Handle the no-baseline case (first run or release-tag failure)."""
+    if blocking and _is_release_tag():
+        _stderr(
+            "FAIL: No module baseline found and this is a release tag.\n"
+            "  Release and RC tags require a baseline for percentage threshold evaluation.\n"
+            "  Create a baseline with: cp perf/reports/module-benchmark-091.json "
+            "perf/baselines/module-baseline-091.json"
+        )
+        evidence_pack = _build_evidence_pack(
+            report=report,
+            verdict="MISSING_EVIDENCE",
+            breaches=[{"metric": "baseline", "reason": "no baseline for release tag"}],
+            results=[],
+        )
+        _print_evidence_summary(evidence_pack)
+        _write_output(evidence_pack, args.output)
+        return {}, False, 1
+
+    _stderr("INFO: No module baseline found — percentage thresholds will be skipped (first run).")
+    return {}, False, None
+
+
 def _evaluate_and_report(
     report: dict | None, args: argparse.Namespace, blocking: bool,
 ) -> int:
@@ -989,60 +1057,11 @@ def _evaluate_and_report(
     current_metrics = _extract_evidence_metrics(report or {})
     thresholds_cfg = _load_thresholds()
 
-    # Load baseline if available, otherwise use empty as baseline (first run).
-    baseline_path = REPO_ROOT / "perf" / "baselines" / "module-baseline-091.json"
-    if baseline_path.exists():
-        baseline_report = json.loads(baseline_path.read_text(encoding="utf-8"))
-
-        integrity_rc = _validate_baseline_evidence(
-            report, args, baseline_report, blocking
-        )
-        if integrity_rc is not None:
-            return integrity_rc
-
-        baseline_metrics = _extract_evidence_metrics(baseline_report)
-        has_baseline = True
-
-        # Environment compatibility: current and baseline must share
-        # platform, load_generator, and nginx_version.  Without this,
-        # percentage regression comparisons are meaningless.
-        env_violations = _check_environment_compatibility(
-            report or {}, baseline_report,
-        )
-        if env_violations and blocking:
-            env_violation_strs = [
-                (f"env.{field}", detail)
-                for field, detail in env_violations
-            ]
-            return _report_integrity_failure(
-                report,
-                args,
-                env_violation_strs,
-                "FAIL: Current and baseline benchmark environments are incompatible:",
-                "  Regenerate the baseline on the same platform, load "
-                "generator, and NGINX version as the current run.\n"
-                "  Do not compare metrics across different environments.",
-            )
-    else:
-        if blocking and _is_release_tag():
-            _stderr(
-                "FAIL: No module baseline found and this is a release tag.\n"
-                "  Release and RC tags require a baseline for percentage threshold evaluation.\n"
-                "  Create a baseline with: cp perf/reports/module-benchmark-091.json "
-                "perf/baselines/module-baseline-091.json"
-            )
-            evidence_pack = _build_evidence_pack(
-                report=report,
-                verdict="MISSING_EVIDENCE",
-                breaches=[{"metric": "baseline", "reason": "no baseline for release tag"}],
-                results=[],
-            )
-            _print_evidence_summary(evidence_pack)
-            _write_output(evidence_pack, args.output)
-            return 1
-        _stderr("INFO: No module baseline found — percentage thresholds will be skipped (first run).")
-        baseline_metrics = {}
-        has_baseline = False
+    baseline_metrics, has_baseline, baseline_rc = _resolve_baseline(
+        report, args, blocking,
+    )
+    if baseline_rc is not None:
+        return baseline_rc
 
     # Import threshold engine for module-level evaluation
     from threshold_engine import evaluate_module_level
