@@ -274,6 +274,7 @@ struct ngx_time_s {
 #ifndef ngx_memzero
 #define ngx_memzero(buf, n) memset((buf), 0, (n))
 #endif
+
 #ifndef ngx_memcpy
 #define ngx_memcpy memcpy
 #endif
@@ -2834,6 +2835,35 @@ test_process_chain_and_body_filter_deep_paths(void)
         "ctx.failopen_completed=1");
     g_buffer_append_rc = NGX_OK;
     conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    /*
+     * Once markdown_streaming_feed consumes an upstream buffer, downstream
+     * NGX_AGAIN applies only to the generated output.  The input position must
+     * advance so NGINX can release its busy buffer and continue upstream I/O.
+     */
+    ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
+    ctx.eligible = 1;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x28;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.prebuffer_initialized = 0;
+    ctx.streaming.failopen_replay_initialized = 0;
+    ctx.streaming.completion.finalize_after_pending = 0;
+    ctx.failopen_completed = 0;
+    conf.stream.zero_copy = 0;
+    in_buf.pos = chunk_data;
+    in_buf.last = chunk_data + 5;
+    in_buf.last_buf = 0;
+    g_streaming_feed_rc = ERROR_SUCCESS;
+    g_streaming_feed_out_data = chunk_data;
+    g_streaming_feed_out_len = 5;
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_process_chain(
+        &r, &ctx, &conf, &in, &last_buf, &fallback_cl);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "process_chain should propagate output backpressure");
+    TEST_ASSERT(in_buf.pos == in_buf.last,
+        "consumed upstream input must advance when output returns NGX_AGAIN");
 
     /*
      * Precise test: prebuffer append succeeds, replay append fails,
