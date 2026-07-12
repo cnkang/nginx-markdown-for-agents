@@ -815,6 +815,95 @@ ngx_http_markdown_streaming_abandon_input(ngx_chain_t *in)
 }
 
 /*
+ * Preflight scan of a chain remainder: count non-empty bytes/links and
+ * detect any terminal buffer. Detects size_t/ngx_uint_t overflow before
+ * accumulation so callers can reject early.
+ *
+ * Outputs via pointers: added_bytes, added_links, terminal_seen.
+ * Returns NGX_OK on success, NGX_ERROR on overflow.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_preflight_chain_stats(
+    ngx_http_request_t *r,
+    ngx_chain_t *cl,
+    size_t *added_bytes,
+    ngx_uint_t *added_links,
+    ngx_flag_t *terminal_seen)
+{
+    size_t      buf_size;
+    ngx_flag_t  term = 0;
+
+    *added_bytes = 0;
+    *added_links = 0;
+
+    for (ngx_chain_t *scan = cl; scan != NULL; scan = scan->next) {
+        if (scan->buf == NULL) {
+            continue;
+        }
+
+        if (scan->buf->last_buf
+            || (r != r->main && scan->buf->last_in_chain))
+        {
+            term = 1;
+        }
+
+        buf_size = ngx_http_markdown_buf_len_safe(scan->buf);
+        if (buf_size == 0) {
+            continue;
+        }
+
+        if (buf_size > (size_t) -1 - *added_bytes
+            || *added_links == (ngx_uint_t) -1)
+        {
+            return NGX_ERROR;
+        }
+        *added_bytes += buf_size;
+        (*added_links)++;
+    }
+
+    *terminal_seen = term;
+    return NGX_OK;
+}
+
+/*
+ * Verify that adding `added_bytes`/`added_links` to the existing
+ * pending_input totals stays within numeric limits and the configured
+ * body buffer limit.
+ *
+ * Returns NGX_OK if within budget, NGX_ERROR otherwise.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_check_pending_budget(
+    const ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    size_t added_bytes,
+    ngx_uint_t added_links)
+{
+    size_t  limit;
+
+    if (added_bytes > (size_t) -1 - ctx->streaming.pending_input.bytes
+        || added_links > (ngx_uint_t) -1
+                         - ctx->streaming.pending_input.links)
+    {
+        return NGX_ERROR;
+    }
+
+    limit = ngx_http_markdown_effective_body_buffer_limit(
+        ctx->effective_conf, conf);
+    if (limit == 0) {
+        return NGX_OK;
+    }
+
+    if (ctx->streaming.pending_input.bytes > limit
+        || added_bytes > limit - ctx->streaming.pending_input.bytes)
+    {
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+/*
  * Enqueue all chain links starting from `cl` (the remainder after
  * a CONSUMED + NGX_AGAIN chunk).  The complete chain is preflighted and
  * built off-queue, then appended atomically so failures cannot expose a
@@ -828,52 +917,22 @@ ngx_http_markdown_streaming_pending_input_enqueue_remainder(
     ngx_chain_t *cl)
 {
     size_t        added_bytes;
-    size_t        buf_size;
-    size_t        limit;
     ngx_uint_t    added_links;
     ngx_flag_t    terminal_seen;
     ngx_chain_t  *head;
     ngx_chain_t  *link;
     ngx_chain_t  *tail;
 
-    added_bytes = 0;
-    added_links = 0;
-    terminal_seen = 0;
-
-    for (ngx_chain_t *scan = cl; scan != NULL; scan = scan->next) {
-        if (scan->buf == NULL) {
-            continue;
-        }
-
-        if (scan->buf->last_buf
-            || (r != r->main && scan->buf->last_in_chain))
-        {
-            terminal_seen = 1;
-        }
-
-        buf_size = ngx_http_markdown_buf_len_safe(scan->buf);
-        if (buf_size == 0) {
-            continue;
-        }
-
-        if (buf_size > (size_t) -1 - added_bytes
-            || added_links == (ngx_uint_t) -1)
-        {
-            return NGX_ERROR;
-        }
-        added_bytes += buf_size;
-        added_links++;
+    if (ngx_http_markdown_streaming_preflight_chain_stats(
+            r, cl, &added_bytes, &added_links, &terminal_seen)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
     }
 
-    limit = ngx_http_markdown_effective_body_buffer_limit(
-        ctx->effective_conf, conf);
-    if (added_bytes > (size_t) -1 - ctx->streaming.pending_input.bytes
-        || added_links > (ngx_uint_t) -1
-                         - ctx->streaming.pending_input.links
-        || (limit > 0
-            && (ctx->streaming.pending_input.bytes > limit
-                || added_bytes > limit
-                                 - ctx->streaming.pending_input.bytes)))
+    if (ngx_http_markdown_streaming_check_pending_budget(
+            ctx, conf, added_bytes, added_links)
+        != NGX_OK)
     {
         return NGX_ERROR;
     }
