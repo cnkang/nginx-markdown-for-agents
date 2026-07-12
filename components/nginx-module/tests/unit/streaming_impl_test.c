@@ -2167,7 +2167,7 @@ test_null_input_tracking_and_body_filter_entry(void)
  * - prepare-options failure routes through precommit_error
  * - handle-create failure routes through precommit_error
  * - NULL handle on success code still fails
- * - cleanup registration failure returns NGX_ERROR
+ * - cleanup registration failure routes through precommit_error
  * - decompressor init failure routes through precommit_error
  * - chunk_result propagates NGX_AGAIN and NGX_OK
  * - chunk_result returns NGX_DONE after fallback switch
@@ -2252,8 +2252,8 @@ test_init_handle_and_chunk_result_helpers(void)
     ctx.streaming.handle = NULL;
     g_pool_cleanup_fail_once = 1;
     rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
-    TEST_ASSERT(rc == NGX_ERROR,
-        "cleanup registration failure should return NGX_ERROR");
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "cleanup registration failure should honor PASS policy");
 
     ctx.streaming.handle = NULL;
     ctx.decompression.needed = 1;
@@ -3156,8 +3156,8 @@ test_streaming_gap_branches(void)
     g_new_with_code_null_handle = 0;
     g_pool_cleanup_fail_once = 1;
     rc = ngx_http_markdown_streaming_ensure_handle(&r, &ctx, &conf, &in);
-    TEST_ASSERT(rc == NGX_ERROR,
-        "ensure_handle should propagate hard init failures");
+    TEST_ASSERT(rc == NGX_DONE,
+        "cleanup allocation failure should follow PASS policy");
 
     ctx.eligible = 1;
     ctx.streaming.handle = NULL;
@@ -3805,7 +3805,7 @@ test_failopen_init_failure_latches_mode(void)
  * Test: P1-2 — failopen_active + pending_output + future-input enqueue
  * failure must not submit a new chain while the old output is still
  * downstream-owned, must not re-enter precommit_error (double-counting
- * conversions_failed), and must latch a safe terminal after drain.
+ * conversions_failed), and must latch a protocol-visible abort after drain.
  *
  * Covers:
  *   - failopen_active already latched
@@ -3813,7 +3813,7 @@ test_failopen_init_failure_latches_mode(void)
  *   - future input exceeds retained-input budget (enqueue fails)
  *   - send_failopen_chain pending_output guard fires before downstream
  *   - failopen_abort_after_pending latched
- *   - after drain, terminal last_buf sent safely
+ *   - after drain, known data loss aborts without a terminal last_buf
  */
 static void
 test_failopen_active_enqueue_failure_aborts_safely(void)
@@ -3826,13 +3826,16 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     ngx_log_t                log;
     ngx_event_t              read_event;
     ngx_chain_t              pending_output;
+    ngx_chain_t              retained;
     ngx_chain_t              future;
     ngx_chain_t              later;
     ngx_buf_t                pending_buf;
+    ngx_buf_t                retained_buf;
     ngx_buf_t                future_buf;
     ngx_buf_t                later_buf;
     ngx_int_t                rc;
     u_char                   future_data[] = "future-overflow";
+    u_char                   retained_data[] = "old";
     u_char                   later_data[] = "later";
     u_char                  *pending_pos;
     u_char                  *pending_last;
@@ -3844,6 +3847,8 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
 
     ngx_memzero(&pending_output, sizeof(pending_output));
     ngx_memzero(&pending_buf, sizeof(pending_buf));
+    ngx_memzero(&retained, sizeof(retained));
+    ngx_memzero(&retained_buf, sizeof(retained_buf));
     ngx_memzero(&future, sizeof(future));
     ngx_memzero(&future_buf, sizeof(future_buf));
     ngx_memzero(&later, sizeof(later));
@@ -3867,6 +3872,11 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     pending_buf.temporary = 1;
     pending_pos = pending_buf.pos;
     pending_last = pending_buf.last;
+    retained.buf = &retained_buf;
+    retained_buf.pos = retained_data;
+    retained_buf.last = retained_data + sizeof(retained_data) - 1;
+    ctx.streaming.pending_input.head = &retained;
+    ctx.streaming.pending_input.tail = &retained;
     ctx.streaming.pending_input.bytes = 3;
     ctx.streaming.pending_input.links = 1;
     ctx.streaming.input_disposition = NGX_HTTP_MD_INPUT_RETAIN;
@@ -3896,7 +3906,7 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
         "downstream-owned (Rule 1 backpressure ownership contract)");
     TEST_ASSERT(ctx.streaming.completion.failopen_abort_after_pending == 1,
         "P1-2: enqueue failure in failopen_active must latch "
-        "failopen_abort_after_pending for safe terminal after drain");
+        "failopen_abort_after_pending for visible abort after drain");
     TEST_ASSERT(ctx.streaming.pending_output == &pending_output,
         "P1-2: old pending_output must remain intact (not freed/overwritten)");
 
@@ -3934,22 +3944,23 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
 
     /*
      * A real NULL resume must drain the old pending output, consume the
-     * abort latch without requiring upstream EOF, and send one empty
-     * terminal buffer.  Later input must be abandoned without another
-     * downstream submit.
+     * abort latch without requiring upstream EOF, consume retained shared
+     * buffers, and return a protocol-visible failure without a clean terminal.
      */
     pending_buf.temporary = 0;
     g_next_body_filter_rc = NGX_OK;
     g_next_body_filter_calls = 0;
     rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
-    TEST_ASSERT(rc == NGX_OK,
-        "P1-2: after drain with failopen_abort, request should terminate");
-    TEST_ASSERT(g_next_body_filter_calls == 2,
-        "P1-2: NULL resume must drain old output then send one terminal");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "P1-2: known data loss must abort after draining old output");
+    TEST_ASSERT(g_next_body_filter_calls == 1,
+        "P1-2: abort must not send a clean terminal after data loss");
     TEST_ASSERT(ctx.streaming.pending_output == NULL,
         "P1-2: old pending anchor must clear only after downstream drain");
     TEST_ASSERT(ctx.streaming.completion.failopen_abort_after_pending == 0,
-        "P1-2: abort latch must clear after terminal continuation");
+        "P1-2: abort latch must clear after failure continuation");
+    TEST_ASSERT(retained_buf.pos == retained_buf.last,
+        "P1-2: discarded retained input must consume shared buffers");
     TEST_ASSERT(ctx.streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL,
         "P1-2: abort continuation must reject all later input");
 
@@ -3962,7 +3973,7 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
         "P1-2: later input after abort must be safely abandoned");
     TEST_ASSERT(later_buf.pos == later_buf.last,
         "P1-2: later input after abort must be consumed without delivery");
-    TEST_ASSERT(g_next_body_filter_calls == 2,
+    TEST_ASSERT(g_next_body_filter_calls == 1,
         "P1-2: later input after abort must not reach downstream");
 
     TEST_PASS("P1-2 failopen_active enqueue-failure safe abort covered");

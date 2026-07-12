@@ -784,6 +784,15 @@ ngx_http_markdown_streaming_abandon_input(ngx_chain_t *in)
     }
 }
 
+static void
+ngx_http_markdown_streaming_pending_input_abandon_and_clear(
+    ngx_http_markdown_ctx_t *ctx)
+{
+    ngx_http_markdown_streaming_abandon_input(
+        ctx->streaming.pending_input.head);
+    ngx_http_markdown_streaming_pending_input_clear(ctx);
+}
+
 /*
  * Preflight scan of a chain remainder: count non-empty bytes/links and
  * detect any terminal buffer. Detects size_t/ngx_uint_t overflow before
@@ -1797,7 +1806,7 @@ ngx_http_markdown_streaming_defer_postcommit_error(
     ctx->streaming.completion.postcommit_error_after_pending = 1;
     ctx->streaming.completion.postcommit_error_code = error_code;
     ctx->streaming.completion.upstream_terminal_seen = 0;
-    ngx_http_markdown_streaming_pending_input_clear(ctx);
+    ngx_http_markdown_streaming_pending_input_abandon_and_clear(ctx);
     ngx_http_markdown_streaming_abandon_input(in);
     ngx_http_markdown_streaming_sync_buffered(r, ctx);
 
@@ -3143,7 +3152,8 @@ ngx_http_markdown_streaming_init_handle(
         markdown_streaming_abort(
             ctx->streaming.handle);
         ctx->streaming.handle = NULL;
-        return NGX_ERROR;
+        return ngx_http_markdown_streaming_precommit_error(
+            r, ctx, conf, ERROR_MEMORY_LIMIT);
     }
     cln->handler =
         ngx_http_markdown_streaming_cleanup;
@@ -3805,16 +3815,33 @@ ngx_http_markdown_streaming_handle_null_input(
      * instead of allowing later input to bypass the missing chunk.
      */
     if (ctx->streaming.completion.failopen_abort_after_pending) {
+        uint32_t  error_code;
+
+        error_code = ctx->streaming.completion.failopen_abort_error_code;
         ctx->streaming.completion.failopen_abort_after_pending = 0;
+        ctx->streaming.completion.failopen_abort_error_code = ERROR_SUCCESS;
         ctx->streaming.completion.upstream_terminal_seen = 0;
         ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
-        ngx_http_markdown_streaming_pending_input_clear(ctx);
-        if (ctx->streaming.main_terminal_sent) {
-            ngx_http_markdown_streaming_sync_buffered(r, ctx);
-            return rc;
+        ngx_http_markdown_streaming_pending_input_abandon_and_clear(ctx);
+        if (!ctx->streaming.completion.failure_recorded) {
+            if (error_code == ERROR_MEMORY_LIMIT
+                || error_code == ERROR_BUDGET_EXCEEDED)
+            {
+                ctx->streaming.reason =
+                    NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_BUDGET_EXCEEDED;
+                NGX_HTTP_MARKDOWN_METRIC_INC(
+                    streaming.budget_exceeded_total);
+                NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
+                ngx_http_markdown_log_decision(r, conf,
+                    ctx->effective_conf,
+                    ngx_http_markdown_reason_streaming_budget_exceeded());
+            } else {
+                NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
+            }
         }
-        return ngx_http_markdown_streaming_send_output(
-            r, ctx, NULL, 0, /* last_buf */ 1);
+        ngx_http_markdown_streaming_record_postcommit_failure(r, ctx, conf);
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
+        return NGX_ERROR;
     }
 
     if (ctx->streaming.completion.failopen_active
@@ -4137,9 +4164,9 @@ ngx_http_markdown_streaming_chain_has_terminal(ngx_chain_t *in,
  * FAILOPEN_ACTIVE mode: retain future input without re-entering Rust or
  * building a new output chain.  If the retained-input budget is
  * exhausted, latch failopen_abort_after_pending so after the old
- * pending output drains the request terminates safely with an empty
- * last_buf, instead of submitting a second chain while downstream
- * still owns the first (Rule 1 backpressure ownership contract).
+ * pending output drains the request aborts without a clean last_buf,
+ * instead of hiding missing bytes or submitting a second chain while
+ * downstream still owns the first (Rule 1 backpressure contract).
  * TERMINAL disposition: abandon the input and return NGX_AGAIN.
  * Otherwise: enqueue the remainder; on budget exhaustion, route through
  * post-commit or pre-commit error handling (which may fail-open).
@@ -4176,6 +4203,8 @@ ngx_http_markdown_streaming_handle_new_input_with_pending(
      * drain.  (Rule 1, Rule 47)
      */
     if (ctx->streaming.completion.failopen_active) {
+        uint32_t  enqueue_error;
+
         if (ctx->streaming.completion.failopen_abort_after_pending) {
             if (ngx_http_markdown_streaming_chain_has_terminal(in, r)) {
                 ctx->streaming.completion.upstream_terminal_seen = 1;
@@ -4185,8 +4214,9 @@ ngx_http_markdown_streaming_handle_new_input_with_pending(
             return NGX_AGAIN;
         }
 
+        enqueue_error = ERROR_BUDGET_EXCEEDED;
         rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
-            r, ctx, conf, in, NULL);
+            r, ctx, conf, in, &enqueue_error);
         if (rc == NGX_OK) {
             ngx_http_markdown_streaming_sync_buffered(r, ctx);
             return NGX_AGAIN;
@@ -4196,6 +4226,8 @@ ngx_http_markdown_streaming_handle_new_input_with_pending(
             ctx->streaming.completion.upstream_terminal_seen = 1;
         }
         ctx->streaming.completion.failopen_abort_after_pending = 1;
+        ctx->streaming.completion.failopen_abort_error_code = enqueue_error;
+        ctx->streaming.completion.pending_failopen_delivery = 0;
         ngx_http_markdown_streaming_abandon_input(in);
         ngx_http_markdown_streaming_sync_buffered(r, ctx);
         return NGX_AGAIN;

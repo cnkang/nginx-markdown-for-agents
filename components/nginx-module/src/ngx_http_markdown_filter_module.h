@@ -1149,10 +1149,10 @@ typedef struct {
 
             /* Fail-open mode selected and future input could not be
              * retained behind pending output (budget/allocation).
-             * After pending output drains, terminate the request
-             * safely with an empty last_buf rather than submitting a
-             * new chain while downstream still owns the old one. */
+             * After pending output drains, abort without a clean last_buf;
+             * known missing bytes must remain protocol-visible. */
             ngx_flag_t                    failopen_abort_after_pending;
+            uint32_t                      failopen_abort_error_code;
 
             /* Post-commit input failure waiting for older downstream-owned
              * output to drain before safe_finish is allowed to run. */
