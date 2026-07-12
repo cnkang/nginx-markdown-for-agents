@@ -48,6 +48,61 @@ static ngx_int_t ngx_http_markdown_streaming_precommit_error(
     const ngx_http_markdown_conf_t *conf, uint32_t error_code);
 static ngx_int_t ngx_http_markdown_streaming_failopen_passthrough(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_chain_t *in);
+
+/*
+ * Handle new non-NULL input arriving while streaming pending_output
+ * is non-NULL (downstream backpressure active).
+ *
+ * TERMINAL disposition: abandon the input and return NGX_AGAIN.
+ * Otherwise: enqueue the remainder; on budget exhaustion, route through
+ * post-commit or pre-commit error handling (which may fail-open).
+ *
+ * Returns NGX_AGAIN when the input was enqueued/abandoned (caller should
+ * return NGX_AGAIN), or a final error/fail-open rc the caller propagates.
+ *
+ * Shared by ngx_http_markdown_body_filter (request_impl.h) and
+ * ngx_http_markdown_streaming_body_filter (streaming_impl.h) so both
+ * entry points stay below SonarCloud c:S3776/c:S134 thresholds.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_handle_new_input_with_pending(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf, ngx_chain_t *in)
+{
+    ngx_int_t  rc;
+
+    if (ctx->streaming.input_disposition
+        == NGX_HTTP_MD_INPUT_TERMINAL)
+    {
+        ngx_http_markdown_streaming_abandon_input(in);
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
+        return NGX_AGAIN;
+    }
+
+    rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+        r, ctx, conf, in);
+    if (rc == NGX_OK) {
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
+        return NGX_AGAIN;
+    }
+
+    if (ctx->streaming.commit_state
+        == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+    {
+        rc = ngx_http_markdown_streaming_handle_postcommit_error(
+            r, ctx, conf, ERROR_BUDGET_EXCEEDED);
+        ngx_http_markdown_streaming_abandon_input(in);
+        return rc;
+    }
+
+    rc = ngx_http_markdown_streaming_precommit_error(
+        r, ctx, conf, ERROR_BUDGET_EXCEEDED);
+    if (rc == NGX_DECLINED && !ctx->eligible) {
+        return ngx_http_markdown_streaming_failopen_passthrough(
+            r, ctx, in);
+    }
+    return rc;
+}
 #endif
 
 /* Forward declarations for helpers defined in this file */
@@ -1309,37 +1364,8 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         && ctx->streaming.pending_output != NULL)
     {
         if (in != NULL) {
-            ngx_int_t  enq_rc;
-
-            if (ctx->streaming.input_disposition
-                == NGX_HTTP_MD_INPUT_TERMINAL)
-            {
-                ngx_http_markdown_streaming_abandon_input(in);
-                ngx_http_markdown_streaming_sync_buffered(r, ctx);
-                return NGX_AGAIN;
-            }
-
-            enq_rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+            return ngx_http_markdown_streaming_handle_new_input_with_pending(
                 r, ctx, conf, in);
-            if (enq_rc != NGX_OK) {
-                if (ctx->streaming.commit_state
-                    == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
-                {
-                    enq_rc = ngx_http_markdown_streaming_handle_postcommit_error(
-                        r, ctx, conf, ERROR_BUDGET_EXCEEDED);
-                    ngx_http_markdown_streaming_abandon_input(in);
-                    return enq_rc;
-                }
-                enq_rc = ngx_http_markdown_streaming_precommit_error(
-                    r, ctx, conf, ERROR_BUDGET_EXCEEDED);
-                if (enq_rc == NGX_DECLINED && !ctx->eligible) {
-                    return ngx_http_markdown_streaming_failopen_passthrough(
-                        r, ctx, in);
-                }
-                return enq_rc;
-            }
-            ngx_http_markdown_streaming_sync_buffered(r, ctx);
-            return NGX_AGAIN;
         }
         return ngx_http_markdown_streaming_body_filter(r, NULL);
     }

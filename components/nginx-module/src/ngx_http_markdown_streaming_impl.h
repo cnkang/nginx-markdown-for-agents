@@ -3951,34 +3951,8 @@ ngx_http_markdown_streaming_body_filter(
     }
 
     if (ctx->streaming.pending_output != NULL) {
-        if (ctx->streaming.input_disposition
-            == NGX_HTTP_MD_INPUT_TERMINAL)
-        {
-            ngx_http_markdown_streaming_abandon_input(in);
-            ngx_http_markdown_streaming_sync_buffered(r, ctx);
-            return NGX_AGAIN;
-        }
-        rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+        return ngx_http_markdown_streaming_handle_new_input_with_pending(
             r, ctx, conf, in);
-        if (rc != NGX_OK) {
-            if (ctx->streaming.commit_state
-                == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
-            {
-                rc = ngx_http_markdown_streaming_handle_postcommit_error(
-                    r, ctx, conf, ERROR_BUDGET_EXCEEDED);
-                ngx_http_markdown_streaming_abandon_input(in);
-                return rc;
-            }
-            rc = ngx_http_markdown_streaming_precommit_error(
-                r, ctx, conf, ERROR_BUDGET_EXCEEDED);
-            if (rc == NGX_DECLINED && !ctx->eligible) {
-                return ngx_http_markdown_streaming_failopen_passthrough(
-                    r, ctx, in);
-            }
-            return rc;
-        }
-        ngx_http_markdown_streaming_sync_buffered(r, ctx);
-        return NGX_AGAIN;
     }
 
     /* Initialize streaming handle on first call */
