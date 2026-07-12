@@ -3527,7 +3527,7 @@ test_pending_input_production_lifecycle(void)
     empty_terminal.buf = &empty_terminal_buf;
     empty_terminal_buf.last_buf = 1;
     rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
-        &r, &ctx, &conf, &empty_terminal);
+        &r, &ctx, &conf, &empty_terminal, NULL);
     TEST_ASSERT(rc == NGX_OK,
         "zero-length terminal remainder should enqueue successfully");
     TEST_ASSERT(ctx.streaming.pending_input.head == NULL,
@@ -3541,10 +3541,15 @@ test_pending_input_production_lifecycle(void)
     future.buf = &future_buf;
     future_buf.pos = future_data;
     future_buf.last = future_data + sizeof(future_data) - 1;
-    rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
-        &r, &ctx, &conf, &future);
-    TEST_ASSERT(rc == NGX_ERROR,
-        "retained input beyond the effective body limit must fail");
+    {
+        uint32_t  enqueue_error = ERROR_SUCCESS;
+        rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+            &r, &ctx, &conf, &future, &enqueue_error);
+        TEST_ASSERT(rc == NGX_ERROR,
+            "retained input beyond the effective body limit must fail");
+        TEST_ASSERT(enqueue_error == ERROR_BUDGET_EXCEEDED,
+            "P2: budget rejection must classify as ERROR_BUDGET_EXCEEDED");
+    }
     TEST_ASSERT(ctx.streaming.pending_input.head == NULL
                 && ctx.streaming.pending_input.bytes == 3
                 && ctx.streaming.pending_input.links == 1,
@@ -3558,10 +3563,16 @@ test_pending_input_production_lifecycle(void)
     future_tail_buf.last = future_data + 1;
     g_alloc_chain_fail_after = 2;
     g_alloc_chain_call_count = 0;
-    rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
-        &r, &ctx, &conf, &future);
-    TEST_ASSERT(rc == NGX_ERROR,
-        "a later chain-link allocation failure must reject the batch");
+    {
+        uint32_t  enqueue_error = ERROR_SUCCESS;
+        rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+            &r, &ctx, &conf, &future, &enqueue_error);
+        TEST_ASSERT(rc == NGX_ERROR,
+            "a later chain-link allocation failure must reject the batch");
+        TEST_ASSERT(enqueue_error == ERROR_MEMORY_LIMIT,
+            "P2: allocation failure must classify as ERROR_MEMORY_LIMIT, "
+            "not ERROR_BUDGET_EXCEEDED");
+    }
     TEST_ASSERT(ctx.streaming.pending_input.head == NULL
                 && ctx.streaming.pending_input.tail == NULL
                 && ctx.streaming.pending_input.bytes == 0
@@ -3661,6 +3672,239 @@ test_pending_input_production_lifecycle(void)
 }
 
 /*
+ * Test: P1-1 — ensure_handle() init-failure fail-open must set
+ * failopen_active so future input bypasses Rust instead of
+ * re-entering the converter with a NULL handle.
+ *
+ * Covers:
+ *   - init_handle returns NGX_DECLINED (precommit_error with pass)
+ *   - ensure_handle sends fail-open chain, downstream NGX_AGAIN
+ *   - failopen_active must be latched at the policy selection point
+ *   - future input must not re-enter markdown_streaming_feed
+ */
+static void
+test_failopen_init_failure_latches_mode(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_chain_t              in;
+    ngx_chain_t              future;
+    ngx_buf_t                in_buf;
+    ngx_buf_t                future_buf;
+    ngx_int_t                rc;
+    u_char                   in_data[] = "initial";
+    u_char                   future_data[] = "future";
+
+    TEST_SUBSECTION("P1-1: init-failure fail-open latches failopen_active");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    ngx_memzero(&in, sizeof(in));
+    ngx_memzero(&future, sizeof(future));
+    ngx_memzero(&in_buf, sizeof(in_buf));
+    ngx_memzero(&future_buf, sizeof(future_buf));
+    in.buf = &in_buf;
+    in_buf.pos = in_data;
+    in_buf.last = in_data + sizeof(in_data) - 1;
+    in.next = NULL;
+
+    /*
+     * Force init_handle to decline: prepare_options failure routes
+     * through precommit_error with pass policy, which sets eligible=0
+     * and (after the P1-1 fix) failopen_active=1.
+     */
+    ctx.eligible = 1;
+    ctx.streaming.handle = NULL;
+    ctx.headers_forwarded = 0;
+    g_prepare_options_rc = NGX_ERROR;
+    g_forward_headers_rc = NGX_OK;
+    g_next_body_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_streaming_ensure_handle(&r, &ctx, &conf, &in);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "ensure_handle init-decline + downstream NGX_AGAIN returns NGX_AGAIN");
+    TEST_ASSERT(ctx.eligible == 0,
+        "precommit_error pass policy must clear eligible");
+    TEST_ASSERT(ctx.streaming.completion.failopen_active == 1,
+        "P1-1: init-failure fail-open must latch failopen_active at "
+        "the policy selection point so future input bypasses Rust");
+    TEST_ASSERT(ctx.streaming.pending_output != NULL,
+        "downstream NGX_AGAIN must retain pending_output");
+    TEST_ASSERT(ctx.streaming.handle == NULL,
+        "failed handle must remain NULL");
+
+    /*
+     * Future input arrives while pending_output is downstream-owned.
+     * handle_new_input_with_pending must route through the
+     * failopen_active early branch, not precommit_error (which would
+     * double-count conversions_failed) or failopen_passthrough (which
+     * would build a new replay+input chain while the old output is
+     * still owned downstream).
+     */
+    future.buf = &future_buf;
+    future_buf.pos = future_data;
+    future_buf.last = future_data + sizeof(future_data) - 1;
+    future.next = NULL;
+    g_streaming_feed_calls = 0;
+    g_next_body_filter_calls = 0;
+
+    rc = ngx_http_markdown_streaming_handle_new_input_with_pending(
+        &r, &ctx, &conf, &future);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "failopen_active future input must return NGX_AGAIN");
+    TEST_ASSERT(g_streaming_feed_calls == 0,
+        "P1-1: failopen_active future input must never re-enter the "
+        "Rust converter (NULL handle would be rejected)");
+    TEST_ASSERT(g_next_body_filter_calls == 0,
+        "P1-2: failopen_active future input must not submit a new "
+        "chain while pending_output is still downstream-owned");
+
+    /*
+     * After pending_output drains (NULL resume), the failopen_active
+     * branch in handle_null_input must send the retained future input
+     * via continue_failopen_input (passthrough, no Rust), then send
+     * terminal last_buf if upstream_terminal_seen.
+     */
+    g_next_body_filter_rc = NGX_OK;
+    g_streaming_feed_calls = 0;
+    rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "failopen drain + future passthrough should complete");
+    TEST_ASSERT(g_streaming_feed_calls == 0,
+        "fail-open continuation must never re-enter the Rust converter");
+    TEST_ASSERT(future_buf.pos == future_buf.last,
+        "fail-open continuation should consume future input exactly once");
+
+    TEST_PASS("P1-1 init-failure failopen_active latch covered");
+}
+
+/*
+ * Test: P1-2 — failopen_active + pending_output + future-input enqueue
+ * failure must not submit a new chain while the old output is still
+ * downstream-owned, must not re-enter precommit_error (double-counting
+ * conversions_failed), and must latch a safe terminal after drain.
+ *
+ * Covers:
+ *   - failopen_active already latched
+ *   - pending_output downstream-owned (NGX_AGAIN retained)
+ *   - future input exceeds retained-input budget (enqueue fails)
+ *   - send_failopen_chain pending_output guard fires before downstream
+ *   - failopen_abort_after_pending latched
+ *   - after drain, terminal last_buf sent safely
+ */
+static void
+test_failopen_active_enqueue_failure_aborts_safely(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_chain_t              pending_output;
+    ngx_chain_t              future;
+    ngx_buf_t                pending_buf;
+    ngx_buf_t                future_buf;
+    ngx_int_t                rc;
+    u_char                   future_data[] = "future-overflow";
+
+    TEST_SUBSECTION("P1-2: failopen_active enqueue failure aborts safely");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+
+    ngx_memzero(&pending_output, sizeof(pending_output));
+    ngx_memzero(&pending_buf, sizeof(pending_buf));
+    ngx_memzero(&future, sizeof(future));
+    ngx_memzero(&future_buf, sizeof(future_buf));
+
+    /*
+     * Simulate the state after fail-open was selected and the first
+     * output chain was retained by downstream (NGX_AGAIN):
+     *   - eligible=0, failopen_active=1
+     *   - pending_output downstream-owned
+     *   - pending_input already holding one entry (bytes=3, links=1)
+     */
+    ctx.eligible = 0;
+    ctx.streaming.handle = NULL;
+    ctx.streaming.completion.failopen_active = 1;
+    ctx.streaming.pending_output = &pending_output;
+    ctx.streaming.pending_meta.has_data = 1;
+    pending_output.buf = &pending_buf;
+    pending_buf.pos = (u_char *) "old";
+    pending_buf.last = pending_buf.pos + 3;
+    ctx.streaming.pending_input.bytes = 3;
+    ctx.streaming.pending_input.links = 1;
+    ctx.streaming.input_disposition = NGX_HTTP_MD_INPUT_RETAIN;
+
+    /*
+     * Future input that exceeds the retained-input budget: conf.max_size
+     * is set so pending_input.bytes(3) + added_bytes > limit.
+     */
+    conf.max_size = 4;
+    future.buf = &future_buf;
+    future_buf.pos = future_data;
+    future_buf.last = future_data + sizeof(future_data) - 1;
+    future.next = NULL;
+
+    g_streaming_feed_calls = 0;
+    g_next_body_filter_calls = 0;
+    g_next_body_filter_rc = NGX_OK;
+
+    rc = ngx_http_markdown_streaming_handle_new_input_with_pending(
+        &r, &ctx, &conf, &future);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "P1-2: failopen_active enqueue failure must return NGX_AGAIN");
+    TEST_ASSERT(g_streaming_feed_calls == 0,
+        "P1-2: must never re-enter the Rust converter");
+    TEST_ASSERT(g_next_body_filter_calls == 0,
+        "P1-2: must not submit a new chain while pending_output is "
+        "downstream-owned (Rule 1 backpressure ownership contract)");
+    TEST_ASSERT(ctx.streaming.completion.failopen_abort_after_pending == 1,
+        "P1-2: enqueue failure in failopen_active must latch "
+        "failopen_abort_after_pending for safe terminal after drain");
+    TEST_ASSERT(ctx.streaming.pending_output == &pending_output,
+        "P1-2: old pending_output must remain intact (not freed/overwritten)");
+
+    /*
+     * Defense-in-depth: send_failopen_chain must refuse to submit when
+     * pending_output is already set, BEFORE calling the downstream filter.
+     */
+    rc = ngx_http_markdown_streaming_send_failopen_chain(&r, &ctx, &future);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "P1-2: send_failopen_chain must refuse to submit a new chain "
+        "before old pending_output drains (defense-in-depth)");
+    TEST_ASSERT(g_next_body_filter_calls == 0,
+        "P1-2: send_failopen_chain guard must fire before downstream call");
+
+    /*
+     * After drain (NULL resume with downstream NGX_OK), the
+     * failopen_abort_after_pending path should send a terminal last_buf
+     * because upstream_terminal_seen is set (future had no last_buf in
+     * this scenario, so we set it manually to simulate prior EOF).
+     */
+    ctx.streaming.pending_output = NULL;
+    ctx.streaming.completion.upstream_terminal_seen = 1;
+    g_next_body_filter_rc = NGX_OK;
+    g_next_body_filter_calls = 0;
+    rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "P1-2: after drain with failopen_abort, request should terminate");
+    TEST_ASSERT(g_next_body_filter_calls >= 1,
+        "P1-2: terminal last_buf must be sent after pending output drains");
+    TEST_ASSERT(ctx.streaming.completion.upstream_terminal_seen == 0,
+        "P1-2: upstream_terminal_seen must clear after terminal send");
+
+    TEST_PASS("P1-2 failopen_active enqueue-failure safe abort covered");
+}
+
+/*
  * Test entry point.  Runs all streaming_impl unit test functions in
  * sequence.  Prints a banner before and after the test run.  Returns 0
  * on success; individual test assertions abort via TEST_ASSERT on failure.
@@ -3687,6 +3931,8 @@ main(void)
     test_streaming_gap_branches();
     test_failopen_passthrough_again_pending();
     test_pending_input_production_lifecycle();
+    test_failopen_init_failure_latches_mode();
+    test_failopen_active_enqueue_failure_aborts_safely();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
