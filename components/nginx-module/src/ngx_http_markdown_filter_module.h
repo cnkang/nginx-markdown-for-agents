@@ -1110,7 +1110,6 @@ typedef struct {
             ngx_chain_t              *tail;
             size_t                    bytes;
             ngx_uint_t                links;
-            ngx_flag_t                terminal_seen;
         } pending_input;
 
         /*
@@ -1143,6 +1142,15 @@ typedef struct {
              * should increment results.failopen_count on downstream
              * success (Rule 38). */
             ngx_flag_t                    pending_failopen_delivery;
+
+            /* Request has selected fail-open passthrough. Future input
+             * bypasses Rust and continues directly downstream. */
+            ngx_flag_t                    failopen_active;
+
+            /* Post-commit input failure waiting for older downstream-owned
+             * output to drain before safe_finish is allowed to run. */
+            ngx_flag_t                    postcommit_error_after_pending;
+            uint32_t                      postcommit_error_code;
         } completion;
     } streaming;
 } ngx_http_markdown_ctx_t;

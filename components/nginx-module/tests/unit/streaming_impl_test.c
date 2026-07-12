@@ -331,6 +331,7 @@ static ngx_uint_t g_next_body_filter_seq_idx = 0;
 static uint32_t g_streaming_feed_rc = ERROR_SUCCESS;
 static u_char *g_streaming_feed_out_data = NULL;
 static uintptr_t g_streaming_feed_out_len = 0;
+static ngx_uint_t g_streaming_feed_calls = 0;
 static uint32_t g_streaming_finalize_rc = ERROR_SUCCESS;
 static struct MarkdownResult g_streaming_finalize_result;
 static ngx_uint_t g_info_log_count = 0;
@@ -767,6 +768,7 @@ markdown_streaming_feed(struct StreamingConverterHandle *handle,
     const uint8_t *html_chunk, uintptr_t chunk_len,
     uint8_t **out_data, uintptr_t *out_len)
 {
+    g_streaming_feed_calls++;
     UNUSED(handle);
     UNUSED(html_chunk);
     UNUSED(chunk_len);
@@ -1281,6 +1283,7 @@ reset_globals(void)
     g_streaming_feed_rc = ERROR_SUCCESS;
     g_streaming_feed_out_data = NULL;
     g_streaming_feed_out_len = 0;
+    g_streaming_feed_calls = 0;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     ngx_memzero(&g_streaming_finalize_result,
         sizeof(g_streaming_finalize_result));
@@ -3355,6 +3358,7 @@ test_failopen_passthrough_again_pending(void)
     }
     ctx.streaming.failopen_replay_initialized = 1;
     ctx.streaming.failopen_replay_buf.size = 3;
+    ctx.failopen_completed = 0;
 
     g_next_body_filter_rc = NGX_AGAIN;
     rc = ngx_http_markdown_streaming_failopen_passthrough(
@@ -3378,6 +3382,7 @@ test_failopen_passthrough_again_pending(void)
     }
     ctx.streaming.failopen_replay_initialized = 0;
     ctx.streaming.failopen_replay_buf.size = 0;
+    ctx.failopen_completed = 0;
 
     g_next_body_filter_rc = NGX_AGAIN;
     rc = ngx_http_markdown_streaming_failopen_passthrough(
@@ -3409,6 +3414,7 @@ test_failopen_passthrough_again_pending(void)
     }
     ctx.streaming.failopen_replay_initialized = 0;
     ctx.streaming.failopen_replay_buf.size = 0;
+    ctx.failopen_completed = 0;
 
     g_next_body_filter_rc = NGX_DONE;
     rc = ngx_http_markdown_streaming_failopen_passthrough(
@@ -3425,6 +3431,7 @@ test_failopen_passthrough_again_pending(void)
     }
     ctx.streaming.failopen_replay_initialized = 1;
     ctx.streaming.failopen_replay_buf.size = 3;
+    ctx.failopen_completed = 0;
 
     g_next_body_filter_rc = NGX_AGAIN;
     rc = ngx_http_markdown_streaming_failopen_passthrough(
@@ -3466,10 +3473,12 @@ test_pending_input_production_lifecycle(void)
     ngx_chain_t              current;
     ngx_chain_t              future;
     ngx_chain_t              future_tail;
+    ngx_chain_t              empty_terminal;
     ngx_chain_t              pending_output;
     ngx_buf_t                current_buf;
     ngx_buf_t                future_buf;
     ngx_buf_t                future_tail_buf;
+    ngx_buf_t                empty_terminal_buf;
     ngx_buf_t                pending_buf;
     ngx_chain_t             *fallback_cl;
     ngx_flag_t               last_buf;
@@ -3484,10 +3493,12 @@ test_pending_input_production_lifecycle(void)
     ngx_memzero(&current, sizeof(current));
     ngx_memzero(&future, sizeof(future));
     ngx_memzero(&future_tail, sizeof(future_tail));
+    ngx_memzero(&empty_terminal, sizeof(empty_terminal));
     ngx_memzero(&pending_output, sizeof(pending_output));
     ngx_memzero(&current_buf, sizeof(current_buf));
     ngx_memzero(&future_buf, sizeof(future_buf));
     ngx_memzero(&future_tail_buf, sizeof(future_tail_buf));
+    ngx_memzero(&empty_terminal_buf, sizeof(empty_terminal_buf));
     ngx_memzero(&pending_buf, sizeof(pending_buf));
 
     current.buf = &current_buf;
@@ -3510,6 +3521,19 @@ test_pending_input_production_lifecycle(void)
         "terminal current link should be consumed exactly once");
     TEST_ASSERT(ctx.streaming.completion.upstream_terminal_seen == 1,
         "current terminal must latch EOF without a queued remainder");
+
+    ngx_http_markdown_streaming_pending_input_clear(&ctx);
+    ctx.streaming.completion.upstream_terminal_seen = 0;
+    empty_terminal.buf = &empty_terminal_buf;
+    empty_terminal_buf.last_buf = 1;
+    rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+        &r, &ctx, &conf, &empty_terminal);
+    TEST_ASSERT(rc == NGX_OK,
+        "zero-length terminal remainder should enqueue successfully");
+    TEST_ASSERT(ctx.streaming.pending_input.head == NULL,
+        "zero-length terminal remainder should not allocate a queue link");
+    TEST_ASSERT(ctx.streaming.completion.upstream_terminal_seen == 1,
+        "zero-length terminal remainder must retain upstream EOF");
 
     ctx.streaming.pending_input.bytes = 3;
     ctx.streaming.pending_input.links = 1;
@@ -3561,10 +3585,64 @@ test_pending_input_production_lifecycle(void)
                 && future_buf.pos != future_buf.last,
         "future input must be retained without feeding while output is pending");
 
+    ctx.eligible = 0;
+    ctx.streaming.handle = NULL;
+    ctx.streaming.input_disposition = NGX_HTTP_MD_INPUT_RETAIN;
+    ctx.streaming.completion.pending_failopen_delivery = 1;
+    ctx.streaming.completion.failopen_active = 1;
+    g_streaming_feed_calls = 0;
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "future input should continue directly after fail-open drain");
+    TEST_ASSERT(g_streaming_feed_calls == 0,
+        "fail-open continuation must never re-enter the Rust converter");
+    TEST_ASSERT(future_buf.pos == future_buf.last,
+        "fail-open continuation should consume future input exactly once");
+
     ctx.streaming.pending_output = NULL;
     ngx_http_markdown_streaming_pending_input_clear(&ctx);
+    ctx.eligible = 1;
+    ctx.streaming.completion.failopen_active = 0;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.pending_output = &pending_output;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x43;
+    conf.max_size = 1;
+    future_buf.pos = future_data;
+    future_buf.last = future_data + sizeof(future_data) - 1;
+    g_next_body_filter_calls = 0;
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_handle_new_input_with_pending(
+        &r, &ctx, &conf, &future);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "post-commit enqueue failure must wait behind pending output");
+    TEST_ASSERT(g_next_body_filter_calls == 0,
+        "post-commit safe finish must not overtake pending output");
+    rc = ngx_http_markdown_streaming_handle_null_input(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "deferred post-commit error should run after pending output drains");
+    TEST_ASSERT(g_next_body_filter_calls == 2,
+        "deferred post-commit error should drain old output before terminal send");
+
+    ctx.streaming.pending_output = NULL;
+    ngx_http_markdown_streaming_pending_input_clear(&ctx);
+    ctx.streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
+    ctx.streaming.handle = NULL;
+    ctx.eligible = 1;
+    future_buf.pos = future_data;
+    future_buf.last = future_data + sizeof(future_data) - 1;
+    g_streaming_feed_calls = 0;
+    rc = ngx_http_markdown_streaming_body_filter(&r, &future);
+    TEST_ASSERT(rc == NGX_OK,
+        "terminal disposition should abandon future input before ensure_handle");
+    TEST_ASSERT(future_buf.pos == future_buf.last
+                && g_streaming_feed_calls == 0,
+        "terminal disposition must neither recreate nor feed a Rust handle");
+
+    ctx.streaming.input_disposition = NGX_HTTP_MD_INPUT_CONSUMED;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x44;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     rc = ngx_http_markdown_streaming_handle_postcommit_error(
         &r, &ctx, &conf, ERROR_POST_COMMIT);
