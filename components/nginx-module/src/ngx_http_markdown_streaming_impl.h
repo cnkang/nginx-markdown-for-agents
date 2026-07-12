@@ -794,7 +794,6 @@ ngx_http_markdown_streaming_pending_input_clear(
     ctx->streaming.pending_input.tail = NULL;
     ctx->streaming.pending_input.bytes = 0;
     ctx->streaming.pending_input.links = 0;
-    ctx->streaming.pending_input.terminal_seen = 0;
 }
 
 static ngx_flag_t
@@ -972,7 +971,7 @@ ngx_http_markdown_streaming_pending_input_enqueue_remainder(
     }
     ctx->streaming.pending_input.bytes += added_bytes;
     ctx->streaming.pending_input.links += added_links;
-    ctx->streaming.pending_input.terminal_seen |= terminal_seen;
+    ctx->streaming.completion.upstream_terminal_seen |= terminal_seen;
 
     return NGX_OK;
 }
@@ -1571,6 +1570,7 @@ ngx_http_markdown_streaming_resume_pending(
     if (ctx->streaming.completion.pending_failopen_delivery) {
         NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
         ctx->streaming.completion.pending_failopen_delivery = 0;
+        ctx->failopen_completed = 1;
     }
 
     /*
@@ -1797,6 +1797,24 @@ ngx_http_markdown_streaming_handle_postcommit_error(
 
     return ngx_http_markdown_streaming_send_output(
         r, ctx, NULL, 0, /* last_buf */ 1);
+}
+
+static ngx_int_t
+ngx_http_markdown_streaming_defer_postcommit_error(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    uint32_t error_code,
+    ngx_chain_t *in)
+{
+    ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
+    ctx->streaming.completion.postcommit_error_after_pending = 1;
+    ctx->streaming.completion.postcommit_error_code = error_code;
+    ctx->streaming.completion.upstream_terminal_seen = 0;
+    ngx_http_markdown_streaming_pending_input_clear(ctx);
+    ngx_http_markdown_streaming_abandon_input(in);
+    ngx_http_markdown_streaming_sync_buffered(r, ctx);
+
+    return NGX_AGAIN;
 }
 
 static ngx_http_markdown_stream_reason_e
@@ -3355,7 +3373,7 @@ ngx_http_markdown_streaming_send_failopen_chain(
         ctx->streaming.pending_output = out;
         ctx->streaming.pending_meta.has_data = 1;
         ctx->streaming.completion.pending_failopen_delivery =
-            (!ctx->eligible) ? 1 : 0;
+            (!ctx->eligible && !ctx->failopen_completed) ? 1 : 0;
 
         /*
          * Set RETAIN disposition: the fail-open clone shares ngx_buf_t
@@ -3372,8 +3390,11 @@ ngx_http_markdown_streaming_send_failopen_chain(
         return NGX_AGAIN;
     }
 
-    if ((rc == NGX_OK || rc == NGX_DONE) && !ctx->eligible) {
+    if ((rc == NGX_OK || rc == NGX_DONE) && !ctx->eligible
+        && !ctx->failopen_completed)
+    {
         NGX_HTTP_MARKDOWN_METRIC_INC(results.failopen_count);
+        ctx->failopen_completed = 1;
     }
 
     return rc;
@@ -3390,6 +3411,8 @@ ngx_http_markdown_streaming_failopen_passthrough(
     ngx_chain_t  **tail;
     ngx_chain_t  *cl;
     ngx_buf_t    *b;
+
+    ctx->streaming.completion.failopen_active = 1;
 
     if (!ctx->headers_forwarded
         && ngx_http_markdown_forward_headers(r, ctx) != NGX_OK)
@@ -3678,6 +3701,52 @@ ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
 }
 
 
+/* Continue request-lifetime fail-open without re-entering Rust or replaying. */
+static ngx_int_t
+ngx_http_markdown_streaming_continue_failopen_input(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_chain_t *input_chain)
+{
+    ngx_chain_t  *cl;
+    ngx_flag_t    last_buf;
+    ngx_int_t     rc;
+
+    last_buf = 0;
+    for (cl = input_chain; cl != NULL; cl = cl->next) {
+        if (cl->buf != NULL
+            && (cl->buf->last_buf
+                || (r != r->main && cl->buf->last_in_chain)))
+        {
+            last_buf = 1;
+            break;
+        }
+    }
+
+    rc = ngx_http_markdown_streaming_send_failopen_chain(
+        r, ctx, input_chain);
+    if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
+        return rc;
+    }
+
+    ngx_http_markdown_streaming_abandon_input(input_chain);
+    if (last_buf) {
+        ctx->streaming.completion.upstream_terminal_seen = 0;
+        if (r == r->main) {
+            ctx->streaming.main_terminal_sent = 1;
+        }
+    } else if (ctx->streaming.completion.upstream_terminal_seen) {
+        ctx->streaming.completion.upstream_terminal_seen = 0;
+        return ngx_http_markdown_streaming_send_output(
+            r, ctx, NULL, 0, /* last_buf */ 1);
+    }
+
+    ngx_http_markdown_streaming_sync_buffered(r, ctx);
+    return rc;
+}
+
+
 /*
  * Resume pending output when the body filter is re-entered with NULL input.
  *
@@ -3712,6 +3781,29 @@ ngx_http_markdown_streaming_handle_null_input(
         return rc;
     }
 
+    if (ctx->streaming.completion.postcommit_error_after_pending) {
+        uint32_t  error_code;
+
+        error_code = ctx->streaming.completion.postcommit_error_code;
+        ctx->streaming.completion.postcommit_error_after_pending = 0;
+        ctx->streaming.completion.postcommit_error_code = ERROR_SUCCESS;
+        return ngx_http_markdown_streaming_handle_postcommit_error(
+            r, ctx, conf, error_code);
+    }
+
+    if (ctx->streaming.completion.failopen_active
+        && ngx_http_markdown_streaming_pending_input_is_empty(ctx)
+        && ctx->streaming.completion.upstream_terminal_seen)
+    {
+        ctx->streaming.completion.upstream_terminal_seen = 0;
+        if (ctx->streaming.main_terminal_sent) {
+            ngx_http_markdown_streaming_sync_buffered(r, ctx);
+            return rc;
+        }
+        return ngx_http_markdown_streaming_send_output(
+            r, ctx, NULL, 0, /* last_buf */ 1);
+    }
+
     if (ctx->streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
         ctx->streaming.completion.upstream_terminal_seen = 0;
         ngx_http_markdown_streaming_pending_input_clear(ctx);
@@ -3731,8 +3823,10 @@ ngx_http_markdown_streaming_handle_null_input(
         ctx->streaming.pending_input.tail = NULL;
         ctx->streaming.pending_input.bytes = 0;
         ctx->streaming.pending_input.links = 0;
-        /* terminal_seen is preserved — not reset by detach */
-
+        if (ctx->streaming.completion.failopen_active) {
+            return ngx_http_markdown_streaming_continue_failopen_input(
+                r, ctx, input_chain);
+        }
         rc = ngx_http_markdown_streaming_process_chain(
             r, ctx, conf, input_chain, &last_buf, &fallback_cl);
 
@@ -3767,7 +3861,6 @@ ngx_http_markdown_streaming_handle_null_input(
         && ctx->eligible)
     {
         ctx->streaming.completion.upstream_terminal_seen = 0;
-        ctx->streaming.pending_input.terminal_seen = 0;
         return ngx_http_markdown_streaming_finalize_request(
             r, ctx, conf);
     }
@@ -3881,6 +3974,13 @@ ngx_http_markdown_streaming_handle_consumed_again(
         rc = ngx_http_markdown_streaming_pending_input_enqueue_remainder(
             r, ctx, conf, cl->next);
         if (rc != NGX_OK) {
+            if (ctx->streaming.pending_output != NULL
+                && ctx->streaming.commit_state
+                   == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+            {
+                return ngx_http_markdown_streaming_defer_postcommit_error(
+                    r, ctx, ERROR_BUDGET_EXCEEDED, cl->next);
+            }
             return rc;
         }
     }
@@ -4017,10 +4117,8 @@ ngx_http_markdown_streaming_handle_new_input_with_pending(
     if (ctx->streaming.commit_state
         == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
     {
-        rc = ngx_http_markdown_streaming_handle_postcommit_error(
-            r, ctx, conf, ERROR_BUDGET_EXCEEDED);
-        ngx_http_markdown_streaming_abandon_input(in);
-        return rc;
+        return ngx_http_markdown_streaming_defer_postcommit_error(
+            r, ctx, ERROR_BUDGET_EXCEEDED, in);
     }
 
     rc = ngx_http_markdown_streaming_precommit_error(
@@ -4080,15 +4178,17 @@ ngx_http_markdown_streaming_body_filter(
             r, ctx, conf, in);
     }
 
+    if (ctx->streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
+        ngx_http_markdown_streaming_abandon_input(in);
+        ngx_http_markdown_streaming_sync_buffered(r, ctx);
+        return NGX_OK;
+    }
+
     /* Initialize streaming handle on first call */
     rc = ngx_http_markdown_streaming_ensure_handle(
         r, ctx, conf, in);
     if (rc != NGX_OK) {
         return rc;
-    }
-
-    if (ctx->streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
-        return NGX_OK;
     }
 
     if (!ctx->eligible || ctx->streaming.handle == NULL) {
@@ -4104,6 +4204,10 @@ ngx_http_markdown_streaming_body_filter(
     }
     if (rc != NGX_OK) {
         return rc;
+    }
+
+    if (ctx->streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
+        return NGX_OK;
     }
 
     /*
