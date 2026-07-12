@@ -441,32 +441,36 @@ ngx_http_markdown_streaming_cleanup(void *data)
     }
 
     /*
-     * Pending output chains that hold Rust-allocated buffers
-     * would leak if not freed. Walk the chain and release
-     * each Rust buffer.
+     * Clear the pending_output anchor/state.
      *
-     * Ownership discriminator: buffers created in send_output use
-     * ngx_palloc (b->memory=1, b->temporary=0) and are freed with
-     * the request pool.  Only buffers with b->temporary=1 are
-     * Rust-owned and require markdown_streaming_output_free().
-     * The ngx_calloc_buf zeroing guarantees temporary=0 for
-     * pool-copied buffers.
+     * Ownership is layered explicitly elsewhere and must not be
+     * re-derived here from generic ngx_buf_t behavior flags
+     * (memory/temporary describe buffer *behavior*, not Rust
+     * allocator *provenance*):
+     *
+     *   - Zero-copy Rust output buffers (b->memory=1, b->temporary=0,
+     *     created by ngx_http_markdown_rust_buf_create_ex) own their
+     *     own pool cleanup context (ngx_http_markdown_rust_buf_cleanup_t)
+     *     registered at creation time.  That cleanup calls
+     *     markdown_streaming_output_free() exactly once, independent
+     *     of pending_output's lifetime.
+     *   - Pool-copy output buffers (send_output) are ngx_palloc'd from
+     *     the request pool and reclaimed with it; nothing to free here.
+     *   - Fail-open cloned chain links share the ngx_buf_t with an
+     *     upstream/module-owned buffer, which may legitimately be
+     *     marked temporary=1.  That memory is never Rust-allocated;
+     *     calling markdown_streaming_output_free() on it would be an
+     *     invalid free.
+     *
+     * Walking pending_output and branching on cl->buf->temporary
+     * cannot distinguish these cases and previously caused exactly
+     * this invalid-free risk for shared fail-open buffers.  Freeing
+     * Rust-owned memory is therefore left entirely to the zero-copy
+     * buffer's own pool cleanup; this function only clears our
+     * tracking state so stale references are not observed after
+     * cleanup runs.
      */
-    {
-        for (ngx_chain_t *cl = ctx->streaming.pending_output;
-             cl != NULL; cl = cl->next)
-        {
-            if (cl->buf != NULL && cl->buf->temporary) {
-                size_t len = ngx_http_markdown_buf_len_safe(cl->buf);
-                if (len > 0) {
-                    markdown_streaming_output_free(cl->buf->pos, len);
-                }
-                cl->buf->pos = NULL;
-                cl->buf->last = NULL;
-            }
-        }
-        ctx->streaming.pending_output = NULL;
-    }
+    ctx->streaming.pending_output = NULL;
 
     /*
      * Clear pending input chain.  Links are pool-allocated and will be
@@ -3656,22 +3660,45 @@ ngx_http_markdown_streaming_ensure_handle(
 
     if (rc == NGX_DECLINED) {
         /*
-         * Fail-open: headers were deferred in the header
-         * filter, so forward them before passing the body
-         * chain downstream.  Route through the shared
-         * fail-open send path so results.failopen_count
-         * is incremented consistently.
+         * Fail-open: route through the shared failopen_passthrough
+         * contract (header forwarding, chain-link cloning, replay
+         * prefix composition, and delivery-metric bookkeeping) so
+         * init-failure fail-open behaves identically to every other
+         * fail-open entry point.
+         *
+         * Do NOT call send_failopen_chain() directly here: `in` is
+         * the body-filter's transient input chain, owned by the
+         * caller and not guaranteed to remain stable across filter
+         * invocations.  failopen_passthrough() clones the chain
+         * links into request-pool memory (sharing only the
+         * underlying ngx_buf_t) before handing off to the delivery
+         * helper, so pending_output stays valid for resume_pending()
+         * and cleanup() even if the caller reuses `in` afterwards.
+         *
+         * The caller (body_filter) must check ctx->failopen_completed
+         * after this call: on immediate downstream success this
+         * function returns NGX_OK, but the fail-open body has
+         * already been delivered, so the caller must not fall
+         * through into a second, generic passthrough of the same
+         * input chain.
          */
-        if (!ctx->headers_forwarded) {
-            rc = ngx_http_markdown_forward_headers(
-                r, ctx);
-            if (rc != NGX_OK) {
-                return NGX_ERROR;
-            }
+        rc = ngx_http_markdown_streaming_failopen_passthrough(
+            r, ctx, in);
+
+        /*
+         * Only latch failopen_completed on confirmed downstream
+         * delivery (NGX_OK/NGX_DONE).  NGX_AGAIN means the chain is
+         * pending_output-owned by downstream; the caller (body_filter)
+         * must still treat this as "handled" and not fall through to
+         * a generic passthrough, but the request-lifetime completion
+         * latch is set only once delivery is confirmed so resume
+         * accounting (Rule 47) stays correct.
+         */
+        if (rc == NGX_OK || rc == NGX_DONE) {
+            ctx->failopen_completed = 1;
         }
 
-        return ngx_http_markdown_streaming_send_failopen_chain(
-            r, ctx, in);
+        return rc;
     }
 
     return NGX_OK;
@@ -3765,7 +3792,27 @@ ngx_http_markdown_streaming_continue_failopen_input(
 }
 
 
-/* Terminate fail-open after older downstream-owned output has drained. */
+/*
+ * Terminate fail-open after older downstream-owned output has drained.
+ *
+ * This handles a fail-open *delivery integrity* failure: later input
+ * could not be retained (budget exhaustion) while an earlier fail-open
+ * output chain was still downstream-owned, so bytes were unavoidably
+ * dropped and delivery must abort without a clean terminal.
+ *
+ * This is deliberately NOT routed through
+ * ngx_http_markdown_streaming_record_postcommit_failure() or any
+ * conversions_failed/streaming.failed_total/failures_resource_limit/
+ * failures_conversion increment.  The conversion failure that selected
+ * fail-open in the first place (ngx_http_markdown_streaming_precommit_error)
+ * already recorded exactly one conversions_failed/streaming.failed_total
+ * increment for this request, classified via failures_resource_limit or
+ * failures_conversion.  That accounting is complete and authoritative;
+ * this function handles a distinct, later-occurring event (the fail-open
+ * delivery itself failing to complete), not a second conversion outcome.
+ * Recording it again here would double-count the same request against
+ * the attempted == succeeded + failed invariant.
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_abort_failopen_after_pending(
     ngx_http_request_t *r,
@@ -3780,21 +3827,17 @@ ngx_http_markdown_streaming_abort_failopen_after_pending(
     ctx->streaming.completion.upstream_terminal_seen = 0;
     ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
     ngx_http_markdown_streaming_pending_input_abandon_and_clear(ctx);
-    if (!ctx->streaming.completion.failure_recorded) {
-        if (error_code == ERROR_MEMORY_LIMIT
-            || error_code == ERROR_BUDGET_EXCEEDED)
-        {
-            ctx->streaming.reason =
-                NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_BUDGET_EXCEEDED;
-            NGX_HTTP_MARKDOWN_METRIC_INC(streaming.budget_exceeded_total);
-            NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
-            ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-                ngx_http_markdown_reason_streaming_budget_exceeded());
-        } else {
-            NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
-        }
-    }
-    ngx_http_markdown_streaming_record_postcommit_failure(r, ctx, conf);
+
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+        "markdown: fail-open delivery integrity abort: "
+        "retained input could not be preserved while an earlier "
+        "fail-open output chain was still downstream-owned "
+        "(error_code=%ui); aborting without a clean terminal",
+        (ngx_uint_t) error_code);
+    (void) error_code;
+    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
+        ngx_http_markdown_reason_streaming_fail_postcommit());
+
     ngx_http_markdown_streaming_sync_buffered(r, ctx);
     return NGX_ERROR;
 }
@@ -4329,6 +4372,19 @@ ngx_http_markdown_streaming_body_filter(
         r, ctx, conf, in);
     if (rc != NGX_OK) {
         return rc;
+    }
+
+    /*
+     * On init failure, ensure_handle() routes through
+     * failopen_passthrough() and, on confirmed downstream delivery
+     * (NGX_OK/NGX_DONE), latches ctx->failopen_completed before
+     * returning NGX_OK here.  The fail-open body (including any
+     * terminal buffer) has therefore already been forwarded
+     * downstream — falling through to the generic passthrough below
+     * would resubmit the same `in` chain a second time.
+     */
+    if (ctx->failopen_completed) {
+        return NGX_OK;
     }
 
     if (!ctx->eligible || ctx->streaming.handle == NULL) {
