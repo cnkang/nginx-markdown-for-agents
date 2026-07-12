@@ -830,7 +830,8 @@ def _validate_benchmark_evidence(
             (f"{role}.path_coverage", f"{name}: {label} (metric={metric})")
         )
 
-    # 5. Environment identity fields must be present and non-empty
+    # 5. Environment identity fields must be present and non-empty;
+    #    nginx_version must also not use the legacy "unknown" placeholder.
     mb = report.get("module_benchmark", {})
     for field in ("platform", "load_generator", "nginx_version"):
         val = mb.get(field, "")

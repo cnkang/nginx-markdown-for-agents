@@ -207,7 +207,7 @@ else
   markdown_ensure_native_apple_silicon "$0"
 fi
 
-for cmd in curl python3 awk grep sed wc; do
+for cmd in curl python3 awk grep pgrep sed wc; do
   markdown_need_cmd "$cmd"
 done
 if [[ "${PROFILE}" == "stress" ]]; then
@@ -235,12 +235,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 SMALL_END_TOKEN = "SMALL_STREAM_END_TOKEN"
+ZERO_COPY_END_TOKEN = "ZERO_COPY_STREAM_END_TOKEN"
 OVERSIZE_END_TOKEN = "OVERSIZE_STREAM_END_TOKEN"
 DELAYED_END_TOKEN = "DELAYED_OVERSIZE_STREAM_END_TOKEN"
 GZIP_END_TOKEN = "GZIP_STREAM_END_TOKEN"
 DEFLATE_END_TOKEN = "DEFLATE_STREAM_END_TOKEN"
 DEFLATE_ZLIB_END_TOKEN = "DEFLATE_ZLIB_STREAM_END_TOKEN"
 SMALL_TARGET = 2 * 1024 * 1024
+ZERO_COPY_TARGET = 1024 * 1024
 COMPRESSED_TARGET = 64 * 1024
 OVERSIZE_TARGET = 12 * 1024 * 1024
 CHUNK_SIZE = 16 * 1024
@@ -262,6 +264,16 @@ def build_payload(title: str, target_size: int, end_token: str) -> bytes:
     out.extend(suffix)
     return bytes(out)
 
+def build_streaming_payload(title: str, target_size: int, end_token: str) -> bytes:
+    prefix = f"<!doctype html><html><body><h1>{title}</h1>\n".encode("utf-8")
+    suffix = f"<p>{end_token}</p></body></html>\n".encode("utf-8")
+    block = b"<p>zero-copy-stream-data-0123456789abcdef</p>\n"
+    out = bytearray(prefix)
+    while len(out) + len(block) + len(suffix) <= target_size:
+        out.extend(block)
+    out.extend(suffix)
+    return bytes(out)
+
 def compress_payload(body: bytes, mode: str) -> bytes:
     if mode == "gzip":
         wbits = zlib.MAX_WBITS | 16
@@ -278,6 +290,9 @@ def compress_payload(body: bytes, mode: str) -> bytes:
     return compressor.compress(body) + compressor.flush()
 
 SMALL_BODY = build_payload("Chunked Small", SMALL_TARGET, SMALL_END_TOKEN)
+ZERO_COPY_BODY = build_streaming_payload(
+    "Zero Copy Streaming", ZERO_COPY_TARGET, ZERO_COPY_END_TOKEN
+)
 OVERSIZE_BODY = build_payload("Chunked Oversize", OVERSIZE_TARGET, OVERSIZE_END_TOKEN)
 DELAYED_BODY = build_payload(
     "Delayed Chunked Oversize", OVERSIZE_TARGET, DELAYED_END_TOKEN
@@ -350,6 +365,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/small-valid":
             self._write_chunked(SMALL_BODY)
+            return
+        if path == "/zero-copy-valid":
+            self._write_chunked(ZERO_COPY_BODY)
             return
         if path == "/oversize":
             self._write_chunked(OVERSIZE_BODY)
@@ -452,6 +470,7 @@ def main():
 
     if args.print_metrics:
         print(f"SMALL_LEN={len(SMALL_BODY)}")
+        print(f"ZERO_COPY_LEN={len(ZERO_COPY_BODY)}")
         print(f"OVERSIZE_LEN={len(OVERSIZE_BODY)}")
         print(f"DELAYED_LEN={len(DELAYED_BODY)}")
         print(f"GZIP_SOURCE_LEN={len(GZIP_SOURCE_BODY)}")
@@ -470,6 +489,7 @@ def main():
             f"{len(TRUNCATED_DEFLATE_ZLIB_BODY)}"
         )
         print(f"SMALL_END_TOKEN={SMALL_END_TOKEN}")
+        print(f"ZERO_COPY_END_TOKEN={ZERO_COPY_END_TOKEN}")
         print(f"OVERSIZE_END_TOKEN={OVERSIZE_END_TOKEN}")
         print(f"DELAYED_END_TOKEN={DELAYED_END_TOKEN}")
         print(f"GZIP_END_TOKEN={GZIP_END_TOKEN}")
@@ -493,13 +513,13 @@ load_upstream_metrics() {
 
   while IFS='=' read -r key value; do
     case "${key}" in
-      SMALL_LEN|OVERSIZE_LEN|DELAYED_LEN|GZIP_SOURCE_LEN|GZIP_COMPRESSED_LEN|DEFLATE_SOURCE_LEN|DEFLATE_COMPRESSED_LEN|DEFLATE_ZLIB_SOURCE_LEN|DEFLATE_ZLIB_COMPRESSED_LEN|TRUNCATED_GZIP_COMPRESSED_LEN|TRUNCATED_DEFLATE_COMPRESSED_LEN|TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN)
+      SMALL_LEN|ZERO_COPY_LEN|OVERSIZE_LEN|DELAYED_LEN|GZIP_SOURCE_LEN|GZIP_COMPRESSED_LEN|DEFLATE_SOURCE_LEN|DEFLATE_COMPRESSED_LEN|DEFLATE_ZLIB_SOURCE_LEN|DEFLATE_ZLIB_COMPRESSED_LEN|TRUNCATED_GZIP_COMPRESSED_LEN|TRUNCATED_DEFLATE_COMPRESSED_LEN|TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN)
         [[ "${value}" =~ ^[0-9]+$ ]] || {
           echo "invalid numeric upstream metric: ${key}=${value}" >&2
           return 1
         }
         ;;
-      SMALL_END_TOKEN|OVERSIZE_END_TOKEN|DELAYED_END_TOKEN|GZIP_END_TOKEN|DEFLATE_END_TOKEN|DEFLATE_ZLIB_END_TOKEN)
+      SMALL_END_TOKEN|ZERO_COPY_END_TOKEN|OVERSIZE_END_TOKEN|DELAYED_END_TOKEN|GZIP_END_TOKEN|DEFLATE_END_TOKEN|DEFLATE_ZLIB_END_TOKEN)
         [[ "${value}" =~ ^[A-Z0-9_]+$ ]] || {
           echo "invalid upstream token metric: ${key}=${value}" >&2
           return 1
@@ -624,6 +644,7 @@ http {
             markdown_streaming force;
             markdown_streaming_engine on;
             markdown_streaming_zero_copy on;
+            markdown_stream_precommit_buffer 4m;
             markdown_cache_validation ims_only;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64m timeout=120s;
             markdown_error_policy pass;
@@ -768,13 +789,18 @@ get_worker_pid() {
   if [[ -f "${RUNTIME}/logs/nginx.pid" ]]; then
     master_pid="$(cat "${RUNTIME}/logs/nginx.pid" 2>/dev/null | tr -d '[:space:]')"
   fi
-  if [[ -z "${master_pid}" ]]; then
-    echo ""
-    return
+  if [[ -z "${master_pid}" || ! "${master_pid}" =~ ^[0-9]+$ ]]; then
+    echo "FAIL: unable to resolve the NGINX master PID" >&2
+    return 1
   fi
-  # pgrep -P finds child processes of the master.  With worker_processes 1
-  # there should be exactly one.  Filter to the first match.
-  wpid="$(pgrep -P "${master_pid}" 2>/dev/null | head -1 | tr -d '[:space:]')"
+  # pgrep -P finds children of the master.  This harness configures exactly
+  # one worker, so any other result is missing or ambiguous runtime evidence.
+  wpid="$(pgrep -P "${master_pid}" 2>/dev/null)"
+  if [[ -z "${wpid}" || ! "${wpid}" =~ ^[0-9]+$ ]] \
+      || ! kill -0 "${wpid}" 2>/dev/null; then
+    echo "FAIL: unable to resolve the single NGINX worker PID" >&2
+    return 1
+  fi
   echo "${wpid}"
 }
 
@@ -841,7 +867,7 @@ zc_worker_pid_before="$(get_worker_pid)"
 
 zc_line="$(curl -sS -D "${RAW_DIR}/zc.hdr" -o "${RAW_DIR}/zc.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
-  "http://127.0.0.1:${PORT}/streaming-zero-copy/small-valid" \
+  "http://127.0.0.1:${PORT}/streaming-zero-copy/zero-copy-valid" \
   -w "${CURL_METRICS_FMT}" || true)"
 echo "${zc_line}" | tee "${RAW_DIR}/zc.metrics" >/dev/null
 
@@ -854,7 +880,7 @@ fi
 
 assert_streaming_markdown_response \
   "zero-copy-small" "${RAW_DIR}/zc.hdr" "${RAW_DIR}/zc.body" \
-  "# Chunked Small" "${SMALL_END_TOKEN}" 1
+  "# Zero Copy Streaming" "${ZERO_COPY_END_TOKEN}" 1
 
 # Detect worker crash + respawn by comparing the worker PID before/after.
 zc_worker_pid_after="$(get_worker_pid)"
@@ -886,7 +912,7 @@ echo "==> Case 4d: zero-copy with slow downstream client (backpressure/NGX_AGAIN
 # cannot be delivered immediately.  We use a Python slow-reader that:
 #   1. Sends the request with Accept: text/markdown
 #   2. Reads response headers
-#   3. Reads body in tiny increments with small sleeps
+#   3. Throttles body reads below the loopback producer rate
 #   4. Verifies the full Markdown content and tail token
 #
 # After the request, we assert:
@@ -894,60 +920,21 @@ echo "==> Case 4d: zero-copy with slow downstream client (backpressure/NGX_AGAIN
 #   - backpressure_total increased (NGX_AGAIN occurred)
 #   - backpressure_resume_total increased (resume path executed)
 #   - worker PID unchanged (no crash)
-python3 - "${RAW_DIR}/zc_slow_reader.py" <<PYEOF > "${RAW_DIR}/zc_slow_reader.log" 2>&1
-import http.client
-import sys
-import time
-
-conn = http.client.HTTPConnection("127.0.0.1", int("${PORT}"), timeout=60)
-conn.request("GET", "/streaming-zero-copy/small-valid", headers={
-    "Accept": "text/markdown",
-})
-resp = conn.getresponse()
-
-if resp.status != 200:
-    print(f"FAIL: non-200 status: {resp.status}", file=sys.stderr)
-    sys.exit(1)
-
-ct = resp.getheader("Content-Type", "")
-if "text/markdown" not in ct:
-    print(f"FAIL: expected markdown Content-Type, got {ct}", file=sys.stderr)
-    sys.exit(1)
-
-body = b""
-total = 0
-while True:
-    chunk = resp.read(256)
-    if not chunk:
-        break
-    body += chunk
-    total += len(chunk)
-    # Small delay to create downstream backpressure without timing out
-    time.sleep(0.005)
-
-conn.close()
-
-if total == 0:
-    print("FAIL: zero-copy slow reader received 0 bytes", file=sys.stderr)
-    sys.exit(1)
-
-if b"# Chunked Small" not in body:
-    print("FAIL: zero-copy slow reader missing heading marker", file=sys.stderr)
-    sys.exit(1)
-
-if b"${SMALL_END_TOKEN}" not in body:
-    print("FAIL: zero-copy slow reader missing tail token", file=sys.stderr)
-    sys.exit(1)
-
-print(f"OK: zero-copy slow reader received {total} bytes with valid Markdown")
-PYEOF
-
-zc_slow_reader_rc=$?
-if [[ ${zc_slow_reader_rc} -ne 0 ]]; then
+if ! curl -sS --limit-rate 128k --max-time 60 \
+  -D "${RAW_DIR}/zc_slow.hdr" -o "${RAW_DIR}/zc_slow.body" \
+  -H "${ACCEPT_MARKDOWN_HEADER}" \
+  "http://127.0.0.1:${PORT}/streaming-zero-copy/zero-copy-valid" \
+  > "${RAW_DIR}/zc_slow_reader.log" 2>&1
+then
   echo "FAIL: zero-copy slow downstream reader failed:" >&2
   cat "${RAW_DIR}/zc_slow_reader.log" >&2
   exit 1
 fi
+assert_streaming_markdown_response \
+  "zero-copy-slow" "${RAW_DIR}/zc_slow.hdr" "${RAW_DIR}/zc_slow.body" \
+  "# Zero Copy Streaming" "${ZERO_COPY_END_TOKEN}" 1
+echo "OK: zero-copy throttled reader received complete valid Markdown" \
+  > "${RAW_DIR}/zc_slow_reader.log"
 cat "${RAW_DIR}/zc_slow_reader.log"
 
 # Assert backpressure metrics increased.
@@ -983,8 +970,9 @@ echo "==> Case 4e: zero-copy client abort during streaming (pool cleanup)"
 # which may complete before the timeout on fast loopback.
 zc_abort_worker_pid_before="$(get_worker_pid)"
 
-python3 - <<PYEOF > "${RAW_DIR}/zc_abort_client.log" 2>&1
+if ! python3 - <<PYEOF > "${RAW_DIR}/zc_abort_client.log" 2>&1
 import socket
+import sys
 import time
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -992,7 +980,7 @@ sock.settimeout(10)
 sock.connect(("127.0.0.1", ${PORT}))
 
 request = (
-    "GET /streaming-zero-copy/small-valid HTTP/1.1\r\n"
+    "GET /streaming-zero-copy/zero-copy-valid HTTP/1.1\r\n"
     "Host: localhost\r\n"
     "Accept: text/markdown\r\n"
     "Connection: close\r\n"
@@ -1018,19 +1006,15 @@ sock.close()
 
 if len(received) == 0:
     print("FAIL: abort client received no data before close", file=sys.stderr)
-    import sys
     sys.exit(1)
 
 if b"HTTP/1.1 200" not in received[:64]:
     print("FAIL: abort client did not receive 200 status", file=sys.stderr)
-    import sys
     sys.exit(1)
 
 print(f"OK: abort client received {len(received)} bytes then closed socket")
 PYEOF
-
-zc_abort_rc=$?
-if [[ ${zc_abort_rc} -ne 0 ]]; then
+then
   echo "FAIL: zero-copy deterministic client abort failed:" >&2
   cat "${RAW_DIR}/zc_abort_client.log" >&2
   exit 1
@@ -1045,7 +1029,7 @@ sleep 0.5
 zc_post_abort_line="$(curl -sS -D "${RAW_DIR}/zc_post_abort.hdr" \
   -o "${RAW_DIR}/zc_post_abort.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
-  "http://127.0.0.1:${PORT}/streaming-zero-copy/small-valid" \
+  "http://127.0.0.1:${PORT}/streaming-zero-copy/zero-copy-valid" \
   -w "${CURL_METRICS_FMT}" || true)"
 echo "${zc_post_abort_line}" | tee "${RAW_DIR}/zc_post_abort.metrics" >/dev/null
 if ! echo "${zc_post_abort_line}" | grep -q "${PATTERN_HTTP_200}"; then
@@ -1055,7 +1039,7 @@ if ! echo "${zc_post_abort_line}" | grep -q "${PATTERN_HTTP_200}"; then
 fi
 assert_streaming_markdown_response \
   "zero-copy-post-abort" "${RAW_DIR}/zc_post_abort.hdr" "${RAW_DIR}/zc_post_abort.body" \
-  "# Chunked Small" "${SMALL_END_TOKEN}" 1
+  "# Zero Copy Streaming" "${ZERO_COPY_END_TOKEN}" 1
 echo "  zero-copy post-abort: NGINX survived client abort, subsequent request OK"
 
 # Verify worker PID unchanged after abort.
