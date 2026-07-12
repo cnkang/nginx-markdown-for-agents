@@ -55,10 +55,6 @@ static void ngx_http_markdown_streaming_start_otel_span(
  *   NGX_AGAIN   on downstream backpressure
  *   NGX_ERROR   on unrecoverable failure
  */
-static ngx_int_t
-ngx_http_markdown_streaming_body_filter(
-    ngx_http_request_t *r, ngx_chain_t *in);
-
 /*
  * Process a single upstream buffer through the streaming pipeline.
  *
@@ -3543,6 +3539,18 @@ ngx_http_markdown_streaming_process_chain(
             r, ctx, in, rc);
 
         if (rc != NGX_OK) {
+            if (rc == NGX_AGAIN) {
+                /*
+                 * markdown_streaming_feed consumed the complete input buffer;
+                 * only its generated output is pending downstream.  Advance
+                 * the upstream position so NGINX can release the busy buffer
+                 * and resume reading after the output chain drains.
+                 */
+                cl->buf->pos = cl->buf->last;
+                if (*last_buf) {
+                    ctx->streaming.completion.finalize_after_pending = 1;
+                }
+            }
             if (rc == NGX_DONE) {
                 *fallback_cl = cl;
             }
