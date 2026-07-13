@@ -61,14 +61,17 @@ def _load_valid_metric_names() -> Optional[set]:
     if schema_path is None:
         return None
     try:
-        with open(schema_path, "r", encoding="utf-8") as fh:
+        validated_schema_path = validate_read_path(
+            schema_path, purpose="metrics schema"
+        )
+        with open(validated_schema_path, "r", encoding="utf-8") as fh:
             schema = json.load(fh)
         names = set()
         for entry in schema.get("metrics", []):
             if name := entry.get("name"):
                 names.add(name)
         return names
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
         return None
 
 
@@ -169,9 +172,7 @@ def _get_metric_path(metrics: Dict[str, Any], *path: str) -> Optional[float]:
         if not isinstance(current, dict) or key not in current:
             return None
         current = current[key]
-    if isinstance(current, (int, float)):
-        return float(current)
-    return None
+    return float(current) if isinstance(current, (int, float)) else None
 
 
 # ---------------------------------------------------------------------------
