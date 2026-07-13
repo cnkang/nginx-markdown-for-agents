@@ -63,6 +63,22 @@ MIGRATED_SCENARIO_WRAPPERS = {
     "tools/e2e/verify_auth_cache_e2e.sh": "auth-cache",
     "tools/e2e/verify_status_codes_e2e.sh": "status-codes",
 }
+DOCKER_RUNTIME_PATHS = (
+    ".clusterfuzzlite/Dockerfile",
+    "examples/docker/Dockerfile.official-nginx-source-build",
+    "tools/build_release/Dockerfile.install-example",
+)
+NGINX_NON_ROOT_REQUIRED_SNIPPETS = (
+    "USER nginx",
+    "EXPOSE 8080",
+    "pid /tmp/nginx.pid;",
+    "client_body_temp_path /tmp/client_temp;",
+)
+TRIVY_REQUIRED_LOCAL_EXCLUSIONS = (
+    ".codeartsdoer",
+    ".kiro",
+    "build",
+)
 
 
 @dataclass(frozen=True)
@@ -890,6 +906,108 @@ def check_clusterfuzzlite_build_config() -> CheckResult:
     )
 
 
+def _dockerfile_final_user(content: str) -> str | None:
+    """Return the final Dockerfile USER principal, excluding any group."""
+    for raw_line in reversed(content.splitlines()):
+        parts = raw_line.strip().split(None, 1)
+        if len(parts) == 2 and parts[0].upper() == "USER":
+            return parts[1].split()[0].split(":", 1)[0].lower()
+    return None
+
+
+def _final_docker_stage_args(content: str) -> set[str]:
+    """Return ARG names declared after the final FROM instruction."""
+    final_stage_args: set[str] = set()
+    for raw_line in content.splitlines():
+        parts = raw_line.strip().split(None, 1)
+        if parts and parts[0].upper() == "FROM":
+            final_stage_args.clear()
+        elif len(parts) == 2 and parts[0].upper() == "ARG":
+            final_stage_args.add(parts[1].split("=", 1)[0])
+    return final_stage_args
+
+
+def _docker_runtime_content_issues(
+    relative_path: str, content: str
+) -> list[str]:
+    """Return non-root and NGINX runtime contract issues for one Dockerfile."""
+    issues: list[str] = []
+    final_user = _dockerfile_final_user(content)
+    if final_user is None:
+        issues.append(f"{relative_path} missing final USER")
+    elif final_user in {"0", "root"}:
+        issues.append(f"{relative_path} final USER must be non-root")
+
+    if relative_path == ".clusterfuzzlite/Dockerfile":
+        return issues
+    issues.extend(
+        f"{relative_path} missing '{snippet}'"
+        for snippet in NGINX_NON_ROOT_REQUIRED_SNIPPETS
+        if snippet not in content
+    )
+    if relative_path.endswith("Dockerfile.install-example"):
+        stage_args = _final_docker_stage_args(content)
+        if not {"MODULE_REF", "INSTALL_SHA256"}.issubset(stage_args):
+            issues.append(
+                f"{relative_path} missing stage ARG declarations"
+            )
+    return issues
+
+
+def check_docker_runtime_security() -> CheckResult:
+    """Verify tracked runnable Dockerfiles use a non-root final user.
+
+    The NGINX runtime images must also use an unprivileged port and writable
+    PID/body-temp paths so the non-root declaration is operational rather than
+    a static-scanner-only change.
+    """
+    issues: list[str] = []
+    for relative_path in DOCKER_RUNTIME_PATHS:
+        path = REPO_ROOT / relative_path
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            issues.append(f"{relative_path} unreadable: {exc}")
+            continue
+        issues.extend(_docker_runtime_content_issues(relative_path, content))
+
+    if issues:
+        return _result("docker-runtime-security", FAIL, "; ".join(issues))
+    return _result(
+        "docker-runtime-security",
+        PASS,
+        "tracked runnable Dockerfiles use operational non-root runtimes",
+    )
+
+
+def check_trivy_local_scan_scope() -> CheckResult:
+    """Verify local Trivy scans exclude ignored adapters and build output."""
+    makefile = REPO_ROOT / "Makefile"
+    try:
+        content = makefile.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return _result(
+            "trivy-local-scope", FAIL, f"Makefile unreadable: {exc}"
+        )
+
+    missing = [
+        directory
+        for directory in TRIVY_REQUIRED_LOCAL_EXCLUSIONS
+        if f"--skip-dirs {directory}" not in content
+    ]
+    if missing:
+        return _result(
+            "trivy-local-scope",
+            FAIL,
+            "local Trivy scan includes ignored paths: " + ", ".join(missing),
+        )
+    return _result(
+        "trivy-local-scope",
+        PASS,
+        "local Trivy scan excludes ignored adapters and generated reports",
+    )
+
+
 def check_fuzz_target_determinism() -> CheckResult:
     """Verify fuzz targets do not use non-deterministic APIs (FUZZ-003).
 
@@ -1066,6 +1184,8 @@ def collect_results(full: bool = False) -> list[CheckResult]:
         _check_e2e_migration_policy(),
         _check_recent_analysis_reports(),
         check_clusterfuzzlite_build_config(),
+        check_docker_runtime_security(),
+        check_trivy_local_scan_scope(),
         check_cfl_workflows(),
         check_batch_prune_pairing(),
         check_fuzz_target_determinism(),
