@@ -1836,6 +1836,17 @@ test_send_output_and_resume_paths(void)
     rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
     TEST_ASSERT(rc == NGX_OK, "deferred last_buf should be sent on resume");
 
+    ctx.streaming.main_terminal_sent = 0;
+    ctx.streaming.subrequest_terminal_sent = 0;
+    rc = ngx_http_markdown_streaming_send_output(
+        &r, &ctx, NULL, 0, /* last_buf */ 1);
+    TEST_ASSERT(rc == NGX_OK,
+        "main-request terminal output should succeed");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
+        "main-request terminal should latch main_terminal_sent");
+    TEST_ASSERT(ctx.streaming.subrequest_terminal_sent == 0,
+        "main-request terminal must not latch subrequest terminal state");
+
     TEST_PASS("send_output/resume_pending branches covered");
 }
 
@@ -3840,6 +3851,8 @@ test_subrequest_pending_terminal_last_in_chain(void)
      */
     TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
         "subrequest: main_terminal_sent must remain 0 for subrequest terminal");
+    TEST_ASSERT(ctx.streaming.subrequest_terminal_sent == 1,
+        "subrequest: confirmed resume must latch subrequest terminal state");
     TEST_ASSERT(ctx.streaming.pending_meta.subrequest_terminal == 0,
         "subrequest: pending_meta.subrequest_terminal must be cleared after drain");
 
@@ -4741,6 +4754,284 @@ test_failopen_delivery_abort_does_not_double_count_conversion_failure(void)
 }
 
 /*
+ * Regression: subrequest terminal (last_in_chain) delivered via a
+ * backpressured fail-open multi-link chain must NOT be duplicated after
+ * the pending chain drains.
+ *
+ * Production lifecycle under test:
+ *
+ *   1. streaming_body_filter(&r, &in)
+ *        - subrequest (r != r->main)
+ *        - in: data buffer with last_in_chain=1 and last_buf=0
+ *        - process_chain detects last_in_chain on the input buffer and
+ *          sets upstream_terminal_seen=1
+ *        - process_chunk feeds the head buffer to Rust; Rust returns
+ *          ERROR_BUDGET_EXCEEDED -> precommit_error(PASS) ->
+ *          eligible=0, failopen_active=1
+ *        - handle_chunk_result sees !eligible -> failopen_passthrough
+ *          composes: replay-prefix (last_buf=0) + cloned input (tail
+ *          carries last_in_chain=1) -> multi-link chain
+ *        - send_failopen_chain submits the multi-link chain downstream
+ *          -> NGX_AGAIN -> pending_output retained, pending_meta
+ *          captures subrequest_terminal=1
+ *
+ *   2. streaming_body_filter(&r, NULL)
+ *        - handle_null_input -> resume_pending
+ *        - ngx_http_next_body_filter(r, NULL) -> NGX_OK
+ *        - original terminal delivery confirmed downstream
+ *        - pending_output cleared, pending_meta cleared,
+ *          pending_failopen_delivery consumed (failopen_count=1,
+ *          failopen_completed=1)
+ *        - upstream_terminal_seen is still 1 (set by process_chain,
+ *          not cleared by resume_pending)
+ *
+ *   3. (BUG, pre-fix) handle_null_input fail-open EOF branch:
+ *        - failopen_active && pending_input empty && upstream_terminal_seen
+ *        - checks main_terminal_sent (== 0 for subrequest)
+ *        - sends a synthetic empty last_in_chain=1 downstream
+ *          -> DUPLICATE SUBREQUEST TERMINAL (call 3)
+ *
+ * After the fix:
+ *   - resume_pending latches subrequest_terminal_sent after confirmed
+ *     delivery of a subrequest terminal
+ *   - handle_null_input's fail-open EOF branch checks the request-type-
+ *     aware terminal-delivered state (subrequest_terminal_sent for
+ *     subrequests), so it returns without synthesizing a duplicate
+ *   - exactly 2 downstream calls: call 1 (multi-link, NGX_AGAIN) and
+ *     call 2 (NULL resume, NGX_OK); call 3 MUST NOT EXIST
+ *
+ * Covers:
+ *   - ngx_http_markdown_streaming_body_filter (production entry point)
+ *   - ngx_http_markdown_streaming_process_chain (sets upstream_terminal_seen)
+ *   - ngx_http_markdown_streaming_process_chunk (Rust feed failure)
+ *   - ngx_http_markdown_streaming_precommit_error (fail-open selection)
+ *   - ngx_http_markdown_streaming_failopen_passthrough (replay prefix +
+ *     clone)
+ *   - ngx_http_markdown_streaming_send_failopen_chain (capture + NGX_AGAIN)
+ *   - ngx_http_markdown_streaming_handle_null_input (resume + EOF branch)
+ *   - ngx_http_markdown_streaming_resume_pending (terminal latch)
+ *   - ngx_http_markdown_streaming_send_output (synthetic terminal)
+ */
+static void
+test_subrequest_failopen_pending_terminal_resumes_once(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_request_t       main_r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_chain_t              in;
+    ngx_buf_t                in_buf;
+    u_char                   in_data[] = "chunk-data";
+    u_char                   prebuf_data[16];
+    ngx_int_t                rc;
+    ngx_http_markdown_metrics_t metrics;
+
+    TEST_SUBSECTION(
+        "subrequest fail-open pending terminal resumes once (no duplicate)");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    /*
+     * Make this a subrequest: r->main points to a distinct request so
+     * the terminal marker is last_in_chain, not last_buf.
+     */
+    ngx_memzero(&main_r, sizeof(main_r));
+    r.main = &main_r;
+
+    /*
+     * Configuration: fail-open policy, no body-size limit (so
+     * track_feed_budget does not reject the head chunk before Rust
+     * sees it), parser budget unlimited.
+     */
+    conf.max_size = 0;
+    conf.advanced.memory_budget = 0;
+    conf.decompress.parser_budget = 0;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    /*
+     * Streaming state: handle initialized, Pre-Commit phase, replay
+     * buffer pre-populated so failopen_passthrough builds a multi-link
+     * (replay-prefix + cloned-input) chain.
+     */
+    ctx.eligible = 1;
+    ctx.headers_forwarded = 1;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x71;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ctx.streaming.prebuffer_initialized = 0;
+
+    ctx.streaming.failopen_replay_initialized = 1;
+    ctx.streaming.failopen_replay_buf.data = prebuf_data;
+    ctx.streaming.failopen_replay_buf.size = 3;
+    ctx.streaming.failopen_replay_buf.capacity = sizeof(prebuf_data);
+    ctx.streaming.failopen_replay_buf.max_size = sizeof(prebuf_data);
+    ctx.streaming.failopen_replay_buf.pool = &pool;
+    ngx_memcpy(prebuf_data, "abc", 3);
+
+    /*
+     * Build a single-link input chain carrying both data and the
+     * subrequest terminal marker.  process_chain detects last_in_chain
+     * BEFORE calling process_chunk, so upstream_terminal_seen is set
+     * authoritatively by the production terminal-detection helper.
+     * process_chunk then feeds the data to Rust, which fails with
+     * ERROR_BUDGET_EXCEEDED, triggering the real precommit_error(PASS)
+     * path that selects fail-open.
+     */
+    ngx_memzero(&in_buf, sizeof(in_buf));
+    in_buf.pos = in_data;
+    in_buf.last = in_data + (sizeof(in_data) - 1);
+    in_buf.last_buf = 0;
+    in_buf.last_in_chain = 1;  /* subrequest terminal */
+
+    in.buf = &in_buf;
+    in.next = NULL;
+
+    /*
+     * Inject a real Pre-Commit failure: markdown_streaming_feed returns
+     * ERROR_BUDGET_EXCEEDED, so process_chunk -> handle_feed_result ->
+     * precommit_error(PASS) clears eligible and latches failopen_active.
+     * Downstream returns NGX_AGAIN so the composed fail-open multi-link
+     * chain is retained as pending_output.
+     */
+    g_streaming_feed_rc = ERROR_BUDGET_EXCEEDED;
+    g_streaming_feed_out_data = NULL;
+    g_streaming_feed_out_len = 0;
+    g_next_body_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_streaming_body_filter(&r, &in);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "subrequest-resumes-once: body_filter must return NGX_AGAIN when "
+        "downstream backpressures the fail-open chain");
+    TEST_ASSERT(ctx.streaming.completion.failopen_active == 1,
+        "subrequest-resumes-once: failopen_active must be latched by "
+        "precommit_error");
+    TEST_ASSERT(ctx.eligible == 0,
+        "subrequest-resumes-once: eligible must be cleared by "
+        "precommit_error PASS policy");
+    TEST_ASSERT(ctx.streaming.pending_output != NULL,
+        "subrequest-resumes-once: pending_output must be retained on "
+        "NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.completion.upstream_terminal_seen == 1,
+        "subrequest-resumes-once: upstream_terminal_seen must be set by "
+        "process_chain (authoritative terminal detection from production "
+        "helper)");
+    TEST_ASSERT(ctx.streaming.pending_meta.subrequest_terminal == 1,
+        "subrequest-resumes-once: pending_meta.subrequest_terminal must "
+        "be captured before downstream ownership crossing");
+    TEST_ASSERT(ctx.streaming.pending_meta.main_terminal == 0,
+        "subrequest-resumes-once: pending_meta.main_terminal must be 0 "
+        "(subrequest uses last_in_chain, not last_buf)");
+    TEST_ASSERT(ctx.streaming.subrequest_terminal_sent == 0,
+        "subrequest-resumes-once: NGX_AGAIN must not confirm terminal "
+        "delivery");
+
+    /*
+     * Call 1 must be the multi-link fail-open chain (in != NULL) with
+     * a terminal tail carrying last_in_chain=1 and last_buf=0.
+     */
+    TEST_ASSERT(g_body_filter_hist_len >= 1,
+        "subrequest-resumes-once: at least one downstream call expected");
+    TEST_ASSERT(g_body_filter_hist[0].is_null == 0,
+        "subrequest-resumes-once: call 1 must have non-NULL input "
+        "(composed fail-open chain)");
+    TEST_ASSERT(g_body_filter_hist[0].any_last_buf == 0,
+        "subrequest-resumes-once: call 1 must NOT carry last_buf "
+        "(subrequest terminal is last_in_chain only)");
+    TEST_ASSERT(g_body_filter_hist[0].any_last_in_chain == 1,
+        "subrequest-resumes-once: call 1 chain must carry last_in_chain "
+        "in the tail link (subrequest terminal)");
+
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(metrics.results.failopen_count == 0,
+            "subrequest-resumes-once: failopen_count must NOT increment "
+            "on NGX_AGAIN (delivery not yet confirmed)");
+    }
+
+    /*
+     * Step 2: real NULL re-entry through the production entry point.
+     * Downstream returns NGX_OK, draining the retained multi-link chain
+     * and confirming the original subrequest terminal delivery.
+     */
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_OK,
+        "subrequest-resumes-once: NULL resume must return NGX_OK after "
+        "downstream confirms delivery");
+
+    /*
+     * Call 2 must be the NULL resume (in == NULL) that drains the
+     * downstream-retained chain.
+     */
+    TEST_ASSERT(g_body_filter_hist_len >= 2,
+        "subrequest-resumes-once: two downstream calls expected");
+    TEST_ASSERT(g_body_filter_hist[1].is_null == 1,
+        "subrequest-resumes-once: call 2 must be NULL resume");
+
+    /*
+     * CRITICAL: exactly 2 downstream calls — the original terminal
+     * delivery (call 1, NGX_AGAIN retained) + the NULL resume
+     * confirming it (call 2, NGX_OK).  A third call with a synthetic
+     * empty last_in_chain=1 would be a DUPLICATE SUBREQUEST TERMINAL.
+     */
+    TEST_ASSERT(g_body_filter_hist_len == 2,
+        "subrequest-resumes-once: downstream call history must contain "
+        "exactly 2 entries — a third would be a duplicate subrequest "
+        "terminal");
+    TEST_ASSERT(g_next_body_filter_calls == 2,
+        "subrequest-resumes-once: exactly 2 downstream calls "
+        "(no duplicate subrequest terminal after pending drain)");
+
+    /*
+     * pending_output and pending metadata must be cleared after the
+     * successful drain.
+     */
+    TEST_ASSERT(ctx.streaming.pending_output == NULL,
+        "subrequest-resumes-once: pending_output must be NULL after "
+        "successful drain");
+    TEST_ASSERT(ctx.streaming.pending_meta.subrequest_terminal == 0,
+        "subrequest-resumes-once: pending_meta.subrequest_terminal "
+        "must be cleared after drain");
+    TEST_ASSERT(ctx.streaming.pending_meta.main_terminal == 0,
+        "subrequest-resumes-once: pending_meta.main_terminal must be "
+        "cleared after drain");
+    TEST_ASSERT(ctx.streaming.completion.pending_failopen_delivery == 0,
+        "subrequest-resumes-once: pending_failopen_delivery must be "
+        "cleared after drain");
+
+    /*
+     * The subrequest terminal delivery is now confirmed downstream.
+     * The request-type-aware terminal-delivered latch must reflect
+     * this so the fail-open EOF branch does not synthesize a duplicate.
+     */
+    TEST_ASSERT(ctx.streaming.completion.upstream_terminal_seen == 0,
+        "subrequest-resumes-once: upstream_terminal_seen must be "
+        "cleared by the fail-open EOF branch after terminal delivery "
+        "is confirmed");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
+        "subrequest-resumes-once: main_terminal_sent must remain 0 "
+        "for a subrequest (last_in_chain is not main-request EOF)");
+    TEST_ASSERT(ctx.streaming.subrequest_terminal_sent == 1,
+        "subrequest-resumes-once: confirmed NULL resume must latch "
+        "subrequest terminal delivery");
+
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(metrics.results.failopen_count == 1,
+            "subrequest-resumes-once: failopen_count must be 1 after "
+            "successful fail-open delivery drain");
+    }
+
+    TEST_PASS(
+        "subrequest fail-open pending terminal resumes once "
+        "(no duplicate subrequest terminal)");
+}
+
+/*
  * Test entry point.  Runs all streaming_impl unit test functions in
  * sequence.  Prints a banner before and after the test run.  Returns 0
  * on success; individual test assertions abort via TEST_ASSERT on failure.
@@ -4775,6 +5066,7 @@ main(void)
     test_init_failure_immediate_success_submits_input_once();
     test_init_failure_again_retains_cloned_chain_links();
     test_failopen_delivery_abort_does_not_double_count_conversion_failure();
+    test_subrequest_failopen_pending_terminal_resumes_once();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

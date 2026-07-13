@@ -483,15 +483,30 @@ ngx_http_markdown_stream_postcommit_send_chain(
         ctx->streaming.pending_output = out;
         ctx->streaming.pending_meta.has_data = pending_has_data;
         ctx->streaming.pending_meta.bytes = pending_output_bytes;
+        ctx->streaming.pending_meta.main_terminal =
+            (r == r->main && b->last_buf);
+        ctx->streaming.pending_meta.subrequest_terminal =
+            (r != r->main && b->last_in_chain);
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 #endif
     }
 
-    /* Rule 47: only latch main_terminal_sent after a successful
-     * downstream return, never on NGX_AGAIN. */
-    if (b->last_buf && (rc == NGX_OK || rc == NGX_DONE)) {
+    /* Rule 47: only latch terminal-delivered state after a successful
+     * downstream return, never on NGX_AGAIN.
+     * Main request terminal (last_buf) latches main_terminal_sent;
+     * subrequest terminal (last_in_chain) latches subrequest_terminal_sent. */
+    if (r == r->main && b->last_buf
+        && (rc == NGX_OK || rc == NGX_DONE))
+    {
 #ifdef MARKDOWN_STREAMING_ENABLED
         ctx->streaming.main_terminal_sent = 1;
+#endif
+    }
+    if (r != r->main && b->last_in_chain
+        && (rc == NGX_OK || rc == NGX_DONE))
+    {
+#ifdef MARKDOWN_STREAMING_ENABLED
+        ctx->streaming.subrequest_terminal_sent = 1;
 #endif
     }
 
@@ -525,7 +540,17 @@ ngx_http_markdown_stream_postcommit_acquire_terminal_buf(
     ngx_buf_t  *b;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * Short-circuit if the request-type-appropriate terminal has already
+     * been sent.  Main requests check main_terminal_sent; subrequests
+     * check subrequest_terminal_sent.  This prevents a duplicate
+     * terminal after the request-type-aware latch has been set by a
+     * prior confirmed delivery.
+     */
     if (r == r->main && ctx->streaming.main_terminal_sent) {
+        return 0;
+    }
+    if (r != r->main && ctx->streaming.subrequest_terminal_sent) {
         return 0;
     }
 #endif

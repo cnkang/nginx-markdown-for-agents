@@ -1018,6 +1018,31 @@ ngx_http_markdown_streaming_record_ttfb(
 
 
 /*
+ * Return the request-type-aware terminal-delivered latch for the current
+ * request.
+ *
+ * Main requests (r == r->main) use main_terminal_sent (last_buf delivered).
+ * Subrequests (r != r->main) use subrequest_terminal_sent
+ * (last_in_chain delivered).
+ *
+ * This lets handle_null_input's fail-open EOF branch check the terminal
+ * delivery state matching the current request type, preventing a
+ * duplicate synthetic terminal after a backpressured subrequest terminal
+ * has already been confirmed downstream.
+ */
+static ngx_inline ngx_flag_t
+ngx_http_markdown_streaming_terminal_sent_for_request(
+    const ngx_http_request_t *r,
+    const ngx_http_markdown_ctx_t *ctx)
+{
+    if (r == r->main) {
+        return ctx->streaming.main_terminal_sent;
+    }
+    return ctx->streaming.subrequest_terminal_sent;
+}
+
+
+/*
  * Scan a chain for terminal metadata, distinguishing main request
  * (last_buf) from subrequest (last_in_chain) semantics.
  *
@@ -1027,9 +1052,8 @@ ngx_http_markdown_streaming_record_ttfb(
  * re-scanning the downstream-retained chain.
  *
  * Output parameters:
- *   main_terminal       - set to 1 if any link carries last_buf
- *   subrequest_terminal - set to 1 if any link carries last_in_chain
- *                         (only meaningful for subrequests)
+ *   main_terminal       - main request chain carries last_buf
+ *   subrequest_terminal - subrequest chain carries last_in_chain
  */
 static void
 ngx_http_markdown_streaming_capture_chain_terminal(
@@ -1045,15 +1069,14 @@ ngx_http_markdown_streaming_capture_chain_terminal(
         if (cl->buf == NULL) {
             continue;
         }
-        if (cl->buf->last_buf) {
+        if (r == r->main && cl->buf->last_buf) {
             mt = 1;
         }
-        if (cl->buf->last_in_chain) {
+        if (r != r->main && cl->buf->last_in_chain) {
             st = 1;
         }
     }
 
-    (void) r;  /* request identity is handled by callers */
     *main_terminal = mt;
     *subrequest_terminal = st;
 }
@@ -1197,13 +1220,23 @@ ngx_http_markdown_streaming_send_output(
      * For the main request, last_buf is the terminal marker; for a
      * subrequest, last_in_chain is the terminal marker.
      */
-    cap_main_terminal = b->last_buf;
-    cap_subrequest_terminal = b->last_in_chain;
+    cap_main_terminal = (r == r->main && b->last_buf);
+    cap_subrequest_terminal = (r != r->main && b->last_in_chain);
 
     rc = ngx_http_next_body_filter(r, out);
 
-    if (terminal_last_buf && (rc == NGX_OK || rc == NGX_DONE)) {
+    /*
+     * Latch terminal-delivered state after confirmed delivery
+     * (Rule 47).  Main request terminal (last_buf) latches
+     * main_terminal_sent; subrequest terminal (last_in_chain)
+     * latches subrequest_terminal_sent.  Both only on NGX_OK/NGX_DONE,
+     * never on NGX_AGAIN.
+     */
+    if (cap_main_terminal && (rc == NGX_OK || rc == NGX_DONE)) {
         ctx->streaming.main_terminal_sent = 1;
+    }
+    if (cap_subrequest_terminal && (rc == NGX_OK || rc == NGX_DONE)) {
+        ctx->streaming.subrequest_terminal_sent = 1;
     }
 
     /*
@@ -1519,6 +1552,7 @@ ngx_http_markdown_streaming_resume_pending(
 {
     ngx_int_t     rc;
     ngx_flag_t    pending_main_terminal;
+    ngx_flag_t    pending_subrequest_terminal;
 
     if (ctx->streaming.pending_output == NULL) {
         /*
@@ -1549,6 +1583,8 @@ ngx_http_markdown_streaming_resume_pending(
      *   present.  This must NOT latch main_terminal_sent.
      */
     pending_main_terminal = ctx->streaming.pending_meta.main_terminal;
+    pending_subrequest_terminal =
+        ctx->streaming.pending_meta.subrequest_terminal;
 
     /*
      * The downstream filter retained the original chain when it returned
@@ -1606,12 +1642,24 @@ ngx_http_markdown_streaming_resume_pending(
      * Rule 47: only latch after confirmed delivery (NGX_OK/NGX_DONE).
      * NGX_AGAIN was handled above and never reaches this point.
      *
-     * Subrequest terminal (last_in_chain) does NOT latch
-     * main_terminal_sent — it represents subrequest EOF, not main
-     * request lifecycle.
+     * Main request terminal (last_buf) latches main_terminal_sent.
+     * Subrequest terminal (last_in_chain) latches subrequest_terminal_sent.
+     * The two latches are request-type-aware and symmetric: each represents
+     * "the terminal marker appropriate for THIS request has been confirmed
+     * downstream."  handle_null_input's fail-open EOF branch checks the
+     * matching latch via terminal_sent_for_request() to avoid synthesizing
+     * a duplicate terminal after a backpressured subrequest terminal has
+     * already been confirmed downstream.
      */
-    if (ngx_http_markdown_streaming_delivery_ok(rc) && pending_main_terminal) {
+    if (ngx_http_markdown_streaming_delivery_ok(rc)
+        && r == r->main && pending_main_terminal)
+    {
         ctx->streaming.main_terminal_sent = 1;
+    }
+    if (ngx_http_markdown_streaming_delivery_ok(rc)
+        && r != r->main && pending_subrequest_terminal)
+    {
+        ctx->streaming.subrequest_terminal_sent = 1;
     }
 
     /*
@@ -3517,6 +3565,24 @@ ngx_http_markdown_streaming_send_failopen_chain(
         ctx->failopen_completed = 1;
     }
 
+    /*
+     * Latch terminal-delivered state after confirmed immediate delivery
+     * (Rule 47).  Symmetric with resume_pending() and send_output():
+     * the fail-open chain's terminal tail may carry last_buf (main
+     * request) or last_in_chain (subrequest).  Latching here prevents
+     * handle_null_input's fail-open EOF branch from synthesizing a
+     * duplicate terminal after a successful immediate fail-open
+     * delivery.
+     */
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        if (r == r->main && cap_main_terminal) {
+            ctx->streaming.main_terminal_sent = 1;
+        }
+        if (r != r->main && cap_subrequest_terminal) {
+            ctx->streaming.subrequest_terminal_sent = 1;
+        }
+    }
+
     return rc;
 }
 
@@ -3875,8 +3941,18 @@ ngx_http_markdown_streaming_continue_failopen_input(
     ngx_http_markdown_streaming_abandon_input(input_chain);
     if (last_buf) {
         ctx->streaming.completion.upstream_terminal_seen = 0;
+        /*
+         * send_failopen_chain already latched the request-type-aware
+         * terminal-delivered state (main_terminal_sent for main
+         * requests, subrequest_terminal_sent for subrequests) after
+         * confirmed delivery.  Set the matching latch here for
+         * symmetry with the immediate-success path, ensuring all
+         * terminal-delivery confirmation paths stay consistent.
+         */
         if (r == r->main) {
             ctx->streaming.main_terminal_sent = 1;
+        } else {
+            ctx->streaming.subrequest_terminal_sent = 1;
         }
     } else if (ctx->streaming.completion.upstream_terminal_seen) {
         ctx->streaming.completion.upstream_terminal_seen = 0;
@@ -3999,7 +4075,17 @@ ngx_http_markdown_streaming_handle_null_input(
         && ctx->streaming.completion.upstream_terminal_seen)
     {
         ctx->streaming.completion.upstream_terminal_seen = 0;
-        if (ctx->streaming.main_terminal_sent) {
+        /*
+         * Check the request-type-aware terminal-delivered latch.
+         * Main requests check main_terminal_sent (last_buf delivered);
+         * subrequests check subrequest_terminal_sent (last_in_chain
+         * delivered).  If the matching terminal has already been
+         * confirmed downstream (e.g. via a backpressured fail-open chain
+         * that carried last_in_chain in its tail), return without
+         * synthesizing a duplicate terminal.  (Rule 47: the latch is
+         * only set after confirmed delivery, never on NGX_AGAIN.)
+         */
+        if (ngx_http_markdown_streaming_terminal_sent_for_request(r, ctx)) {
             ngx_http_markdown_streaming_sync_buffered(r, ctx);
             return rc;
         }
