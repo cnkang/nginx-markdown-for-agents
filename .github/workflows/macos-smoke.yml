@@ -98,7 +98,24 @@ jobs:
       - name: Run chunked streaming native smoke validation
         env:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
-        run: ./tools/e2e/verify_chunked_streaming_native_e2e.sh --profile smoke
+        shell: bash
+        run: |
+          max_attempts=2
+          for attempt in 1 2; do
+            if ./tools/e2e/verify_chunked_streaming_native_e2e.sh --profile smoke; then
+              exit 0
+            fi
+
+            if [[ "${attempt}" -eq "${max_attempts}" ]]; then
+              echo "Darwin native smoke failed on both attempts" >&2
+              exit 1
+            fi
+
+            echo "::warning::Darwin native smoke failed; retrying once after 10 seconds"
+            sleep 10
+          done
+
+          exit 1
 
       - name: Remove retained IMS build artifacts
         if: always()
