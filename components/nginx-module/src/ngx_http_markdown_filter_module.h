@@ -1061,6 +1061,30 @@ typedef struct {
 
             /* Pending output delivery mode for deferred perf accounting. */
             ngx_flag_t                        zero_copy;
+
+            /*
+             * Terminal metadata captured BEFORE the first downstream
+             * body-filter call (Rule 1/47 ownership boundary).
+             *
+             * The pending_output chain may be multi-link (fail-open replay
+             * prefix + cloned input + terminal tail).  Scanning only the
+             * chain head in resume_pending() misses a terminal tail.
+             * Re-scanning the downstream-retained chain after NGX_AGAIN is
+             * unreliable because downstream may mutate buf metadata.
+             *
+             * Instead, the caller that crosses the downstream ownership
+             * boundary captures terminal state from the full chain and
+             * stores it here.  resume_pending() consumes these latches
+             * only after downstream confirms delivery (NGX_OK/NGX_DONE),
+             * preserving Rule 47 (terminal-sent latch only after confirmed
+             * delivery).
+             *
+             * main_terminal: any link carries last_buf (main request EOF).
+             * subrequest_terminal: any link carries last_in_chain
+             *   (subrequest EOF — must NOT latch main_terminal_sent).
+             */
+            ngx_flag_t                        main_terminal;
+            ngx_flag_t                        subrequest_terminal;
         } pending_meta;
 
         /* Pre-Commit prebuffer for fallback */

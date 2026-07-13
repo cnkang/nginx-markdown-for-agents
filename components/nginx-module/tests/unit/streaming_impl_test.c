@@ -296,6 +296,24 @@ struct ngx_time_s {
 static ngx_int_t g_next_body_filter_rc = NGX_OK;
 static ngx_uint_t g_next_body_filter_calls = 0;
 static ngx_chain_t *g_next_body_filter_last_in = NULL;
+
+/*
+ * Per-call history recorder for downstream body-filter invocations.
+ * Captures whether in==NULL, whether any link carries last_buf, and
+ * whether any link carries last_in_chain, for each call.  This lets
+ * regression tests prove exact downstream invocation sequences:
+ *   call 1 = multi-link chain with terminal tail
+ *   call 2 = NULL resume
+ *   call 3 = MUST NOT EXIST
+ */
+#define G_BODY_FILTER_HIST_MAX 16
+typedef struct {
+    unsigned    is_null:1;
+    unsigned    any_last_buf:1;
+    unsigned    any_last_in_chain:1;
+} body_filter_hist_entry_t;
+static body_filter_hist_entry_t g_body_filter_hist[G_BODY_FILTER_HIST_MAX];
+static ngx_uint_t g_body_filter_hist_len = 0;
 static ngx_int_t g_next_header_filter_rc = NGX_OK;
 static ngx_int_t g_complex_value_rc = NGX_OK;
 static ngx_int_t g_add_vary_rc = NGX_OK;
@@ -442,9 +460,33 @@ ngx_module_t ngx_http_markdown_filter_module = { 0 };
 static ngx_int_t
 ngx_http_next_body_filter_stub(ngx_http_request_t *r, ngx_chain_t *in)
 {
+    unsigned  is_null = (in == NULL) ? 1 : 0;
+    unsigned  any_lb = 0;
+    unsigned  any_lic = 0;
+
     UNUSED(r);
     g_next_body_filter_calls++;
     g_next_body_filter_last_in = in;
+
+    for (ngx_chain_t *cl = in; cl != NULL; cl = cl->next) {
+        if (cl->buf == NULL) {
+            continue;
+        }
+        if (cl->buf->last_buf) {
+            any_lb = 1;
+        }
+        if (cl->buf->last_in_chain) {
+            any_lic = 1;
+        }
+    }
+
+    if (g_body_filter_hist_len < G_BODY_FILTER_HIST_MAX) {
+        g_body_filter_hist[g_body_filter_hist_len].is_null = is_null;
+        g_body_filter_hist[g_body_filter_hist_len].any_last_buf = any_lb;
+        g_body_filter_hist[g_body_filter_hist_len].any_last_in_chain = any_lic;
+        g_body_filter_hist_len++;
+    }
+
     if (g_next_body_filter_seq_idx < g_next_body_filter_seq_len) {
         return g_next_body_filter_seq[g_next_body_filter_seq_idx++];
     }
@@ -1246,6 +1288,8 @@ reset_globals(void)
     g_next_body_filter_rc = NGX_OK;
     g_next_body_filter_calls = 0;
     g_next_body_filter_last_in = NULL;
+    g_body_filter_hist_len = 0;
+    ngx_memzero(g_body_filter_hist, sizeof(g_body_filter_hist));
     g_next_header_filter_rc = NGX_OK;
     g_complex_value_rc = NGX_OK;
     g_add_vary_rc = NGX_OK;
@@ -3532,6 +3576,283 @@ test_failopen_passthrough_again_pending(void)
 }
 
 /*
+ * Regression: multi-link fail-open pending chain with terminal tail.
+ *
+ * Drives the real fail-open composition path: replay prefix (non-terminal)
+ * + cloned input chain (containing the terminal buffer).  Downstream
+ * returns NGX_AGAIN, so the full multi-link chain is retained as
+ * pending_output.  NULL resume then drains it.
+ *
+ * Asserts:
+ *   - Initial fail-open submission reaches downstream exactly once
+ *     (call 1 = multi-link chain with terminal tail, in != NULL)
+ *   - NULL resume reaches downstream exactly once
+ *     (call 2 = in == NULL)
+ *   - Total downstream calls == 2 (no third empty terminal send)
+ *   - main_terminal_sent == 1 (terminal was in the tail, not the head)
+ *   - pending_output == NULL after drain
+ *   - failopen_count increments only after successful drain
+ *
+ * Covers: Rule 1 (NULL resume), Rule 38 (failopen_count after OK),
+ *         Rule 47 (terminal-sent latch only after confirmed delivery)
+ */
+static void
+test_failopen_multilink_pending_terminal_tail(void)
+{
+    ngx_http_request_t      r;
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t              pool;
+    ngx_connection_t        conn;
+    ngx_log_t               log;
+    ngx_event_t             read_event;
+    ngx_chain_t             in;
+    ngx_buf_t               in_buf;
+    ngx_int_t               rc;
+    u_char                  prebuf_data[16];
+    u_char                  chunk_data[] = "chunk";
+    ngx_http_markdown_metrics_t metrics;
+
+    TEST_SUBSECTION("fail-open multi-link pending chain with terminal tail");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    conf.max_size = 0;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    /*
+     * Build a fail-open scenario with replay buffer data.
+     * The input chain carries the terminal buffer (last_buf=1).
+     * failopen_passthrough composes: replay prefix (last_buf=0) ->
+     * cloned input (last_buf=1).  This is a multi-link chain where
+     * the head is non-terminal and the tail is terminal.
+     */
+    ngx_memzero(&in, sizeof(in));
+    ngx_memzero(&in_buf, sizeof(in_buf));
+    in.buf = &in_buf;
+    in.next = NULL;
+    in_buf.pos = chunk_data;
+    in_buf.last = chunk_data + 5;
+    in_buf.last_buf = 1;        /* terminal in the input (tail of chain) */
+    in_buf.last_in_chain = 0;
+
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x39;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ctx.streaming.prebuffer_initialized = 1;
+    ctx.streaming.prebuffer.data = prebuf_data;
+    ctx.streaming.prebuffer.capacity = sizeof(prebuf_data);
+    ctx.streaming.prebuffer.max_size = sizeof(prebuf_data);
+    ctx.eligible = 0;
+
+    ctx.streaming.failopen_replay_initialized = 1;
+    ctx.streaming.failopen_replay_buf.data = prebuf_data;
+    ctx.streaming.failopen_replay_buf.size = 3;
+    ctx.streaming.failopen_replay_buf.capacity = sizeof(prebuf_data);
+    ctx.streaming.failopen_replay_buf.max_size = sizeof(prebuf_data);
+    ngx_memcpy(prebuf_data, "abc", 3);
+
+    ctx.headers_forwarded = 1;  /* skip header forwarding */
+
+    if (ngx_http_markdown_metrics != NULL) {
+        ngx_http_markdown_metrics->results.failopen_count = 0;
+    }
+
+    /*
+     * Step 1: failopen_passthrough composes replay prefix + cloned input
+     *         and submits to downstream.  Downstream returns NGX_AGAIN.
+     *         The full multi-link chain is retained as pending_output.
+     */
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_failopen_passthrough(&r, &ctx, &in);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "multi-link: failopen_passthrough should return NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_output != NULL,
+        "multi-link: pending_output must be set on NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.completion.pending_failopen_delivery == 1,
+        "multi-link: pending_failopen_delivery latch must be set");
+
+    /*
+     * Call 1 must be the multi-link chain (in != NULL) with a terminal
+     * tail (any_last_buf == 1).  The head is the replay prefix
+     * (last_buf=0), so head-only detection would miss the terminal.
+     */
+    TEST_ASSERT(g_body_filter_hist_len >= 1,
+        "multi-link: at least one downstream call expected");
+    TEST_ASSERT(g_body_filter_hist[0].is_null == 0,
+        "multi-link: call 1 must have non-NULL input (the composed chain)");
+    TEST_ASSERT(g_body_filter_hist[0].any_last_buf == 1,
+        "multi-link: call 1 chain must carry last_buf in a link (terminal tail)");
+
+    /*
+     * pending_meta must have captured main_terminal=1 BEFORE the
+     * downstream call, even though the chain head is non-terminal.
+     */
+    TEST_ASSERT(ctx.streaming.pending_meta.main_terminal == 1,
+        "multi-link: pending_meta.main_terminal must be captured before ownership crossing");
+
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 0,
+            "multi-link: failopen_count must NOT increment on NGX_AGAIN");
+    }
+
+    /*
+     * Step 2: NULL resume drains the downstream-retained chain.
+     *         Downstream returns NGX_OK.
+     */
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "multi-link: resume_pending should return NGX_OK on downstream success");
+
+    /*
+     * Call 2 must be the NULL resume (in == NULL).
+     */
+    TEST_ASSERT(g_body_filter_hist_len >= 2,
+        "multi-link: two downstream calls expected");
+    TEST_ASSERT(g_body_filter_hist[1].is_null == 1,
+        "multi-link: call 2 must be NULL resume");
+
+    /*
+     * CRITICAL: exactly 2 downstream calls — no third empty terminal send.
+     */
+    TEST_ASSERT(g_next_body_filter_calls == 2,
+        "multi-link: exactly 2 downstream calls (no duplicate empty terminal)");
+
+    /*
+     * main_terminal_sent must be latched only after confirmed delivery.
+     */
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
+        "multi-link: main_terminal_sent must be 1 after confirmed drain");
+    TEST_ASSERT(ctx.streaming.pending_output == NULL,
+        "multi-link: pending_output must be NULL after successful drain");
+    TEST_ASSERT(ctx.streaming.pending_meta.main_terminal == 0,
+        "multi-link: pending_meta.main_terminal must be cleared after drain");
+    TEST_ASSERT(ctx.streaming.completion.pending_failopen_delivery == 0,
+        "multi-link: pending_failopen_delivery must be cleared after drain");
+
+    if (ngx_http_markdown_metrics != NULL) {
+        TEST_ASSERT(ngx_http_markdown_metrics->results.failopen_count == 1,
+            "multi-link: failopen_count must increment after successful drain");
+    }
+
+    TEST_PASS("fail-open multi-link pending chain with terminal tail");
+}
+
+/*
+ * Regression: subrequest terminal (last_in_chain) must not latch
+ * main_terminal_sent.
+ *
+ * For a subrequest (r != r->main), the terminal marker is last_in_chain,
+ * not last_buf.  The pending chain may carry last_in_chain=1 in a
+ * non-head tail link.  resume_pending must detect this via captured
+ * metadata but must NOT latch main_terminal_sent (which is main-request
+ * lifecycle only).
+ */
+static void
+test_subrequest_pending_terminal_last_in_chain(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_request_t       main_r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_chain_t              in_head;
+    ngx_chain_t              in_tail;
+    ngx_buf_t                head_buf;
+    ngx_buf_t                tail_buf;
+    u_char                   head_data[] = "data";
+    ngx_int_t                rc;
+
+    TEST_SUBSECTION("subrequest pending terminal last_in_chain");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    /*
+     * Make this a subrequest: r->main points to a different request.
+     */
+    ngx_memzero(&main_r, sizeof(main_r));
+    r.main = &main_r;
+
+    conf.max_size = 0;
+    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    ctx.headers_forwarded = 1;
+    ctx.eligible = 0;
+
+    /*
+     * Build a 2-link chain: head (non-terminal, has data) + tail
+     * (last_in_chain=1, last_buf=0).  This models a subrequest
+     * terminal marker in the tail.
+     */
+    ngx_memzero(&head_buf, sizeof(head_buf));
+    ngx_memzero(&tail_buf, sizeof(tail_buf));
+    head_buf.pos = head_data;
+    head_buf.last = head_data + 4;
+    head_buf.last_buf = 0;
+    head_buf.last_in_chain = 0;
+    tail_buf.last_buf = 0;
+    tail_buf.last_in_chain = 1;   /* subrequest terminal */
+
+    in_head.buf = &head_buf;
+    in_head.next = &in_tail;
+    in_tail.buf = &tail_buf;
+    in_tail.next = NULL;
+
+    /*
+     * Use the no-replay failopen path (replay not initialized) so
+     * clone_chain_links produces a 2-link clone with shared bufs.
+     */
+    ctx.streaming.failopen_replay_initialized = 0;
+    ctx.streaming.failopen_replay_buf.size = 0;
+
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_failopen_passthrough(&r, &ctx, &in_head);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "subrequest: failopen_passthrough should return NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_output != NULL,
+        "subrequest: pending_output must be set on NGX_AGAIN");
+
+    /*
+     * The pending chain head is non-terminal; the tail carries
+     * last_in_chain=1.  pending_meta must capture subrequest_terminal.
+     */
+    TEST_ASSERT(ctx.streaming.pending_meta.subrequest_terminal == 1,
+        "subrequest: pending_meta.subrequest_terminal must be captured");
+    TEST_ASSERT(ctx.streaming.pending_meta.main_terminal == 0,
+        "subrequest: pending_meta.main_terminal must be 0 (no last_buf)");
+
+    /*
+     * NULL resume drains the chain.
+     */
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_resume_pending(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "subrequest: resume_pending should return NGX_OK");
+    TEST_ASSERT(ctx.streaming.pending_output == NULL,
+        "subrequest: pending_output must be NULL after drain");
+
+    /*
+     * CRITICAL: main_terminal_sent must NOT be latched for a subrequest
+     * terminal.  last_in_chain is subrequest EOF, not main request EOF.
+     */
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
+        "subrequest: main_terminal_sent must remain 0 for subrequest terminal");
+    TEST_ASSERT(ctx.streaming.pending_meta.subrequest_terminal == 0,
+        "subrequest: pending_meta.subrequest_terminal must be cleared after drain");
+
+    /*
+     * Exactly 2 downstream calls: the fail-open submission + NULL resume.
+     */
+    TEST_ASSERT(g_next_body_filter_calls == 2,
+        "subrequest: exactly 2 downstream calls");
+
+    TEST_PASS("subrequest pending terminal last_in_chain");
+}
+
+/*
  * Exercise the production input-lifecycle helpers added for generic
  * downstream backpressure.  These assertions call the real static helpers
  * from ngx_http_markdown_streaming_impl.h rather than simulating their state.
@@ -4007,7 +4328,7 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     free_calls = g_output_free_calls;
     rc = ngx_http_markdown_streaming_save_pending(
         &r, &ctx, &future, future_buf.pos,
-        ngx_http_markdown_buf_len_safe(&future_buf), 0);
+        ngx_http_markdown_buf_len_safe(&future_buf), 0, 0, 0);
     TEST_ASSERT(rc == NGX_ERROR,
         "P1-2: save_pending must reject re-entry");
     TEST_ASSERT(ctx.streaming.pending_output == &pending_output,
@@ -4446,6 +4767,8 @@ main(void)
     test_process_chain_and_body_filter_deep_paths();
     test_streaming_gap_branches();
     test_failopen_passthrough_again_pending();
+    test_failopen_multilink_pending_terminal_tail();
+    test_subrequest_pending_terminal_last_in_chain();
     test_pending_input_production_lifecycle();
     test_failopen_init_failure_latches_mode();
     test_failopen_active_enqueue_failure_aborts_safely();

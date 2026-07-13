@@ -1018,6 +1018,48 @@ ngx_http_markdown_streaming_record_ttfb(
 
 
 /*
+ * Scan a chain for terminal metadata, distinguishing main request
+ * (last_buf) from subrequest (last_in_chain) semantics.
+ *
+ * Terminal state is captured BEFORE the first downstream body-filter
+ * call so it survives across the ownership boundary (Rule 1/47).
+ * resume_pending() consumes the captured metadata instead of
+ * re-scanning the downstream-retained chain.
+ *
+ * Output parameters:
+ *   main_terminal       - set to 1 if any link carries last_buf
+ *   subrequest_terminal - set to 1 if any link carries last_in_chain
+ *                         (only meaningful for subrequests)
+ */
+static void
+ngx_http_markdown_streaming_capture_chain_terminal(
+    ngx_chain_t *out,
+    const ngx_http_request_t *r,
+    ngx_flag_t *main_terminal,
+    ngx_flag_t *subrequest_terminal)
+{
+    ngx_flag_t  mt = 0;
+    ngx_flag_t  st = 0;
+
+    for (ngx_chain_t *cl = out; cl != NULL; cl = cl->next) {
+        if (cl->buf == NULL) {
+            continue;
+        }
+        if (cl->buf->last_buf) {
+            mt = 1;
+        }
+        if (cl->buf->last_in_chain) {
+            st = 1;
+        }
+    }
+
+    (void) r;  /* request identity is handled by callers */
+    *main_terminal = mt;
+    *subrequest_terminal = st;
+}
+
+
+/*
  * Save output chain as pending on downstream backpressure (NGX_AGAIN).
  *
  * Guards against unexpected re-entry without modifying the existing
@@ -1034,7 +1076,9 @@ ngx_http_markdown_streaming_save_pending(
     ngx_http_markdown_ctx_t *ctx,
     ngx_chain_t *out,
     const u_char *data, size_t len,
-    ngx_flag_t zero_copy)
+    ngx_flag_t zero_copy,
+    ngx_flag_t main_terminal,
+    ngx_flag_t subrequest_terminal)
 {
     if (ctx->streaming.pending_output != NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -1051,6 +1095,8 @@ ngx_http_markdown_streaming_save_pending(
         (data != NULL && len > 0) ? 1 : 0;
     ctx->streaming.pending_meta.bytes = len;
     ctx->streaming.pending_meta.zero_copy = zero_copy;
+    ctx->streaming.pending_meta.main_terminal = main_terminal;
+    ctx->streaming.pending_meta.subrequest_terminal = subrequest_terminal;
 
     /* Backpressure metric: streaming output returned NGX_AGAIN */
     NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
@@ -1086,6 +1132,8 @@ ngx_http_markdown_streaming_send_output(
     ngx_chain_t  *out;
     ngx_int_t     rc;
     ngx_flag_t    terminal_last_buf;
+    ngx_flag_t    cap_main_terminal;
+    ngx_flag_t    cap_subrequest_terminal;
 
     b = ngx_calloc_buf(r->pool);
     if (b == NULL) {
@@ -1142,6 +1190,16 @@ ngx_http_markdown_streaming_send_output(
     out->buf = b;
     out->next = NULL;
 
+    /*
+     * Capture terminal metadata BEFORE the downstream call (Rule 1/47
+     * ownership boundary).  send_output builds a single-link chain, so
+     * the terminal state is known from the buffer we just constructed.
+     * For the main request, last_buf is the terminal marker; for a
+     * subrequest, last_in_chain is the terminal marker.
+     */
+    cap_main_terminal = b->last_buf;
+    cap_subrequest_terminal = b->last_in_chain;
+
     rc = ngx_http_next_body_filter(r, out);
 
     if (terminal_last_buf && (rc == NGX_OK || rc == NGX_DONE)) {
@@ -1167,7 +1225,8 @@ ngx_http_markdown_streaming_send_output(
 
     if (rc == NGX_AGAIN) {
         rc = ngx_http_markdown_streaming_save_pending(
-            r, ctx, out, data, len, 0);
+            r, ctx, out, data, len, 0,
+            cap_main_terminal, cap_subrequest_terminal);
     }
 
     return rc;
@@ -1458,12 +1517,10 @@ ngx_http_markdown_streaming_resume_pending(
     ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf)
 {
-    const ngx_chain_t  *out;
     ngx_int_t     rc;
-    ngx_flag_t    pending_last_buf;
+    ngx_flag_t    pending_main_terminal;
 
-    out = ctx->streaming.pending_output;
-    if (out == NULL) {
+    if (ctx->streaming.pending_output == NULL) {
         /*
          * If finalize deferred the terminal last_buf due to
          * backpressure, send it now that the pending output
@@ -1479,12 +1536,20 @@ ngx_http_markdown_streaming_resume_pending(
     }
 
     /*
-     * Capture last_buf before calling the downstream filter: once
-     * the chain is consumed the buf metadata may be modified by
-     * downstream filters (defensive, per Rule 2/38).
+     * Read terminal metadata captured BEFORE the first downstream call
+     * (Rule 1/47 ownership boundary).  This is the authoritative source
+     * for terminal state — NOT a head-only or full-chain re-scan of the
+     * downstream-retained chain, which may have been mutated by
+     * downstream filters.
+     *
+     * For main requests: main_terminal indicates last_buf was present
+     *   in the pending chain (possibly in a non-head tail link of a
+     *   multi-link fail-open chain).
+     * For subrequests: subrequest_terminal indicates last_in_chain was
+     *   present.  This must NOT latch main_terminal_sent.
      */
-    pending_last_buf = (out->buf != NULL && out->buf->last_buf
-                        && r == r->main) ? 1 : 0;
+    pending_main_terminal = ctx->streaming.pending_meta.main_terminal;
+
     /*
      * The downstream filter retained the original chain when it returned
      * NGX_AGAIN.  Resume that owned state with NULL; resubmitting out would
@@ -1531,15 +1596,30 @@ ngx_http_markdown_streaming_resume_pending(
     ngx_http_markdown_streaming_account_pending_output(ctx, rc);
 
     /*
-     * If the drained pending chain carried a last_buf (closing
-     * bytes from safe_finish), mark main_terminal_sent now that
-     * delivery is confirmed.  This complements the fix in
-     * send_closing()/send_terminal() which defers the latch
-     * on NGX_AGAIN.
+     * If the drained pending chain carried a main-request last_buf
+     * (captured before the first downstream call), mark
+     * main_terminal_sent now that delivery is confirmed.  This
+     * complements the fix in send_output()/send_failopen_chain()
+     * which captures terminal state before crossing the downstream
+     * ownership boundary.
+     *
+     * Rule 47: only latch after confirmed delivery (NGX_OK/NGX_DONE).
+     * NGX_AGAIN was handled above and never reaches this point.
+     *
+     * Subrequest terminal (last_in_chain) does NOT latch
+     * main_terminal_sent — it represents subrequest EOF, not main
+     * request lifecycle.
      */
-    if (ngx_http_markdown_streaming_delivery_ok(rc) && pending_last_buf) {
+    if (ngx_http_markdown_streaming_delivery_ok(rc) && pending_main_terminal) {
         ctx->streaming.main_terminal_sent = 1;
     }
+
+    /*
+     * Clear consumed terminal metadata regardless of delivery result
+     * so stale state does not persist into the next pending cycle.
+     */
+    ctx->streaming.pending_meta.main_terminal = 0;
+    ctx->streaming.pending_meta.subrequest_terminal = 0;
 
     /*
      * Pending output drained. Check if resume failed before
@@ -2157,7 +2237,7 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
 
     if (rc == NGX_AGAIN) {
         return ngx_http_markdown_streaming_save_pending(
-            r, ctx, zout, out_data, out_len, 1);
+            r, ctx, zout, out_data, out_len, 1, 0, 0);
     }
 
     return rc;
@@ -3368,7 +3448,9 @@ ngx_http_markdown_streaming_send_failopen_chain(
     ngx_http_markdown_ctx_t *ctx,
     ngx_chain_t *out)
 {
-    ngx_int_t  rc;
+    ngx_int_t   rc;
+    ngx_flag_t  cap_main_terminal;
+    ngx_flag_t  cap_subrequest_terminal;
 
     /*
      * Defense-in-depth: refuse to submit a new output chain while
@@ -3390,11 +3472,26 @@ ngx_http_markdown_streaming_send_failopen_chain(
         return NGX_ERROR;
     }
 
+    /*
+     * Capture terminal metadata from the FULL chain BEFORE the
+     * downstream call (Rule 1/47 ownership boundary).  The fail-open
+     * chain may be multi-link (replay prefix + cloned input + terminal
+     * tail).  The head is typically non-terminal (replay prefix), so
+     * a head-only scan in resume_pending() would miss the terminal
+     * tail.  Capturing here ensures terminal state survives across the
+     * downstream ownership boundary.
+     */
+    ngx_http_markdown_streaming_capture_chain_terminal(
+        out, r, &cap_main_terminal, &cap_subrequest_terminal);
+
     rc = ngx_http_next_body_filter(r, out);
 
     if (rc == NGX_AGAIN) {
         ctx->streaming.pending_output = out;
         ctx->streaming.pending_meta.has_data = 1;
+        ctx->streaming.pending_meta.main_terminal = cap_main_terminal;
+        ctx->streaming.pending_meta.subrequest_terminal =
+            cap_subrequest_terminal;
         ctx->streaming.completion.pending_failopen_delivery =
             (!ctx->eligible && !ctx->failopen_completed) ? 1 : 0;
 
