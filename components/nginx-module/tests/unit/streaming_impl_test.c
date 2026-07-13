@@ -402,28 +402,7 @@ ngx_module_t ngx_http_markdown_filter_module = { 0 };
         }                                                                            \
     } while (0)
 
-void
-ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes)
-{
-    NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
-    if (bytes > 0) {
-        NGX_HTTP_MARKDOWN_METRIC_WATERMARK(
-            perf.pending_output_high_watermark_bytes,
-            (ngx_atomic_t) bytes);
-    }
-}
-
-void
-ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
-{
-    if (bytes == 0) {
-        return;
-    }
-    NGX_HTTP_MARKDOWN_METRIC_ADD(
-        streaming.selection.output_bytes_total,
-        (ngx_atomic_t) bytes);
-    NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
-}
+#include "../../src/ngx_http_markdown_postcommit_metrics_impl.h"
 
 /*
  * Logging macros (no-op stubs).  Production NGINX logging is replaced with
