@@ -94,8 +94,10 @@ jobs:
           cargo --version
 
       - name: Validate package version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          ./packaging/scripts/validate-version.sh "${{ inputs.version }}"
+          ./packaging/scripts/validate-version.sh "$INPUT_VERSION"
 
       - name: Resolve NGINX version
         id: nginx_version
