@@ -618,9 +618,11 @@ class TestEvidenceOutputValidation:
     def test_write_output_rejects_path_outside_repo(self, tmp_path):
         """Caller-controlled output path cannot escape the repo root."""
         outside_path = tmp_path / "evidence.json"
+        output_path = str(outside_path)
+        evidence = {"verdict": "GO"}
 
         with pytest.raises(ValueError):
-            _write_output({"verdict": "GO"}, str(outside_path))
+            _write_output(evidence, output_path)
 
 
 # ---------------------------------------------------------------------------
