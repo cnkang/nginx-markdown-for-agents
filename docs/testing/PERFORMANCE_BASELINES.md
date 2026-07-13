@@ -14,7 +14,7 @@ Key findings from this run:
 - FFI end-to-end conversion is very fast for small/medium HTML and scales roughly linearly to ~1MB input.
 - On the medium (~10KB) sample, `parse_html_with_charset` dominates runtime (~76.8%), while Markdown conversion is ~20.9%.
 - ETag generation and token estimation are negligible compared to parse/convert time.
-- `markdown_conditional_requests if_modified_since_only` is dramatically cheaper than `full_support` in the conditional-request microbench (as expected, because `full_support` performs conversion to generate/compare ETag).
+- `markdown_cache_validation ims_only` is dramatically cheaper than `full` in the conditional-request microbench (as expected, because `full` performs conversion to generate/compare ETag).
 
 ## Environment
 
@@ -262,8 +262,7 @@ The output JSON includes a `memory_peak_method` field (`os_reported_peak` or `sa
 - `ab` used for repeated runs (3 runs per scenario in the summary tables below)
 - Config mode approximates production behavior for this module path:
   - `markdown_filter on`
-  - `markdown_etag on`
-  - `markdown_conditional_requests` = `full_support` or `if_modified_since_only`
+  - `markdown_cache_validation full` or `markdown_cache_validation ims_only`
   - normal `warn` logging (no debug logging during performance runs)
 
 ### x86_64 (Rosetta) - NGINX 1.28.2
@@ -339,3 +338,4 @@ Single-request validation (`curl`, `Accept: text/markdown`):
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

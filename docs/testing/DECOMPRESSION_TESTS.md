@@ -163,7 +163,7 @@ make -C components/nginx-module/tests unit-config_merge
 
 6. **Size Limit Enforcement**
    - Upstream returns large compressed content
-   - Decompressed size exceeds `markdown_max_size`
+   - Decompressed size exceeds `markdown_limits memory=<size>`
    - Module applies fail-open strategy
    - Logs error with category=resource_limit
 
