@@ -75,11 +75,13 @@ Exit codes:
   1  At least one check failed
   2  Usage error
 EOF
+    return 0
 }
 
 # Print a message to stderr
 msg() {
     printf '%s\n' "$*" >&2
+    return 0
 }
 
 # Emit a check result.
@@ -186,6 +188,7 @@ json_escape() {
         LC_ALL="$old_lc_all"
     fi
     printf '%s' "$out"
+    return 0
 }
 
 ##############################################################################
@@ -204,14 +207,14 @@ check_nginx_version() {
     # If nginx_bin is empty string, skip
     if [[ -z "$nginx_bin" ]]; then
         emit_check "nginx_version" "skip" "nginx binary not specified (--nginx-bin empty)"
-        return
+        return 0
     fi
 
     # Check if binary exists / is executable
     if ! command -v "$nginx_bin" >/dev/null 2>&1; then
         emit_check "nginx_version" "skip" "nginx binary not found in PATH" \
             '{"binary":"'"$(json_escape "$nginx_bin")"'"}'
-        return
+        return 0
     fi
 
     # Run nginx -v (version goes to stderr)
@@ -227,13 +230,14 @@ check_nginx_version() {
     if [[ -z "$version" ]]; then
         emit_check "nginx_version" "fail" "could not parse nginx version" \
             '{"raw_output":"'"$(json_escape "$version_output")"'"}'
-        return
+        return 0
     fi
 
     DETECTED_NGINX_VERSION="$version"
 
     emit_check "nginx_version" "pass" "nginx version ${version} detected" \
         '{"version":"'"$version"'"}'
+    return 0
 }
 
 # Check 2: module .so file existence
@@ -274,6 +278,7 @@ check_module_exists() {
             '{"searched":"'"$(json_escape "$searched")"'","filename":"'"$MODULE_FILENAME"'"}' \
             "Download the module from GitHub Releases or install via package"
     fi
+    return 0
 }
 
 # Check 3: basic config syntax validation
@@ -382,12 +387,12 @@ check_configure_args() {
 
     if [[ -z "$nginx_bin" ]]; then
         emit_check "configure_args" "skip" "nginx binary not specified (--nginx-bin empty)"
-        return
+        return 0
     fi
 
     if ! command -v "$nginx_bin" >/dev/null 2>&1; then
         emit_check "configure_args" "skip" "nginx binary not found in PATH"
-        return
+        return 0
     fi
 
     # nginx -V outputs to stderr
@@ -401,7 +406,7 @@ check_configure_args() {
     if [[ -z "$configure_line" ]]; then
         emit_check "configure_args" "skip" "could not extract configure arguments" \
             '{"raw_output":"'"$(json_escape "$v_output")"'"}'
-        return
+        return 0
     fi
 
     local has_compat=0
@@ -420,13 +425,14 @@ check_configure_args() {
             '{"configure_line":"'"$escaped_line"'","with_compat":false}' \
             "Rebuild nginx with --with-compat or use the official nginx.org packages"
     fi
+    return 0
 }
 
 # Check 5: dynamic module signature
 check_module_signature() {
     if [[ -z "$FOUND_MODULE_PATH" ]]; then
         emit_check "module_signature" "skip" "module .so not found, cannot check signature"
-        return
+        return 0
     fi
 
     # Check if nm is available
@@ -434,7 +440,7 @@ check_module_signature() {
         emit_check "module_signature" "skip" "nm not available (install binutils)" \
             '' \
             "Install binutils to enable module signature verification"
-        return
+        return 0
     fi
 
     # Look for the module symbol
@@ -443,7 +449,7 @@ check_module_signature() {
 
     if [[ -z "$nm_output" ]]; then
         emit_check "module_signature" "skip" "could not read symbols from module"
-        return
+        return 0
     fi
 
     if printf '%s\n' "$nm_output" | grep -q "ngx_http_markdown_filter_module"; then
@@ -454,19 +460,20 @@ check_module_signature() {
             '{"symbol":"ngx_http_markdown_filter_module","found":false}' \
             "The module file may be corrupt or built for a different nginx version"
     fi
+    return 0
 }
 
 # Check 6: Rust converter linkage
 check_rust_linkage() {
     if [[ -z "$FOUND_MODULE_PATH" ]]; then
         emit_check "rust_linkage" "skip" "module .so not found, cannot check Rust linkage"
-        return
+        return 0
     fi
 
     # Check if nm is available
     if ! command -v nm >/dev/null 2>&1; then
         emit_check "rust_linkage" "skip" "nm not available (install binutils)"
-        return
+        return 0
     fi
 
     local nm_output
@@ -474,7 +481,7 @@ check_rust_linkage() {
 
     if [[ -z "$nm_output" ]]; then
         emit_check "rust_linkage" "skip" "could not read symbols from module"
-        return
+        return 0
     fi
 
     # Look for known Rust FFI exports
@@ -501,6 +508,7 @@ check_rust_linkage() {
             '{"found_count":0}' \
             "Module may be missing Rust converter linkage or built without FFI exports"
     fi
+    return 0
 }
 
 # Check 7: OS/arch/libc detection
@@ -583,6 +591,7 @@ check_os_arch() {
 
     emit_check "os_arch" "pass" "${DETECTED_OS}/${DETECTED_ARCH}${DETECTED_LIBC:+ (${DETECTED_LIBC}${DETECTED_LIBC_VERSION:+ ${DETECTED_LIBC_VERSION}})}" \
         "$details_json"
+    return 0
 }
 
 # Check 8: package type detection
@@ -657,6 +666,7 @@ check_package_type() {
         emit_check "package_type" "skip" "could not detect nginx installation method" \
             '{"type":"unknown"}'
     fi
+    return 0
 }
 
 # Recommendation: suggest release artifact based on detected environment
@@ -668,7 +678,7 @@ recommend_artifact() {
         || -z "$DETECTED_LIBC"
         || -z "$DETECTED_ARCH" ]]
     then
-        return
+        return 0
     fi
 
     local artifact_name
@@ -681,6 +691,7 @@ recommend_artifact() {
         RECOMMENDATION_JSON="${RECOMMENDATION_JSON}"',"libc_version":"'"$DETECTED_LIBC_VERSION"'"'
     fi
     RECOMMENDATION_JSON="${RECOMMENDATION_JSON}"'}'
+    return 0
 }
 
 ##############################################################################
@@ -701,6 +712,7 @@ output_json() {
         "$CHECKS_JSON" \
         "$TOTAL" "$PASSED" "$FAILED" "$WARNINGS" "$SKIPPED" \
         "$rec_field"
+    return 0
 }
 
 output_human() {
@@ -718,6 +730,7 @@ output_human() {
     fi
     printf '%s\n' "─────────────────────────────────" >&2
     printf '%s\n' "Summary: ${PASSED} passed, ${FAILED} failed, ${WARNINGS} warnings, ${SKIPPED} skipped (${TOTAL} total)" >&2
+    return 0
 }
 
 ##############################################################################
@@ -782,9 +795,9 @@ main() {
 
     # Exit code
     if [[ $FAILED -gt 0 ]]; then
-        exit 1
+        return 1
     fi
-    exit 0
+    return 0
 }
 
 main "$@"

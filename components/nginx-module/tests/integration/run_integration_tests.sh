@@ -438,7 +438,7 @@ events { worker_connections 1024; }
 http {
     access_log '"$NGINX_ACCESS_LOG"';
     markdown_filter on;
-    markdown_max_size 10m;
+    markdown_limits memory=10m timeout=120s;
     
     server {
         listen '"$TEST_PORT"';
@@ -608,10 +608,10 @@ EOF
         log_fail "Body: Expected original HTML body, got $body"
     fi
 
-    if grep -q "markdown decision: reason=SKIP_AUTH" "$NGINX_ERROR_LOG"; then
-        log_pass "Decision log records SKIP_AUTH"
+    if grep -q "markdown: reason=not_eligible" "$NGINX_ERROR_LOG"; then
+        log_pass "Decision log records not_eligible for auth policy denial"
     else
-        log_fail "Decision log missing reason=SKIP_AUTH"
+        log_fail "Decision log missing reason=not_eligible"
         log_info "Error log: $(tail -n 20 "$NGINX_ERROR_LOG" 2>/dev/null || true)"
     fi
 
@@ -640,10 +640,10 @@ EOF
         log_fail "Body: Expected original HTML body, got $body"
     fi
 
-    if grep -q "markdown decision: reason=SKIP_AUTH" "$NGINX_ERROR_LOG"; then
-        log_pass "Decision log records SKIP_AUTH (cookie)"
+    if grep -q "markdown: reason=not_eligible" "$NGINX_ERROR_LOG"; then
+        log_pass "Decision log records not_eligible for auth cookie denial"
     else
-        log_fail "Decision log missing reason=SKIP_AUTH (cookie)"
+        log_fail "Decision log missing reason=not_eligible (cookie)"
         log_info "Error log: $(tail -n 20 "$NGINX_ERROR_LOG" 2>/dev/null || true)"
     fi
 

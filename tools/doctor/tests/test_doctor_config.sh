@@ -9,6 +9,7 @@ cleanup() {
     rm -f "$tmpdir/ngx_http_markdown_filter_module.so"
     rm -f "$tmpdir/captured.conf" "$tmpdir/output.json"
     rmdir "$tmpdir"
+    return 0
 }
 trap cleanup EXIT
 
@@ -33,6 +34,9 @@ case "${1:-}" in
             fi
             shift
         done
+        exit 2
+        ;;
+    *)
         exit 2
         ;;
 esac

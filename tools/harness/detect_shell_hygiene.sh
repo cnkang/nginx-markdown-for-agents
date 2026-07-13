@@ -103,6 +103,10 @@ readonly WARNING_ALLOWLIST=(
     # ── tools/harness/detect_ci_supply_chain.sh ──
     # awk-based scanner; awk exit code is the meaningful return
     "tools/harness/detect_ci_supply_chain.sh:return:check_network_to_shell:awk-based scanner; awk exit code is the meaningful return"
+    # ── tools/perf/run_module_benchmark.sh ──
+    # Terminal helpers deliberately exit the entire benchmark process.
+    "tools/perf/run_module_benchmark.sh:return:usage:function exits with caller-selected status; return is unreachable"
+    "tools/perf/run_module_benchmark.sh:return:die:function exits with status 1; return is unreachable"
 )
 
 # Files where specific violations are known and accepted.
