@@ -137,7 +137,7 @@ contract. The current release line is 0.9.x — see [Current Release Line 0.9.x]
 - Production readiness release:
   - Streaming engine as default (`markdown_streaming_engine auto`).
   - Noise pruning default enabled (`markdown_prune_noise on`).
-  - Unified memory budget (`markdown_memory_budget`) superseding dual
+  - Unified memory budget (`markdown_memory_budget`, 0.6.0; retired in 0.9.0 as `markdown_limits`) superseding dual
     `markdown_max_size` + `markdown_streaming_budget`.
   - OpenTelemetry tracing integration (self-implemented OTLP HTTP/protobuf).
   - Per-path metrics with cardinality control.
@@ -297,7 +297,7 @@ The 0.3.0 release includes:
 - Automatic upstream decompression (gzip, brotli, deflate)
 - Authentication-aware caching (Cache-Control: private)
 - Variable-driven configuration support
-- Large response routing with `markdown_large_body_threshold` directive
+- Large response routing (retired `markdown_large_body_threshold` directive; no Config V2 replacement)
 - Forwarded header trust control with `markdown_trusted_proxies` directive
 
 ## Test Coverage
@@ -367,7 +367,7 @@ When deploying:
 
 1. **Start incrementally**: Enable on one location or path first
 2. **Monitor behavior**: Use the metrics endpoint to track conversions
-3. **Set appropriate limits**: Configure `markdown_memory_budget` and `markdown_timeout`
+3. **Set appropriate limits**: Configure `markdown_limits` (e.g., `memory=<size> timeout=<time>`)
 4. **Choose failure mode**: Select `markdown_error_policy` based on requirements
 5. **Test caching**: Verify cache behavior with your CDN or caching layer
 6. **Review security**: Ensure authentication policies match your security model
@@ -698,3 +698,4 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 | 0.8.0 | 2026-06-16 | Kang | Version bump to 0.8.0; true streaming contract, fallback state machine, streaming observability, streaming security enforcement, release matrix source of truth, streaming config directives |
 | 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
 | 0.8.3 | 2026-06-26 | Kang | 0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
