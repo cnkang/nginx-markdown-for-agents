@@ -45,6 +45,10 @@ readonly PATTERN_CONTENT_LENGTH='^Content-Length:'
 # Pattern matching Content-Encoding header; used to verify that successful
 # decompression strips the header from the downstream response.
 readonly PATTERN_CONTENT_ENCODING='^Content-Encoding:'
+readonly ZC_SLOW_READER_RATE_BYTES_PER_SECOND=$((256 * 1024))
+readonly ZC_SLOW_RECV_BUFFER_BYTES=$((64 * 1024))
+readonly ZC_SLOW_INITIAL_NO_READ_SECONDS=1
+readonly ZC_SLOW_DEADLINE_SECONDS=180
 # shellcheck disable=SC1090
 source "${NATIVE_BUILD_HELPER}"
 # shellcheck disable=SC1090
@@ -242,8 +246,9 @@ GZIP_END_TOKEN = "GZIP_STREAM_END_TOKEN"
 DEFLATE_END_TOKEN = "DEFLATE_STREAM_END_TOKEN"
 DEFLATE_ZLIB_END_TOKEN = "DEFLATE_ZLIB_STREAM_END_TOKEN"
 SMALL_TARGET = 2 * 1024 * 1024
-# Large enough to exceed typical loopback TCP autotuning buffers while the
-# Case 4d reader deliberately pauses with a 4 KiB receive buffer.
+# A 64 KiB receive window remains far below this 8 MiB fixture.  Together with
+# Case 4d's initial no-read interval and throttled reader, it creates downstream
+# pressure while reducing Darwin window-update sensitivity on shared runners.
 ZERO_COPY_TARGET = 8 * 1024 * 1024
 COMPRESSED_TARGET = 64 * 1024
 OVERSIZE_TARGET = 12 * 1024 * 1024
@@ -905,6 +910,7 @@ fi
 echo "  zero_copy_output_total=${zc_output_total} (verified > 0)"
 
 # Record metrics before Case 4d for backpressure assertions.
+zc_slow_output_before="${zc_output_total}"
 zc_backpressure_before="$(get_perf_metric 'backpressure_total')"
 zc_backpressure_resume_before="$(get_perf_metric 'backpressure_resume_total')"
 
@@ -924,7 +930,11 @@ echo "==> Case 4d: zero-copy with slow downstream client (backpressure/NGX_AGAIN
 #   - backpressure_resume_total increased (resume path executed)
 #   - worker PID unchanged (no crash)
 if ! python3 - "${PORT}" "${RAW_DIR}/zc_slow.hdr" \
-  "${RAW_DIR}/zc_slow.body" <<'PYEOF' \
+  "${RAW_DIR}/zc_slow.body" \
+  "${ZC_SLOW_READER_RATE_BYTES_PER_SECOND}" \
+  "${ZC_SLOW_RECV_BUFFER_BYTES}" \
+  "${ZC_SLOW_INITIAL_NO_READ_SECONDS}" \
+  "${ZC_SLOW_DEADLINE_SECONDS}" <<'PYEOF' \
   > "${RAW_DIR}/zc_slow_reader.log" 2>&1
 import http.client
 import socket
@@ -934,20 +944,22 @@ import time
 port = int(sys.argv[1])
 header_path = sys.argv[2]
 body_path = sys.argv[3]
+rate_bytes_per_second = int(sys.argv[4])
+receive_buffer_bytes = int(sys.argv[5])
+initial_no_read_seconds = float(sys.argv[6])
+deadline_seconds = int(sys.argv[7])
 # Keep the reader slow enough to sustain downstream pressure.  The total
 # deadline is intentionally much wider than the fixture's nominal transfer
 # time because the socket's 10-second no-progress timeout remains the hang
 # detector while shared macOS runners may have substantial scheduling jitter.
-rate_bytes_per_second = 256 * 1024
-deadline_seconds = 180
 deadline = time.monotonic() + deadline_seconds
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-# A 4 KiB window makes Darwin TCP window-update latency the throughput
-# bottleneck on shared runners.  64 KiB remains far below the 8 MiB fixture;
-# the initial no-read interval and metric assertions still prove NGX_AGAIN and
-# its confirmed resume without turning transport scheduling into the oracle.
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024)
+# A 64 KiB receive window remains far below the 8 MiB fixture and, together
+# with the initial no-read interval and throttled reader, creates downstream
+# pressure while reducing Darwin TCP window-update scheduling sensitivity on
+# shared runners.  Metric assertions still require NGX_AGAIN and resume.
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, receive_buffer_bytes)
 sock.settimeout(10)
 sock.connect(("127.0.0.1", port))
 request = (
@@ -960,7 +972,7 @@ sock.sendall(request.encode("ascii"))
 
 # Let the deliberately small receive window fill before consuming headers.
 # This creates real downstream write pressure on fast loopback runners.
-time.sleep(1)
+time.sleep(initial_no_read_seconds)
 response = http.client.HTTPResponse(sock)
 response.begin()
 
@@ -1003,9 +1015,17 @@ echo "OK: zero-copy throttled reader received complete valid Markdown" \
   > "${RAW_DIR}/zc_slow_reader.log"
 cat "${RAW_DIR}/zc_slow_reader.log"
 
-# Assert backpressure metrics increased.
+# Assert zero-copy delivery and backpressure metrics increased.
+zc_slow_output_after="$(get_perf_metric 'zero_copy_output_total')"
 zc_backpressure_after="$(get_perf_metric 'backpressure_total')"
 zc_backpressure_resume_after="$(get_perf_metric 'backpressure_resume_total')"
+if [[ "${zc_slow_output_after}" -le "${zc_slow_output_before}" ]]; then
+  echo "FAIL: zero_copy_output_total did not increase during slow downstream" \
+    "(before=${zc_slow_output_before}, after=${zc_slow_output_after})" >&2
+  echo "  Case 4d did not exercise zero-copy delivery" >&2
+  exit 1
+fi
+echo "  zero_copy_output_total: ${zc_slow_output_before} -> ${zc_slow_output_after}"
 if [[ "${zc_backpressure_after}" -le "${zc_backpressure_before}" ]]; then
   echo "FAIL: backpressure_total did not increase during slow downstream (before=${zc_backpressure_before}, after=${zc_backpressure_after})" >&2
   echo "  NGX_AGAIN resume path was not exercised — zero-copy backpressure is unproven" >&2
@@ -1026,6 +1046,9 @@ if [[ -n "${zc_worker_pid_after}" && -n "${zc_slow_pid_after}" \
   echo "FAIL: worker PID changed during zero-copy slow downstream" >&2
   exit 1
 fi
+zc_slow_http_status="$(awk 'NR == 1 { print $2; exit }' \
+  "${RAW_DIR}/zc_slow.hdr")"
+echo "  worker PID: ${zc_worker_pid_after} -> ${zc_slow_pid_after}"
 
 echo "==> Case 4e: zero-copy client abort during streaming (pool cleanup)"
 # Use a deterministic socket-level client that:
@@ -1274,6 +1297,26 @@ echo "  truncated_deflate_zlib_compressed_bytes=${TRUNCATED_DEFLATE_ZLIB_COMPRES
 echo "  truncated_deflate_zlib_result=$(cat "${RAW_DIR}/trunc_deflate_zlib.metrics")"
 echo "  zero_copy_result=$(cat "${RAW_DIR}/zc.metrics" 2>/dev/null || echo "missing")"
 echo "  zero_copy_output_total=${zc_output_total:-0}"
+echo "  zero_copy_slow_fixture_html_bytes=${ZERO_COPY_LEN:-0}"
+printf '  zero_copy_slow_reader_rate_bytes_per_second=%s\n' \
+  "${ZC_SLOW_READER_RATE_BYTES_PER_SECOND}"
+echo "  zero_copy_slow_receive_buffer_bytes=${ZC_SLOW_RECV_BUFFER_BYTES}"
+printf '  zero_copy_slow_initial_no_read_seconds=%s\n' \
+  "${ZC_SLOW_INITIAL_NO_READ_SECONDS}"
+echo "  zero_copy_slow_deadline_seconds=${ZC_SLOW_DEADLINE_SECONDS}"
+echo "  zero_copy_slow_http_status=${zc_slow_http_status:-unknown}"
+echo "  zero_copy_slow_heading_present=yes"
+echo "  zero_copy_slow_tail_token_present=yes"
+printf '  zero_copy_slow_output_total=%s->%s\n' \
+  "${zc_slow_output_before:-0}" "${zc_slow_output_after:-0}"
+printf '  zero_copy_slow_backpressure_total=%s->%s\n' \
+  "${zc_backpressure_before:-0}" "${zc_backpressure_after:-0}"
+printf '  zero_copy_slow_backpressure_resume_total=%s->%s\n' \
+  "${zc_backpressure_resume_before:-0}" \
+  "${zc_backpressure_resume_after:-0}"
+printf '  zero_copy_slow_worker_pid=%s->%s\n' \
+  "${zc_worker_pid_after:-unknown}" "${zc_slow_pid_after:-unknown}"
+echo "  zero_copy_crash_signatures=none"
 echo "  zero_copy_backpressure_total=${zc_backpressure_after:-0}"
 echo "  zero_copy_backpressure_resume_total=${zc_backpressure_resume_after:-0}"
 echo "  zero_copy_slow_reader_result=$(cat "${RAW_DIR}/zc_slow_reader.log" 2>/dev/null || echo "missing")"
