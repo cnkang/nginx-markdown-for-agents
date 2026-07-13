@@ -817,6 +817,7 @@ get_perf_metric() {
   echo "${metrics_json}" | python3 -c \
     "import sys, json; print(json.load(sys.stdin).get('perf', {}).get('${metric_name}', 0))" \
     2>/dev/null || echo 0
+  return 0
 }
 
 # Helper: check for NGINX worker crash signatures in the error log.
