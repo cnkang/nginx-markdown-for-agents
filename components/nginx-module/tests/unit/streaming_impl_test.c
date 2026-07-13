@@ -350,6 +350,9 @@ static uint32_t g_streaming_feed_rc = ERROR_SUCCESS;
 static u_char *g_streaming_feed_out_data = NULL;
 static uintptr_t g_streaming_feed_out_len = 0;
 static ngx_uint_t g_streaming_feed_calls = 0;
+static uint32_t g_streaming_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
+static u_char *g_streaming_safe_finish_data = NULL;
+static uintptr_t g_streaming_safe_finish_len = 0;
 static uint32_t g_streaming_finalize_rc = ERROR_SUCCESS;
 static struct MarkdownResult g_streaming_finalize_result;
 static ngx_uint_t g_info_log_count = 0;
@@ -398,6 +401,29 @@ ngx_module_t ngx_http_markdown_filter_module = { 0 };
             }                                                                        \
         }                                                                            \
     } while (0)
+
+void
+ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes)
+{
+    NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
+    if (bytes > 0) {
+        NGX_HTTP_MARKDOWN_METRIC_WATERMARK(
+            perf.pending_output_high_watermark_bytes,
+            (ngx_atomic_t) bytes);
+    }
+}
+
+void
+ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
+{
+    if (bytes == 0) {
+        return;
+    }
+    NGX_HTTP_MARKDOWN_METRIC_ADD(
+        streaming.selection.output_bytes_total,
+        (ngx_atomic_t) bytes);
+    NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
+}
 
 /*
  * Logging macros (no-op stubs).  Production NGINX logging is replaced with
@@ -821,6 +847,25 @@ markdown_streaming_feed(struct StreamingConverterHandle *handle,
         *out_len = g_streaming_feed_out_len;
     }
     return g_streaming_feed_rc;
+}
+
+/*
+ * Stub for markdown_streaming_safe_finish.  Returns a test-controlled
+ * result and closing-byte buffer so the production postcommit sender can
+ * be exercised together with the shared streaming resume lifecycle.
+ */
+uint32_t
+markdown_streaming_safe_finish(struct StreamingConverterHandle *handle,
+    uint8_t **out_data, uintptr_t *out_len)
+{
+    UNUSED(handle);
+    if (out_data != NULL) {
+        *out_data = g_streaming_safe_finish_data;
+    }
+    if (out_len != NULL) {
+        *out_len = g_streaming_safe_finish_len;
+    }
+    return g_streaming_safe_finish_rc;
 }
 
 /*
@@ -1264,16 +1309,26 @@ ngx_http_markdown_stream_commit_headers(ngx_http_request_t *r,
  */
 #include "../../src/ngx_http_markdown_streaming_impl.h"
 
-/* Stub: ngx_http_markdown_stream_postcommit_safe_finish */
-ngx_int_t
-ngx_http_markdown_stream_postcommit_safe_finish(
-    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx)
+/*
+ * Pull in the production postcommit sender so metric regressions exercise
+ * safe_finish -> send_chain -> pending ownership -> shared NULL resume.
+ */
+static void
+ngx_http_markdown_test_postcommit_log(ngx_uint_t level, ngx_log_t *log,
+    ngx_int_t err, const char *fmt, ...)
 {
-    if (r == NULL || ctx == NULL) {
-        return NGX_ERROR;
-    }
-    return NGX_ERROR;
+    UNUSED(level);
+    UNUSED(log);
+    UNUSED(err);
+    UNUSED(fmt);
 }
+
+#undef ngx_log_error
+#define ngx_log_error(...) \
+    ngx_http_markdown_test_postcommit_log(__VA_ARGS__)
+
+#include "../../src/ngx_http_markdown_filter_chain_impl.h"
+#include "../../src/ngx_http_markdown_stream_postcommit.c"
 
 /*
  * Reset all global stub control variables to their default (success)
@@ -1328,6 +1383,9 @@ reset_globals(void)
     g_streaming_feed_out_data = NULL;
     g_streaming_feed_out_len = 0;
     g_streaming_feed_calls = 0;
+    g_streaming_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
+    g_streaming_safe_finish_data = NULL;
+    g_streaming_safe_finish_len = 0;
     g_streaming_finalize_rc = ERROR_SUCCESS;
     ngx_memzero(&g_streaming_finalize_result,
         sizeof(g_streaming_finalize_result));
@@ -5032,6 +5090,293 @@ test_subrequest_failopen_pending_terminal_resumes_once(void)
 }
 
 /*
+ * Rule 1 regression: an existing pending chain is already owned by the
+ * downstream filter.  Postcommit must reject a second chain before calling
+ * downstream and must preserve every field describing the old pending chain.
+ */
+static void
+test_postcommit_existing_pending_rejects_second_submission(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_chain_t              old_pending;
+    ngx_buf_t                old_buf;
+    ngx_uint_t               buffered_before;
+    ngx_int_t                rc;
+
+    TEST_SUBSECTION(
+        "postcommit rejects a second chain while output is pending");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&old_pending, sizeof(old_pending));
+    ngx_memzero(&old_buf, sizeof(old_buf));
+
+    old_pending.buf = &old_buf;
+    ctx.streaming.pending_output = &old_pending;
+    ctx.streaming.pending_meta.has_data = 1;
+    ctx.streaming.pending_meta.bytes = 37;
+    ctx.streaming.pending_meta.zero_copy = 1;
+    ctx.streaming.pending_meta.main_terminal = 0;
+    ctx.streaming.pending_meta.subrequest_terminal = 1;
+    r.buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+    buffered_before = r.buffered;
+
+    rc = ngx_http_markdown_stream_postcommit_send_terminal(&r, &ctx);
+
+    TEST_ASSERT(g_next_body_filter_calls == 0,
+        "postcommit pending guard: existing pending output must prevent "
+        "a second downstream submission");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "postcommit pending guard: rejected submission must return error");
+    TEST_ASSERT(ctx.streaming.pending_output == &old_pending,
+        "postcommit pending guard: old pending anchor must remain unchanged");
+    TEST_ASSERT(ctx.streaming.pending_meta.has_data == 1
+        && ctx.streaming.pending_meta.bytes == 37
+        && ctx.streaming.pending_meta.zero_copy == 1
+        && ctx.streaming.pending_meta.main_terminal == 0
+        && ctx.streaming.pending_meta.subrequest_terminal == 1,
+        "postcommit pending guard: old pending metadata must remain unchanged");
+    TEST_ASSERT(r.buffered == buffered_before,
+        "postcommit pending guard: buffered state must remain unchanged");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
+        "postcommit pending guard: rejected terminal must not latch delivery");
+
+    TEST_PASS("postcommit rejects a second chain while output is pending");
+}
+
+/*
+ * Regression: the postcommit sender is a pending-output producer and must
+ * create exactly one backpressure event for each pending ownership cycle.
+ * Persistent NULL retries do not create additional cycles; only a confirmed
+ * drain increments the resume counter.
+ */
+static void
+test_postcommit_pending_backpressure_metrics_are_symmetric(void)
+{
+    ngx_http_request_t          r;
+    ngx_http_markdown_ctx_t     ctx;
+    ngx_http_markdown_conf_t    conf;
+    ngx_pool_t                  pool;
+    ngx_connection_t            conn;
+    ngx_log_t                   log;
+    ngx_event_t                 read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_int_t                   rc;
+    u_char                      closing[] = "\n```";
+
+    TEST_SUBSECTION("postcommit pending backpressure metrics are symmetric");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0x91;
+    g_streaming_safe_finish_data = closing;
+    g_streaming_safe_finish_len = sizeof(closing) - 1;
+    g_next_body_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(&r, &ctx);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "postcommit pending metrics: producer must return NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_output != NULL,
+        "postcommit pending metrics: producer must retain pending output");
+    TEST_ASSERT(metrics.perf.backpressure_total == 1,
+        "postcommit pending metrics: pending ownership must increment "
+        "backpressure_total once");
+    TEST_ASSERT(metrics.perf.backpressure_resume_total == 0,
+        "postcommit pending metrics: resume must remain zero before drain");
+    TEST_ASSERT(
+        metrics.perf.pending_output_high_watermark_bytes
+            >= (ngx_atomic_t) (sizeof(closing) - 1),
+        "postcommit pending metrics: closing bytes must update watermark");
+
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "postcommit pending metrics: persistent NULL retry may stay pending");
+    TEST_ASSERT(metrics.perf.backpressure_total == 1,
+        "postcommit pending metrics: NULL retry must not create a new cycle");
+    TEST_ASSERT(metrics.perf.backpressure_resume_total == 0,
+        "postcommit pending metrics: persistent retry is not a resume");
+
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_OK,
+        "postcommit pending metrics: successful NULL resume must return OK");
+    TEST_ASSERT(metrics.perf.backpressure_total == 1,
+        "postcommit pending metrics: first cycle must have one event");
+    TEST_ASSERT(metrics.perf.backpressure_resume_total == 1,
+        "postcommit pending metrics: first cycle must have one resume");
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.streaming.main_terminal_sent = 0;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0x92;
+    g_next_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(&r, &ctx);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "postcommit pending metrics: second cycle must retain output");
+    TEST_ASSERT(metrics.perf.backpressure_total == 2,
+        "postcommit pending metrics: second cycle must increment once");
+
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_OK,
+        "postcommit pending metrics: second cycle must resume successfully");
+    TEST_ASSERT(metrics.perf.backpressure_total == 2,
+        "postcommit pending metrics: two cycles must have two events");
+    TEST_ASSERT(metrics.perf.backpressure_resume_total == 2,
+        "postcommit pending metrics: two cycles must have two resumes");
+
+    TEST_PASS("postcommit pending backpressure metrics are symmetric");
+}
+
+/*
+ * Regression: the same pool-copied safe-finish bytes must have identical
+ * delivered-byte and copied-output classification whether downstream accepts
+ * them immediately or after one pending-output resume.
+ */
+static void
+test_postcommit_copied_output_accounting_matches_after_resume(void)
+{
+    ngx_http_request_t          r;
+    ngx_http_markdown_ctx_t     ctx;
+    ngx_http_markdown_conf_t    conf;
+    ngx_pool_t                  pool;
+    ngx_connection_t            conn;
+    ngx_log_t                   log;
+    ngx_event_t                 read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_atomic_t                immediate_bytes;
+    ngx_atomic_t                immediate_copied;
+    ngx_atomic_t                resumed_bytes;
+    ngx_atomic_t                resumed_copied;
+    ngx_int_t                   rc;
+    u_char                      closing[] = "\n```";
+
+    TEST_SUBSECTION("postcommit immediate and resumed copied output parity");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0x93;
+    g_streaming_safe_finish_data = closing;
+    g_streaming_safe_finish_len = sizeof(closing) - 1;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(&r, &ctx);
+    TEST_ASSERT(rc == NGX_OK,
+        "postcommit copied parity: immediate delivery must succeed");
+    immediate_bytes = metrics.streaming.selection.output_bytes_total;
+    immediate_copied = metrics.perf.copied_output_total;
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0x94;
+    g_streaming_safe_finish_data = closing;
+    g_streaming_safe_finish_len = sizeof(closing) - 1;
+    g_next_body_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(&r, &ctx);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "postcommit copied parity: deferred delivery must retain output");
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_OK,
+        "postcommit copied parity: deferred delivery must resume");
+    resumed_bytes = metrics.streaming.selection.output_bytes_total;
+    resumed_copied = metrics.perf.copied_output_total;
+
+    TEST_ASSERT(immediate_bytes == resumed_bytes,
+        "postcommit copied parity: immediate/resumed byte deltas must match");
+    TEST_ASSERT(immediate_copied == resumed_copied,
+        "postcommit copied parity: immediate/resumed copied deltas must match");
+    TEST_ASSERT(immediate_bytes == (ngx_atomic_t) (sizeof(closing) - 1),
+        "postcommit copied parity: delivered bytes must equal closing length");
+    TEST_ASSERT(immediate_copied == 1,
+        "postcommit copied parity: one pool-copy chain must be counted");
+
+    TEST_PASS("postcommit immediate and resumed copied output parity");
+}
+
+/*
+ * Regression: terminal-only postcommit backpressure is a backpressure event,
+ * but it carries no data and therefore must not update byte, watermark, or
+ * copied-output metrics.  Its terminal latch is confirmed only after resume.
+ */
+static void
+test_postcommit_terminal_only_backpressure_metrics(void)
+{
+    ngx_http_request_t          r;
+    ngx_http_markdown_ctx_t     ctx;
+    ngx_http_markdown_conf_t    conf;
+    ngx_pool_t                  pool;
+    ngx_connection_t            conn;
+    ngx_log_t                   log;
+    ngx_event_t                 read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_int_t                   rc;
+
+    TEST_SUBSECTION("postcommit terminal-only backpressure metrics");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0x95;
+    g_next_body_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(&r, &ctx);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "postcommit terminal metrics: terminal send must retain output");
+    TEST_ASSERT(metrics.perf.backpressure_total == 1,
+        "postcommit terminal metrics: terminal pending cycle must count");
+    TEST_ASSERT(metrics.perf.pending_output_high_watermark_bytes == 0,
+        "postcommit terminal metrics: zero bytes must not change watermark");
+    TEST_ASSERT(metrics.streaming.selection.output_bytes_total == 0,
+        "postcommit terminal metrics: terminal carries no output bytes");
+    TEST_ASSERT(metrics.perf.copied_output_total == 0,
+        "postcommit terminal metrics: terminal is not copied data output");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
+        "postcommit terminal metrics: NGX_AGAIN must not latch terminal");
+
+    g_next_body_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_OK,
+        "postcommit terminal metrics: terminal resume must succeed");
+    TEST_ASSERT(metrics.perf.backpressure_resume_total == 1,
+        "postcommit terminal metrics: confirmed drain must count resume");
+    TEST_ASSERT(metrics.streaming.selection.output_bytes_total == 0,
+        "postcommit terminal metrics: resume must not add output bytes");
+    TEST_ASSERT(metrics.perf.copied_output_total == 0,
+        "postcommit terminal metrics: resume must not add copied output");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 1,
+        "postcommit terminal metrics: resume must latch main terminal");
+    TEST_ASSERT(g_next_body_filter_calls == 2,
+        "postcommit terminal metrics: send plus NULL resume only");
+
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_OK,
+        "postcommit terminal metrics: repeated NULL entry remains stable");
+    TEST_ASSERT(g_next_body_filter_calls == 2,
+        "postcommit terminal metrics: no duplicate terminal submission");
+
+    TEST_PASS("postcommit terminal-only backpressure metrics");
+}
+
+/*
  * Test entry point.  Runs all streaming_impl unit test functions in
  * sequence.  Prints a banner before and after the test run.  Returns 0
  * on success; individual test assertions abort via TEST_ASSERT on failure.
@@ -5067,6 +5412,10 @@ main(void)
     test_init_failure_again_retains_cloned_chain_links();
     test_failopen_delivery_abort_does_not_double_count_conversion_failure();
     test_subrequest_failopen_pending_terminal_resumes_once();
+    test_postcommit_existing_pending_rejects_second_submission();
+    test_postcommit_pending_backpressure_metrics_are_symmetric();
+    test_postcommit_copied_output_accounting_matches_after_resume();
+    test_postcommit_terminal_only_backpressure_metrics();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

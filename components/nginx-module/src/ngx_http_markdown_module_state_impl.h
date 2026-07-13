@@ -127,6 +127,40 @@ static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
     } while (0)
 
 /*
+ * Record a postcommit output chain becoming pending at the downstream
+ * ownership boundary.  A terminal-only chain is still a backpressure event,
+ * but contributes no bytes to the pending-output high-watermark.
+ */
+void
+ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes)
+{
+    NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
+
+    if (bytes > 0) {
+        NGX_HTTP_MARKDOWN_METRIC_WATERMARK(
+            perf.pending_output_high_watermark_bytes,
+            (ngx_atomic_t) bytes);
+    }
+}
+
+/*
+ * Record pool-copied postcommit bytes after confirmed immediate delivery.
+ * Deferred delivery uses pending_meta and is accounted by resume_pending().
+ */
+void
+ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
+{
+    if (bytes == 0) {
+        return;
+    }
+
+    NGX_HTTP_MARKDOWN_METRIC_ADD(
+        streaming.selection.output_bytes_total,
+        (ngx_atomic_t) bytes);
+    NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
+}
+
+/*
  * Increment the skip counter for the given eligibility result.
  *
  * Maps ngx_http_markdown_eligibility_t enum values to the

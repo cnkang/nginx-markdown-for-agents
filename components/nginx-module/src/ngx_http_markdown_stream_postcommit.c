@@ -451,7 +451,7 @@ ngx_http_markdown_stream_postcommit_log(
  *
  * Returns:
  *   NGX_OK / NGX_DONE / NGX_AGAIN as returned by the body filter, or
- *   NGX_ERROR on chain-link allocation failure or NGX_AGAIN re-entry.
+ *   NGX_ERROR on chain-link allocation failure or pending-output re-entry.
  */
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_send_chain(
@@ -460,6 +460,15 @@ ngx_http_markdown_stream_postcommit_send_chain(
 {
     ngx_chain_t  *out;
     ngx_int_t     rc;
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (ctx->streaming.pending_output != NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "markdown postcommit: "
+                      "pending output re-entry detected");
+        return NGX_ERROR;
+    }
+#endif
 
     out = ngx_alloc_chain_link(r->pool);
     if (out == NULL) {
@@ -473,22 +482,23 @@ ngx_http_markdown_stream_postcommit_send_chain(
 
     if (rc == NGX_AGAIN) {
 #ifdef MARKDOWN_STREAMING_ENABLED
-        if (ctx->streaming.pending_output != NULL) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                          "markdown postcommit: "
-                          "pending output re-entry detected");
-            return NGX_ERROR;
-        }
-
         ctx->streaming.pending_output = out;
         ctx->streaming.pending_meta.has_data = pending_has_data;
         ctx->streaming.pending_meta.bytes = pending_output_bytes;
+        ctx->streaming.pending_meta.zero_copy = 0;
         ctx->streaming.pending_meta.main_terminal =
             (r == r->main && b->last_buf);
         ctx->streaming.pending_meta.subrequest_terminal =
             (r != r->main && b->last_in_chain);
+        ngx_http_markdown_metrics_record_postcommit_pending(
+            pending_output_bytes);
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
 #endif
+    }
+
+    if ((rc == NGX_OK || rc == NGX_DONE) && pending_output_bytes > 0) {
+        ngx_http_markdown_metrics_record_postcommit_copied_delivery(
+            pending_output_bytes);
     }
 
     /* Rule 47: only latch terminal-delivered state after a successful
