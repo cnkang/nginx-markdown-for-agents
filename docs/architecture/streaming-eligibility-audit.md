@@ -96,7 +96,7 @@ failure short-circuits to passthrough.
 |-------|-------|
 | File | `ngx_http_markdown_eligibility.c` |
 | Function | `ngx_http_markdown_check_size_limit()` |
-| Directive | `markdown_max_size` (default: 10 MiB) |
+| Directive | `markdown_limits memory=<size>` (default: 10 MiB) |
 | What | If `Content-Length` is present and exceeds `conf->max_size`, ineligible. If `Content-Length` is absent (chunked), passes here and is enforced during buffering. |
 | On failure | Passthrough — `NGX_HTTP_MARKDOWN_INELIGIBLE_SIZE` |
 
@@ -142,13 +142,13 @@ failure short-circuits to passthrough.
 
 These checks apply **during buffering/conversion** in the body filter path.
 
-### 3.1 `markdown_max_size` (Buffering Budget)
+### 3.1 `markdown_limits memory=` (Buffering Budget)
 
 | Field | Value |
 |-------|-------|
 | File | `ngx_http_markdown_payload_impl.h` |
 | Function | `ngx_http_markdown_handle_buffer_append_failure()` |
-| Directive | `markdown_max_size` (default: 10 MiB) |
+| Directive | `markdown_limits memory=<size>` (default: 10 MiB) |
 | What | Buffer initialized with `max_size` as capacity cap. Each append checks `buffer.size + chunk_size > max_size`. |
 | On exceeded | `on_error=pass` then fail-open (forward original HTML). `on_error=reject` then `NGX_ERROR` (502). |
 | Metrics | `conversions_failed++`, `failures_resource_limit++` |
@@ -182,25 +182,27 @@ These checks apply **during buffering/conversion** in the body filter path.
 | On exceeded | Error code `ERROR_PARSE_BUDGET_EXCEEDED` (11). Classified as `RESOURCE_LIMIT`. |
 | Enforcement | Rust-side parser tracks allocations against this ceiling. |
 
-### 3.4 `markdown_memory_budget` (Unified Memory Budget)
+### 3.4 `markdown_limits memory=` (Unified Memory Budget)
+
+> **0.9.0 Note**: `markdown_memory_budget` is retired; use `markdown_limits memory=<size>`.
 
 | Field | Value |
 |-------|-------|
 | File | `ngx_http_markdown_conversion_impl.h`, `ngx_http_markdown_dynconf_impl.h` |
 | Function | `ngx_http_markdown_effective_memory_budget()` populates `options->memory_budget` |
-| Directive | `markdown_memory_budget` (default: NGX_CONF_UNSET_SIZE = not set) |
+| Directive | `markdown_limits memory=<size>` (default: 10MB; inherits per-key) |
 | What | Unified cap for both streaming and full-buffer paths. Currently enforced by Rust streaming/incremental converters; full-buffer relies on NGINX-side `max_size`. |
-| Priority | explicit per-engine > unified memory_budget > compiled default |
 | On exceeded | `ERROR_MEMORY_LIMIT` (4) or `ERROR_BUDGET_EXCEEDED` (6, streaming). |
 
-### 3.5 `markdown_streaming_budget` (Streaming Working-Set Budget)
+### 3.5 `markdown_limits streaming_buffer=` (Streaming Working-Set Budget)
+
+> **0.9.0 Note**: `markdown_streaming_budget` is retired; use `markdown_limits streaming_buffer=<size>`.
 
 | Field | Value |
 |-------|-------|
 | File | `ngx_http_markdown_streaming_impl.h`, Rust `streaming/budget.rs` |
-| Directive | `markdown_streaming_budget` (default: 2 MiB) |
+| Directive | `markdown_limits streaming_buffer=<size>` (default: 2 MiB) |
 | What | Caps streaming converter working-set memory. Enforced by `MemoryBudget` struct in Rust with per-stage caps (state_stack, output_buffer, lookahead, total). |
-| Priority | explicit streaming_budget > memory_budget > 2 MiB default |
 | On exceeded | `ERROR_BUDGET_EXCEEDED` (6). Pre-commit: fallback. Post-commit: abort. |
 
 ### 3.6 Replay Buffer / Pre-Commit Buffer
@@ -224,14 +226,14 @@ These checks apply **during buffering/conversion** in the body filter path.
 | What | Deadline for HTML parsing phase. Passed as `options->parse_timeout_ms`. |
 | On exceeded | `ERROR_PARSE_TIMEOUT` (10). Classified as `RESOURCE_LIMIT`. |
 
-### 3.8 `markdown_timeout` (Overall Conversion Timeout)
+### 3.8 `markdown_limits timeout=` (Overall Conversion Timeout)
 
 | Field | Value |
 |-------|-------|
 | File | `ngx_http_markdown_conversion_impl.h` passes to Rust converter |
-| Directive | `markdown_timeout` (default: 5000 ms) |
+| Directive | `markdown_limits timeout=<time>` (default: 5000 ms) |
 | What | Overall conversion deadline passed to Rust. |
-| On exceeded | `ERROR_TIMEOUT` (3). Applies `on_error` policy. |
+| On exceeded | `ERROR_TIMEOUT` (3). Applies `markdown_error_policy`. |
 
 ---
 
@@ -285,18 +287,18 @@ These semantics apply to:
 | 4 | Range request | eligibility.c | — | passthrough |
 | 5 | Hard exclusions (SSE/NDJSON/stream+json) | eligibility.c | `markdown_stream_types`, `stream.excluded_types` | passthrough |
 | 6 | Content-Type | eligibility.c | `markdown_content_types` | passthrough |
-| 7 | Size limit (header) | eligibility.c | `markdown_max_size` | passthrough |
+| 7 | Size limit (header) | eligibility.c | `markdown_limits memory=` | passthrough |
 | 8 | Auth policy | auth.c + request_impl.h | `markdown_auth_policy`, `markdown_auth_cookies` | passthrough |
 | 9 | Accept negotiation | accept.c via Rust FFI | `markdown_accept` | passthrough |
 | 10 | Content-Encoding | decompression.c | `markdown_auto_decompress` | fail-open/reject |
-| 11 | Body size (buffering) | payload_impl.h | `markdown_max_size` | fail-open/reject |
+| 11 | Body size (buffering) | payload_impl.h | `markdown_limits memory=` | fail-open/reject |
 | 12 | Decompression budget | decompression.c | `markdown_decompress_max_size` | fail-open/reject |
 | 13 | Parser budget | Rust converter | `markdown_parser_budget` | fail-open/reject |
-| 14 | Memory budget | Rust converter | `markdown_memory_budget` | fail-open/reject |
-| 15 | Streaming budget | Rust streaming | `markdown_streaming_budget` | fallback/abort |
+| 14 | Memory budget | Rust converter | `markdown_limits memory=` | fail-open/reject |
+| 15 | Streaming budget | Rust streaming | `markdown_limits streaming_buffer=` | fallback/abort |
 | 16 | Replay buffer | stream_replay.h | `markdown_stream_precommit_buffer` | precommit_error |
 | 17 | Parse timeout | Rust converter | `markdown_parse_timeout` | fail-open/reject |
-| 18 | Conversion timeout | Rust converter | `markdown_timeout` | fail-open/reject |
+| 18 | Conversion timeout | Rust converter | `markdown_limits timeout=` | fail-open/reject |
 
 ---
 

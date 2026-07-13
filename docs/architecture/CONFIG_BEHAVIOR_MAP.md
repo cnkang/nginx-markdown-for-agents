@@ -26,23 +26,18 @@ flowchart LR
         MW["markdown_accept"]
         AP["markdown_auth_policy"]
         AC["markdown_auth_cookies"]
-        CT["markdown_conditional_requests"]
-        ET["markdown_etag"]
+        CV["markdown_cache_validation"]
         LV["markdown_log_verbosity"]
         SE["markdown_streaming_engine"]
     end
 
     subgraph BodyPhase["Body Filter Phase"]
-        MS["markdown_memory_budget"]
-        TO["markdown_timeout"]
+        ML["markdown_limits"]
         OE["markdown_error_policy"]
         FL["markdown_flavor"]
         BC["markdown_buffer_chunked"]
         ST["markdown_stream_types"]
         TF["markdown_trusted_proxies"]
-        LBT["markdown_large_body_threshold"]
-        SB["markdown_streaming_budget"]
-        SOE["markdown_streaming_on_error"]
         SS["markdown_streaming_shadow"]
     end
 
@@ -78,23 +73,14 @@ flowchart LR
 
 ## Resource and Failure Controls
 
-### `markdown_memory_budget`
+### `markdown_limits`
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Caps the size of responses the module will buffer and attempt to convert |
-| Lifecycle impact | Body-phase buffering and fail-open/fail-closed branch |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_buffer.c`, `components/nginx-module/src/ngx_http_markdown_payload_impl.h` |
-| Practical note | This is one of the main guards around the full-buffering architecture. Large documents often hit this branch first. |
-
-### `markdown_timeout`
-
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Limits how long conversion may run in the Rust engine |
-| Lifecycle impact | FFI conversion call and conversion failure classification |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/rust-converter/src/ffi.rs`, `components/rust-converter/src/converter.rs` |
-| Practical note | A timeout is not a header-phase decision. It takes effect only after the request has already entered the conversion path. |
+| Behavior | Unified resource limits block: `memory=<size>`, `timeout=<time>`, `streaming_buffer=<size>`, `max_inflight=<N>` (Config V2, 0.9.0) |
+| Lifecycle impact | Body-phase buffering budget, conversion timeout, streaming memory, and inflight guard |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_buffer.c`, `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h` |
+| Practical note | Consolidates the removed `markdown_max_size`, `markdown_memory_budget`, `markdown_timeout`, and `markdown_streaming_budget` directives. Any subset of keys may be given; unspecified keys inherit. |
 
 ### `markdown_error_policy`
 
@@ -156,23 +142,14 @@ flowchart LR
 
 ## Cache and Conditional Request Behavior
 
-### `markdown_etag`
+### `markdown_cache_validation`
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Enables or disables Markdown-variant ETag generation |
-| Lifecycle impact | Rust conversion options and success-path header updates |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/nginx-module/src/ngx_http_markdown_headers.c`, `components/rust-converter/src/etag_generator.rs` |
-| Practical note | This affects downstream cache behavior, not whether conversion is attempted. |
-
-### `markdown_conditional_requests`
-
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Controls how aggressively the module handles Markdown-variant conditional requests |
-| Lifecycle impact | Conditional resolution branch after buffering and before full conversion |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/nginx-module/src/ngx_http_markdown_conditional.c` |
-| Practical note | This directive changes the branch between “send 304”, “reuse a conditional result”, and “continue to full conversion”. |
+| Behavior | Controls conditional request handling and ETag generation: `off`, `ims_only`, or `full` (Config V2, 0.9.0) |
+| Lifecycle impact | Conditional resolution branch after buffering and before full conversion; ETag generation on success path |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/nginx-module/src/ngx_http_markdown_conditional.c`, `components/nginx-module/src/ngx_http_markdown_headers.c` |
+| Practical note | Replaces the removed `markdown_etag` and `markdown_conditional_requests` directives. `full` generates a transformed ETag; `ims_only` supports If-Modified-Since via upstream Last-Modified; `off` disables both. |
 
 ## Logging and Observability
 
@@ -251,9 +228,8 @@ Then move to [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md) and trace header-phase
 Start with:
 
 - `markdown_error_policy`
-- `markdown_memory_budget`
-- `markdown_timeout`
-- `markdown_conditional_requests`
+- `markdown_limits`
+- `markdown_cache_validation`
 
 Then inspect the failure branches in [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md).
 
@@ -262,10 +238,10 @@ Then inspect the failure branches in [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md
 Mostly:
 
 - `markdown_flavor`
-- `markdown_timeout`
+- `markdown_limits`
 - `markdown_token_estimate`
 - `markdown_front_matter`
-- `markdown_etag`
+- `markdown_cache_validation`
 
 Those are the knobs most directly reflected in the conversion options passed through FFI.
 
@@ -276,3 +252,4 @@ Those are the knobs most directly reflected in the conversion options passed thr
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

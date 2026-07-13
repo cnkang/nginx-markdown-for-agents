@@ -155,10 +155,10 @@ Important details:
 - if the last buffer has not arrived yet, the filter returns and waits for more input
 - full buffering is a deliberate v1 design choice, not an accident
 
-If buffering fails because of allocation or size-limit conditions, the next branch depends on `markdown_on_error`:
+If buffering fails because of allocation or size-limit conditions, the next branch depends on `markdown_error_policy`:
 
 - `pass`: fail open and return original HTML
-- `reject`: fail closed and return an error to the client
+- `fail_closed`: fail closed and return an error to the client
 
 ## Phase 3: Optional Decompression
 
@@ -225,7 +225,7 @@ If the converter returns an error, the module classifies it into a failure categ
 - resource-limit failure
 - system failure
 
-It then records the relevant counters and applies `markdown_on_error`:
+It then records the relevant counters and applies `markdown_error_policy`:
 
 - `pass`: send original HTML
 - `reject`: fail the request
@@ -248,7 +248,7 @@ markdown_large_body_threshold 512k;
 
 The router evaluates in this order:
 
-1. If `markdown_large_body_threshold` is `off`: all requests use the full-buffer path. No further evaluation happens.
+1. If `markdown_large_body_threshold` is `off` (retired in 0.9.0; the threshold is no longer user-configurable): all requests use the full-buffer path. No further evaluation happens.
 2. If the request is HEAD, 304, or a fail-open replay: always use the full-buffer path. These special paths are never routed to the incremental path.
 3. If `Content-Length` is present and meets or exceeds the threshold: use the incremental path.
 4. If `Content-Length` is absent: buffer the response first. Once the buffered size exceeds the threshold, switch to the incremental path. Otherwise, continue on the full-buffer path.
@@ -265,7 +265,7 @@ When the threshold router selects the incremental path, the module feeds respons
 
 The incremental API is compiled only when the `incremental` Rust feature flag is enabled. If the feature is not compiled but a threshold is configured, the module logs a warning and falls back to the full-buffer path.
 
-Error handling on the incremental path follows the same `markdown_on_error` policy as the full-buffer path: fail-open returns original HTML, fail-closed returns an error to the client.
+Error handling on the incremental path follows the same `markdown_error_policy` as the full-buffer path: fail-open returns original HTML, fail-closed returns an error to the client.
 
 ### Deferred Path Selection for Chunked Responses
 
@@ -351,3 +351,4 @@ If you are debugging a behavior, the best mental model is:
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
