@@ -238,6 +238,7 @@ static int g_cond_result_code;
 static int g_convert_error_code;
 static uint8_t *g_convert_etag;
 static uintptr_t g_convert_etag_len;
+static uintptr_t g_decide_last_modified_len;
 
 ngx_int_t
 ngx_http_markdown_set_etag(ngx_http_request_t *r, const u_char *etag,
@@ -354,6 +355,9 @@ void
 markdown_decide_conditional(const struct FFIConditionalInput *input,
     struct FFIConditionalDecision *out)
 {
+    g_decide_last_modified_len = input == NULL
+                                 ? 0 : input->last_modified_len;
+
     if (out == NULL) {
         return;
     }
@@ -1271,6 +1275,9 @@ test_handle_ims_only_last_modified_time_fallback(void)
         "IMS-only with last_modified_time fallback returns 304");
     TEST_ASSERT(result == NULL,
         "IMS-only path does not allocate result");
+    TEST_ASSERT(g_decide_last_modified_len ==
+                    NGX_HTTP_MARKDOWN_HTTP_DATE_LEN,
+        "IMS-only fallback forwards the fixed RFC 1123 date length");
     TEST_PASS("ims_only last_modified_time fallback to 304");
 }
 
