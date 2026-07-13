@@ -88,7 +88,7 @@ properties.
 | Directive | Role in Compression Strategy |
 |-----------|------------------------------|
 | `markdown_auto_decompress` | Controls whether the module attempts decompression at all. Default: `on`. When off, compressed responses pass through unconverted. |
-| `markdown_decompress_max_size` | Maximum decompressed output size. Prevents decompression bombs. Default: inherits `markdown_max_size`. |
+| `markdown_decompress_max_size` | Maximum decompressed output size. Prevents decompression bombs. Default: inherits `markdown_limits memory=<size>`. |
 
 ## Operator Guidance
 
@@ -120,3 +120,4 @@ properties.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.8.0 | 2026-06-16 | Kang | Initial document for v0.8.0 streaming compression strategy (streaming security enforcement task 3.3) |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

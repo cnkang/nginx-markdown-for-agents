@@ -194,7 +194,7 @@ Yes, but you may need to:
 
 ### What about compressed responses?
 
-The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`) as part of the conversion path via the `markdown_auto_decompress` directive (default: on). The decompression budget is independently controlled by `markdown_decompress_max_size` (default: same as `markdown_max_size`).
+The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`) as part of the conversion path via the `markdown_auto_decompress` directive (default: on). The decompression budget is independently controlled by `markdown_decompress_max_size` (default: same as `markdown_limits memory=<size>`).
 
 **Recommended decompression strategies** (in order of preference):
 
@@ -508,3 +508,4 @@ Check the repository for sponsorship information (if available).
 | 0.7.0 | 2026-05-19 | Kang | Added decompression budget guidance, v0.7.0 error codes and directives |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

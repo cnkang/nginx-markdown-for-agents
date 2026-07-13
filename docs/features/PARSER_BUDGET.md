@@ -76,7 +76,7 @@ and **cooperative checkpoints** (during DOM traversal, after parsing).
 
 ### 2.1 Input Size Limit (Pre-parse Gate)
 
-**Directive**: `markdown_max_size` (existing)
+**Directive**: `markdown_limits memory=<size>` (Config V2; `markdown_max_size` retired in 0.9.0)
 
 Before any parsing occurs, the C module checks the response body size
 against the configured maximum. Documents exceeding this limit are never
@@ -166,9 +166,9 @@ the actual timeout overshoot depends on input size:
 | < 1 MB | < 100 ms | Negligible |
 | 1-5 MB | 100-500 ms | Low |
 | 5-10 MB | 500 ms - 1 s | Moderate |
-| > 10 MB | Blocked by max_size | N/A |
+| > 10 MB | Blocked by `markdown_limits memory=` | N/A |
 
-The `markdown_max_size` directive (default 10 MB) ensures that the
+The `markdown_limits memory=<size>` directive (default 10 MB) ensures that the
 uninterruptible parse phase is bounded to approximately 1 second on
 modern hardware.
 
@@ -183,7 +183,7 @@ Deep nesting is bounded by the streaming pipeline's `state_stack` budget:
 
 For the full-buffer path, html5ever's tree builder handles deep nesting
 according to the HTML5 spec (which defines a maximum nesting depth of 512
-for formatting elements). The DOM tree size is bounded by `markdown_max_size`.
+for formatting elements). The DOM tree size is bounded by `markdown_limits memory=<size>`.
 
 ### 2.5 Node-Count Tracking
 
@@ -212,14 +212,14 @@ input size or elapsed time.
 ```
 Request arrives
     │
-    ├─ markdown_max_size check (C layer)
+    ├─ markdown_limits memory= check (C layer)
     │   └─ FAIL → pass-through, reason: SIZE_EXCEEDED
     │
     ├─ markdown_parse_timeout pre-check
     │   └─ FAIL → pass-through, reason: PARSE_TIMEOUT
     │
     ├─ html5ever parse_document (uninterruptible)
-    │   └─ Bounded by max_size ≤ 10 MB
+    │   └─ Bounded by markdown_limits memory= ≤ 10 MB
     │
     ├─ markdown_parse_timeout post-parse check
     │   └─ FAIL → pass-through, reason: PARSE_TIMEOUT
@@ -257,7 +257,7 @@ When any limit is hit:
 
 | Limit | Status | Path | Enforcement Point |
 |-------|--------|------|-------------------|
-| Input size (`markdown_max_size`) | ✅ Implemented | Both | C body filter pre-check |
+| Input size (`markdown_limits memory=`) | ✅ Implemented | Both | C body filter pre-check |
 | Parse timeout (`markdown_parse_timeout`) | ✅ Implemented | Both | Cooperative checkpoints in Rust |
 | Parser memory budget (`markdown_parser_budget`) | ✅ Implemented | Streaming | `MemoryBudget` stage checks |
 | Parser memory budget (full-buffer) | ✅ Implemented | Full-buffer | Input size proxy pre-check |
@@ -285,7 +285,7 @@ When any limit is hit:
 
 ```nginx
 # Maximum input size before parsing (pre-parse gate)
-markdown_max_size 10m;
+markdown_limits memory=10m;
 
 # Cooperative timeout for the entire conversion pipeline
 markdown_parse_timeout 30s;
@@ -325,3 +325,4 @@ For full directive syntax and examples, see `docs/guides/CONFIGURATION.md`.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.7.0 | 2026-05-17 | Kang | Initial parser budget documentation (TASK-A06.3) |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
