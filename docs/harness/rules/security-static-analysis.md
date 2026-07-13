@@ -64,8 +64,11 @@ Required:
   images must pair that user with an unprivileged listener and writable PID and
   temporary paths. ClusterFuzzLite images must keep the toolchain readable and
   the source/build/output directories writable under the actual fuzz action
-  mount contract. Do not suppress Trivy's missing-user finding when those
-  runtime changes are feasible.
+  mount contract, including ownership of the fixed
+  `/usr/lib/libFuzzingEngine.a` archive installed by the compile wrapper. Grant
+  access to that file only, not the full system library directory. Do not
+  suppress Trivy's missing-user finding when those runtime changes are
+  feasible.
 - Third-party actions in these workflows must be pinned to immutable commit
   SHAs with human-readable version comments.
 - Generated scan output, SBOM files, tool caches, and vulnerability databases

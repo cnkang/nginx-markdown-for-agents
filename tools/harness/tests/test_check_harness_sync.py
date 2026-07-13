@@ -176,6 +176,24 @@ def test_docker_runtime_security_rejects_root_user(tmp_path, monkeypatch):
     assert ".clusterfuzzlite/Dockerfile final USER must be non-root" in result.detail
 
 
+def test_docker_runtime_security_rejects_unwritable_libfuzzer_archive(
+    tmp_path, monkeypatch
+):
+    """Reject non-root fuzz images that cannot install libFuzzer."""
+    _write_docker_runtime_fixture(tmp_path)
+    dockerfile = tmp_path / ".clusterfuzzlite/Dockerfile"
+    content = dockerfile.read_text(encoding="utf-8").replace(
+        "    && chown fuzzer:fuzzer /usr/lib/libFuzzingEngine.a\n", ""
+    )
+    dockerfile.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_docker_runtime_security()
+
+    assert result.status == sync.FAIL
+    assert "writable /usr/lib/libFuzzingEngine.a" in result.detail
+
+
 def test_docker_runtime_security_rejects_privileged_nginx_port(
     tmp_path, monkeypatch
 ):
@@ -475,7 +493,12 @@ def _write_repo_fixture(repo: Path, *, with_kiro: bool, kiro_has_links: bool = T
 def _write_docker_runtime_fixture(repo: Path) -> None:
     """Create the tracked Dockerfile security surfaces for focused tests."""
     dockerfiles = {
-        ".clusterfuzzlite/Dockerfile": "FROM scratch\nUSER 10001\n",
+        ".clusterfuzzlite/Dockerfile": (
+            "FROM scratch\n"
+            "RUN touch /usr/lib/libFuzzingEngine.a \\\n"
+            "    && chown fuzzer:fuzzer /usr/lib/libFuzzingEngine.a\n"
+            "USER 10001\n"
+        ),
         "examples/docker/Dockerfile.official-nginx-source-build": (
             "FROM scratch\n"
             "RUN pid /tmp/nginx.pid; client_body_temp_path /tmp/client_temp;\n"

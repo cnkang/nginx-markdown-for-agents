@@ -74,6 +74,10 @@ NGINX_NON_ROOT_REQUIRED_SNIPPETS = (
     "pid /tmp/nginx.pid;",
     "client_body_temp_path /tmp/client_temp;",
 )
+CLUSTERFUZZ_NON_ROOT_REQUIRED_SNIPPETS = (
+    "touch /usr/lib/libFuzzingEngine.a",
+    "chown fuzzer:fuzzer /usr/lib/libFuzzingEngine.a",
+)
 TRIVY_REQUIRED_LOCAL_EXCLUSIONS = (
     ".codeartsdoer",
     ".kiro",
@@ -939,6 +943,14 @@ def _docker_runtime_content_issues(
         issues.append(f"{relative_path} final USER must be non-root")
 
     if relative_path == ".clusterfuzzlite/Dockerfile":
+        if any(
+            snippet not in content
+            for snippet in CLUSTERFUZZ_NON_ROOT_REQUIRED_SNIPPETS
+        ):
+            issues.append(
+                f"{relative_path} missing writable "
+                "/usr/lib/libFuzzingEngine.a contract"
+            )
         return issues
     issues.extend(
         f"{relative_path} missing '{snippet}'"
