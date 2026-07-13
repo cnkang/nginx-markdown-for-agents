@@ -1457,6 +1457,16 @@ typedef struct {
 } ngx_http_markdown_metrics_t;
 
 /*
+ * Cross-translation-unit metric ownership helpers used by postcommit output.
+ * Pending metrics are recorded when downstream returns NGX_AGAIN and the
+ * module retains the output anchor.  Copied delivery metrics are recorded only
+ * after immediate downstream delivery is confirmed; deferred delivery is
+ * accounted by the shared streaming pending-resume path.
+ */
+void ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes);
+void ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes);
+
+/*
  * Per-path metric node stored in the shared RB-tree.
  *
  * rbnode.key holds a hash of the path for O(1) first-level

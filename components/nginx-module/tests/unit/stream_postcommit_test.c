@@ -133,6 +133,18 @@ static ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r,
     ngx_chain_t *in);
 #include "../../src/ngx_http_markdown_filter_chain_impl.h"
 
+void
+ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes)
+{
+    UNUSED(bytes);
+}
+
+void
+ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
+{
+    UNUSED(bytes);
+}
+
 /* Include the decision engine source directly */
 #include "../../src/ngx_http_markdown_stream_state.h"
 #include "../../src/ngx_http_markdown_stream_state.c"
