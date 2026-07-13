@@ -40,6 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 VALIDATION_IMPORT_RE = re.compile(
     r"from\s+tools\.lib\.path_validation\s+import"
+    r"|from\s+lib\.path_validation\s+import"
     r"|from\s+path_validation\s+import"
     r"|import\s+tools\.lib\.path_validation"
     r"|def\s+_resolve_repo_write_path",

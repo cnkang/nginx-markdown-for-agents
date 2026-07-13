@@ -20,6 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import doctor_advice as doctor_advice_module
 from doctor_advice import (
     Finding,
     _evaluate_d01,
@@ -71,6 +72,33 @@ class TestInputValidation:
 
         assert exc.value.code == 2
         assert "Invalid metrics file path" in capsys.readouterr().err
+
+    def test_metric_schema_path_is_validated_before_read(
+        self, tmp_path, monkeypatch,
+    ):
+        """The auto-discovered metrics schema is validated before opening."""
+        schema_path = tmp_path / "metrics-schema.json"
+        schema_path.write_text(
+            json.dumps({"metrics": [{"name": "requests_total"}]}),
+            encoding="utf-8",
+        )
+        validation_calls = []
+
+        def validate_schema_path(path, *, purpose):
+            validation_calls.append((path, purpose))
+            return Path(path)
+
+        monkeypatch.setattr(
+            doctor_advice_module, "_find_schema_path", lambda: str(schema_path)
+        )
+        monkeypatch.setattr(
+            doctor_advice_module, "validate_read_path", validate_schema_path
+        )
+
+        assert doctor_advice_module._load_valid_metric_names() == {
+            "requests_total"
+        }
+        assert validation_calls == [(str(schema_path), "metrics schema")]
 
 
 # ---------------------------------------------------------------------------
