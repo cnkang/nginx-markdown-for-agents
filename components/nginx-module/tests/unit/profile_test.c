@@ -310,15 +310,6 @@ markdown_trusted_proxies_free(struct MarkdownTrustedProxies *handle)
 
 /* FFI conflict detection stub — moved after markdown_converter.h include */
 
-/* Stream engine handler stub */
-static char *
-ngx_http_markdown_stream_engine_handler(ngx_conf_t *cf,
-    ngx_command_t *cmd, void *conf)
-{
-    UNUSED(cf); UNUSED(cmd); UNUSED(conf);
-    return NGX_CONF_OK;
-}
-
 static ngx_int_t g_compile_complex_rc;
 
 typedef struct {

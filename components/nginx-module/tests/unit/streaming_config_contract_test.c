@@ -307,24 +307,6 @@ ngx_ascii_strncasecmp(const u_char *s1, const u_char *s2, size_t n)
 }
 
 static ngx_int_t
-ngx_strcasecmp(u_char *s1, u_char *s2)
-{
-    if (s1 == NULL || s2 == NULL) {
-        return NGX_ERROR;
-    }
-    size_t i = 0;
-    while (s1[i] != '\0' && s2[i] != '\0') {
-        ngx_int_t diff = ngx_ascii_strncasecmp(&s1[i], &s2[i], 1);
-        if (diff != 0) {
-            return diff;
-        }
-        i++;
-    }
-    return (ngx_int_t) tolower((unsigned char) s1[i])
-         - (ngx_int_t) tolower((unsigned char) s2[i]);
-}
-
-static ngx_int_t
 ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
 {
     return ngx_ascii_strncasecmp(s1, s2, n);

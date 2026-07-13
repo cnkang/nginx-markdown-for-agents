@@ -1020,8 +1020,12 @@ test_multi_again_loop_each_input_once(void)
         feed_count++;
         /* output NGX_AGAIN */
         rc = NGX_AGAIN;
+        TEST_ASSERT(rc == NGX_AGAIN,
+            "Output must suspend before the drain succeeds");
         /* drain OK */
         rc = NGX_OK;
+        TEST_ASSERT(rc == NGX_OK,
+            "Successful drain should resume pending input");
         /* process pending_input */
         if (i < 2) {
             /* not terminal, continue */
@@ -1055,7 +1059,7 @@ test_terminal_on_queued_link(void)
     ngx_flag_t  terminal_seen = 0;
     ngx_flag_t  finalize_called = 0;
     ngx_uint_t  links_enqueued = 0;
-    int         step;
+    ngx_uint_t  step;
 
     TEST_SUBSECTION(
         "Terminal on queued link: deferred EOF preservation");
