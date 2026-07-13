@@ -1603,6 +1603,9 @@ const ngx_str_t *ngx_http_markdown_reason_skip_conditional(void);
 /* Return the BYPASS_NO_TRANSFORM reason code (RFC 9111 §5.2.2.6) */
 const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
 
+/* Return the compressed-response passthrough reason in every build mode. */
+const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
+
 #ifdef MARKDOWN_STREAMING_ENABLED
 /* Streaming reason code accessors */
 const ngx_str_t *ngx_http_markdown_reason_engine_streaming(void);
@@ -1610,7 +1613,6 @@ const ngx_str_t *ngx_http_markdown_reason_streaming_convert(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_fallback(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_fail_postcommit(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_skip_unsupported(void);
-const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_budget_exceeded(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_failopen(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_reject(void);

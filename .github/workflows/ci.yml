@@ -368,6 +368,9 @@ jobs:
             components/rust-converter -> target
           cache-bin: false
 
+      - name: Verify non-streaming production module linkage
+        run: ./tools/ci/verify_non_streaming_nginx_module.sh
+
       - name: Run delegated If-Modified-Since runtime validation
         id: ims_runtime
         shell: bash
