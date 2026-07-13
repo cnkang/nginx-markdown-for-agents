@@ -371,8 +371,9 @@ Markdown) exceeds `LARGE_BODY_THRESHOLD` (256 KB, a hardcoded constant in
 after `traverse_node_with_context` completes — not against the input HTML size.
 
 The 256 KB value is chosen to match the order of magnitude of the
-`markdown_large_body_threshold` NGINX directive default, though the two values
-measure different things (the directive controls input HTML size; the constant
+`markdown_large_body_threshold` NGINX directive default (retired in 0.9.0;
+historically controlled input HTML size), though the two values
+measure different things (the directive controlled input HTML size; the constant
 controls intermediate output size). Documents below the threshold use the
 standard `normalize_output` two-pass approach.
 
@@ -400,8 +401,9 @@ standard `normalize_output` two-pass approach.
   ratios may over- or under-allocate, but the clamp bounds (4 KB–4 MB)
   prevent pathological cases.
 - The threshold is a hardcoded constant, not configurable via NGINX directives.
-  It is not the same as `markdown_large_body_threshold` (which controls input
-  HTML size limits), though both use 256 KB as a default.
+  It is not the same as `markdown_large_body_threshold` (retired in 0.9.0;
+  historically controlled input HTML size limits), though both use 256 KB
+  as a default.
 - `ConversionContext` timeout checks remain active throughout the large-response
   path. The fused normalizer does not bypass timeout enforcement.
 
@@ -475,3 +477,4 @@ The following items are explicitly out of scope for 0.4.0:
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

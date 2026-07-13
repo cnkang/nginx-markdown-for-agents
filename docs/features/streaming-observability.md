@@ -1,8 +1,8 @@
 # Streaming Observability and Diagnostics
 
 > **0.9.0 Note**: The module-wide reason code registry has been renamed to
-> lowercase snake_case in 0.9.0. The streaming reason codes documented below
-> (numeric codes 0–13) are a **separate system** used internally by the
+> lowercase snake_case in 0.9.0. The streaming block reason codes documented
+> below (numeric codes 0–8) are a **separate system** used internally by the
 > streaming engine for routing decisions. They are not part of the unified
 > `ReasonCode` enum. See the
 > [Observability Schema v1](../architecture/observability-schema-v1.md) for
@@ -62,22 +62,19 @@ versions; removal requires a major version bump.
 
 | Code | String | Engine Path | Description |
 |------|--------|-------------|-------------|
-| 0 | `eligible` | streaming | Request eligible for true streaming |
-| 1 | `content_length_known` | full_buffer | Content-Length present, below threshold |
-| 2 | `below_threshold` | full_buffer | Response size below `markdown_stream_threshold` |
-| 3 | `config_disabled` | full_buffer | Streaming disabled by configuration |
-| 4 | `excluded_content_type` | passthrough | Excluded by stream_types list |
-| 5 | `not_html` | passthrough | Response is not HTML |
-| 6 | `not_candidate` | not_eligible | Not a streaming candidate |
-| 7 | `accept_mismatch` | not_eligible | Accept header doesn't match |
-| 8 | `precommit_html_error` | fallback | HTML parse error in pre-commit |
-| 9 | `precommit_budget` | fallback | Memory budget exceeded in pre-commit |
-| 10 | `precommit_timeout` | fallback | Parse timeout in pre-commit |
-| 11 | `postcommit_parse_error` | failure | Parse error after commit |
-| 12 | `postcommit_budget_exceeded` | failure | Budget exceeded after commit |
-| 13 | `postcommit_io_error` | failure | I/O error after commit |
+| 0 | `streaming_block_full_cache_validation` | full_buffer | `cache_validation = full` forces full-buffer for ETag |
+| 1 | `streaming_block_content_encoding` | full_buffer | Upstream `Content-Encoding` requires decompression |
+| 2 | `streaming_block_content_length_unknown` | full_buffer | `auto` mode cannot size response without `Content-Length` |
+| 3 | `streaming_block_range_request` | passthrough | `Range` request bypasses conversion |
+| 4 | `streaming_block_no_transform` | passthrough | `Cache-Control: no-transform` bypasses conversion |
+| 5 | `streaming_block_engine_off` | full_buffer | No streaming backend (policy `off` or engine `off`) |
+| 6 | `streaming_block_small_body` | full_buffer | `auto` mode response below streaming threshold |
+| 7 | `streaming_block_head_request` | passthrough | `HEAD` request: header decisions only, no body |
+| 8 | `streaming_block_304_response` | passthrough | `304 Not Modified` carries no body |
 
 **Note:** Reason codes are additive only. Removal requires a major version bump.
+The 9-variant enum is defined in `components/rust-converter/src/decision/streaming.rs`
+(`StreamingBlockReason`, `#[repr(u8)]`).
 
 ---
 
@@ -157,7 +154,7 @@ If `nginx_markdown_streaming_fallback_total` is high relative to
 1. Check `reason` field in info-level logs for common patterns.
 2. Common causes: malformed HTML, exceeded budgets, excluded content types.
 3. Consider adjusting `markdown_stream_threshold` or
-   `markdown_streaming_on_error`.
+   `markdown_error_policy`.
 
 ### Post-commit failures
 
