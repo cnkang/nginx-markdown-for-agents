@@ -1577,7 +1577,7 @@ pub unsafe extern "C" fn markdown_detect_conflicts(
         // Freed one-by-one in markdown_free_conflicts.
         //
         // NOTE: If catch_unwind catches a panic after some messages have been
-        // Box::into_raw'd but before mem::forget(boxed), those message buffers
+        // transferred but before mem::forget(boxed), those message buffers
         // would leak. This is acceptable because: (1) the closure is pure and
         // allocation-only — panics here are practically impossible, and (2) the
         // leak is bounded by conflict count (typically <5 short strings).
@@ -1589,11 +1589,11 @@ pub unsafe extern "C" fn markdown_detect_conflicts(
             };
             // Allocate message bytes on the heap via Box
             let msg_bytes: Box<[u8]> = conflict.message.as_bytes().to_vec().into_boxed_slice();
-            let msg_len = msg_bytes.len();
-            let msg_ptr = Box::into_raw(msg_bytes) as *const u8;
+            let (msg_ptr, msg_len) =
+                crate::ffi::memory::leak_boxed_slice_to_raw(msg_bytes);
             ffi_conflicts.push(FFIConflict {
                 level,
-                message: msg_ptr,
+                message: msg_ptr as *const u8,
                 message_len: msg_len,
             });
         }
