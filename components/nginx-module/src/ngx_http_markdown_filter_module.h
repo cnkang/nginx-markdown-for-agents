@@ -1040,6 +1040,7 @@ typedef struct {
             unsigned                      overflowed:1;
         } output;
         unsigned                          main_terminal_sent:1;
+        unsigned                          subrequest_terminal_sent:1;
 
         /* TTFB tracking (from first feed to first non-empty output) */
         struct {
