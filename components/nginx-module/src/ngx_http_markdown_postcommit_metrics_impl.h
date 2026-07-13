@@ -1,13 +1,14 @@
 /*
  * Internal postcommit metric helper implementations.
  *
- * Production inclusion owner: ngx_http_markdown_module_state_impl.h in the
- * main ngx_http_markdown_filter_module.c translation unit.  Focused unit tests
- * may include this file only after defining MARKDOWN_STREAMING_ENABLED and
- * providing ngx_http_markdown_metrics_t, the ngx_http_markdown_metrics
- * pointer, ngx_atomic_t, and the METRIC_ADD, METRIC_INC, and
- * METRIC_WATERMARK macros used below.  Feature-disabled builds intentionally
- * receive no definitions because their metrics layout omits streaming fields.
+ * Production inclusion owner: the main ngx_http_markdown_filter_module.c
+ * translation unit, immediately after ngx_http_markdown_module_state_impl.h
+ * defines the metric macros used below.  Focused unit tests may include this
+ * file only after defining MARKDOWN_STREAMING_ENABLED and providing
+ * ngx_http_markdown_metrics_t, the ngx_http_markdown_metrics pointer,
+ * ngx_atomic_t, and the METRIC_ADD, METRIC_INC, and METRIC_WATERMARK macros.
+ * Feature-disabled builds intentionally receive no definitions because their
+ * metrics layout omits streaming fields.
  */
 
 #ifndef NGX_HTTP_MARKDOWN_POSTCOMMIT_METRICS_IMPL_H

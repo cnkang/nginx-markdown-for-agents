@@ -126,8 +126,6 @@ static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
         }                                                                           \
     } while (0)
 
-#include "ngx_http_markdown_postcommit_metrics_impl.h"
-
 /*
  * Increment the skip counter for the given eligibility result.
  *
