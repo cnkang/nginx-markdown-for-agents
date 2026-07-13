@@ -126,6 +126,7 @@ jobs:
               - 'tests/corpus/**'
               - 'tools/e2e/**'
               - 'tools/e2e-harness/**'
+              - 'tools/ci/verify_non_streaming_nginx_module.sh'
               - 'Makefile'
             perf:
               - 'components/rust-converter/**'
