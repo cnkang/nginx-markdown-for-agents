@@ -1,5 +1,14 @@
 # Large Response Incremental Path — Rollout and Rollback Playbook
 
+> ⚠️ **RETIRED IN 0.9.0** — The `markdown_large_body_threshold` directive
+> documented in this playbook is a **reject-only stub** in 0.9.0+. Setting it
+> in `nginx.conf` causes `nginx -t` to fail with a migration hint. There is no
+> Config V2 replacement; the incremental-path threshold is no longer
+> user-configurable. This playbook is retained as a historical reference for
+> pre-0.9.0 deployments. For current rollout guidance, use the
+> [Rollout Cookbook](ROLLOUT_COOKBOOK.md) and
+> [Configuration Guide](CONFIGURATION.md#markdown_limits).
+
 ## Table of Contents
 
 1. [Overview](#overview)
@@ -539,3 +548,4 @@ nginx -t && nginx -s reload
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

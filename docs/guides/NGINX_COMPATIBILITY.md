@@ -122,7 +122,7 @@ NGINX source tree and configuration.
 
 ### Fail-Open Behavior
 
-The module defaults to `markdown_on_error pass` (fail-open). If the
+The module defaults to `markdown_error_policy pass` (fail-open). If the
 conversion fails at runtime (timeout, memory budget exceeded, converter
 error), the original HTML response is returned unchanged. This is a safety
 design choice, not a compatibility limitation, but operators should be aware
@@ -192,3 +192,4 @@ prebuilt package for an nginx.org official build, or build from source with
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.7.0 | 2026-05-20 | Kiro | Initial NGINX compatibility guide for docs/guides/ |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
