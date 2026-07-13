@@ -83,6 +83,8 @@ proptest! {
         let mut buf: Box<[u8]> = vec![0xABu8; size].into_boxed_slice();
         let ptr = buf.as_mut_ptr();
         let len = buf.len();
+        prop_assert_eq!(len, size);
+        prop_assert!(!ptr.is_null());
 
         /* Step 2: Transfer ownership (simulates Rust producing output) */
         mem::forget(buf);
@@ -161,6 +163,8 @@ fn ffi_ownership_deterministic_sizes() {
         let mut buf: Box<[u8]> = vec![0x42u8; size].into_boxed_slice();
         let ptr = buf.as_mut_ptr();
         let len = buf.len();
+        assert_eq!(len, size);
+        assert!(!ptr.is_null());
         mem::forget(buf);
         unsafe {
             markdown_streaming_output_free(ptr, len);
@@ -186,6 +190,8 @@ fn ffi_ownership_sequential_cycles() {
         let mut buf: Box<[u8]> = vec![0u8; 4096].into_boxed_slice();
         let ptr = buf.as_mut_ptr();
         let len = buf.len();
+        assert_eq!(len, 4096);
+        assert!(!ptr.is_null());
         mem::forget(buf);
         unsafe {
             markdown_streaming_output_free(ptr, len);
