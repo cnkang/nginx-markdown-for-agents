@@ -934,13 +934,20 @@ import time
 port = int(sys.argv[1])
 header_path = sys.argv[2]
 body_path = sys.argv[3]
-# Keep the reader slow enough to sustain downstream pressure, but leave ample
-# headroom inside the 60-second deadline for the 8 MiB fixture on macOS CI.
+# Keep the reader slow enough to sustain downstream pressure.  The total
+# deadline is intentionally much wider than the fixture's nominal transfer
+# time because the socket's 10-second no-progress timeout remains the hang
+# detector while shared macOS runners may have substantial scheduling jitter.
 rate_bytes_per_second = 256 * 1024
-deadline = time.monotonic() + 60
+deadline_seconds = 180
+deadline = time.monotonic() + deadline_seconds
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+# A 4 KiB window makes Darwin TCP window-update latency the throughput
+# bottleneck on shared runners.  64 KiB remains far below the 8 MiB fixture;
+# the initial no-read interval and metric assertions still prove NGX_AGAIN and
+# its confirmed resume without turning transport scheduling into the oracle.
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 * 1024)
 sock.settimeout(10)
 sock.connect(("127.0.0.1", port))
 request = (
@@ -966,7 +973,9 @@ with open(header_path, "w", encoding="iso-8859-1") as header_file:
 with open(body_path, "wb") as body_file:
     while True:
         if time.monotonic() >= deadline:
-            raise TimeoutError("slow reader exceeded 60-second deadline")
+            raise TimeoutError(
+                f"slow reader exceeded {deadline_seconds}-second deadline"
+            )
         started = time.monotonic()
         chunk = response.read(16 * 1024)
         if not chunk:
