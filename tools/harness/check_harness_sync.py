@@ -38,6 +38,7 @@ GITHUB_WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 CFLITE_PR_WORKFLOW = "cflite_pr.yml"
 CFLITE_BATCH_WORKFLOW = "cflite_batch.yml"
 CFLITE_CRON_WORKFLOW = "cflite_cron.yml"
+CLUSTERFUZZ_DOCKERFILE = ".clusterfuzzlite/Dockerfile"
 MANIFEST_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.json"
 E2E_HARNESS_DIR = REPO_ROOT / "tools" / "e2e-harness"
 E2E_HARNESS_CARGO = E2E_HARNESS_DIR / "Cargo.toml"
@@ -64,7 +65,7 @@ MIGRATED_SCENARIO_WRAPPERS = {
     "tools/e2e/verify_status_codes_e2e.sh": "status-codes",
 }
 DOCKER_RUNTIME_PATHS = (
-    ".clusterfuzzlite/Dockerfile",
+    CLUSTERFUZZ_DOCKERFILE,
     "examples/docker/Dockerfile.official-nginx-source-build",
     "tools/build_release/Dockerfile.install-example",
 )
@@ -75,6 +76,8 @@ NGINX_NON_ROOT_REQUIRED_SNIPPETS = (
     "client_body_temp_path /tmp/client_temp;",
 )
 CLUSTERFUZZ_NON_ROOT_REQUIRED_SNIPPETS = (
+    "mkdir -p /rustc",
+    "chown fuzzer:fuzzer /rustc",
     "touch /usr/lib/libFuzzingEngine.a",
     "chown fuzzer:fuzzer /usr/lib/libFuzzingEngine.a",
 )
@@ -883,7 +886,7 @@ def check_clusterfuzzlite_build_config() -> CheckResult:
     """
     required_files = [
         ".clusterfuzzlite/project.yaml",
-        ".clusterfuzzlite/Dockerfile",
+        CLUSTERFUZZ_DOCKERFILE,
         ".clusterfuzzlite/build.sh",
     ]
     if missing := [
@@ -966,15 +969,8 @@ def _docker_runtime_content_issues(
     elif final_user in {"0", "root"}:
         issues.append(f"{relative_path} final USER must be non-root")
 
-    if relative_path == ".clusterfuzzlite/Dockerfile":
-        if any(
-            snippet not in content
-            for snippet in CLUSTERFUZZ_NON_ROOT_REQUIRED_SNIPPETS
-        ):
-            issues.append(
-                f"{relative_path} missing writable "
-                "/usr/lib/libFuzzingEngine.a contract"
-            )
+    if relative_path == CLUSTERFUZZ_DOCKERFILE:
+        issues.extend(_clusterfuzz_non_root_issues(relative_path, content))
         return issues
     issues.extend(
         f"{relative_path} missing '{snippet}'"
@@ -987,6 +983,26 @@ def _docker_runtime_content_issues(
             issues.append(
                 f"{relative_path} missing stage ARG declarations"
             )
+    return issues
+
+
+def _clusterfuzz_non_root_issues(
+    relative_path: str, content: str
+) -> list[str]:
+    """Return missing non-root write contracts for ClusterFuzzLite."""
+    missing = [
+        snippet
+        for snippet in CLUSTERFUZZ_NON_ROOT_REQUIRED_SNIPPETS
+        if snippet not in content
+    ]
+    issues: list[str] = []
+    if any("/rustc" in snippet for snippet in missing):
+        issues.append(f"{relative_path} missing writable /rustc contract")
+    if any("/usr/lib/libFuzzingEngine.a" in snippet for snippet in missing):
+        issues.append(
+            f"{relative_path} missing writable "
+            "/usr/lib/libFuzzingEngine.a contract"
+        )
     return issues
 
 
