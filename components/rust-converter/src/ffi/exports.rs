@@ -1589,8 +1589,7 @@ pub unsafe extern "C" fn markdown_detect_conflicts(
             };
             // Allocate message bytes on the heap via Box
             let msg_bytes: Box<[u8]> = conflict.message.as_bytes().to_vec().into_boxed_slice();
-            let (msg_ptr, msg_len) =
-                crate::ffi::memory::leak_boxed_slice_to_raw(msg_bytes);
+            let (msg_ptr, msg_len) = crate::ffi::memory::leak_boxed_slice_to_raw(msg_bytes);
             ffi_conflicts.push(FFIConflict {
                 level,
                 message: msg_ptr as *const u8,
