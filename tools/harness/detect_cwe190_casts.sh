@@ -111,6 +111,7 @@ readonly SAFE_CAST_ALLOWLIST=(
     $'ngx_http_markdown_conversion_impl.h\tsize_t.*feed_len\tuintptr_t→size_t same-width cast (FFI feed_len)'
     $'ngx_http_markdown_conversion_impl.h\tsize_t.*markdown_len\tuintptr_t→size_t same-width cast (FFI markdown_len)'
     $'ngx_http_markdown_conversion_impl.h\tsize_t.*out_len\tuintptr_t→size_t same-width cast (FFI out_len)'
+    $'ngx_http_markdown_conversion_impl.h\tsize_t.*base_url_len\tuintptr_t→size_t same-width cast after out_cap guard'
     $'ngx_http_markdown_conversion_impl.h\tsize_t.*peak_memory\tuintptr_t→size_t same-width cast (FFI peak_memory_estimate for log)'
     $'ngx_http_markdown_diagnostics.c\tsize_t.*decision_count\tngx_uint_t→size_t same-width identity cast'
     # ── Bounded ternary (always 0 or 1) ──
