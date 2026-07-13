@@ -693,6 +693,30 @@ def check_cfl_workflows() -> CheckResult:
     if batch_missing:
         issues.append(f"{CFLITE_BATCH_WORKFLOW} missing storage-repo configuration")
 
+    # The build action creates absent workspace directories as root before it
+    # starts the project image. Pre-creation keeps build-out owned by the
+    # GitHub runner UID shared by the final non-root fuzzer user.
+    for workflow_name in (
+        CFLITE_PR_WORKFLOW,
+        CFLITE_BATCH_WORKFLOW,
+        CFLITE_CRON_WORKFLOW,
+    ):
+        workflow = GITHUB_WORKFLOWS_DIR / workflow_name
+        output_missing = _required_patterns(
+            workflow,
+            {
+                "non-root build-out preparation": (
+                    r"run:\s*mkdir -p build-out[\s\S]*"
+                    r"google/clusterfuzzlite/actions/build_fuzzers@"
+                )
+            },
+        )
+        if output_missing:
+            issues.append(
+                f"{workflow_name} must pre-create build-out "
+                "before build_fuzzers"
+            )
+
     if issues:
         return _result("cfl-workflows", FAIL, "; ".join(issues))
 

@@ -163,6 +163,34 @@ def test_docker_runtime_security_accepts_non_root_images(tmp_path, monkeypatch):
     assert result.status == sync.PASS
 
 
+def test_cfl_workflows_reject_unprepared_non_root_output(tmp_path, monkeypatch):
+    """Reject fuzz workflows that let the root action create build-out."""
+    workflows = tmp_path / ".github/workflows"
+    workflows.mkdir(parents=True)
+    (workflows / sync.CFLITE_PR_WORKFLOW).write_text(
+        "pull_request:\n  paths:\n    - fuzz/**\n"
+        "sanitizer: address\n"
+        "uses: google/clusterfuzzlite/actions/build_fuzzers@sha\n",
+        encoding="utf-8",
+    )
+    (workflows / sync.CFLITE_BATCH_WORKFLOW).write_text(
+        "storage-repo: repo\n"
+        "uses: google/clusterfuzzlite/actions/build_fuzzers@sha\n",
+        encoding="utf-8",
+    )
+    (workflows / sync.CFLITE_CRON_WORKFLOW).write_text(
+        "uses: google/clusterfuzzlite/actions/build_fuzzers@sha\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(sync, "GITHUB_WORKFLOWS_DIR", workflows)
+
+    result = sync.check_cfl_workflows()
+
+    assert result.status == sync.FAIL
+    assert "pre-create build-out before build_fuzzers" in result.detail
+
+
 def test_docker_runtime_security_rejects_root_user(tmp_path, monkeypatch):
     """Reject a tracked runtime Dockerfile whose final user remains root."""
     _write_docker_runtime_fixture(tmp_path)

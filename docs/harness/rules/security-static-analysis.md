@@ -68,7 +68,9 @@ Required:
   `/usr/lib/libFuzzingEngine.a` archive installed by the compile wrapper. Grant
   access to that file only, not the full system library directory. Do not
   suppress Trivy's missing-user finding when those runtime changes are
-  feasible.
+  feasible. ClusterFuzzLite workflows must pre-create the bind-mounted
+  `build-out` directory as the runner user before the root container action
+  initializes its workspace.
 - Third-party actions in these workflows must be pinned to immutable commit
   SHAs with human-readable version comments.
 - Generated scan output, SBOM files, tool caches, and vulnerability databases
