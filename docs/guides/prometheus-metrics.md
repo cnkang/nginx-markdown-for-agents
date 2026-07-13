@@ -385,7 +385,6 @@ Prometheus metric label values use the same reason code strings as the module's 
 | `disabled` | `disabled` | Module disabled by configuration (`markdown_filter off`) for this scope |
 | `skipped_accept` | `skipped_accept` | Client `Accept` header present but does not request Markdown |
 | `skipped_no_accept` | `skipped_no_accept` | No `Accept` header and `markdown_accept` is `strict` |
-| `skipped_accept_reject` | `skipped_accept_reject` | `Accept` explicitly rejects Markdown (`q=0`) |
 | `skipped_conditional` | `skipped_conditional` | Conditional request matched (304 Not Modified) |
 
 ### Failure Reason Codes
@@ -580,8 +579,9 @@ state transitions.
 
 **Bypass is not fail-open:** Conditional bypass (`Cache-Control:
 no-transform`, Range requests) is a protocol/cache semantic, not a
-conversion failure. Bypass responses do NOT increment `failopen_count`; they
-are tracked via the `bypass_no_transform` reason code in the skip metrics.
+conversion failure. Bypass responses do NOT increment `failopen_count`;
+they are excluded from conversion metrics and recorded as a bypass event
+in the decision log (no dedicated `reason` label in the Prometheus output).
 
 In backpressure scenarios (downstream returns `NGX_AGAIN`), the decision is
 recorded immediately but `failopen_count` is deferred until the pending
@@ -686,3 +686,4 @@ sum by (reason) (rate(nginx_markdown_skips_total[5m]))
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 metrics (delivery_total, decision_total, decompression_budget_exceeded, parse_timeouts, parse_budget_exceeded, replay_buffer_errors) and delivery/decision counter semantics |
 | 0.9.0 | 2026-07-01 | Kang | Breaking: unified metric families, label whitelist, lowercase reason codes, PromQL examples for unified families |
+| 0.9.1 | 2026-07-13 | Kang | Align skip/failure reason labels with actual C-module output (remove non-existent skipped_accept_reject; correct bypass_no_transform reference) |
