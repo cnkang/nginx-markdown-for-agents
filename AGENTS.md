@@ -123,7 +123,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 45 | dynconf-snapshot | effective_conf NULL-safe access; cross-TU field visibility in shared headers; sentinel value consistency |
 | 46 | ffi-crosslang | FFI operations must validate NULL/empty key inputs; guards on both sides of FFI boundary; NULL/empty-input test coverage |
 | 47 | streaming-backpressure | Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return |
-| 48 | security-static-analysis | CodeQL remains primary SAST; supplemental static security and supply-chain gates must stay focused, pinned, low-noise, and locally runnable |
+| 48 | security-static-analysis | CodeQL remains primary SAST; supplemental gates stay focused, pinned, low-noise, and locally runnable; runnable Dockerfiles use operational non-root runtimes |
 | 49 | docs-tooling | THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions; add/remove/update entries in same changeset as Cargo.lock changes |
 | 50 | nginx-idioms | Content-Type OWS separator accepts HTAB; trailing OWS excluded before parameter comparison |
 | 51 | streaming-backpressure | Auth Cache-Control commit failure routes through precommit_error; multi-header aggregation checks any_public before has_private |
@@ -380,6 +380,13 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   remain report-oriented unless a specific blocking threshold is adopted. Do
   not describe them as hard blocking gates without documenting the
   runtime/noise tradeoff and enforcing threshold semantics [48]
+- Local Trivy scans must exclude Git-ignored adapter state and generated
+  reports (including `.kiro/`, `.codeartsdoer/`, and `build/`) so local-only
+  files and prior SBOM output cannot create findings or memory pressure [48]
+- Runnable CI and example Dockerfiles must end with a non-root `USER`. NGINX
+  images must also listen on an unprivileged port and move PID/temp paths to
+  locations writable by that user; a scanner-only `USER` declaration that
+  breaks container startup is forbidden [48]
 - Release artifact path traversal protection: validate manifest filenames resolve within artifact directory before accessing [54]
 - Homebrew formula SHA-256 generated from release tag git archive (not HEAD);
   version stanza before sha256; nginx version derived from dependency

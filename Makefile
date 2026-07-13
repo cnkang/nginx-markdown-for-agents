@@ -286,6 +286,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_ffi_panic_safety.sh
 	bash tools/harness/tests/test_detect_ffi_fat_pointer_transfer.sh
 	bash tools/harness/tests/test_security_gitleaks_scope.sh
+	bash tools/harness/tests/test_install_config_search.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
 license-check:
@@ -331,9 +332,34 @@ security-cargo-deny:
 
 supply-chain: supply-chain-trivy supply-chain-sbom
 
+TRIVY_LOCAL_SKIP_DIRS := \
+	--skip-dirs .arts \
+	--skip-dirs .codeartsdoer \
+	--skip-dirs .kiro \
+	--skip-dirs .serena \
+	--skip-dirs .vscode \
+	--skip-dirs .idea \
+	--skip-dirs .fleet \
+	--skip-dirs .codex-venv \
+	--skip-dirs .trae \
+	--skip-dirs docs/archive \
+	--skip-dirs build \
+	--skip-dirs dist \
+	--skip-dirs out \
+	--skip-dirs tmp \
+	--skip-dirs temp \
+	--skip-dirs .test-tmp \
+	--skip-dirs coverage \
+	--skip-dirs test-output \
+	--skip-dirs test-results \
+	--skip-dirs '**/target' \
+	--skip-dirs '**/node_modules' \
+	--skip-dirs '**/__pycache__'
+
 supply-chain-trivy:
 	@command -v trivy >/dev/null 2>&1 || { echo "ERROR: trivy not found. Install from https://aquasecurity.github.io/trivy/latest/getting-started/installation/." >&2; exit 127; }
-	trivy fs --scanners vuln,misconfig,secret --ignore-unfixed --severity HIGH,CRITICAL .
+	trivy fs --scanners vuln,misconfig,secret --ignore-unfixed \
+		--severity HIGH,CRITICAL $(TRIVY_LOCAL_SKIP_DIRS) .
 
 supply-chain-sbom:
 	@command -v syft >/dev/null 2>&1 || { echo "ERROR: syft not found. Install from https://github.com/anchore/syft#installation." >&2; exit 127; }

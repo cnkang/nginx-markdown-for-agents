@@ -250,13 +250,16 @@ This follows the official-image multi-stage pattern:
 2. Install build dependencies in the build stage.
 3. Clone this repository inside the image.
 4. Compile the module in the build stage.
-5. Copy the resulting `.so` into a clean official `nginx` runtime image.
+5. Copy the resulting `.so` into a clean official `nginx` runtime stage.
+6. Run NGINX as the image's unprivileged `nginx` user on port `8080`, with
+   PID and temporary files under `/tmp`.
 
 ### Platform-Specific Build Notes
 
 - **Alpine-based** official images use `nginx-mod-dev`, which provides a matching NGINX source tree in the container.
 - **Debian-based** official images do not currently provide a matching `nginx-dev` package, so the Dockerfile downloads the exact matching NGINX source tarball for the build stage only.
-- In all cases, the runtime container remains the unmodified official `nginx` image.
+- In all cases, the runtime stage keeps the official `nginx` image and adds
+  only the module, example content, and the non-root runtime configuration.
 
 ### Build Examples
 
@@ -301,7 +304,7 @@ docker build \
 ### Run and Verify
 
 ```bash
-docker run --rm -p 8080:80 nginx-markdown:mainline
+docker run --rm -p 8080:8080 nginx-markdown:mainline
 
 # Markdown conversion
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://127.0.0.1:8080/
@@ -1348,7 +1351,9 @@ SKIP_ROOT_CHECK=1 bash tools/install.sh
 
 If you fetch `tools/install.sh` remotely during image build, pin and verify its digest.
 The example [`tools/build_release/Dockerfile.install-example`](../../tools/build_release/Dockerfile.install-example)
-expects `INSTALL_SHA256` and checks the script before execution.
+expects `INSTALL_SHA256` and checks the script before execution. It also drops
+to the image's `nginx` user for runtime, listens on unprivileged port `8080`,
+and moves the NGINX PID and temporary paths to `/tmp`.
 
 For a fully self-contained Docker build, use the [Docker Source Build](#5-secondary-docker-source-build) method instead.
 

@@ -247,6 +247,9 @@ includes:
    also exist (FUZZ-005).
 6. **Documentation completeness**: `fuzz/README.md` exists.
 7. **Gitignore configuration**: `.gitignore` excludes generated corpus paths.
+8. **Container privilege**: the ClusterFuzzLite Dockerfile ends with a
+   non-root user while keeping the Rust toolchain readable and the
+   source/build/output paths writable for the action's mounted directories.
 
 **Verification command:**
 ```bash

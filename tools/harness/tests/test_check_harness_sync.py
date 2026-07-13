@@ -153,6 +153,92 @@ def test_collect_results_fail_when_optional_adapters_key_missing(tmp_path, monke
     assert "truth surface keys" in results[0].detail
 
 
+def test_docker_runtime_security_accepts_non_root_images(tmp_path, monkeypatch):
+    """Accept tracked runtime Dockerfiles with non-root users and safe paths."""
+    _write_docker_runtime_fixture(tmp_path)
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_docker_runtime_security()
+
+    assert result.status == sync.PASS
+
+
+def test_docker_runtime_security_rejects_root_user(tmp_path, monkeypatch):
+    """Reject a tracked runtime Dockerfile whose final user remains root."""
+    _write_docker_runtime_fixture(tmp_path)
+    dockerfile = tmp_path / ".clusterfuzzlite/Dockerfile"
+    dockerfile.write_text("FROM scratch\nUSER root\n", encoding="utf-8")
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_docker_runtime_security()
+
+    assert result.status == sync.FAIL
+    assert ".clusterfuzzlite/Dockerfile final USER must be non-root" in result.detail
+
+
+def test_docker_runtime_security_rejects_privileged_nginx_port(
+    tmp_path, monkeypatch
+):
+    """Reject non-root NGINX images that regress to a privileged port."""
+    _write_docker_runtime_fixture(tmp_path)
+    dockerfile = tmp_path / "tools/build_release/Dockerfile.install-example"
+    content = dockerfile.read_text(encoding="utf-8").replace(
+        "EXPOSE 8080", "EXPOSE 80"
+    )
+    dockerfile.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_docker_runtime_security()
+
+    assert result.status == sync.FAIL
+    assert "Dockerfile.install-example missing 'EXPOSE 8080'" in result.detail
+
+
+def test_docker_runtime_security_rejects_missing_stage_build_args(
+    tmp_path, monkeypatch
+):
+    """Reject install examples that lose pre-FROM args at the stage boundary."""
+    _write_docker_runtime_fixture(tmp_path)
+    dockerfile = tmp_path / "tools/build_release/Dockerfile.install-example"
+    content = dockerfile.read_text(encoding="utf-8").replace(
+        "ARG MODULE_REF\nARG INSTALL_SHA256\n", ""
+    )
+    dockerfile.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_docker_runtime_security()
+
+    assert result.status == sync.FAIL
+    assert "Dockerfile.install-example missing stage ARG declarations" in result.detail
+
+
+def test_trivy_local_scope_excludes_ignored_state(tmp_path, monkeypatch):
+    """Accept local Trivy scope that excludes adapters and generated reports."""
+    (tmp_path / "Makefile").write_text(
+        "--skip-dirs .codeartsdoer --skip-dirs .kiro --skip-dirs build\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_trivy_local_scan_scope()
+
+    assert result.status == sync.PASS
+
+
+def test_trivy_local_scope_rejects_ignored_adapter_scan(tmp_path, monkeypatch):
+    """Reject local Trivy scope when ignored Kiro state remains in scope."""
+    (tmp_path / "Makefile").write_text(
+        "--skip-dirs .codeartsdoer --skip-dirs build\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_trivy_local_scan_scope()
+
+    assert result.status == sync.FAIL
+    assert ".kiro" in result.detail
+
+
 def test_collect_results_accept_reordered_status_semantics(tmp_path, monkeypatch):
     repo = tmp_path
     _write_repo_fixture(repo, with_kiro=False)
@@ -374,9 +460,38 @@ def _write_repo_fixture(repo: Path, *, with_kiro: bool, kiro_has_links: bool = T
         + "\n",
         encoding="utf-8",
     )
+    (repo / "Makefile").write_text(
+        "--skip-dirs .codeartsdoer --skip-dirs .kiro --skip-dirs build\n",
+        encoding="utf-8",
+    )
 
     if with_kiro:
         (repo / ".kiro/steering").mkdir(parents=True, exist_ok=True)
         content = "docs/harness/README.md\ndocs/harness/core.md\n" if kiro_has_links else "old doc\n"
         for name in ("product.md", "structure.md", "tech.md"):
             (repo / f".kiro/steering/{name}").write_text(content, encoding="utf-8")
+
+
+def _write_docker_runtime_fixture(repo: Path) -> None:
+    """Create the tracked Dockerfile security surfaces for focused tests."""
+    dockerfiles = {
+        ".clusterfuzzlite/Dockerfile": "FROM scratch\nUSER 10001\n",
+        "examples/docker/Dockerfile.official-nginx-source-build": (
+            "FROM scratch\n"
+            "RUN pid /tmp/nginx.pid; client_body_temp_path /tmp/client_temp;\n"
+            "USER nginx\n"
+            "EXPOSE 8080\n"
+        ),
+        "tools/build_release/Dockerfile.install-example": (
+            "FROM scratch\n"
+            "ARG MODULE_REF\n"
+            "ARG INSTALL_SHA256\n"
+            "RUN pid /tmp/nginx.pid; client_body_temp_path /tmp/client_temp;\n"
+            "USER nginx\n"
+            "EXPOSE 8080\n"
+        ),
+    }
+    for relative_path, content in dockerfiles.items():
+        path = repo / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
