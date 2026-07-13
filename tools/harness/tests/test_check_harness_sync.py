@@ -8,6 +8,7 @@ adapter drift detection under both quick and full modes.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from tools.harness import check_harness_sync as sync
@@ -47,6 +48,28 @@ def test_collect_results_warns_for_local_kiro_drift(tmp_path, monkeypatch):
     full_results = sync.collect_results(full=True)
     full_adapter = next(item for item in full_results if item.name == "kiro-adapters")
     assert full_adapter.status == sync.FAIL
+
+
+def test_collect_results_skips_git_ignored_kiro(tmp_path, monkeypatch):
+    repo = tmp_path
+    _write_repo_fixture(repo, with_kiro=True, kiro_has_links=False)
+    (repo / ".gitignore").write_text(".kiro/\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "GITHUB_WORKFLOWS_DIR", repo / ".github" / "workflows")
+    monkeypatch.setattr(sync, "MANIFEST_PATH", repo / "docs/harness/routing-manifest.json")
+    monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
+    monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
+    monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
+    monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
+
+    results = sync.collect_results(full=False)
+    adapter = next(item for item in results if item.name == "kiro-adapters")
+    assert adapter.status == sync.SKIP_NOT_PRESENT
+
+    full_results = sync.collect_results(full=True)
+    full_adapter = next(item for item in full_results if item.name == "kiro-adapters")
+    assert full_adapter.status == sync.SKIP_NOT_PRESENT
 
 
 def test_collect_results_fail_when_pack_doc_missing(tmp_path, monkeypatch):

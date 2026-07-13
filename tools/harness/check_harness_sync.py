@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -160,6 +161,35 @@ def _result(name: str, status: str, detail: str) -> CheckResult:
         A frozen CheckResult dataclass instance.
     """
     return CheckResult(name=name, status=status, detail=detail)
+
+
+def _is_git_ignored(path: Path) -> bool:
+    """Return whether Git excludes *path* from the repository worktree.
+
+    Tracked files are not reported as ignored by ``git check-ignore`` even
+    when a matching ignore pattern exists, so repository-owned adapters remain
+    eligible for validation.  If Git is unavailable or *path* is outside the
+    repository, preserve the existing behavior and treat it as non-ignored.
+    """
+    try:
+        relative_path = path.relative_to(REPO_ROOT)
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(REPO_ROOT),
+                "check-ignore",
+                "--quiet",
+                "--",
+                str(relative_path),
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, ValueError):
+        return False
+    return result.returncode == 0
 
 
 def _check_manifest_structure(manifest: dict) -> CheckResult:
@@ -656,9 +686,11 @@ def check_cfl_workflows() -> CheckResult:
 def _check_optional_kiro(manifest: dict, full: bool) -> CheckResult:
     """Check optional .kiro/steering adapters for drift against harness truth surfaces.
 
-    If no adapters are present, returns SKIP_NOT_PRESENT.  If adapters
-    exist but lack required links, returns WARN_NEEDS_AUTHOR_REVIEW in
-    quick mode or FAIL in full mode.
+    If no non-ignored adapters are present, returns SKIP_NOT_PRESENT.  Git-
+    ignored adapters are user-local state outside repository validation;
+    tracked adapters remain eligible even when an ignore pattern matches.
+    If eligible adapters lack required links, returns
+    WARN_NEEDS_AUTHOR_REVIEW in quick mode or FAIL in full mode.
 
     Args:
         manifest: Parsed routing manifest dictionary.
@@ -669,12 +701,18 @@ def _check_optional_kiro(manifest: dict, full: bool) -> CheckResult:
         absent, or need author review.
     """
     adapters = manifest.get("truth_surfaces", {}).get("optional_adapters", [])
-    present = [REPO_ROOT / rel for rel in adapters if (REPO_ROOT / rel).exists()]
+    present = [
+        REPO_ROOT / rel
+        for rel in adapters
+        if (REPO_ROOT / rel).exists()
+        and not _is_git_ignored(REPO_ROOT / rel)
+    ]
     if not present:
         return _result(
             "kiro-adapters",
             SKIP_NOT_PRESENT,
-            ".kiro/steering is absent, skipping optional adapter checks",
+            ".kiro/steering is absent or git-ignored, skipping optional "
+            "adapter checks",
         )
 
     missing_links: list[str] = []
