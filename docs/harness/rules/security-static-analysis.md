@@ -64,7 +64,8 @@ Required:
   images must pair that user with an unprivileged listener and writable PID and
   temporary paths. ClusterFuzzLite images must keep the toolchain readable and
   the source/build/output directories writable under the actual fuzz action
-  mount contract, including ownership of the fixed
+  mount contract, including ownership of the `/rustc` source-staging directory
+  and the fixed
   `/usr/lib/libFuzzingEngine.a` archive installed by the compile wrapper. Grant
   access to that file only, not the full system library directory. Do not
   suppress Trivy's missing-user finding when those runtime changes are

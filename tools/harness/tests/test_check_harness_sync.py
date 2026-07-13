@@ -222,6 +222,24 @@ def test_docker_runtime_security_rejects_unwritable_libfuzzer_archive(
     assert "writable /usr/lib/libFuzzingEngine.a" in result.detail
 
 
+def test_docker_runtime_security_rejects_unwritable_rust_sources(
+    tmp_path, monkeypatch
+):
+    """Reject non-root fuzz images that cannot stage rustc sources."""
+    _write_docker_runtime_fixture(tmp_path)
+    dockerfile = tmp_path / ".clusterfuzzlite/Dockerfile"
+    content = dockerfile.read_text(encoding="utf-8").replace(
+        "RUN chown fuzzer:fuzzer /rustc\n", ""
+    )
+    dockerfile.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_docker_runtime_security()
+
+    assert result.status == sync.FAIL
+    assert "writable /rustc" in result.detail
+
+
 def test_docker_runtime_security_rejects_privileged_nginx_port(
     tmp_path, monkeypatch
 ):
@@ -523,6 +541,8 @@ def _write_docker_runtime_fixture(repo: Path) -> None:
     dockerfiles = {
         ".clusterfuzzlite/Dockerfile": (
             "FROM scratch\n"
+            "RUN mkdir -p /rustc\n"
+            "RUN chown fuzzer:fuzzer /rustc\n"
             "RUN touch /usr/lib/libFuzzingEngine.a \\\n"
             "    && chown fuzzer:fuzzer /usr/lib/libFuzzingEngine.a\n"
             "USER 10001\n"

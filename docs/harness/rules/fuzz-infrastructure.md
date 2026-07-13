@@ -250,9 +250,10 @@ includes:
 8. **Container privilege**: the ClusterFuzzLite Dockerfile ends with a
    non-root user while keeping the Rust toolchain readable and the
    source/build/output paths writable for the action's mounted directories.
-   The fixed `/usr/lib/libFuzzingEngine.a` destination used by the OSS-Fuzz
-   compile wrapper must be pre-created with ownership for that user; do not
-   make the whole `/usr/lib` directory writable. Every workflow invoking
+   The `/rustc` standard-library source staging directory and fixed
+   `/usr/lib/libFuzzingEngine.a` destination used by the OSS-Fuzz compile
+   wrapper must be pre-created with ownership for that user; do not make the
+   whole `/usr/lib` directory writable. Every workflow invoking
    `build_fuzzers` must also pre-create `build-out` before the container action
    runs, so the action's root process cannot make the bind-mounted output
    directory unwritable to the final non-root project image.
