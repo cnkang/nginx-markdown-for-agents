@@ -84,12 +84,12 @@ This detector is integrated into:
 ## Example Output
 ```text
 INFO: Checking version consistency...
-PASS: Main Cargo.toml version: 0.8.3
-PASS: Chart.yaml version: 0.8.3
-PASS: Chart.yaml appVersion: 0.8.3
-PASS: fuzz/Cargo.toml dep version: 0.8.3
-PASS: corpus/Cargo.toml dep version: 0.8.3
-INFO: Homebrew formula: 0.8.2 (intentionally previous; updated by publish workflow)
+PASS: Main Cargo.toml version: 0.9.1
+PASS: Chart.yaml version: 0.9.1
+PASS: Chart.yaml appVersion: 0.9.1
+PASS: fuzz/Cargo.toml dep version: 0.9.1
+PASS: corpus/Cargo.toml dep version: 0.9.1
+INFO: Homebrew formula: 0.8.3 (intentionally previous; updated by publish workflow)
 
 PASS: All version checks passed
 ```
@@ -104,3 +104,4 @@ PASS: All version checks passed
   - Helm Chart was at 0.8.2 while main version was 0.8.3
   - Internal dependencies were at 0.8.0
   - Documentation examples referenced v0.8.2
+- **2026-07-13**: Updated example output to 0.9.1 (Rule 55 detector output)
