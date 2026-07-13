@@ -7,21 +7,21 @@ see [AUTOMATIC_DECOMPRESSION.md](AUTOMATIC_DECOMPRESSION.md).
 ## Bounded Decompression
 
 The `markdown_decompress_max_size` directive limits decompressed output size
-independently from `markdown_max_size`, preventing zip-bomb attacks and
+independently from `markdown_limits memory=<size>`, preventing zip-bomb attacks and
 unbounded memory growth.
 
 ### Configuration
 
 | Directive | Syntax | Default | Context |
 |-----------|--------|---------|---------|
-| `markdown_decompress_max_size` | `markdown_decompress_max_size <size>;` | Inherits `markdown_max_size` | http, server, location |
+| `markdown_decompress_max_size` | `markdown_decompress_max_size <size>;` | Inherits `markdown_limits memory=<size>` | http, server, location |
 
 ### Example
 
 ```nginx
 location /api/ {
     markdown_filter on;
-    markdown_max_size 10m;
+    markdown_limits memory=10m;
     markdown_decompress_max_size 50m;  # Allow high compression ratios
 }
 ```
@@ -279,3 +279,4 @@ Streaming-specific codes (7=FALLBACK, 8=POST_COMMIT) are feature-gated.
 |---------|------|--------|---------|
 | 0.7.0 | 2026-05-17 | Kang | Initial document for v0.7.0 decompression budget and error classification |
 | 0.7.0 | 2026-05-18 | Kang | Added detailed decompression error categories, FFI mapping, per-category Prometheus metrics, fail-open behavior, and operator guidance (TASK-A04.4) |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

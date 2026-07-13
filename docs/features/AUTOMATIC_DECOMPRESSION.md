@@ -64,7 +64,7 @@ Decompression failures (corrupt data, resource limits, system errors):
 ## Safety and Resource Controls
 
 - Decompressed output is bounded by `markdown_decompress_max_size` (introduced in v0.7.0).
-  When not explicitly set, it inherits the value of `markdown_max_size` as a fallback.
+  When not explicitly set, it inherits the value of `markdown_limits memory=<size>` as a fallback.
 - Input/output buffers are validated before use.
 - Memory is allocated from request pools and cleaned automatically.
 - Error paths perform structured cleanup.
@@ -106,10 +106,10 @@ For operational troubleshooting:
 ## Resource Budgets (v0.7.0)
 
 The `markdown_decompress_max_size` directive controls the maximum decompressed
-output size independently from `markdown_max_size`. This prevents memory
+output size independently from `markdown_limits memory=<size>`. This prevents memory
 exhaustion from highly compressible (zip-bomb) upstream content.
 
-- **Default**: inherits `markdown_max_size` when not explicitly set
+- **Default**: inherits `markdown_limits memory=<size>` when not explicitly set
 - **Directive**: `markdown_decompress_max_size <size>;`
 - **Error code**: `ERROR_DECOMPRESSION_BUDGET_EXCEEDED` (9)
 - **Error category**: `NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT`
@@ -143,3 +143,4 @@ the three-level error category enum (`CONVERSION`, `RESOURCE_LIMIT`,
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.0 | 2026-05-17 | Kang | Added Resource Budgets and Error Categories sections for v0.7.0 |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
