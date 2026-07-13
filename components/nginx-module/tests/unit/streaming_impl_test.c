@@ -4287,6 +4287,7 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     u_char                  *pending_pos;
     u_char                  *pending_last;
     ngx_uint_t               free_calls;
+    ngx_http_markdown_pending_terminal_t  terminal;
 
     TEST_SUBSECTION("P1-2: failopen_active enqueue failure aborts safely");
     reset_globals();
@@ -4300,6 +4301,7 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     ngx_memzero(&future_buf, sizeof(future_buf));
     ngx_memzero(&later, sizeof(later));
     ngx_memzero(&later_buf, sizeof(later_buf));
+    ngx_memzero(&terminal, sizeof(terminal));
 
     /*
      * Simulate the state after fail-open was selected and the first
@@ -4378,7 +4380,7 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     free_calls = g_output_free_calls;
     rc = ngx_http_markdown_streaming_save_pending(
         &r, &ctx, &future, future_buf.pos,
-        ngx_http_markdown_buf_len_safe(&future_buf), 0, 0, 0);
+        ngx_http_markdown_buf_len_safe(&future_buf), 0, terminal);
     TEST_ASSERT(rc == NGX_ERROR,
         "P1-2: save_pending must reject re-entry");
     TEST_ASSERT(ctx.streaming.pending_output == &pending_output,

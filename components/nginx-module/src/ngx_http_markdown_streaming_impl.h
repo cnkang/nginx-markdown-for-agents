@@ -22,6 +22,12 @@
 #include "ngx_http_markdown_output_decision_impl.h"
 
 
+typedef struct {
+    ngx_flag_t  main_terminal;
+    ngx_flag_t  subrequest_terminal;
+} ngx_http_markdown_pending_terminal_t;
+
+
 /* Forward declarations */
 static ngx_http_markdown_otel_span_t *ngx_http_markdown_otel_span_start(
     ngx_http_request_t *r, const ngx_http_markdown_conf_t *conf);
@@ -38,6 +44,7 @@ static void ngx_http_markdown_otel_span_export(
 static void ngx_http_markdown_streaming_start_otel_span(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf);
+static ngx_flag_t ngx_http_markdown_streaming_delivery_ok(ngx_int_t rc);
 
 /*
  * Streaming body filter main entry point.
@@ -1100,8 +1107,7 @@ ngx_http_markdown_streaming_save_pending(
     ngx_chain_t *out,
     const u_char *data, size_t len,
     ngx_flag_t zero_copy,
-    ngx_flag_t main_terminal,
-    ngx_flag_t subrequest_terminal)
+    ngx_http_markdown_pending_terminal_t terminal)
 {
     if (ctx->streaming.pending_output != NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -1118,8 +1124,9 @@ ngx_http_markdown_streaming_save_pending(
         (data != NULL && len > 0) ? 1 : 0;
     ctx->streaming.pending_meta.bytes = len;
     ctx->streaming.pending_meta.zero_copy = zero_copy;
-    ctx->streaming.pending_meta.main_terminal = main_terminal;
-    ctx->streaming.pending_meta.subrequest_terminal = subrequest_terminal;
+    ctx->streaming.pending_meta.main_terminal = terminal.main_terminal;
+    ctx->streaming.pending_meta.subrequest_terminal =
+        terminal.subrequest_terminal;
 
     /* Backpressure metric: streaming output returned NGX_AGAIN */
     NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
@@ -1154,9 +1161,8 @@ ngx_http_markdown_streaming_send_output(
     ngx_buf_t    *b;
     ngx_chain_t  *out;
     ngx_int_t     rc;
-    ngx_flag_t    terminal_last_buf;
-    ngx_flag_t    cap_main_terminal;
-    ngx_flag_t    cap_subrequest_terminal;
+    ngx_flag_t    delivered;
+    ngx_http_markdown_pending_terminal_t  terminal;
 
     b = ngx_calloc_buf(r->pool);
     if (b == NULL) {
@@ -1200,10 +1206,8 @@ ngx_http_markdown_streaming_send_output(
      * request's last_buf has been sent downstream, further calls
      * with last_buf=1 are silently deduplicated.
      */
-    terminal_last_buf = b->last_buf;
-    if (terminal_last_buf && ctx->streaming.main_terminal_sent) {
+    if (b->last_buf && ctx->streaming.main_terminal_sent) {
         b->last_buf = 0;
-        terminal_last_buf = 0;
     }
 
     out = ngx_alloc_chain_link(r->pool);
@@ -1220,10 +1224,11 @@ ngx_http_markdown_streaming_send_output(
      * For the main request, last_buf is the terminal marker; for a
      * subrequest, last_in_chain is the terminal marker.
      */
-    cap_main_terminal = (r == r->main && b->last_buf);
-    cap_subrequest_terminal = (r != r->main && b->last_in_chain);
+    terminal.main_terminal = (r == r->main && b->last_buf);
+    terminal.subrequest_terminal = (r != r->main && b->last_in_chain);
 
     rc = ngx_http_next_body_filter(r, out);
+    delivered = ngx_http_markdown_streaming_delivery_ok(rc);
 
     /*
      * Latch terminal-delivered state after confirmed delivery
@@ -1232,10 +1237,10 @@ ngx_http_markdown_streaming_send_output(
      * latches subrequest_terminal_sent.  Both only on NGX_OK/NGX_DONE,
      * never on NGX_AGAIN.
      */
-    if (cap_main_terminal && (rc == NGX_OK || rc == NGX_DONE)) {
+    if (terminal.main_terminal && delivered) {
         ctx->streaming.main_terminal_sent = 1;
     }
-    if (cap_subrequest_terminal && (rc == NGX_OK || rc == NGX_DONE)) {
+    if (terminal.subrequest_terminal && delivered) {
         ctx->streaming.subrequest_terminal_sent = 1;
     }
 
@@ -1245,7 +1250,7 @@ ngx_http_markdown_streaming_send_output(
      * TTFB will be recorded later in resume_pending() when
      * the pending chain drains successfully.
      */
-    if (rc == NGX_OK || rc == NGX_DONE) {
+    if (delivered) {
         ctx->streaming.flushes_sent++;
 
         if (data != NULL && len > 0) {
@@ -1258,8 +1263,7 @@ ngx_http_markdown_streaming_send_output(
 
     if (rc == NGX_AGAIN) {
         rc = ngx_http_markdown_streaming_save_pending(
-            r, ctx, out, data, len, 0,
-            cap_main_terminal, cap_subrequest_terminal);
+            r, ctx, out, data, len, 0, terminal);
     }
 
     return rc;
@@ -2224,6 +2228,7 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
     ngx_chain_t  *zout;
     ngx_int_t     rc;
     ngx_flag_t    owner_transferred;
+    ngx_http_markdown_pending_terminal_t  terminal;
 
     /*
      * Zero-copy path: buffer factory creates an ngx_buf_t referencing
@@ -2284,8 +2289,10 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
     }
 
     if (rc == NGX_AGAIN) {
+        terminal.main_terminal = 0;
+        terminal.subrequest_terminal = 0;
         return ngx_http_markdown_streaming_save_pending(
-            r, ctx, zout, out_data, out_len, 1, 0, 0);
+            r, ctx, zout, out_data, out_len, 1, terminal);
     }
 
     return rc;
