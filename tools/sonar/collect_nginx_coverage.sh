@@ -1537,9 +1537,11 @@ if ! env NGINX_BIN="${REUSE_NGINX_BIN}" RUN_1G_GET=0 \
 fi
 
 echo "==> Running huge-body allowed native e2e coverage (skip 1GB GET)"
-# --markdown-max-size 1536m allows bodies up to 1.5 GiB, exercising the
-# allowed-huge-body path where conversion proceeds instead of fail-open.
+# --markdown-max-size 1536m allows bodies up to 1.5 GiB, while the explicit
+# 1 GiB parser budget keeps the independent parser limit above the 100 MiB
+# conversion fixture's estimated working set.
 if ! env NGINX_BIN="${REUSE_NGINX_BIN}" RUN_1G_GET=0 \
+    MARKDOWN_PARSER_BUDGET=1024m \
     bash "${WORKSPACE_ROOT}/tools/e2e/verify_huge_body_allowed_native_e2e.sh" \
     --port 18293 \
     --skip-1g-get \
