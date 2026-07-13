@@ -3,13 +3,17 @@
  *
  * Production inclusion owner: ngx_http_markdown_module_state_impl.h in the
  * main ngx_http_markdown_filter_module.c translation unit.  Focused unit tests
- * may include this file only after providing ngx_http_markdown_metrics_t, the
- * ngx_http_markdown_metrics pointer, ngx_atomic_t, and the METRIC_ADD,
- * METRIC_INC, and METRIC_WATERMARK macros used below.
+ * may include this file only after defining MARKDOWN_STREAMING_ENABLED and
+ * providing ngx_http_markdown_metrics_t, the ngx_http_markdown_metrics
+ * pointer, ngx_atomic_t, and the METRIC_ADD, METRIC_INC, and
+ * METRIC_WATERMARK macros used below.  Feature-disabled builds intentionally
+ * receive no definitions because their metrics layout omits streaming fields.
  */
 
 #ifndef NGX_HTTP_MARKDOWN_POSTCOMMIT_METRICS_IMPL_H
 #define NGX_HTTP_MARKDOWN_POSTCOMMIT_METRICS_IMPL_H
+
+#ifdef MARKDOWN_STREAMING_ENABLED
 
 /*
  * Record a postcommit output chain becoming pending at the downstream
@@ -44,5 +48,7 @@ ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
         (ngx_atomic_t) bytes);
     NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
 }
+
+#endif /* MARKDOWN_STREAMING_ENABLED */
 
 #endif /* NGX_HTTP_MARKDOWN_POSTCOMMIT_METRICS_IMPL_H */

@@ -8,6 +8,8 @@
 
 #include "../include/test_common.h"
 
+#define MARKDOWN_STREAMING_ENABLED 1
+
 typedef unsigned long  ngx_atomic_t;
 
 typedef struct {
