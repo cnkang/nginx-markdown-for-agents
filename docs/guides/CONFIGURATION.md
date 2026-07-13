@@ -1912,7 +1912,7 @@ http {
     
     # Configure resource limits
     markdown_limits memory=10m;
-    markdown_timeout 5s;
+    markdown_limits timeout=5s;
     
     # Use fail-open strategy (recommended)
     markdown_error_policy pass;
@@ -2082,7 +2082,7 @@ http {
     
     # Conservative resource limits
     markdown_limits memory=5m;
-    markdown_timeout 3s;
+    markdown_limits timeout=3s;
     
     # Fail-closed for critical applications
     markdown_error_policy fail_closed;
@@ -2128,7 +2128,7 @@ http {
     
     # Aggressive resource limits
     markdown_limits memory=2m;
-    markdown_timeout 1s;
+    markdown_limits timeout=1s;
     
     # Fail-open for availability
     markdown_error_policy pass;
@@ -2175,7 +2175,7 @@ http {
     # Global defaults
     markdown_filter on;
     markdown_limits memory=10m;
-    markdown_timeout 5s;
+    markdown_limits timeout=5s;
     markdown_error_policy pass;
     
     # Tenant A: Public documentation site
@@ -2211,7 +2211,7 @@ http {
         
         location / {
             markdown_limits memory=5m;  # Smaller limit
-            markdown_timeout 2s;   # Faster timeout
+            markdown_limits timeout=2s;   # Faster timeout
             markdown_cache_validation ims_only;
             proxy_pass http://backend-c;
             
@@ -2314,7 +2314,7 @@ http {
 http {
     markdown_filter on;
     markdown_limits memory=10m;
-    markdown_timeout 5s;
+    markdown_limits timeout=5s;
     
     server {
         server_name api.example.com;
@@ -2327,11 +2327,11 @@ http {
     
     server {
         server_name docs.example.com;
-        markdown_timeout 3s;  # Override timeout
+        markdown_limits timeout=3s;  # Override timeout
         
         location / {
             # Inherits: markdown_filter on (from http)
-            # Inherits: markdown_timeout 3s (from server)
+            # Inherits: markdown_limits timeout=3s (from server)
             # Inherits: markdown_limits memory=10m (from http)
         }
     }
@@ -2346,17 +2346,17 @@ http {
 http {
     markdown_filter on;
     markdown_limits memory=10m;
-    markdown_timeout 5s;
+    markdown_limits timeout=5s;
     markdown_flavor commonmark;
     
     server {
-        markdown_timeout 3s;  # Override
+        markdown_limits timeout=3s;  # Override
          
         location /docs {
             markdown_flavor gfm;  # Override
             markdown_limits memory=5m; # Override
             # Inherits: markdown_filter on (from http)
-            # Inherits: markdown_timeout 3s (from server)
+            # Inherits: markdown_limits timeout=3s (from server)
         }
         
         location /api {
@@ -2387,7 +2387,7 @@ http {
     # Global defaults for all sites
     markdown_filter on;
     markdown_limits memory=10m;
-    markdown_timeout 5s;
+    markdown_limits timeout=5s;
     markdown_error_policy pass;
     
     server {
@@ -2422,7 +2422,7 @@ Always configure resource limits to prevent resource exhaustion:
 ```nginx
 # Conservative limits for production
 markdown_limits memory=5m;      # Limit response size
-markdown_timeout 3s;       # Limit conversion time
+markdown_limits timeout=3s;       # Limit conversion time
 ```
 
 **Recommendations:**
@@ -2548,7 +2548,7 @@ Balance between functionality and performance:
 ```nginx
 # Aggressive limits for high-traffic sites
 markdown_limits memory=2m;      # Smaller limit
-markdown_timeout 1s;       # Faster timeout
+markdown_limits timeout=1s;       # Faster timeout
 ```
 
 **Tuning Guidelines:**
@@ -2700,7 +2700,7 @@ http {
     # Markdown filter global settings
     markdown_filter on;
     markdown_limits memory=10m;
-    markdown_timeout 5s;
+    markdown_limits timeout=5s;
     markdown_error_policy pass;
     markdown_flavor commonmark;
     markdown_auth_policy allow;
@@ -2790,7 +2790,7 @@ http {
     # Markdown filter with verbose logging
     markdown_filter on;
     markdown_limits memory=10m;
-    markdown_timeout 10s;  # Longer timeout for debugging
+    markdown_limits timeout=10s;  # Longer timeout for debugging
     markdown_error_policy pass;
     markdown_flavor gfm;
     markdown_token_estimate on;
@@ -2840,7 +2840,7 @@ http {
     # Aggressive markdown filter settings
     markdown_filter on;
     markdown_limits memory=2m;
-    markdown_timeout 1s;
+    markdown_limits timeout=1s;
     markdown_error_policy pass;
     markdown_flavor commonmark;
     markdown_token_estimate off;
@@ -3023,3 +3023,4 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 | 0.8.0 | 2026-06-16 | Codex | Added missing directive documentation: `markdown_content_types`, `markdown_prune_noise`, `markdown_prune_selectors`, `markdown_prune_protection_selectors`, `markdown_llm_provider`, `markdown_chars_per_token`, OpenTelemetry family (`markdown_otel`, `markdown_otel_endpoint`, `markdown_otel_tracing`, `markdown_otel_metrics`, `markdown_otel_service_name`, `markdown_otel_span_buffer_size`, `markdown_otel_export_timeout`), `markdown_metrics_per_path`, `markdown_metrics_per_path_cardinality`; added deprecated directives section for `markdown_max_size` and `markdown_streaming_auto_threshold` |
 | 0.8.3 | 2026-06-26 | Kang | No configuration changes; version alignment with 0.8.3 release |
 | 0.9.0 | 2026-06-28 | Kang | Added Profiles section (`markdown_profile` directive, three profiles, merge order, forced fields, conflict rules) |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

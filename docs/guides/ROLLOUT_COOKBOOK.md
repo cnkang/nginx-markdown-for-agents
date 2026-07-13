@@ -104,13 +104,13 @@ Use these conservative defaults during rollout:
 | Directive | Recommended Value | Rationale |
 |-----------|-------------------|-----------|
 | `markdown_filter` | `off` (global) | No conversion without explicit opt-in |
-| `markdown_on_error` | `pass` | Conversion failures serve original HTML |
-| `markdown_on_wildcard` | `off` | Only explicit `Accept: text/markdown` triggers conversion |
+| `markdown_error_policy` | `pass` | Conversion failures serve original HTML |
+| `markdown_accept` | `strict` | Only explicit `Accept: text/markdown` triggers conversion |
 | `markdown_log_verbosity` | `info` | Decision log entries visible for all outcomes |
 
-Keep `markdown_on_wildcard off` during initial rollout. This limits conversion to clients that explicitly send `Accept: text/markdown`, preventing unexpected conversion for browsers sending `Accept: */*`.
+Keep `markdown_accept strict` during initial rollout. This limits conversion to clients that explicitly send `Accept: text/markdown`, preventing unexpected conversion for browsers sending `Accept: */*`.
 
-Do not change `markdown_on_error` to `reject` during initial rollout. Fail-open (`pass`) ensures conversion failures never break client responses.
+Do not change `markdown_error_policy` to `fail_closed` during initial rollout. Fail-open (`pass`) ensures conversion failures never break client responses.
 
 ---
 
@@ -127,11 +127,11 @@ load_module modules/ngx_http_markdown_filter_module.so;
 
 http {
     markdown_filter off;
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
     markdown_log_verbosity info;
-    markdown_memory_budget 10m;
-    markdown_timeout 5s;
+    markdown_limits memory=10m;
+    markdown_limits timeout=5s;
 
     server {
         listen 80;
@@ -182,7 +182,7 @@ curl -sD - -o /dev/null \
 
 - Conversion success rate > 95% (few or no `failed_open` / `failed_closed` entries)
 - No `FAIL_SYSTEM` category codes in logs
-- Conversion latency within the configured `markdown_timeout`
+- Conversion latency within the configured `markdown_limits`
 - No upstream error rate increase
 - No `not_eligible` reason codes for requests you expect to convert
 
@@ -190,7 +190,7 @@ curl -sD - -o /dev/null \
 
 - Sudden increase in `failed_open` or `failed_closed` counts
 - Any `FAIL_SYSTEM` category codes
-- Conversion latency exceeding `markdown_timeout`
+- Conversion latency exceeding `markdown_limits`
 - Upstream error rate increase correlated with module enablement
 - Unexpected `Content-Type` in converted responses
 
@@ -205,11 +205,11 @@ Expand to additional paths on the same staging host.
 ```nginx
 http {
     markdown_filter off;
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
     markdown_log_verbosity info;
-    markdown_memory_budget 10m;
-    markdown_timeout 5s;
+    markdown_limits memory=10m;
+    markdown_limits timeout=5s;
 
     server {
         listen 80;
@@ -290,11 +290,11 @@ Enable on one production path with low traffic. Minimum observation period: 24 h
 ```nginx
 http {
     markdown_filter off;
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
     markdown_log_verbosity info;
-    markdown_memory_budget 10m;
-    markdown_timeout 5s;
+    markdown_limits memory=10m;
+    markdown_limits timeout=5s;
 
     # Staging server (already enabled from Stage 2)
     server {
@@ -382,7 +382,7 @@ else:
 - All Stage 1 criteria hold over a full 24-hour period
 - No increase in `failed_open` or `failed_closed` counts relative to conversion volume
 - No `FAIL_SYSTEM` category codes
-- Conversion latency within configured `markdown_timeout`
+- Conversion latency within configured `markdown_limits`
 - Stable or decreasing failure count over the 24-hour observation period
 - No upstream error rate increase correlated with module enablement
 
@@ -413,11 +413,11 @@ http {
         "~^/guides"     on;
     }
 
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
     markdown_log_verbosity info;
-    markdown_memory_budget 10m;
-    markdown_timeout 5s;
+    markdown_limits memory=10m;
+    markdown_limits timeout=5s;
 
     server {
         listen 80;
@@ -512,8 +512,8 @@ The simplest approach — enable `markdown_filter on` in specific `location` blo
 ```nginx
 http {
     markdown_filter off;
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
 
     server {
         listen 80;
@@ -550,8 +550,8 @@ http {
         "~*\.html$"     on;
     }
 
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
 
     server {
         listen 80;
@@ -583,8 +583,8 @@ Enable conversion for specific virtual hosts. Use this to test on a staging or i
 ```nginx
 http {
     markdown_filter off;
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
 
     # Staging host — conversion enabled
     server {
@@ -622,8 +622,8 @@ http {
         internal.example.com    on;
     }
 
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
 
     server {
         listen 80;
@@ -657,8 +657,8 @@ http {
         "~*(^|,)\s*text/markdown(\s*;|,|$)"         on;
     }
 
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
 
     server {
         listen 80;
@@ -672,9 +672,9 @@ http {
 }
 ```
 
-Keep `markdown_on_wildcard off` (the default) during initial rollout. With `off`, only explicit `text/markdown` in the Accept header triggers conversion. Clients sending `Accept: */*` or `Accept: text/*` receive HTML unchanged.
+Keep `markdown_accept strict` (the default) during initial rollout. With `strict`, only explicit `text/markdown` in the Accept header triggers conversion. Clients sending `Accept: */*` or `Accept: text/*` receive HTML unchanged.
 
-If you later want wildcard Accept values (e.g., `text/*`) to trigger conversion, set `markdown_on_wildcard on` and expand the `map`:
+If you later want wildcard Accept values (e.g., `text/*`) to trigger conversion, set `markdown_accept wildcard` and expand the `map`:
 
 ```nginx
     map $http_accept $markdown_by_accept {
@@ -689,7 +689,7 @@ If you later want wildcard Accept values (e.g., `text/*`) to trigger conversion,
 
         location / {
             markdown_filter $markdown_by_accept;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             proxy_pass http://backend;
         }
     }
@@ -727,8 +727,8 @@ http {
         default $bot_accept_override;
     }
 
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
 
     server {
         listen 80;
@@ -736,7 +736,7 @@ http {
 
         location / {
             markdown_filter $is_ai_bot;
-            markdown_on_wildcard on;
+            markdown_accept wildcard;
             proxy_set_header Accept $final_accept;
             proxy_pass http://backend;
         }
@@ -751,7 +751,7 @@ http {
 
 UA-based targeting depends on clients sending accurate User-Agent strings. It is not a security boundary — any client can spoof a User-Agent. Use this pattern for convenience, not access control.
 
-Note: `proxy_set_header Accept` only modifies the header sent upstream to the backend — it does not change the incoming request header that the module evaluates. The `markdown_on_wildcard on` directive is required here so that bots whose original `Accept` header does not include `text/markdown` are still eligible for conversion when the filter is enabled by `$is_ai_bot`.
+Note: `proxy_set_header Accept` only modifies the header sent upstream to the backend — it does not change the incoming request header that the module evaluates. The `markdown_accept wildcard` directive is required here so that bots whose original `Accept` header does not include `text/markdown` are still eligible for conversion when the filter is enabled by `$is_ai_bot`.
 
 #### Verification
 
@@ -793,8 +793,8 @@ http {
         1   on;
     }
 
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
 
     server {
         listen 80;
@@ -830,8 +830,8 @@ http {
         *       off;
     }
 
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
 
     server {
         listen 80;
@@ -870,8 +870,8 @@ http {
         "1"         on;
     }
 
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
 
     server {
         listen 80;
@@ -936,9 +936,9 @@ These page types share common traits that make them ideal first candidates:
 - HTML structure is simple and predictable
 - Pages are not personalized or authenticated
 - Content-Type is consistently `text/html`
-- Response sizes are within typical `markdown_memory_budget` limits
+- Response sizes are within typical `markdown_limits` limits
 
-Once these paths are stable (conversion success rate > 95%, no `FAIL_SYSTEM` codes, latency within `markdown_timeout`), expand to additional content paths following the [Rollout Stages](#rollout-stages) sequence.
+Once these paths are stable (conversion success rate > 95%, no `FAIL_SYSTEM` codes, latency within `markdown_limits`), expand to additional content paths following the [Rollout Stages](#rollout-stages) sequence.
 
 ### Excluding Page Types from Conversion Scope
 
@@ -951,8 +951,8 @@ The most direct approach — set `markdown_filter off` in `location` blocks for 
 ```nginx
 http {
     markdown_filter off;
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
 
     server {
         listen 80;
@@ -1045,8 +1045,8 @@ http {
         "~^/dashboard/" off;
     }
 
-    markdown_on_error pass;
-    markdown_on_wildcard off;
+    markdown_error_policy pass;
+    markdown_accept strict;
 
     server {
         listen 80;
@@ -1086,13 +1086,13 @@ The module performs no conversion unless you explicitly enable it per scope. Wit
 
 This is the most important default: it means a module upgrade or installation never introduces conversion as a side effect. You control exactly which traffic segments see Markdown responses.
 
-#### `markdown_on_error pass`
+#### `markdown_error_policy pass`
 
 When conversion fails (HTML parse error, timeout, memory limit), the module serves the original HTML response unchanged. The client never sees a 502 or broken response due to a conversion problem.
 
 Fail-open (`pass`) is the safe choice for production because conversion is an enhancement, not a requirement. If the converter encounters HTML it cannot handle, the worst outcome is that the client receives the same HTML it would have received without the module. Metrics and decision logs still record the failure (as `failed_open`) so you can investigate, but client experience is unaffected.
 
-#### `markdown_on_wildcard off`
+#### `markdown_accept strict`
 
 With `off`, only requests containing an explicit `Accept: text/markdown` media type trigger conversion. Wildcard Accept values like `Accept: */*` or `Accept: text/*` — which browsers and many HTTP clients send by default — do not trigger conversion.
 
@@ -1111,22 +1111,22 @@ Most defaults should remain unchanged throughout your initial rollout. The table
 | Directive | Safe to Change During Rollout? | Guidance |
 |-----------|-------------------------------|----------|
 | `markdown_filter` | Yes — this is how you roll out | Enable per scope following the [Rollout Stages](#rollout-stages) sequence |
-| `markdown_on_error` | No — keep `pass` | See warning below |
-| `markdown_on_wildcard` | No — keep `off` | Only enable after confirming no browser traffic reaches enabled scopes |
+| `markdown_error_policy` | No — keep `pass` | See warning below |
+| `markdown_accept` | No — keep `strict` | Only enable after confirming no browser traffic reaches enabled scopes |
 | `markdown_log_verbosity` | Yes — but keep `info` initially | Lower to `warn` only after rollout is stable and you no longer need full decision visibility |
 
-#### Do not change `markdown_on_error` to `reject` during initial rollout
+#### Do not change `markdown_error_policy` to `fail_closed` during initial rollout
 
-Setting `markdown_on_error reject` causes the module to return a 502 Bad Gateway when conversion fails. During initial rollout, you are still discovering which pages convert cleanly and which trigger edge cases in the converter. A single unexpected HTML structure could cause a conversion failure that, with `reject`, returns a 502 to the client instead of the original HTML.
+Setting `markdown_error_policy fail_closed` causes the module to return a 502 Bad Gateway when conversion fails. During initial rollout, you are still discovering which pages convert cleanly and which trigger edge cases in the converter. A single unexpected HTML structure could cause a conversion failure that, with `fail_closed`, returns a 502 to the client instead of the original HTML.
 
-Keep `markdown_on_error pass` until:
+Keep `markdown_error_policy pass` until:
 
 1. Your rollout has been stable for multiple traffic cycles (at least 48 hours in production).
 2. Your `failed_open` count is zero or near-zero for all enabled scopes.
 3. You have reviewed the failure reason codes (`FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, `FAIL_SYSTEM`) and resolved any underlying issues.
 4. You have a specific operational reason to reject failed conversions (e.g., you need to guarantee Markdown-only responses for a downstream consumer).
 
-Even then, consider enabling `reject` only in narrow scopes (specific `location` blocks) rather than globally, and monitor closely after the change. If failures appear, switch back to `pass` immediately by setting `markdown_on_error pass` and running `nginx -s reload`.
+Even then, consider enabling `fail_closed` only in narrow scopes (specific `location` blocks) rather than globally, and monitor closely after the change. If failures appear, switch back to `pass` immediately by setting `markdown_error_policy pass` and running `nginx -s reload`.
 
 
 ---
@@ -1336,7 +1336,7 @@ A rollout is healthy when all of the following hold true during the observation 
 |-----------|-----------|--------------|
 | Conversion success rate | > 95% | `conversions_succeeded / (conversions_succeeded + conversions_failed)` from metrics endpoint |
 | `FAIL_SYSTEM` count | 0 | `grep -c "category=FAIL_SYSTEM"` in logs, or `failures_system` in metrics |
-| Conversion latency | Within configured `markdown_timeout` | Latency buckets show the vast majority of conversions completing before the timeout threshold |
+| Conversion latency | Within configured `markdown_limits` | Latency buckets show the vast majority of conversions completing before the timeout threshold |
 | `conversions_failed` trend | Stable or decreasing | Compare metrics snapshots over the observation period — failure count should not be climbing |
 | Upstream error rate | No increase correlated with enablement | Compare upstream 5xx rates before and after enabling the module |
 | Unexpected skip reasons | None for traffic you expect to convert | Check decision log `reason=not_eligible` — no unexpected `not_eligible` (content-type/size) for enabled paths |
@@ -1351,11 +1351,11 @@ Stop expanding rollout scope and investigate if any of the following occur:
 |---------|---------------|---------------|
 | Sudden increase in failure category codes | Conversion failures are spiking — may indicate upstream HTML changes, resource pressure, or a converter bug | `grep "reason=failed_open\|reason=failed_closed" /var/log/nginx/error.log \| tail -20` or watch `conversions_failed` in metrics |
 | Any `FAIL_SYSTEM` category codes | Internal/system error — this should never happen in normal operation and indicates a bug or severe resource issue | `grep -c "category=FAIL_SYSTEM" /var/log/nginx/error.log` |
-| Conversion latency exceeding `markdown_timeout` | Conversions are taking too long — may indicate large pages, resource contention, or converter performance issues | Check latency buckets; look for conversions in the highest `le` bucket or timeouts in logs |
+| Conversion latency exceeding `markdown_limits` | Conversions are taking too long — may indicate large pages, resource contention, or converter performance issues | Check latency buckets; look for conversions in the highest `le` bucket or timeouts in logs |
 | Upstream error rate increase | The module may be causing upstream issues (unlikely but possible with decompression or buffering interactions) | Compare upstream 5xx rates before and after enablement |
 | Unexpected `Content-Type` in responses | Converted responses have wrong Content-Type, or non-HTML responses are being processed | `curl -sD - -H "Accept: text/markdown" http://localhost/your-path/ \| grep Content-Type` |
 | One path failing significantly more than others | Path-specific issue — the HTML structure on that path may not convert cleanly | Per-URI failure check: `grep "reason=failed_open\|reason=failed_closed" \| grep -oP 'uri=\K[^ ]+' \| sort \| uniq -c` |
-| `not_eligible` or `disabled` for paths you expect to convert | Upstream responses changed — content type is no longer `text/html` or response size exceeds `markdown_memory_budget` | Check skip reason distribution filtered by URI |
+| `not_eligible` or `disabled` for paths you expect to convert | Upstream responses changed — content type is no longer `text/html` or response size exceeds `markdown_limits` | Check skip reason distribution filtered by URI |
 
 When a trigger fires:
 
@@ -1372,3 +1372,4 @@ When a trigger fires:
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

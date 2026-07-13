@@ -544,7 +544,7 @@ curl -H "Accept: text/markdown" http://localhost/test
 #### Upgrading to 0.3.x
 
 - `fullbuffer_path_hits` and `incremental_path_hits` have been moved to the end of `ngx_http_markdown_metrics_t`. If you use shared-memory metrics, a graceful reload is sufficient; no data migration is needed.
-- The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter to use the new `markdown_large_body_threshold` directive.
+- The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter to use the incremental processing path. Note: the `markdown_large_body_threshold` directive was retired in 0.9.0 with no direct Config V2 replacement; the incremental-path threshold is not user-configurable.
 - `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add `markdown_trusted_proxies on;` to restore the previous behavior.
 
 #### Upgrading to 0.2.x
@@ -1405,3 +1405,4 @@ throughput = conversions_succeeded / time_period_seconds
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
