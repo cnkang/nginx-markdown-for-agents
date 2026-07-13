@@ -30,7 +30,6 @@ jobs:
     name: Darwin Native Smoke
     runs-on: macos-15
     timeout-minutes: 90
-    continue-on-error: true
     permissions:
       contents: read
     steps:
@@ -95,6 +94,8 @@ jobs:
           echo "buildroot=${buildroot}" >> "${GITHUB_OUTPUT}"
           echo "nginx_bin=${nginx_bin}" >> "${GITHUB_OUTPUT}"
 
+      # Darwin loopback window updates can be delayed on shared runners.  One
+      # retry absorbs isolated transport jitter; repeated failures still block.
       - name: Run chunked streaming native smoke validation
         env:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
