@@ -623,23 +623,6 @@ ngx_alloc_chain_link(ngx_pool_t *pool)
     return calloc(1, sizeof(ngx_chain_t));
 }
 
-static ngx_inline ngx_int_t
-ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
-{
-    for (size_t i = 0; i < n; i++) {
-        u_char c1;
-        u_char c2;
-
-        c1 = (u_char) tolower((unsigned char) s1[i]);
-        c2 = (u_char) tolower((unsigned char) s2[i]);
-        if (c1 != c2) {
-            return (ngx_int_t) c1 - (ngx_int_t) c2;
-        }
-    }
-
-    return 0;
-}
-
 #ifndef ngx_timeofday
 static ngx_inline const ngx_time_t *
 ngx_timeofday_stub(void)
