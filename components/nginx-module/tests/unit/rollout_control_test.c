@@ -183,9 +183,10 @@ ngx_http_markdown_decomp_routing_decision(
 
     /*
      * Condition 4: encoding must be supported by streaming
-     * decompressor. In 0.9.1, only raw deflate is supported.
+     * decompressor. Gzip and deflate are supported in 0.9.1.
      */
-    if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE) {
+    if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }
 
@@ -315,8 +316,8 @@ test_zero_copy_default_off(void)
  *   c) streaming_first + auto_decompress off does NOT select it
  *   d) streaming_first + auto_decompress on DOES select streaming
  *      decompression for raw deflate
- *   e) streaming_first + auto_decompress on + gzip still routes
- *      to full-buffer (gzip deferred in 0.9.1)
+ *   e) streaming_first + auto_decompress on selects streaming
+ *      decompression for gzip
  * ================================================================ */
 
 static void
@@ -390,9 +391,9 @@ test_streaming_decompression_profile_gated(void)
         conf.cache_validation,
         NGX_HTTP_MARKDOWN_COMPRESSION_GZIP);
     TEST_ASSERT(
-        route == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+        route == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
         "streaming_first + auto_decompress on + gzip "
-        "→ FULLBUFFER (gzip deferred in 0.9.1)");
+        "→ STREAMING");
 
     TEST_PASS(
         "streaming decompression correctly profile-gated");
@@ -591,14 +592,14 @@ test_ci_matrix_all_features_config(void)
         decomp_route == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
         "all-features: deflate reaches STREAMING");
 
-    /* Gzip still full-buffer (deferred in 0.9.1) */
+    /* Gzip reaches streaming with all features enabled */
     decomp_route = ngx_http_markdown_decomp_routing_decision(
         conf.auto_decompress, streaming_selected,
         conf.cache_validation,
         NGX_HTTP_MARKDOWN_COMPRESSION_GZIP);
     TEST_ASSERT(
-        decomp_route == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
-        "all-features: gzip → FULLBUFFER (deferred)");
+        decomp_route == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+        "all-features: gzip reaches STREAMING");
 
     /* No encoding → bypass even with all features */
     decomp_route = ngx_http_markdown_decomp_routing_decision(

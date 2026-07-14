@@ -12,16 +12,15 @@
  * and optionally brotli compressed upstream responses in the streaming
  * conversion path.
  *
- * ROUTING NOTE (0.9.1): Only deflate is currently routed to the streaming
- * decompression path.  The streaming path defers inflateInit2 until the
- * first 2 bytes of input arrive, then sniffs the zlib wrapper:
+ * ROUTING NOTE (0.9.1): Deflate and gzip are routed to the streaming
+ * decompression path when automatic decompression is enabled and full cache
+ * validation is not required.  The deflate path defers inflateInit2 until
+ * the first 2 bytes of input arrive, then sniffs the zlib wrapper:
  *   - zlib-wrapped (RFC 1950, RFC 9110-compliant): MAX_WBITS
  *   - raw deflate (RFC 1951): -MAX_WBITS
- * Gzip and brotli support is implemented here but gated by
- * ngx_http_markdown_decomp_routing_decision() which routes non-deflate
- * encodings to the full-buffer path.  The gzip/brotli code paths are
- * retained for future enablement (planned post-0.9.1) without requiring
- * a reimplementation.
+ * Gzip uses MAX_WBITS + 16 and preserves gzip member boundaries across
+ * arbitrary input chunks.  Brotli remains routed to the bounded full-buffer
+ * path pending dedicated streaming lifecycle and backpressure validation.
  */
 
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -106,7 +105,16 @@ typedef struct ngx_http_markdown_streaming_decomp_s {
     u_char                                pending_header[2];
     size_t                                pending_header_len;
 
+    /*
+     * Set after a gzip member reaches Z_STREAM_END and the inflater has
+     * been reset for a possible next member.  A member boundary is valid at
+     * upstream EOF, but later compressed input starts a new member and must
+     * not be discarded as if the HTTP response had already finished.
+     */
+    ngx_flag_t                            at_gzip_member_boundary;
+
     ngx_flag_t                            initialized;
+    /* Set only when the complete compressed HTTP response is finalized. */
     ngx_flag_t                            finished;
 } ngx_http_markdown_streaming_decomp_t;
 
@@ -357,6 +365,7 @@ ngx_http_markdown_streaming_decomp_create(
     decomp->total_decompressed = 0;
     decomp->initialized = 0;
     decomp->finished = 0;
+    decomp->at_gzip_member_boundary = 0;
     decomp->zlib_header_pending = 0;
     decomp->pending_header_len = 0;
 
@@ -365,11 +374,9 @@ ngx_http_markdown_streaming_decomp_create(
     case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
         /*
          * Gzip is unambiguous (magic 0x1f 0x8b), so we initialize
-         * eagerly with MAX_WBITS + 16.
-         *
-         * Deferred path for post-0.9.1. Header routing keeps gzip on
-         * full-buffer in 0.9.1, so this branch is intentionally
-         * unreachable for supported streaming decompression.
+         * eagerly with MAX_WBITS + 16.  Z_STREAM_END completes one gzip
+         * member, not necessarily the complete HTTP response; the feed
+         * loop resets this inflater when another member follows.
          */
         if (ngx_http_markdown_streaming_decomp_init_zlib(
                 decomp, MAX_WBITS + 16)
@@ -593,6 +600,51 @@ ngx_http_markdown_streaming_decomp_finalize_buf(
 
 
 /*
+ * Reset the gzip inflater after one member reaches Z_STREAM_END while
+ * preserving the caller-owned input and output cursors.  inflateReset()
+ * retains the MAX_WBITS + 16 attributes selected by inflateInit2().
+ * Response-wide decompression accounting lives outside z_stream and is
+ * intentionally not reset here.
+ *
+ * Returns NGX_OK on success.  On failure, releases the current heap
+ * workspace and returns NGX_ERROR.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_reset_gzip_member(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    u_char **heap_buf_ptr,
+    ngx_log_t *log)
+{
+    Bytef  *next_in;
+    Bytef  *next_out;
+    uInt    avail_in;
+    uInt    avail_out;
+    int     zrc;
+
+    next_in = decomp->state.zlib.next_in;
+    avail_in = decomp->state.zlib.avail_in;
+    next_out = decomp->state.zlib.next_out;
+    avail_out = decomp->state.zlib.avail_out;
+
+    zrc = inflateReset(&decomp->state.zlib);
+    if (zrc != Z_OK) {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+            "markdown: gzip member inflateReset error %d", zrc);
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        return NGX_ERROR;
+    }
+
+    decomp->state.zlib.next_in = next_in;
+    decomp->state.zlib.avail_in = avail_in;
+    decomp->state.zlib.next_out = next_out;
+    decomp->state.zlib.avail_out = avail_out;
+    decomp->at_gzip_member_boundary = 1;
+
+    return NGX_OK;
+}
+
+
+/*
  * Step return codes:
  *   1  - done (Z_STREAM_END or avail_in == 0)
  *   0  - continue iterating
@@ -671,8 +723,24 @@ ngx_http_markdown_streaming_decomp_inflate_step(
     }
 
     if (zrc == Z_STREAM_END) {
-        decomp->finished = 1;
-        return 1;
+        if (decomp->type != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
+            decomp->finished = 1;
+            return 1;
+        }
+
+        if (ngx_http_markdown_streaming_decomp_reset_gzip_member(
+                decomp, heap_buf_ptr, log)
+            != NGX_OK)
+        {
+            return -1;
+        }
+
+        if (decomp->state.zlib.avail_in == 0) {
+            return 1;
+        }
+
+        /* Remaining compressed bytes belong to the next gzip member. */
+        decomp->at_gzip_member_boundary = 0;
     }
 
     if (decomp->state.zlib.avail_in == 0) {
@@ -1199,6 +1267,13 @@ ngx_http_markdown_streaming_decomp_feed(
         return NGX_OK;
     }
 
+    if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+        && decomp->at_gzip_member_boundary)
+    {
+        /* The reset inflater is about to consume a later gzip member. */
+        decomp->at_gzip_member_boundary = 0;
+    }
+
     /*
      * Deferred deflate initialization: if we are still sniffing the
      * zlib header, accumulate up to 2 bytes before initializing the
@@ -1490,6 +1565,9 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
         }
 
         if (zrc == Z_STREAM_END) {
+            if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
+                decomp->at_gzip_member_boundary = 1;
+            }
             decomp->finished = 1;
             break;
         }
@@ -1610,6 +1688,14 @@ ngx_http_markdown_streaming_decomp_finish(
     *out_len = 0;
 
     if (decomp->finished) {
+        return NGX_OK;
+    }
+
+    if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+        && decomp->at_gzip_member_boundary)
+    {
+        /* EOF immediately after a complete gzip member is valid. */
+        decomp->finished = 1;
         return NGX_OK;
     }
 
