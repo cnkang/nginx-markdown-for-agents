@@ -497,6 +497,43 @@ add the harness workflow to your default path:
 2. Run `make harness-check`
 3. Run `make harness-check-full` before closing broader docs or release-gate work
 
+## What's New in v0.9.1
+
+v0.9.1 is a **non-breaking patch release** focused on performance readiness for
+the 0.9.x line. All optimizations are opt-in or internal — existing
+configurations work without modification.
+
+- **Hybrid zero-copy streaming output**: `markdown_streaming_zero_copy on`
+  (default off, opt-in) enables `ngx_buf_t` to reference Rust-owned memory
+  directly without intermediate pool-copy, reducing memcpy for non-terminal
+  streaming chunks. NGINX pool cleanup handlers ensure safe Rust buffer
+  lifetime across backpressure and request teardown.
+- **Streaming decompression routing (gzip + deflate)**: under `streaming_first`
+  profile with `markdown_auto_decompress on` and `cache_validation` not `full`,
+  gzip and deflate responses (both zlib-wrapped RFC 1950 and raw RFC 1951
+  deflate) are decompressed incrementally through the streaming engine instead
+  of forcing full-buffer accumulation. Gzip member boundaries and trailers are
+  validated across chunks; Brotli remains on bounded full-buffer in 0.9.1.
+- **Full-buffer copy reduction**: internal optimization (default on, no
+  configuration surface) eliminates redundant memcpy in the full-buffer
+  compressed path by passing contiguous buffers directly to the decompressor
+  and swapping output via pointer assignment.
+- **`markdown_auto_decompress` directive**: now officially registered as a
+  configurable directive (default on). Previously an internal field not
+  settable via `nginx.conf`.
+- **Performance evidence gate**: module-level benchmark harness
+  (`tools/perf/run_module_benchmark.sh`) with automated release gate
+  (`make release-gates-check-091`) enforcing latency, TTFB, memory slope, and
+  fallback rate thresholds before release promotion.
+- **Doctor advice tool**: `python3 tools/perf/doctor_advice.py` analyzes
+  runtime metrics and produces actionable tuning recommendations for
+  operators.
+- **New ADRs**: [0020](docs/architecture/ADR/0020-091-hybrid-zero-copy-pool-cleanup.md),
+  [0021](docs/architecture/ADR/0021-091-gzip-deflate-streaming-decompression-routing.md),
+  [0022](docs/architecture/ADR/0022-091-performance-evidence-release-gate.md).
+
+For the full list, see [CHANGELOG.md](CHANGELOG.md).
+
 ## What's New in v0.9.0
 
 v0.9.0 is a **breaking release** — the last breaking opportunity before 1.0.0 API freeze:
@@ -584,6 +621,10 @@ Additional changes:
 - `auto` mode as the default `markdown_streaming_engine` setting
 - Bounded-memory streaming conversion with size-based flush (`markdown_stream_flush_min`)
 - Pre-commit safety: fallback to HTML if conversion error occurs before output is committed
+- Hybrid zero-copy streaming output (opt-in via `markdown_streaming_zero_copy`, default off)
+- Streaming decompression routing for gzip and zlib/raw-deflate responses (profile-gated, `streaming_first` only); Brotli remains bounded full-buffer
+- Full-buffer compressed copy reduction (internal, default on)
+- Performance evidence gate: `make release-gates-check-091` (blocking for RC tags)
 - Streaming release gate: `make release-gates-check-08x` (alias of `release-gates-check-080`) validates the 0.8.x release contract
 - Static security gate: `.github/workflows/security-static.yml` runs actionlint,
   shellcheck, gitleaks, focused Semgrep, and cargo-deny for workflow, shell,
@@ -637,6 +678,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-08 | Kang | 0.9.1 release: zero-copy output, gzip plus zlib/raw-deflate streaming decompression, bounded Brotli full-buffer routing, full-buffer copy reduction, markdown_auto_decompress directive registration fix, performance evidence gate, doctor advice tool, ADRs 0020–0022 |
 | 0.9.0 | 2026-07-02 | Kang | Doc review: added What's New v0.9.0 section, MIGRATION-0.9 link, reason code count fix, CHANGELOG sync with branch commits |
 | 0.8.3 | 2026-06-26 | Kang | v0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |
 | 0.8.2 | 2026-06-25 | Kang | v0.8.2 release: streaming decompression hardening, FFI panic safety, implied-closure correctness, decompression budget enforcement, security scan scoping, release-line documentation closeout |

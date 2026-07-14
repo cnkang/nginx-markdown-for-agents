@@ -80,6 +80,15 @@ The script builds the release binary, runs benchmarks, generates a
 Measurement Report, invokes the threshold engine for a Verdict Report,
 and prints a text summary to stderr.
 
+### 0.9.1 Release Gate Evidence
+For the 0.9.1 release, evidence is gathered via the following targets:
+- `make release-gates-check-091`: (Blocking) Verifies all core architectural and functional requirements.
+- `make perf-evidence-check`: (Non-blocking) Verifies that 0.9.1 meets performance baselines across the target matrix.
+
+For deep analysis, use:
+- `python3 tools/perf/doctor_advice.py`: Analyzes measurement reports and suggests configuration tuning.
+- `tools/perf/run_module_benchmark.sh`: Runs a standalone benchmark of the module.
+
 When invoked directly, `threshold_engine.py` emits the Verdict Report JSON to
 stdout and diagnostics to stderr. Redirect stdout to the intended artifact;
 the Python process does not accept a caller-controlled output path.
@@ -137,3 +146,4 @@ above to bootstrap.
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-08 | Agent | Updated performance gate evidence and tool references for 0.9.1 release |

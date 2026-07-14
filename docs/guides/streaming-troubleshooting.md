@@ -387,7 +387,7 @@ Example log line:
 **Step 4 — Identify affected URIs:**
 
 ```bash
-grep -E 'STREAMING_PRECOMMIT_REJECT' /var/log/nginx/error.log | \
+grep -E 'streaming_precommit_reject' /var/log/nginx/error.log | \
   grep -oP 'uri=[^ ]*' | sort | uniq -c | sort -rn | head -10
 ```
 
@@ -732,7 +732,7 @@ default during rollout).  They confirm normal streaming operation.
 
 | Field | Value | Meaning |
 |-------|-------|---------|
-| `reason=ENGINE_STREAMING` | Reason code | Streaming engine was selected for this request |
+| `reason=engine_streaming` | Reason code | Streaming engine was selected for this request |
 | `engine=streaming` | Engine path | True streaming conversion will be used |
 | `phase=header_filter` | Decision point | Decision made during the header filter phase |
 | `action=stream` | Outcome | Request will be streamed |
@@ -752,7 +752,7 @@ default during rollout).  They confirm normal streaming operation.
 
 | Field | Value | Meaning |
 |-------|-------|---------|
-| `reason=STREAMING_CONVERT` | Reason code | Streaming conversion finished successfully |
+| `reason=streaming_convert` | Reason code | Streaming conversion finished successfully |
 | `phase=postcommit` | Phase | Conversion completed after headers were sent |
 | `action=complete` | Outcome | Full Markdown response delivered to client |
 
@@ -768,7 +768,7 @@ default during rollout).  They confirm normal streaming operation.
 
 | Field | Value | Meaning |
 |-------|-------|---------|
-| `reason=STREAMING_FALLBACK_PREBUFFER` | Reason code | Streaming abandoned before committing headers |
+| `reason=streaming_fallback_prebuffer` | Reason code | Streaming abandoned before committing headers |
 | `engine=full_buffer` | Engine path | Fell back to full-buffer conversion |
 | `phase=precommit` | Phase | Decision made before headers were sent to client |
 | `action=fallback` | Outcome | Client will receive correct output via full-buffer |
@@ -794,12 +794,12 @@ the client may receive truncated output.
 
 | Field | Value | Meaning |
 |-------|-------|---------|
-| `reason=STREAMING_FAIL_POSTCOMMIT` | Reason code | Error occurred after headers were sent |
+| `reason=streaming_fail_postcommit` | Reason code | Error occurred after headers were sent |
 | `phase=postcommit` | Phase | Past the point of no return |
 | `action=abort` | Outcome | Connection closed; client got partial output |
 | `committed=1` | Headers sent? | Yes — cannot transparently recover |
 | `fallback_available=0` | Can fall back? | No — headers already on the wire |
-| `category=FAIL_CONVERSION` | Failure class | HTML parsing failure |
+| `category=fail_conversion` | Failure class | HTML parsing failure |
 
 **Action**: **Immediate** — disable streaming for this path:
 ```nginx
@@ -819,8 +819,8 @@ Then reload: `nginx -t && nginx -s reload`
 
 | Field | Value | Meaning |
 |-------|-------|---------|
-| `reason=STREAMING_BUDGET_EXCEEDED` | Reason code | Memory budget exhausted during streaming |
-| `category=FAIL_RESOURCE_LIMIT` | Failure class | Resource limit violation |
+| `reason=streaming_budget_exceeded` | Reason code | Memory budget exhausted during streaming |
+| `category=fail_resource_limit` | Failure class | Resource limit violation |
 | `committed=1` | Headers sent? | Cannot recover |
 
 **Action**: Disable streaming for this path, then raise
@@ -837,7 +837,7 @@ response stays in full-buffer.
 
 | Field | Value | Meaning |
 |-------|-------|---------|
-| `reason=STREAMING_PRECOMMIT_REJECT` | Reason code | Pre-commit error with reject policy |
+| `reason=streaming_precommit_reject` | Reason code | Pre-commit error with reject policy |
 | `engine=rejected` | Engine path | Request rejected (error returned to client) |
 | `markdown_error_policy=fail_closed` | Error policy | Fail-closed: errors produce HTTP error responses |
 | `committed=0` | Headers sent? | No — but client still gets an error response |
@@ -1075,7 +1075,7 @@ Example output (streaming-relevant sections):
     {
       "timestamp": "2025-01-15T14:30:26Z",
       "uri": "/api/reference",
-      "reason": "STREAMING_CONVERT",
+      "reason": "streaming_convert",
       "engine": "streaming",
       "phase": "postcommit",
       "action": "complete"

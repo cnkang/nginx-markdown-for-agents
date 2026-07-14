@@ -485,6 +485,36 @@ Makefile               顶层构建与测试入口
 2. 运行 `make harness-check`
 3. 在结束更广义的文档或 release-gate 改动前，运行 `make harness-check-full`
 
+## v0.9.1 新特性
+
+v0.9.1 是一个**非破坏性补丁版本**，重点关注 0.9.x 版本线的性能就绪。
+所有优化均为可选开启或内部实现——现有配置无需修改即可继续工作。
+
+- **混合零拷贝流式输出**：`markdown_streaming_zero_copy on`（默认关闭，
+  需显式开启）允许 `ngx_buf_t` 直接引用 Rust 管理的内存，省去中间的
+  pool-copy，降低非终端流式分块的 memcpy 开销。NGINX 请求池清理句柄
+  确保在背压和请求销毁场景下 Rust 缓冲区的生命周期安全。
+- **流式解压路由（gzip + deflate）**：在 `streaming_first` profile 下，
+  当 `markdown_auto_decompress on` 且 `markdown_cache_validation` 不为
+  `full` 时，gzip 与 deflate 响应（包括 zlib 封装 RFC 1950 和原始 RFC 1951
+  deflate）通过流式引擎增量解压，无需强制全缓冲积攒。gzip member 边界和
+  trailer 会跨分块校验；Brotli 在 0.9.1 中仍走有界全缓冲路径。
+- **全缓冲拷贝减少**：内部优化（默认开启，无配置项），通过将连续缓冲区
+  直接传递给解压器并通过指针赋值交换输出，消除全缓冲压缩路径中冗余的
+  memcpy。
+- **`markdown_auto_decompress` 指令**：现已正式注册为可配置指令（默认
+  开启）。此前仅为内部字段，无法通过 `nginx.conf` 设置。
+- **性能证据门禁**：模块级基准测试工具（`tools/perf/run_module_benchmark.sh`）
+  与自动化发布门禁（`make release-gates-check-091`）在发布前强制验证
+  延迟、TTFB、内存斜率和回退率阈值。
+- **Doctor 诊断工具**：`python3 tools/perf/doctor_advice.py` 分析运行时
+  指标，为运维人员提供可操作的调优建议。
+- **新增 ADR**：[0020](docs/architecture/ADR/0020-091-hybrid-zero-copy-pool-cleanup.md)、
+  [0021](docs/architecture/ADR/0021-091-gzip-deflate-streaming-decompression-routing.md)、
+  [0022](docs/architecture/ADR/0022-091-performance-evidence-release-gate.md)。
+
+完整变更列表见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## v0.9.0 新特性
 
 v0.9.0 是**破坏性版本**——1.0.0 API 冻结前最后一次破坏性变更机会：
@@ -572,6 +602,10 @@ v0.7.0 是一个正确性、分发和可运维性版本：
 - `auto` 模式作为默认 `markdown_streaming_engine` 设置
 - 基于 `markdown_stream_flush_min` 的有界内存流式转换与按大小 flush
 - 提交前安全回退：输出提交前发生转换错误时回退到 HTML
+- 混合零拷贝流式输出（通过 `markdown_streaming_zero_copy` 可选开启，默认关闭）
+- 流式解压路由（gzip 与 zlib/raw-deflate，profile-gated，仅 `streaming_first`）；Brotli 仍为有界全缓冲
+- 全缓冲压缩拷贝减少（内部优化，默认开启）
+- 性能证据门禁：`make release-gates-check-091`（对 RC 标签阻断）
 - 流式发布门禁：`make release-gates-check-08x`（`release-gates-check-080` 的别名）验证 0.8.x 发布合约
 - 静态安全门禁：`.github/workflows/security-static.yml` 针对 workflow、shell、
   Python 工具脚本、secret、Semgrep 规则与 Rust 依赖策略运行 actionlint、
@@ -624,7 +658,8 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.0 | 2026-07-02 | Kang | Doc review: 新增 v0.9.0 新特性段落、MIGRATION-0.9 链接、reason code 数量修正、CHANGELOG 同步分支提交 |
+| 0.9.1 | 2026-07-08 | Kang | 0.9.1 发布：零拷贝输出、gzip 与 zlib/raw-deflate 流式解压、Brotli 有界全缓冲路由、全缓冲拷贝减少、markdown_auto_decompress 指令注册修复、性能证据门禁、doctor 诊断工具、ADR 0020–0022 |
+| 0.9.0 | 2026-07-02 | Kang | 文档审查：新增 v0.9.0 新特性段落、MIGRATION-0.9 链接、reason code 数量修正、CHANGELOG 同步分支提交 |
 | 0.8.3 | 2026-06-26 | Kang | v0.8.3 收口：流式状态机修复、ExitMany 批量解上下文、解压缓冲区内存安全、快照容量提升、FFI Box::into_raw 修复、完整发布门禁验证 |
 | 0.8.2 | 2026-06-25 | Kang | v0.8.2 发布：流式解压加固、FFI panic 安全、隐式闭合正确性、解压预算强制执行、安全扫描范围限定、版本线文档收口 |
 | 0.8.0 | 2026-06-16 | Codex | 同步中英文 README 结构、Quick Start 示例、本地测试命令、平台支持标题和 v0.8.0 路线说明 |

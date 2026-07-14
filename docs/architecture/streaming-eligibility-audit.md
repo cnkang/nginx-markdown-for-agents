@@ -1,8 +1,8 @@
-# 0.7.x Eligibility & Policy Check Audit (Streaming Security)
+# 0.9.1 Eligibility & Policy Check Audit (Streaming Security)
 
 | Field | Value |
 |-------|-------|
-| Version | 0.7.16 |
+| Version | 0.9.1 |
 | Created | 2026-06-05 |
 | Purpose | Enumerate every eligibility/policy check that gates HTML→Markdown conversion |
 
@@ -131,10 +131,10 @@ failure short-circuits to passthrough.
 | File | `ngx_http_markdown_decompression.c` |
 | Function | `ngx_http_markdown_detect_compression()` |
 | Directive | `markdown_auto_decompress on\|off` (default: on) |
-| What | Reads `Content-Encoding` header. Detects: `gzip`, `deflate`, `br` (brotli). Unknown formats produce `COMPRESSION_UNKNOWN`. |
+| What | Reads `Content-Encoding` header. Detects: `gzip`, `deflate`, `br` (brotli). |
 | Location | Header filter, after eligibility passes, before context init completes |
 | On UNKNOWN | Fail-open (pass original) or reject per `on_error` policy |
-| On known format | Sets `ctx->decompression.needed = 1`; decompression occurs in body filter |
+| On known format | Sets `ctx->decompression.needed = 1`; decompression occurs in the selected body-filter path. **In 0.9.1, gzip and zlib/raw deflate are streaming-eligible when the streaming/cache gates pass; `br` remains bounded full-buffer.** |
 
 ---
 
@@ -168,7 +168,7 @@ These checks apply **during buffering/conversion** in the body filter path.
 | Functions | `ngx_http_markdown_grow_output_buffer()`, `ngx_http_markdown_decompress_gzip()`, Rust FFI `markdown_decompress_bounded()` |
 | Directive | `markdown_decompress_max_size` (default: same as `max_size`) |
 | What | Independent budget for decompressed output size. Caps decompression output buffer growth. Prevents decompression bombs. |
-| On exceeded | Error code `ERROR_DECOMPRESSION_BUDGET_EXCEEDED` (9). Classified as `RESOURCE_LIMIT`. Applies `on_error` policy. |
+| On exceeded | Error code `ERROR_DECOMPRESSION_BUDGET_EXCEEDED` (9). Classified as `resource_limit`. Applies `on_error` policy. |
 | Rust FFI | `markdown_decompress_bounded()` receives the budget as a parameter; returns `DECOMP_CATEGORY_BUDGET_EXCEEDED` (101) if output exceeds it. |
 
 ### 3.3 `markdown_parser_budget` (Parser Memory Budget)
@@ -179,7 +179,7 @@ These checks apply **during buffering/conversion** in the body filter path.
 | Function | Passed as `options->parser_memory_budget` to `markdown_convert()` / `markdown_streaming_new()` |
 | Directive | `markdown_parser_budget` (default: 64 MiB) |
 | What | Maximum memory the HTML parser may allocate. Enforced inside the Rust parser. |
-| On exceeded | Error code `ERROR_PARSE_BUDGET_EXCEEDED` (11). Classified as `RESOURCE_LIMIT`. |
+| On exceeded | Error code `ERROR_PARSE_BUDGET_EXCEEDED` (11). Classified as `resource_limit`. |
 | Enforcement | Rust-side parser tracks allocations against this ceiling. |
 
 ### 3.4 `markdown_limits memory=` (Unified Memory Budget)
@@ -224,7 +224,7 @@ These checks apply **during buffering/conversion** in the body filter path.
 | File | `ngx_http_markdown_conversion_impl.h` passes to Rust converter |
 | Directive | `markdown_parse_timeout` (default: 30 s) |
 | What | Deadline for HTML parsing phase. Passed as `options->parse_timeout_ms`. |
-| On exceeded | `ERROR_PARSE_TIMEOUT` (10). Classified as `RESOURCE_LIMIT`. |
+| On exceeded | `ERROR_PARSE_TIMEOUT` (10). Classified as `resource_limit`. |
 
 ### 3.8 `markdown_limits timeout=` (Overall Conversion Timeout)
 
@@ -307,7 +307,7 @@ These semantics apply to:
 The Pre-streaming Policy Gate (Design Component 1) must ensure:
 
 1. **Checks 1-9** all run in the header filter **before** streaming candidate evaluation.
-2. **Check 10** (Content-Encoding) must route compressed responses to full-buffer or passthrough (Requirement 3: Compression Handling).
+2. **Check 10** (Content-Encoding) must route gzip and zlib/raw deflate through incremental decompression when the streaming gates pass; Brotli routes to bounded full-buffer, while unknown/disabled decompression preserves existing bypass or error-policy behavior.
 3. **Hard exclusions** (check 5) must use `ngx_http_markdown_stream_type_excluded()` which is parameter-aware and case-insensitive — matching the Requirement 4: Hard Exclusions requirements.
 4. **Checks 11-18** are enforced incrementally during the body filter streaming path via the Budget Tracker (Design Component 2).
 

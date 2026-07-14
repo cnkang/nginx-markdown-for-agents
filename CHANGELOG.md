@@ -5,28 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.1] - 2026-07-08
+## [0.9.1] - 2026-07-14
 
 Patch release focused on performance readiness and release evidence for the
-0.9.x line.
+0.9.x line. Non-breaking — all optimizations are opt-in or internal.
 
 ### Added
 
-- Hybrid zero-copy output path for streaming responses, with NGINX pool cleanup
-  ownership guarding Rust-backed buffers.
+- Hybrid zero-copy output path for streaming responses (`markdown_streaming_zero_copy on`,
+  default off), with NGINX pool cleanup ownership guarding Rust-backed buffers
+  across backpressure and request teardown.
+- Streaming decompression routing for gzip and deflate responses (both
+  zlib-wrapped RFC 1950 and raw RFC 1951 deflate) under `streaming_first` with
+  `markdown_auto_decompress on` and `markdown_cache_validation` not `full`.
+  Gzip is member-aware across chunks; Brotli remains bounded full-buffer.
+- Full-buffer compressed copy reduction (default on, internal optimization):
+  eliminates redundant memcpy by passing contiguous buffers directly to the
+  decompressor and swapping output via pointer assignment.
+- `markdown_auto_decompress` directive now officially registered as a
+  configurable NGINX directive (default on). Previously an internal field not
+  settable via `nginx.conf`.
 - 0.9.1 performance evidence gate chain with module-level benchmark thresholds,
-  blocking release-gate integration, and deterministic perf tooling tests.
+  blocking release-gate integration (`make release-gates-check-091`), and
+  deterministic perf tooling tests.
+- Performance doctor advice tool (`tools/perf/doctor_advice.py`) that analyzes
+  runtime metrics and produces actionable operator tuning recommendations.
+- Module-level benchmark harness (`tools/perf/run_module_benchmark.sh`)
+  exercising the full NGINX request lifecycle with 5 scenarios.
 - Performance rollout and rollback guidance for zero-copy output, streaming
   decompression, and copy-reduction rollout stages.
-- Perf observability fields for backpressure and pending-output high-watermark
-  tracking across metrics renderers.
+- Perf observability fields for backpressure, pending-output high-watermark,
+  decompression path selection, and output copy mode across metrics renderers.
+- ADRs 0020–0022 documenting zero-copy pool cleanup, gzip/deflate streaming
+  decompression routing, and the performance evidence release gate.
 
 ### Fixed
 
+- `markdown_auto_decompress` was referenced in 8+ documentation files as a
+  user-configurable directive but was never registered in the `ngx_command_t`
+  table — `nginx -t` would reject user configs using it. Now properly
+  registered as a `NGX_CONF_FLAG` directive.
 - JSON perf metrics rendering now uses a production helper covered by a direct
   renderer unit test.
 - Module benchmark tooling now uses portable temporary files, executable
   preflight checks, BSD-compatible worker lookup, and wall-clock RPS evidence.
+- Streaming backpressure lifecycle: input disposition state machine, pending
+  output ownership, fail-open lifecycle gaps, and terminal-sent latch semantics
+  hardened across multiple commits.
+- Streaming decompression: zlib-wrapped deflate (RFC 1950) header sniffing,
+  gzip member-boundary reset with cumulative budget, truncated stream/member
+  rejection, no-progress inflate guard, and pre-/post-commit backpressure
+  lifecycle coverage.
+- Security: Forwarded header spoofing prevention (right-most element);
+  workflow input sanitization via environment variables to prevent command
+  injection; base URL FFI scheme propagation for HTTPS.
+- Configuration: profile merge preserves explicit parent directives;
+  `max_inflight=0` accepted as unlimited per documented contract;
+  error-policy reject paths return configured `error_status`.
 
 ## [0.9.0] - 2026-07-06
 

@@ -21,12 +21,11 @@ in the compatibility matrix below.
 
 | NGINX Version | Channel | Support Tier |
 |---------------|---------|--------------|
-| 1.24.0 | stable | Full (prebuilt binary) |
+| 1.24.0 | oldstable | Full (prebuilt binary) |
 | 1.26.3 | stable | Full (prebuilt binary) |
-| 1.28.3 | mainline | Full (prebuilt binary) |
-| 1.30.1 | mainline | Full (prebuilt binary) |
-| 1.31.0 | mainline | Full (prebuilt binary) |
-
+| 1.28.3 | stable | Full (prebuilt binary) |
+| 1.30.3 | stable | Full (prebuilt binary) |
+| 1.31.2 | mainline | Full (prebuilt binary) |
 Architectures: `x86_64` (amd64) and `aarch64` (arm64), both glibc and musl.
 
 If your NGINX version is >= 1.24.0 but not listed above, build the module

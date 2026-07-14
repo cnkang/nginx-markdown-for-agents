@@ -218,13 +218,34 @@ resource limits.
 |---|---|---|
 | `nginx_markdown_delivery_total` | counter | Successful deliveries confirmed after the downstream filter returns `NGX_OK`. Increments only when the client actually receives the response. |
 | `nginx_markdown_decision_total` | counter | Decision engine evaluations. Increments each time the decision engine runs, regardless of outcome. Use with `delivery_total` to identify backpressure gaps. |
-| `nginx_markdown_decompression_budget_exceeded_total` | counter | Decompression terminated because the output exceeded `markdown_decompress_max_size`. |
+| `nginx_markdown_perf_decompression_budget_exceeded_total` | counter | Decompression terminated because the output exceeded `markdown_decompress_max_size`. |
 | `nginx_markdown_decompression_format_error_total` | counter | Decompression failed due to invalid compressed format (corrupted or misidentified content). |
 | `nginx_markdown_decompression_truncated_input_total` | counter | Decompression failed due to truncated/incomplete compressed input. |
 | `nginx_markdown_decompression_io_error_total` | counter | Decompression failed due to an I/O error during the decompression operation. |
 | `nginx_markdown_replay_buffer_errors_total` | counter | Replay buffer init or append failures (fail-open path triggered). |
 | `nginx_markdown_parse_timeouts_total` | counter | Parse operations terminated because `markdown_parse_timeout` was exceeded. |
 | `nginx_markdown_parse_budget_exceeded_total` | counter | Parse operations terminated because `markdown_parser_budget` was exceeded. |
+
+#### Performance and Streaming Metrics (v0.9.1)
+
+The following metrics are emitted by the performance metrics renderer
+(`ngx_http_markdown_metrics_write_prometheus_perf`) and appear in the
+Prometheus output alongside the runtime correctness counters above.
+
+| Metric Name | Type | Description |
+|---|---|---|
+| `nginx_markdown_backpressure_total` | counter | Body-filter output returned `NGX_AGAIN` (backpressure events). |
+| `nginx_markdown_backpressure_resume_total` | counter | Pending drain completed with `NGX_OK` (backpressure resumes). |
+| `nginx_markdown_pending_output_high_watermark_bytes` | gauge | Peak pending output bytes buffered in the filter chain. |
+| `nginx_markdown_decompression_streaming_total` | counter | Compressed responses routed to the streaming decompressor. |
+| `nginx_markdown_decompression_fullbuffer_total` | counter | Compressed responses routed to the full-buffer decompressor. |
+| `nginx_markdown_zero_copy_output_total` | counter | Chunks delivered via the zero-copy output path (`markdown_streaming_zero_copy on`). |
+| `nginx_markdown_copied_output_total` | counter | Chunks delivered via the pool-copy output path. |
+
+> **Note**: `nginx_markdown_perf_decompression_budget_exceeded_total` (listed
+> above in the runtime correctness table) is also emitted by the performance
+> renderer. The 7 metrics in this table are additive (v0.9.1) and do not
+> replace any existing metric.
 
 ### Total Time Series
 
@@ -491,7 +512,7 @@ location /docs {
 
 ### Interpretation
 
-- A growing `estimated_token_savings_total` indicates the module is reducing token consumption for AI agent consumers.
+- A growing `nginx_markdown_estimated_token_savings_total` indicates the module is reducing token consumption for AI agent consumers.
 - Compare the growth rate of this counter against `nginx_markdown_conversions_total` to estimate average per-request savings.
 - The estimate is most useful as a trend indicator over time, not as an absolute value.
 

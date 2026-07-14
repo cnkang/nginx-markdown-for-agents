@@ -224,9 +224,9 @@ Streaming decompression requires ALL FOUR conditions to be met:
 1. `auto_decompress on` (enabled by default)
 2. Streaming engine selected for the request
 3. `cache_validation` is NOT `full`
-4. Encoding supported by streaming decompressor (deflate in 0.9.1: both
-   zlib-wrapped RFC 1950 and raw deflate RFC 1951 via header sniff;
-   gzip/brotli use full-buffer decompression)
+4. Encoding supported by streaming decompressor (gzip, zlib-wrapped deflate
+   RFC 1950, or raw deflate RFC 1951); Brotli uses bounded full-buffer
+   decompression
 
 Switching the profile from `streaming_first` to `balanced` or `strict_cache`
 changes the streaming engine selection. The `balanced` profile uses
@@ -250,7 +250,8 @@ decompression settings.
 ### Rollback: Full-Buffer Copy Reduction
 
 **Trigger conditions:**
-- Conversion failures only on compressed responses in full-buffer path
+- Conversion failures only on compressed responses that take full-buffer
+  (for example Brotli or full cache validation)
 - Memory corruption symptoms (unexpected crashes after decompression)
 - Fail-open triggering more frequently for gzip responses
 

@@ -1,6 +1,6 @@
 # Observability Schema v1 (DRAFT)
 
-**Status**: DRAFT (0.9.0) — will be frozen at 1.0.0
+**Status**: DRAFT (0.9.1) — will be frozen at 1.0.0
 **Single Source of Truth**: `components/rust-converter/src/decision/reason_code.rs`
 
 ---
@@ -29,32 +29,32 @@ C code accesses them via FFI. The `as_str()` values are lowercase snake_case.
 
 | # | Variant | `as_str()` | `metric_key()` | `log_callsite()` |
 |--:|---------|-----------|----------------|-------------------|
-| 0 | `Converted` | `converted` | `markdown_conversions_total` | body_filter: after successful conversion and downstream NGX_OK |
-| 1 | `SkippedAccept` | `skipped_accept` | `markdown_skipped_total` | header_filter: Accept negotiation determined text/html preferred |
-| 2 | `SkippedNoAccept` | `skipped_no_accept` | `markdown_skipped_total` | header_filter: no Accept header present |
-| 3 | `SkippedConditional` | `skipped_conditional` | `markdown_skipped_total` | header_filter: conditional request matched (304) |
-| 4 | `DecompressionError` | `decompression_error` | `markdown_errors_total` | body_filter: decompression error |
-| 5 | `DecompressionBudgetExceeded` | `decompression_budget_exceeded` | `markdown_errors_total` | body_filter: decompression output exceeded budget |
-| 6 | `DecompressionFormatError` | `decompression_format_error` | `markdown_errors_total` | body_filter: invalid compression format |
-| 7 | `DecompressionTruncatedInput` | `decompression_truncated_input` | `markdown_errors_total` | body_filter: truncated compressed input |
-| 8 | `DecompressionIoError` | `decompression_io_error` | `markdown_errors_total` | body_filter: decompression I/O error |
-| 9 | `Timeout` | `timeout` | `markdown_errors_total` | body_filter: timeout |
-| 10 | `BudgetExceeded` | `budget_exceeded` | `markdown_errors_total` | body_filter: budget exceeded |
-| 11 | `ReplayError` | `replay_error` | `markdown_errors_total` | body_filter: replay error |
-| 12 | `SkippedAcceptReject` | `skipped_accept_reject` | `markdown_skipped_total` | header_filter: Accept explicitly rejects text/markdown (q=0) |
-| 13 | `FfiPanic` | `ffi_panic` | `markdown_errors_total` | body_filter: FFI panic |
-| 14 | `NotEligible` | `not_eligible` | `markdown_skipped_total` | header_filter: response not eligible (method/status/content-type) |
-| 15 | `Disabled` | `disabled` | `markdown_skipped_total` | header_filter: module disabled for this location |
-| 16 | `FailedOpen` | `failed_open` | `markdown_failed_open_total` | body_filter: fail-open path triggered |
-| 17 | `FailedClosed` | `failed_closed` | `markdown_failed_closed_total` | body_filter: fail-closed path triggered |
-| 18 | `ConversionError` | `conversion_error` | `markdown_errors_total` | body_filter: conversion error |
-| 19 | `MemoryBudgetExceeded` | `memory_budget_exceeded` | `markdown_errors_total` | body_filter: memory budget exceeded |
-| 20 | `Overload` | `overload` | `markdown_errors_total` | header_filter: inflight guard overload |
-| 21 | `InvalidDynconf` | `invalid_dynconf` | `markdown_errors_total` | header_filter: invalid dynconf |
-| 22 | `DegradedSnapshot` | `degraded_snapshot` | `markdown_errors_total` | header_filter: degraded dynconf snapshot |
-| 23 | `HeaderPlanApplyError` | `header_plan_apply_error` | `markdown_errors_total` | header_filter: header plan apply error |
-| 24 | `StreamingMidFlightError` | `streaming_mid_flight_error` | `markdown_errors_total` | body_filter: streaming mid-flight error |
-| 25 | `BypassNoTransform` | `bypass_no_transform` | `markdown_skipped_total` | header_filter: no-transform bypass |
+| 0 | `Converted` | `converted` | `nginx_markdown_conversions_total` | body_filter: after successful conversion and downstream NGX_OK |
+| 1 | `SkippedAccept` | `skipped_accept` | `nginx_markdown_skipped_total` | header_filter: Accept negotiation determined text/html preferred |
+| 2 | `SkippedNoAccept` | `skipped_no_accept` | `nginx_markdown_skipped_total` | header_filter: no Accept header present |
+| 3 | `SkippedConditional` | `skipped_conditional` | `nginx_markdown_skipped_total` | header_filter: conditional request matched (304) |
+| 4 | `DecompressionError` | `decompression_error` | `nginx_markdown_errors_total` | body_filter: decompression error |
+| 5 | `DecompressionBudgetExceeded` | `decompression_budget_exceeded` | `nginx_markdown_errors_total` | body_filter: decompression output exceeded budget |
+| 6 | `DecompressionFormatError` | `decompression_format_error` | `nginx_markdown_errors_total` | body_filter: invalid compression format |
+| 7 | `DecompressionTruncatedInput` | `decompression_truncated_input` | `nginx_markdown_errors_total` | body_filter: truncated compressed input |
+| 8 | `DecompressionIoError` | `decompression_io_error` | `nginx_markdown_errors_total` | body_filter: decompression I/O error |
+| 9 | `Timeout` | `timeout` | `nginx_markdown_errors_total` | body_filter: timeout |
+| 10 | `BudgetExceeded` | `budget_exceeded` | `nginx_markdown_errors_total` | body_filter: budget exceeded |
+| 11 | `ReplayError` | `replay_error` | `nginx_markdown_errors_total` | body_filter: replay error |
+| 12 | `SkippedAcceptReject` | `skipped_accept_reject` | `nginx_markdown_skipped_total` | header_filter: Accept explicitly rejects text/markdown (q=0) |
+| 13 | `FfiPanic` | `ffi_panic` | `nginx_markdown_errors_total` | body_filter: FFI panic |
+| 14 | `NotEligible` | `not_eligible` | `nginx_markdown_skipped_total` | header_filter: response not eligible (method/status/content-type) |
+| 15 | `Disabled` | `disabled` | `nginx_markdown_skipped_total` | header_filter: module disabled for this location |
+| 16 | `FailedOpen` | `failed_open` | `nginx_markdown_failed_open_total` | body_filter: fail-open path triggered |
+| 17 | `FailedClosed` | `failed_closed` | `nginx_markdown_failed_closed_total` | body_filter: fail-closed path triggered |
+| 18 | `ConversionError` | `conversion_error` | `nginx_markdown_errors_total` | body_filter: conversion error |
+| 19 | `MemoryBudgetExceeded` | `memory_budget_exceeded` | `nginx_markdown_errors_total` | body_filter: memory budget exceeded |
+| 20 | `Overload` | `overload` | `nginx_markdown_errors_total` | header_filter: inflight guard overload |
+| 21 | `InvalidDynconf` | `invalid_dynconf` | `nginx_markdown_errors_total` | header_filter: invalid dynconf |
+| 22 | `DegradedSnapshot` | `degraded_snapshot` | `nginx_markdown_errors_total` | header_filter: degraded dynconf snapshot |
+| 23 | `HeaderPlanApplyError` | `header_plan_apply_error` | `nginx_markdown_errors_total` | header_filter: header plan apply error |
+| 24 | `StreamingMidFlightError` | `streaming_mid_flight_error` | `nginx_markdown_errors_total` | body_filter: streaming mid-flight error |
+| 25 | `BypassNoTransform` | `bypass_no_transform` | `nginx_markdown_skipped_total` | header_filter: no-transform bypass |
 
 ### Naming Convention
 
@@ -108,37 +108,50 @@ Implementation: `components/rust-converter/src/metrics/labels.rs`
 
 ## Unified Metric Families
 
-0.9.0 consolidates per-reason counters into 5 unified families. Each family
-uses the `reason` label to distinguish individual reason codes.
+0.9.1 consolidates per-reason counters into 5 unified families. Each family
+uses the `reason` label to distinguish individual reason codes. All metrics are prefixed with `nginx_markdown_`.
 
 | Metric Family | Category | Reason Codes (by `reason` label) |
 |---------------|----------|----------------------------------|
-| `markdown_conversions_total` | Success | `converted` |
-| `markdown_skipped_total` | Skip | `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `skipped_accept_reject`, `not_eligible`, `disabled`, `bypass_no_transform` |
-| `markdown_errors_total` | Error | `decompression_error`, `decompression_budget_exceeded`, `decompression_format_error`, `decompression_truncated_input`, `decompression_io_error`, `timeout`, `budget_exceeded`, `replay_error`, `ffi_panic`, `conversion_error`, `memory_budget_exceeded`, `overload`, `invalid_dynconf`, `degraded_snapshot`, `header_plan_apply_error`, `streaming_mid_flight_error` |
-| `markdown_failed_open_total` | Fail-Open | `failed_open` |
-| `markdown_failed_closed_total` | Fail-Closed | `failed_closed` |
+| `nginx_markdown_conversions_total` | Success | `converted` |
+| `nginx_markdown_skipped_total` | Skip | `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `skipped_accept_reject`, `not_eligible`, `disabled`, `bypass_no_transform` |
+| `nginx_markdown_errors_total` | Error | `decompression_error`, `decompression_budget_exceeded`, `decompression_format_error`, `decompression_truncated_input`, `decompression_io_error`, `timeout`, `budget_exceeded`, `replay_error`, `ffi_panic`, `conversion_error`, `memory_budget_exceeded`, `overload`, `invalid_dynconf`, `degraded_snapshot`, `header_plan_apply_error`, `streaming_mid_flight_error` |
+| `nginx_markdown_failed_open_total` | Fail-Open | `failed_open` |
+| `nginx_markdown_failed_closed_total` | Fail-Closed | `failed_closed` |
+
+### New 0.9.1 Specialized Metrics
+
+In addition to the reason-based families, 0.9.1 introduces specific performance and resource metrics:
+
+- `nginx_markdown_backpressure_total`: Total backpressure events encountered.
+- `nginx_markdown_backpressure_resume_total`: Total resumes after backpressure.
+- `nginx_markdown_pending_output_high_watermark_bytes`: Peak buffered output size.
+- `nginx_markdown_decompression_streaming_total`: Number of responses decompressed via the streaming path.
+- `nginx_markdown_decompression_fullbuffer_total`: Number of responses decompressed via the full-buffer path.
+- `nginx_markdown_perf_decompression_budget_exceeded_total`: Total decompression budget violations.
+- `nginx_markdown_zero_copy_output_total`: Total bytes delivered via zero-copy path.
+- `nginx_markdown_copied_output_total`: Total bytes delivered via copy path.
 
 ### Prometheus Example
 
 ```text
-# TYPE markdown_conversions_total counter
-markdown_conversions_total{reason="converted"} 12450
+# TYPE nginx_markdown_conversions_total counter
+nginx_markdown_conversions_total{reason="converted"} 12450
 
-# TYPE markdown_skipped_total counter
-markdown_skipped_total{reason="skipped_accept"} 340
-markdown_skipped_total{reason="not_eligible"} 28
-markdown_skipped_total{reason="disabled"} 5
+# TYPE nginx_markdown_skipped_total counter
+nginx_markdown_skipped_total{reason="skipped_accept"} 340
+nginx_markdown_skipped_total{reason="not_eligible"} 28
+nginx_markdown_skipped_total{reason="disabled"} 5
 
-# TYPE markdown_errors_total counter
-markdown_errors_total{reason="timeout"} 3
-markdown_errors_total{reason="decompression_error"} 1
+# TYPE nginx_markdown_errors_total counter
+nginx_markdown_errors_total{reason="timeout"} 3
+nginx_markdown_errors_total{reason="decompression_error"} 1
 
-# TYPE markdown_failed_open_total counter
-markdown_failed_open_total{reason="failed_open"} 7
+# TYPE nginx_markdown_failed_open_total counter
+nginx_markdown_failed_open_total{reason="failed_open"} 7
 
-# TYPE markdown_failed_closed_total counter
-markdown_failed_closed_total{reason="failed_closed"} 0
+# TYPE nginx_markdown_failed_closed_total counter
+nginx_markdown_failed_closed_total{reason="failed_closed"} 0
 ```
 
 ---

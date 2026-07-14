@@ -63,7 +63,7 @@ versions; removal requires a major version bump.
 | Code | String | Engine Path | Description |
 |------|--------|-------------|-------------|
 | 0 | `streaming_block_full_cache_validation` | full_buffer | `cache_validation = full` forces full-buffer for ETag |
-| 1 | `streaming_block_content_encoding` | full_buffer | Upstream `Content-Encoding` requires decompression |
+| 1 | `streaming_block_content_encoding` | full_buffer | Content coding or validation mode is unsupported by streaming decompression |
 | 2 | `streaming_block_content_length_unknown` | full_buffer | `auto` mode cannot size response without `Content-Length` |
 | 3 | `streaming_block_range_request` | passthrough | `Range` request bypasses conversion |
 | 4 | `streaming_block_no_transform` | passthrough | `Cache-Control: no-transform` bypasses conversion |
@@ -172,4 +172,6 @@ while `nginx_markdown_streaming_candidate_total` > 0:
 
 1. Check if `markdown_streaming_engine` is set to `on` or `auto`.
 2. Verify `markdown_stream_threshold` is smaller than typical response sizes.
-3. Check for Content-Encoding headers (compressed responses force full-buffer).
+3. Check the content coding and cache-validation mode: gzip and deflate can
+   stream when decompression is enabled and validation is not `full`; Brotli
+   and unsupported codings do not use streaming decompression.
