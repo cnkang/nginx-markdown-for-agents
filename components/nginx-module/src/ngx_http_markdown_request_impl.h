@@ -435,7 +435,7 @@ ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
             &(r)->headers_out.content_type,                                 \
             ((r)->headers_out.content_length_n >= 0) ? 1 : 0,               \
             ((r)->headers_out.content_length_n < 0) ? 1 : 0,                \
-            ((conf)->stream.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)    \
+            ((conf)->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)           \
                 ? "pass" : "reject");                                      \
     } while (0)
 #endif /* MARKDOWN_STREAMING_ENABLED */
@@ -886,8 +886,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     /*
-     * Engine selector: evaluate markdown_streaming_engine
-     * once and cache the result. If streaming is selected,
+     * Policy selector: evaluate markdown_streaming once and cache the result.
+     * If streaming is selected,
      * skip the threshold router entirely.
      */
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.selection.candidate_total);
@@ -921,8 +921,7 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      *       - brotli: deferred, route to bounded full-buffer
      *
      * This check runs after select_processing_path() so that
-     * compression routing is enforced regardless of engine mode
-     * (on, auto, or variable-evaluated).
+     * compression routing is enforced regardless of streaming policy.
      */
     if (ngx_http_markdown_route_streaming_compression(r, ctx, conf)) {
         goto path_selected;

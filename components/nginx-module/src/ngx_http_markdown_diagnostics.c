@@ -1022,14 +1022,14 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
     u_char       threshold_explicit_str[sizeof("false")];
 
     if (conf != NULL
-        && conf->stream.engine
-           != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO)
+        && conf->stream.policy != NGX_HTTP_MARKDOWN_STREAMING_AUTO)
     {
-        engine_source_str = "configured";
-        if (conf->stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF) {
+        engine_source_str = conf->stream.policy_explicit
+            ? "configured" : "profile";
+        if (conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF) {
             engine_str = "off";
-        } else if (conf->stream.engine
-                   == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON)
+        } else if (conf->stream.policy
+                   == NGX_HTTP_MARKDOWN_STREAMING_FORCE)
         {
             engine_str = "on";
         } else {
@@ -1041,8 +1041,7 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
     }
 
     on_error_str = (conf != NULL
-         && conf->stream.on_error
-            == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
+         && conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
         ? "reject" : "pass";
     threshold = (conf != NULL)
         ? conf->stream.threshold : 0;

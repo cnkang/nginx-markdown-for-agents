@@ -267,9 +267,6 @@ ngx_http_markdown_collect_profile_explicit_mask(
     if (conf->stream.policy != NGX_CONF_UNSET_UINT) {
         mask |= NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY;
     }
-    if (conf->stream.engine != NGX_CONF_UNSET_UINT) {
-        mask |= NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_ENGINE;
-    }
     if (conf->stream.budget != NGX_CONF_UNSET_SIZE) {
         mask |= NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET;
     }
@@ -371,7 +368,6 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->ops.otel_export_timeout = NGX_CONF_UNSET_MSEC;
 
     /* v0.8.0 streaming config */
-    conf->stream.engine = NGX_CONF_UNSET_UINT;
     conf->stream.policy = NGX_CONF_UNSET_UINT;
     conf->stream.policy_explicit = -1;
     conf->stream.threshold = NGX_CONF_UNSET_SIZE;
@@ -379,12 +375,9 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
     conf->stream.flush_min = NGX_CONF_UNSET_SIZE;
     conf->stream.excluded_types = NGX_CONF_UNSET_PTR;
-    conf->stream.on_error = NGX_CONF_UNSET_UINT;
-    conf->stream.on_error_explicit = -1;
     conf->stream.budget = NGX_CONF_UNSET_SIZE;
     conf->stream.budget_explicit = -1;
     conf->stream.shadow = -1;
-    conf->stream.shadow_explicit = -1;
     conf->stream.zero_copy = NGX_CONF_UNSET;
 
     conf->advanced.prune_noise = NGX_CONF_UNSET;
@@ -479,7 +472,6 @@ ngx_http_markdown_profile_defaults(ngx_uint_t profile,
         NGX_HTTP_MARKDOWN_CONDITIONAL_IF_MODIFIED_SINCE;
     defaults->generate_etag = 0;
     defaults->streaming_policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
-    defaults->streaming_engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
     defaults->limits_memory = 10 * 1024 * 1024;
     defaults->limits_timeout = 5000;
     defaults->limits_streaming_buffer =
@@ -496,7 +488,6 @@ ngx_http_markdown_profile_defaults(ngx_uint_t profile,
             NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
         defaults->generate_etag = 1;
         defaults->streaming_policy = NGX_HTTP_MARKDOWN_STREAMING_OFF;
-        defaults->streaming_engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF;
         defaults->limits_memory = 8 * 1024 * 1024;
         defaults->limits_timeout = 2000;
         defaults->limits_streaming_buffer = 0;
@@ -513,7 +504,6 @@ ngx_http_markdown_profile_defaults(ngx_uint_t profile,
         defaults->conditional_requests =
             NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
         defaults->streaming_policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
-        defaults->streaming_engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
         defaults->limits_memory = 8 * 1024 * 1024;
         defaults->limits_timeout = 2000;
         defaults->limits_streaming_buffer = 256 * 1024;
@@ -972,12 +962,6 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
      * needed for the unified memory_budget priority chain below.
      */
     ngx_flag_t  max_size_set = (conf->max_size != NGX_CONF_UNSET_SIZE);
-#ifdef MARKDOWN_STREAMING_ENABLED
-    ngx_flag_t  stream_on_error_set =
-        (conf->stream.on_error != NGX_CONF_UNSET_UINT);
-    ngx_flag_t  stream_shadow_set =
-        (conf->stream.shadow != NGX_CONF_UNSET);
-#endif
     ngx_flag_t  stream_threshold_set =
         (conf->stream.threshold != NGX_CONF_UNSET_SIZE);
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -995,12 +979,6 @@ ngx_http_markdown_merge_conf(ngx_conf_t *cf, void *parent, void *child)
         local_explicit_mask | prev->profile.explicit_mask;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-    if (stream_on_error_set) {
-        conf->stream.on_error_explicit = 1;
-    }
-    if (stream_shadow_set) {
-        conf->stream.shadow_explicit = 1;
-    }
     if (stream_budget_set) {
         conf->stream.budget_explicit = 1;
     }
@@ -1174,7 +1152,7 @@ ngx_http_markdown_on_error_to_ffi(ngx_uint_t on_error,
  * Return human-readable name for markdown_flavor directive value.
  *
  * Parameters:
- *   value - flavor constant (COMMONMARK, GFM, MDX, ORG_MODE)
+ *   value - flavor constant (COMMONMARK or GFM)
  *
  * Returns:
  *   Static ngx_str_t with the flavor name or "unknown"
@@ -1184,8 +1162,6 @@ ngx_http_markdown_flavor_name(ngx_uint_t value)
 {
     static ngx_str_t commonmark = ngx_string("commonmark");
     static ngx_str_t gfm = ngx_string("gfm");
-    static ngx_str_t mdx = ngx_string("mdx");
-    static ngx_str_t org_mode = ngx_string("org-mode");
     static ngx_str_t unknown = ngx_string("unknown");
 
     switch (value) {
@@ -1193,10 +1169,6 @@ ngx_http_markdown_flavor_name(ngx_uint_t value)
             return &commonmark;
         case NGX_HTTP_MARKDOWN_FLAVOR_GFM:
             return &gfm;
-        case NGX_HTTP_MARKDOWN_FLAVOR_MDX:
-            return &mdx;
-        case NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE:
-            return &org_mode;
         default:
             return &unknown;
     }
@@ -1585,7 +1557,7 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     ngx_uint_t stream_type_count = (conf->routing.stream_types != NULL) ? conf->routing.stream_types->nelts : 0;
     ngx_uint_t content_type_count = (conf->routing.content_types != NULL) ? conf->routing.content_types->nelts : 0;
 #ifdef MARKDOWN_STREAMING_ENABLED
-    const char *streaming_engine_str;
+    const char *streaming_policy_str;
 #endif
 
     if (cf == NULL) {
@@ -1593,12 +1565,12 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
     }
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-    if (conf->stream.engine != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO) {
-        streaming_engine_str = (conf->stream.engine
-                                == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF)
-            ? "off" : "on";
+    if (conf->stream.policy != NGX_HTTP_MARKDOWN_STREAMING_AUTO) {
+        streaming_policy_str =
+            (conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF)
+            ? "off" : "force";
     } else {
-        streaming_engine_str = "auto (default)";
+        streaming_policy_str = "auto (default)";
     }
 #endif
 
@@ -1619,9 +1591,9 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                        "trust_forwarded_headers=%ui "
                         "metrics_format=%V metrics_per_path=%i otel=%i"
 #ifdef MARKDOWN_STREAMING_ENABLED
-                        " streaming_engine=%s"
+                        " streaming_policy=%s"
                         " streaming_budget=%uz"
-                        " streaming_on_error=%V"
+                        " streaming_error_policy=%V"
                         " streaming_shadow=%i"
                         " streaming_threshold=%uz"
                         " streaming_zero_copy=%i"
@@ -1651,10 +1623,9 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                         , (ngx_int_t) conf->ops.metrics_per_path
                         , (ngx_int_t) conf->ops.otel_enabled
 #ifdef MARKDOWN_STREAMING_ENABLED
-                        , streaming_engine_str
+                        , streaming_policy_str
                         , conf->stream.budget
-                        , ngx_http_markdown_on_error_name(
-                              conf->stream.on_error)
+                        , ngx_http_markdown_on_error_name(conf->on_error)
                          , (ngx_int_t) conf->stream.shadow
                          , conf->stream.threshold
                          , (ngx_int_t) conf->stream.zero_copy

@@ -679,15 +679,13 @@ ngx_http_markdown_filter(ngx_conf_t *cf,
  * (pass | fail_closed | status <code>).
  *
  * Config V2 (0.9.0): unified error policy consolidating the removed
- * markdown_on_error and markdown_streaming_on_error directives.  It writes
- * the existing backing fields, which stay the runtime source of truth:
- *   pass        -> on_error=PASS, stream.on_error=PASS
- *   fail_closed -> on_error=REJECT, stream.on_error=REJECT, error_status=502
- *   status <c>  -> on_error=REJECT, stream.on_error=REJECT, error_status=<c>
+ * markdown_on_error and markdown_streaming_on_error directives.  The single
+ * on_error field is the runtime source of truth for every conversion path:
+ *   pass        -> on_error=PASS
+ *   fail_closed -> on_error=REJECT, error_status=502
+ *   status <c>  -> on_error=REJECT, error_status=<c>
  *
- * Allowed status codes: 429, 503 (502 rejected; use fail_closed instead).  stream.on_error
- * uses the same 0=pass/1=reject encoding as on_error, so the unconditional
- * ON_ERROR constants are used to avoid a streaming-only ifdef.
+ * Allowed status codes: 429, 503 (502 rejected; use fail_closed instead).
  */
 static char *
 ngx_http_markdown_error_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
@@ -709,14 +707,12 @@ ngx_http_markdown_error_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
                                         sizeof(pass_str) - 1))
     {
         mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-        mcf->stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     } else if (cf->args->nelts == 2
                && ngx_http_markdown_arg_equals(&value[1], closed_str,
                                                sizeof(closed_str) - 1))
     {
         mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
-        mcf->stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
         mcf->error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
 
     } else if (cf->args->nelts == 3
@@ -741,7 +737,6 @@ ngx_http_markdown_error_policy(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
         mcf->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
-        mcf->stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
         mcf->error_status = code;
 
     } else {
@@ -905,11 +900,10 @@ ngx_http_markdown_streaming(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     value = cf->args->elts;
 
     /*
-     * markdown_streaming (Config V2, 0.9.0) is the streaming *enablement*
-     * selector and is distinct from markdown_streaming_engine (the
-     * implementation selector).  policy_explicit records that an operator
-     * set this directive so the cache-validation conflict check in
-     * merge_conf does not fire for default configurations.
+     * markdown_streaming (Config V2, 0.9.0) is the sole processing-path
+     * selector. policy_explicit records that an operator set this directive
+     * so the cache-validation conflict check in merge_conf does not fire for
+     * default configurations.
      *
      *   off   - never stream
      *   auto  - stream large responses, full-buffer small ones
@@ -1078,8 +1072,9 @@ ngx_http_markdown_content_types(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 /*
  * Handle the "markdown_flavor" configuration directive.
  *
- * Accepts "commonmark", "gfm", "mdx", or "org-mode" and sets
- * the flavor enum.  MDX and Org-mode are experimental selectors.
+ * Accepts "commonmark" or "gfm" and sets the flavor enum.  The former
+ * experimental MDX and Org-mode selectors are rejected because they never
+ * had distinct conversion semantics.
  *
  * Parameters:
  *   cf  - Configuration parsing context
@@ -1117,19 +1112,20 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     {
         mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_GFM;
     } else if (ngx_http_markdown_arg_equals(
-                   &value[1], mdx_str,
-                   sizeof(mdx_str) - 1))
+                   &value[1], mdx_str, sizeof(mdx_str) - 1)
+               || ngx_http_markdown_arg_equals(
+                   &value[1], org_str, sizeof(org_str) - 1))
     {
-        mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_MDX;
-    } else if (ngx_http_markdown_arg_equals(
-                   &value[1], org_str,
-                   sizeof(org_str) - 1))
-    {
-        mcf->flavor = NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE;
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "\"markdown_flavor %V\" is no longer supported because it "
+            "never had distinct conversion semantics; use "
+            "\"markdown_flavor commonmark\" or \"markdown_flavor gfm\"",
+            &value[1]);
+        return NGX_CONF_ERROR;
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid value \"%V\" in \"%V\" directive, "
-                           "it must be \"commonmark\", \"gfm\", \"mdx\", or \"org-mode\"",
+                           "it must be \"commonmark\" or \"gfm\"",
                            &value[1], &cmd->name);
         return NGX_CONF_ERROR;
     }
@@ -1433,54 +1429,54 @@ ngx_http_markdown_set_dynconf_path(ngx_conf_t *cf, ngx_command_t *cmd,
     return NGX_CONF_OK;
 }
 
-#ifndef MARKDOWN_STREAMING_ENABLED
 /*
- * Configuration directive handler: markdown_streaming_engine (v0.8.0)
+ * Reject the removed markdown_streaming_engine directive.
  *
- * Non-streaming builds keep the directive parseable so configuration
- * validation fails only on invalid values, not on missing symbols. Runtime
- * selection still falls back to the full-buffer path because streaming code is
- * not compiled in.
+ * The old values map one-to-one to markdown_streaming policy values, but this
+ * handler never mutates configuration. nginx -t always fails so an operator
+ * must perform the migration explicitly.
  */
 static char *
-ngx_http_markdown_stream_engine_handler(ngx_conf_t *cf,
+ngx_http_markdown_reject_streaming_engine(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf)
 {
-    ngx_http_markdown_conf_t *mcf = conf;
-    ngx_str_t                *value;
+    static u_char  off_str[] = "off";
+    static u_char  auto_str[] = "auto";
+    static u_char  on_str[] = "on";
+    const char  *replacement;
+    ngx_str_t   *value;
 
-    (void) cmd;
-
+    (void) conf;
     value = cf->args->elts;
 
-    if (mcf->stream.engine != NGX_CONF_UNSET_UINT) {
-        return "is duplicate";
-    }
-
-    if (value[1].len == 3
-        && ngx_strncmp(value[1].data, "off", 3) == 0)
+    if (ngx_http_markdown_arg_equals(
+            &value[1], off_str, sizeof(off_str) - 1))
     {
-        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF;
-    } else if (value[1].len == 4
-               && ngx_strncmp(value[1].data, "auto", 4) == 0)
+        replacement = "off";
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], auto_str, sizeof(auto_str) - 1))
     {
-        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
-    } else if (value[1].len == 2
-               && ngx_strncmp(value[1].data, "on", 2) == 0)
+        replacement = "auto";
+    } else if (ngx_http_markdown_arg_equals(
+                   &value[1], on_str, sizeof(on_str) - 1))
     {
-        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
+        replacement = "force";
     } else {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-            "invalid value \"%V\" in "
-            "\"markdown_streaming_engine\" directive, "
-            "it must be \"off\", \"auto\", or \"on\"",
-            &value[1]);
+            "\"%V\" directive has been removed; use "
+            "\"markdown_streaming off|auto|force\" instead "
+            "(legacy mappings: off -> off, auto -> auto, on -> force)",
+            &cmd->name);
         return NGX_CONF_ERROR;
     }
 
-    return NGX_CONF_OK;
+    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+        "\"%V %V\" has been removed; use "
+        "\"markdown_streaming %s\" instead",
+        &cmd->name, &value[1], replacement);
+
+    return NGX_CONF_ERROR;
 }
-#endif
 
 /*
  * Configuration directive handler: markdown_stream_threshold (v0.8.0)

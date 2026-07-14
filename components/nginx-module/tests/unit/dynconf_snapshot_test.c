@@ -280,9 +280,9 @@ test_default_config_all_keys_present(void)
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
     conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
     conf.ops.trust_forwarded_headers = 0;
-    conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
+    conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
     conf.stream.budget = 2 * 1024 * 1024;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     conf.stream.shadow = 0;
     conf.stream.threshold = 32 * 1024;
 
@@ -338,8 +338,8 @@ test_default_config_all_keys_present(void)
         "should contain markdown_trust_forwarded_headers key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_large_body_threshold"),
         "should contain markdown_large_body_threshold key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming_engine"),
-        "should contain markdown_streaming_engine key");
+    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming"),
+        "should contain markdown_streaming key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming_budget"),
         "should contain markdown_streaming_budget key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming_shadow"),
@@ -389,8 +389,8 @@ test_default_config_all_keys_present(void)
         "markdown_metrics_format", "auto"),
         "markdown_metrics_format should be 'auto'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_streaming_engine", "auto"),
-        "markdown_streaming_engine should be 'auto'");
+        "markdown_streaming", "auto"),
+        "markdown_streaming should be 'auto'");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_streaming_shadow", "off"),
         "markdown_streaming_shadow should be 'off'");
@@ -441,9 +441,9 @@ test_custom_config_values_reflected(void)
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
     conf.ops.trust_forwarded_headers = 1;
-    conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
+    conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
     conf.stream.budget = 4 * 1024 * 1024;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     conf.stream.shadow = 1;
     conf.stream.threshold = 64 * 1024;
 
@@ -511,24 +511,24 @@ test_custom_config_values_reflected(void)
 /* ── Test 3: NULL pool returns NGX_ERROR ─────────────────────────── */
 
 static void
-test_streaming_engine_enum_names(void)
+test_streaming_policy_names(void)
 {
-    TEST_SUBSECTION("Streaming engine enum names");
+    TEST_SUBSECTION("Streaming policy names");
 
-    TEST_ASSERT(strcmp(ngx_http_markdown_streaming_engine_str(
-        NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF), "off") == 0,
-        "stream engine off should render as off");
-    TEST_ASSERT(strcmp(ngx_http_markdown_streaming_engine_str(
-        NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO), "auto") == 0,
-        "stream engine auto should render as auto");
-    TEST_ASSERT(strcmp(ngx_http_markdown_streaming_engine_str(
-        NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON), "on") == 0,
-        "stream engine on should render as on");
-    TEST_ASSERT(strcmp(ngx_http_markdown_streaming_engine_str(
+    TEST_ASSERT(strcmp(ngx_http_markdown_streaming_policy_str(
+        NGX_HTTP_MARKDOWN_STREAMING_OFF), "off") == 0,
+        "streaming policy off should render as off");
+    TEST_ASSERT(strcmp(ngx_http_markdown_streaming_policy_str(
+        NGX_HTTP_MARKDOWN_STREAMING_AUTO), "auto") == 0,
+        "streaming policy auto should render as auto");
+    TEST_ASSERT(strcmp(ngx_http_markdown_streaming_policy_str(
+        NGX_HTTP_MARKDOWN_STREAMING_FORCE), "force") == 0,
+        "streaming policy force should render as force");
+    TEST_ASSERT(strcmp(ngx_http_markdown_streaming_policy_str(
         NGX_CONF_UNSET_UINT), "unknown") == 0,
-        "unknown stream engine enum should render as unknown");
+        "unknown streaming policy should render as unknown");
 
-    TEST_PASS("Streaming engine enum names covered");
+    TEST_PASS("Streaming policy names covered");
 }
 
 static void
@@ -590,7 +590,7 @@ main(void)
 
     test_default_config_all_keys_present();
     test_custom_config_values_reflected();
-    test_streaming_engine_enum_names();
+    test_streaming_policy_names();
     test_null_pool_returns_error();
     test_null_conf_returns_error();
 

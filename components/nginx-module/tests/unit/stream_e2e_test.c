@@ -430,7 +430,7 @@ e2e_init_context_precommit(ngx_http_markdown_ctx_t *ctx,
     ctx->stream_sm.replay_capacity = 4096;
 
     /* Configuration: streaming on_error policy (0.8.0 model) */
-    conf->stream.on_error = on_error_policy;
+    conf->on_error = on_error_policy;
     conf->error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
 }
 
@@ -459,7 +459,7 @@ e2e_init_context_committed(ngx_http_markdown_ctx_t *ctx,
     ctx->stream_sm.replay_initialized = 0;
 
     /* Configuration: streaming on_error policy (0.8.0 model) */
-    conf->stream.on_error = on_error_policy;
+    conf->on_error = on_error_policy;
     conf->error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
 
     /* Assign non-NULL dummy handle so the FFI finish path is exercised */

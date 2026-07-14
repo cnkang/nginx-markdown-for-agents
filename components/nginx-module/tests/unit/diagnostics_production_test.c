@@ -53,15 +53,6 @@
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1
 #define NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT  502
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS    0
-#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT  1
-
-#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF   0
-#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO  1
-#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON    2
-#endif
-
 #define ngx_memcpy(dst, src, n)      memcpy(dst, src, n)
 #define ngx_strcmp(s1, s2)           strcmp((const char *) (s1), (const char *) (s2))
 
@@ -149,7 +140,6 @@ typedef struct ngx_http_markdown_conf_s {
         ngx_uint_t                  max_inflight;
     } routing;
     struct {
-        ngx_uint_t    engine;
         ngx_uint_t    policy;
         ngx_flag_t    policy_explicit;
         size_t        threshold;
@@ -157,12 +147,9 @@ typedef struct ngx_http_markdown_conf_s {
         size_t        precommit_buffer;
         size_t        flush_min;
         ngx_array_t  *excluded_types;
-        ngx_uint_t    on_error;
-        ngx_flag_t    on_error_explicit;
         size_t        budget;
         ngx_flag_t    budget_explicit;
         ngx_flag_t    shadow;
-        ngx_flag_t    shadow_explicit;
     } stream;
     struct {
         ngx_uint_t   name;
@@ -329,9 +316,6 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     return NGX_OK;
 }
 
-#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF   0
-#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO  1
-#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON    2
 #define NGX_HTTP_MARKDOWN_FILTER_MODULE_H
 #include "../src/ngx_http_markdown_diagnostics.c"
 
@@ -528,7 +512,8 @@ test_access_and_json_builder(void)
 
     reset_test_state();
     init_request(&r, &c, &conf, &addr);
-    conf.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
+    conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
+    conf.stream.policy_explicit = 1;
     conf.stream.threshold_explicit = 1;
 
     rc = ngx_http_markdown_diagnostics_init(

@@ -546,40 +546,6 @@ ngx_http_conf_get_module_loc_conf(ngx_conf_t *cf, ngx_module_t module)
     return g_clcf;
 }
 
-static char *
-ngx_http_markdown_stream_engine_handler(ngx_conf_t *cf,
-    ngx_command_t *cmd, void *conf)
-{
-    ngx_http_markdown_conf_t *mcf = conf;
-    ngx_str_t                *value;
-
-    (void) cmd;
-
-    value = cf->args->elts;
-
-    if (mcf->stream.engine != NGX_CONF_UNSET_UINT) {
-        return "is duplicate";
-    }
-
-    if (value[1].len == 3
-        && ngx_memcmp(value[1].data, "off", 3) == 0)
-    {
-        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF;
-    } else if (value[1].len == 4
-               && ngx_memcmp(value[1].data, "auto", 4) == 0)
-    {
-        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO;
-    } else if (value[1].len == 2
-               && ngx_memcmp(value[1].data, "on", 2) == 0)
-    {
-        mcf->stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
-    } else {
-        return NGX_CONF_ERROR;
-    }
-
-    return NGX_CONF_OK;
-}
-
 /*
  * Returns the test instance of ngx_http_markdown_main_conf_t,
  * allowing ngx_http_markdown_set_dynconf_path to read and write
@@ -757,7 +723,6 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->routing.stream_types = NGX_CONF_UNSET_PTR;
     mcf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     mcf->ops.metrics_format = NGX_CONF_UNSET_UINT;
-    mcf->stream.engine = NGX_CONF_UNSET_UINT;
     mcf->stream.policy = NGX_CONF_UNSET_UINT;
     mcf->stream.policy_explicit = -1;
     mcf->stream.threshold = NGX_CONF_UNSET_SIZE;
@@ -1056,17 +1021,21 @@ test_simple_enum_handlers(void)
 
     init_conf(&mcf);
     set_arg(&values[1], "mdx");
+    g_conf_log_buf[0] = '\0';
     rc = ngx_http_markdown_flavor(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "mdx should parse");
-    TEST_ASSERT(mcf.flavor == NGX_HTTP_MARKDOWN_FLAVOR_MDX,
-        "flavor should be mdx");
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "mdx should be rejected");
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_flavor commonmark") != NULL
+            && strstr(g_conf_log_buf, "markdown_flavor gfm") != NULL,
+        "mdx rejection should name supported flavor replacements");
 
     init_conf(&mcf);
     set_arg(&values[1], "org-mode");
+    g_conf_log_buf[0] = '\0';
     rc = ngx_http_markdown_flavor(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "org-mode should parse");
-    TEST_ASSERT(mcf.flavor == NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE,
-        "flavor should be org-mode");
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "org-mode should be rejected");
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_flavor commonmark") != NULL
+            && strstr(g_conf_log_buf, "markdown_flavor gfm") != NULL,
+        "org-mode rejection should name supported flavor replacements");
 
     init_conf(&mcf);
     set_arg(&values[1], "markdown");
@@ -1566,17 +1535,10 @@ test_metrics_handlers(void)
 }
 
 /*
- * Verify stream_engine handler: static enum values, duplicate
- * detection, and invalid value rejection.
- *
- * Semantic contract mirrored: ngx_http_markdown_stream_engine_handler
- * accepts static enum tokens (off, auto, on), stores the value in
- * mcf.stream.engine, rejects duplicates, and returns NGX_CONF_ERROR
- * for invalid tokens.
+ * Verify the removed stream_engine handler always rejects and emits a
+ * value-specific migration to markdown_streaming.
  *
  * Return: void.
- *
- * Side effects: asserts on mcf.stream.engine.
  */
 static void
 test_streaming_engine_handler(void)
@@ -1595,39 +1557,41 @@ test_streaming_engine_handler(void)
     set_arg(&values[0], "markdown_streaming_engine");
 
     init_conf(&mcf);
-    set_arg(&values[1], "auto");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "auto should parse");
-    TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO,
-        "stream engine should be set to AUTO");
-
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
-    TEST_ASSERT(strcmp(rc, "is duplicate") == 0,
-        "duplicate stream_engine should fail");
-
-    init_conf(&mcf);
     set_arg(&values[1], "off");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "off should parse");
-    TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF,
-        "stream engine should be set to OFF");
+    g_conf_log_buf[0] = '\0';
+    rc = ngx_http_markdown_reject_streaming_engine(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "off should be rejected");
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_streaming off") != NULL,
+        "off should map to markdown_streaming off");
 
-    init_conf(&mcf);
+    set_arg(&values[1], "auto");
+    g_conf_log_buf[0] = '\0';
+    rc = ngx_http_markdown_reject_streaming_engine(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "auto should be rejected");
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_streaming auto") != NULL,
+        "auto should map to markdown_streaming auto");
+
     set_arg(&values[1], "on");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
-    TEST_ASSERT(rc == NGX_CONF_OK, "on should parse");
-    TEST_ASSERT(mcf.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
-        "stream engine should be set to ON");
+    g_conf_log_buf[0] = '\0';
+    rc = ngx_http_markdown_reject_streaming_engine(&cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR, "on should be rejected");
+    TEST_ASSERT(strstr(g_conf_log_buf, "markdown_streaming force") != NULL,
+        "on should map to markdown_streaming force");
 
-    init_conf(&mcf);
     set_arg(&values[1], "invalid");
-    rc = ngx_http_markdown_stream_engine_handler(&cf, &cmd, &mcf);
+    g_conf_log_buf[0] = '\0';
+    rc = ngx_http_markdown_reject_streaming_engine(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
-        "invalid static value should fail");
+        "invalid legacy value should fail");
+    TEST_ASSERT(strstr(g_conf_log_buf, "off -> off") != NULL
+            && strstr(g_conf_log_buf, "on -> force") != NULL,
+        "invalid value should report the complete legacy mapping");
+    TEST_ASSERT(mcf.stream.policy == NGX_CONF_UNSET_UINT,
+        "removed directive must not alias or mutate markdown_streaming");
 
     g_compile_complex_rc = NGX_OK;
 
-    TEST_PASS("streaming_engine branches covered");
+    TEST_PASS("streaming_engine migration rejections covered");
 }
 
 /*

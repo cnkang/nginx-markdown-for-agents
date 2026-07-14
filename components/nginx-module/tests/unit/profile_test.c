@@ -488,7 +488,6 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->ops.otel_metrics = NGX_CONF_UNSET;
     mcf->ops.otel_span_buffer_size = NGX_CONF_UNSET_UINT;
     mcf->ops.otel_export_timeout = NGX_CONF_UNSET_MSEC;
-    mcf->stream.engine = NGX_CONF_UNSET_UINT;
     mcf->stream.policy = NGX_CONF_UNSET_UINT;
     mcf->stream.policy_explicit = -1;
     mcf->stream.threshold = NGX_CONF_UNSET_SIZE;
@@ -496,12 +495,9 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
     mcf->stream.flush_min = NGX_CONF_UNSET_SIZE;
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;
-    mcf->stream.on_error = NGX_CONF_UNSET_UINT;
-    mcf->stream.on_error_explicit = -1;
     mcf->stream.budget = NGX_CONF_UNSET_SIZE;
     mcf->stream.budget_explicit = -1;
     mcf->stream.shadow = -1;
-    mcf->stream.shadow_explicit = -1;
     mcf->advanced.prune_noise = NGX_CONF_UNSET;
     mcf->advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     mcf->advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -675,8 +671,6 @@ test_profile_defaults_strict_cache_merge(void)
         "strict_cache enables full cache validation");
     TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
         "strict_cache disables streaming policy");
-    TEST_ASSERT(child.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF,
-        "strict_cache disables streaming engine");
     TEST_ASSERT(child.max_size == 8 * 1024 * 1024,
         "strict_cache memory default is 8m");
     TEST_ASSERT(child.timeout == 2000,
@@ -723,8 +717,6 @@ test_profile_defaults_streaming_first_merge(void)
         "streaming_first disables cache validation");
     TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
         "streaming_first forces streaming policy");
-    TEST_ASSERT(child.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
-        "streaming_first enables streaming engine");
     TEST_ASSERT(child.stream.budget == 256 * 1024,
         "streaming_first streaming buffer default is 256k");
 
@@ -1045,8 +1037,6 @@ test_hierarchical_profile_merge_child_defaults(void)
         "child streaming_first disabled cache validation overrides parent ims_only");
     TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
         "child streaming_first force overrides parent balanced auto");
-    TEST_ASSERT(child.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
-        "child streaming_first engine_on overrides parent balanced auto");
     TEST_ASSERT(child.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
         "child streaming_first pass error policy overrides parent balanced pass");
 

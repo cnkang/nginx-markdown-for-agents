@@ -778,17 +778,11 @@ static const ngx_str_t *
 ngx_http_markdown_otel_flavor_name(ngx_uint_t flavor)
 {
     static ngx_str_t  gfm_name = ngx_string("gfm");
-    static ngx_str_t  mdx_name = ngx_string("mdx");
-    static ngx_str_t  org_mode_name = ngx_string("org-mode");
     static ngx_str_t  commonmark_name = ngx_string("commonmark");
 
     switch (flavor) {
     case NGX_HTTP_MARKDOWN_FLAVOR_GFM:
         return &gfm_name;
-    case NGX_HTTP_MARKDOWN_FLAVOR_MDX:
-        return &mdx_name;
-    case NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE:
-        return &org_mode_name;
     case NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK:
     default:
         return &commonmark_name;
