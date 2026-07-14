@@ -1379,7 +1379,7 @@ static void test_on_error_terminal_only_again_no_abort(void)
 
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     /* Rust safe_finish succeeds with no closing bytes */
     test_safe_finish_rc = POST_COMMIT_SAFE_FINISH;

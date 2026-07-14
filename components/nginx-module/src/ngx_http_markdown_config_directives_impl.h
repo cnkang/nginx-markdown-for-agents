@@ -19,19 +19,6 @@
  * Each directive includes validation and clear error messages.
  */
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-static ngx_conf_enum_t
-    ngx_http_markdown_streaming_engine_enum[] = {
-    { ngx_string("off"),
-      NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF },
-    { ngx_string("auto"),
-      NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO },
-    { ngx_string("on"),
-      NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON },
-    { ngx_null_string, 0 }
-};
-#endif /* MARKDOWN_STREAMING_ENABLED */
-
 static ngx_conf_enum_t
     ngx_http_markdown_llm_provider_values[] = {
     { ngx_string("default"),           0 },
@@ -335,13 +322,11 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_flavor commonmark|gfm|mdx|org-mode
+     * markdown_flavor commonmark|gfm
      *
      * Markdown flavor to generate:
      * - commonmark: CommonMark specification (default)
      * - gfm: GitHub Flavored Markdown (includes tables, strikethrough)
-     * - mdx: experimental MDX-oriented selector
-     * - org-mode: experimental Org-mode-oriented selector
      * Default: commonmark
      * Context: http, server, location
      *
@@ -499,8 +484,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_streaming off|auto|force   (Config V2, 0.9.0)
      *
-     * Streaming *enablement* policy.  Distinct from
-     * markdown_streaming_engine (the implementation selector).
+     * Sole streaming processing-path policy.
      *
      *   off   - never stream
      *   auto  - stream large responses, full-buffer small ones (default)
@@ -842,28 +826,27 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NULL
     },
 
-#ifdef MARKDOWN_STREAMING_ENABLED
     /*
      * markdown_streaming_engine off|on|auto
      *
-     * Streaming engine selection mode.
-     * Default: auto (per-request selection based on
-     *          markdown_stream_threshold)
+     * Removed implementation selector.  Keep a reject-only parser entry so
+     * nginx -t gives an actionable value-specific migration message.
      * Context: http, server, location
      *
-     * Example:
-     *   markdown_streaming_engine auto;
+     * Migration: off -> markdown_streaming off,
+     * auto -> markdown_streaming auto, on -> markdown_streaming force.
      */
     {
         ngx_string("markdown_streaming_engine"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_enum_slot,
+        ngx_http_markdown_reject_streaming_engine,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, stream.engine),
-        &ngx_http_markdown_streaming_engine_enum
+        0,
+        NULL
     },
 
+#ifdef MARKDOWN_STREAMING_ENABLED
     /*
      * markdown_streaming_shadow on|off
      *
@@ -1409,36 +1392,6 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         0,
         NULL
     },
-
-    /*
-     * markdown_streaming_engine off|auto|on
-     *
-     * v0.8.0 core engine switch for true streaming availability.
-     * - off: streaming disabled
-     * - auto: automatic selection based on threshold (default)
-     * - on: streaming always enabled for eligible responses
-     *
-     * Streaming-enabled builds register the same directive above through
-     * ngx_conf_set_enum_slot. Non-streaming builds keep this parser so
-     * config validation reports invalid values consistently.
-     *
-     * Default: auto
-     * Context: http, server, location
-     *
-     * Example:
-     *   markdown_streaming_engine on;
-     */
-#ifndef MARKDOWN_STREAMING_ENABLED
-    {
-        ngx_string("markdown_streaming_engine"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_http_markdown_stream_engine_handler,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        0,
-        NULL
-    },
-#endif
 
     /*
      * markdown_stream_threshold <size>

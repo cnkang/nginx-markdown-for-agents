@@ -124,15 +124,6 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
     (2 * 1024 * 1024)
 
 /*
- * Streaming on_error policy constants
- *
- * Controls Pre_Commit_Phase failure behavior for the
- * markdown_streaming_on_error directive.
- */
-#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS    0
-#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT  1
-
-/*
  * Streaming engine reason codes (streaming observability).
  *
  * Stable identifiers explaining why a particular engine path was chosen.
@@ -314,23 +305,9 @@ typedef struct {
 } ngx_http_markdown_decision_t;
 
 /*
- * Streaming engine mode constants (markdown_streaming_engine directive).
- *
- * These use a simple enum stored as ngx_uint_t
- * rather than a complex value.
- */
-#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF   0
-#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO  1
-#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON    2
-
-/*
  * Streaming policy mode constants (markdown_streaming directive, 0.9.0).
  *
- * markdown_streaming off|auto|force is the streaming *enablement* selector
- * (Config V2, spec 49).  It is distinct from markdown_streaming_engine,
- * which is the *implementation* selector (off|auto|on).  Do not conflate
- * the two: policy decides whether streaming is attempted, engine decides
- * which backend implementation is used.
+ * markdown_streaming off|auto|force is the sole processing-path selector.
  */
 #define NGX_HTTP_MARKDOWN_STREAMING_OFF    0
 #define NGX_HTTP_MARKDOWN_STREAMING_AUTO   1
@@ -359,7 +336,6 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_EXPLICIT_ACCEPT_POLICY     0x0008
 #define NGX_HTTP_MARKDOWN_EXPLICIT_CACHE_VALIDATION  0x0010
 #define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY     0x0020
-#define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_ENGINE     0x0040
 #define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET     0x0080
 
 /*
@@ -434,8 +410,6 @@ typedef struct {
  */
 #define NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK  0  /* CommonMark flavor */
 #define NGX_HTTP_MARKDOWN_FLAVOR_GFM         1  /* GitHub Flavored Markdown */
-#define NGX_HTTP_MARKDOWN_FLAVOR_MDX         2  /* MDX (Markdown + JSX) */
-#define NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE    3  /* Org-mode */
 
 /*
  * Configuration constants for auth_policy directive
@@ -523,14 +497,13 @@ typedef enum {
  * - advanced.dynconf_dry_run: 0 (off by default)
  *
  * Streaming defaults when MARKDOWN_STREAMING_ENABLED is compiled in:
- * - stream.engine: auto (1) — NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO
  * - stream.budget: NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT
- * - stream.on_error: NGX_HTTP_MARKDOWN_ON_ERROR_PASS
+ * - on_error: NGX_HTTP_MARKDOWN_ON_ERROR_PASS
  * - stream.shadow: 0 (off by default)
  * - stream.threshold: NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT (1m)
  *
  * v0.8.0 streaming config defaults (streaming configuration directives):
- * - stream.engine: auto (1)
+ * - stream.policy: auto
  * - stream.threshold: NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT (1m)
  * - stream.precommit_buffer: 262144 (256k)
  * - stream.flush_min: 16384 (16k)
@@ -582,7 +555,6 @@ typedef struct {
     ngx_uint_t   conditional_requests;     /* markdown_cache_validation mode */
     ngx_flag_t   generate_etag;            /* markdown_cache_validation ETag */
     ngx_uint_t   streaming_policy;         /* markdown_streaming */
-    ngx_uint_t   streaming_engine;         /* markdown_streaming_engine */
     size_t       limits_memory;            /* markdown_limits memory= */
     ngx_msec_t   limits_timeout;           /* markdown_limits timeout= */
     size_t       limits_streaming_buffer;  /* markdown_limits streaming_buffer= */
@@ -659,7 +631,6 @@ typedef struct {
      * directives.  There is no compatibility layer from v0.6.x.
      */
     struct {
-        ngx_uint_t    engine;              /* markdown_streaming_engine off|auto|on */
         ngx_uint_t    policy;              /* markdown_streaming off|auto|force */
         ngx_flag_t    policy_explicit;     /* 1 if operator set markdown_streaming */
         size_t        threshold;           /* markdown_stream_threshold (default: 1m) */
@@ -667,12 +638,9 @@ typedef struct {
         size_t        precommit_buffer;    /* markdown_stream_precommit_buffer (default: 256k) */
         size_t        flush_min;           /* markdown_stream_flush_min (default: 16k) */
         ngx_array_t  *excluded_types;      /* markdown_stream_excluded_types (default: NULL) */
-        ngx_uint_t    on_error;            /* markdown_error_policy (streaming component) pass|reject */
-        ngx_flag_t    on_error_explicit;   /* 1 if operator set streaming error_policy */
         size_t        budget;              /* markdown_limits streaming_buffer (default: 2m) */
         ngx_flag_t    budget_explicit;     /* 1 if operator set streaming_buffer */
         ngx_flag_t    shadow;              /* markdown_streaming_shadow on|off */
-        ngx_flag_t    shadow_explicit;     /* 1 if operator set streaming_shadow */
         ngx_flag_t    zero_copy;           /* markdown_streaming_zero_copy on|off (default: off) */
     } stream;
 
@@ -753,9 +721,6 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
         }                                                                    \
     } while (0)
 
-    NGX_MD_MERGE_STREAM(engine, ngx_uint_t, -1,
-                        profile_defaults->streaming_engine,
-                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_ENGINE);
     NGX_MD_MERGE_STREAM(policy, ngx_uint_t, -1,
                         profile_defaults->streaming_policy,
                         NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY);
@@ -774,18 +739,12 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
                 ? prev->stream.excluded_types : NULL;
     }
 
-    NGX_MD_MERGE_STREAM(on_error, ngx_uint_t, -1,
-                        profile_defaults->error_policy,
-                        NGX_HTTP_MARKDOWN_EXPLICIT_ERROR_POLICY);
-    NGX_MD_MERGE_STREAM(on_error_explicit, ngx_flag_t, -1, 0,
-                        NGX_HTTP_MARKDOWN_EXPLICIT_ERROR_POLICY);
     NGX_MD_MERGE_STREAM(budget, size_t, -1,
                         profile_defaults->limits_streaming_buffer,
                         NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET);
     NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0,
                         NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET);
     NGX_MD_MERGE_STREAM(shadow, ngx_flag_t, -1, 0, 0);
-    NGX_MD_MERGE_STREAM(shadow_explicit, ngx_flag_t, -1, 0, 0);
     NGX_MD_MERGE_STREAM(zero_copy, ngx_flag_t, -1, 0, 0);
 
 #undef NGX_MD_MERGE_STREAM

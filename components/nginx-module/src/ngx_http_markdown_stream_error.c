@@ -85,7 +85,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
         dctx.within_resource_limits = 1;
     }
 
-    dctx.on_error_policy = conf->stream.on_error;
+    dctx.on_error_policy = conf->on_error;
 
     /* 2. Choose event based on committed state and on_error policy */
     if (ctx->stream_sm.headers_committed) {
@@ -95,7 +95,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
          * to choose safe_finish vs abort.
          */
         event = NGX_HTTP_MD_EVENT_ERROR;
-    } else if (conf->stream.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
+    } else if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
         event = NGX_HTTP_MD_EVENT_ON_ERROR_PASS;
     } else {
         event = NGX_HTTP_MD_EVENT_ON_ERROR_REJECT;

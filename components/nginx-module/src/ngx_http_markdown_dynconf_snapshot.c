@@ -175,10 +175,6 @@ ngx_http_markdown_flavor_str(ngx_uint_t val)
         return "commonmark";
     case NGX_HTTP_MARKDOWN_FLAVOR_GFM:
         return "gfm";
-    case NGX_HTTP_MARKDOWN_FLAVOR_MDX:
-        return "mdx";
-    case NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE:
-        return "org-mode";
     default:
         return "unknown";
     }
@@ -274,15 +270,15 @@ ngx_http_markdown_log_verbosity_str(ngx_uint_t val)
  * to a human-readable string.
  */
 static const char *
-ngx_http_markdown_streaming_engine_str(ngx_uint_t engine)
+ngx_http_markdown_streaming_policy_str(ngx_uint_t policy)
 {
-    switch (engine) {
-    case NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF:
+    switch (policy) {
+    case NGX_HTTP_MARKDOWN_STREAMING_OFF:
         return "off";
-    case NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO:
+    case NGX_HTTP_MARKDOWN_STREAMING_AUTO:
         return "auto";
-    case NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON:
-        return "on";
+    case NGX_HTTP_MARKDOWN_STREAMING_FORCE:
+        return "force";
     default:
         return "unknown";
     }
@@ -299,7 +295,7 @@ ngx_http_markdown_streaming_engine_str(ngx_uint_t engine)
  * The output format matches the design.md §13.2 specification:
  *   "config_snapshot": {
  *       "markdown_filter": "on",
- *       "markdown_streaming_engine": "auto",
+ *       "markdown_streaming": "auto",
  *       "decompression_budget": "10485760",
  *       ...
  *   }
@@ -437,10 +433,10 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
 #endif
 
 #ifdef MARKDOWN_STREAMING_ENABLED
-    /* markdown_streaming_engine */
+    /* markdown_streaming */
     p = ngx_http_markdown_snapshot_str(p, last,
-        "markdown_streaming_engine",
-        ngx_http_markdown_streaming_engine_str(conf->stream.engine), 1);
+        "markdown_streaming",
+        ngx_http_markdown_streaming_policy_str(conf->stream.policy), 1);
 
     /* markdown_streaming_budget */
     p = ngx_http_markdown_snapshot_size(p, last,

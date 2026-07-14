@@ -61,9 +61,9 @@ typedef size_t          ngx_msec_t;
 #define PATH_INCREMENTAL  1
 #define PATH_STREAMING    2
 
-#define ENGINE_OFF   0
-#define ENGINE_ON    1
-#define ENGINE_AUTO  2
+#define POLICY_OFF    0
+#define POLICY_AUTO   1
+#define POLICY_FORCE  2
 
 #define COMMIT_PRE   0
 #define COMMIT_POST  1
@@ -90,11 +90,11 @@ typedef size_t          ngx_msec_t;
 #define STREAMING_BUDGET_DEFAULT  (2 * 1024 * 1024)
 
 /* ================================================================
- * Lightweight stubs for engine selection tests
+ * Lightweight stubs for streaming policy selection tests
  * ================================================================ */
 
 typedef struct {
-    ngx_uint_t   engine_mode;       /* resolved engine value */
+    ngx_uint_t   streaming_policy;       /* resolved policy value */
     ngx_uint_t   conditional_requests;
     size_t       large_body_threshold;
     size_t       streaming_auto_threshold;
@@ -114,17 +114,17 @@ typedef struct {
 static ngx_uint_t
 test_select_processing_path(const test_conf_t *conf,
     const test_request_t *r);
-static void test_engine_off(void);
-static void test_engine_on_get(void);
-static void test_engine_on_head(void);
-static void test_engine_on_304(void);
-static void test_engine_on_conditional_full(void);
-static void test_engine_on_conditional_ims_only(void);
-static void test_engine_on_conditional_disabled(void);
-static void test_engine_on_sse(void);
-static void test_engine_auto_large_cl(void);
-static void test_engine_auto_small_cl(void);
-static void test_engine_auto_no_cl(void);
+static void test_policy_off(void);
+static void test_policy_on_get(void);
+static void test_policy_on_head(void);
+static void test_policy_on_304(void);
+static void test_policy_on_conditional_full(void);
+static void test_policy_on_conditional_ims_only(void);
+static void test_policy_on_conditional_disabled(void);
+static void test_policy_on_sse(void);
+static void test_policy_auto_large_cl(void);
+static void test_policy_auto_small_cl(void);
+static void test_policy_auto_no_cl(void);
 static void test_decomp_null_safety(void);
 static void test_decomp_empty_input(void);
 static void test_chunk_processing_empty(void);
@@ -136,7 +136,7 @@ static void test_postcommit_error_ignores_on_error_policy(void);
 static void test_postcommit_error_debug_log_details(void);
 static void test_postcommit_error_various_error_codes(void);
 static void test_config_budget_default(void);
-static void test_config_engine_values(void);
+static void test_config_policy_values(void);
 static void test_output_chain_last_buf(void);
 static void test_output_chain_flush(void);
 static void test_size_limit_precommit(void);
@@ -158,7 +158,7 @@ static void test_streaming_no_cl_and_chunked_coexist(void);
 static void test_precommit_no_header_modification(void);
 static void test_commit_boundary_strips_upstream_etag(void);
 static void test_precommit_all_failopen_paths_record_metrics(void);
-static void test_init_failure_respects_streaming_on_error(void);
+static void test_init_failure_respects_error_policy(void);
 static void test_streaming_failopen_increments_global_counter(void);
 
 /* Preservation test prototypes (non-bug-condition baseline) */
@@ -171,30 +171,30 @@ static void test_preserve_tail_feed_success(void);
 static void test_preserve_no_tail_data(void);
 static void test_preserve_no_decompression(void);
 static void test_preserve_valid_static_values(void);
-static void test_preserve_variable_expression(void);
+static void test_policy_rejects_variable_expression(void);
 static void test_preserve_duplicate_directive(void);
 
 
 /*
- * Engine selection logic (mirrors ngx_http_markdown_select_processing_path).
+ * Streaming policy selection logic (mirrors production path selection).
  *
  * Evaluation order:
- * 1. engine == off -> PATH_FULLBUFFER
+ * 1. policy == off -> PATH_FULLBUFFER
  * 2. HEAD request -> PATH_FULLBUFFER
  * 3. 304 Not Modified -> PATH_FULLBUFFER
  * 4. conditional_requests full_support -> PATH_FULLBUFFER
  * 5. Content-Type is text/event-stream -> PATH_FULLBUFFER
- * 6. engine == on -> PATH_STREAMING
- * 7. engine == auto + CL >= threshold -> PATH_STREAMING
- * 8. engine == auto + no CL -> PATH_STREAMING
- * 9. engine == auto + CL < threshold -> PATH_FULLBUFFER
+ * 6. policy == force -> PATH_STREAMING
+ * 7. policy == auto + CL >= threshold -> PATH_STREAMING
+ * 8. policy == auto + no CL -> PATH_STREAMING
+ * 9. policy == auto + CL < threshold -> PATH_FULLBUFFER
  */
 static ngx_uint_t
 test_select_processing_path(const test_conf_t *conf,
     const test_request_t *r)
 {
-    /* Rule 1: engine off */
-    if (conf->engine_mode == ENGINE_OFF) {
+    /* Rule 1: policy off */
+    if (conf->streaming_policy == POLICY_OFF) {
         return PATH_FULLBUFFER;
     }
 
@@ -224,12 +224,12 @@ test_select_processing_path(const test_conf_t *conf,
         return PATH_FULLBUFFER;
     }
 
-    /* Rule 6: engine on */
-    if (conf->engine_mode == ENGINE_ON) {
+    /* Rule 6: policy force */
+    if (conf->streaming_policy == POLICY_FORCE) {
         return PATH_STREAMING;
     }
 
-    /* Rules 7-9: engine auto */
+    /* Rules 7-9: policy auto */
     if (r->content_length >= 0
         && (size_t) r->content_length
            < conf->streaming_auto_threshold)
@@ -243,20 +243,19 @@ test_select_processing_path(const test_conf_t *conf,
 }
 
 /* ================================================================
- * 14.1 Engine selection unit tests
- * Feature: nginx-streaming-runtime-and-ffi, engine selection / shadow error isolation
+ * 14.1 Streaming policy selection unit tests
  * ================================================================ */
 
 static void
-test_engine_off(void)
+test_policy_off(void)
 {
     test_conf_t    conf;
     test_request_t req;
 
-    TEST_SUBSECTION("Engine off: always full-buffer");
+    TEST_SUBSECTION("Policy off: always full-buffer");
 
     memset(&conf, 0, sizeof(conf));
-    conf.engine_mode = ENGINE_OFF;
+    conf.streaming_policy = POLICY_OFF;
     conf.conditional_requests = CONDITIONAL_DISABLED;
 
     memset(&req, 0, sizeof(req));
@@ -268,20 +267,20 @@ test_engine_off(void)
     TEST_ASSERT(
         test_select_processing_path(&conf, &req)
             == PATH_FULLBUFFER,
-        "engine=off should always select full-buffer");
-    TEST_PASS("engine=off selects full-buffer");
+        "policy=off should always select full-buffer");
+    TEST_PASS("policy=off selects full-buffer");
 }
 
 static void
-test_engine_on_get(void)
+test_policy_on_get(void)
 {
     test_conf_t    conf;
     test_request_t req;
 
-    TEST_SUBSECTION("Engine on + GET: streaming");
+    TEST_SUBSECTION("Policy force + GET: streaming");
 
     memset(&conf, 0, sizeof(conf));
-    conf.engine_mode = ENGINE_ON;
+    conf.streaming_policy = POLICY_FORCE;
     conf.conditional_requests = CONDITIONAL_DISABLED;
 
     memset(&req, 0, sizeof(req));
@@ -293,20 +292,20 @@ test_engine_on_get(void)
     TEST_ASSERT(
         test_select_processing_path(&conf, &req)
             == PATH_STREAMING,
-        "engine=on + GET should select streaming");
-    TEST_PASS("engine=on + GET selects streaming");
+        "policy=force + GET should select streaming");
+    TEST_PASS("policy=force + GET selects streaming");
 }
 
 static void
-test_engine_on_head(void)
+test_policy_on_head(void)
 {
     test_conf_t    conf;
     test_request_t req;
 
-    TEST_SUBSECTION("Engine on + HEAD: full-buffer");
+    TEST_SUBSECTION("Policy force + HEAD: full-buffer");
 
     memset(&conf, 0, sizeof(conf));
-    conf.engine_mode = ENGINE_ON;
+    conf.streaming_policy = POLICY_FORCE;
     conf.conditional_requests = CONDITIONAL_DISABLED;
 
     memset(&req, 0, sizeof(req));
@@ -318,20 +317,20 @@ test_engine_on_head(void)
     TEST_ASSERT(
         test_select_processing_path(&conf, &req)
             == PATH_FULLBUFFER,
-        "engine=on + HEAD should select full-buffer");
-    TEST_PASS("engine=on + HEAD selects full-buffer");
+        "policy=force + HEAD should select full-buffer");
+    TEST_PASS("policy=force + HEAD selects full-buffer");
 }
 
 static void
-test_engine_on_304(void)
+test_policy_on_304(void)
 {
     test_conf_t    conf;
     test_request_t req;
 
-    TEST_SUBSECTION("Engine on + 304: full-buffer");
+    TEST_SUBSECTION("Policy force + 304: full-buffer");
 
     memset(&conf, 0, sizeof(conf));
-    conf.engine_mode = ENGINE_ON;
+    conf.streaming_policy = POLICY_FORCE;
     conf.conditional_requests = CONDITIONAL_DISABLED;
 
     memset(&req, 0, sizeof(req));
@@ -343,21 +342,21 @@ test_engine_on_304(void)
     TEST_ASSERT(
         test_select_processing_path(&conf, &req)
             == PATH_FULLBUFFER,
-        "engine=on + 304 should select full-buffer");
-    TEST_PASS("engine=on + 304 selects full-buffer");
+        "policy=force + 304 should select full-buffer");
+    TEST_PASS("policy=force + 304 selects full-buffer");
 }
 
 static void
-test_engine_on_conditional_full(void)
+test_policy_on_conditional_full(void)
 {
     test_conf_t    conf;
     test_request_t req;
 
     TEST_SUBSECTION(
-        "Engine on + conditional full_support: full-buffer");
+        "Policy force + conditional full_support: full-buffer");
 
     memset(&conf, 0, sizeof(conf));
-    conf.engine_mode = ENGINE_ON;
+    conf.streaming_policy = POLICY_FORCE;
     conf.conditional_requests = CONDITIONAL_FULL_SUPPORT;
 
     memset(&req, 0, sizeof(req));
@@ -381,17 +380,17 @@ test_engine_on_conditional_full(void)
  * Validates: conditional if_modified_since_only allows streaming
  */
 static void
-test_engine_on_conditional_ims_only(void)
+test_policy_on_conditional_ims_only(void)
 {
     test_conf_t    conf;
     test_request_t req;
 
     TEST_SUBSECTION(
-        "Engine on + conditional if_modified_since_only: "
+        "Policy force + conditional if_modified_since_only: "
         "streaming");
 
     memset(&conf, 0, sizeof(conf));
-    conf.engine_mode = ENGINE_ON;
+    conf.streaming_policy = POLICY_FORCE;
     conf.conditional_requests =
         CONDITIONAL_IF_MODIFIED_SINCE;
 
@@ -418,16 +417,16 @@ test_engine_on_conditional_ims_only(void)
  * Validates: conditional disabled allows streaming
  */
 static void
-test_engine_on_conditional_disabled(void)
+test_policy_on_conditional_disabled(void)
 {
     test_conf_t    conf;
     test_request_t req;
 
     TEST_SUBSECTION(
-        "Engine on + conditional disabled: streaming");
+        "Policy force + conditional disabled: streaming");
 
     memset(&conf, 0, sizeof(conf));
-    conf.engine_mode = ENGINE_ON;
+    conf.streaming_policy = POLICY_FORCE;
     conf.conditional_requests = CONDITIONAL_DISABLED;
 
     memset(&req, 0, sizeof(req));
@@ -445,15 +444,15 @@ test_engine_on_conditional_disabled(void)
 }
 
 static void
-test_engine_on_sse(void)
+test_policy_on_sse(void)
 {
     test_conf_t    conf;
     test_request_t req;
 
-    TEST_SUBSECTION("Engine on + SSE: full-buffer");
+    TEST_SUBSECTION("Policy force + SSE: full-buffer");
 
     memset(&conf, 0, sizeof(conf));
-    conf.engine_mode = ENGINE_ON;
+    conf.streaming_policy = POLICY_FORCE;
     conf.conditional_requests = CONDITIONAL_DISABLED;
 
     memset(&req, 0, sizeof(req));
@@ -470,15 +469,15 @@ test_engine_on_sse(void)
 }
 
 static void
-test_engine_auto_large_cl(void)
+test_policy_auto_large_cl(void)
 {
     test_conf_t    conf;
     test_request_t req;
 
-    TEST_SUBSECTION("Engine auto + large CL: streaming");
+    TEST_SUBSECTION("Policy auto + large CL: streaming");
 
     memset(&conf, 0, sizeof(conf));
-    conf.engine_mode = ENGINE_AUTO;
+    conf.streaming_policy = POLICY_AUTO;
     conf.conditional_requests = CONDITIONAL_DISABLED;
     conf.streaming_auto_threshold = 1024;
 
@@ -496,15 +495,15 @@ test_engine_auto_large_cl(void)
 }
 
 static void
-test_engine_auto_small_cl(void)
+test_policy_auto_small_cl(void)
 {
     test_conf_t    conf;
     test_request_t req;
 
-    TEST_SUBSECTION("Engine auto + small CL: full-buffer");
+    TEST_SUBSECTION("Policy auto + small CL: full-buffer");
 
     memset(&conf, 0, sizeof(conf));
-    conf.engine_mode = ENGINE_AUTO;
+    conf.streaming_policy = POLICY_AUTO;
     conf.conditional_requests = CONDITIONAL_DISABLED;
     conf.streaming_auto_threshold = 1024;
 
@@ -522,15 +521,15 @@ test_engine_auto_small_cl(void)
 }
 
 static void
-test_engine_auto_no_cl(void)
+test_policy_auto_no_cl(void)
 {
     test_conf_t    conf;
     test_request_t req;
 
-    TEST_SUBSECTION("Engine auto + no CL: streaming");
+    TEST_SUBSECTION("Policy auto + no CL: streaming");
 
     memset(&conf, 0, sizeof(conf));
-    conf.engine_mode = ENGINE_AUTO;
+    conf.streaming_policy = POLICY_AUTO;
     conf.conditional_requests = CONDITIONAL_DISABLED;
     conf.streaming_auto_threshold = 1024;
 
@@ -1267,7 +1266,7 @@ test_postcommit_error(void)
 
 /*
  * Verify post-commit error is always fail-closed regardless
- * of streaming_on_error config value.
+ * of error_policy config value.
  *
  * Validates: post-commit ignores on_error policy
  */
@@ -1282,10 +1281,10 @@ test_postcommit_error_ignores_on_error_policy(void)
     unsigned    failed_total;
 
     TEST_SUBSECTION(
-        "Post-Commit error ignores streaming_on_error");
+        "Post-Commit error ignores error_policy");
 
     /*
-     * Test with streaming_on_error = pass.
+     * Test with error_policy = pass.
      * Post-commit must still fail-closed.
      */
     on_error = ON_ERROR_PASS;
@@ -1316,7 +1315,7 @@ test_postcommit_error_ignores_on_error_policy(void)
         "failed_total incremented");
 
     /*
-     * Test with streaming_on_error = reject.
+     * Test with error_policy = reject.
      * Post-commit must still fail-closed (same behavior).
      */
     on_error = ON_ERROR_REJECT;
@@ -1341,7 +1340,7 @@ test_postcommit_error_ignores_on_error_policy(void)
 
     TEST_PASS(
         "Post-Commit always fail-closed, "
-        "streaming_on_error ignored");
+        "error_policy ignored");
 }
 
 
@@ -1557,13 +1556,13 @@ test_config_budget_default(void)
 }
 
 static void
-test_config_engine_values(void)
+test_config_policy_values(void)
 {
-    TEST_SUBSECTION("Config: engine mode values");
+    TEST_SUBSECTION("Config: streaming policy values");
 
-    TEST_ASSERT(ENGINE_OFF == 0, "OFF should be 0");
-    TEST_ASSERT(ENGINE_ON == 1, "ON should be 1");
-    TEST_ASSERT(ENGINE_AUTO == 2, "AUTO should be 2");
+    TEST_ASSERT(POLICY_OFF == 0, "OFF should be 0");
+    TEST_ASSERT(POLICY_AUTO == 1, "AUTO should be 1");
+    TEST_ASSERT(POLICY_FORCE == 2, "FORCE should be 2");
 
     /* Budget parsing */
     TEST_ASSERT(parse_streaming_budget("2m") == 2 * 1024 * 1024,
@@ -1574,7 +1573,7 @@ test_config_engine_values(void)
         "'4096' should parse to 4096 bytes");
     TEST_ASSERT(parse_streaming_budget(NULL) == 0,
         "NULL should return 0");
-    TEST_PASS("Engine mode values and budget parsing correct");
+    TEST_PASS("Streaming policy values and budget parsing correct");
 }
 
 /* ================================================================
@@ -2165,7 +2164,7 @@ test_precommit_all_failopen_paths_record_metrics(void)
 
     /*
      * Simulate 4 different pre-commit error types,
-     * all with streaming_on_error = pass.
+     * all with error_policy = pass.
      * Each must increment both counters.
      */
 
@@ -2201,35 +2200,26 @@ test_precommit_all_failopen_paths_record_metrics(void)
 /*
  * Verify that init-time failures (prepare_options,
  * markdown_streaming_new, decompressor create) respect
- * streaming_on_error=reject instead of falling through
- * to the full-buffer on_error policy.
- *
- * Validates: directive independence from top-level on_error
+ * the unified error policy used by every conversion path.
  */
 static void
-test_init_failure_respects_streaming_on_error(void)
+test_init_failure_respects_error_policy(void)
 {
-    ngx_uint_t  streaming_on_error;
-    ngx_uint_t  on_error;
+    ngx_uint_t  error_policy;
     int         route;
     ngx_int_t   result;
 
     TEST_SUBSECTION(
         "Init-time failure respects "
-        "streaming_on_error");
+        "error_policy");
 
     /*
-     * Scenario: on_error=pass, streaming_on_error=reject.
-     * Init failure must fail-closed (reject), not
-     * fall through to on_error=pass.
+     * Reject policy must fail closed.
      */
-    on_error = ON_ERROR_PASS;
-    streaming_on_error = ON_ERROR_REJECT;
-
-    UNUSED(on_error);
+    error_policy = ON_ERROR_REJECT;
 
     route = test_precommit_route(ERROR_INTERNAL,
-        streaming_on_error);
+        error_policy);
     if (route == 2) {
         result = NGX_ERROR;
     } else {
@@ -2237,21 +2227,16 @@ test_init_failure_respects_streaming_on_error(void)
     }
 
     TEST_ASSERT(result == NGX_ERROR,
-        "Init failure with streaming_on_error=reject "
+        "Init failure with error_policy=reject "
         "must fail-closed");
 
     /*
-     * Scenario: on_error=reject, streaming_on_error=pass.
-     * Init failure must fail-open (pass), not
-     * inherit on_error=reject.
+     * Pass policy must fail open.
      */
-    on_error = ON_ERROR_REJECT;
-    streaming_on_error = ON_ERROR_PASS;
-
-    UNUSED(on_error);
+    error_policy = ON_ERROR_PASS;
 
     route = test_precommit_route(ERROR_INTERNAL,
-        streaming_on_error);
+        error_policy);
     if (route == 2) {
         result = NGX_ERROR;
     } else {
@@ -2259,12 +2244,12 @@ test_init_failure_respects_streaming_on_error(void)
     }
 
     TEST_ASSERT(result == NGX_DECLINED,
-        "Init failure with streaming_on_error=pass "
+        "Init failure with error_policy=pass "
         "must fail-open");
 
     TEST_PASS(
         "Init-time failures respect "
-        "streaming_on_error independently");
+        "the unified error_policy");
 }
 
 
@@ -2341,16 +2326,16 @@ test_streaming_failopen_increments_global_counter(void)
 
 
 /* ================================================================
- * 15.9.1 streaming_on_error Config Parsing
+ * 15.9.1 unified error policy runtime encoding
  * Feature: streaming-failure-cache-semantics
  *
- * Validates: streaming_on_error directive completeness
+ * Validates: one pass/reject runtime value is shared by all paths
  *
- * Tests for markdown_streaming_on_error directive:
- * - Legal values (pass, reject) are accepted
+ * Tests for the resolved runtime field:
+ * - Legal internal values (pass, reject) are distinct
  * - Default value is pass (ON_ERROR_PASS = 0)
  * - Config inheritance (child inherits from parent)
- * - Invalid values are rejected by ngx_conf_set_enum_slot
+ * - Invalid internal names are not accepted
  * ================================================================ */
 
 /* Forward declarations for 15.9 tests */
@@ -2379,21 +2364,19 @@ static void test_metrics_failed_total(void);
 
 
 /*
- * Verify that legal values (pass, reject) are accepted
- * and map to the correct constants.
+ * Verify that resolved pass/reject values map to distinct constants.
  *
- * Validates: streaming_on_error legal values and default
+ * Validates: error_policy legal values and default
  */
 static void
 test_config_on_error_legal_values(void)
 {
     TEST_SUBSECTION(
-        "Config: streaming_on_error legal values");
+        "Runtime: unified error_policy values");
 
     /*
      * ON_ERROR_PASS and ON_ERROR_REJECT must be distinct
-     * and match the enum values used by
-     * ngx_conf_set_enum_slot.
+     * and match the streaming decision state's encoding.
      */
     TEST_ASSERT(ON_ERROR_PASS == 0,
         "ON_ERROR_PASS should be 0");
@@ -2403,7 +2386,7 @@ test_config_on_error_legal_values(void)
         "pass and reject must be distinct values");
 
     /*
-     * Simulate enum lookup: "pass" -> ON_ERROR_PASS,
+     * Runtime lookup: "pass" -> ON_ERROR_PASS,
      * "reject" -> ON_ERROR_REJECT.
      */
     {
@@ -2428,7 +2411,7 @@ test_config_on_error_legal_values(void)
     }
 
     TEST_PASS(
-        "streaming_on_error legal values accepted");
+        "unified error_policy runtime values accepted");
 }
 
 
@@ -2436,33 +2419,33 @@ test_config_on_error_legal_values(void)
  * Verify that the default value is pass (ON_ERROR_PASS = 0).
  *
  * The merge logic uses:
- *   ngx_conf_merge_uint_value(conf->stream.on_error,
- *       prev->stream.on_error,
+ *   ngx_conf_merge_uint_value(conf->on_error,
+ *       prev->on_error,
  *       NGX_HTTP_MARKDOWN_ON_ERROR_PASS);
  *
- * Validates: streaming_on_error legal values and default (default = pass)
+ * Validates: error_policy legal values and default (default = pass)
  */
 static void
 test_config_on_error_default_value(void)
 {
-    ngx_uint_t  streaming_on_error;
+    ngx_uint_t  error_policy;
 
     TEST_SUBSECTION(
-        "Config: streaming_on_error default value");
+        "Runtime: error_policy default value");
 
     /*
      * Simulate unset config: NGX_CONF_UNSET_UINT
      * triggers the default in merge.
      */
-    streaming_on_error = (ngx_uint_t) -1;  /* UNSET */
+    error_policy = (ngx_uint_t) -1;  /* UNSET */
 
     /* Simulate merge with default */
-    if (streaming_on_error == (ngx_uint_t) -1) {
-        streaming_on_error = ON_ERROR_PASS;
+    if (error_policy == (ngx_uint_t) -1) {
+        error_policy = ON_ERROR_PASS;
     }
 
-    TEST_ASSERT(streaming_on_error == ON_ERROR_PASS,
-        "Default streaming_on_error should be pass (0)");
+    TEST_ASSERT(error_policy == ON_ERROR_PASS,
+        "Default error_policy should be pass (0)");
 
     /*
      * Verify the default constant matches the module
@@ -2472,7 +2455,7 @@ test_config_on_error_default_value(void)
         "ON_ERROR_PASS constant should be 0");
 
     TEST_PASS(
-        "streaming_on_error defaults to pass");
+        "error_policy defaults to pass");
 }
 
 
@@ -2480,7 +2463,7 @@ test_config_on_error_default_value(void)
  * Verify config inheritance: child inherits from parent
  * when not explicitly set.
  *
- * Validates: streaming_on_error config inheritance
+ * Validates: error_policy config inheritance
  */
 static void
 test_config_on_error_inheritance(void)
@@ -2489,7 +2472,7 @@ test_config_on_error_inheritance(void)
     ngx_uint_t  child_on_error;
 
     TEST_SUBSECTION(
-        "Config: streaming_on_error inheritance");
+        "Runtime: error_policy inheritance");
 
     /*
      * Scenario 1: Parent = reject, child = unset.
@@ -2542,17 +2525,16 @@ test_config_on_error_inheritance(void)
         "Both unset should resolve to default pass");
 
     TEST_PASS(
-        "streaming_on_error inheritance works");
+        "error_policy inheritance works");
 }
 
 
 /*
  * Verify that invalid values are rejected.
  *
- * ngx_conf_set_enum_slot only accepts values defined in
- * the enum table. Any other value causes a config error.
+ * Only resolved pass/reject names are accepted by this runtime model.
  *
- * Validates: streaming_on_error legal values and default (invalid rejection)
+ * Validates: error_policy legal values and default (invalid rejection)
  */
 static void
 test_config_on_error_invalid_values(void)
@@ -2564,7 +2546,7 @@ test_config_on_error_invalid_values(void)
     size_t       num_values;
 
     TEST_SUBSECTION(
-        "Config: streaming_on_error invalid values");
+        "Runtime: invalid error_policy names");
 
     num_values = ARRAY_SIZE(invalid_values);
 
@@ -2575,7 +2557,7 @@ test_config_on_error_invalid_values(void)
         val = invalid_values[i];
 
         /*
-         * Simulate ngx_conf_set_enum_slot lookup:
+         * Simulate the resolved runtime lookup:
          * only "pass" and "reject" are valid.
          */
         is_valid = (strcmp(val, "pass") == 0
@@ -2586,7 +2568,7 @@ test_config_on_error_invalid_values(void)
     }
 
     TEST_PASS(
-        "Invalid streaming_on_error values rejected");
+        "Invalid error_policy values rejected");
 }
 
 
@@ -3543,7 +3525,7 @@ test_metrics_deferred_lastbuf_again_then_error(void)
  * Validates that the Rust FFI budget exceeded code (6) is
  * classified correctly alongside the C-side memory limit
  * code (4).  Both must increment budget_exceeded_total and
- * route through the streaming_on_error policy.
+ * route through the error_policy policy.
  *
  * These tests exercise the real classification condition
  * from ngx_http_markdown_streaming_precommit_error() and
@@ -4258,7 +4240,7 @@ test_ttfb_nonempty_pending_records(void)
  * in a single run. The final assertion at the end ensures
  * the test binary exits non-zero if any bug was confirmed.
  *
- * Validates: fallback return value correctness, streaming_on_error legal values and default,
+ * Validates: fallback return value correctness, error_policy legal values and default,
  *            decomp inflate loop completeness, tail feed error handling,
  *            invalid static value rejection at parse time
  * ================================================================ */
@@ -4475,9 +4457,7 @@ test_finalize_tail_feed_error(void)
 
 
 /*
- * Bug 4: markdown_streaming_engine directive accepts any
- * static string without validation. Typos like "atuo" are
- * silently accepted and fall back to "off" at runtime.
+ * Regression: markdown_streaming rejects invalid static values.
  *
  * **Validates: invalid static value rejection at parse time**
  */
@@ -4491,67 +4471,46 @@ test_config_invalid_static_value(void)
     int          all_rejected;
 
     TEST_SUBSECTION(
-        "Bug 4: streaming_engine invalid static values");
+        "markdown_streaming invalid static values");
 
     num_values = ARRAY_SIZE(test_values);
     all_rejected = 1;
 
     for (size_t i = 0; i < num_values; i++) {
         const char  *val;
-        int          has_dollar;
         int          is_valid_static;
         int          would_reject;
 
         val = test_values[i];
 
-        /* Check if value contains '$' (variable marker) */
-        has_dollar = (strchr(val, '$') != NULL);
-
         /*
          * Check if value is a valid static keyword
-         * (case-insensitive: off, on, auto)
+         * (case-insensitive: off, auto, force)
          */
-        is_valid_static = 0;
-        if (!has_dollar
-            && (strcasecmp(val, "off") == 0
-                || strcasecmp(val, "on") == 0
-                || strcasecmp(val, "auto") == 0))
-        {
-            is_valid_static = 1;
-        }
+        is_valid_static = (strcasecmp(val, "off") == 0
+            || strcasecmp(val, "auto") == 0
+            || strcasecmp(val, "force") == 0);
 
         /*
-         * Simulate fixed stream_engine_handler() logic:
-         * Static values without '$' are validated against
-         * off/on/auto — invalid ones are rejected.
+         * Simulate markdown_streaming's closed value set.
          */
-        if (has_dollar || !is_valid_static) {
-            would_reject = 1;  /* fixed: rejects invalid */
-        } else {
-            would_reject = 0;  /* valid static enum */
-        }
+        would_reject = !is_valid_static;
 
-        /*
-         * Bug condition: value is not a static off/on/auto enum
-         * but would not be rejected.
-         */
-        if ((has_dollar || !is_valid_static) && would_reject == 0) {
+        /* Every value in this table is outside off/auto/force. */
+        if (!would_reject) {
             all_rejected = 0;
         }
     }
 
     /*
      * EXPECTED BEHAVIOR assertion:
-     * All invalid static values (no '$', not off/on/auto)
+     * All invalid static values outside off/auto/force
      * should be rejected with NGX_CONF_ERROR.
      *
-     * This WILL FAIL on unfixed code (all_rejected == 0
-     * because would_reject is always 0).
      */
-    BUG_EXPECT_FAIL(all_rejected == 1,
+    TEST_ASSERT(all_rejected == 1,
         "Invalid static values like 'atuo' should be "
-        "rejected at config parse time "
-        "(Bug 4: silently accepted)");
+        "rejected at config parse time");
 }
 
 
@@ -4948,12 +4907,11 @@ test_preserve_no_decompression(void)
 
 
 /*
- * Bug 4 Preservation: Valid static values (off/on/auto)
+ * Streaming policy values (off/auto/force)
  * are accepted normally, including case variations.
  *
- * The streaming_engine directive accepts off, on, auto
- * as valid static values (case-insensitive). These must
- * continue to be accepted after the fix adds validation.
+ * The markdown_streaming directive accepts off, auto, and force
+ * as valid static values (case-insensitive).
  *
  * **Validates: valid static values accepted**
  */
@@ -4961,13 +4919,13 @@ static void
 test_preserve_valid_static_values(void)
 {
     const char  *valid_values[] = {
-        "off", "on", "auto", "OFF", "ON", "AUTO",
-        "Off", "On", "Auto"
+        "off", "auto", "force", "OFF", "AUTO", "FORCE",
+        "Off", "Auto", "Force"
     };
     size_t       num_values;
 
     TEST_SUBSECTION(
-        "Preserve Bug 4: valid static values accepted");
+        "markdown_streaming valid static values");
 
     num_values = ARRAY_SIZE(valid_values);
 
@@ -4979,34 +4937,28 @@ test_preserve_valid_static_values(void)
 
         /*
          * Check case-insensitive match against
-         * off, on, auto.
+         * off, auto, force.
          */
         is_valid = (strcasecmp(val, "off") == 0
-                    || strcasecmp(val, "on") == 0
-                    || strcasecmp(val, "auto") == 0);
+                    || strcasecmp(val, "auto") == 0
+                    || strcasecmp(val, "force") == 0);
 
         TEST_ASSERT(is_valid == 1,
             "Valid static value should be recognized");
     }
 
     TEST_PASS(
-        "All valid static values accepted preserved");
+        "All markdown_streaming values accepted");
 }
 
 
 /*
- * Bug 4 Preservation: Variable expressions ($streaming_mode)
- * compile normally via complex value path.
+ * markdown_streaming accepts only static policy tokens.
  *
- * When the directive argument contains '$', it is treated
- * as a variable expression and compiled via
- * ngx_http_compile_complex_value. This path must remain
- * unchanged after adding static value validation.
- *
- * **Validates: variable expressions compile**
+ * **Validates: variable expressions are outside the supported value set**
  */
 static void
-test_preserve_variable_expression(void)
+test_policy_rejects_variable_expression(void)
 {
     const char  *var_values[] = {
         "$streaming_mode", "${streaming_mode}",
@@ -5015,40 +4967,39 @@ test_preserve_variable_expression(void)
     size_t       num_values;
 
     TEST_SUBSECTION(
-        "Preserve Bug 4: variable expressions compile");
+        "markdown_streaming variable expressions rejected");
 
     num_values = ARRAY_SIZE(var_values);
 
     for (size_t i = 0; i < num_values; i++) {
         const char  *val;
         int          has_dollar;
+        int          is_valid_policy;
 
         val = var_values[i];
 
         /* Check if value contains '$' */
         has_dollar = (strchr(val, '$') != NULL);
+        is_valid_policy = (strcasecmp(val, "off") == 0
+            || strcasecmp(val, "auto") == 0
+            || strcasecmp(val, "force") == 0);
 
         TEST_ASSERT(has_dollar == 1,
-            "Variable expression should contain '$'");
-
-        /*
-         * In the real code, values with '$' go through
-         * ngx_http_compile_complex_value and are accepted.
-         * The fix only adds validation for static values
-         * (no '$'), so this path is unchanged.
-         */
+            "test input should contain '$'");
+        TEST_ASSERT(is_valid_policy == 0,
+            "variable expression must not match a streaming policy token");
     }
 
     TEST_PASS(
-        "Variable expressions compile normally preserved");
+        "Variable expressions are rejected by the policy value set");
 }
 
 
 /*
- * Bug 4 Preservation: Duplicate directive returns
+ * Duplicate markdown_streaming directive returns
  * "is duplicate" error.
  *
- * When markdown_streaming_engine is specified more than
+ * When markdown_streaming is specified more than
  * once, the function returns "is duplicate". This check
  * is at the top of the function and must remain unchanged.
  *
@@ -5057,23 +5008,23 @@ test_preserve_variable_expression(void)
 static void
 test_preserve_duplicate_directive(void)
 {
-    int          streaming_engine_set;
+    int          streaming_policy_set;
     const char  *result;
 
     TEST_SUBSECTION(
-        "Preserve Bug 4: duplicate returns error");
+        "markdown_streaming duplicate returns error");
 
     /*
      * Simulate the duplicate check at the top of
-     * ngx_http_markdown_stream_engine_handler():
-     * if (mcf->stream.engine != NGX_CONF_UNSET_UINT) {
+     * ngx_http_markdown_streaming():
+     * if the policy is already set:
      *     return "is duplicate";
      * }
      */
-    streaming_engine_set = 1;  /* already configured */
+    streaming_policy_set = 1;  /* already configured */
     result = NULL;
 
-    if (streaming_engine_set) {
+    if (streaming_policy_set) {
         result = "is duplicate";
     }
 
@@ -5082,7 +5033,7 @@ test_preserve_duplicate_directive(void)
     TEST_ASSERT(strcmp(result, "is duplicate") == 0,
         "Error should be 'is duplicate'");
     TEST_PASS(
-        "Duplicate directive -> 'is duplicate' preserved");
+        "Duplicate markdown_streaming directive returns 'is duplicate'");
 }
 
 
@@ -5097,18 +5048,18 @@ main(void)
     printf("Streaming Unit Tests\n");
     printf("========================================\n");
 
-    TEST_SECTION("14.1 Engine Selection");
-    test_engine_off();
-    test_engine_on_get();
-    test_engine_on_head();
-    test_engine_on_304();
-    test_engine_on_conditional_full();
-    test_engine_on_conditional_ims_only();
-    test_engine_on_conditional_disabled();
-    test_engine_on_sse();
-    test_engine_auto_large_cl();
-    test_engine_auto_small_cl();
-    test_engine_auto_no_cl();
+    TEST_SECTION("14.1 Streaming Policy Selection");
+    test_policy_off();
+    test_policy_on_get();
+    test_policy_on_head();
+    test_policy_on_304();
+    test_policy_on_conditional_full();
+    test_policy_on_conditional_ims_only();
+    test_policy_on_conditional_disabled();
+    test_policy_on_sse();
+    test_policy_auto_large_cl();
+    test_policy_auto_small_cl();
+    test_policy_auto_no_cl();
 
     TEST_SECTION("14.2 Streaming Decompression");
     test_decomp_null_safety();
@@ -5148,7 +5099,7 @@ main(void)
 
     TEST_SECTION("14.7 Configuration Directive Parsing");
     test_config_budget_default();
-    test_config_engine_values();
+    test_config_policy_values();
 
     TEST_SECTION("14.8 Output Chain Construction");
     test_output_chain_last_buf();
@@ -5167,11 +5118,11 @@ main(void)
     test_precommit_no_header_modification();
     test_commit_boundary_strips_upstream_etag();
     test_precommit_all_failopen_paths_record_metrics();
-    test_init_failure_respects_streaming_on_error();
+    test_init_failure_respects_error_policy();
     test_streaming_failopen_increments_global_counter();
 
     TEST_SECTION(
-        "15.9.1 streaming_on_error Config Parsing");
+        "15.9.1 Unified Error Policy Runtime Encoding");
     test_config_on_error_legal_values();
     test_config_on_error_default_value();
     test_config_on_error_inheritance();
@@ -5238,7 +5189,7 @@ main(void)
 
     TEST_SECTION("Bug 4 Preservation (Baseline)");
     test_preserve_valid_static_values();
-    test_preserve_variable_expression();
+    test_policy_rejects_variable_expression();
     test_preserve_duplicate_directive();
 
     TEST_SECTION("Bug Condition Exploration (preservation bugfix)");

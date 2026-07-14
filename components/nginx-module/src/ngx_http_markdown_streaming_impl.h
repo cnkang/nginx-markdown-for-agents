@@ -207,12 +207,12 @@ ngx_http_markdown_streaming_handle_postcommit_error(
     uint32_t error_code);
 
 /*
- * Pre-Commit error handler: apply streaming_on_error policy.
+ * Pre-Commit error handler: apply unified markdown_error_policy.
  *
  * Single entry point for all pre-commit streaming failures.
  * Routes to fallback (ERROR_STREAMING_FALLBACK), fail-open
  * (pass original HTML), or fail-closed (reject) based on
- * the error code and the markdown_streaming_on_error directive.
+ * the error code and the unified markdown_error_policy directive.
  *
  * r          - current HTTP request
  * ctx        - per-request module context
@@ -327,10 +327,9 @@ static void
 ngx_http_markdown_streaming_cleanup(void *data);
 
 /*
- * Engine selector: determine the processing path for a request.
+ * Streaming policy selector: determine the processing path for a request.
  *
- * Evaluates the markdown_streaming_engine enum and applies the
- * selection rules (engine mode, HEAD request,
+ * Evaluates markdown_streaming and applies the selection rules (policy, HEAD,
  * 304 status, conditional_requests policy, content-type
  * exclusions, and auto-mode content-length threshold).
  *
@@ -567,25 +566,25 @@ ngx_http_markdown_log_conditional_streaming(
 
 
 /*
- * Engine selector: determine the processing path for a request.
+ * Streaming policy selector: determine the processing path for a request.
  *
- * Evaluates the markdown_streaming_engine enum once in the header
- * filter phase and caches the result.
+ * Evaluates markdown_streaming once in the header filter phase and caches
+ * the result.
  *
  * Evaluation order (per design doc):
- * 1. engine == off -> PATH_FULLBUFFER
+ * 1. policy == off -> PATH_FULLBUFFER
  * 2. streaming feature not compiled -> warn + PATH_FULLBUFFER
  * 3. HEAD request -> PATH_FULLBUFFER
  * 4. 304 Not Modified -> PATH_FULLBUFFER
  * 5. conditional_requests full_support -> PATH_FULLBUFFER
  * 6. Content-Type is text/event-stream -> PATH_FULLBUFFER
  * 7. stream_types exclusion match -> PATH_FULLBUFFER
- * 8. engine == on -> PATH_STREAMING
- * 9. engine == auto + CL >= markdown_stream_threshold -> PATH_STREAMING
- * 10. engine == auto + chunked -> PATH_STREAMING
- * 11. engine == auto + CL < markdown_stream_threshold -> PATH_FULLBUFFER
+ * 8. policy == force -> PATH_STREAMING
+ * 9. policy == auto + CL >= markdown_stream_threshold -> PATH_STREAMING
+ * 10. policy == auto + chunked -> PATH_STREAMING
+ * 11. policy == auto + CL < markdown_stream_threshold -> PATH_FULLBUFFER
  *
- * Default (no markdown_streaming_engine directive): auto mode.
+ * Default (no markdown_streaming directive): auto mode.
  */
 static ngx_http_markdown_path_selection_t
 ngx_http_markdown_select_processing_path(
@@ -593,7 +592,7 @@ ngx_http_markdown_select_processing_path(
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff)
 {
-    ngx_uint_t   engine_mode;
+    ngx_uint_t   policy;
 
     if (conf == NULL) {
         return ngx_http_markdown_path_selection(
@@ -601,9 +600,9 @@ ngx_http_markdown_select_processing_path(
             NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
     }
 
-    engine_mode = conf->stream.engine;
+    policy = conf->stream.policy;
 
-    if (engine_mode == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF) {
+    if (policy == NGX_HTTP_MARKDOWN_STREAMING_OFF) {
         return ngx_http_markdown_path_selection(
             NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
             NGX_HTTP_MARKDOWN_STREAM_REASON_CONFIG_DISABLED);
@@ -679,16 +678,15 @@ ngx_http_markdown_select_processing_path(
             NGX_HTTP_MARKDOWN_STREAM_REASON_EXCLUDED_CONTENT_TYPE);
     }
 
-    /* Rule 8: engine == on */
-    if (engine_mode
-        == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON)
+    /* Rule 8: policy == force */
+    if (policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE)
     {
         return ngx_http_markdown_path_selection(
             NGX_HTTP_MARKDOWN_PATH_STREAMING,
             NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE);
     }
 
-    /* Rules 9-11: engine == auto */
+    /* Rules 9-11: policy == auto */
     if (r->headers_out.content_length_n >= 0
         && (size_t) r->headers_out.content_length_n
            < conf->stream.threshold)
@@ -1351,7 +1349,7 @@ ngx_http_markdown_streaming_record_postcommit_failure(
             &r->headers_out.content_type,
             (r->headers_out.content_length_n >= 0) ? 1 : 0,
             (r->headers_out.content_length_n < 0) ? 1 : 0,
-             (conf->stream.on_error
+             (conf->on_error
               == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
                 ? "fail_closed" : "pass");
 
@@ -1889,7 +1887,7 @@ ngx_http_markdown_streaming_handle_postcommit_error(
     /*
      * Debug log: bytes already sent, error type, chunks
      * processed. Always emitted regardless of
-     * streaming_on_error (post-commit is unconditional).
+     * markdown_error_policy (post-commit is unconditional).
      */
     ngx_log_debug3(NGX_LOG_DEBUG_HTTP,
         r->connection->log, 0,
@@ -2019,7 +2017,7 @@ ngx_http_markdown_streaming_precommit_error(
     if (error_code == ERROR_STREAMING_FALLBACK) {
         /*
          * Capability fallback: always fall back to full-buffer
-         * regardless of streaming_on_error setting.
+         * regardless of markdown_error_policy setting.
          */
         return ngx_http_markdown_streaming_fallback_to_fullbuffer(
             r, ctx, conf);
@@ -2037,7 +2035,7 @@ ngx_http_markdown_streaming_precommit_error(
      *   ERROR_DECOMPRESSION_BUDGET_EXCEEDED (9),
      *   ERROR_PARSE_TIMEOUT (10),
      *   ERROR_PARSE_BUDGET_EXCEEDED (11).
-     * The terminal state is determined by streaming_on_error
+     * The terminal state is determined by markdown_error_policy
      * policy below.
      */
     if (error_code == ERROR_MEMORY_LIMIT
@@ -2083,7 +2081,7 @@ ngx_http_markdown_streaming_precommit_error(
         NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
     }
 
-    if (conf->stream.on_error
+    if (conf->on_error
         == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
     {
         /* Fail-closed: record reject metrics and reason */
@@ -3173,8 +3171,6 @@ ngx_http_markdown_streaming_start_otel_span(
     const ngx_http_markdown_conf_t *conf)
 {
     static ngx_str_t  s_gfm = ngx_string("gfm");
-    static ngx_str_t  s_mdx = ngx_string("mdx");
-    static ngx_str_t  s_org = ngx_string("org-mode");
     static ngx_str_t  s_cm = ngx_string("commonmark");
 
     const ngx_str_t  *flavor;
@@ -3192,12 +3188,6 @@ ngx_http_markdown_streaming_start_otel_span(
     switch (conf->flavor) {
     case NGX_HTTP_MARKDOWN_FLAVOR_GFM:
         flavor = &s_gfm;
-        break;
-    case NGX_HTTP_MARKDOWN_FLAVOR_MDX:
-        flavor = &s_mdx;
-        break;
-    case NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE:
-        flavor = &s_org;
         break;
     default:
         flavor = &s_cm;
@@ -3345,7 +3335,7 @@ ngx_http_markdown_streaming_init_handle(
              * fallback-to-fullbuffer path cannot recover already-processed
              * prefix data, so continuing streaming would silently lose data
              * on fallback.  Treat this as a pre-commit error: fail-open
-             * (pass) or reject per the configured streaming_on_error policy.
+             * (pass) or reject per the configured markdown_error_policy.
              */
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
@@ -3385,7 +3375,7 @@ ngx_http_markdown_streaming_init_handle(
              * the original upstream prefix data on pre-commit error, so
              * continuing streaming would silently lose data.  Treat this
              * identically to prebuffer init failure: abort the handle and
-             * apply the configured streaming_on_error policy.
+             * apply the configured markdown_error_policy.
              */
             NGX_HTTP_MARKDOWN_METRIC_INC(
                 results.replay_buffer_errors_total);

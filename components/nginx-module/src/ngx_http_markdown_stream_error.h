@@ -1,7 +1,7 @@
 /*
  * Streaming Fallback State Machine — Error Handler Integration
  *
- * Wires the markdown_streaming_on_error configuration directive into the
+ * Wires the unified markdown_error_policy configuration directive into the
  * streaming state machine.  This is the main entry point called by
  * the body filter when a streaming error occurs.  It uses the
  * decision engine to determine the correct action, then executes
@@ -9,7 +9,7 @@
  *
  * Policy distinction (0.8.0+):
  *   markdown_on_error        — controls legacy/full-buffer fallback
- *   markdown_streaming_on_error — controls streaming pre-commit fallback
+ *   markdown_error_policy — controls streaming pre-commit fallback
  *   post-commit fallback never returns HTML (safe_finish or abort only)
  *
  * Pre-commit with pass policy: replay original HTML
