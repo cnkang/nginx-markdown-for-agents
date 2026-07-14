@@ -73,8 +73,8 @@ decide_error_behavior(class, policy) → behavior
 ```c
 #include "markdown_converter.h"
 
-/* Error class constants (0-9) */
-/* 0=conversion_error, 1=timeout, 2=memory_budget_exceeded, ... */
+/* Reason codes (0-25) - see Observability Schema v1 for the full registry */
+/* 0=converted, 1=skipped_accept, ..., 25=bypass_no_transform */
 
 /* Policy construction */
 FFIErrorPolicy policy = { .kind = FFI_ERROR_POLICY_PASS, .status_code = 0 };

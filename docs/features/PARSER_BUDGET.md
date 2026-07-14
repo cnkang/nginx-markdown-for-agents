@@ -276,8 +276,8 @@ When any limit is hit:
 
 | Metric | Type | Trigger |
 |--------|------|---------|
-| `markdown_parse_timeouts_total` | Counter | Parse timeout exceeded |
-| `markdown_parse_budget_exceeded_total` | Counter | Parser budget exceeded |
+| `nginx_markdown_parse_timeouts_total` | Counter | Parse timeout exceeded |
+| `nginx_markdown_parse_budget_exceeded_total` | Counter | Parser budget exceeded |
 
 ---
 

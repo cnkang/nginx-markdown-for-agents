@@ -1,19 +1,27 @@
-# Streaming Compression Strategy (v0.8.0)
+# Streaming Compression Strategy (v0.9.1)
 
 ## Purpose
 
-This document describes how the streaming conversion engine handles compressed
-upstream responses in v0.8.0. It covers the routing decision, safety rationale,
-and relationship to the existing full-buffer decompression path.
+This document describes how the 0.9.1 streaming conversion engine handles
+compressed upstream responses, including its relationship to bounded
+full-buffer decompression.
 
 ## Summary
 
-In v0.8.0, compressed responses (those with a `Content-Encoding` header) are
-**routed to the full-buffer path** rather than the streaming parser. The
-full-buffer path already provides safe, bounded decompression with budget
-enforcement via `markdown_decompress_max_size`. True streaming decompression
-(incremental, bounded-memory decompression fed chunk-by-chunk into the streaming
-parser) is deferred to future 0.8.x work.
+In 0.9.1, gzip and deflate responses are eligible for incremental
+decompression when streaming is selected, automatic decompression is enabled,
+and cache validation is not `full`. Brotli remains on bounded full-buffer
+decompression. `streaming_first` prefers streaming where the selected codec and
+validation requirements are supported; it does not guarantee that every
+content encoding streams.
+
+| Encoding | Streaming-eligible conditions | 0.9.1 path |
+|----------|-------------------------------|------------|
+| identity | streaming selected | streaming conversion |
+| deflate RFC 1950 | auto decompress on; cache validation not `full` | streaming decompression |
+| deflate RFC 1951 | auto decompress on; cache validation not `full` | streaming decompression |
+| gzip | auto decompress on; cache validation not `full` | member-aware streaming decompression |
+| Brotli (`br`) | regardless of streaming preference | bounded full-buffer decompression |
 
 ## Routing Decision
 
@@ -22,11 +30,13 @@ eligible response, the following logic applies:
 
 1. If `markdown_auto_decompress` is **off**, or the encoding is unsupported,
    the response passes through unchanged (no conversion attempted).
-2. If `markdown_auto_decompress` is **on** and the encoding is supported
-   (`gzip`, `deflate`, `br`), the response is routed to the **full-buffer
-   conversion path** — not the streaming parser.
-3. The full-buffer path decompresses the response using the existing controlled
-   decompression pipeline, subject to `markdown_decompress_max_size`.
+2. If `markdown_auto_decompress` is **on** and streaming is selected with cache
+   validation not `full`:
+   - **Deflate** (zlib-wrapped RFC 1950 or raw RFC 1951) is decompressed
+     incrementally after a two-byte framing sniff.
+   - **Gzip** is decompressed incrementally with gzip member/trailer validation.
+   - **Brotli** is routed to bounded full-buffer decompression.
+3. Full cache validation also selects the bounded full-buffer path.
 4. Uncompressed responses continue to be eligible for streaming conversion as
    normal.
 
@@ -39,29 +49,38 @@ Upstream response
   │    │    └─ Passthrough (no conversion)
   │    │
   │    └─ auto_decompress ON + supported encoding
-  │         └─ Route to full-buffer path
-  │              └─ Decompression with budget enforcement
-  │                   └─ HTML → Markdown conversion
+  │         ├─ gzip or deflate + streaming/cache gates pass
+  │         │    └─ Incremental decompression → streaming conversion
+  │         └─ Brotli or full cache validation
+  │              └─ Bounded full-buffer decompression → conversion
   │
   └─ No Content-Encoding
        └─ Eligible for streaming conversion
 ```
 
-## Decompression Bomb Mitigation
+## Lifecycle and Decompression-Bomb Safety
 
-The full-buffer decompression path enforces the `markdown_decompress_max_size`
-budget. If decompressed output exceeds this limit, decompression terminates
-immediately and the configured `markdown_error_policy` policy applies:
+Both paths enforce `markdown_decompress_max_size`. Streaming accounting is
+response-wide: a gzip member reset does not reset the budget. A gzip
+`Z_STREAM_END` completes one member, so remaining bytes in the same chunk or a
+later chunk begin another member. Finalization succeeds only at a complete
+member boundary; a truncated final member is rejected.
+
+If decompressed output exceeds the limit, decompression terminates immediately
+and the configured `markdown_error_policy` applies before commit:
 
 - **pass** (default): original compressed response served to client unchanged.
 - **fail_closed**: 502 Bad Gateway returned.
 
-This prevents decompression bombs from exhausting worker memory regardless of
-whether the response would have been a streaming or full-buffer candidate.
+After streaming output is committed, the existing post-commit safe-finish or
+abort behavior applies; the module does not attempt impossible original-body
+replay. Downstream `NGX_AGAIN` suspends delivery without changing compressed
+source ownership, so remaining input is retained and consumed exactly once on
+resume.
 
 ## Rationale
 
-Streaming decompression requires an incremental decompressor that:
+The 0.9.1 boundary is based on validated decoder lifecycles:
 
 - Operates within bounded memory (no full-response buffering).
 - Handles chunk boundaries that may split compressed frames.
@@ -70,18 +89,12 @@ Streaming decompression requires an incremental decompressor that:
 - Preserves backpressure semantics (NGX_AGAIN handling) while decompression
   state is in-flight.
 
-This is a significant engineering effort. The v0.8.0 release instead leverages
-the proven full-buffer decompression path, which already handles all supported
-encodings safely with budget enforcement. The tradeoff is that compressed
-responses do not benefit from streaming's bounded-memory advantage — they are
-fully buffered before conversion. In practice, most agent-facing APIs serve
-uncompressed responses (or operators configure `proxy_set_header
-Accept-Encoding ""` to disable upstream compression), so this routing covers
-the common case without risk.
-
-True streaming decompression is planned for a future release once the
-incremental decompression state machine is validated against the same safety
-properties.
+- Deflate has deterministic RFC 1950/RFC 1951 framing selection before input
+  is irreversibly consumed.
+- Gzip uses zlib's gzip wrapper plus member-aware reset, cumulative budget,
+  truncation, backpressure, and terminal-once validation.
+- Brotli remains full-buffer pending dedicated streaming lifecycle,
+  backpressure, decoder-state, and memory validation.
 
 ## Relevant Directives
 
@@ -93,24 +106,22 @@ properties.
 ## Operator Guidance
 
 - **Uncompressed upstreams**: No action needed. Streaming works normally.
-- **Compressed upstreams, streaming desired**: Configure `proxy_set_header
-  Accept-Encoding "";` to request uncompressed responses from upstream, allowing
-  the streaming path to handle them directly.
-- **Compressed upstreams, full-buffer acceptable**: No action needed. The module
-  automatically routes to full-buffer and decompresses safely.
+- **Gzip/deflate upstreams, streaming desired**: Use `streaming_first`, keep
+  `markdown_auto_decompress on`, and avoid `markdown_cache_validation full`.
+- **Brotli upstreams**: Expect bounded full-buffer decompression in 0.9.1, or
+  request identity encoding upstream when early streaming is required.
 - **Budget tuning**: Set `markdown_decompress_max_size` to a value that
   accommodates your largest legitimate compressed responses while still
   protecting against decompression bombs.
 
-## Future Work
+## Deferred Work
 
-- **0.8.x**: Incremental streaming decompression with bounded-memory guarantees,
-  enabling compressed responses to flow through the streaming parser without
-  full buffering.
+- Brotli streaming is intentionally deferred to a later version pending
+  dedicated lifecycle, backpressure, decoder-state, and memory validation.
 
 ## Related Documentation
 
-- [AUTOMATIC_DECOMPRESSION.md](AUTOMATIC_DECOMPRESSION.md) — Full-buffer decompression behavior and error handling
+- [AUTOMATIC_DECOMPRESSION.md](AUTOMATIC_DECOMPRESSION.md) — decompression behavior and error handling
 - [DECOMPRESSION.md](DECOMPRESSION.md) — Budget enforcement and error categories
 - [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md) — Directive syntax and defaults
 - [../guides/streaming-rollout-cookbook.md](../guides/streaming-rollout-cookbook.md) — Streaming rollout guidance
@@ -121,3 +132,4 @@ properties.
 |---------|------|--------|---------|
 | 0.8.0 | 2026-06-16 | Kang | Initial document for v0.8.0 streaming compression strategy (streaming security enforcement task 3.3) |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.9.1 | 2026-07-14 | Codex | Document gzip plus zlib/raw-deflate streaming routing, gzip member lifecycle, and bounded Brotli full-buffer boundary |

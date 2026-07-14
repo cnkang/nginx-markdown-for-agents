@@ -29,6 +29,8 @@ flowchart LR
         CV["markdown_cache_validation"]
         LV["markdown_log_verbosity"]
         SE["markdown_streaming_engine"]
+        PR["markdown_profile"]
+        AD["markdown_auto_decompress"]
     end
 
     subgraph BodyPhase["Body Filter Phase"]
@@ -39,6 +41,7 @@ flowchart LR
         ST["markdown_stream_types"]
         TF["markdown_trusted_proxies"]
         SS["markdown_streaming_shadow"]
+        ZC["markdown_streaming_zero_copy"]
     end
 
     subgraph Metrics["Metrics"]
@@ -191,23 +194,32 @@ flowchart LR
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_eligibility.c` |
 | Practical note | Treat this as an explicit bypass list for response shapes that do not fit the buffering model well. |
 
-## Cross-Cutting Behavior Not Controlled by a Public Directive
+### `markdown_profile`
 
-Some important runtime behavior is part of the architecture even though it is not currently exposed as a top-level directive.
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Applies a named preset of defaults (`balanced`, `strict_cache`, `streaming_first`) to simplify configuration |
+| Lifecycle impact | Config merge phase; overrides built-in defaults before explicit directives are applied |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_config_core_impl.h`, Rust `Profile` enum |
+| Practical note | Use this to quickly align with a known deployment pattern. Explicit directives still override profile defaults. |
 
-Examples include:
+### `markdown_auto_decompress`
 
-- the small C/Rust FFI boundary
-- automatic decompression support as implemented in the module
-- base URL construction for link resolution
-- metrics counter collection inside the worker process
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Automatically decompresses upstream responses (gzip, deflate, br) before conversion |
+| Lifecycle impact | Header filter detection; body filter decompression flow |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_decompression.c` |
+| Practical note | Default is `on`. If `off`, compressed responses are passed through unchanged. |
 
-These are best understood through:
+### `markdown_streaming_zero_copy`
 
-- [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md)
-- [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md)
-- [ADR/0001-use-rust-for-conversion.md](ADR/0001-use-rust-for-conversion.md)
-- [ADR/0002-full-buffering-approach.md](ADR/0002-full-buffering-approach.md)
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Enables zero-copy output path for streaming conversion to reduce internal copying |
+| Lifecycle impact | Streaming body filter output path |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_zerocopy_buf.h` |
+| Practical note | Opt-in feature (default `off`). Use in high-throughput environments to reduce CPU/memory overhead. |
 
 ## Practical Use Cases
 

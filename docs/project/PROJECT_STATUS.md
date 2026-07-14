@@ -11,7 +11,7 @@ steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.9.x)**, the project includes a dual-engine
+As of the **current release line (0.9.1)**, the project includes a dual-engine
 conversion model (streaming default with full-buffer fallback), Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
 logic, and header plan application, independent decompression budget with parse
@@ -25,15 +25,9 @@ fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,
 operations, architecture, and contributor-facing harness maintenance.
 
-### Release 0.8.x Line (Current)
+### Current Release Line 0.9.1
 
-**Status:** Previous release line. The 0.8.x line began with 0.8.0 (true
-streaming contract) and continued with patch releases (0.8.1, 0.8.2, 0.8.3) that
-hardened stability, security, and release-gate consistency without introducing
-new user-visible features or breaking configuration changes.
-
-Version 0.8.0 formalized true streaming semantics as a first-class, verifiable
-contract. The current release line is 0.9.x — see [Current Release Line 0.9.x](#current-release-line-09x).
+**Status:** Current stable release. 0.9.1 introduces zero-copy output for streaming, gzip plus zlib/raw-deflate streaming decompression, bounded Brotli full-buffer routing, and full-buffer copy reduction, all guarded by strict performance evidence gates.
 
 ### Release 0.7.0 Updates
 

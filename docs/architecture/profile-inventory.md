@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Version | 0.9.0 |
+| Version | 0.9.1 |
 | Feature | Profiles Production Defaults |
 | Status | Inventory |
 | Created | 2026-06-28 |

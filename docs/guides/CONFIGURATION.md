@@ -253,6 +253,32 @@ output you are willing to process.
 markdown_decompress_max_size 20m;
 ```
 
+#### markdown_auto_decompress
+
+**Syntax:** `markdown_auto_decompress on | off;`
+**Default:** `on`
+**Context:** http, server, location
+
+Controls whether the module automatically decompresses upstream compressed
+responses (gzip, deflate, brotli) before passing them to the Markdown conversion
+engine. When set to `off`, compressed responses are passed through to the client
+untouched and unconverted. When set to `on`, the module decompresses supported
+formats within the limits of `markdown_decompress_max_size`.
+
+Under the `streaming_first` profile with `markdown_auto_decompress on` and
+`markdown_cache_validation` not set to `full`, gzip and deflate responses
+(zlib-wrapped RFC 1950 or raw RFC 1951 deflate) are routed through streaming
+decompression for lower TTFB. Brotli remains on bounded full-buffer
+decompression. `streaming_first` is a preference for codecs and validation
+requirements supported by the streaming engine, not a guarantee for every
+content encoding.
+
+**Example:**
+```nginx
+# Disable automatic decompression; let compressed content pass through
+markdown_auto_decompress off;
+```
+
 #### markdown_parse_timeout
 
 **Syntax:** `markdown_parse_timeout <time>;`

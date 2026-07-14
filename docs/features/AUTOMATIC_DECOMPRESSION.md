@@ -18,10 +18,13 @@ Automatic decompression is the built-in fallback path for this scenario.
     (RFC 7230 §4.2.2). If the zlib-wrapped attempt fails with a format
     error, the buffered path automatically retries with raw deflate
     (RFC 1951 only) for compatibility with older servers (Microsoft IIS,
-    older Java servlets). The streaming path supports only zlib-wrapped
-    deflate; raw deflate responses in streaming mode will trigger the
-    the configured `markdown_error_policy` strategy (fail-open by default).
-- Supports `br` when Brotli support is compiled in.
+    older Java servlets). The streaming path sniffs the first two bytes and
+    supports both zlib-wrapped and raw deflate without replay.
+  - Gzip uses streaming gzip framing under the streaming-eligible gates;
+    member boundaries may cross feeds, trailers are validated, and a truncated
+    final member is rejected.
+- Supports `br` when Brotli support is compiled in; Brotli remains on bounded
+  full-buffer decompression in 0.9.1.
 - Uses a fast path for uncompressed responses (no decompression work).
 - Applies `markdown_error_policy` strategy on decompression failures.
 
@@ -127,14 +130,14 @@ to the `ConversionError` enum in Rust and are categorized in C:
 
 | Rust Error Variant | FFI Code | C Error Category | Description |
 |--------------------|----------|-------------------|-------------|
-| `DecompressionBudgetExceeded` | 9 | `RESOURCE_LIMIT` | Decompressed output exceeds `decompress_max_size` |
-| `ConversionError::Timeout` | 3 | `RESOURCE_LIMIT` | Decompression timed out |
-| `ConversionError::MemoryLimit` | 4 | `RESOURCE_LIMIT` | Memory allocation during decompression exceeded limit |
-| `ConversionError::Parse` | 1 | `CONVERSION` | Invalid compressed data (corrupt gzip/deflate/brotli) |
+| `DecompressionBudgetExceeded` | 9 | `resource_limit` | Decompressed output exceeds `decompress_max_size` |
+| `ConversionError::Timeout` | 3 | `resource_limit` | Decompression timed out |
+| `ConversionError::MemoryLimit` | 4 | `resource_limit` | Memory allocation during decompression exceeded limit |
+| `ConversionError::Parse` | 1 | `conversion` | Invalid compressed data (corrupt gzip/deflate/brotli) |
 
 The `ngx_http_markdown_classify_error()` function maps FFI error codes to
-the three-level error category enum (`CONVERSION`, `RESOURCE_LIMIT`,
-`SYSTEM`), ensuring correct Prometheus counter routing and log annotation.
+| the three-level error category enum (`conversion`, `resource_limit`,
+| `system`), ensuring correct Prometheus counter routing and log annotation.
 
 ## Document Updates
 
