@@ -113,10 +113,10 @@ def _workflow_uses_pinned_toolchain(workflow: str) -> bool:
     channel = _rust_toolchain_channel()
     if rust_version is None or channel is None:
         return False
-    # Check for the exact env declaration (e.g. "RUST_TOOLCHAIN: 1.91.1") to
+    # Check for the exact env declaration (for example,
+    # "RUST_TOOLCHAIN: <repository channel>") to
     # avoid false positives from version numbers appearing in comments.
-    # Accept both unquoted (RUST_TOOLCHAIN: 1.91.1) and quoted
-    # (RUST_TOOLCHAIN: "1.91.1") YAML value forms.
+    # Accept both quoted and unquoted YAML scalar forms.
     env_unquoted = f"RUST_TOOLCHAIN: {channel}"
     env_quoted = f'RUST_TOOLCHAIN: "{channel}"'
     script = read(RUSTUP_INSTALL_SCRIPT)

@@ -332,8 +332,8 @@ If you use a custom NGINX build, or a platform not supported by the pre-built bi
 
 | Component | Minimum Version | Purpose |
 |-----------|----------------|---------|
-| **Rust Toolchain** | 1.91.0+ | Building the Rust converter |
-| **Cargo** | 1.91.0+ | Rust package manager (included with Rust) |
+| **Rust Toolchain** | 1.97.0+ | Building the Rust converter |
+| **Cargo** | 1.97.0+ | Rust package manager (included with Rust) |
 | **cbindgen** | 0.29.2 | Generating C header files from Rust |
 | **NGINX** | 1.24.0+ | Web server (source code required for module compilation) |
 | **GCC/Clang** | GCC 4.8+ or Clang 3.4+ | C compiler for NGINX module |
@@ -428,7 +428,7 @@ tar -xzf nginx-1.24.0.tar.gz
 
 ```bash
 # Check Rust version
-rustc --version  # Should be 1.91.0 or higher
+rustc --version  # Should be 1.97.0 or higher
 
 # Check Cargo version
 cargo --version
@@ -1456,7 +1456,7 @@ brew install pcre
 # Update Rust toolchain
 rustup update
 
-# Check Rust version (must be 1.91.0+)
+# Check Rust version (must be 1.97.0+)
 rustc --version
 
 # Clean and rebuild

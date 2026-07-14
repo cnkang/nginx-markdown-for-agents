@@ -2,7 +2,7 @@ Source: nginx-module-markdown-for-agents
 Section: web
 Priority: optional
 Maintainer: Kang Liu <liukang@noreply.github.com>
-Build-Depends: debhelper (>= 10), cargo, rustc (>= 1.91), libpcre3-dev, zlib1g-dev, libssl-dev, nginx-dev (>= 1.26.3)
+Build-Depends: debhelper (>= 10), cargo, rustc (>= 1.97), libpcre3-dev, zlib1g-dev, libssl-dev, nginx-dev (>= 1.26.3)
 Standards-Version: 4.6.2
 Homepage: https://github.com/cnkang/nginx-markdown-for-agents
 Vcs-Git: https://github.com/cnkang/nginx-markdown-for-agents.git

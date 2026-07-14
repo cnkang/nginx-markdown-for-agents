@@ -5,10 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.1] - 2026-07-14
+## [0.9.1] - Unreleased
 
-Patch release focused on performance readiness and release evidence for the
-0.9.x line. Non-breaking — all optimizations are opt-in or internal.
+Final pre-v1.0 baseline-consolidation and compatibility-reset release. In
+addition to performance readiness and release evidence, this release closes
+toolchain and public-contract debt before the v1.0 compatibility freeze.
+
+v0.9.0 was released with the intention that it would be the last breaking
+release before v1.0. The freeze was deliberately extended through v0.9.1
+because v1.0 had not shipped, adoption remained limited, and the final
+toolchain, dependency, configuration, and ABI audit found cleanup worth
+completing before the long-lived contract begins.
+
+### Breaking Changes
+
+- **Rust source-build baseline raised from 1.91 to 1.97.** All first-party
+  crates now declare MSRV 1.97 and repository/CI/release builds use exact Rust
+  1.97.0. Source builders must update their toolchain (for rustup users,
+  `rustup toolchain install 1.97.0`). Prebuilt module users do not need Rust;
+  their runtime compatibility remains governed by the published NGINX,
+  OS/libc, architecture, and exact dynamic-module compatibility matrix.
 
 ### Added
 
@@ -65,7 +81,9 @@ Patch release focused on performance readiness and release evidence for the
 
 ## [0.9.0] - 2026-07-06
 
-**Breaking release.** Last breaking opportunity before 1.0.0 API freeze.
+**Breaking release.** At release time, this was intended to be the last
+breaking opportunity before the 1.0.0 API freeze. The project later extended
+that pre-1.0 consolidation window through v0.9.1.
 
 ### Breaking Changes
 

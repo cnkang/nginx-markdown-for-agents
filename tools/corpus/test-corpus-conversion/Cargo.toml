@@ -2,6 +2,7 @@
 name = "test-corpus-conversion"
 version = "0.6.3"
 edition = "2024"
+rust-version = "1.97"
 license = "BSD-2-Clause"
 publish = false
 

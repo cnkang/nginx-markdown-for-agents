@@ -2,7 +2,7 @@
 name = "e2e-harness"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.97"
 authors = ["NGINX Markdown for Agents Contributors"]
 description = "Rust-first E2E test harness for nginx-markdown-for-agents"
 license = "BSD-2-Clause"

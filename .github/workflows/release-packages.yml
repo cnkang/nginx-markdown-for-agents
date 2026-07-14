@@ -88,7 +88,7 @@ permissions: {}
 # release-packages.yml is the canonical release package workflow and official release path.
 
 env:
-  RUST_TOOLCHAIN: 1.91.1
+  RUST_TOOLCHAIN: 1.97.0
   RUST_FEATURES: streaming,incremental
 
 jobs:
