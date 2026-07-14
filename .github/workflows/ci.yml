@@ -14,7 +14,10 @@ on:
       - "packaging/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
+      - "examples/production/**"
       - "charts/**"
+      - ".sonar/**"
+      - ".sonarcloud.properties"
       - "Makefile"
       - "README.md"
       - "README_zh-CN.md"
@@ -33,7 +36,10 @@ on:
       - "packaging/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
+      - "examples/production/**"
       - "charts/**"
+      - ".sonar/**"
+      - ".sonarcloud.properties"
       - "Makefile"
       - "README.md"
       - "README_zh-CN.md"
@@ -108,11 +114,20 @@ jobs:
               - 'README_zh-CN.md'
               - 'tools/docs/**'
               - 'tools/harness/**'
+              - 'tools/e2e/**'
+              - 'tools/sonar/**'
               - 'tools/release-matrix.json'
+              - 'components/nginx-module/src/**'
+              - 'components/nginx-module/tests/e2e/**'
+              - 'components/rust-converter/src/**'
+              - 'tests/e2e/**'
               - 'examples/nginx-configs/**'
               - 'examples/kubernetes/**'
+              - 'examples/production/**'
               - 'charts/**'
               - 'packaging/**'
+              - '.sonar/**'
+              - '.sonarcloud.properties'
             rust:
               - 'components/rust-converter/**'
               - 'Makefile'

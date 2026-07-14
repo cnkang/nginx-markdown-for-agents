@@ -138,7 +138,8 @@ operations, architecture, and contributor-facing harness maintenance.
   - OS package manager distribution (APT, YUM/DNF, Homebrew).
   - Helm chart with Ingress annotation support.
   - Coverage gate as CI merge requirement.
-  - MDX and Org-mode flavor support (experimental, subject to change).
+  - MDX and Org-mode flavor selectors (experimental at the time; removed in
+    v0.9.1 because they never provided distinct conversion semantics).
   - Dynamic configuration hot-reload (`markdown_dynamic_config`).
   - ADR-0006 (OTel), ADR-0007 (Streaming Default), ADR-0008 (Noise Pruning Default).
 

@@ -25,10 +25,10 @@ alerts based on stable reason codes.
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `nginx_markdown_streaming_engine_choice_total{engine="streaming"}` | counter | Requests using true streaming |
-| `nginx_markdown_streaming_engine_choice_total{engine="full_buffer"}` | counter | Requests routed to full-buffer |
-| `nginx_markdown_streaming_engine_choice_total{engine="passthrough"}` | counter | Requests marked passthrough |
-| `nginx_markdown_streaming_engine_choice_total{engine="not_eligible"}` | counter | Requests not eligible |
+| `nginx_markdown_streaming_choice_total{engine="streaming"}` | counter | Requests using true streaming |
+| `nginx_markdown_streaming_choice_total{engine="full_buffer"}` | counter | Requests routed to full-buffer |
+| `nginx_markdown_streaming_choice_total{engine="passthrough"}` | counter | Requests marked passthrough |
+| `nginx_markdown_streaming_choice_total{engine="not_eligible"}` | counter | Requests not eligible |
 
 ### Fallback Counters
 
@@ -167,10 +167,10 @@ If `nginx_markdown_streaming_failure_total{phase="postcommit"}` is non-zero:
 
 ### No streaming selections
 
-If `nginx_markdown_streaming_engine_choice_total{engine="streaming"}` is 0
+If `nginx_markdown_streaming_choice_total{engine="streaming"}` is 0
 while `nginx_markdown_streaming_candidate_total` > 0:
 
-1. Check if `markdown_streaming_engine` is set to `on` or `auto`.
+1. Check if `markdown_streaming` is set to `on` or `auto`.
 2. Verify `markdown_stream_threshold` is smaller than typical response sizes.
 3. Check the content coding and cache-validation mode: gzip and deflate can
    stream when decompression is enabled and validation is not `full`; Brotli

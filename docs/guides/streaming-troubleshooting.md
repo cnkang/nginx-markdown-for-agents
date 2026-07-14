@@ -33,10 +33,10 @@ content type excluded.
 **Step 1 — Check engine setting:**
 
 ```bash
-nginx -T 2>/dev/null | grep -i markdown_streaming_engine
+nginx -T 2>/dev/null | grep -i markdown_streaming
 ```
 
-Expected: `markdown_streaming_engine auto;` or `on;` for the target location.
+Expected: `markdown_streaming auto;` or `force;` for the target location.
 If you see `off`, streaming is explicitly disabled.
 
 **Step 1b — Check cache_validation setting:**
@@ -109,10 +109,10 @@ Look for the `streaming` section showing current configuration state.
 
 | Finding | Fix |
 |---------|-----|
-| Engine is `off` | Set `markdown_streaming_engine auto;` and reload |
+| Engine is `off` | Set `markdown_streaming auto;` and reload |
 | `cache_validation` is `full` (`strict_cache` default) | Set `markdown_cache_validation ims_only;` or `off;` to allow streaming |
 | Response below threshold | Lower `markdown_stream_threshold` or accept full-buffer for small responses |
-| Content-Length below threshold | Expected behavior in `auto` mode; use `on` to force streaming regardless |
+| Content-Length below threshold | Expected behavior in `auto` mode; use `force` to prefer streaming regardless of size |
 | Content type excluded | Remove type from `markdown_stream_excluded_types` if streaming is desired |
 
 ---
@@ -271,7 +271,7 @@ else:
 
 ```bash
 # Edit nginx.conf — add to affected location:
-#   markdown_streaming_engine off;
+#   markdown_streaming off;
 nginx -t && nginx -s reload
 ```
 
@@ -279,7 +279,7 @@ nginx -t && nginx -s reload
 
 ```bash
 # In http {} block:
-#   markdown_streaming_engine off;
+#   markdown_streaming off;
 nginx -t && nginx -s reload
 ```
 
@@ -406,7 +406,7 @@ nginx -t && nginx -s reload
 
 ```bash
 # Edit nginx.conf:
-#   markdown_streaming_engine off;
+#   markdown_streaming off;
 nginx -t && nginx -s reload
 ```
 
@@ -429,7 +429,7 @@ print(f'Reject count: {d.get(\"streaming\", {}).get(\"precommit_reject_total\", 
 Escalate if **any** of the following are true:
 
 1. **Errors persist after disabling streaming** — if HTTP errors continue after
-   `markdown_streaming_engine off`, the issue is not streaming-specific.  It may
+   `markdown_streaming off`, the issue is not streaming-specific.  It may
    be in the full-buffer path, the upstream, or NGINX itself.
 
 2. **Errors occur in the full-buffer path too** — check:
@@ -518,8 +518,8 @@ matching branch.
 
 ```bash
 # 1. Disable streaming
-sed -i 's/markdown_streaming_engine.*/markdown_streaming_engine off;/' /etc/nginx/nginx.conf
-# Or edit manually and set: markdown_streaming_engine off;
+sed -i 's/markdown_streaming.*/markdown_streaming off;/' /etc/nginx/nginx.conf
+# Or edit manually and set: markdown_streaming off;
 
 # 2. Validate and reload
 nginx -t && nginx -s reload
@@ -558,7 +558,7 @@ curl -s -H 'Accept: text/markdown' http://localhost/previously-failing-path \
 
 ```bash
 # 1. Confirm streaming is fully disabled
-nginx -T 2>/dev/null | grep markdown_streaming_engine
+nginx -T 2>/dev/null | grep markdown_streaming
 # Should show only "off" entries
 
 # 2. Confirm errors are still occurring
@@ -665,7 +665,7 @@ permanently (policy decision).
 
 ```nginx
 location /affected-path/ {
-    markdown_streaming_engine off;
+    markdown_streaming off;
 }
 ```
 
@@ -673,7 +673,7 @@ location /affected-path/ {
 
 ```nginx
 http {
-    markdown_streaming_engine off;
+    markdown_streaming off;
 }
 ```
 
@@ -701,8 +701,8 @@ curl -s -H 'Accept: application/json' http://localhost/markdown-metrics | \
 
 | Goal | Configuration |
 |------|---------------|
-| Disable for one location | `markdown_streaming_engine off;` in the location block |
-| Disable globally | `markdown_streaming_engine off;` in the `http` block |
+| Disable for one location | `markdown_streaming off;` in the location block |
+| Disable globally | `markdown_streaming off;` in the `http` block |
 | Raise threshold (fewer streaming candidates) | `markdown_stream_threshold 10m;` |
 | Exclude specific content types | `markdown_stream_excluded_types text/event-stream application/pdf;` |
 
@@ -804,7 +804,7 @@ the client may receive truncated output.
 **Action**: **Immediate** — disable streaming for this path:
 ```nginx
 location /reports/ {
-    markdown_streaming_engine off;
+    markdown_streaming off;
 }
 ```
 Then reload: `nginx -t && nginx -s reload`
@@ -846,7 +846,7 @@ response stays in full-buffer.
 ```nginx
 markdown_error_policy pass;
 # or:
-markdown_streaming_engine off;
+markdown_streaming off;
 ```
 
 ---
@@ -946,7 +946,7 @@ This shows what an unhealthy streaming deployment looks like.
 
 **Action**:
 
-1. **Immediate**: Disable streaming (`markdown_streaming_engine off`) — 12
+1. **Immediate**: Disable streaming (`markdown_streaming off`) — 12
    post-commit failures and 30 rejections mean clients are affected.
 2. **Investigate**: Check structured logs for the dominant `precommit_*`
    reason code causing the 34.9% fallback rate.
@@ -965,12 +965,12 @@ curl -s -H 'Accept: text/plain; version=0.0.4' http://localhost/markdown-metrics
 ```
 
 ```text
-# HELP nginx_markdown_streaming_engine_choice_total Engine selection decisions by engine.
-# TYPE nginx_markdown_streaming_engine_choice_total counter
-nginx_markdown_streaming_engine_choice_total{engine="streaming"} 11200
-nginx_markdown_streaming_engine_choice_total{engine="full_buffer"} 1250
-nginx_markdown_streaming_engine_choice_total{engine="passthrough"} 0
-nginx_markdown_streaming_engine_choice_total{engine="not_eligible"} 0
+# HELP nginx_markdown_streaming_choice_total Engine selection decisions by engine.
+# TYPE nginx_markdown_streaming_choice_total counter
+nginx_markdown_streaming_choice_total{engine="streaming"} 11200
+nginx_markdown_streaming_choice_total{engine="full_buffer"} 1250
+nginx_markdown_streaming_choice_total{engine="passthrough"} 0
+nginx_markdown_streaming_choice_total{engine="not_eligible"} 0
 
 # HELP nginx_markdown_streaming_fallback_total Pre-commit fallbacks by phase and action.
 # TYPE nginx_markdown_streaming_fallback_total counter

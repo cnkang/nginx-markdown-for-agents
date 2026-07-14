@@ -28,7 +28,7 @@ flowchart LR
         AC["markdown_auth_cookies"]
         CV["markdown_cache_validation"]
         LV["markdown_log_verbosity"]
-        SE["markdown_streaming_engine"]
+        SP["markdown_streaming"]
         PR["markdown_profile"]
         AD["markdown_auto_decompress"]
     end
@@ -103,7 +103,7 @@ flowchart LR
 | Behavior | Selects the Markdown flavor emitted by the Rust converter |
 | Lifecycle impact | Rust conversion options preparation before FFI call |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/rust-converter/src/converter.rs` |
-| Practical note | This changes output semantics, not request eligibility. |
+| Practical note | `commonmark` and `gfm` are the supported values. The former `mdx` and `org-mode` selectors are rejected in v0.9.1 because they never provided distinct conversion semantics. |
 
 ### `markdown_token_estimate`
 
@@ -212,6 +212,15 @@ flowchart LR
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_decompression.c` |
 | Practical note | Default is `on`. If `off`, compressed responses are passed through unchanged. |
 
+### `markdown_streaming`
+
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Selects the processing path: `off` requires full-buffer, `auto` routes by size/response shape, and `force` prefers streaming for every eligible response |
+| Lifecycle impact | Header-phase routing and body-filter path selection after hard eligibility and cache-validation gates |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_streaming_impl.h` |
+| Practical note | This is the sole public streaming selector in v0.9.1. The removed `markdown_streaming_engine` directive is reject-only and reports the exact migration. |
+
 ### `markdown_streaming_zero_copy`
 
 | Aspect | Detail |
@@ -265,3 +274,4 @@ Those are the knobs most directly reflected in the conversion options passed thr
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.9.1 | 2026-07-14 | Codex | Make markdown_streaming the sole public processing-path selector and document removal of non-semantic flavor values |

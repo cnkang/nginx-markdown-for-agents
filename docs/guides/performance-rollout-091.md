@@ -89,7 +89,7 @@ Each optimization follows a staged rollout progression:
 ```nginx
 location /docs {
     markdown_filter on;
-    markdown_streaming_engine on;
+    markdown_streaming force;
     markdown_streaming_zero_copy off;   # <-- disable zero-copy
     proxy_pass http://backend;
 }
@@ -191,7 +191,7 @@ full-buffer path):
 ```nginx
 location /docs {
     markdown_filter on;
-    markdown_streaming_engine off;      # <-- disable streaming
+    markdown_streaming off;      # <-- disable streaming
     proxy_pass http://backend;
 }
 ```
@@ -231,7 +231,7 @@ Streaming decompression requires ALL FOUR conditions to be met:
 Switching the profile from `streaming_first` to `balanced` or `strict_cache`
 changes the streaming engine selection. The `balanced` profile uses
 `streaming_policy: auto` (threshold-based), and `strict_cache` forces
-`streaming_engine: off`. Either change means condition (2) is no longer
+`streaming_policy: off`. Either change means condition (2) is no longer
 guaranteed for all requests, so streaming decompression is automatically
 disabled for requests that no longer select the streaming path.
 
@@ -343,7 +343,7 @@ curl -s http://localhost/markdown-metrics | \
 | Zero-copy causing issues | Set `markdown_streaming_zero_copy off` | `nginx -t && nginx -s reload` |
 | Streaming decompress errors | Switch to `markdown_profile balanced` | `nginx -t && nginx -s reload` |
 | Streaming decompress errors (keep profile) | Set `markdown_auto_decompress off` | `nginx -t && nginx -s reload` |
-| All streaming issues | Set `markdown_streaming_engine off` | `nginx -t && nginx -s reload` |
+| All streaming issues | Set `markdown_streaming off` | `nginx -t && nginx -s reload` |
 | Full-buffer copy issues | Code revert + rebuild | `git revert && make build` |
 | All optimizations off | Combine above config changes | `nginx -t && nginx -s reload` |
 
@@ -354,7 +354,7 @@ location /docs {
     markdown_filter on;
     markdown_streaming_zero_copy off;     # zero-copy disabled
     markdown_auto_decompress off;         # streaming decompress disabled
-    markdown_streaming_engine off;        # streaming engine disabled
+    markdown_streaming off;        # streaming engine disabled
     proxy_pass http://backend;
 }
 ```

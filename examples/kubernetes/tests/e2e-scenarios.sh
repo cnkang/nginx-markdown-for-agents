@@ -287,7 +287,7 @@ scenario_config_update() {
     kubectl create configmap "$CONFIGMAP_NAME" \
         -n "$NAMESPACE" \
         --from-literal=markdown_filter="on" \
-        --from-literal=markdown_streaming_engine="auto" \
+        --from-literal=markdown_streaming="auto" \
         --from-literal=markdown_max_size="10485760" \
         --dry-run=client -o yaml \
         | kubectl apply -f - >&2 2>&1 || {

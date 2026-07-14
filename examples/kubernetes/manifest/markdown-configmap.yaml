@@ -11,4 +11,4 @@ data:
     markdown_flavor gfm;
     markdown_auto_decompress on;
     markdown_decompress_max_size 20m;
-    markdown_streaming_engine auto;
+    markdown_streaming auto;

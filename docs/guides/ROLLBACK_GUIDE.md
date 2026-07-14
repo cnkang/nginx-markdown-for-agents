@@ -22,7 +22,7 @@ flowchart TD
     Type -->|High error rate| Disable["markdown_filter off"]
     Type -->|Conversion failures| Narrow["Narrow scope to<br/>specific paths only"]
     Type -->|Performance issue| IncreaseLimit["Increase markdown_limits<br/>memory or timeout"]
-    Type -->|Streaming issues| DisableStream["markdown_streaming_engine off"]
+    Type -->|Streaming issues| DisableStream["markdown_streaming off"]
     Disable --> Verify["Verify HTML responses<br/>work correctly"]
     Narrow --> Verify
     IncreaseLimit --> Verify
