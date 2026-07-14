@@ -2,7 +2,7 @@
 name = "nginx-markdown-converter"
 version = "0.9.1"
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.97"
 authors = ["NGINX Markdown for Agents Contributors"]
 description = "Rust-based HTML to Markdown conversion engine for NGINX"
 license = "BSD-2-Clause"
@@ -17,7 +17,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 html5ever = "0.38"
 # DOM tree representation
 markup5ever_rcdom = "0.38"
-# Fast hashing for ETags (using version compatible with older Rust)
+# Fast hashing for ETags
 blake3 = "1.8"
 # Hex encoding for ETag generation
 hex = "0.4"

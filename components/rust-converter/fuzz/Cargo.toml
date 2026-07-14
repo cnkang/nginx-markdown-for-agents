@@ -3,6 +3,7 @@ name = "nginx-markdown-converter-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2024"
+rust-version = "1.97"
 license = "BSD-2-Clause"
 
 [package.metadata]

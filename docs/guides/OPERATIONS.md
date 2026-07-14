@@ -534,8 +534,8 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 | Module Version | Rust Version | Status |
 |----------------|--------------|--------|
-| 0.3.x | 1.91.0+ | Supported (edition 2024) |
-| 0.3.x | < 1.91.0 | Not supported |
+| 0.9.1+ | 1.97.0+ | Supported (edition 2024) |
+| 0.9.1+ | < 1.97.0 | Not supported for source builds |
 
 ---
 

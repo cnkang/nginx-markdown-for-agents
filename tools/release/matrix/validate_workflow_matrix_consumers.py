@@ -50,9 +50,14 @@ LEGACY_WORKFLOWS = {
     "release-rpm.yml",
 }
 
-# Regex to find NGINX version literals (e.g., 1.24.0, 1.26.3)
-# Matches semver-like patterns that look like NGINX versions (1.x.y)
-NGINX_VERSION_RE = re.compile(r"\b1\.\d{1,2}\.\d{1,3}\b")
+# Candidate semantic versions are classified as NGINX versions only when the
+# same workflow line explicitly associates them with NGINX. This avoids numeric
+# range guesses that eventually misclassify Rust, Python, or tool releases.
+NGINX_VERSION_RE = re.compile(r"(?<![0-9.])\d+\.\d+\.\d+(?![0-9.])")
+NGINX_CONTEXT_RE = re.compile(r"\bnginx\b|\bnginx[_-]", re.IGNORECASE)
+NGINX_BLOCK_KEY_RE = re.compile(
+    r"^(?P<indent>\s*)nginx(?:[_-]versions?)?\s*:", re.IGNORECASE
+)
 
 # Patterns that indicate dynamic matrix resolution from release-matrix.json
 DYNAMIC_RESOLUTION_PATTERNS = [
@@ -104,6 +109,28 @@ def _uses_dynamic_resolution(content: str) -> bool:
     return any(pattern in content for pattern in DYNAMIC_RESOLUTION_PATTERNS)
 
 
+def _nginx_context_for_line(
+    line: str, nginx_block_indent: int | None
+) -> tuple[bool, int | None]:
+    """Return whether *line* is NGINX-scoped and the updated YAML block indent."""
+    stripped = line.strip()
+    indent = len(line) - len(line.lstrip())
+    block_match = NGINX_BLOCK_KEY_RE.match(line)
+    if block_match is not None:
+        nginx_block_indent = len(block_match.group("indent"))
+    elif (
+        stripped
+        and not stripped.startswith("#")
+        and nginx_block_indent is not None
+        and indent <= nginx_block_indent
+    ):
+        nginx_block_indent = None
+
+    explicit_context = NGINX_CONTEXT_RE.search(line) is not None
+    nested_context = nginx_block_indent is not None and indent > nginx_block_indent
+    return explicit_context or nested_context, nginx_block_indent
+
+
 def extract_hardcoded_versions(content: str) -> list[tuple[int, str, str]]:
     """Extract hardcoded NGINX version references from workflow content.
 
@@ -112,29 +139,19 @@ def extract_hardcoded_versions(content: str) -> list[tuple[int, str, str]]:
     (not in excluded contexts like comments/descriptions/examples).
     """
     found: list[tuple[int, str, str]] = []
+    nginx_block_indent: int | None = None
 
     for lineno, line in enumerate(content.splitlines(), start=1):
-        if _is_excluded_line(line):
+        in_nginx_context, nginx_block_indent = _nginx_context_for_line(
+            line, nginx_block_indent
+        )
+        if _is_excluded_line(line) or not in_nginx_context:
             continue
 
-        for match in NGINX_VERSION_RE.finditer(line):
-            version = match.group(0)
-            # Skip version references that are clearly not NGINX versions:
-            # - Rust toolchain versions (1.91.1)
-            # - Python versions (3.14.3)
-            # - Tool versions (2.46.3)
-            # NGINX versions use even minor for stable, odd for mainline,
-            # and are currently in the 1.24-1.31 range.
-            parts = version.split(".")
-            minor = int(parts[1])
-            if minor > 40:
-                # Not an NGINX version (e.g., Rust 1.91.1)
-                continue
-            if minor < 20:
-                # Not a current NGINX version
-                continue
-
-            found.append((lineno, version, line.strip()))
+        found.extend(
+            (lineno, match.group(0), line.strip())
+            for match in NGINX_VERSION_RE.finditer(line)
+        )
 
     return found
 

@@ -218,7 +218,7 @@ the module from source against your local NGINX installation.
 
 - NGINX source tree matching your installed NGINX version
 - C compiler (gcc or clang)
-- Rust toolchain (edition 2024, MSRV 1.91)
+- Rust toolchain (edition 2024, MSRV 1.97)
 - Standard build tools (make, pkg-config)
 
 ### Steps

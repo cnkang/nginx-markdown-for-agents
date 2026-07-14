@@ -22,7 +22,7 @@ on:
 permissions: {}
 
 env:
-  RUST_TOOLCHAIN: 1.91.1
+  RUST_TOOLCHAIN: 1.97.0
   RUST_FEATURES: streaming,incremental
 
 jobs:
