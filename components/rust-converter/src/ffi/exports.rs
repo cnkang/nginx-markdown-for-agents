@@ -2212,6 +2212,38 @@ mod tests {
     }
 
     #[test]
+    fn decompress_bounded_gzip_concatenated_members() {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+
+        fn gzip_member(payload: &[u8]) -> Vec<u8> {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(payload).unwrap();
+            encoder.finish().unwrap()
+        }
+
+        let first = b"first FFI member";
+        let second = b" and second FFI member";
+        let mut compressed = gzip_member(first);
+        compressed.extend_from_slice(&gzip_member(second));
+
+        let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decompress_bounded(compressed.as_ptr(), compressed.len(), 0, 1024, &mut result)
+        };
+
+        assert_eq!(rc, 0, "Expected success (0), got {rc}");
+        assert_eq!(result.error_category, 0);
+        assert!(!result.output.is_null());
+        assert_eq!(result.output_len, first.len() + second.len());
+        let output = unsafe { std::slice::from_raw_parts(result.output, result.output_len) };
+        assert_eq!(output, [first.as_slice(), second.as_slice()].concat());
+
+        unsafe { markdown_decompress_free(&mut result) };
+    }
+
+    #[test]
     fn decompress_bounded_empty_output_returns_null() {
         use flate2::Compression;
         use flate2::write::GzEncoder;

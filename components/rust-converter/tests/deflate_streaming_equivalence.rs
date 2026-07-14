@@ -2,11 +2,11 @@
 //!
 //! **Validates: Requirements 4.8, 4.9**
 //!
-//! Property 6: Gzip Wrapper Handling Produces Correct Raw Deflate
+//! Property 6: Raw Deflate Streaming Matches Full-Buffer Output
 //!
-//! For 0.9.1, module-level gzip streaming decompression is DEFERRED. This
-//! property test applies ONLY to raw deflate payloads. It verifies that
-//! decompressing raw deflate data via
+//! This property remains specific to raw deflate payloads; gzip member
+//! lifecycle and wrapper handling have dedicated production-path coverage.
+//! It verifies that decompressing raw deflate data via
 //! the full-buffer path (`decompress_bounded` with `Format::Deflate`) produces
 //! byte-identical output to incremental chunk-by-chunk decompression (the
 //! streaming decompression approach using `flate2::Decompress`).

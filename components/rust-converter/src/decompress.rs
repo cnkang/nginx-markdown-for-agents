@@ -206,7 +206,7 @@ fn classify_deflate_error(e: flate2::DecompressError) -> DecompError {
 
 /// Decompress gzip data with budget enforcement.
 fn decompress_gzip(input: &[u8], budget: usize) -> Result<DecompResult, DecompError> {
-    use flate2::read::GzDecoder;
+    use flate2::read::MultiGzDecoder;
 
     if input.is_empty() {
         return Err(DecompError::TruncatedInput(
@@ -214,7 +214,7 @@ fn decompress_gzip(input: &[u8], budget: usize) -> Result<DecompResult, DecompEr
         ));
     }
 
-    let decoder = GzDecoder::new(input);
+    let decoder = MultiGzDecoder::new(input);
     let output = read_bounded(decoder, budget)?;
     Ok(DecompResult { output })
 }
@@ -340,6 +340,45 @@ mod tests {
         let compressed = gzip_compress(original);
         let result = decompress_bounded(&compressed, Format::Gzip, 1024).unwrap();
         assert_eq!(result.output, original);
+    }
+
+    #[test]
+    fn gzip_decompresses_all_concatenated_members() {
+        let first = b"<html><body>";
+        let second = b"joined</body></html>";
+        let mut compressed = gzip_compress(first);
+        compressed.extend_from_slice(&gzip_compress(second));
+
+        let result = decompress_bounded(&compressed, Format::Gzip, 1024).unwrap();
+
+        assert_eq!(
+            result.output,
+            [first.as_slice(), second.as_slice()].concat()
+        );
+    }
+
+    #[test]
+    fn concatenated_gzip_budget_is_response_wide() {
+        let first = b"first member";
+        let second = b"second member";
+        let mut compressed = gzip_compress(first);
+        compressed.extend_from_slice(&gzip_compress(second));
+
+        let result = decompress_bounded(&compressed, Format::Gzip, first.len() + second.len() - 1);
+
+        assert_eq!(result.unwrap_err(), DecompError::BudgetExceeded);
+    }
+
+    #[test]
+    fn gzip_rejects_truncated_later_member() {
+        let mut compressed = gzip_compress(b"complete first member");
+        let mut second = gzip_compress(b"truncated second member");
+        second.truncate(second.len() - 4);
+        compressed.extend_from_slice(&second);
+
+        let result = decompress_bounded(&compressed, Format::Gzip, 1024);
+
+        assert_eq!(result.unwrap_err().error_category(), 103);
     }
 
     #[test]

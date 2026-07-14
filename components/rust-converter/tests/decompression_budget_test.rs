@@ -17,10 +17,10 @@ use flate2::write::GzEncoder;
 /// Returns Ok(decompressed_bytes) if output fits within budget,
 /// or Err("budget exceeded") if decompressed size exceeds the budget.
 fn decompress_bounded(compressed: &[u8], budget: usize) -> Result<Vec<u8>, &'static str> {
-    use flate2::read::GzDecoder;
+    use flate2::read::MultiGzDecoder;
     use std::io::Read;
 
-    let mut decoder = GzDecoder::new(compressed);
+    let mut decoder = MultiGzDecoder::new(compressed);
     let mut output = Vec::new();
     let mut buf = [0u8; 4096];
 
