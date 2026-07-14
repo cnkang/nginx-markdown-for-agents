@@ -195,13 +195,12 @@ def test_tag_release_job_supplies_module_enabled_nginx():
         / "release-packages.yml"
     ).read_text(encoding="utf-8")
 
-    # The build step must produce BOTH the nginx binary and the module .so.
-    # `make modules` alone does not produce objs/nginx; the workflow must
-    # invoke `make binary modules` (or equivalent) and verify both artifacts.
-    assert "make -j\"$(nproc)\" binary modules" in workflow, (
-        "Build step must run `make binary modules` to produce both "
-        "objs/nginx and objs/ngx_http_markdown_filter_module.so"
+    # The public top-level `build` target produces both artifacts across the
+    # supported matrix. `binary` is only an objs/Makefile target in 1.24.0.
+    assert "make -j\"$(nproc)\" build" in workflow, (
+        "Build step must run the portable top-level `make build` target"
     )
+    assert "make -j\"$(nproc)\" binary modules" not in workflow
     # Must verify artifacts exist before copying (prevents silent failures
     # when only one target is built).
     assert "Verify build artifacts exist" in workflow, (
@@ -235,19 +234,7 @@ def test_tag_release_job_supplies_module_enabled_nginx():
 
 
 def test_module_baseline_contains_measured_critical_scenarios():
-    """The checked-in baseline must have measured input_bytes for critical scenarios.
-
-    Note: the current baseline is intentionally invalid (streaming_ratio=0,
-    nginx_version=unknown, insufficient memory points) because it was
-    generated before the path-coverage, RSS sampling, and evidence
-    completeness fixes.  The evidence gate now rejects it as
-    MISSING_EVIDENCE via multiple violation categories (path-coverage,
-    nginx_version, memory_evidence).  The baseline must be regenerated
-    by running a real benchmark on a module-enabled NGINX runtime after
-    all benchmark runtime fixes are deployed.  Do not hand-edit the
-    baseline JSON — the strict zero-copy E2E and evidence validator
-    must pass first, then the baseline is generated from real output.
-    """
+    """The checked-in baseline contains real critical-path evidence."""
     baseline_path = (
         Path(__file__).resolve().parents[3]
         / "perf"
@@ -260,12 +247,17 @@ def test_module_baseline_contains_measured_critical_scenarios():
     for name in ("plain-small", "large-body", "streaming-first"):
         assert by_name[name]["status"] == "completed"
         assert by_name[name]["metrics"]["input_bytes"] > 0
-    # The baseline must record the NGINX version key for environment
-    # identity.  The current value is "unknown (...)" which the evidence
-    # gate rejects; this is expected until the baseline is regenerated.
-    assert "nginx_version" in baseline["module_benchmark"], (
-        "Baseline must record nginx_version for environment identity"
+        assert by_name[name]["metrics"]["baseline_rss_bytes"] > 0
+        assert by_name[name]["metrics"]["peak_rss_bytes"] > 0
+    assert baseline["module_benchmark"]["nginx_version"].startswith(
+        "nginx version: nginx/"
     )
+    streaming = by_name["streaming-first"]["metrics"]
+    assert streaming["input_bytes"] == 1_048_516
+    assert streaming["streaming_path_hits"] > 0
+    assert streaming["streaming_ratio"] == 1.0
+    assert streaming["streaming_fallback_total"] == 0
+    assert streaming["zero_copy_output_total"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +587,26 @@ class TestAllowSkipModule:
         assert pack["skipped"] is True
         assert pack["verdict"] == "SKIPPED"
         assert "--allow-skip-module" in pack["skip_reason"]
+
+    @pytest.mark.parametrize(
+        "tag_ref",
+        ["refs/tags/v0.9.1-rc.1", "refs/tags/v0.9.1"],
+    )
+    def test_release_tags_reject_allow_skip_module(
+        self, monkeypatch, tag_ref
+    ):
+        """Development skip must never satisfy an RC or release-tag gate."""
+        monkeypatch.delenv("NGINX_BIN", raising=False)
+        monkeypatch.delenv("CI_COMMIT_TAG", raising=False)
+        monkeypatch.delenv("RELEASE_VERSION", raising=False)
+        monkeypatch.setenv("GITHUB_REF", tag_ref)
+
+        exit_code = main([
+            "--mode", "blocking",
+            "--allow-skip-module",
+        ])
+
+        assert exit_code == 1
 
     def test_parse_args_allow_skip_module_default_false(self):
         """--allow-skip-module defaults to False when not provided."""
@@ -949,13 +961,8 @@ class TestPathCoverageInvariants:
         }
         assert _check_path_coverage(report) == []
 
-    def test_current_baseline_is_rejected_by_path_coverage(self):
-        """The checked-in baseline has streaming_ratio=0 — must be detected.
-
-        This is a regression guard: if someone regenerates the baseline
-        without fixing the benchmark runtime so streaming is actually
-        exercised, the path-coverage check must catch it.
-        """
+    def test_current_baseline_passes_path_coverage(self):
+        """The generated baseline exercises every required module path."""
         baseline_path = (
             Path(__file__).resolve().parents[3]
             / "perf"
@@ -963,16 +970,7 @@ class TestPathCoverageInvariants:
             / "module-baseline-091.json"
         )
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
-        violations = _check_path_coverage(baseline)
-        # The current baseline has streaming_ratio=0 for streaming-first,
-        # which must be detected as a path-coverage violation.
-        streaming_violations = [
-            v for v in violations if v[0] == "streaming-first"
-        ]
-        assert len(streaming_violations) > 0, (
-            "Checked-in baseline has streaming_ratio=0 for streaming-first; "
-            "path-coverage invariant must detect this as MISSING_EVIDENCE"
-        )
+        assert _check_path_coverage(baseline) == []
 
 
 # ---------------------------------------------------------------------------
@@ -983,12 +981,8 @@ class TestPathCoverageInvariants:
 class TestBaselineEvidenceIntegrity:
     """The checked-in baseline must pass the same integrity checks as current."""
 
-    def test_current_baseline_is_rejected_by_full_validation(self):
-        """_validate_benchmark_evidence catches baseline issues.
-
-        The checked-in baseline has both streaming_ratio=0 (path coverage
-        violation) and an 'unknown' nginx_version.  Both must be detected.
-        """
+    def test_current_baseline_passes_full_validation(self):
+        """The generated baseline passes the blocking integrity contract."""
         baseline_path = (
             Path(__file__).resolve().parents[3]
             / "perf"
@@ -996,23 +990,9 @@ class TestBaselineEvidenceIntegrity:
             / "module-baseline-091.json"
         )
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
-        violations = _validate_benchmark_evidence(baseline, role="baseline")
-
-        # Must have at least one path-coverage violation
-        path_violations = [
-            v for v in violations if v[0] == "baseline.path_coverage"
-        ]
-        assert len(path_violations) > 0, (
-            "Baseline must fail path-coverage validation"
-        )
-
-        # Must have an nginx_version violation
-        version_violations = [
-            v for v in violations if v[0] == "baseline.nginx_version"
-        ]
-        assert len(version_violations) > 0, (
-            "Baseline must fail nginx_version validation (is 'unknown')"
-        )
+        assert _validate_benchmark_evidence(
+            baseline, role="baseline"
+        ) == []
 
     def test_valid_baseline_passes_validation(self):
         """A properly generated baseline with real evidence passes."""
@@ -1309,6 +1289,34 @@ class TestEnvironmentCompatibility:
             "nginx_version": "nginx/1.28.2",
         }}
         assert _check_environment_compatibility(current, baseline) == []
+
+    def test_changed_critical_fixture_size_is_rejected(self):
+        """A same-name scenario cannot compare a different fixture payload."""
+        current = {"module_benchmark": {
+            "platform": "linux-x86_64",
+            "load_generator": "ab",
+            "nginx_version": "nginx/1.24.0",
+            "scenarios": [{
+                "name": "streaming-first",
+                "metrics": {"input_bytes": 1_048_516},
+            }],
+        }}
+        baseline = {"module_benchmark": {
+            "platform": "linux-x86_64",
+            "load_generator": "ab",
+            "nginx_version": "nginx/1.24.0",
+            "scenarios": [{
+                "name": "streaming-first",
+                "metrics": {"input_bytes": 5_390},
+            }],
+        }}
+
+        violations = _check_environment_compatibility(current, baseline)
+
+        assert violations == [(
+            "scenario.streaming-first.input_bytes",
+            "current=1048516 vs baseline=5390",
+        )]
 
     def test_mismatched_platform_detected(self):
         """Different platform → violation."""

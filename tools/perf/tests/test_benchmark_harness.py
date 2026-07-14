@@ -18,6 +18,7 @@ Run:
 
 
 import contextlib
+import io
 import json
 import os
 import re
@@ -32,6 +33,7 @@ from pathlib import Path
 import pytest
 
 from tools.perf.report_schema import validate_module_benchmark_091
+from tools.perf.upstream_mock import MockUpstreamHandler
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -61,6 +63,34 @@ def test_module_benchmark_records_actual_fixture_bytes():
     source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
     assert 'fixture_bytes="$(wc -c < "$CORPUS_DIR/$SC_FIXTURE")"' in source
     assert source.count('"input_bytes": input_bytes') == 2
+
+
+def test_upstream_mock_splits_chunked_bodies():
+    """Chunked benchmark responses must expose multiple bounded chunks."""
+    handler = object.__new__(MockUpstreamHandler)
+    handler.wfile = io.BytesIO()
+    handler._send_common_headers = lambda _encoding: None
+    handler.send_header = lambda *_args: None
+    handler.end_headers = lambda: None
+    body = b"x" * (32 * 1024 + 7)
+
+    handler._send_chunked_response(body, None)
+
+    wire = handler.wfile.getvalue()
+    chunks = []
+    offset = 0
+    while True:
+        line_end = wire.index(b"\r\n", offset)
+        size = int(wire[offset:line_end], 16)
+        offset = line_end + 2
+        if size == 0:
+            break
+        chunks.append(wire[offset:offset + size])
+        offset += size + 2
+
+    assert len(chunks) > 1
+    assert max(map(len, chunks)) <= 16 * 1024
+    assert b"".join(chunks) == body
 
 # Canonical allowlist for bash binary paths (Rule 33: CLI-derived executables
 # must match a fixed canonical allowlist before subprocess use).
@@ -793,6 +823,31 @@ class TestNginxConfigGeneration:
         assert '"$NGINX_BIN" -t -c "$conf_path" -p "$NGINX_WORKDIR"' in script_content, (
             "generated benchmark nginx.conf should be validated with nginx -t"
         )
+
+    def test_streaming_first_uses_nonfallback_streaming_fixture(self):
+        """The streaming-path evidence scenario must not force capability fallback."""
+        script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+
+        assert (
+            '"streaming-first|large/large-1mb.html|'
+            'streaming_first|none|chunked|20"'
+        ) in script_content
+        assert (
+            '"streaming-first|complex/documentation.html|' not in script_content
+        )
+
+        fixture = REPO_ROOT / "tests" / "corpus" / "large" / "large-1mb.html"
+        metadata = json.loads(fixture.with_suffix(".meta.json").read_text())
+        assert fixture.stat().st_size >= 1_000_000
+        assert metadata["streaming_notes"]["expected_fallback"] is False
+
+    def test_streaming_first_uses_real_upstream_streaming_transport(self):
+        """Benchmark transport must preserve incremental upstream chunks."""
+        script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+
+        assert "proxy_http_version 1.1;" in script_content
+        assert "proxy_buffering off;" in script_content
+        assert 'proxy_set_header Connection \\"\\";' in script_content
 
     def test_scenario_results_are_collected_as_json_lines(self):
         """Scenario JSON must not be split by delimiters that appear inside nested objects."""
