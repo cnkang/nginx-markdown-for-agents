@@ -23,6 +23,10 @@ Automatic decompression is the built-in fallback path for this scenario.
   - Gzip uses streaming gzip framing under the streaming-eligible gates;
     member boundaries may cross feeds, trailers are validated, and a truncated
     final member is rejected.
+  - When policy selects full-buffer conversion, both the default Rust FFI
+    decoder and the C no-Rust fallback consume every concatenated gzip member,
+    reject a truncated later member, and enforce one response-wide output
+    budget.
 - Supports `br` when Brotli support is compiled in; Brotli remains on bounded
   full-buffer decompression in 0.9.1.
 - Uses a fast path for uncompressed responses (no decompression work).
@@ -147,3 +151,4 @@ The `ngx_http_markdown_classify_error()` function maps FFI error codes to
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.0 | 2026-05-17 | Kang | Added Resource Budgets and Error Categories sections for v0.7.0 |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.9.1 | 2026-07-14 | Codex | Document full-buffer concatenated-gzip handling, later-member truncation rejection, and cumulative budget enforcement |

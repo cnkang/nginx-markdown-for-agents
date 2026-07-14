@@ -26,6 +26,11 @@ The gate fails if the following are exceeded compared to the 0.9.0 baseline:
 
 ### Tooling
 - **Benchmark Harness**: `tools/perf/run_module_benchmark.sh` exercises the full NGINX request lifecycle across 5 representative scenarios.
+- **Streaming-path evidence**: The `streaming-first` scenario uses the tracked
+  large streaming-safe fixture whose metadata declares no expected fallback.
+  The mock upstream emits bounded 16 KiB HTTP chunks, and the scenario disables
+  proxy buffering over HTTP/1.1 so path hits, TTFB, and zero-copy counters
+  represent incremental processing rather than a single buffered body.
 - **Diagnostics**: `tools/perf/doctor_advice.py` provides operator diagnostics when thresholds are breached.
 
 ## Consequences
@@ -35,7 +40,8 @@ The gate fails if the following are exceeded compared to the 0.9.0 baseline:
 - Provides an evidence pack (benchmark tiers, decompression coverage, fallback rate, memory slope) for every release.
 
 ### Negative Consequences
-- Blocking mode requires `NGINX_BIN` to be present in the environment (or use `--allow-skip-module`).
+- Blocking RC/release-tag mode requires a module-enabled `NGINX_BIN`; the
+  development-only skip is not release evidence.
 - Increases the time required for the final release check.
 
 ## Alternatives Considered
@@ -59,3 +65,4 @@ Kang
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.9.1 | 2026-07-08 | Kang | Initial ADR for 0.9.1 Performance Evidence Gate |
+| 0.9.1 | 2026-07-14 | Codex | Required a large non-fallback, genuinely chunked streaming-first scenario and real module evidence for blocking release validation |
