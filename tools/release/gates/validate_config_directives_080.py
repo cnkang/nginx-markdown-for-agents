@@ -69,7 +69,7 @@ NEW_DIRECTIVES = [
         "merge_pattern": r"conf->stream\.threshold",
         "default_pattern": (
             r"NGX_MD_MERGE_STREAM\(\s*threshold\s*,\s*size_t\s*,\s*-1\s*,"
-            r"\s*NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT\s*\)"
+            r"\s*NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT\s*,\s*0\s*\)"
         ),
         "description": "auto-mode streaming threshold (replaces markdown_streaming_auto_threshold)",
     },
@@ -80,7 +80,7 @@ NEW_DIRECTIVES = [
         "merge_pattern": r"conf->stream\.precommit_buffer",
         "default_pattern": (
             r"NGX_MD_MERGE_STREAM\(\s*precommit_buffer\s*,\s*size_t\s*,"
-            r"\s*-1\s*,\s*262144\s*\)"
+            r"\s*-1\s*,\s*262144\s*,\s*0\s*\)"
         ),
         "description": "pre-commit replay buffer size",
     },
@@ -91,7 +91,7 @@ NEW_DIRECTIVES = [
         "merge_pattern": r"conf->stream\.flush_min",
         "default_pattern": (
             r"NGX_MD_MERGE_STREAM\(\s*flush_min\s*,\s*size_t\s*,"
-            r"\s*-1\s*,\s*16384\s*\)"
+            r"\s*-1\s*,\s*16384\s*,\s*0\s*\)"
         ),
         "description": "minimum Markdown output batch size before flush",
     },

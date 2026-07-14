@@ -720,6 +720,12 @@ release-gates-check-080-regression:
 
 # 0.9.0 Release Gates (additive on top of 0.8.0 regression subset)
 # test-rust, test-nginx-unit, check-headers, docs-check already run by prereq
+#
+# Environment variables:
+#   NGINX_BIN                            - Path to module-enabled nginx binary
+#   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Skip production-examples nginx -t
+#                                           (and 091 module benchmarks) when
+#                                           NGINX_BIN is unavailable
 release-gates-check-090: release-gates-check-080-regression
 	@echo "=== 0.9.0 Release Gates ==="
 	$(MAKE) test-production-examples-nginx-t
@@ -748,7 +754,9 @@ perf-evidence-check:
 #
 # Environment variables:
 #   NGINX_BIN                            - Path to module-enabled nginx binary
-#   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Allow proceeding without module benchmarks
+#   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Allow proceeding without module
+#                                           benchmarks (also skips 0.9.0
+#                                           production-examples nginx -t)
 #   RELEASE_GATE_ALLOW_SKIP_FUZZ=1       - (inherited) skip fuzz smoke
 #   RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 - (inherited) skip native E2E
 #   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - (inherited) skip coverage
@@ -788,6 +796,11 @@ release-gates-check-all: release-gates-check release-gates-check-091
 	@echo "=== Release Gates: ALL PASS ==="
 
 # Production Examples: validate all examples pass nginx -t (NEW)
+# Requires a module-enabled NGINX binary (NGINX_BIN or PATH nginx).
+# When the binary is unavailable, the gate fails unless
+# RELEASE_GATE_ALLOW_SKIP_MODULE=1 is set, mirroring the 091
+# module-benchmark skip contract.  This is an environment limitation skip
+# (non-release validation only); tag-release CI must provide NGINX_BIN.
 test-production-examples-nginx-t:
 	@echo "=== Production Examples nginx -t ==="
 	@nginx_bin="$${NGINX_BIN:-nginx}"; \
@@ -803,8 +816,13 @@ test-production-examples-nginx-t:
 		done; \
 		echo "All production examples pass nginx -t"; \
 	else \
-		echo "FAIL: nginx binary not found (set NGINX_BIN to a module-enabled nginx)" >&2; \
-		exit 1; \
+		if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
+			echo "SKIP: nginx binary not found (set NGINX_BIN to a module-enabled nginx; RELEASE_GATE_ALLOW_SKIP_MODULE=1)"; \
+		else \
+			echo "FAIL: nginx binary not found (set NGINX_BIN to a module-enabled nginx)" >&2; \
+			echo "  Set NGINX_BIN=/path/to/nginx or RELEASE_GATE_ALLOW_SKIP_MODULE=1 to skip." >&2; \
+			exit 1; \
+		fi; \
 	fi
 
 # Production Examples: E2E smoke (requires running NGINX, deferred)
