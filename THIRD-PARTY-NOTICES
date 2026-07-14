@@ -97,7 +97,7 @@ Section B: Rust Conversion Engine Dependencies
 
 ================================================================================
 
-4.  html5ever 0.38.0
+4.  html5ever 0.39.0
     https://github.com/servo/html5ever
     License: MIT OR Apache-2.0
     Copyright (c) 2014-2017 The html5ever Project Developers
@@ -107,7 +107,7 @@ Section B: Rust Conversion Engine Dependencies
 
 --------------------------------------------------------------------------------
 
-5.  markup5ever 0.38.0
+5.  markup5ever 0.39.0
     https://github.com/servo/html5ever/tree/main/markup5ever
     License: MIT OR Apache-2.0
     Copyright (c) 2014-2017 The html5ever Project Developers
@@ -117,8 +117,8 @@ Section B: Rust Conversion Engine Dependencies
 
 --------------------------------------------------------------------------------
 
-6.  markup5ever_rcdom 0.38.0
-    https://github.com/nicksenger/markup5ever_rcdom
+6.  markup5ever_rcdom 0.39.0+unofficial
+    https://github.com/servo/html5ever/tree/main/rcdom
     License: MIT OR Apache-2.0
     Copyright (c) 2014-2017 The html5ever Project Developers
 
@@ -147,7 +147,7 @@ Section B: Rust Conversion Engine Dependencies
 
 --------------------------------------------------------------------------------
 
-9.  regex 1.12.4
+9.  regex 1.13.0
     https://github.com/rust-lang/regex
     License: MIT OR Apache-2.0
     Copyright (c) 2014 The Rust Project Developers

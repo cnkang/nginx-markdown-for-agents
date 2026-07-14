@@ -12,7 +12,7 @@ cargo-fuzz = true
 [dependencies]
 flate2 = "1.0"
 libfuzzer-sys = "0.4"
-markup5ever_rcdom = "0.38"
+markup5ever_rcdom = "0.39"
 nginx-markdown-converter = { version = "0.9.1", path = "..", features = ["streaming"] }
 
 [[bin]]

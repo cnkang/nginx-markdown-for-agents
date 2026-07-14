@@ -10,6 +10,7 @@ on:
       - "tools/ci/check_c_licenses.py"
       - "tools/ci/check_rust_licenses.py"
       - "tools/ci/check_third_party_notices.py"
+      - "tools/ci/test_check_third_party_notices.py"
       - "THIRD-PARTY-NOTICES"
       - "Makefile"
       - ".github/workflows/codeql.yml"
@@ -21,6 +22,7 @@ on:
       - "tools/ci/check_c_licenses.py"
       - "tools/ci/check_rust_licenses.py"
       - "tools/ci/check_third_party_notices.py"
+      - "tools/ci/test_check_third_party_notices.py"
       - "THIRD-PARTY-NOTICES"
       - "Makefile"
       - ".github/workflows/codeql.yml"
@@ -140,3 +142,6 @@ jobs:
 
       - name: THIRD-PARTY-NOTICES coverage check
         run: python3 tools/ci/check_third_party_notices.py
+
+      - name: THIRD-PARTY-NOTICES validator tests
+        run: python3 -m unittest tools/ci/test_check_third_party_notices.py

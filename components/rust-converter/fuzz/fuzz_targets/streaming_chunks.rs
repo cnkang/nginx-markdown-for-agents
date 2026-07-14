@@ -103,15 +103,15 @@ fuzz_target!(|data: &[u8]| {
     );
 
     // When both succeed, output must match after whitespace normalization.
-    if let (Ok(single), Ok(chunked)) = (single_res, chunked_res) {
-        if single != chunked {
-            assert_eq!(
-                normalize_ascii_whitespace(&single),
-                normalize_ascii_whitespace(&chunked),
-                "streaming_chunks: chunk split changed output beyond whitespace drift, \
-                 split_sizes={split_sizes:?}, html_len={}",
-                html.len()
-            );
-        }
+    if let (Ok(single), Ok(chunked)) = (single_res, chunked_res)
+        && single != chunked
+    {
+        assert_eq!(
+            normalize_ascii_whitespace(&single),
+            normalize_ascii_whitespace(&chunked),
+            "streaming_chunks: chunk split changed output beyond whitespace drift, \
+             split_sizes={split_sizes:?}, html_len={}",
+            html.len()
+        );
     }
 });

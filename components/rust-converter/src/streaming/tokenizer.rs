@@ -111,6 +111,7 @@ impl TokenSink for TokenSinkAdapter {
 ///     name: "h1".into(),
 ///     attrs: vec![],
 ///     self_closing: false,
+///     had_duplicate_attributes: false,
 ///     kind: TagKind::StartTag,
 /// };
 ///

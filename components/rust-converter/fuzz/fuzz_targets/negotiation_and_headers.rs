@@ -79,8 +79,16 @@ fn derive_status_code(data: &[u8], offset: usize) -> u16 {
 /// `DecisionContext`. This provides full combinatorial coverage of
 /// the decision engine's boolean input space.
 fn derive_config_flags(data: &[u8], offset: usize) -> (bool, bool, bool, bool, bool, bool) {
-    let byte0 = if offset < data.len() { data[offset] } else { 0xFF };
-    let byte1 = if offset + 1 < data.len() { data[offset + 1] } else { 0xFF };
+    let byte0 = if offset < data.len() {
+        data[offset]
+    } else {
+        0xFF
+    };
+    let byte1 = if offset + 1 < data.len() {
+        data[offset + 1]
+    } else {
+        0xFF
+    };
 
     let enabled = (byte0 & 0x01) != 0;
     let eligible = (byte0 & 0x02) != 0;
@@ -91,7 +99,14 @@ fn derive_config_flags(data: &[u8], offset: usize) -> (bool, bool, bool, bool, b
     let _on_wildcard = (byte1 & 0x01) != 0;
     // byte1 bits 1-7 and bytes 2-3 reserved for future config
 
-    (enabled, eligible, conditional_not_modified, decompression_ok, parse_timed_out, parse_budget_exceeded)
+    (
+        enabled,
+        eligible,
+        conditional_not_modified,
+        decompression_ok,
+        parse_timed_out,
+        parse_budget_exceeded,
+    )
 }
 
 /// Derive the `on_wildcard` flag from config bytes.
@@ -112,13 +127,11 @@ fn derive_has_etag(data: &[u8], offset: usize) -> bool {
     }
 }
 
-/// Run the full negotiation + decision + header plan pipeline once.
-///
-/// Returns a tuple of (NegotiationResult, Decision, HeaderPlan) for
-/// determinism comparison.
-fn run_pipeline(
-    accept: &str,
-    content_type: &str,
+/// Inputs for one negotiation, decision, and header-plan pipeline run.
+#[derive(Clone, Copy)]
+struct PipelineInputs<'a> {
+    accept: &'a str,
+    content_type: &'a str,
     on_wildcard: bool,
     has_etag: bool,
     enabled: bool,
@@ -127,29 +140,41 @@ fn run_pipeline(
     decompression_ok: bool,
     parse_timed_out: bool,
     parse_budget_exceeded: bool,
-) -> (NegotiationResult, nginx_markdown_converter::decision::Decision, HeaderPlan) {
+}
+
+/// Run the full negotiation + decision + header plan pipeline once.
+///
+/// Returns a tuple of (NegotiationResult, Decision, HeaderPlan) for
+/// determinism comparison.
+fn run_pipeline(
+    inputs: PipelineInputs<'_>,
+) -> (
+    NegotiationResult,
+    nginx_markdown_converter::decision::Decision,
+    HeaderPlan,
+) {
     // Step 1: Content negotiation
-    let negotiation_result = negotiate(accept, on_wildcard);
+    let negotiation_result = negotiate(inputs.accept, inputs.on_wildcard);
 
     // Step 2: Build decision context from negotiation result + config flags
     let accept_prefers_markdown = matches!(negotiation_result, NegotiationResult::Convert);
-    let accept_header_present = !accept.trim().is_empty();
+    let accept_header_present = !inputs.accept.trim().is_empty();
 
     let ctx = DecisionContext {
-        enabled,
-        eligible,
+        enabled: inputs.enabled,
+        eligible: inputs.eligible,
         accept_prefers_markdown,
         accept_header_present,
-        conditional_not_modified,
-        decompression_ok,
-        parse_timed_out,
-        parse_budget_exceeded,
+        conditional_not_modified: inputs.conditional_not_modified,
+        decompression_ok: inputs.decompression_ok,
+        parse_timed_out: inputs.parse_timed_out,
+        parse_budget_exceeded: inputs.parse_budget_exceeded,
     };
 
     let decision = make_decision(&ctx);
 
     // Step 3: Build header plan (always exercise this path regardless of decision)
-    let plan = HeaderPlan::for_markdown_conversion(content_type, has_etag);
+    let plan = HeaderPlan::for_markdown_conversion(inputs.content_type, inputs.has_etag);
 
     (negotiation_result, decision, plan)
 }
@@ -159,14 +184,19 @@ fuzz_target!(|data: &[u8]| {
     let accept = safe_slice_to_str(data, 0, 64);
     let content_type = safe_slice_to_str(data, 64, 96);
     let _status_code = derive_status_code(data, 96);
-    let (enabled, eligible, conditional_not_modified, decompression_ok, parse_timed_out, parse_budget_exceeded) =
-        derive_config_flags(data, 98);
+    let (
+        enabled,
+        eligible,
+        conditional_not_modified,
+        decompression_ok,
+        parse_timed_out,
+        parse_budget_exceeded,
+    ) = derive_config_flags(data, 98);
     let on_wildcard = derive_on_wildcard(data, 98);
     let has_etag = derive_has_etag(data, 98);
     let _user_agent = safe_slice_to_str(data, 102, 166);
 
-    // Run pipeline first time
-    let (neg1, dec1, plan1) = run_pipeline(
+    let inputs = PipelineInputs {
         accept,
         content_type,
         on_wildcard,
@@ -177,21 +207,11 @@ fuzz_target!(|data: &[u8]| {
         decompression_ok,
         parse_timed_out,
         parse_budget_exceeded,
-    );
+    };
 
-    // Run pipeline second time with identical inputs — determinism assertion
-    let (neg2, dec2, plan2) = run_pipeline(
-        accept,
-        content_type,
-        on_wildcard,
-        has_etag,
-        enabled,
-        eligible,
-        conditional_not_modified,
-        decompression_ok,
-        parse_timed_out,
-        parse_budget_exceeded,
-    );
+    // Run twice with identical inputs to assert determinism.
+    let (neg1, dec1, plan1) = run_pipeline(inputs);
+    let (neg2, dec2, plan2) = run_pipeline(inputs);
 
     // Invariant: same input → same output (determinism)
     assert_eq!(neg1, neg2, "Negotiation result is non-deterministic");

@@ -225,6 +225,7 @@ docs-check-base:
 
 docs-check: docs-check-base
 	python3 tools/harness/check_harness_sync.py
+	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
 
 release-notes:
 	python3 tools/render_release_matrix_docs.py --release-notes
@@ -292,6 +293,7 @@ test-harness:
 license-check:
 	python3 tools/ci/check_c_licenses.py
 	python3 tools/ci/check_rust_licenses.py
+	python3 -m unittest tools/ci/test_check_third_party_notices.py
 	python3 tools/ci/check_third_party_notices.py
 
 security-static: security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny
