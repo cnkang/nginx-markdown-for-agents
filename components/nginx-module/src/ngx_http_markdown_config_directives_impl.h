@@ -1259,6 +1259,28 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
+     * markdown_auto_decompress on|off
+     *
+     * Controls whether the module automatically decompresses upstream
+     * compressed responses (gzip, deflate, brotli) before conversion.
+     * When off, compressed responses pass through unconverted.
+     *
+     * Default: on
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_auto_decompress off;
+     */
+    {
+        ngx_string("markdown_auto_decompress"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, decompress.auto_decompress),
+        NULL
+    },
+
+    /*
      * markdown_dynamic_config on|off
      *
      * Enable runtime configuration hot-reload without NGINX restart.
