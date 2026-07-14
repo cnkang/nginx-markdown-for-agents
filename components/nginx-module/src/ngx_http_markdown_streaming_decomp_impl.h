@@ -607,7 +607,8 @@ ngx_http_markdown_streaming_decomp_finalize_buf(
  * intentionally not reset here.
  *
  * Returns NGX_OK on success.  On failure, releases the current heap
- * workspace and returns NGX_ERROR.
+ * workspace and returns NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR because an
+ * inflater reset failure is a zlib runtime error, not malformed input.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_reset_gzip_member(
@@ -631,7 +632,7 @@ ngx_http_markdown_streaming_decomp_reset_gzip_member(
         ngx_log_error(NGX_LOG_ERR, log, 0,
             "markdown: gzip member inflateReset error %d", zrc);
         ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-        return NGX_ERROR;
+        return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
     }
 
     decomp->state.zlib.next_in = next_in;
@@ -648,8 +649,7 @@ ngx_http_markdown_streaming_decomp_reset_gzip_member(
  * Step return codes:
  *   1  - done (Z_STREAM_END or avail_in == 0)
  *   0  - continue iterating
- *  -1  - error (heap_buf freed if needed)
- *  -2  - budget exceeded (heap_buf freed if needed)
+ *  <0  - NGX/decompression error code (heap_buf freed if needed)
  */
 static int
 ngx_http_markdown_streaming_decomp_inflate_step(
@@ -684,7 +684,10 @@ ngx_http_markdown_streaming_decomp_inflate_step(
             "markdown: "
             "inflate error %d", zrc);
         ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-        return -1;
+        if (zrc == Z_DATA_ERROR) {
+            return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+        }
+        return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
     }
 
     /*
@@ -704,7 +707,7 @@ ngx_http_markdown_streaming_decomp_inflate_step(
             "markdown: "
             "inflate no-progress (Z_BUF_ERROR with no state change)");
         ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-        return -1;
+        return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
     }
 
     *out_produced = *buf_size_ptr
@@ -719,7 +722,7 @@ ngx_http_markdown_streaming_decomp_inflate_step(
             decomp->total_decompressed + *out_produced,
             decomp->max_decompressed_size);
         ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-        return -2;  /* budget exceeded */
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
 
     if (zrc == Z_STREAM_END) {
@@ -728,11 +731,15 @@ ngx_http_markdown_streaming_decomp_inflate_step(
             return 1;
         }
 
-        if (ngx_http_markdown_streaming_decomp_reset_gzip_member(
-                decomp, heap_buf_ptr, log)
-            != NGX_OK)
         {
-            return -1;
+            ngx_int_t  reset_rc;
+
+            reset_rc =
+                ngx_http_markdown_streaming_decomp_reset_gzip_member(
+                    decomp, heap_buf_ptr, log);
+            if (reset_rc != NGX_OK) {
+                return (int) reset_rc;
+            }
         }
 
         if (decomp->state.zlib.avail_in == 0) {
@@ -757,7 +764,7 @@ ngx_http_markdown_streaming_decomp_inflate_step(
                         - decomp->total_decompressed;
             if (*buf_size_ptr >= remaining) {
                 ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-                return -2;
+                return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
             }
         }
 
@@ -790,7 +797,7 @@ ngx_http_markdown_streaming_decomp_inflate_step(
                     "zlib uInt max",
                     *buf_size_ptr - old_size);
                 ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-                return -1;
+                return NGX_ERROR;
             }
             decomp->state.zlib.avail_out = avail_out;
         }
@@ -807,8 +814,11 @@ ngx_http_markdown_streaming_decomp_inflate_step(
  * as needed until all input is consumed or Z_STREAM_END.
  *
  * Returns:
- *   NGX_OK    - success (produced written to *out_produced)
- *   NGX_ERROR - inflate error or size limit exceeded
+ *   NGX_OK - success (produced written to *out_produced)
+ *   NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED - size limit hit
+ *   NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR - malformed compressed data
+ *   NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR - unexpected zlib runtime error
+ *   NGX_ERROR - allocation or narrowing failure
  */
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_inflate_loop(
@@ -833,12 +843,8 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
                 out_produced, &heap_buf,
                 &using_heap, log);
 
-        if (step_rc == -2) {
-            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
-        }
-
         if (step_rc < 0) {
-            return NGX_ERROR;
+            return (ngx_int_t) step_rc;
         }
 
         if (step_rc > 0) {
@@ -1212,13 +1218,26 @@ ngx_http_markdown_streaming_decomp_workspace_size(
     if (decomp->max_decompressed_size == 0) {
         return NGX_OK;
     }
-    if (decomp->total_decompressed >= decomp->max_decompressed_size) {
+    if (decomp->total_decompressed > decomp->max_decompressed_size) {
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
 
     remaining = decomp->max_decompressed_size
                 - decomp->total_decompressed;
-    if (*buf_size > remaining) {
+
+    /*
+     * Gzip permits concatenated empty members.  Reserve one bounded probe
+     * byte when the normal workspace reaches the remaining response budget:
+     * an empty member can consume its header/trailer without output, while
+     * any produced probe byte is rejected by check_limit() before exposure.
+     */
+    if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+        && *buf_size >= remaining && remaining < (size_t) -1)
+    {
+        *buf_size = remaining + 1;
+    } else if (remaining == 0) {
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    } else if (*buf_size > remaining) {
         *buf_size = remaining;
     }
 
@@ -1544,7 +1563,10 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             ngx_http_markdown_streaming_decomp_free_heap(
                 &heap_buf);
             *buf_ptr = NULL;
-            return NGX_ERROR;
+            if (zrc == Z_DATA_ERROR) {
+                return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+            }
+            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
         }
 
         *produced_ptr = *buf_size_ptr
@@ -1581,7 +1603,7 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             ngx_http_markdown_streaming_decomp_free_heap(
                 &heap_buf);
             *buf_ptr = NULL;
-            return NGX_ERROR;
+            return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
         }
 
         if (decomp->state.zlib.avail_out != 0) {
@@ -1663,8 +1685,9 @@ ngx_http_markdown_streaming_decomp_finish_brotli(
  * All error paths free the heap workspace before returning.
  *
  * Returns:
- *   NGX_OK    - success (*out_data is pool-owned or NULL)
- *   NGX_ERROR - decompression error (heap workspace freed)
+ *   NGX_OK - success (*out_data is pool-owned or NULL)
+ *   NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT - incomplete stream at EOF
+ *   Other decompression/NGX errors from the format-specific finish path
  */
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_finish(
@@ -1678,14 +1701,28 @@ ngx_http_markdown_streaming_decomp_finish(
     size_t   buf_size;
     size_t   produced;
 
-    if (decomp == NULL || !decomp->initialized
-        || out_data == NULL || out_len == NULL)
+    if (decomp == NULL || out_data == NULL || out_len == NULL)
     {
         return NGX_ERROR;
     }
 
     *out_data = NULL;
     *out_len = 0;
+
+    /*
+     * A deflate stream can still be waiting for the second format-sniffing
+     * header byte.  Feed-time partial input is valid, but once the complete
+     * HTTP response reaches EOF there is no more input to resolve the stream,
+     * so the terminal classification is truncated input.
+     */
+    if (!decomp->initialized) {
+        if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+            && decomp->zlib_header_pending)
+        {
+            return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+        }
+        return NGX_ERROR;
+    }
 
     if (decomp->finished) {
         return NGX_OK;

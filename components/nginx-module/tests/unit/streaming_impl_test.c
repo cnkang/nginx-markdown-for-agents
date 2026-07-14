@@ -5366,6 +5366,75 @@ test_postcommit_terminal_only_backpressure_metrics(void)
     TEST_PASS("postcommit terminal-only backpressure metrics");
 }
 
+
+/*
+ * The streaming decompressor returns dedicated sentinels; the production
+ * feed/finalize mappers must increment exactly one matching shared metric.
+ * Post-commit finalization still reports ERROR_POST_COMMIT to the state
+ * machine, without losing the decompression taxonomy in metrics.
+ */
+static void
+test_streaming_decompression_error_metric_mapping(void)
+{
+    ngx_http_markdown_ctx_t     ctx;
+    ngx_http_markdown_metrics_t metrics;
+    uint32_t                    error_code;
+
+    TEST_SUBSECTION("streaming decompression error metric mapping");
+    reset_globals();
+    ngx_memzero(&ctx, sizeof(ctx));
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
+        NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR);
+    TEST_ASSERT(error_code == ERROR_DECOMPRESSION_FORMAT_ERROR,
+        "feed format sentinel should map to the format error code");
+    TEST_ASSERT(metrics.decompressions.format_error_total == 1,
+        "feed format sentinel should increment format exactly once");
+    TEST_ASSERT(metrics.decompressions.truncated_input_total == 0
+                && metrics.decompressions.io_error_total == 0,
+        "feed format sentinel must not increment truncated or I/O metrics");
+
+    ngx_memzero(&metrics, sizeof(metrics));
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT);
+    TEST_ASSERT(error_code == ERROR_DECOMPRESSION_TRUNCATED_INPUT,
+        "precommit truncated sentinel should retain its error code");
+    TEST_ASSERT(metrics.decompressions.truncated_input_total == 1,
+        "truncated sentinel should increment truncated exactly once");
+    TEST_ASSERT(metrics.decompressions.format_error_total == 0
+                && metrics.decompressions.io_error_total == 0,
+        "truncated sentinel must not increment format or I/O metrics");
+
+    ngx_memzero(&metrics, sizeof(metrics));
+    error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
+        NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR);
+    TEST_ASSERT(error_code == ERROR_DECOMPRESSION_IO_ERROR,
+        "feed I/O sentinel should map to the I/O error code");
+    TEST_ASSERT(metrics.decompressions.io_error_total == 1,
+        "I/O sentinel should increment I/O exactly once");
+    TEST_ASSERT(metrics.decompressions.format_error_total == 0
+                && metrics.decompressions.truncated_input_total == 0,
+        "I/O sentinel must not increment format or truncated metrics");
+
+    ngx_memzero(&metrics, sizeof(metrics));
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT);
+    TEST_ASSERT(error_code == ERROR_POST_COMMIT,
+        "postcommit truncation should remain terminal postcommit failure");
+    TEST_ASSERT(metrics.decompressions.truncated_input_total == 1,
+        "postcommit truncation should preserve the metric classification");
+    TEST_ASSERT(metrics.decompressions.format_error_total == 0
+                && metrics.decompressions.io_error_total == 0,
+        "postcommit truncation must not increment other error metrics");
+
+    ngx_http_markdown_metrics = NULL;
+    TEST_PASS("streaming decompression metric taxonomy remains exact");
+}
+
 /*
  * Test entry point.  Runs all streaming_impl unit test functions in
  * sequence.  Prints a banner before and after the test run.  Returns 0
@@ -5406,6 +5475,7 @@ main(void)
     test_postcommit_pending_backpressure_metrics_are_symmetric();
     test_postcommit_copied_output_accounting_matches_after_resume();
     test_postcommit_terminal_only_backpressure_metrics();
+    test_streaming_decompression_error_metric_mapping();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

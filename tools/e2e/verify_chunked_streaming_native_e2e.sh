@@ -742,6 +742,42 @@ get_perf_metric() {
   return 0
 }
 
+# Assert one truncated streaming response updates only the truncated-input
+# decompression counter.  Reading metrics does not exercise the filter path,
+# so exact per-request deltas remain isolated between the before/after reads.
+assert_truncated_decompression_metric_delta() {
+  local case_name="$1"
+  local truncated_before="$2"
+  local format_before="$3"
+  local io_before="$4"
+  local truncated_after
+  local format_after
+  local io_after
+
+  truncated_after="$(get_metric_value 'decompression_truncated_input_total')"
+  format_after="$(get_metric_value 'decompression_format_error_total')"
+  io_after="$(get_metric_value 'decompression_io_error_total')"
+
+  if [[ "${truncated_after}" -ne $((truncated_before + 1)) ]]; then
+    echo "FAIL: ${case_name} must increment truncated-input exactly once" \
+      "(before=${truncated_before}, after=${truncated_after})" >&2
+    exit 1
+  fi
+  if [[ "${format_after}" -ne "${format_before}" ]]; then
+    echo "FAIL: ${case_name} must not increment format errors" \
+      "(before=${format_before}, after=${format_after})" >&2
+    exit 1
+  fi
+  if [[ "${io_after}" -ne "${io_before}" ]]; then
+    echo "FAIL: ${case_name} must not increment I/O errors" \
+      "(before=${io_before}, after=${io_after})" >&2
+    exit 1
+  fi
+  echo "  decompression errors: truncated ${truncated_before} -> " \
+    "${truncated_after}; format=${format_after}; io=${io_after}"
+  return 0
+}
+
 echo "==> Case 1: chunked below max_size should convert to Markdown"
 small_line="$(curl -sS -D "${RAW_DIR}/small.hdr" -o "${RAW_DIR}/small.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
@@ -1271,6 +1307,9 @@ echo "==> Case 5: truncated gzip streaming path should fail open"
 # The upstream stops inside the gzip header, before the decompressor can emit
 # bytes. The module must fail open from pre-commit by preserving the upstream
 # compressed payload and Content-Encoding.
+trunc_gzip_truncated_before="$(get_metric_value 'decompression_truncated_input_total')"
+trunc_gzip_format_before="$(get_metric_value 'decompression_format_error_total')"
+trunc_gzip_io_before="$(get_metric_value 'decompression_io_error_total')"
 trunc_gzip_line="$(curl -sS -D "${RAW_DIR}/trunc_gzip.hdr" -o "${RAW_DIR}/trunc_gzip.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/truncated-gzip" \
@@ -1292,10 +1331,16 @@ if [[ "${actual_trunc_gzip_bytes}" != "${TRUNCATED_GZIP_COMPRESSED_LEN}" ]]; the
   echo "truncated-gzip compressed length mismatch: expected ${TRUNCATED_GZIP_COMPRESSED_LEN}, got ${actual_trunc_gzip_bytes}" >&2
   exit 1
 fi
+assert_truncated_decompression_metric_delta \
+  "truncated gzip" "${trunc_gzip_truncated_before}" \
+  "${trunc_gzip_format_before}" "${trunc_gzip_io_before}"
 
 echo "==> Case 5b: truncated later gzip member uses post-commit failure semantics"
 gzip_postcommit_errors_before="$(get_metric_value 'streaming.postcommit_error_total')"
 gzip_postcommit_failed_before="$(get_metric_value 'streaming.failed_total')"
+gzip_postcommit_truncated_before="$(get_metric_value 'decompression_truncated_input_total')"
+gzip_postcommit_format_before="$(get_metric_value 'decompression_format_error_total')"
+gzip_postcommit_io_before="$(get_metric_value 'decompression_io_error_total')"
 gzip_postcommit_worker_before="$(get_worker_pid)"
 gzip_postcommit_log_offset="$(wc -c < "${RUNTIME}/logs/error.log" | tr -d '[:space:]')"
 gzip_postcommit_curl_rc=0
@@ -1336,6 +1381,9 @@ if [[ "${gzip_postcommit_failed_after}" -ne $((gzip_postcommit_failed_before + 1
     "(before=${gzip_postcommit_failed_before}, after=${gzip_postcommit_failed_after})" >&2
   exit 1
 fi
+assert_truncated_decompression_metric_delta \
+  "truncated later gzip member" "${gzip_postcommit_truncated_before}" \
+  "${gzip_postcommit_format_before}" "${gzip_postcommit_io_before}"
 gzip_postcommit_log_size="$(wc -c < "${RUNTIME}/logs/error.log" | tr -d '[:space:]')"
 gzip_postcommit_log_bytes=$((gzip_postcommit_log_size - gzip_postcommit_log_offset))
 tail -c "${gzip_postcommit_log_bytes}" "${RUNTIME}/logs/error.log" \
@@ -1359,6 +1407,9 @@ echo "  curl_rc=${gzip_postcommit_curl_rc} postcommit_error_total: " \
 echo "==> Case 6: truncated raw deflate streaming path should fail open"
 # The raw deflate fixture is cut in the middle of the compressed stream
 # so streaming decompression fails before Markdown headers are committed.
+trunc_deflate_truncated_before="$(get_metric_value 'decompression_truncated_input_total')"
+trunc_deflate_format_before="$(get_metric_value 'decompression_format_error_total')"
+trunc_deflate_io_before="$(get_metric_value 'decompression_io_error_total')"
 trunc_deflate_line="$(curl -sS -D "${RAW_DIR}/trunc_deflate.hdr" -o "${RAW_DIR}/trunc_deflate.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/truncated-deflate" \
@@ -1379,8 +1430,14 @@ if [[ "${actual_trunc_deflate_bytes}" != "${TRUNCATED_DEFLATE_COMPRESSED_LEN}" ]
   echo "truncated-deflate compressed length mismatch: expected ${TRUNCATED_DEFLATE_COMPRESSED_LEN}, got ${actual_trunc_deflate_bytes}" >&2
   exit 1
 fi
+assert_truncated_decompression_metric_delta \
+  "truncated raw deflate" "${trunc_deflate_truncated_before}" \
+  "${trunc_deflate_format_before}" "${trunc_deflate_io_before}"
 
 echo "==> Case 6b: truncated zlib-wrapped deflate streaming path should fail open"
+trunc_deflate_zlib_truncated_before="$(get_metric_value 'decompression_truncated_input_total')"
+trunc_deflate_zlib_format_before="$(get_metric_value 'decompression_format_error_total')"
+trunc_deflate_zlib_io_before="$(get_metric_value 'decompression_io_error_total')"
 trunc_deflate_zlib_line="$(curl -sS -D "${RAW_DIR}/trunc_deflate_zlib.hdr" -o "${RAW_DIR}/trunc_deflate_zlib.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/truncated-deflate-zlib" \
@@ -1400,6 +1457,10 @@ if [[ "${actual_trunc_deflate_zlib_bytes}" != "${TRUNCATED_DEFLATE_ZLIB_COMPRESS
   echo "truncated-deflate-zlib compressed length mismatch: expected ${TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN}, got ${actual_trunc_deflate_zlib_bytes}" >&2
   exit 1
 fi
+assert_truncated_decompression_metric_delta \
+  "truncated zlib-wrapped deflate" \
+  "${trunc_deflate_zlib_truncated_before}" \
+  "${trunc_deflate_zlib_format_before}" "${trunc_deflate_zlib_io_before}"
 
 echo "==> Log sanity checks"
 grep -q 'response size exceeds limit' "${RUNTIME}/logs/error.log" || {

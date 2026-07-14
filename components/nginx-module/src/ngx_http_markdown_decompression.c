@@ -331,6 +331,7 @@ ngx_http_markdown_grow_output_buffer(ngx_http_request_t *r,
  *   output_data - pointer to current output buffer pointer (updated on success)
  *   output_size - pointer to current output buffer size (updated on success)
  *   stream      - zlib stream (next_out and avail_out updated on success)
+ *   completed_out - output bytes from completed gzip members
  *
  * Returns:
  *   NGX_OK on successful reallocation
@@ -341,12 +342,19 @@ static ngx_int_t
 ngx_http_markdown_grow_decomp_buffer(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
     u_char **output_data, size_t *output_size,
-    z_stream *stream)
+    z_stream *stream, size_t completed_out)
 {
     size_t     used;
     ngx_int_t  rc;
 
-    used = stream->total_out;
+    if (completed_out > conf->decompress.max_size
+        || stream->total_out
+           > (uLong) (conf->decompress.max_size - completed_out))
+    {
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    }
+
+    used = completed_out + (size_t) stream->total_out;
     rc = ngx_http_markdown_grow_output_buffer(r, conf, output_data,
                                              output_size, used);
     if (rc != NGX_OK) {
@@ -374,6 +382,7 @@ ngx_http_markdown_grow_decomp_buffer(ngx_http_request_t *r,
  *   stream        - zlib stream (inspected and possibly modified via grow)
  *   output_data   - pointer to output buffer pointer (may be reallocated)
  *   output_size   - pointer to output buffer size (updated on realloc)
+ *   completed_out - output bytes from completed gzip members
  *   stall_code    - error code to return on unexpected stall
  *   context_label - label for log messages ("Z_OK" or "Z_BUF_ERROR")
  *
@@ -386,13 +395,14 @@ static ngx_int_t
 ngx_http_markdown_handle_inflate_stall(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf, z_stream *stream,
     u_char **output_data, size_t *output_size,
-    ngx_int_t stall_code, const char *context_label)
+    size_t completed_out, ngx_int_t stall_code,
+    const char *context_label)
 {
     ngx_int_t  grow_rc;
 
     if (stream->avail_out == 0) {
         grow_rc = ngx_http_markdown_grow_decomp_buffer(
-            r, conf, output_data, output_size, stream);
+            r, conf, output_data, output_size, stream, completed_out);
         if (grow_rc != NGX_OK) {
             return grow_rc;
         }
@@ -416,6 +426,44 @@ ngx_http_markdown_handle_inflate_stall(ngx_http_request_t *r,
     return stall_code;
 }
 
+static ngx_int_t
+ngx_http_markdown_reset_gzip_member(ngx_http_request_t *r,
+    z_stream *stream, u_char *output_data, size_t output_size,
+    size_t completed_out, u_char *overflow_probe)
+{
+    Bytef  *next_in;
+    size_t  remaining_out;
+    uInt    avail_in;
+    int     zrc;
+
+    next_in = stream->next_in;
+    avail_in = stream->avail_in;
+    zrc = inflateReset(stream);
+    if (zrc != Z_OK) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: decompression failed, "
+                     "inflateReset error: %d, category=conversion", zrc);
+        return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
+    }
+
+    stream->next_in = next_in;
+    stream->avail_in = avail_in;
+
+    if (completed_out < output_size) {
+        remaining_out = output_size - completed_out;
+        if (remaining_out > (size_t) UINT_MAX) {
+            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
+        }
+        stream->next_out = output_data + completed_out;
+        stream->avail_out = (uInt) remaining_out;
+    } else {
+        stream->next_out = overflow_probe;
+        stream->avail_out = 1;
+    }
+
+    return NGX_OK;
+}
+
 
 /*
  * Run the zlib inflate loop until Z_STREAM_END or error.
@@ -432,6 +480,8 @@ ngx_http_markdown_handle_inflate_stall(ngx_http_request_t *r,
  *   stream      - initialized zlib stream (modified in place)
  *   output_data - pointer to output buffer pointer (may be reallocated)
  *   output_size - pointer to output buffer size (updated on realloc)
+ *   type        - content coding; gzip permits concatenated members
+ *   total_out   - response-wide decompressed byte count on success
  *
  * Returns:
  *   NGX_OK on Z_STREAM_END (success)
@@ -444,20 +494,58 @@ ngx_http_markdown_handle_inflate_stall(ngx_http_request_t *r,
 static ngx_int_t handle_inflate_stall(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf, z_stream *stream,
     u_char **output_data, size_t *output_size,
-    ngx_int_t fallback_error, const char *label);
+    size_t completed_out, ngx_int_t fallback_error,
+    const char *label);
 
 static ngx_int_t
 ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf, z_stream *stream,
-    u_char **output_data, size_t *output_size)
+    u_char **output_data, size_t *output_size,
+    ngx_http_markdown_compression_type_e type, size_t *total_out)
 {
+    u_char     overflow_probe;
+    size_t     completed_out;
     int        zrc;
     ngx_int_t  rc;
+
+    completed_out = 0;
 
     for ( ;; ) {
         zrc = inflate(stream, Z_NO_FLUSH);
 
         if (zrc == Z_STREAM_END) {
+            if (completed_out > conf->decompress.max_size
+                || stream->total_out
+                   > (uLong) (conf->decompress.max_size - completed_out))
+            {
+                return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+            }
+
+            completed_out += (size_t) stream->total_out;
+
+            if (type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+                && stream->avail_in > 0)
+            {
+                if (completed_out == *output_size
+                    && completed_out < conf->decompress.max_size)
+                {
+                    rc = ngx_http_markdown_grow_output_buffer(
+                        r, conf, output_data, output_size, completed_out);
+                    if (rc != NGX_OK) {
+                        return rc;
+                    }
+                }
+
+                rc = ngx_http_markdown_reset_gzip_member(
+                    r, stream, *output_data, *output_size,
+                    completed_out, &overflow_probe);
+                if (rc != NGX_OK) {
+                    return rc;
+                }
+                continue;
+            }
+
+            *total_out = completed_out;
             return NGX_OK;
         }
 
@@ -476,7 +564,7 @@ ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
 
         if (zrc == Z_OK || zrc == Z_BUF_ERROR) {
             rc = handle_inflate_stall(r, conf, stream, output_data,
-                output_size,
+                output_size, completed_out,
                 zrc == Z_OK
                     ? NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR
                     : NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
@@ -512,13 +600,14 @@ static ngx_int_t
 handle_inflate_stall(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf, z_stream *stream,
     u_char **output_data, size_t *output_size,
-    ngx_int_t fallback_error, const char *label)
+    size_t completed_out, ngx_int_t fallback_error,
+    const char *label)
 {
     ngx_int_t  rc;
 
     rc = ngx_http_markdown_handle_inflate_stall(
         r, conf, stream, output_data, output_size,
-        fallback_error, label);
+        completed_out, fallback_error, label);
 
     return rc;
 }
@@ -835,7 +924,8 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     
     /* Run the inflate loop (extracted for complexity reduction). */
     loop_rc = ngx_http_markdown_inflate_loop(r, conf, &stream,
-                                             &output_data, &output_size);
+                                             &output_data, &output_size,
+                                             type, &total_decompressed);
     if (loop_rc != NGX_OK) {
         /*
          * Fallback: if deflate decompression fails with FORMAT_ERROR,
@@ -870,7 +960,8 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
 
             loop_rc = ngx_http_markdown_inflate_loop(r, conf, &stream,
                                                      &output_data,
-                                                     &output_size);
+                                                     &output_size, type,
+                                                     &total_decompressed);
             if (loop_rc != NGX_OK) {
                 inflateEnd(&stream);
                 return loop_rc;
@@ -883,19 +974,16 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
     }
     
     /* Check if decompressed size exceeds decompression budget (decompressed size budget enforcement) */
-    if (stream.total_out > conf->decompress.max_size) {
+    if (total_decompressed > conf->decompress.max_size) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: decompressed size (%uz) exceeds decompression budget (%uz), "
                      "category=resource_limit",
-                     stream.total_out, conf->decompress.max_size);
+                     total_decompressed, conf->decompress.max_size);
         inflateEnd(&stream);
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
     
-    /* Save total_out before inflateEnd releases the stream (Rule 15) */
-    total_decompressed = stream.total_out;
-
-    /* Clean up with inflateEnd() */
+    /* total_decompressed was saved before inflateEnd releases the stream. */
     inflateEnd(&stream);
     
     /* Build the output chain wrapping the decompressed data directly
