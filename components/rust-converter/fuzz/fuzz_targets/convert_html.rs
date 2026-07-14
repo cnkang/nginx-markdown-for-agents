@@ -24,8 +24,8 @@
 //! - Output size exceeds bound → needs investigation (logged, not aborted)
 
 use libfuzzer_sys::fuzz_target;
-use nginx_markdown_converter::converter::{ConversionOptions, MarkdownConverter, MarkdownFlavor};
 use nginx_markdown_converter::converter::pruning::PruneConfig;
+use nginx_markdown_converter::converter::{ConversionOptions, MarkdownConverter, MarkdownFlavor};
 use nginx_markdown_converter::parser::parse_html;
 
 /// Deterministically derive [`ConversionOptions`] from the first 4 bytes of input.
@@ -43,12 +43,9 @@ use nginx_markdown_converter::parser::parse_html;
 /// - bit 6: `prune_noise` (enabled/disabled)
 /// - bit 7: `resolve_relative_urls`
 fn derive_options(data: &[u8]) -> (ConversionOptions, &[u8]) {
-    let bits = data
-        .iter()
-        .take(4)
-        .fold(0u32, |acc, &b| {
-            acc.wrapping_add(u32::from(b)) ^ u32::from(b).rotate_left(3)
-        });
+    let bits = data.iter().take(4).fold(0u32, |acc, &b| {
+        acc.wrapping_add(u32::from(b)) ^ u32::from(b).rotate_left(3)
+    });
 
     let flavor = match (bits >> 2) & 0x03 {
         0 => MarkdownFlavor::CommonMark,
