@@ -15,12 +15,12 @@
  *   2. Streaming engine is selected (not forced to full-buffer)
  *   3. cache_validation is NOT full
  *   4. Encoding is supported by streaming decompressor:
- *      - raw deflate -> SUPPORTED (always in 0.9.1)
- *      - gzip       -> NOT SUPPORTED (deferred)
+ *      - deflate    -> SUPPORTED (zlib-wrapped or raw)
+ *      - gzip       -> SUPPORTED (gzip-wrapped inflate)
  *      - brotli     -> NOT SUPPORTED
  *      - unknown    -> BYPASS (no decompression at all)
  *
- * If ANY condition is false -> full-buffer decompression.
+ * If ANY condition is false -> full-buffer decompression for a known coding.
  * If ALL four hold -> streaming decompression.
  * If encoding is unknown -> bypass (no decompression).
  */
@@ -75,7 +75,7 @@ typedef enum {
  *   - auto_decompress OFF -> FULLBUFFER (Req 4.1)
  *   - Streaming engine not selected -> FULLBUFFER
  *   - cache_validation == full -> FULLBUFFER (Req 4.2)
- *   - Encoding not supported (gzip/brotli) -> FULLBUFFER
+ *   - Encoding not supported by streaming (brotli) -> FULLBUFFER
  *   - All four conditions met -> STREAMING
  * ---------------------------------------------------------------- */
 
@@ -109,10 +109,11 @@ ngx_http_markdown_decomp_routing_decision(
 
     /*
      * Condition 4: encoding must be supported by streaming
-     * decompressor.  In 0.9.1, only raw deflate is supported.
-     * Gzip and brotli are deferred to full-buffer.
+     * decompressor.  Gzip and deflate are supported in 0.9.1.
+     * Brotli is deferred to full-buffer.
      */
-    if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE) {
+    if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }
 
@@ -169,12 +170,13 @@ expected_routing(
      *   1. auto_decompress ON
      *   2. streaming engine selected
      *   3. cache_validation != full
-     *   4. encoding supported (deflate only in 0.9.1)
+     *   4. encoding supported (gzip or deflate in 0.9.1)
      */
     if (auto_decompress == 1
         && streaming_engine_selected
         && cache_validation != NGX_HTTP_MARKDOWN_CACHE_VALIDATION_FULL
-        && encoding == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE) {
+        && (encoding == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+            || encoding == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP)) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING;
     }
 
@@ -317,13 +319,13 @@ test_property4_named_cases(void)
         result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
         "streaming engine not selected -> FULLBUFFER");
 
-    /* Gzip not supported in streaming -> FULLBUFFER */
+    /* Gzip supported in streaming -> STREAMING */
     result = ngx_http_markdown_decomp_routing_decision(
         1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
         NGX_HTTP_MARKDOWN_COMPRESSION_GZIP);
     TEST_ASSERT(
-        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
-        "gzip encoding -> FULLBUFFER (deferred)");
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+        "gzip encoding -> STREAMING");
 
     /* Brotli not supported -> FULLBUFFER */
     result = ngx_http_markdown_decomp_routing_decision(
@@ -460,10 +462,12 @@ test_property4_streaming_implies_all_conditions(void)
                     != NGX_HTTP_MARKDOWN_CACHE_VALIDATION_FULL,
                     "STREAMING implies "
                     "cache_validation != full");
-                TEST_ASSERT(enc
-                    == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+                TEST_ASSERT((enc
+                    == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
+                    || (enc
+                    == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP),
                     "STREAMING implies "
-                    "deflate encoding");
+                    "gzip or deflate encoding");
             }
         }
     }
@@ -516,7 +520,7 @@ test_property4_fullbuffer_implies_condition_violated(void)
                  *  - auto_decompress != 1
                  *  - streaming_engine not selected
                  *  - cache_validation == FULL
-                 *  - encoding != DEFLATE
+                 *  - encoding is neither DEFLATE nor GZIP
                  *    (but must be a real encoding,
                  *     not NONE/UNKNOWN which is BYPASS)
                  */
@@ -525,8 +529,10 @@ test_property4_fullbuffer_implies_condition_violated(void)
                     || (!stream_eng)
                     || (cv
                        == NGX_HTTP_MARKDOWN_CACHE_VALIDATION_FULL)
-                    || (enc
-                       != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE);
+                    || ((enc
+                        != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
+                       && (enc
+                        != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP));
                 TEST_ASSERT(any_violated,
                     "FULLBUFFER implies at least one "
                     "condition violated");
@@ -627,11 +633,11 @@ test_property4_full_cache_always_fullbuffer(void)
 }
 
 /* ----------------------------------------------------------------
- * Only deflate can ever reach STREAMING in 0.9.1
+ * Only gzip and deflate can ever reach STREAMING in 0.9.1
  * ---------------------------------------------------------------- */
 
 static void
-test_property4_only_deflate_reaches_streaming(void)
+test_property4_only_supported_encodings_reach_streaming(void)
 {
     ngx_http_markdown_decomp_route_t result;
     ngx_http_markdown_compression_type_e enc;
@@ -642,7 +648,7 @@ test_property4_only_deflate_reaches_streaming(void)
     ngx_http_markdown_cache_validation_e cv;
 
     TEST_SUBSECTION(
-        "Property 4: only deflate can reach STREAMING");
+        "Property 4: only gzip/deflate can reach STREAMING");
 
     for (iter = 0; iter < RANDOM_ITERATIONS; iter++) {
         prng_seed((unsigned int)(iter + 8888));
@@ -662,16 +668,18 @@ test_property4_only_deflate_reaches_streaming(void)
             if (result
                 == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING) {
                 TEST_ASSERT(
-                    enc
-                    == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+                    (enc
+                     == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
+                    || (enc
+                        == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP),
                     "STREAMING only reachable with "
-                    "deflate");
+                    "gzip or deflate");
             }
         }
     }
 
     TEST_PASS(
-        "Property 4: only deflate reaches STREAMING "
+        "Property 4: only gzip/deflate reach STREAMING "
         "(25000 inputs)");
 }
 
@@ -704,7 +712,7 @@ main(void)
 
     /* Requirement-specific property tests */
     test_property4_full_cache_always_fullbuffer();
-    test_property4_only_deflate_reaches_streaming();
+    test_property4_only_supported_encodings_reach_streaming();
 
     printf("\n");
     TEST_PASS(

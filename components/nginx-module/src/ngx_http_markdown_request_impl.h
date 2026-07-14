@@ -619,12 +619,15 @@ ngx_http_markdown_route_streaming_compression(
     }
 
     if (ctx->decompression.type
-        == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
+        == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+        || ctx->decompression.type
+           == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP)
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             perf.decompression_streaming_total);
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-            "markdown: streaming decompression selected for deflate");
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+            "markdown: streaming decompression selected for encoding %d",
+            ctx->decompression.type);
         return 0;
     }
 
@@ -914,12 +917,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      *       contract:
      *       - deflate (zlib-wrapped per RFC 9110, or raw deflate):
      *         supported via deferred header sniffing
-     *       - gzip/brotli: deferred, route to full-buffer
-     *
-     * ngx_http_markdown_streaming_decomp_impl.h retains deferred
-     * gzip/brotli streaming implementation branches for future
-     * enablement, but this routing gate makes them unreachable for
-     * the 0.9.1 supported streaming path.
+     *       - gzip: supported with member-aware streaming inflate
+     *       - brotli: deferred, route to bounded full-buffer
      *
      * This check runs after select_processing_path() so that
      * compression routing is enforced regardless of engine mode

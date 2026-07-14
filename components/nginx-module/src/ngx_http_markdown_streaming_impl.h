@@ -1356,10 +1356,10 @@ ngx_http_markdown_streaming_record_postcommit_failure(
                 ? "fail_closed" : "pass");
 
         ctx->streaming.completion.failure_recorded = 1;
-    }
 
-    ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-        ngx_http_markdown_reason_streaming_fail_postcommit());
+        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_streaming_fail_postcommit());
+    }
 }
 
 /*

@@ -98,7 +98,7 @@ typedef struct {
  *   1. Profile is streaming_first (auto_decompress derived)
  *   2. Streaming engine is selected
  *   3. cache_validation is NOT full
- *   4. Encoding is supported (deflate — zlib-wrapped or raw — in 0.9.1)
+ *   4. Encoding is supported (gzip or deflate in 0.9.1)
  *
  * Profile switch from streaming_first to balanced/strict_cache
  * disables streaming decompression (Req 10.5).
@@ -150,8 +150,9 @@ ngx_http_markdown_decomp_routing_decision(
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }
 
-    /* Condition 4: encoding supported (deflate in 0.9.1) */
-    if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE) {
+    /* Condition 4: encoding supported (gzip or deflate in 0.9.1) */
+    if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }
 
@@ -726,20 +727,20 @@ test_property13b_auto_decompress_off_blocks_streaming(void)
 }
 
 /* ----------------------------------------------------------------
- * Edge case: verify that gzip is never routed to streaming
- * decompression in 0.9.1 regardless of profile/gate state.
+ * Edge case: verify that gzip is routed to streaming when every
+ * profile/gate condition is satisfied.
  * ---------------------------------------------------------------- */
 
 static void
-test_property13b_gzip_never_streams_091(void)
+test_property13b_gzip_streams_when_enabled(void)
 {
     ngx_http_markdown_conf_t conf;
     ngx_http_markdown_decomp_route_t route;
     int iter;
 
     TEST_SUBSECTION(
-        "Property 13b: gzip never uses streaming "
-        "decompression in 0.9.1");
+        "Property 13b: gzip uses streaming decompression "
+        "when all gates are enabled");
 
     for (iter = 0; iter < TOGGLE_ITERATIONS; iter++) {
         prng_seed((unsigned int)(iter + 8888));
@@ -754,12 +755,12 @@ test_property13b_gzip_never_streams_091(void)
             NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
             NGX_HTTP_MARKDOWN_COMPRESSION_GZIP);
         TEST_ASSERT(
-            route == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
-            "gzip -> FULLBUFFER (deferred in 0.9.1)");
+            route == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+            "gzip -> STREAMING when all gates are enabled");
     }
 
     TEST_PASS(
-        "Property 13b: gzip always routes to fullbuffer "
+        "Property 13b: gzip routes to streaming when enabled "
         "(300 iterations)");
 }
 
@@ -873,7 +874,7 @@ main(void)
 
     /* Edge cases */
     test_property13b_auto_decompress_off_blocks_streaming();
-    test_property13b_gzip_never_streams_091();
+    test_property13b_gzip_streams_when_enabled();
 
     /* No-restart property */
     test_property13_no_restart_required();

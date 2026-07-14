@@ -3,15 +3,16 @@ set -euo pipefail
 
 # Native-only E2E validation for chunked/streaming upstream responses.
 #
-# Validates six critical paths:
+# Validates the critical chunked and compressed streaming paths:
 #  1) Chunked body below markdown_limits memory converts successfully to Markdown.
 #  2) Chunked body above markdown_limits memory triggers fail-open without truncation.
-#  3) Gzip under a streaming-enabled location routes through full-buffer
-#     decompression and strips Content-Encoding.
+#  3) Gzip streaming decompression converts and strips Content-Encoding.
 #  4) Raw deflate streaming decompression converts to Markdown and strips
 #     Content-Encoding.
-#  5) Truncated gzip full-buffer decompression fails open.
-#  6) Truncated raw deflate stream triggers decomp finalize failure and
+#  5) Large gzip streaming survives real downstream backpressure with exact
+#     output equivalence and terminal-once evidence.
+#  6) Truncated gzip streaming decompression fails open before commit.
+#  7) Truncated raw deflate stream triggers decomp finalize failure and
 #     fail-open.
 
 NGINX_VERSION="${NGINX_VERSION:-1.28.2}"
@@ -243,6 +244,8 @@ ZERO_COPY_END_TOKEN = "ZERO_COPY_STREAM_END_TOKEN"
 OVERSIZE_END_TOKEN = "OVERSIZE_STREAM_END_TOKEN"
 DELAYED_END_TOKEN = "DELAYED_OVERSIZE_STREAM_END_TOKEN"
 GZIP_END_TOKEN = "GZIP_STREAM_END_TOKEN"
+GZIP_POSTCOMMIT_END_TOKEN = "GZIP_POSTCOMMIT_FIRST_MEMBER_END_TOKEN"
+GZIP_POSTCOMMIT_LATE_TOKEN = "GZIP_POSTCOMMIT_TRUNCATED_MEMBER_END_TOKEN"
 DEFLATE_END_TOKEN = "DEFLATE_STREAM_END_TOKEN"
 DEFLATE_ZLIB_END_TOKEN = "DEFLATE_ZLIB_STREAM_END_TOKEN"
 SMALL_TARGET = 2 * 1024 * 1024
@@ -274,10 +277,17 @@ def build_payload(title: str, target_size: int, end_token: str) -> bytes:
 def build_streaming_payload(title: str, target_size: int, end_token: str) -> bytes:
     prefix = f"<!doctype html><html><body><h1>{title}</h1>\n".encode("utf-8")
     suffix = f"<p>{end_token}</p></body></html>\n".encode("utf-8")
-    block = b"<p>zero-copy-stream-data-0123456789abcdef</p>\n"
     out = bytearray(prefix)
-    while len(out) + len(block) + len(suffix) <= target_size:
+    sequence = 0
+    while True:
+        mixed = (sequence * 2654435761) & 0xffffffff
+        block = (
+            f"<p>{sequence:08x}-zero-copy-stream-data-{mixed:08x}</p>\n"
+        ).encode("ascii")
+        if len(out) + len(block) + len(suffix) > target_size:
+            break
         out.extend(block)
+        sequence += 1
     out.extend(suffix)
     return bytes(out)
 
@@ -307,6 +317,12 @@ DELAYED_BODY = build_payload(
 GZIP_SOURCE_BODY = build_payload(
     "Chunked Gzip", COMPRESSED_TARGET, GZIP_END_TOKEN
 )
+GZIP_POSTCOMMIT_SOURCE_BODY = build_streaming_payload(
+    "Gzip Postcommit", 2 * 1024 * 1024, GZIP_POSTCOMMIT_END_TOKEN
+)
+GZIP_POSTCOMMIT_LATE_BODY = build_payload(
+    "Gzip Postcommit Late", COMPRESSED_TARGET, GZIP_POSTCOMMIT_LATE_TOKEN
+)
 DEFLATE_SOURCE_BODY = build_payload(
     "Chunked Deflate", COMPRESSED_TARGET, DEFLATE_END_TOKEN
 )
@@ -314,9 +330,22 @@ DEFLATE_ZLIB_SOURCE_BODY = build_payload(
     "Chunked Zlib Deflate", COMPRESSED_TARGET, DEFLATE_ZLIB_END_TOKEN
 )
 GZIP_BODY = compress_payload(GZIP_SOURCE_BODY, "gzip")
+ZERO_COPY_GZIP_BODY = compress_payload(ZERO_COPY_BODY, "gzip")
+GZIP_POSTCOMMIT_FIRST_MEMBER = compress_payload(
+    GZIP_POSTCOMMIT_SOURCE_BODY, "gzip"
+)
+GZIP_POSTCOMMIT_SECOND_MEMBER = compress_payload(
+    GZIP_POSTCOMMIT_LATE_BODY, "gzip"
+)
+GZIP_POSTCOMMIT_BODY = (
+    GZIP_POSTCOMMIT_FIRST_MEMBER + GZIP_POSTCOMMIT_SECOND_MEMBER[:-8]
+)
 DEFLATE_BODY = compress_payload(DEFLATE_SOURCE_BODY, "deflate")
 DEFLATE_ZLIB_BODY = compress_payload(DEFLATE_ZLIB_SOURCE_BODY, "deflate-zlib")
-TRUNCATED_GZIP_BODY = GZIP_BODY[:-8] if len(GZIP_BODY) > 8 else GZIP_BODY
+# Stop inside the fixed gzip header, before any decompressed byte can reach the
+# converter.  This deterministically exercises the pre-commit replay path;
+# Case 5b separately covers truncation after a complete first member commits.
+TRUNCATED_GZIP_BODY = GZIP_BODY[:8]
 TRUNCATED_DEFLATE_BODY = DEFLATE_BODY[: max(1, len(DEFLATE_BODY) // 2)]
 TRUNCATED_DEFLATE_ZLIB_BODY = DEFLATE_ZLIB_BODY[: max(1, len(DEFLATE_ZLIB_BODY) // 2)]
 
@@ -326,7 +355,8 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args):
         return
 
-    def _write_chunked(self, body: bytes, content_encoding=None):
+    def _write_chunked(self, body: bytes, content_encoding=None,
+                       chunk_size=CHUNK_SIZE):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=UTF-8")
         self.send_header("Transfer-Encoding", "chunked")
@@ -335,8 +365,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Encoding", content_encoding)
         self.end_headers()
 
-        for i in range(0, len(body), CHUNK_SIZE):
-            chunk = body[i : i + CHUNK_SIZE]
+        for i in range(0, len(body), chunk_size):
+            chunk = body[i : i + chunk_size]
             self.wfile.write(f"{len(chunk):X}\r\n".encode("ascii"))
             self.wfile.write(chunk)
             self.wfile.write(b"\r\n")
@@ -376,6 +406,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/zero-copy-valid":
             self._write_chunked(ZERO_COPY_BODY)
             return
+        if path == "/zero-copy-gzip":
+            # Keep compressed chunks independent of the uncompressed fixture's
+            # HTML element boundaries so decompressor and parser tails cross.
+            self._write_chunked(
+                ZERO_COPY_GZIP_BODY, content_encoding="gzip", chunk_size=4096
+            )
+            return
         if path == "/oversize":
             self._write_chunked(OVERSIZE_BODY)
             return
@@ -384,6 +421,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/small-gzip":
             self._write_chunked(GZIP_BODY, content_encoding="gzip")
+            return
+        if path == "/postcommit-gzip":
+            self._write_chunked(GZIP_POSTCOMMIT_BODY, content_encoding="gzip")
             return
         if path == "/small-deflate":
             self._write_chunked(DEFLATE_BODY, content_encoding="deflate")
@@ -482,6 +522,9 @@ def main():
         print(f"DELAYED_LEN={len(DELAYED_BODY)}")
         print(f"GZIP_SOURCE_LEN={len(GZIP_SOURCE_BODY)}")
         print(f"GZIP_COMPRESSED_LEN={len(GZIP_BODY)}")
+        print(f"ZERO_COPY_GZIP_COMPRESSED_LEN={len(ZERO_COPY_GZIP_BODY)}")
+        print(f"GZIP_POSTCOMMIT_SOURCE_LEN={len(GZIP_POSTCOMMIT_SOURCE_BODY)}")
+        print(f"GZIP_POSTCOMMIT_COMPRESSED_LEN={len(GZIP_POSTCOMMIT_BODY)}")
         print(f"DEFLATE_SOURCE_LEN={len(DEFLATE_SOURCE_BODY)}")
         print(f"DEFLATE_COMPRESSED_LEN={len(DEFLATE_BODY)}")
         print(f"DEFLATE_ZLIB_SOURCE_LEN={len(DEFLATE_ZLIB_SOURCE_BODY)}")
@@ -500,6 +543,8 @@ def main():
         print(f"OVERSIZE_END_TOKEN={OVERSIZE_END_TOKEN}")
         print(f"DELAYED_END_TOKEN={DELAYED_END_TOKEN}")
         print(f"GZIP_END_TOKEN={GZIP_END_TOKEN}")
+        print(f"GZIP_POSTCOMMIT_END_TOKEN={GZIP_POSTCOMMIT_END_TOKEN}")
+        print(f"GZIP_POSTCOMMIT_LATE_TOKEN={GZIP_POSTCOMMIT_LATE_TOKEN}")
         print(f"DEFLATE_END_TOKEN={DEFLATE_END_TOKEN}")
         print(f"DEFLATE_ZLIB_END_TOKEN={DEFLATE_ZLIB_END_TOKEN}")
         return
@@ -520,13 +565,13 @@ load_upstream_metrics() {
 
   while IFS='=' read -r key value; do
     case "${key}" in
-      SMALL_LEN|ZERO_COPY_LEN|OVERSIZE_LEN|DELAYED_LEN|GZIP_SOURCE_LEN|GZIP_COMPRESSED_LEN|DEFLATE_SOURCE_LEN|DEFLATE_COMPRESSED_LEN|DEFLATE_ZLIB_SOURCE_LEN|DEFLATE_ZLIB_COMPRESSED_LEN|TRUNCATED_GZIP_COMPRESSED_LEN|TRUNCATED_DEFLATE_COMPRESSED_LEN|TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN)
+      SMALL_LEN|ZERO_COPY_LEN|OVERSIZE_LEN|DELAYED_LEN|GZIP_SOURCE_LEN|GZIP_COMPRESSED_LEN|ZERO_COPY_GZIP_COMPRESSED_LEN|GZIP_POSTCOMMIT_SOURCE_LEN|GZIP_POSTCOMMIT_COMPRESSED_LEN|DEFLATE_SOURCE_LEN|DEFLATE_COMPRESSED_LEN|DEFLATE_ZLIB_SOURCE_LEN|DEFLATE_ZLIB_COMPRESSED_LEN|TRUNCATED_GZIP_COMPRESSED_LEN|TRUNCATED_DEFLATE_COMPRESSED_LEN|TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN)
         [[ "${value}" =~ ^[0-9]+$ ]] || {
           echo "invalid numeric upstream metric: ${key}=${value}" >&2
           return 1
         }
         ;;
-      SMALL_END_TOKEN|ZERO_COPY_END_TOKEN|OVERSIZE_END_TOKEN|DELAYED_END_TOKEN|GZIP_END_TOKEN|DEFLATE_END_TOKEN|DEFLATE_ZLIB_END_TOKEN)
+      SMALL_END_TOKEN|ZERO_COPY_END_TOKEN|OVERSIZE_END_TOKEN|DELAYED_END_TOKEN|GZIP_END_TOKEN|GZIP_POSTCOMMIT_END_TOKEN|GZIP_POSTCOMMIT_LATE_TOKEN|DEFLATE_END_TOKEN|DEFLATE_ZLIB_END_TOKEN)
         [[ "${value}" =~ ^[A-Z0-9_]+$ ]] || {
           echo "invalid upstream token metric: ${key}=${value}" >&2
           return 1
@@ -632,9 +677,7 @@ http {
         location /streaming/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_streaming force;
-            markdown_streaming_engine on;
-            markdown_cache_validation ims_only;
+            markdown_profile streaming_first;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64m timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -648,11 +691,9 @@ http {
         location /streaming-zero-copy/ {
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_streaming force;
-            markdown_streaming_engine on;
+            markdown_profile streaming_first;
             markdown_streaming_zero_copy on;
             markdown_stream_precommit_buffer 4m;
-            markdown_cache_validation ims_only;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64m timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -673,6 +714,33 @@ EOF
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
 markdown_wait_for_http "http://127.0.0.1:${PORT}/stream/small-valid" "NGINX" || exit 1
+
+# Extract a numeric value from the JSON metrics endpoint by dotted path.
+# Args: $1 = dotted metric path (for example perf.backpressure_total)
+get_metric_value() {
+  local metric_path="$1"
+  local metrics_json
+
+  metrics_json="$(curl -s -H 'Accept: application/json' \
+    "http://127.0.0.1:${PORT}/markdown-metrics" 2>/dev/null || echo '{}')"
+  METRIC_PATH="${metric_path}" python3 -c '
+import json
+import os
+import sys
+
+value = json.load(sys.stdin)
+for key in os.environ["METRIC_PATH"].split("."):
+    value = value.get(key, 0) if isinstance(value, dict) else 0
+print(value if isinstance(value, int) else 0)
+' <<< "${metrics_json}" 2>/dev/null || echo 0
+  return 0
+}
+
+# Compatibility wrapper for the existing performance metric assertions.
+get_perf_metric() {
+  get_metric_value "perf.$1"
+  return 0
+}
 
 echo "==> Case 1: chunked below max_size should convert to Markdown"
 small_line="$(curl -sS -D "${RAW_DIR}/small.hdr" -o "${RAW_DIR}/small.body" \
@@ -735,7 +803,8 @@ grep -q "${DELAYED_END_TOKEN}" "${RAW_DIR}/delayed.body" || {
   exit 1
 }
 
-echo "==> Case 3: gzip under streaming location uses full-buffer decompression"
+echo "==> Case 3: gzip streaming decompression converts to Markdown"
+gzip_decompression_before="$(get_perf_metric 'decompression_streaming_total')"
 gzip_line="$(curl -sS -D "${RAW_DIR}/gzip.hdr" -o "${RAW_DIR}/gzip.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/small-gzip" \
@@ -744,7 +813,14 @@ echo "${gzip_line}" | tee "${RAW_DIR}/gzip.metrics" >/dev/null
 echo "${gzip_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "small-gzip failed: ${gzip_line}" >&2; exit 1; }
 assert_streaming_markdown_response \
   "small-gzip" "${RAW_DIR}/gzip.hdr" "${RAW_DIR}/gzip.body" \
-  "# Chunked Gzip" "${GZIP_END_TOKEN}" 0
+  "# Chunked Gzip" "${GZIP_END_TOKEN}" 1
+gzip_decompression_after="$(get_perf_metric 'decompression_streaming_total')"
+if [[ "${gzip_decompression_after}" -ne $((gzip_decompression_before + 1)) ]]; then
+  echo "FAIL: small gzip did not increment streaming decompression exactly once" \
+    "(before=${gzip_decompression_before}, after=${gzip_decompression_after})" >&2
+  exit 1
+fi
+echo "  decompression_streaming_total: ${gzip_decompression_before} -> ${gzip_decompression_after}"
 
 echo "==> Case 4: raw deflate streaming decompression should convert to Markdown"
 deflate_line="$(curl -sS -D "${RAW_DIR}/deflate.hdr" -o "${RAW_DIR}/deflate.body" \
@@ -809,20 +885,6 @@ get_worker_pid() {
     return 1
   fi
   echo "${wpid}"
-}
-
-# Helper: extract a numeric metric from the metrics endpoint.
-# Args: $1 = metric name (e.g. "zero_copy_output_total")
-get_perf_metric() {
-  local metric_name="$1"
-  local metrics_json
-
-  metrics_json="$(curl -s -H 'Accept: application/json' \
-    "http://127.0.0.1:${PORT}/markdown-metrics" 2>/dev/null || echo '{}')"
-  echo "${metrics_json}" | python3 -c \
-    "import sys, json; print(json.load(sys.stdin).get('perf', {}).get('${metric_name}', 0))" \
-    2>/dev/null || echo 0
-  return 0
 }
 
 # Helper: check for NGINX worker crash signatures in the error log.
@@ -913,8 +975,15 @@ echo "  zero_copy_output_total=${zc_output_total} (verified > 0)"
 zc_slow_output_before="${zc_output_total}"
 zc_backpressure_before="$(get_perf_metric 'backpressure_total')"
 zc_backpressure_resume_before="$(get_perf_metric 'backpressure_resume_total')"
+zc_gzip_decompression_before="$(get_perf_metric 'decompression_streaming_total')"
+zc_gzip_succeeded_before="$(get_metric_value 'streaming.succeeded_total')"
+zc_gzip_delivery_before="$(get_metric_value 'delivery_count')"
+zc_gzip_log_offset_before=0
+if [[ -f "${RUNTIME}/logs/error.log" ]]; then
+  zc_gzip_log_offset_before="$(wc -c < "${RUNTIME}/logs/error.log" | tr -d '[:space:]')"
+fi
 
-echo "==> Case 4d: zero-copy with slow downstream client (backpressure/NGX_AGAIN resume)"
+echo "==> Case 4d: large gzip zero-copy with slow downstream (NGX_AGAIN resume)"
 # To force the module to suspend (NGX_AGAIN) and resume, we need
 # downstream write pressure — the client must read slowly enough that
 # NGINX's downstream send buffer fills and the zero-copy output chain
@@ -925,9 +994,11 @@ echo "==> Case 4d: zero-copy with slow downstream client (backpressure/NGX_AGAIN
 #   4. Verifies the full Markdown content and tail token
 #
 # After the request, we assert:
-#   - zero_copy_output_total increased (zero-copy path was used)
+#   - gzip streaming decompression and zero-copy output were both used
 #   - backpressure_total increased (NGX_AGAIN occurred)
 #   - backpressure_resume_total increased (resume path executed)
+#   - streaming success and terminal delivery increment exactly once
+#   - full output equals the uncompressed same-source response byte-for-byte
 #   - worker PID unchanged (no crash)
 if ! python3 - "${PORT}" "${RAW_DIR}/zc_slow.hdr" \
   "${RAW_DIR}/zc_slow.body" \
@@ -963,7 +1034,7 @@ sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, receive_buffer_bytes)
 sock.settimeout(10)
 sock.connect(("127.0.0.1", port))
 request = (
-    "GET /streaming-zero-copy/zero-copy-valid HTTP/1.1\r\n"
+    "GET /streaming-zero-copy/zero-copy-gzip HTTP/1.1\r\n"
     "Host: localhost\r\n"
     "Accept: text/markdown\r\n"
     "Connection: close\r\n\r\n"
@@ -1009,9 +1080,20 @@ then
   exit 1
 fi
 assert_streaming_markdown_response \
-  "zero-copy-slow" "${RAW_DIR}/zc_slow.hdr" "${RAW_DIR}/zc_slow.body" \
+  "zero-copy-gzip-slow" "${RAW_DIR}/zc_slow.hdr" "${RAW_DIR}/zc_slow.body" \
   "# Zero Copy Streaming" "${ZERO_COPY_END_TOKEN}" 1
-echo "OK: zero-copy throttled reader received complete valid Markdown" \
+cmp -s "${RAW_DIR}/zc.body" "${RAW_DIR}/zc_slow.body" || {
+  echo "FAIL: gzip streaming output differs from uncompressed same-source output" >&2
+  exit 1
+}
+zc_gzip_tail_count="$(grep -o "${ZERO_COPY_END_TOKEN}" \
+  "${RAW_DIR}/zc_slow.body" | wc -l | tr -d '[:space:]')"
+if [[ "${zc_gzip_tail_count}" != "1" ]]; then
+  echo "FAIL: gzip streaming tail token count must be exactly one" \
+    "(count=${zc_gzip_tail_count})" >&2
+  exit 1
+fi
+echo "OK: gzip zero-copy throttled reader received exact complete Markdown" \
   > "${RAW_DIR}/zc_slow_reader.log"
 cat "${RAW_DIR}/zc_slow_reader.log"
 
@@ -1019,6 +1101,9 @@ cat "${RAW_DIR}/zc_slow_reader.log"
 zc_slow_output_after="$(get_perf_metric 'zero_copy_output_total')"
 zc_backpressure_after="$(get_perf_metric 'backpressure_total')"
 zc_backpressure_resume_after="$(get_perf_metric 'backpressure_resume_total')"
+zc_gzip_decompression_after="$(get_perf_metric 'decompression_streaming_total')"
+zc_gzip_succeeded_after="$(get_metric_value 'streaming.succeeded_total')"
+zc_gzip_delivery_after="$(get_metric_value 'delivery_count')"
 if [[ "${zc_slow_output_after}" -le "${zc_slow_output_before}" ]]; then
   echo "FAIL: zero_copy_output_total did not increase during slow downstream" \
     "(before=${zc_slow_output_before}, after=${zc_slow_output_after})" >&2
@@ -1038,6 +1123,41 @@ if [[ "${zc_backpressure_resume_after}" -le "${zc_backpressure_resume_before}" ]
   exit 1
 fi
 echo "  backpressure_resume_total: ${zc_backpressure_resume_before} -> ${zc_backpressure_resume_after}"
+if [[ "${zc_gzip_decompression_after}" -ne $((zc_gzip_decompression_before + 1)) ]]; then
+  echo "FAIL: large gzip did not select streaming decompression exactly once" \
+    "(before=${zc_gzip_decompression_before}, after=${zc_gzip_decompression_after})" >&2
+  exit 1
+fi
+echo "  decompression_streaming_total: ${zc_gzip_decompression_before} -> ${zc_gzip_decompression_after}"
+if [[ "${zc_gzip_succeeded_after}" -ne $((zc_gzip_succeeded_before + 1)) ]]; then
+  echo "FAIL: large gzip streaming success count was not exactly one" \
+    "(before=${zc_gzip_succeeded_before}, after=${zc_gzip_succeeded_after})" >&2
+  exit 1
+fi
+echo "  streaming.succeeded_total: ${zc_gzip_succeeded_before} -> ${zc_gzip_succeeded_after}"
+if [[ "${zc_gzip_delivery_after}" -ne $((zc_gzip_delivery_before + 1)) ]]; then
+  echo "FAIL: large gzip delivery count was not exactly one" \
+    "(before=${zc_gzip_delivery_before}, after=${zc_gzip_delivery_after})" >&2
+  exit 1
+fi
+echo "  delivery_count: ${zc_gzip_delivery_before} -> ${zc_gzip_delivery_after}"
+
+zc_gzip_log_size_after="$(wc -c < "${RUNTIME}/logs/error.log" | tr -d '[:space:]')"
+zc_gzip_log_bytes=$((zc_gzip_log_size_after - zc_gzip_log_offset_before))
+tail -c "${zc_gzip_log_bytes}" "${RUNTIME}/logs/error.log" \
+  > "${RAW_DIR}/zc_gzip_request.log"
+zc_gzip_engine_logs="$(grep -Ec \
+  'reason=ENGINE_STREAMING .*uri=/streaming-zero-copy/zero-copy-gzip([[:space:]]|$)' \
+  "${RAW_DIR}/zc_gzip_request.log" || true)"
+zc_gzip_convert_logs="$(grep -Ec \
+  'reason=STREAMING_CONVERT .*uri=/streaming-zero-copy/zero-copy-gzip([[:space:]]|$)' \
+  "${RAW_DIR}/zc_gzip_request.log" || true)"
+if [[ "${zc_gzip_engine_logs}" != "1" || "${zc_gzip_convert_logs}" != "1" ]]; then
+  echo "FAIL: large gzip must log one streaming selection and one terminal conversion" \
+    "(engine=${zc_gzip_engine_logs}, convert=${zc_gzip_convert_logs})" >&2
+  exit 1
+fi
+echo "  decision logs: ENGINE_STREAMING=1 STREAMING_CONVERT=1"
 
 # Verify worker PID unchanged after slow downstream.
 zc_slow_pid_after="$(get_worker_pid)"
@@ -1147,11 +1267,10 @@ if ! check_worker_crash_log "${zc_log_offset_before}"; then
   exit 1
 fi
 
-echo "==> Case 5: truncated gzip full-buffer path should fail open"
-# The upstream sends a gzip stream with the final 8 bytes removed, so
-# decompression fails before the compressed full-body path can commit
-# Markdown headers. The module must fail open by preserving the upstream
-# compressed HTML payload and Content-Encoding.
+echo "==> Case 5: truncated gzip streaming path should fail open"
+# The upstream stops inside the gzip header, before the decompressor can emit
+# bytes. The module must fail open from pre-commit by preserving the upstream
+# compressed payload and Content-Encoding.
 trunc_gzip_line="$(curl -sS -D "${RAW_DIR}/trunc_gzip.hdr" -o "${RAW_DIR}/trunc_gzip.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
   "http://127.0.0.1:${PORT}/streaming/truncated-gzip" \
@@ -1173,6 +1292,69 @@ if [[ "${actual_trunc_gzip_bytes}" != "${TRUNCATED_GZIP_COMPRESSED_LEN}" ]]; the
   echo "truncated-gzip compressed length mismatch: expected ${TRUNCATED_GZIP_COMPRESSED_LEN}, got ${actual_trunc_gzip_bytes}" >&2
   exit 1
 fi
+
+echo "==> Case 5b: truncated later gzip member uses post-commit failure semantics"
+gzip_postcommit_errors_before="$(get_metric_value 'streaming.postcommit_error_total')"
+gzip_postcommit_failed_before="$(get_metric_value 'streaming.failed_total')"
+gzip_postcommit_worker_before="$(get_worker_pid)"
+gzip_postcommit_log_offset="$(wc -c < "${RUNTIME}/logs/error.log" | tr -d '[:space:]')"
+gzip_postcommit_curl_rc=0
+gzip_postcommit_line="$(curl -sS -D "${RAW_DIR}/gzip_postcommit.hdr" \
+  -o "${RAW_DIR}/gzip_postcommit.body" -H "${ACCEPT_MARKDOWN_HEADER}" \
+  --max-time 180 \
+  "http://127.0.0.1:${PORT}/streaming/postcommit-gzip" \
+  -w "${CURL_METRICS_FMT}" 2>"${RAW_DIR}/gzip_postcommit.err")" \
+  || gzip_postcommit_curl_rc=$?
+echo "${gzip_postcommit_line}" | tee \
+  "${RAW_DIR}/gzip_postcommit.metrics" >/dev/null
+if [[ "${gzip_postcommit_curl_rc}" == "28" ]]; then
+  echo "FAIL: gzip post-commit failure path timed out" >&2
+  exit 1
+fi
+echo "${gzip_postcommit_line}" | grep -q "${PATTERN_HTTP_200}" || {
+  echo "gzip post-commit case failed before committing headers: ${gzip_postcommit_line}" >&2
+  exit 1
+}
+assert_streaming_markdown_response \
+  "gzip-postcommit" "${RAW_DIR}/gzip_postcommit.hdr" \
+  "${RAW_DIR}/gzip_postcommit.body" "# Gzip Postcommit" \
+  "${GZIP_POSTCOMMIT_END_TOKEN}" 1
+if grep -q "${GZIP_POSTCOMMIT_LATE_TOKEN}" \
+  "${RAW_DIR}/gzip_postcommit.body"; then
+  echo "FAIL: truncated later gzip member unexpectedly delivered its tail" >&2
+  exit 1
+fi
+gzip_postcommit_errors_after="$(get_metric_value 'streaming.postcommit_error_total')"
+gzip_postcommit_failed_after="$(get_metric_value 'streaming.failed_total')"
+if [[ "${gzip_postcommit_errors_after}" -ne $((gzip_postcommit_errors_before + 1)) ]]; then
+  echo "FAIL: gzip post-commit error count was not exactly one" \
+    "(before=${gzip_postcommit_errors_before}, after=${gzip_postcommit_errors_after})" >&2
+  exit 1
+fi
+if [[ "${gzip_postcommit_failed_after}" -ne $((gzip_postcommit_failed_before + 1)) ]]; then
+  echo "FAIL: gzip streaming failure count was not exactly one" \
+    "(before=${gzip_postcommit_failed_before}, after=${gzip_postcommit_failed_after})" >&2
+  exit 1
+fi
+gzip_postcommit_log_size="$(wc -c < "${RUNTIME}/logs/error.log" | tr -d '[:space:]')"
+gzip_postcommit_log_bytes=$((gzip_postcommit_log_size - gzip_postcommit_log_offset))
+tail -c "${gzip_postcommit_log_bytes}" "${RUNTIME}/logs/error.log" \
+  > "${RAW_DIR}/gzip_postcommit_request.log"
+gzip_postcommit_reason_logs="$(grep -Ec \
+  'reason=STREAMING_FAIL_POSTCOMMIT .*uri=/streaming/postcommit-gzip([[:space:]]|$)' \
+  "${RAW_DIR}/gzip_postcommit_request.log" || true)"
+if [[ "${gzip_postcommit_reason_logs}" != "1" ]]; then
+  echo "FAIL: gzip post-commit failure reason must be logged exactly once" \
+    "(count=${gzip_postcommit_reason_logs})" >&2
+  exit 1
+fi
+gzip_postcommit_worker_after="$(get_worker_pid)"
+if [[ "${gzip_postcommit_worker_before}" != "${gzip_postcommit_worker_after}" ]]; then
+  echo "FAIL: worker PID changed during gzip post-commit failure" >&2
+  exit 1
+fi
+echo "  curl_rc=${gzip_postcommit_curl_rc} postcommit_error_total: " \
+  "${gzip_postcommit_errors_before} -> ${gzip_postcommit_errors_after}"
 
 echo "==> Case 6: truncated raw deflate streaming path should fail open"
 # The raw deflate fixture is cut in the middle of the compressed stream
@@ -1283,6 +1465,8 @@ echo "  oversize_result=$(cat "${RAW_DIR}/oversize.metrics")"
 echo "  gzip_source_html_bytes=${GZIP_SOURCE_LEN}"
 echo "  gzip_compressed_bytes=${GZIP_COMPRESSED_LEN}"
 echo "  gzip_result=$(cat "${RAW_DIR}/gzip.metrics")"
+printf '  gzip_decompression_streaming_total=%s->%s\n' \
+  "${gzip_decompression_before:-0}" "${gzip_decompression_after:-0}"
 echo "  deflate_source_html_bytes=${DEFLATE_SOURCE_LEN}"
 echo "  deflate_compressed_bytes=${DEFLATE_COMPRESSED_LEN}"
 echo "  deflate_result=$(cat "${RAW_DIR}/deflate.metrics")"
@@ -1291,6 +1475,17 @@ echo "  deflate_zlib_compressed_bytes=${DEFLATE_ZLIB_COMPRESSED_LEN}"
 echo "  deflate_zlib_result=$(cat "${RAW_DIR}/deflate_zlib.metrics")"
 echo "  truncated_gzip_compressed_bytes=${TRUNCATED_GZIP_COMPRESSED_LEN}"
 echo "  truncated_gzip_result=$(cat "${RAW_DIR}/trunc_gzip.metrics")"
+echo "  gzip_postcommit_source_html_bytes=${GZIP_POSTCOMMIT_SOURCE_LEN}"
+echo "  gzip_postcommit_compressed_bytes=${GZIP_POSTCOMMIT_COMPRESSED_LEN}"
+echo "  gzip_postcommit_curl_rc=${gzip_postcommit_curl_rc:-unknown}"
+printf '  gzip_postcommit_error_total=%s->%s\n' \
+  "${gzip_postcommit_errors_before:-0}" "${gzip_postcommit_errors_after:-0}"
+printf '  gzip_postcommit_failed_total=%s->%s\n' \
+  "${gzip_postcommit_failed_before:-0}" "${gzip_postcommit_failed_after:-0}"
+echo "  gzip_postcommit_reason_logs=${gzip_postcommit_reason_logs:-0}"
+printf '  gzip_postcommit_worker_pid=%s->%s\n' \
+  "${gzip_postcommit_worker_before:-unknown}" \
+  "${gzip_postcommit_worker_after:-unknown}"
 echo "  truncated_deflate_compressed_bytes=${TRUNCATED_DEFLATE_COMPRESSED_LEN}"
 echo "  truncated_deflate_result=$(cat "${RAW_DIR}/trunc_deflate.metrics")"
 echo "  truncated_deflate_zlib_compressed_bytes=${TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN}"
@@ -1298,6 +1493,7 @@ echo "  truncated_deflate_zlib_result=$(cat "${RAW_DIR}/trunc_deflate_zlib.metri
 echo "  zero_copy_result=$(cat "${RAW_DIR}/zc.metrics" 2>/dev/null || echo "missing")"
 echo "  zero_copy_output_total=${zc_output_total:-0}"
 echo "  zero_copy_slow_fixture_html_bytes=${ZERO_COPY_LEN:-0}"
+echo "  zero_copy_slow_gzip_compressed_bytes=${ZERO_COPY_GZIP_COMPRESSED_LEN:-0}"
 printf '  zero_copy_slow_reader_rate_bytes_per_second=%s\n' \
   "${ZC_SLOW_READER_RATE_BYTES_PER_SECOND}"
 echo "  zero_copy_slow_receive_buffer_bytes=${ZC_SLOW_RECV_BUFFER_BYTES}"
@@ -1307,6 +1503,8 @@ echo "  zero_copy_slow_deadline_seconds=${ZC_SLOW_DEADLINE_SECONDS}"
 echo "  zero_copy_slow_http_status=${zc_slow_http_status:-unknown}"
 echo "  zero_copy_slow_heading_present=yes"
 echo "  zero_copy_slow_tail_token_present=yes"
+echo "  zero_copy_slow_tail_token_count=${zc_gzip_tail_count:-0}"
+echo "  zero_copy_slow_same_source_equivalence=exact"
 printf '  zero_copy_slow_output_total=%s->%s\n' \
   "${zc_slow_output_before:-0}" "${zc_slow_output_after:-0}"
 printf '  zero_copy_slow_backpressure_total=%s->%s\n' \
@@ -1314,6 +1512,15 @@ printf '  zero_copy_slow_backpressure_total=%s->%s\n' \
 printf '  zero_copy_slow_backpressure_resume_total=%s->%s\n' \
   "${zc_backpressure_resume_before:-0}" \
   "${zc_backpressure_resume_after:-0}"
+printf '  zero_copy_slow_decompression_streaming_total=%s->%s\n' \
+  "${zc_gzip_decompression_before:-0}" \
+  "${zc_gzip_decompression_after:-0}"
+printf '  zero_copy_slow_streaming_succeeded_total=%s->%s\n' \
+  "${zc_gzip_succeeded_before:-0}" "${zc_gzip_succeeded_after:-0}"
+printf '  zero_copy_slow_delivery_count=%s->%s\n' \
+  "${zc_gzip_delivery_before:-0}" "${zc_gzip_delivery_after:-0}"
+printf '  zero_copy_slow_decision_logs=ENGINE_STREAMING:%s STREAMING_CONVERT:%s\n' \
+  "${zc_gzip_engine_logs:-0}" "${zc_gzip_convert_logs:-0}"
 printf '  zero_copy_slow_worker_pid=%s->%s\n' \
   "${zc_worker_pid_after:-unknown}" "${zc_slow_pid_after:-unknown}"
 echo "  zero_copy_crash_signatures=none"

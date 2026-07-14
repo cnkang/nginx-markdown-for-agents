@@ -2074,6 +2074,15 @@ test_postcommit_and_precommit_error_paths(void)
         "postcommit error should record failure once");
     TEST_ASSERT(metrics.streaming.budget_exceeded_total == 1,
         "memory-limit postcommit should classify budget exceeded");
+    TEST_ASSERT(g_log_decision_calls == 2,
+        "postcommit budget failure should log classification and terminal reason");
+
+    ngx_http_markdown_streaming_record_postcommit_failure(
+        &r, &ctx, &conf);
+    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
+        "repeated postcommit recording must not increment metrics");
+    TEST_ASSERT(g_log_decision_calls == 2,
+        "repeated postcommit recording must not duplicate terminal reason");
 
     ctx.streaming.completion.failure_recorded = 0;
     ctx.streaming.handle = (struct StreamingConverterHandle *) (uintptr_t) 0x4;

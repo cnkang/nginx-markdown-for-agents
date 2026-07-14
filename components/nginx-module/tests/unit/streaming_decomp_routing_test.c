@@ -8,10 +8,9 @@
  * Feature: 0.9.1-performance-optimization
  * Validates: Requirements 4.1, 4.2, 4.3, 4.4, 4.8, 4.10
  *
- * For 0.9.1: streaming decompression supports deflate (zlib-wrapped
- * per RFC 9110, or raw deflate per RFC 1951) via deferred header
- * sniffing.  These tests confirm gzip/brotli are routed to full-buffer
- * when streaming would otherwise be selected.
+ * For 0.9.1: streaming decompression supports gzip plus deflate
+ * (zlib-wrapped per RFC 9110, or raw per RFC 1951).  These tests confirm
+ * gzip/deflate reach streaming and Brotli remains on full-buffer.
  *
  * The property tests (tasks 8.3, 8.4) cover routing and fail-open
  * exhaustively.  This unit test adds specific named examples for
@@ -166,9 +165,10 @@ ngx_http_markdown_decomp_routing_decision(
 
     /*
      * Condition 4: encoding must be supported by streaming
-     * decompressor.  In 0.9.1, only raw deflate is supported.
+     * decompressor.  Gzip and deflate are supported in 0.9.1.
      */
-    if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE) {
+    if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }
 
@@ -276,40 +276,30 @@ test_routing_raw_deflate_with_etag_cache(void)
 }
 
 static void
-test_routing_gzip_deferred_to_fullbuffer(void)
+test_routing_gzip_all_conditions_met(void)
 {
     ngx_http_markdown_decomp_route_t result;
 
     TEST_SUBSECTION(
-        "gzip + all other conditions met → FULLBUFFER "
-        "(deferred in 0.9.1)");
+        "gzip + all conditions met → STREAMING");
 
     result = ngx_http_markdown_decomp_routing_decision(
         1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
         NGX_HTTP_MARKDOWN_COMPRESSION_GZIP);
     TEST_ASSERT(
-        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
-        "gzip routes to FULLBUFFER under streaming-selected "
-        "conditions (Req 4.8)");
-    TEST_PASS("gzip deferred to full-buffer path");
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+        "gzip + auto_decompress=on + streaming + "
+        "cache!=full → STREAMING (Req 4.8)");
+    TEST_PASS("gzip routes to STREAMING");
 }
 
 static void
-test_routing_gzip_and_brotli_streaming_selected_fullbuffer(void)
+test_routing_brotli_streaming_selected_fullbuffer(void)
 {
     ngx_http_markdown_decomp_route_t result;
 
     TEST_SUBSECTION(
-        "gzip/brotli + streaming selected → FULLBUFFER "
-        "(deferred in 0.9.1)");
-
-    result = ngx_http_markdown_decomp_routing_decision(
-        1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
-        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP);
-    TEST_ASSERT(
-        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
-        "gzip with all non-encoding conditions met routes "
-        "to FULLBUFFER");
+        "brotli + streaming selected → FULLBUFFER");
 
     result = ngx_http_markdown_decomp_routing_decision(
         1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
@@ -319,7 +309,7 @@ test_routing_gzip_and_brotli_streaming_selected_fullbuffer(void)
         "brotli with all non-encoding conditions met routes "
         "to FULLBUFFER");
 
-    TEST_PASS("gzip and brotli route to full-buffer in 0.9.1");
+    TEST_PASS("brotli remains on the full-buffer path");
 }
 
 static void
@@ -480,47 +470,37 @@ test_routing_multiple_conditions_off(void)
 }
 
 /* ================================================================
- * TEST SECTION 2: Raw deflate fallback (gzip deferred)
+ * TEST SECTION 2: Supported gzip and deflate routing
  *
- * Validates: Requirement 4.8 (gzip deferred to full-buffer)
+ * Validates: Requirement 4.8 (gzip and deflate stream)
  * ================================================================ */
 
 static void
-test_deflate_only_encoding_reaches_streaming(void)
+test_supported_encodings_reach_streaming(void)
 {
     ngx_http_markdown_decomp_route_t result;
     ngx_http_markdown_compression_type_e encodings[] = {
-        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
-        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+        NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
     };
     size_t i;
 
     TEST_SUBSECTION(
-        "only deflate reaches streaming in 0.9.1 "
+        "gzip and deflate reach streaming in 0.9.1 "
         "(Req 4.8)");
 
-    /* Confirm deflate reaches streaming */
-    result = ngx_http_markdown_decomp_routing_decision(
-        1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
-        NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE);
-    TEST_ASSERT(
-        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
-        "deflate reaches streaming path");
-
-    /* Confirm gzip and brotli do NOT */
     for (i = 0; i < ARRAY_SIZE(encodings); i++) {
         result = ngx_http_markdown_decomp_routing_decision(
             1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
             encodings[i]);
         TEST_ASSERT(
-            result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
-            "gzip/brotli selected for streaming must route "
-            "to full-buffer");
+            result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+            "gzip/deflate selected for streaming must route "
+            "to streaming");
     }
 
     TEST_PASS(
-        "only deflate reaches streaming; gzip/brotli "
-        "fall to full-buffer");
+        "gzip and deflate reach streaming");
 }
 
 /*
@@ -1013,8 +993,8 @@ main(void)
     /* Section 1: Routing decision named examples */
     test_routing_raw_deflate_all_conditions_met();
     test_routing_raw_deflate_with_etag_cache();
-    test_routing_gzip_deferred_to_fullbuffer();
-    test_routing_gzip_and_brotli_streaming_selected_fullbuffer();
+    test_routing_gzip_all_conditions_met();
+    test_routing_brotli_streaming_selected_fullbuffer();
     test_routing_auto_decompress_off();
     test_routing_streaming_engine_not_selected();
     test_routing_cache_validation_full();
@@ -1023,8 +1003,8 @@ main(void)
     test_routing_no_encoding_bypass();
     test_routing_multiple_conditions_off();
 
-    /* Section 2: deflate routing (zlib-wrapped and raw) */
-    test_deflate_only_encoding_reaches_streaming();
+    /* Section 2: gzip and deflate streaming routing */
+    test_supported_encodings_reach_streaming();
     test_deflate_zlib_and_raw_both_route_streaming();
 
     /* Section 3: Truncated stream fail-open / safe-finish */
