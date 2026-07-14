@@ -944,14 +944,15 @@ def _check_environment_compatibility(
       - platform
       - load_generator
       - nginx_version
+      - input_bytes for each critical scenario
 
-    All three fields must be present and non-empty on both sides.
-    Comparing metrics across different environments produces
-    meaningless regression percentages and must be rejected as
-    MISSING_EVIDENCE in blocking mode.  Missing fields on both sides
-    (e.g. both empty) are also violations — the validator's per-report
-    check should have caught them already, but the compatibility check
-    must be defensive.
+    All three environment fields must be present and non-empty on both sides.
+    Critical scenario input sizes must also match. Comparing metrics across
+    different environments or fixtures produces meaningless regression
+    percentages and must be rejected as MISSING_EVIDENCE in blocking mode.
+    Missing fields on both sides (e.g. both empty) are also violations — the
+    validator's per-report check should have caught them already, but the
+    compatibility check must be defensive.
     """
     violations: list[tuple[str, str]] = []
 
@@ -970,6 +971,31 @@ def _check_environment_compatibility(
             violations.append(
                 (field,
                  f"current={cur_val!r} vs baseline={base_val!r}")
+            )
+
+    cur_scenarios = {
+        scenario.get("name"): scenario
+        for scenario in cur_mb.get("scenarios", [])
+        if scenario.get("name")
+    }
+    base_scenarios = {
+        scenario.get("name"): scenario
+        for scenario in base_mb.get("scenarios", [])
+        if scenario.get("name")
+    }
+    for name in sorted(_CRITICAL_SCENARIOS):
+        if name not in cur_scenarios or name not in base_scenarios:
+            continue
+        cur_metrics = cur_scenarios[name].get("metrics", {})
+        base_metrics = base_scenarios[name].get("metrics", {})
+        cur_bytes = cur_metrics.get("input_bytes")
+        base_bytes = base_metrics.get("input_bytes")
+        if cur_bytes != base_bytes:
+            violations.append(
+                (
+                    f"scenario.{name}.input_bytes",
+                    f"current={cur_bytes!r} vs baseline={base_bytes!r}",
+                )
             )
 
     return violations

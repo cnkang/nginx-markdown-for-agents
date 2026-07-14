@@ -364,13 +364,11 @@ jobs:
       - name: Build NGINX binary and dynamic module
         run: |
           cd "${NGINX_SRC}"
-          # NGINX's generated Makefile defines separate targets:
-          #   build: binary modules manpage
-          #   binary: objs/nginx
-          #   modules: objs/ngx_http_markdown_filter_module.so
-          # `make modules` alone does NOT produce objs/nginx, so we must
-          # build both targets explicitly before copying artifacts.
-          make -j"$(nproc)" binary modules
+          # The public top-level `build` target produces the binary, dynamic
+          # modules, and manpage. `binary` is only defined in objs/Makefile on
+          # older supported releases such as NGINX 1.24.0, so invoking it via
+          # the top-level Makefile would fail before release evidence runs.
+          make -j"$(nproc)" build
         shell: bash
 
       - name: Verify build artifacts exist

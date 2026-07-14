@@ -261,6 +261,9 @@ generate_nginx_conf() {
   case "$profile" in
     streaming_first)
       profile_directives="
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_set_header Connection \"\";
         markdown_profile streaming_first;
         markdown_streaming_zero_copy on;"
       ;;
@@ -534,7 +537,7 @@ SCENARIOS=(
   "chunked-medium|simple/tables.html|balanced|none|chunked|10"
   "gzip-large|complex/blog-post.html|balanced|gzip|identity|10"
   "large-body|large/large-1mb.html|balanced|none|identity|5"
-  "streaming-first|complex/documentation.html|streaming_first|none|chunked|20"
+  "streaming-first|large/large-1mb.html|streaming_first|none|chunked|20"
 )
 
 ###############################################################################

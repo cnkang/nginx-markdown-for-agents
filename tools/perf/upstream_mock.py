@@ -94,10 +94,13 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
 
-        if body:
-            self.wfile.write(f"{len(body):x}\r\n".encode())
-            self.wfile.write(body)
+        chunk_size = 16 * 1024
+        for offset in range(0, len(body), chunk_size):
+            chunk = body[offset:offset + chunk_size]
+            self.wfile.write(f"{len(chunk):x}\r\n".encode())
+            self.wfile.write(chunk)
             self.wfile.write(b"\r\n")
+            self.wfile.flush()
         self.wfile.write(b"0\r\n\r\n")
 
     def _send_identity_response(
