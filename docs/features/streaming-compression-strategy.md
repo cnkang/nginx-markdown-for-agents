@@ -22,6 +22,7 @@ content encoding streams.
 | deflate RFC 1951 | auto decompress on; cache validation not `full` | streaming decompression |
 | gzip | auto decompress on; cache validation not `full` | member-aware streaming decompression |
 | Brotli (`br`) | regardless of streaming preference | bounded full-buffer decompression |
+| unknown/unsupported | none | existing passthrough/error-policy behavior |
 
 ## Routing Decision
 

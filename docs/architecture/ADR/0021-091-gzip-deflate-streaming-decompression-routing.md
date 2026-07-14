@@ -15,7 +15,9 @@ mode (`MAX_WBITS + 16`), including header and trailer validation.
 The lifecycle distinction is important: `Z_STREAM_END` completes one gzip
 member, not necessarily the compressed HTTP response. Concatenated members may
 continue in the same NGINX buffer or a later buffer, including after downstream
-backpressure has suspended delivery.
+backpressure has suspended delivery. The same rule applies when policy selects
+the bounded full-buffer path: completing the first member is not completion of
+the response.
 
 ## Decision
 
@@ -35,6 +37,13 @@ gzip member resets. Source input ownership remains independent of downstream
 `NGX_AGAIN`; unconsumed input stays retained for resume, and terminal delivery
 is recorded only after downstream success.
 
+The default Rust full-buffer decoder consumes all concatenated members through
+`MultiGzDecoder`. The C no-Rust fallback performs member-aware `inflateReset`
+and tracks completed-member output separately from zlib's member-local
+`total_out`. Both paths reject a truncated later member and apply one cumulative
+output budget across the complete response. An empty later member remains valid
+when earlier output exactly fills that budget.
+
 ### Error Handling
 - **Pre-commit errors**: Trigger fail-open via the replay buffer.
 - **Post-commit errors**: Use the existing post-commit safe-finish/abort
@@ -53,6 +62,8 @@ is recorded only after downstream success.
 - Extends incremental decompression and streaming TTFB benefits to gzip, the
   common HTTP content coding, while retaining both deflate framings.
 - Preserves gzip member/trailer integrity across arbitrary chunks and resumes.
+- Gives streaming, Rust full-buffer, and C fallback paths the same
+  concatenated-member and cumulative-budget contract.
 - Keeps Brotli's decoder-state and memory validation outside the 0.9.1 scope.
 
 ### Negative Consequences
@@ -87,3 +98,4 @@ Kang
 |---------|------|--------|---------|
 | 0.9.1 | 2026-07-08 | Kang | Initial ADR for Streaming Decompression Routing |
 | 0.9.1 | 2026-07-14 | Kang | Enabled member-aware gzip streaming alongside zlib/raw deflate; retained bounded Brotli full-buffer routing |
+| 0.9.1 | 2026-07-14 | Codex | Aligned Rust and C full-buffer gzip with the same multi-member, truncation, and response-budget contract |

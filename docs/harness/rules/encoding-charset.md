@@ -30,7 +30,7 @@ Required:
 
 ---
 
-### 44. Streaming decompression codec and member lifecycle consistency
+### 44. Decompression codec and member lifecycle consistency
 Historical issues: e76c1584, 13189d71, b9e5fe4d.
 
 Required:
@@ -42,10 +42,12 @@ Required:
   boundaries and downstream backpressure resumes.  Downstream `NGX_AGAIN`
   must not imply that compressed source input was consumed or may be advanced.
 - A gzip `Z_STREAM_END` completes one gzip member, not necessarily the HTTP
-  response.  Reset the gzip inflater while preserving remaining `avail_in`,
-  accept a boundary exactly between feeds, and consume later members exactly
-  once.  Response finalization succeeds at a complete member boundary and
-  rejects an incomplete final member.
+  response.  Both full-buffer and streaming decoders must consume every
+  concatenated member exactly once.  The C fallback resets the inflater while
+  preserving remaining `avail_in`; the Rust full-buffer path uses a
+  multi-member decoder.  Streaming additionally accepts a boundary exactly
+  between feeds.  Response finalization succeeds at a complete member boundary
+  and rejects an incomplete final member.
 - Decompression size accounting is response-wide.  Inflater reset at a gzip
   member boundary must not reset `total_decompressed` or independently grant
   another `max_decompressed_size` budget.
@@ -100,7 +102,9 @@ Verification:
   `MAX_WBITS` (zlib-wrapped) or `-MAX_WBITS` (raw deflate).
 - Verify gzip concatenated-member tests cover one feed, a boundary between
   feeds, a boundary inside a feed, a truncated later member, and cumulative
-  response budget enforcement.
+  response budget enforcement.  Full-buffer tests must cover both the default
+  Rust FFI decoder and the C fallback, including an empty later member at an
+  exact output budget.
 - `grep -rn 'TRUNCATED\|truncated.*\(gzip\|deflat\)\|Z_BUF_ERROR\|Z_DATA_ERROR\|no.progress' components/rust-converter/src/ components/nginx-module/src/`
 - Verify truncated-stream rejection propagates a budget/integrity error.
 - Verify the no-progress guard detects `Z_BUF_ERROR` with no state change.

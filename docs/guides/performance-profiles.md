@@ -42,8 +42,8 @@ harness.
 | Characteristic | `strict_cache` | `balanced` | `streaming_first` |
 |----------------|:-:|:-:|:-:|
 | **Streaming capability** | None (forced off) | Auto (threshold-gated) | Always (forced on) |
-| **TTFB characteristics** | Higher — full response buffered before conversion | Lower for large responses via auto-streaming; full-buffer for small | Lowest — streaming begins on first chunk arrival (pending benchmark validation) |
-| **Peak memory** | Response size × ~2 (buffer + converted output) | Same as strict_cache for small responses; bounded by `streaming_buffer` for large | Bounded by `streaming_buffer` regardless of response size (pending benchmark validation) |
+| **TTFB characteristics** | Higher — full response buffered before conversion | Lower for large responses via auto-streaming; full-buffer for small | Lower in the validated 1 MiB comparison — streaming begins on first chunk arrival |
+| **Peak memory** | Response size × ~2 (buffer + converted output) | Same as strict_cache for small responses; bounded by `streaming_buffer` for large | Lower in the validated 1 MiB comparison; avoids full-response accumulation |
 | **Cache correctness** | Full — ETag generation, If-None-Match, If-Modified-Since | Partial — If-Modified-Since only (IMS via upstream Last-Modified) | None — no conditional request support |
 | **Zero-copy output (0.9.1)** | Not applicable (no streaming) | Available when streaming active + opt-in | Available + opt-in via `markdown_streaming_zero_copy on` |
 | **Streaming decompression (0.9.1)** | Not applicable (no streaming) | Not active (requires `streaming_first` profile) | Active for gzip and deflate (zlib-wrapped + raw); Brotli uses bounded full-buffer decompression |
@@ -103,9 +103,10 @@ within the user-space constraint:
 
 - **Do not expect** latency parity with `sendfile`-served static files
 - **Do expect** measurable TTFB improvements for large responses under
-  `streaming_first` (pending benchmark validation)
-- **Do expect** reduced peak memory for streaming paths (pending benchmark
-  validation)
+  `streaming_first`; the checked-in 1 MiB module evidence recorded 6.665 ms
+  streaming-first p50 TTFB versus 35.627 ms for full-buffer
+- **Do expect** reduced peak memory for streaming paths; the same evidence
+  recorded 21,127,168 bytes versus 33,632,256 bytes for full-buffer
 - **Do expect** reduced CPU cost when large gzip responses are intentionally
   routed through full-buffer (for example full cache validation), by removing
   the extra apply-back copy after the required FFI-output copy (pending
@@ -268,9 +269,9 @@ do not cache aggressively.
 - Streaming buffer sized for agent consumption rate: `markdown_limits streaming_buffer=512k`
 - Cache validation off (agents rarely send conditional requests): `markdown_cache_validation off`
 
-**Performance expectations (pending benchmark validation):**
-- TTFB improvement over full-buffer for responses >1MB
-- Peak memory bounded by streaming_buffer regardless of response size
+**Performance expectations:**
+- Validated TTFB improvement over full-buffer for the checked-in 1 MiB fixture
+- Validated peak-memory reduction for the checked-in 1 MiB fixture
 - Decompression begins on first chunk rather than after full accumulation
 
 ### Mixed Traffic Proxy
@@ -444,16 +445,15 @@ All performance claims in this document are qualified as follows:
 
 | Claim Category | Evidence Status |
 |----------------|----------------|
-| TTFB improvement under `streaming_first` | Pending benchmark validation |
-| Peak memory reduction for streaming paths | Pending benchmark validation |
+| TTFB improvement under `streaming_first` | Validated for the checked-in 1 MiB module fixture |
+| Peak memory reduction for streaming paths | Validated for the checked-in 1 MiB module fixture |
 | Full-buffer copy reduction latency benefit | Pending benchmark validation |
 | Zero-copy output reduced per-chunk overhead | Pending benchmark validation |
 | Streaming decompression TTFB benefit for gzip/deflate | Pending benchmark validation |
 
-Performance claims will be updated with concrete benchmark data once the
-module-level benchmark harness produces validated evidence packs. The evidence
-gate (`make release-gates-check-091`) enforces the following thresholds before
-claims can be promoted to "validated":
+The module-level benchmark harness produces validated evidence packs. The
+evidence gate (`make release-gates-check-091`) enforces the following thresholds
+before claims can be promoted to "validated":
 
 - p50 latency: ≤ +10% vs baseline
 - p95 latency: ≤ +15% vs baseline

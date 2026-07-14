@@ -119,7 +119,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 41 | shell | Shell harness detect_*.sh scripts must use POSIX ERE ([[:space:]] not \s); grep -E for extended patterns |
 | 42 | c-safety | volatile only for single-threaded compiler barriers; direct aggregate __atomic_* usage is forbidden |
 | 43 | memory-budget | Resizable buffer backing store (ctx->buffer.data) uses ngx_alloc/ngx_free exclusively; fixed-size pool-lifetime decompression workspaces may use ngx_pnalloc/ngx_pfree |
-| 44 | encoding-charset | Streaming gzip/deflate preserves codec and member lifecycle across chunks/resumes; truncation is rejected; budgets remain cumulative |
+| 44 | encoding-charset | Gzip/deflate preserves codec and member lifecycle in full-buffer and streaming paths; truncation is rejected; budgets remain cumulative |
 | 45 | dynconf-snapshot | effective_conf NULL-safe access; cross-TU field visibility in shared headers; sentinel value consistency |
 | 46 | ffi-crosslang | FFI operations must validate NULL/empty key inputs; guards on both sides of FFI boundary; NULL/empty-input test coverage |
 | 47 | streaming-backpressure | Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return |
@@ -178,7 +178,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Fail-open return codes correct; replay buffer init/append failure → precommit_error [2,38]
 - failopen_completed prevents duplicate finalize; failopen_count after downstream OK [38]
 - UTF-8 tails preserved across chunk boundaries; flush at EOF; streaming tokenizer discard_bom=false, strip stream-start BOM in converter [4]
-- Streaming gzip/deflate preserves codec/member lifecycle across arbitrary chunks and backpressure resumes; gzip member resets keep response-wide budgets; truncated final streams/members are rejected; tests match production routing/formats [44]
+- Full-buffer and streaming gzip/deflate preserve codec/member lifecycle; streaming state survives arbitrary chunks and backpressure resumes; gzip member resets keep response-wide budgets; truncated final streams/members are rejected; tests match production routing/formats [44]
 - Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return [47]
 - Auth Cache-Control commit failure routes through precommit_error; multi-header aggregation checks any_public before has_private [51]
 - Derived-state reconciliation on multi-context drain: ALL derived state reconciled for EVERY popped context [52]
