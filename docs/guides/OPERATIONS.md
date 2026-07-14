@@ -1017,7 +1017,7 @@ When the streaming engine is enabled, the engine selector emits a reason code in
 
 #### Streaming Reason Codes
 
-When the streaming engine is active (`markdown_streaming_engine on`), the following reason codes are emitted at streaming decision points:
+When the streaming engine is active (`markdown_streaming force`), the following reason codes are emitted at streaming decision points:
 
 | Reason Code | Family | Severity | Description | Suggested Operator Action |
 |---|---|---|---|---|

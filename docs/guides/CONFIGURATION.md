@@ -89,7 +89,6 @@ An explicit directive always wins over the profile default for the same field.
 | `markdown_accept` | strict | strict | wildcard | strict |
 | `markdown_cache_validation` | full | ims_only | off | ims_only |
 | `markdown_streaming` | off | auto | force | auto |
-| `markdown_streaming_engine` | auto | auto | auto | auto |
 | `markdown_limits memory=` | 8m | 8m | 8m | 10m |
 | `markdown_limits timeout=` | 2s | 2s | 2s | 5s |
 | `markdown_limits streaming_buffer=` | — | 256k | 256k | 2m |
@@ -386,17 +385,17 @@ full-buffer and streaming paths).
 
 #### markdown_flavor
 
-**Syntax:** `markdown_flavor commonmark | gfm | mdx | org-mode;`
+**Syntax:** `markdown_flavor commonmark | gfm;`
 **Default:** `commonmark`  
 **Context:** http, server, location
 
 Markdown flavor to generate:
 - `commonmark`: CommonMark specification (standard)
 - `gfm`: GitHub Flavored Markdown (includes tables, strikethrough, task lists)
-- `mdx`: experimental MDX-oriented selector; output fidelity depends on the
-  active converter integration
-- `org-mode`: experimental Org-mode-oriented selector; output fidelity depends
-  on the active converter integration
+
+The former experimental `mdx` and `org-mode` values never had distinct
+production conversion semantics and are removed in v0.9.1. `nginx -t` rejects
+either value and tells operators to select `commonmark` or `gfm` explicitly.
 
 **Example:**
 ```nginx
@@ -800,12 +799,9 @@ auto-mode threshold control.
 **Default:** `auto`
 **Context:** http, server, location
 
-Streaming *enablement* policy (Config V2, 0.9.0). This is the selector that
-decides **whether** streaming is attempted; it is distinct from
-`markdown_streaming_engine`, which selects **which** streaming backend
-implementation is used. The two are independent and both remain first-class
-directives — `markdown_streaming` is not an alias for
-`markdown_streaming_engine`.
+This is the sole public selector for the full-buffer and streaming processing
+paths. Backend implementation selection is internal and is not an independent
+operator contract.
 
 - `off` — never stream; always use the full-buffer path.
 - `auto` — stream large responses (Content-Length at or above
@@ -833,36 +829,18 @@ markdown_cache_validation ims_only;
 markdown_streaming auto;
 ```
 
-#### markdown_streaming_engine
+#### markdown_streaming_engine (removed in v0.9.1)
 
-**Syntax:** `markdown_streaming_engine off | on | auto;`
-**Default:** `auto`
-**Context:** http, server, location
+The implementation-level selector is now a reject-only legacy directive. It
+duplicated `markdown_streaming` without providing an independent supported
+operator choice. `nginx -t` fails with a value-specific migration hint; there
+is no silent alias.
 
-Controls whether the streaming conversion engine is used. When `off`,
-all requests use the full-buffer conversion path.
-When `auto`, the engine is selected automatically per-request.
-
-- `off`: Disable streaming. All requests use the full-buffer path.
-- `on`: Enable streaming for all eligible requests.
-- `auto`: Enable streaming with automatic fallback to full-buffer when the streaming
-  engine encounters unsupported features (e.g., tables requiring full-buffer processing).
-
-**Note**: `$variable` support was removed in v0.8.0. The directive only accepts
-the enum values `off`, `on`, and `auto`. If your configuration uses a variable
-(e.g. `markdown_streaming_engine $flag`), `nginx -t` will reject it.
-
-**Example:**
-```nginx
-# Enable streaming for all requests
-markdown_streaming_engine on;
-
-# Auto mode with fallback
-markdown_streaming_engine auto;
-
-# Disable streaming
-markdown_streaming_engine off;
-```
+| Removed configuration | Required v0.9.1 configuration |
+|-----------------------|--------------------------------|
+| `markdown_streaming_engine off;` | `markdown_streaming off;` |
+| `markdown_streaming_engine auto;` | `markdown_streaming auto;` |
+| `markdown_streaming_engine on;` | `markdown_streaming force;` |
 
 #### markdown_streaming_budget
 
@@ -898,7 +876,7 @@ Key points for operators:
 
 - A single `markdown_error_policy` directive controls both paths. There is no
   per-path override.
-- When `markdown_streaming_engine` is `off` (or resolves to off), the streaming
+- When `markdown_streaming` is `off`, the streaming
   pre-commit path is never entered; `markdown_error_policy` applies only to the
   full-buffer path.
 - Neither the pre-0.9.0 directives nor `markdown_error_policy` controls the
@@ -997,7 +975,7 @@ guidance.
 ```nginx
 # Phase 0: shadow mode verification
 markdown_filter on;
-markdown_streaming_engine off;
+markdown_streaming off;
 markdown_streaming_shadow on;
 
 # Phase 1+: disable shadow after verification
@@ -1034,7 +1012,7 @@ immediately use the pool-copy path. See
 ```nginx
 location /docs {
     markdown_filter on;
-    markdown_streaming_engine on;
+    markdown_streaming force;
     markdown_streaming_zero_copy on;
     proxy_pass http://backend;
 }
@@ -1044,7 +1022,7 @@ location /docs {
 
 The following directives were introduced in v0.8.0 to give operators fine-grained
 control over which responses enter the streaming conversion path and how the
-streaming engine batches output. They complement `markdown_streaming_engine` and
+streaming engine batches output. They complement `markdown_streaming` and
 the streaming buffer setting in `markdown_limits` (see above).
 
 ##### markdown_stream_threshold
@@ -1139,7 +1117,7 @@ markdown_stream_flush_min 64k;
 
 Space-separated list of MIME types to exclude from streaming conversion. These
 types are added to the built-in hard exclusions and never enter the streaming
-path, regardless of `markdown_streaming_engine` setting.
+path, regardless of the `markdown_streaming` setting.
 
 User-configured exclusions are **additive** to the built-in hard exclusions:
 
@@ -1166,7 +1144,7 @@ markdown_stream_excluded_types text/csv application/xml application/rss+xml;
 ```nginx
 http {
     markdown_filter on;
-    markdown_streaming_engine on;
+    markdown_streaming force;
     markdown_stream_threshold 1m;
 
     server {
@@ -1184,7 +1162,7 @@ http {
 ```nginx
 location /large-docs {
     # Only stream responses >= 2 MB
-    markdown_streaming_engine auto;
+    markdown_streaming auto;
     markdown_stream_threshold 2m;
 
     # Larger pre-commit buffer for complex pages
@@ -1200,7 +1178,7 @@ location /large-docs {
 **Adding custom excluded types:**
 ```nginx
 location /api {
-    markdown_streaming_engine auto;
+    markdown_streaming auto;
 
     # Exclude CSV and XML feeds from streaming
     markdown_stream_excluded_types text/csv application/atom+xml;
@@ -1213,7 +1191,7 @@ location /api {
 ```nginx
 location /legacy {
     # Force full-buffer path regardless of response size
-    markdown_streaming_engine off;
+    markdown_streaming off;
     proxy_pass http://backend;
 }
 ```
@@ -1268,14 +1246,14 @@ configured together.
 
 | Directive Pair | Interaction Summary |
 |----------------|---------------------|
-| `markdown_streaming_engine` + `markdown_filter` | Streaming only applies when `markdown_filter` is `on` (or resolves to a truthy value). If the filter is disabled, the streaming engine setting is irrelevant — no conversion of any kind occurs. |
-| `markdown_streaming_engine` + `markdown_limits` | The unified `markdown_limits memory=<size>` sets the full-buffer ceiling, while `markdown_limits streaming_buffer=<size>` sets the streaming working-buffer ceiling. |
-| `markdown_streaming_engine` + `markdown_error_policy` | The unified error policy applies to both full-buffer and streaming pre-commit failures. See the [error policy section](#markdown_error_policy) above. |
-| `markdown_streaming_engine` + `markdown_cache_validation` | ETags are generated from converted output. For full-buffer responses, the complete Markdown is available before headers are sent, so ETag generation works normally. For streaming responses that have crossed the commit boundary, response headers (including `Content-Type: text/markdown`) are already sent — ETag cannot be retroactively added. Streaming responses do **not** carry an ETag header. When `markdown_cache_validation` is `full` (the `strict_cache` profile default), the streaming selector always selects full-buffer because full ETag support requires the complete converted output before headers. To actually activate streaming in `auto` mode, use `markdown_cache_validation ims_only` or `off` (the default for `balanced` and built-in). |
-| `markdown_stream_threshold` + `Content-Length` | When the upstream response includes a `Content-Length` header and the value is below `markdown_stream_threshold`, the response always uses the full-buffer path regardless of `markdown_streaming_engine on`. This is a size-based eligibility gate, not an error. |
+| `markdown_streaming` + `markdown_filter` | Streaming only applies when `markdown_filter` is `on` (or resolves to a truthy value). If the filter is disabled, the streaming policy is irrelevant — no conversion of any kind occurs. |
+| `markdown_streaming` + `markdown_limits` | The unified `markdown_limits memory=<size>` sets the full-buffer ceiling, while `markdown_limits streaming_buffer=<size>` sets the streaming working-buffer ceiling. |
+| `markdown_streaming` + `markdown_error_policy` | The unified error policy applies to both full-buffer and streaming pre-commit failures. See the [error policy section](#markdown_error_policy) above. |
+| `markdown_streaming` + `markdown_cache_validation` | ETags are generated from converted output. For full-buffer responses, the complete Markdown is available before headers are sent, so ETag generation works normally. For streaming responses that have crossed the commit boundary, response headers (including `Content-Type: text/markdown`) are already sent — ETag cannot be retroactively added. Streaming responses do **not** carry an ETag header. When `markdown_cache_validation` is `full` (the `strict_cache` profile default), the streaming selector always selects full-buffer because full ETag support requires the complete converted output before headers. To actually activate streaming in `auto` mode, use `markdown_cache_validation ims_only` or `off` (the default for `balanced` and built-in). |
+| `markdown_stream_threshold` + `Content-Length` | In `auto` mode, a known length below `markdown_stream_threshold` selects full-buffer. `force` bypasses the size threshold after hard eligibility and cache-validation gates. |
 | `markdown_stream_excluded_types` + `markdown_content_types` | Both must permit the content type for streaming conversion. `markdown_content_types` controls whether the module processes a response at all (any path). `markdown_stream_excluded_types` is an additional filter that prevents specific types from entering the streaming path. A type excluded from streaming may still be converted via full-buffer if it passes the general eligibility checks. |
 | `markdown_stream_precommit_buffer` + `markdown_error_policy` | The pre-commit buffer enables fail-open replay: if an error occurs before the commit boundary, the buffered original HTML is replayed to the client. When `markdown_stream_precommit_buffer 0` (replay disabled), any pre-commit error immediately triggers the `markdown_error_policy` without replay capability. |
-| `markdown_streaming_engine auto` + explicit value | When `markdown_streaming_engine` is set to a fixed value (`off`, `on`, or `auto`), it applies for the entire request lifecycle. Use different values at different configuration levels (http/server/location) for per-path control. |
+| `markdown_streaming` + explicit value | A fixed `off`, `auto`, or `force` value applies for the entire request lifecycle. Use different values at different configuration levels (http/server/location) for per-path control. |
 
 **Non-obvious behaviors to watch for:**
 
@@ -1298,9 +1276,9 @@ configured together.
    close to `markdown_limits streaming_buffer=<size>` leaves little room for
    converter working memory and may trigger budget-exceeded errors.
 
-5. **Streaming engine configuration inheritance.** A `markdown_streaming_engine`
+5. **Streaming policy inheritance.** A `markdown_streaming`
    directive at the `http` level is inherited by all `server`/`location` blocks.
-   Override with an explicit value (`off`, `on`, `auto`) in specific locations to
+   Override with an explicit value (`off`, `auto`, `force`) in specific locations to
    exclude them from the inherited setting.
 
 6. **Default `ims_only` allows streaming.** The default cache validation
@@ -1315,7 +1293,7 @@ configured together.
 http {
     markdown_filter on;
     markdown_limits memory=4m;           # Applies to both paths
-    markdown_streaming_engine auto;
+    markdown_streaming auto;
     markdown_stream_threshold 1m;
     markdown_cache_validation ims_only;  # Allows streaming + IMS
 

@@ -417,7 +417,7 @@ http {
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_error_policy pass;
             markdown_log_verbosity debug;
@@ -430,7 +430,7 @@ http {
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_limits streaming_buffer=1 memory=1m;
             markdown_error_policy fail_closed;
@@ -503,7 +503,7 @@ http {
         location /streaming {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_log_verbosity debug;
         }
@@ -511,7 +511,7 @@ http {
         location /streaming-auto {
             root html;
             markdown_filter on;
-            markdown_streaming_engine auto;
+            markdown_streaming auto;
             markdown_cache_validation off;
             markdown_log_verbosity debug;
         }
@@ -519,7 +519,7 @@ http {
         location /streaming-off {
             root html;
             markdown_filter on;
-            markdown_streaming_engine off;
+            markdown_streaming off;
             markdown_cache_validation off;
             markdown_log_verbosity debug;
         }
@@ -527,7 +527,7 @@ http {
         location /streaming-fullsupport {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation full;
             markdown_log_verbosity debug;
         }
@@ -535,7 +535,7 @@ http {
         location /streaming-ims-only {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation ims_only;
             markdown_log_verbosity debug;
         }
@@ -544,7 +544,7 @@ http {
         location /streaming-tiny-budget {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_limits streaming_buffer=1;
             markdown_log_verbosity debug;
@@ -554,7 +554,7 @@ http {
         location /streaming-reject-budget {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_limits streaming_buffer=1;
             markdown_error_policy fail_closed;
@@ -571,7 +571,7 @@ http {
         location /streaming-etag-tokens {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_token_estimate on;
             markdown_log_verbosity debug;
@@ -581,7 +581,7 @@ http {
         location /streaming-front-matter {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_front_matter on;
             markdown_log_verbosity debug;
@@ -591,7 +591,7 @@ http {
         location /streaming-gfm {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_flavor gfm;
             markdown_log_verbosity debug;
@@ -601,7 +601,7 @@ http {
         location /streaming-large-budget {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_limits streaming_buffer=10m memory=10m;
             markdown_token_estimate on;
@@ -613,7 +613,7 @@ http {
         location /streaming-on-error-reject {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_error_policy fail_closed;
             markdown_log_verbosity debug;
@@ -625,7 +625,7 @@ http {
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_limits streaming_buffer=10m memory=10m;
             markdown_error_policy pass;
@@ -637,7 +637,7 @@ http {
         location /streaming-warn {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_log_verbosity warn;
         }
@@ -646,7 +646,7 @@ http {
         location /streaming-error-verbosity {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_log_verbosity error;
         }

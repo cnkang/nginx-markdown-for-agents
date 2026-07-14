@@ -41,7 +41,7 @@ data:
         {{- end }}
         markdown_log_verbosity {{ .Values.markdown.logVerbosity }};
         {{- if .Values.markdown.streaming }}
-        markdown_streaming_engine {{ .Values.markdown.streaming.engine }};
+        markdown_streaming {{ .Values.markdown.streaming.mode }};
         markdown_limits streaming_buffer={{ .Values.markdown.streaming.budget }};
         markdown_stream_threshold {{ .Values.markdown.streaming.threshold }};
         {{- if .Values.markdown.streaming.shadow }}

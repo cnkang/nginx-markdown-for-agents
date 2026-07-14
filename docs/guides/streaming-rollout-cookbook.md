@@ -9,7 +9,7 @@ continuing, pausing, or rolling back.
 > incremental conversion for large responses.  The default mode is `auto`,
 > which selects streaming for eligible responses above the
 > `markdown_stream_threshold` (default `1m`).  Setting
-> `markdown_streaming_engine off` produces behavior identical to 0.7.x.
+> `markdown_streaming off` produces behavior identical to 0.7.x.
 
 ---
 
@@ -60,7 +60,7 @@ flowchart LR
 
 | Phase | Configuration | Purpose |
 |-------|--------------|---------|
-| 0 | `markdown_streaming_engine off` | Upgrade safely; validate staging |
+| 0 | `markdown_streaming off` | Upgrade safely; validate staging |
 | 1 | `auto` for one low-risk location | Canary streaming on a single path |
 | 2 | `auto` for multiple locations | Gradual rollout |
 | 3 | `auto` everywhere (default) | Full auto-mode deployment |
@@ -74,7 +74,7 @@ change from 0.7.x while you validate the new binary in staging.
 ```nginx
 http {
     # Disable streaming — identical to 0.7.x behavior
-    markdown_streaming_engine off;
+    markdown_streaming off;
 
     server {
         location / {
@@ -100,13 +100,13 @@ streaming for responses meeting the size threshold.
 ```nginx
 location /docs/ {
     markdown_filter on;
-    markdown_streaming_engine auto;
+    markdown_streaming auto;
     markdown_stream_threshold 1m;
 }
 
 location / {
     markdown_filter on;
-    markdown_streaming_engine off;
+    markdown_streaming off;
 }
 ```
 
@@ -139,19 +139,21 @@ curl -s -H 'Accept: application/json' \
 
 ### Phase 2: Wider Rollout
 
-Expand `auto` to additional locations or use `split_clients` for percentage
-rollout:
+Expand `auto` to additional locations. The streaming policy is a fixed
+configuration value; it does not accept NGINX variables. For percentage
+rollout, use `split_clients` to gate `markdown_filter`, which is
+variable-capable, while keeping the streaming policy explicit:
 
 ```nginx
-split_clients $request_id $streaming_mode {
-    20%  auto;
+split_clients $request_id $markdown_canary {
+    20%  on;
     *    off;
 }
 
 server {
+    markdown_streaming auto;
     location / {
-        markdown_filter on;
-        markdown_streaming_engine $streaming_mode;
+        markdown_filter $markdown_canary;
     }
 }
 ```
@@ -163,7 +165,7 @@ Remove per-location overrides and let the default `auto` apply everywhere:
 ```nginx
 http {
     markdown_filter on;
-    markdown_streaming_engine auto;
+    markdown_streaming auto;
     markdown_stream_threshold 1m;
 
     server {
@@ -177,51 +179,61 @@ http {
 ### Phase 4: Force Streaming for Verified Locations
 
 For locations where streaming is proven safe and you want to bypass the
-threshold check, set `on` explicitly:
+threshold check, set `force` explicitly:
 
 ```nginx
 location /large-api/ {
     markdown_filter on;
-    markdown_streaming_engine on;
+    markdown_streaming force;
 }
 ```
 
-> **Note**: `on` forces streaming for all eligible responses regardless of
+> **Note**: `force` selects streaming for all eligible responses regardless of
 > size.  Only use this for paths where streaming behavior is fully validated.
 > High-risk locations should remain at `auto` or `off`.
 
 ### Alternative Rollout Strategies
 
-#### By Host (map-driven)
+#### By Host
 
 ```nginx
-map $host $streaming_mode {
-    default          off;
-    canary.example   auto;
-    staging.example  auto;
+server {
+    server_name default.example;
+    markdown_streaming off;
 }
 
 server {
-    markdown_streaming_engine $streaming_mode;
+    server_name canary.example staging.example;
+    markdown_streaming auto;
 }
 ```
 
 #### By Header (canary flag)
 
 ```nginx
-map $http_x_canary $streaming_mode {
+map $http_x_canary $markdown_canary {
     default  off;
-    "true"   auto;
+    "true"   on;
+}
+
+server {
+    markdown_filter $markdown_canary;
+    markdown_streaming auto;
 }
 ```
 
 #### By User-Agent
 
 ```nginx
-map $http_user_agent $streaming_mode {
+map $http_user_agent $markdown_bot {
     default                off;
-    "~*GPTBot"             auto;
-    "~*ClaudeBot"          auto;
+    "~*GPTBot"             on;
+    "~*ClaudeBot"          on;
+}
+
+server {
+    markdown_filter $markdown_bot;
+    markdown_streaming auto;
 }
 ```
 
@@ -244,7 +256,7 @@ For the complete metrics reference, see
 |--------|-------------------|-------------|
 | `nginx_markdown_streaming_fallback_total{phase,action}` | Pre-commit fallbacks — streaming could not handle content before committing headers | **Yes** — high rate means streaming is ineffective |
 | `nginx_markdown_streaming_failure_total{phase,action}` | Post-commit failures — headers already sent, client may see truncation | **Yes** — any sustained rate is critical |
-| `nginx_markdown_streaming_engine_choice_total{engine}` | Which engine was selected for each request | **Yes** — confirms streaming is actually engaged |
+| `nginx_markdown_streaming_choice_total{engine}` | Which engine was selected for each request | **Yes** — confirms streaming is actually engaged |
 | `nginx_markdown_streaming_candidate_total` | How many requests were evaluated for streaming | **Denominator** — needed for rate calculations |
 | `nginx_markdown_true_streaming_selected_total` | Requests that completed streaming engine selection | **Denominator** — confirms selection funnel |
 | `nginx_markdown_streaming_output_bytes_total` | Total Markdown bytes emitted via streaming | Informational — useful for throughput dashboards |
@@ -257,7 +269,7 @@ For the complete metrics reference, see
 | Fallback rate | > 5% of candidates | Investigate — check reason codes in info-level logs |
 | Post-commit failure rate | > 1% of streaming requests | Consider rollback — clients may receive truncated responses |
 | Memory budget exceeded | `precommit_budget` or `postcommit_budget_exceeded` trending up | Tune `markdown_stream_precommit_buffer` or `markdown_parser_budget` |
-| Zero streaming selections | `engine_choice{engine="streaming"}` stays 0 with traffic | Check `markdown_streaming_engine` directive and `markdown_stream_threshold` |
+| Zero streaming selections | `engine_choice{engine="streaming"}` stays 0 with traffic | Check `markdown_streaming` directive and `markdown_stream_threshold` |
 | Streaming success rate | < 99% | Pause rollout and investigate |
 
 ### Prometheus Queries (PromQL)
@@ -288,7 +300,7 @@ sum(rate(nginx_markdown_streaming_failure_total[5m]))
 **Engine choice breakdown** (pie chart or stacked graph):
 
 ```promql
-sum by (engine) (rate(nginx_markdown_streaming_engine_choice_total[5m]))
+sum by (engine) (rate(nginx_markdown_streaming_choice_total[5m]))
 ```
 
 **Fallback breakdown by action** (pass-through vs rejection):
@@ -335,7 +347,7 @@ groups:
           summary: "Streaming post-commit failure rate exceeds 1%"
           description: >-
             Non-recoverable errors. Clients may receive truncated output.
-            Consider rolling back with markdown_streaming_engine off.
+            Consider rolling back with markdown_streaming off.
 ```
 
 ### JSON Metric Queries (curl)
@@ -463,7 +475,7 @@ a full rollback of the binary upgrade.
 
 ```nginx
 location /problem-path/ {
-    markdown_streaming_engine off;
+    markdown_streaming off;
 }
 ```
 
@@ -476,7 +488,7 @@ nginx -s reload
 
 ```nginx
 http {
-    markdown_streaming_engine off;
+    markdown_streaming off;
 }
 ```
 
@@ -513,8 +525,8 @@ the appropriate operator action.
 | Observed Signal | Severity | Operator Action |
 |----------------|----------|-----------------|
 | `nginx_markdown_streaming_fallback_total` rising, `nginx_markdown_streaming_failure_total` stable | Low | Monitor; fallbacks are safe |
-| `nginx_markdown_streaming_failure_total` rising | High | `markdown_streaming_engine off` for affected locations |
-| Post-commit failures in logs (`postcommit_parse_error`, `postcommit_budget_exceeded`, `postcommit_io_error`) | Critical | `markdown_streaming_engine off` globally |
+| `nginx_markdown_streaming_failure_total` rising | High | `markdown_streaming off` for affected locations |
+| Post-commit failures in logs (`postcommit_parse_error`, `postcommit_budget_exceeded`, `postcommit_io_error`) | Critical | `markdown_streaming off` globally |
 | `excluded_content_type_total` unexpectedly high | Info | Review `markdown_stream_excluded_types` configuration |
 | Memory usage exceeds expectations | Medium | Reduce `markdown_stream_threshold` or lower budget |
 
@@ -545,7 +557,7 @@ the appropriate operator action.
 
 ### Escalation Path
 
-1. **Self-serve**: `markdown_streaming_engine off` + reload
+1. **Self-serve**: `markdown_streaming off` + reload
 2. **Budget tuning**: Adjust `markdown_stream_threshold` or `markdown_stream_precommit_buffer`
 3. **Support escalation**: If post-commit errors persist after disable, or if
    metrics show anomalies unrelated to streaming, escalate to module maintainers
@@ -560,7 +572,7 @@ the appropriate operator action.
   `nginx_markdown_streaming_failure_total` and logs a reason code.
 - **Bounded memory**: The streaming engine enforces memory budgets at every
   phase.  Budget exhaustion triggers the configured error policy.
-- **Graceful degradation**: Setting `markdown_streaming_engine off` instantly
+- **Graceful degradation**: Setting `markdown_streaming off` instantly
   reverts to the proven full-buffer path with zero behavioral change from 0.7.x.
 
 ---

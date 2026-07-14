@@ -17,7 +17,7 @@ Directives below are the **active** Config V2 directives registered in
 markdown_on_error, markdown_streaming_on_error, markdown_etag,
 markdown_etag_policy, markdown_conditional_requests, markdown_on_wildcard,
 markdown_trust_forwarded_headers, markdown_forwarded_headers,
-markdown_large_body_threshold) are excluded — they emit
+markdown_large_body_threshold, markdown_streaming_engine) are excluded — they emit
 `NGX_CONF_ERROR` with a migration hint and execute no behavior.
 
 ### Core Conversion Directives
@@ -26,7 +26,7 @@ markdown_large_body_threshold) are excluded — they emit
 |-----------|---------|---------|-------|
 | `markdown_filter` | off | http, server, location | on\|off\|$variable |
 | `markdown_accept` | strict | http, server, location | strict\|wildcard\|force (Config V2) |
-| `markdown_flavor` | commonmark | http, server, location | commonmark\|gfm\|mdx\|org-mode |
+| `markdown_flavor` | commonmark | http, server, location | commonmark\|gfm; mdx/org-mode are rejected in v0.9.1 |
 | `markdown_token_estimate` | off | http, server, location | on\|off |
 | `markdown_front_matter` | off | http, server, location | on\|off |
 | `markdown_buffer_chunked` | on | http, server, location | on\|off |
@@ -62,8 +62,7 @@ Maps to two struct fields:
 
 | Directive | Default | Context | Notes |
 |-----------|---------|---------|-------|
-| `markdown_streaming` | auto | http, server, location | off\|auto\|force (policy) |
-| `markdown_streaming_engine` | auto | http, server, location | off\|auto\|on (implementation) |
+| `markdown_streaming` | auto | http, server, location | off\|auto\|force; sole processing-path selector |
 | `markdown_stream_threshold` | 1m | http, server, location | Minimum size for streaming candidacy |
 | `markdown_stream_precommit_buffer` | 256k | http, server, location | Replay buffer size |
 | `markdown_stream_flush_min` | 16k | http, server, location | Min batch before flush |
@@ -155,8 +154,7 @@ header) captures the profile-relevant fields:
 | `accept_policy` | markdown_accept | ✓ | Core negotiation behavior differs per profile |
 | `policy.conditional_requests` | markdown_cache_validation | ✓ | Cache-validation mode |
 | `policy.generate_etag` | markdown_cache_validation | ✓ | ETag generation (tied to cache_validation) |
-| `stream.policy` | markdown_streaming | ✓ | Streaming enablement |
-| `stream.engine` | markdown_streaming_engine | ✓ | Implementation selector |
+| `stream.policy` | markdown_streaming | ✓ | Processing-path selection |
 | `max_size` / limits memory | markdown_limits memory= | ✓ | Resource cap |
 | `timeout` / limits timeout | markdown_limits timeout= | ✓ | Resource timeout |
 | `stream.budget` / limits streaming_buffer | markdown_limits streaming_buffer= | ✓ | Streaming buffer |
@@ -269,10 +267,9 @@ compile-time defaults when a profile is active.
 | Field | `strict_cache` | `balanced` | `streaming_first` | Built-in (no profile) |
 |-------|:-----------:|:--------:|:---------------:|:------------------:|
 | accept_policy | strict | strict | wildcard | strict |
-| cache_validation | full | ims_only | off | full |
-| generate_etag | on | off | off | on |
+| cache_validation | full | ims_only | off | ims_only |
+| generate_etag | on | off | off | off |
 | streaming | off | auto | force | auto |
-| streaming_engine | auto | auto | auto | auto |
 | limits memory | 8m | 8m | 8m | 10m |
 | limits timeout | 2s | 2s | 2s | 5s |
 | limits streaming_buffer | — (off) | 256k | 256k | 2m |
@@ -296,7 +293,6 @@ no streaming. Operators that need strong ETag-based cache invalidation.
 | `markdown_accept` | strict | Overridable |
 | `markdown_cache_validation` | full | Overridable |
 | `markdown_streaming` | **off (FORCED)** | Conflict → error |
-| `markdown_streaming_engine` | auto | Overridable |
 | `markdown_limits memory=` | 8m | Overridable |
 | `markdown_limits timeout=` | 2s | Overridable |
 | `markdown_limits streaming_buffer=` | (N/A) | N/A (streaming off) |
@@ -316,7 +312,6 @@ overhead), streaming on auto.
 | `markdown_accept` | strict | Overridable |
 | `markdown_cache_validation` | ims_only | Overridable |
 | `markdown_streaming` | auto | Overridable |
-| `markdown_streaming_engine` | auto | Overridable |
 | `markdown_limits memory=` | 8m | Overridable |
 | `markdown_limits timeout=` | 2s | Overridable |
 | `markdown_limits streaming_buffer=` | 256k | Overridable |
@@ -336,7 +331,6 @@ streaming, no caching overhead, wildcard Accept.
 | `markdown_accept` | wildcard | Overridable |
 | `markdown_cache_validation` | **off (FORCED)** | Conflict → error |
 | `markdown_streaming` | **force (FORCED)** | Conflict → error |
-| `markdown_streaming_engine` | auto | Overridable |
 | `markdown_limits memory=` | 8m | Overridable |
 | `markdown_limits timeout=` | 2s | Overridable |
 | `markdown_limits streaming_buffer=` | 256k | Overridable |

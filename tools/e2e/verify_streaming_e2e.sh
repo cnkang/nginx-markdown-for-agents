@@ -10,7 +10,7 @@ set -euo pipefail
 #   4. Table content triggers fallback to full-buffer
 #   5. Streaming timeout handling
 #   6. Streaming size limit exceeded handling
-#   7. markdown_streaming_engine off/on/auto modes
+#   7. markdown_streaming off/auto/force modes
 #   8. HEAD requests do not enter streaming path
 #   9. 304 responses do not enter streaming path
 #
@@ -49,7 +49,7 @@ Test cases:
   16.4 Streaming fallback (table triggers fallback)
   16.5 Streaming timeout
   16.6 Streaming size limit exceeded
-  16.7 markdown_streaming_engine off/on/auto modes
+  16.7 markdown_streaming off/auto/force modes
   16.8 HEAD request does not enter streaming path
   16.9 304 response does not enter streaming path
 EOF
@@ -130,10 +130,10 @@ echo "  - Feed HTML larger than limit"
 echo "  - Pre-Commit: fail-open returns original HTML"
 echo "  - Post-Commit: empty last_buf terminates response"
 echo ""
-echo "16.7 markdown_streaming_engine off/on/auto modes"
+echo "16.7 markdown_streaming off/auto/force modes"
 echo "  - off: all requests use full-buffer (identical to 0.4.0)"
-echo "  - on: eligible requests use streaming path"
 echo "  - auto: Content-Length heuristic selects path"
+echo "  - force: eligible requests use streaming path"
 echo ""
 echo "16.8 HEAD request does not enter streaming path"
 echo "  - Send HEAD request with Accept: text/markdown"

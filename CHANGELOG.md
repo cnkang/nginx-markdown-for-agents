@@ -25,6 +25,15 @@ completing before the long-lived contract begins.
   `rustup toolchain install 1.97.0`). Prebuilt module users do not need Rust;
   their runtime compatibility remains governed by the published NGINX,
   OS/libc, architecture, and exact dynamic-module compatibility matrix.
+- **Streaming configuration consolidated.** `markdown_streaming off|auto|force`
+  is the sole public processing-path selector. `markdown_streaming_engine` is
+  removed from the active contract and fails `nginx -t` with exact mappings:
+  `off` to `markdown_streaming off`, `auto` to `markdown_streaming auto`, and
+  `on` to `markdown_streaming force`. The Helm value moves from
+  `markdown.streaming.engine` to `markdown.streaming.mode`.
+- **Non-semantic flavors removed.** `markdown_flavor mdx` and `org-mode` now
+  fail `nginx -t` with a `commonmark`/`gfm` migration hint. They were
+  experimental selectors that never produced distinct output formats.
 
 ### Added
 
@@ -52,8 +61,9 @@ completing before the long-lived contract begins.
   decompression, and copy-reduction rollout stages.
 - Perf observability fields for backpressure, pending-output high-watermark,
   decompression path selection, and output copy mode across metrics renderers.
-- ADRs 0020–0022 documenting zero-copy pool cleanup, gzip/deflate streaming
-  decompression routing, and the performance evidence release gate.
+- ADRs 0020–0023 documenting zero-copy pool cleanup, gzip/deflate streaming
+  decompression routing, the performance evidence release gate, and the
+  single public streaming policy.
 
 ### Fixed
 

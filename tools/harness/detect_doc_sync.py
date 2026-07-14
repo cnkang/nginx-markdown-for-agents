@@ -32,6 +32,47 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.path_validation import validate_read_path
 
 
+DIRECTIVES_PATH = Path(
+    "components/nginx-module/src/ngx_http_markdown_config_directives_impl.h"
+)
+HANDLERS_PATH = Path(
+    "components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h"
+)
+CHART_TEMPLATE_PATH = Path("charts/nginx-markdown/templates/configmap.yaml")
+CHART_VALUES_PATH = Path("charts/nginx-markdown/values.yaml")
+CONFIGURATION_GUIDE_PATH = Path("docs/guides/CONFIGURATION.md")
+PRODUCTION_SYMBOL_SURFACES = (
+    Path("components/nginx-module/src"),
+    Path("components/rust-converter/src"),
+    Path("charts/nginx-markdown"),
+    Path("examples"),
+    Path("tools/e2e"),
+    Path("tools/sonar"),
+    Path(".github/workflows"),
+    Path("packaging"),
+)
+ACTIVE_CONFIG_SURFACES = (
+    Path("examples/production"),
+    Path("examples/nginx-configs"),
+    Path("examples/kubernetes"),
+    Path("tools/e2e"),
+    Path("components/nginx-module/tests/e2e"),
+    Path("tests/e2e"),
+    Path("tools/sonar"),
+    Path(".sonar"),
+    Path(".sonarcloud.properties"),
+    Path(".github/workflows/sonarcloud.yml"),
+    Path(".github/workflows/real-nginx-ims.yml"),
+)
+TEXT_SUFFIXES = {
+    ".c", ".conf", ".h", ".md", ".properties", ".py", ".rs", ".sh",
+    ".toml", ".txt", ".yaml", ".yml",
+}
+REMOVED_STREAM_SYMBOL_RE = re.compile(
+    r"\bstream\s*\.\s*engine\b|\bSTREAM_ENGINE\b"
+)
+
+
 def check_changelog_exists(project_root: Path) -> List[str]:
     """Check that CHANGELOG.md exists and has recent entries."""
     changelog = project_root / 'CHANGELOG.md'
@@ -115,6 +156,226 @@ def _has_version_example(content: str) -> bool:
     return False
 
 
+def _read_required(
+    project_root: Path, relative_path: Path, errors: List[str]
+) -> str | None:
+    """Read a required worktree file and append an actionable error on failure."""
+    path = project_root / relative_path
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        errors.append(f"{relative_path}: required contract surface is unreadable: {exc}")
+        return None
+
+
+def _extract_directive_entry(content: str, directive: str) -> str | None:
+    """Extract one ngx_command_t initializer from the directive table."""
+    pattern = re.compile(
+        r"\{\s*ngx_string\(\"" + re.escape(directive)
+        + r"\"\),(.*?)(?=\n\s*\},)",
+        re.DOTALL,
+    )
+    match = pattern.search(content)
+    return match.group(1) if match is not None else None
+
+
+def _check_directive_table(content: str) -> List[str]:
+    """Validate active and reject-only streaming directive registrations."""
+    errors: List[str] = []
+    active = _extract_directive_entry(content, "markdown_streaming")
+    removed = _extract_directive_entry(content, "markdown_streaming_engine")
+    if active is None or "ngx_http_markdown_streaming," not in active:
+        errors.append(
+            f"{DIRECTIVES_PATH}: markdown_streaming must use the active "
+            "ngx_http_markdown_streaming handler"
+        )
+    if removed is None:
+        errors.append(
+            f"{DIRECTIVES_PATH}: markdown_streaming_engine must remain registered "
+            "as a reject-only migration stub"
+        )
+        return errors
+    if "ngx_http_markdown_reject_streaming_engine," not in removed:
+        errors.append(
+            f"{DIRECTIVES_PATH}: markdown_streaming_engine must bind only to "
+            "ngx_http_markdown_reject_streaming_engine"
+        )
+    forbidden_slots = ("ngx_conf_set_enum_slot", "offsetof(")
+    if any(token in removed for token in forbidden_slots) or not re.search(
+        r"\n\s*0,\s*\n\s*NULL\s*$", removed
+    ):
+        errors.append(
+            f"{DIRECTIVES_PATH}: reject-only markdown_streaming_engine must not "
+            "bind an enum table or configuration slot"
+        )
+    return errors
+
+
+def _extract_flavor_handler(content: str) -> str | None:
+    """Extract the markdown_flavor handler body from its implementation file."""
+    match = re.search(
+        r"\nngx_http_markdown_flavor\(.*?\n\}\n",
+        content,
+        flags=re.DOTALL,
+    )
+    return match.group(0) if match is not None else None
+
+
+def _check_flavor_handler(content: str) -> List[str]:
+    """Ensure only commonmark/gfm are active and retired flavors fail closed."""
+    handler = _extract_flavor_handler(content)
+    if handler is None:
+        return [f"{HANDLERS_PATH}: markdown_flavor handler not found"]
+
+    assignments = set(
+        re.findall(r"mcf->flavor\s*=\s*(NGX_HTTP_MARKDOWN_FLAVOR_[A-Z_]+)", handler)
+    )
+    expected = {
+        "NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK",
+        "NGX_HTTP_MARKDOWN_FLAVOR_GFM",
+    }
+    errors: List[str] = []
+    if assignments != expected:
+        errors.append(
+            f"{HANDLERS_PATH}: markdown_flavor active assignments must be exactly "
+            f"commonmark/gfm, found {sorted(assignments)}"
+        )
+    rejection_tokens = (
+        'mdx_str[] = "mdx"',
+        'org_str[] = "org-mode"',
+        "&value[1], mdx_str",
+        "&value[1], org_str",
+        "never had distinct conversion semantics",
+        "return NGX_CONF_ERROR;",
+    )
+    if any(token not in handler for token in rejection_tokens):
+        errors.append(
+            f"{HANDLERS_PATH}: markdown_flavor must explicitly reject both mdx "
+            "and org-mode with the compatibility explanation"
+        )
+    return errors
+
+
+def _iter_worktree_text_files(project_root: Path, surfaces) -> List[Path]:
+    """Return text contract files from tracked, modified, and untracked surfaces."""
+    files: List[Path] = []
+    for relative_path in surfaces:
+        path = project_root / relative_path
+        if path.is_file() and path.suffix in TEXT_SUFFIXES:
+            files.append(path)
+        elif path.is_dir():
+            files.extend(
+                candidate
+                for candidate in path.rglob("*")
+                if candidate.is_file()
+                and candidate.suffix in TEXT_SUFFIXES
+                and "__pycache__" not in candidate.parts
+            )
+    return sorted(set(files))
+
+
+def _scan_for_pattern(
+    project_root: Path, surfaces, pattern: re.Pattern[str], label: str
+) -> List[str]:
+    """Find forbidden patterns in current worktree files without Git filtering."""
+    errors: List[str] = []
+    for path in _iter_worktree_text_files(project_root, surfaces):
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(f"{path.relative_to(project_root)}: unreadable: {exc}")
+            continue
+        if pattern.search(content):
+            errors.append(
+                f"{path.relative_to(project_root)}: forbidden {label} is present"
+            )
+    return errors
+
+
+def _check_chart_contract(template: str, values: str) -> List[str]:
+    """Validate the public Helm streaming policy mapping."""
+    errors: List[str] = []
+    required_template = re.compile(
+        r"markdown_streaming\s+\{\{\s*\.Values\.markdown\.streaming\.mode\s*\}\};"
+    )
+    if required_template.search(template) is None:
+        errors.append(
+            f"{CHART_TEMPLATE_PATH}: must emit markdown_streaming from "
+            ".Values.markdown.streaming.mode"
+        )
+    forbidden_template = (
+        "markdown_streaming_engine",
+        ".Values.markdown.streaming.engine",
+    )
+    if any(token in template for token in forbidden_template):
+        errors.append(f"{CHART_TEMPLATE_PATH}: legacy streaming engine key is forbidden")
+    if re.search(r"(?m)^  streaming:\s*$", values) is None or re.search(
+        r"(?m)^    mode:\s*[\"']?(?:off|auto|force)[\"']?\s*$", values
+    ) is None:
+        errors.append(
+            f"{CHART_VALUES_PATH}: markdown.streaming.mode must define an "
+            "off|auto|force policy"
+        )
+    if re.search(r"(?m)^    engine:\s*", values):
+        errors.append(f"{CHART_VALUES_PATH}: markdown.streaming.engine is forbidden")
+    return errors
+
+
+def _check_migration_table(content: str) -> List[str]:
+    """Require the exact legacy-to-policy migration mappings in active docs."""
+    normalized = content.replace("`", "")
+    errors: List[str] = []
+    for legacy, replacement in (("off", "off"), ("auto", "auto"), ("on", "force")):
+        mapping_present = any(
+            f"markdown_streaming_engine {legacy};" in line
+            and f"markdown_streaming {replacement};" in line
+            for line in normalized.splitlines()
+        )
+        if not mapping_present:
+            errors.append(
+                f"{CONFIGURATION_GUIDE_PATH}: missing exact migration mapping "
+                f"markdown_streaming_engine {legacy} -> markdown_streaming {replacement}"
+            )
+    return errors
+
+
+def check_public_config_contract(project_root: Path) -> List[str]:
+    """Validate the frozen v0.9.1 operator-facing configuration contract."""
+    errors: List[str] = []
+    directives = _read_required(project_root, DIRECTIVES_PATH, errors)
+    handlers = _read_required(project_root, HANDLERS_PATH, errors)
+    chart_template = _read_required(project_root, CHART_TEMPLATE_PATH, errors)
+    chart_values = _read_required(project_root, CHART_VALUES_PATH, errors)
+    guide = _read_required(project_root, CONFIGURATION_GUIDE_PATH, errors)
+
+    if directives is not None:
+        errors.extend(_check_directive_table(directives))
+    if handlers is not None:
+        errors.extend(_check_flavor_handler(handlers))
+    if chart_template is not None and chart_values is not None:
+        errors.extend(_check_chart_contract(chart_template, chart_values))
+    if guide is not None:
+        errors.extend(_check_migration_table(guide))
+
+    errors.extend(
+        _scan_for_pattern(
+            project_root,
+            PRODUCTION_SYMBOL_SURFACES,
+            REMOVED_STREAM_SYMBOL_RE,
+            "stream.engine/STREAM_ENGINE production symbol",
+        )
+    )
+    errors.extend(
+        _scan_for_pattern(
+            project_root,
+            ACTIVE_CONFIG_SURFACES,
+            re.compile(r"\bmarkdown_streaming_engine\b"),
+            "markdown_streaming_engine directive in an active config surface",
+        )
+    )
+    return errors
+
+
 def main():
     if len(sys.argv) > 1:
         project_root = Path(validate_read_path(sys.argv[1]))
@@ -125,18 +386,19 @@ def main():
         print(f"Project directory not found: {project_root}", file=sys.stderr)
         sys.exit(1)
     
-    all_warnings = []
-    all_warnings.extend(check_changelog_exists(project_root))
-    all_warnings.extend(check_readme_mentions_key_features(project_root))
-    all_warnings.extend(check_installation_guide_current(project_root))
+    all_errors = []
+    all_errors.extend(check_changelog_exists(project_root))
+    all_errors.extend(check_readme_mentions_key_features(project_root))
+    all_errors.extend(check_installation_guide_current(project_root))
+    all_errors.extend(check_public_config_contract(project_root))
     
-    if all_warnings:
+    if all_errors:
         print(
-            f"Documentation sync check failed ({len(all_warnings)} warning(s)):",
+            f"Documentation sync check failed ({len(all_errors)} violation(s)):",
             file=sys.stderr,
         )
-        for warning in all_warnings:
-            print(f"  WARNING: {warning}", file=sys.stderr)
+        for error in all_errors:
+            print(f"  ERROR: {error}", file=sys.stderr)
         sys.exit(1)
     else:
         print("OK: Documentation synchronization checks passed")

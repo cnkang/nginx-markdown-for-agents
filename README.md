@@ -509,6 +509,12 @@ limited.
 - **Rust baseline reset**: source builds now require Rust 1.97+; repository,
   CI, and release builds use exact Rust 1.97.0. Prebuilt module users do not
   need Rust.
+- **Single streaming control**: `markdown_streaming off|auto|force` is now the
+  sole processing-path selector. The duplicate `markdown_streaming_engine`
+  directive is reject-only with exact off/auto/on migration hints.
+- **Supported flavors clarified**: `markdown_flavor` supports `commonmark` and
+  `gfm`. The experimental `mdx` and `org-mode` values are rejected because
+  they never had distinct production conversion semantics.
 
 - **Hybrid zero-copy streaming output**: `markdown_streaming_zero_copy on`
   (default off, opt-in) enables `ngx_buf_t` to reference Rust-owned memory
@@ -598,6 +604,10 @@ v0.8.0 introduces true streaming conversion — bounded-memory HTML-to-Markdown 
 - **New streaming controls** — `markdown_stream_threshold`, `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`, and `markdown_stream_excluded_types` make thresholding, replay buffering, flushing, and content-type exclusions explicit.
 - **Breaking: v0.6.x compat removed** — `markdown_streaming_auto_threshold` is removed (not deprecated); `nginx -t` will fail if it appears in configuration. Use `markdown_stream_threshold` instead. `markdown_streaming_engine` no longer accepts `$variable` — only `off`/`auto`/`on`.
 
+These two bullets describe the historical v0.8.0 contract. v0.9.1 removes
+`markdown_streaming_engine`; use `markdown_streaming off|auto|force` as shown
+above.
+
 For upgrade guidance from 0.7.x, see the [Migration Guide](docs/guides/MIGRATION-0.8.md).
 For production rollout steps, see the [Streaming Rollout Cookbook](docs/guides/streaming-rollout-cookbook.md).
 
@@ -627,7 +637,7 @@ Additional changes:
 **Current release line (0.9.x; latest published patch 0.9.0, v0.9.1 in RC preparation)**
 
 - Dual-engine streaming model: full-buffer default + streaming engine for large/chunked responses
-- `auto` mode as the default `markdown_streaming_engine` setting
+- `markdown_streaming auto` as the sole default processing-path policy
 - Bounded-memory streaming conversion with size-based flush (`markdown_stream_flush_min`)
 - Pre-commit safety: fallback to HTML if conversion error occurs before output is committed
 - Hybrid zero-copy streaming output (opt-in via `markdown_streaming_zero_copy`, default off)

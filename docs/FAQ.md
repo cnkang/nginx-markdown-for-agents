@@ -146,7 +146,11 @@ See [Performance Tuning](guides/OPERATIONS.md#performance-tuning) for details.
 
 ### Does it support streaming?
 
-Yes. Since 0.6.0, the streaming engine is the default conversion path (`markdown_streaming_engine auto`). It performs bounded-memory incremental Markdown generation for eligible responses. Full-buffer conversion remains available as a fallback when explicitly selected or when the streaming path cannot handle a response. Chunked transfer responses are supported by both engines.
+Yes. `markdown_streaming auto` is the default processing-path policy. It uses
+bounded-memory incremental conversion for eligible large or chunked responses
+and retains full-buffer conversion for small responses and hard-blocked cases.
+Use `markdown_streaming off` to require full-buffer processing or
+`markdown_streaming force` to prefer streaming for every eligible response.
 
 See [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [ADR-0002](architecture/ADR/0002-full-buffering-approach.md) for the reasoning behind this design.
 

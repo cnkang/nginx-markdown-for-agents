@@ -9,10 +9,10 @@ set -euo pipefail
 #   10.2  Streaming pre-commit failure + error_policy pass: client gets HTML
 #   10.3  Streaming pre-commit failure + error_policy fail_closed: client gets error
 #   10.4  Streaming post-commit failure: client gets truncated Markdown
-#   10.5  cache_validation full + streaming_engine on: full-buffer path
-#   10.6  cache_validation ims_only + streaming_engine on: streaming
+#   10.5  cache_validation full + markdown_streaming force: full-buffer path
+#   10.6  cache_validation ims_only + markdown_streaming force: streaming
 #   10.7  Streaming response headers: no Content-Length, chunked transfer
-#   10.8  streaming_engine off + cache_validation full: 0.4.0 behavior
+#   10.8  markdown_streaming off + cache_validation full: 0.4.0 behavior
 #   10.9  error_policy independence (pass vs fail_closed for streaming pre-commit)
 #   10.10 HEAD request does not enter streaming path
 #   10.11 304 response does not enter streaming path
@@ -92,10 +92,10 @@ Test cases:
   10.2  Streaming pre-commit failure + pass
   10.3  Streaming pre-commit failure + reject
   10.4  Streaming post-commit failure
-  10.5  conditional_requests full_support + streaming on
-  10.6  conditional_requests if_modified_since_only + streaming on
+  10.5  cache_validation full + markdown_streaming force
+  10.6  cache_validation ims_only + markdown_streaming force
   10.7  Streaming response headers
-  10.8  streaming_engine off + streaming_on_error
+  10.8  markdown_streaming off + unified error policy
   10.9  Directive independence
   10.10 HEAD request does not enter streaming path
   10.11 304 response does not enter streaming path
@@ -406,33 +406,33 @@ echo "Streaming Failure/Cache E2E Test Plan"
 echo "${SEPARATOR}"
 echo ""
 echo "10.1 Streaming success + cache_validation full"
-echo "  - streaming_engine on, cache_validation full"
+echo "  - markdown_streaming force, cache_validation full"
 echo "  - Verify: no ETag in response headers, ETag in debug log"
 echo ""
 echo "10.1b Streaming strips upstream ETag"
-echo "  - streaming_engine on, cache_validation full, upstream sends ETag header"
+echo "  - markdown_streaming force, cache_validation full, upstream sends ETag header"
 echo "  - Verify: upstream ETag stripped from response headers"
 echo ""
 echo "10.2 Streaming pre-commit failure + error_policy pass"
-echo "  - streaming_engine on, error_policy pass"
+echo "  - markdown_streaming force, error_policy pass"
 echo "  - Trigger pre-commit failure (oversize input)"
 echo "  - Verify: HTTP 200, Content-Type text/html, complete original HTML"
 echo ""
 echo "10.3 Streaming pre-commit failure + error_policy fail_closed"
-echo "  - streaming_engine on, error_policy fail_closed"
+echo "  - markdown_streaming force, error_policy fail_closed"
 echo "  - Trigger pre-commit failure (oversize input)"
 echo "  - Verify: HTTP non-success response, no partial Markdown"
 echo ""
 echo "10.4 Streaming post-commit failure"
-echo "  - streaming_engine on"
+echo "  - markdown_streaming force"
 echo "  - Upstream aborts mid-stream after commit boundary"
 echo "  - Verify: truncated Markdown, STREAMING_FAIL_POSTCOMMIT in log"
 echo ""
-echo "10.5 cache_validation full + streaming_engine on"
+echo "10.5 cache_validation full + markdown_streaming force"
 echo "  - Forces full-buffer path"
 echo "  - Verify: ETag present, Content-Length present"
 echo ""
-echo "10.6 cache_validation ims_only + streaming_engine on"
+echo "10.6 cache_validation ims_only + markdown_streaming force"
 echo "  - Allows streaming path"
 echo "  - Verify: no Content-Length, chunked transfer"
 echo ""
@@ -440,8 +440,8 @@ echo "10.7 Streaming response headers"
 echo "  - Verify: no Content-Length, Transfer-Encoding chunked"
 echo "  - Verify: Content-Type text/markdown, Vary Accept"
 echo ""
-echo "10.8 streaming_engine off + cache_validation full"
-echo "  - streaming_engine off (default), cache_validation full"
+echo "10.8 markdown_streaming off + cache_validation full"
+echo "  - explicitly set markdown_streaming off, cache_validation full"
 echo "  - Verify: full-buffer path, Content-Length present, 0.4.0 behavior"
 echo ""
 echo "10.9 Directive independence"
@@ -450,7 +450,7 @@ echo "  - Cross-config: error_policy fail_closed + streaming pre-commit failure"
 echo "  - Verify: each error policy controls only its own path"
 echo ""
 echo "10.10 HEAD request does not enter streaming path"
-echo "  - streaming_engine on + HEAD request"
+echo "  - markdown_streaming force + HEAD request"
 echo "  - Verify: HTTP 200 and empty response body"
 echo ""
 echo "10.11 304 response does not enter streaming path"
@@ -458,7 +458,7 @@ echo "  - Capture ETag from full-buffer location"
 echo "  - Re-request with If-None-Match and verify HTTP 304 + empty body"
 echo ""
 echo "10.12 Fail-open preserves Cache-Control and ETag (authenticated)"
-echo "  - streaming_engine on, error_policy pass, auth_policy allow"
+echo "  - markdown_streaming force, error_policy pass, auth_policy allow"
 echo "  - Trigger pre-commit failure (budget exceeded) with authenticated request"
 echo "  - Verify: Cache-Control preserved as 'public, max-age=600' (not rewritten to private)"
 echo "  - Verify: ETag preserved as upstream value"
@@ -816,7 +816,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -832,7 +832,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_limits memory=20m streaming_buffer=1k timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -848,7 +848,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_limits memory=20m streaming_buffer=1k timeout=120s;
             markdown_error_policy fail_closed;
             markdown_log_verbosity info;
@@ -864,7 +864,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -880,7 +880,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation full;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -896,7 +896,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -912,7 +912,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -923,12 +923,12 @@ http {
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
-        # 10.8: streaming_engine off + cache_validation full
+        # 10.8: markdown_streaming off + cache_validation full
         location /t08/ {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation full;
-            # streaming_engine defaults to off
+            markdown_streaming off;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -944,7 +944,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_limits memory=20m streaming_buffer=1k timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -960,7 +960,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_limits memory=20m streaming_buffer=1k timeout=120s;
             markdown_error_policy fail_closed;
             markdown_log_verbosity info;
@@ -978,7 +978,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -996,7 +996,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation full;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -1017,7 +1017,7 @@ http {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation ims_only;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_limits memory=20m streaming_buffer=1k timeout=120s;
             markdown_error_policy pass;
             markdown_auth_policy allow;
@@ -1301,9 +1301,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 10.8 streaming_engine off + streaming_on_error config
+# 10.8 markdown_streaming off + unified error-policy config
 # ---------------------------------------------------------------------------
-echo "==> 10.8 streaming_engine off ignores streaming config"
+echo "==> 10.8 markdown_streaming off ignores streaming config"
 curl -sS -D "${RAW_DIR}/t08.hdr" -o "${RAW_DIR}/t08.body" \
     -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 30 \
     "http://127.0.0.1:${PORT}/t08/simple"
@@ -1322,9 +1322,9 @@ assert_body_contains "${RAW_DIR}/t08.body" "${EXPECTED_HEADING}" "10.8" \
     t08_pass "${MSG_MISSING_CONVERTED_HEADING}"
 
 if [[ ${t08_pass} -eq 1 ]]; then
-    report_case "10.8" "PASS" "streaming_engine off: 0.4.0 behavior"
+    report_case "10.8" "PASS" "markdown_streaming off: 0.4.0 behavior"
 else
-    report_case "10.8" "FAIL" "streaming_engine off: 0.4.0 behavior"
+    report_case "10.8" "FAIL" "markdown_streaming off: 0.4.0 behavior"
 fi
 
 # ---------------------------------------------------------------------------

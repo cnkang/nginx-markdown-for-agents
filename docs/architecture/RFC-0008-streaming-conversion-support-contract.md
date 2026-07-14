@@ -108,14 +108,14 @@ pages or normal browser traffic.
 ### 2.1 Core Engine Switch
 
 ```nginx
-markdown_streaming_engine auto;
+markdown_streaming auto;
 ```
 
 | Value  | Behavior |
 |--------|----------|
 | `off`  | Disable true streaming. All convertible responses use the 0.7.x full-buffer path or are skipped per existing policy. |
 | `auto` | The module selects full-buffer or true streaming based on response type, size, transfer mode, feature combination, and risk assessment. |
-| `on`   | Prefer true streaming. If the response does not meet streaming preconditions, fallback semantics apply — the module does not silently pretend it is streaming. |
+| `force` | Prefer true streaming. If the response does not meet streaming preconditions, fallback semantics apply — the module does not silently pretend it is streaming. |
 
 **Default**: `auto`
 
@@ -193,9 +193,9 @@ markdown_buffer_chunked on;
 In 0.8.0, this directive means: whether chunked responses are allowed to enter
 the Markdown conversion pipeline.
 
-| `markdown_buffer_chunked` | `markdown_streaming_engine` | Behavior |
+| `markdown_buffer_chunked` | `markdown_streaming` | Behavior |
 |---------------------------|-----------------------------|----------|
-| `on`  | `auto` or `on`  | Chunked HTML responses may enter true streaming. |
+| `on`  | `auto` or `force` | Chunked HTML responses may enter true streaming. |
 | `on`  | `off`           | Chunked HTML responses use full-buffer conversion. |
 | `off` | any             | Chunked responses pass through without conversion. |
 
@@ -205,7 +205,7 @@ This preserves 0.7.x user mental models for chunked behavior while allowing
 ### 2.6 Default Error Policy
 
 ```nginx
-markdown_on_error pass;
+markdown_error_policy pass;
 ```
 
 **Default retained**: `pass`
@@ -293,7 +293,7 @@ full-buffer resource limits (e.g., `markdown_max_size`, memory budget):
   maintain Markdown structure.
 - Streaming parser encounters input exceeding its look-behind capacity but
   recoverable via full-buffer.
-- `markdown_streaming_engine auto` and the module assesses streaming risk
+- `markdown_streaming auto` and the module assesses streaming risk
   outweighs benefit.
 
 If full-buffer resource limits would be exceeded, fallback proceeds to

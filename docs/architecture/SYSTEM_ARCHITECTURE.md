@@ -205,8 +205,8 @@ The NGINX module still owns request lifecycle, header ordering, policy gates,
 and backpressure handling. Rust owns conversion logic and exposes both
 full-buffer and incremental streaming FFI entrypoints.
 
-### Engine Selection and Defaults
-`markdown_streaming_engine` defaults to `auto`. In auto mode, known small
+### Processing-Path Selection and Defaults
+`markdown_streaming` defaults to `auto`. In auto mode, known small
 responses remain on the full-buffer path while large or chunked responses can
 enter the streaming path. The default threshold is
 `markdown_stream_threshold` (default `1m`). The v0.6.x

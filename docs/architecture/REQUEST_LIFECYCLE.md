@@ -248,7 +248,10 @@ It then records the relevant counters and applies `markdown_error_policy`:
 
 ## Streaming Processing Path
 
-The module supports a streaming conversion path for large responses. This path is governed by the `markdown_streaming_engine` directive. When set to `auto` (default), the module uses a size-based threshold to decide between full-buffer and streaming paths.
+The module supports a streaming conversion path for eligible responses. The
+sole public selector is `markdown_streaming`: `off` requires full-buffer,
+`auto` (default) uses response size and shape, and `force` selects streaming
+after hard request, content-type, and cache-validation blocks.
 
 ### Threshold Router
 After the body filter has buffered the response (or while buffering), a threshold router decides which conversion path to use. The decision is controlled by the `markdown_stream_threshold` configuration directive:
@@ -259,9 +262,9 @@ markdown_stream_threshold 1m;
 ```
 
 The router evaluates in this order:
-1. If `markdown_streaming_engine` is `off`: all requests use the full-buffer path.
-2. If `markdown_streaming_engine` is `on`: all eligible responses use the streaming path.
-3. If `markdown_streaming_engine` is `auto` (default):
+1. If `markdown_streaming` is `off`: all requests use the full-buffer path.
+2. If `markdown_streaming` is `force`: all eligible responses use the streaming path.
+3. If `markdown_streaming` is `auto` (default):
    - If the request is HEAD, 304, or a fail-open replay: always use the full-buffer path.
    - If `Content-Length` is present and meets or exceeds `markdown_stream_threshold`: use the streaming path.
    - If `Content-Length` is absent: buffer the response. Once the buffered size exceeds the threshold, switch to the streaming path. Otherwise, continue on the full-buffer path.
@@ -329,7 +332,7 @@ If you are debugging a behavior, the module's runtime behavior is:
 
 - header filter decides intent
 - body filter executes the expensive path
-- the threshold router selects full-buffer or streaming conversion based on response size (when `markdown_streaming_engine auto` is used)
+- the threshold router selects full-buffer or streaming conversion based on response size when `markdown_streaming auto` is used
 - helper functions handle branching details for decompression, conditionals, and failure policy
 - the Rust converter is called only after the module has enough buffered state to do so safely
 

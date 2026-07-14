@@ -297,7 +297,7 @@ http {
             markdown_filter on;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;
-            markdown_streaming_engine on;
+            markdown_streaming force;
         }
     }
 }
