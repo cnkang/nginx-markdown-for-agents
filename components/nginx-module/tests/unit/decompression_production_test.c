@@ -891,8 +891,16 @@ test_handle_inflate_stall_direct(void)
     u_char *output_data;
     size_t output_size;
     ngx_int_t rc;
+    ngx_http_markdown_inflate_ctx_t ctx;
 
     init_request(&r);
+    ctx.request = &r;
+    ctx.conf = &g_conf;
+    ctx.stream = &stream;
+    ctx.output_data = &output_data;
+    ctx.output_size = &output_size;
+    ctx.type = NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
+    ctx.completed_out = 0;
 
     /* Branch 1: avail_out==0 -> should grow buffer and return NGX_AGAIN */
     output_data = output_buf;
@@ -903,8 +911,7 @@ test_handle_inflate_stall_direct(void)
     stream.avail_in = 10;
     stream.total_out = 256;
     rc = ngx_http_markdown_handle_inflate_stall(
-        &r, &g_conf, &stream, &output_data, &output_size,
-        0, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
     TEST_ASSERT(rc == NGX_AGAIN,
                 "handle_inflate_stall should return AGAIN when avail_out==0");
 
@@ -916,8 +923,7 @@ test_handle_inflate_stall_direct(void)
     stream.avail_out = 100;
     stream.avail_in = 0;
     rc = ngx_http_markdown_handle_inflate_stall(
-        &r, &g_conf, &stream, &output_data, &output_size,
-        0, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT,
                 "handle_inflate_stall should detect truncated input");
 
@@ -929,8 +935,7 @@ test_handle_inflate_stall_direct(void)
     stream.avail_out = 50;
     stream.avail_in = 10;
     rc = ngx_http_markdown_handle_inflate_stall(
-        &r, &g_conf, &stream, &output_data, &output_size,
-        0, NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, "Z_BUF_ERROR");
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, "Z_BUF_ERROR");
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
                 "handle_inflate_stall should return stall_code on unexpected stall");
 
@@ -943,8 +948,7 @@ test_handle_inflate_stall_direct(void)
     stream.avail_in = 10;
     stream.total_out = 256;
     rc = ngx_http_markdown_handle_inflate_stall(
-        &r, &g_conf, &stream, &output_data, &output_size,
-        0, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
                 "handle_inflate_stall should propagate budget exceeded from grow");
 }
