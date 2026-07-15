@@ -376,7 +376,7 @@ typedef struct {
     size_t                                *output_size;
     ngx_http_markdown_compression_type_e   type;
     size_t                                 completed_out;
-    u_char                                 overflow_probe;
+    u_char                                *overflow_probe;
 } ngx_http_markdown_inflate_ctx_t;
 
 
@@ -508,7 +508,7 @@ ngx_http_markdown_complete_inflate_member(
 
     rc = ngx_http_markdown_reset_gzip_member(
         ctx->request, ctx->stream, *ctx->output_data, *ctx->output_size,
-        ctx->completed_out, &ctx->overflow_probe);
+        ctx->completed_out, ctx->overflow_probe);
     if (rc != NGX_OK) {
         return rc;
     }
@@ -598,7 +598,17 @@ ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
     ctx.output_size = output_size;
     ctx.type = type;
     ctx.completed_out = 0;
-    ctx.overflow_probe = 0;
+
+    /*
+     * Pool-allocate the overflow probe byte so its address is heap-resident.
+     * Storing a stack address into stream->next_out (non-local memory) would
+     * trigger CodeQL "local variable address stored in non-local memory".
+     */
+    ctx.overflow_probe = ngx_pnalloc(r->pool, 1);
+    if (ctx.overflow_probe == NULL) {
+        return NGX_ERROR;
+    }
+    *ctx.overflow_probe = 0;
 
     for ( ;; ) {
         zrc = inflate(stream, Z_NO_FLUSH);
