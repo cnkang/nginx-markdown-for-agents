@@ -1,26 +1,18 @@
 #!/usr/bin/env python3
 """
-Config directive validator for v0.8.0 release gates.
+Config directive validator for release gates.
 
-Validates that v0.8.0 configuration directives are properly defined,
-documented, and that removed directives are absent from the source:
+Validates that configuration directives are properly defined, documented,
+and that removed directives are absent from the source:
 
-1. New v0.8.0 directives exist in C source, docs, merge, and defaults
-2. Removed v0.8.0 directives are NOT in the C command array
-3. Removed v0.8.0 directives are documented as REMOVED in CONFIGURATION.md
-4. No conf->streaming fields remain in any C source under src/ (replaced by conf->stream in v0.8.0)
+1. New directives exist in C source, docs, merge, and defaults
+2. Removed directives are NOT in the C command array
+3. Removed directives are documented as REMOVED in CONFIGURATION.md
+4. Removed constants are not #defined in filter_module.h
+5. Removed conf->streaming.* fields are absent from C sources
 
-New directives validated:
-- markdown_stream_threshold (size, replaces markdown_streaming_auto_threshold)
-- markdown_stream_precommit_buffer (size, pre-commit replay buffer)
-- markdown_stream_flush_min (size, minimum flush batch)
-- markdown_stream_excluded_types (string list, excluded MIME types)
-
-Removed directives validated:
-- markdown_streaming_auto_threshold (must NOT be in command array)
-
-Removed constants validated:
-- NGX_HTTP_MARKDOWN_STREAMING_ENGINE_* (must NOT be in filter_module.h)
+This validator merges the v0.7.0 and v0.8.0 directive checks into a single
+version-independent validation of the current directive surface.
 
 Exit codes:
   0 - All checks passed
@@ -61,7 +53,50 @@ FILTER_MODULE_H = (
 )
 CONFIGURATION_MD = PROJECT_ROOT / "docs" / "guides" / "CONFIGURATION.md"
 
-NEW_DIRECTIVES = [
+
+# ── Active directives (v0.7.0 additions) ──────────────────────────────────
+
+V070_DIRECTIVES = [
+    {
+        "name": "markdown_decompress_max_size",
+        "type": "size",
+        "doc_heading": "markdown_decompress_max_size",
+        "merge_pattern": r"conf->decompress\.max_size",
+        "description": "decompression budget (max decompressed output size)",
+    },
+    {
+        "name": "markdown_parse_timeout",
+        "type": "msec",
+        "doc_heading": "markdown_parse_timeout",
+        "merge_pattern": r"conf->decompress\.parse_timeout",
+        "description": "parse phase timeout",
+    },
+    {
+        "name": "markdown_parser_budget",
+        "type": "size",
+        "doc_heading": "markdown_parser_budget",
+        "merge_pattern": r"conf->decompress\.parser_budget",
+        "description": "parser memory budget",
+    },
+    {
+        "name": "markdown_diagnostics",
+        "type": "flag",
+        "doc_heading": "markdown_diagnostics",
+        "merge_pattern": r"diagnostics",
+        "description": "runtime diagnostics endpoint toggle",
+    },
+    {
+        "name": "markdown_dynconf_dry_run",
+        "type": "flag",
+        "doc_heading": "markdown_dynconf_dry_run",
+        "merge_pattern": r"conf->advanced\.dynconf_dry_run",
+        "description": "dynconf dry-run validation mode",
+    },
+]
+
+# ── Active directives (v0.8.0 additions) ──────────────────────────────────
+
+V080_DIRECTIVES = [
     {
         "name": "markdown_stream_threshold",
         "type": "size",
@@ -108,6 +143,8 @@ NEW_DIRECTIVES = [
     },
 ]
 
+# ── Removed directives (v0.8.0 cleanup) ────────────────────────────────────
+
 REMOVED_DIRECTIVES = [
     {
         "name": "markdown_streaming_auto_threshold",
@@ -151,7 +188,7 @@ class ValidationResult:
 
 
 def read_safe(path: Path) -> str:
-    """Read a file only if it resolves within PROJECT_ROOT; return '' otherwise."""
+    """Read a file only if it resolves within PROJECT_ROOT; return \'\' otherwise."""
     resolved = path.resolve()
     if not str(resolved).startswith(str(PROJECT_ROOT)):
         return ""
@@ -209,7 +246,7 @@ def check_removed_directive_in_docs(
     if not docs:
         result.fail(check_id, "CONFIGURATION.md not found")
         return
-    pattern = rf"{re.escape(doc_heading)}[^\\n]*REMOVED"
+    pattern = rf"{re.escape(doc_heading)}[^\n]*REMOVED"
     if re.search(pattern, docs, re.IGNORECASE):
         result.pass_(check_id, "documented as REMOVED in CONFIGURATION.md")
     else:
@@ -222,7 +259,7 @@ def check_removed_directive_in_docs(
 def check_directive_merge(
     directive_name: str, merge_pattern: str, core_src: str, result: ValidationResult
 ) -> None:
-    """Verify the merge function references the directive's config field."""
+    """Verify the merge function references the directive\'s config field."""
     check_id = f"merge:{directive_name}"
     if not core_src:
         result.fail(check_id, "config_core_impl.h not found")
@@ -245,6 +282,27 @@ def check_directive_default(
         result.fail(check_id, "default source files not found")
         return
     if re.search(default_pattern, default_src, re.S):
+        result.pass_(check_id, "default value defined via merge macro")
+    else:
+        result.fail(check_id, "no default value found")
+
+
+def check_directive_default_merge(
+    directive_name: str,
+    merge_pattern: str,
+    core_src: str,
+    result: ValidationResult,
+) -> None:
+    """Check that the directive has a default value in the merge function.
+
+    For v0.7.0 directives, the merge pattern presence implies a default
+    value is set via the merge macro\'s third argument.
+    """
+    check_id = f"default:{directive_name}"
+    if not core_src:
+        result.fail(check_id, "config_core_impl.h not found")
+        return
+    if re.search(merge_pattern, core_src):
         result.pass_(check_id, "default value defined via merge macro")
     else:
         result.fail(check_id, "no default value found")
@@ -296,25 +354,37 @@ def validate_all(result: ValidationResult) -> None:
     if not directives_src:
         result.fail(
             "prereq:config_directives_impl.h",
-            "source file not found — cannot validate directives",
+            "source file not found \u2014 cannot validate directives",
         )
         return
 
     if not core_src:
         result.fail(
             "prereq:config_core_impl.h",
-            "source file not found — cannot validate merge functions",
+            "source file not found \u2014 cannot validate merge functions",
         )
 
     if not filter_h:
         result.fail(
             "prereq:filter_module.h",
-            "source file not found — cannot validate removed constants",
+            "source file not found \u2014 cannot validate removed constants",
         )
 
     default_src = "\n".join([core_src, filter_h])
 
-    for directive in NEW_DIRECTIVES:
+    # v0.7.0 directives: source + docs + merge + default(merge pattern)
+    for directive in V070_DIRECTIVES:
+        name = directive["name"]
+        doc_heading = directive["doc_heading"]
+        merge_pat = directive["merge_pattern"]
+
+        check_directive_in_source(name, directives_src, result)
+        check_directive_in_docs(name, doc_heading, docs, result)
+        check_directive_merge(name, merge_pat, core_src, result)
+        check_directive_default_merge(name, merge_pat, core_src, result)
+
+    # v0.8.0 directives: source + docs + merge + default(explicit pattern)
+    for directive in V080_DIRECTIVES:
         name = directive["name"]
         doc_heading = directive["doc_heading"]
         merge_pat = directive["merge_pattern"]
@@ -325,6 +395,7 @@ def validate_all(result: ValidationResult) -> None:
         check_directive_merge(name, merge_pat, core_src, result)
         check_directive_default(name, default_pat, default_src, result)
 
+    # Removed directives: absent from source + documented as REMOVED
     for directive in REMOVED_DIRECTIVES:
         name = directive["name"]
         doc_heading = directive["doc_heading"]
@@ -332,10 +403,12 @@ def validate_all(result: ValidationResult) -> None:
         check_directive_not_in_source(name, directives_src, result)
         check_removed_directive_in_docs(name, doc_heading, docs, result)
 
+    # Removed constants: absent from filter_module.h
     if filter_h:
         for constant in REMOVED_CONSTANTS:
             check_constant_not_in_source(constant, filter_h, result)
 
+    # Removed conf->streaming.* fields: absent from all C sources
     c_sources: dict[str, str] = {}
     src_dir = (
         PROJECT_ROOT / "components" / "nginx-module" / "src"
@@ -350,7 +423,7 @@ def validate_all(result: ValidationResult) -> None:
 
 def print_report(result: ValidationResult) -> None:
     """Print the validation report to stdout."""
-    print("v0.8.0 Config Directive Validation Report")
+    print("Config Directive Validation Report")
     print("=" * 60)
     for status, check_id, message in result.results:
         print(f"  {status:4s}  {check_id:40s}  {message}")

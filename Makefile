@@ -415,7 +415,7 @@ release-gates-check-070:
 	fi
 	$(MAKE) test-e2e-rust
 	python3 tools/release/gates/validate_release_gates_070.py --mode strict
-	python3 tools/release/gates/validate_config_directives_070.py
+	python3 tools/release/gates/validate_config_directives.py
 	python3 tools/release/gates/validate_metrics.py
 	python3 tools/release/gates/validate_reason_codes.py
 	python3 tools/release/gates/validate_package_metadata.py
@@ -675,7 +675,7 @@ release-gates-check-080:
 	python3 tools/release/gates/validate_naming.py
 	@echo "  [14/17] v0.8.0 gate validators (0.8-specific: compat bridge removal, new directives)"
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_release_gates_080.py
-	python3 tools/release/gates/validate_config_directives_080.py
+	python3 tools/release/gates/validate_config_directives.py
 	@echo "  [15/17] legacy/prior-version regression validators (0.7.0 gates remain active)"
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_release_gates_070.py --mode strict
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_metrics.py
@@ -715,7 +715,7 @@ release-gates-check-080-regression:
 	$(MAKE) harness-check
 	python3 tools/release/gates/validate_release_gates.py
 	python3 tools/release/gates/validate_naming.py
-	python3 tools/release/gates/validate_config_directives_080.py
+	python3 tools/release/gates/validate_config_directives.py
 	@test -f docs/harness/routing-manifest.json
 	@test -d docs/harness/risk-packs
 	@test -f docs/harness/core.md

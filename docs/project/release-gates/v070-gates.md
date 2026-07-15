@@ -118,11 +118,11 @@ for a tag.
 
 | New Surface | Validator Type | Validator Script | Gate |
 |-------------|---------------|-----------------|------|
-| `decompression_budget` config | config validator | `validate_config_directives_070.py` | Gate 5 |
-| `parse_timeout` config | config validator | `validate_config_directives_070.py` | Gate 5 |
-| `markdown_parser_budget` config | config validator | `validate_config_directives_070.py` | Gate 5 |
-| `markdown_diagnostics` config | config validator | `validate_config_directives_070.py` | Gate 5 |
-| `markdown_dynconf_dry_run` config | config validator | `validate_config_directives_070.py` | Gate 5 |
+| `decompression_budget` config | config validator | `validate_config_directives.py` | Gate 5 |
+| `parse_timeout` config | config validator | `validate_config_directives.py` | Gate 5 |
+| `markdown_parser_budget` config | config validator | `validate_config_directives.py` | Gate 5 |
+| `markdown_diagnostics` config | config validator | `validate_config_directives.py` | Gate 5 |
+| `markdown_dynconf_dry_run` config | config validator | `validate_config_directives.py` | Gate 5 |
 | `decompression_*_total` metrics | metric validator | `validate_metrics.py` | Gate 5 |
 | `parse_*_total` metrics | metric validator | `validate_metrics.py` | Gate 5 |
 | `replay_buffer_errors_total` metric | metric validator | `validate_metrics.py` | Gate 5 |

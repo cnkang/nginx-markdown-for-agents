@@ -791,9 +791,9 @@ jobs:
           python3 tools/release/gates/validate_naming.py
           python3 tools/release/gates/validate_release_gates_090.py
           python3 tools/release/gates/validate_release_gates_080.py
-          python3 tools/release/gates/validate_config_directives_080.py
+          python3 tools/release/gates/validate_config_directives.py
           python3 tools/release/gates/validate_release_gates_070.py --mode strict
-          python3 tools/release/gates/validate_config_directives_070.py
+          python3 tools/release/gates/validate_config_directives.py
           python3 tools/release/gates/validate_metrics.py
           python3 tools/release/gates/validate_reason_codes.py
           python3 tools/release/gates/validate_package_metadata.py
