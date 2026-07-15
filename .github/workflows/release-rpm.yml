@@ -173,6 +173,8 @@ jobs:
         shell: bash
 
       - name: Prepare rpmbuild tree
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [[ ! -f "build/ngx_http_markdown_filter_module.so" ]]; then
             echo "ERROR: Module .so not found in build/" >&2
@@ -183,7 +185,7 @@ jobs:
 
           # Create source tarball for rpmbuild
           PKG_NAME="nginx-module-markdown-for-agents"
-          PKG_VERSION="${{ inputs.version }}"
+          PKG_VERSION="${INPUT_VERSION}"
           TARBALL_DIR="${PKG_NAME}-${PKG_VERSION}"
 
           mkdir -p "/tmp/${TARBALL_DIR}"
