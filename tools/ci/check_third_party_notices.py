@@ -201,7 +201,7 @@ def main() -> int:
     rust_deps = parse_rust_direct_deps(CARGO_TOML)
     try:
         problems.extend(collect_notice_version_issues(rust_deps, CARGO_LOCK, notices))
-    except (OSError, UnicodeDecodeError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         problems.append(f"Cargo.lock resolution error: {exc}")
 
     # --- C runtime dependencies ---
