@@ -211,7 +211,7 @@ def _check_directive_table(content: str) -> List[str]:
         )
     forbidden_slots = ("ngx_conf_set_enum_slot", "offsetof(")
     if any(token in removed for token in forbidden_slots) or not re.search(
-        r"\n\s*0,\s*\n\s*NULL\s*$", removed
+        r"\n[ \t]*0,[ \t]*\n[ \t]*NULL[ \t]*$", removed
     ):
         errors.append(
             f"{DIRECTIVES_PATH}: reject-only markdown_streaming_engine must not "

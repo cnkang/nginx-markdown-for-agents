@@ -879,16 +879,17 @@ def _validate_standalone_deb(result: ValidationResult) -> None:
     """Validate standalone DEB workflow matches canonical package layout."""
     deb_workflow = read_safe(RELEASE_DEB_WORKFLOW)
     if not deb_workflow:
-        result.fail("standalone-deb:exists", "release-deb.yml not found")
+        result.fail("standalone-deb:exists",
+                    f"{RELEASE_DEB_WORKFLOW.name} not found")
         return
     _check_container_bash_shell(deb_workflow, "standalone-deb", result)
     _check_snippets(
         deb_workflow, STANDALONE_DEB_SNIPPETS, "standalone-deb",
-        "release-deb.yml", result,
+        RELEASE_DEB_WORKFLOW.name, result,
     )
     _check_forbidden_snippets(
         deb_workflow, STANDALONE_VERSION_FORBIDDEN_SNIPPETS, "standalone-deb",
-        "release-deb.yml", result,
+        RELEASE_DEB_WORKFLOW.name, result,
     )
 
 
@@ -896,16 +897,17 @@ def _validate_standalone_rpm_workflow(result: ValidationResult) -> None:
     """Validate standalone RPM workflow matches canonical package layout."""
     rpm_workflow = read_safe(RELEASE_RPM_WORKFLOW)
     if not rpm_workflow:
-        result.fail("standalone-rpm:exists", "release-rpm.yml not found")
+        result.fail("standalone-rpm:exists",
+                    f"{RELEASE_RPM_WORKFLOW.name} not found")
         return
     _check_container_bash_shell(rpm_workflow, "standalone-rpm", result)
     _check_snippets(
         rpm_workflow, STANDALONE_RPM_WORKFLOW_SNIPPETS, "standalone-rpm-workflow",
-        "release-rpm.yml", result,
+        RELEASE_RPM_WORKFLOW.name, result,
     )
     _check_forbidden_snippets(
         rpm_workflow, STANDALONE_VERSION_FORBIDDEN_SNIPPETS,
-        "standalone-rpm-workflow", "release-rpm.yml", result,
+        "standalone-rpm-workflow", RELEASE_RPM_WORKFLOW.name, result,
     )
 
 

@@ -45,7 +45,7 @@ CURRENT_BUILD_DOCS = (
     Path("docs/guides/OPERATIONS.md"),
     Path("docs/project/PROJECT_STATUS.md"),
 )
-EXACT_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+EXACT_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 ACTION_TOOLCHAIN_RE = re.compile(r"^\s*toolchain:\s*['\"]?([^'\"\s#]+)", re.MULTILINE)
 RELEASE_TOOLCHAIN_RE = re.compile(
     r"^\s*RUST_TOOLCHAIN:\s*['\"]?([^'\"\s#]+)", re.MULTILINE
@@ -164,7 +164,7 @@ def _check_packaging(root: Path, expected_msrv: str, errors: list[str]) -> None:
     content = _read_text(root, relative_path, errors)
     if content is None:
         return
-    match = re.search(r"\brustc\s*\(>=\s*([0-9]+\.[0-9]+)\s*\)", content)
+    match = re.search(r"\brustc\s*\(>=\s*(\d+\.\d+)\s*\)", content)
     if match is None:
         errors.append(f"{relative_path}: missing rustc (>= MAJOR.MINOR) build dependency")
     elif match.group(1) != expected_msrv:
