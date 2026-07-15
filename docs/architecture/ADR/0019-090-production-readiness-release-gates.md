@@ -18,7 +18,7 @@ release-gates wave (final wave).
 
 - Make target: `make release-gates-check-090` (**new**; does not exist yet).
 - Validators: `tools/release/gates/validate_release_gates_090.py`,
-  `validate_config_directives_090.py` (**new**).
+  `validate_config_directives.py` (merged validator covering v0.7.0–v0.8.0 directives).
 - Production-examples smoke: `make test-production-examples-nginx-t` and
   `make test-production-examples-e2e-smoke` (**new**).
 

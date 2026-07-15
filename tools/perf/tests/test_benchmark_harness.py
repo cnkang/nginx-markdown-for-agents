@@ -32,7 +32,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.perf.report_schema import validate_module_benchmark_091
+from tools.perf.report_schema import validate_module_benchmark
 from tools.perf.upstream_mock import MockUpstreamHandler
 
 # ---------------------------------------------------------------------------
@@ -482,7 +482,7 @@ class TestReportSchemaConformance:
         report = _build_valid_mock_report()
         report["module_benchmark"]["memory_slope"] = "invalid"
 
-        errors = validate_module_benchmark_091(report)
+        errors = validate_module_benchmark(report)
 
         assert "memory_slope must be a dict" in errors
 

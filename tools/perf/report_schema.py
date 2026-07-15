@@ -135,7 +135,7 @@ def validate_report(report: dict) -> list[str]:
     return errors
 
 
-def validate_module_benchmark_091(report: dict) -> list[str]:
+def validate_module_benchmark(report: dict) -> list[str]:
     """Validate a 0.9.1 module benchmark report against the schema."""
     errors = []
     if "module_benchmark" not in report:
@@ -207,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # ponytail: automatically determine whether it is module or corpus report and validate
     if "module_benchmark" in report:
-        errors = validate_module_benchmark_091(report)
+        errors = validate_module_benchmark(report)
     else:
         errors = validate_report(report)
     if errors:
