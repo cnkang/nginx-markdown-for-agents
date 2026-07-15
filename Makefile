@@ -261,6 +261,10 @@ harness-security-checks:
 	bash tools/harness/detect_ffi_panic_safety.sh --strict
 	PYTHONPATH=. python3 tools/harness/detect_forward_decl_order.py components/nginx-module/src --strict
 	PYTHONPATH=. python3 tools/harness/detect_duplicate_code.py components/nginx-module/src --strict
+	PYTHONPATH=. python3 tools/harness/detect_orphan_comment_close.py
+	bash tools/harness/detect_ifdef_guard_visibility.sh
+	bash tools/harness/detect_workflow_input_injection.sh
+	bash tools/harness/detect_hardcoded_http_status.sh
 	PYTHONPATH=. python3 tools/harness/detect_open_without_path_validation.py --path tools/ --strict
 	PYTHONPATH=. python3 tools/harness/detect_python_complexity.py
 	PYTHONPATH=. python3 tools/harness/detect_auto_generated_naming.py --strict
@@ -288,6 +292,10 @@ test-harness:
 	bash tools/harness/tests/test_detect_ffi_fat_pointer_transfer.sh
 	bash tools/harness/tests/test_security_gitleaks_scope.sh
 	bash tools/harness/tests/test_install_config_search.sh
+	bash tools/harness/tests/test_detect_orphan_comment_close.sh
+	bash tools/harness/tests/test_detect_ifdef_guard_visibility.sh
+	bash tools/harness/tests/test_detect_workflow_input_injection.sh
+	bash tools/harness/tests/test_detect_hardcoded_http_status.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
 license-check:

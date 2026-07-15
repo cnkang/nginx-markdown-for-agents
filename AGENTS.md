@@ -131,6 +131,10 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 53 | ffi-crosslang | FFI fat-pointer safety; use as_mut_ptr + mem::forget for slice ownership transfer; empty results return NULL |
 | 54 | ci-gating | Release artifact path traversal protection; resolve and verify containment before accessing manifest filenames |
 | 55 | version-consistency | Keep source, chart, internal dependency, and documentation version references synchronized for the active release |
+| 56 | build-safety | Orphan comment closers: verify every */ has a matching /* before committing C source; detect_orphan_comment_close.py gates at write time |
+| 57 | build-safety | #ifdef-guarded function visibility: functions declared inside #ifdef FEATURE_GUARD must not be referenced outside that guard; detect_ifdef_guard_visibility.sh gates at write time |
+| 58 | security-cwe | Workflow input injection: GitHub Actions inputs must be routed through env vars before use in shell run blocks; direct ${{ inputs.* }} interpolation in run blocks is command injection; detect_workflow_input_injection.sh gates at write time |
+| 59 | nginx-idioms | Hardcoded HTTP status in reject paths: reject/error paths must return conf->error_status instead of hardcoded NGX_HTTP_BAD_GATEWAY; detect_hardcoded_http_status.sh provides advisory detection |
 
 ## Required Agent Workflow
 
@@ -224,6 +228,8 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - NOSONAR annotations include reason + rule ref; bare `/* NOSONAR */` forbidden; only for NGINX API contract [24]
 - `bash tools/harness/detect_nosonar_discipline.sh` — CI gate for bare NOSONAR [24]
 - No unguarded ops on NULL/uninitialized/invalid values [Baseline]
+- Orphan comment closers: every */ must have a matching /*; `python3 tools/harness/detect_orphan_comment_close.py` — CI gate [56]
+- #ifdef-guarded function visibility: functions declared inside #ifdef GUARD must not be referenced outside; `bash tools/harness/detect_ifdef_guard_visibility.sh` — CI gate [57]
 
 **NGINX Idioms** (C)
 - Full ngx_list_part_t chain iteration (part→next) [28]
@@ -237,6 +243,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Bounded transaction snapshots: capacity overflow fails before mutation; never silently truncate rollback state [39]
 - Header lookup/iteration filters hash==0 (invalidated) entries [40]
 - Content-Type OWS separator accepts HTAB; trailing OWS excluded before parameter comparison [50]
+- Hardcoded HTTP status in reject paths: return conf->error_status instead of NGX_HTTP_BAD_GATEWAY; `bash tools/harness/detect_hardcoded_http_status.sh` — advisory [59]
 
 **HTML Sanitizer & Output Safety** (C, R, D)
 - Void elements self-closing; skip-mode name-aware [5]
@@ -260,6 +267,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 
 **CI/Workflows** (CI)
 - GitHub Actions pinned to immutable SHA; download checksums verified [13]
+- Workflow input injection: ${{ inputs.* }} must be routed through env: before use in shell run blocks; `bash tools/harness/detect_workflow_input_injection.sh` — CI gate [58]
 - Validator/gate regex patterns match actual struct field paths [13]
 - Release/package workflows preserve one canonical module `.so` filename across
   NGINX build output, packaging metadata, load snippets, smoke tests, docs, and
@@ -587,3 +595,4 @@ remediation:
 | 0.9.0 | 2026-07-03 | Kang | Strengthened Rule 4 for streaming BOM handling: html5ever discard_bom=false, strip stream-start BOM in converter after utf8_tail reassembly, bom_stripped flag deferred for partial 0xEF sequences |
 | 0.9.1 | 2026-07-08 | Kang | 0.9.1 release: hybrid zero-copy output (markdown_streaming_zero_copy default off), gzip plus zlib/raw-deflate streaming decompression routing, bounded Brotli full-buffer routing, full-buffer copy reduction, markdown_auto_decompress directive registration fix, performance evidence gate (release-gates-check-091, perf-evidence-check), doctor advice tool, ADRs 0020–0022 |
 | 0.9.1 | 2026-07-14 | Kang | Added `RELEASE_GATE_ALLOW_SKIP_MODULE=1` env-limited skip guard to `test-production-examples-nginx-t` (0.9.0 gate), mirroring the 091 module-benchmark skip contract; updated ADR-0019 blocking-semantics taxonomy |
+| 0.9.1 | 2026-07-15 | Kang | Added Rules 56–59: orphan comment closers (56), #ifdef-guarded function visibility (57), workflow input injection (58), hardcoded HTTP status in reject paths (59); added detect_orphan_comment_close.py, detect_ifdef_guard_visibility.sh, detect_workflow_input_injection.sh, detect_hardcoded_http_status.sh; fixed release-rpm.yml input injection; fixed detect_doc_sync.py _iter_worktree_text_files complexity |
