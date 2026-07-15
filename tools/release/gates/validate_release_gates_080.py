@@ -334,15 +334,15 @@ def check_makefile_080_gate(result: ValidationResult) -> None:
         result.pass_("makefile:080-gate", "release-gates-check-080 target exists")
     else:
         result.fail("makefile:080-gate", "release-gates-check-080 target missing")
-    if "validate_config_directives_080.py" in mk:
+    if "validate_config_directives.py" in mk:
         result.pass_(
             "makefile:080-config-validator",
-            "Makefile references validate_config_directives_080.py",
+            "Makefile references validate_config_directives.py",
         )
     else:
         result.fail(
             "makefile:080-config-validator",
-            "Makefile does not reference validate_config_directives_080.py",
+            "Makefile does not reference validate_config_directives.py",
         )
 
 
