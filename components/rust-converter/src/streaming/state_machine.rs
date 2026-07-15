@@ -64,8 +64,7 @@ pub enum StateMachineAction {
     /// An unsupported HTML structure was detected — signal fallback.
     ///
     /// The embedded string identifies the structure (e.g. `"table"`,
-    /// `"svg"`, `"canvas"`) for diagnostic reporting via
-    /// [`markdown_streaming_reason`](crate::ffi::streaming::markdown_streaming_reason).
+    /// `"svg"`, `"canvas"`) for internal fallback classification.
     FallbackRequired(String),
     /// No action needed (e.g., for ignored events).
     None,

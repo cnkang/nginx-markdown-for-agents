@@ -5,7 +5,7 @@
 //!
 //! | Function | Purpose |
 //! |---|---|
-//! | [`markdown_incremental_new`] | Create a converter handle |
+//! | [`markdown_incremental_new_with_code`] | Create a converter handle |
 //! | [`markdown_incremental_feed`] | Feed a chunk of input data |
 //! | [`markdown_incremental_finalize`] | Finalize conversion, write result |
 //! | [`markdown_incremental_free`] | Free the handle without finalizing |
@@ -16,17 +16,19 @@
 //!
 //! # Memory ownership
 //!
-//! The handle returned by [`markdown_incremental_new`] is owned by the C
+//! The handle returned by [`markdown_incremental_new_with_code`] is owned by the C
 //! caller.  The caller must eventually pass it to either
 //! [`markdown_incremental_finalize`] (which consumes it) **or**
 //! [`markdown_incremental_free`] (which drops it without producing output).
 //! Passing the same handle to both is undefined behavior.
 //!
-//! **Important:** [`markdown_incremental_finalize`] always consumes the
-//! handle, regardless of whether it returns success or failure.  After
-//! `finalize` returns, the handle is invalid and must not be passed to
-//! [`markdown_incremental_free`] or any other function.  Violating this
-//! rule causes a double-free (CWE-415).
+//! **Important:** [`markdown_incremental_finalize`] consumes the handle after
+//! validating that both `handle` and `result` are non-NULL. Once consumed, the
+//! handle is invalid regardless of conversion success, failure, or panic. A
+//! NULL argument returns `ERROR_INVALID_INPUT` without consuming a non-NULL
+//! handle, so the caller must still pass that handle to
+//! [`markdown_incremental_free`]. Violating the ownership rule causes a
+//! double-free (CWE-415).
 
 use std::panic;
 use std::ptr;
@@ -46,7 +48,7 @@ use super::options::decode_options;
 
 /// Opaque handle wrapping an [`IncrementalConverter`] for the C ABI.
 ///
-/// The handle is produced by [`markdown_incremental_new`] and consumed by
+/// The handle is produced by [`markdown_incremental_new_with_code`] and consumed by
 /// either [`markdown_incremental_finalize`] (which produces output) or
 /// [`markdown_incremental_free`] (which drops without output).  The C caller
 /// owns the handle for its entire lifetime.
@@ -78,7 +80,7 @@ pub struct IncrementalConverterHandle {
     chars_per_token: f32,
 }
 
-/// Create a new incremental converter handle for incremental Markdown processing.
+/// Create a new incremental converter handle and return an explicit status code.
 ///
 /// The returned handle is an opaque pointer owned by the caller and must be
 /// either finalized with `markdown_incremental_finalize` or freed with
@@ -91,15 +93,10 @@ pub struct IncrementalConverterHandle {
 /// - The returned pointer is heap-allocated; the caller owns it and must not
 ///   dereference it except via the `markdown_incremental_*` family of functions.
 ///
-/// # Returns
-///
-/// A non-NULL handle on success, or NULL if `options` is NULL, if `MarkdownOptions`
-/// cannot be decoded, or if an internal panic is caught.
-///
 /// # Examples
 ///
 /// ```no_run
-/// use nginx_markdown_converter::ffi::{MarkdownOptions, markdown_incremental_new, markdown_incremental_free};
+/// use nginx_markdown_converter::ffi::{MarkdownOptions, markdown_incremental_new_with_code, markdown_incremental_free};
 /// // Construct and fully initialize MarkdownOptions for your environment.
 /// let opts = MarkdownOptions {
 ///     flavor: 0,
@@ -124,20 +121,17 @@ pub struct IncrementalConverterHandle {
 ///     parser_memory_budget: 0,
 ///     flush_threshold: 0,
 /// };
-/// let handle = unsafe { markdown_incremental_new(&opts) };
+/// let mut handle = std::ptr::null_mut();
+/// let code = unsafe { markdown_incremental_new_with_code(&opts, &mut handle) };
+/// assert_eq!(code, 0);
 /// assert!(!handle.is_null());
 /// // Either finalize to produce output or free when done without producing output.
 /// unsafe { markdown_incremental_free(handle) };
 /// ```
-/// Create a new incremental converter handle and return an explicit status code.
 ///
-/// This API is the recommended constructor for C callers that need actionable
+/// This constructor gives C callers actionable
 /// failure classification. On success, `*out_handle` receives a non-NULL handle.
 /// On error, `*out_handle` is set to NULL and the function returns an error code.
-///
-/// Unlike [`markdown_incremental_new`], this function does not write to stderr,
-/// making it suitable for use as a library function within NGINX where all
-/// diagnostics should go through `ngx_log_error()`.
 ///
 /// # Safety
 ///
@@ -202,32 +196,13 @@ pub unsafe extern "C" fn markdown_incremental_new_with_code(
     }
 }
 
-/// Convenience wrapper around [`markdown_incremental_new_with_code`] that
-/// returns only the handle pointer.
-///
-/// On failure, returns NULL. For actionable error classification, prefer
-/// [`markdown_incremental_new_with_code`].
-///
-/// # Safety
-///
-/// - `options` must point to a valid, properly aligned `MarkdownOptions` that
-///   remains readable for the duration of this call, or be NULL.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_incremental_new(
-    options: *const MarkdownOptions,
-) -> *mut IncrementalConverterHandle {
-    let mut handle: *mut IncrementalConverterHandle = ptr::null_mut();
-    let _rc = unsafe { markdown_incremental_new_with_code(options, &mut handle) };
-    handle
-}
-
 /// Buffers a provided input chunk for later conversion.
 ///
 /// Accepts an empty chunk (`data_len == 0`) as a no-op.
 ///
 /// # Safety
 ///
-/// * `handle` must be a live pointer returned by [`markdown_incremental_new`].
+/// * `handle` must be a live pointer returned by [`markdown_incremental_new_with_code`].
 /// * `data` must point to at least `data_len` readable bytes, or be NULL when `data_len` is 0`.
 ///
 /// # Returns
@@ -238,10 +213,11 @@ pub unsafe extern "C" fn markdown_incremental_new(
 ///
 /// ```no_run
 /// use std::ptr;
-/// use nginx_markdown_converter::ffi::{markdown_incremental_new, markdown_incremental_feed, markdown_incremental_free};
+/// use nginx_markdown_converter::ffi::{markdown_incremental_new_with_code, markdown_incremental_feed, markdown_incremental_free};
 /// unsafe {
 ///     let options = ptr::null(); // populate as needed
-///     let handle = markdown_incremental_new(options);
+///     let mut handle = ptr::null_mut();
+///     let _ = markdown_incremental_new_with_code(options, &mut handle);
 ///     if !handle.is_null() {
 ///         // feed a chunk
 ///         let _ = markdown_incremental_feed(handle, b"hello".as_ptr(), 5);
@@ -307,20 +283,23 @@ pub unsafe extern "C" fn markdown_incremental_feed(
 
 /// Finalize an incremental converter, consume its handle, and write the conversion output or error into `result`.
 ///
-/// The call always consumes the provided `handle`; after this function returns (whether success, failure,
-/// or internal panic) the handle is invalid and must not be used again or freed by the caller.
+/// The call consumes `handle` after validating that both arguments are
+/// non-NULL. Once consumed, the handle is invalid whether conversion succeeds,
+/// fails, or panics. If either argument is NULL, `ERROR_INVALID_INPUT` is
+/// returned without consuming a non-NULL handle.
 ///
 /// # Safety
 ///
-/// - `handle` must be a live pointer returned by `markdown_incremental_new` that has not already been
+/// - `handle` must be a live pointer returned by `markdown_incremental_new_with_code` that has not already been
 ///   finalized or freed. This function takes ownership of the handle and will free it during execution.
 /// - `result` must be a valid, writable pointer to a `MarkdownResult`. Any buffers previously owned by
 ///   `result` must either be NULL/zero-length or must have been previously returned by this API.
 ///
 /// # Returns
 ///
-/// `ERROR_SUCCESS` (0) on success, or a non-zero error code on failure. In all cases `result` is populated
-/// with either the produced markdown (and optional ETag/token estimate) or an error code and message.
+/// `ERROR_SUCCESS` (0) on success, or a non-zero error code on failure. When
+/// `result` is non-NULL, it is populated with either the produced Markdown
+/// (and optional ETag/token estimate) or an error code and message.
 ///
 /// # Examples
 ///
@@ -419,16 +398,18 @@ pub unsafe extern "C" fn markdown_incremental_finalize(
 ///
 /// Use this function to release resources when the conversion is being
 /// abandoned (e.g. on error or cancellation).  If the handle has already
-/// been consumed by [`markdown_incremental_finalize`], do **not** call
-/// this function — `finalize` always consumes the handle regardless of
-/// its return code, and calling `free` afterwards is a double-free.
+/// been consumed by [`markdown_incremental_finalize`], do **not** call this
+/// function: after non-NULL argument validation, `finalize` consumes the
+/// handle regardless of its return code. If `finalize` rejected a NULL
+/// `result`, it did not consume a non-NULL handle and this function remains
+/// the required cleanup path.
 ///
 /// Passing NULL is a safe no-op.
 ///
 /// # Safety
 ///
 /// * `handle` must be NULL or a live pointer returned by
-///   [`markdown_incremental_new`] that has not been finalized or freed.
+///   [`markdown_incremental_new_with_code`] that has not been finalized or freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_incremental_free(handle: *mut IncrementalConverterHandle) {
     if handle.is_null() {
@@ -451,11 +432,18 @@ mod tests {
         options
     }
 
+    unsafe fn new_handle(options: *const MarkdownOptions) -> *mut IncrementalConverterHandle {
+        let mut handle = ptr::null_mut();
+        let code = unsafe { markdown_incremental_new_with_code(options, &mut handle) };
+        assert_eq!(code, ERROR_SUCCESS);
+        handle
+    }
+
     #[test]
     fn constructor_applies_parser_budget_to_amplified_markup() {
         let mut options = options();
         options.parser_memory_budget = 32 * 1024;
-        let handle = unsafe { markdown_incremental_new(&options) };
+        let handle = unsafe { new_handle(&options) };
         assert!(!handle.is_null());
 
         let dense_markup = b"<i></i>".repeat(32);
@@ -471,7 +459,7 @@ mod tests {
         let mut options = options();
         options.timeout_ms = 60_000;
         options.parse_timeout_ms = 1;
-        let handle = unsafe { markdown_incremental_new(&options) };
+        let handle = unsafe { new_handle(&options) };
         assert!(!handle.is_null());
 
         let html = b"<div>text</div>".repeat(20_000);

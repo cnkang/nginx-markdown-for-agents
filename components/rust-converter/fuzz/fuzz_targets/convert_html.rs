@@ -37,7 +37,7 @@ use nginx_markdown_converter::parser::parse_html;
 ///
 /// - bit 0: `include_front_matter`
 /// - bit 1: `extract_metadata`
-/// - bits 2–3: `MarkdownFlavor` (0=CommonMark, 1=GFM, 2=Mdx, 3=OrgMode)
+/// - bit 2: `MarkdownFlavor` (0=CommonMark, 1=GFM)
 /// - bit 4: `simplify_navigation`
 /// - bit 5: `preserve_tables`
 /// - bit 6: `prune_noise` (enabled/disabled)
@@ -47,11 +47,10 @@ fn derive_options(data: &[u8]) -> (ConversionOptions, &[u8]) {
         acc.wrapping_add(u32::from(b)) ^ u32::from(b).rotate_left(3)
     });
 
-    let flavor = match (bits >> 2) & 0x03 {
-        0 => MarkdownFlavor::CommonMark,
-        1 => MarkdownFlavor::GitHubFlavoredMarkdown,
-        2 => MarkdownFlavor::Mdx,
-        _ => MarkdownFlavor::OrgMode,
+    let flavor = if (bits >> 2) & 1 == 0 {
+        MarkdownFlavor::CommonMark
+    } else {
+        MarkdownFlavor::GitHubFlavoredMarkdown
     };
 
     let prune_config = if ((bits >> 6) & 1) != 0 {

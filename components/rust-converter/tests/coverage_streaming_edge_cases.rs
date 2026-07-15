@@ -13,6 +13,14 @@ use nginx_markdown_converter::streaming::converter::StreamingConverter;
 use nginx_markdown_converter::streaming::types::*;
 use std::ptr;
 
+unsafe fn new_streaming_handle_for_test(
+    options: *const MarkdownOptions,
+) -> *mut StreamingConverterHandle {
+    let mut handle = ptr::null_mut();
+    let _ = unsafe { markdown_streaming_new_with_code(options, &mut handle) };
+    handle
+}
+
 fn make_converter() -> StreamingConverter {
     StreamingConverter::new(ConversionOptions::default(), MemoryBudget::default())
 }
@@ -507,7 +515,7 @@ fn test_ffi_streaming_basic_lifecycle() {
     let options = ffi_test_default_streaming_options();
 
     unsafe {
-        let handle = markdown_streaming_new(&options);
+        let handle = new_streaming_handle_for_test(&options);
         assert!(
             !handle.is_null(),
             "streaming new should return non-NULL handle"
@@ -541,7 +549,7 @@ fn test_ffi_streaming_basic_lifecycle() {
 #[test]
 fn test_ffi_streaming_null_options() {
     unsafe {
-        let handle = markdown_streaming_new(ptr::null());
+        let handle = new_streaming_handle_for_test(ptr::null());
         assert!(handle.is_null(), "NULL options should return NULL handle");
     }
 }
@@ -551,20 +559,9 @@ fn test_ffi_streaming_abort() {
     let options = ffi_test_default_streaming_options();
 
     unsafe {
-        let handle = markdown_streaming_new(&options);
+        let handle = new_streaming_handle_for_test(&options);
         assert!(!handle.is_null());
         markdown_streaming_abort(handle);
-    }
-}
-
-#[test]
-fn test_ffi_streaming_free() {
-    let options = ffi_test_default_streaming_options();
-
-    unsafe {
-        let handle = markdown_streaming_new(&options);
-        assert!(!handle.is_null());
-        markdown_streaming_free(handle);
     }
 }
 
@@ -576,7 +573,7 @@ fn test_ffi_streaming_with_timeout() {
     };
 
     unsafe {
-        let handle = markdown_streaming_new(&options);
+        let handle = new_streaming_handle_for_test(&options);
         assert!(!handle.is_null());
 
         let html = b"<p>Quick content</p>";
@@ -611,7 +608,7 @@ fn test_ffi_streaming_with_etag_and_tokens() {
     };
 
     unsafe {
-        let handle = markdown_streaming_new(&options);
+        let handle = new_streaming_handle_for_test(&options);
         assert!(!handle.is_null());
 
         let html = b"<h1>Title</h1><p>Content</p>";
@@ -647,7 +644,7 @@ fn test_ffi_streaming_multiple_feeds() {
     let options = ffi_test_default_streaming_options();
 
     unsafe {
-        let handle = markdown_streaming_new(&options);
+        let handle = new_streaming_handle_for_test(&options);
         assert!(!handle.is_null());
 
         let chunks: &[&[u8]] = &[b"<h1>Hel", b"lo</h1><p>Wo", b"rld</p>"];
@@ -686,7 +683,7 @@ fn test_ffi_streaming_with_content_type() {
     };
 
     unsafe {
-        let handle = markdown_streaming_new(&options);
+        let handle = new_streaming_handle_for_test(&options);
         assert!(!handle.is_null());
 
         let html = b"<p>Test</p>";

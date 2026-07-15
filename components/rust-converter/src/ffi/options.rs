@@ -226,11 +226,9 @@ pub(crate) fn decode_options(
     let flavor = match options.flavor {
         0 => MarkdownFlavor::CommonMark,
         1 => MarkdownFlavor::GitHubFlavoredMarkdown,
-        2 => MarkdownFlavor::Mdx,
-        3 => MarkdownFlavor::OrgMode,
         _ => {
             return Err(ConversionError::InvalidInput(format!(
-                "invalid markdown flavor: {} (must be 0-3)",
+                "invalid markdown flavor: {} (must be 0 or 1)",
                 options.flavor
             )));
         }

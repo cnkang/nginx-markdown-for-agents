@@ -9,7 +9,7 @@
 //! # FFI Boundary
 //!
 //! The enum uses `#[repr(u8)]` so the compiler guarantees all discriminants
-//! fit in a single byte, matching the `u8` transport in `FFIDecisionResult`.
+//! fit in a single byte, matching the C reason-code accessors.
 //! Each variant has a stable numeric discriminant that must not change once
 //! assigned.
 //!
@@ -31,11 +31,11 @@
 pub const REASON_CODE_COUNT: usize = 26;
 
 /// Compile-time guard: all discriminants must fit in a `u8` because the
-/// FFI boundary (`FFIDecisionResult.reason_code`) transports them as `u8`.
+/// FFI boundary transports reason-code discriminants as `u8`.
 /// If the enum grows beyond 256 variants this assertion will fail the build.
 const _: () = assert!(
     REASON_CODE_COUNT <= 256,
-    "ReasonCode discriminant range exceeds u8; FFIDecisionResult.reason_code would truncate"
+    "ReasonCode discriminant range exceeds the u8 FFI transport"
 );
 
 /// Comprehensive reason code enum — single source of truth.
@@ -46,9 +46,8 @@ const _: () = assert!(
 /// # Repr
 ///
 /// Uses `#[repr(u8)]` so the compiler guarantees all discriminants fit in
-/// a single byte — matching the `u8` field in `FFIDecisionResult.reason_code`.
-/// The enum is never passed directly across FFI; only its discriminant value
-/// is transported as `u8`.
+/// a single byte. The enum is never passed directly across FFI; only its
+/// discriminant value is transported as `u8`.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReasonCode {
