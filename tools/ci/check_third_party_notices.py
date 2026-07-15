@@ -23,8 +23,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 NOTICES_PATH = ROOT / "THIRD-PARTY-NOTICES"
 _CARGO_TOML_NAME = "Cargo.toml"
+_CARGO_LOCK_NAME = "Cargo.lock"
 CARGO_TOML = ROOT / "components" / "rust-converter" / _CARGO_TOML_NAME
-CARGO_LOCK = ROOT / "components" / "rust-converter" / "Cargo.lock"
+CARGO_LOCK = ROOT / "components" / "rust-converter" / _CARGO_LOCK_NAME
 
 # Additional Cargo.toml files for sub-workspaces that have their own
 # Cargo.lock.  These are checked for stale lock files and their direct
@@ -39,9 +40,9 @@ SUB_WORKSPACE_CARGO_TOMLS: list[Path] = [
 
 # Corresponding Cargo.lock files for sub-workspaces.
 SUB_WORKSPACE_CARGO_LOCKS: list[Path] = [
-    ROOT / "components" / "rust-converter" / "fuzz" / "Cargo.lock",
-    ROOT / "tools" / "corpus" / "test-corpus-conversion" / "Cargo.lock",
-    ROOT / "tools" / "e2e-harness" / "Cargo.lock",
+    ROOT / "components" / "rust-converter" / "fuzz" / _CARGO_LOCK_NAME,
+    ROOT / "tools" / "corpus" / "test-corpus-conversion" / _CARGO_LOCK_NAME,
+    ROOT / "tools" / "e2e-harness" / _CARGO_LOCK_NAME,
 ]
 
 # Runtime crates that are transitive but intentionally documented because their
@@ -200,7 +201,7 @@ def main() -> int:
     rust_deps = parse_rust_direct_deps(CARGO_TOML)
     try:
         problems.extend(collect_notice_version_issues(rust_deps, CARGO_LOCK, notices))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, ValueError) as exc:
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
         problems.append(f"Cargo.lock resolution error: {exc}")
 
     # --- C runtime dependencies ---

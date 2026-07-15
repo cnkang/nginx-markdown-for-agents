@@ -130,9 +130,9 @@ def check_curl_consistency() -> list[str]:
     readme_set = set(readme_curls)
     install_set = set(install_curls)
 
-    errors = _find_missing_curls(readme_curls, install_set, readme_set)
+    errors = _find_missing_curls(readme_curls, install_set)
     errors.extend(
-        _find_missing_curls(install_curls, readme_set, install_set,
+        _find_missing_curls(install_curls, readme_set,
                             label="Shortest Success Path curl not in README Quick Start")
     )
     errors.extend(_check_curl_count_mismatch(readme_curls, install_curls, errors))
@@ -143,7 +143,6 @@ def check_curl_consistency() -> list[str]:
 def _find_missing_curls(
     curls: list[str],
     other_set: set[str],
-    own_set: set[str],
     label: str = "README Quick Start curl not in Shortest Success Path",
 ) -> list[str]:
     """Find curls present in *curls* but absent from *other_set*."""
@@ -187,7 +186,6 @@ def _check_curl_order_mismatch(
                 f"README has '{readme_curls[i]}', "
                 f"install guide has '{install_curls[i]}')"
             ]
-            break
     return []
 
 
