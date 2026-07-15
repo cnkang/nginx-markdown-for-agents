@@ -53,10 +53,13 @@ No changes. The module buffers the complete response body, optionally decompress
 
 When the threshold router selects the incremental path, the NGINX module still buffers the complete response body (and decompresses it if needed), then hands the full buffer to the Rust `IncrementalConverter` via FFI in a single call sequence:
 
-1. `markdown_incremental_new()` — create a converter instance with the current `ConversionOptions`
+1. `markdown_incremental_new_with_code()` — create a converter instance with the current `ConversionOptions` and retain the status code
 2. `markdown_incremental_feed()` — called once with the complete buffered body (`ctx->buffer.data`)
 3. `markdown_incremental_finalize()` — produce the final `MarkdownResult`
-4. `markdown_incremental_free()` — release the converter (only on error paths; `finalize` consumes the handle on success)
+4. `markdown_incremental_free()` — release the converter only when `feed`
+   fails or `finalize` rejects invalid arguments; after valid non-NULL
+   arguments are accepted, `finalize` consumes the handle regardless of its
+   return code
 
 True per-upstream-chunk feeding from NGINX (calling `feed` as each body chunk arrives from upstream) is not implemented yet and remains a future change. The current implementation buffers first, then delegates to the incremental Rust API.
 
@@ -187,12 +190,12 @@ Exported only when `incremental` feature is enabled:
 
 | FFI Function | Purpose |
 |-------------|---------|
-| `markdown_incremental_new()` | Create converter instance |
+| `markdown_incremental_new_with_code()` | Create converter instance with explicit status |
 | `markdown_incremental_feed()` | Feed a chunk of input data |
 | `markdown_incremental_finalize()` | Finalize and return result |
 | `markdown_incremental_free()` | Free converter resources |
 
-Existing FFI function signatures are not modified.
+The pre-v1 ABI reset removed the redundant NULL-only constructor.
 
 ## Special Path Semantics
 

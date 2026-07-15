@@ -252,7 +252,7 @@ sed -i 's/markdown_parse_timeouts_total/markdown_errors_total{reason="timeout"}/
 |-------------------|-------------------|
 | `rate(markdown_parse_timeouts_total[5m]) > 0` | `rate(nginx_markdown_failures_total{reason="timeout"}[5m]) > 0` |
 | `rate(markdown_failed_open_total[5m]) > 0.01` | `rate(nginx_markdown_failopen_total[5m]) > 0.01` |
-| `sum(rate(markdown_ffi_call_errors_total[5m]))` | `rate(nginx_markdown_failures_total{reason="ffi_panic"}[5m])` |
+| `sum(rate(markdown_ffi_call_errors_total[5m]))` | `rate(nginx_markdown_failures_total{reason="system_error"}[5m])` |
 | `nginx_markdown_skips_total{reason="SKIP_ACCEPT"}` | `nginx_markdown_skips_total{reason="skipped_accept"}` |
 
 #### Key Changes for Alert Authors

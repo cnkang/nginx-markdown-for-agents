@@ -1,267 +1,155 @@
-# FFI ABI Compatibility Assumptions (v0.7.0)
+# Rust/C FFI ABI Compatibility
 
-## Purpose
+## Supported contract
 
-This document defines the ABI compatibility assumptions that govern the FFI
-boundary between the Rust conversion library and the NGINX C module. All
-developers, CI tooling, and automated agents must respect these assumptions
-when modifying FFI structs, adding fields, or changing feature gates.
+The Rust converter C ABI is a **bundled internal boundary** between the Rust
+static library and the NGINX module built from the same source tree. The
+project does not publish a standalone converter shared library, header SDK, or
+third-party ABI compatibility promise. Release artifacts contain the linked
+NGINX module; source builds generate the header and link the matching Rust
+archive as one coordinated build.
 
-Violation of any assumption is a **breaking ABI change** that requires a major
-version bump and coordinated update of both sides.
+The generated `markdown_converter.h` is public source only so the bundled C
+module can compile. Its presence in the repository does not make arbitrary
+third-party C consumers a supported product surface.
 
----
+## v0.9.1 baseline reset
 
-## Assumption 1: Tail-Append Only
+v0.9.1 is the final coordinated pre-v1 reset. ABI version **1** is the new
+baseline. This reset:
 
-**Rule**: New fields are always appended to the **end** of `repr(C)` structs.
-Fields are never inserted in the middle, reordered, or moved.
+- removes the unimplemented MDX and Org-mode flavor discriminants;
+- removes the unused Rust streaming-decision FFI model;
+- removes `FFIConditionalResult`, its reserved `matched_etag_len` field, and
+  the superseded `markdown_check_conditional` API;
+- removes the superseded `markdown_build_base_url` helper; and
+- removes 15 zero-production-consumer exports: the accept/decision init
+  helpers, Rust decision/error-policy wrappers, standalone URL checks,
+  diagnostics-schema accessors, convenience constructors, and redundant
+  streaming finish/free/reason helpers; and
+- retains `markdown_decide_conditional` and `markdown_decide_base_url` as the
+  complete production decision interfaces.
 
-**Rationale**: C struct layout places fields at monotonically increasing
-offsets. Existing code compiled against an older version of the struct accesses
-fields by their fixed offsets. Inserting a field in the middle shifts all
-subsequent field offsets, causing binary incompatibility without any compiler
-warning.
+These changes are intentionally breaking at the internal FFI boundary. Both
+bundled sides are updated atomically, so operators do not migrate C calls.
+Operators must install or build the complete v0.9.1 module rather than mixing
+an older Rust archive or header with the new C module.
 
-**Guarantees**:
-- Existing field offsets remain stable across versions.
-- Older C code linked against a newer Rust library continues to read the
-  correct values for all fields it knows about.
-- The `sizeof` of the struct may grow, but never shrinks.
+## Explicit ABI alignment
 
-**Enforcement**:
-- Rust layout tests (`abi.rs`) verify `offset_of!` for every field.
-- C `static_assert` checks verify `offsetof` for critical structs.
-- Code review rejects any PR that inserts a field before the last existing
-  field in an FFI struct.
+Rust owns:
 
-**Example**:
-
-```rust
-#[repr(C)]
-pub struct MarkdownOptions {
-    pub max_size: usize,              // offset 0 — stable since v0.5.0
-    pub on_error: u8,                 // offset 8 — stable since v0.5.0
-    // ... existing fields ...
-    pub decompression_budget: usize,  // appended in v0.7.0
-    pub parse_timeout_ms: u32,        // appended in v0.7.0
-    pub parser_memory_budget: usize,  // appended in v0.7.0
-}
+```text
+MARKDOWN_ABI_VERSION = 1
+markdown_abi_version() -> 1
 ```
 
----
+`cbindgen` emits both declarations into the generated header. During NGINX
+preconfiguration, the C module calls `markdown_abi_version()` and compares the
+result with its generated-header `MARKDOWN_ABI_VERSION`. A mismatch logs a
+critical configuration error and makes `nginx -t`/startup fail. This check runs
+before the module installs its header and body filters.
 
-## Assumption 2: `repr(C)` Deterministic Layout
+`nginx-markdown-doctor` also checks that the module contains the
+`markdown_abi_version` symbol. The doctor symbol check is diagnostic; the
+NGINX startup comparison is the authoritative value enforcement.
 
-**Rule**: All FFI structs use `#[repr(C)]` to guarantee deterministic layout
-matching C struct layout rules.
+Increment `MARKDOWN_ABI_VERSION` whenever a shared struct changes size or
+layout (including a tail-field append), a field is removed/reordered or changes
+type, an enum representation changes, an export is removed/changed, or any
+other change makes a C object built against the previous header unsafe or
+semantically invalid.
 
-**Rationale**: Without `repr(C)`, the Rust compiler is free to reorder fields,
-insert arbitrary padding, or optimize layout in ways that differ between
-compiler versions. `repr(C)` forces Rust to follow the same field ordering,
-alignment, and padding rules as a C compiler targeting the same platform ABI.
+## Compatibility policy
 
-**Guarantees**:
-- Field order in memory matches declaration order.
-- Padding is inserted according to platform C ABI rules (System V AMD64 ABI on
-  Linux/macOS x86_64, AAPCS64 on ARM64).
-- `size_of::<T>()` in Rust equals `sizeof(T)` in C.
-- `align_of::<T>()` in Rust equals `_Alignof(T)` in C.
-- `offset_of!(T, field)` in Rust equals `offsetof(T, field)` in C.
+### Before v1.0
 
-**Enforcement**:
-- All FFI structs in `components/rust-converter/src/ffi/` carry `#[repr(C)]`.
-- cbindgen generates the C header from these Rust definitions, ensuring the C
-  side sees the identical layout.
-- Rust layout tests compare `size_of`, `align_of`, and `offset_of` against
-  expected constants.
-- C `static_assert` checks mirror the Rust layout tests.
+v0.9.1 is the last planned coordinated reset. Any further pre-v1 incompatible
+change must be release-noted, increment `MARKDOWN_ABI_VERSION`, and update all
+Rust definitions, C consumers, headers, layout assertions, tests, and operator
+diagnostics in one change.
 
-**Prohibited patterns**:
-- `#[repr(Rust)]` (default) — non-deterministic layout.
-- `#[repr(packed)]` — misaligned access on some architectures.
-- `#[repr(align(N))]` without corresponding C-side `_Alignas(N)`.
+### v1.0 and later
 
----
+The bundled ABI becomes a frozen internal contract:
 
-## Assumption 3: Feature-Gated Fields Cause No Layout Drift
+- every shared-struct size/layout change, including a tail-field append,
+  requires an ABI version increment;
+- new structs and exports are preferred to changing existing layouts;
+- field removal, reordering, type changes, or signature changes require an ABI
+  version increment and a release whose compatibility policy explicitly
+  permits that break;
+- Cargo package version is not the ABI identifier; `MARKDOWN_ABI_VERSION` is;
+  and
+- no external third-party ABI support is implied without a separate published
+  SDK policy, artifact, support matrix, and conformance suite.
 
-**Rule**: Fields behind `#[cfg(feature = "...")]` do NOT cause layout drift
-because they are always placed at the struct tail AND the feature gate is
-consistent between Rust and C compilation.
+An append-only exception is possible only after the boundary adopts and
+validates an explicit size-tagged/versioned struct protocol. The current bare
+pointer ABI has no caller-size field, so init helpers cannot make old/new
+object sizes interoperable.
 
-**Rationale**: Feature-gated fields (e.g., `#[cfg(feature = "streaming")]`)
-are conditionally compiled. If the same feature flag state is not maintained
-on both the Rust and C sides, the two sides would disagree on struct size and
-field offsets — a silent ABI mismatch leading to memory corruption.
+## Layout and platform rules
 
-**Mechanism — cbindgen `[defines]` mapping**:
+All shared structs use `#[repr(C)]`. All FFI enums use an explicit integer
+representation. Raw strings use pointer-plus-length pairs, not implicit
+NUL-termination. Opaque handles are owned by Rust and never dereferenced by C.
 
-The `cbindgen.toml` `[defines]` section maps Cargo feature flags to C
-preprocessor symbols:
+The production module and checked layout assertions target LP64 platforms:
 
-```toml
-[defines]
-"feature = incremental" = "MARKDOWN_INCREMENTAL_ENABLED"
-"feature = streaming" = "MARKDOWN_STREAMING_ENABLED"
+| Platform | Pointer | `size_t` | `unsigned long` |
+|----------|---------|----------|-----------------|
+| Linux x86_64 | 8 | 8 | 8 |
+| Linux aarch64 | 8 | 8 | 8 |
+| macOS x86_64 | 8 | 8 | 8 |
+| macOS arm64 | 8 | 8 | 8 |
+
+The layout header fails compilation on non-LP64 data models. Rust layout tests
+and C `_Static_assert` checks cover size, alignment, and field offsets. Feature
+combinations must not change the layout of a type that exists in more than one
+combination.
+
+## Ownership rules
+
+- C borrows input pointers only for the documented call duration.
+- Rust-owned result buffers are released only through their matching Rust free
+  function.
+- A finalize, abort, free, or safe-finish operation that consumes a handle
+  makes that handle invalid immediately.
+- Empty Rust output buffers cross the boundary as `NULL` plus length zero.
+- Slice ownership transfer uses a thin data pointer plus explicit length; it
+  never exposes a Rust fat pointer.
+- Output structs are initialized to a safe state before fallible work and are
+  written only after `catch_unwind` succeeds.
+
+## Header synchronization
+
+The two checked-in copies are:
+
+1. `components/rust-converter/include/markdown_converter.h` (generated), and
+2. `components/nginx-module/src/markdown_converter.h` (bundled consumer copy).
+
+They must be byte-identical. Regenerate with pinned `cbindgen 0.29.2`, copy the
+header, and run:
+
+```bash
+make check-headers
+make test-rust
+make test-nginx-unit
 ```
 
-When cbindgen generates the C header, feature-gated Rust fields become
-`#ifdef`-guarded C fields:
+## Atomic change checklist
 
-```c
-typedef struct MarkdownOptions {
-    /* ... common fields ... */
-#ifdef MARKDOWN_STREAMING_ENABLED
-    uint32_t streaming_chunk_size;   /* only present when streaming enabled */
-#endif
-} MarkdownOptions;
-```
+For every ABI change:
 
-**Guarantees**:
-- The C module is compiled with the same feature defines as the Rust library.
-- Feature-gated fields are always at the struct tail (combining with
-  Assumption 1).
-- Enabling or disabling a feature changes `sizeof` consistently on both sides.
-- No "layout hole" exists between common fields and feature-gated fields.
+1. update Rust definitions, exports, defaults, cleanup, and panic fallbacks;
+2. update all C call sites and init sites;
+3. regenerate and copy both headers;
+4. update Rust layout tests and C static assertions;
+5. update x86_64/aarch64 and feature-combination coverage;
+6. update doctor/alignment checks when the ABI version changes;
+7. update this document, the migration contract, changelog, and release notes;
+8. run header, Rust, C, harness, and documentation gates.
 
-**Enforcement**:
-- CI builds both Rust and C with identical feature flag sets.
-- The `make check-headers` target verifies the generated header (with all
-  features expanded) matches the checked-in copy.
-- Layout tests run with all features enabled to verify the maximum struct size.
-
----
-
-## Assumption 4: No Field Removal
-
-**Rule**: Fields are never removed from FFI structs. Deprecated fields are
-retained in place, zeroed by init helpers, and documented as deprecated.
-
-**Rationale**: Removing a field shifts all subsequent field offsets (same
-problem as mid-insertion). Even if both sides are recompiled simultaneously,
-any third-party code or cached shared library linked against the old layout
-would silently corrupt memory.
-
-**Deprecation protocol**:
-1. Mark the field with a `/* DEPRECATED since vX.Y.Z */` comment in the C
-   header. When the field is read on the Rust side, add a Rust doc comment
-   documenting the deprecation; the generated C header comment (via cbindgen)
-   carries the deprecation note to C consumers.
-2. The `markdown_*_init()` helper sets the deprecated field to zero/null.
-3. The C consumer ignores the field (reads are no-ops, writes are discarded).
-4. The field remains at its original offset indefinitely.
-5. After two major versions, the field name may be renamed to `_reserved_N`
-   but its offset and size must not change.
-
-> **Note on `#[deprecated]`**: The example below uses `#[deprecated]` to
-> illustrate the *intended future protocol*. As of the 0.8.x release line no
-> FFI struct field in `components/rust-converter/src/ffi/abi.rs` carries a
-> `#[deprecated]` attribute. The normative requirement today is: a
-> deprecation comment in the C header, init-helper zeroing, layout tests
-> pinning the field's offset/size, and C consumer no-op behavior. Adopting
-> `#[deprecated]` on Rust FFI fields is a future hardening candidate tracked
-> in `docs/project/0.9.0-migration-tracking.md`, not a current ABI property.
-
-**Example** (illustrative — not a current struct definition):
-
-```rust
-#[repr(C)]
-pub struct MarkdownResult {
-    pub output: *const u8,
-    pub output_len: usize,
-    // Hypothetical future deprecation showing the intended protocol.
-    // Today `MarkdownResult` does not contain a `legacy_error_code` field.
-    #[deprecated(since = "0.8.0", note = "Use error_category instead")]
-    pub legacy_error_code: u32,   // offset preserved, always zeroed by init
-    pub error_category: u32,      // appended after legacy field
-}
-```
-
----
-
-## Assumption 5: Alignment Guarantees
-
-**Rule**: All FFI structs maintain natural alignment. On LP64 platforms
-(Linux x86_64, macOS x86_64, Linux aarch64), the maximum field alignment is
-8 bytes (`alignof(uintptr_t) == alignof(size_t) == 8`), so struct alignment
-is 8 bytes.
-
-**Platform ABI details**:
-
-| Platform | Pointer size | `size_t` | `uintptr_t` | Max natural align | Struct align |
-|----------|-------------|----------|-------------|-------------------|-------------|
-| Linux x86_64 (LP64) | 8 | 8 | 8 | 8 | 8 |
-| macOS x86_64 (LP64) | 8 | 8 | 8 | 8 | 8 |
-| Linux aarch64 (LP64) | 8 | 8 | 8 | 8 | 8 |
-| Linux x86 (ILP32) | 4 | 4 | 4 | 4 | 4 |
-
-**Guarantees**:
-- No FFI struct uses `#[repr(packed)]` (which would violate alignment).
-- No FFI struct uses `#[repr(align(N))]` with N > 8 (which would introduce
-  platform-specific over-alignment).
-- All pointer and `usize`/`isize` fields are naturally aligned (offset is a
-  multiple of 8 on LP64).
-- Smaller fields (`u8`, `u16`, `u32`) are naturally aligned to their own size.
-- Padding bytes between fields follow C ABI rules and are zeroed by init
-  helpers.
-
-**Enforcement**:
-- Rust layout tests verify `align_of::<T>()` equals the expected platform
-  alignment for each FFI struct.
-- C `static_assert` checks verify `_Alignof(T)` matches.
-- CI runs on both x86_64 and aarch64 targets to catch alignment divergence.
-
----
-
-## Header Synchronization
-
-Two copies of `markdown_converter.h` exist:
-1. `components/rust-converter/include/markdown_converter.h` — cbindgen output
-2. `components/nginx-module/src/markdown_converter.h` — checked-in C module copy
-
-The `make check-headers` target and CI `header-sync` job verify these are
-byte-identical. Any divergence is a CI failure.
-
----
-
-## Versioning
-
-The ABI is versioned by the Cargo.toml package version. Breaking ABI changes
-(field insertion, removal, reordering, alignment change) require a major
-version bump. v0.7.0 is ABI-compatible with v0.6.x: all new fields were
-appended to struct tails or placed in new structs.
-
----
-
-## Summary of Invariants
-
-| # | Invariant | Violation consequence | Detection |
-|---|-----------|----------------------|-----------|
-| 1 | Tail-append only | Offset shift → memory corruption | Layout tests + review |
-| 2 | `repr(C)` on all FFI structs | Non-deterministic layout | cbindgen + CI |
-| 3 | Feature gates consistent (cbindgen `[defines]`) | Size mismatch → corruption | `check-headers` + CI |
-| 4 | No field removal | Offset shift → memory corruption | Layout tests + review |
-| 5 | 8-byte alignment on LP64 | Misaligned access → UB/SIGBUS | Layout tests + CI |
-
----
-
-## References
-
-- `docs/architecture/FFI_MIGRATION_CONTRACT.md` — FFI function/struct registry
-  and migration status
-- `AGENTS.md` Rule 15 — FFI cross-language boundary requirements
-- `components/rust-converter/cbindgen.toml` — cbindgen configuration and
-  `[defines]` mapping
-- `components/rust-converter/src/ffi/abi.rs` — Rust layout tests
-- Design document §2.3 — Boundary rules
-- Design document §6 — FFI synchronization strategy
-
----
-
-## Document Updates
-
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 0.7.0 | 2026-05-17 | Kang | Initial ABI compatibility assumptions document |
-| 0.7.0-a07.7 | 2026-05-18 | kiro | Expanded: 5 formal assumptions (tail-append, repr(C), feature-gate no-drift, no-removal, alignment), enforcement details, examples, invariant summary table |
+Never suppress an ABI mismatch or bypass the startup comparison. Rebuild both
+bundled halves from the same source revision.

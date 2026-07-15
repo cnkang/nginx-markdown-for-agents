@@ -66,7 +66,7 @@ New directives introduced in 0.4.0 must follow the same `markdown_` prefix and l
 |---------------------------------------------------|-----------|-----------------|
 | `nginx_markdown_conversions_total`                | counter   | —               |
 | `nginx_markdown_conversions_bypassed_total`       | counter   | —               |
-| `nginx_markdown_conversion_duration_seconds`      | histogram | `le`            |
+| `nginx_markdown_conversion_latency_bucket_total` | counter   | `le`            |
 | `nginx_markdown_input_bytes_total`                | counter   | —               |
 | `nginx_markdown_output_bytes_total`               | counter   | —               |
 | `nginx_markdown_failures_total`                   | counter   | `reason`        |

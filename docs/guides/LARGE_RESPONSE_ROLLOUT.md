@@ -63,7 +63,7 @@ Before starting the rollout, verify:
    After building, verify the incremental symbols are present in the module:
 
    ```bash
-   nm /path/to/nginx | grep markdown_incremental_new
+   nm /path/to/nginx | grep markdown_incremental_new_with_code
    # Should show a symbol — if empty, the feature was not linked in.
    ```
 

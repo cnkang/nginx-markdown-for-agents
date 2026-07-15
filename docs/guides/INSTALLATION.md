@@ -530,7 +530,15 @@ export MODULE_PATH=/path/to/nginx-markdown-for-agents/components/nginx-module
 
 Dynamic modules can be loaded/unloaded without recompiling NGINX.
 
+The default shown below matches the Rust library's Cargo default features. If
+you built Rust with a different final feature set, export the matching
+comma-separated `NGX_MARKDOWN_RUST_FEATURES` value before `./configure`. Use
+`NGX_MARKDOWN_RUST_FEATURES=none` with `cargo build --no-default-features`.
+The module configuration consumes this explicit contract instead of probing
+the LLVM LTO archive with the system `nm`.
+
 ```bash
+export NGX_MARKDOWN_RUST_FEATURES=default
 ./configure \
     --prefix=/usr/local/nginx \
     --with-compat \
@@ -544,6 +552,7 @@ Dynamic modules can be loaded/unloaded without recompiling NGINX.
 Static modules are compiled directly into the NGINX binary.
 
 ```bash
+export NGX_MARKDOWN_RUST_FEATURES=default
 ./configure \
     --prefix=/usr/local/nginx \
     --add-module=$MODULE_PATH \

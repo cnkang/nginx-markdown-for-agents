@@ -1,385 +1,137 @@
-# FFI Migration Contract — v0.7.0
+# FFI Migration Contract — v0.9.1 Baseline
 
-## Purpose
+## Purpose and ownership
 
-This document defines the ownership, migration status, and compatibility
-constraints for every FFI function and struct at the Rust↔C boundary.
-It serves as the single source of truth for the Rust-first architecture
-migration strategy.
+This document inventories the coordinated Rust↔C boundary after the v0.9.1
+pre-v1 reset. Rust owns conversion and pure decision logic. C owns NGINX
+lifecycle, pools, chains, filters, headers, and request finalization.
 
-## Boundary Overview
+This is a bundled internal ABI, not an external converter SDK. The canonical
+declarations are Rust source plus the generated header; the NGINX module is the
+supported consumer.
 
-The FFI boundary is implemented in:
-- **Rust**: `components/rust-converter/src/ffi/` (abi.rs, exports.rs, convert.rs, options.rs, memory.rs, streaming.rs, incremental.rs)
-- **C header** (auto-generated): `components/rust-converter/include/markdown_converter.h`
-- **C header** (checked-in copy): `components/nginx-module/src/markdown_converter.h`
-- **C consumer**: `components/nginx-module/src/ngx_http_markdown_*.c/h`
+## ABI identity
 
-## FFI Function Registry
+The baseline identifier is `MARKDOWN_ABI_VERSION = 1`.
+`markdown_abi_version()` returns the linked Rust value. NGINX checks it during
+preconfiguration and refuses directive parsing and startup on mismatch. Cargo
+package version is
+release metadata and is not a substitute for this ABI identifier.
 
-| FFI Function | Rust Owner | C Consumer | Migration Status | Compat Constraint |
-|-------------|-----------|-----------|-----------------|------------------|
-| `markdown_converter_new` | Rust | C | **Stable** | Returns opaque handle |
-| `markdown_convert` | Rust | C | **Stable** | Full-buffer conversion |
-| `markdown_converter_free` | Rust | C | **Stable** | Releases handle |
-| `markdown_result_free` | Rust | C | **Stable** | Releases result buffers |
-| `markdown_negotiate_accept` | Rust | C | **v0.7.0 NEW** | Accept header negotiation |
-| `markdown_build_header_plan` | Rust | C | **v0.7.0 NEW** | Returns Rust-owned plan + opaque handle |
-| `markdown_header_plan_free` | Rust | C | **v0.7.0 NEW** | Releases plan handle and owned buffers |
-| `markdown_streaming_new` | Rust | C | **Stable** | Streaming converter handle |
-| `markdown_streaming_new_with_code` | Rust | C | **Stable** | Streaming converter handle with error code |
-| `markdown_streaming_feed` | Rust | C | **Stable** | Incremental input |
-| `markdown_streaming_finalize` | Rust | C | **Stable** | End-of-stream |
-| `markdown_streaming_abort` | Rust | C | **Stable** | Error cleanup |
-| `markdown_streaming_output_free` | Rust | C | **Stable** | Releases output buffer |
-| `markdown_incremental_*` | Rust | C | **Stable** | Incremental API |
+## Production FFI registry
 
-## FFI Struct Registry
+The following families have current NGINX production consumers:
 
-| Struct | Rust Owner | Size (bytes) | Layout Stability | Migration Status |
-|--------|-----------|-------------|-----------------|-----------------|
-| `MarkdownOptions` | Rust→C (input) | — | `repr(C)`, tail-append only | **Stable** |
-| `MarkdownResult` | Rust→C (output) | 64 | `repr(C)`, tail-append only | **Stable** |
-| `FFIAcceptResult` | Rust→C (output) | 2 | `repr(C)` | **v0.7.0 NEW** |
-| `FFIHeaderPlan` | Rust→C (output) | ABI-defined | `repr(C)` + opaque handle | **v0.7.0 NEW** |
-| `StreamingConverterHandle` | Rust (opaque) | — | Opaque pointer | **Stable** |
-| `MarkdownConverterHandle` | Rust (opaque) | — | Opaque pointer | **Stable** |
+| Family | Exports | Contract |
+|--------|---------|----------|
+| Converter | `markdown_converter_new`, `markdown_convert`, `markdown_result_free`, `markdown_converter_free` | Per-worker handle and full-buffer conversion |
+| Options/results | `markdown_options_init`, `markdown_result_init` | Complete semantic initialization |
+| Accept | `markdown_negotiate_accept` | Rust-owned RFC negotiation |
+| Eligibility | `markdown_decide_eligibility` | Pure eligibility decision |
+| Conditional | `markdown_decide_conditional` | Cache mode, precedence, and bypass decision |
+| Header plan | `markdown_build_header_plan`, `markdown_header_plan_init`, `markdown_header_plan_free` | Rust-owned atomic plan, C application |
+| Base URL | `markdown_trusted_proxies_new`, `markdown_trusted_proxies_push`, `markdown_trusted_proxies_free`, `markdown_decide_base_url` | CIDR-aware trusted forwarding decision |
+| Decompression | `markdown_decompress_bounded`, `markdown_decomp_result_init`, `markdown_decompress_free` | Bounded Rust decompression path |
+| Config conflicts | `markdown_detect_conflicts`, `markdown_free_conflicts` | Config-time profile/explicit conflict list |
+| Error/reason | `markdown_classify_error_code`, `markdown_reason_code_str`, `markdown_reason_code_metric_key`, `markdown_reason_code_count` | Canonical cross-language classification and labels |
+| Streaming | `markdown_streaming_new_with_code`, `markdown_streaming_feed`, `markdown_streaming_finalize`, `markdown_streaming_abort`, `markdown_streaming_safe_finish`, `markdown_streaming_output_free` | Streaming request lifecycle |
+| Incremental | `markdown_incremental_new_with_code`, `markdown_incremental_feed`, `markdown_incremental_finalize`, `markdown_incremental_free` | Bounded incremental conversion |
+| ABI alignment | `markdown_abi_version` | Startup-enforced Rust/C version match |
 
-## Error Code Registry
+The generated header contains only the bundled production boundary. Test-only
+Rust helpers are not emitted as C declarations.
 
-Reason code ownership follows the same single-source contract: Rust defines the
-canonical reason-code values and C consumes/mirrors without introducing
-independent semantic forks.
+## Removed v0.9.1 entries
 
-| Code | Constant | Category | Owner | Since |
-|------|----------|----------|-------|-------|
-| 0 | `ERROR_SUCCESS` | — | Rust | v0.5.0 |
-| 1 | `ERROR_PARSE` | conversion | Rust | v0.5.0 |
-| 2 | `ERROR_ENCODING` | conversion | Rust | v0.5.0 |
-| 3 | `ERROR_TIMEOUT` | resource_limit | Rust | v0.5.0 |
-| 4 | `ERROR_MEMORY_LIMIT` | resource_limit | Rust | v0.5.0 |
-| 5 | `ERROR_INVALID_INPUT` | conversion | Rust | v0.5.0 |
-| 6 | `ERROR_BUDGET_EXCEEDED` | resource_limit | Rust (streaming) | v0.6.0 |
-| 7 | `ERROR_STREAMING_FALLBACK` | system | Rust (streaming) | v0.6.0 |
-| 8 | `ERROR_POST_COMMIT` | conversion | Rust (streaming) | v0.6.0 |
-| 9 | `ERROR_DECOMPRESSION_BUDGET_EXCEEDED` | resource_limit | Rust | v0.7.0 |
-| 10 | `ERROR_PARSE_TIMEOUT` | resource_limit | Rust | v0.7.0 |
-| 11 | `ERROR_PARSE_BUDGET_EXCEEDED` | resource_limit | Rust | v0.7.0 |
-| 99 | `ERROR_INTERNAL` | system | Rust | v0.5.0 |
+| Removed entry | Evidence | Replacement |
+|---------------|----------|-------------|
+| `MarkdownFlavor::Mdx` / FFI flavor `2` | Selector produced no independent output semantics | `0` CommonMark or `1` GFM |
+| `MarkdownFlavor::OrgMode` / FFI flavor `3` | Selector produced no independent output semantics | `0` CommonMark or `1` GFM |
+| `FFIStreamingInput.engine` and Rust `StreamingEngine` | Duplicated the sole public streaming policy; no independent backend behavior | `FFIStreamingInput.policy` (`off`, `auto`, `force`) |
+| `FFIConditionalResult` | Only served the old primitive conditional helper; `matched_etag_len` was reserved and always zero | `FFIConditionalDecision` |
+| `markdown_check_conditional` | No production C consumer; superseded by complete mode/precedence/bypass API | `markdown_decide_conditional` |
+| `markdown_conditional_result_init` | Its result type was removed | Initialize/use `FFIConditionalDecision` through its owning path |
+| `markdown_build_base_url` | No production C consumer; lacked trusted-proxy/source decision context | `markdown_decide_base_url` |
+| `markdown_accept_result_init`, `markdown_decision_result_init` | No production caller; decision result type was unused | Owning C path initializes active outputs |
+| `markdown_make_decision`, `markdown_decide_streaming` | No production caller; C runtime owns the actual request/streaming decision | Production C decision paths |
+| `markdown_decide_error_behavior`, `markdown_error_to_reason_code` | No production caller | C error policy plus active reason accessors |
+| `markdown_validate_url`, `markdown_is_dangerous_url` | No production caller | Rust converter's internal URL validation |
+| `markdown_get_diagnostics_schema`, `markdown_free_diagnostics` | Separate Rust specimen drifted from the C endpoint | C diagnostics renderer and schema document |
+| `markdown_incremental_new`, `markdown_streaming_new` | Redundant wrappers hid constructor error codes | Corresponding `_new_with_code` exports |
+| `markdown_streaming_finish`, `markdown_streaming_free`, `markdown_streaming_reason` | No production caller; duplicated finalize/abort/error-code paths | `finalize`, `abort`, `safe_finish`, and return codes |
 
-## Migration Priority
+## Shared struct policy
 
-Functions ordered by migration risk and complexity (highest first):
+### `MarkdownOptions` and `StreamingOptions`
 
-1. **`markdown_convert`** — Core conversion; already Rust-owned. No migration needed.
-2. **`markdown_negotiate_accept`** — New in v0.7.0; Rust-first from inception.
-3. **Error classification** — C-side `ngx_http_markdown_classify_error()` must stay in sync with Rust `ConversionError::code()`. Adding new Rust variants requires updating C-side switch.
-4. **Config option structs** — `MarkdownOptions` fields added at tail only; C-side init sites must be updated.
+These remain separate because their lifecycles and consumers differ. Repeated
+semantic fields must be updated together, but v0.9.1 does not combine the
+structs merely for aesthetic deduplication. Both flavor fields accept only 0
+(CommonMark) and 1 (GFM).
 
-## Compatibility Rules
+### Config/profile structs
 
-1. **Tail-append only**: New fields in `repr(C)` structs MUST be appended after existing fields. Never reorder or insert.
-2. **Feature-gated fields**: Streaming/incremental-only fields are `#ifdef`-gated in the C header. Layout drift within a feature gate is a breaking change.
-3. **Header sync**: Both copies of `markdown_converter.h` MUST be byte-identical. `make check-headers` enforces this.
-4. **Error code uniqueness**: Every `ERROR_*` constant MUST have a unique value. The Rust `layout_tests::test_error_codes_distinct` test enforces this.
-5. **Opaque pointers**: `MarkdownConverterHandle` and `StreamingConverterHandle` are opaque to C. C never dereferences them.
-6. **Header plan lifetime**: `FFIHeaderPlan.entries` remains valid until `markdown_header_plan_free()`; C must not retain pointers after free.
+`FFIExplicitConfig` and `FFIEffectiveConfig` contain one streaming field:
+`streaming` (`off=0`, `auto=1`, `force=2`). There is no independent engine
+field. `markdown_detect_conflicts` consumes these snapshots at configuration
+time; request-path semantics remain in the C effective configuration.
 
-## Zero/Default Initialization Strategy
+### Results and handles
 
-### Strategy
+Result pointer fields are Rust-owned until their matching free function.
+Opaque converter, streaming, incremental, header-plan, and trusted-proxy
+handles are consumed only by their documented finalizer/free operation. C must
+not use a handle or borrowed pointer after consumption.
 
-All FFI structs crossing the Rust↔C boundary MUST be initialized via their
-corresponding `markdown_*_init()` helper function. Direct zero-initialization
-(`memset(&s, 0, sizeof(s))`) and C literal initialization (`= {0}`) are
-**prohibited** for FFI structs.
+## Initialization contract
 
-### Rationale
+Shared FFI structs with semantic defaults use their matching init helper rather
+than a partial literal or caller-side `memset`. The active helpers include:
 
-When new fields are appended to structs (tail-append ABI evolution per
-Compatibility Rule #1), literal initialization may miss newly added fields.
-Helper functions guarantee that **all** fields — including future ones added in
-later versions — are set to valid, semantically correct defaults. This
-eliminates an entire class of bugs where:
+- `markdown_options_init`
+- `markdown_result_init`
+- `markdown_header_plan_init`
+- `markdown_decomp_result_init`
 
-1. A new field is appended to a `repr(C)` struct in Rust.
-2. C call sites using `= {0}` or `memset` compile without error.
-3. The new field receives a zero bit pattern that may not represent a valid
-   default (e.g., a zero enum discriminant mapping to an unintended variant,
-   or a zero budget meaning "unlimited" instead of "use default").
+Tests may use a single centralized helper that calls the production initializer.
+Adding a field requires an ABI version increment plus updates to the
+initializer, reset/free path, Rust layout test, C layout assertion, and all
+semantic consumers in the same change. The only future exception would be an
+explicitly adopted and validated size-tagged struct protocol.
 
-Helper functions are maintained alongside the struct definition in Rust and
-are regenerated by cbindgen, ensuring they always cover every field.
+## Error and panic contract
 
-### Available Helpers
+Error constants are defined in Rust and emitted to the header. C classification
+must cover every code in the relevant category. Non-trivial exports catch Rust
+panics; output structs are fail-safe before the catch and committed only after
+success. Cleanup helpers also catch panics so unwinding never crosses C.
 
-| Helper Function | Struct Initialized | Since |
-|----------------|-------------------|-------|
-| `markdown_options_init()` | `MarkdownOptions` | v0.7.0 |
-| `markdown_result_init()` | `MarkdownResult` | v0.7.0 |
-| `markdown_accept_result_init()` | `FFIAcceptResult` | v0.7.0 |
-| `markdown_conditional_result_init()` | `FFIConditionalResult` | v0.7.0 |
-| `markdown_decision_result_init()` | `FFIDecisionResult` | v0.7.0 |
-| `markdown_header_plan_init()` | `FFIHeaderPlan` | v0.7.0 |
+NULL and empty inputs are validated independently on both sides of the
+boundary. Empty output buffers are represented as `NULL`/0. No C allocator may
+free Rust-owned memory.
 
-Each helper:
-- Accepts a non-NULL pointer to the target struct.
-- Sets every field to its semantically correct default value.
-- Is safe to call on already-initialized structs (idempotent).
-- Is a no-op when passed NULL (defensive guard).
+## v1 freeze
 
-Corresponding cleanup/free functions release any Rust-owned resources:
+After v0.9.1, existing layouts, discriminants, ownership rules, and export
+signatures are frozen for the bundled v1 contract. Prefer new structs or
+exports for additive work. Any permitted incompatible change increments
+`MARKDOWN_ABI_VERSION`, updates both halves atomically, adds mismatch and layout
+tests, and is called out as breaking release behavior.
 
-| Cleanup Function | Struct | Notes |
-|-----------------|--------|-------|
-| `markdown_result_free()` | `MarkdownResult` | Frees output buffer; idempotent |
-| `markdown_header_plan_free()` | `FFIHeaderPlan` | Frees plan entries and handle |
-| `markdown_converter_free()` | `MarkdownConverterHandle` | Releases converter |
-| `markdown_streaming_free()` | `StreamingConverterHandle` | Releases streaming handle; pairs with both `markdown_streaming_new` and `markdown_streaming_new_with_code` |
-| `markdown_incremental_free()` | `IncrementalConverterHandle` | Releases incremental handle |
-| `markdown_streaming_output_free()` | streaming output buffer | Frees (data, len) pair |
+An external third-party ABI can be promised only through a separate decision
+that publishes a standalone SDK/library, support matrix, symbol/versioning
+policy, and conformance suite. Until then, third-party consumers must not infer
+support from the generated header.
 
-### C-side Usage Pattern
+## Required verification
 
-**Correct** — use helper initialization:
-
-```c
-MarkdownOptions opts;
-markdown_options_init(&opts);       /* all fields set to valid defaults */
-opts.max_size = conf->max_size;     /* override only what you need */
-opts.decompression_budget = conf->decompression_budget;
-
-FFIAcceptResult accept_result;
-markdown_accept_result_init(&accept_result);
-markdown_negotiate_accept(accept_header.data, accept_header.len,
-                          on_wildcard, &accept_result);
-
-FFIHeaderPlan plan;
-markdown_header_plan_init(&plan);
-markdown_build_header_plan(content_type, content_len, etag,
-                           vary, &plan);
-/* ... use plan ... */
-markdown_header_plan_free(&plan);   /* release Rust-owned resources */
+```bash
+cargo fmt --all -- --check
+cargo check --locked --all-targets --all-features
+make test-rust
+make check-headers
+make test-nginx-unit
+bash tools/harness/detect_ffi_panic_safety.sh --strict
+bash tools/doctor/tests/test_doctor_config.sh
+make docs-check
 ```
-
-**Prohibited** — literal or memset initialization:
-
-```c
-/* WRONG: may miss fields added in future versions */
-MarkdownOptions opts = {0};
-opts.max_size = conf->max_size;
-
-/* WRONG: zero bit pattern may not be a valid default */
-FFIHeaderPlan plan;
-memset(&plan, 0, sizeof(plan));
-
-/* WRONG: partial initialization */
-MarkdownResult result = { .output = NULL, .output_len = 0 };
-```
-
-### Enforcement
-
-1. **CI header drift check** (`make check-headers`): Detects when Rust struct
-   definitions change but C headers are not regenerated. If a new field is
-   added, the helper function is automatically updated by cbindgen.
-
-2. **Layout tests** (Rust `layout_tests` module + C `static_assert`): Verify
-   that struct sizes and field offsets match between Rust and C. A mismatch
-   indicates the init helper may be out of sync.
-
-3. **Code review convention**: Any C code that initializes an FFI struct
-   without calling the corresponding `markdown_*_init()` function should be
-   flagged during review. The pattern `StructName varname = {0}` or
-   `memset(&varname, 0, sizeof(varname))` for FFI structs is a review
-   rejection signal.
-
-4. **Rule 15 (FFI cross-language boundary)**: AGENTS.md Rule 15 requires that
-   Rust FFI changes update all C-side init sites. Using helpers instead of
-   literal initialization means init sites automatically pick up new field
-   defaults without per-site changes.
-
-> **Note**: The CI header drift check and layout tests catch ABI mismatches at
-> the binary level, but initialization correctness (ensuring all fields have
-> valid semantic defaults) requires disciplined use of helper functions. The
-> two mechanisms are complementary.
-
----
-
-## C-side Pure Logic Audit (v0.7.0)
-
-This section identifies C-side functions that perform pure computation without
-NGINX API dependencies (pool alloc, chain ops, header list push, request
-finalize, etc.). Per the boundary contract §2.2, these belong on the Rust side
-and are candidates for migration.
-
-### Automated First-Pass Detector (advisory)
-
-`tools/harness/detect_c_pure_logic.sh` provides a fast, automated first-pass
-signal that complements this manual audit. It scans the C module sources and
-flags functions that reference no NGINX API as migration candidates. The
-detector runs in advisory mode as part of `make harness-security-checks`
-(it prints findings but never blocks CI) and has a `--check` strict mode for
-deliberate, scoped enforcement runs. **This audit table — not the detector —
-remains the authoritative source for migration decisions** (the detector is a
-heuristic and intentionally over-reports, since the contract permits a curated
-backlog of known C-side pure-logic functions).
-
-### Audit Methodology
-
-
-1. Scanned all `.c` files under `components/nginx-module/src/`
-2. Classified each function by its dependency on NGINX APIs
-3. Functions that only perform computation, string matching, enum mapping, or
-   data classification without calling `ngx_palloc`, `ngx_list_push`,
-   `ngx_http_send_header`, `ngx_http_finalize_request`, or similar NGINX
-   lifecycle APIs are marked as **pure logic**
-4. Functions that mix pure logic with NGINX glue are marked as **mixed** with
-   notes on extractable portions
-
-### Pure Logic Functions — Migration Candidates
-
-| # | Function | File | Current Responsibility | Pure Logic? | Priority | Complexity |
-|---|----------|------|----------------------|-------------|----------|------------|
-| 1 | `ngx_http_markdown_classify_error` | `ngx_http_markdown_error.c` | Maps Rust error codes to error categories (conversion/resource_limit/system) | **Yes** — pure switch/case mapping | High | Low |
-| 2 | `ngx_http_markdown_error_category_string` | `ngx_http_markdown_error.c` | Returns human-readable string for error category enum | **Yes** — pure enum→string lookup | High | Low |
-| 3 | `ngx_http_markdown_check_method` | `ngx_http_markdown_eligibility.c` | Checks if request method is GET/HEAD | **Yes** — reads `r->method` field only (no API call) | Medium | Low |
-| 4 | `ngx_http_markdown_check_status` | `ngx_http_markdown_eligibility.c` | Checks if response status is 200 | **Yes** — reads `r->headers_out.status` field only | Medium | Low |
-| 5 | `ngx_http_markdown_check_content_type` | `ngx_http_markdown_eligibility.c` | Matches Content-Type against allowlist with prefix+boundary semantics | **Yes** — pure string comparison logic | High | Medium |
-| 6 | `ngx_http_markdown_check_size_limit` | `ngx_http_markdown_eligibility.c` | Checks Content-Length against configured max_size | **Yes** — pure numeric comparison | Medium | Low |
-| 7 | `ngx_http_markdown_is_streaming` | `ngx_http_markdown_eligibility.c` | Detects unbounded streaming content types (SSE, configured exclusions) | **Yes** — pure string matching against type list | High | Medium |
-| 8 | `ngx_http_markdown_check_eligibility` | `ngx_http_markdown_eligibility.c` | Orchestrates all eligibility checks into a decision | **Yes** — pure decision logic composing sub-checks | High | Medium |
-| 9 | `ngx_http_markdown_eligibility_string` | `ngx_http_markdown_eligibility.c` | Returns human-readable string for eligibility enum | **Yes** — pure enum→string lookup | Medium | Low |
-| 10 | `ngx_http_markdown_reason_from_eligibility` | `ngx_http_markdown_reason.c` | Maps eligibility enum to reason code string | **Mixed** — pure mapping but uses `ngx_log_error` for unknown values | High | Low |
-| 11 | `ngx_http_markdown_reason_from_error_category` | `ngx_http_markdown_reason.c` | Maps error category to failure reason code string | **Mixed** — pure mapping but uses `ngx_log_error` for unknown values | High | Low |
-| 12 | `ngx_http_markdown_reason_converted` | `ngx_http_markdown_reason.c` | Returns `converted` reason code (lowercase `as_str()`) | **Yes** — trivial accessor | Medium | Low |
-| 13 | `ngx_http_markdown_reason_failed_open` | `ngx_http_markdown_reason.c` | Returns `failed_open` reason code (lowercase `as_str()`) | **Yes** — trivial accessor | Medium | Low |
-| 14 | `ngx_http_markdown_reason_failed_closed` | `ngx_http_markdown_reason.c` | Returns `failed_closed` reason code (lowercase `as_str()`) | **Yes** — trivial accessor | Medium | Low |
-| 15 | `ngx_http_markdown_reason_skip_accept` | `ngx_http_markdown_reason.c` | Returns `skipped_accept` reason code (lowercase `as_str()`) | **Yes** — trivial accessor | Medium | Low |
-| 16 | `ngx_http_markdown_reason_ct_route_default` | `ngx_http_markdown_reason.c` | Returns "CT_ROUTE_DEFAULT" reason code | **Yes** — trivial accessor | Low | Low |
-| 17 | `ngx_http_markdown_reason_ct_route_configured` | `ngx_http_markdown_reason.c` | Returns "CT_ROUTE_CONFIGURED" reason code | **Yes** — trivial accessor | Low | Low |
-| 18 | `ngx_http_markdown_detect_compression` | `ngx_http_markdown_decompression.c` | Detects compression type from Content-Encoding header value | **Mixed** — reads `r->headers_out.content_encoding` then does pure string matching | High | Low |
-| 19 | `ngx_http_markdown_chain_size` | `ngx_http_markdown_decompression.c` | Calculates total size of chain buffers | **Mixed** — iterates NGINX chain struct (pointer arithmetic only, no API) | Low | Low |
-| 20 | `ngx_http_markdown_calc_output_size` | `ngx_http_markdown_decompression.c` | Estimates safe decompression output buffer size with budget cap | **Mixed** — pure arithmetic but uses `ngx_log_error` for diagnostics | High | Low |
-| 21 | `ngx_http_markdown_const_strncasecmp` | `ngx_http_markdown_conversion_impl.h` | Case-insensitive byte comparison for const-qualified slices | **Yes** — pure byte comparison | Low | Low |
-| 22 | `ngx_http_markdown_strncasecmp_const` | `ngx_http_markdown_headers_impl.h` | Case-insensitive comparison mirroring strncasecmp semantics | **Yes** — pure byte comparison | Low | Low |
-| 23 | `ngx_http_markdown_path_rbtree_choose_branch` | `ngx_http_markdown_config_core_impl.h` | RB-tree branch direction for path metric nodes | **Yes** — pure comparison logic | Low | Low |
-| 24 | `ngx_http_markdown_cookie_matches_pattern` | `ngx_http_markdown_auth.c` | Matches cookie name against configured pattern (glob/prefix) | **Yes** — pure string/pattern matching | Medium | Medium |
-| 25 | `ngx_http_markdown_cache_control_token_is_public` | `ngx_http_markdown_auth.c` | Checks if a Cache-Control token is "public" | **Yes** — pure string comparison | Low | Low |
-| 26 | `ngx_http_markdown_token_equals_ignore_case` | `ngx_http_markdown_auth.c` | Case-insensitive token comparison | **Yes** — pure byte comparison | Low | Low |
-| 27 | `ngx_http_markdown_next_cache_control_token` | `ngx_http_markdown_auth.c` | Tokenizes Cache-Control header value | **Yes** — pure parsing/tokenization | Medium | Medium |
-| 28 | `ngx_http_markdown_skip_cache_control_separators` | `ngx_http_markdown_auth.c` | Skips whitespace/comma separators in Cache-Control | **Yes** — pure cursor advancement | Low | Low |
-| 29 | `ngx_http_markdown_trim_cache_control_token` | `ngx_http_markdown_auth.c` | Trims whitespace from token boundaries | **Yes** — pure cursor adjustment | Low | Low |
-| 30 | Streaming reason code accessors (11 functions) | `ngx_http_markdown_reason.c` | Return static reason code strings for streaming paths | **Yes** — trivial accessors | Low | Low |
-
-### Migration Priority Summary
-
-**High Priority** (should migrate in v0.7.0–v0.8.0):
-
-| Category | Functions | Rationale |
-|----------|-----------|-----------|
-| Error classification | #1, #2 | Already mirrors Rust enum; C switch must stay in sync manually — single-source in Rust eliminates drift risk (R04, R08) |
-| Eligibility/decision logic | #5, #7, #8 | Core decision logic; design §2.2 assigns to Rust |
-| Reason code mapping | #10, #11 | REQ-0700-RUST-006 mandates Rust as single source for reason codes |
-| Compression detection | #18 | Design §2.2 assigns bounded decompression to Rust |
-| Decompression budget calc | #20 | Design §2.2 assigns bounded decompression budget logic to Rust |
-| Content-type matching | #5 | Part of conversion decision; should be input to Rust decision engine |
-
-**Medium Priority** (v0.8.0–v0.9.0):
-
-| Category | Functions | Rationale | Tracking |
-|----------|-----------|-----------|----------|
-| Simple eligibility checks | #3, #4, #6, #9 | Trivial but part of decision chain; migrate when decision engine absorbs full eligibility | 0.9.0-tracking: ELIGIBILITY-MIGRATE |
-| Reason code accessors | #12–#15 | Migrate when reason codes become Rust-only enum | 0.9.0-tracking: REASON-REGISTRY |
-| Auth pattern matching | #24, #27 | Token/cookie validation is pure logic per §2.2 | 0.9.0-tracking: AUTH-PATTERN-MIGRATE |
-
-**Low Priority** (v0.9.0+):
-
-| Category | Functions | Rationale | Tracking |
-|----------|-----------|-----------|----------|
-| String utilities | #21, #22, #23, #25, #26, #28, #29 | Generic helpers; low risk staying in C | 0.9.0-tracking: C-RETAIN-STRING-UTILS |
-| Streaming reason accessors | #30 | Trivial; migrate with streaming engine consolidation | 0.9.0-tracking: STREAMING-CONSOLIDATE |
-| Content-type route codes | #16, #17 | Trivial accessors with no drift risk | 0.9.0-tracking: C-RETAIN-CT-ROUTE |
-
-### Functions Confirmed as C-side Retained (Not Migration Candidates)
-
-These functions use NGINX APIs and correctly remain on the C side per §2.1:
-
-| Function | File | NGINX API Dependency | Tracking |
-|----------|------|---------------------|----------|
-| `ngx_http_markdown_should_convert` | `ngx_http_markdown_accept.c` | `ngx_list_part_t` iteration, `r->headers_in`, `ngx_log_debug` | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
-| `ngx_http_markdown_handle_if_none_match` | `ngx_http_markdown_conditional.c` | `ngx_pcalloc`, `ngx_pfree`, FFI calls, `ngx_log_*` | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
-| `ngx_http_markdown_send_304` | `ngx_http_markdown_conditional.c` | `ngx_list_push`, `ngx_pnalloc`, `ngx_http_send_header`, `ngx_http_finalize_request` | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
-| `ngx_http_markdown_decompress_gzip` | `ngx_http_markdown_decompression.c` | `ngx_pnalloc`, `ngx_create_temp_buf`, `ngx_alloc_chain_link`, pool ops | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
-| `ngx_http_markdown_decompress_brotli` | `ngx_http_markdown_decompression.c` | Same pool/chain NGINX APIs | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
-| `ngx_http_markdown_decompress` | `ngx_http_markdown_decompression.c` | Dispatcher using NGINX logging | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
-| `ngx_http_markdown_buffer_init` | `ngx_http_markdown_buffer.c` | `ngx_pool_cleanup_add` | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
-| `ngx_http_markdown_buffer_append` | `ngx_http_markdown_buffer.c` | `ngx_alloc`/`ngx_free` (heap, not pool — but tied to pool cleanup) | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
-| `ngx_http_markdown_add_private_cache_control_header` | `ngx_http_markdown_auth.c` | `ngx_list_push` | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
-| `ngx_http_markdown_dynconf_snapshot_*` | `ngx_http_markdown_dynconf_snapshot.c` | `ngx_slprintf`, reads conf struct | 0.9.0-tracking: DYNCONF-SNAPSHOT |
-| `ngx_http_markdown_diagnostics_*` | `ngx_http_markdown_diagnostics.c` | NGINX handler registration, pool alloc, chain construction | 0.9.0-tracking: C-RETAIN-NGINX-GLUE |
-
-> **Tracking reference**: Per-bucket tracking entries (format
-> `0.9.0-tracking: <ID>`) are resolved in
-> `docs/project/0.9.0-migration-tracking.md`. Low-priority buckets marked
-> `C-RETAIN-*` are explicitly *retained in C* (not migration candidates) and
-> must not be reclassified as "must migrate" without a new risk rationale.
-
-### Extractable Pure Logic from Mixed Functions
-
-Some functions mix pure logic with NGINX glue. The pure portions can be
-extracted into Rust while the NGINX glue remains in C:
-
-| Function | Extractable Logic | Remaining C Glue |
-|----------|------------------|------------------|
-| `ngx_http_markdown_detect_compression` | String matching against "gzip"/"deflate"/"br" | Reading `r->headers_out.content_encoding` |
-| `ngx_http_markdown_calc_output_size` | Arithmetic: `min(input*10, budget, UINT_MAX)` | Logging warnings |
-| `ngx_http_markdown_reason_from_eligibility` | Enum→string mapping | Logging unknown values |
-| `ngx_http_markdown_reason_from_error_category` | Enum→string mapping | Logging unknown values |
-| `ngx_http_markdown_check_eligibility` | Decision composition | Reading request struct fields |
-
-### Migration Strategy Notes
-
-1. **Phase 1 (v0.7.0)**: The Rust decision engine (`src/decision/mod.rs`)
-   already implements `make_decision()` which subsumes eligibility checks #3–#8.
-   The C-side eligibility functions remain as a parallel path until the FFI
-   integration is complete. No immediate removal needed.
-
-2. **Error classification (#1, #2)**: Should be the first to migrate because
-   the Rust `ConversionError` enum is already the source of truth. The C-side
-   `classify_error()` switch statement must be manually kept in sync — moving
-   it to Rust eliminates this drift vector entirely.
-
-3. **Reason codes (#10–#17, #30)**: REQ-0700-RUST-006 mandates Rust as single
-   source. The C-side reason code accessors should be replaced by FFI calls to
-   `get_reason_code_string()` once the decision engine is fully integrated.
-
-   **v0.7.0 status (B06.2)**: C-side FFI accessor wrappers are now available in
-   `ngx_http_markdown_reason_ffi.c`:
-   - `ngx_http_markdown_get_reason_code_str(code, &str)` — wraps `markdown_reason_code_str()`
-   - `ngx_http_markdown_get_reason_code_metric_key(code, &str)` — wraps `markdown_reason_code_metric_key()`
-   - `ngx_http_markdown_reason_code_total_count()` — wraps `markdown_reason_code_count()`
-
-   The legacy C-side string literals in `ngx_http_markdown_reason.c` are marked
-   deprecated.  New code must use the FFI accessors.  Full migration of existing
-   callsites will happen when the decision engine integration is complete.
-
-4. **Content-type and streaming detection (#5, #7)**: These are inputs to the
-   conversion decision. When the Rust decision engine absorbs the full
-   eligibility check, these become internal to the Rust side.
-
-5. **Auth token/cookie matching (#24, #27)**: Design §2.2 lists
-   "token/ETag/front-matter/pruning logic" as Rust-owned. Cookie pattern
-   matching is a form of token validation and should migrate.
-
----
-
-## Document Updates
-
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 0.7.0-draft | 2026-05-17 | agent | Initial FFI migration contract for v0.7.0 |
-| 0.7.0-impl | 2026-05-18 | codex | Add header-plan ownership/lifecycle contract |
-| 0.7.0-audit | 2026-05-18 | kiro | C-side pure logic audit: 30 functions identified, prioritized for migration |
-| 0.7.0-b06.2 | 2026-05-18 | kiro | B06.2: Document C-side FFI accessor wrappers for Rust reason codes |
-| 0.7.0-a07.5 | 2026-05-18 | kiro | A07.5: Add zero/default initialization strategy section |
-| 0.8.5-track | 2026-06-29 | Kang | Add per-bucket 0.9.0 tracking references (resolved in docs/project/0.9.0-migration-tracking.md) |

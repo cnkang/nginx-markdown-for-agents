@@ -25,10 +25,10 @@ alerts based on stable reason codes.
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `nginx_markdown_streaming_choice_total{engine="streaming"}` | counter | Requests using true streaming |
-| `nginx_markdown_streaming_choice_total{engine="full_buffer"}` | counter | Requests routed to full-buffer |
-| `nginx_markdown_streaming_choice_total{engine="passthrough"}` | counter | Requests marked passthrough |
-| `nginx_markdown_streaming_choice_total{engine="not_eligible"}` | counter | Requests not eligible |
+| `nginx_markdown_streaming_engine_choice_total{engine="streaming"}` | counter | Requests using true streaming |
+| `nginx_markdown_streaming_engine_choice_total{engine="full_buffer"}` | counter | Requests routed to full-buffer |
+| `nginx_markdown_streaming_engine_choice_total{engine="passthrough"}` | counter | Requests marked passthrough |
+| `nginx_markdown_streaming_engine_choice_total{engine="not_eligible"}` | counter | Requests not eligible |
 
 ### Fallback Counters
 
@@ -92,7 +92,7 @@ All streaming decision logs include these fields:
 | `content_type` | Response Content-Type | e.g., text/html |
 | `content_length_known` | CL header present? | 0 (no), 1 (yes) |
 | `chunked` | Chunked transfer? | 0 (no), 1 (yes) |
-| `markdown_error_policy` | Error policy | pass, fail_closed |
+| `markdown_error_policy` | Error policy | `pass`, `fail_closed`, `status 429`, or `status 503` |
 
 ### Log Levels
 
@@ -112,7 +112,8 @@ endpoint includes streaming sections:
 ```json
 {
   "streaming_config": {
-    "engine": "auto",
+    "policy": "auto",
+    "policy_source": "default",
     "on_error": "pass",
     "threshold": 1048576,
     "precommit_buffer": 262144,
@@ -122,8 +123,11 @@ endpoint includes streaming sections:
 }
 ```
 
-`threshold_explicit: false` means the threshold came from the v0.8
-`markdown_stream_threshold` default, not from an explicit configuration.
+`policy_source` is `configured`, `profile`, or `default`.
+`on_error` preserves the complete unified `markdown_error_policy` value:
+`pass`, `fail_closed`, `status 429`, or `status 503`.
+`threshold_explicit: false` means `markdown_stream_threshold` was not set
+explicitly.
 
 ### streaming_metrics
 
@@ -167,10 +171,10 @@ If `nginx_markdown_streaming_failure_total{phase="postcommit"}` is non-zero:
 
 ### No streaming selections
 
-If `nginx_markdown_streaming_choice_total{engine="streaming"}` is 0
+If `nginx_markdown_streaming_engine_choice_total{engine="streaming"}` is 0
 while `nginx_markdown_streaming_candidate_total` > 0:
 
-1. Check if `markdown_streaming` is set to `on` or `auto`.
+1. Check if `markdown_streaming` is set to `force` or `auto`.
 2. Verify `markdown_stream_threshold` is smaller than typical response sizes.
 3. Check the content coding and cache-validation mode: gzip and deflate can
    stream when decompression is enabled and validation is not `full`; Brotli

@@ -176,7 +176,7 @@ These checks apply **during buffering/conversion** in the body filter path.
 | Field | Value |
 |-------|-------|
 | File | `ngx_http_markdown_conversion_impl.h` passes to Rust converter |
-| Function | Passed as `options->parser_memory_budget` to `markdown_convert()` / `markdown_streaming_new()` |
+| Function | Passed as `options->parser_memory_budget` to `markdown_convert()` / `markdown_streaming_new_with_code()` |
 | Directive | `markdown_parser_budget` (default: 64 MiB) |
 | What | Maximum memory the HTML parser may allocate. Enforced inside the Rust parser. |
 | On exceeded | Error code `ERROR_PARSE_BUDGET_EXCEEDED` (11). Classified as `resource_limit`. |

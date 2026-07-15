@@ -256,7 +256,7 @@ For the complete metrics reference, see
 |--------|-------------------|-------------|
 | `nginx_markdown_streaming_fallback_total{phase,action}` | Pre-commit fallbacks — streaming could not handle content before committing headers | **Yes** — high rate means streaming is ineffective |
 | `nginx_markdown_streaming_failure_total{phase,action}` | Post-commit failures — headers already sent, client may see truncation | **Yes** — any sustained rate is critical |
-| `nginx_markdown_streaming_choice_total{engine}` | Which engine was selected for each request | **Yes** — confirms streaming is actually engaged |
+| `nginx_markdown_streaming_engine_choice_total{engine}` | Which engine was selected for each request | **Yes** — confirms streaming is actually engaged |
 | `nginx_markdown_streaming_candidate_total` | How many requests were evaluated for streaming | **Denominator** — needed for rate calculations |
 | `nginx_markdown_true_streaming_selected_total` | Requests that completed streaming engine selection | **Denominator** — confirms selection funnel |
 | `nginx_markdown_streaming_output_bytes_total` | Total Markdown bytes emitted via streaming | Informational — useful for throughput dashboards |
@@ -300,7 +300,7 @@ sum(rate(nginx_markdown_streaming_failure_total[5m]))
 **Engine choice breakdown** (pie chart or stacked graph):
 
 ```promql
-sum by (engine) (rate(nginx_markdown_streaming_choice_total[5m]))
+sum by (engine) (rate(nginx_markdown_streaming_engine_choice_total[5m]))
 ```
 
 **Fallback breakdown by action** (pass-through vs rejection):
@@ -439,7 +439,7 @@ requests are not streaming or why fallbacks occur.
 - Engine choice metrics show candidates being evaluated
 
 **Phase 1 (Single Location / Canary)**:
-- `engine_choice_total{engine="streaming"}` > 0 and growing
+- `nginx_markdown_streaming_engine_choice_total{engine="streaming"}` > 0 and growing
 - Fallback rate < 5% of candidates
 - Post-commit failure rate = 0% (ideally)
 - Reason codes in logs are predominantly `eligible`

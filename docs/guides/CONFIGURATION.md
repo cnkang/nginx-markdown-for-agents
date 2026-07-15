@@ -19,11 +19,16 @@ The NGINX Markdown filter module provides fine-grained control over HTML-to-Mark
 
 ### Maintenance and Scope Notes
 
-- Directive names and accepted values in this guide are intended to match the module implementation in `components/nginx-module/src/ngx_http_markdown_filter_module.c`.
+- Directive names and accepted values in this guide are intended to match the
+  command table in
+  `components/nginx-module/src/ngx_http_markdown_config_directives_impl.h`.
 - Example configurations are operational templates, not guaranteed drop-in configs for every deployment.
 - For build/runtime preparation steps, use `BUILD_INSTRUCTIONS.md` and `INSTALLATION.md`.
 - Metrics endpoint examples use `/markdown-metrics` as a placeholder path. Use your configured `location` path if different.
 - For “which directive changes which runtime branch,” use [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md) instead of duplicating that rationale here.
+- For the 1.0 stability classification and evidence for every command-table
+  entry, wire schema, and internal FFI group, use the
+  [Public Surface Inventory](../architecture/PUBLIC_SURFACE_INVENTORY.md).
 
 ### Configuration Contexts
 
@@ -986,7 +991,7 @@ markdown_streaming_shadow off;
 
 **Syntax:** `markdown_streaming_zero_copy on | off;`
 **Default:** `off`
-**Context:** location
+**Context:** http, server, location
 
 Enables zero-copy output for streaming chunks. When enabled, non-terminal
 streaming output buffers reference Rust-owned memory directly via the buffer
@@ -1499,6 +1504,13 @@ markdown_chars_per_token 38;
 
 ### OpenTelemetry Integration
 
+> **Stability:** The OTel family is explicitly experimental before 1.0. Span
+> creation and request-scoped export through an internal subrequest are
+> implemented. Collector-backed E2E coverage is not yet part of the release
+> contract. Five unimplemented or duplicate controls are reject-only in 0.9.1;
+> `nginx -t` fails instead of accepting settings with no runtime effect. See the
+> [Public Surface Inventory](../architecture/PUBLIC_SURFACE_INVENTORY.md#active-experimental-and-incomplete-otel-directives).
+
 #### markdown_otel
 
 **Syntax:** `markdown_otel on | off;`
@@ -1545,60 +1557,55 @@ markdown_otel_endpoint /_otel_export;
 #### markdown_otel_tracing
 
 **Syntax:** `markdown_otel_tracing on | off;`
-**Default:** `off`
 **Context:** http, server, location
+**Status:** reject-only in 0.9.1
 
-Enable OTel span creation for conversion request tracing. When enabled, each conversion creates a span with trace context propagation and conversion attributes.
+This duplicate enable switch is no longer accepted. Use `markdown_otel on;`.
 
 ---
 
 #### markdown_otel_metrics
 
 **Syntax:** `markdown_otel_metrics on | off;`
-**Default:** `off`
 **Context:** http, server, location
+**Status:** reject-only in 0.9.1
 
-Enable OTel metrics export via OTLP protocol.
+OTLP metrics export is not implemented. Use a `markdown_metrics` location for
+the module's JSON, text, or Prometheus metrics endpoint.
 
 ---
 
 #### markdown_otel_service_name
 
 **Syntax:** `markdown_otel_service_name <name>;`
-**Default:** `nginx-markdown`
 **Context:** http, server, location
+**Status:** reject-only in 0.9.1
 
-Service name label for OTel resource attributes.
-
-**Example:**
-```nginx
-markdown_otel_service_name my-nginx-markdown;
-```
+The span renderer currently uses the fixed service name `nginx-markdown`.
+Service-name override is not implemented, so this directive fails `nginx -t`.
 
 ---
 
 #### markdown_otel_span_buffer_size
 
 **Syntax:** `markdown_otel_span_buffer_size <number>;`
-**Default:** `1024`
 **Context:** http, server, location
+**Status:** reject-only in 0.9.1
 
-Buffer size for spans when the collector is unreachable. Buffered spans are retried on the next export window.
+The request-scoped exporter has no retry queue. This directive fails
+`nginx -t` instead of pretending to configure buffering.
 
 ---
 
 #### markdown_otel_export_timeout
 
 **Syntax:** `markdown_otel_export_timeout <time>;`
-**Default:** `5s`
 **Context:** http, server, location
+**Status:** reject-only in 0.9.1
 
-Timeout for OTLP HTTP export requests.
-
-**Example:**
-```nginx
-markdown_otel_export_timeout 10s;
-```
+The subrequest exporter does not implement a module-owned timeout. This
+directive fails `nginx -t`; configure proxy timeouts on the internal export
+location when required.
 
 ---
 
@@ -1611,32 +1618,9 @@ markdown_otel_export_timeout 10s;
 **Context:** http, server, location
 **Status:** REMOVED in 0.9.0 — no direct replacement
 
-Routes responses whose body size is at or above the configured threshold to the incremental processing path. When set to `off` (the default), all responses use the existing full-buffer path and behavior is identical to a build without this feature.
-
-**Valid Units:** `k` (kilobytes), `m` (megabytes)
-
-**Example:**
-```nginx
-# Route responses >= 512KB to incremental path
-markdown_large_body_threshold 512k;
-
-# Disable incremental path (default)
-markdown_large_body_threshold off;
-```
-
-**Behavior:**
-- `off` (default): All responses use the full-buffer conversion path
-- `<size>`: Responses at or above the threshold use the incremental conversion path
-
-**Notes:**
-- The incremental path requires the Rust converter to be built with the `incremental` feature (`cargo build --release --features incremental`). If the feature is not compiled but a threshold is configured, the module logs a warning and falls back to the full-buffer path.
-- HEAD requests, 304 responses, and fail-open replays always use the full-buffer path regardless of the threshold setting.
-- Path selection is based on `Content-Length` when available; for chunked responses without `Content-Length`, the module buffers first and evaluates the threshold against the buffered size.
-- Path hit counters (`fullbuffer_path_hits`, `incremental_path_hits`) are exposed through the `markdown_metrics` endpoint.
-- **Hard Limit**: The Rust incremental converter enforces a strict 64 MiB (`64 * 1024 * 1024` bytes) maximum buffer limit. Responses exceeding this size will trigger a `MemoryLimit` error, resulting in the `markdown_error_policy` policy being applied.
-
-
-For the design rationale and rollout guidance, see [LARGE_RESPONSE_DESIGN.md](../architecture/LARGE_RESPONSE_DESIGN.md) and [LARGE_RESPONSE_ROLLOUT.md](LARGE_RESPONSE_ROLLOUT.md).
+This directive is reject-only and must not appear in an active configuration.
+Use `markdown_streaming off|auto|force` with `markdown_stream_threshold` and
+the bounded streaming controls instead.
 
 ---
 
@@ -1880,6 +1864,13 @@ markdown_max_size 5m;
 # After
 markdown_limits memory=5m;
 ```
+
+Two additional compatibility names are also reject-only:
+
+| Removed directive | Required replacement |
+|-------------------|----------------------|
+| `markdown_etag_policy` | `markdown_cache_validation` |
+| `markdown_forwarded_headers` | `markdown_trusted_proxies <CIDR>...` |
 
 ---
 

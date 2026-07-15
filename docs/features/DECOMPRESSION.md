@@ -94,7 +94,7 @@ and respond appropriately.
 | `nginx_markdown_decompression_failures_total` | counter | Total failed decompression attempts (aggregate, all categories). |
 
 In addition, the broad failure classification counter
-`nginx_markdown_failures_total{reason="memory_budget_exceeded"}` is incremented for
+`nginx_markdown_failures_total{reason="resource_limit"}` is incremented for
 budget-exceeded errors (FFI code 9).
 
 ### PromQL Examples
