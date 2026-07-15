@@ -14,7 +14,7 @@ This directory contains project-level status and maintenance-oriented documentat
   - [test-matrix-0-5-0.md](test-matrix-0-5-0.md)
   - [go-nogo-template-0-5-0.md](go-nogo-template-0-5-0.md)
   - [naming-conventions-0-5-0.md](naming-conventions-0-5-0.md)
-- 0.5.5 gate inputs (canonical `release-gates-check-055` inputs):
+- 0.5.5 gate inputs:
   - [release-spec.md](0.5.5-release-spec.md)
   - [release-checklist-0-5-5.md](release-checklist-0-5-5.md)
   - [test-matrix-0-5-5.md](test-matrix-0-5-5.md)

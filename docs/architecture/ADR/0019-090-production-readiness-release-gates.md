@@ -6,7 +6,7 @@ Accepted (0.9.0 contract freeze — Wave 1; gate implementation lands in Wave 7)
 
 ## Context
 
-Each release line has a versioned gate (`release-gates-check-055` …
+Each release line has a versioned gate (`release-gates-check-070` …
 `-080`). 0.9.0 is a breaking production-readiness release and needs its own
 capstone gate. This ADR freezes the gate **name**, structure, and blocking
 semantics now (Wave 1) so downstream specs reference a stable target; the gate body is implemented in the
