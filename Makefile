@@ -66,7 +66,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
-	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-090 release-gates-check-091 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+	docs-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-090 release-gates-check-091 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
         perf-evidence-check \
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
@@ -379,12 +379,6 @@ supply-chain-sbom:
 release-gates-check:
 	python3 tools/release/gates/validate_release_gates.py
 	python3 tools/release/gates/validate_naming.py
-
-release-gates-check-055:
-	python3 tools/release/gates/validate_release_gates_055.py
-
-release-gates-check-060:
-	python3 tools/release/gates/validate_release_gates_060.py
 
 # release-gates-check-070: comprehensive v0.7.0 release readiness gate.
 #
@@ -1021,9 +1015,7 @@ help:
 	@echo "  test-harness             - Run unit tests for harness detector scripts"
 	@echo "  docs-check               - Validate documentation links/style"
 	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"
-	@echo "  release-gates-check      - Validate release gate framework (0.5.0 + 0.5.5)"
-	@echo "  release-gates-check-055  - Validate 0.5.5 release gates (evidence, known-diffs, docs)"
-	@echo "  release-gates-check-060  - Validate 0.6.0 release gates (streaming default, pruning, budget)"
+	@echo "  release-gates-check      - Validate release gate framework (0.5.0)"
 	@echo "  release-gates-check-070  - Validate 0.7.0 release gates (runtime correctness, package compat, fuzz)"
 	@echo "  release-gates-check-080  - Validate 0.8.x release gates (streaming, coverage, matrix, harness boundary)"
 	@echo "  release-gates-check-080-regression - 0.8.x version-independent regression subset (no Cargo version bind)"

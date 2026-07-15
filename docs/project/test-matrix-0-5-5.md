@@ -71,7 +71,7 @@ distinguishes runtime verification targets from static verification targets.
 | Go/no-go criteria definition | Manual audit | Static | `release-governance` |
 | Documentation synchronization | `make docs-check` | Static | `docs-tooling` |
 | Metrics naming in docs | `make release-gates-check` (naming) | Static | `observability-metrics` |
-| 0.5.5 release gates | `make release-gates-check-055` | Static | `release-governance` |
+| 0.5.5 release gates | _(removed — validator deleted)_ | Static | `release-governance` |
 | Command example validation | Manual audit | Static | `docs-tooling` |
 | Harness routing references | `make harness-check` | Static | `harness-sync` |
 | Version framing (CHANGELOG) | Manual audit | Static | `release-governance` |
@@ -91,7 +91,7 @@ distinguishes runtime verification targets from static verification targets.
 |---------------|-----|-----------|
 | Streaming evidence artifact | No automated runtime generation in this workstream | The streaming parity workstream owns evidence generation; this workstream verifies the artifact exists |
 | Command example execution | No automated execution against running NGINX | Requires running NGINX instance; validated manually or via static Accept header check |
-| Release-gate validator version | `make release-gates-check` validates 0.5.0 surfaces, not 0.5.5 | Use `make release-gates-check-055` for 0.5.5-specific gate validation covering the 0.5.5 stabilization workstreams, evidence artifact, and known-difference metadata. The 0.5.0 targets serve as a non-regression baseline. |
+| Release-gate validator version | `make release-gates-check` validates 0.5.0 surfaces, not 0.5.5 | The 0.5.5-specific validator has been removed; 0.5.0 targets serve as a non-regression baseline. |
 
 ## Consistency with Routing Manifest
 
@@ -105,7 +105,7 @@ All verification families referenced in this matrix are defined in
 - `rust-streaming` → focused semantic → `make test-rust-streaming`
 - `nginx-streaming` → focused semantic → `make test-nginx-unit-streaming`
 - `observability-metrics` → focused semantic → `make docs-check`, `make release-gates-check`
-- `release-governance` → focused semantic → `make release-gates-check`, `make release-gates-check-strict`, `make release-gates-check-055`
+- `release-governance` → focused semantic → `make release-gates-check`, `make release-gates-check-strict`
 - `runtime-e2e` → umbrella → `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e`
 - `release-quality` → umbrella → `make harness-check-full`
 
