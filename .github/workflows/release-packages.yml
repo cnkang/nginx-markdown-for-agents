@@ -803,7 +803,7 @@ jobs:
           # Run the 0.9.1 performance evidence gate in blocking mode.
           # Tag releases require module benchmark evidence; the NGINX_BIN
           # from the build job provides the module-enabled binary.
-          python3 tools/perf/evidence_gate_091.py --mode blocking
+          python3 tools/perf/evidence_gate.py --mode blocking
         shell: bash
 
   # ─────────────────────────────────────────────────────────────────────────────

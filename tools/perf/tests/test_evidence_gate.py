@@ -7,7 +7,7 @@ Covers:
   - --allow-skip-module flag in blocking mode
 
 Run:
-    python3 -m pytest tools/perf/tests/test_evidence_gate_091.py -q
+    python3 -m pytest tools/perf/tests/test_evidence_gate.py -q
 
 Requirements: 9.1, 9.3, 9.4
 """
@@ -21,8 +21,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import evidence_gate_091
-from evidence_gate_091 import (
+import evidence_gate
+from evidence_gate import (
     EX_SKIP_NOT_PRESENT,
     _RC_RE,
     _RELEASE_TAG_RE,
@@ -229,8 +229,8 @@ def test_tag_release_job_supplies_module_enabled_nginx():
     assert "BENCHMARK_NGINX_VERSION" in workflow, (
         "Release gate must record the benchmark NGINX version for evidence"
     )
-    assert "python3 tools/perf/evidence_gate_091.py --mode blocking" in workflow
-    assert "evidence_gate_091.py --blocking" not in workflow
+    assert "python3 tools/perf/evidence_gate.py --mode blocking" in workflow
+    assert "evidence_gate.py --blocking" not in workflow
 
 
 def test_module_baseline_contains_measured_critical_scenarios():
@@ -494,7 +494,7 @@ class TestGracefulDegradation:
     def test_non_blocking_exits_75_when_nginx_bin_unset(self, monkeypatch, tmp_path):
         """Non-blocking mode exits with code 75 (SKIP_NOT_PRESENT) when NGINX_BIN unset."""
         monkeypatch.delenv("NGINX_BIN", raising=False)
-        monkeypatch.setattr(evidence_gate_091, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
         output_path = tmp_path / "evidence.json"
 
         exit_code = main([
@@ -508,7 +508,7 @@ class TestGracefulDegradation:
     def test_non_blocking_skip_produces_evidence_pack(self, monkeypatch, tmp_path):
         """Skip produces an evidence pack JSON with skipped=true."""
         monkeypatch.delenv("NGINX_BIN", raising=False)
-        monkeypatch.setattr(evidence_gate_091, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
         output_path = tmp_path / "evidence.json"
 
         main(["--mode", "non-blocking", "--output", str(output_path)])
@@ -559,7 +559,7 @@ class TestAllowSkipModule:
     def test_blocking_with_allow_skip_exits_0(self, monkeypatch, tmp_path):
         """Blocking mode with --allow-skip-module exits 0 when NGINX_BIN unset."""
         monkeypatch.delenv("NGINX_BIN", raising=False)
-        monkeypatch.setattr(evidence_gate_091, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
         output_path = tmp_path / "evidence.json"
 
         exit_code = main([
@@ -573,7 +573,7 @@ class TestAllowSkipModule:
     def test_blocking_with_allow_skip_produces_skipped_evidence(self, monkeypatch, tmp_path):
         """Blocking + --allow-skip-module produces evidence pack with skipped=true."""
         monkeypatch.delenv("NGINX_BIN", raising=False)
-        monkeypatch.setattr(evidence_gate_091, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
         output_path = tmp_path / "evidence.json"
 
         main([
@@ -1301,14 +1301,14 @@ class TestEnvironmentCompatibility:
             },
         }
 
-        monkeypatch.setattr(evidence_gate_091, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
         monkeypatch.setattr(
-            evidence_gate_091, "_validate_baseline_evidence",
+            evidence_gate, "_validate_baseline_evidence",
             lambda *_args: None,
         )
 
         output_path = tmp_path / "perf" / "reports" / "evidence-091.json"
-        metrics, has_baseline, exit_rc = evidence_gate_091._resolve_baseline(
+        metrics, has_baseline, exit_rc = evidence_gate._resolve_baseline(
             current,
             parse_args(["--output", str(output_path)]),
             blocking=False,
