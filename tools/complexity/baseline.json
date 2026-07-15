@@ -17,8 +17,8 @@
     {
       "file": "components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h",
       "function": "ngx_http_markdown_parse_size",
-      "ccn": 31, "length": 84, "params": 1,
-      "note": "Size parser with unit suffixes — many branches for each unit"
+      "ccn": 27, "length": 76, "params": 1,
+      "note": "Size parser with unit suffixes — many branches for each unit (reduced after extracting suffix_scale helper)"
     },
     {
       "file": "components/nginx-module/src/ngx_http_markdown_prometheus_impl.h",
@@ -29,7 +29,7 @@
     {
       "file": "components/nginx-module/src/ngx_http_markdown_payload_impl.h",
       "function": "ngx_http_markdown_decompress_via_rust",
-      "ccn": 20, "length": 200, "params": 5,
+      "ccn": 13, "length": 190, "params": 5,
       "note": "Decompression FFI bridge — error handling and buffer management"
     },
     {
@@ -105,18 +105,6 @@
       "note": "Streaming emitter exit handler — structural closure, block state"
     },
     {
-      "file": "components/rust-converter/src/ffi/exports.rs",
-      "function": "markdown_check_conditional",
-      "ccn": 4, "length": 41, "params": 9,
-      "note": "FFI export — many params from C struct fields"
-    },
-    {
-      "file": "components/rust-converter/src/ffi/exports.rs",
-      "function": "markdown_make_decision",
-      "ccn": 7, "length": 98, "params": 9,
-      "note": "FFI export — many params from C struct fields"
-    },
-    {
       "file": "components/rust-converter/src/decision/reason_code.rs",
       "function": "test_metric_keys_prometheus_format",
       "ccn": 7, "length": 211, "params": 0,
@@ -143,69 +131,26 @@
     {
       "file": "tools/release/gates/validate_release_gates_070.py",
       "function": "_workflow_uses_pinned_toolchain",
-      "ccn": 18, "length": 40, "params": 1,
-      "note": "CI workflow validation — many branch conditions"
+      "ccn": 10, "length": 40, "params": 1,
+      "note": "CI workflow validation — many branch conditions (reduced after extracting _verify_rustup_installer helper)"
     },
     {
       "file": "tools/release/gates/validate_release_gates_070.py",
       "function": "_gate_1_items",
-      "ccn": 8, "length": 22, "params": 10,
-      "note": "Gate item collector — many parameters from gate config"
-    },
-    {
-      "file": "tools/release/gates/validate_naming.py",
-      "function": "validate_names",
-      "ccn": 21, "length": 31, "params": 5,
-      "note": "Naming validator — many pattern checks"
-    },
-    {
-      "file": "tools/harness/detect_open_without_path_validation.py",
-      "function": "_classify_open_call",
-      "ccn": 5, "length": 46, "params": 10,
-      "note": "AST classifier — many parameters from AST node fields"
+      "ccn": 8, "length": 22, "params": 1,
+      "note": "Gate item collector — now takes a single sources dict"
     },
     {
       "file": "tools/render_release_matrix_docs.py",
       "function": "_rn_generate_changes",
-      "ccn": 21, "length": 68, "params": 3,
-      "cognitive_complexity": 17,
-      "note": "Release notes generator — many version comparison branches"
+      "ccn": 10, "length": 68, "params": 3,
+      "note": "Release notes generator — many version comparison branches (reduced after extracting helpers)"
     },
     {
       "file": "tools/ci/check_third_party_notices.py",
       "function": "main",
       "cognitive_complexity": 16,
       "note": "Third-party notice checker — multiple validation steps"
-    },
-    {
-      "file": "tools/docs/check_duplicate_docs.py",
-      "function": "normalize_markdown",
-      "cognitive_complexity": 16,
-      "note": "Markdown normalizer — multiple transformation steps"
-    },
-    {
-      "file": "tools/docs/check_packaging_consistency.py",
-      "function": "check_curl_consistency",
-      "cognitive_complexity": 16,
-      "note": "Packaging consistency checker — multiple validation branches"
-    },
-    {
-      "file": "tools/docs/validate_packaging_matrix.py",
-      "function": "validate",
-      "cognitive_complexity": 17,
-      "note": "Packaging matrix validator — many field checks"
-    },
-    {
-      "file": "tools/render_release_matrix_docs.py",
-      "function": "generate_release_notes",
-      "cognitive_complexity": 17,
-      "note": "Release notes entry point — orchestrates multiple generators"
-    },
-    {
-      "file": "tools/harness/detect_cwe22_paths.py",
-      "function": "_classify_open_call",
-      "ccn": 5, "length": 46, "params": 10,
-      "note": "AST classifier — many parameters from AST node fields"
     },
     {
       "file": "tools/complexity/_compare_baseline.py",

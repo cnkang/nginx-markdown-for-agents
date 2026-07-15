@@ -8,9 +8,7 @@
 # Structs with Rust-provided init helpers:
 #   - MarkdownOptions          → markdown_options_init()
 #   - MarkdownResult           → markdown_result_init()
-#   - FFIAcceptResult          → markdown_accept_result_init()
 #   - FFIConditionalResult     → markdown_conditional_result_init()
-#   - FFIDecisionResult        → markdown_decision_result_init()
 #   - FFIHeaderPlan            → markdown_header_plan_init()
 #   - FFIDecompResult          → markdown_decomp_result_init()
 #
@@ -37,9 +35,7 @@ SRC_DIR="${1:-${REPO_ROOT}/components/nginx-module/src}"
 GUARDED_STRUCTS=(
     "MarkdownOptions"
     "MarkdownResult"
-    "FFIAcceptResult"
     "FFIConditionalResult"
-    "FFIDecisionResult"
     "FFIHeaderPlan"
     "FFIDecompResult"
 )

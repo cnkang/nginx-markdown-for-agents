@@ -23,16 +23,21 @@ from tools.release.gates.validate_package_metadata_070 import (  # noqa: E402
     NFPM_POSTINSTALL_SNIPPETS,
     SMOKE_RPM_REPO_SNIPPETS,
     RELEASE_BUILD_GLIBC_SNIPPETS,
+    RELEASE_RUST_BUILD_INVARIANTS,
+    RETIRED_RELEASE_FFI_SYMBOLS,
     SIGN_AND_PUBLISH_FORBIDDEN_SNIPPETS,
     SIGN_AND_PUBLISH_SECURITY_SNIPPETS,
     STANDALONE_DEB_SNIPPETS,
     STANDALONE_RPM_SPEC_SNIPPETS,
     STANDALONE_RPM_WORKFLOW_SNIPPETS,
+    STANDALONE_VERSION_FORBIDDEN_SNIPPETS,
+    ValidationResult,
     _contains_make_build_command,
     _is_nginx_version,
     _split_inline_list,
     _strip_unquoted_comment,
     _unquote,
+    _validate_standalone_deb,
     extract_nginx_versions,
 )
 
@@ -418,10 +423,36 @@ class TestReleaseGateSnippetExpectations:
         assert "/usr/lib64/nginx/modules/ngx_http_markdown_filter_module.so" in STANDALONE_RPM_SPEC_SNIPPETS
 
     def test_standalone_workflows_validate_input_version(self) -> None:
-        """Ensure standalone DEB and RPM workflows validate input versions."""
-        validator = './packaging/scripts/validate-version.sh "${{ inputs.version }}"'
-        assert validator in STANDALONE_DEB_SNIPPETS
-        assert validator in STANDALONE_RPM_WORKFLOW_SNIPPETS
+        """Ensure workflow expressions are isolated from shell evaluation."""
+        env_binding = "INPUT_VERSION: ${{ inputs.version }}"
+        validator = './packaging/scripts/validate-version.sh "$INPUT_VERSION"'
+        direct_interpolation = (
+            './packaging/scripts/validate-version.sh "${{ inputs.version }}"'
+        )
+
+        for snippets in (STANDALONE_DEB_SNIPPETS, STANDALONE_RPM_WORKFLOW_SNIPPETS):
+            assert env_binding in snippets
+            assert validator in snippets
+            assert direct_interpolation not in snippets
+        assert direct_interpolation in STANDALONE_VERSION_FORBIDDEN_SNIPPETS
+
+    def test_standalone_workflow_rejects_direct_expression_in_shell(
+        self, monkeypatch
+    ) -> None:
+        """Fail when a workflow expression is interpolated into shell source."""
+        direct_interpolation = (
+            './packaging/scripts/validate-version.sh "${{ inputs.version }}"'
+        )
+        content = "\n".join([*STANDALONE_DEB_SNIPPETS, direct_interpolation])
+        monkeypatch.setattr(validator, "read_safe", lambda _path: content)
+        result = ValidationResult()
+
+        _validate_standalone_deb(result)
+
+        assert any(
+            status == "FAIL" and ":forbid:" in check_id
+            for status, check_id, _message in result.results
+        )
 
     def test_sign_and_publish_uses_trusted_checkout_before_secrets(self) -> None:
         """Ensure signing workflow scripts come from the default branch."""
@@ -473,3 +504,11 @@ class TestReleaseGateSnippetExpectations:
         assert "--toolchain none" in snippets
         assert "COPY rust-toolchain.toml /src/rust-toolchain.toml" in snippets
         assert "rustup toolchain install" in snippets
+
+    def test_release_build_requires_only_current_ffi_constructors(self) -> None:
+        """Keep release symbol checks on the v0.9.1 FFI baseline."""
+        assert "markdown_streaming_new_with_code" in RELEASE_RUST_BUILD_INVARIANTS
+        assert "markdown_incremental_new_with_code" in RELEASE_RUST_BUILD_INVARIANTS
+        assert "markdown_streaming_new" in RETIRED_RELEASE_FFI_SYMBOLS
+        assert "markdown_incremental_new" in RETIRED_RELEASE_FFI_SYMBOLS
+        assert "markdown_streaming_free" in RETIRED_RELEASE_FFI_SYMBOLS

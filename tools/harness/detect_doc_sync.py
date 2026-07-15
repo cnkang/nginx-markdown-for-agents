@@ -41,6 +41,15 @@ HANDLERS_PATH = Path(
 CHART_TEMPLATE_PATH = Path("charts/nginx-markdown/templates/configmap.yaml")
 CHART_VALUES_PATH = Path("charts/nginx-markdown/values.yaml")
 CONFIGURATION_GUIDE_PATH = Path("docs/guides/CONFIGURATION.md")
+PUBLIC_INVENTORY_PATH = Path("docs/architecture/PUBLIC_SURFACE_INVENTORY.md")
+STREAMING_TROUBLESHOOTING_PATH = Path(
+    "docs/guides/streaming-troubleshooting.md"
+)
+PROFILE_INVENTORY_PATH = Path("docs/architecture/profile-inventory.md")
+PROMETHEUS_RENDERER_PATH = Path(
+    "components/nginx-module/src/ngx_http_markdown_prometheus_impl.h"
+)
+PROMETHEUS_GUIDE_PATH = Path("docs/guides/prometheus-metrics.md")
 PRODUCTION_SYMBOL_SURFACES = (
     Path("components/nginx-module/src"),
     Path("components/rust-converter/src"),
@@ -339,6 +348,120 @@ def _check_migration_table(content: str) -> List[str]:
     return errors
 
 
+def _directive_registry(content: str) -> tuple[list[str], list[str]]:
+    """Return all command-table directives and the reject-only subset."""
+    entries = re.findall(
+        r"\{\s*ngx_string\(\"(markdown_[^\"]+)\"\),(.*?)(?=\n\s*\},)",
+        content,
+        flags=re.DOTALL,
+    )
+    names = [name for name, _ in entries]
+    rejected = [name for name, body in entries if "ngx_http_markdown_reject_" in body]
+    return names, rejected
+
+
+def _check_public_inventory(directives: str, inventory: str) -> List[str]:
+    """Keep registry counts and reject-only classification synchronized."""
+    errors: List[str] = []
+    names, rejected = _directive_registry(directives)
+    count_match = re.search(
+        r"There are (\d+) `markdown_\*` command-table entries: "
+        r"(\d+) active parser entries and\s+(\d+) reject-only migration entries",
+        inventory,
+    )
+    if count_match is None:
+        errors.append(
+            f"{PUBLIC_INVENTORY_PATH}: directive registry count statement is missing"
+        )
+    else:
+        documented = tuple(int(value) for value in count_match.groups())
+        actual = (len(names), len(names) - len(rejected), len(rejected))
+        if documented != actual:
+            errors.append(
+                f"{PUBLIC_INVENTORY_PATH}: directive counts {documented} do not "
+                f"match command table {actual}"
+            )
+
+    reject_section = inventory.partition("### Reject-only migration directives")[2]
+    for name in rejected:
+        if f"`{name}`" not in reject_section:
+            errors.append(
+                f"{PUBLIC_INVENTORY_PATH}: reject-only directive {name} is "
+                "missing from the reject-only registry"
+            )
+    return errors
+
+
+def _check_otel_reject_docs(directives: str, guide: str) -> List[str]:
+    """Require every reject-only OTel control to be documented as rejected."""
+    errors: List[str] = []
+    _, rejected = _directive_registry(directives)
+    for name in rejected:
+        if not name.startswith("markdown_otel_"):
+            continue
+        section_match = re.search(
+            rf"#### {re.escape(name)}\n(.*?)(?=\n#### |\n### |\Z)",
+            guide,
+            flags=re.DOTALL,
+        )
+        if section_match is None or "reject-only in 0.9.1" not in section_match.group(1):
+            errors.append(
+                f"{CONFIGURATION_GUIDE_PATH}: {name} must be documented as "
+                "reject-only in 0.9.1"
+            )
+    return errors
+
+
+def _check_observability_examples(troubleshooting: str) -> List[str]:
+    """Block known non-production diagnostics fields and retired metric names."""
+    errors: List[str] = []
+    forbidden = {
+        '"version"': "diagnostics version field",
+        '"uptime_seconds"': "diagnostics uptime_seconds field",
+        '"worker_pid"': "diagnostics worker_pid field",
+        '"ttfb_last_seconds"': "diagnostics ttfb_last_seconds field",
+        '"peak_memory_last_bytes"': "diagnostics peak_memory_last_bytes field",
+        "nginx_markdown_streaming_choice_total": "retired streaming metric name",
+        "nginx_markdown_conversion_duration_seconds": "retired latency metric name",
+    }
+    for token, label in forbidden.items():
+        if token in troubleshooting:
+            errors.append(
+                f"{STREAMING_TROUBLESHOOTING_PATH}: forbidden {label} is present"
+            )
+    return errors
+
+
+def _check_active_directive_inventory(
+    directives: str, profile_inventory: str
+) -> List[str]:
+    """Require the active-directive inventory to name every active entry."""
+    names, rejected = _directive_registry(directives)
+    active = sorted(set(names) - set(rejected))
+    errors = [
+        f"{PROFILE_INVENTORY_PATH}: active directive {name} is missing"
+        for name in active
+        if f"`{name}`" not in profile_inventory
+    ]
+    expected_default = "| `markdown_cache_validation` | ims_only |"
+    if expected_default not in profile_inventory:
+        errors.append(
+            f"{PROFILE_INVENTORY_PATH}: markdown_cache_validation default "
+            "must be ims_only"
+        )
+    return errors
+
+
+def _check_prometheus_catalog(renderer: str, guide: str) -> List[str]:
+    """Require every production renderer family to appear in the guide."""
+    families = sorted(set(re.findall(r"nginx_markdown_[a-z0-9_]+", renderer)))
+    return [
+        f"{PROMETHEUS_GUIDE_PATH}: production metric family {name} is missing"
+        for name in families
+        if f"`{name}`" not in guide
+    ]
+
+
 def check_public_config_contract(project_root: Path) -> List[str]:
     """Validate the frozen v0.9.1 operator-facing configuration contract."""
     errors: List[str] = []
@@ -347,6 +470,13 @@ def check_public_config_contract(project_root: Path) -> List[str]:
     chart_template = _read_required(project_root, CHART_TEMPLATE_PATH, errors)
     chart_values = _read_required(project_root, CHART_VALUES_PATH, errors)
     guide = _read_required(project_root, CONFIGURATION_GUIDE_PATH, errors)
+    inventory = _read_required(project_root, PUBLIC_INVENTORY_PATH, errors)
+    troubleshooting = _read_required(
+        project_root, STREAMING_TROUBLESHOOTING_PATH, errors
+    )
+    profile_inventory = _read_required(project_root, PROFILE_INVENTORY_PATH, errors)
+    prometheus_renderer = _read_required(project_root, PROMETHEUS_RENDERER_PATH, errors)
+    prometheus_guide = _read_required(project_root, PROMETHEUS_GUIDE_PATH, errors)
 
     if directives is not None:
         errors.extend(_check_directive_table(directives))
@@ -356,6 +486,16 @@ def check_public_config_contract(project_root: Path) -> List[str]:
         errors.extend(_check_chart_contract(chart_template, chart_values))
     if guide is not None:
         errors.extend(_check_migration_table(guide))
+    if directives is not None and inventory is not None:
+        errors.extend(_check_public_inventory(directives, inventory))
+    if directives is not None and guide is not None:
+        errors.extend(_check_otel_reject_docs(directives, guide))
+    if troubleshooting is not None:
+        errors.extend(_check_observability_examples(troubleshooting))
+    if directives is not None and profile_inventory is not None:
+        errors.extend(_check_active_directive_inventory(directives, profile_inventory))
+    if prometheus_renderer is not None and prometheus_guide is not None:
+        errors.extend(_check_prometheus_catalog(prometheus_renderer, prometheus_guide))
 
     errors.extend(
         _scan_for_pattern(
@@ -371,6 +511,19 @@ def check_public_config_contract(project_root: Path) -> List[str]:
             ACTIVE_CONFIG_SURFACES,
             re.compile(r"\bmarkdown_streaming_engine\b"),
             "markdown_streaming_engine directive in an active config surface",
+        )
+    )
+    errors.extend(
+        _scan_for_pattern(
+            project_root,
+            (Path("docs/guides"), Path("docs/features"), Path("docs/architecture")),
+            re.compile(
+                r"nginx_markdown_streaming_choice_total|"
+                r"nginx_markdown_conversion_duration_seconds|"
+                r"nginx_markdown_failures_total\{reason=\\?\""
+                r"(?:memory_budget_exceeded|ffi_panic)\\?\"\}"
+            ),
+            "retired production metric name or failure label",
         )
     )
     return errors

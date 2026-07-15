@@ -89,7 +89,7 @@ PY
 }
 trap cleanup EXIT
 
-for cmd in cargo curl make nm python3 tar; do
+for cmd in cargo curl make python3 tar; do
   markdown_need_cmd "${cmd}"
 done
 
@@ -98,7 +98,6 @@ NGINX_VERSION="$(resolve_nginx_version "${NGINX_VERSION}")"
 BUILDROOT="$(mktemp -d /tmp/nginx-nonstreaming-module.XXXXXX)"
 RUNTIME="${BUILDROOT}/runtime"
 BUILD_LOG="${BUILDROOT}/build.log"
-SYMBOLS_FILE="${BUILDROOT}/rust-symbols.txt"
 ARCHIVE="${WORKSPACE_ROOT}/components/rust-converter/target/${RUST_TARGET}/release/libnginx_markdown_converter.a"
 
 mkdir -p "${BUILDROOT}/src" "${RUNTIME}/conf" "${RUNTIME}/logs"
@@ -112,15 +111,13 @@ echo "==> Building non-streaming Rust converter (${RUST_TARGET})"
     --target "${RUST_TARGET}"
 )
 
-nm "${ARCHIVE}" >"${SYMBOLS_FILE}" 2>/dev/null
-if grep -q 'markdown_streaming_new' "${SYMBOLS_FILE}"; then
-  echo "FAIL: non-streaming archive exports markdown_streaming_new" >&2
+if [[ ! -f "${ARCHIVE}" ]]; then
+  echo "FAIL: non-streaming Rust archive not found: ${ARCHIVE}" >&2
   exit 1
 fi
 
 echo "  Rust features: none (--no-default-features)"
 echo "  archive: ${ARCHIVE}"
-echo "  markdown_streaming_new present: no"
 
 echo "==> Downloading NGINX ${NGINX_VERSION}"
 curl --proto '=https' --tlsv1.2 --max-time 600 --connect-timeout 30 \
@@ -136,6 +133,9 @@ tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" \
 echo "==> Configuring NGINX through components/nginx-module/config"
 (
   cd "${BUILDROOT}/src"
+  # Match the Cargo --no-default-features build above.  The module config uses
+  # this explicit contract instead of probing an LLVM LTO archive with nm.
+  export NGX_MARKDOWN_RUST_FEATURES=none
   configure_args=(
     --without-http_rewrite_module
     --with-compat

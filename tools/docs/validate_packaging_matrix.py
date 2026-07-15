@@ -120,15 +120,38 @@ def validate() -> list[str]:
         # No nginx_versions key or empty list — nothing to validate
         return errors
 
-    if extra_versions := packaging_versions - release_versions:
-        errors.extend(
-            f"packaging/matrix.yaml lists NGINX version '{v}' which is not present in tools/release-matrix.json (known versions: {sorted(release_versions)})"
-            for v in sorted(extra_versions)
-        )
+    errors.extend(_validate_version_subset(packaging_versions, release_versions))
+
     # --- Check 2: No tier escalation ---
-    # packaging/matrix.yaml doesn't directly declare tiers per-version,
-    # but if a tier_overrides or support_tiers section exists, validate it
-    tier_overrides = packaging_data.get("tier_overrides", {})
+    errors.extend(_validate_tier_overrides(
+        packaging_data.get("tier_overrides", {}), release_versions, release_data
+    ))
+
+    return errors
+
+
+def _validate_version_subset(
+    packaging_versions: set[str],
+    release_versions: set[str],
+) -> list[str]:
+    """Check 1: packaging versions must be a subset of release-matrix versions."""
+    if extra_versions := packaging_versions - release_versions:
+        return [
+            f"packaging/matrix.yaml lists NGINX version '{v}' which is not "
+            f"present in tools/release-matrix.json "
+            f"(known versions: {sorted(release_versions)})"
+            for v in sorted(extra_versions)
+        ]
+    return []
+
+
+def _validate_tier_overrides(
+    tier_overrides: dict[str, str],
+    release_versions: set[str],
+    release_data: dict,
+) -> list[str]:
+    """Check 2: no tier escalation beyond release-matrix maximum."""
+    errors: list[str] = []
     for version, claimed_tier in tier_overrides.items():
         if version not in release_versions:
             # Already caught in check 1
@@ -152,7 +175,6 @@ def validate() -> list[str]:
                 f"release-matrix.json maximum is '{release_tier_name}' "
                 f"(level {release_max})"
             )
-
     return errors
 
 

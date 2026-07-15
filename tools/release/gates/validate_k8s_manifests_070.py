@@ -21,6 +21,7 @@ No user-supplied patterns are compiled at runtime.
 from __future__ import annotations
 
 from collections.abc import Sequence
+import re
 import shutil
 import subprocess
 import sys
@@ -63,6 +64,14 @@ HELM_CONFIG_REQUIRED_SNIPPETS = [
     "uwsgi_temp_path /var/cache/nginx/uwsgi_temp;",
     "scgi_temp_path /var/cache/nginx/scgi_temp;",
     "listen 8080;",
+    "markdown_metrics_shm_size {{ .Values.metrics.shmSize }};",
+    "location = {{ .Values.metrics.uri }} {",
+    "markdown_metrics;",
+    "markdown_metrics_format {{ .Values.metrics.format }};",
+]
+HELM_CONFIG_FORBIDDEN_SNIPPETS = [
+    "markdown_metrics on;",
+    "markdown_metrics_uri",
 ]
 HELM_DEPLOYMENT_REQUIRED_SNIPPETS = [
     "containerPort: 8080",
@@ -293,6 +302,13 @@ def validate_helm_secure_defaults(result: ValidationResult) -> None:
         CONFIGMAP_TEMPLATE, HELM_CONFIG_REQUIRED_SNIPPETS,
         "helm:configmap", "configmap template", result,
     )
+    configmap = read_safe(CONFIGMAP_TEMPLATE)
+    for snippet in HELM_CONFIG_FORBIDDEN_SNIPPETS:
+        check_id = f"helm:configmap-forbidden:{snippet[:24]}"
+        if snippet in configmap:
+            result.fail(check_id, f"configmap template must not contain {snippet}")
+        else:
+            result.pass_(check_id, f"configmap template omits {snippet}")
     _validate_helm_deployment(result)
 
 
@@ -558,16 +574,143 @@ def _validate_module_metrics_render(
             f"{_truncate_output(rendered.stdout.strip())}",
         )
         return
-    if "markdown_metrics on;" in rendered.stdout:
+    errors = _metrics_config_errors(rendered.stdout)
+    if not errors:
         result.pass_(
             _CHECK_HELM_RENDER_MODULE_METRICS,
-            "module-enabled metrics render includes markdown_metrics directives",
+            "module-enabled metrics render uses valid HTTP and location scopes",
         )
     else:
         result.fail(
             _CHECK_HELM_RENDER_MODULE_METRICS,
-            "module-enabled metrics render missing markdown_metrics directives",
+            "module-enabled metrics render violates the NGINX directive contract: "
+            + "; ".join(errors),
         )
+
+
+def _metrics_config_errors(rendered: str) -> list[str]:
+    """Return Helm metrics directive syntax and scope violations.
+
+    The rendered YAML contains the ConfigMap's ``nginx.conf`` as a block
+    scalar. NGINX block lines remain distinguishable, so the lightweight stack
+    below can validate directive ownership without accepting a text-only
+    presence check that would miss invalid ``server`` scope or arguments.
+    """
+    directives = _collect_metrics_directives(rendered)
+    entries_by_name = {
+        name: [entry for entry in directives if entry[0] == name]
+        for name in (
+            "markdown_metrics_shm_size",
+            "markdown_metrics",
+            "markdown_metrics_format",
+        )
+    }
+    errors = _removed_metrics_directive_errors(directives)
+    errors.extend(
+        _single_metrics_scope_errors(
+            entries_by_name["markdown_metrics_shm_size"],
+            "markdown_metrics_shm_size",
+            "http",
+        )
+    )
+    errors.extend(
+        _metrics_handler_errors(entries_by_name["markdown_metrics"])
+    )
+    errors.extend(
+        _single_metrics_scope_errors(
+            entries_by_name["markdown_metrics_format"],
+            "markdown_metrics_format",
+            "location",
+        )
+    )
+    errors.extend(
+        _metrics_location_pair_errors(
+            entries_by_name["markdown_metrics"],
+            entries_by_name["markdown_metrics_format"],
+        )
+    )
+    return errors
+
+
+def _collect_metrics_directives(
+    rendered: str,
+) -> list[tuple[str, str, tuple[str, ...]]]:
+    """Collect metrics directives with their rendered NGINX block stack."""
+    scopes: list[str] = []
+    directives: list[tuple[str, str, tuple[str, ...]]] = []
+    metric_directive = re.compile(
+        r"^(markdown_metrics(?:_[a-z_]+)?)(?:\s+(.*?))?;$"
+    )
+
+    for raw_line in rendered.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line == "}":
+            if scopes:
+                scopes.pop()
+            continue
+        if line.endswith("{"):
+            scopes.append(line[:-1].strip())
+            continue
+        match = metric_directive.match(line)
+        if match:
+            directives.append(
+                (match.group(1), match.group(2) or "", tuple(scopes))
+            )
+    return directives
+
+
+def _removed_metrics_directive_errors(
+    directives: list[tuple[str, str, tuple[str, ...]]],
+) -> list[str]:
+    """Reject chart output that uses removed or nonexistent directives."""
+    if any(name == "markdown_metrics_uri" for name, _, _ in directives):
+        return ["markdown_metrics_uri does not exist"]
+    return []
+
+
+def _single_metrics_scope_errors(
+    entries: list[tuple[str, str, tuple[str, ...]]],
+    directive: str,
+    expected_scope: str,
+) -> list[str]:
+    """Require a metrics directive exactly once in its documented scope."""
+    if len(entries) != 1 or _scope_kind(entries[0][2]) != expected_scope:
+        return [f"{directive} must appear once in {expected_scope} scope"]
+    return []
+
+
+def _metrics_handler_errors(
+    handler_entries: list[tuple[str, str, tuple[str, ...]]],
+) -> list[str]:
+    """Validate the no-argument location-only metrics content handler."""
+    if len(handler_entries) != 1:
+        return ["markdown_metrics must appear once"]
+    if handler_entries[0][1]:
+        return ["markdown_metrics accepts no arguments"]
+    if _scope_kind(handler_entries[0][2]) != "location":
+        return ["markdown_metrics must be in location scope"]
+    return []
+
+
+def _metrics_location_pair_errors(
+    handler_entries: list[tuple[str, str, tuple[str, ...]]],
+    format_entries: list[tuple[str, str, tuple[str, ...]]],
+) -> list[str]:
+    """Require handler and format directives to share the same location."""
+    if len(handler_entries) != 1 or len(format_entries) != 1:
+        return []
+    if handler_entries[0][2] == format_entries[0][2]:
+        return []
+    return ["markdown_metrics and markdown_metrics_format must share a location"]
+
+
+def _scope_kind(scopes: tuple[str, ...]) -> str:
+    """Return the NGINX context kind for the innermost rendered block."""
+    if not scopes:
+        return "main"
+    return scopes[-1].split(maxsplit=1)[0]
 
 
 def validate_helm_render(result: ValidationResult) -> None:

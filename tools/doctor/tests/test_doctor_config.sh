@@ -5,7 +5,7 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "$0")/../../.." && pwd)
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/doctor-config-test.XXXXXX")
 cleanup() {
-    rm -f "$tmpdir/nginx" "$tmpdir/uname" "$tmpdir/ldd"
+    rm -f "$tmpdir/nginx" "$tmpdir/uname" "$tmpdir/ldd" "$tmpdir/nm"
     rm -f "$tmpdir/ngx_http_markdown_filter_module.so"
     rm -f "$tmpdir/captured.conf" "$tmpdir/output.json"
     rmdir "$tmpdir"
@@ -54,7 +54,16 @@ cat > "$tmpdir/ldd" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' 'ldd (GNU libc) 2.31'
 STUB
-chmod +x "$tmpdir/uname" "$tmpdir/ldd"
+cat > "$tmpdir/nm" <<'STUB'
+#!/usr/bin/env bash
+cat <<'SYMBOLS'
+0000000000000000 T ngx_http_markdown_filter_module
+0000000000000010 T markdown_abi_version
+0000000000000020 T markdown_convert
+0000000000000030 T markdown_converter_new
+SYMBOLS
+STUB
+chmod +x "$tmpdir/uname" "$tmpdir/ldd" "$tmpdir/nm"
 : > "$tmpdir/ngx_http_markdown_filter_module.so"
 
 PATH="$tmpdir:$PATH" DOCTOR_CAPTURE_PATH="$capture_path" \
@@ -75,5 +84,7 @@ grep -Fq "load_module \"$tmpdir/ngx_http_markdown_filter_module.so\";" \
 grep -Fq 'markdown_filter on;' "$capture_path"
 grep -Fq '"artifact":"ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz"' \
     "$tmpdir/output.json"
+grep -Fq '"name":"rust_linkage","status":"pass"' "$tmpdir/output.json"
+grep -Fq '"markdown_abi_version"' "$tmpdir/output.json"
 
 printf '%s\n' 'doctor config test passed'

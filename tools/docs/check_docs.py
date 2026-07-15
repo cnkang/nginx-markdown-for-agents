@@ -31,6 +31,14 @@ SPEC_INDEX_RE = re.compile(
 )
 KIRO_PATH_RE = re.compile(r"(?P<path>\.kiro/[A-Za-z0-9._/*-]+)")
 ALLOWED_KIRO_PATHS = {".kiro/nginx-development-guide.md"}
+BOOLEAN_TRUSTED_PROXY_RE = re.compile(
+    r"\bmarkdown_trusted_proxies\s+(?:on|true|yes)\s*;",
+    re.IGNORECASE,
+)
+UNRELEASED_CHANGELOG_RE = re.compile(
+    r"^## \[(?P<version>\d+\.\d+\.\d+)\] - Unreleased\s*$",
+    re.MULTILINE,
+)
 
 
 def is_maintained_markdown(rel_path: str) -> bool:
@@ -209,6 +217,64 @@ def check_duplicate_sync() -> list[str]:
     return [f"duplicate-sync: {line}" for line in output.splitlines() if line.strip()]
 
 
+def check_operator_config_examples(files: list[Path]) -> list[str]:
+    """Reject examples that reintroduce the removed boolean proxy trust model."""
+    errors: list[str] = []
+    for doc in files:
+        text = doc.read_text(encoding="utf-8", errors="ignore")
+        for line_no, line in enumerate(text.splitlines(), 1):
+            if BOOLEAN_TRUSTED_PROXY_RE.search(line):
+                errors.append(
+                    f"{doc}:{line_no}: markdown_trusted_proxies requires at least "
+                    "one trusted proxy CIDR (or off), not a boolean value"
+                )
+    return errors
+
+
+def check_release_status_consistency(
+    changelog_path: Path,
+    project_status_path: Path,
+) -> list[str]:
+    """Keep an unreleased changelog line from being presented as stable."""
+    changelog = changelog_path.read_text(encoding="utf-8", errors="ignore")
+    match = UNRELEASED_CHANGELOG_RE.search(changelog)
+    if match is None:
+        return []
+
+    version = match.group("version")
+    project_status = project_status_path.read_text(
+        encoding="utf-8",
+        errors="ignore",
+    )
+    section_match = re.search(
+        rf"^### Current Release Line {re.escape(version)}\s*$"
+        rf"(?P<body>.*?)(?=^### |\Z)",
+        project_status,
+        re.MULTILINE | re.DOTALL,
+    )
+    if section_match is None:
+        return [
+            f"{project_status_path}: missing Current Release Line {version} section"
+        ]
+
+    status = section_match.group("body")
+    errors: list[str] = []
+    if re.search(r"\bstable release\b", status, re.IGNORECASE):
+        errors.append(
+            f"{project_status_path}: unreleased {version} cannot be marked stable"
+        )
+    if not re.search(
+        r"\b(?:unreleased|development|release[- ]candidate)\b",
+        status,
+        re.IGNORECASE,
+    ):
+        errors.append(
+            f"{project_status_path}: unreleased {version} must be identified as "
+            "development or release-candidate status"
+        )
+    return errors
+
+
 def _validate_kiro_reference(raw: str, tracked: set[str]) -> str | None:
     """Validate a single .kiro/ path reference against repository tracking.
 
@@ -277,6 +343,13 @@ def main() -> int:
     failures.extend(check_heading_hierarchy(files))
     failures.extend(check_english_policy(files))
     failures.extend(check_internal_reference_policy(files))
+    failures.extend(check_operator_config_examples(files))
+    failures.extend(
+        check_release_status_consistency(
+            ROOT / "CHANGELOG.md",
+            ROOT / "docs" / "project" / "PROJECT_STATUS.md",
+        )
+    )
     failures.extend(check_duplicate_sync())
 
     if failures:
@@ -291,6 +364,8 @@ def main() -> int:
     print("- Heading hierarchy: OK")
     print("- English docs policy (Han-character scan): OK")
     print("- Internal reference policy (tracked paths/no 'spec X'): OK")
+    print("- Operator configuration examples: OK")
+    print("- Unreleased/stable release status consistency: OK")
     print("- Duplicate canonical/mirror sync: OK")
     return 0
 

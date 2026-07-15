@@ -34,18 +34,28 @@ MIRROR_NOTE_PATTERNS = [
 
 def normalize_markdown(text: str) -> list[str]:
     """Normalize markdown text for comparison by removing mirror notes and extra blanks."""
-    # Normalize line endings and remove intentional mirror-copy notes.
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    kept = _strip_mirror_notes(lines)
+    collapsed = _collapse_blank_lines(kept)
+    _trim_edge_blanks(collapsed)
+    return collapsed
+
+
+def _strip_mirror_notes(lines: list[str]) -> list[str]:
+    """Remove intentional mirror-copy notice lines."""
     kept: list[str] = []
     for line in lines:
         if any(pat.match(line.strip()) for pat in MIRROR_NOTE_PATTERNS):
             continue
         kept.append(line.rstrip())
+    return kept
 
-    # Collapse multiple blank lines to minimize formatting-only noise.
+
+def _collapse_blank_lines(lines: list[str]) -> list[str]:
+    """Collapse runs of multiple blank lines into a single blank line."""
     collapsed: list[str] = []
     blank_run = 0
-    for line in kept:
+    for line in lines:
         if line == "":
             blank_run += 1
             if blank_run > 1:
@@ -53,13 +63,15 @@ def normalize_markdown(text: str) -> list[str]:
         else:
             blank_run = 0
         collapsed.append(line)
-
-    # Trim leading/trailing blank lines for stable comparisons.
-    while collapsed and collapsed[0] == "":
-        collapsed.pop(0)
-    while collapsed and collapsed[-1] == "":
-        collapsed.pop()
     return collapsed
+
+
+def _trim_edge_blanks(lines: list[str]) -> None:
+    """Trim leading and trailing blank lines in-place for stable comparisons."""
+    while lines and lines[0] == "":
+        lines.pop(0)
+    while lines and lines[-1] == "":
+        lines.pop()
 
 
 def main() -> int:

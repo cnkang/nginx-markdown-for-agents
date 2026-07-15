@@ -280,6 +280,7 @@ while IFS= read -r rs_file; do
                 has_alloc = 0
                 has_deref_ffi_input = 0
                 body = ""
+                code_body = ""
                 # Track set of sibling names called in the body
                 delete called_names
                 called_count = 0
@@ -309,6 +310,7 @@ while IFS= read -r rs_file; do
                 sub(/\/\/.*/, "", codeline)
                 sub(/\/\*.*\*\//, "", codeline)
                 body = body "\n" $0
+                code_body = code_body codeline
                 if (codeline ~ /catch_unwind/) has_catch = 1
                 if (codeline ~ /_with_code[[:space:]]*\(/) calls_with_code = 1
                 if (codeline ~ /ptr::write.*zeroed|mem::zeroed/) has_ptr_write_zeroed = 1
@@ -341,6 +343,17 @@ while IFS= read -r rs_file; do
                             calls_sibling_with_catch = 1
                         }
                     }
+                    # A version accessor is safe only when its complete,
+                    # whitespace-normalized definition is exactly a zero-
+                    # parameter function returning one ALL_CAPS constant.
+                    # Merely ending in `_version` and mentioning a constant
+                    # is insufficient: parameters or any extra statements
+                    # can introduce panics or other business logic.
+                    normalized_code = code_body
+                    gsub(/[[:space:]]/, "", normalized_code)
+                    version_accessor_pattern = "^pub(unsafe)?extern\"C\"fn" func_name "\\(\\)->[A-Za-z_][A-Za-z0-9_:]*\\{(return)?([A-Za-z_][A-Za-z0-9_]*::)*[A-Z][A-Z0-9_]*;?\\}$"
+                    is_exact_version_accessor = (normalized_code ~ version_accessor_pattern)
+
                     # Classify
                     if (has_catch) {
                         category = "direct_catch"
@@ -353,6 +366,8 @@ while IFS= read -r rs_file; do
                     } else if (func_name ~ /_str$/ && !has_validate && !has_alloc && has_static_read) {
                         category = "safe_static_lookup"
                     } else if (func_name ~ /_metric_key$/ && !has_validate && !has_alloc && has_static_read) {
+                        category = "safe_static_lookup"
+                    } else if (func_name ~ /_version$/ && is_exact_version_accessor) {
                         category = "safe_static_lookup"
                     } else if (has_box_from_raw && !has_validate && !has_slice_from_raw && !has_ptr_write_zeroed && !has_alloc) {
                         category = "free_helper"

@@ -81,6 +81,37 @@ ngx_http_markdown_flavor(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 | `markdown_streaming_engine on;` | `markdown_streaming force;` |
 """,
     )
+    _write(
+        root,
+        detector.PUBLIC_INVENTORY_PATH,
+        """
+There are 2 `markdown_*` command-table entries: 1 active parser entries and
+1 reject-only migration entries.
+
+### Reject-only migration directives
+
+| `markdown_streaming_engine` | `markdown_streaming` |
+""",
+    )
+    _write(root, detector.STREAMING_TROUBLESHOOTING_PATH, "canonical example\n")
+    _write(
+        root,
+        detector.PROFILE_INVENTORY_PATH,
+        """
+| `markdown_streaming` | auto |
+| `markdown_cache_validation` | ims_only |
+""",
+    )
+    _write(
+        root,
+        detector.PROMETHEUS_RENDERER_PATH,
+        '"nginx_markdown_requests_total"\n',
+    )
+    _write(
+        root,
+        detector.PROMETHEUS_GUIDE_PATH,
+        "`nginx_markdown_requests_total`\n",
+    )
 
 
 def test_public_config_contract_accepts_canonical_fixture(tmp_path: Path) -> None:
@@ -172,3 +203,103 @@ def test_configuration_guide_requires_exact_on_to_force_mapping(tmp_path: Path) 
     errors = detector.check_public_config_contract(tmp_path)
 
     assert any("on -> markdown_streaming force" in error for error in errors)
+
+
+def test_public_inventory_counts_must_match_directive_table(tmp_path: Path) -> None:
+    _write_valid_fixture(tmp_path)
+    path = tmp_path / detector.PUBLIC_INVENTORY_PATH
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "2 `markdown_*`", "3 `markdown_*`"
+        ),
+        encoding="utf-8",
+    )
+
+    errors = detector.check_public_config_contract(tmp_path)
+
+    assert any("directive counts" in error for error in errors)
+
+
+def test_reject_only_otel_directive_requires_reject_only_docs(tmp_path: Path) -> None:
+    _write_valid_fixture(tmp_path)
+    directives = tmp_path / detector.DIRECTIVES_PATH
+    content = directives.read_text(encoding="utf-8").replace(
+        "};\n",
+        """
+    {
+        ngx_string("markdown_otel_metrics"),
+        NGX_CONF_FLAG,
+        ngx_http_markdown_reject_otel_directive,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        0,
+        hint
+    },
+};
+""",
+    )
+    directives.write_text(content, encoding="utf-8")
+    inventory = tmp_path / detector.PUBLIC_INVENTORY_PATH
+    inventory.write_text(
+        """
+There are 3 `markdown_*` command-table entries: 1 active parser entries and
+2 reject-only migration entries.
+
+### Reject-only migration directives
+
+| `markdown_streaming_engine` | migration |
+| `markdown_otel_metrics` | migration |
+""",
+        encoding="utf-8",
+    )
+
+    errors = detector.check_public_config_contract(tmp_path)
+
+    assert any("markdown_otel_metrics must be documented" in error for error in errors)
+
+
+def test_diagnostics_example_rejects_non_production_fields(tmp_path: Path) -> None:
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path,
+        detector.STREAMING_TROUBLESHOOTING_PATH,
+        '{"uptime_seconds": 42}\n',
+    )
+
+    errors = detector.check_public_config_contract(tmp_path)
+
+    assert any("uptime_seconds" in error for error in errors)
+
+
+def test_active_directive_inventory_cannot_omit_entry(tmp_path: Path) -> None:
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path,
+        detector.PROFILE_INVENTORY_PATH,
+        "| `markdown_cache_validation` | ims_only |\n",
+    )
+
+    errors = detector.check_public_config_contract(tmp_path)
+
+    assert any("active directive markdown_streaming is missing" in error for error in errors)
+
+
+def test_prometheus_guide_cannot_omit_renderer_family(tmp_path: Path) -> None:
+    _write_valid_fixture(tmp_path)
+    _write(tmp_path, detector.PROMETHEUS_GUIDE_PATH, "empty catalog\n")
+
+    errors = detector.check_public_config_contract(tmp_path)
+
+    assert any("nginx_markdown_requests_total is missing" in error for error in errors)
+
+
+def test_retired_failure_label_is_blocked_in_active_docs(tmp_path: Path) -> None:
+    _write_valid_fixture(tmp_path)
+    _write(
+        tmp_path,
+        "docs/features/new.md",
+        'nginx_markdown_failures_total{reason="ffi_panic"}\n',
+    )
+
+    errors = detector.check_public_config_contract(tmp_path)
+
+    assert any("retired production metric" in error for error in errors)

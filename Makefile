@@ -740,6 +740,9 @@ release-gates-check-090: release-gates-check-080-regression
 # Runs the module-level benchmark harness and evaluates against thresholds.
 # Exits 0 regardless of verdict (soft/report-only mode).
 # Reports SKIP_NOT_PRESENT and exits 0 when NGINX_BIN is unavailable.
+# Reports MISSING_EVIDENCE and exits 0 when the checked-in baseline does not
+# match the current platform, load generator, or NGINX version; incompatible
+# environments are never used for percentage regression comparisons.
 #
 # Evidence pack includes: module benchmark tiers, decompression coverage,
 # fallback rate, memory slope.

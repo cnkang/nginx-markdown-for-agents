@@ -127,41 +127,68 @@ def check_curl_consistency() -> list[str]:
     if readme_curls == install_curls:
         return []
 
-    errors: list[str] = []
     readme_set = set(readme_curls)
     install_set = set(install_curls)
-    errors.extend(
-        f"README Quick Start curl not in Shortest Success Path: {cmd}"
-        for cmd in readme_curls
-        if cmd not in install_set
-    )
-    errors.extend(
-        f"Shortest Success Path curl not in README Quick Start: {cmd}"
-        for cmd in install_curls
-        if cmd not in readme_set
-    )
-    # If sets match but counts differ, one side has duplicates
-    if not errors and len(readme_curls) != len(install_curls):
-        errors.append(
-            f"README Quick Start and Shortest Success Path have the same "
-            f"unique verification curls but different counts "
-            f"(README has {len(readme_curls)}, "
-            f"install guide has {len(install_curls)})"
-        )
 
-    # If sets match and counts match but order differs, report first divergence
-    if not errors:
-        for i, (r, s) in enumerate(zip(readme_curls, install_curls, strict=True)):
-            if r != s:
-                errors.append(
-                    f"README Quick Start and Shortest Success Path have the same "
-                    f"verification curls but in different order "
-                    f"(first difference at position {i + 1}: "
-                    f"README has '{readme_curls[i]}', "
-                    f"install guide has '{install_curls[i]}')"
-                )
-                break
+    errors = _find_missing_curls(readme_curls, install_set, readme_set)
+    errors.extend(
+        _find_missing_curls(install_curls, readme_set, install_set,
+                            label="Shortest Success Path curl not in README Quick Start")
+    )
+    errors.extend(_check_curl_count_mismatch(readme_curls, install_curls, errors))
+    errors.extend(_check_curl_order_mismatch(readme_curls, install_curls, errors))
     return errors
+
+
+def _find_missing_curls(
+    curls: list[str],
+    other_set: set[str],
+    own_set: set[str],
+    label: str = "README Quick Start curl not in Shortest Success Path",
+) -> list[str]:
+    """Find curls present in *curls* but absent from *other_set*."""
+    return [
+        f"{label}: {cmd}"
+        for cmd in curls
+        if cmd not in other_set
+    ]
+
+
+def _check_curl_count_mismatch(
+    readme_curls: list[str],
+    install_curls: list[str],
+    existing_errors: list[str],
+) -> list[str]:
+    """If sets match but counts differ, one side has duplicates."""
+    if existing_errors or len(readme_curls) == len(install_curls):
+        return []
+    return [
+        f"README Quick Start and Shortest Success Path have the same "
+        f"unique verification curls but different counts "
+        f"(README has {len(readme_curls)}, "
+        f"install guide has {len(install_curls)})"
+    ]
+
+
+def _check_curl_order_mismatch(
+    readme_curls: list[str],
+    install_curls: list[str],
+    existing_errors: list[str],
+) -> list[str]:
+    """If sets and counts match but order differs, report first divergence."""
+    if existing_errors:
+        return []
+    for i, (r, s) in enumerate(zip(readme_curls, install_curls, strict=True)):
+        if r != s:
+            return [
+                f"README Quick Start and Shortest Success Path have the same "
+                f"verification curls but in different order "
+                f"(first difference at position {i + 1}: "
+                f"README has '{readme_curls[i]}', "
+                f"install guide has '{install_curls[i]}')"
+            ]
+            break
+    return []
 
 
 # ---------------------------------------------------------------------------
