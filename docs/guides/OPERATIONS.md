@@ -219,9 +219,9 @@ sum(rate(nginx_markdown_failures_total[5m]))
 / clamp_min(rate(nginx_markdown_requests_total[5m]), 1e-10) * 100
 
 # Slow conversion bucket share (> 1s)
-(rate(nginx_markdown_conversion_duration_seconds{le="+Inf"}[5m])
-  - rate(nginx_markdown_conversion_duration_seconds{le="1.0"}[5m]))
-/ clamp_min(rate(nginx_markdown_conversion_duration_seconds{le="+Inf"}[5m]), 1e-10) * 100
+(rate(nginx_markdown_conversion_latency_bucket_total{le="+Inf"}[5m])
+  - rate(nginx_markdown_conversion_latency_bucket_total{le="1.0"}[5m]))
+/ clamp_min(rate(nginx_markdown_conversion_latency_bucket_total{le="+Inf"}[5m]), 1e-10) * 100
 
 # Throughput (conversions per second)
 rate(nginx_markdown_conversions_total[1m])
@@ -545,7 +545,7 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 - `fullbuffer_path_hits` and `incremental_path_hits` have been moved to the end of `ngx_http_markdown_metrics_t`. If you use shared-memory metrics, a graceful reload is sufficient; no data migration is needed.
 - The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter to use the incremental processing path. Note: the `markdown_large_body_threshold` directive was retired in 0.9.0 with no direct Config V2 replacement; the incremental-path threshold is not user-configurable.
-- `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add `markdown_trusted_proxies on;` to restore the previous behavior.
+- `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add its proxy range in the `http` context, for example `markdown_trusted_proxies 10.0.0.0/8;`. Forwarded headers remain ignored for direct peers outside the configured CIDRs.
 
 #### Upgrading to 0.2.x
 
@@ -1120,7 +1120,7 @@ The alignment works as follows:
 | Reason Code Category | Metrics Endpoint Field | Log Correlation | Example |
 |---|---|---|---|
 | Skip codes (`not_eligible`, `skipped_*`, `bypass_no_transform`) | JSON `skips.*`; Prometheus `nginx_markdown_skips_total{reason="..."}` | `reason` field in decision log | `grep "reason=not_eligible" error.log` |
-| Failure codes (`conversion_error`, `memory_budget_exceeded`, `timeout`, `ffi_panic`) | `nginx_markdown_failures_total{reason="..."}` | `reason` field in decision log | `grep "reason=conversion_error" error.log` |
+| Failure categories (`conversion_error`, `resource_limit`, `system_error`) | `nginx_markdown_failures_total{reason="..."}` | Map the bounded metric category to the more specific `reason` field in decision logs | `grep "reason=conversion_error" error.log` |
 | `converted` | `conversions_succeeded` | `reason` field in decision log | `grep "reason=converted" error.log` |
 | `failed_open` | `conversions_failed` (aggregate) | `reason` field in decision log | `grep "reason=failed_open" error.log` |
 | `failed_closed` | `conversions_failed` (aggregate) | `reason` field in decision log | `grep "reason=failed_closed" error.log` |
@@ -1231,7 +1231,7 @@ The `markdown_log_verbosity` directive controls which decision outcomes produce 
 | `info` (default) | All outcomes | Base | Recommended for rollout — full visibility into every decision |
 | `debug` | All outcomes | Extended (adds `filter_value`, `accept`, `status`) | Troubleshooting — maximum detail for diagnosing specific requests |
 
-At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, `converted`, `ENGINE_STREAMING`, `STREAMING_CONVERT`, `STREAMING_SHADOW`, `STREAMING_SKIP_UNSUPPORTED`) are silently suppressed. Both levels only emit failure outcomes: `failed_open`, `failed_closed`, `STREAMING_FAIL_POSTCOMMIT`, `STREAMING_PRECOMMIT_FAILOPEN`, `STREAMING_PRECOMMIT_REJECT`, `STREAMING_BUDGET_EXCEEDED`, `STREAMING_FALLBACK_PREBUFFER`. At `info` and `debug` levels, they include full outcomes. When failures are logged at any level, failure subclassifications (like `conversion_error`, `memory_budget_exceeded`, `ffi_panic`) are emitted in the `reason=` field of `nginx_markdown_failures_total`, while the legacy `category=` field (e.g., `FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, `FAIL_SYSTEM`) is used for streaming error-class mapping per `ngx_http_markdown_log_decision_with_category()`.
+At `error` and `warn` levels, non-failure outcomes (`not_eligible`, `skipped_*`, `disabled`, `converted`, `ENGINE_STREAMING`, `STREAMING_CONVERT`, `STREAMING_SHADOW`, `STREAMING_SKIP_UNSUPPORTED`) are silently suppressed. Both levels only emit failure outcomes: `failed_open`, `failed_closed`, `STREAMING_FAIL_POSTCOMMIT`, `STREAMING_PRECOMMIT_FAILOPEN`, `STREAMING_PRECOMMIT_REJECT`, `STREAMING_BUDGET_EXCEEDED`, `STREAMING_FALLBACK_PREBUFFER`. At `info` and `debug` levels, they include full outcomes. Decision logs retain specific reason codes such as `memory_budget_exceeded`, `timeout`, or `ffi_panic`; the Prometheus `nginx_markdown_failures_total` family intentionally aggregates them into `conversion_error`, `resource_limit`, and `system_error`. The legacy `category=` field (for example `FAIL_CONVERSION`, `FAIL_RESOURCE_LIMIT`, or `FAIL_SYSTEM`) is used for streaming error-class mapping by `ngx_http_markdown_log_decision_with_category()`.
 
 #### Configuration examples
 

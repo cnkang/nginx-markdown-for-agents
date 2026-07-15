@@ -27,7 +27,7 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Current Release Line 0.9.1
 
-**Status:** Current stable release. 0.9.1 introduces zero-copy output for streaming, gzip plus zlib/raw-deflate streaming decompression, bounded Brotli full-buffer routing, and full-buffer copy reduction, all guarded by strict performance evidence gates.
+**Status:** Unreleased development and release-candidate line. 0.9.1 introduces zero-copy output for streaming, gzip plus zlib/raw-deflate streaming decompression, bounded Brotli full-buffer routing, and full-buffer copy reduction, all guarded by strict performance evidence gates.
 
 ### Release 0.7.0 Updates
 

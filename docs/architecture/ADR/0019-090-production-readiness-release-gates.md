@@ -26,8 +26,8 @@ release-gates wave (final wave).
 
 `release-gates-check-090` is modeled on the real 17-step `-080` gate
 (`Makefile:568`), extended with 0.9.0-specific steps (Config V2 reject-only
-golden errors, HeaderPlan fault-injection, reason-registry/diagnostics schema
-golden, production-examples smoke, version-consistency). It MUST NOT recursively
+golden errors, HeaderPlan fault-injection, reason-registry/diagnostics renderer
+contract, production-examples smoke, version-consistency). It MUST NOT recursively
 invoke `release-gates-check-080` from inside its own recipe; prior-version
 validators it reuses are invoked directly and **caller-parameterized** for the
 active version (`RELEASE_GATE_EXPECTED_CARGO_VERSION=0.9.0`), per AGENTS.md Rule

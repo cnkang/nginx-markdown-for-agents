@@ -180,6 +180,31 @@ make rust-lib-debug
 
 Use this when debugging Rust-side behavior.
 
+### 4. Keep Cargo and NGINX Features Aligned
+
+`components/nginx-module/config` does not inspect the Rust static archive with
+`nm`. Rust 1.97 LTO archives use LLVM 22 and may not be readable by an older
+system `nm`, so archive probing could silently compile out matching C paths.
+Instead, NGINX configuration consumes `NGX_MARKDOWN_RUST_FEATURES`:
+
+- unset or `default`: use the Cargo default features (`streaming`,
+  `incremental`, and `prune_noise_regions`)
+- `none`: match a Cargo build made with `--no-default-features`
+- a comma-separated list: match the final enabled Cargo feature set, for
+  example `streaming,incremental`
+
+Set the variable in the same shell that runs NGINX `./configure` whenever the
+Rust build does not use Cargo defaults:
+
+```bash
+cargo build --release --no-default-features
+export NGX_MARKDOWN_RUST_FEATURES=none
+./configure --add-dynamic-module="$MODULE_PATH"
+```
+
+Unknown, empty, or ambiguous combinations fail configuration instead of
+guessing. In particular, do not combine `default` or `none` with feature names.
+
 ## Running Tests
 
 ### Root-Level Smoke Test

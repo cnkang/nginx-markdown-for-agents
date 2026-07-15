@@ -9,6 +9,12 @@ Performance baselines are used to:
 - Compare full-buffer vs streaming engine performance
 - Generate evidence packs for release decisions
 
+Module-level percentage comparisons require the current report and baseline to
+use the same platform, load generator, NGINX version, and critical-scenario
+input sizes. The evidence gate reports `MISSING_EVIDENCE` rather than a
+regression verdict when these fields differ. Report-only mode retains exit zero
+for visibility; blocking release mode fails until comparable evidence exists.
+
 ## Baseline Files
 
 Each platform has a dedicated baseline file:

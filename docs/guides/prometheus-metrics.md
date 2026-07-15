@@ -1,10 +1,10 @@
 # Prometheus Metrics Guide
 
-> ⚠️ **0.9.0 Breaking Change** — Reason code strings have been renamed from
-> UPPERCASE_SNAKE_CASE to lowercase_snake_case. Metrics are consolidated into
-> 5 unified families. See the [Migration Guide](MIGRATION-0.9.md) and the
-> [Observability Schema v1](../architecture/observability-schema-v1.md) for
-> the full schema specification.
+> **0.9.x schema note:** Reason strings use lowercase_snake_case. The catalog
+> below describes the production C renderer. The Rust observability model is
+> internal and is not a substitute for the wire schema. See the
+> [Public Surface Inventory](../architecture/PUBLIC_SURFACE_INVENTORY.md#metrics-and-reason-code-contract)
+> for the complete freeze inventory.
 
 ## Table of Contents
 
@@ -130,7 +130,10 @@ If NGINX listens on a non-standard port or the metrics location uses a different
 
 ### Access Control
 
-The metrics endpoint does not enforce any access restrictions by itself. The example above uses NGINX `allow`/`deny` directives to restrict access to localhost. Operators must configure their own access control to prevent exposing `/markdown-metrics` on the public internet.
+The metrics handler enforces loopback-only access (`127.0.0.1` and `::1`).
+NGINX `allow`/`deny` rules can narrow access further, but they do not broaden
+the module's built-in check. Keep the endpoint on a management listener and do
+not expose it on the public internet.
 
 **Security recommendations:**
 
@@ -157,20 +160,31 @@ All metrics use the `nginx_markdown_` prefix. Counter metrics use the `_total` s
 | `nginx_markdown_output_bytes_total` | counter | Cumulative Markdown output bytes from successful conversions. |
 | `nginx_markdown_estimated_token_savings_total` | counter | Estimated cumulative token savings. Requires `markdown_token_estimate on` to produce non-zero values. See [Token Savings Estimate](#token-savings-estimate). |
 | `nginx_markdown_decompression_failures_total` | counter | Failed decompression attempts. |
+| `nginx_markdown_per_path_conversions_total` | counter | Aggregate conversions recorded by the bounded per-path store. |
+| `nginx_markdown_per_path_conversion_time_ms_total` | counter | Aggregate conversion time recorded by the bounded per-path store. |
+| `nginx_markdown_per_path_overflow_total` | counter | Paths folded into the bounded overflow bucket. |
 
 ### Counter Metrics (with labels)
 
 | Metric Name | Type | Label Key | Label Values | Description |
 |---|---|---|---|---|
 | `nginx_markdown_skips_total` | counter | `reason` | `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `disabled` | Requests skipped by reason. |
-| `nginx_markdown_failures_total` | counter | `reason` | `conversion_error`, `memory_budget_exceeded`, `ffi_panic` | Conversion failures by reason. |
+| `nginx_markdown_failures_total` | counter | `reason` | `conversion_error`, `resource_limit`, `system_error` | Conversion failures by bounded category. |
 | `nginx_markdown_decompressions_total` | counter | `format` | `gzip`, `deflate`, `brotli` | Decompression operations by compression format. |
+| `nginx_markdown_path_conversions_total` | counter | `path` | bounded configured paths plus `__other__` | Conversions by retained path. |
+| `nginx_markdown_path_conversion_time_ms_total` | counter | `path` | bounded configured paths plus `__other__` | Cumulative conversion time by retained path. |
 
-### Gauge Metrics (latency buckets)
+### Cumulative Latency Counters
 
 | Metric Name | Type | Label Key | Label Values | Description |
 |---|---|---|---|---|
-| `nginx_markdown_conversion_duration_seconds` | gauge | `le` | `0.01`, `0.1`, `1.0`, `+Inf` | Cumulative conversion count per latency bucket. Each bucket value is an independent atomic counter, not a native Prometheus histogram. |
+| `nginx_markdown_conversion_latency_bucket_total` | counter | `le` | `0.01`, `0.1`, `1.0`, `+Inf` | Cumulative conversion count per latency boundary. This is a counter family, not a native Prometheus histogram. |
+
+### Per-Path Store Gauge
+
+| Metric Name | Type | Description |
+|---|---|---|
+| `nginx_markdown_per_path_entries` | gauge | Number of retained path entries in the bounded per-path store. |
 
 ### Streaming Metrics (0.5.0+, `MARKDOWN_STREAMING_ENABLED`)
 
@@ -237,6 +251,9 @@ Prometheus output alongside the runtime correctness counters above.
 | `nginx_markdown_backpressure_total` | counter | Body-filter output returned `NGX_AGAIN` (backpressure events). |
 | `nginx_markdown_backpressure_resume_total` | counter | Pending drain completed with `NGX_OK` (backpressure resumes). |
 | `nginx_markdown_pending_output_high_watermark_bytes` | gauge | Peak pending output bytes buffered in the filter chain. |
+| `nginx_markdown_inflight_current` | gauge | Requests currently holding an inflight conversion slot. |
+| `nginx_markdown_inflight_high_watermark` | gauge | Peak concurrent inflight conversions. |
+| `nginx_markdown_overload_total` | counter | Requests rejected by the inflight guard. |
 | `nginx_markdown_decompression_streaming_total` | counter | Compressed responses routed to the streaming decompressor. |
 | `nginx_markdown_decompression_fullbuffer_total` | counter | Compressed responses routed to the full-buffer decompressor. |
 | `nginx_markdown_zero_copy_output_total` | counter | Chunks delivered via the zero-copy output path (`markdown_streaming_zero_copy on`). |
@@ -244,50 +261,18 @@ Prometheus output alongside the runtime correctness counters above.
 
 > **Note**: `nginx_markdown_perf_decompression_budget_exceeded_total` (listed
 > above in the runtime correctness table) is also emitted by the performance
-> renderer. The 7 metrics in this table are additive (v0.9.1) and do not
+> renderer. The metrics in this table are additive (v0.9.1) and do not
 > replace any existing metric.
 
-### Total Time Series
+### Time-Series Cardinality
 
-The endpoint produces exactly 28 base time series (always present):
-
-- 9 unlabeled counters (requests, conversions, passthrough, failopen, large response path, input bytes, output bytes, token savings, decompression failures)
-- 5 skip reason labels (`not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `disabled`)
-- 3 failure reason labels (`conversion_error`, `memory_budget_exceeded`, `ffi_panic`)
-- 3 decompression format labels
-- 4 latency bucket labels
-
-When `MARKDOWN_STREAMING_ENABLED` is compiled in, an additional 24 streaming time series are emitted:
-
-- 1 streaming path counter
-- 3 streaming outcome labels (`result`)
-- 3 streaming failure stage labels (`stage`)
-- 1 budget exceeded counter
-- 1 shadow total counter
-- 1 shadow diff counter
-- 1 TTFB gauge
-- 1 peak memory gauge
-- 4 engine choice labels (`engine`)
-- 2 fallback labels (`phase`, `action`)
-- 2 post-commit failure labels (`phase`, `action`)
-- 1 candidate counter
-- 1 true-streaming selection counter
-- 1 streaming output byte counter
-- 1 excluded content-type counter
-
-v0.7.0 adds 9 runtime correctness counters:
-
-- 1 delivery counter
-- 1 decision counter
-- 1 decompression budget exceeded counter
-- 1 decompression format error counter
-- 1 decompression truncated input counter
-- 1 decompression I/O error counter
-- 1 replay buffer errors counter
-- 1 parse timeouts counter
-- 1 parse budget exceeded counter
-
-**Total with streaming + v0.8.0: 61 time series.** This count is deterministic and bounded. No request-specific or high-cardinality labels are used.
+The fixed families and bounded label values are listed above and in the
+[Public Surface Inventory](../architecture/PUBLIC_SURFACE_INVENTORY.md#prometheus-families-currently-emitted).
+There is intentionally no fixed total-series claim: streaming families depend
+on the compiled feature set, and `markdown_metrics_per_path on` adds one series
+per retained path to two per-path families. Per-path tracking is off by default,
+is capped by `markdown_metrics_per_path_cardinality`, and aggregates overflow
+under `path="__other__"`.
 
 ---
 
@@ -351,8 +336,8 @@ nginx_markdown_skips_total{reason="disabled"} 5
 # HELP nginx_markdown_failures_total Conversion failures by reason.
 # TYPE nginx_markdown_failures_total counter
 nginx_markdown_failures_total{reason="conversion_error"} 3
-nginx_markdown_failures_total{reason="memory_budget_exceeded"} 4
-nginx_markdown_failures_total{reason="ffi_panic"} 0
+nginx_markdown_failures_total{reason="resource_limit"} 4
+nginx_markdown_failures_total{reason="system_error"} 0
 
 # HELP nginx_markdown_failopen_total Conversions failed with original HTML served (fail-open).
 # TYPE nginx_markdown_failopen_total counter
@@ -384,12 +369,12 @@ nginx_markdown_decompressions_total{format="brotli"} 20
 # TYPE nginx_markdown_decompression_failures_total counter
 nginx_markdown_decompression_failures_total 1
 
-# HELP nginx_markdown_conversion_duration_seconds Cumulative conversion count per latency bucket (not a native Prometheus histogram; no _sum/_count).
-# TYPE nginx_markdown_conversion_duration_seconds gauge
-nginx_markdown_conversion_duration_seconds{le="0.01"} 140
-nginx_markdown_conversion_duration_seconds{le="0.1"} 1030
-nginx_markdown_conversion_duration_seconds{le="1.0"} 1170
-nginx_markdown_conversion_duration_seconds{le="+Inf"} 1180
+# HELP nginx_markdown_conversion_latency_bucket_total Cumulative conversion count per latency boundary.
+# TYPE nginx_markdown_conversion_latency_bucket_total counter
+nginx_markdown_conversion_latency_bucket_total{le="0.01"} 140
+nginx_markdown_conversion_latency_bucket_total{le="0.1"} 1030
+nginx_markdown_conversion_latency_bucket_total{le="1.0"} 1170
+nginx_markdown_conversion_latency_bucket_total{le="+Inf"} 1180
 ```
 
 ---
@@ -413,8 +398,8 @@ Prometheus metric label values use the same reason code strings as the module's 
 | Prometheus Label Value | Decision Log Reason | Meaning |
 |---|---|---|
 | `conversion_error` | `conversion_error` | HTML parsing or Markdown generation failed |
-| `memory_budget_exceeded` | `memory_budget_exceeded` | Size limit or timeout exceeded during conversion |
-| `ffi_panic` | `ffi_panic` | Internal/system error (Rust↔C panic) |
+| `resource_limit` | resource-limit category | Size, memory, or timeout limit exceeded during conversion |
+| `system_error` | system-error category | Allocation, FFI, or other internal system failure |
 
 ### Correlation Example
 
@@ -438,7 +423,9 @@ These patterns indicate normal, healthy operation:
 - **Conversion rate is stable.** `nginx_markdown_conversions_total / nginx_markdown_requests_total` remains consistent over time (typically 60–90% depending on traffic mix).
 - **Fail-open rate is near zero.** `nginx_markdown_failopen_total` grows slowly or not at all. A small number of fail-opens is acceptable; a sustained rate above 1% warrants investigation.
 - **Skip reasons are expected.** The dominant skip reasons match your deployment (e.g., `skipped_accept` is high because most clients do not request Markdown).
-- **Latency is concentrated in fast buckets.** Most conversions fall in the `le="0.01"` and `le="0.1"` buckets. Few or no conversions in the `le="+Inf"` (>1s) bucket.
+- **Latency is concentrated below one second.** The rate difference between
+  `le="+Inf"` (all conversions) and `le="1.0"` (conversions at or below one
+  second) remains small.
 - **Byte reduction is positive.** `nginx_markdown_output_bytes_total < nginx_markdown_input_bytes_total`, indicating Markdown output is smaller than HTML input.
 
 ### Problem Patterns
@@ -447,9 +434,11 @@ These patterns indicate issues that may require action:
 
 - **Rising failure rate.** `sum(nginx_markdown_failures_total)` growing faster than `nginx_markdown_conversions_total`. Check the `reason` label breakdown to identify the failure category.
 - **Fail-open rate above 1%.** `nginx_markdown_failopen_total / nginx_markdown_requests_total > 0.01` sustained over 5 minutes. The module is silently serving HTML instead of Markdown.
-- **Latency drift to slow buckets.** Increasing counts in `le="1.0"` or `le="+Inf"` buckets. May indicate large documents, resource contention, or upstream slowness.
+- **Latency drift above one second.** The rate difference between `le="+Inf"`
+  and `le="1.0"` grows. This may indicate large documents, resource
+  contention, or upstream slowness.
 - **Unexpected skip reason spikes.** A sudden increase in `not_eligible` (or a specific `skipped_*` code, e.g., `skipped_accept`) may indicate upstream issues returning non-200 responses.
-- **System errors.** Any non-zero `nginx_markdown_failures_total{reason="ffi_panic"}` warrants immediate investigation — these indicate memory allocation or system-level failures.
+- **System errors.** Any non-zero `nginx_markdown_failures_total{reason="system_error"}` warrants immediate investigation — these indicate allocation, FFI, or other internal system failures.
 
 ### Recommended Alerting Thresholds
 
@@ -484,9 +473,9 @@ rate(nginx_markdown_failopen_total[5m])
 nginx_markdown_skips_total
 
 # Slow conversion ratio (>1s bucket as percentage of total conversions, 5m window)
-(rate(nginx_markdown_conversion_duration_seconds{le="+Inf"}[5m])
-  - rate(nginx_markdown_conversion_duration_seconds{le="1.0"}[5m]))
-/ clamp_min(rate(nginx_markdown_conversion_duration_seconds{le="+Inf"}[5m]), 1e-10) * 100
+(rate(nginx_markdown_conversion_latency_bucket_total{le="+Inf"}[5m])
+  - rate(nginx_markdown_conversion_latency_bucket_total{le="1.0"}[5m]))
+/ clamp_min(rate(nginx_markdown_conversion_latency_bucket_total{le="+Inf"}[5m]), 1e-10) * 100
 ```
 
 ---
@@ -548,7 +537,7 @@ All metrics listed in the [Metric Catalog](#metric-catalog) section are consider
 | `nginx_markdown_estimated_token_savings_total` | counter | — | Stable |
 | `nginx_markdown_decompressions_total` | counter | `format` | Stable |
 | `nginx_markdown_decompression_failures_total` | counter | — | Stable |
-| `nginx_markdown_conversion_duration_seconds` | gauge | `le` | Stable |
+| `nginx_markdown_conversion_latency_bucket_total` | counter | `le` | Stable |
 
 ### Published Metrics (0.5.0, Streaming)
 
@@ -611,11 +600,12 @@ chain drains successfully. This prevents overcounting during retries.
 
 ---
 
-## Unified Metric Families (0.9.0)
+## Core Outcome Families (0.9.0)
 
-Starting in 0.9.0, per-reason counters are consolidated into 5 unified
-families using the `reason` label. This replaces the per-reason metric
-approach (e.g., `markdown_skipped_accept_total` → `nginx_markdown_skips_total{reason="skipped_accept"}`).
+The production renderer consolidates skip and failure classifications into
+reason-labelled families. Successful conversions and fail-open deliveries are
+separate unlabeled counters. Not every value in the full decision reason
+registry is emitted as a Prometheus label.
 
 | Metric Family | Category | Description |
 |---------------|----------|-------------|
@@ -623,41 +613,40 @@ approach (e.g., `markdown_skipped_accept_total` → `nginx_markdown_skips_total{
 | `nginx_markdown_skips_total` | Skip | Requests skipped (with `reason` label) |
 | `nginx_markdown_failures_total` | Error | All error paths (with `reason` label) |
 | `nginx_markdown_failopen_total` | Fail-Open | Fail-open deliveries |
-| `nginx_markdown_failures_total{reason="failed_closed"}` | Fail-Closed | Fail-closed rejections |
+| — | Fail-Closed | No dedicated production family; use failure counters and decision diagnostics |
 
 All `reason` label values use lowercase snake_case. See the
-[Observability Schema v1](../architecture/observability-schema-v1.md) for the
-complete reason code registry.
+[Rust observability model](../architecture/observability-schema-v1.md) for the
+complete internal reason-code registry.
 
 ---
 
-## Label Whitelist
+## Production Label Controls
 
-0.9.0 introduces a label whitelist to prevent high-cardinality label explosion.
-Only 4 label keys are permitted in Prometheus metrics output.
+The production C renderer uses bounded labels for fixed families and an
+explicitly opt-in, capped `path` label for per-path metrics.
 
 ### Allowed Labels
 
 | Label Key | Description | Example Values |
 |-----------|-------------|----------------|
-| `reason` | Decision reason code | `converted`, `timeout`, `failed_open` |
-| `profile` | Active processing profile | `balanced`, `strict_cache` |
-| `path_mode` | Request processing path | `full_buffer`, `streaming` |
-| `cache_validation` | Cache validation setting | `off`, `ims_only`, `full` |
+| `reason` | Skip/failure classification | `not_eligible`, `conversion_error` |
+| `engine` | Runtime path outcome | `streaming`, `full_buffer`, `passthrough`, `not_eligible` |
+| `result` | Streaming outcome | `success`, `failed`, `fallback` |
+| `stage` | Streaming failure stage | `precommit_failopen`, `precommit_reject`, `postcommit_error` |
+| `phase` / `action` | Streaming failure stage and handling action | `precommit` / `pass`, `postcommit` / `safe_finish` |
+| `format` | Decompression format | `gzip`, `deflate`, `brotli` |
+| `le` | Fixed latency boundary | `0.01`, `0.1`, `1.0`, `+Inf` |
+| `path` | Per-path series when explicitly enabled | bounded retained paths plus `__other__` |
 
-### Blocked Labels
-
-The following labels are explicitly blocked and will never appear in metrics:
-
-`url`, `path`, `uri`, `host`, `ip`, `client_ip`, `remote_addr`,
-`user_agent`, `ua`, `request_id`, `trace_id`, `session_id`
-
-These labels are high-cardinality and would create unbounded time series.
-The whitelist is enforced at the Rust layer.
+Request IDs, trace IDs, client addresses, user agents, and hosts are not emitted
+as metric labels. The Rust `MetricLabel` whitelist is an internal helper and is
+not the C renderer's wire-label registry. Path is the sole request-derived
+label; it is opt-in and bounded as described above.
 
 ---
 
-## PromQL Examples (0.9.0 Unified Families)
+## PromQL Examples (0.9.0 Outcome Families)
 
 These examples use the 0.9.0 unified metric families with the `reason` label.
 
@@ -666,8 +655,8 @@ These examples use the 0.9.0 unified metric families with the `reason` label.
 rate(nginx_markdown_conversions_total[5m])
 / (
     rate(nginx_markdown_conversions_total[5m])
-  + rate(nginx_markdown_skips_total[5m])
-  + rate(nginx_markdown_failures_total[5m])
+  + sum(rate(nginx_markdown_skips_total[5m]))
+  + sum(rate(nginx_markdown_failures_total[5m]))
 )
 
 # Error rate by reason code
@@ -686,8 +675,8 @@ rate(nginx_markdown_failopen_total[5m])
 # Skip breakdown by reason
 sum by (reason) (rate(nginx_markdown_skips_total[5m]))
 
-# Inflight current (from diagnostics endpoint, not Prometheus — future metric)
-# markdown_inflight_current (planned)
+# Current inflight conversions
+nginx_markdown_inflight_current
 ```
 
 ### Grafana Dashboard Tips
@@ -706,5 +695,5 @@ sum by (reason) (rate(nginx_markdown_skips_total[5m]))
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 metrics (delivery_total, decision_total, decompression_budget_exceeded, parse_timeouts, parse_budget_exceeded, replay_buffer_errors) and delivery/decision counter semantics |
-| 0.9.0 | 2026-07-01 | Kang | Breaking: unified metric families, label whitelist, lowercase reason codes, PromQL examples for unified families |
+| 0.9.0 | 2026-07-01 | Kang | Breaking: outcome families, lowercase reason codes, and PromQL examples |
 | 0.9.1 | 2026-07-13 | Kang | Align skip/failure reason labels with actual C-module output (remove non-existent skipped_accept_reject; correct bypass_no_transform reference) |

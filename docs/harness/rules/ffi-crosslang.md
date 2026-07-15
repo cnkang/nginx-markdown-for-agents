@@ -48,7 +48,7 @@ Required:
   constant or return a fixed value may omit the wrapper with a comment
   documenting why.
 - **Fail-closed fallback initialization**: Before calling `catch_unwind`,
-  initialize any FFI output struct (for example `FFIDecisionResult`,
+  initialize any FFI output struct (for example `FFIHeaderPlan`,
   `MarkdownResult`) to a safe fail-closed default value.  If the closure
   panics after partially writing struct fields, the caller receives a
   defined, safe state instead of stale or uninitialized bytes.  For

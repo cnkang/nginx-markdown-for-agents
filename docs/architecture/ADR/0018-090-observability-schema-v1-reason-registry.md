@@ -55,9 +55,9 @@ Frozen response-header behavior: `Content-Type: text/markdown` on conversion;
 
 ### Single-source enforcement
 
-A docs-sync test asserts that the reason-code registry, the Prometheus golden
-output, and the diagnostics schema all derive from the Rust enum (no
-hand-maintained parallel list). `make check-headers` covers FFI drift.
+A docs-sync test asserts that the reason-code registry, Prometheus output, and
+the C diagnostics renderer stay synchronized with the canonical registry (no
+unvalidated parallel public list). `make check-headers` covers FFI drift.
 
 ## Consequences
 
