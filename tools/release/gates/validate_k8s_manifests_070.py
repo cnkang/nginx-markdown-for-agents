@@ -639,7 +639,7 @@ def _collect_metrics_directives(
     scopes: list[str] = []
     directives: list[tuple[str, str, tuple[str, ...]]] = []
     metric_directive = re.compile(
-        r"^(markdown_metrics(?:_[a-z_]+)?)(?:\s+([^;]*))?;$"
+        r"^(markdown_metrics(?:_[a-z][a-z_]*)?)(?:\s+([^;]*))?;$"
     )
 
     for raw_line in rendered.splitlines():
