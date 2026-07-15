@@ -103,8 +103,8 @@ or packaging documentation.
 ```bash
 helm lint charts/nginx-markdown
 helm template test charts/nginx-markdown
-python3 tools/release/gates/validate_package_metadata_070.py
-python3 tools/release/gates/validate_k8s_manifests_070.py
+python3 tools/release/gates/validate_package_metadata.py
+python3 tools/release/gates/validate_k8s_manifests.py
 make docs-check
 make release-gates-check
 ```

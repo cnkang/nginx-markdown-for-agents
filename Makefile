@@ -416,11 +416,11 @@ release-gates-check-070:
 	$(MAKE) test-e2e-rust
 	python3 tools/release/gates/validate_release_gates_070.py --mode strict
 	python3 tools/release/gates/validate_config_directives_070.py
-	python3 tools/release/gates/validate_metrics_070.py
-	python3 tools/release/gates/validate_reason_codes_070.py
-	python3 tools/release/gates/validate_package_metadata_070.py
-	python3 tools/release/gates/validate_k8s_manifests_070.py
-	python3 tools/release/gates/validate_fuzz_packaging_070.py
+	python3 tools/release/gates/validate_metrics.py
+	python3 tools/release/gates/validate_reason_codes.py
+	python3 tools/release/gates/validate_package_metadata.py
+	python3 tools/release/gates/validate_k8s_manifests.py
+	python3 tools/release/gates/validate_fuzz_packaging.py
 	@echo "=== Package Compatibility Gate ==="
 	@echo "  [artifact-naming-tests] Running artifact naming unit tests..."
 	@bash tools/release/gates/test_artifact_naming.sh || \
@@ -678,11 +678,11 @@ release-gates-check-080:
 	python3 tools/release/gates/validate_config_directives_080.py
 	@echo "  [15/17] legacy/prior-version regression validators (0.7.0 gates remain active)"
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_release_gates_070.py --mode strict
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_metrics_070.py
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_reason_codes_070.py
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_package_metadata_070.py
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_k8s_manifests_070.py
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_fuzz_packaging_070.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_metrics.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_reason_codes.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_package_metadata.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_k8s_manifests.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_fuzz_packaging.py
 	@echo "  [16/17] harness boundary: routing-manifest.json + risk-packs (Req 9)"
 	@test -f docs/harness/routing-manifest.json || { echo "FAIL: docs/harness/routing-manifest.json not found — release gates require repo-owned harness sources" >&2; exit 1; }
 	@test -d docs/harness/risk-packs || { echo "FAIL: docs/harness/risk-packs/ not found — release gates require repo-owned risk-pack inputs" >&2; exit 1; }
@@ -855,7 +855,7 @@ release-gates-check-strict:
 	python3 tools/release/gates/validate_release_gates.py --mode strict
 	python3 tools/release/gates/validate_naming.py
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_release_gates_070.py --mode strict
-	python3 tools/release/gates/validate_fuzz_packaging_070.py
+	python3 tools/release/gates/validate_fuzz_packaging.py
 	@echo "=== Strict: Release Workflow Gate ==="
 	@test -f .github/workflows/release-packages.yml || { echo "FAIL: .github/workflows/release-packages.yml not found" >&2; exit 1; }
 	@grep -q 'SHA256SUMS\|generate-checksums' .github/workflows/release-packages.yml || { echo "FAIL: release-packages.yml missing SHA256SUMS generation logic" >&2; exit 1; }

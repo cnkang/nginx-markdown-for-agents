@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
-from tools.release.gates.validate_k8s_manifests_070 import (  # noqa: E402
+from tools.release.gates.validate_k8s_manifests import (  # noqa: E402
     GATE4_LOCAL_REQUIRED_SNIPPETS,
     HELM_CONFIG_REQUIRED_SNIPPETS,
     HELM_DEPLOYMENT_FORBIDDEN_SNIPPETS,
@@ -19,7 +19,7 @@ from tools.release.gates.validate_k8s_manifests_070 import (  # noqa: E402
     HELM_VALUES_REQUIRED_SNIPPETS,
     ValidationResult,
 )
-from tools.release.gates import validate_k8s_manifests_070 as validator  # noqa: E402
+from tools.release.gates import validate_k8s_manifests as validator  # noqa: E402
 
 
 def test_helm_defaults_are_stock_nginx_safe() -> None:

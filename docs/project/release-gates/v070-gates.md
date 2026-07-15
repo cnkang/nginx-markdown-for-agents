@@ -123,17 +123,17 @@ for a tag.
 | `markdown_parser_budget` config | config validator | `validate_config_directives_070.py` | Gate 5 |
 | `markdown_diagnostics` config | config validator | `validate_config_directives_070.py` | Gate 5 |
 | `markdown_dynconf_dry_run` config | config validator | `validate_config_directives_070.py` | Gate 5 |
-| `decompression_*_total` metrics | metric validator | `validate_metrics_070.py` | Gate 5 |
-| `parse_*_total` metrics | metric validator | `validate_metrics_070.py` | Gate 5 |
-| `replay_buffer_errors_total` metric | metric validator | `validate_metrics_070.py` | Gate 5 |
-| `DECOMP_*` reason codes | reason-code validator | `validate_reason_codes_070.py` | Gate 5 |
-| `PARSE_*` reason codes | reason-code validator | `validate_reason_codes_070.py` | Gate 5 |
-| `REPLAY_BUFFER_ERROR` reason code | reason-code validator | `validate_reason_codes_070.py` | Gate 5 |
-| DEB package metadata | package validator | `validate_package_metadata_070.py` | Gate 3/6 |
-| RPM package metadata | package validator | `validate_package_metadata_070.py` | Gate 3/6 |
-| Helm chart values | helm lint + values schema | `validate_k8s_manifests_070.py` | Gate 4 |
-| Fuzz targets + infrastructure | fuzz infrastructure validator | `validate_fuzz_packaging_070.py` | Gate 6 |
-| Release workflow artifacts | packaging workflow validator | `validate_fuzz_packaging_070.py` | Gate 6 |
+| `decompression_*_total` metrics | metric validator | `validate_metrics.py` | Gate 5 |
+| `parse_*_total` metrics | metric validator | `validate_metrics.py` | Gate 5 |
+| `replay_buffer_errors_total` metric | metric validator | `validate_metrics.py` | Gate 5 |
+| `DECOMP_*` reason codes | reason-code validator | `validate_reason_codes.py` | Gate 5 |
+| `PARSE_*` reason codes | reason-code validator | `validate_reason_codes.py` | Gate 5 |
+| `REPLAY_BUFFER_ERROR` reason code | reason-code validator | `validate_reason_codes.py` | Gate 5 |
+| DEB package metadata | package validator | `validate_package_metadata.py` | Gate 3/6 |
+| RPM package metadata | package validator | `validate_package_metadata.py` | Gate 3/6 |
+| Helm chart values | helm lint + values schema | `validate_k8s_manifests.py` | Gate 4 |
+| Fuzz targets + infrastructure | fuzz infrastructure validator | `validate_fuzz_packaging.py` | Gate 6 |
+| Release workflow artifacts | packaging workflow validator | `validate_fuzz_packaging.py` | Gate 6 |
 
 ---
 
@@ -143,17 +143,17 @@ for a tag.
 
 | # | Check Item | Verification Command | Pass Criteria |
 |---|-----------|---------------------|---------------|
-| 6.1 | Fuzz targets exist and buildable | `validate_fuzz_packaging_070.py` | fuzz/Cargo.toml has [[bin]] targets |
-| 6.2 | ClusterFuzzLite PR workflow | `validate_fuzz_packaging_070.py` | .github/workflows/cflite_pr.yml exists |
-| 6.3 | Nightly batch fuzz workflow | `validate_fuzz_packaging_070.py` | .github/workflows/cflite_batch.yml exists |
-| 6.4 | Corpus pruning mechanism | `validate_fuzz_packaging_070.py` | cflite_cron.yml exists with prune mode |
-| 6.5 | Fuzz guide complete | `validate_fuzz_packaging_070.py` | fuzz/README.md has FUZZ-001..007 |
-| 6.6 | Release package workflow | `validate_fuzz_packaging_070.py` | release-packages.yml exists |
-| 6.7 | Artifact naming with NGINX version | `validate_fuzz_packaging_070.py` | nFPM config + workflow reference NGINX_VERSION |
-| 6.8 | SHA256SUMS generation | `validate_fuzz_packaging_070.py` | Release workflow has checksum logic |
-| 6.9 | Install/compatibility docs | `validate_fuzz_packaging_070.py` | Documentation exists |
-| 6.10 | Package smoke test job | `validate_fuzz_packaging_070.py` | Smoke test job in release workflow |
-| 6.11 | Harness rules FUZZ-001..007 | `validate_fuzz_packaging_070.py` | All rules defined in fuzz/README.md |
+| 6.1 | Fuzz targets exist and buildable | `validate_fuzz_packaging.py` | fuzz/Cargo.toml has [[bin]] targets |
+| 6.2 | ClusterFuzzLite PR workflow | `validate_fuzz_packaging.py` | .github/workflows/cflite_pr.yml exists |
+| 6.3 | Nightly batch fuzz workflow | `validate_fuzz_packaging.py` | .github/workflows/cflite_batch.yml exists |
+| 6.4 | Corpus pruning mechanism | `validate_fuzz_packaging.py` | cflite_cron.yml exists with prune mode |
+| 6.5 | Fuzz guide complete | `validate_fuzz_packaging.py` | fuzz/README.md has FUZZ-001..007 |
+| 6.6 | Release package workflow | `validate_fuzz_packaging.py` | release-packages.yml exists |
+| 6.7 | Artifact naming with NGINX version | `validate_fuzz_packaging.py` | nFPM config + workflow reference NGINX_VERSION |
+| 6.8 | SHA256SUMS generation | `validate_fuzz_packaging.py` | Release workflow has checksum logic |
+| 6.9 | Install/compatibility docs | `validate_fuzz_packaging.py` | Documentation exists |
+| 6.10 | Package smoke test job | `validate_fuzz_packaging.py` | Smoke test job in release workflow |
+| 6.11 | Harness rules FUZZ-001..007 | `validate_fuzz_packaging.py` | All rules defined in fuzz/README.md |
 
 **Fail action**: Block release. Fuzz infrastructure and packaging artifacts must be complete.
 
@@ -182,7 +182,7 @@ make docs-check
 make release-gates-check-strict
 
 # Gate 6
-python3 tools/release/gates/validate_fuzz_packaging_070.py
+python3 tools/release/gates/validate_fuzz_packaging.py
 ```
 
 Or use the combined target:
@@ -198,4 +198,4 @@ make release-gates-check-070
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.7.0-draft | 2026-05-17 | spec-agent | Initial v0.7.0 gate definitions from design.md §14.0 |
-| 0.7.0-int | 2026-05-20 | Kang | Add Gate 6 (Fuzz & Packaging Infrastructure) with validate_fuzz_packaging_070.py checks |
+| 0.7.0-int | 2026-05-20 | Kang | Add Gate 6 (Fuzz & Packaging Infrastructure) with validate_fuzz_packaging.py checks |
