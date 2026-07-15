@@ -2062,13 +2062,21 @@ test_trusted_proxies_handler(void)
     memset(&g_main_conf, 0, sizeof(g_main_conf));
     setup_cf(&cf, &args, values, 2);
     cf.cmd_type = NGX_HTTP_SRV_CONF;
+    g_conf_log_buf[0] = '\0';
     rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
                 "server context should be rejected");
+    TEST_ASSERT(strstr(g_conf_log_buf, "only valid in the http context")
+                != NULL,
+                "server rejection should explain the http-only contract");
     cf.cmd_type = NGX_HTTP_LOC_CONF;
+    g_conf_log_buf[0] = '\0';
     rc = ngx_http_markdown_trusted_proxies(&cf, &cmd, &g_main_conf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
                 "location context should be rejected");
+    TEST_ASSERT(strstr(g_conf_log_buf, "only valid in the http context")
+                != NULL,
+                "location rejection should explain the http-only contract");
 
     /* "off" -> configured, no handle. */
     memset(&g_main_conf, 0, sizeof(g_main_conf));

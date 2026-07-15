@@ -457,7 +457,7 @@ test_known_values(void)
     /* Latency cumulative: le=0.01 -> 80, le=+Inf -> 80+50+15+5=150 */
     TEST_ASSERT(
         contains((char *) buf,
-            "nginx_markdown_conversion_duration_seconds"
+            "nginx_markdown_conversion_latency_bucket_total"
             "{le=\"+Inf\"} 150"),
         "latency le +Inf should be 150");
 
@@ -539,7 +539,7 @@ test_help_and_type_lines(void)
         "nginx_markdown_estimated_token_savings_total",
         "nginx_markdown_decompressions_total",
         "nginx_markdown_decompression_failures_total",
-        "nginx_markdown_conversion_duration_seconds",
+        "nginx_markdown_conversion_latency_bucket_total",
         "nginx_markdown_per_path_conversion_time_ms_total",
         "nginx_markdown_per_path_overflow_total",
         "nginx_markdown_inflight_current",

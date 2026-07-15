@@ -77,7 +77,8 @@ typedef struct {
 /* ── Streaming config snapshot ────────────────────────────────── */
 
 typedef struct {
-    const char  *engine;
+    const char  *policy;
+    const char  *policy_source;
     const char  *on_error;
     size_t       threshold;
     size_t       precommit_buffer;
@@ -160,8 +161,10 @@ build_diagnostics_json_with_streaming(output_ctx_t *out,
 
     /* streaming_config section (streaming observability) */
     output_append(out, "  \"streaming_config\": {\n");
-    output_append(out, "    \"engine\": \"%s\",\n",
-        stream_config->engine);
+    output_append(out, "    \"policy\": \"%s\",\n",
+        stream_config->policy);
+    output_append(out, "    \"policy_source\": \"%s\",\n",
+        stream_config->policy_source);
     output_append(out, "    \"on_error\": \"%s\",\n",
         stream_config->on_error);
     output_append(out, "    \"threshold\": %zu,\n",
@@ -231,7 +234,8 @@ test_streaming_metrics_section_present(void)
     stream_metrics.engine_choice_streaming = 45;
     stream_metrics.engine_choice_full_buffer = 155;
 
-    stream_config.engine = "auto";
+    stream_config.policy = "auto";
+    stream_config.policy_source = "default";
     stream_config.on_error = "pass";
     stream_config.threshold = 1048576;
     stream_config.precommit_buffer = 262144;
@@ -275,7 +279,8 @@ test_streaming_metrics_field_names(void)
     stream_metrics.engine_choice_streaming = 7;
     stream_metrics.engine_choice_full_buffer = 3;
 
-    stream_config.engine = "auto";
+    stream_config.policy = "auto";
+    stream_config.policy_source = "default";
     stream_config.on_error = "pass";
     stream_config.threshold = 0;
     stream_config.precommit_buffer = 0;
@@ -336,8 +341,9 @@ test_streaming_metrics_values(void)
     stream_metrics.engine_choice_streaming = 210;
     stream_metrics.engine_choice_full_buffer = 40;
 
-    stream_config.engine = "configured";
-    stream_config.on_error = "reject";
+    stream_config.policy = "force";
+    stream_config.policy_source = "configured";
+    stream_config.on_error = "fail_closed";
     stream_config.threshold = 1048576;
     stream_config.precommit_buffer = 262144;
     stream_config.flush_min = 16384;
@@ -386,7 +392,8 @@ test_streaming_config_section_present(void)
     memset(&base, 0, sizeof(base));
     memset(&stream_metrics, 0, sizeof(stream_metrics));
 
-    stream_config.engine = "auto";
+    stream_config.policy = "auto";
+    stream_config.policy_source = "default";
     stream_config.on_error = "pass";
     stream_config.threshold = 65536;
     stream_config.precommit_buffer = 262144;
@@ -422,7 +429,8 @@ test_streaming_config_field_names(void)
     memset(&base, 0, sizeof(base));
     memset(&stream_metrics, 0, sizeof(stream_metrics));
 
-    stream_config.engine = "auto";
+    stream_config.policy = "auto";
+    stream_config.policy_source = "default";
     stream_config.on_error = "pass";
     stream_config.threshold = 32768;
     stream_config.precommit_buffer = 262144;
@@ -436,8 +444,10 @@ test_streaming_config_field_names(void)
     TEST_ASSERT(rc == NGX_OK, "JSON build succeeds");
 
     /* Verify all expected field names */
-    TEST_ASSERT(json_contains(buf, "\"engine\":"),
-        "engine field present");
+    TEST_ASSERT(json_contains(buf, "\"policy\":"),
+        "policy field present");
+    TEST_ASSERT(json_contains(buf, "\"policy_source\":"),
+        "policy_source field present");
     TEST_ASSERT(json_contains(buf, "\"on_error\":"),
         "on_error field present");
     TEST_ASSERT(json_contains(buf, "\"threshold\":"),
@@ -472,8 +482,9 @@ test_streaming_config_values(void)
     memset(&base, 0, sizeof(base));
     memset(&stream_metrics, 0, sizeof(stream_metrics));
 
-    stream_config.engine = "configured";
-    stream_config.on_error = "reject";
+    stream_config.policy = "force";
+    stream_config.policy_source = "configured";
+    stream_config.on_error = "fail_closed";
     stream_config.threshold = 1048576;
     stream_config.precommit_buffer = 262144;
     stream_config.flush_min = 16384;
@@ -484,10 +495,13 @@ test_streaming_config_values(void)
         &stream_metrics, &stream_config);
 
     TEST_ASSERT(rc == NGX_OK, "JSON build succeeds");
-    TEST_ASSERT(json_contains(buf, "\"engine\": \"configured\""),
-        "engine value is configured");
-    TEST_ASSERT(json_contains(buf, "\"on_error\": \"reject\""),
-        "on_error value is reject");
+    TEST_ASSERT(json_contains(buf, "\"policy\": \"force\""),
+        "policy value is force");
+    TEST_ASSERT(json_contains(buf,
+        "\"policy_source\": \"configured\""),
+        "policy_source value is configured");
+    TEST_ASSERT(json_contains(buf, "\"on_error\": \"fail_closed\""),
+        "on_error value is fail_closed");
     TEST_ASSERT(json_contains(buf, "\"threshold\": 1048576"),
         "threshold value is 1048576");
     TEST_ASSERT(json_contains(buf, "\"precommit_buffer\": 262144"),
@@ -504,10 +518,10 @@ test_streaming_config_values(void)
 }
 
 
-/* ── Test: streaming_config auto engine value ─────────────────── */
+/* ── Test: streaming_config auto policy value ─────────────────── */
 
 static void
-test_streaming_config_auto_engine(void)
+test_streaming_config_auto_policy(void)
 {
     char buf[4096];
     output_ctx_t out;
@@ -516,12 +530,13 @@ test_streaming_config_auto_engine(void)
     streaming_config_snapshot_t stream_config;
     int rc;
 
-    TEST_SUBSECTION("streaming_config with auto engine");
+    TEST_SUBSECTION("streaming_config with auto policy");
 
     memset(&base, 0, sizeof(base));
     memset(&stream_metrics, 0, sizeof(stream_metrics));
 
-    stream_config.engine = "auto";
+    stream_config.policy = "auto";
+    stream_config.policy_source = "default";
     stream_config.on_error = "pass";
     stream_config.threshold = 0;
     stream_config.precommit_buffer = 0;
@@ -533,8 +548,10 @@ test_streaming_config_auto_engine(void)
         &stream_metrics, &stream_config);
 
     TEST_ASSERT(rc == NGX_OK, "JSON build succeeds");
-    TEST_ASSERT(json_contains(buf, "\"engine\": \"auto\""),
-        "engine value is auto");
+    TEST_ASSERT(json_contains(buf, "\"policy\": \"auto\""),
+        "policy value is auto");
+    TEST_ASSERT(json_contains(buf, "\"policy_source\": \"default\""),
+        "policy_source value is default");
     TEST_ASSERT(json_contains(buf, "\"on_error\": \"pass\""),
         "on_error value is pass");
     TEST_ASSERT(json_contains(buf, "\"threshold\": 0"),
@@ -549,7 +566,7 @@ test_streaming_config_auto_engine(void)
         "\"threshold_explicit\": false"),
         "threshold_explicit value is false");
 
-    TEST_PASS("streaming_config auto engine values correct");
+    TEST_PASS("streaming_config auto policy values correct");
 }
 
 
@@ -570,7 +587,8 @@ test_streaming_metrics_all_zero(void)
     memset(&base, 0, sizeof(base));
     memset(&stream_metrics, 0, sizeof(stream_metrics));
 
-    stream_config.engine = "auto";
+    stream_config.policy = "auto";
+    stream_config.policy_source = "default";
     stream_config.on_error = "pass";
     stream_config.threshold = 65536;
     stream_config.precommit_buffer = 262144;
@@ -604,7 +622,7 @@ main(void)
     test_streaming_config_section_present();
     test_streaming_config_field_names();
     test_streaming_config_values();
-    test_streaming_config_auto_engine();
+    test_streaming_config_auto_policy();
     test_streaming_metrics_all_zero();
 
     TEST_PASS("diagnostics_streaming_response: all tests passed");

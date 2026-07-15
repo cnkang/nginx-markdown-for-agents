@@ -733,12 +733,18 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
 /*
  * Build the JSON diagnostics response.
  *
- * Constructs a JSON document with five top-level sections:
+ * Constructs a JSON document with eleven top-level fields:
+ *   - schema_version
  *   - config_snapshot
  *   - recent_decisions
  *   - metrics_snapshot
+ *   - streaming_metrics (when streaming support is compiled in)
  *   - dynconf_state
  *   - streaming_config
+ *   - profile
+ *   - overridden_fields
+ *   - forced_fields
+ *   - effective_config
  *
  * Allocates the output buffer from the request pool.
  *
@@ -829,8 +835,10 @@ ngx_http_markdown_diagnostics_streaming_str(ngx_uint_t val)
  * Map error_policy enum to string.
  *
  * The C model uses on_error=REJECT for both fail_closed and status modes.
- * Distinguish them by error_status: the default (502) means fail_closed,
- * any other code (429, 503) means explicit status mode.
+ * Preserve the complete directive semantics by distinguishing the default
+ * 502 fail-closed response from each allowed explicit status code.  Invalid
+ * enum/status combinations are reported as unknown rather than being
+ * presented as a valid policy.
  */
 static const char *
 ngx_http_markdown_diagnostics_error_policy_str(ngx_uint_t val,
@@ -840,10 +848,16 @@ ngx_http_markdown_diagnostics_error_policy_str(ngx_uint_t val,
     case NGX_HTTP_MARKDOWN_ON_ERROR_PASS:
         return "pass";
     case NGX_HTTP_MARKDOWN_ON_ERROR_REJECT:
-        if (error_status != NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT) {
-            return "status";
+        switch (error_status) {
+        case NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT:
+            return "fail_closed";
+        case 429:
+            return "status 429";
+        case 503:
+            return "status 503";
+        default:
+            return "unknown";
         }
-        return "fail_closed";
     default:
         return "unknown";
     }
@@ -1012,8 +1026,8 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
     u_char *p, u_char *last, const ngx_http_markdown_conf_t *conf)
 {
 #ifdef MARKDOWN_STREAMING_ENABLED
-    const char  *engine_str;
-    const char  *engine_source_str;
+    const char  *policy_str;
+    const char  *policy_source_str;
     const char  *on_error_str;
     size_t       threshold;
     size_t       precommit_buffer;
@@ -1021,28 +1035,38 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
     ngx_flag_t   threshold_explicit;
     u_char       threshold_explicit_str[sizeof("false")];
 
-    if (conf != NULL
-        && conf->stream.policy != NGX_HTTP_MARKDOWN_STREAMING_AUTO)
-    {
-        engine_source_str = conf->stream.policy_explicit
-            ? "configured" : "profile";
+    if (conf != NULL) {
+        if (conf->stream.policy_explicit) {
+            policy_source_str = "configured";
+        } else if (conf->profile.name != NGX_HTTP_MARKDOWN_PROFILE_NONE)
+        {
+            policy_source_str = "profile";
+        } else {
+            policy_source_str = "default";
+        }
+
         if (conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF) {
-            engine_str = "off";
+            policy_str = "off";
         } else if (conf->stream.policy
                    == NGX_HTTP_MARKDOWN_STREAMING_FORCE)
         {
-            engine_str = "on";
+            policy_str = "force";
+        } else if (conf->stream.policy
+                   == NGX_HTTP_MARKDOWN_STREAMING_AUTO)
+        {
+            policy_str = "auto";
         } else {
-            engine_str = "unknown";
+            policy_str = "unknown";
         }
     } else {
-        engine_source_str = "default";
-        engine_str = "auto";
+        policy_source_str = "default";
+        policy_str = "auto";
     }
 
-    on_error_str = (conf != NULL
-         && conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-        ? "reject" : "pass";
+    on_error_str = (conf != NULL)
+        ? ngx_http_markdown_diagnostics_error_policy_str(
+            conf->on_error, conf->error_status)
+        : "unknown";
     threshold = (conf != NULL)
         ? conf->stream.threshold : 0;
     precommit_buffer = (conf != NULL)
@@ -1060,15 +1084,15 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
 
     p = ngx_slprintf(p, last,
         "  \"streaming_config\": {\n"
-        "    \"engine\": \"%s\",\n"
-        "    \"engine_source\": \"%s\",\n"
+        "    \"policy\": \"%s\",\n"
+        "    \"policy_source\": \"%s\",\n"
         "    \"on_error\": \"%s\",\n"
         "    \"threshold\": %uz,\n"
         "    \"precommit_buffer\": %uz,\n"
         "    \"flush_min\": %uz,\n"
         "    \"threshold_explicit\": %s\n"
         "  },\n",
-        engine_str, engine_source_str, on_error_str, threshold,
+        policy_str, policy_source_str, on_error_str, threshold,
         precommit_buffer, flush_min,
         threshold_explicit_str);
 #else

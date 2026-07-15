@@ -4,10 +4,10 @@
  * Validates the streaming error handler integration module (streaming fallback state machine,
  * streaming error policy integration):
  *
- * 6.1: Pre-commit + on_error=pass  -> PASS_HTML (replay)
- * 6.2: Pre-commit + on_error=reject -> conf->error_status (default 502)
- * 6.3: Post-commit + on_error=pass  -> safe_finish (abort fallback)
- * 6.4: Post-commit + on_error=reject -> abort
+ * 6.1: Pre-commit + pass -> PASS_HTML (replay)
+ * 6.2: Pre-commit + fail_closed/status -> conf->error_status
+ * 6.3: Post-commit + pass -> safe_finish (abort fallback)
+ * 6.4: Post-commit + fail_closed/status -> abort
  *
  * Also covers edge cases: NULL parameters, passthrough state,
  * replay chain NULL, output filter failure, non-error on_error.
@@ -157,6 +157,7 @@ static ngx_chain_t test_chain_link_storage;
 static u_char test_palloc_storage[256];
 static int test_palloc_called;
 static int test_palloc_fail;
+static ngx_int_t test_finalize_status;
 
 /* Mocked request infrastructure */
 static ngx_log_t             test_log;
@@ -285,8 +286,20 @@ markdown_streaming_output_free(u_char *data, uintptr_t len) /* NOSONAR(S995) FFI
 /* Include the postcommit source (for safe_finish, abort, guard, log) */
 #include "../../src/ngx_http_markdown_stream_postcommit.c"
 
+static ngx_int_t
+test_filter_finalize_request(ngx_http_request_t *r, ngx_module_t *module,
+    ngx_int_t status)
+{
+    UNUSED(r);
+    UNUSED(module);
+    test_finalize_status = status;
+    return NGX_ERROR;
+}
+
 /* Include the error handler source directly */
+#define ngx_http_filter_finalize_request test_filter_finalize_request
 #include "../../src/ngx_http_markdown_stream_error.c"
+#undef ngx_http_filter_finalize_request
 
 
 static void test_setup(void)
@@ -305,6 +318,7 @@ static void test_setup(void)
     memset(test_palloc_storage, 0, sizeof(test_palloc_storage));
     test_palloc_called = 0;
     test_palloc_fail = 0;
+    test_finalize_status = 0;
     memset(&test_log, 0, sizeof(test_log));
     memset(&test_pool, 0, sizeof(test_pool));
     memset(&test_connection, 0, sizeof(test_connection));
@@ -539,11 +553,47 @@ static void test_task_6_2_precommit_reject_502(void)
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
     TEST_ASSERT(rc == NGX_ERROR, "6.2: finalizer returns NGX_ERROR (error_status=502)");
+    TEST_ASSERT(test_finalize_status == 502,
+                "6.2: fail_closed finalizes with 502");
     TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "6.2: state PASSTHROUGH");
     TEST_ASSERT(test_replay_chain_called == 0, "6.2: no replay");
     TEST_ASSERT(test_output_filter_called == 0, "6.2: no output_filter");
     TEST_PASS("pre-commit reject: finalize with configured error_status");
+}
+
+
+static void
+test_precommit_explicit_status_policies(void)
+{
+    static const ngx_uint_t statuses[] = { 429, 503 };
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+    ngx_uint_t i;
+
+    for (i = 0; i < sizeof(statuses) / sizeof(statuses[0]); i++) {
+        test_setup();
+        memset(&ctx, 0, sizeof(ctx));
+        memset(&conf, 0, sizeof(conf));
+
+        ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+        ctx.stream_sm.replay_initialized = 1;
+        ctx.stream_sm.replay_capacity = 1024;
+        conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+        conf.error_status = statuses[i];
+
+        rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+        TEST_ASSERT(rc == NGX_ERROR,
+                    "explicit status finalizer return should propagate");
+        TEST_ASSERT(test_finalize_status == (ngx_int_t) statuses[i],
+                    "explicit policy must finalize with configured status");
+        TEST_ASSERT(test_replay_chain_called == 0,
+                    "explicit status policy must not replay HTML");
+    }
+
+    TEST_PASS("pre-commit status 429/503 finalize exactly");
 }
 
 /* --- post-commit pass: safe_finish --- */
@@ -836,6 +886,7 @@ int main(void)
     test_precommit_pass_replay_html_backpressure();
     test_precommit_pass_replay_preserves_existing_pending();
     test_task_6_2_precommit_reject_502();
+    test_precommit_explicit_status_policies();
     test_task_6_3_postcommit_pass_safe_finish();
     test_task_6_3_postcommit_pass_safe_finish_fails();
     test_task_6_3_abort_fallback_returns_again();

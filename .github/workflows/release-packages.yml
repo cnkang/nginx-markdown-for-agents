@@ -334,8 +334,8 @@ jobs:
             exit 1
           fi
           MISSING=0
-          for sym in markdown_streaming_new markdown_streaming_new_with_code \
-                     markdown_incremental_new markdown_incremental_new_with_code \
+          for sym in markdown_streaming_new_with_code \
+                     markdown_incremental_new_with_code \
                      markdown_decompress_bounded; do
             if ! grep -Eq "^_?${sym}$" <<<"${SYMBOLS}"; then
               echo "ERROR: Required symbol ${sym} not found in ${RUST_LIB}" >&2
@@ -412,14 +412,11 @@ jobs:
         run: |
           echo "=== Verifying required FFI symbols in module ===" >&2
           REQUIRED_SYMBOLS=(
-            markdown_streaming_new
             markdown_streaming_new_with_code
             markdown_streaming_feed
             markdown_streaming_finalize
-            markdown_streaming_free
             markdown_streaming_abort
             markdown_streaming_output_free
-            markdown_incremental_new
             markdown_incremental_new_with_code
             markdown_incremental_feed
             markdown_incremental_finalize

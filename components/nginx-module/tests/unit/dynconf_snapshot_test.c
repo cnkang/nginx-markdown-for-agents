@@ -2,10 +2,10 @@
  * Test: dynconf_snapshot
  *
  * Validates that ngx_http_markdown_dynconf_snapshot_to_json() returns
- * a complete configuration snapshot with all expected fields.
+ * a configuration snapshot with active directive-shaped fields.
  *
  * Test cases:
- *   1. Default configuration → all keys present with default values
+ *   1. Default configuration → active keys present with default values
  *   2. Custom configuration → keys reflect custom values
  *   3. NULL pool → returns NGX_ERROR
  *   4. NULL conf → returns NGX_ERROR
@@ -239,7 +239,7 @@ output_contains_key_value(const u_char *buf, size_t len,
     return 0;
 }
 
-/* ── Test 1: Default configuration returns all keys ──────────────── */
+/* ── Test 1: Default configuration returns active keys ──────────── */
 
 static void
 test_default_config_all_keys_present(void)
@@ -250,7 +250,7 @@ test_default_config_all_keys_present(void)
     size_t                   out_len;
     ngx_int_t                rc;
 
-    TEST_SUBSECTION("Default config: all keys present with default values");
+    TEST_SUBSECTION("Default config: active keys and default values");
 
     memset(&conf, 0, sizeof(conf));
     memset(&pool, 0, sizeof(pool));
@@ -279,7 +279,6 @@ test_default_config_all_keys_present(void)
     conf.policy.generate_etag = 1;
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_FULL_SUPPORT;
     conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO;
-    conf.ops.trust_forwarded_headers = 0;
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
     conf.stream.budget = 2 * 1024 * 1024;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
@@ -292,13 +291,13 @@ test_default_config_all_keys_present(void)
     TEST_ASSERT(out_buf != NULL, "output buffer should not be NULL");
     TEST_ASSERT(out_len > 0, "output length should be > 0");
 
-    /* Verify all expected keys are present */
+    /* Verify active keys are present and removed names stay absent. */
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_filter"),
         "should contain markdown_filter key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_max_size"),
-        "should contain markdown_max_size key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_timeout"),
-        "should contain markdown_timeout key");
+    TEST_ASSERT(!output_contains_key(out_buf, out_len, "markdown_max_size"),
+        "removed markdown_max_size key should not be exposed");
+    TEST_ASSERT(!output_contains_key(out_buf, out_len, "markdown_timeout"),
+        "removed markdown_timeout key should not be exposed");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_error_policy"),
         "should contain markdown_error_policy key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_flavor"),
@@ -313,16 +312,17 @@ test_default_config_all_keys_present(void)
         "should contain markdown_buffer_chunked key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_auto_decompress"),
         "should contain markdown_auto_decompress key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_decompression_budget"),
-        "should contain markdown_decompression_budget key");
+    TEST_ASSERT(!output_contains_key(out_buf, out_len,
+        "markdown_decompression_budget"),
+        "non-directive markdown_decompression_budget key should not be exposed");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_parse_timeout"),
         "should contain markdown_parse_timeout key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_parser_budget"),
         "should contain markdown_parser_budget key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_prune_noise"),
         "should contain markdown_prune_noise key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_memory_budget"),
-        "should contain markdown_memory_budget key");
+    TEST_ASSERT(!output_contains_key(out_buf, out_len, "markdown_memory_budget"),
+        "removed markdown_memory_budget key should not be exposed");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_dynamic_config"),
         "should contain markdown_dynamic_config key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_dynconf_dry_run"),
@@ -333,15 +333,17 @@ test_default_config_all_keys_present(void)
         "should contain markdown_cache_validation key");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_metrics_format"),
         "should contain markdown_metrics_format key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len,
+    TEST_ASSERT(!output_contains_key(out_buf, out_len,
         "markdown_trust_forwarded_headers"),
-        "should contain markdown_trust_forwarded_headers key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_large_body_threshold"),
-        "should contain markdown_large_body_threshold key");
+        "removed trust-forwarded-headers key should not be exposed");
+    TEST_ASSERT(!output_contains_key(out_buf, out_len,
+        "markdown_large_body_threshold"),
+        "removed large-body-threshold key should not be exposed");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming"),
         "should contain markdown_streaming key");
-    TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming_budget"),
-        "should contain markdown_streaming_budget key");
+    TEST_ASSERT(!output_contains_key(out_buf, out_len,
+        "markdown_streaming_budget"),
+        "removed markdown_streaming_budget key should not be exposed");
     TEST_ASSERT(output_contains_key(out_buf, out_len, "markdown_streaming_shadow"),
         "should contain markdown_streaming_shadow key");
     TEST_ASSERT(output_contains_key(out_buf, out_len,
@@ -395,7 +397,7 @@ test_default_config_all_keys_present(void)
         "markdown_streaming_shadow", "off"),
         "markdown_streaming_shadow should be 'off'");
 
-    TEST_PASS("Default config: all keys present with correct default values");
+    TEST_PASS("Default config: active keys have correct default values");
 
     free(out_buf);
 }
@@ -440,7 +442,6 @@ test_custom_config_values_reflected(void)
     conf.policy.generate_etag = 0;
     conf.policy.conditional_requests = NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED;
     conf.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
-    conf.ops.trust_forwarded_headers = 1;
     conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
     conf.stream.budget = 4 * 1024 * 1024;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
@@ -496,14 +497,14 @@ test_custom_config_values_reflected(void)
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_metrics_format", "prometheus"),
         "markdown_metrics_format should be 'prometheus'");
-    TEST_ASSERT(output_contains_key_value(out_buf, out_len,
-        "markdown_trust_forwarded_headers", "on"),
-        "markdown_trust_forwarded_headers should be 'on'");
+    TEST_ASSERT(!output_contains_key(out_buf, out_len,
+        "markdown_trust_forwarded_headers"),
+        "removed trust-forwarded-headers key should stay absent");
     TEST_ASSERT(output_contains_key_value(out_buf, out_len,
         "markdown_streaming_shadow", "on"),
         "markdown_streaming_shadow should be 'on'");
 
-    TEST_PASS("Custom config: all custom values correctly reflected");
+    TEST_PASS("Custom config: active custom values correctly reflected");
 
     free(out_buf);
 }

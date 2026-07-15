@@ -479,15 +479,10 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     mcf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     mcf->routing.max_inflight = NGX_CONF_UNSET_UINT;
-    mcf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     mcf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     mcf->ops.metrics_per_path = NGX_CONF_UNSET;
     mcf->ops.diagnostics_enabled = NGX_CONF_UNSET;
     mcf->ops.otel_enabled = NGX_CONF_UNSET;
-    mcf->ops.otel_tracing = NGX_CONF_UNSET;
-    mcf->ops.otel_metrics = NGX_CONF_UNSET;
-    mcf->ops.otel_span_buffer_size = NGX_CONF_UNSET_UINT;
-    mcf->ops.otel_export_timeout = NGX_CONF_UNSET_MSEC;
     mcf->stream.policy = NGX_CONF_UNSET_UINT;
     mcf->stream.policy_explicit = -1;
     mcf->stream.threshold = NGX_CONF_UNSET_SIZE;
