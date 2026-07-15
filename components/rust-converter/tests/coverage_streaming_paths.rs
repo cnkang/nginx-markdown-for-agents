@@ -13,6 +13,14 @@ use nginx_markdown_converter::ffi::*;
 use nginx_markdown_converter::streaming::types::*;
 use std::ptr;
 
+unsafe fn new_streaming_handle_for_test(
+    options: *const MarkdownOptions,
+) -> *mut StreamingConverterHandle {
+    let mut handle = ptr::null_mut();
+    let _ = unsafe { markdown_streaming_new_with_code(options, &mut handle) };
+    handle
+}
+
 /* ================================================================
  * error.rs streaming variants — code() and Display
  * ================================================================ */
@@ -320,7 +328,7 @@ fn test_streaming_finalize_with_etag() {
         generate_etag: 1,
         ..test_options()
     };
-    let handle = unsafe { markdown_streaming_new(&opts) };
+    let handle = unsafe { new_streaming_handle_for_test(&opts) };
     assert!(!handle.is_null());
 
     let html = b"<h1>Title</h1><p>Content</p>";
@@ -358,7 +366,7 @@ fn test_streaming_finalize_with_token_estimate() {
         estimate_tokens: 1,
         ..test_options()
     };
-    let handle = unsafe { markdown_streaming_new(&opts) };
+    let handle = unsafe { new_streaming_handle_for_test(&opts) };
     assert!(!handle.is_null());
 
     let html = b"<p>Some text content for token estimation</p>";
@@ -394,7 +402,7 @@ fn test_streaming_finalize_with_etag_and_tokens() {
         estimate_tokens: 1,
         ..test_options()
     };
-    let handle = unsafe { markdown_streaming_new(&opts) };
+    let handle = unsafe { new_streaming_handle_for_test(&opts) };
     assert!(!handle.is_null());
 
     let html = b"<h1>Title</h1><p>Paragraph with enough content for tokens</p>";
@@ -432,7 +440,7 @@ fn test_streaming_with_custom_budget() {
         streaming_budget: 32 * 1024,
         ..test_options()
     };
-    let handle = unsafe { markdown_streaming_new(&opts) };
+    let handle = unsafe { new_streaming_handle_for_test(&opts) };
     assert!(!handle.is_null());
 
     let html = b"<p>Content with custom budget</p>";
@@ -469,7 +477,7 @@ fn test_streaming_with_content_type() {
         content_type_len: ct.len(),
         ..test_options()
     };
-    let handle = unsafe { markdown_streaming_new(&opts) };
+    let handle = unsafe { new_streaming_handle_for_test(&opts) };
     assert!(!handle.is_null());
 
     let html = b"<p>Content with charset</p>";
@@ -501,7 +509,7 @@ fn test_streaming_with_content_type() {
 #[test]
 fn test_streaming_multiple_feeds() {
     let opts = test_options();
-    let handle = unsafe { markdown_streaming_new(&opts) };
+    let handle = unsafe { new_streaming_handle_for_test(&opts) };
     assert!(!handle.is_null());
 
     let chunks = [
@@ -545,7 +553,7 @@ fn test_streaming_with_timeout() {
         timeout_ms: 100,
         ..test_options()
     };
-    let handle = unsafe { markdown_streaming_new(&opts) };
+    let handle = unsafe { new_streaming_handle_for_test(&opts) };
     assert!(!handle.is_null());
 
     let html = b"<p>Quick content</p>";

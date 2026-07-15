@@ -28,7 +28,6 @@ pub mod config;
 pub mod converter;
 pub mod decision;
 pub mod decompress;
-pub mod diagnostics;
 pub mod error;
 pub mod etag_generator;
 pub mod ffi;

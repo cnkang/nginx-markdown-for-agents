@@ -29,11 +29,6 @@ encoding_rs = "0.8"
 flate2 = "1.0"
 # Brotli decompression for bounded decompression FFI
 brotli = "8.0"
-# Serialization framework for diagnostics schema
-serde = { version = "1.0", features = ["derive"] }
-# JSON serialization for diagnostics endpoint output
-serde_json = "1.0"
-
 [dev-dependencies]
 # Property-based testing framework
 proptest = "1.11"
@@ -41,6 +36,8 @@ proptest = "1.11"
 libc = "0.2"
 # Parse known-difference registry for streaming parity harness
 toml = "1.1"
+# JSON reports emitted by examples and test/evidence harnesses
+serde_json = "1.0"
 
 [features]
 default = ["prune_noise_regions", "streaming", "incremental"]

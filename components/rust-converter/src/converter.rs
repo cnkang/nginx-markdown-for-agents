@@ -137,10 +137,6 @@ pub enum MarkdownFlavor {
     CommonMark,
     /// GitHub Flavored Markdown
     GitHubFlavoredMarkdown,
-    /// Experimental MDX-oriented selector
-    Mdx,
-    /// Experimental Org-mode-oriented selector
-    OrgMode,
 }
 
 /// Table column alignment (GFM)

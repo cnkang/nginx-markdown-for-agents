@@ -38,11 +38,12 @@ The crate includes an optional incremental processing API behind a feature gate.
 
 ### Enabling
 
-The `incremental` feature is off by default. Enable it at build time:
+The `incremental` feature is included in the crate's default feature set. To
+select it explicitly in a no-default-features build:
 
 ```bash
-cargo build --features incremental
-cargo test --features incremental
+cargo build --no-default-features --features incremental
+cargo test --no-default-features --features incremental
 ```
 
 The incremental C ABI reuses the existing `MarkdownOptions` layout, so
@@ -77,12 +78,13 @@ Four C-callable functions are exported when the feature is enabled:
 
 | Function | Purpose |
 |----------|---------|
-| `markdown_incremental_new` | Create an opaque converter handle |
+| `markdown_incremental_new_with_code` | Create a handle and return an explicit status code |
 | `markdown_incremental_feed` | Feed a chunk of input data |
 | `markdown_incremental_finalize` | Finalize conversion and write the result |
 | `markdown_incremental_free` | Free the handle without finalizing |
 
-Existing FFI function signatures are not modified.
+The pre-v1 ABI reset removed the redundant pointer-only constructor; bundled C
+callers use `_new_with_code` so construction failures remain classifiable.
 
 ### Limitations
 

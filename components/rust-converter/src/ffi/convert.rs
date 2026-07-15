@@ -61,6 +61,7 @@ pub(crate) fn estimate_parser_working_set(input_len: usize, tag_openers: usize) 
 /// Return the largest raw input that can fit a parser budget before accounting
 /// for tag-specific DOM allocations. Incremental callers use this as an early
 /// buffer ceiling and apply the full estimate while chunks arrive.
+#[cfg(any(feature = "incremental", test))]
 pub(crate) fn max_input_for_parser_budget(parser_budget: u64) -> usize {
     if parser_budget == 0 {
         return 0;
