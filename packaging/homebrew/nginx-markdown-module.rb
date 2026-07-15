@@ -21,24 +21,11 @@ class NginxMarkdownModule < Formula
   depends_on "cbindgen" => :build
   depends_on "nginx" => :build
   depends_on "pkgconf" => :build
-  depends_on "rustup" => :build
+  depends_on "rust" => :build
   depends_on "openssl@3"
   depends_on "pcre2"
 
   def install
-    # Use rustup to install the exact toolchain pinned by
-    # rust-toolchain.toml (MSRV 1.97) instead of relying on the
-    # Homebrew `rust` formula version, which may lag behind.
-    # rustup is keg-only, so we must add it to PATH explicitly.
-    ENV["RUSTUP_HOME"] = "#{buildpath}/rustup"
-    ENV["CARGO_HOME"] = "#{buildpath}/cargo"
-    ENV["PATH"] = "#{Formula["rustup"].opt_bin}:#{ENV["PATH"]}"
-    # rust-toolchain.toml in the repo root pins channel "1.97.0";
-    # rustup will auto-install it on first cargo invocation.
-    system "rustup", "toolchain", "install", "1.97.0",
-           "--profile", "minimal", "--component", "rustfmt",
-           "--no-self-update"
-
     system "make", "build"
 
     nginx_version = Formula["nginx"].version.to_s
