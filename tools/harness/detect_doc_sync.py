@@ -318,14 +318,14 @@ def _check_chart_contract(template: str, values: str) -> List[str]:
     )
     if any(token in template for token in forbidden_template):
         errors.append(f"{CHART_TEMPLATE_PATH}: legacy streaming engine key is forbidden")
-    if re.search(r"(?m)^  streaming:\s*$", values) is None or re.search(
-        r"(?m)^    mode:\s*[\"']?(?:off|auto|force)[\"']?\s*$", values
+    if re.search(r"(?m)^ {2}streaming:\s*$", values) is None or re.search(
+        r"(?m)^ {4}mode:\s*[\"']?(?:off|auto|force)[\"']?\s*$", values
     ) is None:
         errors.append(
             f"{CHART_VALUES_PATH}: markdown.streaming.mode must define an "
             "off|auto|force policy"
         )
-    if re.search(r"(?m)^    engine:\s*", values):
+    if re.search(r"(?m)^ {4}engine:\s*", values):
         errors.append(f"{CHART_VALUES_PATH}: markdown.streaming.engine is forbidden")
     return errors
 
@@ -351,7 +351,7 @@ def _check_migration_table(content: str) -> List[str]:
 def _directive_registry(content: str) -> tuple[list[str], list[str]]:
     """Return all command-table directives and the reject-only subset."""
     entries = re.findall(
-        r"\{\s*ngx_string\(\"(markdown_[^\"]+)\"\),(.*?)(?=\n\s*\},)",
+        r"\{\s*ngx_string\(\"(markdown_[^\"]+)\"\),((?:[^\n]|\n(?!\s*\},))*)",
         content,
         flags=re.DOTALL,
     )

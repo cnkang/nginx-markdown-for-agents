@@ -780,13 +780,11 @@ ngx_http_markdown_otel_flavor_name(ngx_uint_t flavor)
     static ngx_str_t  gfm_name = ngx_string("gfm");
     static ngx_str_t  commonmark_name = ngx_string("commonmark");
 
-    switch (flavor) {
-    case NGX_HTTP_MARKDOWN_FLAVOR_GFM:
+    if (flavor == NGX_HTTP_MARKDOWN_FLAVOR_GFM) {
         return &gfm_name;
-    case NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK:
-    default:
-        return &commonmark_name;
     }
+
+    return &commonmark_name;
 }
 
 static const ngx_str_t *

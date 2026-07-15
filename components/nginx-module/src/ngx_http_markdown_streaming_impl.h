@@ -3185,13 +3185,10 @@ ngx_http_markdown_streaming_start_otel_span(
         return;
     }
 
-    switch (conf->flavor) {
-    case NGX_HTTP_MARKDOWN_FLAVOR_GFM:
+    if (conf->flavor == NGX_HTTP_MARKDOWN_FLAVOR_GFM) {
         flavor = &s_gfm;
-        break;
-    default:
+    } else {
         flavor = &s_cm;
-        break;
     }
 
     ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
