@@ -1,7 +1,7 @@
 """Tests for release gate validator: NGINX version extraction.
 
 Run:
-    python3 -m pytest tools/release/gates/tests/test_validate_package_metadata_070.py -v
+    python3 -m pytest tools/release/gates/tests/test_validate_package_metadata.py -v
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from pathlib import Path
 # Ensure the tools package is importable.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
-import tools.release.gates.validate_package_metadata_070 as validator  # noqa: E402
-from tools.release.gates.validate_package_metadata_070 import (  # noqa: E402
+import tools.release.gates.validate_package_metadata as validator  # noqa: E402
+from tools.release.gates.validate_package_metadata import (  # noqa: E402
     FORBIDDEN_NAKED_EXACT_NGINX_DEPS,
     GATE3_LOCAL_ARCH_SNIPPETS,
     NFPM_DEB_ONLY_MODULES_AVAILABLE_PATTERN,

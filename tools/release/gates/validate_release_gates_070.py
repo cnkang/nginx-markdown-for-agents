@@ -453,7 +453,7 @@ def _gate_6_items(
     release_packages: str,
 ) -> BlockingItems:
     return [
-        ("fuzz packaging validator", "validate_fuzz_packaging_070.py" in mk and "validate_fuzz_packaging_070.py" in gates),
+        ("fuzz packaging validator", "validate_fuzz_packaging.py" in mk and "validate_fuzz_packaging.py" in gates),
         ("fuzz target coverage", "fuzz:targets-exist" in gates and "fuzz/Cargo.toml" in gates),
         ("clusterfuzzlite workflows", "fuzz:cflite-pr-workflow" in gates and "fuzz:cflite-batch-workflow" in gates),
         ("corpus pruning", "fuzz:corpus-pruning" in gates and "cflite_cron.yml" in gates),
