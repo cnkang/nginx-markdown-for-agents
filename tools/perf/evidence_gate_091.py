@@ -345,8 +345,10 @@ def _compute_memory_slope(data_points: list[tuple[float, float]]) -> float:
     means no measurable memory growth per input byte (ideal).
 
     The slope has a clear physical meaning: how many bytes of RSS the
-    module consumes per byte of input processed.  This is directly
-    comparable across platforms and NGINX versions.
+    module consumes per byte of input processed.  Percentage regression
+    comparisons are valid only after the environment compatibility check
+    confirms the same platform, load generator, and NGINX version; allocator
+    and process-memory behavior differ across environments.
 
     Previously this divided by mean RSS to produce a dimensionless
     percentage, which was misleading (the dimension was 1/input_byte,
@@ -864,8 +866,9 @@ def _report_integrity_failure(
     violations: list[tuple[str, str]],
     heading: str,
     guidance: str,
+    exit_code: int = 1,
 ) -> int:
-    """Emit a missing-evidence result for integrity violations."""
+    """Emit a missing-evidence result and return the caller-selected status."""
     _stderr(
         heading
         + "\n"
@@ -885,7 +888,7 @@ def _report_integrity_failure(
     )
     _print_evidence_summary(evidence_pack)
     _write_output(evidence_pack, args.output)
-    return 1
+    return exit_code
 
 
 def _validate_current_evidence(
@@ -1006,6 +1009,10 @@ def _resolve_baseline(
 ) -> tuple[dict, bool, int | None]:
     """Load and validate the module baseline.
 
+    An environment-incompatible baseline is never used for percentage
+    comparisons.  Both modes report MISSING_EVIDENCE; blocking mode fails,
+    while report-only mode preserves its informational exit status of zero.
+
     Returns:
         (baseline_metrics, has_baseline, exit_rc):
             exit_rc is None on success; otherwise it is a terminal exit
@@ -1026,19 +1033,34 @@ def _resolve_baseline(
     env_violations = _check_environment_compatibility(
         report or {}, baseline_report,
     )
-    if env_violations and blocking:
+    if env_violations:
         env_violation_strs = [
             (f"env.{field}", detail)
             for field, detail in env_violations
         ]
+        env_violation_strs.append(
+            (
+                "baseline.percentage_thresholds",
+                "cannot evaluate percentage thresholds across incompatible "
+                "benchmark environments",
+            )
+        )
+        heading = (
+            "FAIL: Current and baseline benchmark environments are incompatible:"
+            if blocking else
+            "MISSING_EVIDENCE: Current and baseline benchmark environments "
+            "are incompatible:"
+        )
         return {}, False, _report_integrity_failure(
             report,
             args,
             env_violation_strs,
-            "FAIL: Current and baseline benchmark environments are incompatible:",
-            "  Regenerate the baseline on the same platform, load "
-            "generator, and NGINX version as the current run.\n"
-            "  Do not compare metrics across different environments.",
+            heading,
+            "  Percentage thresholds cannot be evaluated across incompatible "
+            "environments.\n"
+            "  Regenerate the baseline on the same platform, load generator, "
+            "and NGINX version as the current run.",
+            exit_code=1 if blocking else 0,
         )
 
     return _extract_evidence_metrics(baseline_report), True, None

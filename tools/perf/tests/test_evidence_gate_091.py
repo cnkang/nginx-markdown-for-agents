@@ -1276,6 +1276,58 @@ class TestMemoryEvidenceCompleteness:
 class TestEnvironmentCompatibility:
     """Current and baseline environments must match for regression comparison."""
 
+    def test_non_blocking_incompatible_baseline_is_not_compared(
+        self, tmp_path, monkeypatch, capsys,
+    ):
+        """Report-only runs expose incompatible percentage evidence as missing."""
+        baseline_path = (
+            tmp_path / "perf" / "baselines" / "module-baseline-091.json"
+        )
+        baseline_path.parent.mkdir(parents=True)
+        baseline_path.write_text(json.dumps({
+            "module_benchmark": {
+                "platform": "linux-x86_64",
+                "load_generator": "ab",
+                "nginx_version": "nginx version: nginx/1.24.0",
+                "scenarios": [],
+            },
+        }), encoding="utf-8")
+        current = {
+            "module_benchmark": {
+                "platform": "darwin-arm64",
+                "load_generator": "hey",
+                "nginx_version": "nginx version: nginx/1.28.2",
+                "scenarios": [],
+            },
+        }
+
+        monkeypatch.setattr(evidence_gate_091, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(
+            evidence_gate_091, "_validate_baseline_evidence",
+            lambda *_args: None,
+        )
+
+        output_path = tmp_path / "perf" / "reports" / "evidence-091.json"
+        metrics, has_baseline, exit_rc = evidence_gate_091._resolve_baseline(
+            current,
+            parse_args(["--output", str(output_path)]),
+            blocking=False,
+        )
+
+        assert metrics == {}
+        assert has_baseline is False
+        assert exit_rc == 0
+        evidence = json.loads(output_path.read_text(encoding="utf-8"))
+        assert evidence["verdict"] == "MISSING_EVIDENCE"
+        assert any(
+            breach["metric"] == "baseline.percentage_thresholds"
+            and "cannot evaluate percentage thresholds" in breach["reason"]
+            for breach in evidence["breaches"]
+        )
+        stderr = capsys.readouterr().err.lower()
+        assert "incompatible" in stderr
+        assert "percentage thresholds cannot be evaluated" in stderr
+
     def test_matching_environments_no_violations(self):
         """Same platform, load_generator, nginx_version → no violations."""
         current = {"module_benchmark": {

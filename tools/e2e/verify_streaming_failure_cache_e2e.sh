@@ -4,12 +4,12 @@ set -euo pipefail
 # Streaming failure semantics, cache behavior, and conditional request E2E tests.
 #
 # Validates sub-spec #15 end-to-end:
-#   10.1  Streaming success + cache_validation full: no ETag in response headers, ETag in logs
+#   10.1  Streaming success + cache_validation ims_only: no response ETag
 #   10.1b Streaming strips upstream ETag from proxied response
 #   10.2  Streaming pre-commit failure + error_policy pass: client gets HTML
 #   10.3  Streaming pre-commit failure + error_policy fail_closed: client gets error
 #   10.4  Streaming post-commit failure: client gets truncated Markdown
-#   10.5  cache_validation full + markdown_streaming force: full-buffer path
+#   10.5  cache_validation full + markdown_streaming auto: full-buffer path
 #   10.6  cache_validation ims_only + markdown_streaming force: streaming
 #   10.7  Streaming response headers: no Content-Length, chunked transfer
 #   10.8  markdown_streaming off + cache_validation full: 0.4.0 behavior
@@ -92,7 +92,7 @@ Test cases:
   10.2  Streaming pre-commit failure + pass
   10.3  Streaming pre-commit failure + reject
   10.4  Streaming post-commit failure
-  10.5  cache_validation full + markdown_streaming force
+  10.5  cache_validation full + markdown_streaming auto
   10.6  cache_validation ims_only + markdown_streaming force
   10.7  Streaming response headers
   10.8  markdown_streaming off + unified error policy
@@ -405,12 +405,12 @@ echo "${SEPARATOR}"
 echo "Streaming Failure/Cache E2E Test Plan"
 echo "${SEPARATOR}"
 echo ""
-echo "10.1 Streaming success + cache_validation full"
-echo "  - markdown_streaming force, cache_validation full"
-echo "  - Verify: no ETag in response headers, ETag in debug log"
+echo "10.1 Streaming success + cache_validation ims_only"
+echo "  - markdown_streaming force, cache_validation ims_only"
+echo "  - Verify: no ETag in response headers"
 echo ""
 echo "10.1b Streaming strips upstream ETag"
-echo "  - markdown_streaming force, cache_validation full, upstream sends ETag header"
+echo "  - markdown_streaming force, cache_validation ims_only, upstream sends ETag header"
 echo "  - Verify: upstream ETag stripped from response headers"
 echo ""
 echo "10.2 Streaming pre-commit failure + error_policy pass"
@@ -428,7 +428,7 @@ echo "  - markdown_streaming force"
 echo "  - Upstream aborts mid-stream after commit boundary"
 echo "  - Verify: truncated Markdown, STREAMING_FAIL_POSTCOMMIT in log"
 echo ""
-echo "10.5 cache_validation full + markdown_streaming force"
+echo "10.5 cache_validation full + markdown_streaming auto"
 echo "  - Forces full-buffer path"
 echo "  - Verify: ETag present, Content-Length present"
 echo ""
@@ -511,10 +511,10 @@ fi
 
 # Check streaming support
 streaming_detected=0
-if nm "${NGINX_BIN}" 2>/dev/null | grep -q 'markdown_streaming_new'; then
+if nm "${NGINX_BIN}" 2>/dev/null | grep -q 'markdown_streaming_new_with_code'; then
     streaming_detected=1
 elif objdump -T "${NGINX_BIN}" 2>/dev/null \
-     | grep -q 'markdown_streaming_new'; then
+     | grep -q 'markdown_streaming_new_with_code'; then
     streaming_detected=1
 fi
 
@@ -875,12 +875,12 @@ http {
             proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
         }
 
-        # 10.5: cache_validation full + streaming on
+        # 10.5: full validation selects the full-buffer path in auto mode
         location /t05/ {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation full;
-            markdown_streaming force;
+            markdown_streaming auto;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
@@ -990,13 +990,13 @@ http {
         }
 
         # 10.11: 304 should bypass streaming path selection
-        # Uses cache_validation full so ETag is generated, enabling If-None-Match
-        # revalidation that must produce 304 without entering streaming.
+        # Full validation with auto mode generates an ETag for revalidation and
+        # keeps this request out of the streaming path.
         location /t11/ {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_cache_validation full;
-            markdown_streaming force;
+            markdown_streaming auto;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;

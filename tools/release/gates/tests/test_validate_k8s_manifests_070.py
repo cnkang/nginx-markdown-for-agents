@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
@@ -14,7 +17,9 @@ from tools.release.gates.validate_k8s_manifests_070 import (  # noqa: E402
     HELM_DEPLOYMENT_REQUIRED_SNIPPETS,
     HELM_RENDER_FORBIDDEN_DEFAULT_SNIPPETS,
     HELM_VALUES_REQUIRED_SNIPPETS,
+    ValidationResult,
 )
+from tools.release.gates import validate_k8s_manifests_070 as validator  # noqa: E402
 
 
 def test_helm_defaults_are_stock_nginx_safe() -> None:
@@ -60,3 +65,58 @@ def test_helm_deployment_uses_explicit_extra_volumes_only() -> None:
 def test_gate4_documents_stock_nginx_smoke_scope() -> None:
     """Local K8s smoke should stay explicit about its stock-image scope."""
     assert "stock-nginx chart deployment path" in GATE4_LOCAL_REQUIRED_SNIPPETS
+
+
+def test_module_metrics_render_rejects_invalid_directives_and_scopes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The release gate must reject the legacy invalid Helm metrics layout."""
+    invalid_nginx_config = """
+http {
+    server {
+        markdown_metrics on;
+        markdown_metrics_uri /_markdown_metrics;
+        markdown_metrics_format auto;
+        markdown_metrics_shm_size 8m;
+    }
+}
+"""
+    completed = subprocess.CompletedProcess(
+        args=["helm", "template"],
+        returncode=0,
+        stdout=invalid_nginx_config,
+    )
+    monkeypatch.setattr(validator, "_run_helm_template", lambda *args: completed)
+
+    result = ValidationResult()
+    validator._validate_module_metrics_render(result, "helm", Path("chart"))
+
+    assert result.has_failures
+
+
+def test_module_metrics_render_accepts_http_and_location_scopes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The release gate must accept the NGINX metrics directive contract."""
+    valid_nginx_config = """
+http {
+    markdown_metrics_shm_size 8m;
+    server {
+        location = /_markdown_metrics {
+            markdown_metrics;
+            markdown_metrics_format auto;
+        }
+    }
+}
+"""
+    completed = subprocess.CompletedProcess(
+        args=["helm", "template"],
+        returncode=0,
+        stdout=valid_nginx_config,
+    )
+    monkeypatch.setattr(validator, "_run_helm_template", lambda *args: completed)
+
+    result = ValidationResult()
+    validator._validate_module_metrics_render(result, "helm", Path("chart"))
+
+    assert not result.has_failures

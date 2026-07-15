@@ -175,9 +175,9 @@ fi
 # Check if the binary has streaming support by looking for the symbol.
 # Try nm first; fall back to objdump -T for stripped binaries.
 streaming_detected=0
-if nm "${NGINX_BIN}" 2>/dev/null | grep -q 'markdown_streaming_new'; then
+if nm "${NGINX_BIN}" 2>/dev/null | grep -q 'markdown_streaming_new_with_code'; then
     streaming_detected=1
-elif objdump -T "${NGINX_BIN}" 2>/dev/null | grep -q 'markdown_streaming_new'; then
+elif objdump -T "${NGINX_BIN}" 2>/dev/null | grep -q 'markdown_streaming_new_with_code'; then
     streaming_detected=1
 fi
 

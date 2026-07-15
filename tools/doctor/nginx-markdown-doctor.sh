@@ -489,7 +489,7 @@ check_rust_linkage() {
     local found_count=0
 
     local sym
-    for sym in markdown_convert markdown_converter_new markdown_converter_free markdown_result_free markdown_negotiate_accept markdown_decide_eligibility; do
+    for sym in markdown_abi_version markdown_convert markdown_converter_new markdown_converter_free markdown_result_free markdown_negotiate_accept markdown_decide_eligibility; do
         if printf '%s\n' "$nm_output" | grep -qw "$sym"; then
             found_count=$((found_count + 1))
             if [[ -z "$rust_symbols" ]]; then

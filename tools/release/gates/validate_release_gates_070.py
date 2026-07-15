@@ -108,6 +108,29 @@ def _toolchain_matches_cargo() -> bool:
     return channel == rust_version or channel.startswith(f"{rust_version}.")
 
 
+def _verify_rustup_installer(script: str, checksums: str) -> bool:
+    """Check that the rustup install script is pinned with verified checksums."""
+    expected_artifacts = {
+        "rustup-init-1.28.2-x86_64-unknown-linux-gnu",
+        "rustup-init-1.28.2-aarch64-unknown-linux-gnu",
+    }
+    found_artifacts: set[str] = set()
+    for line in checksums.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(None, 1)
+        if len(parts) == 2 and re.fullmatch(r"[0-9a-fA-F]{64}", parts[0]):
+            found_artifacts.add(parts[1])
+    return (
+        'RUSTUP_VERSION="1.28.2"' in script
+        and "static.rust-lang.org/rustup/archive" in script
+        and "verify-checksum.sh" in script
+        and '--default-toolchain "$RUST_TOOLCHAIN"' in script
+        and expected_artifacts.issubset(found_artifacts)
+    )
+
+
 def _workflow_uses_pinned_toolchain(workflow: str) -> bool:
     rust_version = _cargo_rust_version()
     channel = _rust_toolchain_channel()
@@ -121,25 +144,7 @@ def _workflow_uses_pinned_toolchain(workflow: str) -> bool:
     env_quoted = f'RUST_TOOLCHAIN: "{channel}"'
     script = read(RUSTUP_INSTALL_SCRIPT)
     checksums = read(CHECKSUMS_PATH)
-    expected_artifacts = {
-        "rustup-init-1.28.2-x86_64-unknown-linux-gnu",
-        "rustup-init-1.28.2-aarch64-unknown-linux-gnu",
-    }
-    found_artifacts: set[str] = set()
-    for line in checksums.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split(None, 1)
-        if len(parts) == 2 and re.fullmatch(r"[0-9a-fA-F]{64}", parts[0]):
-            found_artifacts.add(parts[1])
-    verified_rustup_installer = (
-        'RUSTUP_VERSION="1.28.2"' in script
-        and "static.rust-lang.org/rustup/archive" in script
-        and "verify-checksum.sh" in script
-        and '--default-toolchain "$RUST_TOOLCHAIN"' in script
-        and expected_artifacts.issubset(found_artifacts)
-    )
+    verified_rustup_installer = _verify_rustup_installer(script, checksums)
     return (
         (env_unquoted in workflow or env_quoted in workflow)
         and "./packaging/scripts/install-verified-rustup.sh" in workflow
@@ -328,27 +333,17 @@ def check_structure(result: ValidationResult) -> None:
         result.fail(CARGO_VERSION_070_GATE, "Cargo.toml missing")
 
 
-def _gate_1_items(
-    gates: str,
-    mk: str,
-    docs: str,
-    cfg: str,
-    err: str,
-    abi: str,
-    exports: str,
-    payload: str,
-    decomp: str,
-    filter_h: str,
-) -> BlockingItems:
+def _gate_1_items(sources: dict[str, str]) -> BlockingItems:
+    """Gate 1 blocking items from the source dict built by _build_blocking_items."""
     return [
-        ("make test-nginx-unit-streaming", "`make test-nginx-unit-streaming`" in gates and "test-nginx-unit-streaming" in mk),
-        ("make test-rust", "`make test-rust`" in gates and re.search(r"\btest-rust:", mk) is not None),
-        ("make build && make check-headers", "check-headers" in mk and "make check-headers" in docs),
-        ("bounded decompression", "markdown_decompress_max_size" in cfg and "DecompressionBudgetExceeded" in err),
-        ("accept negotiation", "FFIAcceptResult" in abi and "markdown_negotiate_accept" in exports),
-        ("decomp budget exceeded metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total)" in payload),
-        ("decomp budget exceeded return code", "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in filter_h and "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in decomp),
-        ("decomp budget exceeded resource_limit path", "NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT" in payload and "DECOMP_BUDGET_EXCEEDED" in payload),
+        ("make test-nginx-unit-streaming", "`make test-nginx-unit-streaming`" in sources["gates"] and "test-nginx-unit-streaming" in sources["mk"]),
+        ("make test-rust", "`make test-rust`" in sources["gates"] and re.search(r"\btest-rust:", sources["mk"]) is not None),
+        ("make build && make check-headers", "check-headers" in sources["mk"] and "make check-headers" in sources["docs"]),
+        ("bounded decompression", "markdown_decompress_max_size" in sources["cfg"] and "DecompressionBudgetExceeded" in sources["err"]),
+        ("accept negotiation", "FFIAcceptResult" in sources["abi"] and "markdown_negotiate_accept" in sources["exports"]),
+        ("decomp budget exceeded metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total)" in sources["payload"]),
+        ("decomp budget exceeded return code", "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in sources["filter_h"] and "NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED" in sources["decomp"]),
+        ("decomp budget exceeded resource_limit path", "NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT" in sources["payload"] and "DECOMP_BUDGET_EXCEEDED" in sources["payload"]),
     ]
 
 
@@ -496,8 +491,18 @@ def _build_blocking_items() -> dict[str, BlockingItems]:
         str(p) for p in (PROJECT_ROOT / "components" / "nginx-module" / "tests" / "unit").glob("*.c")
     )
 
+    sources = {
+        "gates": gates, "mk": mk, "docs": docs, "cfg": cfg,
+        "err": err, "abi": abi, "exports": exports, "payload": payload,
+        "decomp": decomp, "filter_h": filter_h, "ffi_contract": ffi_contract,
+        "unit_test_files": unit_test_files, "conversion": conversion,
+        "decision_log": decision_log, "headers": headers,
+        "release_packages": release_packages, "release_deb": release_deb,
+        "release_rpm": release_rpm,
+    }
+
     return {
-        GATE_1: _gate_1_items(gates, mk, docs, cfg, err, abi, exports, payload, decomp, filter_h),
+        GATE_1: _gate_1_items(sources),
         GATE_2: _gate_2_items(
             docs,
             ffi_contract,

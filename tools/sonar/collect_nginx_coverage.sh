@@ -275,7 +275,6 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation full;
             markdown_otel on;
-            markdown_otel_tracing on;
             markdown_log_verbosity debug;
             markdown_token_estimate on;
             markdown_error_policy pass;
@@ -527,7 +526,9 @@ http {
         location /streaming-fullsupport {
             root html;
             markdown_filter on;
-            markdown_streaming force;
+            # Full cache validation requires the buffered path so that a
+            # transformed-representation ETag can be generated.
+            markdown_streaming auto;
             markdown_cache_validation full;
             markdown_log_verbosity debug;
         }

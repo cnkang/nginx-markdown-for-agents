@@ -135,7 +135,8 @@ ARCH_RUNNER_SNIPPET = (
 )
 STANDALONE_CONTAINER_BASH_SHELL = "defaults:\n      run:\n        shell: bash"
 STANDALONE_DEB_SNIPPETS = [
-    './packaging/scripts/validate-version.sh "${{ inputs.version }}"',
+    "INPUT_VERSION: ${{ inputs.version }}",
+    './packaging/scripts/validate-version.sh "$INPUT_VERSION"',
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "/usr/share/doc/nginx-markdown-for-agents",
     "/usr/share/licenses/nginx-markdown-for-agents",
@@ -147,13 +148,17 @@ STANDALONE_DEB_SNIPPETS = [
     '"dist/${PKG_NAME}_${PKG_VERSION}_nginx-${NGINX_VERSION}_${PKG_ARCH}.deb"',
 ]
 STANDALONE_RPM_WORKFLOW_SNIPPETS = [
-    './packaging/scripts/validate-version.sh "${{ inputs.version }}"',
+    "INPUT_VERSION: ${{ inputs.version }}",
+    './packaging/scripts/validate-version.sh "$INPUT_VERSION"',
     f'PKG_NAME="{CANONICAL_PACKAGE_NAME}"',
     "docs/guides/INSTALL.md",
     "docs/COMPATIBILITY.md",
     'NGINX_VERSION_FLOOR="${NGINX_MAJOR}.${NGINX_MINOR}.0"',
     'NGINX_VERSION_CEIL="${NGINX_MAJOR}.$((NGINX_MINOR + 1)).0"',
     "tools/release/gates/check_install_layout.sh dist/*.rpm",
+]
+STANDALONE_VERSION_FORBIDDEN_SNIPPETS = [
+    './packaging/scripts/validate-version.sh "${{ inputs.version }}"',
 ]
 _VALIDATE_RELEASE_TAG_INPUT = "Validate release tag input"
 SIGN_AND_PUBLISH_SECURITY_SNIPPETS = [
@@ -233,9 +238,18 @@ RELEASE_RUST_BUILD_INVARIANTS = [
     '--features "${RUST_FEATURES}"',
     "--config profile.release.lto=false",
     "target/${RUST_TARGET}/release/libnginx_markdown_converter.a",
-    "markdown_streaming_new",
-    "markdown_incremental_new",
+    "markdown_streaming_new_with_code",
+    "markdown_incremental_new_with_code",
     "markdown_decompress_bounded",
+]
+
+# These wrappers were removed by the v0.9.1 coordinated FFI reset. Match them
+# as complete identifiers so active replacements such as
+# `markdown_streaming_new_with_code` cannot satisfy or trip the wrong check.
+RETIRED_RELEASE_FFI_SYMBOLS = [
+    "markdown_streaming_new",
+    "markdown_streaming_free",
+    "markdown_incremental_new",
 ]
 
 _CHECK_CHECKSUMS_EXISTS = "checksums:exists"
@@ -322,6 +336,19 @@ def _check_snippets(
             result.pass_(sid, f"{label} contains {snippet}")
         else:
             result.fail(sid, f"{label} missing {snippet}")
+
+
+def _check_forbidden_snippets(
+    content: str, snippets: list[str], prefix: str, label: str,
+    result: ValidationResult,
+) -> None:
+    """Check that unsafe or retired snippets are absent."""
+    for snippet in snippets:
+        sid = f"{prefix}:forbid:{snippet[:24]}"
+        if snippet in content:
+            result.fail(sid, f"{label} must not contain {snippet}")
+        else:
+            result.pass_(sid, f"{label} omits {snippet}")
 
 
 def _check_container_bash_shell(
@@ -859,6 +886,10 @@ def _validate_standalone_deb(result: ValidationResult) -> None:
         deb_workflow, STANDALONE_DEB_SNIPPETS, "standalone-deb",
         "release-deb.yml", result,
     )
+    _check_forbidden_snippets(
+        deb_workflow, STANDALONE_VERSION_FORBIDDEN_SNIPPETS, "standalone-deb",
+        "release-deb.yml", result,
+    )
 
 
 def _validate_standalone_rpm_workflow(result: ValidationResult) -> None:
@@ -871,6 +902,10 @@ def _validate_standalone_rpm_workflow(result: ValidationResult) -> None:
     _check_snippets(
         rpm_workflow, STANDALONE_RPM_WORKFLOW_SNIPPETS, "standalone-rpm-workflow",
         "release-rpm.yml", result,
+    )
+    _check_forbidden_snippets(
+        rpm_workflow, STANDALONE_VERSION_FORBIDDEN_SNIPPETS,
+        "standalone-rpm-workflow", "release-rpm.yml", result,
     )
 
 
@@ -979,6 +1014,20 @@ def validate_release_rust_build_invariants(result: ValidationResult) -> None:
             result.pass_(sid, f"release-packages.yml contains {snippet}")
         else:
             result.fail(sid, f"release-packages.yml missing {snippet}")
+
+    for symbol in RETIRED_RELEASE_FFI_SYMBOLS:
+        sid = f"rust-build-invariant:retired:{symbol}"
+        pattern = rf"(?<![A-Za-z0-9_]){re.escape(symbol)}(?![A-Za-z0-9_])"
+        if re.search(pattern, content):
+            result.fail(
+                sid,
+                f"release-packages.yml still requires retired FFI symbol {symbol}",
+            )
+        else:
+            result.pass_(
+                sid,
+                f"release-packages.yml omits retired FFI symbol {symbol}",
+            )
 
 
 def validate_package_installation_docs(result: ValidationResult) -> None:
