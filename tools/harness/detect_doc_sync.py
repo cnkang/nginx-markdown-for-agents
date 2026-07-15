@@ -265,6 +265,15 @@ def _check_flavor_handler(content: str) -> List[str]:
     return errors
 
 
+def _is_text_contract_file(path: Path) -> bool:
+    """Check if a path is a text contract file (text suffix, not pycache)."""
+    return (
+        path.is_file()
+        and path.suffix in TEXT_SUFFIXES
+        and "__pycache__" not in path.parts
+    )
+
+
 def _iter_worktree_text_files(project_root: Path, surfaces) -> List[Path]:
     """Return text contract files from tracked, modified, and untracked surfaces."""
     files: List[Path] = []
@@ -276,9 +285,7 @@ def _iter_worktree_text_files(project_root: Path, surfaces) -> List[Path]:
             files.extend(
                 candidate
                 for candidate in path.rglob("*")
-                if candidate.is_file()
-                and candidate.suffix in TEXT_SUFFIXES
-                and "__pycache__" not in candidate.parts
+                if _is_text_contract_file(candidate)
             )
     return sorted(set(files))
 
