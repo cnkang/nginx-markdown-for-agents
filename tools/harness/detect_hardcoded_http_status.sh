@@ -105,7 +105,7 @@ if [[ $findings -gt 0 ]]; then
         echo "WARN: found ${findings} hardcoded HTTP status code(s) in reject/error paths (advisory)" >&2
     fi
 else
-    echo "OK: no hardcoded HTTP status codes in reject/error paths"
+    echo "OK: no hardcoded HTTP status codes in reject/error paths" >&2
 fi
 
 exit 0
