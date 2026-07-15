@@ -263,11 +263,10 @@ ngx_http_markdown_log_verbosity_str(ngx_uint_t val)
 
 #ifdef MARKDOWN_STREAMING_ENABLED
 /*
- * Map streaming engine enum to string representation.
+ * Map the streaming policy enum to its public string representation.
  *
- * The streaming engine is stored as a ngx_uint_t enum
- * (off=0, auto=1, on=2).  This helper maps the enum value
- * to a human-readable string.
+ * The sole selector is stored as a ngx_uint_t enum (off=0, auto=1,
+ * force=2).  This helper maps the enum value to a human-readable string.
  */
 static const char *
 ngx_http_markdown_streaming_policy_str(ngx_uint_t policy)
@@ -292,11 +291,13 @@ ngx_http_markdown_streaming_policy_str(ngx_uint_t policy)
  * Reads all dynconf-relevant fields from the location config and
  * produces a JSON object fragment containing key-value pairs.
  *
- * The output format matches the design.md §13.2 specification:
+ * The output contains active directive-shaped keys only.  Unified Config V2
+ * limits are already represented by diagnostics.effective_config and are not
+ * duplicated under removed directive names here:
  *   "config_snapshot": {
  *       "markdown_filter": "on",
  *       "markdown_streaming": "auto",
- *       "decompression_budget": "10485760",
+ *       "markdown_error_policy": "pass",
  *       ...
  *   }
  *
@@ -334,14 +335,6 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     p = ngx_http_markdown_snapshot_flag(p, last,
         "markdown_filter", conf->enabled, 1);
 
-    /* markdown_max_size */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_max_size", conf->max_size, 1);
-
-    /* markdown_timeout */
-    p = ngx_http_markdown_snapshot_msec(p, last,
-        "markdown_timeout", conf->timeout, 1);
-
     /* markdown_error_policy (pass|fail_closed|status_<code>) */
     p = ngx_http_markdown_snapshot_str(p, last,
         "markdown_error_policy",
@@ -374,10 +367,6 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     p = ngx_http_markdown_snapshot_flag(p, last,
         "markdown_auto_decompress", conf->decompress.auto_decompress, 1);
 
-    /* markdown_decompression_budget (decompress.max_size) */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_decompression_budget", conf->decompress.max_size, 1);
-
     /* markdown_parse_timeout */
     p = ngx_http_markdown_snapshot_msec(p, last,
         "markdown_parse_timeout", conf->decompress.parse_timeout, 1);
@@ -389,10 +378,6 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     /* markdown_prune_noise (on/off) */
     p = ngx_http_markdown_snapshot_flag(p, last,
         "markdown_prune_noise", conf->advanced.prune_noise, 1);
-
-    /* markdown_memory_budget */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_memory_budget", conf->advanced.memory_budget, 1);
 
     /* markdown_dynamic_config (on/off) */
     p = ngx_http_markdown_snapshot_flag(p, last,
@@ -416,16 +401,7 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     /* markdown_metrics_format */
     p = ngx_http_markdown_snapshot_str(p, last,
         "markdown_metrics_format",
-        ngx_http_markdown_metrics_format_str(conf->ops.metrics_format), 1);
-
-    /* markdown_trust_forwarded_headers (on/off) */
-    p = ngx_http_markdown_snapshot_flag(p, last,
-        "markdown_trust_forwarded_headers",
-        conf->ops.trust_forwarded_headers, 1);
-
-    /* markdown_large_body_threshold */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_large_body_threshold", conf->routing.large_body_threshold,
+        ngx_http_markdown_metrics_format_str(conf->ops.metrics_format),
 #ifdef MARKDOWN_STREAMING_ENABLED
         1);
 #else
@@ -437,10 +413,6 @@ ngx_http_markdown_dynconf_snapshot_to_json(ngx_pool_t *pool,
     p = ngx_http_markdown_snapshot_str(p, last,
         "markdown_streaming",
         ngx_http_markdown_streaming_policy_str(conf->stream.policy), 1);
-
-    /* markdown_streaming_budget */
-    p = ngx_http_markdown_snapshot_size(p, last,
-        "markdown_streaming_budget", conf->stream.budget, 1);
 
     /* markdown_streaming_shadow (on/off) */
     p = ngx_http_markdown_snapshot_flag(p, last,

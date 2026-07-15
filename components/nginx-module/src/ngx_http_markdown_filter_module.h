@@ -350,12 +350,11 @@ typedef struct {
  *   conf->on_error  = PASS (0) or REJECT (1)
  *   conf->error_status = actual HTTP status code (429/503; 502 is fail_closed default)
  *
- * The Rust FFI uses a three-value kind (FFI_ERROR_POLICY_*):
- *   0 = pass, 1 = status, 2 = fail_closed
+ * FFIExplicitConfig.error_policy uses a three-value encoding:
+ *   0 = pass, 1 = status, 2 = fail_closed.
  *
- * An explicit adapter (ngx_http_markdown_error_policy_to_ffi) must
- * translate from the C model to FFIErrorPolicy when crossing the boundary.
- * See ngx_http_markdown_config_core_impl.h for the adapter function.
+ * ngx_http_markdown_on_error_to_ffi() translates the C model when building
+ * the Rust configuration snapshot. See ngx_http_markdown_config_core_impl.h.
  */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_PASS    0  /* fail-open: return original HTML */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1  /* fail-closed: return error status */
@@ -491,7 +490,6 @@ typedef enum {
  * - parse_timeout: 30000ms (30 seconds)
  * - parser_budget: 64MB (64 * 1024 * 1024 bytes)
  * - large_body_threshold: NGX_HTTP_MARKDOWN_THRESHOLD_OFF
- * - ops.trust_forwarded_headers: 0 (off by default)
  * - ops.metrics_format: NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO
  * - ops.diagnostics_enabled: 0 (off by default)
  * - advanced.dynconf_dry_run: 0 (off by default)
@@ -610,18 +608,12 @@ typedef struct {
      * enforced by static analysis (SonarCloud rule c:S1820).
      */
     struct {
-        ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
         ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
         ngx_flag_t   metrics_per_path;    /* markdown_metrics_per_path on|off (default: off) */
         ngx_flag_t   diagnostics_enabled; /* markdown_diagnostics on|off (default: off) */
         ngx_array_t *diagnostics_allow;   /* markdown_diagnostics_allow CIDR list (default: NULL = loopback only) */
         ngx_flag_t   otel_enabled;       /* markdown_otel on|off (default: off) */
-        ngx_flag_t   otel_tracing;      /* markdown_otel_tracing on|off (default: off) */
-        ngx_flag_t   otel_metrics;      /* markdown_otel_metrics on|off (default: off) */
-        ngx_str_t    otel_endpoint;      /* markdown_otel_endpoint: internal NGINX URI for subrequest export (default: empty) */
-        ngx_str_t    otel_service_name;  /* markdown_otel_service_name (default: nginx-markdown) */
-        ngx_uint_t   otel_span_buffer_size; /* markdown_otel_span_buffer_size (default: 1024) */
-        ngx_msec_t   otel_export_timeout;   /* markdown_otel_export_timeout (default: 5000ms) */
+        ngx_str_t    otel_endpoint;      /* internal URI for OTel subrequest export */
     } ops;
 
     /*

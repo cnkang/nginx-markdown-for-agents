@@ -624,6 +624,100 @@ streaming_zero_copy_directive(void)
 }
 
 static void
+test_otel_directive_contract(void)
+{
+    static const char *reject_only[] = {
+        "markdown_otel_tracing",
+        "markdown_otel_metrics",
+        "markdown_otel_service_name",
+        "markdown_otel_span_buffer_size",
+        "markdown_otel_export_timeout"
+    };
+    ngx_command_t     *cmd;
+    size_t             i;
+
+    TEST_SUBSECTION("OTel directive runtime contract");
+
+    cmd = find_directive("markdown_otel");
+    TEST_ASSERT(cmd != NULL, "markdown_otel should be registered");
+    TEST_ASSERT(cmd->set == ngx_conf_set_flag_slot,
+        "markdown_otel should remain the tracing enable switch");
+    TEST_ASSERT(cmd->offset
+            == offsetof(ngx_http_markdown_conf_t, ops.otel_enabled),
+        "markdown_otel should target ops.otel_enabled");
+
+    cmd = find_directive("markdown_otel_endpoint");
+    TEST_ASSERT(cmd != NULL, "markdown_otel_endpoint should be registered");
+    TEST_ASSERT(cmd->set == ngx_conf_set_str_slot,
+        "markdown_otel_endpoint should remain the export URI setter");
+    TEST_ASSERT(cmd->offset
+            == offsetof(ngx_http_markdown_conf_t, ops.otel_endpoint),
+        "markdown_otel_endpoint should target ops.otel_endpoint");
+
+    for (i = 0; i < sizeof(reject_only) / sizeof(reject_only[0]); i++) {
+        cmd = find_directive(reject_only[i]);
+        TEST_ASSERT(cmd != NULL,
+            "incomplete OTel directive should retain a parser entry");
+        TEST_ASSERT(cmd->offset == 0,
+            "reject-only OTel directive must not target config state");
+        TEST_ASSERT(cmd->post != NULL,
+            "reject-only OTel directive should provide an operator hint");
+        TEST_ASSERT(cmd->set != ngx_conf_set_flag_slot
+                && cmd->set != ngx_conf_set_str_slot
+                && cmd->set != ngx_conf_set_num_slot
+                && cmd->set != ngx_conf_set_msec_slot,
+            "incomplete OTel directive must not use an accepting slot setter");
+        TEST_ASSERT(cmd->set(NULL, cmd, NULL) == NGX_CONF_ERROR,
+            "reject-only OTel directive must fail nginx -t dispatch");
+    }
+
+    TEST_ASSERT(strstr((const char *)
+                find_directive("markdown_otel_tracing")->post,
+                "markdown_otel on|off") != NULL,
+        "duplicate tracing directive should name markdown_otel migration");
+    TEST_ASSERT(strstr((const char *)
+                find_directive("markdown_otel_metrics")->post,
+                "not implemented") != NULL,
+        "OTel metrics directive should explain it is not implemented");
+    TEST_ASSERT(strstr((const char *)
+                find_directive("markdown_otel_service_name")->post,
+                "not implemented") != NULL,
+        "service name directive should explain it is not implemented");
+    TEST_ASSERT(strstr((const char *)
+                find_directive("markdown_otel_span_buffer_size")->post,
+                "not implemented") != NULL,
+        "span buffer directive should explain it is not implemented");
+    TEST_ASSERT(strstr((const char *)
+                find_directive("markdown_otel_export_timeout")->post,
+                "not implemented") != NULL,
+        "export timeout directive should explain it is not implemented");
+
+    TEST_PASS("OTel directive surface matches runtime implementation");
+}
+
+static void
+test_trusted_proxies_http_only_command_contract(void)
+{
+    ngx_command_t *cmd;
+
+    TEST_SUBSECTION("trusted proxies is http-only at command dispatch");
+
+    cmd = find_directive("markdown_trusted_proxies");
+    TEST_ASSERT(cmd != NULL,
+        "markdown_trusted_proxies should be registered");
+    TEST_ASSERT((cmd->type & NGX_HTTP_MAIN_CONF) != 0,
+        "markdown_trusted_proxies should allow http context");
+    TEST_ASSERT((cmd->type & NGX_HTTP_SRV_CONF) == 0,
+        "markdown_trusted_proxies should fail nginx -t in server context");
+    TEST_ASSERT((cmd->type & NGX_HTTP_LOC_CONF) == 0,
+        "markdown_trusted_proxies should fail nginx -t in location context");
+    TEST_ASSERT(cmd->conf == NGX_HTTP_MAIN_CONF_OFFSET,
+        "markdown_trusted_proxies should receive main configuration");
+
+    TEST_PASS("trusted proxies command table is http-only");
+}
+
+static void
 test_dynconf_directives_support_published_contexts(void)
 {
     static const char *names[] = {
@@ -1501,6 +1595,8 @@ main(void)
     test_valid_values();
     test_stream_engine_values_rejected();
     test_streaming_zero_copy_flag_values();
+    test_otel_directive_contract();
+    test_trusted_proxies_http_only_command_contract();
     test_dynconf_directives_support_published_contexts();
     test_invalid_values();
     test_stream_engine_handler_rejection();

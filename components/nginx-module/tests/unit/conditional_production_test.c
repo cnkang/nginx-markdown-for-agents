@@ -333,25 +333,6 @@ markdown_convert(struct MarkdownConverterHandle *handle,
 }
 
 void
-markdown_check_conditional(const uint8_t *if_none_match,
-    uintptr_t if_none_match_len,
-    const uint8_t *etag, uintptr_t etag_len,
-    const uint8_t *if_modified_since,
-    uintptr_t if_modified_since_len,
-    const uint8_t *vary_digest, uintptr_t vary_digest_len,
-    struct FFIConditionalResult *result)
-{
-    UNUSED(if_none_match); UNUSED(if_none_match_len);
-    UNUSED(etag); UNUSED(etag_len);
-    UNUSED(if_modified_since); UNUSED(if_modified_since_len);
-    UNUSED(vary_digest); UNUSED(vary_digest_len);
-    if (result != NULL) {
-        memset(result, 0, sizeof(*result));
-        result->result_code = (uint8_t) g_cond_result_code;
-    }
-}
-
-void
 markdown_decide_conditional(const struct FFIConditionalInput *input,
     struct FFIConditionalDecision *out)
 {
@@ -422,30 +403,6 @@ markdown_converter_free(struct MarkdownConverterHandle *handle)
 
 void
 markdown_result_init(struct MarkdownResult *result)
-{
-    if (result != NULL) {
-        memset(result, 0, sizeof(*result));
-    }
-}
-
-void
-markdown_accept_result_init(struct FFIAcceptResult *result)
-{
-    if (result != NULL) {
-        memset(result, 0, sizeof(*result));
-    }
-}
-
-void
-markdown_conditional_result_init(struct FFIConditionalResult *result)
-{
-    if (result != NULL) {
-        memset(result, 0, sizeof(*result));
-    }
-}
-
-void
-markdown_decision_result_init(struct FFIDecisionResult *result)
 {
     if (result != NULL) {
         memset(result, 0, sizeof(*result));

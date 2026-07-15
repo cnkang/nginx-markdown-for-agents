@@ -2199,7 +2199,7 @@ test_precommit_all_failopen_paths_record_metrics(void)
 
 /*
  * Verify that init-time failures (prepare_options,
- * markdown_streaming_new, decompressor create) respect
+ * markdown_streaming_new_with_code, decompressor create) respect
  * the unified error policy used by every conversion path.
  */
 static void

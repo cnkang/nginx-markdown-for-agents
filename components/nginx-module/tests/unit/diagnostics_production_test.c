@@ -539,23 +539,142 @@ test_access_and_json_builder(void)
     json = (const char *) b.pos;
     TEST_ASSERT(strstr(json, "\"config_snapshot\"") != NULL,
                 "JSON should include config snapshot");
+    TEST_ASSERT(strstr(json, "\"markdown_max_size\"") == NULL
+                && strstr(json, "\"markdown_timeout\"") == NULL
+                && strstr(json, "\"markdown_streaming_budget\"") == NULL
+                && strstr(json, "\"markdown_memory_budget\"") == NULL
+                && strstr(json,
+                    "\"markdown_trust_forwarded_headers\"") == NULL
+                && strstr(json,
+                    "\"markdown_large_body_threshold\"") == NULL
+                && strstr(json,
+                    "\"markdown_decompression_budget\"") == NULL,
+                "config snapshot should not expose removed directive names");
     TEST_ASSERT(strstr(json, "\"recent_decisions\"") != NULL,
                 "JSON should include recent decisions");
     TEST_ASSERT(strstr(json, "\"metrics_snapshot\"") != NULL,
                 "JSON should include metrics");
     TEST_ASSERT(strstr(json, "\"dynconf_state\"") != NULL,
                 "JSON should include dynconf state");
-    TEST_ASSERT(strstr(json, "\"engine\": \"on\"") != NULL,
-                "JSON should expose configured streaming engine");
-    TEST_ASSERT(strstr(json, "\"engine_source\": \"configured\"") != NULL,
-                "JSON should expose configured engine source");
+    TEST_ASSERT(strstr(json, "\"limits_memory_bytes\"") != NULL
+                && strstr(json, "\"limits_timeout_ms\"") != NULL
+                && strstr(json,
+                    "\"limits_streaming_buffer_bytes\"") != NULL
+                && strstr(json, "\"limits_max_inflight\"") != NULL,
+                "effective_config should expose Config V2 limit keys");
+    TEST_ASSERT(strstr(json, "\"policy\": \"force\"") != NULL,
+                "JSON should expose configured streaming policy");
+    TEST_ASSERT(strstr(json, "\"policy_source\": \"configured\"") != NULL,
+                "JSON should expose configured policy source");
     TEST_ASSERT(strstr(json,
                 "\"threshold_explicit\": true") != NULL,
                 "JSON should expose threshold explicit state");
     TEST_ASSERT(strstr(json, "\"reason_code\": 11") != NULL,
                 "JSON should include recorded reason");
 
+    conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
+    conf.stream.policy_explicit = 1;
+    memset(&b, 0, sizeof(b));
+    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
+    TEST_ASSERT(rc == NGX_OK,
+                "explicit auto diagnostics JSON should succeed");
+    json = (const char *) b.pos;
+    TEST_ASSERT(strstr(json, "\"policy\": \"auto\"") != NULL,
+                "JSON should expose explicit auto streaming policy");
+    TEST_ASSERT(strstr(json,
+                "\"policy_source\": \"configured\"") != NULL,
+                "explicit auto streaming policy should be configured");
+
     TEST_PASS("Access and JSON builder covered");
+}
+
+
+static void
+test_json_preserves_unified_error_policy(void)
+{
+    static const struct {
+        ngx_uint_t   on_error;
+        ngx_uint_t   error_status;
+        const char  *value;
+    } cases[] = {
+        { NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
+          NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT, "pass" },
+        { NGX_HTTP_MARKDOWN_ON_ERROR_REJECT,
+          NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT, "fail_closed" },
+        { NGX_HTTP_MARKDOWN_ON_ERROR_REJECT, 429, "status 429" },
+        { NGX_HTTP_MARKDOWN_ON_ERROR_REJECT, 503, "status 503" },
+    };
+    ngx_http_request_t       r;
+    ngx_connection_t         c;
+    ngx_http_markdown_conf_t conf;
+    struct sockaddr_in       addr;
+    ngx_buf_t                b;
+    ngx_int_t                rc;
+    char                     streaming_expected[96];
+    char                     effective_expected[96];
+    ngx_uint_t               i;
+
+    TEST_SUBSECTION("diagnostics preserve every unified error policy");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        conf.on_error = cases[i].on_error;
+        conf.error_status = cases[i].error_status;
+        memset(&b, 0, sizeof(b));
+
+        rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
+        TEST_ASSERT(rc == NGX_OK,
+                    "diagnostics JSON should render each error policy");
+
+        snprintf(streaming_expected, sizeof(streaming_expected),
+                 "\"on_error\": \"%s\"", cases[i].value);
+        snprintf(effective_expected, sizeof(effective_expected),
+                 "\"error_policy\": \"%s\"", cases[i].value);
+        TEST_ASSERT(strstr((const char *) b.pos, streaming_expected) != NULL,
+                    "streaming_config should preserve the unified policy");
+        TEST_ASSERT(strstr((const char *) b.pos, effective_expected) != NULL,
+                    "effective_config should preserve the unified policy");
+    }
+
+    TEST_PASS("Every unified error policy is preserved in diagnostics JSON");
+}
+
+
+static void
+test_balanced_profile_reports_profile_policy_source(void)
+{
+    ngx_http_request_t       r;
+    ngx_connection_t         c;
+    ngx_http_markdown_conf_t conf;
+    struct sockaddr_in       addr;
+    ngx_buf_t                b;
+    ngx_int_t                rc;
+    const char              *json;
+
+    TEST_SUBSECTION("balanced profile reports profile streaming source");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+    conf.profile.name = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
+    conf.profile.set = 1;
+    conf.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_AUTO;
+    conf.stream.policy_explicit = 0;
+    memset(&b, 0, sizeof(b));
+
+    rc = ngx_http_markdown_diagnostics_build_json(&r, &b);
+    TEST_ASSERT(rc == NGX_OK,
+                "balanced profile diagnostics JSON should succeed");
+    json = (const char *) b.pos;
+    TEST_ASSERT(strstr(json, "\"profile\": \"balanced\"") != NULL,
+                "diagnostics should expose the balanced profile");
+    TEST_ASSERT(strstr(json, "\"policy\": \"auto\"") != NULL,
+                "balanced profile should preserve auto streaming policy");
+    TEST_ASSERT(strstr(json, "\"policy_source\": \"profile\"") != NULL,
+                "balanced auto policy should report profile source");
+
+    TEST_PASS("Balanced profile streaming source is preserved");
 }
 
 static void
@@ -775,6 +894,8 @@ main(void)
     test_lifecycle_failure_branches();
     test_recording_request_resets_between_config_cycles();
     test_access_and_json_builder();
+    test_json_preserves_unified_error_policy();
+    test_balanced_profile_reports_profile_policy_source();
     test_json_buffer_scales_with_ring_count();
     test_json_builder_rejects_invalid_ring_state();
     test_access_json_and_logging_failure_branches();

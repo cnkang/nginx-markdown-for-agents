@@ -84,19 +84,58 @@ int main(void) { unsigned char buf[1]; arc4random_buf(buf, 1); return 0; }' \
     fi
 fi
 
-# Detect whether the Rust library was built with the `incremental` feature.
-# If the symbol is present, define MARKDOWN_INCREMENTAL_ENABLED so the C
-# header exposes the incremental API declarations.
-if nm "$ngx_markdown_rust_lib" 2>/dev/null | grep -q 'markdown_incremental_new'; then
-    CFLAGS="$CFLAGS -DMARKDOWN_INCREMENTAL_ENABLED"
-fi
+# Keep the C compilation surface aligned with the Cargo feature set explicitly.
+# Rust 1.97 uses LLVM 22, whose LTO archives are not guaranteed to be readable
+# by the system nm.  Symbol probing can therefore silently disable matching C
+# paths even though the Rust exports are present.  The contract accepts Cargo
+# feature names as a comma-separated list, plus the canonical `default` and
+# `none` values.  An unset value means Cargo defaults.
+ngx_markdown_rust_features=${NGX_MARKDOWN_RUST_FEATURES-default}
 
-# Detect whether the Rust library was built with the `streaming` feature.
-# If the symbol is present, define MARKDOWN_STREAMING_ENABLED so the C
-# header exposes the streaming API declarations.
-if nm "$ngx_markdown_rust_lib" 2>/dev/null | grep -q 'markdown_streaming_new'; then
-    CFLAGS="$CFLAGS -DMARKDOWN_STREAMING_ENABLED"
-fi
+case "$ngx_markdown_rust_features" in
+    default)
+        ngx_markdown_rust_features=prune_noise_regions,streaming,incremental
+        ;;
+    none)
+        ngx_markdown_rust_features=
+        ;;
+    ""|,*|*,|*,,*|*[!a-z_,]*)
+        echo "configuration error: invalid NGX_MARKDOWN_RUST_FEATURES='$ngx_markdown_rust_features'" >&2
+        exit 1
+        ;;
+    *)
+        ngx_markdown_remaining_features=$ngx_markdown_rust_features
+        while test -n "$ngx_markdown_remaining_features"; do
+            ngx_markdown_feature=${ngx_markdown_remaining_features%%,*}
+            if test "$ngx_markdown_feature" = "$ngx_markdown_remaining_features"; then
+                ngx_markdown_remaining_features=
+            else
+                ngx_markdown_remaining_features=${ngx_markdown_remaining_features#*,}
+            fi
+
+            case "$ngx_markdown_feature" in
+                incremental|streaming|prune_noise_regions)
+                    ;;
+                *)
+                    echo "configuration error: invalid NGX_MARKDOWN_RUST_FEATURES='$NGX_MARKDOWN_RUST_FEATURES'" >&2
+                    exit 1
+                    ;;
+            esac
+        done
+        ;;
+esac
+
+case ",$ngx_markdown_rust_features," in
+    *,incremental,*)
+        CFLAGS="$CFLAGS -DMARKDOWN_INCREMENTAL_ENABLED"
+        ;;
+esac
+
+case ",$ngx_markdown_rust_features," in
+    *,streaming,*)
+        CFLAGS="$CFLAGS -DMARKDOWN_STREAMING_ENABLED"
+        ;;
+esac
 
 # Check if module is configured as dynamic
 if test -n "$ngx_module_link"; then

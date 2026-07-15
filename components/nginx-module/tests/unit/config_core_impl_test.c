@@ -592,7 +592,6 @@ test_merge_conf(void)
     parent.decompress.parse_timeout = 30000;
     parent.decompress.parser_budget = 64 * 1024 * 1024;
     parent.routing.large_body_threshold = 4096;
-    parent.ops.trust_forwarded_headers = 1;
     parent.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
     parent.ops.metrics_per_path = 1;
     parent.ops.otel_enabled = 0;
@@ -630,7 +629,6 @@ test_merge_conf(void)
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
-    child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
     child.ops.otel_enabled = NGX_CONF_UNSET;
@@ -690,7 +688,6 @@ test_merge_conf(void)
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
-    child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
     child.ops.otel_enabled = NGX_CONF_UNSET;
@@ -1112,7 +1109,6 @@ test_merge_conf_double_unset(void)
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
-    child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
     child.ops.otel_enabled = NGX_CONF_UNSET;

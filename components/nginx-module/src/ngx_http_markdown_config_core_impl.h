@@ -352,20 +352,13 @@ ngx_http_markdown_create_conf(ngx_conf_t *cf)
     conf->decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     conf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     conf->routing.max_inflight = NGX_CONF_UNSET_UINT;
-    conf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     conf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     conf->ops.metrics_per_path = NGX_CONF_UNSET;
     conf->ops.diagnostics_enabled = NGX_CONF_UNSET;
     conf->ops.diagnostics_allow = NULL;
     conf->ops.otel_enabled = NGX_CONF_UNSET;
-    conf->ops.otel_tracing = NGX_CONF_UNSET;
-    conf->ops.otel_metrics = NGX_CONF_UNSET;
     conf->ops.otel_endpoint.len = 0;
     conf->ops.otel_endpoint.data = NULL;
-    conf->ops.otel_service_name.len = 0;
-    conf->ops.otel_service_name.data = NULL;
-    conf->ops.otel_span_buffer_size = NGX_CONF_UNSET_UINT;
-    conf->ops.otel_export_timeout = NGX_CONF_UNSET_MSEC;
 
     /* v0.8.0 streaming config */
     conf->stream.policy = NGX_CONF_UNSET_UINT;
@@ -651,8 +644,6 @@ ngx_http_markdown_merge_core_ops_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev,
     const ngx_http_markdown_profile_defaults_t *profile_defaults)
 {
-    ngx_conf_merge_value(conf->ops.trust_forwarded_headers,
-                         prev->ops.trust_forwarded_headers, 0);
     ngx_conf_merge_uint_value(conf->ops.metrics_format, prev->ops.metrics_format,
                               NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO);
     ngx_conf_merge_value(conf->ops.metrics_per_path, prev->ops.metrics_per_path, 0);
@@ -665,21 +656,8 @@ ngx_http_markdown_merge_core_ops_values(ngx_http_markdown_conf_t *conf,
     }
 
     ngx_conf_merge_value(conf->ops.otel_enabled, prev->ops.otel_enabled, 0);
-    ngx_conf_merge_value(conf->ops.otel_tracing, prev->ops.otel_tracing, 0);
-    ngx_conf_merge_value(conf->ops.otel_metrics, prev->ops.otel_metrics, 0);
-
-    if (conf->ops.otel_tracing || conf->ops.otel_metrics) {
-        conf->ops.otel_enabled = 1;
-    }
-
     ngx_http_markdown_merge_str_if_unset(&conf->ops.otel_endpoint,
                                          &prev->ops.otel_endpoint);
-    ngx_http_markdown_merge_str_if_unset(&conf->ops.otel_service_name,
-                                         &prev->ops.otel_service_name);
-    ngx_conf_merge_uint_value(conf->ops.otel_span_buffer_size,
-                              prev->ops.otel_span_buffer_size, 1024);
-    ngx_conf_merge_msec_value(conf->ops.otel_export_timeout,
-                              prev->ops.otel_export_timeout, 5000);
 }
 
 /*
@@ -1117,7 +1095,7 @@ ngx_http_markdown_on_error_name(ngx_uint_t value)
  *   on_error = PASS(0) or REJECT(1)
  *   error_status = actual HTTP code (429/502/503)
  *
- * The Rust FFI uses a three-value kind:
+ * FFIExplicitConfig.error_policy uses a three-value encoding:
  *   0 = pass, 1 = status, 2 = fail_closed
  *
  * Translation:
@@ -1130,22 +1108,22 @@ ngx_http_markdown_on_error_name(ngx_uint_t value)
  *   error_status - HTTP status code (default: 502)
  *
  * Returns:
- *   FFI error policy kind (0, 1, or 2)
+ *   FFIExplicitConfig.error_policy value (0, 1, or 2)
  */
 static ngx_inline uint8_t
 ngx_http_markdown_on_error_to_ffi(ngx_uint_t on_error,
     ngx_uint_t error_status)
 {
     if (on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
-        return 0;  /* FFI_ERROR_POLICY_PASS */
+        return 0;  /* pass */
     }
 
     /* REJECT mode: distinguish status vs fail_closed */
     if (error_status != NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT) {
-        return 1;  /* FFI_ERROR_POLICY_STATUS */
+        return 1;  /* status */
     }
 
-    return 2;  /* FFI_ERROR_POLICY_FAIL_CLOSED */
+    return 2;  /* fail_closed */
 }
 
 /*
@@ -1588,7 +1566,6 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                         "stream_types=%ui "
                         "content_types=%ui "
                        "large_body_threshold=%uz "
-                       "trust_forwarded_headers=%ui "
                         "metrics_format=%V metrics_per_path=%i otel=%i"
 #ifdef MARKDOWN_STREAMING_ENABLED
                         " streaming_policy=%s"
@@ -1617,7 +1594,6 @@ ngx_http_markdown_log_merged_conf(ngx_conf_t *cf,
                         stream_type_count,
                         content_type_count,
                        conf->routing.large_body_threshold,
-                       (ngx_uint_t) conf->ops.trust_forwarded_headers,
                         ngx_http_markdown_metrics_format_name(
                             conf->ops.metrics_format)
                         , (ngx_int_t) conf->ops.metrics_per_path

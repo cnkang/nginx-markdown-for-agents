@@ -101,27 +101,4 @@ ngx_http_markdown_diagnostics_get_dynconf_state(
 }
 
 
-/*
- * Trigger a manual rollback to the last-known-good configuration.
- *
- * Called from the diagnostics endpoint when an operator requests
- * a rollback via the diagnostics API.  Delegates to the dynconf
- * rollback function which restores the LKG snapshot.
- *
- * Parameters:
- *   log - NGINX log for recording the rollback event
- *
- * Returns:
- *   NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK on success
- *   NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_NO_LKG if no LKG available
- *   NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_APPLY_ERR on error
- */
-ngx_int_t
-ngx_http_markdown_diagnostics_trigger_rollback(ngx_log_t *log)
-{
-    return ngx_http_markdown_dynconf_rollback(
-        &ngx_http_markdown_dynconf_watcher, log);
-}
-
-
 #endif /* NGX_HTTP_MARKDOWN_DIAGNOSTICS_ACCESSORS_IMPL_H */

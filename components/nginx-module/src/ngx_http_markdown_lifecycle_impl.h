@@ -12,11 +12,22 @@
  * on request-path orchestration.
  */
 
-/* Reset per-configuration-cycle state before nginx parses directives. */
+/* Validate the Rust/C ABI, then reset state before parsing directives. */
 static ngx_int_t
 ngx_http_markdown_preconfiguration(ngx_conf_t *cf)
 {
-    (void) cf;
+    uint32_t  actual_abi;
+
+    actual_abi = markdown_abi_version();
+    if (!ngx_http_markdown_ffi_abi_matches(actual_abi)) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "markdown: Rust/C ABI mismatch "
+                           "(expected=%ui, actual=%ui); rebuild the module "
+                           "and bundled Rust converter together",
+                           (ngx_uint_t) MARKDOWN_ABI_VERSION,
+                           (ngx_uint_t) actual_abi);
+        return NGX_ERROR;
+    }
 
     ngx_http_markdown_diagnostics_reset_recording_request();
 

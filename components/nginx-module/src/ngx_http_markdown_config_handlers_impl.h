@@ -53,6 +53,30 @@ ngx_http_markdown_arg_equals(
 }
 
 /*
+ * Resolve a size suffix character (k/K, m/M, g/G) to its multiplier.
+ * Returns 0 for no suffix (bare number), or (size_t) NGX_ERROR for an
+ * unrecognized character so the caller can distinguish "no suffix" from
+ * "invalid suffix".  Caller must check: 0 = bare, NGX_ERROR = invalid.
+ */
+static size_t
+ngx_http_markdown_size_suffix_scale(char suffix)
+{
+    switch (suffix) {
+    case 'k':
+    case 'K':
+        return (size_t) 1024;
+    case 'm':
+    case 'M':
+        return (size_t) 1024 * 1024;
+    case 'g':
+    case 'G':
+        return (size_t) 1024 * 1024 * 1024;
+    default:
+        return (size_t) NGX_ERROR;
+    }
+}
+
+/*
  * Parse an ngx_str_t size token using the module's directive
  * semantics.  Supports the same suffix families as NGINX's size
  * parser (k/K, m/M, g/G) and rejects overflow or malformed input.
@@ -119,21 +143,13 @@ ngx_http_markdown_parse_size(const ngx_str_t *line)
 
     value = (size_t) raw;
 
-    switch (suffix) {
-    case 'k':
-    case 'K':
-        scale = (size_t) 1024;
-        break;
-    case 'm':
-    case 'M':
-        scale = (size_t) 1024 * 1024;
-        break;
-    case 'g':
-    case 'G':
-        scale = (size_t) 1024 * 1024 * 1024;
-        break;
-    default:
+    if (suffix == '\0') {
         return value;
+    }
+
+    scale = ngx_http_markdown_size_suffix_scale(suffix);
+    if (scale == (size_t) NGX_ERROR) {
+        return (size_t) NGX_ERROR;
     }
 
     if (value > NGX_MAX_SIZE_T_VALUE / scale) {
@@ -535,9 +551,9 @@ ngx_http_markdown_trusted_proxies(ngx_conf_t *cf, ngx_command_t *cmd,
     uint8_t                         rc;
 
     /*
-     * http context only.  With NGX_HTTP_MAIN_CONF_OFFSET the conf pointer is
-     * always the main conf, so detect a misplaced directive via cf->cmd_type
-     * to emit a custom golden error rather than NGINX's generic message.
+     * The command table is MAIN_CONF-only, so NGINX rejects server/location
+     * use before dispatch.  Keep this guard for direct calls and defensive
+     * protection if the command flags ever regress.
      */
     if (!(cf->cmd_type & NGX_HTTP_MAIN_CONF)) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,

@@ -208,7 +208,7 @@ ngx_http_markdown_metrics_write_prometheus(
         snapshot->skips.conditional,
         snapshot->skips.config);
 
-    /* failures_total{reason=...} — lowercase snake_case per schema v1 */
+    /* failures_total{reason=...} — bounded failure categories. */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_failures_total "
         "Conversion failures by reason.\n"
@@ -216,9 +216,9 @@ ngx_http_markdown_metrics_write_prometheus(
         "nginx_markdown_failures_total"
         "{reason=\"conversion_error\"} %uA\n"
         "nginx_markdown_failures_total"
-        "{reason=\"memory_budget_exceeded\"} %uA\n"
+        "{reason=\"resource_limit\"} %uA\n"
         "nginx_markdown_failures_total"
-        "{reason=\"ffi_panic\"} %uA\n"
+        "{reason=\"system_error\"} %uA\n"
         "\n",
         snapshot->failures_conversion,
         snapshot->failures_resource_limit,
@@ -628,7 +628,7 @@ ngx_http_markdown_metrics_write_prometheus(
         snapshot->results.decision_count);
 
     /*
-     * conversion_duration_seconds{le=...}
+     * conversion_latency_bucket_total{le=...}
      *
      * Emitted as cumulative buckets: each le value includes
      * all observations at or below that threshold.
@@ -636,19 +636,17 @@ ngx_http_markdown_metrics_write_prometheus(
      */
     p = ngx_slprintf(p, end,
         "# HELP "
-        "nginx_markdown_conversion_duration_seconds "
-        "Cumulative conversion count per latency bucket "
-        "(not a native Prometheus histogram; "
-        "no _sum/_count).\n"
+        "nginx_markdown_conversion_latency_bucket_total "
+        "Cumulative conversion count per latency boundary.\n"
         "# TYPE "
-        "nginx_markdown_conversion_duration_seconds gauge\n"
-        "nginx_markdown_conversion_duration_seconds"
+        "nginx_markdown_conversion_latency_bucket_total counter\n"
+        "nginx_markdown_conversion_latency_bucket_total"
         "{le=\"0.01\"} %uA\n"
-        "nginx_markdown_conversion_duration_seconds"
+        "nginx_markdown_conversion_latency_bucket_total"
         "{le=\"0.1\"} %uA\n"
-        "nginx_markdown_conversion_duration_seconds"
+        "nginx_markdown_conversion_latency_bucket_total"
         "{le=\"1.0\"} %uA\n"
-        "nginx_markdown_conversion_duration_seconds"
+        "nginx_markdown_conversion_latency_bucket_total"
         "{le=\"+Inf\"} %uA\n",
         snapshot->conversion_latency.le_10ms,
         snapshot->conversion_latency.le_10ms

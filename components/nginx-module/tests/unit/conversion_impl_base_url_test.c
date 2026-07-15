@@ -189,7 +189,6 @@ static ngx_uint_t g_reason_streaming_shadow_calls = 0;
 static ngx_uint_t g_streaming_new_with_code_calls = 0;
 static ngx_uint_t g_streaming_feed_calls = 0;
 static ngx_uint_t g_streaming_finish_calls = 0;
-static ngx_uint_t g_streaming_free_calls = 0;
 static ngx_uint_t g_abort_calls = 0;
 static ngx_uint_t g_output_free_calls = 0;
 static ngx_uint_t g_pnalloc_fail_once = 0;
@@ -382,13 +381,6 @@ markdown_streaming_finalize(struct StreamingConverterHandle *handle,
     UNUSED(result);
     g_streaming_finish_calls++;
     return g_streaming_finalize_rc;
-}
-
-void
-markdown_streaming_free(struct StreamingConverterHandle *handle)
-{
-    UNUSED(handle);
-    g_streaming_free_calls++;
 }
 
 typedef struct ngx_list_part_s ngx_list_part_t;
@@ -1007,7 +999,6 @@ reset_stub_state(void)
     g_streaming_new_with_code_calls = 0;
     g_streaming_feed_calls = 0;
     g_streaming_finish_calls = 0;
-    g_streaming_free_calls = 0;
     g_abort_calls = 0;
     g_output_free_calls = 0;
     g_pnalloc_fail_once = 0;
@@ -1639,8 +1630,6 @@ test_shadow_compare_prepare_options_failure(void)
                 "shadow compare must not feed streaming after option failure");
     TEST_ASSERT(g_streaming_finish_calls == 0,
                 "shadow compare must not finish streaming after option failure");
-    TEST_ASSERT(g_streaming_free_calls == 0,
-                "shadow compare must not free streaming after option failure");
 
     TEST_PASS("shadow compare aborts on prepare options failure");
 }
@@ -1682,8 +1671,6 @@ test_find_request_header_multi_part(void)
     r.headers_in.headers.part.elts = headers_part1;
     r.headers_in.headers.part.nelts = 1;
     r.headers_in.headers.part.next = &part2;
-
-    conf.ops.trust_forwarded_headers = 1;
 
     /* Search for X-Forwarded-Proto — should find it in part 2 */
     result = ngx_http_markdown_find_request_header_value(
