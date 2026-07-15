@@ -19,7 +19,7 @@ The following *semantic* numeric suffixes are intentionally exempt because
 they encode real meaning, not an auto-generated index:
 
   - exit-code semantics:           ``..._exit_0``, ``..._exit_2``
-  - spec / version tags:           ``validate_module_benchmark_091``
+  - spec / version tags:           ``validate_module_benchmark``
   - ADR references:                ``check_adr_0007``
   - semver embedded in a name:     ``test_schema_version_is_1_0_0``
 

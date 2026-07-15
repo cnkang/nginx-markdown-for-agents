@@ -91,7 +91,7 @@ def test_spec_version_suffix_is_exempt(det, tmp_path):
     errors, warnings = _scan_source(
         det, tmp_path,
         """
-        def validate_module_benchmark_091(report):
+        def validate_module_benchmark(report):
             return report
         """,
     )
@@ -174,7 +174,7 @@ def test_rust_example_numbering_is_exempt(det, tmp_path):
 def test_classify_name_helper(det):
     assert det.classify_name("_extracted_from_test_foo_3") == "extracted"
     assert det.classify_name("helper_1") == "index"
-    assert det.classify_name("validate_module_benchmark_091") is None
+    assert det.classify_name("validate_module_benchmark") is None
     assert det.classify_name("check_adr_0007") is None
     assert det.classify_name("test_cli_exit_0") is None
     assert det.classify_name("do_real_work") is None
