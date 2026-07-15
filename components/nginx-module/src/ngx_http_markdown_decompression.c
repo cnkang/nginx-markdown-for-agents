@@ -376,6 +376,7 @@ typedef struct {
     size_t                                *output_size;
     ngx_http_markdown_compression_type_e   type;
     size_t                                 completed_out;
+    u_char                                 overflow_probe;
 } ngx_http_markdown_inflate_ctx_t;
 
 
@@ -473,8 +474,7 @@ ngx_http_markdown_reset_gzip_member(ngx_http_request_t *r,
 
 static ngx_int_t
 ngx_http_markdown_complete_inflate_member(
-    ngx_http_markdown_inflate_ctx_t *ctx, u_char *overflow_probe,
-    size_t *total_out)
+    ngx_http_markdown_inflate_ctx_t *ctx, size_t *total_out)
 {
     ngx_int_t  rc;
 
@@ -508,7 +508,7 @@ ngx_http_markdown_complete_inflate_member(
 
     rc = ngx_http_markdown_reset_gzip_member(
         ctx->request, ctx->stream, *ctx->output_data, *ctx->output_size,
-        ctx->completed_out, overflow_probe);
+        ctx->completed_out, &ctx->overflow_probe);
     if (rc != NGX_OK) {
         return rc;
     }
@@ -519,12 +519,11 @@ ngx_http_markdown_complete_inflate_member(
 
 static ngx_int_t
 ngx_http_markdown_handle_inflate_result(
-    ngx_http_markdown_inflate_ctx_t *ctx, int zrc,
-    u_char *overflow_probe, size_t *total_out)
+    ngx_http_markdown_inflate_ctx_t *ctx, int zrc, size_t *total_out)
 {
     if (zrc == Z_STREAM_END) {
         return ngx_http_markdown_complete_inflate_member(
-            ctx, overflow_probe, total_out);
+            ctx, total_out);
     }
 
     if (zrc == Z_OK && ctx->stream->avail_out > 0) {
@@ -588,7 +587,6 @@ ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
     u_char **output_data, size_t *output_size,
     ngx_http_markdown_compression_type_e type, size_t *total_out)
 {
-    u_char                           overflow_probe;
     int                              zrc;
     ngx_int_t                        rc;
     ngx_http_markdown_inflate_ctx_t  ctx;
@@ -600,11 +598,12 @@ ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
     ctx.output_size = output_size;
     ctx.type = type;
     ctx.completed_out = 0;
+    ctx.overflow_probe = 0;
 
     for ( ;; ) {
         zrc = inflate(stream, Z_NO_FLUSH);
         rc = ngx_http_markdown_handle_inflate_result(
-            &ctx, zrc, &overflow_probe, total_out);
+            &ctx, zrc, total_out);
         if (rc != NGX_AGAIN) {
             return rc;
         }
