@@ -752,7 +752,7 @@ release-gates-check-090: release-gates-check-080-regression
 # Classification: SOFT (report-only, does not fail the build)
 perf-evidence-check:
 	@echo "=== Performance Evidence Check (non-blocking) ==="
-	@tools/perf/run_evidence_gate_091.sh
+	@tools/perf/run_evidence_gate.sh
 
 # release-gates-check-091: Blocking 0.9.1 release gate.
 # Runs all prior regression gates (0.9.0 gate chain), then adds 0.9.1-specific
@@ -775,10 +775,10 @@ release-gates-check-091: release-gates-check-090
 	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
 	@echo "  [2/3] Performance evidence gate (blocking mode)"
 	@if [ -n "$${NGINX_BIN:-}" ]; then \
-		python3 tools/perf/evidence_gate_091.py --mode blocking || exit 1; \
+		python3 tools/perf/evidence_gate.py --mode blocking || exit 1; \
 	else \
 		if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
-			python3 tools/perf/evidence_gate_091.py --mode blocking --allow-skip-module || exit 1; \
+			python3 tools/perf/evidence_gate.py --mode blocking --allow-skip-module || exit 1; \
 		else \
 			echo "FAIL: Module-level benchmarks require NGINX_BIN." >&2; \
 			echo "  Set NGINX_BIN=/path/to/nginx or RELEASE_GATE_ALLOW_SKIP_MODULE=1 to skip." >&2; \

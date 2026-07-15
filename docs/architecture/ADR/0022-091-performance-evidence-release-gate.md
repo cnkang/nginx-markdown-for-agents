@@ -10,7 +10,7 @@ Accepted
 
 ## Decision
 
-Add `evidence_gate_091.py` as the formal release gate for 0.9.1.
+Add `evidence_gate.py` as the formal release gate for 0.9.1.
 
 ### Operational Modes
 - **Non-blocking mode** (`make perf-evidence-check`): Used for PRs to provide visibility.
