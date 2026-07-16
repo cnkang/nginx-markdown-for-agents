@@ -1039,6 +1039,9 @@ class TestPathCoverageInvariants:
                     {
                         "name": "streaming-first",
                         "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "none",
+                        "transfer_encoding": "chunked",
                         "metrics": {
                             "streaming_ratio": 0.0,
                             "fullbuffer_ratio": 1.0,
@@ -1063,6 +1066,9 @@ class TestPathCoverageInvariants:
                     {
                         "name": "streaming-first",
                         "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "none",
+                        "transfer_encoding": "chunked",
                         "metrics": {
                             "streaming_ratio": 0.8,
                             "fullbuffer_ratio": 0.2,
@@ -1102,6 +1108,7 @@ class TestPathCoverageInvariants:
                         "status": "completed",
                         "profile": "balanced",
                         "compression": "gzip",
+                        "transfer_encoding": "identity",
                         "metrics": {
                             "decompression_fullbuffer_total": 0,
                             "fullbuffer_path_hits": 0,
@@ -1124,6 +1131,7 @@ class TestPathCoverageInvariants:
                         "status": "completed",
                         "profile": "balanced",
                         "compression": "gzip",
+                        "transfer_encoding": "identity",
                         "metrics": {
                             "decompression_fullbuffer_total": 1030,
                             "fullbuffer_path_hits": 1030,
@@ -1181,6 +1189,144 @@ class TestBaselineEvidenceIntegrity:
         assert _validate_benchmark_evidence(
             baseline, role="baseline"
         ) == []
+
+    @pytest.mark.parametrize(
+        ("scenario", "field", "value"),
+        [
+            ("plain-small", "profile", "streaming_first"),
+            ("plain-small", "compression", "gzip"),
+            ("plain-small", "transfer_encoding", "chunked"),
+            ("chunked-medium", "profile", "streaming_first"),
+            ("chunked-medium", "compression", "gzip"),
+            ("chunked-medium", "transfer_encoding", "identity"),
+            ("gzip-large", "transfer_encoding", "chunked"),
+            ("large-body", "profile", "streaming_first"),
+            ("large-body", "compression", "gzip"),
+            ("large-body", "transfer_encoding", "chunked"),
+            ("streaming-first", "profile", "balanced"),
+            ("streaming-first", "compression", "gzip"),
+            ("streaming-first", "transfer_encoding", "identity"),
+        ],
+    )
+    def test_all_scenario_metadata_mutations_fail_blocking_validation(
+        self, scenario, field, value
+    ):
+        report = _load_canonical_module_baseline()
+        _scenario(report, scenario)[field] = value
+
+        violations = _validate_benchmark_evidence(report, role="baseline")
+
+        assert any(
+            check == "baseline.path_coverage"
+            and scenario in reason
+            and f"metric={field}" in reason
+            for check, reason in violations
+        )
+
+    @pytest.mark.parametrize(
+        ("scenario", "metric"),
+        [
+            ("plain-small", "fullbuffer_path_hits"),
+            ("chunked-medium", "fullbuffer_path_hits"),
+            ("large-body", "fullbuffer_path_hits"),
+            ("streaming-first", "streaming_path_hits"),
+            ("gzip-large", "decompression_fullbuffer_total"),
+            ("gzip-streaming-first", "decompression_streaming_total"),
+            ("deflate-streaming-first", "decompression_streaming_total"),
+        ],
+    )
+    def test_all_target_path_mutations_fail_blocking_validation(
+        self, scenario, metric
+    ):
+        report = _load_canonical_module_baseline()
+        _scenario(report, scenario)["metrics"][metric] = 0
+
+        violations = _validate_benchmark_evidence(report, role="baseline")
+
+        assert any(
+            check == "baseline.path_coverage"
+            and scenario in reason
+            and f"metric={metric}" in reason
+            for check, reason in violations
+        )
+
+    @pytest.mark.parametrize("invalid", [None, True, "1", -1])
+    @pytest.mark.parametrize(
+        ("scenario", "metric"),
+        [
+            ("streaming-first", "zero_copy_output_total"),
+            ("streaming-first", "copied_output_total"),
+            ("streaming-first", "streaming_path_hits"),
+            ("plain-small", "fullbuffer_path_hits"),
+            ("gzip-large", "decompression_fullbuffer_total"),
+            ("gzip-streaming-first", "decompression_streaming_total"),
+        ],
+    )
+    def test_path_counters_require_nonnegative_integers(
+        self, scenario, metric, invalid
+    ):
+        report = _load_canonical_module_baseline()
+        metrics = _scenario(report, scenario)["metrics"]
+        if invalid is None:
+            metrics.pop(metric)
+        else:
+            metrics[metric] = invalid
+
+        violations = _validate_benchmark_evidence(report, role="baseline")
+
+        assert any(
+            check == "baseline.path_coverage"
+            and scenario in reason
+            for check, reason in violations
+        )
+
+    def test_current_normalized_baseline_uses_explicit_historical_exception(self):
+        report = _load_canonical_module_baseline()
+
+        assert report["baseline_policy"]["historical_audit_exception"] is True
+        assert _validate_benchmark_evidence(report, role="baseline") == []
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "source_git_commit",
+            "source_run",
+            "source_artifact",
+            "adjustments",
+            "adjustment_reason",
+            "adjustment_date",
+        ],
+    )
+    def test_normalized_baseline_requires_audit_metadata(self, field):
+        report = _load_canonical_module_baseline()
+        policy = report["baseline_policy"]
+        policy["historical_audit_exception"] = False
+        policy["source_artifact"] = "actions/runs/123/artifacts/456"
+        policy.pop(field)
+
+        violations = _validate_benchmark_evidence(report, role="baseline")
+
+        assert any(
+            check == "baseline.baseline_policy" and field in reason
+            for check, reason in violations
+        )
+
+    @pytest.mark.parametrize("placeholder", ["", "not-recorded", "unknown"])
+    def test_future_normalized_baseline_rejects_unlocatable_artifact(
+        self, placeholder
+    ):
+        report = _load_canonical_module_baseline()
+        policy = report["baseline_policy"]
+        policy["historical_audit_exception"] = False
+        policy["source_artifact"] = placeholder
+
+        violations = _validate_benchmark_evidence(report, role="baseline")
+
+        assert any(
+            check == "baseline.baseline_policy"
+            and "source_artifact" in reason
+            for check, reason in violations
+        )
 
     @pytest.mark.parametrize(
         ("field", "value", "reason_fragment"),
@@ -1269,6 +1415,7 @@ class TestBaselineEvidenceIntegrity:
                             "peak_rss_bytes": 1100,
                             "streaming_ratio": 0.0,
                             "fullbuffer_ratio": 1.0,
+                            "fullbuffer_path_hits": 1,
                         },
                     },
                     {
@@ -1281,6 +1428,7 @@ class TestBaselineEvidenceIntegrity:
                             "input_bytes": 200,
                             "baseline_rss_bytes": 2000,
                             "peak_rss_bytes": 2200,
+                            "fullbuffer_path_hits": 1,
                         },
                     },
                     {
@@ -1293,6 +1441,7 @@ class TestBaselineEvidenceIntegrity:
                             "input_bytes": 125,
                             "baseline_rss_bytes": 1250,
                             "peak_rss_bytes": 1400,
+                            "fullbuffer_path_hits": 1,
                         },
                     },
                     {
@@ -1427,6 +1576,9 @@ class TestBaselineEvidenceIntegrity:
                     {
                         "name": "streaming-first",
                         "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "none",
+                        "transfer_encoding": "chunked",
                         "metrics": {
                             "streaming_ratio": 0.8,
                             "fullbuffer_ratio": 0.2,
@@ -2319,6 +2471,9 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "streaming-first",
                         "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "none",
+                        "transfer_encoding": "chunked",
                         "metrics": {
                             "streaming_ratio": 1.0,
                             "fullbuffer_ratio": 0.0,
@@ -2334,6 +2489,7 @@ class TestCompressedStreamingPathTruthfulness:
                         "status": "completed",
                         "profile": "balanced",
                         "compression": "gzip",
+                        "transfer_encoding": "identity",
                         "metrics": {
                             "decompression_fullbuffer_total": 1030,
                             "fullbuffer_path_hits": 1030,
@@ -2472,6 +2628,8 @@ class TestCompressedStreamingPathTruthfulness:
                             "input_bytes": 5390,
                             "baseline_rss_bytes": 10_000_000,
                             "peak_rss_bytes": 11_000_000,
+                            "fullbuffer_path_hits": 1000,
+                            "fullbuffer_ratio": 1.0,
                         },
                     },
                     {
@@ -2484,6 +2642,7 @@ class TestCompressedStreamingPathTruthfulness:
                             "input_bytes": 1_048_516,
                             "baseline_rss_bytes": 20_000_000,
                             "peak_rss_bytes": 25_000_000,
+                            "fullbuffer_path_hits": 1000,
                         },
                     },
                     {
@@ -2496,6 +2655,7 @@ class TestCompressedStreamingPathTruthfulness:
                             "input_bytes": 10_000,
                             "baseline_rss_bytes": 10_000_000,
                             "peak_rss_bytes": 11_500_000,
+                            "fullbuffer_path_hits": 1000,
                         },
                     },
                     {
