@@ -669,7 +669,6 @@ ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
 {
     ngx_pool_cleanup_t *cln;
 
-    UNUSED(size);
     if (pool == NULL) {
         return NULL;
     }
@@ -681,6 +680,14 @@ ngx_pool_cleanup_add(ngx_pool_t *pool, size_t size)
     cln = calloc(1, sizeof(ngx_pool_cleanup_t));
     if (cln == NULL) {
         return NULL;
+    }
+
+    if (size > 0) {
+        cln->data = calloc(1, size);
+        if (cln->data == NULL) {
+            free(cln);
+            return NULL;
+        }
     }
 
     cln->next = pool->cleanups;
