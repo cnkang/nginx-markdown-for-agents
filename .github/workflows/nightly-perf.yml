@@ -21,6 +21,7 @@ permissions: {}
 jobs:
   nightly-perf:
     name: Nightly Full Performance
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.bootstrap_module_baseline) }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -178,7 +179,7 @@ jobs:
     name: Canonical Module Baseline 0.9.1
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap_module_baseline }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
     env:
@@ -246,6 +247,20 @@ jobs:
         with:
           toolchain: 1.97.0
           targets: x86_64-unknown-linux-gnu
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.3'
+
+      - name: Install release-gate tooling
+        run: |
+          python3 -m pip install -r requirements-dev.txt lizard complexipy
+          if ! command -v cbindgen >/dev/null 2>&1 \
+              || [[ "$(cbindgen --version)" != "cbindgen 0.29.2" ]]; then
+            cargo install cbindgen --version 0.29.2 --locked
+          fi
+        shell: bash
 
       - name: Download verified NGINX source
         env:
@@ -315,3 +330,15 @@ jobs:
           path: perf/baselines/module-baseline-091.json
           if-no-files-found: error
           retention-days: 14
+
+      - name: Run canonical performance evidence check
+        run: |
+          NGINX_BIN="${NGINX_SRC}/objs/nginx" \
+          MODULE_SO="${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so" \
+            make perf-evidence-check
+
+      - name: Run canonical 0.9.1 release gates
+        run: |
+          NGINX_BIN="${NGINX_SRC}/objs/nginx" \
+          MODULE_SO="${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so" \
+            make release-gates-check-091

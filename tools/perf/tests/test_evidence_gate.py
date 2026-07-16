@@ -242,6 +242,7 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
     ).read_text(encoding="utf-8")
 
     assert "bootstrap_module_baseline" in workflow
+    assert "if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.bootstrap_module_baseline) }}" in workflow
     assert "name: Canonical Module Baseline 0.9.1" in workflow
     assert "runs-on: ubuntu-24.04" in workflow
     assert '[[ "$(uname -m)" == "x86_64" ]]' in workflow
@@ -251,20 +252,13 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
     assert "tools/perf/run_module_benchmark.sh" in workflow
     assert "perf/baselines/module-baseline-091.json" in workflow
     assert "_validate_benchmark_evidence" in workflow
+    assert "make perf-evidence-check" in workflow
+    assert "make release-gates-check-091" in workflow
     assert "module-baseline-091-${{ github.sha }}" in workflow
 
 
-@pytest.mark.xfail(
-    reason="baseline needs regeneration with gzip/deflate streaming scenarios",
-    strict=True,
-)
 def test_module_baseline_contains_measured_critical_scenarios():
-    """The checked-in baseline contains real critical-path evidence.
-
-    After adding gzip-streaming-first and deflate-streaming-first as
-    critical scenarios, the baseline must be regenerated to include them.
-    Until regeneration, this test documents the gap.
-    """
+    """The checked-in baseline contains real critical-path evidence."""
     baseline_path = (
         Path(__file__).resolve().parents[3]
         / "perf"
@@ -293,9 +287,7 @@ def test_module_baseline_contains_measured_critical_scenarios():
     assert streaming["streaming_fallback_total"] == 0
     assert streaming["zero_copy_output_total"] > 0
 
-    # New critical scenarios (0.9.1 compressed streaming evidence)
-    # These require baseline regeneration with a module-enabled NGINX
-    # that supports gzip/deflate streaming decompression.
+    # 0.9.1 compressed-streaming critical scenarios.
     for name in ("gzip-large", "gzip-streaming-first", "deflate-streaming-first"):
         assert name in by_name, (
             f"baseline missing critical scenario: {name}; "
@@ -1049,10 +1041,6 @@ class TestPathCoverageInvariants:
 class TestBaselineEvidenceIntegrity:
     """The checked-in baseline must pass the same integrity checks as current."""
 
-    @pytest.mark.xfail(
-        reason="baseline needs regeneration with gzip/deflate streaming scenarios",
-        strict=True,
-    )
     def test_current_baseline_passes_full_validation(self):
         """The generated baseline passes the blocking integrity contract."""
         baseline_path = (
