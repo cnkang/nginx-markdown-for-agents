@@ -60,7 +60,7 @@ usage() {
   echo >&2 "Environment:"
   echo >&2 "  NGINX_BIN   Path to nginx binary with markdown module (required)"
   echo >&2 ""
-  echo >&2 "Scenarios: plain-small, chunked-medium, gzip-large, large-body, streaming-first"
+  echo >&2 "Scenarios: plain-small, chunked-medium, gzip-large, large-body, streaming-first, gzip-streaming-first, deflate-streaming-first"
   exit "${1:-1}"
 }
 
@@ -538,6 +538,8 @@ SCENARIOS=(
   "gzip-large|complex/blog-post.html|balanced|gzip|identity|10"
   "large-body|large/large-1mb.html|balanced|none|identity|5"
   "streaming-first|large/large-1mb.html|streaming_first|none|chunked|20"
+  "gzip-streaming-first|large/large-1mb.html|streaming_first|gzip|chunked|10"
+  "deflate-streaming-first|large/large-1mb.html|streaming_first|deflate|chunked|10"
 )
 
 ###############################################################################
