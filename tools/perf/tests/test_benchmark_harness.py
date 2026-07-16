@@ -28,6 +28,7 @@ import socket
 import subprocess
 import tempfile
 import time
+import zlib
 from pathlib import Path
 
 import pytest
@@ -103,6 +104,44 @@ def test_upstream_mock_splits_chunked_bodies():
     assert len(chunks) > 1
     assert max(map(len, chunks)) <= 16 * 1024
     assert b"".join(chunks) == body
+
+
+@pytest.mark.parametrize(
+    ("content_encoding", "wbits"),
+    [("gzip", zlib.MAX_WBITS | 16), ("deflate", zlib.MAX_WBITS)],
+)
+def test_upstream_mock_streams_compression_in_bounded_chunks(
+    content_encoding, wbits
+):
+    """Compressed streaming fixtures must not inflate in one giant burst."""
+    handler = object.__new__(MockUpstreamHandler)
+    handler.wfile = io.BytesIO()
+    handler._send_common_headers = lambda _encoding: None
+    handler.send_header = lambda *_args: None
+    handler.end_headers = lambda: None
+    body = b"<p>highly compressible benchmark content</p>\n" * 32_768
+
+    handler._send_chunked_response(body, content_encoding)
+
+    wire = handler.wfile.getvalue()
+    chunks = []
+    offset = 0
+    while True:
+        line_end = wire.index(b"\r\n", offset)
+        size = int(wire[offset:line_end], 16)
+        offset = line_end + 2
+        if size == 0:
+            break
+        chunks.append(wire[offset:offset + size])
+        offset += size + 2
+
+    decompressor = zlib.decompressobj(wbits)
+    decompressed_chunks = [decompressor.decompress(chunk) for chunk in chunks]
+    decompressed_chunks.append(decompressor.flush())
+
+    assert len(chunks) > 1
+    assert max(map(len, decompressed_chunks)) <= 16 * 1024
+    assert b"".join(decompressed_chunks) == body
 
 # Canonical allowlist for bash binary paths (Rule 33: CLI-derived executables
 # must match a fixed canonical allowlist before subprocess use).
