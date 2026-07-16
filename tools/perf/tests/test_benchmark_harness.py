@@ -69,6 +69,9 @@ def test_production_example_gate_loads_dynamic_module_when_provided():
     assert "test-production-examples-nginx-t: SHELL := /bin/bash" in makefile
     assert 'module_so="$${MODULE_SO:-}"' in target
     assert '-g "load_module $$module_so;"' in target
+    assert 'runtime_prefix="$${RUNNER_TEMP:-$${TMPDIR:-/tmp}}/' in target
+    assert 'mkdir -p "$$runtime_prefix/logs"' in target
+    assert '-p "$$runtime_prefix/"' in target
 
 
 def test_module_benchmark_records_actual_fixture_bytes():

@@ -814,6 +814,9 @@ test-production-examples-nginx-t:
 	@nginx_bin="$${NGINX_BIN:-nginx}"; \
 	module_so="$${MODULE_SO:-}"; \
 	if command -v "$$nginx_bin" >/dev/null 2>&1; then \
+		runtime_prefix="$${RUNNER_TEMP:-$${TMPDIR:-/tmp}}/nginx-markdown-config-test-$$$$"; \
+		mkdir -p "$$runtime_prefix/logs"; \
+		trap 'rm -rf -- "$$runtime_prefix"' EXIT; \
 		set -- examples/production/*.conf; \
 		if [ "$$1" = 'examples/production/*.conf' ]; then \
 			echo "FAIL: no production example configs found in examples/production/" >&2; \
@@ -822,10 +825,12 @@ test-production-examples-nginx-t:
 		for conf in "$$@"; do \
 			echo "  Testing: $$conf"; \
 			if [[ -n "$$module_so" ]]; then \
-				"$$nginx_bin" -t -g "load_module $$module_so;" \
+				"$$nginx_bin" -t -p "$$runtime_prefix/" \
+					-g "load_module $$module_so;" \
 					-c "$$(pwd)/$$conf" 2>&1 || exit 1; \
 			else \
-				"$$nginx_bin" -t -c "$$(pwd)/$$conf" 2>&1 || exit 1; \
+				"$$nginx_bin" -t -p "$$runtime_prefix/" \
+					-c "$$(pwd)/$$conf" 2>&1 || exit 1; \
 			fi; \
 		done; \
 		echo "All production examples pass nginx -t"; \
