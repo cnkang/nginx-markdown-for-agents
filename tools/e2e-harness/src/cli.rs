@@ -224,6 +224,7 @@ fn run_scenario_inner(cli: &Cli, name: &str, timeout: Duration) -> Result<bool> 
 
     let mut nginx = crate::process::NginxProcess::start(
         &runtime.nginx_bin,
+        &runtime.runtime_dir,
         &runtime.nginx_conf(),
         &runtime.base_url,
         timeout,
