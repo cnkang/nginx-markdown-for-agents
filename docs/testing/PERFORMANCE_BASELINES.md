@@ -29,7 +29,9 @@ artifact/run, original Git commit, adjustment rule, person or reason, and date
 in machine-locatable `baseline_policy` metadata. The current 0.9.1 module
 baseline identifies source commit `847f9013` and local run timestamp
 `2026-07-16T09:47:06Z`; its raw artifact location was not recorded and is
-explicitly documented as a historical audit gap, not an acceptable precedent.
+explicitly documented with `historical_audit_exception: true`. The validator
+scopes that exception to this source commit and audit note; it is not an
+acceptable precedent for future normalized baselines.
 
 CI now also records non-blocking performance artifacts from the same `perf_baseline` example. The workflow stores the full benchmark output plus `/usr/bin/time -v` captures for the medium, medium-front-matter, and large single-sample runs. Those artifacts are for regression comparison and trend review; they are not merge-blocking thresholds yet.
 
