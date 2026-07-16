@@ -236,12 +236,9 @@ def _extract_streaming_and_fallback(scenarios: list[dict], metrics: dict) -> Non
         ttfb = m.get("ttfb_p50_ms") or m.get("ttfb_ms")
         if ttfb is not None:
             metrics["ttfb_streaming_large_pct"] = ttfb
-        if "fallback_rate" in m:
-            metrics["fallback_rate_abs"] = m["fallback_rate"]
-
-    # Compute fallback rate from cumulative counts if not directly present under streaming_first
-    if "fallback_rate_abs" not in metrics:
-        metrics["fallback_rate_abs"] = _calc_fallback_rate(scenarios)
+    fallback_rate = _calc_fallback_rate(scenarios)
+    if fallback_rate is not None:
+        metrics["fallback_rate_abs"] = fallback_rate
 
 
 def _find_streaming_scenario(scenarios: list[dict]) -> dict | None:
@@ -264,18 +261,26 @@ def _find_streaming_scenario(scenarios: list[dict]) -> dict | None:
     return None
 
 
-def _calc_fallback_rate(scenarios: list[dict]) -> float:
-    """Calculate fallback rate from cumulative counts."""
-    num = 0
-    den = 0
-    for s in scenarios:
-        m = s.get("metrics") or s.get("results") or s
-        fallback_count = m.get("fallback_count")
-        total_requests = m.get("total_requests")
-        if fallback_count is not None and total_requests is not None:
-            num += fallback_count
-            den += total_requests
-    return num / den if den > 0 else 0.0
+def _calc_fallback_rate(scenarios: list[dict]) -> float | None:
+    """Return the worst fail-open rate across critical streaming scenarios.
+
+    A missing scenario, missing counter, or non-positive request count is
+    incomplete evidence.  Returning ``None`` leaves the threshold metric
+    absent so the caller reports MISSING_EVIDENCE instead of a false zero.
+    """
+    by_name = {scenario.get("name"): scenario for scenario in scenarios}
+    rates = []
+    for name in _CRITICAL_STREAMING_SCENARIOS:
+        scenario = by_name.get(name)
+        if scenario is None:
+            return None
+        m = scenario.get("metrics") or scenario.get("results") or scenario
+        failopen = m.get("precommit_failopen_total")
+        requests = m.get("streaming_requests_total")
+        if failopen is None or requests is None or requests <= 0:
+            return None
+        rates.append(float(failopen) / float(requests))
+    return max(rates)
 
 
 def _memory_point_for_scenario(scenario: dict) -> tuple[float, float] | None:
@@ -630,9 +635,26 @@ _CRITICAL_SCENARIOS = frozenset({
     "gzip-streaming-first",
     "deflate-streaming-first",
 })
+_CRITICAL_STREAMING_SCENARIOS = (
+    "streaming-first",
+    "gzip-streaming-first",
+    "deflate-streaming-first",
+)
 _FULLBUFFER_RATIO_COVERAGE_LABEL = (
     "fullbuffer_ratio < 1 (not all requests fell back to full-buffer)"
 )
+
+
+def _is_positive(value: float | int | None) -> bool:
+    return value is not None and value > 0
+
+
+def _is_less_than_one(value: float | int | None) -> bool:
+    return value is not None and value < 1.0
+
+
+def _is_acceptable_fallback_rate(value: float | int | None) -> bool:
+    return value is not None and value <= 0.05
 
 
 # Path-coverage invariants: a "completed" scenario must actually exercise
@@ -652,23 +674,28 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
             "checks": [
                 {
                     "metric": "streaming_ratio",
-                    "predicate": lambda v: v is not None and v > 0.0,
+                    "predicate": _is_positive,
                     "label": "streaming_ratio > 0 (streaming path must be hit)",
                 },
                 {
                     "metric": "streaming_path_hits",
-                    "predicate": lambda v: v is not None and v > 0,
+                    "predicate": _is_positive,
                     "label": "streaming_path_hits > 0",
                 },
                 {
                     "metric": "fullbuffer_ratio",
-                    "predicate": lambda v: v is not None and v < 1.0,
+                    "predicate": _is_less_than_one,
                     "label": _FULLBUFFER_RATIO_COVERAGE_LABEL,
                 },
                 {
-                    "metric": "zero_copy_output_total",
-                    "predicate": lambda v: v is not None and v > 0,
-                    "label": "zero_copy_output_total > 0 (zero-copy path must produce output)",
+                    "metric": "streaming_requests_total",
+                    "predicate": _is_positive,
+                    "label": "streaming_requests_total > 0",
+                },
+                {
+                    "metric": "output_total",
+                    "predicate": _is_positive,
+                    "label": "zero_copy_output_total + copied_output_total > 0",
                 },
             ],
         },
@@ -677,12 +704,12 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
             "checks": [
                 {
                     "metric": "decompression_fullbuffer_total",
-                    "predicate": lambda v: v is not None and v > 0,
+                    "predicate": _is_positive,
                     "label": "decompression_fullbuffer_total > 0 (gzip full-buffer decompression must run)",
                 },
                 {
                     "metric": "fullbuffer_path_hits",
-                    "predicate": lambda v: v is not None and v > 0,
+                    "predicate": _is_positive,
                     "label": "fullbuffer_path_hits > 0 (full-buffer path must be hit)",
                 },
             ],
@@ -704,23 +731,38 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
             "checks": [
                 {
                     "metric": "decompression_streaming_total",
-                    "predicate": lambda v: v is not None and v > 0,
+                    "predicate": _is_positive,
                     "label": "decompression_streaming_total > 0 (gzip streaming decompression must run)",
                 },
                 {
                     "metric": "streaming_path_hits",
-                    "predicate": lambda v: v is not None and v > 0,
+                    "predicate": _is_positive,
                     "label": "streaming_path_hits > 0 (streaming path must be hit)",
                 },
                 {
                     "metric": "streaming_ratio",
-                    "predicate": lambda v: v is not None and v > 0.0,
+                    "predicate": _is_positive,
                     "label": "streaming_ratio > 0 (must not fall back entirely to full-buffer)",
                 },
                 {
                     "metric": "fullbuffer_ratio",
-                    "predicate": lambda v: v is not None and v < 1.0,
+                    "predicate": _is_less_than_one,
                     "label": _FULLBUFFER_RATIO_COVERAGE_LABEL,
+                },
+                {
+                    "metric": "streaming_requests_total",
+                    "predicate": _is_positive,
+                    "label": "streaming_requests_total > 0",
+                },
+                {
+                    "metric": "output_total",
+                    "predicate": _is_positive,
+                    "label": "zero_copy_output_total + copied_output_total > 0",
+                },
+                {
+                    "metric": "fallback_rate",
+                    "predicate": _is_acceptable_fallback_rate,
+                    "label": "precommit_failopen_total / streaming_requests_total <= 0.05",
                 },
             ],
             "metadata_checks": [
@@ -746,23 +788,38 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
             "checks": [
                 {
                     "metric": "decompression_streaming_total",
-                    "predicate": lambda v: v is not None and v > 0,
+                    "predicate": _is_positive,
                     "label": "decompression_streaming_total > 0 (deflate streaming decompression must run)",
                 },
                 {
                     "metric": "streaming_path_hits",
-                    "predicate": lambda v: v is not None and v > 0,
+                    "predicate": _is_positive,
                     "label": "streaming_path_hits > 0 (streaming path must be hit)",
                 },
                 {
                     "metric": "streaming_ratio",
-                    "predicate": lambda v: v is not None and v > 0.0,
+                    "predicate": _is_positive,
                     "label": "streaming_ratio > 0 (must not fall back entirely to full-buffer)",
                 },
                 {
                     "metric": "fullbuffer_ratio",
-                    "predicate": lambda v: v is not None and v < 1.0,
+                    "predicate": _is_less_than_one,
                     "label": _FULLBUFFER_RATIO_COVERAGE_LABEL,
+                },
+                {
+                    "metric": "streaming_requests_total",
+                    "predicate": _is_positive,
+                    "label": "streaming_requests_total > 0",
+                },
+                {
+                    "metric": "output_total",
+                    "predicate": _is_positive,
+                    "label": "zero_copy_output_total + copied_output_total > 0",
+                },
+                {
+                    "metric": "fallback_rate",
+                    "predicate": _is_acceptable_fallback_rate,
+                    "label": "precommit_failopen_total / streaming_requests_total <= 0.05",
                 },
             ],
             "metadata_checks": [
@@ -828,9 +885,26 @@ def _check_metric_predicates(
     """Check metric predicate invariants for a single scenario."""
     m = scenario.get("metrics") or scenario.get("results") or scenario
     for check in invariant["checks"]:
-        value = m.get(check["metric"])
+        value = _path_metric_value(m, check["metric"])
         if not check["predicate"](value):
             violations.append((name, check["metric"], check["label"]))
+
+
+def _path_metric_value(metrics: dict, metric: str) -> float | int | None:
+    """Return a stored or derived path-integrity metric."""
+    if metric == "output_total":
+        zero_copy = metrics.get("zero_copy_output_total")
+        copied = metrics.get("copied_output_total")
+        if zero_copy is None or copied is None:
+            return None
+        return zero_copy + copied
+    if metric == "fallback_rate":
+        failopen = metrics.get("precommit_failopen_total")
+        requests = metrics.get("streaming_requests_total")
+        if failopen is None or requests is None or requests <= 0:
+            return None
+        return float(failopen) / float(requests)
+    return metrics.get(metric)
 
 
 def _check_metadata_fields(
@@ -925,6 +999,29 @@ def _check_scenario_completion(report: dict) -> list[tuple[str, str]]:
     return incomplete
 
 
+def _canonical_baseline_fallback_violations(
+    report: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Reject non-zero fail-open counters in canonical baselines."""
+    if role != "baseline":
+        return []
+
+    scenarios = report.get("module_benchmark", {}).get("scenarios", [])
+    by_name = {scenario.get("name"): scenario for scenario in scenarios}
+    violations = []
+    for name in _CRITICAL_STREAMING_SCENARIOS:
+        scenario = by_name.get(name, {})
+        metrics = scenario.get("metrics") or scenario.get("results") or scenario
+        failopen = metrics.get("precommit_failopen_total")
+        if failopen is not None and failopen != 0:
+            violations.append((
+                f"{role}.fallback_rate",
+                f"{name}: canonical precommit_failopen_total must be 0 "
+                f"(actual={failopen})",
+            ))
+    return violations
+
+
 def _validate_benchmark_evidence(
     report: dict, role: str,
 ) -> list[tuple[str, str]]:
@@ -970,6 +1067,10 @@ def _validate_benchmark_evidence(
         violations.append(
             (f"{role}.path_coverage", f"{name}: {label} (metric={metric})")
         )
+
+    violations.extend(
+        _canonical_baseline_fallback_violations(report, role)
+    )
 
     # 5. Environment identity fields must be present and non-empty;
     #    nginx_version must also not use the legacy "unknown" placeholder.
