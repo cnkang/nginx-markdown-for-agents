@@ -46,14 +46,17 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
         is_deflate = "deflate" in path_str or "deflate" in query
         is_chunked = "chunked" in path_str or "chunked" in query
 
-        # Apply compression if requested
-        body, content_encoding = self._apply_compression(body, is_gzip, is_deflate)
-
         self.protocol_version = "HTTP/1.1"
 
         if is_chunked:
+            content_encoding = (
+                "gzip" if is_gzip else "deflate" if is_deflate else None
+            )
             self._send_chunked_response(body, content_encoding)
         else:
+            body, content_encoding = self._apply_compression(
+                body, is_gzip, is_deflate
+            )
             self._send_identity_response(body, content_encoding)
 
     def _resolve_and_verify_path(self, path_str: str) -> Path | None:
@@ -94,14 +97,41 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
 
-        chunk_size = 16 * 1024
-        for offset in range(0, len(body), chunk_size):
-            chunk = body[offset:offset + chunk_size]
+        for chunk in self._iter_chunked_body(body, content_encoding):
             self.wfile.write(f"{len(chunk):x}\r\n".encode())
             self.wfile.write(chunk)
             self.wfile.write(b"\r\n")
             self.wfile.flush()
         self.wfile.write(b"0\r\n\r\n")
+
+    @staticmethod
+    def _iter_chunked_body(
+        body: bytes, content_encoding: str | None
+    ) -> list[bytes]:
+        """Return wire chunks with bounded decompressed production bursts."""
+        chunk_size = 16 * 1024
+        if content_encoding is None:
+            return [
+                body[offset:offset + chunk_size]
+                for offset in range(0, len(body), chunk_size)
+            ]
+
+        wbits = (
+            zlib.MAX_WBITS | 16
+            if content_encoding == "gzip"
+            else zlib.MAX_WBITS
+        )
+        compressor = zlib.compressobj(wbits=wbits)
+        chunks = []
+        for offset in range(0, len(body), chunk_size):
+            encoded = compressor.compress(body[offset:offset + chunk_size])
+            encoded += compressor.flush(zlib.Z_SYNC_FLUSH)
+            if encoded:
+                chunks.append(encoded)
+        tail = compressor.flush(zlib.Z_FINISH)
+        if tail:
+            chunks.append(tail)
+        return chunks
 
     def _send_identity_response(
         self, body: bytes, content_encoding: str | None
