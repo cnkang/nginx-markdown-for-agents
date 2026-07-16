@@ -3433,26 +3433,73 @@ test_zero_copy_pending_conflict_is_invariant_output_loss(void)
     ngx_log_t                   log;
     ngx_event_t                 read_event;
     ngx_http_markdown_metrics_t metrics;
+    ngx_chain_t                 first;
+    ngx_chain_t                 retained;
+    ngx_chain_t                 reentry;
+    ngx_buf_t                   first_buf;
+    ngx_buf_t                   retained_buf;
+    ngx_buf_t                   reentry_buf;
+    u_char                      first_data[] = "first";
     u_char                      output_data[] = "zero-copy";
+    u_char                      retained_data[] = "retained";
+    u_char                      reentry_data[] = "reentry";
     ngx_int_t                   rc;
 
     TEST_SUBSECTION("zero-copy pending conflict classification");
     reset_globals();
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
     ngx_memzero(&metrics, sizeof(metrics));
+    ngx_memzero(&first_buf, sizeof(first_buf));
+    ngx_memzero(&retained_buf, sizeof(retained_buf));
+    ngx_memzero(&reentry_buf, sizeof(reentry_buf));
     ngx_http_markdown_metrics = &metrics;
 
+    ctx.eligible = 1;
+    ctx.headers_forwarded = 1;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x54;
     conf.stream.zero_copy = 1;
+    conf.max_size = 0;
     g_next_body_filter_rc = NGX_AGAIN;
     g_inject_pending_conflict_once = 1;
 
-    rc = ngx_http_markdown_streaming_handle_feed_result(
-        &r, &ctx, &conf, ERROR_SUCCESS,
-        output_data, sizeof(output_data) - 1);
+    first_buf.pos = first_data;
+    first_buf.last = first_data + sizeof(first_data) - 1;
+    first.buf = &first_buf;
+    first.next = NULL;
+
+    retained_buf.pos = retained_data;
+    retained_buf.last = retained_data + sizeof(retained_data) - 1;
+    retained.buf = &retained_buf;
+    retained.next = NULL;
+    ctx.streaming.pending_input.head = &retained;
+    ctx.streaming.pending_input.tail = &retained;
+    ctx.streaming.pending_input.bytes = sizeof(retained_data) - 1;
+    ctx.streaming.pending_input.links = 1;
+
+    ctx.streaming.pending_meta.has_data = 1;
+    ctx.streaming.pending_meta.bytes = 17;
+    ctx.streaming.pending_meta.zero_copy = 1;
+    ctx.streaming.pending_meta.main_terminal = 1;
+    ctx.streaming.pending_meta.subrequest_terminal = 1;
+    ctx.streaming.completion.finalize_after_pending = 1;
+    ctx.streaming.completion.finalize_pending_lastbuf = 1;
+    ctx.streaming.completion.pending_terminal_metrics = 1;
+    ctx.streaming.completion.pending_failopen_delivery = 1;
+    ctx.streaming.completion.postcommit_error_after_pending = 1;
+    ctx.streaming.completion.postcommit_error_code = ERROR_INTERNAL;
+    ctx.streaming.completion.failopen_abort_after_pending = 1;
+    ctx.streaming.completion.failopen_abort_error_code = ERROR_INTERNAL;
+    ctx.streaming.completion.upstream_terminal_seen = 1;
+    r.buffered = NGX_HTTP_MARKDOWN_BUFFERED;
+
+    g_streaming_feed_rc = ERROR_SUCCESS;
+    g_streaming_feed_out_data = output_data;
+    g_streaming_feed_out_len = sizeof(output_data) - 1;
+
+    rc = ngx_http_markdown_streaming_body_filter(&r, &first);
 
     TEST_ASSERT(rc == NGX_ERROR,
         "zero-copy pending conflict must hard-abort");
@@ -3466,6 +3513,32 @@ test_zero_copy_pending_conflict_is_invariant_output_loss(void)
         "zero-copy invariant must latch terminal input disposition");
     TEST_ASSERT(ctx.streaming.handle == NULL && g_abort_calls == 1,
         "zero-copy invariant must abort the Rust handle exactly once");
+    TEST_ASSERT(ctx.streaming.pending_output == NULL,
+        "fatal output loss must detach the pending output anchor");
+    TEST_ASSERT(ctx.streaming.pending_meta.has_data == 0
+        && ctx.streaming.pending_meta.bytes == 0
+        && ctx.streaming.pending_meta.zero_copy == 0
+        && ctx.streaming.pending_meta.main_terminal == 0
+        && ctx.streaming.pending_meta.subrequest_terminal == 0,
+        "fatal output loss must clear all pending output metadata");
+    TEST_ASSERT(ctx.streaming.pending_input.head == NULL
+        && ctx.streaming.pending_input.tail == NULL
+        && ctx.streaming.pending_input.bytes == 0
+        && ctx.streaming.pending_input.links == 0
+        && retained_buf.pos == retained_buf.last,
+        "fatal output loss must abandon and clear pending input");
+    TEST_ASSERT(ctx.streaming.completion.finalize_after_pending == 0
+        && ctx.streaming.completion.finalize_pending_lastbuf == 0
+        && ctx.streaming.completion.pending_terminal_metrics == 0
+        && ctx.streaming.completion.pending_failopen_delivery == 0
+        && ctx.streaming.completion.postcommit_error_after_pending == 0
+        && ctx.streaming.completion.postcommit_error_code == ERROR_SUCCESS
+        && ctx.streaming.completion.failopen_abort_after_pending == 0
+        && ctx.streaming.completion.failopen_abort_error_code == ERROR_SUCCESS
+        && ctx.streaming.completion.upstream_terminal_seen == 0,
+        "fatal output loss must clear every pending continuation latch");
+    TEST_ASSERT((r.buffered & NGX_HTTP_MARKDOWN_BUFFERED) == 0,
+        "fatal output loss must clear the module buffered bit");
     TEST_ASSERT(ctx.streaming.reason
         == NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR,
         "zero-copy invariant uses generic non-resource parse reason");
@@ -3485,6 +3558,33 @@ test_zero_copy_pending_conflict_is_invariant_output_loss(void)
     TEST_ASSERT(g_next_body_filter_calls == 1
         && g_safe_finish_calls == 0,
         "zero-copy invariant must not send closing or terminal output");
+
+    rc = ngx_http_markdown_streaming_body_filter(&r, NULL);
+    TEST_ASSERT(rc == NGX_OK,
+        "NULL re-entry after hard abort must finish without resuming output");
+    TEST_ASSERT(g_next_body_filter_calls == 1
+        && metrics.perf.backpressure_resume_total == 0,
+        "NULL re-entry must not call downstream or record a resume");
+
+    reentry_buf.pos = reentry_data;
+    reentry_buf.last = reentry_data + sizeof(reentry_data) - 1;
+    reentry.buf = &reentry_buf;
+    reentry.next = NULL;
+
+    rc = ngx_http_markdown_streaming_body_filter(&r, &reentry);
+    TEST_ASSERT(rc == NGX_OK && reentry_buf.pos == reentry_buf.last,
+        "non-NULL re-entry must abandon input without NGX_AGAIN");
+    TEST_ASSERT(g_streaming_feed_calls == 1
+        && g_next_body_filter_calls == 1,
+        "non-NULL re-entry must not recreate Rust or call downstream");
+    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1
+        && metrics.streaming.failed_total == 1
+        && metrics.conversions_failed == 1
+        && metrics.failures_conversion == 1
+        && metrics.failures_resource_limit == 0,
+        "re-entry must preserve exactly-once failure accounting");
+    TEST_ASSERT(g_abort_calls == 1 && g_safe_finish_calls == 0,
+        "re-entry must not repeat abort or send closing output");
 
     pool.cleanups->handler(pool.cleanups->data);
     TEST_ASSERT(g_output_free_calls == 1,

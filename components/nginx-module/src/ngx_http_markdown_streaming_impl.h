@@ -809,6 +809,41 @@ ngx_http_markdown_streaming_pending_input_abandon_and_clear(
     ngx_http_markdown_streaming_pending_input_clear(ctx);
 }
 
+
+/*
+ * Abandon every module-owned continuation after irrecoverable output loss.
+ *
+ * pending_output may already be downstream-owned after NGX_AGAIN.  Detach
+ * only the module's anchor and metadata: never inspect, mutate, free, or
+ * resubmit that chain.  Pending input remains module-owned bookkeeping, so
+ * consume its payload positions before clearing the retained links.
+ */
+static void
+ngx_http_markdown_streaming_abandon_pending_after_fatal(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx)
+{
+    ctx->streaming.pending_output = NULL;
+    ctx->streaming.pending_meta.has_data = 0;
+    ctx->streaming.pending_meta.bytes = 0;
+    ctx->streaming.pending_meta.zero_copy = 0;
+    ctx->streaming.pending_meta.main_terminal = 0;
+    ctx->streaming.pending_meta.subrequest_terminal = 0;
+
+    ctx->streaming.completion.finalize_after_pending = 0;
+    ctx->streaming.completion.finalize_pending_lastbuf = 0;
+    ctx->streaming.completion.pending_terminal_metrics = 0;
+    ctx->streaming.completion.pending_failopen_delivery = 0;
+    ctx->streaming.completion.postcommit_error_after_pending = 0;
+    ctx->streaming.completion.postcommit_error_code = ERROR_SUCCESS;
+    ctx->streaming.completion.failopen_abort_after_pending = 0;
+    ctx->streaming.completion.failopen_abort_error_code = ERROR_SUCCESS;
+    ctx->streaming.completion.upstream_terminal_seen = 0;
+
+    ngx_http_markdown_streaming_pending_input_abandon_and_clear(ctx);
+    ngx_http_markdown_streaming_sync_buffered(r, ctx);
+}
+
 /*
  * Preflight scan of a chain remainder: count non-empty bytes/links and
  * detect any terminal buffer. Detects size_t/ngx_uint_t overflow before
@@ -2417,6 +2452,8 @@ ngx_http_markdown_streaming_handle_output_loss(
 
     ctx->streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_POST_COMMIT_ABORT;
+
+    ngx_http_markdown_streaming_abandon_pending_after_fatal(r, ctx);
 
     origin = ctx->streaming.classify.last_send_failure_origin;
 
