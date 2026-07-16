@@ -824,13 +824,16 @@ test-production-examples-nginx-t:
 		fi; \
 		for conf in "$$@"; do \
 			echo "  Testing: $$conf"; \
+			test_conf="$$runtime_prefix/$$(basename "$$conf")"; \
+			sed -E 's/^([[:space:]]*)listen[[:space:]]+80([[:space:]]*;)/\1listen 18080\2/' \
+				"$$conf" > "$$test_conf"; \
 			if [[ -n "$$module_so" ]]; then \
 				"$$nginx_bin" -t -p "$$runtime_prefix/" \
 					-g "load_module $$module_so;" \
-					-c "$$(pwd)/$$conf" 2>&1 || exit 1; \
+					-c "$$test_conf" 2>&1 || exit 1; \
 			else \
 				"$$nginx_bin" -t -p "$$runtime_prefix/" \
-					-c "$$(pwd)/$$conf" 2>&1 || exit 1; \
+					-c "$$test_conf" 2>&1 || exit 1; \
 			fi; \
 		done; \
 		echo "All production examples pass nginx -t"; \

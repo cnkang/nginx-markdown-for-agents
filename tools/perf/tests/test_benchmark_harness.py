@@ -239,6 +239,43 @@ def test_production_example_gate_loads_dynamic_module_when_provided():
     assert '-p "$$runtime_prefix/"' in target
 
 
+def test_production_example_gate_rewrites_privileged_listeners(tmp_path):
+    """nginx -t must not bind production port 80 on an unprivileged runner."""
+    fake_nginx = tmp_path / "nginx"
+    fake_nginx.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+config=''
+while (($#)); do
+    if [[ "$1" == '-c' ]]; then
+        config="$2"
+        shift 2
+    else
+        shift
+    fi
+done
+[[ -n "$config" && -f "$config" ]]
+if grep -Eq '^[[:space:]]*listen[[:space:]]+80[[:space:]]*;' "$config"; then
+    echo "privileged listener remained in $config" >&2
+    exit 42
+fi
+""",
+        encoding="utf-8",
+    )
+    fake_nginx.chmod(0o755)
+
+    result = subprocess.run(
+        ["make", "test-production-examples-nginx-t"],
+        cwd=REPO_ROOT,
+        env={**os.environ, "NGINX_BIN": str(fake_nginx)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_module_benchmark_records_actual_fixture_bytes():
     """Every scenario must report the actual fixture size for memory slope."""
     source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
