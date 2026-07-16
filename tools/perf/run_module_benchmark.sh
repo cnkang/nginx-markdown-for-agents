@@ -33,6 +33,7 @@ set -euo pipefail
 # Constants
 ###############################################################################
 
+readonly ACCEPT_MD_HEADER="Accept: text/markdown"
 readonly EX_SKIP_NOT_PRESENT=75
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -414,13 +415,13 @@ run_load_gen() {
   case "$LOAD_GEN" in
     hey)
       hey -n "$total_requests" -c "$concurrency" \
-        -H "Accept: text/markdown" \
+        -H "$ACCEPT_MD_HEADER" \
         -o csv \
         "$url" > "$raw_output" 2>/dev/null
       ;;
     ab)
       ab -n "$total_requests" -c "$concurrency" \
-        -H "Accept: text/markdown" \
+        -H "$ACCEPT_MD_HEADER" \
         "$url" > "$raw_output" 2>/dev/null
       ;;
     *)
@@ -433,7 +434,8 @@ run_load_gen() {
 
 # probe_expectations returns a visible heading and terminal integrity token.
 probe_expectations() {
-  case "$1" in
+  local fixture="$1"
+  case "$fixture" in
     simple/basic.html)
       echo "Welcome to the Test Page|This is a second paragraph"
       ;;
@@ -447,7 +449,7 @@ probe_expectations() {
       echo "Repeated Heading|gamma"
       ;;
     *)
-      die "No correctness-probe expectations for fixture: $1"
+      die "No correctness-probe expectations for fixture: $fixture"
       ;;
   esac
   return 0
@@ -472,7 +474,7 @@ run_response_probe() {
   expected_heading="${expectations%%|*}"
   expected_tail="${expectations#*|}"
   http_status="$(curl -sS -D "$headers_file" -o "$body_file" \
-    -w '%{http_code}' -H 'Accept: text/markdown' \
+    -w '%{http_code}' -H "$ACCEPT_MD_HEADER" \
     "http://127.0.0.1:${NGINX_PORT}${url_path}")" || curl_exit=$?
 
   python3 - "$REPO_ROOT" "$http_status" "$headers_file" "$body_file" \
@@ -680,7 +682,7 @@ measure_ttfb() {
   while [[ $i -lt $TTFB_SAMPLE_COUNT ]]; do
     local ttfb_s
     ttfb_s="$(curl -s -o /dev/null -w '%{time_starttransfer}' \
-      -H "Accept: text/markdown" \
+      -H "$ACCEPT_MD_HEADER" \
       "$url" 2>/dev/null)" || true
 
     # Validate we got a numeric result

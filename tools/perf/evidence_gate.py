@@ -684,6 +684,7 @@ def _scenario_metadata_checks(
 # returning True when the path was genuinely exercised.  ``label`` is
 # used in the breach/evidence message.
 def _fullbuffer_path_invariants() -> list[dict]:
+    fullbuffer_hits_label = "fullbuffer_path_hits > 0"
     return [
         {
             "scenario": "plain-small",
@@ -691,7 +692,7 @@ def _fullbuffer_path_invariants() -> list[dict]:
                 {
                     "metric": "fullbuffer_path_hits",
                     "predicate": _is_positive_counter,
-                    "label": "fullbuffer_path_hits > 0",
+                    "label": fullbuffer_hits_label,
                 },
                 {
                     "metric": "fullbuffer_ratio",
@@ -708,7 +709,7 @@ def _fullbuffer_path_invariants() -> list[dict]:
             "checks": [{
                 "metric": "fullbuffer_path_hits",
                 "predicate": _is_positive_counter,
-                "label": "fullbuffer_path_hits > 0",
+                "label": fullbuffer_hits_label,
             }],
             "metadata_checks": _scenario_metadata_checks(
                 "balanced", "none", "chunked"
@@ -719,7 +720,7 @@ def _fullbuffer_path_invariants() -> list[dict]:
             "checks": [{
                 "metric": "fullbuffer_path_hits",
                 "predicate": _is_positive_counter,
-                "label": "fullbuffer_path_hits > 0",
+                "label": fullbuffer_hits_label,
             }],
             "metadata_checks": _scenario_metadata_checks(
                 "balanced", "none", "identity"

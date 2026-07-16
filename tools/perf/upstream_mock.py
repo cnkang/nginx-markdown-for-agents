@@ -49,9 +49,12 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
         self.protocol_version = "HTTP/1.1"
 
         if is_chunked:
-            content_encoding = (
-                "gzip" if is_gzip else "deflate" if is_deflate else None
-            )
+            if is_gzip:
+                content_encoding = "gzip"
+            elif is_deflate:
+                content_encoding = "deflate"
+            else:
+                content_encoding = None
             self._send_chunked_response(body, content_encoding)
         else:
             body, content_encoding = self._apply_compression(
