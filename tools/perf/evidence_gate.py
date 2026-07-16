@@ -626,6 +626,9 @@ _CRITICAL_SCENARIOS = frozenset({
     "plain-small",
     "large-body",
     "streaming-first",
+    "gzip-large",
+    "gzip-streaming-first",
+    "deflate-streaming-first",
 })
 
 
@@ -673,6 +676,46 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
                     "metric": "decompression_fullbuffer_total",
                     "predicate": lambda v: v is not None and v > 0,
                     "label": "decompression_fullbuffer_total > 0 (gzip full-buffer decompression must run)",
+                },
+            ],
+        },
+        {
+            "scenario": "gzip-streaming-first",
+            "checks": [
+                {
+                    "metric": "decompression_streaming_total",
+                    "predicate": lambda v: v is not None and v > 0,
+                    "label": "decompression_streaming_total > 0 (gzip streaming decompression must run)",
+                },
+                {
+                    "metric": "streaming_path_hits",
+                    "predicate": lambda v: v is not None and v > 0,
+                    "label": "streaming_path_hits > 0 (streaming path must be hit)",
+                },
+                {
+                    "metric": "streaming_ratio",
+                    "predicate": lambda v: v is not None and v > 0.0,
+                    "label": "streaming_ratio > 0 (must not fall back entirely to full-buffer)",
+                },
+            ],
+        },
+        {
+            "scenario": "deflate-streaming-first",
+            "checks": [
+                {
+                    "metric": "decompression_streaming_total",
+                    "predicate": lambda v: v is not None and v > 0,
+                    "label": "decompression_streaming_total > 0 (deflate streaming decompression must run)",
+                },
+                {
+                    "metric": "streaming_path_hits",
+                    "predicate": lambda v: v is not None and v > 0,
+                    "label": "streaming_path_hits > 0 (streaming path must be hit)",
+                },
+                {
+                    "metric": "streaming_ratio",
+                    "predicate": lambda v: v is not None and v > 0.0,
+                    "label": "streaming_ratio > 0 (must not fall back entirely to full-buffer)",
                 },
             ],
         },
