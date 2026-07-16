@@ -58,6 +58,17 @@ def test_corpus_benchmark_generates_large_fixtures_before_validation():
     assert target.index(generator) < target.index(validator)
 
 
+def test_production_example_gate_loads_dynamic_module_when_provided():
+    """Dynamic release builds must load MODULE_SO for nginx -t."""
+    makefile = MAKEFILE_PATH.read_text(encoding="utf-8")
+    target = makefile.split("test-production-examples-nginx-t:", 1)[1].split(
+        "test-production-examples-e2e-smoke:", 1
+    )[0]
+
+    assert 'module_so="$${MODULE_SO:-}"' in target
+    assert '-g "load_module $$module_so;"' in target
+
+
 def test_module_benchmark_records_actual_fixture_bytes():
     """Every scenario must report the actual fixture size for memory slope."""
     source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
