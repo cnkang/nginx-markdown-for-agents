@@ -254,6 +254,19 @@
       }
     ]
   },
+  "baseline_policy": {
+    "type": "conservative_normalized",
+    "source_git_commit": "847f90139d287446882052ec78661746541aebff",
+    "source_artifact": "not-recorded",
+    "source_run": "local canonical module benchmark at 2026-07-16T09:47:06Z",
+    "audit_note": "The original raw artifact location was not recorded; this is a historical audit gap and must not be repeated.",
+    "adjustments": {
+      "rps": "rounded downward or lowered",
+      "latency_ttfb": "rounded upward or raised"
+    },
+    "adjustment_reason": "user-approved conservative release baseline normalization",
+    "adjustment_date": "2026-07-16"
+  },
   "decompression_coverage": {
     "decompression_streaming_total": 2060,
     "decompression_fullbuffer_total": 1030

@@ -7,6 +7,30 @@
 
 This file replaces the previous placeholder template with real local baseline data.
 
+### Canonical Evidence and Threshold Normalization
+
+Canonical module baselines separate measured truth from conservatively
+normalized performance thresholds. The following fields must be copied
+verbatim from the real canonical run: `streaming_path_hits`,
+`fullbuffer_path_hits`, `streaming_requests_total`,
+`precommit_failopen_total`, `decompression_streaming_total`,
+`decompression_fullbuffer_total`, `zero_copy_output_total`,
+`copied_output_total`, `baseline_rss_bytes`, `peak_rss_bytes`, `input_bytes`,
+scenario status and metadata, platform, load generator, and NGINX version.
+
+For long-lived release thresholds, RPS may be rounded downward or lowered and
+latency/TTFB may be rounded upward or raised. RPS may not be increased,
+latency/TTFB may not be decreased, and path, fallback, output, memory, or
+environment evidence may not be changed. This makes the threshold more
+conservative without improving or fabricating measured evidence.
+
+Every normalized baseline must retain the raw workflow artifact and record the
+artifact/run, original Git commit, adjustment rule, person or reason, and date
+in machine-locatable `baseline_policy` metadata. The current 0.9.1 module
+baseline identifies source commit `847f9013` and local run timestamp
+`2026-07-16T09:47:06Z`; its raw artifact location was not recorded and is
+explicitly documented as a historical audit gap, not an acceptable precedent.
+
 CI now also records non-blocking performance artifacts from the same `perf_baseline` example. The workflow stores the full benchmark output plus `/usr/bin/time -v` captures for the medium, medium-front-matter, and large single-sample runs. Those artifacts are for regression comparison and trend review; they are not merge-blocking thresholds yet.
 
 Key findings from this run:
