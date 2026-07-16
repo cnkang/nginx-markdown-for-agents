@@ -105,6 +105,26 @@ generated on the target platform:
 2. Submit the generated baseline file via PR.
 3. When no baseline exists, the engine skips comparison (exit 0).
 
+### Canonical Module Baseline Policy
+
+Do not fabricate or improve measured evidence. Only documented conservative
+normalization of latency/throughput is allowed; path, fallback, output, memory,
+and environment evidence must remain verbatim.
+
+The immutable truth fields are `streaming_path_hits`, `fullbuffer_path_hits`,
+`streaming_requests_total`, `precommit_failopen_total`,
+`decompression_streaming_total`, `decompression_fullbuffer_total`,
+`zero_copy_output_total`, `copied_output_total`, `baseline_rss_bytes`,
+`peak_rss_bytes`, `input_bytes`, scenario status and metadata, platform, load
+generator, and NGINX version. RPS may only be rounded downward or lowered;
+latency and TTFB may only be rounded upward or raised. Never increase RPS,
+decrease latency/TTFB, or alter truth evidence.
+
+Keep the raw workflow artifact and record the artifact/run, source Git commit,
+adjustment rule, person or reason, and date in `baseline_policy`. Missing raw
+artifact provenance is an audit failure to disclose, not a reason to invent a
+workflow identifier.
+
 ## Troubleshooting
 
 ### False positives / noisy failures
