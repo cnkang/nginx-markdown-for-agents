@@ -232,9 +232,31 @@ def test_tag_release_job_supplies_module_enabled_nginx():
     assert "evidence_gate.py --blocking" not in workflow
 
 
+def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
+    """Manual baseline bootstrap produces auditable native module evidence."""
+    workflow = (
+        Path(__file__).resolve().parents[3]
+        / ".github"
+        / "workflows"
+        / "nightly-perf.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "bootstrap_module_baseline" in workflow
+    assert "name: Canonical Module Baseline 0.9.1" in workflow
+    assert "runs-on: ubuntu-24.04" in workflow
+    assert '[[ "$(uname -m)" == "x86_64" ]]' in workflow
+    assert "Determine canonical benchmark NGINX version" in workflow
+    assert "tools/release-matrix.json" in workflow
+    assert "apache2-utils" in workflow
+    assert "tools/perf/run_module_benchmark.sh" in workflow
+    assert "perf/baselines/module-baseline-091.json" in workflow
+    assert "_validate_benchmark_evidence" in workflow
+    assert "module-baseline-091-${{ github.sha }}" in workflow
+
+
 @pytest.mark.xfail(
     reason="baseline needs regeneration with gzip/deflate streaming scenarios",
-    strict=False,
+    strict=True,
 )
 def test_module_baseline_contains_measured_critical_scenarios():
     """The checked-in baseline contains real critical-path evidence.
@@ -1029,7 +1051,7 @@ class TestBaselineEvidenceIntegrity:
 
     @pytest.mark.xfail(
         reason="baseline needs regeneration with gzip/deflate streaming scenarios",
-        strict=False,
+        strict=True,
     )
     def test_current_baseline_passes_full_validation(self):
         """The generated baseline passes the blocking integrity contract."""

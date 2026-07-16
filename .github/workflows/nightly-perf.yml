@@ -10,6 +10,11 @@ on:
         required: false
         default: false
         type: boolean
+      bootstrap_module_baseline:
+        description: "Generate the canonical 0.9.1 module baseline on native x86_64"
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -168,3 +173,145 @@ jobs:
         with:
           name: corpus-examples
           path: perf/reports/examples/
+
+  module-baseline-091:
+    name: Canonical Module Baseline 0.9.1
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap_module_baseline }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      RUST_TARGET: x86_64-unknown-linux-gnu
+      RUST_FEATURES: streaming,incremental
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+        with:
+          persist-credentials: false
+
+      - name: Require native x86_64 runner
+        run: |
+          [[ "$(uname -m)" == "x86_64" ]] || {
+            echo "ERROR: canonical module baseline requires native x86_64" >&2
+            exit 1
+          }
+        shell: bash
+
+      - name: Determine canonical benchmark NGINX version
+        id: bench-nginx
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          with open("tools/release-matrix.json", encoding="utf-8") as handle:
+              data = json.load(handle)
+
+          owner = ".github/workflows/release-packages.yml"
+          versions = sorted(
+              {
+                  entry["nginx_version"]
+                  for entry in data.get("entries", [])
+                  if entry.get("owner_workflow") == owner
+                  and entry.get("support_tier") == "supported"
+                  and entry.get("libc") == "glibc"
+                  and entry.get("release_blocking") is True
+              },
+              key=lambda value: tuple(int(part) for part in value.split(".")),
+          )
+          if not versions:
+              raise SystemExit("no canonical release-blocking NGINX version")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={versions[0]}\n")
+          PY
+        shell: bash
+
+      - name: Install native benchmark dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            apache2-utils \
+            binutils \
+            build-essential \
+            ca-certificates \
+            curl \
+            libpcre2-dev \
+            libssl-dev \
+            zlib1g-dev
+        shell: bash
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.97.0
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Download verified NGINX source
+        env:
+          NGINX_VERSION: ${{ steps.bench-nginx.outputs.version }}
+        run: |
+          NGINX_TARBALL="nginx-${NGINX_VERSION}.tar.gz"
+          curl -fsSL -o "${NGINX_TARBALL}" \
+            "https://nginx.org/download/${NGINX_TARBALL}"
+          packaging/scripts/verify-checksum.sh \
+            -f "${NGINX_TARBALL}" \
+            -i "nginx-${NGINX_VERSION}"
+          tar xzf "${NGINX_TARBALL}"
+          echo "NGINX_SRC=${GITHUB_WORKSPACE}/nginx-${NGINX_VERSION}" \
+            >> "${GITHUB_ENV}"
+        shell: bash
+
+      - name: Build Rust converter
+        working-directory: components/rust-converter
+        run: |
+          cargo build --release --locked --target "${RUST_TARGET}" \
+            --features "${RUST_FEATURES}" \
+            --config profile.release.lto=false
+        shell: bash
+
+      - name: Build module-enabled NGINX
+        env:
+          NGX_MARKDOWN_RUST_FEATURES: ${{ env.RUST_FEATURES }}
+        run: |
+          cd "${NGINX_SRC}"
+          ./configure \
+            --with-compat \
+            --add-dynamic-module="${GITHUB_WORKSPACE}/components/nginx-module"
+          make -j"$(nproc)" build
+          test -x "${NGINX_SRC}/objs/nginx"
+          test -f "${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so"
+        shell: bash
+
+      - name: Generate canonical seven-scenario module baseline
+        run: |
+          NGINX_BIN="${NGINX_SRC}/objs/nginx" \
+          MODULE_SO="${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so" \
+            tools/perf/run_module_benchmark.sh \
+            --output perf/baselines/module-baseline-091.json
+        shell: bash
+
+      - name: Validate canonical module baseline
+        run: |
+          python3 - <<'PY'
+          import json
+          from tools.perf.evidence_gate import _validate_benchmark_evidence
+
+          path = "perf/baselines/module-baseline-091.json"
+          with open(path, encoding="utf-8") as handle:
+              baseline = json.load(handle)
+          violations = _validate_benchmark_evidence(baseline, role="baseline")
+          if violations:
+              for check, reason in violations:
+                  print(f"{check}: {reason}")
+              raise SystemExit("canonical module baseline validation failed")
+          PY
+        shell: bash
+
+      - name: Upload canonical module baseline
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: module-baseline-091-${{ github.sha }}
+          path: perf/baselines/module-baseline-091.json
+          if-no-files-found: error
+          retention-days: 14
