@@ -811,6 +811,7 @@ release-gates-check-all: release-gates-check release-gates-check-091
 test-production-examples-nginx-t:
 	@echo "=== Production Examples nginx -t ==="
 	@nginx_bin="$${NGINX_BIN:-nginx}"; \
+	module_so="$${MODULE_SO:-}"; \
 	if command -v "$$nginx_bin" >/dev/null 2>&1; then \
 		set -- examples/production/*.conf; \
 		if [ "$$1" = 'examples/production/*.conf' ]; then \
@@ -819,7 +820,12 @@ test-production-examples-nginx-t:
 		fi; \
 		for conf in "$$@"; do \
 			echo "  Testing: $$conf"; \
-			"$$nginx_bin" -t -c "$$(pwd)/$$conf" 2>&1 || exit 1; \
+			if [[ -n "$$module_so" ]]; then \
+				"$$nginx_bin" -t -g "load_module $$module_so;" \
+					-c "$$(pwd)/$$conf" 2>&1 || exit 1; \
+			else \
+				"$$nginx_bin" -t -c "$$(pwd)/$$conf" 2>&1 || exit 1; \
+			fi; \
 		done; \
 		echo "All production examples pass nginx -t"; \
 	else \
