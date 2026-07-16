@@ -630,6 +630,9 @@ _CRITICAL_SCENARIOS = frozenset({
     "gzip-streaming-first",
     "deflate-streaming-first",
 })
+_FULLBUFFER_RATIO_COVERAGE_LABEL = (
+    "fullbuffer_ratio < 1 (not all requests fell back to full-buffer)"
+)
 
 
 # Path-coverage invariants: a "completed" scenario must actually exercise
@@ -660,7 +663,7 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
                 {
                     "metric": "fullbuffer_ratio",
                     "predicate": lambda v: v is not None and v < 1.0,
-                    "label": "fullbuffer_ratio < 1 (not all requests fell back to full-buffer)",
+                    "label": _FULLBUFFER_RATIO_COVERAGE_LABEL,
                 },
                 {
                     "metric": "zero_copy_output_total",
@@ -717,7 +720,7 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
                 {
                     "metric": "fullbuffer_ratio",
                     "predicate": lambda v: v is not None and v < 1.0,
-                    "label": "fullbuffer_ratio < 1 (not all requests fell back to full-buffer)",
+                    "label": _FULLBUFFER_RATIO_COVERAGE_LABEL,
                 },
             ],
             "metadata_checks": [
@@ -759,7 +762,7 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
                 {
                     "metric": "fullbuffer_ratio",
                     "predicate": lambda v: v is not None and v < 1.0,
-                    "label": "fullbuffer_ratio < 1 (not all requests fell back to full-buffer)",
+                    "label": _FULLBUFFER_RATIO_COVERAGE_LABEL,
                 },
             ],
             "metadata_checks": [
