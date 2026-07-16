@@ -118,6 +118,29 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
 #define NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST  1
 
 /*
+ * Post-commit send failure origin classification.
+ *
+ * Set by send_output / send_zero_copy_feed_output before returning
+ * NGX_ERROR so the caller (handle_success_output) can route the
+ * failure to the correct metrics and recovery path:
+ *
+ * ALLOCATION: pool/buf/chain allocation failure (memory pressure).
+ *   Maps to ERROR_MEMORY_LIMIT, increments failures_resource_limit.
+ *
+ * DOWNSTREAM: ngx_http_next_body_filter returned definitive failure.
+ *   Does NOT increment failures_resource_limit; routes to
+ *   failures_conversion.
+ *
+ * INVARIANT: internal state error (e.g. pending-output re-entry).
+ *   Does NOT increment failures_resource_limit; routes to
+ *   failures_conversion.
+ */
+#define NGX_HTTP_MD_SEND_ORIGIN_NONE         0
+#define NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION   1
+#define NGX_HTTP_MD_SEND_ORIGIN_DOWNSTREAM   2
+#define NGX_HTTP_MD_SEND_ORIGIN_INVARIANT    3
+
+/*
  * Default streaming budget: 2 MiB
  */
 #define NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT \
@@ -1065,6 +1088,15 @@ typedef struct {
          *   abandoned, release upstream buffers.
          */
         ngx_uint_t                        input_disposition;
+
+        /*
+         * Last send-failure origin, set by send_output /
+         * send_zero_copy_feed_output on NGX_ERROR return.
+         * Read by handle_success_output to classify post-commit
+         * failures into allocation, downstream, or invariant.
+         * Reset to NONE before each send call.
+         */
+        ngx_uint_t                        last_send_failure_origin;
 
         /*
          * Module-owned pending input chain for backpressure continuation.
