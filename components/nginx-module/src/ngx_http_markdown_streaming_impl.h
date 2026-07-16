@@ -45,6 +45,10 @@ static void ngx_http_markdown_streaming_start_otel_span(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf);
 static ngx_flag_t ngx_http_markdown_streaming_delivery_ok(ngx_int_t rc);
+static void ngx_http_markdown_streaming_record_send_delivery(
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_pending_terminal_t *terminal,
+    const u_char *data, size_t len, ngx_flag_t delivered);
 static ngx_int_t ngx_http_markdown_streaming_handle_output_loss(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf);
@@ -1145,6 +1149,34 @@ ngx_http_markdown_streaming_save_pending(
 }
 
 
+static void
+ngx_http_markdown_streaming_record_send_delivery(
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_pending_terminal_t *terminal,
+    const u_char *data, size_t len, ngx_flag_t delivered)
+{
+    if (!delivered) {
+        return;
+    }
+
+    if (terminal->main_terminal) {
+        ctx->streaming.main_terminal_sent = 1;
+    }
+    if (terminal->subrequest_terminal) {
+        ctx->streaming.subrequest_terminal_sent = 1;
+    }
+
+    ctx->streaming.flushes_sent++;
+
+    if (data != NULL && len > 0) {
+        ngx_http_markdown_streaming_record_ttfb(ctx);
+        NGX_HTTP_MARKDOWN_METRIC_ADD(
+            streaming.selection.output_bytes_total,
+            (ngx_atomic_int_t) len);
+    }
+}
+
+
 /*
  * Send Markdown output downstream.
  *
@@ -1246,35 +1278,11 @@ ngx_http_markdown_streaming_send_output(
     }
 
     /*
-     * Latch terminal-delivered state after confirmed delivery
-     * (Rule 47).  Main request terminal (last_buf) latches
-     * main_terminal_sent; subrequest terminal (last_in_chain)
-     * latches subrequest_terminal_sent.  Both only on NGX_OK/NGX_DONE,
-     * never on NGX_AGAIN.
+     * Latch terminal delivery and record TTFB/bytes only after confirmed
+     * delivery.  NGX_AGAIN is accounted when resume_pending() drains.
      */
-    if (terminal.main_terminal && delivered) {
-        ctx->streaming.main_terminal_sent = 1;
-    }
-    if (terminal.subrequest_terminal && delivered) {
-        ctx->streaming.subrequest_terminal_sent = 1;
-    }
-
-    /*
-     * Record TTFB on first successful non-empty output send.
-     * NGX_AGAIN means backpressure — bytes are not yet sent.
-     * TTFB will be recorded later in resume_pending() when
-     * the pending chain drains successfully.
-     */
-    if (delivered) {
-        ctx->streaming.flushes_sent++;
-
-        if (data != NULL && len > 0) {
-            ngx_http_markdown_streaming_record_ttfb(ctx);
-            NGX_HTTP_MARKDOWN_METRIC_ADD(
-                streaming.selection.output_bytes_total,
-                (ngx_atomic_int_t) len);
-        }
-    }
+    ngx_http_markdown_streaming_record_send_delivery(
+        ctx, &terminal, data, len, delivered);
 
     if (rc == NGX_AGAIN) {
         rc = ngx_http_markdown_streaming_save_pending(
@@ -2324,8 +2332,12 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
     if (rc == NGX_AGAIN) {
         terminal.main_terminal = 0;
         terminal.subrequest_terminal = 0;
-        return ngx_http_markdown_streaming_save_pending(
+        rc = ngx_http_markdown_streaming_save_pending(
             r, ctx, zout, out_data, out_len, 1, terminal);
+        if (rc == NGX_ERROR) {
+            ctx->streaming.classify.last_send_failure_origin =
+                NGX_HTTP_MD_SEND_ORIGIN_INVARIANT;
+        }
     }
 
     return rc;
@@ -2404,6 +2416,7 @@ ngx_http_markdown_streaming_handle_output_loss(
     ngx_uint_t  origin;
 
     ctx->streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
+    ctx->stream_sm.state = NGX_HTTP_MD_STATE_POST_COMMIT_ABORT;
 
     origin = ctx->streaming.classify.last_send_failure_origin;
 
@@ -2412,9 +2425,10 @@ ngx_http_markdown_streaming_handle_output_loss(
         "origin=%ui, hard abort (no safe-finish)",
         origin);
 
-    /* Classify failure for metrics */
+    /* Classify failure for reason taxonomy and metrics. */
     if (!ctx->streaming.completion.failure_recorded) {
-        if (origin == NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION) {
+        switch (origin) {
+        case NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION:
             ctx->streaming.reason =
                 NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_BUDGET_EXCEEDED;
             NGX_HTTP_MARKDOWN_METRIC_INC(
@@ -2422,9 +2436,34 @@ ngx_http_markdown_streaming_handle_output_loss(
             NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
             ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
                 ngx_http_markdown_reason_streaming_budget_exceeded());
-        } else {
-            /* DOWNSTREAM or INVARIANT: conversion/I/O failure */
+            break;
+
+        case NGX_HTTP_MD_SEND_ORIGIN_DOWNSTREAM:
+            ctx->streaming.reason =
+                NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_IO_ERROR;
             NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
+            break;
+
+        case NGX_HTTP_MD_SEND_ORIGIN_INVARIANT:
+            /*
+             * No public internal-failure reason exists.  Preserve the
+             * current taxonomy by using the generic post-commit conversion
+             * fallback, never the resource-limit reason.
+             */
+            ctx->streaming.reason =
+                NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR;
+            NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
+            break;
+
+        default:
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "markdown: unexpected output-loss origin=%ui, "
+                "classifying as internal invariant failure",
+                origin);
+            ctx->streaming.reason =
+                NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_PARSE_ERROR;
+            NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
+            break;
         }
     }
 
