@@ -1078,25 +1078,29 @@ typedef struct {
         ngx_flag_t                        failopen_replay_initialized;
 
         /*
-         * Input disposition: decoupled from downstream return code.
+         * Input/send state classification fields.
          *
-         * NGX_HTTP_MD_INPUT_CONSUMED (0) - Rust ate the input chunk;
-         *   advance buf->pos and enqueue remainder to pending_input.
-         * NGX_HTTP_MD_INPUT_RETAIN (1) - fail-open shared ngx_buf_t;
-         *   do NOT advance pos (would corrupt pending fail-open output).
-         * NGX_HTTP_MD_INPUT_TERMINAL (2) - post-commit fatal; input
-         *   abandoned, release upstream buffers.
+         * Grouped into a sub-struct to keep the parent streaming struct
+         * below the SonarCloud c:S1820 20-field limit.
+         *
+         * input_disposition: decoupled from downstream return code.
+         *   NGX_HTTP_MD_INPUT_CONSUMED (0) - Rust ate the input chunk;
+         *     advance buf->pos and enqueue remainder to pending_input.
+         *   NGX_HTTP_MD_INPUT_RETAIN (1) - fail-open shared ngx_buf_t;
+         *     do NOT advance pos (would corrupt pending fail-open output).
+         *   NGX_HTTP_MD_INPUT_TERMINAL (2) - post-commit fatal; input
+         *     abandoned, release upstream buffers.
+         *
+         * last_send_failure_origin: set by send_output /
+         *   send_zero_copy_feed_output on NGX_ERROR return.
+         *   Read by handle_success_output to classify post-commit
+         *   failures into allocation, downstream, or invariant.
+         *   Reset to NONE before each send call.
          */
-        ngx_uint_t                        input_disposition;
-
-        /*
-         * Last send-failure origin, set by send_output /
-         * send_zero_copy_feed_output on NGX_ERROR return.
-         * Read by handle_success_output to classify post-commit
-         * failures into allocation, downstream, or invariant.
-         * Reset to NONE before each send call.
-         */
-        ngx_uint_t                        last_send_failure_origin;
+        struct {
+            ngx_uint_t                    input_disposition;
+            ngx_uint_t                    last_send_failure_origin;
+        } classify;
 
         /*
          * Module-owned pending input chain for backpressure continuation.

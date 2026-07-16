@@ -1165,11 +1165,11 @@ ngx_http_markdown_streaming_send_output(
     ngx_flag_t    delivered;
     ngx_http_markdown_pending_terminal_t  terminal;
 
-    ctx->streaming.last_send_failure_origin = NGX_HTTP_MD_SEND_ORIGIN_NONE;
+    ctx->streaming.classify.last_send_failure_origin = NGX_HTTP_MD_SEND_ORIGIN_NONE;
 
     b = ngx_calloc_buf(r->pool);
     if (b == NULL) {
-        ctx->streaming.last_send_failure_origin =
+        ctx->streaming.classify.last_send_failure_origin =
             NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
@@ -1195,7 +1195,7 @@ ngx_http_markdown_streaming_send_output(
              * Pool allocation failed.  The caller still owns
              * `data` and must free it on seeing NGX_ERROR.
              */
-            ctx->streaming.last_send_failure_origin =
+            ctx->streaming.classify.last_send_failure_origin =
                 NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
             return NGX_ERROR;
         }
@@ -1219,7 +1219,7 @@ ngx_http_markdown_streaming_send_output(
 
     out = ngx_alloc_chain_link(r->pool);
     if (out == NULL) {
-        ctx->streaming.last_send_failure_origin =
+        ctx->streaming.classify.last_send_failure_origin =
             NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
@@ -1241,7 +1241,7 @@ ngx_http_markdown_streaming_send_output(
 
     /* Classify downstream failure (non-AGAIN, non-delivery) */
     if (!delivered && rc != NGX_AGAIN) {
-        ctx->streaming.last_send_failure_origin =
+        ctx->streaming.classify.last_send_failure_origin =
             NGX_HTTP_MD_SEND_ORIGIN_DOWNSTREAM;
     }
 
@@ -1280,7 +1280,7 @@ ngx_http_markdown_streaming_send_output(
         rc = ngx_http_markdown_streaming_save_pending(
             r, ctx, out, data, len, 0, terminal);
         if (rc == NGX_ERROR) {
-            ctx->streaming.last_send_failure_origin =
+            ctx->streaming.classify.last_send_failure_origin =
                 NGX_HTTP_MD_SEND_ORIGIN_INVARIANT;
         }
     }
@@ -1875,7 +1875,7 @@ ngx_http_markdown_streaming_handle_postcommit_error(
 {
     ngx_int_t  rc;
 
-    ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
+    ctx->streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
         "markdown: Post-Commit error, "
@@ -1957,7 +1957,7 @@ ngx_http_markdown_streaming_defer_postcommit_error(
     uint32_t error_code,
     ngx_chain_t *in)
 {
-    ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
+    ctx->streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
     ctx->streaming.completion.postcommit_error_after_pending = 1;
     ctx->streaming.completion.postcommit_error_code = error_code;
     ctx->streaming.completion.upstream_terminal_seen = 0;
@@ -2249,7 +2249,7 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
     ngx_flag_t    owner_transferred;
     ngx_http_markdown_pending_terminal_t  terminal;
 
-    ctx->streaming.last_send_failure_origin = NGX_HTTP_MD_SEND_ORIGIN_NONE;
+    ctx->streaming.classify.last_send_failure_origin = NGX_HTTP_MD_SEND_ORIGIN_NONE;
 
     /*
      * Zero-copy path: buffer factory creates an ngx_buf_t referencing
@@ -2284,7 +2284,7 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
          * succeeded but something else went wrong, or it freed the
          * buffer).  Cannot fallback — the data is gone.
          */
-        ctx->streaming.last_send_failure_origin =
+        ctx->streaming.classify.last_send_failure_origin =
             NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
@@ -2295,7 +2295,7 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
 
     zout = ngx_alloc_chain_link(r->pool);
     if (zout == NULL) {
-        ctx->streaming.last_send_failure_origin =
+        ctx->streaming.classify.last_send_failure_origin =
             NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
@@ -2317,7 +2317,7 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
     if (!ngx_http_markdown_streaming_delivery_ok(rc)
         && rc != NGX_AGAIN)
     {
-        ctx->streaming.last_send_failure_origin =
+        ctx->streaming.classify.last_send_failure_origin =
             NGX_HTTP_MD_SEND_ORIGIN_DOWNSTREAM;
     }
 
@@ -2403,9 +2403,9 @@ ngx_http_markdown_streaming_handle_output_loss(
 {
     ngx_uint_t  origin;
 
-    ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
+    ctx->streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
 
-    origin = ctx->streaming.last_send_failure_origin;
+    origin = ctx->streaming.classify.last_send_failure_origin;
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
         "markdown: post-commit output loss, "
@@ -2798,7 +2798,7 @@ ngx_http_markdown_streaming_process_chunk(
      * clone shares this ngx_buf_t (advancing pos would corrupt the
      * pending fail-open output).
      */
-    ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_CONSUMED;
+    ctx->streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_CONSUMED;
 
     feed_len = ngx_http_markdown_buf_len_safe(buf);
     if (feed_len == 0) {
@@ -3694,7 +3694,7 @@ ngx_http_markdown_streaming_send_failopen_chain(
          * would corrupt the pending fail-open output's shared buffers.
          * process_chain checks this to avoid advancing pos on RETAIN.
          */
-        ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_RETAIN;
+        ctx->streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_RETAIN;
 
         /* Backpressure metric: fail-open output returned NGX_AGAIN */
         NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
@@ -3955,7 +3955,7 @@ ngx_http_markdown_streaming_ensure_handle(
         return NGX_OK;
     }
 
-    if (ctx->streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
+    if (ctx->streaming.classify.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
         return NGX_ERROR;
     }
 
@@ -4143,7 +4143,7 @@ ngx_http_markdown_streaming_abort_failopen_after_pending(
     ctx->streaming.completion.failopen_abort_after_pending = 0;
     ctx->streaming.completion.failopen_abort_error_code = ERROR_SUCCESS;
     ctx->streaming.completion.upstream_terminal_seen = 0;
-    ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
+    ctx->streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
     ngx_http_markdown_streaming_pending_input_abandon_and_clear(ctx);
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -4238,7 +4238,7 @@ ngx_http_markdown_streaming_handle_null_input(
             r, ctx, NULL, 0, /* last_buf */ 1);
     }
 
-    if (ctx->streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
+    if (ctx->streaming.classify.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
         ctx->streaming.completion.upstream_terminal_seen = 0;
         ngx_http_markdown_streaming_pending_input_clear(ctx);
         ngx_http_markdown_streaming_sync_buffered(r, ctx);
@@ -4394,7 +4394,7 @@ ngx_http_markdown_streaming_handle_consumed_again(
 {
     ngx_int_t  rc;
 
-    if (ctx->streaming.input_disposition
+    if (ctx->streaming.classify.input_disposition
         == NGX_HTTP_MD_INPUT_RETAIN)
     {
         ngx_http_markdown_streaming_sync_buffered(r, ctx);
@@ -4475,7 +4475,7 @@ ngx_http_markdown_streaming_process_chain(
         rc = ngx_http_markdown_streaming_handle_chunk_result(
             r, ctx, in, rc);
 
-        if (ctx->streaming.input_disposition
+        if (ctx->streaming.classify.input_disposition
             == NGX_HTTP_MD_INPUT_TERMINAL)
         {
             ngx_http_markdown_streaming_abandon_input(cl);
@@ -4566,7 +4566,7 @@ ngx_http_markdown_streaming_handle_new_input_with_pending(
 {
     ngx_int_t  rc;
 
-    if (ctx->streaming.input_disposition
+    if (ctx->streaming.classify.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL)
     {
         ngx_http_markdown_streaming_abandon_input(in);
@@ -4689,7 +4689,7 @@ ngx_http_markdown_streaming_body_filter(
             r, ctx, conf, in);
     }
 
-    if (ctx->streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
+    if (ctx->streaming.classify.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
         ngx_http_markdown_streaming_abandon_input(in);
         ngx_http_markdown_streaming_sync_buffered(r, ctx);
         return NGX_OK;
@@ -4730,7 +4730,7 @@ ngx_http_markdown_streaming_body_filter(
         return rc;
     }
 
-    if (ctx->streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
+    if (ctx->streaming.classify.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL) {
         return NGX_OK;
     }
 

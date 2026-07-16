@@ -2861,7 +2861,7 @@ test_postcommit_output_construction_failures(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
         "case A: output-loss must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.input_disposition
+    TEST_ASSERT(ctx.streaming.classify.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "case A: input_disposition must be TERMINAL");
     TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
@@ -2901,7 +2901,7 @@ test_postcommit_output_construction_failures(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
         "case B: output-loss must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.input_disposition
+    TEST_ASSERT(ctx.streaming.classify.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "case B: input_disposition must be TERMINAL");
     TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
@@ -2934,7 +2934,7 @@ test_postcommit_output_construction_failures(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
         "case C: output-loss must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.input_disposition
+    TEST_ASSERT(ctx.streaming.classify.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "case C: input_disposition must be TERMINAL");
     TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
@@ -2968,7 +2968,7 @@ test_postcommit_output_construction_failures(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
         "case D: output-loss must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.input_disposition
+    TEST_ASSERT(ctx.streaming.classify.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "case D: input_disposition must be TERMINAL");
     TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
@@ -3005,7 +3005,7 @@ test_postcommit_output_construction_failures(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
         "case E: output-loss must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.input_disposition
+    TEST_ASSERT(ctx.streaming.classify.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "case E: input_disposition must be TERMINAL");
     TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
@@ -3040,7 +3040,7 @@ test_postcommit_output_construction_failures(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
         "case F: output-loss must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.input_disposition
+    TEST_ASSERT(ctx.streaming.classify.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "case F: input_disposition must be TERMINAL");
     TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
@@ -3148,7 +3148,7 @@ test_postcommit_ngx_done_is_delivery_success(void)
         "NGX_DONE: streaming.failed_total unchanged");
     TEST_ASSERT(metrics.conversions_failed == 0,
         "NGX_DONE: conversions_failed unchanged");
-    TEST_ASSERT(ctx.streaming.input_disposition
+    TEST_ASSERT(ctx.streaming.classify.input_disposition
         != NGX_HTTP_MD_INPUT_TERMINAL,
         "NGX_DONE: input_disposition must NOT be TERMINAL");
     TEST_ASSERT(ctx.streaming.handle != NULL,
@@ -3204,7 +3204,7 @@ test_postcommit_downstream_failure_classification(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
         "downstream failure: must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.input_disposition
+    TEST_ASSERT(ctx.streaming.classify.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "downstream failure: input_disposition must be TERMINAL");
     TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
@@ -3279,7 +3279,7 @@ test_postcommit_output_loss_no_safe_finish(void)
 
     TEST_ASSERT(rc == NGX_ERROR,
         "output-loss: must return NGX_ERROR");
-    TEST_ASSERT(ctx.streaming.input_disposition
+    TEST_ASSERT(ctx.streaming.classify.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "output-loss: input_disposition must be TERMINAL");
     TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
@@ -4569,7 +4569,7 @@ test_pending_input_production_lifecycle(void)
 
     ctx.eligible = 0;
     ctx.streaming.handle = NULL;
-    ctx.streaming.input_disposition = NGX_HTTP_MD_INPUT_RETAIN;
+    ctx.streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_RETAIN;
     ctx.streaming.completion.pending_failopen_delivery = 1;
     ctx.streaming.completion.failopen_active = 1;
     g_streaming_feed_calls = 0;
@@ -4609,7 +4609,7 @@ test_pending_input_production_lifecycle(void)
 
     ctx.streaming.pending_output = NULL;
     ngx_http_markdown_streaming_pending_input_clear(&ctx);
-    ctx.streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
+    ctx.streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
     ctx.streaming.handle = NULL;
     ctx.eligible = 1;
     future_buf.pos = future_data;
@@ -4622,13 +4622,13 @@ test_pending_input_production_lifecycle(void)
                 && g_streaming_feed_calls == 0,
         "terminal disposition must neither recreate nor feed a Rust handle");
 
-    ctx.streaming.input_disposition = NGX_HTTP_MD_INPUT_CONSUMED;
+    ctx.streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_CONSUMED;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x44;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     rc = ngx_http_markdown_streaming_handle_postcommit_error(
         &r, &ctx, &conf, ERROR_POST_COMMIT);
-    TEST_ASSERT(ctx.streaming.input_disposition
+    TEST_ASSERT(ctx.streaming.classify.input_disposition
                 == NGX_HTTP_MD_INPUT_TERMINAL,
         "post-commit termination must select TERMINAL input disposition");
     ctx.streaming.completion.upstream_terminal_seen = 1;
@@ -4852,7 +4852,7 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
     ctx.streaming.pending_input.tail = &retained;
     ctx.streaming.pending_input.bytes = 3;
     ctx.streaming.pending_input.links = 1;
-    ctx.streaming.input_disposition = NGX_HTTP_MD_INPUT_RETAIN;
+    ctx.streaming.classify.input_disposition = NGX_HTTP_MD_INPUT_RETAIN;
 
     /*
      * Future input that exceeds the retained-input budget: conf.max_size
@@ -4934,7 +4934,7 @@ test_failopen_active_enqueue_failure_aborts_safely(void)
         "P1-2: abort latch must clear after failure continuation");
     TEST_ASSERT(retained_buf.pos == retained_buf.last,
         "P1-2: discarded retained input must consume shared buffers");
-    TEST_ASSERT(ctx.streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL,
+    TEST_ASSERT(ctx.streaming.classify.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL,
         "P1-2: abort continuation must reject all later input");
 
     later.buf = &later_buf;
@@ -5291,7 +5291,7 @@ test_failopen_delivery_abort_does_not_double_count_conversion_failure(void)
         "pending_output must clear after the drain");
     TEST_ASSERT(ctx.streaming.completion.failopen_abort_after_pending == 0,
         "abort latch must clear after the abort completes");
-    TEST_ASSERT(ctx.streaming.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL,
+    TEST_ASSERT(ctx.streaming.classify.input_disposition == NGX_HTTP_MD_INPUT_TERMINAL,
         "abort must reject all further input for this request");
 
     TEST_ASSERT(metrics.conversions_attempted == 1,
