@@ -2791,6 +2791,338 @@ test_commit_feed_and_finalize_core_paths(void)
 }
 
 /*
+ * Test post-commit C-side output construction failures.
+ *
+ * When FFI feed succeeds (ERROR_SUCCESS) and commit_state == POST,
+ * but C-side output construction fails (ngx_calloc_buf, ngx_palloc,
+ * ngx_alloc_chain_link, or zero-copy factory failure), the failure
+ * must enter the unified post-commit failure lifecycle:
+ *   - input_disposition = TERMINAL
+ *   - postcommit_error_total += 1
+ *   - streaming.failed_total += 1
+ *   - conversions_failed += 1
+ *   - Rust buffer freed exactly once (no double-free)
+ *   - failure_recorded == 1 (idempotent)
+ *   - no delivery metrics for the undelivered chunk
+ *
+ * Cases:
+ *   A: pool-copy ngx_calloc_buf failure
+ *   B: pool-copy ngx_palloc (data) failure
+ *   C: pool-copy ngx_alloc_chain_link failure
+ *   D: zero-copy factory failure before ownership transfer + fallback fail
+ *   E: zero-copy factory failure after ownership transfer
+ *   F: zero-copy factory succeeds, chain-link allocation fails
+ *   G: failure accounting idempotence (re-entry)
+ *
+ * Covers: ngx_http_markdown_streaming_handle_success_output,
+ *         ngx_http_markdown_streaming_send_feed_output,
+ *         ngx_http_markdown_streaming_send_zero_copy_feed_output
+ */
+static void
+test_postcommit_output_construction_failures(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_http_markdown_metrics_t metrics;
+    u_char                   out_data[] = "hello";
+    ngx_int_t                rc;
+    ngx_uint_t               free_before;
+
+    TEST_SUBSECTION("post-commit output construction failure lifecycle");
+
+    /* --- Case A: pool-copy ngx_calloc_buf failure --- */
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x30;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    conf.stream.zero_copy = 0;
+    g_next_body_filter_rc = NGX_OK;
+    g_calloc_buf_fail_once = 1;
+    free_before = g_output_free_calls;
+
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
+
+    TEST_ASSERT(rc == NGX_OK || rc == NGX_ERROR,
+        "case A: should return definitive result");
+    TEST_ASSERT(ctx.streaming.input_disposition
+        == NGX_HTTP_MD_INPUT_TERMINAL,
+        "case A: input_disposition must be TERMINAL");
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
+        "case A: failure_recorded must be 1");
+    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
+        "case A: postcommit_error_total must be 1");
+    TEST_ASSERT(metrics.streaming.failed_total == 1,
+        "case A: streaming.failed_total must be 1");
+    TEST_ASSERT(metrics.conversions_failed == 1,
+        "case A: conversions_failed must be 1");
+    TEST_ASSERT(metrics.conversions_succeeded == 0,
+        "case A: conversions_succeeded must be unchanged");
+    TEST_ASSERT(g_output_free_calls == free_before + 1,
+        "case A: Rust buffer must be freed exactly once");
+
+    /* --- Case B: pool-copy ngx_palloc (data copy) failure --- */
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x31;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    conf.stream.zero_copy = 0;
+    g_next_body_filter_rc = NGX_OK;
+    /*
+     * ngx_calloc_buf succeeds but the subsequent ngx_palloc for data
+     * fails.  Use g_palloc_fail_once which triggers on the SECOND
+     * palloc call (first is calloc_buf which uses its own stub).
+     */
+    g_palloc_fail_once = 1;
+    free_before = g_output_free_calls;
+
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
+
+    TEST_ASSERT(rc == NGX_OK || rc == NGX_ERROR,
+        "case B: should return definitive result");
+    TEST_ASSERT(ctx.streaming.input_disposition
+        == NGX_HTTP_MD_INPUT_TERMINAL,
+        "case B: input_disposition must be TERMINAL");
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
+        "case B: failure_recorded must be 1");
+    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
+        "case B: postcommit_error_total must be 1");
+    TEST_ASSERT(metrics.streaming.failed_total == 1,
+        "case B: streaming.failed_total must be 1");
+    TEST_ASSERT(metrics.conversions_failed == 1,
+        "case B: conversions_failed must be 1");
+    TEST_ASSERT(g_output_free_calls == free_before + 1,
+        "case B: Rust buffer must be freed exactly once");
+
+    /* --- Case C: pool-copy ngx_alloc_chain_link failure --- */
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x32;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    conf.stream.zero_copy = 0;
+    g_next_body_filter_rc = NGX_OK;
+    g_alloc_chain_fail_once = 1;
+    free_before = g_output_free_calls;
+
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
+
+    TEST_ASSERT(rc == NGX_OK || rc == NGX_ERROR,
+        "case C: should return definitive result");
+    TEST_ASSERT(ctx.streaming.input_disposition
+        == NGX_HTTP_MD_INPUT_TERMINAL,
+        "case C: input_disposition must be TERMINAL");
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
+        "case C: failure_recorded must be 1");
+    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
+        "case C: postcommit_error_total must be 1");
+    TEST_ASSERT(metrics.streaming.failed_total == 1,
+        "case C: streaming.failed_total must be 1");
+    TEST_ASSERT(metrics.conversions_failed == 1,
+        "case C: conversions_failed must be 1");
+    TEST_ASSERT(g_output_free_calls == free_before + 1,
+        "case C: Rust buffer must be freed exactly once");
+
+    /* --- Case D: zero-copy factory fail before ownership + fallback fail --- */
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x33;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    conf.stream.zero_copy = 1;
+    g_next_body_filter_rc = NGX_OK;
+    /*
+     * First ngx_calloc_buf call is for the zero-copy factory
+     * (rust_buf_create_ex).  It fails with owner_transferred=0,
+     * triggering pool-copy fallback.  Then the second calloc_buf
+     * for the fallback pool-copy path also fails.
+     *
+     * Use g_calloc_buf_fail_once for the factory.  The fallback
+     * pool-copy path calls send_output which also calls
+     * ngx_calloc_buf — set g_calloc_buf_fail_once again inside the
+     * chain.  Actually, since g_calloc_buf_fail_once is consumed by
+     * the factory call, we need a second failure mechanism.
+     * The fallback path in send_zero_copy calls send_output which
+     * calls ngx_calloc_buf — we need BOTH to fail.
+     *
+     * Strategy: fail calloc_buf for factory (owner_transferred=0),
+     * then fail palloc for the fallback data copy.
+     */
+    g_calloc_buf_fail_once = 1;
+    g_palloc_fail_once = 1;
+    free_before = g_output_free_calls;
+
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
+
+    TEST_ASSERT(rc == NGX_OK || rc == NGX_ERROR,
+        "case D: should return definitive result");
+    TEST_ASSERT(ctx.streaming.input_disposition
+        == NGX_HTTP_MD_INPUT_TERMINAL,
+        "case D: input_disposition must be TERMINAL");
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
+        "case D: failure_recorded must be 1");
+    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
+        "case D: postcommit_error_total must be 1");
+    TEST_ASSERT(metrics.conversions_failed == 1,
+        "case D: conversions_failed must be 1");
+    TEST_ASSERT(g_output_free_calls == free_before + 1,
+        "case D: Rust buffer freed exactly once (by fallback path)");
+
+    /* --- Case E: zero-copy factory fail after ownership transfer --- */
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x34;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    conf.stream.zero_copy = 1;
+    g_next_body_filter_rc = NGX_OK;
+    /*
+     * Simulate factory failure after ownership transfer:
+     * ngx_calloc_buf succeeds but ngx_pool_cleanup_add fails.
+     * The factory frees the Rust buffer itself and sets
+     * owner_transferred = 1, returning NULL.
+     * No pool-copy fallback is attempted.
+     */
+    g_pool_cleanup_fail_once = 1;
+    free_before = g_output_free_calls;
+
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
+
+    TEST_ASSERT(rc == NGX_OK || rc == NGX_ERROR,
+        "case E: should return definitive result");
+    TEST_ASSERT(ctx.streaming.input_disposition
+        == NGX_HTTP_MD_INPUT_TERMINAL,
+        "case E: input_disposition must be TERMINAL");
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
+        "case E: failure_recorded must be 1");
+    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
+        "case E: postcommit_error_total must be 1");
+    TEST_ASSERT(metrics.conversions_failed == 1,
+        "case E: conversions_failed must be 1");
+    TEST_ASSERT(g_output_free_calls == free_before + 1,
+        "case E: Rust buffer freed exactly once (by factory)");
+
+    /* --- Case F: zero-copy factory succeeds, chain-link fails --- */
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x35;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    conf.stream.zero_copy = 1;
+    g_next_body_filter_rc = NGX_OK;
+    /*
+     * Zero-copy factory succeeds (cleanup registered, ownership
+     * transferred).  The subsequent ngx_alloc_chain_link fails.
+     * Ownership is with pool cleanup — no caller-side free.
+     */
+    g_alloc_chain_fail_once = 1;
+    free_before = g_output_free_calls;
+
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
+
+    TEST_ASSERT(rc == NGX_OK || rc == NGX_ERROR,
+        "case F: should return definitive result");
+    TEST_ASSERT(ctx.streaming.input_disposition
+        == NGX_HTTP_MD_INPUT_TERMINAL,
+        "case F: input_disposition must be TERMINAL");
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
+        "case F: failure_recorded must be 1");
+    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
+        "case F: postcommit_error_total must be 1");
+    TEST_ASSERT(metrics.conversions_failed == 1,
+        "case F: conversions_failed must be 1");
+    TEST_ASSERT(metrics.perf.zero_copy_output_total == 0,
+        "case F: no delivery metrics for undelivered chunk");
+
+    /* --- Case G: failure accounting idempotence on re-entry --- */
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x36;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    conf.stream.zero_copy = 0;
+    g_next_body_filter_rc = NGX_OK;
+    g_calloc_buf_fail_once = 1;
+
+    /* First failure */
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
+
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
+        "case G: first failure records");
+    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
+        "case G: first postcommit_error_total == 1");
+    TEST_ASSERT(metrics.streaming.failed_total == 1,
+        "case G: first streaming.failed_total == 1");
+    TEST_ASSERT(metrics.conversions_failed == 1,
+        "case G: first conversions_failed == 1");
+
+    /*
+     * Simulate re-entry: reset handle for a hypothetical second
+     * feed attempt that also fails.  The failure_recorded guard
+     * prevents double-counting.
+     */
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x37;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    g_calloc_buf_fail_once = 1;
+
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
+
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
+        "case G: re-entry failure_recorded stays 1");
+    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
+        "case G: re-entry postcommit_error_total stays 1");
+    TEST_ASSERT(metrics.streaming.failed_total == 1,
+        "case G: re-entry streaming.failed_total stays 1");
+    TEST_ASSERT(metrics.conversions_failed == 1,
+        "case G: re-entry conversions_failed stays 1");
+
+    TEST_PASS("post-commit output construction failure lifecycle covered");
+}
+
+/*
  * Test process-chain, failopen passthrough, and body_filter deep branches.
  * Verifies:
  * - failopen passthrough passes current chain for first invocation
@@ -5459,6 +5791,7 @@ main(void)
     test_null_input_tracking_and_body_filter_entry();
     test_init_handle_and_chunk_result_helpers();
     test_commit_feed_and_finalize_core_paths();
+    test_postcommit_output_construction_failures();
     test_process_chain_and_body_filter_deep_paths();
     test_streaming_gap_branches();
     test_failopen_passthrough_again_pending();
