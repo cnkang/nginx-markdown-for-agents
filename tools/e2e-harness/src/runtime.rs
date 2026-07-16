@@ -106,6 +106,7 @@ impl ScenarioRuntime {
         let scenario_artifact_dir = artifact_dir.join("scenarios").join(scenario_name);
 
         std::fs::create_dir_all(&runtime_dir)?;
+        std::fs::create_dir_all(runtime_dir.join("logs"))?;
         std::fs::create_dir_all(&scenario_artifact_dir)?;
 
         // Write a minimal nginx.conf stub; scenarios may override this.
@@ -219,6 +220,22 @@ mod tests {
         )));
         assert!(content.contains("listen 18080;"));
         assert!(content.contains("server 127.0.0.1:18081;"));
+        Ok(())
+    }
+
+    #[test]
+    fn scenario_runtime_creates_nginx_prefix_log_directory() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+
+        let runtime = ScenarioRuntime::prepare(
+            "smoke",
+            temp.path(),
+            PathBuf::from("/opt/nginx/sbin/nginx"),
+            18080,
+            18081,
+        )?;
+
+        assert!(runtime.runtime_dir.join("logs").is_dir());
         Ok(())
     }
 }
