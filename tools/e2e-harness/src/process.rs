@@ -42,15 +42,24 @@ impl NginxProcess {
         base_url: &str,
         timeout: Duration,
     ) -> Result<Self> {
-        let mut child = build_nginx_command(nginx_bin, runtime_prefix, config_path).spawn()?;
+        Self::start_command(
+            build_nginx_command(nginx_bin, runtime_prefix, config_path),
+            base_url,
+            timeout,
+        )
+    }
 
+    fn start_command(mut command: Command, base_url: &str, timeout: Duration) -> Result<Self> {
+        let child = command.spawn()?;
         let pid = child.id();
-        wait_ready_with_child(Some(&mut child), base_url, timeout)?;
-        Ok(NginxProcess {
+        let mut process = NginxProcess {
             child: Some(child),
             pid,
             timeout,
-        })
+        };
+
+        wait_ready_with_child(process.child.as_mut(), base_url, timeout)?;
+        Ok(process)
     }
 
     /// Wait for NGINX to become ready by probing the base URL.
@@ -186,6 +195,27 @@ mod tests {
     use super::*;
     use std::ffi::OsStr;
 
+    #[cfg(unix)]
+    unsafe extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+        fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+    }
+
+    #[cfg(unix)]
+    struct ProcessCleanupGuard(Option<i32>);
+
+    #[cfg(unix)]
+    impl Drop for ProcessCleanupGuard {
+        fn drop(&mut self) {
+            if let Some(pid) = self.0 {
+                unsafe {
+                    kill(pid, 9);
+                    waitpid(pid, std::ptr::null_mut(), 0);
+                }
+            }
+        }
+    }
+
     #[test]
     fn nginx_command_uses_isolated_runtime_prefix() {
         let command = build_nginx_command(
@@ -206,5 +236,48 @@ mod tests {
                 OsStr::new("daemon off;"),
             ]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn start_reaps_child_when_readiness_times_out() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let pid_file = temp.path().join("fake-nginx.pid");
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg(format!("echo $$ > '{}'; exec sleep 30", pid_file.display()));
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
+        drop(listener);
+
+        let error = match NginxProcess::start_command(
+            command,
+            &format!("http://127.0.0.1:{port}/"),
+            Duration::from_millis(150),
+        ) {
+            Ok(_) => panic!("fake NGINX unexpectedly passed readiness"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("did not become ready"),
+            "unexpected start failure: {error:#}"
+        );
+
+        let pid_deadline = Instant::now() + Duration::from_secs(1);
+        while !pid_file.exists() && Instant::now() < pid_deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let pid: i32 = std::fs::read_to_string(&pid_file)?.trim().parse()?;
+        let mut cleanup = ProcessCleanupGuard(Some(pid));
+        let wait_result = unsafe { waitpid(pid, std::ptr::null_mut(), 1) };
+        assert_eq!(
+            wait_result, -1,
+            "child PID {pid} was still running or left as a zombie"
+        );
+        cleanup.0 = None;
+
+        Ok(())
     }
 }
