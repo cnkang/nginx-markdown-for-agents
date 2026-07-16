@@ -31,6 +31,7 @@ Requirements: 9.2, 9.3, 9.4, 9.5
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import subprocess
@@ -90,7 +91,7 @@ def _is_rc_tag() -> bool:
         if val and _RC_RE.search(val):
             return True
 
-    try:
+    with contextlib.suppress(Exception):
         result = subprocess.run(
             ["git", "describe", "--tags", "--exact-match", "HEAD"],
             capture_output=True,
@@ -100,9 +101,6 @@ def _is_rc_tag() -> bool:
         )
         if result.returncode == 0 and _RC_RE.search(result.stdout.strip()):
             return True
-    except Exception:
-        pass
-
     return False
 
 
@@ -118,7 +116,7 @@ def _is_release_tag() -> bool:
         if val and (_RELEASE_TAG_RE.search(val) or _RC_RE.search(val)):
             return True
 
-    try:
+    with contextlib.suppress(Exception):
         result = subprocess.run(
             ["git", "describe", "--tags", "--exact-match", "HEAD"],
             capture_output=True,
@@ -130,9 +128,6 @@ def _is_release_tag() -> bool:
             tag = result.stdout.strip()
             if _RELEASE_TAG_RE.search(tag) or _RC_RE.search(tag):
                 return True
-    except Exception:
-        pass
-
     return False
 
 
@@ -169,9 +164,7 @@ def _extract_evidence_metrics(report: dict) -> dict:
 
     Returns a flat dict suitable for evaluate_module_level().
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", [])
-    if not scenarios:
-        scenarios = report.get("scenarios", [])
+    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
 
     if not scenarios:
         # ponytail: keep empty/legacy tests happy while failing real missing scenarios
@@ -190,22 +183,15 @@ def _extract_evidence_metrics(report: dict) -> dict:
 
     if len(memory_data_points) >= 2:
         metrics["memory_slope_pct"] = _compute_memory_slope(memory_data_points)
-    else:
-        # Not enough measured data points to compute a slope.
-        # Leave memory_slope_pct absent — the threshold engine will
-        # treat it as MISSING_EVIDENCE.  We intentionally do NOT read
-        # a top-level memory_slope placeholder from the report, because
-        # a hardcoded 0.0 would mask missing evidence as "perfect 0
-        # slope".
-        pass
 
     return metrics
 
 
 def _extract_small_latency(scenarios: list[dict], metrics: dict) -> None:
     """Extract latency metrics for small scenario."""
-    plain_small = next((s for s in scenarios if s.get("name") == "plain-small"), None)
-    if plain_small:
+    if plain_small := next(
+        (s for s in scenarios if s.get("name") == "plain-small"), None
+    ):
         m = plain_small.get("metrics") or plain_small.get("results") or plain_small
         p50 = m.get("latency_p50_ms") or m.get("p50_ms") or m.get("p50_latency_ms")
         p95 = m.get("latency_p95_ms") or m.get("p95_ms") or m.get("p95_latency_ms")
@@ -219,8 +205,7 @@ def _extract_large_latency(scenarios: list[dict], metrics: dict) -> None:
     """Extract latency metrics for large scenarios."""
     large_body = next((s for s in scenarios if s.get("name") == "large-body"), None)
     gzip_large = next((s for s in scenarios if s.get("name") == "gzip-large"), None)
-    large_scenario = large_body or gzip_large
-    if large_scenario:
+    if large_scenario := large_body or gzip_large:
         m = large_scenario.get("metrics") or large_scenario.get("results") or large_scenario
         p50 = m.get("latency_p50_ms") or m.get("p50_ms") or m.get("p50_latency_ms")
         if p50 is not None:
@@ -229,9 +214,7 @@ def _extract_large_latency(scenarios: list[dict], metrics: dict) -> None:
 
 def _extract_streaming_and_fallback(scenarios: list[dict], metrics: dict) -> None:
     """Extract streaming large TTFB and fallback rate."""
-    streaming_first = _find_streaming_scenario(scenarios)
-
-    if streaming_first:
+    if streaming_first := _find_streaming_scenario(scenarios):
         m = streaming_first.get("metrics") or streaming_first.get("results") or streaming_first
         ttfb = m.get("ttfb_p50_ms") or m.get("ttfb_ms")
         if ttfb is not None:
@@ -324,12 +307,7 @@ def _memory_point_for_scenario(scenario: dict) -> tuple[float, float] | None:
         return None
 
     delta = peak_rss - baseline_rss
-    if delta < 0:
-        # peak < baseline is evidence of a sampler error; reject.
-        return None
-
-    # delta >= 0 is valid (including 0 = no growth)
-    return float(input_bytes), float(delta)
+    return None if delta < 0 else (float(input_bytes), float(delta))
 
 
 def _extract_memory_points(scenarios: list[dict]) -> list[tuple[float, float]]:
@@ -443,8 +421,7 @@ def _print_evidence_summary(evidence_pack: dict) -> None:
     for entry in results:
         _print_result_entry(entry)
 
-    breaches = evidence_pack.get("breaches", [])
-    if breaches:
+    if breaches := evidence_pack.get("breaches", []):
         _stderr("")
         _stderr(f"  Threshold breaches: {len(breaches)}")
         for b in breaches:
@@ -871,14 +848,11 @@ def _check_path_coverage(report: dict) -> list[tuple[str, str, str]]:
     Each violation is evidence that the benchmark did not actually test
     the path it claims to cover.
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", [])
-    if not scenarios:
-        scenarios = report.get("scenarios", [])
+    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
 
     by_name: dict[str, dict] = {}
     for s in scenarios:
-        name = s.get("name", "")
-        if name:
+        if name := s.get("name", ""):
             by_name[name] = s
 
     violations: list[tuple[str, str, str]] = []
@@ -908,23 +882,23 @@ def _check_metric_predicates(
 
 def _path_metric_value(metrics: dict, metric: str) -> float | int | None:
     """Return a stored or derived path-integrity metric."""
-    if metric == "output_total":
-        zero_copy = metrics.get("zero_copy_output_total")
-        copied = metrics.get("copied_output_total")
-        if zero_copy is None or copied is None:
-            return None
-        return zero_copy + copied
     if metric == "fallback_rate":
         failopen = metrics.get("precommit_failopen_total")
         requests = metrics.get("streaming_requests_total")
-        if (
-            type(failopen) is not int
-            or failopen < 0
-            or type(requests) is not int
-            or requests <= 0
-        ):
-            return None
-        return float(failopen) / float(requests)
+        return (
+            None
+            if (
+                type(failopen) is not int
+                or failopen < 0
+                or type(requests) is not int
+                or requests <= 0
+            )
+            else float(failopen) / float(requests)
+        )
+    elif metric == "output_total":
+        zero_copy = metrics.get("zero_copy_output_total")
+        copied = metrics.get("copied_output_total")
+        return None if zero_copy is None or copied is None else zero_copy + copied
     return metrics.get(metric)
 
 
@@ -954,9 +928,7 @@ def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
     the report.  In blocking mode, a skipped critical scenario means
     the evidence is incomplete and the gate must fail.
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", [])
-    if not scenarios:
-        scenarios = report.get("scenarios", [])
+    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
 
     skipped = []
     for s in scenarios:
@@ -975,20 +947,15 @@ def _check_missing_scenarios(report: dict) -> list[str]:
     record for it — stronger than "skipped".  The evidence gate must
     reject this as MISSING_EVIDENCE because there is no data at all.
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", [])
-    if not scenarios:
-        scenarios = report.get("scenarios", [])
+    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
 
     by_name: dict[str, dict] = {}
     for s in scenarios:
-        name = s.get("name", "")
-        if name:
+        if name := s.get("name", ""):
             by_name[name] = s
 
     missing = []
-    for name in _CRITICAL_SCENARIOS:
-        if name not in by_name:
-            missing.append(name)
+    missing.extend(name for name in _CRITICAL_SCENARIOS if name not in by_name)
     return missing
 
 
@@ -999,14 +966,11 @@ def _check_scenario_completion(report: dict) -> list[tuple[str, str]]:
     A scenario present with status != "completed" (and not "skipped",
     which is handled by _check_skipped_scenarios) is incomplete evidence.
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", [])
-    if not scenarios:
-        scenarios = report.get("scenarios", [])
+    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
 
     by_name: dict[str, dict] = {}
     for s in scenarios:
-        name = s.get("name", "")
-        if name:
+        if name := s.get("name", ""):
             by_name[name] = s
 
     incomplete = []
@@ -1087,37 +1051,34 @@ def _validate_benchmark_evidence(
     Returns a list of (check_name, reason) violations.  Empty list
     means the report passes all integrity checks.
     """
-    violations: list[tuple[str, str]] = []
-
     # 1. Critical scenarios must exist
     missing = _check_missing_scenarios(report)
-    for name in missing:
-        violations.append(
-            (f"{role}.scenario", f"missing critical scenario: {name}")
-        )
-
+    violations: list[tuple[str, str]] = [
+        (f"{role}.scenario", f"missing critical scenario: {name}")
+        for name in missing
+    ]
     # 2. Critical scenarios must be completed (not skipped, not other)
     incomplete = _check_scenario_completion(report)
-    for name, status in incomplete:
-        violations.append(
-            (f"{role}.scenario", f"incomplete critical scenario: {name} status={status}")
+    violations.extend(
+        (
+            f"{role}.scenario",
+            f"incomplete critical scenario: {name} status={status}",
         )
-
+        for name, status in incomplete
+    )
     # 3. Skipped critical scenarios (redundant with #2 but preserves the
     #    existing skipped-with-reason message format for diagnostics)
     skipped = _check_skipped_scenarios(report)
-    for name, reason in skipped:
-        violations.append(
-            (f"{role}.scenario", f"skipped: {name}: {reason}")
-        )
-
+    violations.extend(
+        (f"{role}.scenario", f"skipped: {name}: {reason}")
+        for name, reason in skipped
+    )
     # 4. Path-coverage invariants
     path_violations = _check_path_coverage(report)
-    for name, metric, label in path_violations:
-        violations.append(
-            (f"{role}.path_coverage", f"{name}: {label} (metric={metric})")
-        )
-
+    violations.extend(
+        (f"{role}.path_coverage", f"{name}: {label} (metric={metric})")
+        for name, metric, label in path_violations
+    )
     violations.extend(
         _canonical_baseline_fallback_violations(report, role)
     )
@@ -1137,9 +1098,7 @@ def _validate_benchmark_evidence(
             )
 
     # 6. Memory evidence completeness: at least 2 valid memory points
-    scenarios = report.get("module_benchmark", {}).get("scenarios", [])
-    if not scenarios:
-        scenarios = report.get("scenarios", [])
+    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
     memory_points = _extract_memory_points(scenarios)
     if len(memory_points) < 2:
         violations.append(
@@ -1318,10 +1277,10 @@ def _resolve_baseline(
     if integrity_rc is not None:
         return {}, False, integrity_rc
 
-    env_violations = _check_environment_compatibility(
-        report or {}, baseline_report,
-    )
-    if env_violations:
+    if env_violations := _check_environment_compatibility(
+        report or {},
+        baseline_report,
+    ):
         env_violation_strs = [
             (f"env.{field}", detail)
             for field, detail in env_violations
