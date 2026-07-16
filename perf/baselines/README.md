@@ -39,8 +39,11 @@ Retain the raw workflow artifact and record its run, source Git commit,
 adjustment rule, person or reason, and adjustment date in `baseline_policy`.
 The current `module-baseline-091.json` records commit `847f9013` and the local
 canonical run timestamp `2026-07-16T09:47:06Z`. Its original artifact location
-was not recorded, which is explicitly marked as a historical audit gap; future
-baseline updates must not replace `source_artifact` with an unlocatable value.
+was not recorded, which is explicitly marked by
+`historical_audit_exception: true` as a one-baseline audit gap. The validator
+scopes that exception to the recorded source commit and audit note; future
+baseline updates must identify a retained raw artifact and must not use an
+empty, `unknown`, or `not-recorded` `source_artifact`.
 
 ## Baseline Files
 

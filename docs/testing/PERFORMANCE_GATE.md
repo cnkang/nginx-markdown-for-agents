@@ -125,6 +125,12 @@ adjustment rule, person or reason, and date in `baseline_policy`. Missing raw
 artifact provenance is an audit failure to disclose, not a reason to invent a
 workflow identifier.
 
+The checked-in 0.9.1 baseline is the only accepted historical exception. It
+uses `historical_audit_exception: true`, the original source commit, and an
+explicit audit note because its raw artifact was not retained. Machine
+validation rejects unlocatable `source_artifact` values for every future
+conservatively normalized baseline.
+
 ## Troubleshooting
 
 ### False positives / noisy failures
