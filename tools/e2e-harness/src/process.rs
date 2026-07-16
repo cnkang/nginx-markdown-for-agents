@@ -27,6 +27,7 @@ impl NginxProcess {
     /// # Arguments
     ///
     /// * `nginx_bin` - Path to the NGINX binary.
+    /// * `runtime_prefix` - Isolated prefix for NGINX runtime paths.
     /// * `config_path` - Path to the `nginx.conf`.
     /// * `base_url` - Base URL for readiness probing.
     /// * `timeout` - Maximum time to wait for readiness.
@@ -36,16 +37,12 @@ impl NginxProcess {
     /// An `NginxProcess` handle on success.
     pub fn start(
         nginx_bin: &Path,
+        runtime_prefix: &Path,
         config_path: &Path,
         base_url: &str,
         timeout: Duration,
     ) -> Result<Self> {
-        let mut child = Command::new(nginx_bin)
-            .arg("-c")
-            .arg(config_path)
-            .arg("-g")
-            .arg("daemon off;")
-            .spawn()?;
+        let mut child = build_nginx_command(nginx_bin, runtime_prefix, config_path).spawn()?;
 
         let pid = child.id();
         wait_ready_with_child(Some(&mut child), base_url, timeout)?;
@@ -69,6 +66,18 @@ impl NginxProcess {
         // Keep the method for external callers and tests.
         wait_ready_with_child(None, base_url, timeout)
     }
+}
+
+fn build_nginx_command(nginx_bin: &Path, runtime_prefix: &Path, config_path: &Path) -> Command {
+    let mut command = Command::new(nginx_bin);
+    command
+        .arg("-p")
+        .arg(runtime_prefix)
+        .arg("-c")
+        .arg(config_path)
+        .arg("-g")
+        .arg("daemon off;");
+    command
 }
 
 fn wait_ready_with_child(
@@ -169,5 +178,33 @@ impl Drop for NginxProcess {
         if self.child.is_some() {
             let _ = self.stop_force();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn nginx_command_uses_isolated_runtime_prefix() {
+        let command = build_nginx_command(
+            Path::new("/opt/nginx/sbin/nginx"),
+            Path::new("/tmp/e2e-runtime"),
+            Path::new("/tmp/e2e-runtime/nginx.conf"),
+        );
+        let args: Vec<&OsStr> = command.get_args().collect();
+
+        assert_eq!(
+            args,
+            [
+                OsStr::new("-p"),
+                OsStr::new("/tmp/e2e-runtime"),
+                OsStr::new("-c"),
+                OsStr::new("/tmp/e2e-runtime/nginx.conf"),
+                OsStr::new("-g"),
+                OsStr::new("daemon off;"),
+            ]
+        );
     }
 }
