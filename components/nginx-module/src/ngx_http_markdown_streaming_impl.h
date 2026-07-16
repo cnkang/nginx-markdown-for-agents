@@ -45,6 +45,9 @@ static void ngx_http_markdown_streaming_start_otel_span(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf);
 static ngx_flag_t ngx_http_markdown_streaming_delivery_ok(ngx_int_t rc);
+static ngx_int_t ngx_http_markdown_streaming_handle_output_loss(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf);
 
 /*
  * Streaming body filter main entry point.
@@ -1162,8 +1165,12 @@ ngx_http_markdown_streaming_send_output(
     ngx_flag_t    delivered;
     ngx_http_markdown_pending_terminal_t  terminal;
 
+    ctx->streaming.last_send_failure_origin = NGX_HTTP_MD_SEND_ORIGIN_NONE;
+
     b = ngx_calloc_buf(r->pool);
     if (b == NULL) {
+        ctx->streaming.last_send_failure_origin =
+            NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
 
@@ -1188,6 +1195,8 @@ ngx_http_markdown_streaming_send_output(
              * Pool allocation failed.  The caller still owns
              * `data` and must free it on seeing NGX_ERROR.
              */
+            ctx->streaming.last_send_failure_origin =
+                NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
             return NGX_ERROR;
         }
         ngx_memcpy(b->pos, data, len);
@@ -1210,6 +1219,8 @@ ngx_http_markdown_streaming_send_output(
 
     out = ngx_alloc_chain_link(r->pool);
     if (out == NULL) {
+        ctx->streaming.last_send_failure_origin =
+            NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
     out->buf = b;
@@ -1227,6 +1238,12 @@ ngx_http_markdown_streaming_send_output(
 
     rc = ngx_http_next_body_filter(r, out);
     delivered = ngx_http_markdown_streaming_delivery_ok(rc);
+
+    /* Classify downstream failure (non-AGAIN, non-delivery) */
+    if (!delivered && rc != NGX_AGAIN) {
+        ctx->streaming.last_send_failure_origin =
+            NGX_HTTP_MD_SEND_ORIGIN_DOWNSTREAM;
+    }
 
     /*
      * Latch terminal-delivered state after confirmed delivery
@@ -1262,6 +1279,10 @@ ngx_http_markdown_streaming_send_output(
     if (rc == NGX_AGAIN) {
         rc = ngx_http_markdown_streaming_save_pending(
             r, ctx, out, data, len, 0, terminal);
+        if (rc == NGX_ERROR) {
+            ctx->streaming.last_send_failure_origin =
+                NGX_HTTP_MD_SEND_ORIGIN_INVARIANT;
+        }
     }
 
     return rc;
@@ -2228,6 +2249,8 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
     ngx_flag_t    owner_transferred;
     ngx_http_markdown_pending_terminal_t  terminal;
 
+    ctx->streaming.last_send_failure_origin = NGX_HTTP_MD_SEND_ORIGIN_NONE;
+
     /*
      * Zero-copy path: buffer factory creates an ngx_buf_t referencing
      * Rust memory with pool cleanup registered.  On success, the pool
@@ -2261,6 +2284,8 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
          * succeeded but something else went wrong, or it freed the
          * buffer).  Cannot fallback — the data is gone.
          */
+        ctx->streaming.last_send_failure_origin =
+            NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
 
@@ -2270,6 +2295,8 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
 
     zout = ngx_alloc_chain_link(r->pool);
     if (zout == NULL) {
+        ctx->streaming.last_send_failure_origin =
+            NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
     zout->buf = zb;
@@ -2284,6 +2311,14 @@ ngx_http_markdown_streaming_send_zero_copy_feed_output(
             streaming.selection.output_bytes_total,
             (ngx_atomic_int_t) out_len);
         NGX_HTTP_MARKDOWN_METRIC_INC(perf.zero_copy_output_total);
+    }
+
+    /* Classify downstream failure */
+    if (!ngx_http_markdown_streaming_delivery_ok(rc)
+        && rc != NGX_AGAIN)
+    {
+        ctx->streaming.last_send_failure_origin =
+            NGX_HTTP_MD_SEND_ORIGIN_DOWNSTREAM;
     }
 
     if (rc == NGX_AGAIN) {
@@ -2335,6 +2370,93 @@ ngx_http_markdown_streaming_send_feed_output(
 }
 
 
+/*
+ * Handle known output-loss post-commit failure (hard abort).
+ *
+ * Called when the Rust converter produced output (out_data/out_len)
+ * but the C-side construction or downstream delivery failed.  The
+ * chunk is irrecoverably lost — the client has received a partial
+ * Markdown body.
+ *
+ * Unlike handle_postcommit_error (which attempts safe-finish for
+ * converter/parser errors where no output was lost), this path
+ * performs a hard abort:
+ *   - Does NOT call safe_finish (would send closing markers for
+ *     an incomplete body, masquerading as a valid response)
+ *   - Does NOT send a terminal chain or last_buf (would signal
+ *     chunked-encoding completion to the client)
+ *   - Aborts the Rust streaming handle
+ *   - Returns NGX_ERROR so the connection is reset
+ *
+ * Metrics classification uses last_send_failure_origin:
+ *   ALLOCATION → failures_resource_limit + budget_exceeded_total
+ *   DOWNSTREAM/INVARIANT → failures_conversion only
+ *
+ * Returns:
+ *   NGX_ERROR unconditionally (hard failure)
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_handle_output_loss(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    ngx_uint_t  origin;
+
+    ctx->streaming.input_disposition = NGX_HTTP_MD_INPUT_TERMINAL;
+
+    origin = ctx->streaming.last_send_failure_origin;
+
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+        "markdown: post-commit output loss, "
+        "origin=%ui, hard abort (no safe-finish)",
+        origin);
+
+    /* Classify failure for metrics */
+    if (!ctx->streaming.completion.failure_recorded) {
+        if (origin == NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION) {
+            ctx->streaming.reason =
+                NGX_HTTP_MARKDOWN_STREAM_REASON_POSTCOMMIT_BUDGET_EXCEEDED;
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                streaming.budget_exceeded_total);
+            NGX_HTTP_MARKDOWN_METRIC_INC(failures_resource_limit);
+            ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
+                ngx_http_markdown_reason_streaming_budget_exceeded());
+        } else {
+            /* DOWNSTREAM or INVARIANT: conversion/I/O failure */
+            NGX_HTTP_MARKDOWN_METRIC_INC(failures_conversion);
+        }
+    }
+
+    /* Record postcommit failure exactly once */
+    ngx_http_markdown_streaming_record_postcommit_failure(
+        r, ctx, conf);
+
+    ngx_log_debug3(NGX_LOG_DEBUG_HTTP,
+        r->connection->log, 0,
+        "markdown: output-loss hard abort, "
+        "bytes_sent=%uz, origin=%ui, chunks=%ui",
+        ctx->streaming.output.bytes,
+        origin,
+        ctx->streaming.chunks_processed);
+
+    /* Hard abort: destroy Rust handle without safe-finish */
+    if (ctx->streaming.handle != NULL) {
+        markdown_streaming_abort(ctx->streaming.handle);
+        ctx->streaming.handle = NULL;
+    }
+
+    /*
+     * Return NGX_ERROR without sending any terminal chain.
+     * The body-filter caller sees NGX_ERROR and the connection
+     * will be reset, making the incomplete body visible to the
+     * client as a protocol-level error (truncated chunked
+     * transfer).
+     */
+    return NGX_ERROR;
+}
+
+
 static ngx_int_t
 ngx_http_markdown_streaming_handle_success_output(
     ngx_http_request_t *r,
@@ -2368,32 +2490,33 @@ ngx_http_markdown_streaming_handle_success_output(
         return ngx_http_markdown_streaming_handle_backpressure(r, ctx);
     }
 
-    if (rc != NGX_OK
+    if (!ngx_http_markdown_streaming_delivery_ok(rc)
+        && rc != NGX_AGAIN
         && ctx->streaming.commit_state
            == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
     {
         /*
-         * C-side output construction/materialization failed after
-         * commit (pool alloc, chain-link alloc, or zero-copy factory
-         * failure).  The Rust buffer has already been freed or its
-         * ownership transferred to pool cleanup by send_feed_output.
+         * C-side output construction or downstream delivery failed
+         * after commit.  The Rust converter produced output that was
+         * lost before reaching the client — safe-finish MUST NOT be
+         * attempted because it would send closing markers pretending
+         * the response body is complete while a chunk is missing.
          *
-         * The undelivered chunk is lost — the downstream client will
-         * receive an incomplete Markdown body.  Route through the
-         * unified post-commit failure lifecycle:
+         * Classification by failure origin:
+         *   ALLOCATION: pool/buf/chain alloc failure → resource limit
+         *   DOWNSTREAM: body filter definitive error → I/O failure
+         *   INVARIANT:  save_pending re-entry or state error → internal
+         *
+         * All paths:
          *   - input_disposition = TERMINAL
          *   - postcommit_error_total, failed_total, conversions_failed
          *     incremented exactly once (idempotent via failure_recorded)
-         *   - safe_finish attempts graceful closure of open Markdown
-         *     structures so the partial response is at least parseable
-         *   - if safe_finish fails, abort the Rust handle and send
-         *     terminal last_buf
-         *
-         * ERROR_MEMORY_LIMIT is the canonical code for pool allocation
-         * failures already used by other post-commit paths.
+         *   - Rust handle aborted (not safe-finished)
+         *   - No terminal chain or closing bytes sent
+         *   - Returns NGX_ERROR for protocol-visible disconnect
          */
-        return ngx_http_markdown_streaming_handle_postcommit_error(
-            r, ctx, conf, ERROR_MEMORY_LIMIT);
+        return ngx_http_markdown_streaming_handle_output_loss(
+            r, ctx, conf);
     }
 
     return rc;

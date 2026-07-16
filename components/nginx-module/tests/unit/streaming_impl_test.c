@@ -2859,8 +2859,8 @@ test_postcommit_output_construction_failures(void)
     rc = ngx_http_markdown_streaming_handle_feed_result(
         &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
 
-    TEST_ASSERT(rc == NGX_OK || rc == NGX_ERROR,
-        "case A: should return definitive result");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "case A: output-loss must return NGX_ERROR");
     TEST_ASSERT(ctx.streaming.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "case A: input_disposition must be TERMINAL");
@@ -2899,8 +2899,8 @@ test_postcommit_output_construction_failures(void)
     rc = ngx_http_markdown_streaming_handle_feed_result(
         &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
 
-    TEST_ASSERT(rc == NGX_OK || rc == NGX_ERROR,
-        "case B: should return definitive result");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "case B: output-loss must return NGX_ERROR");
     TEST_ASSERT(ctx.streaming.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "case B: input_disposition must be TERMINAL");
@@ -2932,8 +2932,8 @@ test_postcommit_output_construction_failures(void)
     rc = ngx_http_markdown_streaming_handle_feed_result(
         &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
 
-    TEST_ASSERT(rc == NGX_OK || rc == NGX_ERROR,
-        "case C: should return definitive result");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "case C: output-loss must return NGX_ERROR");
     TEST_ASSERT(ctx.streaming.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "case C: input_disposition must be TERMINAL");
@@ -2966,8 +2966,8 @@ test_postcommit_output_construction_failures(void)
     rc = ngx_http_markdown_streaming_handle_feed_result(
         &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
 
-    TEST_ASSERT(rc == NGX_OK || rc == NGX_ERROR,
-        "case D: should return definitive result");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "case D: output-loss must return NGX_ERROR");
     TEST_ASSERT(ctx.streaming.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "case D: input_disposition must be TERMINAL");
@@ -3003,8 +3003,8 @@ test_postcommit_output_construction_failures(void)
     rc = ngx_http_markdown_streaming_handle_feed_result(
         &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
 
-    TEST_ASSERT(rc == NGX_OK || rc == NGX_ERROR,
-        "case E: should return definitive result");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "case E: output-loss must return NGX_ERROR");
     TEST_ASSERT(ctx.streaming.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "case E: input_disposition must be TERMINAL");
@@ -3038,8 +3038,8 @@ test_postcommit_output_construction_failures(void)
     rc = ngx_http_markdown_streaming_handle_feed_result(
         &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
 
-    TEST_ASSERT(rc == NGX_OK || rc == NGX_ERROR,
-        "case F: should return definitive result");
+    TEST_ASSERT(rc == NGX_ERROR,
+        "case F: output-loss must return NGX_ERROR");
     TEST_ASSERT(ctx.streaming.input_disposition
         == NGX_HTTP_MD_INPUT_TERMINAL,
         "case F: input_disposition must be TERMINAL");
@@ -3096,6 +3096,214 @@ test_postcommit_output_construction_failures(void)
 
     TEST_PASS("post-commit output construction failure lifecycle covered");
 }
+
+
+/*
+ * Test NGX_DONE is treated as successful delivery (not routed to error).
+ *
+ * Regression: handle_success_output previously used (rc != NGX_OK) which
+ * misclassified NGX_DONE as failure, routing it to post-commit error.
+ * The delivery contract is: NGX_OK and NGX_DONE are both success.
+ *
+ * Covers: ngx_http_markdown_streaming_handle_feed_result
+ *   -> handle_success_output -> send_feed_output -> downstream NGX_DONE
+ */
+static void
+test_postcommit_ngx_done_is_delivery_success(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_http_markdown_metrics_t metrics;
+    u_char                   out_data[] = "# Title";
+    ngx_int_t                rc;
+
+    TEST_SUBSECTION("NGX_DONE delivery success contract");
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x50;
+    conf.stream.zero_copy = 0;
+    g_next_body_filter_rc = NGX_DONE;
+
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 7);
+
+    TEST_ASSERT(rc == NGX_DONE,
+        "NGX_DONE from downstream must propagate as success");
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 0,
+        "NGX_DONE: no failure recorded");
+    TEST_ASSERT(metrics.streaming.postcommit_error_total == 0,
+        "NGX_DONE: postcommit_error_total unchanged");
+    TEST_ASSERT(metrics.streaming.failed_total == 0,
+        "NGX_DONE: streaming.failed_total unchanged");
+    TEST_ASSERT(metrics.conversions_failed == 0,
+        "NGX_DONE: conversions_failed unchanged");
+    TEST_ASSERT(ctx.streaming.input_disposition
+        != NGX_HTTP_MD_INPUT_TERMINAL,
+        "NGX_DONE: input_disposition must NOT be TERMINAL");
+    TEST_ASSERT(ctx.streaming.handle != NULL,
+        "NGX_DONE: Rust handle must NOT be aborted");
+
+    TEST_PASS("NGX_DONE delivery success contract verified");
+}
+
+
+/*
+ * Test downstream failure classification (body filter NGX_ERROR).
+ *
+ * When ngx_http_next_body_filter returns NGX_ERROR after commit,
+ * the failure must be classified as DOWNSTREAM (not allocation).
+ * This must NOT increment failures_resource_limit or
+ * streaming.budget_exceeded_total.
+ *
+ * Covers: handle_feed_result -> handle_success_output
+ *   -> send_feed_output -> downstream NGX_ERROR -> handle_output_loss
+ */
+static void
+test_postcommit_downstream_failure_classification(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_http_markdown_metrics_t metrics;
+    u_char                   out_data[] = "hello";
+    ngx_int_t                rc;
+    ngx_uint_t               free_before;
+
+    TEST_SUBSECTION("downstream failure: no resource_limit metrics");
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x51;
+    conf.stream.zero_copy = 0;
+    /* Downstream body filter returns definitive failure */
+    g_next_body_filter_rc = NGX_ERROR;
+    free_before = g_output_free_calls;
+
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 5);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+        "downstream failure: must return NGX_ERROR");
+    TEST_ASSERT(ctx.streaming.input_disposition
+        == NGX_HTTP_MD_INPUT_TERMINAL,
+        "downstream failure: input_disposition must be TERMINAL");
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
+        "downstream failure: failure_recorded must be 1");
+    TEST_ASSERT(metrics.streaming.postcommit_error_total == 1,
+        "downstream failure: postcommit_error_total must be 1");
+    TEST_ASSERT(metrics.streaming.failed_total == 1,
+        "downstream failure: streaming.failed_total must be 1");
+    TEST_ASSERT(metrics.conversions_failed == 1,
+        "downstream failure: conversions_failed must be 1");
+    /* Key assertion: downstream failure must NOT count as resource limit */
+    TEST_ASSERT(metrics.failures_resource_limit == 0,
+        "downstream failure: failures_resource_limit must be 0");
+    TEST_ASSERT(metrics.streaming.budget_exceeded_total == 0,
+        "downstream failure: budget_exceeded_total must be 0");
+    /* Rust handle must be aborted (hard abort, no safe-finish) */
+    TEST_ASSERT(ctx.streaming.handle == NULL,
+        "downstream failure: Rust handle must be aborted");
+    /* Rust buffer freed exactly once (by send_output pool-copy path) */
+    TEST_ASSERT(g_output_free_calls == free_before + 1,
+        "downstream failure: Rust buffer freed exactly once");
+
+    TEST_PASS("downstream failure classification verified");
+}
+
+
+/*
+ * Test that output-loss failures do NOT send safe-finish or terminal chain.
+ *
+ * When a known output chunk is lost, the hard-abort path must:
+ *   - NOT call safe_finish (no closing Markdown markers)
+ *   - NOT send empty last_buf terminal
+ *   - Return NGX_ERROR for connection reset
+ *
+ * Covers: handle_success_output -> handle_output_loss
+ *   (allocation failure case — ensures no safe-finish attempt)
+ */
+static void
+test_postcommit_output_loss_no_safe_finish(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_http_markdown_metrics_t metrics;
+    u_char                   out_data[] = "lost chunk";
+    ngx_int_t                rc;
+    ngx_uint_t               filter_calls_before;
+
+    TEST_SUBSECTION("output-loss: no safe-finish, no terminal chain");
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x52;
+    conf.stream.zero_copy = 0;
+    g_next_body_filter_rc = NGX_OK;
+    /* Force allocation failure so the chunk is lost */
+    g_calloc_buf_fail_once = 1;
+
+    filter_calls_before = g_next_body_filter_calls;
+
+    rc = ngx_http_markdown_streaming_handle_feed_result(
+        &r, &ctx, &conf, ERROR_SUCCESS, out_data, 10);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+        "output-loss: must return NGX_ERROR");
+    TEST_ASSERT(ctx.streaming.input_disposition
+        == NGX_HTTP_MD_INPUT_TERMINAL,
+        "output-loss: input_disposition must be TERMINAL");
+    TEST_ASSERT(ctx.streaming.completion.failure_recorded == 1,
+        "output-loss: failure_recorded must be 1");
+    /* No downstream calls after the failed allocation */
+    TEST_ASSERT(g_next_body_filter_calls == filter_calls_before,
+        "output-loss: no body_filter calls for safe-finish/terminal");
+    /* Rust handle aborted */
+    TEST_ASSERT(ctx.streaming.handle == NULL,
+        "output-loss: Rust handle must be aborted");
+    /* No success metrics */
+    TEST_ASSERT(metrics.conversions_succeeded == 0,
+        "output-loss: conversions_succeeded must be 0");
+    TEST_ASSERT(metrics.results.delivery_count == 0,
+        "output-loss: delivery_count must be 0");
+    /* Allocation failure → resource_limit counted */
+    TEST_ASSERT(metrics.failures_resource_limit == 1,
+        "output-loss (alloc): failures_resource_limit must be 1");
+    TEST_ASSERT(metrics.streaming.budget_exceeded_total == 1,
+        "output-loss (alloc): budget_exceeded_total must be 1");
+
+    TEST_PASS("output-loss hard abort verified (no safe-finish)");
+}
+
 
 /*
  * Test process-chain, failopen passthrough, and body_filter deep branches.
@@ -5767,6 +5975,9 @@ main(void)
     test_init_handle_and_chunk_result_helpers();
     test_commit_feed_and_finalize_core_paths();
     test_postcommit_output_construction_failures();
+    test_postcommit_ngx_done_is_delivery_success();
+    test_postcommit_downstream_failure_classification();
+    test_postcommit_output_loss_no_safe_finish();
     test_process_chain_and_body_filter_deep_paths();
     test_streaming_gap_branches();
     test_failopen_passthrough_again_pending();
