@@ -677,6 +677,23 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
                     "predicate": lambda v: v is not None and v > 0,
                     "label": "decompression_fullbuffer_total > 0 (gzip full-buffer decompression must run)",
                 },
+                {
+                    "metric": "fullbuffer_path_hits",
+                    "predicate": lambda v: v is not None and v > 0,
+                    "label": "fullbuffer_path_hits > 0 (full-buffer path must be hit)",
+                },
+            ],
+            "metadata_checks": [
+                {
+                    "field": "profile",
+                    "expected": "balanced",
+                    "label": "profile must be 'balanced'",
+                },
+                {
+                    "field": "compression",
+                    "expected": "gzip",
+                    "label": "compression must be 'gzip'",
+                },
             ],
         },
         {
@@ -696,6 +713,28 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
                     "metric": "streaming_ratio",
                     "predicate": lambda v: v is not None and v > 0.0,
                     "label": "streaming_ratio > 0 (must not fall back entirely to full-buffer)",
+                },
+                {
+                    "metric": "fullbuffer_ratio",
+                    "predicate": lambda v: v is not None and v < 1.0,
+                    "label": "fullbuffer_ratio < 1 (not all requests fell back to full-buffer)",
+                },
+            ],
+            "metadata_checks": [
+                {
+                    "field": "profile",
+                    "expected": "streaming_first",
+                    "label": "profile must be 'streaming_first'",
+                },
+                {
+                    "field": "compression",
+                    "expected": "gzip",
+                    "label": "compression must be 'gzip'",
+                },
+                {
+                    "field": "transfer_encoding",
+                    "expected": "chunked",
+                    "label": "transfer_encoding must be 'chunked'",
                 },
             ],
         },
@@ -717,6 +756,28 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
                     "predicate": lambda v: v is not None and v > 0.0,
                     "label": "streaming_ratio > 0 (must not fall back entirely to full-buffer)",
                 },
+                {
+                    "metric": "fullbuffer_ratio",
+                    "predicate": lambda v: v is not None and v < 1.0,
+                    "label": "fullbuffer_ratio < 1 (not all requests fell back to full-buffer)",
+                },
+            ],
+            "metadata_checks": [
+                {
+                    "field": "profile",
+                    "expected": "streaming_first",
+                    "label": "profile must be 'streaming_first'",
+                },
+                {
+                    "field": "compression",
+                    "expected": "deflate",
+                    "label": "compression must be 'deflate'",
+                },
+                {
+                    "field": "transfer_encoding",
+                    "expected": "chunked",
+                    "label": "transfer_encoding must be 'chunked'",
+                },
             ],
         },
     ]
@@ -727,8 +788,12 @@ def _check_path_coverage(report: dict) -> list[tuple[str, str, str]]:
 
     A violation occurs when a critical scenario is marked "completed"
     but its target production path was never exercised (the invariant
-    metric predicate returned False).  Each violation is evidence that
-    the benchmark did not actually test the path it claims to cover.
+    metric predicate returned False), or when scenario metadata does
+    not match the expected configuration (wrong profile, compression,
+    or transfer_encoding).
+
+    Each violation is evidence that the benchmark did not actually test
+    the path it claims to cover.
     """
     scenarios = report.get("module_benchmark", {}).get("scenarios", [])
     if not scenarios:
@@ -744,16 +809,44 @@ def _check_path_coverage(report: dict) -> list[tuple[str, str, str]]:
     for invariant in _path_coverage_invariants():
         name = invariant["scenario"]
         scenario = by_name.get(name)
-        if scenario is None:
+        if scenario is None or scenario.get("status") != "completed":
             continue
-        if scenario.get("status") != "completed":
-            continue
-        m = scenario.get("metrics") or scenario.get("results") or scenario
-        for check in invariant["checks"]:
-            value = m.get(check["metric"])
-            if not check["predicate"](value):
-                violations.append((name, check["metric"], check["label"]))
+        _check_metric_predicates(name, scenario, invariant, violations)
+        _check_metadata_fields(name, scenario, invariant, violations)
     return violations
+
+
+def _check_metric_predicates(
+    name: str,
+    scenario: dict,
+    invariant: dict,
+    violations: list[tuple[str, str, str]],
+) -> None:
+    """Check metric predicate invariants for a single scenario."""
+    m = scenario.get("metrics") or scenario.get("results") or scenario
+    for check in invariant["checks"]:
+        value = m.get(check["metric"])
+        if not check["predicate"](value):
+            violations.append((name, check["metric"], check["label"]))
+
+
+def _check_metadata_fields(
+    name: str,
+    scenario: dict,
+    invariant: dict,
+    violations: list[tuple[str, str, str]],
+) -> None:
+    """Check metadata field expectations for a single scenario."""
+    for meta_check in invariant.get("metadata_checks", []):
+        field = meta_check["field"]
+        expected = meta_check["expected"]
+        actual = scenario.get(field, "")
+        if actual != expected:
+            violations.append((
+                name,
+                field,
+                f"{meta_check['label']} (actual={actual!r})",
+            ))
 
 
 def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:

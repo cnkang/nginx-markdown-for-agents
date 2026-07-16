@@ -958,16 +958,19 @@ class TestPathCoverageInvariants:
                     {
                         "name": "gzip-large",
                         "status": "completed",
+                        "profile": "balanced",
+                        "compression": "gzip",
                         "metrics": {
                             "decompression_fullbuffer_total": 0,
+                            "fullbuffer_path_hits": 0,
                         },
                     },
                 ]
             }
         }
         violations = _check_path_coverage(report)
-        assert len(violations) == 1
-        assert violations[0][0] == "gzip-large"
+        assert len(violations) == 2
+        assert all(v[0] == "gzip-large" for v in violations)
 
     def test_gzip_large_with_decompression_is_not_violation(self):
         """gzip-large with decompression_fullbuffer_total > 0 passes."""
@@ -977,8 +980,11 @@ class TestPathCoverageInvariants:
                     {
                         "name": "gzip-large",
                         "status": "completed",
+                        "profile": "balanced",
+                        "compression": "gzip",
                         "metrics": {
                             "decompression_fullbuffer_total": 1030,
+                            "fullbuffer_path_hits": 1030,
                         },
                     },
                 ]
@@ -1049,6 +1055,9 @@ class TestBaselineEvidenceIntegrity:
                     {
                         "name": "plain-small",
                         "status": "completed",
+                        "profile": "balanced",
+                        "compression": "none",
+                        "transfer_encoding": "identity",
                         "metrics": {
                             "input_bytes": 100,
                             "baseline_rss_bytes": 1000,
@@ -1060,6 +1069,9 @@ class TestBaselineEvidenceIntegrity:
                     {
                         "name": "large-body",
                         "status": "completed",
+                        "profile": "balanced",
+                        "compression": "none",
+                        "transfer_encoding": "identity",
                         "metrics": {
                             "input_bytes": 200,
                             "baseline_rss_bytes": 2000,
@@ -1069,6 +1081,9 @@ class TestBaselineEvidenceIntegrity:
                     {
                         "name": "streaming-first",
                         "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "none",
+                        "transfer_encoding": "chunked",
                         "metrics": {
                             "streaming_ratio": 0.8,
                             "fullbuffer_ratio": 0.2,
@@ -1082,8 +1097,12 @@ class TestBaselineEvidenceIntegrity:
                     {
                         "name": "gzip-large",
                         "status": "completed",
+                        "profile": "balanced",
+                        "compression": "gzip",
+                        "transfer_encoding": "identity",
                         "metrics": {
                             "decompression_fullbuffer_total": 1030,
+                            "fullbuffer_path_hits": 1030,
                             "input_bytes": 150,
                             "baseline_rss_bytes": 1500,
                             "peak_rss_bytes": 1700,
@@ -1092,10 +1111,14 @@ class TestBaselineEvidenceIntegrity:
                     {
                         "name": "gzip-streaming-first",
                         "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "gzip",
+                        "transfer_encoding": "chunked",
                         "metrics": {
                             "decompression_streaming_total": 800,
                             "streaming_path_hits": 1000,
                             "streaming_ratio": 1.0,
+                            "fullbuffer_ratio": 0.0,
                             "input_bytes": 300,
                             "baseline_rss_bytes": 3000,
                             "peak_rss_bytes": 3500,
@@ -1104,10 +1127,14 @@ class TestBaselineEvidenceIntegrity:
                     {
                         "name": "deflate-streaming-first",
                         "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "deflate",
+                        "transfer_encoding": "chunked",
                         "metrics": {
                             "decompression_streaming_total": 800,
                             "streaming_path_hits": 1000,
                             "streaming_ratio": 1.0,
+                            "fullbuffer_ratio": 0.0,
                             "input_bytes": 300,
                             "baseline_rss_bytes": 3000,
                             "peak_rss_bytes": 3500,
@@ -1839,25 +1866,29 @@ class TestCompressedStreamingPathTruthfulness:
         )
 
     def test_gzip_streaming_first_fullbuffer_ratio_1_is_violation(self):
-        """gzip-streaming-first: fullbuffer_ratio is NOT checked (unlike streaming-first)."""
-        # Note: gzip-streaming-first invariants don't include fullbuffer_ratio.
-        # This test verifies the invariant set is correctly scoped.
+        """gzip-streaming-first: fullbuffer_ratio == 1 is a violation (all fell back)."""
         report = {
             "module_benchmark": {
                 "scenarios": [{
                     "name": "gzip-streaming-first",
                     "status": "completed",
+                    "profile": "streaming_first",
+                    "compression": "gzip",
+                    "transfer_encoding": "chunked",
                     "metrics": {
                         "decompression_streaming_total": 500,
                         "streaming_path_hits": 500,
                         "streaming_ratio": 0.8,
-                        "fullbuffer_ratio": 0.2,
+                        "fullbuffer_ratio": 1.0,
                     },
                 }]
             }
         }
         violations = _check_path_coverage(report)
-        assert violations == []
+        assert any(
+            v[0] == "gzip-streaming-first" and "fullbuffer_ratio" in v[1]
+            for v in violations
+        )
 
     def test_deflate_streaming_first_zero_decompression_is_violation(self):
         """deflate-streaming-first with decompression_streaming_total == 0 → rejected."""
@@ -1940,26 +1971,37 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "gzip-large",
                         "status": "completed",
+                        "profile": "balanced",
+                        "compression": "gzip",
                         "metrics": {
                             "decompression_fullbuffer_total": 1030,
+                            "fullbuffer_path_hits": 1030,
                         },
                     },
                     {
                         "name": "gzip-streaming-first",
                         "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "gzip",
+                        "transfer_encoding": "chunked",
                         "metrics": {
                             "decompression_streaming_total": 800,
                             "streaming_path_hits": 1000,
                             "streaming_ratio": 1.0,
+                            "fullbuffer_ratio": 0.0,
                         },
                     },
                     {
                         "name": "deflate-streaming-first",
                         "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "deflate",
+                        "transfer_encoding": "chunked",
                         "metrics": {
                             "decompression_streaming_total": 800,
                             "streaming_path_hits": 1000,
                             "streaming_ratio": 1.0,
+                            "fullbuffer_ratio": 0.0,
                         },
                     },
                 ]
@@ -1967,6 +2009,81 @@ class TestCompressedStreamingPathTruthfulness:
         }
         violations = _check_path_coverage(report)
         assert violations == []
+
+    def test_gzip_streaming_first_wrong_profile_is_violation(self):
+        """gzip-streaming-first with wrong profile metadata → rejected."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [{
+                    "name": "gzip-streaming-first",
+                    "status": "completed",
+                    "profile": "balanced",
+                    "compression": "gzip",
+                    "transfer_encoding": "chunked",
+                    "metrics": {
+                        "decompression_streaming_total": 800,
+                        "streaming_path_hits": 1000,
+                        "streaming_ratio": 1.0,
+                        "fullbuffer_ratio": 0.0,
+                    },
+                }]
+            }
+        }
+        violations = _check_path_coverage(report)
+        assert any(
+            v[0] == "gzip-streaming-first" and v[1] == "profile"
+            for v in violations
+        )
+
+    def test_gzip_streaming_first_wrong_compression_is_violation(self):
+        """gzip-streaming-first with wrong compression metadata → rejected."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [{
+                    "name": "gzip-streaming-first",
+                    "status": "completed",
+                    "profile": "streaming_first",
+                    "compression": "deflate",
+                    "transfer_encoding": "chunked",
+                    "metrics": {
+                        "decompression_streaming_total": 800,
+                        "streaming_path_hits": 1000,
+                        "streaming_ratio": 1.0,
+                        "fullbuffer_ratio": 0.0,
+                    },
+                }]
+            }
+        }
+        violations = _check_path_coverage(report)
+        assert any(
+            v[0] == "gzip-streaming-first" and v[1] == "compression"
+            for v in violations
+        )
+
+    def test_deflate_streaming_first_wrong_transfer_encoding_is_violation(self):
+        """deflate-streaming-first with wrong transfer_encoding → rejected."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [{
+                    "name": "deflate-streaming-first",
+                    "status": "completed",
+                    "profile": "streaming_first",
+                    "compression": "deflate",
+                    "transfer_encoding": "identity",
+                    "metrics": {
+                        "decompression_streaming_total": 800,
+                        "streaming_path_hits": 1000,
+                        "streaming_ratio": 1.0,
+                        "fullbuffer_ratio": 0.0,
+                    },
+                }]
+            }
+        }
+        violations = _check_path_coverage(report)
+        assert any(
+            v[0] == "deflate-streaming-first" and v[1] == "transfer_encoding"
+            for v in violations
+        )
 
     def test_validate_benchmark_evidence_with_full_report_passes(self):
         """A complete report with all critical scenarios and genuine paths passes."""
@@ -1979,6 +2096,9 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "plain-small",
                         "status": "completed",
+                        "profile": "balanced",
+                        "compression": "none",
+                        "transfer_encoding": "identity",
                         "metrics": {
                             "input_bytes": 5390,
                             "baseline_rss_bytes": 10_000_000,
@@ -1988,6 +2108,9 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "large-body",
                         "status": "completed",
+                        "profile": "balanced",
+                        "compression": "none",
+                        "transfer_encoding": "identity",
                         "metrics": {
                             "input_bytes": 1_048_516,
                             "baseline_rss_bytes": 20_000_000,
@@ -1997,6 +2120,9 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "streaming-first",
                         "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "none",
+                        "transfer_encoding": "chunked",
                         "metrics": {
                             "streaming_ratio": 1.0,
                             "fullbuffer_ratio": 0.0,
@@ -2010,8 +2136,12 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "gzip-large",
                         "status": "completed",
+                        "profile": "balanced",
+                        "compression": "gzip",
+                        "transfer_encoding": "identity",
                         "metrics": {
                             "decompression_fullbuffer_total": 1030,
+                            "fullbuffer_path_hits": 1030,
                             "input_bytes": 30_000,
                             "baseline_rss_bytes": 10_000_000,
                             "peak_rss_bytes": 12_000_000,
@@ -2020,10 +2150,14 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "gzip-streaming-first",
                         "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "gzip",
+                        "transfer_encoding": "chunked",
                         "metrics": {
                             "decompression_streaming_total": 800,
                             "streaming_path_hits": 1000,
                             "streaming_ratio": 1.0,
+                            "fullbuffer_ratio": 0.0,
                             "input_bytes": 1_048_516,
                             "baseline_rss_bytes": 22_000_000,
                             "peak_rss_bytes": 29_000_000,
@@ -2032,10 +2166,14 @@ class TestCompressedStreamingPathTruthfulness:
                     {
                         "name": "deflate-streaming-first",
                         "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "deflate",
+                        "transfer_encoding": "chunked",
                         "metrics": {
                             "decompression_streaming_total": 800,
                             "streaming_path_hits": 1000,
                             "streaming_ratio": 1.0,
+                            "fullbuffer_ratio": 0.0,
                             "input_bytes": 1_048_516,
                             "baseline_rss_bytes": 22_000_000,
                             "peak_rss_bytes": 29_000_000,
