@@ -2368,6 +2368,34 @@ ngx_http_markdown_streaming_handle_success_output(
         return ngx_http_markdown_streaming_handle_backpressure(r, ctx);
     }
 
+    if (rc != NGX_OK
+        && ctx->streaming.commit_state
+           == NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST)
+    {
+        /*
+         * C-side output construction/materialization failed after
+         * commit (pool alloc, chain-link alloc, or zero-copy factory
+         * failure).  The Rust buffer has already been freed or its
+         * ownership transferred to pool cleanup by send_feed_output.
+         *
+         * The undelivered chunk is lost — the downstream client will
+         * receive an incomplete Markdown body.  Route through the
+         * unified post-commit failure lifecycle:
+         *   - input_disposition = TERMINAL
+         *   - postcommit_error_total, failed_total, conversions_failed
+         *     incremented exactly once (idempotent via failure_recorded)
+         *   - safe_finish attempts graceful closure of open Markdown
+         *     structures so the partial response is at least parseable
+         *   - if safe_finish fails, abort the Rust handle and send
+         *     terminal last_buf
+         *
+         * ERROR_MEMORY_LIMIT is the canonical code for pool allocation
+         * failures already used by other post-commit paths.
+         */
+        return ngx_http_markdown_streaming_handle_postcommit_error(
+            r, ctx, conf, ERROR_MEMORY_LIMIT);
+    }
+
     return rc;
 }
 
