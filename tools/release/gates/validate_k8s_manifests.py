@@ -574,17 +574,16 @@ def _validate_module_metrics_render(
             f"{_truncate_output(rendered.stdout.strip())}",
         )
         return
-    errors = _metrics_config_errors(rendered.stdout)
-    if not errors:
-        result.pass_(
-            _CHECK_HELM_RENDER_MODULE_METRICS,
-            "module-enabled metrics render uses valid HTTP and location scopes",
-        )
-    else:
+    if errors := _metrics_config_errors(rendered.stdout):
         result.fail(
             _CHECK_HELM_RENDER_MODULE_METRICS,
             "module-enabled metrics render violates the NGINX directive contract: "
             + "; ".join(errors),
+        )
+    else:
+        result.pass_(
+            _CHECK_HELM_RENDER_MODULE_METRICS,
+            "module-enabled metrics render uses valid HTTP and location scopes",
         )
 
 
@@ -639,7 +638,7 @@ def _collect_metrics_directives(
     scopes: list[str] = []
     directives: list[tuple[str, str, tuple[str, ...]]] = []
     metric_directive = re.compile(
-        r"^(markdown_metrics(?:_[a-z][a-z_]*)?)(?:[ \t]+([^;]*))?;$"
+        r"^(markdown_metrics(?:_[a-z]+)*)(?:[ \t]+([^ \t;][^;]*))?;$"
     )
 
     for raw_line in rendered.splitlines():
@@ -653,11 +652,8 @@ def _collect_metrics_directives(
         if line.endswith("{"):
             scopes.append(line[:-1].strip())
             continue
-        match = metric_directive.match(line)
-        if match:
-            directives.append(
-                (match.group(1), match.group(2) or "", tuple(scopes))
-            )
+        if match := metric_directive.match(line):
+            directives.append((match[1], match[2] or "", tuple(scopes)))
     return directives
 
 
@@ -708,9 +704,7 @@ def _metrics_location_pair_errors(
 
 def _scope_kind(scopes: tuple[str, ...]) -> str:
     """Return the NGINX context kind for the innermost rendered block."""
-    if not scopes:
-        return "main"
-    return scopes[-1].split(maxsplit=1)[0]
+    return scopes[-1].split(maxsplit=1)[0] if scopes else "main"
 
 
 def validate_helm_render(result: ValidationResult) -> None:
