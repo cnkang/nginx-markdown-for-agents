@@ -248,12 +248,14 @@ GZIP_POSTCOMMIT_END_TOKEN = "GZIP_POSTCOMMIT_FIRST_MEMBER_END_TOKEN"
 GZIP_POSTCOMMIT_LATE_TOKEN = "GZIP_POSTCOMMIT_TRUNCATED_MEMBER_END_TOKEN"
 DEFLATE_END_TOKEN = "DEFLATE_STREAM_END_TOKEN"
 DEFLATE_ZLIB_END_TOKEN = "DEFLATE_ZLIB_STREAM_END_TOKEN"
+CONTINUOUS_BURST_END_TOKEN = "CONTINUOUS_BURST_END_TOKEN"
 SMALL_TARGET = 2 * 1024 * 1024
 # A 64 KiB receive window remains far below this 8 MiB fixture.  Together with
 # Case 4d's initial no-read interval and throttled reader, it creates downstream
 # pressure while reducing Darwin window-update sensitivity on shared runners.
 ZERO_COPY_TARGET = 8 * 1024 * 1024
 COMPRESSED_TARGET = 64 * 1024
+CONTINUOUS_BURST_TARGET = 2 * 1024 * 1024
 OVERSIZE_TARGET = 12 * 1024 * 1024
 CHUNK_SIZE = 16 * 1024
 
@@ -329,6 +331,11 @@ DEFLATE_SOURCE_BODY = build_payload(
 DEFLATE_ZLIB_SOURCE_BODY = build_payload(
     "Chunked Zlib Deflate", COMPRESSED_TARGET, DEFLATE_ZLIB_END_TOKEN
 )
+CONTINUOUS_BURST_SOURCE_BODY = build_payload(
+    "Continuous Compression Burst",
+    CONTINUOUS_BURST_TARGET,
+    CONTINUOUS_BURST_END_TOKEN,
+)
 GZIP_BODY = compress_payload(GZIP_SOURCE_BODY, "gzip")
 ZERO_COPY_GZIP_BODY = compress_payload(ZERO_COPY_BODY, "gzip")
 GZIP_POSTCOMMIT_FIRST_MEMBER = compress_payload(
@@ -342,6 +349,12 @@ GZIP_POSTCOMMIT_BODY = (
 )
 DEFLATE_BODY = compress_payload(DEFLATE_SOURCE_BODY, "deflate")
 DEFLATE_ZLIB_BODY = compress_payload(DEFLATE_ZLIB_SOURCE_BODY, "deflate-zlib")
+CONTINUOUS_BURST_GZIP_BODY = compress_payload(
+    CONTINUOUS_BURST_SOURCE_BODY, "gzip"
+)
+CONTINUOUS_BURST_DEFLATE_BODY = compress_payload(
+    CONTINUOUS_BURST_SOURCE_BODY, "deflate-zlib"
+)
 # Stop inside the fixed gzip header, before any decompressed byte can reach the
 # converter.  This deterministically exercises the pre-commit replay path;
 # Case 5b separately covers truncation after a complete first member commits.
@@ -430,6 +443,23 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/small-deflate-zlib":
             self._write_chunked(DEFLATE_ZLIB_BODY, content_encoding="deflate")
+            return
+        if path == "/continuous-burst-plain":
+            self._write_chunked(CONTINUOUS_BURST_SOURCE_BODY, chunk_size=4096)
+            return
+        if path == "/continuous-burst-gzip":
+            self._write_chunked(
+                CONTINUOUS_BURST_GZIP_BODY,
+                content_encoding="gzip",
+                chunk_size=1024,
+            )
+            return
+        if path == "/continuous-burst-deflate":
+            self._write_chunked(
+                CONTINUOUS_BURST_DEFLATE_BODY,
+                content_encoding="deflate",
+                chunk_size=1024,
+            )
             return
         if path == "/truncated-gzip":
             self._write_chunked(TRUNCATED_GZIP_BODY, content_encoding="gzip")
@@ -529,6 +559,9 @@ def main():
         print(f"DEFLATE_COMPRESSED_LEN={len(DEFLATE_BODY)}")
         print(f"DEFLATE_ZLIB_SOURCE_LEN={len(DEFLATE_ZLIB_SOURCE_BODY)}")
         print(f"DEFLATE_ZLIB_COMPRESSED_LEN={len(DEFLATE_ZLIB_BODY)}")
+        print(f"CONTINUOUS_BURST_SOURCE_LEN={len(CONTINUOUS_BURST_SOURCE_BODY)}")
+        print(f"CONTINUOUS_BURST_GZIP_LEN={len(CONTINUOUS_BURST_GZIP_BODY)}")
+        print(f"CONTINUOUS_BURST_DEFLATE_LEN={len(CONTINUOUS_BURST_DEFLATE_BODY)}")
         print(f"TRUNCATED_GZIP_COMPRESSED_LEN={len(TRUNCATED_GZIP_BODY)}")
         print(
             f"TRUNCATED_DEFLATE_COMPRESSED_LEN="
@@ -547,6 +580,7 @@ def main():
         print(f"GZIP_POSTCOMMIT_LATE_TOKEN={GZIP_POSTCOMMIT_LATE_TOKEN}")
         print(f"DEFLATE_END_TOKEN={DEFLATE_END_TOKEN}")
         print(f"DEFLATE_ZLIB_END_TOKEN={DEFLATE_ZLIB_END_TOKEN}")
+        print(f"CONTINUOUS_BURST_END_TOKEN={CONTINUOUS_BURST_END_TOKEN}")
         return
 
     if args.serve:
@@ -565,13 +599,13 @@ load_upstream_metrics() {
 
   while IFS='=' read -r key value; do
     case "${key}" in
-      SMALL_LEN|ZERO_COPY_LEN|OVERSIZE_LEN|DELAYED_LEN|GZIP_SOURCE_LEN|GZIP_COMPRESSED_LEN|ZERO_COPY_GZIP_COMPRESSED_LEN|GZIP_POSTCOMMIT_SOURCE_LEN|GZIP_POSTCOMMIT_COMPRESSED_LEN|DEFLATE_SOURCE_LEN|DEFLATE_COMPRESSED_LEN|DEFLATE_ZLIB_SOURCE_LEN|DEFLATE_ZLIB_COMPRESSED_LEN|TRUNCATED_GZIP_COMPRESSED_LEN|TRUNCATED_DEFLATE_COMPRESSED_LEN|TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN)
+      SMALL_LEN|ZERO_COPY_LEN|OVERSIZE_LEN|DELAYED_LEN|GZIP_SOURCE_LEN|GZIP_COMPRESSED_LEN|ZERO_COPY_GZIP_COMPRESSED_LEN|GZIP_POSTCOMMIT_SOURCE_LEN|GZIP_POSTCOMMIT_COMPRESSED_LEN|DEFLATE_SOURCE_LEN|DEFLATE_COMPRESSED_LEN|DEFLATE_ZLIB_SOURCE_LEN|DEFLATE_ZLIB_COMPRESSED_LEN|CONTINUOUS_BURST_SOURCE_LEN|CONTINUOUS_BURST_GZIP_LEN|CONTINUOUS_BURST_DEFLATE_LEN|TRUNCATED_GZIP_COMPRESSED_LEN|TRUNCATED_DEFLATE_COMPRESSED_LEN|TRUNCATED_DEFLATE_ZLIB_COMPRESSED_LEN)
         [[ "${value}" =~ ^[0-9]+$ ]] || {
           echo "invalid numeric upstream metric: ${key}=${value}" >&2
           return 1
         }
         ;;
-      SMALL_END_TOKEN|ZERO_COPY_END_TOKEN|OVERSIZE_END_TOKEN|DELAYED_END_TOKEN|GZIP_END_TOKEN|GZIP_POSTCOMMIT_END_TOKEN|GZIP_POSTCOMMIT_LATE_TOKEN|DEFLATE_END_TOKEN|DEFLATE_ZLIB_END_TOKEN)
+      SMALL_END_TOKEN|ZERO_COPY_END_TOKEN|OVERSIZE_END_TOKEN|DELAYED_END_TOKEN|GZIP_END_TOKEN|GZIP_POSTCOMMIT_END_TOKEN|GZIP_POSTCOMMIT_LATE_TOKEN|DEFLATE_END_TOKEN|DEFLATE_ZLIB_END_TOKEN|CONTINUOUS_BURST_END_TOKEN)
         [[ "${value}" =~ ^[A-Z0-9_]+$ ]] || {
           echo "invalid upstream token metric: ${key}=${value}" >&2
           return 1
@@ -695,6 +729,21 @@ http {
             markdown_streaming_zero_copy on;
             markdown_stream_precommit_buffer 4m;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} streaming_buffer=64m timeout=120s;
+            markdown_error_policy pass;
+            markdown_log_verbosity info;
+
+            proxy_http_version 1.1;
+            proxy_buffering off;
+            proxy_set_header Connection "";
+            proxy_pass http://127.0.0.1:${UPSTREAM_PORT}/;
+        }
+
+        location /streaming-256k/ {
+            markdown_filter on;
+            markdown_accept wildcard;
+            markdown_profile streaming_first;
+            markdown_streaming_zero_copy on;
+            markdown_limits memory=${MARKDOWN_MAX_SIZE} streaming_buffer=256k timeout=120s;
             markdown_error_policy pass;
             markdown_log_verbosity info;
 
@@ -879,6 +928,85 @@ echo "${deflate_zlib_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "small-def
 assert_streaming_markdown_response \
   "small-deflate-zlib" "${RAW_DIR}/deflate_zlib.hdr" "${RAW_DIR}/deflate_zlib.body" \
   "# Chunked Zlib Deflate" "${DEFLATE_ZLIB_END_TOKEN}" 0
+
+echo "==> Case 4c-burst: 256 KiB continuous compressed bursts must fail open intact"
+burst_failopen_before="$(get_metric_value 'streaming.precommit_failopen_total')"
+burst_budget_before="$(get_metric_value 'streaming.budget_exceeded_total')"
+burst_failed_before="$(get_metric_value 'streaming.failed_total')"
+burst_decompression_before="$(get_perf_metric 'decompression_streaming_total')"
+burst_output_before="$(get_perf_metric 'zero_copy_output_total')"
+for burst_mode in gzip deflate; do
+  burst_line="$(curl -sS -D "${RAW_DIR}/continuous_burst_${burst_mode}.hdr" \
+    -o "${RAW_DIR}/continuous_burst_${burst_mode}.body" \
+    -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
+    "http://127.0.0.1:${PORT}/streaming-256k/continuous-burst-${burst_mode}" \
+    -w "${CURL_METRICS_FMT}")"
+  echo "${burst_line}" \
+    | tee "${RAW_DIR}/continuous_burst_${burst_mode}.metrics" >/dev/null
+  echo "${burst_line}" | grep -q "${PATTERN_HTTP_200}" || {
+    echo "continuous-burst-${burst_mode} failed: ${burst_line}" >&2
+    exit 1
+  }
+  grep -qi "${PATTERN_CT_HTML}" \
+    "${RAW_DIR}/continuous_burst_${burst_mode}.hdr" || {
+    echo "continuous-burst-${burst_mode} must preserve HTML Content-Type" >&2
+    exit 1
+  }
+  grep -qi "^Content-Encoding: ${burst_mode}" \
+    "${RAW_DIR}/continuous_burst_${burst_mode}.hdr" || {
+    echo "continuous-burst-${burst_mode} must preserve Content-Encoding" >&2
+    exit 1
+  }
+done
+python3 - "${RAW_DIR}" "${CONTINUOUS_BURST_SOURCE_LEN}" \
+  "${CONTINUOUS_BURST_END_TOKEN}" <<'BURST_PYEOF'
+import gzip
+import sys
+import zlib
+from pathlib import Path
+
+raw_dir = Path(sys.argv[1])
+expected_length = int(sys.argv[2])
+end_token = sys.argv[3].encode()
+decoded = {
+    "gzip": gzip.decompress((raw_dir / "continuous_burst_gzip.body").read_bytes()),
+    "deflate": zlib.decompress(
+        (raw_dir / "continuous_burst_deflate.body").read_bytes()
+    ),
+}
+for mode, body in decoded.items():
+    if len(body) != expected_length or end_token not in body:
+        raise SystemExit(f"{mode} fail-open replay is truncated")
+    (raw_dir / f"continuous_burst_{mode}.decoded").write_bytes(body)
+BURST_PYEOF
+cmp -s "${RAW_DIR}/continuous_burst_gzip.decoded" \
+  "${RAW_DIR}/continuous_burst_deflate.decoded" || {
+  echo "continuous compressed fail-open replays differ" >&2
+  exit 1
+}
+burst_failopen_after="$(get_metric_value 'streaming.precommit_failopen_total')"
+burst_budget_after="$(get_metric_value 'streaming.budget_exceeded_total')"
+burst_failed_after="$(get_metric_value 'streaming.failed_total')"
+burst_decompression_after="$(get_perf_metric 'decompression_streaming_total')"
+burst_output_after="$(get_perf_metric 'zero_copy_output_total')"
+if [[ "${burst_failopen_after}" -ne $((burst_failopen_before + 2)) \
+  || "${burst_budget_after}" -ne $((burst_budget_before + 2)) \
+  || "${burst_failed_after}" -ne $((burst_failed_before + 2)) \
+  || "${burst_decompression_after}" -ne $((burst_decompression_before + 2)) ]]; then
+  echo "continuous compression burst fallback counters are inconsistent" >&2
+  exit 1
+fi
+if [[ "${burst_output_after}" -ne "${burst_output_before}" ]]; then
+  echo "continuous compression fail-open committed partial Markdown output" >&2
+  exit 1
+fi
+for burst_mode in gzip deflate; do
+  grep -q "reason=STREAMING_PRECOMMIT_FAILOPEN.*uri=/streaming-256k/continuous-burst-${burst_mode}" \
+    "${RUNTIME}/logs/error.log" || {
+    echo "continuous-burst-${burst_mode} missing fail-open reason log" >&2
+    exit 1
+  }
+done
 
 # The zero-copy path is a Stage 1 opt-in optimization in 0.9.1.
 # When the test location explicitly configures:
@@ -1534,6 +1662,19 @@ echo "  deflate_result=$(cat "${RAW_DIR}/deflate.metrics")"
 echo "  deflate_zlib_source_html_bytes=${DEFLATE_ZLIB_SOURCE_LEN}"
 echo "  deflate_zlib_compressed_bytes=${DEFLATE_ZLIB_COMPRESSED_LEN}"
 echo "  deflate_zlib_result=$(cat "${RAW_DIR}/deflate_zlib.metrics")"
+echo "  continuous_burst_buffer_bytes=262144"
+echo "  continuous_burst_source_bytes=${CONTINUOUS_BURST_SOURCE_LEN}"
+echo "  continuous_burst_gzip_wire_bytes=${CONTINUOUS_BURST_GZIP_LEN}"
+echo "  continuous_burst_deflate_wire_bytes=${CONTINUOUS_BURST_DEFLATE_LEN}"
+echo "  continuous_burst_replay_equivalence=exact"
+printf '  continuous_burst_failopen_total=%s->%s\n' \
+  "${burst_failopen_before:-0}" "${burst_failopen_after:-0}"
+printf '  continuous_burst_budget_exceeded_total=%s->%s\n' \
+  "${burst_budget_before:-0}" "${burst_budget_after:-0}"
+printf '  continuous_burst_decompression_streaming_total=%s->%s\n' \
+  "${burst_decompression_before:-0}" "${burst_decompression_after:-0}"
+printf '  continuous_burst_zero_copy_output_total=%s->%s\n' \
+  "${burst_output_before:-0}" "${burst_output_after:-0}"
 echo "  truncated_gzip_compressed_bytes=${TRUNCATED_GZIP_COMPRESSED_LEN}"
 echo "  truncated_gzip_result=$(cat "${RAW_DIR}/trunc_gzip.metrics")"
 echo "  gzip_postcommit_source_html_bytes=${GZIP_POSTCOMMIT_SOURCE_LEN}"
