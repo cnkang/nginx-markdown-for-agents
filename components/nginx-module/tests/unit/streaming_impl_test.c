@@ -2844,7 +2844,6 @@ test_postcommit_output_construction_failures(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x30;
-    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_OK;
     g_calloc_buf_fail_once = 1;
@@ -2880,7 +2879,6 @@ test_postcommit_output_construction_failures(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x31;
-    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_OK;
     /*
@@ -2919,7 +2917,6 @@ test_postcommit_output_construction_failures(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x32;
-    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_OK;
     g_alloc_chain_fail_once = 1;
@@ -2953,26 +2950,8 @@ test_postcommit_output_construction_failures(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x33;
-    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     conf.stream.zero_copy = 1;
     g_next_body_filter_rc = NGX_OK;
-    /*
-     * First ngx_calloc_buf call is for the zero-copy factory
-     * (rust_buf_create_ex).  It fails with owner_transferred=0,
-     * triggering pool-copy fallback.  Then the second calloc_buf
-     * for the fallback pool-copy path also fails.
-     *
-     * Use g_calloc_buf_fail_once for the factory.  The fallback
-     * pool-copy path calls send_output which also calls
-     * ngx_calloc_buf — set g_calloc_buf_fail_once again inside the
-     * chain.  Actually, since g_calloc_buf_fail_once is consumed by
-     * the factory call, we need a second failure mechanism.
-     * The fallback path in send_zero_copy calls send_output which
-     * calls ngx_calloc_buf — we need BOTH to fail.
-     *
-     * Strategy: fail calloc_buf for factory (owner_transferred=0),
-     * then fail palloc for the fallback data copy.
-     */
     g_calloc_buf_fail_once = 1;
     g_palloc_fail_once = 1;
     free_before = g_output_free_calls;
@@ -2999,11 +2978,9 @@ test_postcommit_output_construction_failures(void)
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
     ngx_memzero(&metrics, sizeof(metrics));
     ngx_http_markdown_metrics = &metrics;
-
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x34;
-    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     conf.stream.zero_copy = 1;
     g_next_body_filter_rc = NGX_OK;
     /*
@@ -3038,11 +3015,9 @@ test_postcommit_output_construction_failures(void)
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
     ngx_memzero(&metrics, sizeof(metrics));
     ngx_http_markdown_metrics = &metrics;
-
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x35;
-    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     conf.stream.zero_copy = 1;
     g_next_body_filter_rc = NGX_OK;
     /*
@@ -3075,11 +3050,9 @@ test_postcommit_output_construction_failures(void)
     init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
     ngx_memzero(&metrics, sizeof(metrics));
     ngx_http_markdown_metrics = &metrics;
-
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x36;
-    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     conf.stream.zero_copy = 0;
     g_next_body_filter_rc = NGX_OK;
     g_calloc_buf_fail_once = 1;
@@ -3097,14 +3070,9 @@ test_postcommit_output_construction_failures(void)
     TEST_ASSERT(metrics.conversions_failed == 1,
         "case G: first conversions_failed == 1");
 
-    /*
-     * Simulate re-entry: reset handle for a hypothetical second
-     * feed attempt that also fails.  The failure_recorded guard
-     * prevents double-counting.
-     */
+    /* Simulate re-entry with another allocation failure */
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x37;
-    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     g_calloc_buf_fail_once = 1;
 
     rc = ngx_http_markdown_streaming_handle_feed_result(
