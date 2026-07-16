@@ -129,6 +129,15 @@ impl NginxProcess {
     /// * `timeout` - Maximum time to wait after SIGTERM before SIGKILL.
     pub fn stop_graceful(&mut self, timeout: Duration) -> Result<()> {
         if let Some(child) = self.child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(_status)) => {
+                    self.child = None;
+                    return Ok(());
+                }
+                Ok(None) => {}
+                Err(e) => bail!("Error checking NGINX child status: {e}"),
+            }
+
             #[cfg(unix)]
             {
                 let _ = Command::new("kill")
@@ -278,6 +287,34 @@ mod tests {
         );
         cleanup.0 = None;
 
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn graceful_stop_does_not_signal_after_child_was_reaped() -> Result<()> {
+        let mut exited_child = Command::new("/usr/bin/true").spawn()?;
+        exited_child.wait()?;
+
+        let mut sentinel = Command::new("/bin/sleep").arg("30").spawn()?;
+        let mut process = NginxProcess {
+            child: Some(exited_child),
+            // Simulate the kernel reusing the reaped child's PID.
+            pid: sentinel.id(),
+            timeout: Duration::from_secs(1),
+        };
+
+        process.stop_graceful(Duration::from_millis(50))?;
+        let sentinel_status = sentinel.try_wait()?;
+        if sentinel_status.is_none() {
+            sentinel.kill()?;
+        }
+        sentinel.wait()?;
+
+        assert!(
+            sentinel_status.is_none(),
+            "graceful stop signalled a PID after its managed child was reaped"
+        );
         Ok(())
     }
 }
