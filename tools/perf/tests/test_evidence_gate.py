@@ -819,18 +819,105 @@ class TestEvidenceMetricExtraction:
         assert metrics["ttfb_streaming_large_pct"] == 3.0
 
     def test_computes_fallback_rate(self):
-        """Computes fallback rate from aggregated scenario data."""
-        report = _make_benchmark_report()
+        """Computes fallback rate from the worst critical streaming scenario."""
+        report = _make_benchmark_report(scenarios=[
+            {
+                "name": name,
+                "metrics": {
+                    "streaming_requests_total": requests,
+                    "precommit_failopen_total": failopen,
+                },
+            }
+            for name, failopen, requests in (
+                ("streaming-first", 10, 1000),
+                ("gzip-streaming-first", 5, 500),
+                ("deflate-streaming-first", 1, 50),
+            )
+        ])
         metrics = _extract_evidence_metrics(report)
 
-        # Total fallback: 10+5=15, total requests: 1000+500=1500
-        expected_rate = 15 / 1500
+        expected_rate = 1 / 50
         assert metrics["fallback_rate_abs"] == pytest.approx(expected_rate, abs=1e-6)
 
     def test_empty_report_returns_zero_fallback(self):
         """Empty report produces zero fallback rate."""
         metrics = _extract_evidence_metrics({})
         assert metrics["fallback_rate_abs"] == 0.0
+
+    @pytest.mark.parametrize(
+        "degraded_scenario",
+        ["gzip-streaming-first", "deflate-streaming-first"],
+    )
+    def test_codec_fallback_controls_absolute_rate(self, degraded_scenario):
+        """Any critical streaming codec regression controls the gate rate."""
+        scenarios = []
+        for name in (
+            "streaming-first",
+            "gzip-streaming-first",
+            "deflate-streaming-first",
+        ):
+            failopen = 100 if name == degraded_scenario else 0
+            scenarios.append({
+                "name": name,
+                "metrics": {
+                    "streaming_requests_total": 100,
+                    "precommit_failopen_total": failopen,
+                },
+            })
+
+        metrics = _extract_evidence_metrics({"scenarios": scenarios})
+
+        assert metrics["fallback_rate_abs"] == 1.0
+        result = evaluate_module_level(
+            {**_make_passing_metrics(), **metrics},
+            _make_baseline_metrics(),
+            _make_module_thresholds_cfg(),
+        )
+        assert result["verdict"] == "NO_GO"
+
+    def test_critical_streaming_fallback_uses_maximum_codec_rate(self):
+        """Healthy critical scenarios expose their maximum real fail-open rate."""
+        scenarios = [
+            {
+                "name": name,
+                "metrics": {
+                    "streaming_requests_total": 100,
+                    "precommit_failopen_total": failopen,
+                },
+            }
+            for name, failopen in (
+                ("streaming-first", 0),
+                ("gzip-streaming-first", 2),
+                ("deflate-streaming-first", 4),
+            )
+        ]
+
+        metrics = _extract_evidence_metrics({"scenarios": scenarios})
+
+        assert metrics["fallback_rate_abs"] == pytest.approx(0.04)
+
+    def test_missing_codec_fallback_counts_remain_missing_evidence(self):
+        """Missing real fallback counters must not be interpreted as zero."""
+        scenarios = [
+            {
+                "name": name,
+                "metrics": {
+                    "streaming_requests_total": 100,
+                    **({} if name == "gzip-streaming-first" else {
+                        "precommit_failopen_total": 0,
+                    }),
+                },
+            }
+            for name in (
+                "streaming-first",
+                "gzip-streaming-first",
+                "deflate-streaming-first",
+            )
+        ]
+
+        metrics = _extract_evidence_metrics({"scenarios": scenarios})
+
+        assert "fallback_rate_abs" not in metrics
 
     def test_missing_critical_metric_causes_missing_evidence_verdict(self):
         """When a critical metric is missing, the verdict must be MISSING_EVIDENCE."""
@@ -933,14 +1020,14 @@ class TestPathCoverageInvariants:
                             "fullbuffer_ratio": 1.0,
                             "streaming_path_hits": 0,
                             "zero_copy_output_total": 0,
+                            "copied_output_total": 0,
                         },
                     },
                 ]
             }
         }
         violations = _check_path_coverage(report)
-        # streaming_ratio, streaming_path_hits, fullbuffer_ratio, zero_copy
-        assert len(violations) == 4
+        assert len(violations) == 5
         names = {v[0] for v in violations}
         assert names == {"streaming-first"}
 
@@ -956,7 +1043,9 @@ class TestPathCoverageInvariants:
                             "streaming_ratio": 0.8,
                             "fullbuffer_ratio": 0.2,
                             "streaming_path_hits": 820,
+                            "streaming_requests_total": 1000,
                             "zero_copy_output_total": 500,
+                            "copied_output_total": 0,
                         },
                     },
                 ]
@@ -1021,8 +1110,8 @@ class TestPathCoverageInvariants:
         }
         assert _check_path_coverage(report) == []
 
-    def test_current_baseline_passes_path_coverage(self):
-        """The generated baseline exercises every required module path."""
+    def test_current_baseline_passes_compressed_path_coverage(self):
+        """The regenerated baseline exercises every required module path."""
         baseline_path = (
             Path(__file__).resolve().parents[3]
             / "perf"
@@ -1039,10 +1128,10 @@ class TestPathCoverageInvariants:
 # ---------------------------------------------------------------------------
 
 class TestBaselineEvidenceIntegrity:
-    """The checked-in baseline must pass the same integrity checks as current."""
+    """Baselines must pass the same integrity checks as current evidence."""
 
     def test_current_baseline_passes_full_validation(self):
-        """The generated baseline passes the blocking integrity contract."""
+        """The regenerated baseline passes the blocking integrity contract."""
         baseline_path = (
             Path(__file__).resolve().parents[3]
             / "perf"
@@ -1054,8 +1143,8 @@ class TestBaselineEvidenceIntegrity:
             baseline, role="baseline"
         ) == []
 
-    def test_valid_baseline_passes_validation(self):
-        """A properly generated baseline with real evidence passes."""
+    def test_valid_baseline_requires_zero_canonical_failopen(self):
+        """Canonical evidence passes at zero fail-open and rejects even 1%."""
         report = {
             "module_benchmark": {
                 "nginx_version": "nginx/1.28.2",
@@ -1098,7 +1187,10 @@ class TestBaselineEvidenceIntegrity:
                             "streaming_ratio": 0.8,
                             "fullbuffer_ratio": 0.2,
                             "streaming_path_hits": 820,
+                            "streaming_requests_total": 1000,
+                            "precommit_failopen_total": 0,
                             "zero_copy_output_total": 500,
+                            "copied_output_total": 0,
                             "input_bytes": 300,
                             "baseline_rss_bytes": 3000,
                             "peak_rss_bytes": 3300,
@@ -1129,6 +1221,10 @@ class TestBaselineEvidenceIntegrity:
                             "streaming_path_hits": 1000,
                             "streaming_ratio": 1.0,
                             "fullbuffer_ratio": 0.0,
+                            "streaming_requests_total": 1000,
+                            "precommit_failopen_total": 0,
+                            "zero_copy_output_total": 500,
+                            "copied_output_total": 0,
                             "input_bytes": 300,
                             "baseline_rss_bytes": 3000,
                             "peak_rss_bytes": 3500,
@@ -1145,6 +1241,10 @@ class TestBaselineEvidenceIntegrity:
                             "streaming_path_hits": 1000,
                             "streaming_ratio": 1.0,
                             "fullbuffer_ratio": 0.0,
+                            "streaming_requests_total": 1000,
+                            "precommit_failopen_total": 0,
+                            "zero_copy_output_total": 500,
+                            "copied_output_total": 0,
                             "input_bytes": 300,
                             "baseline_rss_bytes": 3000,
                             "peak_rss_bytes": 3500,
@@ -1153,7 +1253,20 @@ class TestBaselineEvidenceIntegrity:
                 ],
             }
         }
-        assert _validate_benchmark_evidence(report, role="current") == []
+        assert _validate_benchmark_evidence(report, role="baseline") == []
+
+        gzip_streaming = next(
+            scenario
+            for scenario in report["module_benchmark"]["scenarios"]
+            if scenario["name"] == "gzip-streaming-first"
+        )
+        gzip_streaming["metrics"]["precommit_failopen_total"] = 10
+        violations = _validate_benchmark_evidence(report, role="baseline")
+        assert any(
+            check == "baseline.fallback_rate"
+            and "gzip-streaming-first" in reason
+            for check, reason in violations
+        )
 
     def test_unknown_nginx_version_is_rejected(self):
         """An 'unknown' nginx_version fails evidence validation."""
@@ -1963,6 +2076,68 @@ class TestCompressedStreamingPathTruthfulness:
             for v in violations
         )
 
+    @pytest.mark.parametrize(
+        "scenario_name", ["gzip-streaming-first", "deflate-streaming-first"]
+    )
+    def test_compressed_streaming_zero_output_is_violation(self, scenario_name):
+        """Codec path hits without delivered output are not credible evidence."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [{
+                    "name": scenario_name,
+                    "status": "completed",
+                    "metrics": {
+                        "decompression_streaming_total": 100,
+                        "streaming_path_hits": 100,
+                        "streaming_requests_total": 100,
+                        "precommit_failopen_total": 0,
+                        "streaming_ratio": 1.0,
+                        "fullbuffer_ratio": 0.0,
+                        "zero_copy_output_total": 0,
+                        "copied_output_total": 0,
+                    },
+                }]
+            }
+        }
+
+        violations = _check_path_coverage(report)
+
+        assert any(
+            v[0] == scenario_name and v[1] == "output_total"
+            for v in violations
+        )
+
+    @pytest.mark.parametrize(
+        "scenario_name", ["gzip-streaming-first", "deflate-streaming-first"]
+    )
+    def test_compressed_streaming_all_failopen_is_violation(self, scenario_name):
+        """A codec scenario with 100 percent precommit fail-open is invalid."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [{
+                    "name": scenario_name,
+                    "status": "completed",
+                    "metrics": {
+                        "decompression_streaming_total": 100,
+                        "streaming_path_hits": 100,
+                        "streaming_requests_total": 100,
+                        "precommit_failopen_total": 100,
+                        "streaming_ratio": 1.0,
+                        "fullbuffer_ratio": 0.0,
+                        "zero_copy_output_total": 1,
+                        "copied_output_total": 0,
+                    },
+                }]
+            }
+        }
+
+        violations = _check_path_coverage(report)
+
+        assert any(
+            v[0] == scenario_name and v[1] == "fallback_rate"
+            for v in violations
+        )
+
     def test_all_compressed_streaming_paths_genuinely_hit_passes(self):
         """Valid report with genuine path hits for all compressed scenarios passes."""
         report = {
@@ -1975,7 +2150,10 @@ class TestCompressedStreamingPathTruthfulness:
                             "streaming_ratio": 1.0,
                             "fullbuffer_ratio": 0.0,
                             "streaming_path_hits": 1000,
+                            "streaming_requests_total": 1000,
+                            "precommit_failopen_total": 0,
                             "zero_copy_output_total": 5000,
+                            "copied_output_total": 0,
                         },
                     },
                     {
@@ -1999,6 +2177,10 @@ class TestCompressedStreamingPathTruthfulness:
                             "streaming_path_hits": 1000,
                             "streaming_ratio": 1.0,
                             "fullbuffer_ratio": 0.0,
+                            "streaming_requests_total": 1000,
+                            "precommit_failopen_total": 0,
+                            "zero_copy_output_total": 5000,
+                            "copied_output_total": 0,
                         },
                     },
                     {
@@ -2012,6 +2194,10 @@ class TestCompressedStreamingPathTruthfulness:
                             "streaming_path_hits": 1000,
                             "streaming_ratio": 1.0,
                             "fullbuffer_ratio": 0.0,
+                            "streaming_requests_total": 1000,
+                            "precommit_failopen_total": 0,
+                            "zero_copy_output_total": 5000,
+                            "copied_output_total": 0,
                         },
                     },
                 ]
@@ -2137,7 +2323,10 @@ class TestCompressedStreamingPathTruthfulness:
                             "streaming_ratio": 1.0,
                             "fullbuffer_ratio": 0.0,
                             "streaming_path_hits": 1000,
+                            "streaming_requests_total": 1000,
+                            "precommit_failopen_total": 0,
                             "zero_copy_output_total": 5000,
+                            "copied_output_total": 0,
                             "input_bytes": 1_048_516,
                             "baseline_rss_bytes": 22_000_000,
                             "peak_rss_bytes": 28_000_000,
@@ -2168,6 +2357,10 @@ class TestCompressedStreamingPathTruthfulness:
                             "streaming_path_hits": 1000,
                             "streaming_ratio": 1.0,
                             "fullbuffer_ratio": 0.0,
+                            "streaming_requests_total": 1000,
+                            "precommit_failopen_total": 0,
+                            "zero_copy_output_total": 5000,
+                            "copied_output_total": 0,
                             "input_bytes": 1_048_516,
                             "baseline_rss_bytes": 22_000_000,
                             "peak_rss_bytes": 29_000_000,
@@ -2184,6 +2377,10 @@ class TestCompressedStreamingPathTruthfulness:
                             "streaming_path_hits": 1000,
                             "streaming_ratio": 1.0,
                             "fullbuffer_ratio": 0.0,
+                            "streaming_requests_total": 1000,
+                            "precommit_failopen_total": 0,
+                            "zero_copy_output_total": 5000,
+                            "copied_output_total": 0,
                             "input_bytes": 1_048_516,
                             "baseline_rss_bytes": 22_000_000,
                             "peak_rss_bytes": 29_000_000,
