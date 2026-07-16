@@ -35,6 +35,13 @@ import pytest
 
 from tools.perf.report_schema import validate_module_benchmark
 from tools.perf.upstream_mock import MockUpstreamHandler
+from tools.perf.benchmark_validation import (
+    attach_response_probe,
+    compare_streaming_probe_bodies,
+    parse_ab_result,
+    parse_hey_result,
+    validate_response_probe,
+)
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -44,6 +51,164 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 SCHEMA_PATH = REPO_ROOT / "perf" / "metrics-schema.json"
 BENCHMARK_SCRIPT = REPO_ROOT / "tools" / "perf" / "run_module_benchmark.sh"
 MAKEFILE_PATH = REPO_ROOT / "Makefile"
+
+
+VALID_AB_OUTPUT = """
+Complete requests:      10
+Failed requests:        0
+Requests per second:    100.00 [#/sec] (mean)
+  50%      2
+  95%      4
+  99%      5
+"""
+
+VALID_HEY_OUTPUT = """response-time,DNS+dialup,DNS,Request-write,Response-delay,Response-read,status-code,offset,error
+0.010,0,0,0,0,0,200,0,
+0.020,0,0,0,0,0,200,0,
+"""
+
+
+def test_ab_requires_all_requests_and_zero_failures():
+    assert parse_ab_result(VALID_AB_OUTPUT, 10)["verdict"] == "pass"
+
+    failed = parse_ab_result(
+        VALID_AB_OUTPUT.replace("Failed requests:        0", "Failed requests:        1"),
+        10,
+    )
+    assert failed["verdict"] == "fail"
+    assert failed["failed_requests"] == 1
+
+
+def test_ab_rejects_non_2xx_and_incomplete_results():
+    non_2xx = parse_ab_result(
+        f"{VALID_AB_OUTPUT}\nNon-2xx responses:      1\n", 10
+    )
+    incomplete = parse_ab_result(
+        VALID_AB_OUTPUT.replace("Complete requests:      10", "Complete requests:      9"),
+        10,
+    )
+
+    assert non_2xx["verdict"] == "fail"
+    assert non_2xx["non_2xx_responses"] == 1
+    assert incomplete["verdict"] == "fail"
+
+
+def test_hey_rejects_non_2xx_transport_errors_and_short_results():
+    assert parse_hey_result(VALID_HEY_OUTPUT, 2)["verdict"] == "pass"
+
+    non_2xx = parse_hey_result(VALID_HEY_OUTPUT.replace(",200,", ",500,", 1), 2)
+    transport = parse_hey_result(
+        VALID_HEY_OUTPUT.replace("200,0,\n", "200,0,connection reset\n", 1),
+        2,
+    )
+    incomplete = parse_hey_result(VALID_HEY_OUTPUT, 3)
+
+    assert non_2xx["verdict"] == "fail"
+    assert non_2xx["non_2xx_responses"] == 1
+    assert transport["verdict"] == "fail"
+    assert transport["transport_errors"] == 1
+    assert incomplete["verdict"] == "fail"
+
+
+@pytest.mark.parametrize(
+    ("status", "headers", "body", "reason_fragment"),
+    [
+        (500, {"content-type": "text/markdown"}, b"# Heading\nTail", "http_status"),
+        (200, {"content-type": "text/html"}, b"# Heading\nTail", "content_type"),
+        (200, {"content-type": "text/markdown"}, b"", "body_empty"),
+        (200, {"content-type": "text/markdown"}, b"# Heading", "tail_token"),
+    ],
+)
+def test_response_probe_rejects_incorrect_markdown(
+    status, headers, body, reason_fragment
+):
+    result = validate_response_probe(
+        status=status,
+        headers=headers,
+        body=body,
+        expected_heading="Heading",
+        expected_tail_token="Tail",
+        expected_tail_count=1,
+        compressed=False,
+    )
+
+    assert result["verdict"] == "fail"
+    assert reason_fragment in result["failure_reason"]
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "deflate"])
+def test_compressed_probe_rejects_content_encoding(encoding):
+    result = validate_response_probe(
+        status=200,
+        headers={
+            "content-type": "text/markdown",
+            "content-encoding": encoding,
+        },
+        body=b"# Heading\nTail",
+        expected_heading="Heading",
+        expected_tail_token="Tail",
+        expected_tail_count=1,
+        compressed=True,
+    )
+
+    assert result["verdict"] == "fail"
+    assert "content_encoding" in result["failure_reason"]
+
+
+@pytest.mark.parametrize("body", [b"\x1f\x8bcompressed", b"\x78\x9ccompressed"])
+def test_compressed_probe_rejects_wire_compressed_body(body):
+    result = validate_response_probe(
+        status=200,
+        headers={"content-type": "text/markdown"},
+        body=body,
+        expected_heading="Heading",
+        expected_tail_token="Tail",
+        expected_tail_count=1,
+        compressed=True,
+    )
+
+    assert result["verdict"] == "fail"
+    assert "compressed_payload" in result["failure_reason"]
+
+
+def test_response_probe_accepts_complete_markdown():
+    result = validate_response_probe(
+        status=200,
+        headers={"content-type": "text/markdown; charset=utf-8"},
+        body=b"# Heading\n\nTail",
+        expected_heading="Heading",
+        expected_tail_token="Tail",
+        expected_tail_count=1,
+        compressed=True,
+    )
+
+    assert result["verdict"] == "pass"
+    assert result["body_bytes"] > 0
+    assert result["body_sha256"]
+
+
+def test_http_500_probe_prevents_completed_scenario():
+    scenario = {"name": "plain-small", "status": "completed"}
+    probe = {"verdict": "fail", "failure_reason": "http_status: 500"}
+
+    result = attach_response_probe(scenario, probe)
+
+    assert result["status"] == "failed"
+    assert result["reason"] == "response_correctness_failed: http_status: 500"
+
+
+@pytest.mark.parametrize(
+    "scenario_name", ["gzip-streaming-first", "deflate-streaming-first"]
+)
+def test_compressed_streaming_probe_must_match_uncompressed(scenario_name):
+    probes = {
+        "streaming-first": b"# Heading\nTail",
+        scenario_name: b"# Heading\nDifferent Tail",
+    }
+
+    failures = compare_streaming_probe_bodies(probes)
+
+    assert failures[scenario_name] == "response_body_mismatch: streaming-first"
 
 
 def test_corpus_benchmark_generates_large_fixtures_before_validation():
@@ -78,7 +243,32 @@ def test_module_benchmark_records_actual_fixture_bytes():
     """Every scenario must report the actual fixture size for memory slope."""
     source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
     assert 'fixture_bytes="$(wc -c < "$CORPUS_DIR/$SC_FIXTURE")"' in source
-    assert source.count('"input_bytes": input_bytes') == 2
+    assert "input_bytes=int(sys.argv[11])" in source
+
+
+def test_module_benchmark_requires_load_and_response_correctness():
+    """Production benchmark must gate completed status on both checks."""
+    source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+
+    validation_source = (
+        REPO_ROOT / "tools" / "perf" / "benchmark_validation.py"
+    ).read_text(encoding="utf-8")
+    assert "parse_ab_result" in validation_source
+    assert "parse_hey_result" in validation_source
+    assert "ScenarioResultInput, build_scenario_result" in source
+    assert '"$ITERATIONS" "$load_gen_exit"' in source
+    assert "validate_response_probe" in source
+    assert "response_correctness_failed" in source
+    assert "compare_streaming_probe_bodies" in source
+    assert "probe_bodies" in source
+
+
+def test_canonical_workflow_retains_probe_artifacts():
+    workflow = (
+        REPO_ROOT / ".github" / "workflows" / "nightly-perf.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "perf/baselines/module-baseline-091-probes/" in workflow
 
 
 def test_upstream_mock_splits_chunked_bodies():
@@ -374,12 +564,24 @@ class TestSchemaWellFormedness:
         self._assert_object_has_required_fields(items, "name", "status")
 
     def test_scenario_name_enum_values(self):
-        """scenario name enum contains the 5 required scenario names."""
+        """Scenario schema freezes all seven required scenario names."""
         mb_props = _load_schema()["module_benchmark"]["report_schema"]["properties"]["module_benchmark"]
         items = mb_props["properties"]["scenarios"]["items"]
         name_prop = items["properties"]["name"]
-        expected_names = {"plain-small", "chunked-medium", "gzip-large", "large-body", "streaming-first"}
+        expected_names = {
+            "plain-small",
+            "chunked-medium",
+            "gzip-large",
+            "large-body",
+            "streaming-first",
+            "gzip-streaming-first",
+            "deflate-streaming-first",
+        }
         assert set(name_prop.get("enum", [])) == expected_names
+        status_prop = items["properties"]["status"]
+        assert set(status_prop["enum"]) == {"completed", "failed", "skipped"}
+        assert "load_integrity" in items["properties"]
+        assert "response_correctness" in items["properties"]
 
     def test_memory_slope_required_fields(self):
         """memory_slope requires rss_per_input_mb and r_squared."""
@@ -914,8 +1116,10 @@ class TestNginxConfigGeneration:
     def test_gate_fallback_rate_uses_precommit_failopen(self):
         """The hard fallback gate tracks fail-open events, not capability fallbacks."""
         assert BENCHMARK_SCRIPT.exists(), "Benchmark script not found"
-        script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
 
-        assert 'streaming_data.get("precommit_failopen_total", 0)' in script_content
-        assert "float(precommit_failopen_total) / requests_total" in script_content
-        assert '"streaming_fallback_total": fallback_total' in script_content
+        validation = (
+            REPO_ROOT / "tools" / "perf" / "benchmark_validation.py"
+        ).read_text(encoding="utf-8")
+        assert 'streaming.get("precommit_failopen_total", 0)' in validation
+        assert "failopen_total / requests_total" in validation
+        assert '"streaming_fallback_total": streaming.get' in validation
