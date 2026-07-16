@@ -198,6 +198,8 @@ log "Load generator: $LOAD_GEN"
 
 mkdir -p "$NGINX_WORKDIR/logs"
 mkdir -p "$NGINX_WORKDIR/temp"
+PROBE_DIR="$NGINX_WORKDIR/probes"
+mkdir -p "$PROBE_DIR"
 echo "$$" > "$PID_FILE"
 log "Workdir: $NGINX_WORKDIR"
 
@@ -426,6 +428,100 @@ run_load_gen() {
       ;;
   esac
 
+  return 0
+}
+
+# probe_expectations returns a visible heading and terminal integrity token.
+probe_expectations() {
+  case "$1" in
+    simple/basic.html)
+      echo "Welcome to the Test Page|This is a second paragraph"
+      ;;
+    simple/tables.html)
+      echo "Table Examples|Implemented"
+      ;;
+    complex/blog-post.html)
+      echo "Building an NGINX Module for AI Agents|Share on Facebook"
+      ;;
+    large/large-1mb.html)
+      echo "Repeated Heading|gamma"
+      ;;
+    *)
+      die "No correctness-probe expectations for fixture: $1"
+      ;;
+  esac
+  return 0
+}
+
+# run_response_probe captures and validates one response after metrics snapshot.
+run_response_probe() {
+  local name="$1"
+  local fixture="$2"
+  local compression="$3"
+  local url_path="$4"
+  local headers_file="$PROBE_DIR/${name}.headers"
+  local body_file="$PROBE_DIR/${name}.body"
+  local result_file="$PROBE_DIR/${name}.json"
+  local http_status="0"
+  local curl_exit=0
+  local expectations
+  local expected_heading
+  local expected_tail
+
+  expectations="$(probe_expectations "$fixture")"
+  expected_heading="${expectations%%|*}"
+  expected_tail="${expectations#*|}"
+  http_status="$(curl -sS -D "$headers_file" -o "$body_file" \
+    -w '%{http_code}' -H 'Accept: text/markdown' \
+    "http://127.0.0.1:${NGINX_PORT}${url_path}")" || curl_exit=$?
+
+  python3 - "$REPO_ROOT" "$http_status" "$headers_file" "$body_file" \
+    "$CORPUS_DIR/$fixture" "$expected_heading" "$expected_tail" \
+    "$compression" "$curl_exit" <<'PROBE_PYEOF' > "$result_file"
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+
+from tools.perf.benchmark_validation import validate_response_probe
+
+status = int(sys.argv[2])
+headers_path = Path(sys.argv[3])
+body_path = Path(sys.argv[4])
+fixture_path = Path(sys.argv[5])
+expected_heading = sys.argv[6]
+expected_tail = sys.argv[7]
+compressed = sys.argv[8] != "none"
+curl_exit = int(sys.argv[9])
+
+headers = {}
+if headers_path.exists():
+    for line in headers_path.read_text(errors="replace").splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            headers[key.strip().lower()] = value.strip()
+body = body_path.read_bytes() if body_path.exists() else b""
+fixture = fixture_path.read_text(encoding="utf-8")
+result = validate_response_probe(
+    status=status,
+    headers=headers,
+    body=body,
+    expected_heading=expected_heading,
+    expected_tail_token=expected_tail,
+    expected_tail_count=fixture.count(expected_tail),
+    compressed=compressed,
+)
+result["curl_exit_code"] = curl_exit
+result["header_artifact"] = headers_path.name
+result["body_artifact"] = body_path.name
+if curl_exit:
+    result["verdict"] = "fail"
+    result["failure_reason"] = f"curl_exit: {curl_exit}"
+print(json.dumps(result))
+PROBE_PYEOF
+
+  cat "$result_file"
   return 0
 }
 
@@ -733,7 +829,9 @@ run_scenario() {
     fi
   fi
 
-  run_load_gen "$url_path" "$SC_CONCURRENCY" "$ITERATIONS" "$raw_output"
+  local load_gen_exit=0
+  run_load_gen "$url_path" "$SC_CONCURRENCY" "$ITERATIONS" "$raw_output" \
+    || load_gen_exit=$?
 
   # Stop the background sampler and read peak RSS
   if [[ -n "$sampler_pid" ]] && kill -0 "$sampler_pid" 2>/dev/null; then
@@ -773,12 +871,33 @@ run_scenario() {
   local metrics_file="$NGINX_WORKDIR/${SC_NAME}_metrics.json"
   printf '%s\n' "$metrics_json" > "$metrics_file"
 
+  # Run after the metrics snapshot so the probe cannot contaminate evidence.
+  log "  Running response correctness probe..."
+  local probe_json
+  probe_json="$(run_response_probe "$SC_NAME" "$SC_FIXTURE" \
+    "$SC_COMPRESSION" "$url_path")"
+
   # Parse results and emit JSON (passing TTFB data for integration)
   local scenario_json
   scenario_json="$(parse_load_gen_results "$raw_output" "$SC_NAME" "$SC_PROFILE" \
     "$SC_COMPRESSION" "$SC_TRANSFER" "$SC_CONCURRENCY" "$rss_after" \
     "$ttfb_file" "$metrics_file" "$fixture_bytes" \
-    "$rss_baseline" "$rss_peak")"
+    "$rss_baseline" "$rss_peak" "$ITERATIONS" "$load_gen_exit")"
+
+  scenario_json="$(python3 - "$scenario_json" "$probe_json" \
+    "$REPO_ROOT" <<'MERGE_PYEOF'
+import json
+import sys
+
+sys.path.insert(0, sys.argv[3])
+
+from tools.perf.benchmark_validation import attach_response_probe
+
+scenario = json.loads(sys.argv[1])
+probe = json.loads(sys.argv[2])
+print(json.dumps(attach_response_probe(scenario, probe)))
+MERGE_PYEOF
+)"
 
   # Stop NGINX for next scenario
   stop_nginx
@@ -818,218 +937,46 @@ parse_load_gen_results() {
   local input_bytes="${10:-0}"
   local rss_baseline_kb="${11:-0}"
   local rss_peak_kb="${12:-0}"
-  local ttfb_file="${8:-}"
-  local metrics_file="${9:-}"
-  local input_bytes="${10:-0}"
+  local iterations="${13:-0}"
+  local load_gen_exit="${14:-1}"
 
   python3 - "$raw_file" "$name" "$profile" "$compression" "$transfer" \
     "$concurrency" "$rss_kb" "$LOAD_GEN" "$ttfb_file" "$metrics_file" \
-    "$input_bytes" "$rss_baseline_kb" "$rss_peak_kb" <<'PYEOF'
-import csv
+    "$input_bytes" "$rss_baseline_kb" "$rss_peak_kb" "$iterations" \
+    "$load_gen_exit" "$REPO_ROOT" <<'PYEOF'
 import json
 import sys
-import os
-import re
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[16])
+
+from tools.perf.benchmark_validation import ScenarioResultInput, build_scenario_result
 
 
-def read_json_file(path, default):
-    if not path:
-        return default
+def read_json_file(path):
     try:
-        with open(path, encoding="utf-8") as handle:
-            return json.load(handle)
-    except (OSError, json.JSONDecodeError, ValueError):
-        return default
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
 
-raw_file = sys.argv[1]
-name = sys.argv[2]
-profile = sys.argv[3]
-compression = sys.argv[4]
-transfer = sys.argv[5]
-concurrency = int(sys.argv[6])
-rss_kb = int(sys.argv[7])
-load_gen = sys.argv[8]
-ttfb_json_path = sys.argv[9]
-metrics_json_path = sys.argv[10]
-input_bytes = int(sys.argv[11])
-rss_baseline_kb = int(sys.argv[12]) if len(sys.argv) > 12 else 0
-rss_peak_kb = int(sys.argv[13]) if len(sys.argv) > 13 else 0
 
-# Parse supplemental TTFB data (measured via curl time_starttransfer)
-ttfb_data = read_json_file(
-    ttfb_json_path,
-    {"ttfb_p50_ms": None, "ttfb_p95_ms": None},
-)
-
-ttfb_p50 = ttfb_data.get("ttfb_p50_ms")
-ttfb_p95 = ttfb_data.get("ttfb_p95_ms")
-
-# Parse real NGINX metrics
-nginx_metrics = read_json_file(metrics_json_path, {})
-
-perf_data = nginx_metrics.get("perf", {})
-streaming_data = nginx_metrics.get("streaming", {})
-
-# 1. fallback_rate
-fallback_total = streaming_data.get("fallback_total", 0)
-requests_total = streaming_data.get("requests_total", 0)
-precommit_failopen_total = streaming_data.get("precommit_failopen_total", 0)
-fallback_rate = (
-    float(precommit_failopen_total) / requests_total
-    if requests_total > 0
-    else 0.0
-)
-
-# 2. streaming_ratio and fullbuffer_ratio
-sf_hits = nginx_metrics.get("streaming_path_hits", 0)
-fb_hits = nginx_metrics.get("fullbuffer_path_hits", 0)
-total_hits = sf_hits + fb_hits
-if total_hits > 0:
-    streaming_ratio = float(sf_hits) / total_hits
-    fullbuffer_ratio = float(fb_hits) / total_hits
-else:
-    # No path-hit data from the metrics endpoint.  For release-blocking
-    # evidence, we must NOT synthesize path coverage from the profile
-    # name — that would claim a path was exercised without proof.
-    # Report None so the evidence gate returns MISSING_EVIDENCE.
-    streaming_ratio = None
-    fullbuffer_ratio = None
-
-# 3. decompression streaming vs fullbuffer counts
-decomp_streaming = perf_data.get("decompression_streaming_total", 0)
-decomp_fullbuffer = perf_data.get("decompression_fullbuffer_total", 0)
-if decomp_streaming == 0 and decomp_fullbuffer == 0:
-    decomp_attempted = nginx_metrics.get("decompressions_attempted", 0)
-    if decomp_attempted > 0:
-        # Do NOT synthesize decompression path from the profile name.
-        # Report only what the metrics endpoint actually observed.
-        # The evidence gate will treat 0 as MISSING_EVIDENCE if the
-        # scenario requires decompression evidence.
-        pass
-
-latencies = []
-wall_end_s = 0.0
-
-if load_gen == "hey":
-    try:
-        with open(raw_file, "r") as f:
-            reader = csv.reader(f)
-            for row in reader:
-                if not row or row[0] == "response-time":
-                    continue
-                try:
-                    lat_s = float(row[0])
-                    latencies.append(lat_s * 1000.0)  # convert to ms
-                    if len(row) > 6:
-                        end_s = float(row[6]) + lat_s
-                        if end_s > wall_end_s:
-                            wall_end_s = end_s
-                except (ValueError, IndexError):
-                    continue
-    except (FileNotFoundError, IOError):
-        pass
-elif load_gen == "ab":
-    try:
-        with open(raw_file, "r") as f:
-            content = f.read()
-        rps_match = re.search(r"Requests per second:\s+([\d.]+)", content)
-        p50_match = re.search(r"\s+50%\s+(\d+)", content)
-        p95_match = re.search(r"\s+95%\s+(\d+)", content)
-        p99_match = re.search(r"\s+99%\s+(\d+)", content)
-
-        rps_val = float(rps_match.group(1)) if rps_match else 0.0
-        p50_val = float(p50_match.group(1)) if p50_match else 0.0
-        p95_val = float(p95_match.group(1)) if p95_match else 0.0
-        p99_val = float(p99_match.group(1)) if p99_match else 0.0
-
-        result = {
-            "name": name,
-            "profile": profile,
-            "compression": compression,
-            "transfer_encoding": transfer,
-            "concurrency": concurrency,
-            "status": "completed",
-            "metrics": {
-                "rps": rps_val,
-                "latency_p50_ms": p50_val,
-                "latency_p95_ms": p95_val,
-                "latency_p99_ms": p99_val,
-                "ttfb_p50_ms": ttfb_p50,
-                "ttfb_p95_ms": ttfb_p95,
-                "ttlb_p50_ms": p50_val,
-                "worker_rss_mb": rss_kb / 1024.0,
-                "baseline_rss_bytes": rss_baseline_kb * 1024,
-                "peak_rss_bytes": rss_peak_kb * 1024,
-                "input_bytes": input_bytes,
-                "streaming_path_hits": sf_hits,
-                "fullbuffer_path_hits": fb_hits,
-                "streaming_ratio": streaming_ratio,
-                "fullbuffer_ratio": fullbuffer_ratio,
-                "fallback_rate": fallback_rate,
-                "streaming_fallback_total": fallback_total,
-                "streaming_requests_total": requests_total,
-                "precommit_failopen_total": precommit_failopen_total,
-                "throughput_mbps": 0.0,
-                "decompression_streaming_total": decomp_streaming,
-                "decompression_fullbuffer_total": decomp_fullbuffer,
-                "zero_copy_output_total": perf_data.get("zero_copy_output_total", 0),
-                "copied_output_total": perf_data.get("copied_output_total", 0),
-                "pending_output_high_watermark_bytes": perf_data.get("pending_output_high_watermark_bytes", 0),
-            },
-        }
-        print(json.dumps(result))
-        sys.exit(0)
-    except (FileNotFoundError, IOError):
-        pass
-
-if latencies:
-    latencies.sort()
-    n = len(latencies)
-    p50 = latencies[int(n * 0.50)]
-    p95 = latencies[int(n * 0.95)]
-    p99 = latencies[int(n * 0.99)]
-    total_time_s = wall_end_s if wall_end_s > 0 else sum(latencies) / 1000.0
-    rps = n / total_time_s if total_time_s > 0 else 0.0
-else:
-    p50 = p95 = p99 = 0.0
-    rps = 0.0
-
-result = {
-    "name": name,
-    "profile": profile,
-    "compression": compression,
-    "transfer_encoding": transfer,
-    "concurrency": concurrency,
-    "status": "completed",
-    "metrics": {
-        "rps": rps,
-        "latency_p50_ms": p50,
-        "latency_p95_ms": p95,
-        "latency_p99_ms": p99,
-        "ttfb_p50_ms": ttfb_p50,
-        "ttfb_p95_ms": ttfb_p95,
-        "ttlb_p50_ms": p50,
-        "worker_rss_mb": rss_kb / 1024.0,
-        "baseline_rss_bytes": rss_baseline_kb * 1024,
-        "peak_rss_bytes": rss_peak_kb * 1024,
-        "input_bytes": input_bytes,
-        "streaming_path_hits": sf_hits,
-        "fullbuffer_path_hits": fb_hits,
-        "streaming_ratio": streaming_ratio,
-        "fullbuffer_ratio": fullbuffer_ratio,
-        "fallback_rate": fallback_rate,
-        "streaming_fallback_total": fallback_total,
-        "streaming_requests_total": requests_total,
-        "precommit_failopen_total": precommit_failopen_total,
-        "throughput_mbps": 0.0,
-        "decompression_streaming_total": decomp_streaming,
-        "decompression_fullbuffer_total": decomp_fullbuffer,
-        "zero_copy_output_total": perf_data.get("zero_copy_output_total", 0),
-        "copied_output_total": perf_data.get("copied_output_total", 0),
-        "pending_output_high_watermark_bytes": perf_data.get("pending_output_high_watermark_bytes", 0),
-    },
-}
-
+result = build_scenario_result(ScenarioResultInput(
+    raw_content=Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace"),
+    name=sys.argv[2],
+    profile=sys.argv[3],
+    compression=sys.argv[4],
+    transfer_encoding=sys.argv[5],
+    concurrency=int(sys.argv[6]),
+    worker_rss_kb=int(sys.argv[7]),
+    load_generator=sys.argv[8],
+    ttfb=read_json_file(sys.argv[9]),
+    nginx_metrics=read_json_file(sys.argv[10]),
+    input_bytes=int(sys.argv[11]),
+    baseline_rss_kb=int(sys.argv[12]),
+    peak_rss_kb=int(sys.argv[13]),
+    iterations=int(sys.argv[14]),
+    load_exit_code=int(sys.argv[15]),
+))
 print(json.dumps(result))
 PYEOF
 
@@ -1088,9 +1035,15 @@ if [[ -x "$NGINX_BIN" ]]; then
   NGINX_VERSION_INFO="$("$NGINX_BIN" -v 2>&1 | head -1 || echo "unknown")"
 fi
 
-REPORT_JSON="$(python3 - "$TIMESTAMP" "$GIT_COMMIT" "$PLATFORM" "$LOAD_GEN" "$RESULTS_FILE" "$NGINX_VERSION_INFO" <<'PYEOF'
+REPORT_JSON="$(python3 - "$TIMESTAMP" "$GIT_COMMIT" "$PLATFORM" "$LOAD_GEN" \
+  "$RESULTS_FILE" "$NGINX_VERSION_INFO" "$REPO_ROOT" "$PROBE_DIR" <<'PYEOF'
 import json
 import sys
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[7])
+
+from tools.perf.benchmark_validation import compare_streaming_probe_bodies
 
 timestamp = sys.argv[1]
 git_commit = sys.argv[2]
@@ -1098,6 +1051,7 @@ platform = sys.argv[3]
 load_gen = sys.argv[4]
 results_file = sys.argv[5]
 nginx_version = sys.argv[6] if len(sys.argv) > 6 else "unknown"
+probe_dir = Path(sys.argv[8])
 
 scenarios = []
 with open(results_file, encoding="utf-8") as handle:
@@ -1108,6 +1062,23 @@ for line in lines:
         scenarios.append(json.loads(line))
     except json.JSONDecodeError:
         pass
+
+probe_bodies = {
+    name: path.read_bytes()
+    for name in (
+        "streaming-first",
+        "gzip-streaming-first",
+        "deflate-streaming-first",
+    )
+    if (path := probe_dir / f"{name}.body").exists()
+}
+body_failures = compare_streaming_probe_bodies(probe_bodies)
+for scenario in scenarios:
+    if reason := body_failures.get(scenario.get("name", "")):
+        scenario["status"] = "failed"
+        scenario["reason"] = f"response_correctness_failed: {reason}"
+        scenario["response_correctness"]["verdict"] = "fail"
+        scenario["response_correctness"]["failure_reason"] = reason
 
 report = {
     "module_benchmark": {
@@ -1137,7 +1108,11 @@ PYEOF
 if [[ -n "$OUTPUT_PATH" ]]; then
   mkdir -p "$(dirname "$OUTPUT_PATH")"
   echo "$REPORT_JSON" > "$OUTPUT_PATH"
+  PROBE_OUTPUT_DIR="${OUTPUT_PATH%.json}-probes"
+  mkdir -p "$PROBE_OUTPUT_DIR"
+  cp -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"
   log "Report written to: $OUTPUT_PATH"
+  log "Probe artifacts written to: $PROBE_OUTPUT_DIR"
 else
   echo "$REPORT_JSON"
 fi

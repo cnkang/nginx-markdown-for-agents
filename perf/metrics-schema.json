@@ -360,7 +360,7 @@
                 "properties": {
                   "name": {
                     "type": "string",
-                    "enum": ["plain-small", "chunked-medium", "gzip-large", "large-body", "streaming-first"],
+                    "enum": ["plain-small", "chunked-medium", "gzip-large", "large-body", "streaming-first", "gzip-streaming-first", "deflate-streaming-first"],
                     "description": "Scenario identifier"
                   },
                   "profile": {
@@ -385,12 +385,37 @@
                   },
                   "status": {
                     "type": "string",
-                    "enum": ["completed", "skipped"],
+                    "enum": ["completed", "failed", "skipped"],
                     "description": "Scenario execution status"
                   },
                   "reason": {
                     "type": "string",
-                    "description": "Reason for skip (only present when status=skipped)"
+                    "description": "Reason for skipped or failed evidence"
+                  },
+                  "load_integrity": {
+                    "type": "object",
+                    "required": ["configured_requests", "completed_requests", "failed_requests", "non_2xx_responses", "transport_errors", "verdict", "failure_reason"],
+                    "properties": {
+                      "configured_requests": {"type": "integer", "minimum": 1},
+                      "completed_requests": {"type": ["integer", "null"], "minimum": 0},
+                      "failed_requests": {"type": ["integer", "null"], "minimum": 0},
+                      "non_2xx_responses": {"type": ["integer", "null"], "minimum": 0},
+                      "transport_errors": {"type": ["integer", "null"], "minimum": 0},
+                      "verdict": {"type": "string", "enum": ["pass", "fail"]},
+                      "failure_reason": {"type": "string"}
+                    }
+                  },
+                  "response_correctness": {
+                    "type": "object",
+                    "required": ["http_status", "headers", "body_bytes", "body_sha256", "verdict", "failure_reason"],
+                    "properties": {
+                      "http_status": {"type": "integer", "minimum": 0},
+                      "headers": {"type": "object"},
+                      "body_bytes": {"type": "integer", "minimum": 0},
+                      "body_sha256": {"type": "string"},
+                      "verdict": {"type": "string", "enum": ["pass", "fail"]},
+                      "failure_reason": {"type": "string"}
+                    }
                   },
                   "metrics": {
                     "type": "object",
@@ -474,7 +499,16 @@
                       },
                       "required": ["status"]
                     },
-                    "then": { "required": ["metrics"] }
+                    "then": { "required": ["metrics", "load_integrity", "response_correctness"] }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "status": { "const": "failed" }
+                      },
+                      "required": ["status"]
+                    },
+                    "then": { "required": ["reason", "metrics", "load_integrity", "response_correctness"] }
                   },
                   {
                     "if": {
