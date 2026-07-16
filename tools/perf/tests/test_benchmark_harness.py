@@ -65,6 +65,7 @@ def test_production_example_gate_loads_dynamic_module_when_provided():
         "test-production-examples-e2e-smoke:", 1
     )[0]
 
+    assert "test-production-examples-nginx-t: SHELL := /bin/bash" in makefile
     assert 'module_so="$${MODULE_SO:-}"' in target
     assert '-g "load_module $$module_so;"' in target
 

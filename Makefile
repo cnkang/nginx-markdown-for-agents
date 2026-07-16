@@ -808,6 +808,7 @@ release-gates-check-all: release-gates-check release-gates-check-091
 # RELEASE_GATE_ALLOW_SKIP_MODULE=1 is set, mirroring the 091
 # module-benchmark skip contract.  This is an environment limitation skip
 # (non-release validation only); tag-release CI must provide NGINX_BIN.
+test-production-examples-nginx-t: SHELL := /bin/bash
 test-production-examples-nginx-t:
 	@echo "=== Production Examples nginx -t ==="
 	@nginx_bin="$${NGINX_BIN:-nginx}"; \
