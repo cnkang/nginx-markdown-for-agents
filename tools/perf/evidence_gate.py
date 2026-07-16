@@ -631,18 +631,46 @@ _OUTPUT_TOTAL_COVERAGE_LABEL = (
 _FALLBACK_RATE_COVERAGE_LABEL = (
     "precommit_failopen_total / streaming_requests_total <= 0.05"
 )
+_HISTORICAL_BASELINE_COMMIT = "847f90139d287446882052ec78661746541aebff"
 
 
 def _is_positive(value: float | int | None) -> bool:
-    return value is not None and value > 0
+    return type(value) in (int, float) and value > 0
+
+
+def _is_positive_counter(value: float | int | None) -> bool:
+    return type(value) is int and value > 0
 
 
 def _is_less_than_one(value: float | int | None) -> bool:
-    return value is not None and value < 1.0
+    return type(value) in (int, float) and value < 1.0
 
 
 def _is_acceptable_fallback_rate(value: float | int | None) -> bool:
-    return value is not None and value <= 0.05
+    return type(value) in (int, float) and value <= 0.05
+
+
+def _scenario_metadata_checks(
+    profile: str, compression: str, transfer_encoding: str,
+) -> list[dict]:
+    """Return the frozen configuration contract for one scenario."""
+    return [
+        {
+            "field": "profile",
+            "expected": profile,
+            "label": f"profile must be {profile!r}",
+        },
+        {
+            "field": "compression",
+            "expected": compression,
+            "label": f"compression must be {compression!r}",
+        },
+        {
+            "field": "transfer_encoding",
+            "expected": transfer_encoding,
+            "label": f"transfer_encoding must be {transfer_encoding!r}",
+        },
+    ]
 
 
 # Path-coverage invariants: a "completed" scenario must actually exercise
@@ -655,186 +683,147 @@ def _is_acceptable_fallback_rate(value: float | int | None) -> bool:
 # tuples.  ``predicate`` is a callable taking the metric value and
 # returning True when the path was genuinely exercised.  ``label`` is
 # used in the breach/evidence message.
-def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
+def _fullbuffer_path_invariants() -> list[dict]:
     return [
         {
-            "scenario": "streaming-first",
+            "scenario": "plain-small",
             "checks": [
-                {
-                    "metric": "streaming_ratio",
-                    "predicate": _is_positive,
-                    "label": "streaming_ratio > 0 (streaming path must be hit)",
-                },
-                {
-                    "metric": "streaming_path_hits",
-                    "predicate": _is_positive,
-                    "label": "streaming_path_hits > 0",
-                },
-                {
-                    "metric": "fullbuffer_ratio",
-                    "predicate": _is_less_than_one,
-                    "label": _FULLBUFFER_RATIO_COVERAGE_LABEL,
-                },
-                {
-                    "metric": "streaming_requests_total",
-                    "predicate": _is_positive,
-                    "label": _STREAMING_REQUESTS_COVERAGE_LABEL,
-                },
-                {
-                    "metric": "output_total",
-                    "predicate": _is_positive,
-                    "label": _OUTPUT_TOTAL_COVERAGE_LABEL,
-                },
-                {
-                    "metric": "fallback_rate",
-                    "predicate": _is_acceptable_fallback_rate,
-                    "label": _FALLBACK_RATE_COVERAGE_LABEL,
-                },
-            ],
-        },
-        {
-            "scenario": "gzip-large",
-            "checks": [
-                {
-                    "metric": "decompression_fullbuffer_total",
-                    "predicate": _is_positive,
-                    "label": "decompression_fullbuffer_total > 0 (gzip full-buffer decompression must run)",
-                },
                 {
                     "metric": "fullbuffer_path_hits",
-                    "predicate": _is_positive,
-                    "label": "fullbuffer_path_hits > 0 (full-buffer path must be hit)",
-                },
-            ],
-            "metadata_checks": [
-                {
-                    "field": "profile",
-                    "expected": "balanced",
-                    "label": "profile must be 'balanced'",
-                },
-                {
-                    "field": "compression",
-                    "expected": "gzip",
-                    "label": "compression must be 'gzip'",
-                },
-            ],
-        },
-        {
-            "scenario": "gzip-streaming-first",
-            "checks": [
-                {
-                    "metric": "decompression_streaming_total",
-                    "predicate": _is_positive,
-                    "label": "decompression_streaming_total > 0 (gzip streaming decompression must run)",
-                },
-                {
-                    "metric": "streaming_path_hits",
-                    "predicate": _is_positive,
-                    "label": "streaming_path_hits > 0 (streaming path must be hit)",
-                },
-                {
-                    "metric": "streaming_ratio",
-                    "predicate": _is_positive,
-                    "label": "streaming_ratio > 0 (must not fall back entirely to full-buffer)",
+                    "predicate": _is_positive_counter,
+                    "label": "fullbuffer_path_hits > 0",
                 },
                 {
                     "metric": "fullbuffer_ratio",
-                    "predicate": _is_less_than_one,
-                    "label": _FULLBUFFER_RATIO_COVERAGE_LABEL,
-                },
-                {
-                    "metric": "streaming_requests_total",
                     "predicate": _is_positive,
-                    "label": _STREAMING_REQUESTS_COVERAGE_LABEL,
-                },
-                {
-                    "metric": "output_total",
-                    "predicate": _is_positive,
-                    "label": _OUTPUT_TOTAL_COVERAGE_LABEL,
-                },
-                {
-                    "metric": "fallback_rate",
-                    "predicate": _is_acceptable_fallback_rate,
-                    "label": _FALLBACK_RATE_COVERAGE_LABEL,
+                    "label": "fullbuffer_ratio > 0",
                 },
             ],
-            "metadata_checks": [
-                {
-                    "field": "profile",
-                    "expected": "streaming_first",
-                    "label": "profile must be 'streaming_first'",
-                },
-                {
-                    "field": "compression",
-                    "expected": "gzip",
-                    "label": "compression must be 'gzip'",
-                },
-                {
-                    "field": "transfer_encoding",
-                    "expected": "chunked",
-                    "label": "transfer_encoding must be 'chunked'",
-                },
-            ],
+            "metadata_checks": _scenario_metadata_checks(
+                "balanced", "none", "identity"
+            ),
         },
         {
-            "scenario": "deflate-streaming-first",
-            "checks": [
-                {
-                    "metric": "decompression_streaming_total",
-                    "predicate": _is_positive,
-                    "label": "decompression_streaming_total > 0 (deflate streaming decompression must run)",
-                },
-                {
-                    "metric": "streaming_path_hits",
-                    "predicate": _is_positive,
-                    "label": "streaming_path_hits > 0 (streaming path must be hit)",
-                },
-                {
-                    "metric": "streaming_ratio",
-                    "predicate": _is_positive,
-                    "label": "streaming_ratio > 0 (must not fall back entirely to full-buffer)",
-                },
-                {
-                    "metric": "fullbuffer_ratio",
-                    "predicate": _is_less_than_one,
-                    "label": _FULLBUFFER_RATIO_COVERAGE_LABEL,
-                },
-                {
-                    "metric": "streaming_requests_total",
-                    "predicate": _is_positive,
-                    "label": _STREAMING_REQUESTS_COVERAGE_LABEL,
-                },
-                {
-                    "metric": "output_total",
-                    "predicate": _is_positive,
-                    "label": _OUTPUT_TOTAL_COVERAGE_LABEL,
-                },
-                {
-                    "metric": "fallback_rate",
-                    "predicate": _is_acceptable_fallback_rate,
-                    "label": _FALLBACK_RATE_COVERAGE_LABEL,
-                },
-            ],
-            "metadata_checks": [
-                {
-                    "field": "profile",
-                    "expected": "streaming_first",
-                    "label": "profile must be 'streaming_first'",
-                },
-                {
-                    "field": "compression",
-                    "expected": "deflate",
-                    "label": "compression must be 'deflate'",
-                },
-                {
-                    "field": "transfer_encoding",
-                    "expected": "chunked",
-                    "label": "transfer_encoding must be 'chunked'",
-                },
-            ],
+            "scenario": "chunked-medium",
+            "checks": [{
+                "metric": "fullbuffer_path_hits",
+                "predicate": _is_positive_counter,
+                "label": "fullbuffer_path_hits > 0",
+            }],
+            "metadata_checks": _scenario_metadata_checks(
+                "balanced", "none", "chunked"
+            ),
+        },
+        {
+            "scenario": "large-body",
+            "checks": [{
+                "metric": "fullbuffer_path_hits",
+                "predicate": _is_positive_counter,
+                "label": "fullbuffer_path_hits > 0",
+            }],
+            "metadata_checks": _scenario_metadata_checks(
+                "balanced", "none", "identity"
+            ),
         },
     ]
 
+
+def _streaming_checks() -> list[dict]:
+    return [
+        {
+            "metric": "streaming_ratio",
+            "predicate": _is_positive,
+            "label": "streaming_ratio > 0 (streaming path must be hit)",
+        },
+        {
+            "metric": "streaming_path_hits",
+            "predicate": _is_positive_counter,
+            "label": "streaming_path_hits > 0",
+        },
+        {
+            "metric": "fullbuffer_ratio",
+            "predicate": _is_less_than_one,
+            "label": _FULLBUFFER_RATIO_COVERAGE_LABEL,
+        },
+        {
+            "metric": "streaming_requests_total",
+            "predicate": _is_positive_counter,
+            "label": _STREAMING_REQUESTS_COVERAGE_LABEL,
+        },
+        {
+            "metric": "output_total",
+            "predicate": _is_positive_counter,
+            "label": _OUTPUT_TOTAL_COVERAGE_LABEL,
+        },
+        {
+            "metric": "fallback_rate",
+            "predicate": _is_acceptable_fallback_rate,
+            "label": _FALLBACK_RATE_COVERAGE_LABEL,
+        },
+    ]
+
+
+def _gzip_large_invariant() -> dict:
+    return {
+        "scenario": "gzip-large",
+        "checks": [
+            {
+                "metric": "decompression_fullbuffer_total",
+                "predicate": _is_positive_counter,
+                "label": (
+                    "decompression_fullbuffer_total > 0 "
+                    "(gzip full-buffer decompression must run)"
+                ),
+            },
+            {
+                "metric": "fullbuffer_path_hits",
+                "predicate": _is_positive_counter,
+                "label": "fullbuffer_path_hits > 0 (full-buffer path must be hit)",
+            },
+        ],
+        "metadata_checks": _scenario_metadata_checks(
+            "balanced", "gzip", "identity"
+        ),
+    }
+
+
+def _compressed_streaming_invariant(name: str, compression: str) -> dict:
+    checks = _streaming_checks()
+    checks.insert(0, {
+        "metric": "decompression_streaming_total",
+        "predicate": _is_positive_counter,
+        "label": (
+            f"decompression_streaming_total > 0 "
+            f"({compression} streaming decompression must run)"
+        ),
+    })
+    return {
+        "scenario": name,
+        "checks": checks,
+        "metadata_checks": _scenario_metadata_checks(
+            "streaming_first", compression, "chunked"
+        ),
+    }
+
+
+def _path_coverage_invariants() -> list[dict]:
+    return [
+        *_fullbuffer_path_invariants(),
+        {
+            "scenario": "streaming-first",
+            "checks": _streaming_checks(),
+            "metadata_checks": _scenario_metadata_checks(
+                "streaming_first", "none", "chunked"
+            ),
+        },
+        _gzip_large_invariant(),
+        _compressed_streaming_invariant(
+            "gzip-streaming-first", "gzip"
+        ),
+        _compressed_streaming_invariant(
+            "deflate-streaming-first", "deflate"
+        ),
+    ]
 
 def _check_path_coverage(report: dict) -> list[tuple[str, str, str]]:
     """Return [(scenario, metric, label)] for path-coverage violations.
@@ -898,7 +887,14 @@ def _path_metric_value(metrics: dict, metric: str) -> float | int | None:
     elif metric == "output_total":
         zero_copy = metrics.get("zero_copy_output_total")
         copied = metrics.get("copied_output_total")
-        return None if zero_copy is None or copied is None else zero_copy + copied
+        if (
+            type(zero_copy) is not int
+            or zero_copy < 0
+            or type(copied) is not int
+            or copied < 0
+        ):
+            return None
+        return zero_copy + copied
     return metrics.get(metric)
 
 
@@ -938,6 +934,54 @@ def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
             reason = s.get("reason", "unknown")
             skipped.append((name, reason))
     return skipped
+
+
+def _baseline_policy_violations(
+    report: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Validate provenance for conservatively normalized baselines."""
+    policy = report.get("baseline_policy")
+    if not policy or policy.get("type") != "conservative_normalized":
+        return []
+
+    violations = []
+    required = (
+        "source_git_commit",
+        "source_run",
+        "source_artifact",
+        "adjustments",
+        "adjustment_reason",
+        "adjustment_date",
+    )
+    for field in required:
+        if field not in policy or policy[field] in (None, "", {}):
+            violations.append((
+                f"{role}.baseline_policy",
+                f"missing or empty {field}",
+            ))
+
+    adjustments = policy.get("adjustments")
+    if isinstance(adjustments, dict):
+        for field in ("rps", "latency_ttfb"):
+            if not adjustments.get(field):
+                violations.append((
+                    f"{role}.baseline_policy",
+                    f"missing or empty adjustments.{field}",
+                ))
+
+    artifact = policy.get("source_artifact")
+    historical_exception = policy.get("historical_audit_exception") is True
+    exception_is_scoped = (
+        historical_exception
+        and policy.get("source_git_commit") == _HISTORICAL_BASELINE_COMMIT
+        and bool(policy.get("audit_note"))
+    )
+    if artifact in (None, "", "not-recorded", "unknown") and not exception_is_scoped:
+        violations.append((
+            f"{role}.baseline_policy",
+            "source_artifact must identify a retained raw artifact",
+        ))
+    return violations
 
 
 def _check_missing_scenarios(report: dict) -> list[str]:
@@ -1082,6 +1126,7 @@ def _validate_benchmark_evidence(
     violations.extend(
         _canonical_baseline_fallback_violations(report, role)
     )
+    violations.extend(_baseline_policy_violations(report, role))
 
     # 5. Environment identity fields must be present and non-empty;
     #    nginx_version must also not use the legacy "unknown" placeholder.
