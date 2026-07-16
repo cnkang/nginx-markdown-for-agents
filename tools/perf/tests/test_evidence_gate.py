@@ -12,6 +12,7 @@ Run:
 Requirements: 9.1, 9.3, 9.4
 """
 
+import copy
 import json
 import sys
 from pathlib import Path
@@ -257,8 +258,8 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
     assert "module-baseline-091-${{ github.sha }}" in workflow
 
 
-def test_module_baseline_contains_measured_critical_scenarios():
-    """The checked-in baseline contains real critical-path evidence."""
+def test_module_baseline_contains_completed_seven_scenario_contract():
+    """The checked-in baseline contains all seven completed release scenarios."""
     baseline_path = (
         Path(__file__).resolve().parents[3]
         / "perf"
@@ -269,8 +270,16 @@ def test_module_baseline_contains_measured_critical_scenarios():
     scenarios = baseline["module_benchmark"]["scenarios"]
     by_name = {scenario["name"]: scenario for scenario in scenarios}
 
-    # Original critical scenarios — verified from existing baseline
-    for name in ("plain-small", "large-body", "streaming-first"):
+    # Keep the complete seven-scenario contract explicit to prevent drift.
+    for name in (
+        "plain-small",
+        "chunked-medium",
+        "gzip-large",
+        "large-body",
+        "streaming-first",
+        "gzip-streaming-first",
+        "deflate-streaming-first",
+    ):
         assert name in by_name, f"baseline missing scenario: {name}"
         assert by_name[name]["status"] == "completed"
         assert by_name[name]["metrics"]["input_bytes"] > 0
@@ -286,17 +295,6 @@ def test_module_baseline_contains_measured_critical_scenarios():
     assert streaming["streaming_ratio"] == 1.0
     assert streaming["streaming_fallback_total"] == 0
     assert streaming["zero_copy_output_total"] > 0
-
-    # 0.9.1 compressed-streaming critical scenarios.
-    for name in ("gzip-large", "gzip-streaming-first", "deflate-streaming-first"):
-        assert name in by_name, (
-            f"baseline missing critical scenario: {name}; "
-            f"regenerate baseline with module-enabled NGINX"
-        )
-        assert by_name[name]["status"] == "completed"
-        assert by_name[name]["metrics"]["input_bytes"] > 0
-        assert by_name[name]["metrics"]["baseline_rss_bytes"] > 0
-        assert by_name[name]["metrics"]["peak_rss_bytes"] > 0
 
     # Verify decompression path evidence in compressed streaming scenarios
     if "gzip-streaming-first" in by_name:
@@ -401,6 +399,26 @@ def _make_benchmark_report(scenarios=None):
             "scenarios": scenarios,
         },
     }
+
+
+def _load_canonical_module_baseline():
+    """Return an isolated copy of the checked-in seven-scenario baseline."""
+    baseline_path = (
+        Path(__file__).resolve().parents[3]
+        / "perf"
+        / "baselines"
+        / "module-baseline-091.json"
+    )
+    return copy.deepcopy(json.loads(baseline_path.read_text(encoding="utf-8")))
+
+
+def _scenario(report, name):
+    """Return a named canonical module scenario for mutation tests."""
+    return next(
+        scenario
+        for scenario in report["module_benchmark"]["scenarios"]
+        if scenario["name"] == name
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -982,8 +1000,8 @@ class TestSkippedCriticalScenarios:
         }
         assert _check_skipped_scenarios(report) == []
 
-    def test_non_critical_skipped_ignored(self):
-        """Skipped non-critical scenarios are not reported."""
+    def test_seven_scenario_contract_rejects_skipped_chunked_medium(self):
+        """The seven-scenario release contract makes chunked-medium blocking."""
         report = {
             "scenarios": [
                 {"name": "plain-small", "status": "pass"},
@@ -992,7 +1010,9 @@ class TestSkippedCriticalScenarios:
                 {"name": "streaming-first", "status": "pass"},
             ]
         }
-        assert _check_skipped_scenarios(report) == []
+        assert _check_skipped_scenarios(report) == [
+            ("chunked-medium", "fixture_not_found")
+        ]
 
     def test_empty_report_no_skipped(self):
         """Empty report has no skipped scenarios."""
@@ -1027,7 +1047,7 @@ class TestPathCoverageInvariants:
             }
         }
         violations = _check_path_coverage(report)
-        assert len(violations) == 5
+        assert len(violations) == 6
         names = {v[0] for v in violations}
         assert names == {"streaming-first"}
 
@@ -1044,6 +1064,7 @@ class TestPathCoverageInvariants:
                             "fullbuffer_ratio": 0.2,
                             "streaming_path_hits": 820,
                             "streaming_requests_total": 1000,
+                            "precommit_failopen_total": 50,
                             "zero_copy_output_total": 500,
                             "copied_output_total": 0,
                         },
@@ -1052,6 +1073,20 @@ class TestPathCoverageInvariants:
             }
         }
         assert _check_path_coverage(report) == []
+
+    def test_streaming_first_missing_failopen_counter_is_violation(self):
+        """Uncompressed streaming evidence must include the fallback numerator."""
+        report = _load_canonical_module_baseline()
+        _scenario(report, "streaming-first")["metrics"].pop(
+            "precommit_failopen_total"
+        )
+
+        violations = _check_path_coverage(report)
+
+        assert any(
+            name == "streaming-first" and metric == "fallback_rate"
+            for name, metric, _label in violations
+        )
 
     def test_gzip_large_without_decompression_is_violation(self):
         """gzip-large must show decompression_fullbuffer_total > 0."""
@@ -1143,6 +1178,73 @@ class TestBaselineEvidenceIntegrity:
             baseline, role="baseline"
         ) == []
 
+    @pytest.mark.parametrize(
+        ("field", "value", "reason_fragment"),
+        [
+            ("precommit_failopen_total", None, "missing precommit_failopen_total"),
+            ("precommit_failopen_total", "0", "must be an integer"),
+            ("streaming_requests_total", None, "missing streaming_requests_total"),
+            ("streaming_requests_total", 0, "must be > 0"),
+        ],
+    )
+    def test_canonical_streaming_counters_are_complete_and_typed(
+        self, field, value, reason_fragment,
+    ):
+        """Canonical fallback evidence distinguishes missing and invalid counters."""
+        report = _load_canonical_module_baseline()
+        metrics = _scenario(report, "streaming-first")["metrics"]
+        if value is None:
+            metrics.pop(field)
+        else:
+            metrics[field] = value
+
+        violations = _validate_benchmark_evidence(report, role="baseline")
+
+        assert any(
+            check == "baseline.fallback_rate"
+            and "streaming-first" in reason
+            and reason_fragment in reason
+            for check, reason in violations
+        )
+
+    def test_canonical_baseline_rejects_one_failopen_below_five_percent(self):
+        """Canonical evidence requires zero fail-open, not merely <= 5 percent."""
+        report = _load_canonical_module_baseline()
+        metrics = _scenario(report, "streaming-first")["metrics"]
+        metrics["streaming_requests_total"] = 1000
+        metrics["precommit_failopen_total"] = 1
+
+        violations = _validate_benchmark_evidence(report, role="baseline")
+
+        assert any(
+            check == "baseline.fallback_rate"
+            and "actual=1" in reason
+            for check, reason in violations
+        )
+
+    def test_current_evidence_allows_failopen_at_five_percent(self):
+        """Non-canonical current evidence continues to use the 5 percent cap."""
+        report = _load_canonical_module_baseline()
+        metrics = _scenario(report, "streaming-first")["metrics"]
+        metrics["streaming_requests_total"] = 1000
+        metrics["precommit_failopen_total"] = 50
+
+        violations = _validate_benchmark_evidence(report, role="current")
+
+        assert all("fallback_rate" not in reason for _check, reason in violations)
+
+    @pytest.mark.parametrize(
+        "name", ["gzip-streaming-first", "deflate-streaming-first"]
+    )
+    def test_compressed_streaming_missing_failopen_counter_still_fails(self, name):
+        """Both compressed streaming paths keep the real fallback-counter contract."""
+        report = _load_canonical_module_baseline()
+        _scenario(report, name)["metrics"].pop("precommit_failopen_total")
+
+        violations = _validate_benchmark_evidence(report, role="baseline")
+
+        assert any(name in reason for _check, reason in violations)
+
     def test_valid_baseline_requires_zero_canonical_failopen(self):
         """Canonical evidence passes at zero fail-open and rejects even 1%."""
         report = {
@@ -1175,6 +1277,18 @@ class TestBaselineEvidenceIntegrity:
                             "input_bytes": 200,
                             "baseline_rss_bytes": 2000,
                             "peak_rss_bytes": 2200,
+                        },
+                    },
+                    {
+                        "name": "chunked-medium",
+                        "status": "completed",
+                        "profile": "balanced",
+                        "compression": "none",
+                        "transfer_encoding": "chunked",
+                        "metrics": {
+                            "input_bytes": 125,
+                            "baseline_rss_bytes": 1250,
+                            "peak_rss_bytes": 1400,
                         },
                     },
                     {
@@ -1295,6 +1409,18 @@ class TestBaselineEvidenceIntegrity:
                         },
                     },
                     {
+                        "name": "chunked-medium",
+                        "status": "completed",
+                        "profile": "balanced",
+                        "compression": "none",
+                        "transfer_encoding": "chunked",
+                        "metrics": {
+                            "input_bytes": 10_000,
+                            "baseline_rss_bytes": 10_000_000,
+                            "peak_rss_bytes": 11_500_000,
+                        },
+                    },
+                    {
                         "name": "streaming-first",
                         "status": "completed",
                         "metrics": {
@@ -1345,10 +1471,11 @@ class TestCriticalScenarioCompleteness:
         assert any(name == "large-body" for name, _ in incomplete)
 
     def test_all_completed_no_incomplete(self):
-        """All critical scenarios completed returns empty."""
+        """All seven critical release scenarios completed returns empty."""
         report = {
             "scenarios": [
                 {"name": "plain-small", "status": "completed"},
+                {"name": "chunked-medium", "status": "completed"},
                 {"name": "large-body", "status": "completed"},
                 {"name": "streaming-first", "status": "completed"},
                 {"name": "gzip-large", "status": "completed"},
@@ -1358,6 +1485,34 @@ class TestCriticalScenarioCompleteness:
         }
         assert _check_missing_scenarios(report) == []
         assert _check_scenario_completion(report) == []
+
+    def test_seven_scenario_contract_rejects_missing_chunked_medium(self):
+        """Removing chunked-medium produces missing evidence for the release gate."""
+        report = _load_canonical_module_baseline()
+        report["module_benchmark"]["scenarios"] = [
+            scenario
+            for scenario in report["module_benchmark"]["scenarios"]
+            if scenario["name"] != "chunked-medium"
+        ]
+
+        violations = _validate_benchmark_evidence(report, role="current")
+
+        assert (
+            "current.scenario",
+            "missing critical scenario: chunked-medium",
+        ) in violations
+
+    @pytest.mark.parametrize("status", ["failed", ""])
+    def test_seven_scenario_contract_rejects_incomplete_chunked_medium(
+        self, status,
+    ):
+        """Failed or empty chunked-medium status is incomplete evidence."""
+        report = _load_canonical_module_baseline()
+        _scenario(report, "chunked-medium")["status"] = status
+
+        incomplete = _check_scenario_completion(report)
+
+        assert ("chunked-medium", status or "empty") in incomplete
 
     def test_validate_rejects_missing_scenario(self):
         """_validate_benchmark_evidence flags a missing critical scenario."""
@@ -1599,6 +1754,19 @@ class TestEnvironmentCompatibility:
         assert violations == [(
             "scenario.streaming-first.input_bytes",
             "current=1048516 vs baseline=5390",
+        )]
+
+    def test_seven_scenario_contract_compares_chunked_medium_input_bytes(self):
+        """Current and baseline chunked-medium fixtures must be byte-identical."""
+        current = _load_canonical_module_baseline()
+        baseline = _load_canonical_module_baseline()
+        _scenario(current, "chunked-medium")["metrics"]["input_bytes"] += 1
+
+        violations = _check_environment_compatibility(current, baseline)
+
+        assert violations == [(
+            "scenario.chunked-medium.input_bytes",
+            "current=2165 vs baseline=2164",
         )]
 
     def test_mismatched_platform_detected(self):
@@ -1902,10 +2070,11 @@ class TestCompressedStreamingEvidenceCompleteness:
         assert any(name == "deflate-streaming-first" for name, _ in incomplete)
 
     def test_all_critical_scenarios_completed_passes(self):
-        """All six critical scenarios completed → no missing/incomplete."""
+        """All seven critical scenarios completed → no missing/incomplete."""
         report = {
             "scenarios": [
                 {"name": "plain-small", "status": "completed"},
+                {"name": "chunked-medium", "status": "completed"},
                 {"name": "large-body", "status": "completed"},
                 {"name": "streaming-first", "status": "completed"},
                 {"name": "gzip-large", "status": "completed"},
@@ -2311,6 +2480,18 @@ class TestCompressedStreamingPathTruthfulness:
                             "input_bytes": 1_048_516,
                             "baseline_rss_bytes": 20_000_000,
                             "peak_rss_bytes": 25_000_000,
+                        },
+                    },
+                    {
+                        "name": "chunked-medium",
+                        "status": "completed",
+                        "profile": "balanced",
+                        "compression": "none",
+                        "transfer_encoding": "chunked",
+                        "metrics": {
+                            "input_bytes": 10_000,
+                            "baseline_rss_bytes": 10_000_000,
+                            "peak_rss_bytes": 11_500_000,
                         },
                     },
                     {

@@ -277,7 +277,12 @@ def _calc_fallback_rate(scenarios: list[dict]) -> float | None:
         m = scenario.get("metrics") or scenario.get("results") or scenario
         failopen = m.get("precommit_failopen_total")
         requests = m.get("streaming_requests_total")
-        if failopen is None or requests is None or requests <= 0:
+        if (
+            type(failopen) is not int
+            or failopen < 0
+            or type(requests) is not int
+            or requests <= 0
+        ):
             return None
         rates.append(float(failopen) / float(requests))
     return max(rates)
@@ -525,24 +530,15 @@ def _handle_nginx_unavailable(blocking: bool, args: argparse.Namespace) -> int:
     Returns the appropriate exit code.
     """
     if not blocking:
-        _stderr(
+        return _report_skipped_benchmark(
             "SKIP_NOT_PRESENT: NGINX_BIN is not set or binary not found.\n"
             "  Module-level benchmarks require a locally-compiled NGINX binary\n"
             "  with the markdown filter module loaded.\n"
-            "  Set NGINX_BIN=/path/to/nginx to enable module benchmarks."
+            "  Set NGINX_BIN=/path/to/nginx to enable module benchmarks.",
+            "NGINX_BIN not set or binary not found",
+            args,
+            EX_SKIP_NOT_PRESENT,
         )
-        evidence_pack = _build_evidence_pack(
-            report=None,
-            verdict="SKIPPED",
-            breaches=[],
-            results=[],
-            skipped=True,
-            skip_reason="NGINX_BIN not set or binary not found",
-        )
-        _print_evidence_summary(evidence_pack)
-        _write_output(evidence_pack, args.output)
-        return EX_SKIP_NOT_PRESENT
-
     # Blocking mode
     if args.allow_skip_module:
         if _is_release_tag():
@@ -553,23 +549,14 @@ def _handle_nginx_unavailable(blocking: bool, args: argparse.Namespace) -> int:
             )
             return 1
 
-        _stderr(
+        return _report_skipped_benchmark(
             "WARNING: NGINX_BIN is not set — module benchmarks skipped.\n"
             "  Proceeding due to --allow-skip-module flag.\n"
-            "  This is acceptable for development builds but NOT for release tags."
+            "  This is acceptable for development builds but NOT for release tags.",
+            "NGINX_BIN not set; --allow-skip-module used",
+            args,
+            0,
         )
-        evidence_pack = _build_evidence_pack(
-            report=None,
-            verdict="SKIPPED",
-            breaches=[],
-            results=[],
-            skipped=True,
-            skip_reason="NGINX_BIN not set; --allow-skip-module used",
-        )
-        _print_evidence_summary(evidence_pack)
-        _write_output(evidence_pack, args.output)
-        return 0
-
     _stderr(
         "FAIL: NGINX_BIN is not set and --allow-skip-module was not provided.\n"
         "  In blocking mode, module benchmarks are required for release tags.\n"
@@ -578,6 +565,22 @@ def _handle_nginx_unavailable(blocking: bool, args: argparse.Namespace) -> int:
         "    2. Pass --allow-skip-module to explicitly skip (non-release only)."
     )
     return 1
+
+
+def _report_skipped_benchmark(message, skip_reason, args, exit_code):
+    """Write a skipped evidence pack and return the requested exit code."""
+    _stderr(message)
+    evidence_pack = _build_evidence_pack(
+        report=None,
+        verdict="SKIPPED",
+        breaches=[],
+        results=[],
+        skipped=True,
+        skip_reason=skip_reason,
+    )
+    _print_evidence_summary(evidence_pack)
+    _write_output(evidence_pack, args.output)
+    return exit_code
 
 
 def _obtain_benchmark_report(
@@ -629,9 +632,10 @@ def _obtain_benchmark_report(
 # Scenarios that must complete (not be skipped) in blocking mode.
 _CRITICAL_SCENARIOS = frozenset({
     "plain-small",
+    "chunked-medium",
+    "gzip-large",
     "large-body",
     "streaming-first",
-    "gzip-large",
     "gzip-streaming-first",
     "deflate-streaming-first",
 })
@@ -642,6 +646,13 @@ _CRITICAL_STREAMING_SCENARIOS = (
 )
 _FULLBUFFER_RATIO_COVERAGE_LABEL = (
     "fullbuffer_ratio < 1 (not all requests fell back to full-buffer)"
+)
+_STREAMING_REQUESTS_COVERAGE_LABEL = "streaming_requests_total > 0"
+_OUTPUT_TOTAL_COVERAGE_LABEL = (
+    "zero_copy_output_total + copied_output_total > 0"
+)
+_FALLBACK_RATE_COVERAGE_LABEL = (
+    "precommit_failopen_total / streaming_requests_total <= 0.05"
 )
 
 
@@ -690,12 +701,17 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
                 {
                     "metric": "streaming_requests_total",
                     "predicate": _is_positive,
-                    "label": "streaming_requests_total > 0",
+                    "label": _STREAMING_REQUESTS_COVERAGE_LABEL,
                 },
                 {
                     "metric": "output_total",
                     "predicate": _is_positive,
-                    "label": "zero_copy_output_total + copied_output_total > 0",
+                    "label": _OUTPUT_TOTAL_COVERAGE_LABEL,
+                },
+                {
+                    "metric": "fallback_rate",
+                    "predicate": _is_acceptable_fallback_rate,
+                    "label": _FALLBACK_RATE_COVERAGE_LABEL,
                 },
             ],
         },
@@ -752,17 +768,17 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
                 {
                     "metric": "streaming_requests_total",
                     "predicate": _is_positive,
-                    "label": "streaming_requests_total > 0",
+                    "label": _STREAMING_REQUESTS_COVERAGE_LABEL,
                 },
                 {
                     "metric": "output_total",
                     "predicate": _is_positive,
-                    "label": "zero_copy_output_total + copied_output_total > 0",
+                    "label": _OUTPUT_TOTAL_COVERAGE_LABEL,
                 },
                 {
                     "metric": "fallback_rate",
                     "predicate": _is_acceptable_fallback_rate,
-                    "label": "precommit_failopen_total / streaming_requests_total <= 0.05",
+                    "label": _FALLBACK_RATE_COVERAGE_LABEL,
                 },
             ],
             "metadata_checks": [
@@ -809,17 +825,17 @@ def _path_coverage_invariants() -> list[tuple[str, list[dict]]]:
                 {
                     "metric": "streaming_requests_total",
                     "predicate": _is_positive,
-                    "label": "streaming_requests_total > 0",
+                    "label": _STREAMING_REQUESTS_COVERAGE_LABEL,
                 },
                 {
                     "metric": "output_total",
                     "predicate": _is_positive,
-                    "label": "zero_copy_output_total + copied_output_total > 0",
+                    "label": _OUTPUT_TOTAL_COVERAGE_LABEL,
                 },
                 {
                     "metric": "fallback_rate",
                     "predicate": _is_acceptable_fallback_rate,
-                    "label": "precommit_failopen_total / streaming_requests_total <= 0.05",
+                    "label": _FALLBACK_RATE_COVERAGE_LABEL,
                 },
             ],
             "metadata_checks": [
@@ -901,7 +917,12 @@ def _path_metric_value(metrics: dict, metric: str) -> float | int | None:
     if metric == "fallback_rate":
         failopen = metrics.get("precommit_failopen_total")
         requests = metrics.get("streaming_requests_total")
-        if failopen is None or requests is None or requests <= 0:
+        if (
+            type(failopen) is not int
+            or failopen < 0
+            or type(requests) is not int
+            or requests <= 0
+        ):
             return None
         return float(failopen) / float(requests)
     return metrics.get(metric)
@@ -1002,7 +1023,7 @@ def _check_scenario_completion(report: dict) -> list[tuple[str, str]]:
 def _canonical_baseline_fallback_violations(
     report: dict, role: str,
 ) -> list[tuple[str, str]]:
-    """Reject non-zero fail-open counters in canonical baselines."""
+    """Require complete zero-fallback counters in canonical baselines."""
     if role != "baseline":
         return []
 
@@ -1013,11 +1034,40 @@ def _canonical_baseline_fallback_violations(
         scenario = by_name.get(name, {})
         metrics = scenario.get("metrics") or scenario.get("results") or scenario
         failopen = metrics.get("precommit_failopen_total")
-        if failopen is not None and failopen != 0:
+        requests = metrics.get("streaming_requests_total")
+        if failopen is None:
+            violations.append((
+                f"{role}.fallback_rate",
+                f"{name}: missing precommit_failopen_total",
+            ))
+        elif type(failopen) is not int or failopen < 0:
+            violations.append((
+                f"{role}.fallback_rate",
+                f"{name}: precommit_failopen_total must be an integer >= 0 "
+                f"(actual={failopen!r})",
+            ))
+        elif failopen != 0:
             violations.append((
                 f"{role}.fallback_rate",
                 f"{name}: canonical precommit_failopen_total must be 0 "
                 f"(actual={failopen})",
+            ))
+        if requests is None:
+            violations.append((
+                f"{role}.fallback_rate",
+                f"{name}: missing streaming_requests_total",
+            ))
+        elif type(requests) is not int:
+            violations.append((
+                f"{role}.fallback_rate",
+                f"{name}: streaming_requests_total must be an integer > 0 "
+                f"(actual={requests!r})",
+            ))
+        elif requests <= 0:
+            violations.append((
+                f"{role}.fallback_rate",
+                f"{name}: streaming_requests_total must be > 0 "
+                f"(actual={requests})",
             ))
     return violations
 
@@ -1138,17 +1188,15 @@ def _validate_current_evidence(
     if not blocking:
         return None
 
-    violations = _validate_benchmark_evidence(report or {}, role="current")
-    if not violations:
-        return None
-
-    return _report_integrity_failure(
-        report,
-        args,
-        violations,
-        "FAIL: Current benchmark report failed evidence integrity validation:",
-        "  Release tags require complete, credible evidence.",
-    )
+    if violations := _validate_benchmark_evidence(report or {}, role="current"):
+        return _report_integrity_failure(
+            report,
+            args,
+            violations,
+            "FAIL: Current benchmark report failed evidence integrity validation:",
+            "  Release tags require complete, credible evidence.",
+        )
+    return None
 
 
 def _validate_baseline_evidence(
@@ -1161,21 +1209,21 @@ def _validate_baseline_evidence(
     if not blocking:
         return None
 
-    violations = _validate_benchmark_evidence(
+    if violations := _validate_benchmark_evidence(
         baseline_report, role="baseline"
-    )
-    if not violations:
-        return None
-
-    return _report_integrity_failure(
-        report,
-        args,
-        violations,
-        "FAIL: Checked-in baseline failed evidence integrity validation:",
-        "  The baseline must be regenerated by running a real benchmark "
-        "after fixing the benchmark runtime.\n"
-        "  Do not hand-edit baseline values.",
-    )
+    ):
+        return _report_integrity_failure(
+            report,
+            args,
+            violations,
+            "FAIL: Checked-in baseline failed evidence integrity validation:",
+            "  The baseline must be regenerated by running a real benchmark "
+            "after fixing the benchmark runtime.\n"
+            "  Do not fabricate or improve measured evidence. Only documented "
+            "conservative normalization of latency/throughput is allowed; path, "
+            "fallback, output, memory and environment evidence must remain verbatim.",
+        )
+    return None
 
 
 def _check_environment_compatibility(
