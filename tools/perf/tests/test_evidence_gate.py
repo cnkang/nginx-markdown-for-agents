@@ -250,6 +250,10 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
     assert "Determine canonical benchmark NGINX version" in workflow
     assert "tools/release-matrix.json" in workflow
     assert "apache2-utils" in workflow
+    assert "components: rustfmt,clippy" in workflow, (
+        "Canonical job must install repository-required Rust components with "
+        "the toolchain instead of deferring rustup to cargo install"
+    )
     assert "tools/perf/run_module_benchmark.sh" in workflow
     assert "perf/baselines/module-baseline-091.json" in workflow
     assert "_validate_benchmark_evidence" in workflow
