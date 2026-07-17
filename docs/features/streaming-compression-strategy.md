@@ -67,6 +67,16 @@ response-wide: a gzip member reset does not reset the budget. A gzip
 later chunk begin another member. Finalization succeeds only at a complete
 member boundary; a truncated final member is rejected.
 
+**Deflate trailing-data integrity**: deflate (zlib-wrapped RFC 1950 or raw
+RFC 1951) does not support concatenated members. A complete deflate stream
+must consume every byte of the compressed payload. If `Z_STREAM_END` is
+reached with `avail_in > 0`, the remaining bytes are trailing data and the
+response is rejected as `FORMAT_ERROR` rather than silently truncated. The
+same applies to non-empty chunks arriving after the deflate stream has
+already finished: empty chunks remain a safe no-op, but any non-empty
+subsequent input is classified as trailing data and rejected. Gzip is
+exempt from this constraint because it supports concatenated members.
+
 If decompressed output exceeds the limit, decompression terminates immediately
 and the configured `markdown_error_policy` applies before commit:
 
@@ -134,3 +144,4 @@ The 0.9.1 boundary is based on validated decoder lifecycles:
 | 0.8.0 | 2026-06-16 | Kang | Initial document for v0.8.0 streaming compression strategy (streaming security enforcement task 3.3) |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.9.1 | 2026-07-14 | Codex | Document gzip plus zlib/raw-deflate streaming routing, gzip member lifecycle, and bounded Brotli full-buffer boundary |
+| 0.9.1 | 2026-07-17 | Kang | Document deflate trailing-data integrity: complete input consumption required, trailing bytes after Z_STREAM_END rejected as FORMAT_ERROR, gzip concatenated members remain supported |

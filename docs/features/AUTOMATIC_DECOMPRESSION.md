@@ -26,7 +26,9 @@ Automatic decompression is the built-in fallback path for this scenario.
   - When policy selects full-buffer conversion, both the default Rust FFI
     decoder and the C no-Rust fallback consume every concatenated gzip member,
     reject a truncated later member, and enforce one response-wide output
-    budget.
+    budget. Deflate (zlib-wrapped or raw) must completely consume its
+    compressed payload; trailing bytes after `Z_STREAM_END` are rejected as
+    `FORMAT_ERROR` (deflate does not support concatenated members).
 - Supports `br` when Brotli support is compiled in; Brotli remains on bounded
   full-buffer decompression in 0.9.1.
 - Uses a fast path for uncompressed responses (no decompression work).
