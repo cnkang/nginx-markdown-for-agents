@@ -1142,8 +1142,8 @@ values.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
 | 0.8.0 | 2026-06-16 | Kang | Initial streaming troubleshooting guide with 5 diagnostic scenarios |
 | 0.8.0 | 2026-06-16 | Kang  | Added Log and Metrics Examples section with annotated log entries, JSON/Prometheus metrics examples (healthy and unhealthy), and diagnostics endpoint output |
 | 0.8.0 | 2026-06-16 | Kang  | Added Scenario 6 (fallback-disabled escalation), decision tree, concrete commands |
-| 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
-| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

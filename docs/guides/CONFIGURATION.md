@@ -3010,12 +3010,12 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Added `markdown_streaming_engine`, `markdown_streaming_budget`, `markdown_metrics_format`, and `markdown_metrics_shm_size` directive documentation previously missing from this guide; added update tracking section |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.7.0 | 2026-05-17 | Kang | Added `markdown_dynconf_dry_run` directive documentation |
-| 0.7.0 | 2026-05-18 | Kang | Added `markdown_diagnostics` directive documentation |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.9.0 | 2026-06-28 | Kang | Added Profiles section (`markdown_profile` directive, three profiles, merge order, forced fields, conflict rules) |
+| 0.8.3 | 2026-06-26 | Kang | No configuration changes; version alignment with 0.8.3 release |
 | 0.8.0 | 2026-06-16 | Kang | Cross-reference audit: fixed stale `markdown_streaming_auto_threshold` reference in streaming section intro to use `markdown_stream_threshold` |
 | 0.8.0 | 2026-06-16 | Codex | Added missing directive documentation: `markdown_content_types`, `markdown_prune_noise`, `markdown_prune_selectors`, `markdown_prune_protection_selectors`, `markdown_llm_provider`, `markdown_chars_per_token`, OpenTelemetry family (`markdown_otel`, `markdown_otel_endpoint`, `markdown_otel_tracing`, `markdown_otel_metrics`, `markdown_otel_service_name`, `markdown_otel_span_buffer_size`, `markdown_otel_export_timeout`), `markdown_metrics_per_path`, `markdown_metrics_per_path_cardinality`; added deprecated directives section for `markdown_max_size` and `markdown_streaming_auto_threshold` |
-| 0.8.3 | 2026-06-26 | Kang | No configuration changes; version alignment with 0.8.3 release |
-| 0.9.0 | 2026-06-28 | Kang | Added Profiles section (`markdown_profile` directive, three profiles, merge order, forced fields, conflict rules) |
-| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.7.0 | 2026-05-18 | Kang | Added `markdown_diagnostics` directive documentation |
+| 0.7.0 | 2026-05-17 | Kang | Added `markdown_dynconf_dry_run` directive documentation |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.5.0 | 2026-04-21 | docs-standardization | Added `markdown_streaming_engine`, `markdown_streaming_budget`, `markdown_metrics_format`, and `markdown_metrics_shm_size` directive documentation previously missing from this guide; added update tracking section |

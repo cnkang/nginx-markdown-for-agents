@@ -368,8 +368,8 @@ http {
     # Accept negotiation (replaces markdown_on_wildcard)
     markdown_accept wildcard;
 
-    # Streaming configuration (unchanged directives)
-    markdown_streaming_engine auto;
+    # Streaming configuration (replaces markdown_streaming_engine in v0.9.1)
+    markdown_streaming auto;
     markdown_stream_threshold 1m;
     markdown_stream_flush_min 4k;
 

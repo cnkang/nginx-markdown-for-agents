@@ -277,6 +277,6 @@ Streaming-specific codes (7=FALLBACK, 8=POST_COMMIT) are feature-gated.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.7.0 | 2026-05-17 | Kang | Initial document for v0.7.0 decompression budget and error classification |
-| 0.7.0 | 2026-05-18 | Kang | Added detailed decompression error categories, FFI mapping, per-category Prometheus metrics, fail-open behavior, and operator guidance (TASK-A04.4) |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.7.0 | 2026-05-18 | Kang | Added detailed decompression error categories, FFI mapping, per-category Prometheus metrics, fail-open behavior, and operator guidance (TASK-A04.4) |
+| 0.7.0 | 2026-05-17 | Kang | Initial document for v0.7.0 decompression budget and error classification |
