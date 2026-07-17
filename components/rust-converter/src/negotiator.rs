@@ -199,7 +199,7 @@ fn extract_q_values(entries: &[AcceptEntry], on_wildcard: bool) -> (u16, u16) {
 ///
 /// * `accept_header` - The raw Accept header value (may be empty or malformed).
 /// * `on_wildcard` - Whether `*/*` in the Accept header implies markdown
-///   preference (corresponds to `markdown_on_wildcard on`).
+///   preference (corresponds to `markdown_accept wildcard`).
 ///
 /// # Returns
 ///

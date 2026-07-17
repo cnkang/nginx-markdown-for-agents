@@ -72,8 +72,8 @@ pub(crate) struct DecodedOptions<'a> {
     pub(crate) prune_protection_selectors: Option<&'a str>,
     /// Unified memory budget (bytes).  Currently enforced only by the
     /// streaming and incremental paths.  The full-buffer path relies
-    /// on the NGINX-side `max_size` limit instead; see the FFI
-    /// header contract for details.
+    /// on the NGINX-side `markdown_limits memory=<size>` limit instead;
+    /// see the FFI header contract for details.
     #[allow(dead_code)]
     pub(crate) memory_budget: u64,
     #[allow(dead_code)]
