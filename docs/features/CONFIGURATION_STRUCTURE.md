@@ -90,8 +90,8 @@ typedef struct {
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `generate_etag` | `ngx_flag_t` | `1` (on) | Generate ETags for Markdown responses |
-| `conditional_requests` | `ngx_uint_t` | `FULL_SUPPORT` | Conditional request mode: full_support, if_modified_since_only, or disabled |
+| `generate_etag` | `ngx_flag_t` | `0` (off) | Generate ETags for Markdown responses (on only when `markdown_cache_validation full`) |
+| `conditional_requests` | `ngx_uint_t` | `IF_MODIFIED_SINCE` | Conditional request mode (Config V2: controlled by `markdown_cache_validation off\|ims_only\|full`) |
 
 ### Observability
 
@@ -178,11 +178,11 @@ All default values are applied during configuration merging:
 - **flavor**: `COMMONMARK` - Well-specified baseline
 - **token_estimate**: `0` (off) - Optional feature
 - **front_matter**: `0` (off) - Optional feature
-- **on_wildcard**: `0` (off) - Conservative default
+- **on_wildcard**: removed (Config V2: use `markdown_accept strict|wildcard|force`, default `strict`)
 - **auth_policy**: `ALLOW` - Allow conversion of authenticated requests
 - **auth_cookies**: `NULL` - No patterns configured
-- **generate_etag**: `1` (on) - Enable proper caching
-- **conditional_requests**: `FULL_SUPPORT` - Full HTTP semantics
+- **generate_etag**: `0` (off) - Disabled by default (ims_only default)
+- **conditional_requests**: `IF_MODIFIED_SINCE` - Config V2 default (controlled by `markdown_cache_validation`)
 - **log_verbosity**: `INFO` - Informational module logs by default
 - **buffer_chunked**: `1` (on) - Handle chunked responses
 - **stream_types**: `NULL` - No exclusions by default

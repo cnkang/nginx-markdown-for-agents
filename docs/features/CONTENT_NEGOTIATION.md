@@ -173,7 +173,7 @@ Not all requests are eligible for conversion. The module checks:
 - `image/png` → Not eligible
 
 ### Response Size
-- The module uses a dual-engine routing strategy:
+- The module uses a streaming-default routing strategy:
   - **Full-buffer engine**: Responses within `markdown_limits memory=<size>` are eligible for conversion.
   - **Streaming engine**: Responses exceeding `markdown_stream_threshold` are routed to the streaming converter, which processes chunks incrementally and is bounded by streaming memory budgets rather than `markdown_limits memory=<size>`.
 - Responses that exceed all applicable limits → Not eligible (passthrough)

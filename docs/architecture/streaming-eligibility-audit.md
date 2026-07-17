@@ -120,7 +120,7 @@ failure short-circuits to passthrough.
 | What | RFC 7231 section 5.3.2 q-value comparison with RFC 9110 tie-break rules. Client must prefer `text/markdown` over `text/html`. |
 | On failure | Passthrough — `skips.accept++` with reason sub-codes: `NO_ACCEPT`, `LOWER_Q`, `EXPLICIT_REJECT`, `MALFORMED` |
 | Order | **Last** check before conversion attempt |
-| Directive | `markdown_accept on\|off` (controls `*/*` interpretation) |
+| Directive | `markdown_accept strict\|wildcard\|force` (controls `*/*` interpretation) |
 
 ---
 

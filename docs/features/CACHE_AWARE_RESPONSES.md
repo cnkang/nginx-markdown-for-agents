@@ -128,9 +128,9 @@ location /docs/ {
 
 **Modes**:
 
-- `full_support` (default): Support Markdown-variant `If-None-Match` (ETag) and preserve upstream `If-Modified-Since` semantics
-- `if_modified_since_only`: Skip module-side `If-None-Match` processing (performance optimization); `If-Modified-Since` remains handled by standard NGINX
-- `disabled`: No conditional request support for Markdown variants
+- `ims_only` (default): Skip module-side `If-None-Match` processing (performance optimization); `If-Modified-Since` remains handled by standard NGINX
+- `full`: Support Markdown-variant `If-None-Match` (ETag) and preserve upstream `If-Modified-Since` semantics
+- `off`: No conditional request support for Markdown variants
 
 **Performance Note**: `full_support` requires conversion to generate a Markdown-variant ETag for comparison, which has performance implications for conditional requests.
 
@@ -258,7 +258,7 @@ For authenticated requests, the module adjusts cache control:
 ```nginx
 location /private/ {
     markdown_filter on;
-    markdown_auth_policy detect;
+    markdown_auth_policy deny;
     markdown_auth_cookies "session_id auth_token";
     
     proxy_pass http://backend;
