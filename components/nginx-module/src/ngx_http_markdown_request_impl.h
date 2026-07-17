@@ -974,15 +974,20 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     }
     /* else: unknown Content-Length — path deferred to body filter */
 #else
-    if (conf->routing.large_body_threshold > 0
+    /* Incremental path not compiled; if streaming is also not compiled
+     * and the operator explicitly set markdown_stream_threshold, warn
+     * that the threshold has no effect without streaming support. */
+#ifndef MARKDOWN_STREAMING_ENABLED
+    if (conf->stream.threshold_explicit
         && r->method != NGX_HTTP_HEAD
         && r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
     {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown: markdown_large_body_threshold is set, "
-                     "but incremental support was not compiled in; using "
+                     "markdown: markdown_stream_threshold is set, "
+                     "but streaming support was not compiled in; using "
                      "full-buffer path");
     }
+#endif
 #endif
 
     /* Record path hit metric (only for eligible requests) */
