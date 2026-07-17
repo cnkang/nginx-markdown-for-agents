@@ -71,6 +71,6 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.1 | 2026-07-08 | Kang | Initial ADR for 0.9.1 Performance Evidence Gate |
-| 0.9.1 | 2026-07-14 | Codex | Required a large non-fallback, genuinely chunked streaming-first scenario and real module evidence for blocking release validation |
 | 0.9.1 | 2026-07-16 | Kang | Added gzip-streaming-first and deflate-streaming-first scenarios; promoted gzip-large to critical; 7 scenarios total with per-codec decompression path evidence |
+| 0.9.1 | 2026-07-14 | Codex | Required a large non-fallback, genuinely chunked streaming-first scenario and real module evidence for blocking release validation |
+| 0.9.1 | 2026-07-08 | Kang | Initial ADR for 0.9.1 Performance Evidence Gate |

@@ -87,5 +87,5 @@ thresholds.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.8.0 | 2026-06-16 | Kang  | Initial feature compatibility matrix |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.8.0 | 2026-06-16 | Kang  | Initial feature compatibility matrix |

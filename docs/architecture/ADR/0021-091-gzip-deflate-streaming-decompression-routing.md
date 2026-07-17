@@ -96,6 +96,6 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.1 | 2026-07-08 | Kang | Initial ADR for Streaming Decompression Routing |
 | 0.9.1 | 2026-07-14 | Kang | Enabled member-aware gzip streaming alongside zlib/raw deflate; retained bounded Brotli full-buffer routing |
 | 0.9.1 | 2026-07-14 | Codex | Aligned Rust and C full-buffer gzip with the same multi-member, truncation, and response-budget contract |
+| 0.9.1 | 2026-07-08 | Kang | Initial ADR for Streaming Decompression Routing |

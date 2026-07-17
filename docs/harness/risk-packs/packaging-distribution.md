@@ -113,12 +113,12 @@ make release-gates-check
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.6.0 | 2026-04-28 | v0.6.0-planning | Initial pack definition |
-| 0.6.0 | 2026-05-03 | Codex | Covered Homebrew workflows/formula, package metadata, and release-gate docs |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.7.2 | 2026-05-25 | Codex | Added release package chain invariants for module names, checksum coverage, artifact naming, architecture-matched smoke tests, and Helm secure defaults |
-| 0.7.3 | 2026-05-26 | Codex | Added standalone DEB/RPM package-name, layout, and prebuilt-module contract coverage |
-| 0.7.4 | 2026-05-26 | Codex | Added GitHub Actions container shell coverage for standalone package workflows |
-| 0.7.5 | 2026-05-26 | Codex | Added package dependency satisfiability, version-input validation, distro-specific RPM repo selection, package script lifecycle args, module path/glibc runtime compatibility, and local K8s smoke context/module safety coverage |
-| 0.7.6 | 2026-05-27 | Codex | Added Helm metrics directive gating coverage for stock-image-safe chart renders |
 | 0.7.7 | 2026-05-27 | Codex | Added public package install docs channel-state coverage before APT/YUM repositories exist |
+| 0.7.6 | 2026-05-27 | Codex | Added Helm metrics directive gating coverage for stock-image-safe chart renders |
+| 0.7.5 | 2026-05-26 | Codex | Added package dependency satisfiability, version-input validation, distro-specific RPM repo selection, package script lifecycle args, module path/glibc runtime compatibility, and local K8s smoke context/module safety coverage |
+| 0.7.4 | 2026-05-26 | Codex | Added GitHub Actions container shell coverage for standalone package workflows |
+| 0.7.3 | 2026-05-26 | Codex | Added standalone DEB/RPM package-name, layout, and prebuilt-module contract coverage |
+| 0.7.2 | 2026-05-25 | Codex | Added release package chain invariants for module names, checksum coverage, artifact naming, architecture-matched smoke tests, and Helm secure defaults |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.6.0 | 2026-05-03 | Codex | Covered Homebrew workflows/formula, package metadata, and release-gate docs |
+| 0.6.0 | 2026-04-28 | v0.6.0-planning | Initial pack definition |

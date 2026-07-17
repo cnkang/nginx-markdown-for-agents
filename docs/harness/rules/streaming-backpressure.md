@@ -430,7 +430,7 @@ remediation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
-| 0.5.5 | 2026-04-24 | Codex | Added recent Git analysis remediation closeout rule |
-| 0.6.0 | 2026-05-02 | Kang | Comment/doc audit: Rust module docs, C function comments, Python docstrings, shell script headers; version 0.6.0 consistency fixes |
 | 0.6.1 | 2026-05-06 | Kang | Rules 27–31: Markdown escaping/injection prevention, full ngx_list_part_t iteration, flag clearing ordering, NUL-termination/EOF boundary, merge residual integrity; output-safety risk pack |
+| 0.6.0 | 2026-05-02 | Kang | Comment/doc audit: Rust module docs, C function comments, Python docstrings, shell script headers; version 0.6.0 consistency fixes |
+| 0.5.5 | 2026-04-24 | Codex | Added recent Git analysis remediation closeout rule |
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

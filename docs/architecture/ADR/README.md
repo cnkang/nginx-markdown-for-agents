@@ -110,8 +110,8 @@ What other options were considered and why were they not chosen?
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.1 | 2026-07-08 | Kang | Added ADR-0020 (Hybrid Zero-Copy), ADR-0021 (gzip/deflate streaming routing), ADR-0022 (Perf Evidence Gate) |
 | 0.9.1 | 2026-07-14 | Codex | Added ADR-0023 for the final pre-v1 streaming and flavor contract reset |
+| 0.9.1 | 2026-07-08 | Kang | Added ADR-0020 (Hybrid Zero-Copy), ADR-0021 (gzip/deflate streaming routing), ADR-0022 (Perf Evidence Gate) |
 | 0.9.0 | 2026-06-30 | Kang | Added ADR-0015 (Config V2), ADR-0016 (Rust-first decision core boundary), ADR-0017 (HeaderPlan atomic apply), ADR-0018 (observability schema v1 / reason registry), ADR-0019 (0.9.0 release gate framework) — Wave 1 contract freeze |
 | 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
 | 0.8.2 | 2026-06-25 | Kang | Promoted ADR-0011 through ADR-0014 from Proposed to Accepted (implemented in 0.8.0) |

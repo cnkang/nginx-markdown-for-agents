@@ -95,5 +95,5 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.0 | 2026-06-30 | Kang | Initial ADR — 0.9.0 gate name/structure/blocking-semantics freeze (body implemented in Wave 7) |
 | 0.9.1 | 2026-07-14 | Kang | Add `RELEASE_GATE_ALLOW_SKIP_MODULE=1` env-limited skip for `test-production-examples-nginx-t`, mirroring the 091 module-benchmark skip contract |
+| 0.9.0 | 2026-06-30 | Kang | Initial ADR — 0.9.0 gate name/structure/blocking-semantics freeze (body implemented in Wave 7) |

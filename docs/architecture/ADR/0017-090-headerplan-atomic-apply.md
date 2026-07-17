@@ -156,5 +156,5 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.0 | 2026-06-30 | Kang | Initial ADR — prepare/commit split, special-field atomicity, exception table, post-commit boundary |
 | 0.9.0 | 2026-07-02 | Kang | Documented atomic scope boundary: core plan vs post-plan best-effort with hard abort |
+| 0.9.0 | 2026-06-30 | Kang | Initial ADR — prepare/commit split, special-field atomicity, exception table, post-commit boundary |

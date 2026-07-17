@@ -692,8 +692,8 @@ nginx_markdown_inflight_current
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 metrics (delivery_total, decision_total, decompression_budget_exceeded, parse_timeouts, parse_budget_exceeded, replay_buffer_errors) and delivery/decision counter semantics |
-| 0.9.0 | 2026-07-01 | Kang | Breaking: outcome families, lowercase reason codes, and PromQL examples |
 | 0.9.1 | 2026-07-13 | Kang | Align skip/failure reason labels with actual C-module output (remove non-existent skipped_accept_reject; correct bypass_no_transform reference) |
+| 0.9.0 | 2026-07-01 | Kang | Breaking: outcome families, lowercase reason codes, and PromQL examples |
+| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 metrics (delivery_total, decision_total, decompression_budget_exceeded, parse_timeouts, parse_budget_exceeded, replay_buffer_errors) and delivery/decision counter semantics |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

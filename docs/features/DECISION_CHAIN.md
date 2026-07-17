@@ -208,7 +208,7 @@ The reason code strings are produced by the Rust `ReasonCode::as_str()` registry
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 reason codes (REPLAY_BUFFER_ERROR, DECOMPRESSION_BUDGET_EXCEEDED, PARSE_TIMEOUT, PARSE_BUDGET_EXCEEDED, SKIPPED_NO_ACCEPT, SKIPPED_CONDITIONAL) and delivery/decision counter separation |
 | 0.9.0 | 2026-07-09 | Kang | **Synchronized with observability-schema-v1 (single source of truth).** All reason codes switched to lowercase snake_case; eligibility checks 2–7 collapsed to `not_eligible`; scope-off → `disabled`; conversion outcomes → `converted`/`failed_open`/`failed_closed`; removed legacy `NGX_HTTP_MARKDOWN_INELIGIBLE_*` enum column; Accept negotiation split into `skipped_accept`/`skipped_no_accept`/`skipped_accept_reject` |
+| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 reason codes (REPLAY_BUFFER_ERROR, DECOMPRESSION_BUDGET_EXCEEDED, PARSE_TIMEOUT, PARSE_BUDGET_EXCEEDED, SKIPPED_NO_ACCEPT, SKIPPED_CONDITIONAL) and delivery/decision counter separation |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

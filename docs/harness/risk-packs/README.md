@@ -29,12 +29,12 @@ runtime semantics from canonical docs. They answer four practical questions:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
+| 0.8.3 | 2026-06-26 | Kang | Added release-manifest and version-consistency verification families |
+| 0.8.2 | 2026-06-13 | Codex | Added security-static-supply-chain pack for supplemental static security and supply-chain visibility gates |
+| 0.6.2 | 2026-05-11 | Kang | Added tooling-path-security pack to generalize repeated tooling path-safety fixes |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.6.0 | 2026-05-03 | Codex | Added dynamic-config-hot-reload pack from two-week branch scan |
+| 0.6.0 | 2026-04-28 | v0.6.0-planning | Added otel-integration and packaging-distribution packs |
 | 0.5.5 | 2026-04-24 | Codex | Added harness-remediation pack |
 | 0.5.5 | 2026-04-24 | Codex | Added protocol safety and release governance packs |
-| 0.6.0 | 2026-04-28 | v0.6.0-planning | Added otel-integration and packaging-distribution packs |
-| 0.6.0 | 2026-05-03 | Codex | Added dynamic-config-hot-reload pack from two-week branch scan |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.6.2 | 2026-05-11 | Kang | Added tooling-path-security pack to generalize repeated tooling path-safety fixes |
-| 0.8.2 | 2026-06-13 | Codex | Added security-static-supply-chain pack for supplemental static security and supply-chain visibility gates |
-| 0.8.3 | 2026-06-26 | Kang | Added release-manifest and version-consistency verification families |
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

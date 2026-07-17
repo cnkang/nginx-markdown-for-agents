@@ -63,7 +63,7 @@ behavior, also run the matching focused E2E or `make harness-check-full`.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.5 | 2026-04-24 | Codex | Added 60-day protocol safety routing |
-| 0.6.0 | 2026-05-03 | Codex | Added multi-header and cookie-boundary sync points |
-| 0.6.1 | 2026-05-06 | Kang | Added NUL-termination and directive-matching sync points (Rule 30) |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.6.1 | 2026-05-06 | Kang | Added NUL-termination and directive-matching sync points (Rule 30) |
+| 0.6.0 | 2026-05-03 | Codex | Added multi-header and cookie-boundary sync points |
+| 0.5.5 | 2026-04-24 | Codex | Added 60-day protocol safety routing |

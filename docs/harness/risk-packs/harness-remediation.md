@@ -52,5 +52,5 @@ python3 -m pytest tools/harness/tests/test_check_harness_sync.py
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.5 | 2026-04-24 | Codex | Added history-analysis remediation routing |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.5.5 | 2026-04-24 | Codex | Added history-analysis remediation routing |
