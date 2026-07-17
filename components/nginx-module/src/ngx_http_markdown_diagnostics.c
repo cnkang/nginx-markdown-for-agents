@@ -321,7 +321,7 @@ ngx_http_markdown_diagnostics_recording_active(void)
  *   reason - NUL-terminated reason code string (may be NULL)
  *
  * Returns:
- *   Canonical discriminant (0..17), or -1 when the string is NULL or not a
+ *   Canonical discriminant (0..24), or -1 when the string is NULL or not a
  *   canonical reason code.
  */
 ngx_int_t
@@ -352,7 +352,7 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
         { "failed_closed",                17 },
         { "conversion_error",             18 },
         { "memory_budget_exceeded",       19 },
-        /* Indices 20-24: reserved for future reason codes (not yet production-used) */
+        /* Production reason codes (indices 20-24) */
         { "overload",                     20 },
         { "invalid_dynconf",              21 },
         { "degraded_snapshot",            22 },

@@ -596,8 +596,8 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
      * Priority: explicit streaming_budget > memory_budget > default
      *
      * streaming_budget_explicit is set during merge_conf when the
-     * operator explicitly configured markdown_streaming_budget at
-     * this or any parent configuration level.
+     * operator explicitly configured markdown_limits streaming_buffer=
+     * at this or any parent configuration level.
      *
      * After merge_conf, streaming_budget is always resolved to a
      * concrete default value (never NGX_CONF_UNSET_SIZE), so the
