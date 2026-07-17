@@ -42,8 +42,8 @@ uname -m
 
 | Format | Pattern | Example |
 |--------|---------|---------|
-| DEB | `nginx-module-markdown-for-agents_{version}_nginx-{nginx_version}_{arch}.deb` | `nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_amd64.deb` |
-| RPM | `nginx-module-markdown-for-agents-{version}-nginx{nginx_version}-1.{arch}.rpm` | `nginx-module-markdown-for-agents-0.7.0-nginx1.26.3-1.x86_64.rpm` |
+| DEB | `nginx-module-markdown-for-agents_{version}_nginx-{nginx_version}_{arch}.deb` | `nginx-module-markdown-for-agents_0.9.1_nginx-1.26.3_amd64.deb` |
+| RPM | `nginx-module-markdown-for-agents-{version}-nginx{nginx_version}-1.{arch}.rpm` | `nginx-module-markdown-for-agents-0.9.1-nginx1.26.3-1.x86_64.rpm` |
 
 Select the package that matches your exact NGINX version and architecture.
 Using a package built for a different NGINX version will result in a binary
@@ -62,14 +62,14 @@ validated for the tested NGINX version encoded in the package name.
 
 ```bash
 # Install the package
-sudo dpkg -i nginx-module-markdown-for-agents_0.7.0_nginx-1.26.3_amd64.deb
+sudo dpkg -i nginx-module-markdown-for-agents_0.9.1_nginx-1.26.3_amd64.deb
 ```
 
 ### RPM-based Systems (RHEL, AlmaLinux, Amazon Linux)
 
 ```bash
 # Install the package
-sudo rpm -i nginx-module-markdown-for-agents-0.7.0-nginx1.26.3-1.x86_64.rpm
+sudo rpm -i nginx-module-markdown-for-agents-0.9.1-nginx1.26.3-1.x86_64.rpm
 ```
 
 The package installs:

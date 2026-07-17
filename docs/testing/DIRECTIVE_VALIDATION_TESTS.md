@@ -80,18 +80,19 @@ markdown_limits timeout;           # Error: missing value
 
 ---
 
-### 4. markdown_error_policy (pass|fail_closed)
+### 4. markdown_error_policy (pass|fail_closed|status <code>)
 
 **Valid configurations:**
 ```nginx
 markdown_error_policy pass;         # Fail-open: return original HTML
 markdown_error_policy fail_closed;   # Fail-closed: return 502 error
+markdown_error_policy status 503;    # Return custom error status
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_error_policy fail;             # Error: invalid value, must be "pass" or "fail_closed"
-markdown_error_policy open;             # Error: invalid value, must be "pass" or "fail_closed"
+markdown_error_policy fail;             # Error: invalid value, must be "pass", "fail_closed", or "status <code>"
+markdown_error_policy open;             # Error: invalid value, must be "pass", "fail_closed", or "status <code>"
 markdown_error_policy;                   # Error: missing value
 markdown_error_policy pass fail_closed; # Error: too many arguments
 ```
@@ -170,23 +171,24 @@ markdown_front_matter;      # Error: missing value
 
 ---
 
-### 8. markdown_accept (strict|wildcard)
+### 8. markdown_accept (strict|wildcard|force)
 
 **Valid configurations:**
 ```nginx
 markdown_accept wildcard;
 markdown_accept strict;
+markdown_accept force;
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_accept yes;       # Error: invalid value, must be "strict" or "wildcard"
-markdown_accept 1;         # Error: invalid value, must be "strict" or "wildcard"
+markdown_accept yes;       # Error: invalid value, must be "strict", "wildcard", or "force"
+markdown_accept 1;         # Error: invalid value, must be "strict", "wildcard", or "force"
 markdown_accept;           # Error: missing value
 ```
 
 **Expected behavior:**
-- Default: off
+- Default: strict
 - Context: http, server, location
 - When enabled: converts on Accept: */* or Accept: text/*
 
