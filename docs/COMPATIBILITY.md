@@ -235,7 +235,7 @@ the module from source against your local NGINX installation.
 2. **Clone the module source**:
 
    ```bash
-   git clone https://github.com/pederhan/nginx-markdown-for-agents.git
+   git clone https://github.com/cnkang/nginx-markdown-for-agents.git
    ```
 
 3. **Configure NGINX with the module**:
