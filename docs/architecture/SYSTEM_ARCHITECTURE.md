@@ -270,7 +270,7 @@ prevention.
 
 ### Bounded Decompression
 `markdown_decompress_max_size` directive limits decompressed output
-independently from `markdown_max_size`, preventing zip-bomb attacks.
+independently from `markdown_limits memory=<size>`, preventing zip-bomb attacks.
 `DecompressionBudgetExceeded` (FFI code 9) is classified as
 `resource_limit` in C.
 
