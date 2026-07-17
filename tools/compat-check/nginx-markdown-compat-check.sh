@@ -50,7 +50,7 @@ set -e
 # Constants
 # ---------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")"
-PROJECT_VERSION="0.7.0"
+PROJECT_VERSION="0.9.1"
 
 # Supported NGINX versions (nginx.org stable)
 SUPPORTED_NGINX_VERSIONS="1.26.3"

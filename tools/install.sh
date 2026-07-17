@@ -1099,8 +1099,8 @@ EOF
 markdown_filter on;
 
 # Optional tuning examples:
-# markdown_max_size 5m;
-# markdown_on_error pass;
+# markdown_limits memory=5m;
+# markdown_error_policy pass;
 EOF
       then
         die_with_error "$CATEGORY_FILESYSTEM" \
@@ -1186,7 +1186,7 @@ rm -f "$NGINX_TEST_LOG" || true
 echo ""
 echo "You can continue fine-tuning later (recommended):"
 echo "- Scope rollout with server/location-level markdown_filter on/off"
-echo "- Adjust markdown_max_size / markdown_on_error by workload"
+echo "- Adjust markdown_limits memory= / markdown_error_policy by workload"
 echo "$SEPARATOR_LINE"
 
 # Emit JSON output if --json was requested
