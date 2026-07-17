@@ -8,6 +8,7 @@ adapter drift detection under both quick and full modes.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from tools.harness import check_harness_sync as sync
@@ -47,6 +48,28 @@ def test_collect_results_warns_for_local_kiro_drift(tmp_path, monkeypatch):
     full_results = sync.collect_results(full=True)
     full_adapter = next(item for item in full_results if item.name == "kiro-adapters")
     assert full_adapter.status == sync.FAIL
+
+
+def test_collect_results_skips_git_ignored_kiro(tmp_path, monkeypatch):
+    repo = tmp_path
+    _write_repo_fixture(repo, with_kiro=True, kiro_has_links=False)
+    (repo / ".gitignore").write_text(".kiro/\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    monkeypatch.setattr(sync, "REPO_ROOT", repo)
+    monkeypatch.setattr(sync, "GITHUB_WORKFLOWS_DIR", repo / ".github" / "workflows")
+    monkeypatch.setattr(sync, "MANIFEST_PATH", repo / "docs/harness/routing-manifest.json")
+    monkeypatch.setattr(sync, "README_PATH", repo / "docs/harness/README.md")
+    monkeypatch.setattr(sync, "CORE_PATH", repo / "docs/harness/core.md")
+    monkeypatch.setattr(sync, "SUMMARY_PATH", repo / "docs/harness/routing-manifest.md")
+    monkeypatch.setattr(sync, "AGENTS_PATH", repo / "AGENTS.md")
+
+    results = sync.collect_results(full=False)
+    adapter = next(item for item in results if item.name == "kiro-adapters")
+    assert adapter.status == sync.SKIP_NOT_PRESENT
+
+    full_results = sync.collect_results(full=True)
+    full_adapter = next(item for item in full_results if item.name == "kiro-adapters")
+    assert full_adapter.status == sync.SKIP_NOT_PRESENT
 
 
 def test_collect_results_fail_when_pack_doc_missing(tmp_path, monkeypatch):
@@ -128,6 +151,156 @@ def test_collect_results_fail_when_optional_adapters_key_missing(tmp_path, monke
     assert results[0].name == "manifest-structure"
     assert results[0].status == sync.FAIL
     assert "truth surface keys" in results[0].detail
+
+
+def test_docker_runtime_security_accepts_non_root_images(tmp_path, monkeypatch):
+    """Accept tracked runtime Dockerfiles with non-root users and safe paths."""
+    _write_docker_runtime_fixture(tmp_path)
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_docker_runtime_security()
+
+    assert result.status == sync.PASS
+
+
+def test_cfl_workflows_reject_unprepared_non_root_output(tmp_path, monkeypatch):
+    """Reject fuzz workflows that let the root action create build-out."""
+    workflows = tmp_path / ".github/workflows"
+    workflows.mkdir(parents=True)
+    (workflows / sync.CFLITE_PR_WORKFLOW).write_text(
+        "pull_request:\n  paths:\n    - fuzz/**\n"
+        "sanitizer: address\n"
+        "uses: google/clusterfuzzlite/actions/build_fuzzers@sha\n",
+        encoding="utf-8",
+    )
+    (workflows / sync.CFLITE_BATCH_WORKFLOW).write_text(
+        "storage-repo: repo\n"
+        "uses: google/clusterfuzzlite/actions/build_fuzzers@sha\n",
+        encoding="utf-8",
+    )
+    (workflows / sync.CFLITE_CRON_WORKFLOW).write_text(
+        "uses: google/clusterfuzzlite/actions/build_fuzzers@sha\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(sync, "GITHUB_WORKFLOWS_DIR", workflows)
+
+    result = sync.check_cfl_workflows()
+
+    assert result.status == sync.FAIL
+    assert "pre-create build-out before build_fuzzers" in result.detail
+
+
+def test_docker_runtime_security_rejects_root_user(tmp_path, monkeypatch):
+    """Reject a tracked runtime Dockerfile whose final user remains root."""
+    _write_docker_runtime_fixture(tmp_path)
+    dockerfile = tmp_path / ".clusterfuzzlite/Dockerfile"
+    dockerfile.write_text("FROM scratch\nUSER root\n", encoding="utf-8")
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_docker_runtime_security()
+
+    assert result.status == sync.FAIL
+    assert ".clusterfuzzlite/Dockerfile final USER must be non-root" in result.detail
+
+
+def test_docker_runtime_security_rejects_unwritable_libfuzzer_archive(
+    tmp_path, monkeypatch
+):
+    """Reject non-root fuzz images that cannot install libFuzzer."""
+    _write_docker_runtime_fixture(tmp_path)
+    dockerfile = tmp_path / ".clusterfuzzlite/Dockerfile"
+    content = dockerfile.read_text(encoding="utf-8").replace(
+        "    && chown fuzzer:fuzzer /usr/lib/libFuzzingEngine.a\n", ""
+    )
+    dockerfile.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_docker_runtime_security()
+
+    assert result.status == sync.FAIL
+    assert "writable /usr/lib/libFuzzingEngine.a" in result.detail
+
+
+def test_docker_runtime_security_rejects_unwritable_rust_sources(
+    tmp_path, monkeypatch
+):
+    """Reject non-root fuzz images that cannot stage rustc sources."""
+    _write_docker_runtime_fixture(tmp_path)
+    dockerfile = tmp_path / ".clusterfuzzlite/Dockerfile"
+    content = dockerfile.read_text(encoding="utf-8").replace(
+        "RUN chown fuzzer:fuzzer /rustc\n", ""
+    )
+    dockerfile.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_docker_runtime_security()
+
+    assert result.status == sync.FAIL
+    assert "writable /rustc" in result.detail
+
+
+def test_docker_runtime_security_rejects_privileged_nginx_port(
+    tmp_path, monkeypatch
+):
+    """Reject non-root NGINX images that regress to a privileged port."""
+    _write_docker_runtime_fixture(tmp_path)
+    dockerfile = tmp_path / "tools/build_release/Dockerfile.install-example"
+    content = dockerfile.read_text(encoding="utf-8").replace(
+        "EXPOSE 8080", "EXPOSE 80"
+    )
+    dockerfile.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_docker_runtime_security()
+
+    assert result.status == sync.FAIL
+    assert "Dockerfile.install-example missing 'EXPOSE 8080'" in result.detail
+
+
+def test_docker_runtime_security_rejects_missing_stage_build_args(
+    tmp_path, monkeypatch
+):
+    """Reject install examples that lose pre-FROM args at the stage boundary."""
+    _write_docker_runtime_fixture(tmp_path)
+    dockerfile = tmp_path / "tools/build_release/Dockerfile.install-example"
+    content = dockerfile.read_text(encoding="utf-8").replace(
+        "ARG MODULE_REF\nARG INSTALL_SHA256\n", ""
+    )
+    dockerfile.write_text(content, encoding="utf-8")
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_docker_runtime_security()
+
+    assert result.status == sync.FAIL
+    assert "Dockerfile.install-example missing stage ARG declarations" in result.detail
+
+
+def test_trivy_local_scope_excludes_ignored_state(tmp_path, monkeypatch):
+    """Accept local Trivy scope that excludes adapters and generated reports."""
+    (tmp_path / "Makefile").write_text(
+        "--skip-dirs .codeartsdoer --skip-dirs .kiro --skip-dirs build\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_trivy_local_scan_scope()
+
+    assert result.status == sync.PASS
+
+
+def test_trivy_local_scope_rejects_ignored_adapter_scan(tmp_path, monkeypatch):
+    """Reject local Trivy scope when ignored Kiro state remains in scope."""
+    (tmp_path / "Makefile").write_text(
+        "--skip-dirs .codeartsdoer --skip-dirs build\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sync, "REPO_ROOT", tmp_path)
+
+    result = sync.check_trivy_local_scan_scope()
+
+    assert result.status == sync.FAIL
+    assert ".kiro" in result.detail
 
 
 def test_collect_results_accept_reordered_status_semantics(tmp_path, monkeypatch):
@@ -351,9 +524,45 @@ def _write_repo_fixture(repo: Path, *, with_kiro: bool, kiro_has_links: bool = T
         + "\n",
         encoding="utf-8",
     )
+    (repo / "Makefile").write_text(
+        "--skip-dirs .codeartsdoer --skip-dirs .kiro --skip-dirs build\n",
+        encoding="utf-8",
+    )
 
     if with_kiro:
         (repo / ".kiro/steering").mkdir(parents=True, exist_ok=True)
         content = "docs/harness/README.md\ndocs/harness/core.md\n" if kiro_has_links else "old doc\n"
         for name in ("product.md", "structure.md", "tech.md"):
             (repo / f".kiro/steering/{name}").write_text(content, encoding="utf-8")
+
+
+def _write_docker_runtime_fixture(repo: Path) -> None:
+    """Create the tracked Dockerfile security surfaces for focused tests."""
+    dockerfiles = {
+        ".clusterfuzzlite/Dockerfile": (
+            "FROM scratch\n"
+            "RUN mkdir -p /rustc\n"
+            "RUN chown fuzzer:fuzzer /rustc\n"
+            "RUN touch /usr/lib/libFuzzingEngine.a \\\n"
+            "    && chown fuzzer:fuzzer /usr/lib/libFuzzingEngine.a\n"
+            "USER 10001\n"
+        ),
+        "examples/docker/Dockerfile.official-nginx-source-build": (
+            "FROM scratch\n"
+            "RUN pid /tmp/nginx.pid; client_body_temp_path /tmp/client_temp;\n"
+            "USER nginx\n"
+            "EXPOSE 8080\n"
+        ),
+        "tools/build_release/Dockerfile.install-example": (
+            "FROM scratch\n"
+            "ARG MODULE_REF\n"
+            "ARG INSTALL_SHA256\n"
+            "RUN pid /tmp/nginx.pid; client_body_temp_path /tmp/client_temp;\n"
+            "USER nginx\n"
+            "EXPOSE 8080\n"
+        ),
+    }
+    for relative_path, content in dockerfiles.items():
+        path = repo / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")

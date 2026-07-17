@@ -10,6 +10,7 @@ on:
       - master
       - "dev/*"
     paths:
+      - ".clusterfuzzlite/**"
       - ".github/workflows/supply-chain.yml"
       - ".github/workflows/security-static.yml"
       - "components/**"
@@ -17,6 +18,7 @@ on:
       - "packaging/**"
       - "examples/**"
       - "charts/**"
+      - "Makefile"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -29,6 +31,7 @@ on:
       - master
       - "dev/*"
     paths:
+      - ".clusterfuzzlite/**"
       - ".github/workflows/supply-chain.yml"
       - ".github/workflows/security-static.yml"
       - "components/**"
@@ -36,6 +39,7 @@ on:
       - "packaging/**"
       - "examples/**"
       - "charts/**"
+      - "Makefile"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"

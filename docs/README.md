@@ -13,6 +13,7 @@ Think of this directory as the maintained map behind that landing page: guides f
 | Understand the project quickly | [../README.md](../README.md) |
 | Install or deploy the module | [guides/README.md](guides/README.md) |
 | Configure directives and behavior | [guides/CONFIGURATION.md](guides/CONFIGURATION.md) |
+| Audit the public surface before the 1.0 freeze | [architecture/PUBLIC_SURFACE_INVENTORY.md](architecture/PUBLIC_SURFACE_INVENTORY.md) |
 | Operate and troubleshoot a deployment | [guides/OPERATIONS.md](guides/OPERATIONS.md) |
 | Understand the architecture and design rationale | [architecture/README.md](architecture/README.md) |
 | Understand agent routing, risk packs, and harness checks | [harness/README.md](harness/README.md) |

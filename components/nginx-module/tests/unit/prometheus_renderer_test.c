@@ -23,6 +23,22 @@ typedef unsigned long ngx_atomic_uint_t;
 
 #define ngx_string(str) { sizeof(str) - 1, (u_char *) str }
 
+typedef struct {
+    ngx_atomic_uint_t backpressure_total;
+    ngx_atomic_uint_t backpressure_resume_total;
+    ngx_atomic_uint_t pending_output_high_watermark_bytes;
+    ngx_atomic_uint_t decompression_streaming_total;
+    ngx_atomic_uint_t decompression_fullbuffer_total;
+    ngx_atomic_uint_t decompression_budget_exceeded_total;
+    ngx_atomic_uint_t zero_copy_output_total;
+    ngx_atomic_uint_t copied_output_total;
+    struct {
+        ngx_atomic_uint_t current;
+        ngx_atomic_uint_t high_watermark;
+        ngx_atomic_uint_t overload_total;
+    } inflight;
+} ngx_http_markdown_metrics_perf_snapshot_t;
+
 /* ── Metrics snapshot type (mirrors production layout) ────────────── */
 
 /*
@@ -65,10 +81,6 @@ typedef struct { /* SONAR_NOTE */
         ngx_atomic_t  truncated_input_total;
         ngx_atomic_t  io_error_total;
     } decompressions;
-    struct {
-        ngx_atomic_t  parse_timeouts_total;
-        ngx_atomic_t  parse_budget_exceeded_total;
-    } parse_interrupts;
     struct {
         ngx_atomic_t  fullbuffer;
         ngx_atomic_t  incremental;
@@ -125,6 +137,10 @@ typedef struct { /* SONAR_NOTE */
         ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
         ngx_atomic_t  replay_buffer_errors_total;
+        struct {
+            ngx_atomic_t  parse_timeouts_total;
+            ngx_atomic_t  parse_budget_exceeded_total;
+        } parse_interrupts;
     } results;
     struct {
         ngx_atomic_t  path_entries;
@@ -132,11 +148,7 @@ typedef struct { /* SONAR_NOTE */
         ngx_atomic_t  path_conversion_time_sum_ms;
         ngx_atomic_t  overflow_count;
     } per_path;
-    struct {
-        ngx_atomic_t  current;
-        ngx_atomic_t  high_watermark;
-        ngx_atomic_t  overload_total;
-    } inflight;
+    ngx_http_markdown_metrics_perf_snapshot_t perf;
 } ngx_http_markdown_metrics_snapshot_t;
 
 /* ── ngx_slprintf stub ────────────────────────────────────────────── */
@@ -354,6 +366,14 @@ test_known_values(void)
     s.streaming.shadow_diff_total = 1;
     s.streaming.last_ttfb_ms = 1234;
     s.streaming.last_peak_memory_bytes = 65536;
+    s.perf.backpressure_total = 7;
+    s.perf.backpressure_resume_total = 3;
+    s.perf.pending_output_high_watermark_bytes = 65536;
+    s.perf.decompression_streaming_total = 12;
+    s.perf.decompression_fullbuffer_total = 8;
+    s.perf.decompression_budget_exceeded_total = 2;
+    s.perf.zero_copy_output_total = 50;
+    s.perf.copied_output_total = 30;
 
     p = ngx_http_markdown_metrics_write_prometheus(
         buf, buf + sizeof(buf), &s);
@@ -396,10 +416,48 @@ test_known_values(void)
         contains((char *) buf,
             "nginx_markdown_streaming_peak_memory_bytes 65536"),
         "streaming peak memory should be 65536");
+    TEST_ASSERT(
+        contains((char *) buf,
+            "# TYPE nginx_markdown_backpressure_total counter"),
+        "backpressure TYPE should be emitted");
+    TEST_ASSERT(
+        contains((char *) buf, "nginx_markdown_backpressure_total 7"),
+        "backpressure_total should be 7");
+    TEST_ASSERT(
+        contains((char *) buf,
+            "nginx_markdown_backpressure_resume_total 3"),
+        "backpressure_resume_total should be 3");
+    TEST_ASSERT(
+        contains((char *) buf,
+            "# TYPE nginx_markdown_pending_output_high_watermark_bytes "
+            "gauge"),
+        "pending output high watermark TYPE should be emitted");
+    TEST_ASSERT(
+        contains((char *) buf,
+            "nginx_markdown_pending_output_high_watermark_bytes 65536"),
+        "pending output high watermark should be 65536");
+    TEST_ASSERT(
+        contains((char *) buf,
+            "nginx_markdown_decompression_streaming_total 12"),
+        "decompression streaming total should be 12");
+    TEST_ASSERT(
+        contains((char *) buf,
+            "nginx_markdown_decompression_fullbuffer_total 8"),
+        "decompression fullbuffer total should be 8");
+    TEST_ASSERT(
+        contains((char *) buf,
+            "nginx_markdown_perf_decompression_budget_exceeded_total 2"),
+        "perf decompression budget exceeded should be 2");
+    TEST_ASSERT(
+        contains((char *) buf, "nginx_markdown_zero_copy_output_total 50"),
+        "zero-copy output total should be 50");
+    TEST_ASSERT(
+        contains((char *) buf, "nginx_markdown_copied_output_total 30"),
+        "copied output total should be 30");
     /* Latency cumulative: le=0.01 -> 80, le=+Inf -> 80+50+15+5=150 */
     TEST_ASSERT(
         contains((char *) buf,
-            "nginx_markdown_conversion_duration_seconds"
+            "nginx_markdown_conversion_latency_bucket_total"
             "{le=\"+Inf\"} 150"),
         "latency le +Inf should be 150");
 
@@ -481,7 +539,20 @@ test_help_and_type_lines(void)
         "nginx_markdown_estimated_token_savings_total",
         "nginx_markdown_decompressions_total",
         "nginx_markdown_decompression_failures_total",
-        "nginx_markdown_conversion_duration_seconds",
+        "nginx_markdown_conversion_latency_bucket_total",
+        "nginx_markdown_per_path_conversion_time_ms_total",
+        "nginx_markdown_per_path_overflow_total",
+        "nginx_markdown_inflight_current",
+        "nginx_markdown_inflight_high_watermark",
+        "nginx_markdown_overload_total",
+        "nginx_markdown_backpressure_total",
+        "nginx_markdown_backpressure_resume_total",
+        "nginx_markdown_pending_output_high_watermark_bytes",
+        "nginx_markdown_decompression_streaming_total",
+        "nginx_markdown_decompression_fullbuffer_total",
+        "nginx_markdown_perf_decompression_budget_exceeded_total",
+        "nginx_markdown_zero_copy_output_total",
+        "nginx_markdown_copied_output_total",
     };
 
     TEST_SUBSECTION("HELP and TYPE lines for all families");

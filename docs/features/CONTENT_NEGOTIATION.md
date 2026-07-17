@@ -173,9 +173,9 @@ Not all requests are eligible for conversion. The module checks:
 - `image/png` → Not eligible
 
 ### Response Size
-- The module uses a dual-engine routing strategy:
-  - **Full-buffer engine**: Responses within `markdown_max_size` are eligible for conversion.
-  - **Streaming engine**: Responses exceeding `markdown_stream_threshold` are routed to the streaming converter, which processes chunks incrementally and is bounded by streaming memory budgets rather than `markdown_max_size`.
+- The module uses a streaming-default routing strategy:
+  - **Full-buffer engine**: Responses within `markdown_limits memory=<size>` are eligible for conversion.
+  - **Streaming engine**: Responses exceeding `markdown_stream_threshold` are routed to the streaming converter, which processes chunks incrementally and is bounded by streaming memory budgets rather than `markdown_limits memory=<size>`.
 - Responses that exceed all applicable limits → Not eligible (passthrough)
 
 ### Other Conditions
@@ -347,7 +347,7 @@ Check:
 1. `markdown_filter on` is set
 2. Client sends `Accept: text/markdown`
 3. Response is `200 OK` with `Content-Type: text/html`
-4. Response size is within `markdown_max_size`
+4. Response size is within `markdown_limits memory=<size>`
 
 Debug with verbose curl:
 ```bash
@@ -418,3 +418,4 @@ For implementation details, see the source code and inline comments.
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

@@ -24,6 +24,9 @@ data:
       fastcgi_temp_path /var/cache/nginx/fastcgi_temp;
       uwsgi_temp_path /var/cache/nginx/uwsgi_temp;
       scgi_temp_path /var/cache/nginx/scgi_temp;
+      {{- if and .Values.markdown.enabled .Values.metrics.enabled }}
+      markdown_metrics_shm_size {{ .Values.metrics.shmSize }};
+      {{- end }}
       server {
         listen 8080;
         {{- if .Values.markdown.enabled }}
@@ -41,7 +44,7 @@ data:
         {{- end }}
         markdown_log_verbosity {{ .Values.markdown.logVerbosity }};
         {{- if .Values.markdown.streaming }}
-        markdown_streaming_engine {{ .Values.markdown.streaming.engine }};
+        markdown_streaming {{ .Values.markdown.streaming.mode }};
         markdown_limits streaming_buffer={{ .Values.markdown.streaming.budget }};
         markdown_stream_threshold {{ .Values.markdown.streaming.threshold }};
         {{- if .Values.markdown.streaming.shadow }}
@@ -67,14 +70,14 @@ data:
         markdown_chars_per_token {{ .Values.markdown.llm.charsPerToken }};
         {{- end }}
         {{- end }}
-        {{- if and .Values.markdown.enabled .Values.metrics.enabled }}
-        markdown_metrics on;
-        markdown_metrics_uri {{ .Values.metrics.uri }};
-        markdown_metrics_format {{ .Values.metrics.format }};
-        markdown_metrics_shm_size {{ .Values.metrics.shmSize }};
-        {{- end }}
         location / {
           root /usr/share/nginx/html;
         }
+        {{- if and .Values.markdown.enabled .Values.metrics.enabled }}
+        location = {{ .Values.metrics.uri }} {
+          markdown_metrics;
+          markdown_metrics_format {{ .Values.metrics.format }};
+        }
+        {{- end }}
       }
     }

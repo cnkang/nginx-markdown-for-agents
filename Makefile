@@ -66,7 +66,8 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
-	docs-check license-check release-notes release-gates-check release-gates-check-055 release-gates-check-060 release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-090 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+	docs-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-090 release-gates-check-091 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+        perf-evidence-check \
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
@@ -190,6 +191,8 @@ CORPUS_BASELINE := perf/baselines/corpus-baseline.json
 CORPUS_VERDICT := perf/reports/corpus-verdict.json
 
 test-benchmark:
+	@echo "Generating large corpus fixtures..."
+	tests/corpus/large/generate-large-fixtures.sh
 	@echo "Validating corpus metadata..."
 	tools/corpus/validate_corpus.sh
 	@echo "Building test-corpus-conversion binary..."
@@ -222,6 +225,7 @@ docs-check-base:
 
 docs-check: docs-check-base
 	python3 tools/harness/check_harness_sync.py
+	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
 
 release-notes:
 	python3 tools/render_release_matrix_docs.py --release-notes
@@ -257,8 +261,13 @@ harness-security-checks:
 	bash tools/harness/detect_ffi_panic_safety.sh --strict
 	PYTHONPATH=. python3 tools/harness/detect_forward_decl_order.py components/nginx-module/src --strict
 	PYTHONPATH=. python3 tools/harness/detect_duplicate_code.py components/nginx-module/src --strict
+	PYTHONPATH=. python3 tools/harness/detect_orphan_comment_close.py
+	bash tools/harness/detect_ifdef_guard_visibility.sh
+	bash tools/harness/detect_workflow_input_injection.sh
+	bash tools/harness/detect_hardcoded_http_status.sh
 	PYTHONPATH=. python3 tools/harness/detect_open_without_path_validation.py --path tools/ --strict
 	PYTHONPATH=. python3 tools/harness/detect_python_complexity.py
+	PYTHONPATH=. python3 tools/harness/detect_auto_generated_naming.py --strict
 	bash tools/harness/detect_version_consistency.sh
 	bash tools/harness/detect_backpressure_resume.sh
 	bash tools/harness/detect_decompression_budget.sh
@@ -282,11 +291,17 @@ test-harness:
 	bash tools/harness/tests/test_detect_ffi_panic_safety.sh
 	bash tools/harness/tests/test_detect_ffi_fat_pointer_transfer.sh
 	bash tools/harness/tests/test_security_gitleaks_scope.sh
+	bash tools/harness/tests/test_install_config_search.sh
+	bash tools/harness/tests/test_detect_orphan_comment_close.sh
+	bash tools/harness/tests/test_detect_ifdef_guard_visibility.sh
+	bash tools/harness/tests/test_detect_workflow_input_injection.sh
+	bash tools/harness/tests/test_detect_hardcoded_http_status.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
 license-check:
 	python3 tools/ci/check_c_licenses.py
 	python3 tools/ci/check_rust_licenses.py
+	python3 -m unittest tools/ci/test_check_third_party_notices.py
 	python3 tools/ci/check_third_party_notices.py
 
 security-static: security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny
@@ -327,9 +342,34 @@ security-cargo-deny:
 
 supply-chain: supply-chain-trivy supply-chain-sbom
 
+TRIVY_LOCAL_SKIP_DIRS := \
+	--skip-dirs .arts \
+	--skip-dirs .codeartsdoer \
+	--skip-dirs .kiro \
+	--skip-dirs .serena \
+	--skip-dirs .vscode \
+	--skip-dirs .idea \
+	--skip-dirs .fleet \
+	--skip-dirs .codex-venv \
+	--skip-dirs .trae \
+	--skip-dirs docs/archive \
+	--skip-dirs build \
+	--skip-dirs dist \
+	--skip-dirs out \
+	--skip-dirs tmp \
+	--skip-dirs temp \
+	--skip-dirs .test-tmp \
+	--skip-dirs coverage \
+	--skip-dirs test-output \
+	--skip-dirs test-results \
+	--skip-dirs '**/target' \
+	--skip-dirs '**/node_modules' \
+	--skip-dirs '**/__pycache__'
+
 supply-chain-trivy:
 	@command -v trivy >/dev/null 2>&1 || { echo "ERROR: trivy not found. Install from https://aquasecurity.github.io/trivy/latest/getting-started/installation/." >&2; exit 127; }
-	trivy fs --scanners vuln,misconfig,secret --ignore-unfixed --severity HIGH,CRITICAL .
+	trivy fs --scanners vuln,misconfig,secret --ignore-unfixed \
+		--severity HIGH,CRITICAL $(TRIVY_LOCAL_SKIP_DIRS) .
 
 supply-chain-sbom:
 	@command -v syft >/dev/null 2>&1 || { echo "ERROR: syft not found. Install from https://github.com/anchore/syft#installation." >&2; exit 127; }
@@ -339,12 +379,6 @@ supply-chain-sbom:
 release-gates-check:
 	python3 tools/release/gates/validate_release_gates.py
 	python3 tools/release/gates/validate_naming.py
-
-release-gates-check-055:
-	python3 tools/release/gates/validate_release_gates_055.py
-
-release-gates-check-060:
-	python3 tools/release/gates/validate_release_gates_060.py
 
 # release-gates-check-070: comprehensive v0.7.0 release readiness gate.
 #
@@ -381,12 +415,12 @@ release-gates-check-070:
 	fi
 	$(MAKE) test-e2e-rust
 	python3 tools/release/gates/validate_release_gates_070.py --mode strict
-	python3 tools/release/gates/validate_config_directives_070.py
-	python3 tools/release/gates/validate_metrics_070.py
-	python3 tools/release/gates/validate_reason_codes_070.py
-	python3 tools/release/gates/validate_package_metadata_070.py
-	python3 tools/release/gates/validate_k8s_manifests_070.py
-	python3 tools/release/gates/validate_fuzz_packaging_070.py
+	python3 tools/release/gates/validate_config_directives.py
+	python3 tools/release/gates/validate_metrics.py
+	python3 tools/release/gates/validate_reason_codes.py
+	python3 tools/release/gates/validate_package_metadata.py
+	python3 tools/release/gates/validate_k8s_manifests.py
+	python3 tools/release/gates/validate_fuzz_packaging.py
 	@echo "=== Package Compatibility Gate ==="
 	@echo "  [artifact-naming-tests] Running artifact naming unit tests..."
 	@bash tools/release/gates/test_artifact_naming.sh || \
@@ -641,14 +675,14 @@ release-gates-check-080:
 	python3 tools/release/gates/validate_naming.py
 	@echo "  [14/17] v0.8.0 gate validators (0.8-specific: compat bridge removal, new directives)"
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_release_gates_080.py
-	python3 tools/release/gates/validate_config_directives_080.py
+	python3 tools/release/gates/validate_config_directives.py
 	@echo "  [15/17] legacy/prior-version regression validators (0.7.0 gates remain active)"
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_release_gates_070.py --mode strict
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_metrics_070.py
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_reason_codes_070.py
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_package_metadata_070.py
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_k8s_manifests_070.py
-	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_fuzz_packaging_070.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_metrics.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_reason_codes.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_package_metadata.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_k8s_manifests.py
+	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_fuzz_packaging.py
 	@echo "  [16/17] harness boundary: routing-manifest.json + risk-packs (Req 9)"
 	@test -f docs/harness/routing-manifest.json || { echo "FAIL: docs/harness/routing-manifest.json not found — release gates require repo-owned harness sources" >&2; exit 1; }
 	@test -d docs/harness/risk-packs || { echo "FAIL: docs/harness/risk-packs/ not found — release gates require repo-owned risk-pack inputs" >&2; exit 1; }
@@ -681,7 +715,7 @@ release-gates-check-080-regression:
 	$(MAKE) harness-check
 	python3 tools/release/gates/validate_release_gates.py
 	python3 tools/release/gates/validate_naming.py
-	python3 tools/release/gates/validate_config_directives_080.py
+	python3 tools/release/gates/validate_config_directives.py
 	@test -f docs/harness/routing-manifest.json
 	@test -d docs/harness/risk-packs
 	@test -f docs/harness/core.md
@@ -690,6 +724,12 @@ release-gates-check-080-regression:
 
 # 0.9.0 Release Gates (additive on top of 0.8.0 regression subset)
 # test-rust, test-nginx-unit, check-headers, docs-check already run by prereq
+#
+# Environment variables:
+#   NGINX_BIN                            - Path to module-enabled nginx binary
+#   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Skip production-examples nginx -t
+#                                           (and 091 module benchmarks) when
+#                                           NGINX_BIN is unavailable
 release-gates-check-090: release-gates-check-080-regression
 	@echo "=== 0.9.0 Release Gates ==="
 	$(MAKE) test-production-examples-nginx-t
@@ -698,14 +738,85 @@ release-gates-check-090: release-gates-check-080-regression
 	python3 tools/release/gates/validate_release_gates_090.py
 	@echo "=== 0.9.0 Release Gates: PASS ==="
 
-release-gates-check-all: release-gates-check release-gates-check-090
+# perf-evidence-check: Non-blocking performance evidence gate (report-only).
+# Runs the module-level benchmark harness and evaluates against thresholds.
+# Exits 0 regardless of verdict (soft/report-only mode).
+# Reports SKIP_NOT_PRESENT and exits 0 when NGINX_BIN is unavailable.
+# Reports MISSING_EVIDENCE and exits 0 when the checked-in baseline does not
+# match the current platform, load generator, or NGINX version; incompatible
+# environments are never used for percentage regression comparisons.
+#
+# Evidence pack includes: module benchmark tiers, decompression coverage,
+# fallback rate, memory slope.
+#
+# Classification: SOFT (report-only, does not fail the build)
+perf-evidence-check:
+	@echo "=== Performance Evidence Check (non-blocking) ==="
+	@tools/perf/run_evidence_gate.sh
+
+# release-gates-check-091: Blocking 0.9.1 release gate.
+# Runs all prior regression gates (0.9.0 gate chain), then adds 0.9.1-specific
+# evidence gate in blocking mode.  Fails on NO_GO verdict for RC tags.
+# When NGINX_BIN is unavailable, requires --allow-skip-module to proceed.
+#
+# Environment variables:
+#   NGINX_BIN                            - Path to module-enabled nginx binary
+#   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Allow proceeding without module
+#                                           benchmarks (also skips 0.9.0
+#                                           production-examples nginx -t)
+#   RELEASE_GATE_ALLOW_SKIP_FUZZ=1       - (inherited) skip fuzz smoke
+#   RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 - (inherited) skip native E2E
+#   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - (inherited) skip coverage
+#
+# Classification: BLOCKING (fails on NO_GO for release-candidate tags)
+release-gates-check-091: release-gates-check-090
+	@echo "=== 0.9.1 Release Gates (blocking) ==="
+	@echo "  [1/3] Module-level threshold engine validation"
+	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
+	@echo "  [2/3] Performance evidence gate (blocking mode)"
+	@if [ -n "$${NGINX_BIN:-}" ]; then \
+		python3 tools/perf/evidence_gate.py --mode blocking || exit 1; \
+	else \
+		if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
+			python3 tools/perf/evidence_gate.py --mode blocking --allow-skip-module || exit 1; \
+		else \
+			echo "FAIL: Module-level benchmarks require NGINX_BIN." >&2; \
+			echo "  Set NGINX_BIN=/path/to/nginx or RELEASE_GATE_ALLOW_SKIP_MODULE=1 to skip." >&2; \
+			exit 1; \
+		fi; \
+	fi
+	@echo "  [3/3] Python perf tooling tests"
+	@if python3 -c "import pytest, hypothesis" >/dev/null 2>&1; then \
+		if python3 -m pytest tools/perf/tests/ -q --tb=short; then \
+			echo "  perf tests: PASS"; \
+		else \
+			echo "FAIL: perf tests failed" >&2; \
+			exit 1; \
+		fi; \
+	else \
+		echo "FAIL: pytest/hypothesis dependencies are missing. Please install them using: pip install -r requirements-dev.txt" >&2; \
+		exit 1; \
+	fi
+	@echo "=== 0.9.1 Release Gates: PASS ==="
+
+release-gates-check-all: release-gates-check release-gates-check-091
 	@echo "=== Release Gates: ALL PASS ==="
 
 # Production Examples: validate all examples pass nginx -t (NEW)
+# Requires a module-enabled NGINX binary (NGINX_BIN or PATH nginx).
+# When the binary is unavailable, the gate fails unless
+# RELEASE_GATE_ALLOW_SKIP_MODULE=1 is set, mirroring the 091
+# module-benchmark skip contract.  This is an environment limitation skip
+# (non-release validation only); tag-release CI must provide NGINX_BIN.
+test-production-examples-nginx-t: SHELL := /bin/bash
 test-production-examples-nginx-t:
 	@echo "=== Production Examples nginx -t ==="
 	@nginx_bin="$${NGINX_BIN:-nginx}"; \
+	module_so="$${MODULE_SO:-}"; \
 	if command -v "$$nginx_bin" >/dev/null 2>&1; then \
+		runtime_prefix="$${RUNNER_TEMP:-$${TMPDIR:-/tmp}}/nginx-markdown-config-test-$$$$"; \
+		mkdir -p "$$runtime_prefix/logs"; \
+		trap 'rm -rf -- "$$runtime_prefix"' EXIT; \
 		set -- examples/production/*.conf; \
 		if [ "$$1" = 'examples/production/*.conf' ]; then \
 			echo "FAIL: no production example configs found in examples/production/" >&2; \
@@ -713,12 +824,27 @@ test-production-examples-nginx-t:
 		fi; \
 		for conf in "$$@"; do \
 			echo "  Testing: $$conf"; \
-			"$$nginx_bin" -t -c "$$(pwd)/$$conf" 2>&1 || exit 1; \
+			test_conf="$$runtime_prefix/$$(basename "$$conf")"; \
+			sed -E 's/^([[:space:]]*)listen[[:space:]]+80([[:space:]]*;)/\1listen 18080\2/' \
+				"$$conf" > "$$test_conf"; \
+			if [[ -n "$$module_so" ]]; then \
+				"$$nginx_bin" -t -p "$$runtime_prefix/" \
+					-g "load_module $$module_so;" \
+					-c "$$test_conf" 2>&1 || exit 1; \
+			else \
+				"$$nginx_bin" -t -p "$$runtime_prefix/" \
+					-c "$$test_conf" 2>&1 || exit 1; \
+			fi; \
 		done; \
 		echo "All production examples pass nginx -t"; \
 	else \
-		echo "FAIL: nginx binary not found (set NGINX_BIN to a module-enabled nginx)" >&2; \
-		exit 1; \
+		if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
+			echo "SKIP: nginx binary not found (set NGINX_BIN to a module-enabled nginx; RELEASE_GATE_ALLOW_SKIP_MODULE=1)"; \
+		else \
+			echo "FAIL: nginx binary not found (set NGINX_BIN to a module-enabled nginx)" >&2; \
+			echo "  Set NGINX_BIN=/path/to/nginx or RELEASE_GATE_ALLOW_SKIP_MODULE=1 to skip." >&2; \
+			exit 1; \
+		fi; \
 	fi
 
 # Production Examples: E2E smoke (requires running NGINX, deferred)
@@ -744,7 +870,7 @@ release-gates-check-strict:
 	python3 tools/release/gates/validate_release_gates.py --mode strict
 	python3 tools/release/gates/validate_naming.py
 	RELEASE_GATE_EXPECTED_CARGO_VERSION=$(RELEASE_GATE_080_ACTIVE_VERSION) python3 tools/release/gates/validate_release_gates_070.py --mode strict
-	python3 tools/release/gates/validate_fuzz_packaging_070.py
+	python3 tools/release/gates/validate_fuzz_packaging.py
 	@echo "=== Strict: Release Workflow Gate ==="
 	@test -f .github/workflows/release-packages.yml || { echo "FAIL: .github/workflows/release-packages.yml not found" >&2; exit 1; }
 	@grep -q 'SHA256SUMS\|generate-checksums' .github/workflows/release-packages.yml || { echo "FAIL: release-packages.yml missing SHA256SUMS generation logic" >&2; exit 1; }
@@ -904,15 +1030,15 @@ help:
 	@echo "  test-harness             - Run unit tests for harness detector scripts"
 	@echo "  docs-check               - Validate documentation links/style"
 	@echo "  license-check            - Verify license policy and THIRD-PARTY-NOTICES coverage"
-	@echo "  release-gates-check      - Validate release gate framework (0.5.0 + 0.5.5)"
-	@echo "  release-gates-check-055  - Validate 0.5.5 release gates (evidence, known-diffs, docs)"
-	@echo "  release-gates-check-060  - Validate 0.6.0 release gates (streaming default, pruning, budget)"
+	@echo "  release-gates-check      - Validate release gate framework (0.5.0)"
 	@echo "  release-gates-check-070  - Validate 0.7.0 release gates (runtime correctness, package compat, fuzz)"
 	@echo "  release-gates-check-080  - Validate 0.8.x release gates (streaming, coverage, matrix, harness boundary)"
 	@echo "  release-gates-check-080-regression - 0.8.x version-independent regression subset (no Cargo version bind)"
 	@echo "  release-gates-check-08x  - Alias for release-gates-check-080 (0.8.x patch-line canonical entry)"
 	@echo "  release-gates-check-090  - Validate 0.9.0 release gates (additive on 0.8.0; production examples, gate validator)"
-	@echo "  release-gates-check-all  - Run current baseline and 0.9.0 release gates"
+	@echo "  release-gates-check-091  - Validate 0.9.1 release gates (blocking; module benchmark evidence gate)"
+	@echo "  perf-evidence-check      - Run performance evidence gate (non-blocking, report-only)"
+	@echo "  release-gates-check-all  - Run current baseline and 0.9.1 release gates"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
 	@echo "  test-production-examples-nginx-t - Validate production example configs pass nginx -t"

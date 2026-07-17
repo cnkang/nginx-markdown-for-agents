@@ -552,7 +552,7 @@ test_create_conf_defaults(void)
  * Verify merge_conf inheritance and override semantics:
  *  - child fields at their unset sentinels inherit from parent;
  *  - child with a static enabled_source clears the complex pointer;
- *  - streaming_engine, streaming_budget, and streaming_on_error are
+ *  - streaming policy, streaming budget, and unified error policy are
  *    inherited from parent when child leaves them unset.
  */
 static void
@@ -592,14 +592,12 @@ test_merge_conf(void)
     parent.decompress.parse_timeout = 30000;
     parent.decompress.parser_budget = 64 * 1024 * 1024;
     parent.routing.large_body_threshold = 4096;
-    parent.ops.trust_forwarded_headers = 1;
     parent.ops.metrics_format = NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS;
     parent.ops.metrics_per_path = 1;
     parent.ops.otel_enabled = 0;
-    parent.stream.engine = NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON;
+    parent.stream.policy = NGX_HTTP_MARKDOWN_STREAMING_FORCE;
     parent.stream.budget = 777;
     parent.stream.budget_explicit = 1;
-    parent.stream.on_error = NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT;
     parent.stream.shadow = 1;
     parent.stream.threshold = 32768;
     parent.advanced.prune_noise = 1;
@@ -631,21 +629,17 @@ test_merge_conf(void)
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
-    child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
     child.ops.otel_enabled = NGX_CONF_UNSET;
-    child.stream.engine = NGX_CONF_UNSET_UINT;
+    child.stream.policy = NGX_CONF_UNSET_UINT;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.stream.budget_explicit = 0;
-    child.stream.on_error = NGX_CONF_UNSET_UINT;
     child.stream.shadow = NGX_CONF_UNSET;
     child.stream.threshold = NGX_CONF_UNSET_SIZE;
     child.stream.threshold_explicit = 0;
     child.stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
     child.stream.flush_min = NGX_CONF_UNSET_SIZE;
-    child.stream.on_error_explicit = 0;
-    child.stream.shadow_explicit = 0;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
@@ -663,13 +657,12 @@ test_merge_conf(void)
         "child should inherit complex expression");
     TEST_ASSERT(child.max_size == 2048, "child should inherit max_size");
     TEST_ASSERT(child.timeout == 42, "child should inherit timeout");
-    TEST_ASSERT(child.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
-        "child should inherit stream engine");
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
+        "child should inherit streaming policy");
     TEST_ASSERT(child.stream.budget == 777,
         "child should inherit stream budget");
-    TEST_ASSERT(child.stream.on_error
-        == NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT,
-        "child should inherit streaming on_error");
+    TEST_ASSERT(child.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT,
+        "child should inherit unified error policy");
 
     memset(&child, 0, sizeof(child));
     child.enabled_source = NGX_HTTP_MARKDOWN_ENABLED_STATIC;
@@ -695,21 +688,17 @@ test_merge_conf(void)
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
-    child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
     child.ops.otel_enabled = NGX_CONF_UNSET;
-    child.stream.engine = NGX_CONF_UNSET_UINT;
+    child.stream.policy = NGX_CONF_UNSET_UINT;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.stream.budget_explicit = 0;
-    child.stream.on_error = NGX_CONF_UNSET_UINT;
     child.stream.shadow = NGX_CONF_UNSET;
     child.stream.threshold = NGX_CONF_UNSET_SIZE;
     child.stream.threshold_explicit = 0;
     child.stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
     child.stream.flush_min = NGX_CONF_UNSET_SIZE;
-    child.stream.on_error_explicit = 0;
-    child.stream.shadow_explicit = 0;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
@@ -1120,21 +1109,17 @@ test_merge_conf_double_unset(void)
     child.decompress.parse_timeout = NGX_CONF_UNSET_MSEC;
     child.decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     child.routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
-    child.ops.trust_forwarded_headers = NGX_CONF_UNSET;
     child.ops.metrics_format = NGX_CONF_UNSET_UINT;
     child.ops.metrics_per_path = NGX_CONF_UNSET;
     child.ops.otel_enabled = NGX_CONF_UNSET;
-    child.stream.engine = NGX_CONF_UNSET_UINT;
+    child.stream.policy = NGX_CONF_UNSET_UINT;
     child.stream.budget = NGX_CONF_UNSET_SIZE;
     child.stream.budget_explicit = 0;
-    child.stream.on_error = NGX_CONF_UNSET_UINT;
     child.stream.shadow = NGX_CONF_UNSET;
     child.stream.threshold = NGX_CONF_UNSET_SIZE;
     child.stream.threshold_explicit = 0;
     child.stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
     child.stream.flush_min = NGX_CONF_UNSET_SIZE;
-    child.stream.on_error_explicit = 0;
-    child.stream.shadow_explicit = 0;
     child.stream.excluded_types = NGX_CONF_UNSET_PTR;
     child.advanced.prune_noise = NGX_CONF_UNSET;
     child.advanced.prune_selectors = NGX_CONF_UNSET_PTR;
@@ -1223,21 +1208,17 @@ test_stream_preserves_explicit_defaults(void)
     TEST_ASSERT(parent != NULL && child != NULL,
                 "create_conf should allocate parent and child");
 
-    child->stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    child->on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
     child->stream.shadow = 0;
 
     rc = ngx_http_markdown_merge_conf(&cf, parent, child);
 
     TEST_ASSERT(rc == NGX_CONF_OK,
                 "merge_conf should accept stream settings");
-    TEST_ASSERT(child->stream.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
-                "explicit on_error=pass should not be overwritten");
-    TEST_ASSERT(child->stream.on_error_explicit == 1,
-                "explicit on_error should be tracked");
+    TEST_ASSERT(child->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
+                "explicit unified on_error=pass should not be overwritten");
     TEST_ASSERT(child->stream.shadow == 0,
                 "explicit shadow=off should not be overwritten");
-    TEST_ASSERT(child->stream.shadow_explicit == 1,
-                "explicit shadow should be tracked");
     TEST_PASS("stream explicit defaults preserved");
 }
 

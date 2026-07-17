@@ -77,13 +77,6 @@
  */
 
 /*
- * Rollback result codes.
- */
-#define NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK          0
-#define NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_NO_LKG      1
-#define NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_APPLY_ERR   2
-
-/*
  * Maximum number of validation errors collected during dry-run.
  * Prevents unbounded allocation; additional errors beyond this
  * cap are counted but not stored.
@@ -2190,88 +2183,6 @@ ngx_http_markdown_dynconf_reload(
     }
 
     return ngx_http_markdown_dynconf_reload_normal(watcher, conf, fd, buf, log);
-}
-
-
-/**
- * Trigger a manual rollback of the active configuration to the
- * last-known-good (LKG) snapshot.
- *
- * This function implements the manual rollback path described in
- * design.md §13.3:
- *   active_snapshot (N+1) ← last_known_good (N)
- *   record rollback event to log and metrics
- *
- * The rollback is only possible when lkg_valid is set (i.e. at
- * least one successful reload has occurred since the watcher was
- * started).  After rollback, the version counter is incremented
- * to reflect the configuration change, and the LKG snapshot is
- * preserved (not cleared) so that repeated rollback calls are
- * idempotent.
- *
- * Callable from:
- *   - The diagnostics endpoint (manual rollback API)
- *   - A signal handler or timer callback (future: automatic
- *     rollback on anomaly detection)
- *
- * @param watcher Dynamic config watcher holding the snapshots.
- * @param log     NGINX log for recording the rollback event.
- *
- * @returns NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK
- *          if the rollback succeeded
- * @returns NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_NO_LKG
- *          if no last-known-good is available (lkg_valid == 0)
- * @returns NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_APPLY_ERR
- *          if the watcher or conf pointer is invalid
- */
-static ngx_int_t
-ngx_http_markdown_dynconf_rollback(
-    ngx_http_markdown_dynconf_watcher_t *watcher,
-    ngx_log_t *log)
-{
-    if (watcher == NULL || watcher->conf == NULL) {
-        if (log != NULL) {
-            ngx_log_error(NGX_LOG_ERR, log, 0,
-                          "markdown: "
-                          "invalid watcher or conf pointer");
-        }
-        return NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_APPLY_ERR;
-    }
-
-    if (!watcher->lkg_valid) {
-        if (log != NULL) {
-            ngx_log_error(NGX_LOG_WARN, log, 0,
-                          "markdown: "
-                          "no last-known-good available "
-                          "(no successful reload has occurred)");
-        }
-        return NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_NO_LKG;
-    }
-
-    /*
-     * Restore the last-known-good snapshot as the active
-     * configuration.  The LKG itself is NOT cleared — it
-     * remains valid so that repeated rollback calls are
-     * idempotent (rolling back to the same LKG again is
-     * a no-op in effect but still logged).
-     */
-    watcher->active_snapshot = watcher->last_known_good;
-    watcher->applied_mtime = watcher->lkg_mtime;
-    watcher->version++;
-
-    /* Apply the restored snapshot to the live conf. */
-    ngx_http_markdown_dynconf_apply_snapshot(watcher->conf,
-                                              &watcher->active_snapshot);
-
-    if (log != NULL) {
-        ngx_log_error(NGX_LOG_WARN, log, 0,
-                      "markdown: "
-                      "restored last-known-good configuration "
-                      "(version=%ui)",
-                      watcher->version);
-    }
-
-    return NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK;
 }
 
 

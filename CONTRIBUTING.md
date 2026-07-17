@@ -29,7 +29,7 @@ This project follows a professional and respectful code of conduct. Please:
 
 Before contributing, ensure you have:
 
-- Rust 1.91.0 or higher
+- Rust 1.97.0 or higher
 - NGINX 1.24.0 or higher (source code for module development)
 - cbindgen for C header generation
 - Basic understanding of NGINX module development (for C contributions)
@@ -441,3 +441,4 @@ Thank you for contributing to NGINX Markdown for Agents!
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.3 | 2026-05-14 | Codex | Fix repository URL placeholder, update coverage tool to cargo llvm-cov |
 | 0.8.3 | 2026-06-26 | Kang | Updated Rust version requirement to 1.91.0+ |
+| 0.9.1 | 2026-07-14 | Kang | Raised the final pre-1.0 Rust baseline to 1.97.0+ |

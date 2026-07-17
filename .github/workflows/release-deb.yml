@@ -22,7 +22,7 @@ on:
 permissions: {}
 
 env:
-  RUST_TOOLCHAIN: 1.91.1
+  RUST_TOOLCHAIN: 1.97.0
   RUST_FEATURES: streaming,incremental
 
 jobs:
@@ -78,8 +78,10 @@ jobs:
           cargo --version
 
       - name: Validate package version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          ./packaging/scripts/validate-version.sh "${{ inputs.version }}"
+          ./packaging/scripts/validate-version.sh "$INPUT_VERSION"
 
       - name: Resolve NGINX version
         id: nginx_version

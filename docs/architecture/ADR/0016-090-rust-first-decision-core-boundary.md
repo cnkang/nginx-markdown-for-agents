@@ -56,7 +56,9 @@ ADR-justified exception.
 Source IP is taken from `r->connection->sockaddr` (after the realip module,
 if configured). `markdown_trusted_proxies` is **http context only**, CIDR-based
 (IPv4 + IPv6, parsed at config time), and `Forwarded` takes precedence over
-`X-Forwarded-*` with left-most value selection on multi-hop chains. `proto` is
+`X-Forwarded-*` with right-most value selection on multi-hop chains (the
+right-most element is the one appended by the trusted proxy; the left-most
+is client-controlled and must not be trusted). `proto` is
 restricted to `http`/`https`. Untrusted sources produce a reason code and never
 leak raw header values into logs/metrics.
 

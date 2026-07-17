@@ -1,6 +1,10 @@
 # ADR-0007: Streaming Engine as Default (auto mode)
 
-**Status**: Proposed
+> Historical decision for the v0.6.0 directive surface. ADR-0023 supersedes
+> its active configuration recommendation in v0.9.1; use
+> `markdown_streaming off|auto|force`.
+
+**Status**: Superseded by ADR-0023
 **Date**: 2026-04-28
 **Context**: v0.6.0 Production Readiness Release
 

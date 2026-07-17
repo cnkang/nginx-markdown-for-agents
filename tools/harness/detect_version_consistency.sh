@@ -5,6 +5,7 @@
 # - Main Cargo.toml (source of truth)
 # - Helm Chart.yaml (version and appVersion)
 # - Internal Cargo.toml dependencies (fuzz, corpus tools)
+# - Exact Rust toolchain, first-party MSRV, CI, packaging, and current docs
 #
 # Exit codes:
 #   0 - All versions consistent
@@ -133,7 +134,15 @@ main() {
         fi
     fi
 
-    # 4. Homebrew formula (informational — workflow rewrites url/sha256 at publish time)
+    # 4. Exact Rust compiler and public MSRV contract
+    if PYTHONPATH="${PROJECT_ROOT}" python3 \
+        "${PROJECT_ROOT}/tools/harness/check_rust_baseline.py"; then
+        log_pass "Rust compiler/MSRV baseline is consistent"
+    else
+        log_error "Rust compiler/MSRV baseline is inconsistent"
+    fi
+
+    # 5. Homebrew formula (informational — workflow rewrites url/sha256 at publish time)
     local formula_file="${PROJECT_ROOT}/packaging/homebrew/nginx-markdown-module.rb"
     if [[ -f "$formula_file" ]]; then
         local formula_ver

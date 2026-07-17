@@ -63,16 +63,40 @@ def check_reason_code_count(repo: Path) -> dict:
 
 
 def check_diagnostics_schema_version(repo: Path) -> dict:
-    """Verify diagnostics schema defines schema_version = 1."""
-    schema_file = repo / "components/rust-converter/src/diagnostics/schema.rs"
+    """Verify docs and the production C renderer emit schema_version 1."""
+    schema_file = repo / "docs/architecture/observability-schema-v1.md"
     if not schema_file.exists():
         return {"name": "diagnostics_schema_v1", "status": "fail",
-                "message": "diagnostics/schema.rs not found"}
-    content = schema_file.read_text()
-    if "schema_version" in content:
-        return {"name": "diagnostics_schema_v1", "status": "pass"}
-    return {"name": "diagnostics_schema_v1", "status": "fail",
-            "message": "schema_version not found in schema.rs"}
+                "message": "observability-schema-v1.md not found"}
+    documentation = schema_file.read_text(encoding="utf-8")
+    if not re.search(r"schema_version[^\n]*\b1\b", documentation):
+        return {"name": "diagnostics_schema_v1", "status": "fail",
+                "message": "schema_version 1 not documented"}
+
+    renderer_file = (
+        repo
+        / "components/nginx-module/src/ngx_http_markdown_diagnostics.c"
+    )
+    if not renderer_file.exists():
+        return {"name": "diagnostics_schema_v1", "status": "fail",
+                "message": "production C renderer not found"}
+
+    renderer = renderer_file.read_text(encoding="utf-8")
+    renderer_without_comments = re.sub(
+        r"/\*.*?\*/", "", renderer, flags=re.DOTALL
+    )
+    emission = re.compile(
+        r'ngx_slprintf\s*\(\s*p\s*,\s*last\s*,\s*'
+        r'"  \\"schema_version\\": 1,\\n"\s*\)'
+    )
+    if not emission.search(renderer_without_comments):
+        return {"name": "diagnostics_schema_v1", "status": "fail",
+                "message": (
+                    "production C renderer does not emit exact "
+                    "schema_version 1"
+                )}
+
+    return {"name": "diagnostics_schema_v1", "status": "pass"}
 
 
 def check_production_examples(repo: Path) -> dict:
@@ -82,12 +106,33 @@ def check_production_examples(repo: Path) -> dict:
         return {"name": "production_examples", "status": "fail",
                 "message": "examples/production/ directory not found"}
     confs = list(examples_dir.glob("*.conf"))
-    if len(confs) >= 4:
-        return {"name": "production_examples", "status": "pass",
-                "details": {"count": len(confs),
-                            "files": [f.name for f in confs]}}
-    return {"name": "production_examples", "status": "fail",
-            "message": f"Expected >= 4 configs, found {len(confs)}"}
+    if len(confs) < 4:
+        return {"name": "production_examples", "status": "fail",
+                "message": f"Expected >= 4 configs, found {len(confs)}"}
+
+    duplicate_default_type = []
+    for conf in confs:
+        uncommented = "\n".join(
+            line.split("#", 1)[0] for line in conf.read_text().splitlines()
+        )
+        for statement in uncommented.split(";"):
+            tokens = statement.split()
+            if tokens and tokens[0] == "gzip_types" and "text/html" in tokens[1:]:
+                duplicate_default_type.append(conf.name)
+                break
+    if duplicate_default_type:
+        return {
+            "name": "production_examples",
+            "status": "fail",
+            "message": (
+                "gzip_types must not redeclare NGINX's default text/html type: "
+                + ", ".join(sorted(duplicate_default_type))
+            ),
+        }
+
+    return {"name": "production_examples", "status": "pass",
+            "details": {"count": len(confs),
+                        "files": [f.name for f in confs]}}
 
 
 def check_migration_guide(repo: Path) -> dict:
@@ -486,11 +531,6 @@ def main():
         repo,
         "docs/operations/production-configs.md",
         "production_configs_doc"))
-    results.append(check_file_exists(
-        repo,
-        "components/rust-converter/src/ffi/diagnostics.rs",
-        "diagnostics_ffi"))
-
     # Summary
     passed = sum(1 for r in results if r["status"] == "pass")
     failed = sum(1 for r in results if r["status"] == "fail")

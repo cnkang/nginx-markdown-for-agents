@@ -32,10 +32,11 @@ class TestNginxVersionRegex:
         assert NGINX_VERSION_RE.search("1.24.0")
         assert NGINX_VERSION_RE.search("1.26.3")
         assert NGINX_VERSION_RE.search("1.31.1")
+        assert NGINX_VERSION_RE.search("2.0.0")
 
     def test_does_not_match_non_versions(self) -> None:
         assert not NGINX_VERSION_RE.search("hello world")
-        assert not NGINX_VERSION_RE.search("2.0.0")
+        assert not NGINX_VERSION_RE.search("1.2")
 
 
 class TestExcludedLine:
@@ -82,7 +83,25 @@ class TestExtractHardcodedVersions:
         assert "1.26.3" in versions
 
     def test_skips_rust_toolchain(self) -> None:
-        self._assert_no_hardcoded_versions("  RUST_TOOLCHAIN: 1.91.1")
+        self._assert_no_hardcoded_versions("  RUST_TOOLCHAIN: 1.97.0")
+
+    def test_skips_future_rust_toolchain(self) -> None:
+        self._assert_no_hardcoded_versions("  RUST_TOOLCHAIN: 1.120.0")
+
+    def test_skips_python_version(self) -> None:
+        self._assert_no_hardcoded_versions("  python-version: 3.14.3")
+
+    def test_skips_tool_version(self) -> None:
+        self._assert_no_hardcoded_versions("  NFPM_VERSION: 2.46.3")
+
+    def test_finds_future_nginx_major_when_context_is_explicit(self) -> None:
+        found = extract_hardcoded_versions('  NGINX_VERSION: "2.0.0"')
+        assert [version for _, version, _ in found] == ["2.0.0"]
+
+    def test_finds_versions_in_nginx_yaml_block(self) -> None:
+        content = "nginx_versions:\n  - 1.30.3\n  - 1.31.2\npython-version: 3.14.3\n"
+        found = extract_hardcoded_versions(content)
+        assert [version for _, version, _ in found] == ["1.30.3", "1.31.2"]
 
     def test_skips_commented_versions(self) -> None:
         self._assert_no_hardcoded_versions("  # NGINX_VERSION=1.26.3")

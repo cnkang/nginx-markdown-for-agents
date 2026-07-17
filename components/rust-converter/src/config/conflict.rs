@@ -155,11 +155,9 @@ pub fn detect_conflicts(
         ));
     }
 
-    // Rule 4: max_inflight == 0 → Error
-    // Zero inflight means no conversions can ever execute.
-    if effective.limits_max_inflight == 0 {
-        conflicts.push(Conflict::error("max_inflight must be > 0"));
-    }
+    // Rule 4: max_inflight == 0 means unlimited (no enforcement).
+    // This is the documented and runtime-guard semantics; the parser
+    // and conflict detector must accept 0 as a valid value.
 
     conflicts
 }
@@ -323,7 +321,10 @@ mod tests {
     }
 
     #[test]
-    fn general_max_inflight_zero_is_error() {
+    fn general_max_inflight_zero_is_unlimited() {
+        // max_inflight == 0 means unlimited (no enforcement), matching
+        // the documented and runtime-guard semantics.  The conflict
+        // detector must NOT produce an error for 0.
         let explicit = ExplicitConfig {
             limits_max_inflight: Some(0),
             cache_validation: Some(CacheValidation::ImsOnly),
@@ -335,7 +336,7 @@ mod tests {
             .iter()
             .filter(|c| c.level == ConflictLevel::Error && c.message.contains("max_inflight"))
             .collect();
-        assert_eq!(errors.len(), 1);
+        assert_eq!(errors.len(), 0, "max_inflight=0 (unlimited) must not error");
     }
 
     #[test]

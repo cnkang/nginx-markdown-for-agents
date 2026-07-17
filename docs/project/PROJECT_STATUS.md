@@ -11,8 +11,9 @@ steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.9.x)**, the project includes a dual-engine
-conversion model (streaming default with full-buffer fallback), Rust-first
+As of the **current release line (0.9.1)**, the project includes a
+streaming-default conversion model with full-buffer fallback,
+Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
 logic, and header plan application, independent decompression budget with parse
 timeout and parser budget directives, runtime diagnostics endpoint, dynconf
@@ -25,15 +26,9 @@ fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,
 operations, architecture, and contributor-facing harness maintenance.
 
-### Release 0.8.x Line (Current)
+### Current Release Line 0.9.1
 
-**Status:** Previous release line. The 0.8.x line began with 0.8.0 (true
-streaming contract) and continued with patch releases (0.8.1, 0.8.2, 0.8.3) that
-hardened stability, security, and release-gate consistency without introducing
-new user-visible features or breaking configuration changes.
-
-Version 0.8.0 formalized true streaming semantics as a first-class, verifiable
-contract. The current release line is 0.9.x — see [Current Release Line 0.9.x](#current-release-line-09x).
+**Status:** Unreleased development and release-candidate line. 0.9.1 introduces zero-copy output for streaming, gzip plus zlib/raw-deflate streaming decompression, bounded Brotli full-buffer routing, and full-buffer copy reduction, all guarded by strict performance evidence gates.
 
 ### Release 0.7.0 Updates
 
@@ -137,14 +132,15 @@ contract. The current release line is 0.9.x — see [Current Release Line 0.9.x]
 - Production readiness release:
   - Streaming engine as default (`markdown_streaming_engine auto`).
   - Noise pruning default enabled (`markdown_prune_noise on`).
-  - Unified memory budget (`markdown_memory_budget`) superseding dual
+  - Unified memory budget (`markdown_memory_budget`, 0.6.0; retired in 0.9.0 as `markdown_limits`) superseding dual
     `markdown_max_size` + `markdown_streaming_budget`.
   - OpenTelemetry tracing integration (self-implemented OTLP HTTP/protobuf).
   - Per-path metrics with cardinality control.
   - OS package manager distribution (APT, YUM/DNF, Homebrew).
   - Helm chart with Ingress annotation support.
   - Coverage gate as CI merge requirement.
-  - MDX and Org-mode flavor support (experimental, subject to change).
+  - MDX and Org-mode flavor selectors (experimental at the time; removed in
+    v0.9.1 because they never provided distinct conversion semantics).
   - Dynamic configuration hot-reload (`markdown_dynamic_config`).
   - ADR-0006 (OTel), ADR-0007 (Streaming Default), ADR-0008 (Noise Pruning Default).
 
@@ -211,7 +207,7 @@ The 0.3.0 release includes:
 - Image conversion now preserves the `title` attribute in Markdown syntax; missing/blocked image URLs emit `alt` text as plain text
 - Media elements (`video`, `audio`) now have their `src` URL extracted as a Markdown link; video `poster` thumbnails extracted as Markdown images
 - Image map `<area>` elements now have their `href` extracted as Markdown links
-- X-Forwarded-Host/Proto headers are no longer trusted by default; added `markdown_trusted_proxies on|off` directive (default: off)
+- X-Forwarded-Host/Proto headers are no longer trusted by default; added CIDR-based `markdown_trusted_proxies <CIDR>...` directive (default: off — no forwarded headers honored)
 - Decompression buffer estimation now logs a warning when the estimated output exceeds 50 MB
 - CI jobs for clang compiler and AddressSanitizer/UndefinedBehaviorSanitizer smoke tests
 - SonarCloud Quality Gate Status badge in both English and Chinese READMEs
@@ -297,7 +293,7 @@ The 0.3.0 release includes:
 - Automatic upstream decompression (gzip, brotli, deflate)
 - Authentication-aware caching (Cache-Control: private)
 - Variable-driven configuration support
-- Large response routing with `markdown_large_body_threshold` directive
+- Large response routing (retired `markdown_large_body_threshold` directive; no Config V2 replacement)
 - Forwarded header trust control with `markdown_trusted_proxies` directive
 
 ## Test Coverage
@@ -367,7 +363,7 @@ When deploying:
 
 1. **Start incrementally**: Enable on one location or path first
 2. **Monitor behavior**: Use the metrics endpoint to track conversions
-3. **Set appropriate limits**: Configure `markdown_memory_budget` and `markdown_timeout`
+3. **Set appropriate limits**: Configure `markdown_limits` (e.g., `memory=<size> timeout=<time>`)
 4. **Choose failure mode**: Select `markdown_error_policy` based on requirements
 5. **Test caching**: Verify cache behavior with your CDN or caching layer
 6. **Review security**: Ensure authentication policies match your security model
@@ -389,10 +385,16 @@ and adds profile-based deployments, while preserving upgrade paths from 0.8.x.
   replace 0.8.x legacy directives.
 - **Profile system**: `markdown_profile` (strict_cache, balanced, streaming_first)
   for one-line preset deployments.
-- **0.8.x migration**: All 0.8.x configs work unchanged; legacy aliases
-  silently remap to new directives.
+- **0.8.x migration**: 0.9.0 is a breaking release; legacy directive
+  names are rejected at `nginx -t` with a migration hint. See
+  [MIGRATION-0.9.md](../guides/MIGRATION-0.9.md) for the full mapping.
 - Breaking: removed `markdown_max_size`, `markdown_timeout`,
-  `markdown_streaming_budget`, `markdown_conditional_requests` as standalone directives.
+  `markdown_streaming_budget`, `markdown_on_error`,
+  `markdown_streaming_on_error`, `markdown_etag`,
+  `markdown_conditional_requests`, `markdown_trust_forwarded_headers`,
+  `markdown_on_wildcard`, `markdown_large_body_threshold`,
+  `markdown_streaming_engine` (0.9.1), and
+  `markdown_streaming_auto_threshold` (0.8.0) as standalone directives.
 
 #### 0.8.3 (last 0.8.x patch)
 
@@ -595,7 +597,7 @@ View the latest CI status: [GitHub Actions](https://github.com/cnkang/nginx-mark
 - macOS (Apple Silicon and Intel)
 - Linux (x86_64 and aarch64)
 - NGINX 1.24.0 and later
-- Rust 1.91.0 and later
+- Rust 1.97.0 and later for source builds
 
 ### Docker Support
 - Official NGINX base images
@@ -647,11 +649,12 @@ See `examples/docker/` for Docker build examples.
 ## Summary
 
 **NGINX Markdown for Agents** is on the 0.9.x release line (latest patch:
-0.9.0). The project provides
+0.9.0; 0.9.1 in RC preparation). The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
-dual-engine model, with bounded-memory streaming as the default path and
-full-buffer conversion as the fallback. Version 0.8.0 formalizes the true
-streaming contract (RFC 0008, ADR-0011), introduces the streaming fallback
+streaming-default conversion model, with bounded-memory streaming as the
+default path and full-buffer conversion as the fallback. Version 0.8.0
+formalizes the true streaming contract (RFC 0008, ADR-0011), introduces
+the streaming fallback
 state machine (ADR-0012), aligns the auto-mode streaming policy with the true
 streaming contract definition (ADR-0013), and consolidates platform and
 version support declarations into a release matrix source of truth (ADR-0014).
@@ -698,3 +701,4 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 | 0.8.0 | 2026-06-16 | Kang | Version bump to 0.8.0; true streaming contract, fallback state machine, streaming observability, streaming security enforcement, release matrix source of truth, streaming config directives |
 | 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
 | 0.8.3 | 2026-06-26 | Kang | 0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

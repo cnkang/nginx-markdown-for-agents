@@ -1,21 +1,22 @@
 /*
  * Streaming Fallback State Machine — Error Handler Integration
  *
- * Wires the markdown_streaming_on_error configuration directive into the
+ * Wires the unified markdown_error_policy configuration directive into the
  * streaming state machine.  This is the main entry point called by
  * the body filter when a streaming error occurs.  It uses the
  * decision engine to determine the correct action, then executes
  * that action using the replay, commit, and post-commit modules.
  *
- * Policy distinction (0.8.0+):
- *   markdown_on_error        — controls legacy/full-buffer fallback
- *   markdown_streaming_on_error — controls streaming pre-commit fallback
- *   post-commit fallback never returns HTML (safe_finish or abort only)
+ * The unified markdown_error_policy controls every pre-commit conversion
+ * failure and selects the post-commit recovery strategy:
+ *   pass          - replay original HTML before commit; after commit attempt
+ *                   safe_finish and abort if safe_finish fails
+ *   fail_closed   - finalize with 502 before commit; abort after commit
+ *   status 429/503 - finalize with the configured status before commit;
+ *                   abort after commit
  *
- * Pre-commit with pass policy: replay original HTML
- * Pre-commit with reject policy: return 502
- * Post-commit with pass policy: safe_finish/abort
- * Post-commit with reject policy: safe_finish/abort
+ * Post-commit handling never replays HTML or changes the HTTP status because
+ * response headers are already on the wire.
  */
 
 #ifndef NGX_HTTP_MARKDOWN_STREAM_ERROR_H_INCLUDED_
@@ -38,10 +39,10 @@
  *   ctx    - request context with stream_sm sub-struct
  *   conf   - module configuration (for on_error policy)
  *
- * Returns:
- *   NGX_OK             - Error handled (fallback or finish executed)
- *   NGX_HTTP_BAD_GATEWAY - 502 reject (pre-commit with reject policy)
- *   NGX_ERROR          - Unrecoverable error
+ * Returns the result of the selected replay, request-finalization, safe-finish,
+ * or abort operation. NGX_AGAIN preserves pending downstream output for
+ * backpressure resume; NGX_ERROR reports invalid input or an unrecoverable
+ * downstream/finalization failure.
  */
 ngx_int_t
 ngx_http_markdown_stream_on_error(ngx_http_request_t *r,

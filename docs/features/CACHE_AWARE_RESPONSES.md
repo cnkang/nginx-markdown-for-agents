@@ -85,12 +85,12 @@ Module:    Vary: User-Agent, Accept
 
 ### Enable ETag Generation
 
-ETags are enabled by default:
+ETags are enabled with `markdown_cache_validation full`:
 
 ```nginx
 location /docs/ {
     markdown_filter on;
-    markdown_etag on;  # Default
+    markdown_cache_validation full;  # Generate transformed ETag + conditional support
 }
 ```
 
@@ -101,7 +101,7 @@ To disable ETag generation (not recommended):
 ```nginx
 location /docs/ {
     markdown_filter on;
-    markdown_etag off;
+    markdown_cache_validation off;
 }
 ```
 
@@ -114,23 +114,23 @@ Configure conditional request handling:
 ```nginx
 location /docs/ {
     markdown_filter on;
-    
-    # Full support (default)
-    markdown_conditional_requests full_support;
-    
-    # Or optimize for performance
-    # markdown_conditional_requests if_modified_since_only;
-    
+
+    # IMS-only: If-Modified-Since via upstream Last-Modified (no ETag)
+    markdown_cache_validation ims_only;
+
+    # Or full support (ETag + If-None-Match + If-Modified-Since)
+    # markdown_cache_validation full;
+
     # Or disable
-    # markdown_conditional_requests disabled;
+    # markdown_cache_validation off;
 }
 ```
 
 **Modes**:
 
-- `full_support` (default): Support Markdown-variant `If-None-Match` (ETag) and preserve upstream `If-Modified-Since` semantics
-- `if_modified_since_only`: Skip module-side `If-None-Match` processing (performance optimization); `If-Modified-Since` remains handled by standard NGINX
-- `disabled`: No conditional request support for Markdown variants
+- `ims_only` (default): Skip module-side `If-None-Match` processing (performance optimization); `If-Modified-Since` remains handled by standard NGINX
+- `full`: Support Markdown-variant `If-None-Match` (ETag) and preserve upstream `If-Modified-Since` semantics
+- `off`: No conditional request support for Markdown variants
 
 **Performance Note**: `full_support` requires conversion to generate a Markdown-variant ETag for comparison, which has performance implications for conditional requests.
 
@@ -258,7 +258,7 @@ For authenticated requests, the module adjusts cache control:
 ```nginx
 location /private/ {
     markdown_filter on;
-    markdown_auth_policy detect;
+    markdown_auth_policy deny;
     markdown_auth_cookies "session_id auth_token";
     
     proxy_pass http://backend;
@@ -364,7 +364,7 @@ Proper caching reduces:
 ### ETags Not Generated
 
 Check:
-1. `markdown_etag on` is set (default)
+1. `markdown_cache_validation full` is set
 2. Conversion is happening (check Content-Type)
 3. Response is successful (200 OK)
 
@@ -372,7 +372,7 @@ Check:
 
 Check:
 1. Client sends `If-None-Match` with correct ETag
-2. `markdown_conditional_requests` is not `disabled`
+2. `markdown_cache_validation` is not `off`
 3. Content hasn't changed (ETag should match)
 
 ### Wrong Variant from Cache
@@ -413,3 +413,4 @@ For implementation details, see the source code and inline comments.
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

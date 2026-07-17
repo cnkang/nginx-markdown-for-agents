@@ -9,7 +9,7 @@
 # --- How to extend ---
 #
 # Add a new NGINX version:
-#   1. Add the entry to tools/release-matrix.json (support_tier: "full")
+#   1. Add the entry to tools/release-matrix.json (support_tier: "supported")
 #   2. Add the SHA256 checksum to packaging/checksums.sha256
 #   3. (Optional) Update this file for human reference
 #   The release-packages.yml workflow reads tools/release-matrix.json directly;
@@ -39,8 +39,8 @@ nginx_versions:
   - "1.24.0"
   - "1.26.3"
   - "1.28.3"
-  - "1.30.2"
-  - "1.31.1"
+  - "1.30.3"
+  - "1.31.2"
 
 # ---------------------------------------------------------------------------
 # Target architectures

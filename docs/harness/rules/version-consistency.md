@@ -2,9 +2,13 @@
 domain: version-consistency
 rules: [55]
 paths:
+  - "rust-toolchain.toml"
   - "components/rust-converter/Cargo.toml"
   - "components/rust-converter/fuzz/Cargo.toml"
+  - "tools/e2e-harness/Cargo.toml"
   - "tools/corpus/test-corpus-conversion/Cargo.toml"
+  - ".github/workflows/**"
+  - "packaging/debian/control"
   - "charts/nginx-markdown/Chart.yaml"
   - "AGENTS.md"
   - "CONTRIBUTING.md"
@@ -13,6 +17,7 @@ paths:
   - "README_zh-CN.md"
   - "packaging/README.md"
   - "docs/**"
+  - "tools/harness/check_rust_baseline.py"
   - "tools/harness/detect_version_consistency.sh"
 ---
 
@@ -30,6 +35,17 @@ All version numbers across the project must be synchronized to reflect the curre
 - Helm Chart `version` and `appVersion` fields
 - Internal Cargo.toml dependencies (fuzz targets, corpus tools)
 - Documentation examples (INSTALLATION.md, etc.)
+
+The Rust build contract is a second, independently synchronized baseline:
+
+- `rust-toolchain.toml` owns the exact repository/release compiler.
+- Every first-party Cargo manifest declares the matching major/minor MSRV.
+- Blocking CI and release workflows use the exact compiler; nightly fuzzing is
+  the only intentionally nightly lane.
+- Release Dockerfiles consume `rust-toolchain.toml` instead of embedding an
+  independent compiler version.
+- Source-build packaging and current build documentation declare the same
+  MSRV.
 
 ## Rationale
 Version inconsistencies have been a recurring issue in past releases:
@@ -51,6 +67,17 @@ The harness detector `tools/harness/detect_version_consistency.sh` performs the 
    - `components/rust-converter/fuzz/Cargo.toml`
    - `tools/corpus/test-corpus-conversion/Cargo.toml`
 4. **Homebrew Formula**: Reports version (informational only - intentionally kept at previous release, updated by publish workflow)
+5. **Rust Baseline**: Calls the blocking
+   `tools/harness/check_rust_baseline.py` validator, which checks:
+   - exact `MAJOR.MINOR.PATCH` toolchain identity;
+   - all four first-party manifest MSRVs;
+   - classified blocking, release, and nightly workflows;
+   - release Dockerfile consumption of the canonical toolchain;
+   - Debian source-build compiler floor; and
+   - current contributor, install, compatibility, and operations docs.
+
+An unclassified workflow that installs Rust is a failure so a new workflow
+cannot silently introduce a floating compiler.
 
 ## Exclusions
 The following are intentionally NOT checked:
@@ -75,6 +102,10 @@ When version inconsistency is detected:
    nginx-markdown-converter = { version = "<current-version>", path = "..." }
    ```
 4. **Update documentation examples**: Replace outdated version references in INSTALLATION.md and other guides
+5. **Update the Rust baseline atomically**: Change `rust-toolchain.toml`, all
+   first-party `rust-version` fields, classified workflows, source-build
+   packaging, and current build documentation in the same change set. Do not
+   use floating `stable` for blocking or release builds.
 
 ## Integration
 This detector is integrated into:
@@ -84,12 +115,13 @@ This detector is integrated into:
 ## Example Output
 ```text
 INFO: Checking version consistency...
-PASS: Main Cargo.toml version: 0.8.3
-PASS: Chart.yaml version: 0.8.3
-PASS: Chart.yaml appVersion: 0.8.3
-PASS: fuzz/Cargo.toml dep version: 0.8.3
-PASS: corpus/Cargo.toml dep version: 0.8.3
-INFO: Homebrew formula: 0.8.2 (intentionally previous; updated by publish workflow)
+PASS: Main Cargo.toml version: 0.9.1
+PASS: Chart.yaml version: 0.9.1
+PASS: Chart.yaml appVersion: 0.9.1
+PASS: fuzz/Cargo.toml dep version: 0.9.1
+PASS: corpus/Cargo.toml dep version: 0.9.1
+Rust baseline consistency check PASSED: toolchain=1.97.0, MSRV=1.97
+INFO: Homebrew formula: 0.8.3 (intentionally previous; updated by publish workflow)
 
 PASS: All version checks passed
 ```
@@ -104,3 +136,7 @@ PASS: All version checks passed
   - Helm Chart was at 0.8.2 while main version was 0.8.3
   - Internal dependencies were at 0.8.0
   - Documentation examples referenced v0.8.2
+- **2026-07-13**: Updated example output to 0.9.1 (Rule 55 detector output)
+- **2026-07-14**: Added blocking exact Rust compiler/MSRV consistency checks
+  for manifests, workflows, release Dockerfiles, source packaging, and current
+  build documentation

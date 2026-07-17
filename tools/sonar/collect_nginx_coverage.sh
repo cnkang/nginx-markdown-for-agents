@@ -275,7 +275,6 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation full;
             markdown_otel on;
-            markdown_otel_tracing on;
             markdown_log_verbosity debug;
             markdown_token_estimate on;
             markdown_error_policy pass;
@@ -411,13 +410,13 @@ http {
             markdown_limits memory=1m;
         }
 
-        # Streaming + gzip proxy (exercises streaming decompression path)
+        # Gzip under streaming-enabled location (incremental decompression)
         location /streaming-proxy-gzip {
             proxy_pass http://127.0.0.1:${BACKEND_PORT}/;
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_error_policy pass;
             markdown_log_verbosity debug;
@@ -430,7 +429,7 @@ http {
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_limits streaming_buffer=1 memory=1m;
             markdown_error_policy fail_closed;
@@ -503,7 +502,7 @@ http {
         location /streaming {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_log_verbosity debug;
         }
@@ -511,7 +510,7 @@ http {
         location /streaming-auto {
             root html;
             markdown_filter on;
-            markdown_streaming_engine auto;
+            markdown_streaming auto;
             markdown_cache_validation off;
             markdown_log_verbosity debug;
         }
@@ -519,7 +518,7 @@ http {
         location /streaming-off {
             root html;
             markdown_filter on;
-            markdown_streaming_engine off;
+            markdown_streaming off;
             markdown_cache_validation off;
             markdown_log_verbosity debug;
         }
@@ -527,7 +526,9 @@ http {
         location /streaming-fullsupport {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            # Full cache validation requires the buffered path so that a
+            # transformed-representation ETag can be generated.
+            markdown_streaming auto;
             markdown_cache_validation full;
             markdown_log_verbosity debug;
         }
@@ -535,7 +536,7 @@ http {
         location /streaming-ims-only {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation ims_only;
             markdown_log_verbosity debug;
         }
@@ -544,7 +545,7 @@ http {
         location /streaming-tiny-budget {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_limits streaming_buffer=1;
             markdown_log_verbosity debug;
@@ -554,7 +555,7 @@ http {
         location /streaming-reject-budget {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_limits streaming_buffer=1;
             markdown_error_policy fail_closed;
@@ -571,7 +572,7 @@ http {
         location /streaming-etag-tokens {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_token_estimate on;
             markdown_log_verbosity debug;
@@ -581,7 +582,7 @@ http {
         location /streaming-front-matter {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_front_matter on;
             markdown_log_verbosity debug;
@@ -591,7 +592,7 @@ http {
         location /streaming-gfm {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_flavor gfm;
             markdown_log_verbosity debug;
@@ -601,7 +602,7 @@ http {
         location /streaming-large-budget {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_limits streaming_buffer=10m memory=10m;
             markdown_token_estimate on;
@@ -613,7 +614,7 @@ http {
         location /streaming-on-error-reject {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_error_policy fail_closed;
             markdown_log_verbosity debug;
@@ -625,7 +626,7 @@ http {
             proxy_set_header Accept-Encoding gzip;
             markdown_filter on;
             markdown_accept wildcard;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_limits streaming_buffer=10m memory=10m;
             markdown_error_policy pass;
@@ -637,7 +638,7 @@ http {
         location /streaming-warn {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_log_verbosity warn;
         }
@@ -646,7 +647,7 @@ http {
         location /streaming-error-verbosity {
             root html;
             markdown_filter on;
-            markdown_streaming_engine on;
+            markdown_streaming force;
             markdown_cache_validation off;
             markdown_log_verbosity error;
         }
@@ -1026,14 +1027,14 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 curl -sS -H "${ACCEPT_MARKDOWN}" \
   "http://127.0.0.1:${PORT}/proxy-gzip/large.html" -o /dev/null -w "  gzip proxy large: HTTP %{http_code}\n"
 
-# Streaming + gzip proxy (exercises streaming_decomp_impl.h)
+# Gzip under streaming-enabled location (incremental decompression path)
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  "http://127.0.0.1:${PORT}/streaming-proxy-gzip/index.html" -o /dev/null -w "  streaming gzip proxy: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/streaming-proxy-gzip/index.html" -o /dev/null -w "  gzip streaming decompression: HTTP %{http_code}\n"
 
-# Streaming + gzip proxy + reject on pre-commit failure
+# Gzip under streaming-enabled location + reject on pre-commit failure
 curl -sS -H "${ACCEPT_MARKDOWN}" \
   "http://127.0.0.1:${PORT}/streaming-proxy-gzip-reject/large.html" \
-  -o /dev/null -w "  streaming gzip reject: HTTP %{http_code}\n" || true
+  -o /dev/null -w "  gzip streaming reject: HTTP %{http_code}\n" || true
 
 # Proxy with invalid/mislabeled compressed payloads
 # These exercise the decompression error/fail-open paths: the backend
@@ -1161,15 +1162,15 @@ curl -sS -H "${ACCEPT_MARKDOWN}" \
 
 # ── Extended streaming decompression scenarios ──────────────────────
 
-# Streaming + gzip proxy with large content (exercises inflate_loop, expand_buf)
+# Gzip under streaming-enabled location with large content
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  "http://127.0.0.1:${PORT}/streaming-proxy-gzip/large.html" -o /dev/null -w "  streaming gzip large: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/streaming-proxy-gzip/large.html" -o /dev/null -w "  gzip streaming large: HTTP %{http_code}\n"
 
-# Streaming + gzip proxy with large budget (exercises full decomp + convert path)
+# Gzip under streaming-enabled location with large budget
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  "http://127.0.0.1:${PORT}/streaming-proxy-gzip-large/index.html" -o /dev/null -w "  streaming gzip large-budget: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/streaming-proxy-gzip-large/index.html" -o /dev/null -w "  gzip streaming large-budget: HTTP %{http_code}\n"
 curl -sS -H "${ACCEPT_MARKDOWN}" \
-  "http://127.0.0.1:${PORT}/streaming-proxy-gzip-large/large.html" -o /dev/null -w "  streaming gzip large-budget+large: HTTP %{http_code}\n"
+  "http://127.0.0.1:${PORT}/streaming-proxy-gzip-large/large.html" -o /dev/null -w "  gzip streaming large-budget+large: HTTP %{http_code}\n"
 
 # ── Extended conversion_impl.h scenarios ────────────────────────────
 
@@ -1461,8 +1462,8 @@ if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
 fi
 
 echo "==> Running chunked streaming e2e coverage (smoke)"
-# Keep 10m so streaming gzip/deflate fixtures can validate decompression
-# behavior instead of tripping full-buffer size fail-open at 1m.
+# Keep 10m so gzip and raw/zlib-deflate streaming fixtures can
+# validate decompression behavior instead of tripping size fail-open at 1m.
 if ! env NGINX_BIN="${REUSE_NGINX_BIN}" \
     bash "${WORKSPACE_ROOT}/tools/e2e/verify_chunked_streaming_native_e2e.sh" \
     --profile smoke \
@@ -1537,9 +1538,11 @@ if ! env NGINX_BIN="${REUSE_NGINX_BIN}" RUN_1G_GET=0 \
 fi
 
 echo "==> Running huge-body allowed native e2e coverage (skip 1GB GET)"
-# --markdown-max-size 1536m allows bodies up to 1.5 GiB, exercising the
-# allowed-huge-body path where conversion proceeds instead of fail-open.
+# --markdown-max-size 1536m allows bodies up to 1.5 GiB, while the explicit
+# 1 GiB parser budget keeps the independent parser limit above the 100 MiB
+# conversion fixture's estimated working set.
 if ! env NGINX_BIN="${REUSE_NGINX_BIN}" RUN_1G_GET=0 \
+    MARKDOWN_PARSER_BUDGET=1024m \
     bash "${WORKSPACE_ROOT}/tools/e2e/verify_huge_body_allowed_native_e2e.sh" \
     --port 18293 \
     --skip-1g-get \

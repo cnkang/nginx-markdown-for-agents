@@ -92,6 +92,37 @@ def test_update_matrix_pr_creation_is_non_blocking_when_repo_disallows_actions_p
     assert "Matrix update branch pushed, but automatic PR creation is blocked." in text
 
 
+def test_non_streaming_verifier_changes_trigger_runtime_regressions() -> None:
+    """Verifier changes must classify as E2E so the blocking job runs."""
+    workflow = _workflow_data("ci.yml")
+    changes_steps = workflow["jobs"]["changes"]["steps"]
+    filter_step = _step_by_name(changes_steps, "Filter changed paths")
+    filters = yaml.load(filter_step["with"]["filters"], Loader=yaml.BaseLoader)
+
+    assert "tools/ci/verify_non_streaming_nginx_module.sh" in filters["e2e"]
+
+
+def test_macos_smoke_retries_once_and_blocks_a_second_failure() -> None:
+    """Darwin transport retries must not make repeated E2E failures advisory."""
+    workflow = _workflow_data("macos-smoke.yml")
+    job = workflow["jobs"]["darwin-native-smoke"]
+    step = _step_by_name(
+        job["steps"], "Run chunked streaming native smoke validation"
+    )
+    run = step["run"]
+
+    assert job.get("continue-on-error") != "true"
+    assert step.get("continue-on-error") != "true"
+    assert "max_attempts=2" in run
+    assert "for attempt in 1 2" in run
+    assert "retrying once after 10 seconds" in run
+    assert "sleep 10" in run
+    assert "Darwin native smoke failed on both attempts" in run
+    command = "./tools/e2e/verify_chunked_streaming_native_e2e.sh --profile smoke"
+    assert run.count(command) == 1
+    assert run.rstrip().endswith("exit 1")
+
+
 def test_install_verify_workflow_avoids_js_actions_on_alpine_arm64_and_uses_bash() -> None:
     """Install verification must stay runnable on Alpine arm64 GitHub containers."""
     workflow = _workflow_data("install-verify.yml")

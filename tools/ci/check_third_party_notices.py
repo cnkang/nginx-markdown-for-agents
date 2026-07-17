@@ -2,9 +2,10 @@
 """Verify THIRD-PARTY-NOTICES covers all direct runtime dependencies.
 
 Checks:
-1. Every Rust [dependencies] crate in Cargo.toml has a matching entry.
-2. Every known C runtime dependency (NGINX, zlib, brotli) has a matching entry.
-3. The THIRD-PARTY-NOTICES file exists and is non-empty.
+1. Every Rust [dependencies] crate has an entry with its exact resolved version.
+2. Required transitive runtime crates have entries with exact resolved versions.
+3. Every known C runtime dependency (NGINX, zlib, brotli) has a matching entry.
+4. Every first-party Rust workspace has a present and current Cargo.lock.
 
 Dev-only dependencies ([dev-dependencies], test frameworks, CI tools) are
 intentionally excluded because they are not linked into or distributed with
@@ -14,13 +15,17 @@ the final binary.
 from __future__ import annotations
 
 import re
+import subprocess
+import tomllib
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 NOTICES_PATH = ROOT / "THIRD-PARTY-NOTICES"
 _CARGO_TOML_NAME = "Cargo.toml"
+_CARGO_LOCK_NAME = "Cargo.lock"
 CARGO_TOML = ROOT / "components" / "rust-converter" / _CARGO_TOML_NAME
+CARGO_LOCK = ROOT / "components" / "rust-converter" / _CARGO_LOCK_NAME
 
 # Additional Cargo.toml files for sub-workspaces that have their own
 # Cargo.lock.  These are checked for stale lock files and their direct
@@ -30,13 +35,19 @@ CARGO_TOML = ROOT / "components" / "rust-converter" / _CARGO_TOML_NAME
 SUB_WORKSPACE_CARGO_TOMLS: list[Path] = [
     ROOT / "components" / "rust-converter" / "fuzz" / _CARGO_TOML_NAME,
     ROOT / "tools" / "corpus" / "test-corpus-conversion" / _CARGO_TOML_NAME,
+    ROOT / "tools" / "e2e-harness" / _CARGO_TOML_NAME,
 ]
 
 # Corresponding Cargo.lock files for sub-workspaces.
 SUB_WORKSPACE_CARGO_LOCKS: list[Path] = [
-    ROOT / "components" / "rust-converter" / "fuzz" / "Cargo.lock",
-    ROOT / "tools" / "corpus" / "test-corpus-conversion" / "Cargo.lock",
+    ROOT / "components" / "rust-converter" / "fuzz" / _CARGO_LOCK_NAME,
+    ROOT / "tools" / "corpus" / "test-corpus-conversion" / _CARGO_LOCK_NAME,
+    ROOT / "tools" / "e2e-harness" / _CARGO_LOCK_NAME,
 ]
+
+# Runtime crates that are transitive but intentionally documented because their
+# implementation is shipped as part of the converter's parser stack.
+NOTICE_REQUIRED_TRANSITIVE_DEPS = ("markup5ever",)
 
 # Known C-side runtime dependencies that must appear in the notices file.
 # Each tuple is (display_name, list_of_search_patterns).
@@ -91,6 +102,87 @@ def check_dep_in_notices(patterns: list[str], notices: str) -> bool:
     return any(p.lower() in lower for p in patterns)
 
 
+def resolved_versions(cargo_lock: Path, dependency_names: list[str]) -> dict[str, str]:
+    """Return one unambiguous resolved Cargo.lock version per dependency."""
+    data = tomllib.loads(cargo_lock.read_text(encoding="utf-8"))
+    packages = data.get("package", [])
+    versions: dict[str, str] = {}
+
+    for name in dependency_names:
+        matches = {
+            str(package.get("version", ""))
+            for package in packages
+            if package.get("name") == name and package.get("version")
+        }
+        if len(matches) != 1:
+            rendered = ", ".join(sorted(matches)) if matches else "none"
+            raise ValueError(
+                f"expected one resolved version for {name}, found: {rendered}"
+            )
+        versions[name] = matches.pop()
+    return versions
+
+
+def notice_has_exact_version(name: str, version: str, notices: str) -> bool:
+    """Return whether a numbered NOTICE entry has the exact resolved version."""
+    variants = {name, name.replace("-", "_"), name.replace("_", "-")}
+    return any(
+        re.search(
+            rf"^\s*\d+\.\s+{re.escape(variant)}\s+{re.escape(version)}(?=\s|\(|$)",
+            notices,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        is not None
+        for variant in variants
+    )
+
+
+def collect_notice_version_issues(
+    rust_deps: list[str], cargo_lock: Path, notices: str
+) -> list[str]:
+    """Collect missing or stale exact-version NOTICE entries."""
+    required_names = rust_deps + list(NOTICE_REQUIRED_TRANSITIVE_DEPS)
+    versions = resolved_versions(cargo_lock, required_names)
+    return [
+        f"Rust dependency: {name} must list resolved version {version}"
+        for name, version in versions.items()
+        if not notice_has_exact_version(name, version, notices)
+    ]
+
+
+def collect_workspace_lock_issues() -> list[str]:
+    """Collect missing or stale sub-workspace Cargo.lock errors."""
+    issues: list[str] = []
+    for cargo_toml, cargo_lock in zip(
+        SUB_WORKSPACE_CARGO_TOMLS, SUB_WORKSPACE_CARGO_LOCKS, strict=True
+    ):
+        if not cargo_toml.is_file():
+            continue
+        relative_manifest = cargo_toml.relative_to(ROOT)
+        if not cargo_lock.is_file():
+            issues.append(f"Cargo.lock missing for {relative_manifest}")
+            continue
+        completed = subprocess.run(
+            [
+                "cargo",
+                "metadata",
+                "--format-version",
+                "1",
+                "--locked",
+                "--no-deps",
+                "--manifest-path",
+                str(cargo_toml),
+            ],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            issues.append(f"Cargo.lock is stale for {relative_manifest}")
+    return issues
+
+
 def main() -> int:
     """Run THIRD-PARTY-NOTICES coverage check and report results."""
     # --- Existence check ---
@@ -103,54 +195,32 @@ def main() -> int:
         print("THIRD-PARTY-NOTICES file is empty.")
         return 1
 
-    missing: list[str] = []
+    problems: list[str] = []
 
     # --- Rust direct dependencies ---
     rust_deps = parse_rust_direct_deps(CARGO_TOML)
-    for dep in rust_deps:
-        # Search for the crate name (underscores and hyphens are interchangeable
-        # in Cargo but the notices file may use either form).
-        patterns = [dep, dep.replace("-", "_"), dep.replace("_", "-")]
-        if not check_dep_in_notices(patterns, notices):
-            missing.append(f"Rust dependency: {dep}")
+    try:
+        problems.extend(collect_notice_version_issues(rust_deps, CARGO_LOCK, notices))
+    except (OSError, ValueError) as exc:
+        problems.append(f"Cargo.lock resolution error: {exc}")
 
     # --- C runtime dependencies ---
-    missing.extend(
+    problems.extend(
         f"C dependency: {display_name}"
         for display_name, patterns in C_RUNTIME_DEPS
         if not check_dep_in_notices(patterns, notices)
     )
 
-    # --- Sub-workspace Cargo.lock existence check ---
-    # These sub-workspaces have their own Cargo.lock that can go stale
-    # when Cargo.toml changes are made without running cargo update.
-    # We only check existence here — a full lock-file freshness check
-    # requires running cargo and is left to CI.
-    stale_locks: list[str] = []
-    for cargo_toml, cargo_lock in zip(
-        SUB_WORKSPACE_CARGO_TOMLS, SUB_WORKSPACE_CARGO_LOCKS,
-        strict=True,
-    ):
-        if cargo_toml.is_file() and not cargo_lock.is_file():
-            stale_locks.append(
-                f"Cargo.lock missing for {cargo_toml.relative_to(ROOT)}"
-            )
-
-    if stale_locks:
-        print("Sub-workspace Cargo.lock issues detected:")
-        for item in stale_locks:
-            print(f"  - {item}")
-        print("Run `cargo generate-lockfile` in each sub-workspace directory.")
-        # Report as warning, not failure — lock file may not exist yet
-        # in early development.  CI will catch staleness via --locked.
+    # --- Sub-workspace Cargo.lock freshness check ---
+    problems.extend(collect_workspace_lock_issues())
 
     # --- Report ---
-    if missing:
-        return report_missing_and_fail(missing)
-    dep_count = len(rust_deps) + len(C_RUNTIME_DEPS)
+    if problems:
+        return report_missing_and_fail(problems)
+    dep_count = (
+        len(rust_deps) + len(NOTICE_REQUIRED_TRANSITIVE_DEPS) + len(C_RUNTIME_DEPS)
+    )
     print(f"THIRD-PARTY-NOTICES coverage check passed ({dep_count} dependencies verified).")
-    if stale_locks:
-        print(f"WARNING: {len(stale_locks)} sub-workspace Cargo.lock issue(s) detected.")
     return 0
 
 

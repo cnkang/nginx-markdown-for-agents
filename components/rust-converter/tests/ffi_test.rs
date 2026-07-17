@@ -32,7 +32,12 @@ fn ffi_markdown_converter_free(handle: *mut MarkdownConverterHandle) {
 fn ffi_markdown_incremental_new(
     options: *const MarkdownOptions,
 ) -> *mut IncrementalConverterHandle {
-    unsafe { nginx_markdown_converter::ffi::markdown_incremental_new(options) }
+    let mut handle = ptr::null_mut();
+    let code = unsafe {
+        nginx_markdown_converter::ffi::markdown_incremental_new_with_code(options, &mut handle)
+    };
+    assert_eq!(code, ERROR_SUCCESS);
+    handle
 }
 
 #[cfg(feature = "incremental")]
@@ -792,14 +797,14 @@ fn test_gfm_flavor() {
 }
 
 #[test]
-fn test_invalid_flavor_rejected() {
+fn test_removed_mdx_flavor_rejected() {
     let converter = markdown_converter_new();
     assert!(!converter.is_null());
 
     let html = b"<p>hello</p>";
 
     let mut options = ffi_test_default_options();
-    options.flavor = 99;
+    options.flavor = 2;
 
     let mut result = MarkdownResult {
         markdown: ptr::null_mut(),
@@ -817,7 +822,7 @@ fn test_invalid_flavor_rejected() {
 
     assert_eq!(
         result.error_code, ERROR_INVALID_INPUT,
-        "flavor=99 should be rejected with ERROR_INVALID_INPUT"
+        "removed flavor=2 should be rejected with ERROR_INVALID_INPUT"
     );
     assert!(
         result.markdown.is_null(),
@@ -1706,112 +1711,6 @@ fn test_negotiate_accept_malformed_utf8() {
     }
     assert_eq!(result.should_convert, 0);
     assert_eq!(result.reason, NEGOTIATE_REASON_MALFORMED);
-}
-
-#[test]
-fn test_check_conditional_null_result_is_safe() {
-    let inm = b"\"abc\"";
-    let etag = b"\"abc\"";
-    unsafe {
-        markdown_check_conditional(
-            inm.as_ptr(),
-            inm.len(),
-            etag.as_ptr(),
-            etag.len(),
-            std::ptr::null(),
-            0,
-            std::ptr::null(),
-            0,
-            std::ptr::null_mut(),
-        );
-    }
-}
-
-#[test]
-fn test_check_conditional_etag_match_not_modified() {
-    let inm = b"\"abc\"";
-    let etag = b"\"abc\"";
-    let mut result = FFIConditionalResult {
-        result_code: 9,
-        matched_etag_len: 9,
-    };
-    unsafe {
-        markdown_check_conditional(
-            inm.as_ptr(),
-            inm.len(),
-            etag.as_ptr(),
-            etag.len(),
-            std::ptr::null(),
-            0,
-            std::ptr::null(),
-            0,
-            &mut result,
-        );
-    }
-    assert_eq!(result.result_code, 0, "matching ETag must be NotModified");
-}
-
-#[test]
-fn test_check_conditional_non_ascii_ims_proceeds() {
-    /* Regression (FFI-1) at the boundary: a crafted 29-byte non-ASCII
-     * If-Modified-Since must not panic; with no If-None-Match and a
-     * Last-Modified present it falls through parse_http_date to Proceed. */
-    let ims = "😀aaaaaaaaaaaaaaaaaaaaa GMT".as_bytes();
-    let lm = b"Sun, 04 Nov 1994 08:49:37 GMT";
-    let mut result = FFIConditionalResult {
-        result_code: 9,
-        matched_etag_len: 9,
-    };
-    unsafe {
-        markdown_check_conditional(
-            std::ptr::null(),
-            0,
-            std::ptr::null(),
-            0,
-            ims.as_ptr(),
-            ims.len(),
-            lm.as_ptr(),
-            lm.len(),
-            &mut result,
-        );
-    }
-    assert_eq!(result.result_code, 1, "unparseable IMS must Proceed");
-}
-
-#[test]
-fn test_make_decision_null_result_is_safe() {
-    unsafe {
-        markdown_make_decision(1, 1, 1, 1, 0, 1, 0, 0, std::ptr::null_mut());
-    }
-}
-
-#[test]
-fn test_make_decision_convert_path() {
-    /* enabled, eligible, accept prefers markdown, accept present, not
-     * conditional-304, decompression ok, no timeout, no budget overrun. */
-    let mut result = FFIDecisionResult {
-        decision: 9,
-        reason_code: 9,
-    };
-    unsafe {
-        markdown_make_decision(1, 1, 1, 1, 0, 1, 0, 0, &mut result);
-    }
-    assert_eq!(result.decision, 0, "should convert");
-    assert_eq!(result.reason_code, 0, "Converted reason code is 0");
-}
-
-#[test]
-fn test_make_decision_disabled_skips() {
-    let mut result = FFIDecisionResult {
-        decision: 9,
-        reason_code: 9,
-    };
-    unsafe {
-        /* enabled = 0 → skip with Disabled (canonical discriminant 15). */
-        markdown_make_decision(0, 1, 1, 1, 0, 1, 0, 0, &mut result);
-    }
-    assert_eq!(result.decision, 1, "disabled must skip");
-    assert_eq!(result.reason_code, 15, "Disabled discriminant is 15");
 }
 
 #[cfg(feature = "streaming")]

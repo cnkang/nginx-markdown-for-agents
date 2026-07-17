@@ -47,6 +47,10 @@ ngx_http_markdown_diagnostics_collect_metrics(
         ngx_http_markdown_metrics->requests_entered;
     out->failopen_total =
         ngx_http_markdown_metrics->results.failopen_count;
+    out->overload_total =
+        (ngx_atomic_uint_t) ngx_http_markdown_inflight_overload_total();
+    out->backpressure_total =
+        ngx_http_markdown_metrics->perf.backpressure_total;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     out->streaming_requests_total =
@@ -94,29 +98,6 @@ ngx_http_markdown_diagnostics_get_dynconf_state(
     out->config_version = ngx_http_markdown_dynconf_watcher.version;
     out->last_known_good_mtime = ngx_http_markdown_dynconf_watcher.lkg_mtime;
     out->lkg_valid = ngx_http_markdown_dynconf_watcher.lkg_valid ? 1 : 0;
-}
-
-
-/*
- * Trigger a manual rollback to the last-known-good configuration.
- *
- * Called from the diagnostics endpoint when an operator requests
- * a rollback via the diagnostics API.  Delegates to the dynconf
- * rollback function which restores the LKG snapshot.
- *
- * Parameters:
- *   log - NGINX log for recording the rollback event
- *
- * Returns:
- *   NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK on success
- *   NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_NO_LKG if no LKG available
- *   NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_APPLY_ERR on error
- */
-ngx_int_t
-ngx_http_markdown_diagnostics_trigger_rollback(ngx_log_t *log)
-{
-    return ngx_http_markdown_dynconf_rollback(
-        &ngx_http_markdown_dynconf_watcher, log);
 }
 
 

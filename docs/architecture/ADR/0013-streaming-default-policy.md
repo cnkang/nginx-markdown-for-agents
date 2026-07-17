@@ -1,5 +1,9 @@
 # ADR-0013: Streaming Default Policy
 
+> Historical decision for the pre-Config-V2 selector. ADR-0023 supersedes its
+> active configuration recommendation in v0.9.1; use
+> `markdown_streaming off|auto|force`.
+
 **Status**: Accepted (implemented in 0.8.0)
 **Date**: 2026-06-04
 **Context**: v0.8.0 True Streaming Contract

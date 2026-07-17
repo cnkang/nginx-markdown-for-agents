@@ -11,6 +11,7 @@ Use it when you need more than deployment guidance but less than source-level im
 | The runtime architecture and component boundaries | [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) |
 | The request flow through header/body filters and failure paths | [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md) |
 | How directives map to runtime branches and implementation areas | [CONFIG_BEHAVIOR_MAP.md](CONFIG_BEHAVIOR_MAP.md) |
+| Which current surfaces are stable, experimental, internal, or must be removed before 1.0 | [PUBLIC_SURFACE_INVENTORY.md](PUBLIC_SURFACE_INVENTORY.md) |
 | The repository layout and where code lives | [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md) |
 | How the repo-owned harness is structured and why it exists | [HARNESS_ARCHITECTURE.md](HARNESS_ARCHITECTURE.md) |
 | How repo-owned agent routing and risk overlays are organized | [../harness/README.md](../harness/README.md) |
@@ -32,6 +33,8 @@ Use it when you need more than deployment guidance but less than source-level im
 - `SYSTEM_ARCHITECTURE.md` explains the runtime design in product and engineering terms.
 - `REQUEST_LIFECYCLE.md` explains the dynamic request path and control flow.
 - `CONFIG_BEHAVIOR_MAP.md` maps public directives to runtime behavior.
+- `PUBLIC_SURFACE_INVENTORY.md` records the evidence-backed 1.0 freeze
+  classification for directives, wire schemas, observability, and FFI.
 - `REPOSITORY_STRUCTURE.md` explains how the repository is organized.
 - `HARNESS_ARCHITECTURE.md` explains the repo-owned harness, its truth surfaces,
   and its relationship to local-only inputs.

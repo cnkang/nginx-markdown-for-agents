@@ -837,14 +837,31 @@ def generate_release_notes(
       4. Tier summary with counts
       5. Changes from previous (if previous_data provided)
     """
-    additional = data.get("additional_artifacts", [])
+    lines = _rn_header()
+    _rn_append_versions(lines, entries)
+    _rn_append_artifact_table(lines, data, entries)
+    _rn_append_coverage_summary(lines, data, entries)
 
-    lines: list[str] = [
+    # --- Section 4: Changes from previous ---
+    if previous_data is not None:
+        changes = _rn_generate_changes(data, entries, previous_data)
+        lines.extend(changes)
+
+    return "\n".join(lines)
+
+
+def _rn_header() -> list[str]:
+    """Return the static header lines for release notes."""
+    return [
         "## Platform Support Matrix",
         "",
         "### Supported NGINX Versions",
         "",
     ]
+
+
+def _rn_append_versions(lines: list[str], entries: list[dict[str, Any]]) -> None:
+    """Append the supported NGINX versions list."""
     versions = sorted(
         {e.get("nginx_version", "") for e in entries if e.get("nginx_version")},
         key=_version_sort_key,
@@ -865,12 +882,30 @@ def generate_release_notes(
             "|------|------|-----------|",
         )
     )
+
+
+def _rn_append_artifact_table(
+    lines: list[str],
+    data: dict[str, Any],
+    entries: list[dict[str, Any]],
+) -> None:
+    """Append the artifact availability table."""
+    additional = data.get("additional_artifacts", [])
     artifact_rows = _rn_build_artifact_rows(data, entries, additional)
     lines.extend(
         f"| {row['type']} | {row['tier']} | {row['platforms']} |"
         for row in artifact_rows
     )
     lines.extend(("", "### Coverage Summary", ""))
+
+
+def _rn_append_coverage_summary(
+    lines: list[str],
+    data: dict[str, Any],
+    entries: list[dict[str, Any]],
+) -> None:
+    """Append the tier coverage summary."""
+    additional = data.get("additional_artifacts", [])
     tier_counts: dict[str, int] = {}
     for entry in entries:
         tier = resolve_tier(data, entry.get("support_tier", ""))
@@ -893,13 +928,6 @@ def generate_release_notes(
             else:
                 lines.append(f"- **{tier}**: {count} entries")
     lines.append("")
-
-    # --- Section 4: Changes from previous ---
-    if previous_data is not None:
-        changes = _rn_generate_changes(data, entries, previous_data)
-        lines.extend(changes)
-
-    return "\n".join(lines)
 
 
 def _rn_normalize_arch(arch: str) -> str:
@@ -1009,6 +1037,23 @@ def _rn_generate_changes(
     lines: list[str] = ["### Changes from Previous", ""]
     prev_entries = get_entries(previous_data)
 
+    added_versions, removed_versions, added_keys, removed_keys = (
+        _rn_compute_version_and_platform_diffs(current_entries, prev_entries)
+    )
+
+    tier_changes = _rn_detect_tier_changes(data, current_entries, prev_entries, previous_data=previous_data)
+
+    _rn_append_change_sections(
+        lines, added_versions, removed_versions, added_keys, removed_keys, tier_changes
+    )
+    return lines
+
+
+def _rn_compute_version_and_platform_diffs(
+    current_entries: list[dict[str, Any]],
+    prev_entries: list[dict[str, Any]],
+) -> tuple[list[str], list[str], set, set]:
+    """Compute added/removed versions and platform-level keys."""
     cur_versions = {
         e.get("nginx_version", "")
         for e in current_entries
@@ -1036,17 +1081,23 @@ def _rn_generate_changes(
     added_keys = cur_keys - prev_keys
     removed_keys = prev_keys - cur_keys
 
-    # Detect tier changes for entries present in both
-    tier_changes = _rn_detect_tier_changes(data, current_entries, prev_entries, previous_data=previous_data)
+    return added_versions, removed_versions, added_keys, removed_keys
 
+
+def _rn_append_change_sections(
+    lines: list[str],
+    added_versions: list[str],
+    removed_versions: list[str],
+    added_keys: set,
+    removed_keys: set,
+    tier_changes: list[str],
+) -> None:
+    """Append all change sections to *lines*."""
     if added_versions:
-        _rn_append_change_bullets(
-            lines, "**Added versions:**", added_versions
-        )
+        _rn_append_change_bullets(lines, "**Added versions:**", added_versions)
     if removed_versions:
-        _rn_append_change_bullets(
-            lines, "**Removed versions:**", removed_versions
-        )
+        _rn_append_change_bullets(lines, "**Removed versions:**", removed_versions)
+
     # Platform-level adds/removes (excluding version-level changes)
     platform_added = [k for k in added_keys if k[0] not in added_versions]
     platform_removed = [k for k in removed_keys if k[0] not in removed_versions]
@@ -1061,13 +1112,10 @@ def _rn_generate_changes(
             )
         )
     if tier_changes:
-        _rn_append_change_bullets(
-            lines, "**Tier changes:**", tier_changes
-        )
+        _rn_append_change_bullets(lines, "**Tier changes:**", tier_changes)
     if not (added_versions or removed_versions or platform_added
             or platform_removed or tier_changes):
         lines.extend(("No changes detected.", ""))
-    return lines
 
 
 def _rn_append_change_bullets(

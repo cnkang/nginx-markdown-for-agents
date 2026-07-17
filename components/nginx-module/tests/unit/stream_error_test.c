@@ -4,10 +4,10 @@
  * Validates the streaming error handler integration module (streaming fallback state machine,
  * streaming error policy integration):
  *
- * 6.1: Pre-commit + on_error=pass  -> PASS_HTML (replay)
- * 6.2: Pre-commit + on_error=reject -> NGX_HTTP_BAD_GATEWAY
- * 6.3: Post-commit + on_error=pass  -> safe_finish (abort fallback)
- * 6.4: Post-commit + on_error=reject -> abort
+ * 6.1: Pre-commit + pass -> PASS_HTML (replay)
+ * 6.2: Pre-commit + fail_closed/status -> conf->error_status
+ * 6.3: Post-commit + pass -> safe_finish (abort fallback)
+ * 6.4: Post-commit + fail_closed/status -> abort
  *
  * Also covers edge cases: NULL parameters, passthrough state,
  * replay chain NULL, output filter failure, non-error on_error.
@@ -103,12 +103,26 @@ struct ngx_http_request_s {
     ngx_uint_t              buffered;
 };
 
-/* Include the module header for types */
-#include "../../src/ngx_http_markdown_filter_module.h"
+/* Include the module header for types — must follow type/macro setup above */
+#include "../../src/ngx_http_markdown_filter_module.h" /* NOSONAR(S954) test include-after-setup pattern */
+
+ngx_module_t ngx_http_markdown_filter_module;
 
 static ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r,
     ngx_chain_t *in);
 #include "../../src/ngx_http_markdown_filter_chain_impl.h"
+
+void
+ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes)
+{
+    UNUSED(bytes);
+}
+
+void
+ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
+{
+    UNUSED(bytes);
+}
 
 /* Include the decision engine source directly */
 #include "../../src/ngx_http_markdown_stream_state.h"
@@ -143,6 +157,7 @@ static ngx_chain_t test_chain_link_storage;
 static u_char test_palloc_storage[256];
 static int test_palloc_called;
 static int test_palloc_fail;
+static ngx_int_t test_finalize_status;
 
 /* Mocked request infrastructure */
 static ngx_log_t             test_log;
@@ -155,7 +170,8 @@ static void test_setup(void);
 
 /* Saved downstream body filter used by the production delegation helper. */
 static ngx_int_t
-test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
+test_next_body_filter(ngx_http_request_t *r, /* NOSONAR(S995) NGINX filter signature */
+                      ngx_chain_t *in)
 {
     UNUSED(r);
     test_output_filter_called++;
@@ -165,7 +181,8 @@ test_next_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
 /* Poison top filter: replay and postcommit output must bypass it. */
 ngx_int_t
-ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
+ngx_http_output_filter(ngx_http_request_t *r, /* NOSONAR(S995) NGINX API signature */
+                       ngx_chain_t *in) /* NOSONAR(S995) NGINX API signature */
 {
     UNUSED(r);
     UNUSED(in);
@@ -176,7 +193,7 @@ ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *in)
 /* Mock: replay_chain */
 ngx_chain_t *
 ngx_http_markdown_stream_replay_chain(const ngx_http_markdown_ctx_t *ctx,
-                                       ngx_pool_t *pool)
+                                       ngx_pool_t *pool) /* NOSONAR(S995) match real signature */
 {
     UNUSED(ctx); UNUSED(pool);
     test_replay_chain_called++;
@@ -198,7 +215,7 @@ ngx_http_markdown_stream_replay_available(
 
 /* Mock: ngx_calloc_buf (for send_terminal) */
 ngx_buf_t *
-ngx_calloc_buf(ngx_pool_t *pool)
+ngx_calloc_buf(ngx_pool_t *pool) /* NOSONAR(S995) NGINX API signature */
 {
     UNUSED(pool);
     test_calloc_buf_called++;
@@ -210,7 +227,7 @@ ngx_calloc_buf(ngx_pool_t *pool)
 }
 
 void *
-ngx_palloc(ngx_pool_t *pool, size_t size)
+ngx_palloc(ngx_pool_t *pool, size_t size) /* NOSONAR(S995) NGINX API signature */
 {
     UNUSED(pool);
     test_palloc_called++;
@@ -224,23 +241,23 @@ ngx_palloc(ngx_pool_t *pool, size_t size)
 }
 
 ngx_chain_t *
-ngx_alloc_chain_link(ngx_pool_t *pool)
+ngx_alloc_chain_link(ngx_pool_t *pool) /* NOSONAR(S995) NGINX API signature */
 {
     UNUSED(pool);
     memset(&test_chain_link_storage, 0, sizeof(test_chain_link_storage));
     return &test_chain_link_storage;
 }
 
-/* Stub: ngx_log_error_core */
+/* Stub: ngx_log_error_core — variadic matches NGINX core signature */
 void
-ngx_log_error_core(ngx_uint_t level, ngx_log_t *log,
+ngx_log_error_core(ngx_uint_t level, ngx_log_t *log, /* NOSONAR(S923, S995) NGINX API: variadic + non-const */
                    ngx_err_t err, const char *fmt, ...)
 {
     UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt);
 }
 
 uint32_t
-markdown_streaming_safe_finish(struct StreamingConverterHandle *handle,
+markdown_streaming_safe_finish(struct StreamingConverterHandle *handle, /* NOSONAR(S995) FFI signature */
     u_char **out_data, uintptr_t *out_len)
 {
     UNUSED(handle);
@@ -254,13 +271,13 @@ markdown_streaming_safe_finish(struct StreamingConverterHandle *handle,
 }
 
 void
-markdown_streaming_abort(struct StreamingConverterHandle *handle)
+markdown_streaming_abort(struct StreamingConverterHandle *handle) /* NOSONAR(S995) FFI signature */
 {
     UNUSED(handle);
 }
 
 void
-markdown_streaming_output_free(u_char *data, uintptr_t len)
+markdown_streaming_output_free(u_char *data, uintptr_t len) /* NOSONAR(S995) FFI signature */
 {
     UNUSED(data);
     UNUSED(len);
@@ -269,8 +286,20 @@ markdown_streaming_output_free(u_char *data, uintptr_t len)
 /* Include the postcommit source (for safe_finish, abort, guard, log) */
 #include "../../src/ngx_http_markdown_stream_postcommit.c"
 
+static ngx_int_t
+test_filter_finalize_request(ngx_http_request_t *r, ngx_module_t *module,
+    ngx_int_t status)
+{
+    UNUSED(r);
+    UNUSED(module);
+    test_finalize_status = status;
+    return NGX_ERROR;
+}
+
 /* Include the error handler source directly */
+#define ngx_http_filter_finalize_request test_filter_finalize_request
 #include "../../src/ngx_http_markdown_stream_error.c"
+#undef ngx_http_filter_finalize_request
 
 
 static void test_setup(void)
@@ -289,6 +318,7 @@ static void test_setup(void)
     memset(test_palloc_storage, 0, sizeof(test_palloc_storage));
     test_palloc_called = 0;
     test_palloc_fail = 0;
+    test_finalize_status = 0;
     memset(&test_log, 0, sizeof(test_log));
     memset(&test_pool, 0, sizeof(test_pool));
     memset(&test_connection, 0, sizeof(test_connection));
@@ -322,7 +352,7 @@ static void test_task_6_1_precommit_pass_replay_html(void)
     ctx.stream_sm.replay_initialized = 1;
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     fc.buf = &fb;
     fc.next = NULL;
@@ -345,42 +375,7 @@ static void test_task_6_1_precommit_pass_replay_html(void)
     TEST_PASS("pre-commit pass: replay HTML");
 }
 
-static void test_precommit_uses_stream_on_error_policy(void)
-{
-    ngx_http_markdown_ctx_t ctx;
-    ngx_http_markdown_conf_t conf;
-    ngx_chain_t fc;
-    ngx_buf_t fb;
-    ngx_int_t rc;
-
-    test_setup();
-    memset(&ctx, 0, sizeof(ctx));
-    memset(&conf, 0, sizeof(conf));
-    memset(&fc, 0, sizeof(fc));
-    memset(&fb, 0, sizeof(fb));
-
-    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
-    ctx.stream_sm.headers_committed = 0;
-    ctx.stream_sm.replay_initialized = 1;
-    ctx.stream_sm.replay_buf.size = 100;
-    ctx.stream_sm.replay_capacity = 1024;
-    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-
-    fc.buf = &fb;
-    fc.next = NULL;
-    test_replay_chain_result = &fc;
-
-    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
-
-    TEST_ASSERT(rc == NGX_OK,
-        "stream.on_error pass should replay even if top-level rejects");
-    TEST_ASSERT(test_output_filter_called == 1,
-        "stream.on_error pass should call output filter");
-    TEST_PASS("Pre-commit error uses stream.on_error policy");
-}
-
-static void test_precommit_reject_uses_stream_on_error_policy(void)
+static void test_precommit_uses_unified_pass_policy(void)
 {
     ngx_http_markdown_ctx_t ctx;
     ngx_http_markdown_conf_t conf;
@@ -400,7 +395,6 @@ static void test_precommit_reject_uses_stream_on_error_policy(void)
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
     conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
 
     fc.buf = &fb;
     fc.next = NULL;
@@ -408,11 +402,46 @@ static void test_precommit_reject_uses_stream_on_error_policy(void)
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
-    TEST_ASSERT(rc == NGX_HTTP_BAD_GATEWAY,
-        "stream.on_error reject should reject even if top-level passes");
+    TEST_ASSERT(rc == NGX_OK,
+        "unified pass policy should replay buffered HTML");
+    TEST_ASSERT(test_output_filter_called == 1,
+        "unified pass policy should call output filter");
+    TEST_PASS("Pre-commit error uses unified pass policy");
+}
+
+static void test_precommit_uses_unified_reject_policy(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_chain_t fc;
+    ngx_buf_t fb;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+    memset(&fc, 0, sizeof(fc));
+    memset(&fb, 0, sizeof(fb));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+    ctx.stream_sm.headers_committed = 0;
+    ctx.stream_sm.replay_initialized = 1;
+    ctx.stream_sm.replay_buf.size = 100;
+    ctx.stream_sm.replay_capacity = 1024;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+
+    fc.buf = &fb;
+    fc.next = NULL;
+    test_replay_chain_result = &fc;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_ERROR,
+        "unified reject policy finalizes with the configured error status");
     TEST_ASSERT(test_output_filter_called == 0,
-        "stream.on_error reject should not replay HTML");
-    TEST_PASS("Pre-commit reject uses stream.on_error policy");
+        "unified reject policy should not replay HTML");
+    TEST_PASS("Pre-commit error uses unified reject policy");
 }
 
 static void test_precommit_pass_replay_html_backpressure(void)
@@ -434,7 +463,7 @@ static void test_precommit_pass_replay_html_backpressure(void)
     ctx.stream_sm.replay_initialized = 1;
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     fc.buf = &fb;
     fc.next = NULL;
@@ -452,11 +481,11 @@ static void test_precommit_pass_replay_html_backpressure(void)
         "output filter should receive replay chain");
     TEST_ASSERT(ctx.streaming.pending_output == &fc,
         "replay chain saved as pending output");
-    TEST_ASSERT(ctx.streaming.pending_has_data == 1,
+    TEST_ASSERT(ctx.streaming.pending_meta.has_data == 1,
         "replay pending chain records data");
-    TEST_ASSERT(ctx.streaming.pending_output_bytes == 100,
+    TEST_ASSERT(ctx.streaming.pending_meta.bytes == 100,
         "replay pending byte count preserved");
-    TEST_ASSERT(ctx.streaming.pending_failopen_delivery == 1,
+    TEST_ASSERT(ctx.streaming.completion.pending_failopen_delivery == 1,
         "fail-open delivery latch set for replay pending chain");
     TEST_ASSERT((test_request.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
         "request buffered flag set on replay backpressure");
@@ -485,7 +514,7 @@ static void test_precommit_pass_replay_preserves_existing_pending(void)
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
     ctx.streaming.pending_output = &existing;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     fc.buf = &fb;
     fc.next = NULL;
@@ -501,7 +530,7 @@ static void test_precommit_pass_replay_preserves_existing_pending(void)
     TEST_PASS("Pre-commit replay backpressure preserves existing pending");
 }
 
-/* --- pre-commit reject: return 502 --- */
+/* --- pre-commit reject: return configured error_status --- */
 
 static void test_task_6_2_precommit_reject_502(void)
 {
@@ -518,16 +547,53 @@ static void test_task_6_2_precommit_reject_502(void)
     ctx.stream_sm.replay_initialized = 1;
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
-    TEST_ASSERT(rc == NGX_HTTP_BAD_GATEWAY, "6.2: returns 502");
+    TEST_ASSERT(rc == NGX_ERROR, "6.2: finalizer returns NGX_ERROR (error_status=502)");
+    TEST_ASSERT(test_finalize_status == 502,
+                "6.2: fail_closed finalizes with 502");
     TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_PASSTHROUGH,
                 "6.2: state PASSTHROUGH");
     TEST_ASSERT(test_replay_chain_called == 0, "6.2: no replay");
     TEST_ASSERT(test_output_filter_called == 0, "6.2: no output_filter");
-    TEST_PASS("pre-commit reject: return 502");
+    TEST_PASS("pre-commit reject: finalize with configured error_status");
+}
+
+
+static void
+test_precommit_explicit_status_policies(void)
+{
+    static const ngx_uint_t statuses[] = { 429, 503 };
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+    ngx_uint_t i;
+
+    for (i = 0; i < sizeof(statuses) / sizeof(statuses[0]); i++) {
+        test_setup();
+        memset(&ctx, 0, sizeof(ctx));
+        memset(&conf, 0, sizeof(conf));
+
+        ctx.stream_sm.state = NGX_HTTP_MD_STATE_PRE_COMMIT;
+        ctx.stream_sm.replay_initialized = 1;
+        ctx.stream_sm.replay_capacity = 1024;
+        conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+        conf.error_status = statuses[i];
+
+        rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+        TEST_ASSERT(rc == NGX_ERROR,
+                    "explicit status finalizer return should propagate");
+        TEST_ASSERT(test_finalize_status == (ngx_int_t) statuses[i],
+                    "explicit policy must finalize with configured status");
+        TEST_ASSERT(test_replay_chain_called == 0,
+                    "explicit status policy must not replay HTML");
+    }
+
+    TEST_PASS("pre-commit status 429/503 finalize exactly");
 }
 
 /* --- post-commit pass: safe_finish --- */
@@ -544,7 +610,7 @@ static void test_task_6_3_postcommit_pass_safe_finish(void)
 
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
@@ -571,7 +637,7 @@ static void test_task_6_3_postcommit_pass_safe_finish_fails(void)
 
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     /* Make send_terminal fail (calloc_buf returns NULL) */
     test_calloc_buf_result = NULL;
@@ -601,7 +667,7 @@ static void test_task_6_3_abort_fallback_returns_again(void)
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
     ctx.streaming.handle = (struct StreamingConverterHandle *) 0x1;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     test_output_filter_rc = NGX_AGAIN;
 
@@ -628,7 +694,7 @@ static void test_task_6_4_postcommit_reject_abort(void)
 
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
@@ -652,7 +718,7 @@ static void test_task_6_4_postcommit_abort_returns_again(void)
 
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
     test_output_filter_rc = NGX_AGAIN;
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
@@ -697,7 +763,7 @@ static void test_passthrough_state(void)
     memset(&conf, 0, sizeof(conf));
 
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_PASSTHROUGH;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
 
@@ -724,7 +790,7 @@ static void test_replay_chain_null(void)
     ctx.stream_sm.replay_initialized = 1;
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     /* replay_chain returns NULL */
     test_replay_chain_result = NULL;
@@ -756,7 +822,7 @@ static void test_output_filter_failure(void)
     ctx.stream_sm.replay_initialized = 1;
     ctx.stream_sm.replay_buf.size = 100;
     ctx.stream_sm.replay_capacity = 1024;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     fc.buf = &fb;
     fc.next = NULL;
@@ -789,11 +855,12 @@ static void test_content_type_restored(void)
     ctx.stream_sm.replay_initialized = 1;
     ctx.stream_sm.replay_buf.size = 50;
     ctx.stream_sm.replay_capacity = 1024;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     /* Set a different Content-Type before the call */
     test_request.headers_out.content_type_len = 30;
-    test_request.headers_out.content_type_lowcase = (u_char *) "something";
+    test_request.headers_out.content_type_lowcase =
+        (u_char *) test_palloc_storage;  /* mutable buffer avoids const-drop */
 
     fc.buf = &fb;
     fc.next = NULL;
@@ -814,11 +881,12 @@ int main(void)
 {
     TEST_SECTION("Stream Error Handler (streaming error policy integration)");
     test_task_6_1_precommit_pass_replay_html();
-    test_precommit_uses_stream_on_error_policy();
-    test_precommit_reject_uses_stream_on_error_policy();
+    test_precommit_uses_unified_pass_policy();
+    test_precommit_uses_unified_reject_policy();
     test_precommit_pass_replay_html_backpressure();
     test_precommit_pass_replay_preserves_existing_pending();
     test_task_6_2_precommit_reject_502();
+    test_precommit_explicit_status_policies();
     test_task_6_3_postcommit_pass_safe_finish();
     test_task_6_3_postcommit_pass_safe_finish_fails();
     test_task_6_3_abort_fallback_returns_again();

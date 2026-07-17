@@ -259,20 +259,30 @@ def check_new_directives(result: ValidationResult) -> None:
 
 
 def check_select_processing_path(result: ValidationResult) -> None:
-    """Verify select_processing_path uses conf->stream.engine, not conf->streaming.engine."""
+    """Verify processing-path selection uses the sole Config V2 policy."""
     src = read(STREAMING_IMPL_H)
     if not src:
         result.fail("prereq:streaming_impl", "streaming_impl.h not found")
         return
-    if "conf->stream.engine" in src:
+    if "conf->stream.policy" in src:
         result.pass_(
-            "runtime:conf->stream.engine",
-            "select_processing_path uses conf->stream.engine",
+            "runtime:conf->stream.policy",
+            "select_processing_path uses conf->stream.policy",
         )
     else:
         result.fail(
-            "runtime:conf->stream.engine",
-            "select_processing_path does not use conf->stream.engine",
+            "runtime:conf->stream.policy",
+            "select_processing_path does not use conf->stream.policy",
+        )
+    if "conf->stream.engine" in src:
+        result.fail(
+            "removed:conf->stream.engine",
+            "select_processing_path still uses removed engine selector",
+        )
+    else:
+        result.pass_(
+            "removed:conf->stream.engine",
+            "select_processing_path has no duplicate engine selector",
         )
     if "conf->streaming.engine" in src:
         result.fail(
@@ -324,15 +334,15 @@ def check_makefile_080_gate(result: ValidationResult) -> None:
         result.pass_("makefile:080-gate", "release-gates-check-080 target exists")
     else:
         result.fail("makefile:080-gate", "release-gates-check-080 target missing")
-    if "validate_config_directives_080.py" in mk:
+    if "validate_config_directives.py" in mk:
         result.pass_(
             "makefile:080-config-validator",
-            "Makefile references validate_config_directives_080.py",
+            "Makefile references validate_config_directives.py",
         )
     else:
         result.fail(
             "makefile:080-config-validator",
-            "Makefile does not reference validate_config_directives_080.py",
+            "Makefile does not reference validate_config_directives.py",
         )
 
 

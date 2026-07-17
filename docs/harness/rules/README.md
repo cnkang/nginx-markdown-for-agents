@@ -9,7 +9,7 @@ related rules by domain with YAML frontmatter for path-scoped loading.
 |----------|--------|------|-----------------|
 | 1, 2, 38, 47, 51 | Streaming & Backpressure | [streaming-backpressure.md](streaming-backpressure.md) | backpressure, fail-open, replay buffer, auth cache-control |
 | 3, 43 | Memory & Budget | [memory-budget.md](memory-budget.md) | allocations, budget enforcement, pool vs heap |
-| 4, 44 | Encoding & Charset | [encoding-charset.md](encoding-charset.md) | UTF-8 chunk boundaries, deflate semantics |
+| 4, 44 | Encoding & Charset | [encoding-charset.md](encoding-charset.md) | UTF-8 chunk boundaries, gzip/deflate streaming lifecycle |
 | 5, 6, 27 | HTML Sanitizer & Output Safety | [html-sanitizer.md](html-sanitizer.md) | void elements, emitter, escaping, fence language |
 | 7, 8, 8b, 8c, 23 | Observability & Metrics | [observability-metrics.md](observability-metrics.md) | metrics, reason codes, config alignment |
 | 9, 49 | Docs & Tooling Drift | [docs-tooling.md](docs-tooling.md) | README, validators, metric names, THIRD-PARTY-NOTICES |

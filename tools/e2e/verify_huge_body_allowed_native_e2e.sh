@@ -17,6 +17,7 @@ PORT="${PORT:-18093}"
 KEEP_ARTIFACTS=0
 RUN_1G_GET="${RUN_1G_GET:-1}"
 MARKDOWN_MAX_SIZE="${MARKDOWN_MAX_SIZE:-1536m}"
+MARKDOWN_PARSER_BUDGET="${MARKDOWN_PARSER_BUDGET:-1024m}"
 ACCEPT_MARKDOWN_HEADER='Accept: text/markdown'
 NGINX_BIN="${NGINX_BIN:-}"
 
@@ -49,6 +50,8 @@ Notes:
   - This script auto-reexecs under native arm64 on Apple Silicon if launched under Rosetta.
   - 1GB GET can be skipped with --skip-1g-get.
   - Set NGINX_BIN to reuse an existing module-enabled nginx binary and skip rebuilding.
+  - MARKDOWN_PARSER_BUDGET defaults to 1024m so the 100MB conversion fixture is
+    not rejected by the independent parser-memory safety limit.
 EOF
   return 0
 }
@@ -205,6 +208,7 @@ http {
             markdown_accept wildcard;
             markdown_cache_validation full;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=600s;
+            markdown_parser_budget ${MARKDOWN_PARSER_BUDGET};
             markdown_error_policy pass;
             markdown_log_verbosity info;
         }
@@ -333,6 +337,7 @@ echo "Allowed-size huge-body summary:"
 echo "  nginx_version=${NGINX_VERSION}"
 echo "  arch=$(uname -m)"
 echo "  markdown_limits memory=${MARKDOWN_MAX_SIZE}"
+echo "  markdown_parser_budget=${MARKDOWN_PARSER_BUDGET}"
 echo "  convert_100m=$(cat "${RAW_DIR}/convert-100m.get.metrics")"
 if [[ -f "${RAW_DIR}/failopen-1g-invalid.get.metrics" ]]; then
   echo "  failopen_1g=$(cat "${RAW_DIR}/failopen-1g-invalid.get.metrics")"

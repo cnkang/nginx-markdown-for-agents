@@ -64,6 +64,11 @@ SUPPORT_TIER = "full"
 DOC_MARKER_BEGIN = "<!-- BEGIN AUTO-GENERATED MATRIX -->"
 DOC_MARKER_END = "<!-- END AUTO-GENERATED MATRIX -->"
 REQUIRED_MATRIX_ENTRY_KEYS = ("nginx", "os_type", "arch")
+REQUIRED_KEY_ALIASES = {
+    "nginx": ("nginx", "nginx_version"),
+    "os_type": ("os_type", "libc", "os"),
+    "arch": ("arch",),
+}
 _CONTROL_CHARS_RE = re.compile(
     r"[\x00-\x1f\x7f]|%(?:0[0-9a-fA-F]|1[0-9a-fA-F]|7[fF])"
 )
@@ -120,27 +125,25 @@ def classify_version(version: str) -> str:
     return "stable" if minor % 2 == 0 else "mainline"
 
 
+def _matrix_error(message: str) -> None:
+    """Print a matrix validation error and exit with code 1."""
+    print(message, file=sys.stderr)
+    sys.exit(1)
+
+
+def _entry_has_required_key(entry: dict, required_key: str) -> bool:
+    """Return whether an entry contains a required key or accepted alias."""
+    aliases = REQUIRED_KEY_ALIASES.get(required_key, (required_key,))
+    return any(alias in entry for alias in aliases)
+
+
 def _missing_required_keys(entry: dict, required_keys: tuple[str, ...]) -> list[str]:
     """List required keys that are missing from the given mapping, preserving the order
     of `required_keys`.
 
     Handles canonical schema (nginx_version, libc) vs legacy (nginx, os_type).
     """
-    missing = []
-    for key in required_keys:
-        if key == "nginx":
-            if "nginx" not in entry and "nginx_version" not in entry:
-                missing.append(key)
-        elif key == "os_type":
-            if "os_type" not in entry and "libc" not in entry and "os" not in entry:
-                missing.append(key)
-        elif key == "arch":
-            if "arch" not in entry:
-                missing.append(key)
-        else:
-            if key not in entry:
-                missing.append(key)
-    return missing
+    return [key for key in required_keys if not _entry_has_required_key(entry, key)]
 
 
 def _resolve_repo_write_path(path: Path) -> Path:
@@ -401,6 +404,73 @@ def _validate_manual_entries(manual_entries: list[dict], path: Path) -> None:
         sys.exit(1)
 
 
+def _read_matrix_json(path: Path) -> dict:
+    """Read and parse a release matrix JSON object."""
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        _matrix_error(f"Error reading {path}: {exc}")
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        _matrix_error(f"Invalid JSON in {path}: {exc}")
+
+    if not isinstance(data, dict) or ("matrix" not in data and "entries" not in data):
+        _matrix_error(
+            f"Invalid matrix structure in {path}: missing 'matrix' or 'entries' key"
+        )
+    return data
+
+
+def _matrix_entry_list(data: dict, path: Path) -> list:
+    """Return the matrix entry list from supported schema variants."""
+    matrix_entries = data.get("matrix") or data.get("entries")
+    if not isinstance(matrix_entries, list):
+        _matrix_error(f"Invalid matrix structure in {path}: matrix must be a list")
+    return matrix_entries
+
+
+def _validate_matrix_entry(entry: object, index: int, path: Path) -> dict:
+    """Validate and return a single matrix entry mapping."""
+    if not isinstance(entry, dict):
+        _matrix_error(
+            f"Invalid matrix entry at index {index} in {path}: "
+            f"expected dict, got {type(entry).__name__}"
+        )
+
+    if missing := _missing_required_keys(entry, REQUIRED_MATRIX_ENTRY_KEYS):
+        _matrix_error(
+            f"Matrix entry at index {index} in {path} missing required keys: "
+            f"{', '.join(missing)}"
+        )
+    return entry
+
+
+def _split_matrix_entries(
+    matrix_entries: list,
+    path: Path,
+) -> tuple[list[dict], list[dict]]:
+    """Split matrix entries into auto-managed and manual lists."""
+    auto_entries: list[dict] = []
+    manual_entries: list[dict] = []
+
+    for i, raw_entry in enumerate(matrix_entries):
+        entry = _validate_matrix_entry(raw_entry, i, path)
+        managed_by = entry.get("managed_by")
+        if managed_by == "manual":
+            manual_entries.append(entry)
+        elif managed_by is None or managed_by == "auto":
+            auto_entries.append(entry)
+        else:
+            _matrix_error(
+                f"Matrix entry at index {i} in {path} has unknown "
+                f"managed_by value: {managed_by!r}"
+            )
+
+    return auto_entries, manual_entries
+
+
 def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
     """Load and validate release-matrix.json and split its entries into auto-managed and
     manual lists.
@@ -414,62 +484,9 @@ def load_matrix(path: Path) -> tuple[dict, list[dict], list[dict]]:
             - auto_entries: List of entry dicts where `managed_by` is absent or "auto".
             - manual_entries: List of entry dicts where `managed_by` == "manual".
     """
-    try:
-        text = path.read_text()
-    except OSError as exc:
-        print(f"Error reading {path}: {exc}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        print(f"Invalid JSON in {path}: {exc}", file=sys.stderr)
-        sys.exit(1)
-
-    if not isinstance(data, dict) or ("matrix" not in data and "entries" not in data):
-        print(
-            f"Invalid matrix structure in {path}: missing 'matrix' or 'entries' key", file=sys.stderr
-        )
-        sys.exit(1)
-
-    matrix_entries = data.get("matrix") or data.get("entries")
-    if not isinstance(matrix_entries, list):
-        print(
-            f"Invalid matrix structure in {path}: matrix must be a list",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    auto_entries: list[dict] = []
-    manual_entries: list[dict] = []
-
-    for i, entry in enumerate(matrix_entries):
-        if not isinstance(entry, dict):
-            print(
-                (
-                    f"Invalid matrix entry at index {i} in {path}: "
-                    f"expected dict, got {type(entry).__name__}"
-                ),
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        if missing := _missing_required_keys(entry, REQUIRED_MATRIX_ENTRY_KEYS):
-            print(
-                f"Matrix entry at index {i} in {path} missing required keys: {', '.join(missing)}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        managed_by = entry.get("managed_by")
-        if managed_by == "manual":
-            manual_entries.append(entry)
-        elif managed_by is None or managed_by == "auto":
-            auto_entries.append(entry)
-        else:
-            print(
-                f"Matrix entry at index {i} in {path} has unknown managed_by value: {managed_by!r}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+    data = _read_matrix_json(path)
+    matrix_entries = _matrix_entry_list(data, path)
+    auto_entries, manual_entries = _split_matrix_entries(matrix_entries, path)
 
     _validate_manual_entries(manual_entries, path)
 
@@ -876,6 +893,35 @@ def _atomic_doc_write(new_doc_content: str, matrix_backup: str | None) -> int:
     return 0
 
 
+def _version_track(version: str) -> str:
+    """Return the major.minor track for a dotted NGINX version string."""
+    return ".".join(version.split(".")[:2])
+
+
+def _added_version_track_map(diff: MatrixDiff) -> dict[str, str]:
+    """Map each added major.minor track to its new full version."""
+    return {_version_track(version): version for version in diff.added_versions}
+
+
+def _update_entry_version_for_track(entry: dict, track_map: dict[str, str]) -> None:
+    """Update legacy and canonical nginx version keys when their track advances."""
+    for key in ("nginx_version", "nginx"):
+        if key in entry and (new_version := track_map.get(_version_track(entry[key]))):
+            entry[key] = new_version
+
+
+def _update_entries_for_added_versions(data: dict, diff: MatrixDiff) -> None:
+    """Update existing entry versions to the newly added version for each track."""
+    entries = data.get("entries")
+    track_map = _added_version_track_map(diff)
+    if not track_map or not isinstance(entries, list):
+        return
+
+    for entry in entries:
+        if isinstance(entry, dict):
+            _update_entry_version_for_track(entry, track_map)
+
+
 def _run_write_mode(
     data: dict,
     merged: list[dict],
@@ -900,22 +946,7 @@ def _run_write_mode(
     data["matrix"] = merged
 
     # Update entries with the new version numbers if they exist
-    if "entries" in data and isinstance(data["entries"], list):
-        track_map = {}
-        for new_v in diff.added_versions:
-            track = ".".join(new_v.split(".")[:2])
-            track_map[track] = new_v
-        for entry in data["entries"]:
-            if "nginx_version" in entry:
-                old_v = entry["nginx_version"]
-                track = ".".join(old_v.split(".")[:2])
-                if track in track_map:
-                    entry["nginx_version"] = track_map[track]
-            if "nginx" in entry:
-                old_v = entry["nginx"]
-                track = ".".join(old_v.split(".")[:2])
-                if track in track_map:
-                    entry["nginx"] = track_map[track]
+    _update_entries_for_added_versions(data, diff)
 
     # Write matrix via crash-safe temp+rename
     try:

@@ -203,8 +203,8 @@ Verification:
 - `make security-static`
 - `grep -rn 'uses:' .github/workflows/ | grep -v '@[0-9a-f]\{40\}'` — should
   return no results (all actions pinned to SHA).
-- `python3 tools/release/gates/validate_package_metadata_070.py`
-- `python3 tools/release/gates/validate_k8s_manifests_070.py`
+- `python3 tools/release/gates/validate_package_metadata.py`
+- `python3 tools/release/gates/validate_k8s_manifests.py`
 - `make release-gates-check`
 
 ---

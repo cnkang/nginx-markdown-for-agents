@@ -19,19 +19,6 @@
  * Each directive includes validation and clear error messages.
  */
 
-#ifdef MARKDOWN_STREAMING_ENABLED
-static ngx_conf_enum_t
-    ngx_http_markdown_streaming_engine_enum[] = {
-    { ngx_string("off"),
-      NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF },
-    { ngx_string("auto"),
-      NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO },
-    { ngx_string("on"),
-      NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON },
-    { ngx_null_string, 0 }
-};
-#endif /* MARKDOWN_STREAMING_ENABLED */
-
 static ngx_conf_enum_t
     ngx_http_markdown_llm_provider_values[] = {
     { ngx_string("default"),           0 },
@@ -72,6 +59,19 @@ static u_char ngx_http_markdown_hint_trusted_proxies[] =
     "use \"markdown_trusted_proxies <CIDR>...\" instead";
 static u_char ngx_http_markdown_hint_removed_no_replacement[] =
     "it has been removed with no direct replacement";
+static u_char ngx_http_markdown_hint_otel_tracing[] =
+    "use \"markdown_otel on|off\" instead; it is the tracing enable switch";
+static u_char ngx_http_markdown_hint_otel_metrics[] =
+    "OTLP metrics export is not implemented; configure a location and use "
+    "\"markdown_metrics;\" for module metrics";
+static u_char ngx_http_markdown_hint_otel_service_name[] =
+    "service-name override is not implemented; exported spans use "
+    "\"nginx-markdown\"";
+static u_char ngx_http_markdown_hint_otel_span_buffer_size[] =
+    "retry buffering is not implemented; span export is request-scoped";
+static u_char ngx_http_markdown_hint_otel_export_timeout[] =
+    "export timeout control is not implemented; configure timeouts on the "
+    "internal endpoint location";
 
 
 /*
@@ -102,6 +102,27 @@ ngx_http_markdown_reject_removed_directive(ngx_conf_t *cf,
     ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
         "\"%V\" directive has been removed in 0.9.0; %s "
         "(see docs/guides/MIGRATION-0.9.md)",
+        &cmd->name, (char *) cmd->post);
+
+    return NGX_CONF_ERROR;
+}
+
+
+/*
+ * Reject OTel controls that have no runtime implementation.
+ *
+ * The OTel family is experimental, so these parser entries remain only to
+ * provide a precise nginx -t diagnostic instead of silently accepting a
+ * setting that cannot affect span production or export.
+ */
+static char *
+ngx_http_markdown_reject_otel_directive(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf)
+{
+    (void) conf;
+
+    ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+        "\"%V\" directive is reject-only; %s",
         &cmd->name, (char *) cmd->post);
 
     return NGX_CONF_ERROR;
@@ -290,7 +311,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * markdown_on_error and markdown_streaming_on_error directives.
      *   pass        - return original content on pre-commit error (fail-open)
      *   fail_closed - return 502 on pre-commit error
-     *   status <c>  - return status code c (429, 502, or 503)
+     *   status <c>  - return status code c (429 or 503)
      * Default: pass
      * Context: http, server, location
      *
@@ -335,13 +356,11 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     },
 
     /*
-     * markdown_flavor commonmark|gfm|mdx|org-mode
+     * markdown_flavor commonmark|gfm
      *
      * Markdown flavor to generate:
      * - commonmark: CommonMark specification (default)
      * - gfm: GitHub Flavored Markdown (includes tables, strikethrough)
-     * - mdx: experimental MDX-oriented selector
-     * - org-mode: experimental Org-mode-oriented selector
      * Default: commonmark
      * Context: http, server, location
      *
@@ -499,8 +518,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
     /*
      * markdown_streaming off|auto|force   (Config V2, 0.9.0)
      *
-     * Streaming *enablement* policy.  Distinct from
-     * markdown_streaming_engine (the implementation selector).
+     * Sole streaming processing-path policy.
      *
      *   off   - never stream
      *   auto  - stream large responses, full-buffer small ones (default)
@@ -654,9 +672,9 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * deriving the base URL for relative-link resolution.  Replaces the
      * removed boolean markdown_trust_forwarded_headers trust model.
      *
-     * Context: http only.  server/location context is rejected with a
-     * migration hint to avoid per-location trust bypass.  CIDRs are
-     * validated at config time (IPv4 + IPv6); "off" disables trust entirely.
+     * Context: http only.  NGINX rejects server/location use to avoid
+     * per-location trust bypass.  CIDRs are validated at config time
+     * (IPv4 + IPv6); "off" disables trust entirely.
      *
      * Example:
      *   markdown_trusted_proxies 10.0.0.0/8 2001:db8::/32;
@@ -664,7 +682,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      */
     {
         ngx_string("markdown_trusted_proxies"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+        NGX_HTTP_MAIN_CONF|NGX_CONF_1MORE,
         ngx_http_markdown_trusted_proxies,
         NGX_HTTP_MAIN_CONF_OFFSET,
         0,
@@ -842,28 +860,27 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NULL
     },
 
-#ifdef MARKDOWN_STREAMING_ENABLED
     /*
-     * markdown_streaming_engine off|on|auto
+     * REMOVED: markdown_streaming_engine off|on|auto
      *
-     * Streaming engine selection mode.
-     * Default: auto (per-request selection based on
-     *          markdown_stream_threshold)
+     * Removed implementation selector.  Keep a reject-only parser entry so
+     * nginx -t gives an actionable value-specific migration message.
      * Context: http, server, location
      *
-     * Example:
-     *   markdown_streaming_engine auto;
+     * Migration: off -> markdown_streaming off,
+     * auto -> markdown_streaming auto, on -> markdown_streaming force.
      */
     {
         ngx_string("markdown_streaming_engine"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_enum_slot,
+        ngx_http_markdown_reject_streaming_engine,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, stream.engine),
-        &ngx_http_markdown_streaming_engine_enum
+        0,
+        NULL
     },
 
+#ifdef MARKDOWN_STREAMING_ENABLED
     /*
      * markdown_streaming_shadow on|off
      *
@@ -884,6 +901,31 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_conf_set_flag_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, stream.shadow),
+        NULL
+    },
+
+    /*
+     * markdown_streaming_zero_copy on|off
+     *
+     * Enable zero-copy output path for streaming chunks.
+     * When enabled, non-terminal chunks with no active backpressure
+     * use ngx_buf_t referencing Rust-owned memory directly without
+     * intermediate pool-copy (freed via pool cleanup handler).
+     *
+     * Default: off (conservative; requires production soak)
+     * Context: http, server, location
+     * Togglable via HUP reload without binary rebuild.
+     *
+     * Example:
+     *   markdown_streaming_zero_copy on;
+     */
+    {
+        ngx_string("markdown_streaming_zero_copy"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
+            |NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, stream.zero_copy),
         NULL
     },
 
@@ -1074,92 +1116,54 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NULL
     },
 
-    /*
-     * markdown_otel_tracing on|off
-     *
-     * Enable OTel span creation for conversion request tracing.
-     * When enabled, each conversion creates a span with trace
-     * context propagation and conversion attributes.
-     *
-     * Default: off
-     * Context: http, server, location
-     */
+    /* Duplicate tracing switch: reject with markdown_otel migration. */
     {
         ngx_string("markdown_otel_tracing"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
+        ngx_http_markdown_reject_otel_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, ops.otel_tracing),
-        NULL
+        0,
+        ngx_http_markdown_hint_otel_tracing
     },
 
-    /*
-     * markdown_otel_metrics on|off
-     *
-     * Enable OTel metrics export via OTLP protocol.
-     *
-     * Default: off
-     * Context: http, server, location
-     */
+    /* OTLP metrics export is not implemented: reject at nginx -t. */
     {
         ngx_string("markdown_otel_metrics"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
-        ngx_conf_set_flag_slot,
+        ngx_http_markdown_reject_otel_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, ops.otel_metrics),
-        NULL
+        0,
+        ngx_http_markdown_hint_otel_metrics
     },
 
-    /*
-     * markdown_otel_service_name <name>
-     *
-     * Service name label for OTel resource attributes.
-     *
-     * Default: nginx-markdown
-     * Context: http, server, location
-     */
+    /* Service-name override is not implemented: reject at nginx -t. */
     {
         ngx_string("markdown_otel_service_name"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_str_slot,
+        ngx_http_markdown_reject_otel_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, ops.otel_service_name),
-        NULL
+        0,
+        ngx_http_markdown_hint_otel_service_name
     },
 
-    /*
-     * markdown_otel_span_buffer_size <number>
-     *
-     * Buffer size for spans when the collector is unreachable.
-     * Buffered spans are retried on the next export window.
-     *
-     * Default: 1024
-     * Context: http, server, location
-     */
+    /* Retry buffering is not implemented: reject at nginx -t. */
     {
         ngx_string("markdown_otel_span_buffer_size"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_num_slot,
+        ngx_http_markdown_reject_otel_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, ops.otel_span_buffer_size),
-        NULL
+        0,
+        ngx_http_markdown_hint_otel_span_buffer_size
     },
 
-    /*
-     * markdown_otel_export_timeout <time>
-     *
-     * Timeout for OTLP HTTP export requests.
-     *
-     * Default: 5s
-     * Context: http, server, location
-     */
+    /* Export-timeout control is not implemented: reject at nginx -t. */
     {
         ngx_string("markdown_otel_export_timeout"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_msec_slot,
+        ngx_http_markdown_reject_otel_directive,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, ops.otel_export_timeout),
-        NULL
+        0,
+        ngx_http_markdown_hint_otel_export_timeout
     },
 
     /*
@@ -1169,8 +1173,9 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * The parse phase deadline is checked before and after parsing; the HTML
      * parser itself is not preemptively interrupted. If the deadline expires,
      * parsing is aborted and the request proceeds according to the on_error
-     * policy. Combine with markdown_max_size, markdown_decompress_max_size, and
-     * markdown_parser_budget for comprehensive resource control.
+     * policy. Combine with markdown_limits memory=<size>,
+     * markdown_decompress_max_size, and markdown_parser_budget for
+     * comprehensive resource control.
      *
      * Default: 30s
      * Context: http, server, location
@@ -1214,11 +1219,10 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Independent budget for decompressed output size.  When upstream
      * content is compressed (gzip/deflate/brotli), this directive caps
-     * the maximum decompressed byte count, separate from markdown_max_size
-     * which also limits the final Markdown output.
+     * the maximum decompressed byte count, separate from the effective
+     * full-buffer memory limit configured by markdown_limits memory=<size>.
      *
-     * Default: same as markdown_max_size (inherited after memory_budget
-     * override resolution).
+     * Default: same as the effective markdown_limits memory=<size> value.
      * Context: http, server, location
      *
      * Example:
@@ -1230,6 +1234,28 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_conf_set_size_slot,
         NGX_HTTP_LOC_CONF_OFFSET,
         offsetof(ngx_http_markdown_conf_t, decompress.max_size),
+        NULL
+    },
+
+    /*
+     * markdown_auto_decompress on|off
+     *
+     * Controls whether the module automatically decompresses upstream
+     * compressed responses (gzip, deflate, brotli) before conversion.
+     * When off, compressed responses pass through unconverted.
+     *
+     * Default: on
+     * Context: http, server, location
+     *
+     * Example:
+     *   markdown_auto_decompress off;
+     */
+    {
+        ngx_string("markdown_auto_decompress"),
+        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+        ngx_conf_set_flag_slot,
+        NGX_HTTP_LOC_CONF_OFFSET,
+        offsetof(ngx_http_markdown_conf_t, decompress.auto_decompress),
         NULL
     },
 
@@ -1362,36 +1388,6 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         0,
         NULL
     },
-
-    /*
-     * markdown_streaming_engine off|auto|on
-     *
-     * v0.8.0 core engine switch for true streaming availability.
-     * - off: streaming disabled
-     * - auto: automatic selection based on threshold (default)
-     * - on: streaming always enabled for eligible responses
-     *
-     * Streaming-enabled builds register the same directive above through
-     * ngx_conf_set_enum_slot. Non-streaming builds keep this parser so
-     * config validation reports invalid values consistently.
-     *
-     * Default: auto
-     * Context: http, server, location
-     *
-     * Example:
-     *   markdown_streaming_engine on;
-     */
-#ifndef MARKDOWN_STREAMING_ENABLED
-    {
-        ngx_string("markdown_streaming_engine"),
-        NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
-            |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_http_markdown_stream_engine_handler,
-        NGX_HTTP_LOC_CONF_OFFSET,
-        0,
-        NULL
-    },
-#endif
 
     /*
      * markdown_stream_threshold <size>

@@ -474,6 +474,44 @@ PY
   return 0
 }
 
+# Search matching NGINX config files without GNU grep-only traversal flags.
+#
+# Arguments:
+#   $1 - directory tree to search
+#   $2 - filename glob accepted by find (for example, *.conf)
+#   $3 - extended regular expression passed to grep
+#
+# Outputs:
+#   None.
+#
+# Returns:
+#   0 when at least one matching file contains the pattern; 1 otherwise.
+conf_tree_contains_pattern() {
+  local search_dir="$1"
+  local file_glob="$2"
+  local pattern="$3"
+  local match_marker=""
+
+  if [[ ! -d "${search_dir}" ]]; then
+    return 1
+  fi
+
+  match_marker="$(
+    find "${search_dir}" -type f -name "${file_glob}" \
+      -exec sh -c '
+        pattern="$1"
+        shift
+        for candidate do
+          if grep -Eq "$pattern" "$candidate"; then
+            printf "%s\n" matched
+            break
+          fi
+        done
+      ' _ "${pattern}" {} + 2>/dev/null
+  )"
+  [[ -n "${match_marker}" ]]
+}
+
 # collect_stale_module_suggestions inspects current nginx config for an already-loaded
 # markdown module with ABI mismatch and appends concrete remediation suggestions into
 # the provided array variable name.
@@ -492,7 +530,8 @@ collect_stale_module_suggestions() {
     return 0
   fi
 
-  if ! grep -R --include="$CONF_GLOB" -Eq "^[[:space:]]*load_module[[:space:]]+.*${module_so}[[:space:]]*;" "$nginx_conf_dir"; then
+  if ! conf_tree_contains_pattern "$nginx_conf_dir" "$CONF_GLOB" \
+    "^[[:space:]]*load_module[[:space:]]+.*${module_so}[[:space:]]*;"; then
     return 0
   fi
 
@@ -1001,7 +1040,8 @@ MARKDOWN_INSERTED_IN_MAIN=0
 MANUAL_ACTIONS=()
 
 if [[ -f "$NGINX_CONF_PATH" ]]; then
-  if [[ -d "$NGINX_CONF_DIR" ]] && grep -R --include="$CONF_GLOB" -Eq "^[[:space:]]*load_module[[:space:]]+.*${MODULE_SO}[[:space:]]*;" "$NGINX_CONF_DIR"; then
+  if conf_tree_contains_pattern "$NGINX_CONF_DIR" "$CONF_GLOB" \
+    "^[[:space:]]*load_module[[:space:]]+.*${MODULE_SO}[[:space:]]*;"; then
     MODULE_ALREADY_CONFIGURED=1
   fi
 
@@ -1039,7 +1079,8 @@ EOF
     echo "[+] Existing load_module directive found for ${MODULE_SO}, skipping snippet creation"
   fi
 
-  if [[ -d "$NGINX_CONF_DIR" ]] && grep -R --include="$CONF_GLOB" -Eq "^[[:space:]]*markdown_filter[[:space:]]+on[[:space:]]*;" "$NGINX_CONF_DIR"; then
+  if conf_tree_contains_pattern "$NGINX_CONF_DIR" "$CONF_GLOB" \
+    "^[[:space:]]*markdown_filter[[:space:]]+on[[:space:]]*;"; then
     MARKDOWN_ALREADY_CONFIGURED=1
   fi
 
@@ -1058,8 +1099,8 @@ EOF
 markdown_filter on;
 
 # Optional tuning examples:
-# markdown_max_size 5m;
-# markdown_on_error pass;
+# markdown_limits memory=5m;
+# markdown_error_policy pass;
 EOF
       then
         die_with_error "$CATEGORY_FILESYSTEM" \
@@ -1145,7 +1186,7 @@ rm -f "$NGINX_TEST_LOG" || true
 echo ""
 echo "You can continue fine-tuning later (recommended):"
 echo "- Scope rollout with server/location-level markdown_filter on/off"
-echo "- Adjust markdown_max_size / markdown_on_error by workload"
+echo "- Adjust markdown_limits memory= / markdown_error_policy by workload"
 echo "$SEPARATOR_LINE"
 
 # Emit JSON output if --json was requested

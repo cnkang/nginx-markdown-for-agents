@@ -533,5 +533,172 @@ def main(argv=None):
     return 1 if has_failure else 0
 
 
+# ---------------------------------------------------------------------------
+# Module-level threshold evaluation (Spec 65 / Requirement 9.1, 9.6)
+# ---------------------------------------------------------------------------
+
+# Default module-level thresholds used when the "module_level" section is
+# absent from the thresholds config.  These represent the 0.9.1 release gate
+# criteria.
+DEFAULT_MODULE_LEVEL_THRESHOLDS = {
+    "p50_latency_small_pct": 10,
+    "p95_latency_small_pct": 15,
+    "p50_latency_large_pct": 5,
+    "ttfb_streaming_large_pct": 10,
+    "fallback_rate_abs": 0.05,
+    "memory_slope_pct": 20,
+}
+
+# Direction map for module-level metrics.  Positive deviation is a regression
+# for latency/memory; fallback_rate is absolute (not percentage-of-baseline).
+_MODULE_LEVEL_DIRECTION = {
+    "p50_latency_small_pct": "lower_is_better",
+    "p95_latency_small_pct": "lower_is_better",
+    "p50_latency_large_pct": "lower_is_better",
+    "ttfb_streaming_large_pct": "lower_is_better",
+    "fallback_rate_abs": "absolute_cap",
+    "memory_slope_pct": "lower_is_better",
+}
+
+
+def get_module_level_thresholds(thresholds_cfg):
+    """
+    Retrieve the module-level threshold definitions from the config.
+
+    Falls back to DEFAULT_MODULE_LEVEL_THRESHOLDS when the "module_level"
+    section is absent.  Non-numeric keys (e.g. "description") are excluded.
+
+    Parameters:
+        thresholds_cfg (dict): Full thresholds configuration (from perf/thresholds.json).
+
+    Returns:
+        dict: Mapping of metric name to threshold value (percentage or absolute).
+    """
+    section = thresholds_cfg.get("module_level", DEFAULT_MODULE_LEVEL_THRESHOLDS)
+    return {k: v for k, v in section.items() if isinstance(v, (int, float))}
+
+
+def evaluate_module_level(current_metrics, baseline_metrics, thresholds_cfg, has_baseline=True):
+    """
+    Evaluate module-level benchmark metrics against thresholds.
+
+    Compares current benchmark metrics against baseline using the thresholds
+    defined in the "module_level" section of the thresholds config.
+
+    Parameters:
+        current_metrics (dict): Current module-level benchmark metrics.
+            Expected keys depend on the metric:
+            - For pct thresholds: the metric value itself (e.g., p50 latency).
+            - For fallback_rate_abs: the absolute fallback rate (0.0 to 1.0).
+            - For memory_slope_pct: the memory slope value.
+        baseline_metrics (dict): Baseline module-level benchmark metrics
+            (same structure as current_metrics).
+        thresholds_cfg (dict): Full thresholds configuration containing the
+            optional "module_level" section.
+        has_baseline (bool): Whether a valid baseline report is available.
+
+    Returns:
+        dict: A verdict report with keys:
+            - "verdict" (str): "GO" if all metrics pass, "NO_GO" if any breach,
+              "MISSING_EVIDENCE" if any critical metric is missing.
+            - "breaches" (list[dict]): List of threshold breaches, each with:
+                - "metric" (str): Metric name.
+                - "threshold" (float): The configured threshold.
+                - "actual" (float): The actual deviation or value.
+                - "baseline" (float|None): Baseline value (None for absolute caps).
+                - "current" (float|None): Current value (None for absolute caps).
+            - "results" (list[dict]): All evaluated metrics with pass/breach status.
+    """
+    module_thresholds = get_module_level_thresholds(thresholds_cfg)
+    breaches = []
+    results = []
+    missing_evidence = []
+
+    for metric_name, threshold_value in sorted(module_thresholds.items()):
+        direction = _MODULE_LEVEL_DIRECTION.get(metric_name, "lower_is_better")
+        entry = _evaluate_single_module_metric(
+            metric_name, threshold_value, direction,
+            current_metrics, baseline_metrics, has_baseline=has_baseline
+        )
+        results.append(entry)
+        if entry.get("status") == "breach":
+            breaches.append(entry)
+        elif entry.get("status") == "missing_evidence":
+            missing_evidence.append(entry)
+
+    if missing_evidence:
+        verdict = "MISSING_EVIDENCE"
+    elif breaches:
+        verdict = "NO_GO"
+    else:
+        verdict = "GO"
+
+    return {
+        "verdict": verdict,
+        "breaches": breaches,
+        "results": results,
+    }
+
+
+def _evaluate_single_module_metric(metric_name, threshold_value, direction,
+                                   current_metrics, baseline_metrics, has_baseline=True):
+    """
+    Evaluate a single module-level metric against its threshold.
+
+    Parameters:
+        metric_name (str): The metric identifier.
+        threshold_value (float): The configured threshold (pct or absolute).
+        direction (str): "absolute_cap" or "lower_is_better".
+        current_metrics (dict): Current metric values.
+        baseline_metrics (dict): Baseline metric values.
+        has_baseline (bool): Whether a valid baseline report is available.
+
+    Returns:
+        dict: Result entry with status ("pass", "breach", "missing_evidence", or "skipped").
+    """
+    cur_val = current_metrics.get(metric_name)
+    if cur_val is None:
+        return {
+            "metric": metric_name,
+            "status": "missing_evidence",
+            "reason": f"critical metric '{metric_name}' not present in current measurements",
+        }
+
+    if direction == "absolute_cap":
+        passed = cur_val <= threshold_value
+        return {
+            "metric": metric_name,
+            "status": "pass" if passed else "breach",
+            "threshold": threshold_value,
+            "actual": cur_val,
+            "baseline": None,
+            "current": cur_val,
+        }
+
+    # percentage deviation
+    base_val = baseline_metrics.get(metric_name) if has_baseline else None
+    if not has_baseline or base_val is None:
+        return {
+            "metric": metric_name,
+            "status": "skipped",
+            "reason": "cannot evaluate percentage threshold: missing baseline",
+            "threshold": threshold_value,
+            "actual": None,
+            "baseline": None,
+            "current": cur_val,
+        }
+
+    deviation = compute_deviation(cur_val, base_val)
+    passed = deviation <= threshold_value
+    return {
+        "metric": metric_name,
+        "status": "pass" if passed else "breach",
+        "threshold": threshold_value,
+        "actual": round(deviation, 4),
+        "baseline": base_val,
+        "current": cur_val,
+    }
+
+
 if __name__ == "__main__":
     sys.exit(main())

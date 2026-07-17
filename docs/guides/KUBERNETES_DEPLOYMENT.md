@@ -54,7 +54,7 @@ Before building the custom image, ensure the following tools are available:
 |------|---------|-----------------|
 | Docker or Podman | Container image build | Docker 20.10+ / Podman 4.0+ |
 | Docker Buildx (optional) | Multi-platform builds | Bundled with Docker 20.10+ |
-| Rust toolchain | Compiles the Rust converter component | Stable (MSRV 1.91) |
+| Rust toolchain | Compiles the Rust converter component | Rust 1.97.0 (MSRV 1.97) |
 | NGINX source | Module compilation target | Must match Ingress Controller NGINX version |
 | Git | Clone module source | Any recent version |
 
@@ -236,7 +236,7 @@ the module-build stage.
 
 **Symptom:** Build fails with Rust compiler errors.
 
-**Cause:** The module requires a recent stable Rust toolchain (MSRV 1.91).
+**Cause:** Source builds require Rust 1.97.0 or newer (MSRV 1.97).
 Network issues during `rustup` installation can also cause failures.
 
 **Solution:**

@@ -374,7 +374,7 @@ ngx_http_markdown_otel_parse_traceparent(ngx_http_request_t *r,
  *
  * Returns:
  *   Pointer to the new span, or NULL if OTel is disabled
- *   or the ring buffer is full
+ *   or allocation failure occurs
  */
 static ngx_http_markdown_otel_span_t *
 ngx_http_markdown_otel_span_start(ngx_http_request_t *r,

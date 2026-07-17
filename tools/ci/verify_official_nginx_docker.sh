@@ -177,6 +177,7 @@ sanitize_tag() {
 #   TMP_DIR              - temporary directory for build artifacts
 #   IMAGE_NAME           - Docker image name
 #   MODULE_GIT_REF       - module Git reference
+#   runtime_uid          - effective UID used by the running container
 #   markdown_code        - exit code from markdown content negotiation
 #   html_code            - exit code from HTML content negotiation
 #
@@ -198,8 +199,9 @@ append_step_summary() {
     echo "- Status: ${status}"
     echo "- Tag: \`${NGINX_TAG}\`"
     echo "- Image: \`${IMAGE_NAME}\`"
-    echo "- Module ref: \`${MODULE_REF}\`"
-    echo "- Module sha: \`${MODULE_SHA:-<none>}\`"
+      echo "- Module ref: \`${MODULE_REF}\`"
+      echo "- Module sha: \`${MODULE_SHA:-<none>}\`"
+      echo "- Runtime UID: \`${runtime_uid:-<not-checked>}\`"
     if [[ -f "${TMP_DIR}/nginx-t.stderr" ]]; then
       if grep -q "test is successful" "${TMP_DIR}/nginx-t.stderr"; then
         echo "- nginx -t: ok"
@@ -323,8 +325,15 @@ fi
 echo "==> Starting container on 127.0.0.1:${PORT}"
 docker run -d \
   --name "${CONTAINER_NAME}" \
-  -p "127.0.0.1:${PORT}:80" \
+  -p "127.0.0.1:${PORT}:8080" \
   "${IMAGE_NAME}" >/dev/null
+
+echo "==> Verifying container runs as a non-root user"
+runtime_uid="$(docker exec "${CONTAINER_NAME}" id -u)"
+[[ "${runtime_uid}" != "0" ]] || {
+  echo "Container must not run as root" >&2
+  exit 1
+}
 
 echo "==> Waiting for nginx to become ready"
 ready=0
@@ -392,6 +401,7 @@ echo "  module_repo=${MODULE_REPO}"
 echo "  module_ref=${MODULE_REF}"
 echo "  module_sha=${MODULE_SHA:-<none>}"
 echo "  image_name=${IMAGE_NAME}"
+echo "  runtime_uid=${runtime_uid}"
 echo "  markdown_status=${markdown_code}"
 echo "  html_status=${html_code}"
 echo "==> Official NGINX Docker source-build validation passed"

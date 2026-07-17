@@ -502,12 +502,11 @@ def _build_open_finding(
 
 
 def _build_path_io_finding(
-    rel: str, lineno: int, method: str, expr_str: str, strict: bool,
+    rel: str, lineno: int, method: str, expr_str: str,
 ) -> str:
     """Format a single Path IO method validation finding line."""
-    level = "ERROR" if strict else "WARNING"
     detail = _PATH_IO_DETAIL_TEMPLATE.format(method=method, expr=expr_str)
-    return f"  {level}   {rel}:{lineno} — {detail}"
+    return f"  WARNING {rel}:{lineno} — {detail}"
 
 
 def _build_parent_map(tree: ast.AST) -> dict[int, ast.AST]:
@@ -582,7 +581,7 @@ def _check_single_call(
 
     if is_path_io:
         method = node.func.attr  # type: ignore[attr-defined]
-        finding = _build_path_io_finding(rel, node.lineno, method, _unparse(path_arg), strict)
+        finding = _build_path_io_finding(rel, node.lineno, method, _unparse(path_arg))
         return None, finding  # Path IO always advisory
     else:
         finding = _build_open_finding(rel, node.lineno, _unparse(path_arg), strict)

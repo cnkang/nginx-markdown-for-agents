@@ -210,30 +210,6 @@ markdown_build_header_plan(const uint8_t *content_type,
 }
 
 void
-markdown_accept_result_init(struct FFIAcceptResult *result)
-{
-    if (result != NULL) {
-        memset(result, 0, sizeof(*result));
-    }
-}
-
-void
-markdown_conditional_result_init(struct FFIConditionalResult *result)
-{
-    if (result != NULL) {
-        memset(result, 0, sizeof(*result));
-    }
-}
-
-void
-markdown_decision_result_init(struct FFIDecisionResult *result)
-{
-    if (result != NULL) {
-        memset(result, 0, sizeof(*result));
-    }
-}
-
-void
 markdown_decompress_free(struct FFIDecompResult *result)
 {
     if (result != NULL) {

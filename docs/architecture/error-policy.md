@@ -11,7 +11,7 @@ runtime. A single directive `markdown_error_policy` covers all error paths
 ```nginx
 # Context: http, server, location
 markdown_error_policy pass;            # Default: deliver original response
-markdown_error_policy status 502;      # Return specified HTTP status code
+markdown_error_policy status 429;      # Return explicit overload status
 markdown_error_policy status 503;      # Recommended for overload (with spec 52)
 markdown_error_policy fail_closed;     # Return 502, never leak original content
 ```
@@ -49,12 +49,19 @@ can safely:
 Errors that occur after headers have been sent (e.g., `Content-Type: text/markdown`
 is already on the wire). The module **cannot** rewrite the status line.
 
-**Behavior**: Always `TerminateConnection` (close/abort the connection).
+The configured policy selects one of two protocol-safe actions:
 
-This is a safety invariant:
+- **Pass**: Ask the Rust streaming converter to close any open Markdown
+  structures and send only those closure bytes. If safe finish fails, abort the
+  response.
+- **FailClosed or Status**: Abort the response immediately. The configured
+  pre-commit status cannot replace a status line that is already committed.
+
+Both actions preserve these safety invariants:
 - Cannot return original HTML content (client expects Markdown).
 - Cannot send a new status code (headers already sent).
-- Must terminate to avoid client seeing partial/mixed content.
+- Cannot synthesize Markdown closure in C; only Rust-owned state may produce
+  safe-finish bytes.
 
 ## Decision Function
 
@@ -62,43 +69,26 @@ This is a safety invariant:
 decide_error_behavior(class, policy) → behavior
 ```
 
-1. If `class.is_post_commit()` → `TerminateConnection` (forced, ignores policy)
-2. Otherwise, apply policy:
+1. If the failure is post-commit:
+   - `Pass` -> `SafeFinish`, falling back to `Abort`
+   - `FailClosed` or `Status(n)` -> `Abort`
+2. Otherwise, apply the configured pre-commit policy:
    - `Pass` → `PassThrough`
    - `Status(n)` → `ReturnStatus(n)`
    - `FailClosed` → `ReturnStatus(502)`
 
-## FFI Interface
+## Runtime boundary
 
-```c
-#include "markdown_converter.h"
-
-/* Error class constants (0-9) */
-/* 0=conversion_error, 1=timeout, 2=memory_budget_exceeded, ... */
-
-/* Policy construction */
-FFIErrorPolicy policy = { .kind = FFI_ERROR_POLICY_PASS, .status_code = 0 };
-/* or */
-FFIErrorPolicy policy = { .kind = FFI_ERROR_POLICY_STATUS, .status_code = 503 };
-
-/* Decision call */
-FFIErrorBehavior behavior;
-uint8_t rc = markdown_decide_error_behavior(error_class, policy, &behavior);
-
-/* Interpret result */
-if (behavior.kind == FFI_ERROR_BEHAVIOR_PASS_THROUGH) {
-    /* deliver original response */
-} else if (behavior.kind == FFI_ERROR_BEHAVIOR_RETURN_STATUS) {
-    /* return behavior.status_code */
-} else if (behavior.kind == FFI_ERROR_BEHAVIOR_TERMINATE) {
-    /* close connection (behavior.forced == 1) */
-}
-```
+The NGINX C module applies the configured pass/status/fail-closed behavior at
+the request lifecycle boundary. Rust exposes `markdown_classify_error_code`
+for canonical error classification; the former zero-consumer FFI behavior
+decision structs and export were removed before the v1 ABI freeze.
 
 ## Stability Contract
 
 - Error class enum: frozen at 0.9.0, additive-only after 1.0.
-- Post-commit forced TerminateConnection: safety invariant, never relaxed.
+- Post-commit never replays HTML or rewrites status; only Rust safe-finish or
+  abort is allowed.
 - Error class → reason code mapping: stable, additive-only after 1.0.
 - `markdown_error_policy` directive semantics: frozen at 1.0.
 

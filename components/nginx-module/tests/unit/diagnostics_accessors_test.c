@@ -5,7 +5,6 @@
  * diagnostics compilation unit with module-internal state:
  *   - collect_metrics (reads SHM metrics zone)
  *   - get_dynconf_state (reads dynconf watcher)
- *   - trigger_rollback (delegates to dynconf rollback)
  *
  * Coverage targets:
  *   ngx_http_markdown_diagnostics_accessors_impl.h
@@ -23,8 +22,6 @@ struct ngx_log_s {
 #define NGX_ERROR     -1
 
 #define ngx_memzero(buf, n) memset(buf, 0, n)
-
-static ngx_log_t g_log;
 
 /* ── Metrics struct (mirrors production SHM layout) ───────────── */
 
@@ -67,6 +64,16 @@ typedef struct {
         } selection;
     } streaming;
 #endif
+    struct {
+        ngx_atomic_t  backpressure_total;
+        ngx_atomic_t  backpressure_resume_total;
+        ngx_atomic_t  pending_output_high_watermark_bytes;
+        ngx_atomic_t  decompression_streaming_total;
+        ngx_atomic_t  decompression_fullbuffer_total;
+        ngx_atomic_t  decompression_budget_exceeded_total;
+        ngx_atomic_t  zero_copy_output_total;
+        ngx_atomic_t  copied_output_total;
+    } perf;
 } ngx_http_markdown_metrics_t;
 
 /* Global metrics pointer (mirrors production) */
@@ -86,31 +93,19 @@ typedef struct {
 
 static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
 
-ngx_int_t ngx_http_markdown_dynconf_rollback(
-    ngx_http_markdown_dynconf_watcher_t *watcher, ngx_log_t *log);
+/* ── Inflight overload stub ────────────────────────────────────── */
+
+static ngx_atomic_int_t g_inflight_overload_total;
+
+static ngx_inline ngx_atomic_int_t
+ngx_http_markdown_inflight_overload_total(void)
+{
+    return g_inflight_overload_total;
+}
 
 /* ── Production function headers and implementation ───────────── */
 
 #include "ngx_http_markdown_diagnostics_accessors_impl.h"
-
-/* ── Rollback return codes ────────────────────────────────────── */
-
-#define NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK         0
-#define NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_NO_LKG    -1
-#define NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_APPLY_ERR -2
-
-static int g_rollback_called;
-static ngx_int_t g_rollback_result;
-
-ngx_int_t
-ngx_http_markdown_dynconf_rollback(
-    ngx_http_markdown_dynconf_watcher_t *watcher, ngx_log_t *log)
-{
-    (void) watcher;
-    (void) log;
-    g_rollback_called = 1;
-    return g_rollback_result;
-}
 
 /* ── Tests ─────────────────────────────────────────────────────── */
 
@@ -286,64 +281,6 @@ test_get_dynconf_state_active(void)
     TEST_PASS("Active watcher state collected correctly");
 }
 
-static void
-test_trigger_rollback_ok(void)
-{
-    ngx_int_t rc;
-
-    TEST_SUBSECTION("trigger_rollback success");
-
-    g_rollback_called = 0;
-    g_rollback_result = NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK;
-
-    rc = ngx_http_markdown_diagnostics_trigger_rollback(&g_log);
-
-    TEST_ASSERT(g_rollback_called == 1, "rollback should be called");
-    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_OK,
-                "should return OK");
-
-    TEST_PASS("Rollback success correct");
-}
-
-static void
-test_trigger_rollback_no_lkg(void)
-{
-    ngx_int_t rc;
-
-    TEST_SUBSECTION("trigger_rollback no LKG");
-
-    g_rollback_called = 0;
-    g_rollback_result = NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_NO_LKG;
-
-    rc = ngx_http_markdown_diagnostics_trigger_rollback(&g_log);
-
-    TEST_ASSERT(g_rollback_called == 1, "rollback should be called");
-    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_NO_LKG,
-                "should return NO_LKG");
-
-    TEST_PASS("Rollback no-LKG correct");
-}
-
-static void
-test_trigger_rollback_apply_err(void)
-{
-    ngx_int_t rc;
-
-    TEST_SUBSECTION("trigger_rollback apply error");
-
-    g_rollback_called = 0;
-    g_rollback_result = NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_APPLY_ERR;
-
-    rc = ngx_http_markdown_diagnostics_trigger_rollback(&g_log);
-
-    TEST_ASSERT(g_rollback_called == 1, "rollback should be called");
-    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DYNCONF_ROLLBACK_APPLY_ERR,
-                "should return APPLY_ERR");
-
-    TEST_PASS("Rollback apply-error correct");
-}
-
-
 int
 main(void)
 {
@@ -360,9 +297,6 @@ main(void)
     test_get_dynconf_state_null_output();
     test_get_dynconf_state_inactive();
     test_get_dynconf_state_active();
-    test_trigger_rollback_ok();
-    test_trigger_rollback_no_lkg();
-    test_trigger_rollback_apply_err();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

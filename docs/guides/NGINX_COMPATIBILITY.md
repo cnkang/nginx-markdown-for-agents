@@ -21,12 +21,11 @@ in the compatibility matrix below.
 
 | NGINX Version | Channel | Support Tier |
 |---------------|---------|--------------|
-| 1.24.0 | stable | Full (prebuilt binary) |
+| 1.24.0 | oldstable | Full (prebuilt binary) |
 | 1.26.3 | stable | Full (prebuilt binary) |
-| 1.28.3 | mainline | Full (prebuilt binary) |
-| 1.30.1 | mainline | Full (prebuilt binary) |
-| 1.31.0 | mainline | Full (prebuilt binary) |
-
+| 1.28.3 | stable | Full (prebuilt binary) |
+| 1.30.3 | stable | Full (prebuilt binary) |
+| 1.31.2 | mainline | Full (prebuilt binary) |
 Architectures: `x86_64` (amd64) and `aarch64` (arm64), both glibc and musl.
 
 If your NGINX version is >= 1.24.0 but not listed above, build the module
@@ -122,7 +121,7 @@ NGINX source tree and configuration.
 
 ### Fail-Open Behavior
 
-The module defaults to `markdown_on_error pass` (fail-open). If the
+The module defaults to `markdown_error_policy pass` (fail-open). If the
 conversion fails at runtime (timeout, memory budget exceeded, converter
 error), the original HTML response is returned unchanged. This is a safety
 design choice, not a compatibility limitation, but operators should be aware
@@ -192,3 +191,4 @@ prebuilt package for an nginx.org official build, or build from source with
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.7.0 | 2026-05-20 | Kiro | Initial NGINX compatibility guide for docs/guides/ |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

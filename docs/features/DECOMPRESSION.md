@@ -1,4 +1,4 @@
-# Decompression Budget and Error Handling (v0.7.0)
+# Decompression Budget and Error Handling (v0.9.1)
 
 This document describes the bounded decompression and error classification
 features introduced in v0.7.0. For the base automatic decompression behavior,
@@ -7,21 +7,21 @@ see [AUTOMATIC_DECOMPRESSION.md](AUTOMATIC_DECOMPRESSION.md).
 ## Bounded Decompression
 
 The `markdown_decompress_max_size` directive limits decompressed output size
-independently from `markdown_max_size`, preventing zip-bomb attacks and
+independently from `markdown_limits memory=<size>`, preventing zip-bomb attacks and
 unbounded memory growth.
 
 ### Configuration
 
 | Directive | Syntax | Default | Context |
 |-----------|--------|---------|---------|
-| `markdown_decompress_max_size` | `markdown_decompress_max_size <size>;` | Inherits `markdown_max_size` | http, server, location |
+| `markdown_decompress_max_size` | `markdown_decompress_max_size <size>;` | Inherits `markdown_limits memory=<size>` | http, server, location |
 
 ### Example
 
 ```nginx
 location /api/ {
     markdown_filter on;
-    markdown_max_size 10m;
+    markdown_limits memory=10m;
     markdown_decompress_max_size 50m;  # Allow high compression ratios
 }
 ```
@@ -38,12 +38,12 @@ specific reason code for structured logging and diagnostics.
 
 | Category | Reason Code String | Rust Enum Variant | Reason Code Value | Meaning |
 |----------|-------------------|-------------------|-------------------|---------|
-| Budget Exceeded | `DECOMPRESSION_BUDGET_EXCEEDED` | `ReasonCode::DecompressionBudgetExceeded` | 5 | Decompressed output exceeded the configured `markdown_decompress_max_size` budget. Indicates potential zip bomb or unexpectedly large compressed content. |
-| Format Error | `DECOMPRESSION_FORMAT_ERROR` | `ReasonCode::DecompressionFormatError` | 6 | The compressed input has an invalid format (not valid gzip/deflate/brotli). Indicates corrupted or misidentified content. |
-| Truncated Input | `DECOMPRESSION_TRUNCATED_INPUT` | `ReasonCode::DecompressionTruncatedInput` | 7 | The compressed input was truncated (incomplete stream). Indicates network issues or upstream sending partial content. |
-| I/O Error | `DECOMPRESSION_IO_ERROR` | `ReasonCode::DecompressionIoError` | 8 | An I/O error occurred during decompression. Indicates system-level issues (disk, memory mapping, etc.). |
+| Budget Exceeded | `decompression_budget_exceeded` | `ReasonCode::DecompressionBudgetExceeded` | 5 | Decompressed output exceeded the configured `markdown_decompress_max_size` budget. Indicates potential zip bomb or unexpectedly large compressed content. |
+| Format Error | `decompression_format_error` | `ReasonCode::DecompressionFormatError` | 6 | The compressed input has an invalid format (not valid gzip/deflate/brotli). Indicates corrupted or misidentified content. |
+| Truncated Input | `decompression_truncated_input` | `ReasonCode::DecompressionTruncatedInput` | 7 | The compressed input was truncated (incomplete stream). Indicates network issues or upstream sending partial content. |
+| I/O Error | `decompression_io_error` | `ReasonCode::DecompressionIoError` | 8 | An I/O error occurred during decompression. Indicates system-level issues (disk, memory mapping, etc.). |
 
-There is also a generic `FAILED_DECOMPRESSION` (reason code value 4) used when
+There is also a generic `failed_decompression` (reason code value 4) used when
 the error does not map to a specific category above.
 
 ---
@@ -72,10 +72,10 @@ metrics and logging.
 
 | Reason Code Value | Reason Code String | Prometheus Metric |
 |-------------------|-------------------|-------------------|
-| 5 | `DECOMPRESSION_BUDGET_EXCEEDED` | `nginx_markdown_decompression_budget_exceeded_total` |
-| 6 | `DECOMPRESSION_FORMAT_ERROR` | `nginx_markdown_decompression_format_error_total` |
-| 7 | `DECOMPRESSION_TRUNCATED_INPUT` | `nginx_markdown_decompression_truncated_input_total` |
-| 8 | `DECOMPRESSION_IO_ERROR` | `nginx_markdown_decompression_io_error_total` |
+| 5 | `decompression_budget_exceeded` | `nginx_markdown_perf_decompression_budget_exceeded_total` |
+| 6 | `decompression_format_error` | `nginx_markdown_decompression_format_error_total` |
+| 7 | `decompression_truncated_input` | `nginx_markdown_decompression_truncated_input_total` |
+| 8 | `decompression_io_error` | `nginx_markdown_decompression_io_error_total` |
 
 ---
 
@@ -87,14 +87,14 @@ and respond appropriately.
 
 | Metric Name | Type | Description |
 |-------------|------|-------------|
-| `nginx_markdown_decompression_budget_exceeded_total` | counter | Number of decompression operations terminated because output exceeded the configured budget. |
+| `nginx_markdown_perf_decompression_budget_exceeded_total` | counter | Number of decompression operations terminated because output exceeded the configured budget. |
 | `nginx_markdown_decompression_format_error_total` | counter | Number of decompression operations that failed due to invalid compressed format. |
 | `nginx_markdown_decompression_truncated_input_total` | counter | Number of decompression operations that failed due to truncated/incomplete input. |
 | `nginx_markdown_decompression_io_error_total` | counter | Number of decompression operations that failed due to I/O errors. |
 | `nginx_markdown_decompression_failures_total` | counter | Total failed decompression attempts (aggregate, all categories). |
 
 In addition, the broad failure classification counter
-`nginx_markdown_failures_total{stage="FAIL_RESOURCE_LIMIT"}` is incremented for
+`nginx_markdown_failures_total{reason="resource_limit"}` is incremented for
 budget-exceeded errors (FFI code 9).
 
 ### PromQL Examples
@@ -160,7 +160,7 @@ Key fields in the log entry:
 | Field | Description |
 |-------|-------------|
 | `error_code` | The FFI error code (e.g., 9 for budget exceeded) |
-| `category` | The broad error classification (`RESOURCE_LIMIT`, `CONVERSION`, `SYSTEM`) |
+| `category` | The broad error classification (`resource_limit`, `conversion`, `system`) |
 | `message` | Detailed error message from the Rust converter |
 | `elapsed_ms` | Time spent before the error was detected |
 
@@ -171,7 +171,7 @@ The reason code is also available through the diagnostics endpoint
 
 ## Operator Guidance
 
-### Budget Exceeded (`DECOMPRESSION_BUDGET_EXCEEDED`)
+### Budget Exceeded (`decompression_budget_exceeded`)
 
 **What it means**: The decompressed output would exceed the configured
 `markdown_decompress_max_size` limit. This is a safety mechanism against zip
@@ -193,7 +193,7 @@ bombs and unexpectedly large compressed payloads.
    Check source IPs and request patterns.
 4. Monitor `nginx_markdown_decompression_budget_exceeded_total` for trends.
 
-### Format Error (`DECOMPRESSION_FORMAT_ERROR`)
+### Format Error (`decompression_format_error`)
 
 **What it means**: The compressed input does not conform to the expected
 compression format (gzip, deflate, or brotli). The data is corrupted or the
@@ -211,7 +211,7 @@ compression format (gzip, deflate, or brotli). The data is corrupted or the
    compression pipeline.
 4. Consider adding the upstream to a bypass list if it cannot be fixed.
 
-### Truncated Input (`DECOMPRESSION_TRUNCATED_INPUT`)
+### Truncated Input (`decompression_truncated_input`)
 
 **What it means**: The compressed stream ended prematurely — the decompressor
 expected more data but reached end-of-input. The compressed payload is
@@ -231,7 +231,7 @@ incomplete.
 5. Monitor `nginx_markdown_decompression_truncated_input_total` alongside
    upstream error rates.
 
-### I/O Error (`DECOMPRESSION_IO_ERROR`)
+### I/O Error (`decompression_io_error`)
 
 **What it means**: A system-level I/O error occurred during the decompression
 operation. This is typically not related to the compressed data itself but to
@@ -258,9 +258,9 @@ and logging:
 
 | Category | Meaning | FFI Codes |
 |----------|---------|-----------|
-| `CONVERSION` | HTML parse/conversion error | 1 (PARSE), 2 (ENCODING), 5 (INVALID_INPUT) |
-| `RESOURCE_LIMIT` | Timeout, memory, or budget exceeded | 3 (TIMEOUT), 4 (MEMORY_LIMIT), 6 (BUDGET_EXCEEDED), 9 (DECOMPRESSION_BUDGET_EXCEEDED), 10 (PARSE_TIMEOUT), 11 (PARSE_BUDGET_EXCEEDED) |
-| `SYSTEM` | Internal/system error | 99 (INTERNAL) |
+| `conversion` | HTML parse/conversion error | 1 (PARSE), 2 (ENCODING), 5 (INVALID_INPUT) |
+| `resource_limit` | Timeout, memory, or budget exceeded | 3 (TIMEOUT), 4 (MEMORY_LIMIT), 6 (BUDGET_EXCEEDED), 9 (DECOMPRESSION_BUDGET_EXCEEDED), 10 (PARSE_TIMEOUT), 11 (PARSE_BUDGET_EXCEEDED) |
+| `system` | Internal/system error | 99 (INTERNAL) |
 
 Streaming-specific codes (7=FALLBACK, 8=POST_COMMIT) are feature-gated.
 
@@ -279,3 +279,4 @@ Streaming-specific codes (7=FALLBACK, 8=POST_COMMIT) are feature-gated.
 |---------|------|--------|---------|
 | 0.7.0 | 2026-05-17 | Kang | Initial document for v0.7.0 decompression budget and error classification |
 | 0.7.0 | 2026-05-18 | Kang | Added detailed decompression error categories, FFI mapping, per-category Prometheus metrics, fail-open behavior, and operator guidance (TASK-A04.4) |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

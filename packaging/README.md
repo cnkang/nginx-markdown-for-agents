@@ -43,7 +43,7 @@ The configuration uses template variables injected by the CI matrix:
 
 ```bash
 # Set required environment variables
-export PKG_VERSION="0.8.3"
+export PKG_VERSION="0.9.1"
 export NGINX_VERSION="1.26.3"
 export NFPM_ARCH="amd64"
 

@@ -315,6 +315,7 @@ def test_write_text_unvalidated_strict_still_warns(det):
     errors, warnings = _check_source(det, src, strict=True)
     assert errors == []
     assert len(warnings) == 1
+    assert warnings[0].lstrip().startswith("WARNING")
     assert "write_text" in warnings[0]
 
 

@@ -16,9 +16,7 @@ Usage:
 
 from __future__ import annotations
 
-import os
 import re
-import sys
 from pathlib import Path
 
 _SAFE_FILENAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
@@ -109,11 +107,11 @@ def validate_write_path_within_root(
 
     try:
         resolved.relative_to(resolved_root)
-    except ValueError:
+    except ValueError as e:
         raise ValueError(
             f"Write {purpose} path {resolved} escapes root {resolved_root}; "
             f"refusing to write outside the intended directory tree"
-        )
+        ) from e
 
     return resolved
 
@@ -131,8 +129,7 @@ def sanitize_path_component(name: str) -> str:
     Returns:
         Sanitized string safe for use as a filename component.
     """
-    result = name.replace("/", "_").replace("\\", "_").replace("..", "_")
-    return result
+    return name.replace("/", "_").replace("\\", "_").replace("..", "_")
 
 
 def validate_filename_strict(name: str, *, purpose: str = "filename") -> str:

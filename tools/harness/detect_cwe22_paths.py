@@ -40,6 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 VALIDATION_IMPORT_RE = re.compile(
     r"from\s+tools\.lib\.path_validation\s+import"
+    r"|from\s+lib\.path_validation\s+import"
     r"|from\s+path_validation\s+import"
     r"|import\s+tools\.lib\.path_validation"
     r"|def\s+_resolve_repo_write_path",
@@ -285,48 +286,57 @@ def _is_tempfile_assignment(line: str) -> bool:
     )
 
 
-def _classify_open_call(
-    first_arg: str,
-    line: str,
-    lines: list[str],
-    lineno: int,
-    has_validation_import: bool,
-    validated_vars: set[str],
-    hardcoded_vars: set[str],
-    filepath: Path,
-    rel: str,
-    strict: bool,
-) -> tuple[list[str], list[str]]:
+from dataclasses import dataclass
+
+
+@dataclass
+class OpenCallContext:
+    """Context for classifying a single open() call."""
+
+    first_arg: str
+    line: str
+    lines: list[str]
+    lineno: int
+    has_validation_import: bool
+    validated_vars: set[str]
+    hardcoded_vars: set[str]
+    filepath: Path
+    rel: str
+    strict: bool
+
+
+def _classify_open_call(ctx: OpenCallContext) -> tuple[list[str], list[str]]:
     """Classify a single open() call and return (errors, warnings)."""
     errors: list[str] = []
     warnings: list[str] = []
 
     if _is_safe_open_context(
-        first_arg, line, lines, lineno, validated_vars, hardcoded_vars,
+        ctx.first_arg, ctx.line, ctx.lines, ctx.lineno,
+        ctx.validated_vars, ctx.hardcoded_vars,
     ):
         return errors, warnings
 
-    if "test_" in filepath.name:
+    if "test_" in ctx.filepath.name:
         warnings.append(
-            f"  WARNING {rel}:{lineno} — open({first_arg}) in test file; "
+            f"  WARNING {ctx.rel}:{ctx.lineno} — open({ctx.first_arg}) in test file; "
             f"verify path source is controlled"
         )
         return errors, warnings
 
-    if not has_validation_import:
-        _emit_finding(strict, errors, warnings,
-            f"  ERROR   {rel}:{lineno} — open({first_arg}) without "
-            f"path_validation import; variable '{first_arg}' not validated",
-            f"  WARNING {rel}:{lineno} — open({first_arg}) without "
-            f"path_validation import; variable '{first_arg}' not validated "
+    if not ctx.has_validation_import:
+        _emit_finding(ctx.strict, errors, warnings,
+            f"  ERROR   {ctx.rel}:{ctx.lineno} — open({ctx.first_arg}) without "
+            f"path_validation import; variable '{ctx.first_arg}' not validated",
+            f"  WARNING {ctx.rel}:{ctx.lineno} — open({ctx.first_arg}) without "
+            f"path_validation import; variable '{ctx.first_arg}' not validated "
             f"(use --strict to promote to error)",
         )
-    elif first_arg not in validated_vars:
-        _emit_finding(strict, errors, warnings,
-            f"  ERROR   {rel}:{lineno} — open({first_arg}) but "
-            f"'{first_arg}' not passed through validate_read_path()",
-            f"  WARNING {rel}:{lineno} — open({first_arg}) but "
-            f"'{first_arg}' not passed through validate_read_path() "
+    elif ctx.first_arg not in ctx.validated_vars:
+        _emit_finding(ctx.strict, errors, warnings,
+            f"  ERROR   {ctx.rel}:{ctx.lineno} — open({ctx.first_arg}) but "
+            f"'{ctx.first_arg}' not passed through validate_read_path()",
+            f"  WARNING {ctx.rel}:{ctx.lineno} — open({ctx.first_arg}) but "
+            f"'{ctx.first_arg}' not passed through validate_read_path() "
             f"(use --strict to promote to error)",
         )
 
@@ -476,9 +486,12 @@ def _scan_open_calls(
             continue
 
         call_errors, call_warnings = _classify_open_call(
-            first_arg, line, lines, lineno,
-            has_validation_import,
-            validated_vars, hardcoded_vars, filepath, rel, strict,
+            OpenCallContext(
+                first_arg=first_arg, line=line, lines=lines, lineno=lineno,
+                has_validation_import=has_validation_import,
+                validated_vars=validated_vars, hardcoded_vars=hardcoded_vars,
+                filepath=filepath, rel=rel, strict=strict,
+            )
         )
         errors.extend(call_errors)
         warnings.extend(call_warnings)

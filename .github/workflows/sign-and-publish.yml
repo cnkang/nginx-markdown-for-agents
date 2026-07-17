@@ -49,10 +49,28 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout repository
+      - name: Checkout trusted workflow scripts
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ inputs.version }}
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release tag input
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="${INPUT_VERSION}"
+          if [[ ! "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: version must be a release tag like v0.9.1" >&2
+            exit 1
+          fi
+          package_version="${version#v}"
+          ./packaging/scripts/validate-version.sh "${package_version}"
+          if ! git show-ref --verify --quiet "refs/tags/${version}"; then
+            echo "ERROR: release tag does not exist locally: ${version}" >&2
+            exit 1
+          fi
 
       - name: Download package artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -113,10 +131,28 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout repository
+      - name: Checkout trusted workflow scripts
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ inputs.version }}
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release tag input
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="${INPUT_VERSION}"
+          if [[ ! "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: version must be a release tag like v0.9.1" >&2
+            exit 1
+          fi
+          package_version="${version#v}"
+          ./packaging/scripts/validate-version.sh "${package_version}"
+          if ! git show-ref --verify --quiet "refs/tags/${version}"; then
+            echo "ERROR: release tag does not exist locally: ${version}" >&2
+            exit 1
+          fi
 
       - name: Download signed packages
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8

@@ -19,6 +19,12 @@ module parameters without restarting NGINX. A periodic timer (1s interval)
 polls a configuration file for changes and applies them using a two-phase,
 staged-commit model.
 
+Dynconf is classified `STABLE_FOR_1_0`. The supported key set, atomic staged
+promotion, one-snapshot-per-request rule, dry-run behavior, and
+last-known-good rollback form the compatibility contract. See the
+[Public Surface Inventory](../architecture/PUBLIC_SURFACE_INVENTORY.md#dynamic-configuration-contract)
+for the production evidence and freeze boundary.
+
 For directive syntax and full parameter reference, see
 [CONFIGURATION.md](CONFIGURATION.md#dynamic-configuration-061).
 
@@ -44,10 +50,10 @@ require hot-reload without restart.
 |-----|-------|---------|
 | `schema_version` | `0.9` | **mandatory** — file rejected if missing or unknown |
 | `markdown_filter` | `on` \| `off` | `conf->enabled` |
-| `prune_noise` | `on` \| `off` | `conf->prune_noise` |
-| `log_verbosity` | `error` \| `warn` \| `info` \| `debug` | `conf->log_verbosity` |
-| `streaming_budget` | `<size>` (e.g. `64k`, `4m`) | `conf->streaming_budget` |
-| `memory_budget` | `<size>` (e.g. `128k`) | `conf->memory_budget` |
+| `prune_noise` | `on` \| `off` | `conf->advanced.prune_noise` |
+| `log_verbosity` | `error` \| `warn` \| `info` \| `debug` | `conf->policy.log_verbosity` |
+| `streaming_budget` | `<size>` (e.g. `64k`, `4m`) | `conf->stream.budget` |
+| `memory_budget` | `<size>` (e.g. `128k`) | `conf->advanced.memory_budget` |
 
 ### Schema Version (0.9.0+)
 
@@ -87,8 +93,8 @@ poll cycle.
 
 ## Last-Known-Good and Rollback
 
-The module maintains a last-known-good (LKG) configuration snapshot to
-support safe rollback after a bad configuration change.
+The module maintains a last-known-good (LKG) configuration snapshot for state
+tracking and diagnostics when a new configuration is promoted.
 
 ### LKG Preservation
 
@@ -96,20 +102,19 @@ When a reload succeeds, the previous active snapshot is preserved as the
 last-known-good configuration. This happens automatically on every
 successful reload cycle.
 
-### Manual Rollback
+### Operator Rollback
 
-To restore the LKG as the active configuration:
-
-1. The operator triggers a rollback (via the diagnostics endpoint or by
-   restoring the previous dynconf file contents).
-2. The module replaces the active snapshot with the preserved LKG snapshot.
-3. `applied_mtime` updates to reflect the rollback event.
+The diagnostics endpoint is read-only and accepts only `GET` and `HEAD`; it
+does not expose a rollback operation. To roll back, atomically restore a
+previous valid dynconf file (with a changed modification time). The normal
+poll cycle parses and validates the restored contents before promoting them as
+a new active snapshot.
 
 ### Timing Guarantees
 
-- `applied_mtime` only updates on successful reload or rollback. A failed
-  validation never advances the timestamp.
-- Requests in flight at the time of rollback continue using their
+- `applied_mtime` only updates on a successful reload. A failed validation
+  never advances the timestamp.
+- Requests in flight at the time of a restoring reload continue using their
   previously-bound snapshot (request consistency is preserved).
 - The LKG snapshot is replaced only when a new reload succeeds — a failed
   reload does not discard the existing LKG.
@@ -120,7 +125,8 @@ To restore the LKG as the active configuration:
 Time 0: Active=v1, LKG=none
 Time 1: Reload v2 succeeds → Active=v2, LKG=v1, applied_mtime updated
 Time 2: Reload v3 fails   → Active=v2, LKG=v1, applied_mtime unchanged
-Time 3: Rollback triggered → Active=v1, LKG=v1, applied_mtime updated
+Time 3: Restore v1 file
+Time 4: Reload v1 succeeds → Active=v1, LKG=v2, applied_mtime updated
 ```
 
 ---
@@ -156,7 +162,7 @@ production environments where a bad dynconf file could affect traffic.
   mtime detection.
 - Use dry-run mode to validate changes before applying them in
   production.
-- Monitor `applied_mtime` via the diagnostics endpoint to confirm
+- Monitor `dynconf_state.active_mtime` via the diagnostics endpoint to confirm
   successful reloads.
 - Configure dynconf at the `http` or `server` level — only one global
   watcher per worker process is supported.

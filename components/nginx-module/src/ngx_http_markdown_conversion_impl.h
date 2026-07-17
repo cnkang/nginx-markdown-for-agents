@@ -200,6 +200,17 @@ ngx_http_markdown_decide_base_authority(ngx_http_request_t *r,
         input.host_len = r->headers_in.server.len;
     }
 
+    /*
+     * Pass the direct connection scheme (r->schema) so Host header
+     * fallback uses the actual protocol.  Without this, a direct
+     * HTTPS request would get an http:// base URL, breaking relative
+     * link resolution.
+     */
+    if (r->schema.len > 0) {
+        input.direct_scheme = r->schema.data;
+        input.direct_scheme_len = r->schema.len;
+    }
+
     rc = markdown_decide_base_url(&input, out_buf, out_cap, &decision);
     if (rc != DECIDE_BASE_URL_OK) {
         return NGX_ERROR;
@@ -585,8 +596,8 @@ ngx_http_markdown_prepare_conversion_options(ngx_http_request_t *r,
      * Priority: explicit streaming_budget > memory_budget > default
      *
      * streaming_budget_explicit is set during merge_conf when the
-     * operator explicitly configured markdown_streaming_budget at
-     * this or any parent configuration level.
+     * operator explicitly configured markdown_limits streaming_buffer=
+     * at this or any parent configuration level.
      *
      * After merge_conf, streaming_budget is always resolved to a
      * concrete default value (never NGX_CONF_UNSET_SIZE), so the
@@ -656,6 +667,8 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
     switch (result->error_code) {
         case ERROR_DECOMPRESSION_BUDGET_EXCEEDED:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                perf.decompression_budget_exceeded_total);
             break;
         case ERROR_DECOMPRESSION_FORMAT_ERROR:
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.format_error_total);
@@ -667,10 +680,12 @@ ngx_http_markdown_handle_conversion_failure(ngx_http_request_t *r,
             NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.io_error_total);
             break;
         case ERROR_PARSE_TIMEOUT:
-            NGX_HTTP_MARKDOWN_METRIC_INC(parse_interrupts.parse_timeouts_total);
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                results.parse_interrupts.parse_timeouts_total);
             break;
         case ERROR_PARSE_BUDGET_EXCEEDED:
-            NGX_HTTP_MARKDOWN_METRIC_INC(parse_interrupts.parse_budget_exceeded_total);
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                results.parse_interrupts.parse_budget_exceeded_total);
             break;
         default:
             break;
@@ -763,21 +778,13 @@ static const ngx_str_t *
 ngx_http_markdown_otel_flavor_name(ngx_uint_t flavor)
 {
     static ngx_str_t  gfm_name = ngx_string("gfm");
-    static ngx_str_t  mdx_name = ngx_string("mdx");
-    static ngx_str_t  org_mode_name = ngx_string("org-mode");
     static ngx_str_t  commonmark_name = ngx_string("commonmark");
 
-    switch (flavor) {
-    case NGX_HTTP_MARKDOWN_FLAVOR_GFM:
+    if (flavor == NGX_HTTP_MARKDOWN_FLAVOR_GFM) {
         return &gfm_name;
-    case NGX_HTTP_MARKDOWN_FLAVOR_MDX:
-        return &mdx_name;
-    case NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE:
-        return &org_mode_name;
-    case NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK:
-    default:
-        return &commonmark_name;
     }
+
+    return &commonmark_name;
 }
 
 static const ngx_str_t *
@@ -1345,8 +1352,8 @@ ngx_http_markdown_otel_start_conversion_span(
         engine_name->data, engine_name->len);
     if (r->uri.len > 0) {
         ngx_http_markdown_otel_set_str_attr(ctx->otel_span,
-            (const u_char *) "uri", 3,
-            r->uri.data, r->uri.len);
+            (const u_char *) "uri_route", 9,
+            (const u_char *) "redacted", 8);
     }
 }
 
@@ -1690,6 +1697,16 @@ ngx_http_markdown_send_conversion_output(ngx_http_request_t *r,
         ctx->fullbuffer.pending_output = out;
         ctx->fullbuffer.pending_has_data = 1;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+
+        /* Backpressure metric: body-filter output returned NGX_AGAIN */
+        NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_total);
+
+        /* Watermark gauge: CAS loop for pending output high-water */
+        if (b->last > b->pos) {
+            NGX_HTTP_MARKDOWN_METRIC_WATERMARK(
+                perf.pending_output_high_watermark_bytes,
+                (ngx_atomic_t) (b->last - b->pos));
+        }
     }
 
     return rc;
@@ -1726,6 +1743,8 @@ ngx_http_markdown_body_filter_resume_pending(ngx_http_request_t *r,
 
     if (rc == NGX_OK || rc == NGX_DONE) {
         NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
+        /* Backpressure resume: drain completed successfully */
+        NGX_HTTP_MARKDOWN_METRIC_INC(perf.backpressure_resume_total);
     }
 
     ctx->fullbuffer.pending_output = NULL;

@@ -22,6 +22,8 @@
  * Forward declarations for streaming functions defined in
  * ngx_http_markdown_streaming_impl.h (included after this header).
  * Required so call sites in this header see proper prototypes.
+ * Also declared here (instead of the main .c file) so the .c file can
+ * keep all #include directives contiguous at the top (SonarCloud c:S954).
  */
 #ifdef MARKDOWN_STREAMING_ENABLED
 static ngx_http_markdown_path_selection_t
@@ -32,6 +34,33 @@ ngx_http_markdown_select_processing_path(
 static ngx_int_t
 ngx_http_markdown_streaming_body_filter(
     ngx_http_request_t *r, ngx_chain_t *in);
+static void ngx_http_markdown_streaming_sync_buffered(
+    ngx_http_request_t *r, const ngx_http_markdown_ctx_t *ctx);
+static void ngx_http_markdown_streaming_abandon_input(ngx_chain_t *in);
+static ngx_int_t ngx_http_markdown_streaming_pending_input_enqueue_remainder(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf, ngx_chain_t *cl,
+    uint32_t *out_error_code);
+static ngx_int_t ngx_http_markdown_streaming_handle_postcommit_error(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf, uint32_t error_code);
+static ngx_int_t ngx_http_markdown_streaming_precommit_error(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf, uint32_t error_code);
+static ngx_int_t ngx_http_markdown_streaming_failopen_passthrough(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_chain_t *in);
+
+/*
+ * Forward declaration for the shared new-input-with-pending helper.
+ * Defined in ngx_http_markdown_streaming_impl.h (included after this
+ * header). Used by ngx_http_markdown_body_filter here and by
+ * ngx_http_markdown_streaming_body_filter in streaming_impl.h so both
+ * entry points stay below SonarCloud c:S3776/c:S134 thresholds.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_handle_new_input_with_pending(
+    ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf, ngx_chain_t *in);
 #endif
 
 /* Forward declarations for helpers defined in this file */
@@ -215,7 +244,7 @@ ngx_http_markdown_handle_unsupported_compression(
             "rejecting (fail-closed)");
         ngx_http_markdown_log_failure_decision(
             r, ctx, conf);
-        return NGX_HTTP_BAD_GATEWAY;
+        return (ngx_int_t) conf->error_status;
     }
 
     ngx_http_markdown_metric_inc_failopen(conf);
@@ -270,13 +299,13 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
             r->connection->log, 0,
             "markdown: context allocation "
             "failed, rejecting (fail-closed)");
-        ngx_http_markdown_log_decision_with_category(
+            ngx_http_markdown_log_decision_with_category(
             r, conf, eff,
             ngx_http_markdown_reason_failed_closed(),
             ngx_http_markdown_reason_from_error_category(
                 NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
                 r->connection->log));
-        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        return (ngx_int_t) conf->error_status;
     }
 
     ngx_http_markdown_metric_inc_failopen(conf);
@@ -406,7 +435,7 @@ ngx_http_markdown_log_accept_skip(ngx_http_request_t *r,
             &(r)->headers_out.content_type,                                 \
             ((r)->headers_out.content_length_n >= 0) ? 1 : 0,               \
             ((r)->headers_out.content_length_n < 0) ? 1 : 0,                \
-            ((conf)->stream.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)    \
+            ((conf)->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS)           \
                 ? "pass" : "reject");                                      \
     } while (0)
 #endif /* MARKDOWN_STREAMING_ENABLED */
@@ -559,7 +588,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
             ngx_http_markdown_log_decision(
                 r, conf, ctx->effective_conf,
                 ngx_http_markdown_reason_failed_closed());
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            return (ngx_int_t) conf->error_status;
         }
 
         ngx_http_markdown_metric_inc_failopen(conf);
@@ -574,6 +603,52 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
     /* NGX_OK: inflight incremented, cleanup registered */
     return NGX_OK;
 }
+
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+static ngx_flag_t
+ngx_http_markdown_route_streaming_compression(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (!ctx->decompression.needed
+        || ctx->processing_path != NGX_HTTP_MARKDOWN_PATH_STREAMING)
+    {
+        return 0;
+    }
+
+    if (ctx->decompression.type
+        == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
+        || ctx->decompression.type
+           == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP)
+    {
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            perf.decompression_streaming_total);
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+            "markdown: streaming decompression selected for encoding %d",
+            ctx->decompression.type);
+        return 0;
+    }
+
+    ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
+    ctx->streaming.reason = NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED;
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        streaming.engine_choice.full_buffer);
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+        "markdown: streaming decompression not available for encoding %d, "
+        "routing to full-buffer", ctx->decompression.type);
+    ngx_http_markdown_log_streaming_decision(
+        r, conf, ctx, "full_buffer");
+    ngx_http_markdown_log_decision(
+        r, conf, ctx->effective_conf,
+        ngx_http_markdown_reason_streaming_skip_compressed());
+
+    return 1;
+}
+#endif
+
 
 /**
  * Determine whether the response should be converted and, if eligible,
@@ -811,8 +886,8 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     /*
-     * Engine selector: evaluate markdown_streaming_engine
-     * once and cache the result. If streaming is selected,
+     * Policy selector: evaluate markdown_streaming once and cache the result.
+     * If streaming is selected,
      * skip the threshold router entirely.
      */
     NGX_HTTP_MARKDOWN_METRIC_INC(streaming.selection.candidate_total);
@@ -824,37 +899,31 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     ctx->streaming.reason = selection.reason;
 
     /*
-     * Compression guard (streaming security enforcement):
+     * Streaming decompression routing (Req 4.1, 4.2, 4.5–4.7, 4.9):
      *
-     * Compressed responses MUST NOT enter the streaming parser
-     * directly.  When Content-Encoding is detected, override the
-     * engine selector result and force full-buffer path.  The
-     * full-buffer path has existing safe decompression support
-     * with budget enforcement (markdown_decompress_max_size).
+     * When compression is detected AND streaming was selected,
+     * decide whether to route through streaming decompression or
+     * force the full-buffer path.
+     *
+     * Streaming decompression is selected iff ALL FOUR conditions:
+     *   (1) auto_decompress on  (already verified above — otherwise
+     *       the request was passthrough'd before reaching here)
+     *   (2) streaming engine selected (ctx->processing_path ==
+     *       PATH_STREAMING at this point)
+     *   (3) cache_validation NOT full (select_processing_path
+     *       already forces full-buffer for full_support, so if
+     *       we reach here streaming was selected → not full)
+     *   (4) encoding supported by the 0.9.1 streaming decompression
+     *       contract:
+     *       - deflate (zlib-wrapped per RFC 9110, or raw deflate):
+     *         supported via deferred header sniffing
+     *       - gzip: supported with member-aware streaming inflate
+     *       - brotli: deferred, route to bounded full-buffer
      *
      * This check runs after select_processing_path() so that
-     * compression routing is enforced regardless of engine mode
-     * (on, auto, or variable-evaluated).
+     * compression routing is enforced regardless of streaming policy.
      */
-    if (ctx->decompression.needed
-        && ctx->processing_path
-           == NGX_HTTP_MARKDOWN_PATH_STREAMING)
-    {
-        ctx->processing_path =
-            NGX_HTTP_MARKDOWN_PATH_FULLBUFFER;
-        ctx->streaming.reason =
-            NGX_HTTP_MARKDOWN_STREAM_REASON_COMPRESSED;
-
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            streaming.engine_choice.full_buffer);
-
-        ngx_http_markdown_log_streaming_decision(
-            r, conf, ctx, "full_buffer");
-
-        ngx_http_markdown_log_decision(
-            r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_streaming_skip_compressed());
-
+    if (ngx_http_markdown_route_streaming_compression(r, ctx, conf)) {
         goto path_selected;
     }
 
@@ -905,15 +974,20 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     }
     /* else: unknown Content-Length — path deferred to body filter */
 #else
-    if (conf->routing.large_body_threshold > 0
+    /* Incremental path not compiled; if streaming is also not compiled
+     * and the operator explicitly set markdown_stream_threshold, warn
+     * that the threshold has no effect without streaming support. */
+#ifndef MARKDOWN_STREAMING_ENABLED
+    if (conf->stream.threshold_explicit
         && r->method != NGX_HTTP_HEAD
         && r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
     {
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown: markdown_large_body_threshold is set, "
-                     "but incremental support was not compiled in; using "
+                     "markdown: markdown_stream_threshold is set, "
+                     "but streaming support was not compiled in; using "
                      "full-buffer path");
     }
+#endif
 #endif
 
     /* Record path hit metric (only for eligible requests) */
@@ -1232,6 +1306,31 @@ ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     if (ctx->fullbuffer.pending_has_data) {
         return ngx_http_markdown_body_filter_resume_pending(r, ctx);
     }
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * A fail-open send can mark the request ineligible while downstream owns
+     * a pending streaming chain after NGX_AGAIN.  Drain that chain before the
+     * generic ineligible passthrough clears our buffered bit.
+     *
+     * When new non-NULL input arrives while pending output exists, enqueue
+     * it to pending_input instead of rejecting it.  Rejecting (returning
+     * NGX_AGAIN without retaining the chain) would strand the input in
+     * u->busy_bufs — the same lost-continuation bug as process_chain.
+     * The enqueue copies chain links (sharing ngx_buf_t) so NGINX keeps
+     * the busy buffers alive until we feed them to Rust after the
+     * pending output drains.
+     */
+    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_STREAMING
+        && ctx->streaming.pending_output != NULL)
+    {
+        if (in != NULL) {
+            return ngx_http_markdown_streaming_handle_new_input_with_pending(
+                r, ctx, conf, in);
+        }
+        return ngx_http_markdown_streaming_body_filter(r, NULL);
+    }
+#endif
 
     /* If not eligible for conversion, pass through */
     if (!ctx->eligible) {

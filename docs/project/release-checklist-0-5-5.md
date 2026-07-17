@@ -21,7 +21,7 @@ These gates catch obvious failures fast and must pass before deeper checks.
 | CB-01 | `harness-sync` | `make harness-check` | All checks PASS | Exit code 0, all items PASS |
 | CB-02 | `docs-tooling` | `make docs-check` | All checks PASS | Exit code 0, no failures in operator-facing docs |
 | CB-03 | naming-consistency | `make release-gates-check` (naming) | All names conform | Exit code 0, PASS message |
-| CB-04 | 0.5.5-gates | `make release-gates-check-055` | All 0.5.5 gates PASS | Exit code 0, all items PASS |
+| CB-04 | 0.5.5-gates | _(removed — 0.5.5 validator deleted, see commit history)_ | N/A | Historical reference |
 
 ## Phase 2: Focused Semantic Checks
 
@@ -97,10 +97,8 @@ waived before the release proceeds.
 
 `make release-gates-check` and `make release-gates-check-strict` validate
 0.5.0 release gate surfaces (the 0.5.0 workstreams), not 0.5.5-specific surfaces.
-For 0.5.5, use `make release-gates-check-055` which validates the 0.5.5 stabilization workstreams
-document existence, the release spec, release checklist, test matrix,
-streaming evidence artifact, known-difference registry metadata, and
-CHANGELOG entry.  The 0.5.0 targets serve as a non-regression baseline.
+The 0.5.5-specific validator (`validate_release_gates_055.py`) has been
+removed; the 0.5.0 targets serve as a non-regression baseline for 0.5.5.
 
 ## Waiver Process
 
