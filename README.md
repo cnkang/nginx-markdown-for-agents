@@ -43,17 +43,6 @@ AI bot (by User-Agent)                 -> Markdown (via NGINX config)
 - Convert at the reverse-proxy layer closest to your application, where you have full control over the HTML source and conversion configuration.
 - Give AI consumers a cleaner, lower-token representation of your content, which can reduce misinterpretation and improve the accuracy of generated answers that reference your site.
 
-## At a Glance
-
-| If you need... | This project gives you... |
-|----------------|---------------------------|
-| Agent-friendly content from an existing site | Markdown negotiated from your current HTML responses |
-| Minimal application change | NGINX-side enablement with per-path control |
-| Safe rollout | Fail-open mode, size limits, timeouts, and shared aggregate metrics |
-| Bounded-memory streaming | Dual-engine model — `auto` mode routes large responses to bounded-memory streaming |
-| Cache-aware behavior | Variant `ETag`, `Vary: Accept`, and conditional-request support |
-| Flexible configuration | Variable-driven per-request control, User-Agent targeting, and authentication policies |
-
 ## Quick Start
 
 Three steps are enough for a first trial:
@@ -69,8 +58,7 @@ curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/mai
 sudo nginx -t && sudo nginx -s reload
 ```
 
-The install script auto-detects the local NGINX version, downloads the matching module artifact, and wires up `load_module` and `markdown_filter on` — no manual configuration editing required.
-It also enforces SHA-256 artifact integrity checks by default.
+The install script auto-detects the local NGINX version, downloads the matching module artifact, and wires up `load_module` and `markdown_filter on` — no manual configuration editing required. It also enforces SHA-256 artifact integrity checks by default.
 
 For alternative installation methods (source builds, Docker, custom NGINX builds), troubleshooting, and detailed instructions, see the [Installation Guide](docs/guides/INSTALLATION.md).
 
@@ -126,14 +114,11 @@ If something doesn't work as expected, see the [Troubleshooting](docs/guides/INS
 
 If you want a practical production-oriented configuration next, go straight to [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md).
 
-For complete, ready-to-use production configurations covering all three profiles
-(balanced, strict_cache, streaming_first), see the
-[Production Examples](examples/production/) directory.
+For complete, ready-to-use production configurations covering all three profiles (balanced, strict_cache, streaming_first), see the [Production Examples](examples/production/) directory.
 
-## Profiles (v0.9.0+)
+## Profiles
 
-For production deployments, use `markdown_profile` to apply a tested set of
-defaults instead of configuring each directive individually:
+For production deployments, use `markdown_profile` to apply a tested set of defaults instead of configuring each directive individually:
 
 ```nginx
 http {
@@ -157,12 +142,9 @@ Three profiles are available:
 | `strict_cache` | CDN / caching proxy with full ETag support |
 | `streaming_first` | AI agent workloads with large documents |
 
-Merge order: explicit directives > profile defaults > built-in defaults. You
-can override any non-forced profile field with an explicit directive in the same
-context.
+Merge order: explicit directives > profile defaults > built-in defaults. You can override any non-forced profile field with an explicit directive in the same context.
 
-For the full profile reference, defaults table, and conflict rules, see
-[docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md#profiles).
+For the full profile reference, defaults table, and conflict rules, see [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md#profiles).
 
 ## Serve Markdown to Specific Bots
 
@@ -214,53 +196,21 @@ This works because the module's content negotiation sees `text/markdown` in the 
 
 For a complete template with more bot patterns, see [examples/nginx-configs/06-bot-targeted-conversion.conf](examples/nginx-configs/06-bot-targeted-conversion.conf). For the full walkthrough, see [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md#bot-targeted-conversion-user-agent-based).
 
-## When It Is a Good Fit
-
-This project is a strong fit if you:
-
-- already serve HTML through NGINX and want an agent-friendly representation with minimal backend changes
-- need Markdown output for crawlers, internal agents, search assistants, or retrieval systems
-- want to serve Markdown to specific AI bots (ClaudeBot, GPTBot, etc.) that do not send `Accept: text/markdown` on their own
-- want AI systems that reference your content to work from a cleaner, more semantically accurate representation
-- want to keep representation control and caching at the edge or reverse-proxy layer
-
-It is a weaker fit if you:
-
-- already have a purpose-built Markdown or JSON content API
-- require streaming to be always-on and cannot use the `auto` threshold mode
-- want transformation logic completely outside the request path
-
-## How This Compares to Edge-Layer Conversion
-
-Cloudflare's [Markdown for Agents](https://blog.cloudflare.com/markdown-for-agents/) converts already-rendered HTML at the CDN edge. That approach is effective for lowering adoption friction — site operators can enable it without touching their origin infrastructure.
-
-This project serves `text/markdown` closer to the origin server, typically at the reverse-proxy layer where NGINX sits in front of your application. The practical differences:
-
-- The HTML that NGINX converts is the direct output of your application or CMS. Converting at this layer means you are not dependent on how the page may be restructured or augmented further downstream, making it easier to preserve the original content semantics in the Markdown output.
-- Conversion happens within infrastructure you operate, so you control the module version, configuration, failure policy, and rollout scope.
-- The approach aligns with the standard HTTP content negotiation model: the origin (or its reverse proxy) selects the best representation of a resource based on the client's Accept header.
-
-Neither approach is universally better. Edge-layer conversion is a good fit when you want zero-touch enablement across many sites. Origin-near conversion is a better fit when you want tighter control over what gets converted, how it gets converted, and where the conversion runs.
-
-## What You Get
+## Key Features & Capabilities
 
 | Capability | What it does |
 |------------|--------------|
-| Content negotiation | Converts when the client asks for `text/markdown`, or for specific bots via User-Agent targeting |
-| HTML passthrough | Leaves normal browser traffic unchanged |
-| Automatic decompression | Handles gzip, brotli, and deflate upstream responses |
-| Cache-aware variants | Generates ETags and supports conditional requests |
-| Failure policy control | Choose fail-open or fail-closed behavior |
-| Resource limits | Bound conversion size, time, streaming buffers, and inflight work with `markdown_limits` |
-| Security hardening | Validates emitted links and base URLs, rejects unsafe forwarded-host inputs by default, bounds parser/decompression resources, and avoids executing external content |
-| Optional metadata | Supports token estimates and YAML front matter |
-| Metrics endpoint | Exposes module conversion counters for operations |
-| Variable-driven config | Use NGINX variables for per-request conversion control |
-| Authentication-aware | Configurable policies for authenticated requests with cache control |
-| Dual-engine conversion | Full-buffer (default) for typical responses plus a streaming engine for large or chunked responses, selected automatically via `auto` mode |
-| Bounded-memory streaming | Streaming engine converts in bounded memory with size-based flush (`markdown_stream_flush_min`); pre-commit safety falls back to HTML on conversion error |
-| Performance baseline gating | Automated regression detection with dual-threshold system (warning / blocking) for PR and nightly CI |
-| Matrix-driven release automation | Automated release pipeline with platform matrix management and artifact completeness verification |
+| **Content negotiation** | Converts when the client asks for `text/markdown`, or for specific bots via User-Agent targeting. |
+| **HTML passthrough** | Leaves normal browser traffic completely unchanged. |
+| **Automatic decompression** | Handles gzip, brotli, and deflate upstream responses with zero manual pipe-handling. |
+| **Cache-aware variants** | Generates ETags and supports standard conditional requests. |
+| **Failure policy control** | Choose fail-open or fail-closed behavior to match your operational SLAs. |
+| **Resource limits** | Bound conversion size, processing time, streaming buffers, and inflight work with `markdown_limits`. |
+| **Security hardening** | Validates emitted links, rejects unsafe forwarded-host inputs, and bounds resource usage to prevent denial of service. |
+| **Optional metadata** | Inject token estimates and clean YAML front matter automatically. |
+| **Metrics endpoint** | Exposes Prometheus-compatible module conversion counters for cluster observability. |
+| **Dual-engine conversion** | Full-buffer (default) for typical responses + a streaming engine for large/chunked responses. |
+| **Bounded-memory streaming** | Streaming engine converts with bounded memory (opt-in/auto) with size-based flushing (`markdown_stream_flush_min`). |
 
 ## Platform Support
 
@@ -302,6 +252,7 @@ Neither approach is universally better. Edge-layer conversion is a good fit when
 | 1.24.0 | oldstable | linux | musl | arm64 | dynamic-module | supported | No |
 | 1.24.0 | oldstable | linux | glibc | amd64 | dynamic-module | supported | Yes |
 | 1.24.0 | oldstable | linux | musl | amd64 | dynamic-module | supported | No |
+
 <!-- END:release-matrix:support-matrix -->
 
 ## How It Works
@@ -352,7 +303,7 @@ flowchart TD
 
 The NGINX module handles request eligibility, buffering, and response header management. For bot-targeted conversion, NGINX's `map` directive rewrites the Accept header before the module sees the request, so the module's standard content negotiation handles the rest. The Rust converter handles HTML parsing, sanitization, deterministic Markdown generation, and related transformation logic.
 
-## Why C + Rust
+### Why C + Rust
 
 The split follows the actual problem boundary.
 
@@ -362,9 +313,7 @@ The split follows the actual problem boundary.
 
 If you want the full design rationale rather than the short version, read [docs/architecture/SYSTEM_ARCHITECTURE.md](docs/architecture/SYSTEM_ARCHITECTURE.md), [docs/architecture/ADR/0001-use-rust-for-conversion.md](docs/architecture/ADR/0001-use-rust-for-conversion.md), and [docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md](docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md).
 
-If you are trying to understand how specific directives change runtime behavior, use [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md).
-
-## Test It Locally
+## Local Development & Testing
 
 ```bash
 # Fast build + smoke test
@@ -391,8 +340,7 @@ make test-rust-fuzz-smoke
 
 See [docs/testing/README.md](docs/testing/README.md) and [docs/testing/E2E_TESTS.md](docs/testing/E2E_TESTS.md) for integration, E2E, and performance-oriented test references.
 
-If you are changing repo contracts, docs validators, or agent workflow rules,
-run the harness checks as well:
+If you are changing repo contracts, docs validators, or agent workflow rules, run the harness checks as well:
 
 ```bash
 # Cheap blocker for repo-owned harness truth
@@ -402,8 +350,7 @@ make harness-check
 make harness-check-full
 ```
 
-Use harness checks as the primary guardrail for repo contract and release-gate
-changes:
+Use harness checks as the primary guardrail for repo contract and release-gate changes:
 
 ```bash
 # Static security checks for workflow, shell, secret, Semgrep, and Rust policy changes
@@ -413,281 +360,51 @@ make security-static
 make supply-chain
 ```
 
-## Documentation Map
+## Documentation Guide
 
-| Goal | Document |
-|------|----------|
-| Install the module | [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md) |
-| Build from source | [docs/guides/BUILD_INSTRUCTIONS.md](docs/guides/BUILD_INSTRUCTIONS.md) |
-| Configure directives | [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
-| Upgrade from 0.7.x to 0.8.0 | [docs/guides/MIGRATION-0.8.md](docs/guides/MIGRATION-0.8.md) |
-| Upgrade from 0.8.x to 0.9.0 | [docs/guides/MIGRATION-0.9.md](docs/guides/MIGRATION-0.9.md) |
-| Roll out streaming safely | [docs/guides/streaming-rollout-cookbook.md](docs/guides/streaming-rollout-cookbook.md) |
-| Start from deployment examples | [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md) |
-| Operate and troubleshoot | [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md) |
-| Report a vulnerability or review security support | [SECURITY.md](SECURITY.md) |
-| Understand architecture and design choices | [docs/architecture/README.md](docs/architecture/README.md) |
-| Understand harness architecture and design rationale | [docs/architecture/HARNESS_ARCHITECTURE.md](docs/architecture/HARNESS_ARCHITECTURE.md) |
-| Understand spec routing, risk packs, and harness checks | [docs/harness/README.md](docs/harness/README.md) |
-| Maintain repo-owned harness rules and local adapter workflows | [docs/guides/HARNESS_MAINTENANCE.md](docs/guides/HARNESS_MAINTENANCE.md) |
-| Map directives to runtime behavior | [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md) |
-| Explore implementation details | [docs/features/README.md](docs/features/README.md) |
-| Review testing references | [docs/testing/README.md](docs/testing/README.md) |
-| Check NGINX version compatibility | [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) |
-| Review streaming feature compatibility | [docs/features/STREAMING_COMPATIBILITY.md](docs/features/STREAMING_COMPATIBILITY.md) |
-| Configure dynamic reloading | [docs/guides/DYNAMIC_CONFIG.md](docs/guides/DYNAMIC_CONFIG.md) |
-| Read FAQ | [docs/FAQ.md](docs/FAQ.md) |
-| Look up terminology | [docs/glossary.md](docs/glossary.md) |
-| Check project status | [docs/project/PROJECT_STATUS.md](docs/project/PROJECT_STATUS.md) |
-| Contribute changes | [CONTRIBUTING.md](CONTRIBUTING.md) |
+### Getting Started & Installation
+- [Installation Guide](docs/guides/INSTALLATION.md) — Prebuilt binaries, manual steps, Homebrew tap (`brew install cnkang/nginx-markdown/nginx-markdown-module`).
+- [Build Instructions](docs/guides/BUILD_INSTRUCTIONS.md) — Compiling from source.
+- [Configuration Reference](docs/guides/CONFIGURATION.md) — Directives syntax and behavior.
+- [Deployment Examples](docs/guides/DEPLOYMENT_EXAMPLES.md) — Ready-to-use NGINX server blocks and patterns.
 
-## Choose Your Path
+### Production Rollout & Operations
+- [Streaming Rollout Cookbook](docs/guides/streaming-rollout-cookbook.md) — Step-by-step cookbook for safely introducing bounded streaming.
+- [Operations Guide](docs/guides/OPERATIONS.md) — Monitoring, log tuning, and runtime troubleshooting.
+- [Migration Guides](docs/guides/MIGRATION-0.9.md) — Upgrading from older versions ([0.8.x → 0.9.x Migration](docs/guides/MIGRATION-0.9.md) / [0.7.x → 0.8.x Migration](docs/guides/MIGRATION-0.8.md)).
+- [Dynamic Reloading](docs/guides/DYNAMIC_CONFIG.md) — Fine-tuning dynamic variables and live configuration updates.
 
-- Evaluating the idea: start here, then read [docs/guides/DEPLOYMENT_EXAMPLES.md](docs/guides/DEPLOYMENT_EXAMPLES.md)
-- Installing in a real environment: go to [docs/guides/INSTALLATION.md](docs/guides/INSTALLATION.md)
-- Tuning behavior or policy: use [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md)
-- Upgrading from 0.7.x: use [docs/guides/MIGRATION-0.8.md](docs/guides/MIGRATION-0.8.md) — **0.8.0 is a breaking FFI/ABI change; Rust converter and C module must be upgraded together**
-- Rolling out streaming in production: use [docs/guides/streaming-rollout-cookbook.md](docs/guides/streaming-rollout-cookbook.md)
-- Operating in production: use [docs/guides/OPERATIONS.md](docs/guides/OPERATIONS.md)
-- Reporting a vulnerability: use [SECURITY.md](SECURITY.md)
-- Understanding system design: use [docs/architecture/README.md](docs/architecture/README.md)
-- Understanding harness architecture and why it is a repo-level asset: use [docs/architecture/HARNESS_ARCHITECTURE.md](docs/architecture/HARNESS_ARCHITECTURE.md)
-- Understanding repo-owned agent workflow and spec routing: use [docs/harness/README.md](docs/harness/README.md)
-- Maintaining harness rules, risk packs, and local adapter layers: use [docs/guides/HARNESS_MAINTENANCE.md](docs/guides/HARNESS_MAINTENANCE.md)
-- Understanding what directives change in the runtime path: use [docs/architecture/CONFIG_BEHAVIOR_MAP.md](docs/architecture/CONFIG_BEHAVIOR_MAP.md)
-- Reading implementation details: use [docs/features/README.md](docs/features/README.md)
-- Validating changes: use [docs/testing/README.md](docs/testing/README.md)
-
-## Repository Layout
-
-```text
-components/
-  nginx-module/        NGINX filter module and NGINX-facing tests
-  rust-converter/      HTML-to-Markdown engine and FFI layer
-docs/                  User, operator, testing, and architecture docs
-  architecture/        System design, ADRs, and config behavior maps
-  features/            Implementation details for specific features
-  guides/              Installation, configuration, deployment, and operations
-  harness/             Repo-owned spec routing, risk packs, and harness checks
-  project/             Project status and roadmap
-  testing/             Testing strategy and references
-examples/
-  docker/              Docker build examples and configurations
-  nginx-configs/       Example NGINX configurations
-tests/                 Top-level test corpus and shared test resources
-tools/                 Installers, CI scripts, and developer tooling
-  build_release/       Release build automation
-  ci/                  Continuous integration scripts
-  corpus/              Test corpus generation tools
-  docs/                Documentation tooling
-  e2e/                 End-to-end testing utilities
-.github/workflows/     CI/CD pipeline definitions
-Makefile               Top-level build and test entrypoints
-```
-
-## Contributor Workflow
-
-If you are changing runtime behavior, use the existing test commands.
-
-If you are changing repo contracts, validation tooling, or agent-facing docs,
-add the harness workflow to your default path:
-
-1. Update repo-owned truth first:
-   `AGENTS.md`, `docs/harness/`, `tools/harness/`, `Makefile`, CI wiring
-2. Run `make harness-check`
-3. Run `make harness-check-full` before closing broader docs or release-gate work
+### Technical Architecture & Harness
+- [System Architecture](docs/architecture/README.md) — Dual-engine model, C + Rust boundary design.
+- [Config Behavior Map](docs/architecture/CONFIG_BEHAVIOR_MAP.md) — Mapping configuration parameters to core modules.
+- [Harness & Spec Rationale](docs/harness/README.md) — Why we treat harness checks as first-class, repo-owned assets.
+- [Harness Maintenance SOP](docs/guides/HARNESS_MAINTENANCE.md) — Custom lint rules and validation scripting.
+- [Frequently Asked Questions (FAQ)](docs/FAQ.md) & [Glossary](docs/glossary.md).
 
 ## What's New in v0.9.1
 
-v0.9.1 is in release-candidate preparation as the **final pre-v1.0 baseline
-consolidation and compatibility reset**. It combines performance readiness with
-the last deliberate source-build and public-contract cleanup before the v1.0
-freeze. v0.9.0 was intended to be the last breaking release; the freeze was
-extended through v0.9.1 while v1.0 remained unpublished and adoption was still
-limited.
+v0.9.1 is in release-candidate preparation as the **final pre-v1.0 baseline consolidation and compatibility reset**. It combines performance readiness with the last deliberate source-build and public-contract cleanup before the v1.0 freeze. v0.9.0 was intended to be the last breaking release; the freeze was extended through v0.9.1 while v1.0 remained unpublished and adoption was still limited.
 
-- **Rust baseline reset**: source builds now require Rust 1.97+; repository,
-  CI, and release builds use exact Rust 1.97.0. Prebuilt module users do not
-  need Rust.
-- **Single streaming control**: `markdown_streaming off|auto|force` is now the
-  sole processing-path selector. The duplicate `markdown_streaming_engine`
-  directive is reject-only with exact off/auto/on migration hints.
-- **Supported flavors clarified**: `markdown_flavor` supports `commonmark` and
-  `gfm`. The experimental `mdx` and `org-mode` values are rejected because
-  they never had distinct production conversion semantics.
+- **Rust baseline reset**: source builds now require Rust 1.97+; repository, CI, and release builds use exact Rust 1.97.0 (MSRV 1.97). Prebuilt module users do not need Rust.
+- **Single streaming control**: `markdown_streaming off|auto|force` is now the sole processing-path selector. The duplicate `markdown_streaming_engine` directive is reject-only with exact off/auto/on migration hints.
+- **Supported flavors clarified**: `markdown_flavor` supports `commonmark` and `gfm`. The experimental `mdx` and `org-mode` values are rejected because they never had distinct production conversion semantics.
+- **Hybrid zero-copy streaming output**: `markdown_streaming_zero_copy on` (default off, opt-in) enables `ngx_buf_t` to reference Rust-owned memory directly without intermediate pool-copy, reducing memcpy for non-terminal streaming chunks. NGINX pool cleanup handlers ensure safe Rust buffer lifetime across backpressure and request teardown.
+- **Streaming decompression routing (gzip + deflate)**: under `streaming_first` profile with `markdown_auto_decompress on` and `cache_validation` not `full`, gzip and deflate responses (both zlib-wrapped RFC 1950 and raw RFC 1951 deflate) are decompressed incrementally through the streaming engine instead of forcing full-buffer accumulation. Gzip member boundaries and trailers are validated across chunks; Brotli remains on bounded full-buffer in 0.9.1.
+- **Full-buffer copy reduction**: internal optimization (default on, no configuration surface) eliminates redundant memcpy in the full-buffer compressed path by passing contiguous buffers directly to the decompressor and swapping output via pointer assignment.
+- **`markdown_auto_decompress` directive**: now officially registered as a configurable directive (default on). Previously an internal field not settable via `nginx.conf`.
+- **Performance evidence gate**: module-level benchmark harness (`tools/perf/run_module_benchmark.sh`) with automated release gate (`make release-gates-check-091`) enforcing latency, TTFB, memory slope, and fallback rate thresholds before release promotion.
+- **Doctor advice tool**: `python3 tools/perf/doctor_advice.py` analyzes runtime metrics and produces actionable tuning recommendations for operators.
+- **New ADRs**: [0020](docs/architecture/ADR/0020-091-hybrid-zero-copy-pool-cleanup.md), [0021](docs/architecture/ADR/0021-091-gzip-deflate-streaming-decompression-routing.md), [0022](docs/architecture/ADR/0022-091-performance-evidence-release-gate.md).
 
-- **Hybrid zero-copy streaming output**: `markdown_streaming_zero_copy on`
-  (default off, opt-in) enables `ngx_buf_t` to reference Rust-owned memory
-  directly without intermediate pool-copy, reducing memcpy for non-terminal
-  streaming chunks. NGINX pool cleanup handlers ensure safe Rust buffer
-  lifetime across backpressure and request teardown.
-- **Streaming decompression routing (gzip + deflate)**: under `streaming_first`
-  profile with `markdown_auto_decompress on` and `cache_validation` not `full`,
-  gzip and deflate responses (both zlib-wrapped RFC 1950 and raw RFC 1951
-  deflate) are decompressed incrementally through the streaming engine instead
-  of forcing full-buffer accumulation. Gzip member boundaries and trailers are
-  validated across chunks; Brotli remains on bounded full-buffer in 0.9.1.
-- **Full-buffer copy reduction**: internal optimization (default on, no
-  configuration surface) eliminates redundant memcpy in the full-buffer
-  compressed path by passing contiguous buffers directly to the decompressor
-  and swapping output via pointer assignment.
-- **`markdown_auto_decompress` directive**: now officially registered as a
-  configurable directive (default on). Previously an internal field not
-  settable via `nginx.conf`.
-- **Performance evidence gate**: module-level benchmark harness
-  (`tools/perf/run_module_benchmark.sh`) with automated release gate
-  (`make release-gates-check-091`) enforcing latency, TTFB, memory slope, and
-  fallback rate thresholds before release promotion.
-- **Doctor advice tool**: `python3 tools/perf/doctor_advice.py` analyzes
-  runtime metrics and produces actionable tuning recommendations for
-  operators.
-- **New ADRs**: [0020](docs/architecture/ADR/0020-091-hybrid-zero-copy-pool-cleanup.md),
-  [0021](docs/architecture/ADR/0021-091-gzip-deflate-streaming-decompression-routing.md),
-  [0022](docs/architecture/ADR/0022-091-performance-evidence-release-gate.md).
+For the full list of changes across prior versions (including breaking configuration changes introduced in v0.9.0), please refer to [CHANGELOG.md](CHANGELOG.md).
 
-For the full list, see [CHANGELOG.md](CHANGELOG.md).
+## Future Roadmap
 
-## What's New in v0.9.0
+Post-v0.9.1 and towards the v1.0.0 milestone:
 
-v0.9.0 is a **breaking release** and was intended at release time to be the
-last breaking opportunity before the 1.0.0 API freeze. The final consolidation
-window was later extended through v0.9.1:
-
-- **Reason code naming**: all reason code strings renamed from UPPERCASE_SNAKE_CASE to lowercase_snake_case (e.g., `PARSE_TIMEOUT` → `timeout`, `FFI_CALL_ERROR` → `ffi_panic`). Affects Prometheus labels, structured logs, and diagnostics endpoint.
-- **Directive removals/renames**: `markdown_on_error` → `markdown_error_policy`; `markdown_trust_forwarded_headers` → `markdown_trusted_proxies <CIDR>...`; `markdown_on_wildcard` → `markdown_accept wildcard`. Old names are rejected at `nginx -t`.
-- **Profile system**: `markdown_profile` introduces one-line production defaults (`balanced`, `strict_cache`, `streaming_first`).
-- **Inflight guard**: `markdown_limits max_inflight=N` provides per-worker concurrency protection with `overload` reason code. `max_inflight=0` means unlimited.
-- **Metrics consolidation**: per-reason counters replaced by 5 unified metric families with a `reason` label. Label whitelist prevents high-cardinality series.
-- **Cache-Control no-transform bypass**: conditional requests with `Cache-Control: no-transform` bypass conversion and return original HTML (`bypass_no_transform` reason code).
-- **Diagnostics schema v1**: versioned JSON output with structured sections (decision, inflight, error, streaming, conditional, etag).
-- **`nginx-markdown-doctor` tool**: full diagnostic checks for config snapshot, module health, FFI version alignment, and profile smoke.
-
-For upgrade guidance from 0.8.x, see the [Migration Guide](docs/guides/MIGRATION-0.9.md).
-
-## What's New in v0.8.3
-
-v0.8.3 is a closeout hardening release for the 0.8.x line:
-
-- **Streaming state machine fixes** — corrected `pop_contexts_up_to` return order (innermost-first) and added `CodeBlock` handling in `ol`/`ul` derived state branches to prevent tag soup regressions.
-- **Streaming emitter ExitMany** — new `ExitMany` action enables batch context unwinding from mid-stack, fixing implied-closure ordering for nested block elements.
-- **Decompression buffer memory safety** — switched decompression workspace from `ngx_alloc`/`ngx_free` (heap) to `ngx_pnalloc`/`ngx_pfree` (pool-backed) to avoid mixing allocation lifetimes and prevent pool expansion side effects (Rule 43).
-- **Snapshot capacity increase** — raised the snapshot max from 4 to 8 entries in the stream commit path, supporting more complex multi-header mutation plans.
-- **FFI Box::into_raw correctness** — fixed a use-after-free pattern in converter handle allocation by ensuring `Box::into_raw` is called after initialization succeeds.
-- **Release manifest integrity** — `SHA256SUMS` entries are parsed and matched against package plus manifest digests; non-tag workflow manifests now describe unsigned checksum-only integrity explicitly.
-- **Version consistency detector (Rule 55)** — new harness detector validates version alignment across Cargo.toml, Chart.yaml, and internal dependencies to prevent version drift during releases.
-- **Full release gate validation** — all 0.8.x release gates pass: `make harness-check` (15/15), `make test-harness` (all detectors), `make release-gates-check-08x`, `make test-nginx-unit`, `make test-rust-fuzz-smoke`.
-
-For the full list, see [CHANGELOG.md](CHANGELOG.md).
-
-## What's New in v0.8.2
-
-v0.8.2 is a patch release hardening the 0.8.x streaming line:
-
-- **Streaming decompression budget enforcement** — the streaming decompression path now enforces the configured decompression budget and tracks streaming memory consumption against the module memory budget (Rule 3, Rule 44).
-- **FFI panic safety** — all FFI exports are now wrapped in `catch_unwind` so a Rust panic returns an error code instead of undefined behavior; fallback paths initialize output structs to safe defaults (fail-closed).
-- **Implied closure correctness** — structural closures now unwind inner-to-outer before enclosing block state, fixing HTML sanitizer implied-closure ordering (Rule 6).
-- **C module deduplication** — extracted shared helpers across five C source files to reduce duplication and improve maintainability (Rule 31).
-- **Inflate decompression semantics** — separated `Z_OK` and `Z_BUF_ERROR` handling in the inflate loop so partial-fill buffer conditions are no longer conflated with successful output (Rule 44).
-- **Harness detector improvements** — new `detect_ngx_log_arg_count.sh` and `detect_nosonar_discipline.sh` detectors with `--strict` mode support; improved AST/CWE-22 detectors and path validation.
-- **Security scan scoping** — gitleaks now covers Git-tracked worktree content while excluding ignored adapter state and caches (Rule 48).
-
-For the full list, see [CHANGELOG.md](CHANGELOG.md).
-
-## What's New in v0.8.0
-
-v0.8.0 introduces true streaming conversion — bounded-memory HTML-to-Markdown processing for large and chunked responses:
-
-- **Dual-engine model** — Full-buffer conversion (the default since v0.5.0) remains for typical responses. A new streaming engine handles large or chunked responses with bounded memory. The `markdown_streaming_engine` directive controls which engine is used (`off`, `on`, or `auto`).
-- **`auto` mode (default)** — When set to `auto`, the module automatically routes eligible large or chunked responses to the streaming engine while keeping full-buffer for everything else. **Note (v0.8.0):** the default `markdown_conditional_requests full_support` setting prevented streaming from activating because full ETag support requires the full-buffer path. **Changed in 0.9.0:** `markdown_conditional_requests` is replaced by `markdown_cache_validation`, whose default is `ims_only` (both built-in and `balanced` profile), allowing streaming in `auto` mode. Use `markdown_cache_validation full` (the `strict_cache` profile default) if full ETag support is required.
-- **Bounded-memory conversion** — The streaming engine flushes converted Markdown in chunks based on `markdown_stream_flush_min` (size threshold), keeping memory usage bounded regardless of response size.
-- **Pre-commit safety** — If a conversion error occurs before the streaming engine has committed output to the client, it falls back to serving the original HTML response. This preserves fail-open semantics during streaming.
-- **New streaming controls** — `markdown_stream_threshold`, `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`, and `markdown_stream_excluded_types` make thresholding, replay buffering, flushing, and content-type exclusions explicit.
-- **Breaking: v0.6.x compat removed** — `markdown_streaming_auto_threshold` is removed (not deprecated); `nginx -t` will fail if it appears in configuration. Use `markdown_stream_threshold` instead. `markdown_streaming_engine` no longer accepts `$variable` — only `off`/`auto`/`on`.
-
-These two bullets describe the historical v0.8.0 contract. v0.9.1 removes
-`markdown_streaming_engine`; use `markdown_streaming off|auto|force` as shown
-above.
-
-For upgrade guidance from 0.7.x, see the [Migration Guide](docs/guides/MIGRATION-0.8.md).
-For production rollout steps, see the [Streaming Rollout Cookbook](docs/guides/streaming-rollout-cookbook.md).
-
-## What's New in v0.7.0
-
-v0.7.0 is a correctness, distribution, and operability release:
-
-- **Bounded decompression** — `markdown_decompress_max_size` limits decompressed output independently, preventing zip-bomb attacks (error code 9: DecompressionBudgetExceeded)
-- **Accept negotiation** — Rust-side RFC 9110 §12.5.1 q-value comparison between `text/markdown` and `text/html` (with §12.4.2 quality value semantics) determines conversion eligibility
-- **Parse timeout and budget** — `markdown_parse_timeout` (default 30s) and `markdown_parser_budget` (default 64m) prevent runaway parsing (error codes 10, 11)
-- **DEB/RPM package artifacts** — v0.7.0+ release workflows build GitHub Release artifacts for Ubuntu 22.04/24.04, Debian 12, AlmaLinux 9, Amazon Linux 2023 across amd64/arm64 families, with canonical install layout checks
-- **Kubernetes deployment examples** — Helm chart, manifests, and Ingress Controller custom image build path with secure stock-image defaults; module-enabled Helm installs require an image containing the module and an explicit `markdown.loadModule`
-- **Runtime diagnostics** — `/nginx-markdown/diagnostics` endpoint exposes config snapshot, recent decisions, and metrics
-- **Dynconf dry-run and rollback** — Validate configuration changes without applying them; roll back to last-known-good on failure
-
-Additional changes:
-
-- P0 runtime correctness: pending chain on NGX_AGAIN, fail-open dedup, safe output ordering
-- Rust conditional request module (If-None-Match, If-Modified-Since)
-- Rust decision engine with reason codes
-- Rust header mutation plan module
-- Rust URL control character validation and link escaping
-- FFI ABI layout verification and header drift detection
-
-## Roadmap
-
-**Current release line (0.9.x; latest published patch 0.9.0, v0.9.1 in RC preparation)**
-
-- Dual-engine streaming model: full-buffer default + streaming engine for large/chunked responses
-- `markdown_streaming auto` as the sole default processing-path policy
-- Bounded-memory streaming conversion with size-based flush (`markdown_stream_flush_min`)
-- Pre-commit safety: fallback to HTML if conversion error occurs before output is committed
-- Hybrid zero-copy streaming output (opt-in via `markdown_streaming_zero_copy`, default off)
-- Streaming decompression routing for gzip and zlib/raw-deflate responses (profile-gated, `streaming_first` only); Brotli remains bounded full-buffer
-- Full-buffer compressed copy reduction (internal, default on)
-- Performance evidence gate: `make release-gates-check-091` (blocking for RC tags)
-- Streaming release gate: `make release-gates-check-08x` (alias of `release-gates-check-080`) validates the 0.8.x release contract
-- Static security gate: `.github/workflows/security-static.yml` runs actionlint,
-  shellcheck, gitleaks, focused Semgrep, and cargo-deny for workflow, shell,
-  Python tooling, secret, and Rust dependency policy changes; the Semgrep
-  rules focus on obvious subprocess misuse, CLI-derived path I/O before
-  harness validation helpers, unsafe libc APIs in the C module, and exported
-  Rust FFI functions that still contain panic/unwrap/expect paths; Dockerfile
-  rustup bootstrap paths that download and execute unverified installers are
-  also covered
-- Supply-chain visibility: `.github/workflows/supply-chain.yml` runs
-  report-oriented Trivy filesystem/IaC scans, SPDX SBOM generation, and OpenSSF
-  Scorecard on PR, push, scheduled, and manual triggers
-- Migration guide and rollout cookbook for production adoption
-
-Previous release (0.7.0):
-
-- P0 runtime correctness: pending chain on NGX_AGAIN, fail-open dedup, safe output ordering
-- Independent decompression budget (`markdown_decompress_max_size`)
-- Parse timeout and parser budget directives
-- Rust Accept header negotiation module (RFC 9110 q-value semantics)
-- Rust conditional request module (If-None-Match, If-Modified-Since)
-- Rust decision engine with reason codes
-- Rust header mutation plan module
-- Rust URL control character validation and link escaping
-- FFI ABI layout verification and header drift detection
-- New error codes: DecompressionBudgetExceeded(9), ParseTimeout(10), ParseBudgetExceeded(11)
-- DEB/RPM packaging with GitHub Release artifacts; APT/YUM repository publishing is not part of the current GA channel
-- Package release gates for canonical module paths, artifact names, checksums, and architecture-matched smoke tests
-- Kubernetes deployment examples and Helm chart with secure stock-image defaults plus explicit module-enabled configuration
-- Runtime diagnostics endpoint
-- Dynconf dry-run validation and last-known-good rollback
-- Source-build and release tooling aligned to its Rust 1.91 baseline
-
-Near-term focus:
-
-- Strengthen cross-environment evidence automation for release gates
-- Continue tightening operator diagnostics for conversion drifts and degradations
-- Expand streaming telemetry and observability
-
-Post-0.8.0 exploration:
-
-- OpenTelemetry tracing integration
-- Additional Markdown flavors and output formats
-- Packaging and distribution expansion (apt/yum/brew and ingress-oriented bundles)
+- **Observability Expansion**: Native OpenTelemetry tracing integration inside the NGINX C module filter path.
+- **Distribution Expansion**: Official APT and YUM packaging pipelines integrated into standard Linux package indexing.
+- **Diagnostic Enhancements**: Extending CLI `nginx-markdown-doctor` checks and telemetry metrics for real-time conversion monitoring.
 
 ## License
 
@@ -697,7 +414,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.1 | 2026-07-14 | Codex | Marked v0.9.1 as RC preparation and documented the final pre-v1.0 compatibility reset plus Rust 1.97 source-build baseline |
+| 0.9.1 | 2026-07-17 | Kang | Optimized README organization, removed historical What's New logs, consolidated capabilities table, and structured docs index for v0.9.1 release. |
 | 0.9.0 | 2026-07-02 | Kang | Doc review: added What's New v0.9.0 section, MIGRATION-0.9 link, reason code count fix, CHANGELOG sync with branch commits |
 | 0.8.3 | 2026-06-26 | Kang | v0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |
 | 0.8.2 | 2026-06-25 | Kang | v0.8.2 release: streaming decompression hardening, FFI panic safety, implied-closure correctness, decompression budget enforcement, security scan scoping, release-line documentation closeout |
