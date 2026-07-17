@@ -56,13 +56,14 @@ readonly PID_FILE="$NGINX_WORKDIR/bench.pid"
 
 # usage prints help text to stderr and exits with the given code.
 usage() {
+  local exit_code="${1:-1}"
   echo >&2 "usage: $0 [--scenario <name>] [--iterations <N>] [--output <path>] [--concurrency <N>] [--help]"
   echo >&2 ""
   echo >&2 "Environment:"
   echo >&2 "  NGINX_BIN   Path to nginx binary with markdown module (required)"
   echo >&2 ""
   echo >&2 "Scenarios: plain-small, chunked-medium, gzip-large, large-body, streaming-first, gzip-streaming-first, deflate-streaming-first"
-  exit "${1:-1}"
+  exit "$exit_code"
 }
 
 ###############################################################################
