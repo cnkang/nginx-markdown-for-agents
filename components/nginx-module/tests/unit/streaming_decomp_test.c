@@ -2869,6 +2869,420 @@ test_ngx_free_rejects_pool_memory(void)
 }
 
 /*
+ * test_deflate_trailing_data_same_feed - Verify that a deflate stream with
+ * trailing garbage in the same chunk is rejected as FORMAT_ERROR.
+ *
+ * Covers both zlib-wrapped (RFC 1950) and raw (RFC 1951) deflate formats.
+ * A complete deflate stream must consume every byte of compressed input;
+ * any remaining bytes after Z_STREAM_END are trailing data that must be
+ * rejected rather than silently truncated.
+ *
+ * Branches covered:
+ *   - zlib-wrapped deflate + trailing garbage in one feed -> FORMAT_ERROR
+ *   - raw deflate + trailing garbage in one feed -> FORMAT_ERROR
+ *   - output slots are NULL/0 on error (no partial output exposed)
+ *   - decomp->finished is NOT set on error (state stays recoverable)
+ */
+static void
+test_deflate_trailing_data_same_feed(void)
+{
+    static const char  *plain = "<p>deflate trailing data</p>";
+    size_t              plain_len;
+    u_char             *zlib_data;
+    size_t              zlib_len;
+    u_char             *raw_data;
+    size_t              raw_len;
+    u_char             *combined;
+    size_t              combined_len;
+    test_pool_t         tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char             *out;
+    size_t              out_len;
+    ngx_int_t           rc;
+
+    TEST_SUBSECTION("deflate trailing data rejected in same feed");
+
+    plain_len = test_cstrnlen(plain, 1024);
+
+    /* zlib-wrapped deflate + trailing garbage */
+    zlib_data = NULL;
+    rc = compress_payload_with_window_bits(
+        (const u_char *) plain, plain_len, MAX_WBITS,
+        &zlib_data, &zlib_len);
+    TEST_ASSERT(rc == NGX_OK, "zlib-wrapped deflate should compress");
+
+    combined = concat_compressed_ranges(
+        zlib_data, zlib_len,
+        (const u_char *) "GARBAGE_TRAIL", 12, &combined_len);
+    TEST_ASSERT(combined != NULL, "zlib deflate + garbage should concatenate");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+        plain_len + 256);
+    TEST_ASSERT(decomp != NULL, "deflate decompressor should be created");
+
+    out = (u_char *) 0x1;
+    out_len = 1;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, combined, combined_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+        "zlib-wrapped deflate with trailing garbage should be FORMAT_ERROR");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "trailing-data error should not expose partial output");
+    TEST_ASSERT(decomp->finished == 0,
+        "finished flag must not be set on trailing-data error");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    free(combined);
+    free(zlib_data);
+
+    /* raw deflate + trailing garbage */
+    raw_data = NULL;
+    rc = compress_payload_with_window_bits(
+        (const u_char *) plain, plain_len, -MAX_WBITS,
+        &raw_data, &raw_len);
+    TEST_ASSERT(rc == NGX_OK, "raw deflate should compress");
+
+    combined = concat_compressed_ranges(
+        raw_data, raw_len,
+        (const u_char *) "RAW_GARBAGE_TRAIL", 15, &combined_len);
+    TEST_ASSERT(combined != NULL, "raw deflate + garbage should concatenate");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+        plain_len + 256);
+    TEST_ASSERT(decomp != NULL, "deflate decompressor should be created");
+
+    out = (u_char *) 0x1;
+    out_len = 1;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, combined, combined_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+        "raw deflate with trailing garbage should be FORMAT_ERROR");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "raw trailing-data error should not expose partial output");
+    TEST_ASSERT(decomp->finished == 0,
+        "finished flag must not be set on raw trailing-data error");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    free(combined);
+    free(raw_data);
+
+    TEST_PASS("deflate trailing data rejected in same feed");
+}
+
+
+/*
+ * test_deflate_trailing_data_next_feed - Verify that a deflate stream that
+ * already finished rejects subsequent non-empty chunks as FORMAT_ERROR,
+ * while empty chunks remain a safe no-op.
+ *
+ * Branches covered:
+ *   - valid deflate in first feed -> NGX_OK, finished set
+ *   - empty second feed after finish -> NGX_OK (safe no-op)
+ *   - non-empty second feed after finish -> FORMAT_ERROR (trailing data)
+ *   - output slots cleared on error
+ */
+static void
+test_deflate_trailing_data_next_feed(void)
+{
+    static const char  *plain = "<p>deflate cross-feed trailing</p>";
+    size_t              plain_len;
+    u_char             *zlib_data;
+    size_t              zlib_len;
+    test_pool_t         tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char             *out;
+    size_t              out_len;
+    ngx_int_t           rc;
+
+    TEST_SUBSECTION("deflate trailing data rejected across feeds");
+
+    plain_len = test_cstrnlen(plain, 1024);
+
+    zlib_data = NULL;
+    rc = compress_payload_with_window_bits(
+        (const u_char *) plain, plain_len, MAX_WBITS,
+        &zlib_data, &zlib_len);
+    TEST_ASSERT(rc == NGX_OK, "zlib-wrapped deflate should compress");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+        plain_len + 256);
+    TEST_ASSERT(decomp != NULL, "deflate decompressor should be created");
+
+    /* First feed: valid deflate stream, should succeed and set finished */
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, zlib_data, zlib_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "valid deflate feed should succeed");
+    TEST_ASSERT(out_len == plain_len
+        && MEM_EQ(out, plain, plain_len),
+        "deflate output should match plain text");
+    TEST_ASSERT(decomp->finished == 1,
+        "complete deflate stream should set finished");
+
+    /* Empty second feed: safe no-op */
+    out = (u_char *) 0x1;
+    out_len = 1;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, NULL, 0, &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "empty feed after finish should be a safe no-op");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "empty no-op feed should clear output slots");
+
+    /* Non-empty second feed: trailing data, must be rejected */
+    out = (u_char *) 0x1;
+    out_len = 1;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, (const u_char *) "TRAILING_DATA", 12,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+        "non-empty feed after deflate finish must be FORMAT_ERROR");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "trailing-data error should not expose output");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    free(zlib_data);
+
+    TEST_PASS("deflate trailing data rejected across feeds");
+}
+
+
+/*
+ * test_deflate_no_trailing_data_still_succeeds - Verify that a clean
+ * deflate stream (no trailing data) still succeeds after the fix.
+ *
+ * This is a positive control for both zlib-wrapped and raw deflate to
+ * ensure the trailing-data guard does not over-reject valid streams.
+ *
+ * Branches covered:
+ *   - zlib-wrapped deflate, clean stream -> NGX_OK, finished set
+ *   - raw deflate, clean stream -> NGX_OK, finished set
+ *   - finish after clean deflate -> NGX_OK
+ */
+static void
+test_deflate_no_trailing_data_still_succeeds(void)
+{
+    static const char  *plain = "<p>clean deflate no trailing</p>";
+    size_t              plain_len;
+    u_char             *zlib_data;
+    size_t              zlib_len;
+    u_char             *raw_data;
+    size_t              raw_len;
+    test_pool_t         tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char             *out;
+    size_t              out_len;
+    ngx_int_t           rc;
+
+    TEST_SUBSECTION("clean deflate streams still succeed (no trailing data)");
+
+    plain_len = test_cstrnlen(plain, 1024);
+
+    /* zlib-wrapped deflate, clean stream */
+    zlib_data = NULL;
+    rc = compress_payload_with_window_bits(
+        (const u_char *) plain, plain_len, MAX_WBITS,
+        &zlib_data, &zlib_len);
+    TEST_ASSERT(rc == NGX_OK, "zlib-wrapped deflate should compress");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+        plain_len + 256);
+    TEST_ASSERT(decomp != NULL, "zlib deflate decompressor should be created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, zlib_data, zlib_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "clean zlib-wrapped deflate should succeed");
+    TEST_ASSERT(out_len == plain_len
+        && MEM_EQ(out, plain, plain_len),
+        "clean zlib-wrapped deflate output should match");
+    TEST_ASSERT(decomp->finished == 1,
+        "clean zlib-wrapped deflate should set finished");
+
+    {
+        u_char  *finish_out = (u_char *) 0x1;
+        size_t   finish_len = 1;
+        rc = ngx_http_markdown_streaming_decomp_finish(
+            decomp, &finish_out, &finish_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "finish after clean deflate should succeed");
+        TEST_ASSERT(finish_out == NULL && finish_len == 0,
+            "clean deflate finish should emit no additional output");
+    }
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    free(zlib_data);
+
+    /* raw deflate, clean stream */
+    raw_data = NULL;
+    rc = compress_payload_with_window_bits(
+        (const u_char *) plain, plain_len, -MAX_WBITS,
+        &raw_data, &raw_len);
+    TEST_ASSERT(rc == NGX_OK, "raw deflate should compress");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+        plain_len + 256);
+    TEST_ASSERT(decomp != NULL, "raw deflate decompressor should be created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, raw_data, raw_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "clean raw deflate should succeed");
+    TEST_ASSERT(out_len == plain_len
+        && MEM_EQ(out, plain, plain_len),
+        "clean raw deflate output should match");
+    TEST_ASSERT(decomp->finished == 1,
+        "clean raw deflate should set finished");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    free(raw_data);
+
+    TEST_PASS("clean deflate streams still succeed without trailing data");
+}
+
+
+/*
+ * test_gzip_concatenated_members_not_regressed - Verify that gzip
+ * concatenated members still succeed after the deflate trailing-data fix.
+ *
+ * This is the gzip anti-regression guard: the trailing-data rejection
+ * applies only to deflate, not to gzip, which must continue to support
+ * concatenated members.
+ *
+ * Branches covered:
+ *   - two concatenated gzip members in one feed -> NGX_OK
+ *   - gzip member boundary between feeds -> NGX_OK
+ */
+static void
+test_gzip_concatenated_members_not_regressed(void)
+{
+    static const char  *first_text = "gzip anti-regression first";
+    static const char  *second_text = "gzip anti-regression second";
+    size_t              first_len;
+    size_t              second_len;
+    u_char             *first_gzip;
+    size_t              first_gzip_len;
+    u_char             *second_gzip;
+    size_t              second_gzip_len;
+    u_char             *combined;
+    size_t              combined_len;
+    test_pool_t         tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char             *out;
+    size_t              out_len;
+    ngx_int_t           rc;
+
+    TEST_SUBSECTION("gzip concatenated members not regressed by deflate fix");
+
+    first_len = test_cstrnlen(first_text, 1024);
+    second_len = test_cstrnlen(second_text, 1024);
+    first_gzip = NULL;
+    second_gzip = NULL;
+
+    rc = compress_payload((const u_char *) first_text, first_len,
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        &first_gzip, &first_gzip_len);
+    TEST_ASSERT(rc == NGX_OK, "first gzip member should compress");
+    rc = compress_payload((const u_char *) second_text, second_len,
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        &second_gzip, &second_gzip_len);
+    TEST_ASSERT(rc == NGX_OK, "second gzip member should compress");
+
+    /* Two concatenated members in one feed */
+    combined = concat_compressed_ranges(
+        first_gzip, first_gzip_len,
+        second_gzip, second_gzip_len, &combined_len);
+    TEST_ASSERT(combined != NULL, "gzip members should concatenate");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        first_len + second_len);
+    TEST_ASSERT(decomp != NULL, "gzip decompressor should be created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, combined, combined_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "concatenated gzip members should still succeed");
+    TEST_ASSERT(out_len == first_len + second_len,
+        "concatenated gzip output should include both members");
+    TEST_ASSERT(MEM_EQ(out, first_text, first_len),
+        "first gzip member output should match");
+    TEST_ASSERT(MEM_EQ(out + first_len, second_text, second_len),
+        "second gzip member output should match");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    free(combined);
+
+    /* Two members in separate feeds */
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        first_len + second_len);
+    TEST_ASSERT(decomp != NULL, "gzip decompressor should be created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, first_gzip, first_gzip_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "first gzip member in separate feed should succeed");
+    TEST_ASSERT(out_len == first_len
+        && MEM_EQ(out, first_text, first_len),
+        "first gzip feed output should match");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, second_gzip, second_gzip_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "second gzip member in separate feed should succeed");
+    TEST_ASSERT(out_len == second_len
+        && MEM_EQ(out, second_text, second_len),
+        "second gzip feed output should match");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    free(second_gzip);
+    free(first_gzip);
+
+    TEST_PASS("gzip concatenated members not regressed by deflate fix");
+}
+
+
+/*
  * main - Test entry point.  Runs all streaming decompression test cases
  * and prints a summary banner.  Returns 0 on success.
  */
@@ -2906,6 +3320,10 @@ main(void)
     test_finish_zlib_paths_and_helpers();
     test_finish_wrapper_success_and_overflow_paths();
     test_ngx_free_rejects_pool_memory();
+    test_deflate_trailing_data_same_feed();
+    test_deflate_trailing_data_next_feed();
+    test_deflate_no_trailing_data_still_succeeds();
+    test_gzip_concatenated_members_not_regressed();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

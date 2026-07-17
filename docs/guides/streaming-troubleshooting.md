@@ -1125,6 +1125,7 @@ time rather than treating the array as a per-request trace.
 | `budget_exceeded` | Resource limit | A general conversion budget was exceeded |
 | `memory_budget_exceeded` | Resource limit | The configured memory limit was exceeded |
 | `decompression_budget_exceeded` | Decompression | Expanded content exceeded the decompression cap |
+| `decompression_format_error` | Decompression | Invalid compressed data or trailing bytes after a deflate stream |
 | `decompression_truncated_input` | Decompression | A compressed stream or member ended prematurely |
 | `header_plan_apply_error` | Commit failure | Atomic response-header planning or application failed |
 | `streaming_mid_flight_error` | Post-commit failure | Streaming failed after commit; correlate with error logs and consider disabling streaming |

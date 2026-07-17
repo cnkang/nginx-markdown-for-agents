@@ -111,7 +111,10 @@ completing before the long-lived contract begins.
 - Streaming decompression: zlib-wrapped deflate (RFC 1950) header sniffing,
   gzip member-boundary reset with cumulative budget, truncated stream/member
   rejection, no-progress inflate guard, and pre-/post-commit backpressure
-  lifecycle coverage.
+  lifecycle coverage. Deflate trailing-data integrity: a complete deflate
+  stream must consume every byte of compressed input; trailing bytes after
+  `Z_STREAM_END` (in the same chunk or subsequent non-empty chunks) are
+  rejected as `FORMAT_ERROR`. Gzip concatenated members remain supported.
 - Security: Forwarded header spoofing prevention (right-most element);
   workflow input sanitization via environment variables to prevent command
   injection; base URL FFI scheme propagation for HTTPS.

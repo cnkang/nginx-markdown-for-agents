@@ -727,6 +727,26 @@ ngx_http_markdown_streaming_decomp_inflate_step(
 
     if (zrc == Z_STREAM_END) {
         if (decomp->type != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
+            /*
+             * deflate (zlib-wrapped or raw) does not support concatenated
+             * members the way gzip does.  A complete deflate stream must
+             * consume every byte of the compressed payload; any remaining
+             * avail_in after Z_STREAM_END is trailing data that does not
+             * belong to the stream.  Silently accepting it would let an
+             * illegal Content-Encoding: deflate response be truncated and
+             * treated as a successful conversion.  Reject it as a format
+             * error and route through the existing error classification so
+             * markdown_error_policy decides pass/reject behavior.
+             */
+            if (decomp->state.zlib.avail_in > 0) {
+                ngx_log_error(NGX_LOG_ERR, log, 0,
+                    "markdown: "
+                    "deflate stream ended with %ud trailing bytes "
+                    "(avail_in > 0 after Z_STREAM_END)",
+                    decomp->state.zlib.avail_in);
+                ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+                return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+            }
             decomp->finished = 1;
             return 1;
         }
@@ -1278,6 +1298,25 @@ ngx_http_markdown_streaming_decomp_feed(
     *out_len = 0;
 
     if (decomp->finished) {
+        /*
+         * A deflate stream that already reached Z_STREAM_END must not
+         * receive any more non-empty input.  Gzip is exempt because it
+         * supports concatenated members and the at_gzip_member_boundary
+         * state tracks a clean member boundary for the next feed.  For
+         * deflate, any subsequent non-empty chunk is trailing data that
+         * does not belong to the stream and must be rejected as a format
+         * error rather than silently discarded.  An empty chunk remains
+         * a safe no-op.
+         */
+        if (in_len > 0
+            && decomp->type != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP)
+        {
+            ngx_log_error(NGX_LOG_ERR, log, 0,
+                "markdown: "
+                "deflate trailing data after stream end "
+                "(%uz bytes in finished state)", in_len);
+            return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+        }
         return NGX_OK;
     }
 

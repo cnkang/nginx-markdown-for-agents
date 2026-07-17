@@ -488,9 +488,31 @@ ngx_http_markdown_complete_inflate_member(
 
     ctx->completed_out += (size_t) ctx->stream->total_out;
 
-    if (ctx->type != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
-        || ctx->stream->avail_in == 0)
-    {
+    /*
+     * Deflate (zlib-wrapped or raw) does not support concatenated members.
+     * A complete deflate stream must consume every byte of the compressed
+     * payload; any remaining avail_in after Z_STREAM_END is trailing data
+     * that does not belong to the stream.  Silently accepting it would let
+     * an illegal Content-Encoding: deflate response be truncated and treated
+     * as a successful conversion.  Gzip is exempt because it supports
+     * concatenated members.
+     */
+    if (ctx->type != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
+        if (ctx->stream->avail_in > 0) {
+            ngx_log_error(NGX_LOG_ERR, ctx->request->connection->log, 0,
+                         "markdown: decompression failed, "
+                         "deflate stream ended with %d trailing bytes "
+                         "(avail_in > 0 after Z_STREAM_END), "
+                         "category=conversion",
+                         ctx->stream->avail_in);
+            return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+        }
+        *total_out = ctx->completed_out;
+        return NGX_OK;
+    }
+
+    /* Gzip: a complete member with no remaining input finishes the response. */
+    if (ctx->stream->avail_in == 0) {
         *total_out = ctx->completed_out;
         return NGX_OK;
     }
