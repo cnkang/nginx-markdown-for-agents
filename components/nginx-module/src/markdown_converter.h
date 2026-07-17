@@ -472,7 +472,7 @@ typedef struct MarkdownOptions {
    * Unified memory budget in bytes (0 = use per-engine defaults).
    *
    * When non-zero, NGINX may use this value to derive full-buffer
-   * max_size when no explicit markdown_max_size is set. Rust
+   * max_size when no explicit markdown_limits memory= is set. Rust
    * currently enforces this budget only for streaming/incremental
    * paths; full-buffer relies on NGINX-side buffering limits.
    * Populated from `markdown_limits memory=<size>` (Config V2).
