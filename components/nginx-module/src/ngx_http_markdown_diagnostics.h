@@ -53,8 +53,8 @@ struct ngx_cycle_s;
  *
  * NGX_HTTP_MARKDOWN_DIAG_JSON_BASE_SIZE:
  *   Covers the fixed-size JSON envelope: config_snapshot (dynconf
- *   snapshot serialization), metrics_snapshot (4 counters), dynconf_state
- *   (4 fields), streaming_config (3 fields), streaming_metrics
+ *   snapshot serialization), metrics_snapshot (6 counters), dynconf_state
+ *   (4 fields), streaming_config (7 fields), streaming_metrics
  *   (8 counters), section keys, braces, commas, and whitespace.
  *   Must be >= the maximum rendered size of all non-decision sections
  *   combined.
@@ -156,11 +156,12 @@ void ngx_http_markdown_diagnostics_record(
  * HTTP content handler for the diagnostics endpoint.
  *
  * Responds with a JSON document containing:
- *   - config_snapshot: current module configuration values
+ *   - config_snapshot: active directive-shaped location values; unified
+ *     Config V2 limits are represented under effective_config
  *   - recent_decisions: ring buffer contents (newest first)
  *   - metrics_snapshot: current metrics counters
  *   - dynconf_state: dynamic configuration watcher state
- *   - streaming_config: streaming engine configuration
+ *   - streaming_config: streaming policy configuration
  *
  * Access control: by default (no markdown_diagnostics_allow directives),
  * only loopback clients (127.0.0.1 or ::1) are permitted.  When one or more
@@ -273,6 +274,8 @@ typedef struct {
     ngx_atomic_uint_t  delivery_total;
     ngx_atomic_uint_t  requests_total;
     ngx_atomic_uint_t  failopen_total;
+    ngx_atomic_uint_t  overload_total;
+    ngx_atomic_uint_t  backpressure_total;
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Streaming metrics (streaming observability) */
     ngx_atomic_uint_t  streaming_requests_total;

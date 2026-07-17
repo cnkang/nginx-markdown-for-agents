@@ -1,6 +1,6 @@
 # ADR-0008: Noise Pruning Enabled by Default
 
-**Status**: Proposed
+**Status**: Accepted
 **Date**: 2026-04-28
 **Context**: v0.6.0 Production Readiness Release
 

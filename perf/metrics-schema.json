@@ -120,6 +120,102 @@
       "aggregation": "mean",
       "direction": "lower_is_better",
       "description": "Rate of pre-commit fallback to full-buffer"
+    },
+    {
+      "name": "streaming_fallback_total",
+      "unit": "count",
+      "collection": "module_counter",
+      "aggregation": "sum",
+      "direction": "lower_is_better",
+      "description": "Total pre-commit streaming fallbacks"
+    },
+    {
+      "name": "streaming_requests_total",
+      "unit": "count",
+      "collection": "module_counter",
+      "aggregation": "sum",
+      "direction": "informational",
+      "description": "Total requests that entered the streaming path"
+    },
+    {
+      "name": "overload_total",
+      "unit": "count",
+      "collection": "module_counter",
+      "aggregation": "sum",
+      "direction": "lower_is_better",
+      "description": "Total requests rejected by the inflight guard"
+    },
+    {
+      "name": "streaming_buffer_budget",
+      "unit": "bytes",
+      "collection": "configuration",
+      "aggregation": "latest",
+      "direction": "informational",
+      "description": "Configured streaming output buffer budget"
+    },
+    {
+      "name": "backpressure_total",
+      "unit": "count",
+      "collection": "module_counter",
+      "aggregation": "sum",
+      "direction": "lower_is_better",
+      "description": "Body-filter output returned NGX_AGAIN (backpressure events)"
+    },
+    {
+      "name": "backpressure_resume_total",
+      "unit": "count",
+      "collection": "module_counter",
+      "aggregation": "sum",
+      "direction": "higher_is_better",
+      "description": "Pending drain completed with NGX_OK (backpressure resumes)"
+    },
+    {
+      "name": "pending_output_high_watermark_bytes",
+      "unit": "bytes",
+      "collection": "module_gauge",
+      "aggregation": "max",
+      "direction": "lower_is_better",
+      "description": "Peak pending output bytes observed via CAS"
+    },
+    {
+      "name": "decompression_streaming_total",
+      "unit": "count",
+      "collection": "module_counter",
+      "aggregation": "sum",
+      "direction": "informational",
+      "description": "Decompression operations routed to streaming path"
+    },
+    {
+      "name": "decompression_fullbuffer_total",
+      "unit": "count",
+      "collection": "module_counter",
+      "aggregation": "sum",
+      "direction": "informational",
+      "description": "Decompression operations routed to full-buffer path"
+    },
+    {
+      "name": "decompression_budget_exceeded_total",
+      "unit": "count",
+      "collection": "module_counter",
+      "aggregation": "sum",
+      "direction": "lower_is_better",
+      "description": "Decompression budget exceeded triggering fail-open"
+    },
+    {
+      "name": "zero_copy_output_total",
+      "unit": "count",
+      "collection": "module_counter",
+      "aggregation": "sum",
+      "direction": "higher_is_better",
+      "description": "Output chains delivered via zero-copy on NGX_OK"
+    },
+    {
+      "name": "copied_output_total",
+      "unit": "count",
+      "collection": "module_counter",
+      "aggregation": "sum",
+      "direction": "informational",
+      "description": "Output chains delivered via buffer copy on NGX_OK"
     }
   ],
   "sample_tiers": [
@@ -222,5 +318,229 @@
       "generation": "fixed fixture",
       "streaming_focus": true
     }
-  ]
+  ],
+  "module_benchmark": {
+    "description": "Schema for module-level benchmark reports produced by tools/perf/run_module_benchmark.sh",
+    "version": "1.0.0",
+    "report_schema": {
+      "type": "object",
+      "required": ["module_benchmark"],
+      "properties": {
+        "module_benchmark": {
+          "type": "object",
+          "required": ["version", "timestamp", "scenarios", "memory_slope"],
+          "properties": {
+            "version": {
+              "type": "string",
+              "description": "Schema version of the benchmark report"
+            },
+            "timestamp": {
+              "type": "string",
+              "format": "date-time",
+              "description": "ISO-8601 UTC timestamp of benchmark run"
+            },
+            "git_commit": {
+              "type": "string",
+              "description": "Short git commit SHA of the tested code"
+            },
+            "platform": {
+              "type": "string",
+              "description": "OS and architecture (e.g., darwin-arm64)"
+            },
+            "load_generator": {
+              "type": "string",
+              "enum": ["hey", "ab"],
+              "description": "Load generation tool used"
+            },
+            "scenarios": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "status"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "enum": ["plain-small", "chunked-medium", "gzip-large", "large-body", "streaming-first", "gzip-streaming-first", "deflate-streaming-first"],
+                    "description": "Scenario identifier"
+                  },
+                  "profile": {
+                    "type": "string",
+                    "enum": ["balanced", "streaming_first", "strict_cache"],
+                    "description": "NGINX module profile"
+                  },
+                  "compression": {
+                    "type": "string",
+                    "enum": ["none", "gzip", "deflate"],
+                    "description": "Upstream compression type"
+                  },
+                  "transfer_encoding": {
+                    "type": "string",
+                    "enum": ["identity", "chunked"],
+                    "description": "Transfer encoding used"
+                  },
+                  "concurrency": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Concurrent connections"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["completed", "failed", "skipped"],
+                    "description": "Scenario execution status"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "Reason for skipped or failed evidence"
+                  },
+                  "load_integrity": {
+                    "type": "object",
+                    "required": ["configured_requests", "completed_requests", "failed_requests", "non_2xx_responses", "transport_errors", "verdict", "failure_reason"],
+                    "properties": {
+                      "configured_requests": {"type": "integer", "minimum": 1},
+                      "completed_requests": {"type": ["integer", "null"], "minimum": 0},
+                      "failed_requests": {"type": ["integer", "null"], "minimum": 0},
+                      "non_2xx_responses": {"type": ["integer", "null"], "minimum": 0},
+                      "transport_errors": {"type": ["integer", "null"], "minimum": 0},
+                      "verdict": {"type": "string", "enum": ["pass", "fail"]},
+                      "failure_reason": {"type": "string"}
+                    }
+                  },
+                  "response_correctness": {
+                    "type": "object",
+                    "required": ["http_status", "headers", "body_bytes", "body_sha256", "verdict", "failure_reason"],
+                    "properties": {
+                      "http_status": {"type": "integer", "minimum": 0},
+                      "headers": {"type": "object"},
+                      "body_bytes": {"type": "integer", "minimum": 0},
+                      "body_sha256": {"type": "string"},
+                      "verdict": {"type": "string", "enum": ["pass", "fail"]},
+                      "failure_reason": {"type": "string"}
+                    }
+                  },
+                  "metrics": {
+                    "type": "object",
+                    "properties": {
+                      "rps": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Requests per second"
+                      },
+                      "throughput_mbps": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Throughput in MB/s"
+                      },
+                      "latency_p50_ms": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "P50 request latency (TTLB) in ms"
+                      },
+                      "latency_p95_ms": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "P95 request latency (TTLB) in ms"
+                      },
+                      "latency_p99_ms": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "P99 request latency (TTLB) in ms"
+                      },
+                      "ttfb_p50_ms": {
+                        "type": ["number", "null"],
+                        "minimum": 0,
+                        "description": "P50 Time to First Byte in ms, measured via curl CURLINFO_STARTTRANSFER_TIME. null if measurement unavailable. MUST NOT contain TTLB values."
+                      },
+                      "ttfb_p95_ms": {
+                        "type": ["number", "null"],
+                        "minimum": 0,
+                        "description": "P95 Time to First Byte in ms, measured via curl CURLINFO_STARTTRANSFER_TIME. null if measurement unavailable. MUST NOT contain TTLB values."
+                      },
+                      "ttlb_p50_ms": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "P50 Time to Last Byte in ms (total request latency)"
+                      },
+                      "worker_rss_mb": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "NGINX worker RSS in megabytes after scenario"
+                      },
+                      "streaming_ratio": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Fraction of requests using streaming path"
+                      },
+                      "fullbuffer_ratio": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Fraction of requests using full-buffer path"
+                      },
+                      "fallback_rate": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Rate of streaming fallback to full-buffer"
+                      },
+                      "streaming_buffer_budget": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Configured streaming output buffer budget in bytes"
+                      }
+                    }
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "status": { "const": "completed" }
+                      },
+                      "required": ["status"]
+                    },
+                    "then": { "required": ["metrics", "load_integrity", "response_correctness"] }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "status": { "const": "failed" }
+                      },
+                      "required": ["status"]
+                    },
+                    "then": { "required": ["reason", "metrics", "load_integrity", "response_correctness"] }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "status": { "const": "skipped" }
+                      },
+                      "required": ["status"]
+                    },
+                    "then": { "required": ["reason"] }
+                  }
+                ]
+              }
+            },
+            "memory_slope": {
+              "type": "object",
+              "required": ["rss_per_input_mb", "r_squared"],
+              "properties": {
+                "rss_per_input_mb": {
+                  "type": "number",
+                  "description": "RSS growth per MB of input data processed"
+                },
+                "r_squared": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Goodness of fit for memory slope regression"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }

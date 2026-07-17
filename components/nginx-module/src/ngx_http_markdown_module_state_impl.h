@@ -31,10 +31,11 @@ static ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
  * changes (for example fields appended at the tail), this version suffix
  * prevents attaching an incompatible old allocation after hot reload.
  *
- * v6: streaming observability fields added to metrics struct.
+ * v7: performance metrics fields (backpressure, decompression path,
+ *     output delivery mode) added to metrics struct.
  */
 static ngx_str_t ngx_http_markdown_metrics_shm_name =
-    ngx_string("nginx_markdown_metrics_v6");
+    ngx_string("nginx_markdown_metrics_v7");
 static u_char ngx_http_markdown_empty_string[] = "";
 
 /* Global dynamic config watcher for this worker process.
@@ -96,6 +97,28 @@ static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher = {
                 if (ngx_atomic_cmp_set(                                            \
                         &ngx_http_markdown_metrics->field,                          \
                         _cur, _cur - 1))                                            \
+                {                                                                   \
+                    break;                                                          \
+                }                                                                   \
+            }                                                                       \
+        }                                                                           \
+    } while (0)
+
+/*
+ * Monotonically non-decreasing gauge update via CAS loop.
+ * Only updates the field if `value` exceeds the current maximum.
+ */
+#define NGX_HTTP_MARKDOWN_METRIC_WATERMARK(field, value)                            \
+    do {                                                                            \
+        if (ngx_http_markdown_metrics != NULL) {                                    \
+            ngx_atomic_t  _wm_cur;                                                  \
+            ngx_atomic_t  _wm_new = (ngx_atomic_t) (value);                        \
+            for ( ;; ) {                                                            \
+                _wm_cur = ngx_http_markdown_metrics->field;                         \
+                if (_wm_new <= _wm_cur) { break; }                                  \
+                if (ngx_atomic_cmp_set(                                            \
+                        &ngx_http_markdown_metrics->field,                          \
+                        _wm_cur, _wm_new))                                          \
                 {                                                                   \
                     break;                                                          \
                 }                                                                   \

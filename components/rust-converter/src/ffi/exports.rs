@@ -45,19 +45,16 @@ use super::abi::{
 };
 use super::abi::{
     DECOMP_CATEGORY_INVALID_ARGS, DECOMP_CATEGORY_IO_ERROR, ERROR_INTERNAL, FFIAcceptResult,
-    FFIConditionalResult, FFIDecisionResult, FFIDecompResult, FFIEligibilityInput, FFIHeaderEntry,
-    FFIHeaderPlan, FFIHeaderPlanHandle, FFIStr, MarkdownConverterHandle, MarkdownOptions,
-    MarkdownResult, NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT,
-    NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
+    FFIDecompResult, FFIEligibilityInput, FFIHeaderEntry, FFIHeaderPlan, FFIHeaderPlanHandle,
+    FFIStr, MARKDOWN_ABI_VERSION, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
+    NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q,
+    NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
 };
 use super::abi::{
     FFI_CONFIG_NOT_SET_U8, FFI_CONFIG_NOT_SET_U32, FFI_CONFIG_NOT_SET_U64, FFIConflict,
     FFIConflictLevel, FFIConflictList, FFIEffectiveConfig, FFIExplicitConfig,
 };
-use super::abi::{
-    FFIConditionalDecision, FFIConditionalInput, FFIStreamingDecision, FFIStreamingInput,
-    STREAMING_BLOCK_REASON_NONE,
-};
+use super::abi::{FFIConditionalDecision, FFIConditionalInput};
 use super::convert::convert_inner;
 use super::memory::{free_buffer, reset_result, set_error_result, set_success_result};
 use super::options::{required_bytes, required_ref};
@@ -65,35 +62,78 @@ use crate::decision::conditional::{
     CacheValidation, ConditionalInput, ConditionalOutcome, decide_conditional,
 };
 use crate::decision::eligibility::{Eligibility, EligibilityInput, decide_eligibility};
-use crate::decision::streaming::{
-    StreamingEngine, StreamingInput, StreamingPolicy, decide_streaming,
-};
-use crate::forwarded::{BaseUrlInput, decide_base_url, parse_cidr};
+use crate::decision::streaming::StreamingPolicy;
+use crate::forwarded::{BaseUrlInput, BaseUrlReason, BaseUrlSource, decide_base_url, parse_cidr};
 
 #[cfg(test)]
 thread_local! {
-    /// Test-only panic injection switch. When set to the matching tag,
-    /// the corresponding FFI closure panics on the next call so tests
-    /// can exercise the catch_unwind fail-open/fail-closed fallbacks.
-    /// Not present in release builds — has zero production cost.
     static TEST_PANIC_TAG: std::cell::Cell<Option<&'static str>> =
         const { std::cell::Cell::new(None) };
-}
-
-#[cfg(test)]
-fn test_should_panic(tag: &'static str) -> bool {
-    TEST_PANIC_TAG.with(|c| c.get() == Some(tag))
+    static TEST_CONFLICT_MESSAGES_LIVE: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
 fn set_test_panic(tag: Option<&'static str>) {
-    TEST_PANIC_TAG.with(|c| c.set(tag));
+    TEST_PANIC_TAG.with(|current| current.set(tag));
+}
+
+#[cfg(test)]
+fn test_should_panic(tag: &'static str) -> bool {
+    TEST_PANIC_TAG.with(|current| {
+        if current.get() == Some(tag) {
+            current.set(None);
+            true
+        } else {
+            false
+        }
+    })
+}
+
+#[cfg(test)]
+fn test_conflict_message_created() {
+    TEST_CONFLICT_MESSAGES_LIVE.with(|live| live.set(live.get() + 1));
+}
+
+#[cfg(test)]
+fn test_conflict_message_dropped() {
+    TEST_CONFLICT_MESSAGES_LIVE.with(|live| live.set(live.get() - 1));
+}
+
+#[cfg(test)]
+fn test_conflict_messages_live() -> usize {
+    TEST_CONFLICT_MESSAGES_LIVE.with(std::cell::Cell::get)
 }
 
 struct HeaderPlanOwned {
     entries: Vec<FFIHeaderEntry>,
     key_storage: Vec<Box<[u8]>>,
     value_storage: Vec<Box<[u8]>>,
+}
+
+struct PendingConflictMessage {
+    level: FFIConflictLevel,
+    bytes: Option<Box<[u8]>>,
+}
+
+impl Drop for PendingConflictMessage {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        if self.bytes.is_some() {
+            test_conflict_message_dropped();
+        }
+    }
+}
+
+/// Return the bundled Rust/C boundary version.
+///
+/// This accessor is intentionally trivial and panic-free. The NGINX module
+/// calls it during preconfiguration and refuses to parse directives or install
+/// filters when the returned value differs from the generated-header
+/// expectation.
+#[unsafe(no_mangle)]
+pub extern "C" fn markdown_abi_version() -> u32 {
+    MARKDOWN_ABI_VERSION
 }
 
 /// Allocate a new converter handle for use across multiple FFI calls.
@@ -173,8 +213,10 @@ pub unsafe extern "C" fn markdown_convert(
 /// # Safety
 ///
 /// The caller must ensure that `result` either is NULL or points to a valid
-/// `MarkdownResult` previously initialized by `markdown_convert()`. Passing the
-/// same result twice is allowed because the function resets pointers to NULL.
+/// `MarkdownResult` previously initialized by `markdown_convert()`,
+/// `markdown_incremental_finalize()`, or `markdown_streaming_finalize()`.
+/// Passing the same result twice is allowed because the function resets
+/// pointers to NULL.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_result_free(result: *mut MarkdownResult) {
     if result.is_null() {
@@ -362,59 +404,6 @@ pub unsafe extern "C" fn markdown_decide_eligibility(input: *const FFIEligibilit
     outcome.unwrap_or_else(|_| Eligibility::IneligibleConfig.ffi_code())
 }
 
-/// Evaluate HTTP conditional request headers (If-None-Match / If-Modified-Since).
-///
-/// Returns the conditional result through the `result` output parameter.
-///
-/// # Safety
-///
-/// The caller must ensure that:
-/// - All string pointers either point to readable UTF-8 bytes of the given length
-///   or are NULL when the corresponding length is 0
-/// - `result` points to writable storage for a `FFIConditionalResult`
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_check_conditional(
-    if_none_match: *const u8,
-    if_none_match_len: usize,
-    entity_etag: *const u8,
-    entity_etag_len: usize,
-    if_modified_since: *const u8,
-    if_modified_since_len: usize,
-    last_modified: *const u8,
-    last_modified_len: usize,
-    result: *mut FFIConditionalResult,
-) {
-    if result.is_null() {
-        return;
-    }
-
-    let result_ref = unsafe { &mut *result };
-
-    let inm = unsafe { optional_str(if_none_match, if_none_match_len) };
-    let etag = unsafe { optional_str(entity_etag, entity_etag_len) };
-    let ims = unsafe { optional_str(if_modified_since, if_modified_since_len) };
-    let lm = unsafe { optional_str(last_modified, last_modified_len) };
-
-    use crate::conditional::{ConditionalResult, evaluate_conditional};
-    // Defense-in-depth: evaluate_conditional only operates on borrowed &str and
-    // is panic-free by design, but a panic must never unwind into C. On panic
-    // we default to Proceed (result_code = 1), the safe/fail-open outcome that
-    // delivers full content rather than a spurious 304.
-    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        evaluate_conditional(inm, etag, ims, lm)
-    }));
-    match outcome {
-        Ok(ConditionalResult::NotModified) => {
-            result_ref.result_code = 0;
-            result_ref.matched_etag_len = 0;
-        }
-        Ok(ConditionalResult::Proceed) | Err(_) => {
-            result_ref.result_code = 1;
-            result_ref.matched_etag_len = 0;
-        }
-    }
-}
-
 /// Decide the conditional-request outcome (spec 49): cache-validation mode,
 /// `If-None-Match` over `If-Modified-Since` precedence, and `Range` /
 /// `no-transform` bypass.
@@ -480,177 +469,6 @@ pub unsafe extern "C" fn markdown_decide_conditional(
         out_ref.reason = decision.reason.as_u8();
         out_ref.evaluated_header = decision.evaluated_header.as_u8();
     }
-}
-
-/// Decide whether the request may take the streaming path (spec 49).
-///
-/// This is the Rust single source of truth wrapping
-/// `crate::decision::streaming::decide_streaming`. The result is written
-/// through the `out` output parameter.
-///
-/// On NULL `input`/`out` or on a caught panic, the output is the safe
-/// fallback: not eligible (the full-buffer path), with no block reason
-/// reported (`STREAMING_BLOCK_REASON_NONE`).
-///
-/// # Safety
-///
-/// The caller must ensure that:
-/// - `input` is NULL or points to a readable `FFIStreamingInput`
-/// - `out` is NULL or points to writable storage for an
-///   `FFIStreamingDecision`
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_decide_streaming(
-    input: *const FFIStreamingInput,
-    out: *mut FFIStreamingDecision,
-) {
-    if out.is_null() {
-        return;
-    }
-    let out_ref = unsafe { &mut *out };
-
-    // Fail-safe default: full-buffer (not eligible), no block reason.
-    out_ref.eligible = 0;
-    out_ref.block_reason = STREAMING_BLOCK_REASON_NONE;
-
-    if input.is_null() {
-        return;
-    }
-
-    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        let inp = unsafe { &*input };
-
-        let sinput = StreamingInput {
-            policy: StreamingPolicy::from_u8(inp.policy),
-            engine: StreamingEngine::from_u8(inp.engine),
-            cache_validation: CacheValidation::from_u8(inp.cache_validation),
-            is_head: inp.is_head != 0,
-            is_not_modified: inp.is_not_modified != 0,
-            has_range: inp.has_range != 0,
-            no_transform: inp.no_transform != 0,
-            has_content_encoding: inp.has_content_encoding != 0,
-            content_length_known: inp.content_length_known != 0,
-            content_length: inp.content_length,
-            streaming_threshold: inp.streaming_threshold,
-        };
-
-        decide_streaming(&sinput)
-    }));
-
-    if let Ok(decision) = outcome {
-        out_ref.eligible = u8::from(decision.eligible);
-        out_ref.block_reason = match decision.block_reason {
-            Some(reason) => reason.as_u8(),
-            None => STREAMING_BLOCK_REASON_NONE,
-        };
-    }
-}
-
-/// Evaluate the conversion decision engine.
-///
-/// Returns the decision through the `result` output parameter.
-///
-/// # Safety
-///
-/// The caller must ensure that `result` points to writable storage
-/// for a `FFIDecisionResult`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_make_decision(
-    enabled: u8,
-    eligible: u8,
-    accept_prefers_markdown: u8,
-    accept_header_present: u8,
-    conditional_not_modified: u8,
-    decompression_ok: u8,
-    parse_timed_out: u8,
-    parse_budget_exceeded: u8,
-    result: *mut FFIDecisionResult,
-) {
-    if result.is_null() {
-        return;
-    }
-
-    // SAFETY: `result` was validated as non-NULL above.
-    let result_ref = unsafe { &mut *result };
-
-    // Initialize the output to a safe fallback *before* the catch_unwind block
-    // so that a panic anywhere in the decision path always leaves `result`
-    // holding a defined, fail-open skip state instead of stale/uninitialized
-    // bytes. The normal path below overwrites both fields on success.
-    use crate::decision::reason_code::ReasonCode;
-    result_ref.decision = 1; /* skip */
-    result_ref.reason_code = ReasonCode::FfiPanic.discriminant() as u8;
-
-    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| -> (u8, u8) {
-        #[cfg(test)]
-        if test_should_panic("make_decision") {
-            panic!("test-injected panic in markdown_make_decision");
-        }
-        #[cfg(not(test))]
-        let _ = ("make_decision",);
-        use crate::decision::{Decision, DecisionContext, SkipReason, make_decision};
-        let ctx = DecisionContext {
-            enabled: enabled != 0,
-            eligible: eligible != 0,
-            accept_prefers_markdown: accept_prefers_markdown != 0,
-            accept_header_present: accept_header_present != 0,
-            conditional_not_modified: conditional_not_modified != 0,
-            decompression_ok: decompression_ok != 0,
-            parse_timed_out: parse_timed_out != 0,
-            parse_budget_exceeded: parse_budget_exceeded != 0,
-        };
-
-        match make_decision(&ctx) {
-            Decision::Convert => {
-                /* Converted == ReasonCode::Converted (0). */
-                (0, ReasonCode::Converted.discriminant() as u8)
-            }
-            Decision::Skip(reason) => {
-                /* Map the pre-conversion SkipReason onto the canonical
-                 * ReasonCode discriminants (the single source of truth in
-                 * decision::reason_code). This lets C callers feed
-                 * reason_code directly into markdown_reason_code_str() /
-                 * markdown_reason_code_metric_key() without a second
-                 * translation table. Post-conversion failure categories
-                 * (streaming/decompression codes) are reported through
-                 * separate FFI paths (streaming result codes,
-                 * FFIDecompResult.error_category), not this decision result.
-                 * All mapped discriminants are <= 15, so they fit in the
-                 * uint8_t reason_code field. */
-                let canonical = match reason {
-                    SkipReason::SkipAccept => ReasonCode::SkippedAccept,
-                    SkipReason::SkipNoAccept => ReasonCode::SkippedNoAccept,
-                    SkipReason::SkipConditional => ReasonCode::SkippedConditional,
-                    SkipReason::FailDecompression => ReasonCode::DecompressionError,
-                    SkipReason::ParseTimeout => ReasonCode::Timeout,
-                    SkipReason::ParseBudgetExceeded => ReasonCode::BudgetExceeded,
-                    SkipReason::NotEligible => ReasonCode::NotEligible,
-                    SkipReason::Disabled => ReasonCode::Disabled,
-                };
-                /* The pre-conversion skip reasons all map to canonical
-                 * discriminants in the 0..=15 range (the C uint8_t reason_code
-                 * contract). ReasonCode is repr(u8) so the cast itself can never
-                 * truncate; this assert guards the stronger documented invariant
-                 * that decision results stay within the pre-conversion subset, so
-                 * adding a high-valued post-conversion variant to this match arm
-                 * is caught in debug builds. */
-                debug_assert!(
-                    canonical.discriminant() <= 15,
-                    "decision ReasonCode discriminant {} exceeds the documented \
-                     pre-conversion range (0..=15)",
-                    canonical.discriminant()
-                );
-                (1, canonical.discriminant() as u8)
-            }
-        }
-    }));
-
-    if let Ok((decision, reason_code)) = outcome {
-        /* Write both fields atomically after confirming no panic. */
-        result_ref.decision = decision;
-        result_ref.reason_code = reason_code;
-    }
-    /* else: panic caught — the fail-open skip + FfiPanic fallback
-     * set above remains in place. Nothing else to write. */
 }
 
 /// Build a header plan for a successful Markdown conversion.
@@ -807,144 +625,6 @@ fn reset_header_plan_to_empty(plan: &mut FFIHeaderPlan) {
     plan.count = 0;
 }
 
-/// Validate a URL for use in Markdown link destinations.
-///
-/// Returns 1 if the URL is safe, 0 if it contains control characters
-/// or dangerous schemes.
-///
-/// # Safety
-///
-/// The caller must ensure that `url` either points to `url_len` readable
-/// bytes or is NULL when `url_len == 0`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_validate_url(url: *const u8, url_len: usize) -> u8 {
-    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| -> u8 {
-        #[cfg(test)]
-        if test_should_panic("validate_url") {
-            panic!("test-injected panic in markdown_validate_url");
-        }
-        #[cfg(not(test))]
-        let _ = ("validate_url",);
-        if url.is_null() || url_len == 0 {
-            return 1;
-        }
-        // SAFETY: caller guarantees `url` points to `url_len` readable bytes.
-        let url_str = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(url, url_len) })
-        {
-            Ok(s) => s,
-            Err(_) => return 0,
-        };
-
-        use crate::security::validate_link_url;
-        if validate_link_url(url_str).is_ok() {
-            1
-        } else {
-            0
-        }
-    }));
-    outcome.unwrap_or_default()
-}
-
-/// Check if a URL uses a dangerous scheme (javascript:, data:, etc.).
-///
-/// Returns 1 if dangerous, 0 if safe.
-///
-/// # Safety
-///
-/// The caller must ensure that `url` either points to `url_len` readable
-/// bytes or is NULL when `url_len == 0`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_is_dangerous_url(url: *const u8, url_len: usize) -> u8 {
-    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| -> u8 {
-        #[cfg(test)]
-        if test_should_panic("is_dangerous_url") {
-            panic!("test-injected panic in markdown_is_dangerous_url");
-        }
-        #[cfg(not(test))]
-        let _ = ("is_dangerous_url",);
-        if url.is_null() || url_len == 0 {
-            return 0;
-        }
-        // SAFETY: caller guarantees `url` points to `url_len` readable bytes.
-        let url_str = match std::str::from_utf8(unsafe { std::slice::from_raw_parts(url, url_len) })
-        {
-            Ok(s) => s,
-            Err(_) => return 1,
-        };
-
-        use crate::security::SecurityValidator;
-        let validator = SecurityValidator::new();
-        if validator.is_dangerous_url(url_str) {
-            1
-        } else {
-            0
-        }
-    }));
-    outcome.unwrap_or(1)
-}
-
-/// Build a base URL from X-Forwarded-Host and X-Forwarded-Proto headers.
-///
-/// Parses the forwarded headers and constructs a validated base URL
-/// (e.g., "https://api.example.com"). The result is written into the
-/// caller-provided buffer. Returns the number of bytes written, or 0
-/// if the headers are absent, empty, or contain invalid characters.
-///
-/// # Safety
-///
-/// The caller must ensure that:
-/// - `x_forwarded_host` either points to `host_len` readable bytes or is NULL
-/// - `x_forwarded_proto` either points to `proto_len` readable bytes or is NULL
-/// - `out_buf` points to at least `out_buf_cap` writable bytes
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_build_base_url(
-    x_forwarded_host: *const u8,
-    host_len: usize,
-    x_forwarded_proto: *const u8,
-    proto_len: usize,
-    out_buf: *mut u8,
-    out_buf_cap: usize,
-) -> usize {
-    if out_buf.is_null() || out_buf_cap == 0 {
-        return 0;
-    }
-
-    // Defense-in-depth: parse_forwarded_headers operates on borrowed &str and
-    // is panic-free by design, but a panic must never unwind into C. On panic
-    // we return 0 (no bytes written), the safe default.
-    let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        let host_str = if x_forwarded_host.is_null() || host_len == 0 {
-            None
-        } else {
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(x_forwarded_host, host_len) })
-                .ok()
-        };
-
-        let proto_str = if x_forwarded_proto.is_null() || proto_len == 0 {
-            None
-        } else {
-            std::str::from_utf8(unsafe { std::slice::from_raw_parts(x_forwarded_proto, proto_len) })
-                .ok()
-        };
-
-        use crate::security::parse_forwarded_headers;
-        match parse_forwarded_headers(host_str, proto_str) {
-            Some((scheme, host)) => {
-                let url = format!("{scheme}://{host}");
-                let bytes = url.as_bytes();
-                if bytes.len() > out_buf_cap {
-                    return 0;
-                }
-                unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len()) };
-                bytes.len()
-            }
-            None => 0,
-        }
-    }));
-
-    outcome.unwrap_or_default()
-}
-
 /// Allocate a new, empty trusted-proxy CIDR set (spec 47).
 ///
 /// The handle accumulates config-time-validated CIDRs via
@@ -1049,11 +729,29 @@ pub unsafe extern "C" fn markdown_decide_base_url(
     out_buf_cap: usize,
     out: *mut FFIBaseUrlDecision,
 ) -> u8 {
+    if !out.is_null() {
+        unsafe {
+            ptr::write(
+                out,
+                FFIBaseUrlDecision {
+                    base_url_len: 0,
+                    reason: BaseUrlReason::FallbackToDefault.as_u8(),
+                    source: BaseUrlSource::Default.as_u8(),
+                },
+            );
+        }
+    }
+
     if input.is_null() || out.is_null() || out_buf.is_null() || out_buf_cap == 0 {
         return DECIDE_BASE_URL_INVALID;
     }
 
     let outcome = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+        #[cfg(test)]
+        if test_should_panic("decide_base_url") {
+            panic!("test-injected panic in markdown_decide_base_url");
+        }
+
         // SAFETY: caller guarantees `input` is a valid FFIBaseUrlInput.
         let inp = unsafe { &*input };
 
@@ -1064,6 +762,7 @@ pub unsafe extern "C" fn markdown_decide_base_url(
         let x_forwarded_host =
             unsafe { optional_str(inp.x_forwarded_host, inp.x_forwarded_host_len) };
         let host = unsafe { optional_str(inp.host, inp.host_len) };
+        let direct_scheme = unsafe { optional_str(inp.direct_scheme, inp.direct_scheme_len) };
 
         let cidrs: &[crate::forwarded::Cidr] = if inp.trusted.is_null() {
             &[]
@@ -1080,33 +779,39 @@ pub unsafe extern "C" fn markdown_decide_base_url(
             x_forwarded_proto,
             x_forwarded_host,
             host,
+            direct_scheme,
         };
 
         let decision = decide_base_url(&decision_input, cidrs);
-        let bytes = decision.base_url.as_bytes();
-        if bytes.len() > out_buf_cap {
-            return DECIDE_BASE_URL_INVALID;
+        if decision.base_url.len() > out_buf_cap {
+            return None;
         }
 
-        // SAFETY: out_buf has at least out_buf_cap >= bytes.len() writable bytes.
-        unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len()) };
-
-        // SAFETY: `out` was validated as non-NULL writable storage.
-        unsafe {
-            ptr::write(
-                out,
-                FFIBaseUrlDecision {
-                    base_url_len: bytes.len(),
-                    reason: decision.reason.as_u8(),
-                    source: decision.source.as_u8(),
-                },
-            );
-        }
-
-        DECIDE_BASE_URL_OK
+        Some((
+            decision.base_url,
+            decision.reason.as_u8(),
+            decision.source.as_u8(),
+        ))
     }));
 
-    outcome.unwrap_or(DECIDE_BASE_URL_INVALID)
+    let Ok(Some((base_url, reason, source))) = outcome else {
+        return DECIDE_BASE_URL_INVALID;
+    };
+
+    let bytes = base_url.as_bytes();
+    unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len()) };
+    unsafe {
+        ptr::write(
+            out,
+            FFIBaseUrlDecision {
+                base_url_len: bytes.len(),
+                reason,
+                source,
+            },
+        );
+    }
+
+    DECIDE_BASE_URL_OK
 }
 
 /// Release a header plan previously returned by `markdown_build_header_plan`.
@@ -1160,9 +865,9 @@ unsafe fn optional_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
 ///
 /// C callers **MUST** use this function instead of `memset(&opts, 0, sizeof(opts))`
 /// or literal struct initialization (`MarkdownOptions opts = {0}`). The helper
-/// guarantees that all fields — including any future tail-appended fields — are
-/// set to valid defaults. After calling this function, the caller may override
-/// individual fields as needed.
+/// sets every field in the current ABI layout to a valid default. Any future
+/// layout change still requires an ABI version increment. After calling this
+/// function, the caller may override individual fields as needed.
 ///
 /// Default values:
 /// - `flavor`: 0 (CommonMark)
@@ -1198,8 +903,9 @@ pub unsafe extern "C" fn markdown_options_init(result: *mut MarkdownOptions) {
 /// Zero-initialize a MarkdownResult struct.
 ///
 /// The C caller should use this instead of manual = {0} or memset
-/// to guarantee all fields (including any future tail-appended fields)
-/// start in a valid zero state.
+/// to guarantee all fields in the current ABI layout start in a valid zero
+/// state. This helper does not make differently sized struct versions
+/// interoperable.
 ///
 /// # Safety
 ///
@@ -1207,48 +913,6 @@ pub unsafe extern "C" fn markdown_options_init(result: *mut MarkdownOptions) {
 /// for a `MarkdownResult`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn markdown_result_init(result: *mut MarkdownResult) {
-    if result.is_null() {
-        return;
-    }
-    unsafe { ptr::write(result, std::mem::zeroed()) };
-}
-
-/// Zero-initialize an FFIAcceptResult struct.
-///
-/// # Safety
-///
-/// The caller must ensure that `result` points to writable storage
-/// for an `FFIAcceptResult`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_accept_result_init(result: *mut FFIAcceptResult) {
-    if result.is_null() {
-        return;
-    }
-    unsafe { ptr::write(result, std::mem::zeroed()) };
-}
-
-/// Zero-initialize an FFIConditionalResult struct.
-///
-/// # Safety
-///
-/// The caller must ensure that `result` points to writable storage
-/// for an `FFIConditionalResult`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_conditional_result_init(result: *mut FFIConditionalResult) {
-    if result.is_null() {
-        return;
-    }
-    unsafe { ptr::write(result, std::mem::zeroed()) };
-}
-
-/// Zero-initialize an FFIDecisionResult struct.
-///
-/// # Safety
-///
-/// The caller must ensure that `result` points to writable storage
-/// for an `FFIDecisionResult`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_decision_result_init(result: *mut FFIDecisionResult) {
     if result.is_null() {
         return;
     }
@@ -1571,38 +1235,62 @@ pub unsafe extern "C" fn markdown_detect_conflicts(
         // Convert Vec<Conflict> → FFIConflictList
         let count = conflicts.len();
 
-        // Each conflict's message is individually heap-allocated.
-        // Freed one-by-one in markdown_free_conflicts.
-        //
-        // NOTE: If catch_unwind catches a panic after some messages have been
-        // Box::into_raw'd but before mem::forget(boxed), those message buffers
-        // would leak. This is acceptable because: (1) the closure is pure and
-        // allocation-only — panics here are practically impossible, and (2) the
-        // leak is bounded by conflict count (typically <5 short strings).
-        let mut ffi_conflicts: Vec<FFIConflict> = Vec::with_capacity(count);
+        // Keep every message under Rust ownership until the message array and
+        // FFI array are both complete. A panic during either allocation phase
+        // therefore drops all pending boxes instead of leaking buffers.
+        let mut pending = Vec::with_capacity(count);
         for conflict in &conflicts {
             let level = match conflict.level {
                 crate::config::conflict::ConflictLevel::Error => FFIConflictLevel::Error,
                 crate::config::conflict::ConflictLevel::Warning => FFIConflictLevel::Warning,
             };
-            // Allocate message bytes on the heap via Box
-            let msg_bytes: Box<[u8]> = conflict.message.as_bytes().to_vec().into_boxed_slice();
-            let msg_len = msg_bytes.len();
-            let msg_ptr = Box::into_raw(msg_bytes) as *const u8;
-            ffi_conflicts.push(FFIConflict {
+            pending.push(PendingConflictMessage {
                 level,
-                message: msg_ptr,
-                message_len: msg_len,
+                bytes: Some(conflict.message.as_bytes().to_vec().into_boxed_slice()),
             });
+            #[cfg(test)]
+            test_conflict_message_created();
+            #[cfg(test)]
+            if test_should_panic("detect_conflicts_after_message") {
+                panic!("test-injected panic while conflict messages remain guarded");
+            }
         }
 
-        // Transfer the Vec<FFIConflict> to a heap allocation (Rule 53: fat-pointer safety)
-        let mut boxed = ffi_conflicts.into_boxed_slice();
-        let ptr = boxed.as_mut_ptr();
-        std::mem::forget(boxed);
+        let ffi_conflicts = pending
+            .iter()
+            .map(|message| {
+                let bytes = message.bytes.as_deref().unwrap_or_default();
+                FFIConflict {
+                    level: message.level,
+                    message: if bytes.is_empty() {
+                        ptr::null()
+                    } else {
+                        bytes.as_ptr()
+                    },
+                    message_len: bytes.len(),
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut boxed_conflicts = ffi_conflicts.into_boxed_slice();
+        let conflicts_ptr = boxed_conflicts.as_mut_ptr();
+
+        // No allocation or fallible conversion remains beyond this point.
+        // Transfer the message backing stores and then the FFI array together.
+        for message in &mut pending {
+            if let Some(bytes) = message.bytes.take() {
+                if bytes.is_empty() {
+                    drop(bytes);
+                    #[cfg(test)]
+                    test_conflict_message_dropped();
+                } else {
+                    std::mem::forget(bytes);
+                }
+            }
+        }
+        std::mem::forget(boxed_conflicts);
 
         FFIConflictList {
-            conflicts: ptr,
+            conflicts: conflicts_ptr,
             count,
         }
     }));
@@ -1650,6 +1338,8 @@ pub unsafe extern "C" fn markdown_free_conflicts(list: *mut FFIConflictList) {
                     )
                 };
                 unsafe { drop(Box::from_raw(msg_slice)) };
+                #[cfg(test)]
+                test_conflict_message_dropped();
             }
         }
 
@@ -1670,119 +1360,7 @@ pub unsafe extern "C" fn markdown_free_conflicts(list: *mut FFIConflictList) {
 
 // ─── Error Classification FFI (spec 51) ──────────────────────────────────────
 
-use super::abi::{
-    FFI_ERROR_BEHAVIOR_PASS_THROUGH, FFI_ERROR_BEHAVIOR_RETURN_STATUS,
-    FFI_ERROR_BEHAVIOR_TERMINATE, FFI_ERROR_POLICY_FAIL_CLOSED, FFI_ERROR_POLICY_PASS,
-    FFI_ERROR_POLICY_STATUS, FFIErrorBehavior, FFIErrorPolicy,
-};
-use crate::error::classification::{
-    ErrorBehavior, ErrorClass, ErrorPolicy, classify_error_code, decide_error_behavior,
-    error_to_reason_code,
-};
-
-/// Decide error handling behavior for a given error class and policy (spec 51).
-///
-/// This is the FFI entry point for the unified error policy decision.
-/// The C error handler calls this to determine what action to take.
-///
-/// # Parameters
-///
-/// - `error_class`: The `FFIErrorClass` discriminant identifying the error.
-/// - `policy`: The `FFIErrorPolicy` derived from `markdown_error_policy`.
-/// - `out`: Output pointer for the resulting `FFIErrorBehavior`.
-///
-/// # Returns
-///
-/// `0` on success, `1` if `out` is NULL or `error_class` is invalid.
-///
-/// # Safety
-///
-/// The caller must ensure that `out` is NULL or points to writable storage
-/// for an `FFIErrorBehavior`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn markdown_decide_error_behavior(
-    error_class: u8,
-    policy: FFIErrorPolicy,
-    out: *mut FFIErrorBehavior,
-) -> u8 {
-    if out.is_null() {
-        return 1;
-    }
-
-    /* Fail-safe default: terminate connection (most conservative). */
-    let out_ref = unsafe { &mut *out };
-    out_ref.kind = FFI_ERROR_BEHAVIOR_TERMINATE;
-    out_ref.status_code = 0;
-    out_ref.forced = 1;
-
-    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        let class = match ErrorClass::from_discriminant(error_class) {
-            Some(c) => c,
-            None => return Err(()),
-        };
-
-        let rust_policy = match policy.kind {
-            FFI_ERROR_POLICY_PASS => ErrorPolicy::Pass,
-            FFI_ERROR_POLICY_STATUS => ErrorPolicy::Status(policy.status_code),
-            FFI_ERROR_POLICY_FAIL_CLOSED => ErrorPolicy::FailClosed,
-            _ => ErrorPolicy::Pass, /* unknown → fail-open default */
-        };
-
-        let behavior = decide_error_behavior(class, rust_policy);
-
-        Ok(behavior)
-    }));
-
-    match result {
-        Ok(Ok(behavior)) => {
-            match behavior {
-                ErrorBehavior::PassThrough => {
-                    out_ref.kind = FFI_ERROR_BEHAVIOR_PASS_THROUGH;
-                    out_ref.status_code = 0;
-                    out_ref.forced = 0;
-                }
-                ErrorBehavior::ReturnStatus(code) => {
-                    out_ref.kind = FFI_ERROR_BEHAVIOR_RETURN_STATUS;
-                    out_ref.status_code = code;
-                    out_ref.forced = 0;
-                }
-                ErrorBehavior::TerminateConnection => {
-                    out_ref.kind = FFI_ERROR_BEHAVIOR_TERMINATE;
-                    out_ref.status_code = 0;
-                    out_ref.forced = 1;
-                }
-            }
-            0
-        }
-        Ok(Err(())) => 1, /* invalid error_class discriminant */
-        Err(_) => {
-            /* Panic caught — fail-safe TerminateConnection already set. */
-            0
-        }
-    }
-}
-
-/// Map an error class to its reason code discriminant (spec 51).
-///
-/// Returns the `ReasonCode` discriminant (u8) for the given error class.
-/// Returns `u8::MAX` (255) if the error class is invalid.
-///
-/// # Safety
-///
-/// No pointer parameters; always safe to call.
-#[unsafe(no_mangle)]
-pub extern "C" fn markdown_error_to_reason_code(error_class: u8) -> u8 {
-    let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-        let class = match ErrorClass::from_discriminant(error_class) {
-            Some(c) => c,
-            None => return u8::MAX,
-        };
-        let reason = error_to_reason_code(class);
-        reason.discriminant() as u8
-    }));
-
-    result.unwrap_or(u8::MAX)
-}
+use crate::error::classification::classify_error_code;
 
 /// Classify a raw FFI error code into its `ErrorClass` discriminant.
 ///
@@ -1806,6 +1384,11 @@ pub extern "C" fn markdown_classify_error_code(error_code: u32) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn abi_version_matches_generated_header_owner() {
+        assert_eq!(markdown_abi_version(), MARKDOWN_ABI_VERSION);
+    }
 
     #[test]
     fn options_init_sets_defaults() {
@@ -1935,80 +1518,6 @@ mod tests {
         unsafe { markdown_header_plan_free(&mut plan) };
     }
 
-    #[test]
-    fn build_base_url_from_forwarded_headers() {
-        let host = b"api.example.com";
-        let proto = b"https";
-        let mut buf = [0u8; 256];
-        let len = unsafe {
-            markdown_build_base_url(
-                host.as_ptr(),
-                host.len(),
-                proto.as_ptr(),
-                proto.len(),
-                buf.as_mut_ptr(),
-                buf.len(),
-            )
-        };
-        assert!(len > 0);
-        let url = std::str::from_utf8(&buf[..len]).unwrap();
-        assert_eq!(url, "https://api.example.com");
-    }
-
-    #[test]
-    fn build_base_url_null_host_returns_zero() {
-        let proto = b"https";
-        let mut buf = [0u8; 256];
-        let len = unsafe {
-            markdown_build_base_url(
-                std::ptr::null(),
-                0,
-                proto.as_ptr(),
-                proto.len(),
-                buf.as_mut_ptr(),
-                buf.len(),
-            )
-        };
-        assert_eq!(len, 0);
-    }
-
-    #[test]
-    fn build_base_url_control_chars_rejected() {
-        let host = b"evil.com\r\ninjection";
-        let proto = b"https";
-        let mut buf = [0u8; 256];
-        let len = unsafe {
-            markdown_build_base_url(
-                host.as_ptr(),
-                host.len(),
-                proto.as_ptr(),
-                proto.len(),
-                buf.as_mut_ptr(),
-                buf.len(),
-            )
-        };
-        assert_eq!(len, 0, "Control characters in host should be rejected");
-    }
-
-    #[test]
-    fn build_base_url_default_proto() {
-        let host = b"example.com";
-        let mut buf = [0u8; 256];
-        let len = unsafe {
-            markdown_build_base_url(
-                host.as_ptr(),
-                host.len(),
-                std::ptr::null(),
-                0,
-                buf.as_mut_ptr(),
-                buf.len(),
-            )
-        };
-        assert!(len > 0);
-        let url = std::str::from_utf8(&buf[..len]).unwrap();
-        assert_eq!(url, "https://example.com");
-    }
-
     /* ---- spec 47: trusted proxies + decide_base_url FFI ---- */
 
     fn push_cidr(handle: *mut MarkdownTrustedProxies, cidr: &str) -> u8 {
@@ -2030,6 +1539,8 @@ mod tests {
             host_len: 0,
             is_unix_socket: 0,
             trusted_configured: 0,
+            direct_scheme: ptr::null(),
+            direct_scheme_len: 0,
         }
     }
 
@@ -2039,6 +1550,14 @@ mod tests {
             reason: 0xff,
             source: 0xff,
         }
+    }
+
+    fn assert_safe_base_url_default(decision: &FFIBaseUrlDecision) {
+        use crate::forwarded::{BaseUrlReason, BaseUrlSource};
+
+        assert_eq!(decision.base_url_len, 0);
+        assert_eq!(decision.reason, BaseUrlReason::FallbackToDefault.as_u8());
+        assert_eq!(decision.source, BaseUrlSource::Default.as_u8());
     }
 
     #[test]
@@ -2080,6 +1599,7 @@ mod tests {
             markdown_decide_base_url(ptr::null(), buf.as_mut_ptr(), buf.len(), &mut decision)
         };
         assert_eq!(rc, DECIDE_BASE_URL_INVALID);
+        assert_safe_base_url_default(&decision);
         // NULL out.
         let input = empty_base_url_input();
         let rc = unsafe {
@@ -2089,6 +1609,7 @@ mod tests {
         // NULL out_buf.
         let rc = unsafe { markdown_decide_base_url(&input, ptr::null_mut(), 0, &mut decision) };
         assert_eq!(rc, DECIDE_BASE_URL_INVALID);
+        assert_safe_base_url_default(&decision);
     }
 
     #[test]
@@ -2171,6 +1692,59 @@ mod tests {
         let rc =
             unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
         assert_eq!(rc, DECIDE_BASE_URL_INVALID);
+        assert_safe_base_url_default(&decision);
+    }
+
+    #[test]
+    fn decide_base_url_panic_preserves_safe_default() {
+        let input = empty_base_url_input();
+        let mut buf = [0u8; 64];
+        let mut decision = empty_decision();
+
+        set_test_panic(Some("decide_base_url"));
+        let rc =
+            unsafe { markdown_decide_base_url(&input, buf.as_mut_ptr(), buf.len(), &mut decision) };
+
+        assert_eq!(rc, DECIDE_BASE_URL_INVALID);
+        assert_safe_base_url_default(&decision);
+    }
+
+    #[test]
+    fn detect_conflicts_panic_releases_pending_messages() {
+        let explicit = FFIExplicitConfig {
+            accept: FFI_CONFIG_NOT_SET_U8,
+            cache_validation: 2,
+            streaming: 0,
+            limits_memory_bytes: FFI_CONFIG_NOT_SET_U64,
+            limits_timeout_ms: FFI_CONFIG_NOT_SET_U64,
+            limits_streaming_buffer_bytes: FFI_CONFIG_NOT_SET_U64,
+            limits_max_inflight: FFI_CONFIG_NOT_SET_U32,
+            error_policy: FFI_CONFIG_NOT_SET_U8,
+            diagnostics: FFI_CONFIG_NOT_SET_U8,
+        };
+        let effective = FFIEffectiveConfig {
+            accept: 0,
+            cache_validation: 2,
+            streaming: 0,
+            limits_memory_bytes: 0,
+            limits_timeout_ms: 0,
+            limits_streaming_buffer_bytes: 0,
+            limits_max_inflight: 0,
+            error_policy: 0,
+            diagnostics: 0,
+        };
+
+        assert_eq!(test_conflict_messages_live(), 0);
+        set_test_panic(Some("detect_conflicts_after_message"));
+        let list = unsafe { markdown_detect_conflicts(3, &explicit, &effective) };
+
+        assert!(list.conflicts.is_null());
+        assert_eq!(list.count, 0);
+        assert_eq!(
+            test_conflict_messages_live(),
+            0,
+            "message ownership must remain guarded until the full list is ready"
+        );
     }
 
     #[test]
@@ -2206,6 +1780,38 @@ mod tests {
         unsafe { markdown_decompress_free(&mut result) };
         assert!(result.output.is_null());
         assert_eq!(result.output_len, 0);
+    }
+
+    #[test]
+    fn decompress_bounded_gzip_concatenated_members() {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+
+        fn gzip_member(payload: &[u8]) -> Vec<u8> {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(payload).unwrap();
+            encoder.finish().unwrap()
+        }
+
+        let first = b"first FFI member";
+        let second = b" and second FFI member";
+        let mut compressed = gzip_member(first);
+        compressed.extend_from_slice(&gzip_member(second));
+
+        let mut result: FFIDecompResult = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            markdown_decompress_bounded(compressed.as_ptr(), compressed.len(), 0, 1024, &mut result)
+        };
+
+        assert_eq!(rc, 0, "Expected success (0), got {rc}");
+        assert_eq!(result.error_category, 0);
+        assert!(!result.output.is_null());
+        assert_eq!(result.output_len, first.len() + second.len());
+        let output = unsafe { std::slice::from_raw_parts(result.output, result.output_len) };
+        assert_eq!(output, [first.as_slice(), second.as_slice()].concat());
+
+        unsafe { markdown_decompress_free(&mut result) };
     }
 
     #[test]
@@ -2350,85 +1956,6 @@ mod tests {
         assert!(result.output.is_null());
         assert_eq!(result.output_len, 0);
         assert_eq!(result.error_category, 0);
-    }
-
-    #[test]
-    fn make_decision_panic_fallback_writes_skip_and_ffi_error() {
-        use crate::decision::reason_code::ReasonCode;
-
-        let mut result: FFIDecisionResult = unsafe { std::mem::zeroed() };
-        /* Poison the output to ensure the function overwrites stale bytes
-         * rather than leaving them. decision=0x5a, reason_code=0x5a. */
-        result.decision = 0x5a;
-        result.reason_code = 0x5a;
-
-        set_test_panic(Some("make_decision"));
-        unsafe {
-            markdown_make_decision(1, 1, 1, 1, 0, 1, 0, 0, &mut result);
-        }
-        set_test_panic(None);
-
-        assert_eq!(
-            result.decision, 1,
-            "panic fallback must set decision=skip (1), got {}",
-            result.decision
-        );
-        assert_eq!(
-            result.reason_code,
-            ReasonCode::FfiPanic.discriminant() as u8,
-            "panic fallback must set reason_code=FfiPanic ({}), got {}",
-            ReasonCode::FfiPanic.discriminant(),
-            result.reason_code
-        );
-    }
-
-    #[test]
-    fn make_decision_normal_path_overwrites_fallback() {
-        /* Disabled module → SkipReason::Disabled. Ensures the fallback
-         * pre-init does not leak into the success path. */
-        let mut result: FFIDecisionResult = unsafe { std::mem::zeroed() };
-        unsafe {
-            markdown_make_decision(0, 1, 0, 0, 0, 1, 0, 0, &mut result);
-        }
-        assert_eq!(result.decision, 1);
-        assert_eq!(
-            result.reason_code,
-            crate::decision::reason_code::ReasonCode::Disabled.discriminant() as u8
-        );
-    }
-
-    #[test]
-    fn is_dangerous_url_panic_fallback_returns_one_fail_closed() {
-        let url = b"https://example.com/";
-        set_test_panic(Some("is_dangerous_url"));
-        let rc = unsafe { markdown_is_dangerous_url(url.as_ptr(), url.len()) };
-        set_test_panic(None);
-        assert_eq!(
-            rc, 1,
-            "markdown_is_dangerous_url panic fallback must fail-closed (return 1)"
-        );
-    }
-
-    #[test]
-    fn validate_url_panic_fallback_returns_zero_unsafe() {
-        /* Inject a panic inside markdown_validate_url to exercise the
-         * catch_unwind Err branch. The documented contract is
-         * panic -> 0 (fail-closed unsafe). */
-        let url = b"https://example.com/";
-        set_test_panic(Some("validate_url"));
-        let rc = unsafe { markdown_validate_url(url.as_ptr(), url.len()) };
-        set_test_panic(None);
-        assert_eq!(
-            rc, 0,
-            "markdown_validate_url panic fallback must return 0 (fail-closed unsafe)"
-        );
-    }
-
-    #[test]
-    fn validate_url_normal_path_returns_one() {
-        let url = b"https://example.com/";
-        let rc = unsafe { markdown_validate_url(url.as_ptr(), url.len()) };
-        assert_eq!(rc, 1, "valid URL should be marked safe (1)");
     }
 
     fn default_eligibility_input() -> FFIEligibilityInput {
@@ -2643,94 +2170,5 @@ mod tests {
         assert_eq!(out.outcome, 0); /* not_modified */
         assert_eq!(out.reason, 2); /* conditional_ims_evaluated */
         assert_eq!(out.evaluated_header, 2); /* if_modified_since */
-    }
-
-    /* ---- markdown_decide_streaming (spec 49) ---- */
-
-    fn auto_streaming_input() -> FFIStreamingInput {
-        FFIStreamingInput {
-            policy: 1,           /* auto */
-            engine: 1,           /* auto */
-            cache_validation: 1, /* ims_only */
-            is_head: 0,
-            is_not_modified: 0,
-            has_range: 0,
-            no_transform: 0,
-            has_content_encoding: 0,
-            content_length_known: 1,
-            content_length: 1024 * 1024,
-            streaming_threshold: 256 * 1024,
-        }
-    }
-
-    fn empty_streaming_decision() -> FFIStreamingDecision {
-        FFIStreamingDecision {
-            eligible: 7,
-            block_reason: 7,
-        }
-    }
-
-    #[test]
-    fn decide_streaming_null_out_is_noop() {
-        let input = auto_streaming_input();
-        unsafe { markdown_decide_streaming(&input, ptr::null_mut()) };
-    }
-
-    #[test]
-    fn decide_streaming_null_input_fails_safe_full_buffer() {
-        let mut out = empty_streaming_decision();
-        unsafe { markdown_decide_streaming(ptr::null(), &mut out) };
-        assert_eq!(out.eligible, 0);
-        assert_eq!(out.block_reason, STREAMING_BLOCK_REASON_NONE);
-    }
-
-    #[test]
-    fn decide_streaming_auto_large_eligible() {
-        let input = auto_streaming_input();
-        let mut out = empty_streaming_decision();
-        unsafe { markdown_decide_streaming(&input, &mut out) };
-        assert_eq!(out.eligible, 1);
-        assert_eq!(out.block_reason, STREAMING_BLOCK_REASON_NONE);
-    }
-
-    #[test]
-    fn decide_streaming_full_cache_validation_blocks() {
-        let mut input = auto_streaming_input();
-        input.cache_validation = 2; /* full */
-        let mut out = empty_streaming_decision();
-        unsafe { markdown_decide_streaming(&input, &mut out) };
-        assert_eq!(out.eligible, 0);
-        assert_eq!(out.block_reason, 0); /* FullCacheValidation */
-    }
-
-    #[test]
-    fn decide_streaming_small_body_blocks() {
-        let mut input = auto_streaming_input();
-        input.content_length = 1024;
-        let mut out = empty_streaming_decision();
-        unsafe { markdown_decide_streaming(&input, &mut out) };
-        assert_eq!(out.eligible, 0);
-        assert_eq!(out.block_reason, 6); /* SmallBody */
-    }
-
-    #[test]
-    fn decide_streaming_head_blocks() {
-        let mut input = auto_streaming_input();
-        input.is_head = 1;
-        let mut out = empty_streaming_decision();
-        unsafe { markdown_decide_streaming(&input, &mut out) };
-        assert_eq!(out.eligible, 0);
-        assert_eq!(out.block_reason, 7); /* HeadRequest */
-    }
-
-    #[test]
-    fn decide_streaming_force_streams_small() {
-        let mut input = auto_streaming_input();
-        input.policy = 2; /* force */
-        input.engine = 2; /* on */
-        input.content_length = 1;
-        let mut out = empty_streaming_decision();
-        unsafe { markdown_decide_streaming(&input, &mut out) };
-        assert_eq!(out.eligible, 1);
     }
 }

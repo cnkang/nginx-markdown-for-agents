@@ -14,7 +14,7 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | HTML-to-Markdown conversion | ✅ | ✅ | Same output quality |
 | ETag generation | ✅ | ❌ | No ETag for committed streaming responses |
 | Conditional requests (304) | ✅ | ❌ | Requires ETag; streaming bypasses |
-| Fail-open (pre-commit) | ✅ | ✅ | Streaming: configurable via `markdown_streaming_on_error` |
+| Fail-open (pre-commit) | ✅ | ✅ | Streaming: configurable via `markdown_error_policy` |
 | Fail-open (post-commit) | N/A | ❌ | Post-commit errors produce truncated output |
 | Memory budget | ✅ | ✅ | Enforced in both paths |
 | Prometheus metrics | ✅ | ✅ | Additional streaming-specific counters |
@@ -64,7 +64,7 @@ itself.
 Use **full-buffer** when:
 
 - You need ETag-based caching and conditional requests
-- Response sizes are moderate (within `markdown_max_size`)
+- Response sizes are moderate (within `markdown_limits memory=<size>`)
 - Token estimation headers are required by downstream consumers
 
 Use **streaming** when:
@@ -88,3 +88,4 @@ thresholds.
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.8.0 | 2026-06-16 | Kang  | Initial feature compatibility matrix |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

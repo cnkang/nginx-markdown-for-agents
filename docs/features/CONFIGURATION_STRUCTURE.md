@@ -17,21 +17,33 @@ typedef struct {
     ngx_flag_t   enabled;              /* markdown_filter on|off */
     ngx_uint_t   enabled_source;       /* markdown_filter source: static/complex/unset */
     ngx_http_complex_value_t *enabled_complex; /* markdown_filter variable expression */
-    size_t       max_size;             /* markdown_max_size (default: 10MB) */
-    ngx_msec_t   timeout;              /* markdown_timeout (default: 5000ms) */
-    ngx_uint_t   on_error;             /* markdown_error_policy pass|fail_closed (default: pass) */
+    size_t       max_size;             /* markdown_limits memory (default: 10MB) */
+    ngx_msec_t   timeout;              /* markdown_limits timeout (default: 5000ms) */
+    ngx_uint_t   on_error;             /* markdown_error_policy pass|fail_closed|status (default: pass) */
+    ngx_uint_t   error_status;         /* markdown_error_policy status <code> (default: 502) */
     ngx_uint_t   flavor;               /* markdown_flavor commonmark|gfm (default: commonmark) */
     ngx_flag_t   token_estimate;       /* markdown_token_estimate on|off (default: off) */
     ngx_flag_t   front_matter;         /* markdown_front_matter on|off (default: off) */
-    ngx_uint_t   accept_mode;          /* markdown_accept strict|wildcard (default: strict) */
-    ngx_uint_t   auth_policy;          /* markdown_auth_policy allow|deny (default: allow) */
-    ngx_array_t *auth_cookies;         /* markdown_auth_cookies patterns (default: NULL) */
-    ngx_flag_t   generate_etag;        /* markdown_etag on|off (default: on) */
-    ngx_uint_t   conditional_requests; /* markdown_conditional_requests mode (default: full_support) */
-    ngx_uint_t   log_verbosity;        /* markdown_log_verbosity error|warn|info|debug (default: info) */
+    ngx_uint_t   accept_policy;        /* markdown_accept strict|wildcard|force (default: strict) */
+    ngx_http_markdown_policy_cfg_t policy;  /* auth_policy, auth_cookies */
     ngx_flag_t   buffer_chunked;       /* markdown_buffer_chunked on|off (default: on) */
-    ngx_array_t *stream_types;         /* markdown_stream_types exclusion list (default: NULL) */
-    ngx_flag_t   auto_decompress;      /* internal decompression toggle (default: on) */
+
+    struct {
+        ngx_array_t *stream_types;         /* markdown_stream_types exclusion list */
+        ngx_array_t *content_types;        /* markdown_content_types allowlist */
+        size_t       large_body_threshold; /* markdown_large_body_threshold (retired in 0.9.0) */
+        ngx_uint_t   max_inflight;         /* markdown_limits max_inflight */
+    } routing;
+
+    struct {
+        ngx_flag_t   auto_decompress;      /* internal decompression toggle (default: on) */
+        size_t       max_size;             /* markdown_decompress_max_size */
+        ngx_msec_t   parse_timeout;        /* markdown_parse_timeout (default: 30000ms) */
+        size_t       parser_budget;        /* markdown_parser_budget (default: 64MB) */
+        ngx_flag_t   max_size_explicit;    /* 1 if operator set markdown_limits memory */
+    } decompress;
+
+    /* ... streaming, ops, metrics sub-structs ... */
 } ngx_http_markdown_conf_t;
 ```
 
@@ -78,8 +90,8 @@ typedef struct {
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `generate_etag` | `ngx_flag_t` | `1` (on) | Generate ETags for Markdown responses |
-| `conditional_requests` | `ngx_uint_t` | `FULL_SUPPORT` | Conditional request mode: full_support, if_modified_since_only, or disabled |
+| `generate_etag` | `ngx_flag_t` | `0` (off) | Generate ETags for Markdown responses (on only when `markdown_cache_validation full`) |
+| `conditional_requests` | `ngx_uint_t` | `IF_MODIFIED_SINCE` | Conditional request mode (Config V2: controlled by `markdown_cache_validation off\|ims_only\|full`) |
 
 ### Observability
 
@@ -166,11 +178,11 @@ All default values are applied during configuration merging:
 - **flavor**: `COMMONMARK` - Well-specified baseline
 - **token_estimate**: `0` (off) - Optional feature
 - **front_matter**: `0` (off) - Optional feature
-- **on_wildcard**: `0` (off) - Conservative default
+- **on_wildcard**: removed (Config V2: use `markdown_accept strict|wildcard|force`, default `strict`)
 - **auth_policy**: `ALLOW` - Allow conversion of authenticated requests
 - **auth_cookies**: `NULL` - No patterns configured
-- **generate_etag**: `1` (on) - Enable proper caching
-- **conditional_requests**: `FULL_SUPPORT` - Full HTTP semantics
+- **generate_etag**: `0` (off) - Disabled by default (ims_only default)
+- **conditional_requests**: `IF_MODIFIED_SINCE` - Config V2 default (controlled by `markdown_cache_validation`)
 - **log_verbosity**: `INFO` - Informational module logs by default
 - **buffer_chunked**: `1` (on) - Handle chunked responses
 - **stream_types**: `NULL` - No exclusions by default
@@ -201,3 +213,4 @@ This implementation satisfies the following requirements:
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

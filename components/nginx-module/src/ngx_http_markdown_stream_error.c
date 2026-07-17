@@ -1,7 +1,7 @@
 /*
  * Streaming Fallback State Machine — Error Handler Integration
  *
- * Wires the streaming on_error configuration into the streaming state
+ * Wires the unified error policy into the streaming state
  * machine (streaming fallback state machine, pre-commit pass-through and post-commit error policy wiring).
  *
  * This module is the main entry point called by the body filter when
@@ -9,10 +9,10 @@
  * request state, calls the decision engine, and executes the resulting
  * action via the replay, commit, and post-commit modules.
  *
- * Pre-commit + on_error=pass  -> replay HTML via chain
- * Pre-commit + on_error=reject -> return 502
- * Post-commit + on_error=pass  -> safe_finish (abort fallback)
- * Post-commit + on_error=reject -> abort
+ * Pre-commit + pass -> replay HTML via chain
+ * Pre-commit + fail_closed/status -> finalize with conf->error_status
+ * Post-commit + pass -> safe_finish (abort fallback)
+ * Post-commit + fail_closed/status -> abort
  *
  * Design invariant: post-commit paths NEVER return HTML or 502.
  */
@@ -43,7 +43,7 @@ ngx_http_markdown_stream_error_pass_html(ngx_http_request_t *r,
  *
  * Returns:
  *   NGX_OK               - Error handled (HTML replayed or finish/abort)
- *   NGX_HTTP_BAD_GATEWAY - 502 reject (pre-commit + on_error=reject)
+ *   finalizer result     - pre-commit fail_closed/status policy
  *   NGX_ERROR            - Unrecoverable error
  */
 ngx_int_t
@@ -85,7 +85,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
         dctx.within_resource_limits = 1;
     }
 
-    dctx.on_error_policy = conf->stream.on_error;
+    dctx.on_error_policy = conf->on_error;
 
     /* 2. Choose event based on committed state and on_error policy */
     if (ctx->stream_sm.headers_committed) {
@@ -95,7 +95,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
          * to choose safe_finish vs abort.
          */
         event = NGX_HTTP_MD_EVENT_ERROR;
-    } else if (conf->stream.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
+    } else if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS) {
         event = NGX_HTTP_MD_EVENT_ON_ERROR_PASS;
     } else {
         event = NGX_HTTP_MD_EVENT_ON_ERROR_REJECT;
@@ -126,14 +126,18 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
 
     case NGX_HTTP_MD_ACTION_REJECT_502:
         /*
-         * Pre-commit with reject policy: return 502.
-         * Return NGX_HTTP_BAD_GATEWAY; the caller (body filter)
-         * uses this to finalize with 502.
+     * Pre-commit with fail_closed or status policy: finalize the request with
+     * the configured error status. Use ngx_http_filter_finalize_request
+         * so NGINX generates the correct error response (the body filter
+         * does not reliably handle positive return codes).
          */
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                       "markdown stream on_error: "
-                      "rejecting with 502 (on_error=reject)");
-        return NGX_HTTP_BAD_GATEWAY;
+                      "pre-commit rejection status=%ui",
+                      conf->error_status);
+        return ngx_http_filter_finalize_request(r,
+            &ngx_http_markdown_filter_module,
+            (ngx_int_t) conf->error_status);
 
     case NGX_HTTP_MD_ACTION_SAFE_FINISH:
         /*
@@ -160,7 +164,7 @@ ngx_http_markdown_stream_on_error(ngx_http_request_t *r,
 
     case NGX_HTTP_MD_ACTION_ABORT:
         /*
-         * Post-commit with reject policy: abort.
+         * Post-commit with fail_closed or status policy: abort.
          * Protocol-safe disconnect (no HTML, no 502).
          */
         return ngx_http_markdown_stream_postcommit_abort(r, ctx);
@@ -247,10 +251,10 @@ ngx_http_markdown_stream_error_pass_html(ngx_http_request_t *r,
         }
 
         ctx->streaming.pending_output = chain;
-        ctx->streaming.pending_has_data =
+        ctx->streaming.pending_meta.has_data =
             (ctx->stream_sm.replay_buf.size > 0) ? 1 : 0;
-        ctx->streaming.pending_output_bytes = ctx->stream_sm.replay_buf.size;
-        ctx->streaming.pending_failopen_delivery = 1;
+        ctx->streaming.pending_meta.bytes = ctx->stream_sm.replay_buf.size;
+        ctx->streaming.completion.pending_failopen_delivery = 1;
         r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
         return NGX_AGAIN;
     }

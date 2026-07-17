@@ -66,28 +66,28 @@ For full build and installation steps, use [../../docs/guides/BUILD_INSTRUCTIONS
 For directive semantics and operator-facing behavior, prefer [../../docs/guides/CONFIGURATION.md](../../docs/guides/CONFIGURATION.md) over repeating those details here.
 For canonical architecture and repository-layout notes, prefer [../../docs/architecture/SYSTEM_ARCHITECTURE.md](../../docs/architecture/SYSTEM_ARCHITECTURE.md) and [../../docs/architecture/REPOSITORY_STRUCTURE.md](../../docs/architecture/REPOSITORY_STRUCTURE.md).
 
-## Large Response Threshold Directive
+## Streaming Threshold Directive
 
-The module supports an optional threshold-based routing directive that steers large responses to an incremental processing path.
+The module supports threshold-based routing that steers large responses to the streaming conversion path.
 
-### markdown_large_body_threshold
+### markdown_stream_threshold
 
-**Syntax:** `markdown_large_body_threshold off | <size>;`
-**Default:** `off`
+**Syntax:** `markdown_stream_threshold <size>;`
+**Default:** `1m` (1048576 bytes)
 **Context:** http, server, location
 
-Routes responses whose body size is at or above the configured threshold to the incremental processing path. When set to `off` (the default), all responses use the existing full-buffer path and behavior is identical to a build without this feature.
+Responses with a `Content-Length` at or above this threshold are candidates for streaming conversion (subject to `markdown_streaming` policy and runtime eligibility checks). Responses below the threshold use the full-buffer path. Zero is rejected.
 
 **Example:**
 ```nginx
 location /docs {
-    markdown_large_body_threshold 512k;
+    markdown_stream_threshold 512k;
 }
 ```
 
 **Notes:**
-- The incremental path requires the Rust converter to be built with the `incremental` feature (`cargo build --release --features incremental`). If the feature is not compiled but a threshold is configured, the module logs a warning and falls back to the full-buffer path.
-- The current Rust incremental implementation enforces a hard 64 MiB ceiling even if `markdown_max_size` is configured higher. Keep `markdown_max_size` at or below 64 MiB for locations that route traffic into the incremental path until true streaming support lands.
+- The `markdown_stream_threshold` directive is always registered. However, the streaming conversion path is only compiled when `MARKDOWN_STREAMING_ENABLED` is set at build time. If the streaming path is not compiled, the module logs a warning and falls back to the full-buffer path regardless of the threshold value.
+- The full-buffer path enforces the `markdown_limits memory=<size>` ceiling. Keep `markdown_limits memory=` at or below 64 MiB for locations that route traffic into the incremental path until true streaming support lands.
 - HEAD requests, 304 responses, and fail-open replays always use the full-buffer path regardless of the threshold setting.
 - Path selection is based on `Content-Length` when available; for chunked responses without `Content-Length`, the module buffers first and evaluates the threshold against the buffered size.
 - Path hit counters (`fullbuffer_path_hits`, `incremental_path_hits`) are exposed through the `markdown_metrics` endpoint.

@@ -10,7 +10,7 @@ It focuses on control flow, decision points, and the major branches that affect 
 - conditional requests
 - fail-open and fail-closed behavior
 - the dedicated metrics endpoint
-- the incremental processing path for large responses (feature-gated, default off)
+- the streaming processing path for large responses (default `auto`)
 
 ## Two Runtime Modes
 
@@ -106,12 +106,14 @@ If the response is not eligible, the module stays out of the way and the origina
 
 ### 4. Create the conversion context
 
-If the response is eligible, the module creates a request-scoped context and marks the request for in-memory buffering.
+If the response is eligible, the module creates a request-scoped context and
+selects either streaming or full-buffer processing from the effective profile,
+cache requirements, response shape, and content coding.
 
 That context carries the per-request state used by the body filter, including:
 
 - whether conversion is still eligible
-- whether buffering has been initialized
+- the selected streaming/full-buffer path and pending input/output state
 - whether headers have already been forwarded
 - whether decompression is needed
 - whether conversion has already been attempted
@@ -123,7 +125,10 @@ Before the body arrives, the module inspects response headers to determine wheth
 Possible outcomes:
 
 - no compression detected: continue on the fast path
-- supported compression detected: mark the request for decompression in body phase
+- gzip or deflate detected with streaming selected and cache validation not
+  `full`: use incremental decompression before streaming conversion
+- Brotli, or a supported coding whose validation requirements force buffering:
+  use bounded full-buffer decompression
 - unsupported compression detected: mark the request ineligible and fall back to passthrough behavior
 
 At this point the module does not emit converted headers yet. It waits until the body phase has enough information to produce a correct response.
@@ -144,25 +149,36 @@ Before doing anything expensive, the body filter checks a few short-circuit path
 
 These exits keep the non-conversion path cheap.
 
-### 2. Buffer the response body
+### 2. Process the selected path
 
-For eligible requests, the module buffers the upstream body until the full response has arrived.
+For the streaming path, each upstream chunk is incrementally decompressed when
+it uses gzip or deflate, then fed to the streaming converter. Pending input and
+output remain request-owned across downstream `NGX_AGAIN`; source positions are
+advanced only after actual consumption. Gzip member boundaries may occur
+inside a chunk or between chunks, and decompression budgets remain cumulative
+across member resets.
 
-Important details:
+For the full-buffer path, the module buffers the upstream body until the full
+response has arrived. This path remains required for full cache validation and
+Brotli in 0.9.1.
+
+Full-buffer details:
 
 - buffering is initialized lazily on first body chunk
 - the module may pre-reserve capacity using `Content-Length`
 - if the last buffer has not arrived yet, the filter returns and waits for more input
-- full buffering is a deliberate v1 design choice, not an accident
+- buffering remains bounded by the configured memory limits
 
-If buffering fails because of allocation or size-limit conditions, the next branch depends on `markdown_on_error`:
+If buffering fails because of allocation or size-limit conditions, the next branch depends on `markdown_error_policy`:
 
 - `pass`: fail open and return original HTML
-- `reject`: fail closed and return an error to the client
+- `fail_closed`: fail closed and return an error to the client
 
-## Phase 3: Optional Decompression
+## Phase 3: Optional Full-Buffer Decompression
 
-If the request was marked as compressed in header phase, the body filter decompresses the fully buffered payload before conversion.
+If the full-buffer request was marked as compressed in header phase, the body
+filter decompresses the buffered payload before conversion. Streaming gzip and
+deflate have already been decompressed incrementally in Phase 2.
 
 This step only runs when needed.
 
@@ -206,7 +222,7 @@ Options passed across the boundary include current configuration such as:
 - content type
 - base URL used for resolving relative links
 
-The module also constructs a request-specific base URL before the FFI call. When `markdown_trust_forwarded_headers on;` is configured, forwarded headers are preferred; otherwise the module uses the NGINX request schema and host information.
+The module also constructs a request-specific base URL before the FFI call. When `markdown_trusted_proxies` is configured with trusted CIDR blocks, forwarded headers from those proxies are preferred; otherwise the module uses the NGINX request scheme and host information.
 
 ### Success path
 
@@ -225,59 +241,43 @@ If the converter returns an error, the module classifies it into a failure categ
 - resource-limit failure
 - system failure
 
-It then records the relevant counters and applies `markdown_on_error`:
+It then records the relevant counters and applies `markdown_error_policy`:
 
 - `pass`: send original HTML
 - `reject`: fail the request
 
-## Incremental Processing Path (Feature-Gated)
+## Streaming Processing Path
 
-The module supports an optional incremental processing path for large responses. This path is disabled by default at both the NGINX configuration level and the Rust compilation level. When disabled, the runtime behavior is identical to a build without this feature.
+The module supports a streaming conversion path for eligible responses. The
+sole public selector is `markdown_streaming`: `off` requires full-buffer,
+`auto` (default) uses response size and shape, and `force` selects streaming
+after hard request, content-type, and cache-validation blocks.
 
 ### Threshold Router
-
-After the body filter has buffered the response, a threshold router decides which conversion path to use. The decision is controlled by the `markdown_large_body_threshold` configuration directive:
+After the body filter has buffered the response (or while buffering), a threshold router decides which conversion path to use. The decision is controlled by the `markdown_stream_threshold` configuration directive:
 
 ```nginx
-# Default: incremental path disabled, all requests use full-buffer path
-markdown_large_body_threshold off;
-
-# Enable: route responses >= 512KB to incremental path
-markdown_large_body_threshold 512k;
+# Default: 1m
+markdown_stream_threshold 1m;
 ```
 
 The router evaluates in this order:
+1. If `markdown_streaming` is `off`: all requests use the full-buffer path.
+2. If `markdown_streaming` is `force`: all eligible responses use the streaming path.
+3. If `markdown_streaming` is `auto` (default):
+   - If the request is HEAD, 304, or a fail-open replay: always use the full-buffer path.
+   - If `Content-Length` is present and meets or exceeds `markdown_stream_threshold`: use the streaming path.
+   - If `Content-Length` is absent: buffer the response. Once the buffered size exceeds the threshold, switch to the streaming path. Otherwise, continue on the full-buffer path.
 
-1. If `markdown_large_body_threshold` is `off`: all requests use the full-buffer path. No further evaluation happens.
-2. If the request is HEAD, 304, or a fail-open replay: always use the full-buffer path. These special paths are never routed to the incremental path.
-3. If `Content-Length` is present and meets or exceeds the threshold: use the incremental path.
-4. If `Content-Length` is absent: buffer the response first. Once the buffered size exceeds the threshold, switch to the incremental path. Otherwise, continue on the full-buffer path.
+The selected path is recorded in the request context and tracked through path-hit metrics.
 
-The selected path is recorded in the request context (`processing_path` field) and tracked through path-hit metrics counters exposed on the `markdown_metrics` endpoint.
+### Streaming Conversion
+When the streaming path is selected, the module feeds response data to the Rust `IncrementalConverter` through FFI:
+1. Create a converter instance with the current conversion options.
+2. Feed input data in chunks as they arrive.
+3. Finalize the conversion and obtain the result.
 
-### Incremental Conversion
-
-When the threshold router selects the incremental path, the module feeds response data to the Rust `IncrementalConverter` through FFI instead of calling the single-shot `markdown_convert()` function:
-
-1. Create a converter instance with the current conversion options
-2. Feed input data in chunks as they arrive
-3. Finalize the conversion and obtain the result
-
-The incremental API is compiled only when the `incremental` Rust feature flag is enabled. If the feature is not compiled but a threshold is configured, the module logs a warning and falls back to the full-buffer path.
-
-Error handling on the incremental path follows the same `markdown_on_error` policy as the full-buffer path: fail-open returns original HTML, fail-closed returns an error to the client.
-
-### Deferred Path Selection for Chunked Responses
-
-When the upstream response does not include a `Content-Length` header (for example, chunked transfer encoding), the module cannot determine the response size upfront. In this case, it begins buffering as usual. Once the accumulated buffer size crosses the configured threshold, the module switches to the incremental path for the remainder of the response. If the full response arrives without exceeding the threshold, it proceeds through the normal full-buffer conversion.
-
-This deferred decision keeps the common case (small responses without `Content-Length`) on the existing fast path while still routing genuinely large chunked responses to the incremental path.
-
-### Relationship to Existing Phases
-
-The incremental path does not replace the existing phases described above. It provides an alternative conversion strategy that the threshold router selects after buffering (Phase 2). When the full-buffer path is selected, the request continues through decompression (Phase 3), conditional resolution (Phase 4), and full-buffer Rust conversion (Phase 5) exactly as before.
-
-For the full architecture of the incremental processing path, including the Rust API, FFI interface, state machine, data model extensions, and rollback procedures, see [LARGE_RESPONSE_DESIGN.md](LARGE_RESPONSE_DESIGN.md).
+Error handling on the streaming path follows the same `markdown_error_policy` as the full-buffer path: fail-open returns original HTML, fail-closed returns an error to the client.
 
 ## Header Updates on Successful Conversion
 
@@ -302,7 +302,7 @@ If the module decides not to convert before consuming the full body, it can usua
 
 ### Fail open after partial or full buffering
 
-If the module has already consumed body data into its own buffer, it must replay the original buffered HTML itself. That is why the implementation contains dedicated helpers for:
+If the module has already consumed body data into its own buffer, it must replay the original buffered HTML itself. That is why the implementation contains the following dedicated helpers:
 
 - sending the fully buffered original response
 - replaying a buffered prefix and then forwarding the remaining upstream chain
@@ -318,8 +318,9 @@ Its lifecycle is:
 1. request matches a location configured with `markdown_metrics`
 2. the location handler runs directly
 3. method is checked (`GET` and `HEAD` only)
+e.g. the la
 4. client address is restricted to localhost by the handler
-5. output format is selected from `Accept`
+5. output format is selected and from `Accept`
 6. metrics are rendered as plain text or JSON
 7. response headers and body are sent directly
 
@@ -327,11 +328,11 @@ This path does not use the response conversion filters.
 
 ## What This Means for Readers of the Code
 
-If you are debugging a behavior, the best mental model is:
+If you are debugging a behavior, the module's runtime behavior is:
 
 - header filter decides intent
 - body filter executes the expensive path
-- the threshold router selects full-buffer or incremental conversion based on response size (when enabled)
+- the threshold router selects full-buffer or streaming conversion based on response size when `markdown_streaming auto` is used
 - helper functions handle branching details for decompression, conditionals, and failure policy
 - the Rust converter is called only after the module has enough buffered state to do so safely
 
@@ -344,10 +345,10 @@ If you are debugging a behavior, the best mental model is:
 - Large response optimization: [LARGE_RESPONSE_DESIGN.md](LARGE_RESPONSE_DESIGN.md)
 - Operator-facing behavior: [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md)
 
-
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

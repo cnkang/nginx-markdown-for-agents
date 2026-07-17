@@ -28,21 +28,23 @@ markdown_filter;            # Error: missing value
 
 ---
 
-### 2. markdown_max_size (size)
+### 2. markdown_limits memory=<size> (size)
+
+> **0.9.0**: `markdown_max_size` is retired; use `markdown_limits memory=<size>`.
 
 **Valid configurations:**
 ```nginx
-markdown_max_size 10m;      # 10 megabytes
-markdown_max_size 5120k;    # 5120 kilobytes
-markdown_max_size 1048576;  # 1048576 bytes
+markdown_limits memory=10m;      # 10 megabytes
+markdown_limits memory=5120k;    # 5120 kilobytes
+markdown_limits memory=1048576;  # 1048576 bytes
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_max_size -1;       # Error: negative size
-markdown_max_size 0;        # Error: size must be positive
-markdown_max_size abc;      # Error: invalid size format
-markdown_max_size;          # Error: missing value
+markdown_limits memory=-1;       # Error: negative size
+markdown_limits memory=0;        # Error: size must be positive
+markdown_limits memory=abc;      # Error: invalid size format
+markdown_limits memory;          # Error: missing value
 ```
 
 **Expected behavior:**
@@ -52,21 +54,23 @@ markdown_max_size;          # Error: missing value
 
 ---
 
-### 3. markdown_timeout (time)
+### 3. markdown_limits timeout=<time> (time)
+
+> **0.9.0**: `markdown_timeout` is retired; use `markdown_limits timeout=<time>`.
 
 **Valid configurations:**
 ```nginx
-markdown_timeout 5s;        # 5 seconds
-markdown_timeout 5000ms;    # 5000 milliseconds
-markdown_timeout 5000;      # 5000 milliseconds (default unit)
+markdown_limits timeout=5s;        # 5 seconds
+markdown_limits timeout=5000ms;    # 5000 milliseconds
+markdown_limits timeout=5000;      # 5000 milliseconds (default unit)
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_timeout -1;        # Error: negative timeout
-markdown_timeout 0;         # Error: timeout must be positive
-markdown_timeout abc;       # Error: invalid time format
-markdown_timeout;           # Error: missing value
+markdown_limits timeout=-1;        # Error: negative timeout
+markdown_limits timeout=0;         # Error: timeout must be positive
+markdown_limits timeout=abc;       # Error: invalid time format
+markdown_limits timeout;           # Error: missing value
 ```
 
 **Expected behavior:**
@@ -76,18 +80,19 @@ markdown_timeout;           # Error: missing value
 
 ---
 
-### 4. markdown_error_policy (pass|fail_closed)
+### 4. markdown_error_policy (pass|fail_closed|status <code>)
 
 **Valid configurations:**
 ```nginx
 markdown_error_policy pass;         # Fail-open: return original HTML
 markdown_error_policy fail_closed;   # Fail-closed: return 502 error
+markdown_error_policy status 503;    # Return custom error status
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_error_policy fail;             # Error: invalid value, must be "pass" or "fail_closed"
-markdown_error_policy open;             # Error: invalid value, must be "pass" or "fail_closed"
+markdown_error_policy fail;             # Error: invalid value, must be "pass", "fail_closed", or "status <code>"
+markdown_error_policy open;             # Error: invalid value, must be "pass", "fail_closed", or "status <code>"
 markdown_error_policy;                   # Error: missing value
 markdown_error_policy pass fail_closed; # Error: too many arguments
 ```
@@ -166,23 +171,24 @@ markdown_front_matter;      # Error: missing value
 
 ---
 
-### 8. markdown_accept (strict|wildcard)
+### 8. markdown_accept (strict|wildcard|force)
 
 **Valid configurations:**
 ```nginx
 markdown_accept wildcard;
 markdown_accept strict;
+markdown_accept force;
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_accept yes;       # Error: invalid value, must be "strict" or "wildcard"
-markdown_accept 1;         # Error: invalid value, must be "strict" or "wildcard"
+markdown_accept yes;       # Error: invalid value, must be "strict", "wildcard", or "force"
+markdown_accept 1;         # Error: invalid value, must be "strict", "wildcard", or "force"
 markdown_accept;           # Error: missing value
 ```
 
 **Expected behavior:**
-- Default: off
+- Default: strict
 - Context: http, server, location
 - When enabled: converts on Accept: */* or Accept: text/*
 
@@ -236,49 +242,31 @@ markdown_auth_cookies "";   # Error: empty cookie pattern
 
 ---
 
-### 11. markdown_etag (on|off)
+### 11. markdown_cache_validation (off|ims_only|full)
+
+> **0.9.0**: `markdown_etag` and `markdown_conditional_requests` are retired; use `markdown_cache_validation`.
 
 **Valid configurations:**
 ```nginx
-markdown_etag on;
-markdown_etag off;
+markdown_cache_validation off;
+markdown_cache_validation ims_only;
+markdown_cache_validation full;
 ```
 
 **Invalid configurations:**
 ```nginx
-markdown_etag yes;          # Error: invalid value, must be "on" or "off"
-markdown_etag 1;            # Error: invalid value, must be "on" or "off"
-markdown_etag;              # Error: missing value
+markdown_cache_validation on;          # Error: invalid value
+markdown_cache_validation enabled;     # Error: invalid value
+markdown_cache_validation;             # Error: missing value
+markdown_cache_validation full off;    # Error: too many arguments
 ```
 
 **Expected behavior:**
-- Default: on
+- Default: ims_only
 - Context: http, server, location
-- When enabled: generates ETag from Markdown output hash
-
----
-
-### 12. markdown_conditional_requests (mode)
-
-**Valid configurations:**
-```nginx
-markdown_conditional_requests full_support;
-markdown_conditional_requests if_modified_since_only;
-markdown_conditional_requests disabled;
-```
-
-**Invalid configurations:**
-```nginx
-markdown_conditional_requests on;       # Error: invalid value
-markdown_conditional_requests enabled;  # Error: invalid value
-markdown_conditional_requests;          # Error: missing value
-markdown_conditional_requests full_support disabled; # Error: too many arguments
-```
-
-**Expected behavior:**
-- Default: full_support
-- Context: http, server, location
-- Error message: "invalid value \"%s\" in \"markdown_conditional_requests\" directive, it must be \"full_support\", \"if_modified_since_only\", or \"disabled\""
+- `full`: generates transformed ETag + If-None-Match + If-Modified-Since
+- `ims_only`: If-Modified-Since via upstream Last-Modified (no ETag)
+- `off`: no conditional request support
 
 ---
 
@@ -337,45 +325,45 @@ markdown_stream_types text;     # Error: invalid format, must be "type/subtype"
 ```nginx
 http {
     markdown_filter on;
-    markdown_max_size 5m;
+    markdown_limits memory=5m;
     
     server {
-        # Inherits: markdown_filter on, markdown_max_size 5m
+        # Inherits: markdown_filter on, markdown_limits memory=5m
         
         location /api {
             markdown_filter off;  # Overrides parent
-            # Inherits: markdown_max_size 5m
+            # Inherits: markdown_limits memory=5m
         }
     }
 }
 ```
 
 **Expected:**
-- `/api`: filter off, max_size 5m
-- Other locations: filter on, max_size 5m
+- `/api`: filter off, limits memory=5m
+- Other locations: filter on, limits memory=5m
 
 ### Test 2: Multi-level inheritance
 ```nginx
 http {
     markdown_filter on;
-    markdown_timeout 10s;
+    markdown_limits timeout=10s;
     markdown_error_policy pass;
     
     server {
-        markdown_timeout 5s;  # Overrides http level
+        markdown_limits timeout=5s;  # Overrides http level
         # Inherits: markdown_filter on, markdown_error_policy pass
         
         location /docs {
             markdown_error_policy fail_closed;  # Overrides server level
-            # Inherits: markdown_filter on, markdown_timeout 5s
+            # Inherits: markdown_filter on, markdown_limits timeout=5s
         }
     }
 }
 ```
 
 **Expected:**
-- `/docs`: filter on, timeout 5s, on_error reject
-- Other locations: filter on, timeout 5s, on_error pass
+- `/docs`: filter on, timeout 5s, error_policy fail_closed
+- Other locations: filter on, timeout 5s, error_policy pass
 
 ### Test 3: Array directive inheritance
 ```nginx

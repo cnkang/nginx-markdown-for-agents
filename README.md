@@ -497,9 +497,61 @@ add the harness workflow to your default path:
 2. Run `make harness-check`
 3. Run `make harness-check-full` before closing broader docs or release-gate work
 
+## What's New in v0.9.1
+
+v0.9.1 is in release-candidate preparation as the **final pre-v1.0 baseline
+consolidation and compatibility reset**. It combines performance readiness with
+the last deliberate source-build and public-contract cleanup before the v1.0
+freeze. v0.9.0 was intended to be the last breaking release; the freeze was
+extended through v0.9.1 while v1.0 remained unpublished and adoption was still
+limited.
+
+- **Rust baseline reset**: source builds now require Rust 1.97+; repository,
+  CI, and release builds use exact Rust 1.97.0. Prebuilt module users do not
+  need Rust.
+- **Single streaming control**: `markdown_streaming off|auto|force` is now the
+  sole processing-path selector. The duplicate `markdown_streaming_engine`
+  directive is reject-only with exact off/auto/on migration hints.
+- **Supported flavors clarified**: `markdown_flavor` supports `commonmark` and
+  `gfm`. The experimental `mdx` and `org-mode` values are rejected because
+  they never had distinct production conversion semantics.
+
+- **Hybrid zero-copy streaming output**: `markdown_streaming_zero_copy on`
+  (default off, opt-in) enables `ngx_buf_t` to reference Rust-owned memory
+  directly without intermediate pool-copy, reducing memcpy for non-terminal
+  streaming chunks. NGINX pool cleanup handlers ensure safe Rust buffer
+  lifetime across backpressure and request teardown.
+- **Streaming decompression routing (gzip + deflate)**: under `streaming_first`
+  profile with `markdown_auto_decompress on` and `cache_validation` not `full`,
+  gzip and deflate responses (both zlib-wrapped RFC 1950 and raw RFC 1951
+  deflate) are decompressed incrementally through the streaming engine instead
+  of forcing full-buffer accumulation. Gzip member boundaries and trailers are
+  validated across chunks; Brotli remains on bounded full-buffer in 0.9.1.
+- **Full-buffer copy reduction**: internal optimization (default on, no
+  configuration surface) eliminates redundant memcpy in the full-buffer
+  compressed path by passing contiguous buffers directly to the decompressor
+  and swapping output via pointer assignment.
+- **`markdown_auto_decompress` directive**: now officially registered as a
+  configurable directive (default on). Previously an internal field not
+  settable via `nginx.conf`.
+- **Performance evidence gate**: module-level benchmark harness
+  (`tools/perf/run_module_benchmark.sh`) with automated release gate
+  (`make release-gates-check-091`) enforcing latency, TTFB, memory slope, and
+  fallback rate thresholds before release promotion.
+- **Doctor advice tool**: `python3 tools/perf/doctor_advice.py` analyzes
+  runtime metrics and produces actionable tuning recommendations for
+  operators.
+- **New ADRs**: [0020](docs/architecture/ADR/0020-091-hybrid-zero-copy-pool-cleanup.md),
+  [0021](docs/architecture/ADR/0021-091-gzip-deflate-streaming-decompression-routing.md),
+  [0022](docs/architecture/ADR/0022-091-performance-evidence-release-gate.md).
+
+For the full list, see [CHANGELOG.md](CHANGELOG.md).
+
 ## What's New in v0.9.0
 
-v0.9.0 is a **breaking release** — the last breaking opportunity before 1.0.0 API freeze:
+v0.9.0 is a **breaking release** and was intended at release time to be the
+last breaking opportunity before the 1.0.0 API freeze. The final consolidation
+window was later extended through v0.9.1:
 
 - **Reason code naming**: all reason code strings renamed from UPPERCASE_SNAKE_CASE to lowercase_snake_case (e.g., `PARSE_TIMEOUT` → `timeout`, `FFI_CALL_ERROR` → `ffi_panic`). Affects Prometheus labels, structured logs, and diagnostics endpoint.
 - **Directive removals/renames**: `markdown_on_error` → `markdown_error_policy`; `markdown_trust_forwarded_headers` → `markdown_trusted_proxies <CIDR>...`; `markdown_on_wildcard` → `markdown_accept wildcard`. Old names are rejected at `nginx -t`.
@@ -552,6 +604,10 @@ v0.8.0 introduces true streaming conversion — bounded-memory HTML-to-Markdown 
 - **New streaming controls** — `markdown_stream_threshold`, `markdown_stream_precommit_buffer`, `markdown_stream_flush_min`, and `markdown_stream_excluded_types` make thresholding, replay buffering, flushing, and content-type exclusions explicit.
 - **Breaking: v0.6.x compat removed** — `markdown_streaming_auto_threshold` is removed (not deprecated); `nginx -t` will fail if it appears in configuration. Use `markdown_stream_threshold` instead. `markdown_streaming_engine` no longer accepts `$variable` — only `off`/`auto`/`on`.
 
+These two bullets describe the historical v0.8.0 contract. v0.9.1 removes
+`markdown_streaming_engine`; use `markdown_streaming off|auto|force` as shown
+above.
+
 For upgrade guidance from 0.7.x, see the [Migration Guide](docs/guides/MIGRATION-0.8.md).
 For production rollout steps, see the [Streaming Rollout Cookbook](docs/guides/streaming-rollout-cookbook.md).
 
@@ -578,12 +634,16 @@ Additional changes:
 
 ## Roadmap
 
-**Current release line (0.9.x; latest patch 0.9.0)**
+**Current release line (0.9.x; latest published patch 0.9.0, v0.9.1 in RC preparation)**
 
 - Dual-engine streaming model: full-buffer default + streaming engine for large/chunked responses
-- `auto` mode as the default `markdown_streaming_engine` setting
+- `markdown_streaming auto` as the sole default processing-path policy
 - Bounded-memory streaming conversion with size-based flush (`markdown_stream_flush_min`)
 - Pre-commit safety: fallback to HTML if conversion error occurs before output is committed
+- Hybrid zero-copy streaming output (opt-in via `markdown_streaming_zero_copy`, default off)
+- Streaming decompression routing for gzip and zlib/raw-deflate responses (profile-gated, `streaming_first` only); Brotli remains bounded full-buffer
+- Full-buffer compressed copy reduction (internal, default on)
+- Performance evidence gate: `make release-gates-check-091` (blocking for RC tags)
 - Streaming release gate: `make release-gates-check-08x` (alias of `release-gates-check-080`) validates the 0.8.x release contract
 - Static security gate: `.github/workflows/security-static.yml` runs actionlint,
   shellcheck, gitleaks, focused Semgrep, and cargo-deny for workflow, shell,
@@ -615,7 +675,7 @@ Previous release (0.7.0):
 - Kubernetes deployment examples and Helm chart with secure stock-image defaults plus explicit module-enabled configuration
 - Runtime diagnostics endpoint
 - Dynconf dry-run validation and last-known-good rollback
-- Installation and release docs aligned to Rust 1.91.0+ and current CI expectations
+- Source-build and release tooling aligned to its Rust 1.91 baseline
 
 Near-term focus:
 
@@ -637,6 +697,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-14 | Codex | Marked v0.9.1 as RC preparation and documented the final pre-v1.0 compatibility reset plus Rust 1.97 source-build baseline |
 | 0.9.0 | 2026-07-02 | Kang | Doc review: added What's New v0.9.0 section, MIGRATION-0.9 link, reason code count fix, CHANGELOG sync with branch commits |
 | 0.8.3 | 2026-06-26 | Kang | v0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |
 | 0.8.2 | 2026-06-25 | Kang | v0.8.2 release: streaming decompression hardening, FFI panic safety, implied-closure correctness, decompression budget enforcement, security scan scoping, release-line documentation closeout |

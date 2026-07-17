@@ -30,7 +30,6 @@ jobs:
     name: Darwin Native Smoke
     runs-on: macos-15
     timeout-minutes: 90
-    continue-on-error: true
     permissions:
       contents: read
     steps:
@@ -39,6 +38,8 @@ jobs:
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -95,10 +96,29 @@ jobs:
           echo "buildroot=${buildroot}" >> "${GITHUB_OUTPUT}"
           echo "nginx_bin=${nginx_bin}" >> "${GITHUB_OUTPUT}"
 
+      # Darwin loopback window updates can be delayed on shared runners.  One
+      # retry absorbs isolated transport jitter; repeated failures still block.
       - name: Run chunked streaming native smoke validation
         env:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
-        run: ./tools/e2e/verify_chunked_streaming_native_e2e.sh --profile smoke
+        shell: bash
+        run: |
+          max_attempts=2
+          for attempt in 1 2; do
+            if ./tools/e2e/verify_chunked_streaming_native_e2e.sh --profile smoke; then
+              exit 0
+            fi
+
+            if [[ "${attempt}" -eq "${max_attempts}" ]]; then
+              echo "Darwin native smoke failed on both attempts" >&2
+              exit 1
+            fi
+
+            echo "::warning::Darwin native smoke failed; retrying once after 10 seconds"
+            sleep 10
+          done
+
+          exit 1
 
       - name: Remove retained IMS build artifacts
         if: always()

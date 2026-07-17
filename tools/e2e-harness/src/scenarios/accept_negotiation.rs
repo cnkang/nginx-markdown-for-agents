@@ -5,8 +5,8 @@
 //! 1. Accept: text/markdown triggers conversion (text/markdown response)
 //! 2. Accept: text/html returns original HTML (no conversion)
 //! 3. Empty Accept value returns original HTML (default non-convert behavior)
-//! 4. Accept: */* with markdown_on_wildcard on triggers conversion
-//! 5. Accept: */* with markdown_on_wildcard off does NOT trigger conversion
+//! 4. Accept: */* with markdown_accept wildcard triggers conversion
+//! 5. Accept: */* with markdown_accept strict does NOT trigger conversion
 //! 6. Vary: Accept header present in converted responses
 //! 7. Non-HTML Content-Type from upstream is not converted
 //! 8. text/plain Content-Type is not converted
@@ -120,7 +120,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         ));
     }
 
-    // Case 4: Accept: */* with markdown_on_wildcard on triggers conversion
+    // Case 4: Accept: */* with markdown_accept wildcard triggers conversion
     if let Some(resp4) = common::try_get_with_headers(
         &md_html_url,
         &wildcard_headers,
@@ -140,7 +140,7 @@ pub fn run(ctx: ScenarioContext) -> Result<ScenarioReport> {
         ));
     }
 
-    // Case 5: Accept: */* with markdown_on_wildcard off does NOT convert
+    // Case 5: Accept: */* with markdown_accept strict does NOT convert
     if let Some(resp5) = common::try_get_with_headers(
         &no_wildcard_html_url,
         &wildcard_headers,

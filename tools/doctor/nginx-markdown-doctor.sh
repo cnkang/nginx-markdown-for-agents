@@ -53,6 +53,7 @@ DETECTED_ARCH=""
 DETECTED_LIBC=""
 DETECTED_LIBC_VERSION=""
 DETECTED_PKG_TYPE=""
+DETECTED_NGINX_VERSION=""
 RECOMMENDATION_JSON=""
 
 ##############################################################################
@@ -74,11 +75,13 @@ Exit codes:
   1  At least one check failed
   2  Usage error
 EOF
+    return 0
 }
 
 # Print a message to stderr
 msg() {
     printf '%s\n' "$*" >&2
+    return 0
 }
 
 # Emit a check result.
@@ -185,6 +188,7 @@ json_escape() {
         LC_ALL="$old_lc_all"
     fi
     printf '%s' "$out"
+    return 0
 }
 
 ##############################################################################
@@ -203,14 +207,14 @@ check_nginx_version() {
     # If nginx_bin is empty string, skip
     if [[ -z "$nginx_bin" ]]; then
         emit_check "nginx_version" "skip" "nginx binary not specified (--nginx-bin empty)"
-        return
+        return 0
     fi
 
     # Check if binary exists / is executable
     if ! command -v "$nginx_bin" >/dev/null 2>&1; then
         emit_check "nginx_version" "skip" "nginx binary not found in PATH" \
             '{"binary":"'"$(json_escape "$nginx_bin")"'"}'
-        return
+        return 0
     fi
 
     # Run nginx -v (version goes to stderr)
@@ -226,11 +230,14 @@ check_nginx_version() {
     if [[ -z "$version" ]]; then
         emit_check "nginx_version" "fail" "could not parse nginx version" \
             '{"raw_output":"'"$(json_escape "$version_output")"'"}'
-        return
+        return 0
     fi
+
+    DETECTED_NGINX_VERSION="$version"
 
     emit_check "nginx_version" "pass" "nginx version ${version} detected" \
         '{"version":"'"$version"'"}'
+    return 0
 }
 
 # Check 2: module .so file existence
@@ -271,6 +278,7 @@ check_module_exists() {
             '{"searched":"'"$(json_escape "$searched")"'","filename":"'"$MODULE_FILENAME"'"}' \
             "Download the module from GitHub Releases or install via package"
     fi
+    return 0
 }
 
 # Check 3: basic config syntax validation
@@ -305,12 +313,33 @@ check_config_valid() {
     # leaks to caller on bash 3.2 (macOS default), so use explicit helper.
     _check_config_valid_cleanup() { rm -f "$tmp_conf"; }
 
-    # Write minimal config that tests basic module loading
-    if ! cat > "$tmp_conf" <<'CONF'
+    # Write a config that loads the markdown module if found,
+    # and includes a stable directive so the test validates that
+    # the module is actually loadable and parseable.
+    local load_module_line=""
+    local markdown_directive=""
+    if [[ -n "$FOUND_MODULE_PATH" ]]; then
+        if [[ "$FOUND_MODULE_PATH" == *$'\n'* \
+            || "$FOUND_MODULE_PATH" == *$'\r'* \
+            || "$FOUND_MODULE_PATH" == *'"'* \
+            || "$FOUND_MODULE_PATH" == *\\* ]]
+        then
+            _check_config_valid_cleanup
+            emit_check "config_valid" "fail" \
+                "module path contains characters unsafe for nginx config"
+            return
+        fi
+        load_module_line="load_module \"${FOUND_MODULE_PATH}\";"
+        markdown_directive="    markdown_filter on;"
+    fi
+
+    if ! cat > "$tmp_conf" <<CONF
+${load_module_line}
 daemon off;
 worker_processes 1;
 events { worker_connections 64; }
 http {
+${markdown_directive}
     server {
         listen 127.0.0.1:19999;
         location / { return 200 "ok"; }
@@ -331,7 +360,11 @@ CONF
     _check_config_valid_cleanup
 
     if [[ $test_rc -eq 0 ]]; then
-        emit_check "config_valid" "pass" "nginx config syntax OK (minimal test config)"
+        if [[ -n "$FOUND_MODULE_PATH" ]]; then
+            emit_check "config_valid" "pass" "nginx config syntax OK (module loaded, directive parsed)"
+        else
+            emit_check "config_valid" "pass" "nginx config syntax OK (minimal config, module not found)"
+        fi
     else
         emit_check "config_valid" "fail" "nginx -t failed (exit ${test_rc})" \
             '{"exit_code":'"$test_rc"',"output":"'"$(json_escape "$test_output")"'"}' \
@@ -354,12 +387,12 @@ check_configure_args() {
 
     if [[ -z "$nginx_bin" ]]; then
         emit_check "configure_args" "skip" "nginx binary not specified (--nginx-bin empty)"
-        return
+        return 0
     fi
 
     if ! command -v "$nginx_bin" >/dev/null 2>&1; then
         emit_check "configure_args" "skip" "nginx binary not found in PATH"
-        return
+        return 0
     fi
 
     # nginx -V outputs to stderr
@@ -373,7 +406,7 @@ check_configure_args() {
     if [[ -z "$configure_line" ]]; then
         emit_check "configure_args" "skip" "could not extract configure arguments" \
             '{"raw_output":"'"$(json_escape "$v_output")"'"}'
-        return
+        return 0
     fi
 
     local has_compat=0
@@ -392,13 +425,14 @@ check_configure_args() {
             '{"configure_line":"'"$escaped_line"'","with_compat":false}' \
             "Rebuild nginx with --with-compat or use the official nginx.org packages"
     fi
+    return 0
 }
 
 # Check 5: dynamic module signature
 check_module_signature() {
     if [[ -z "$FOUND_MODULE_PATH" ]]; then
         emit_check "module_signature" "skip" "module .so not found, cannot check signature"
-        return
+        return 0
     fi
 
     # Check if nm is available
@@ -406,7 +440,7 @@ check_module_signature() {
         emit_check "module_signature" "skip" "nm not available (install binutils)" \
             '' \
             "Install binutils to enable module signature verification"
-        return
+        return 0
     fi
 
     # Look for the module symbol
@@ -415,7 +449,7 @@ check_module_signature() {
 
     if [[ -z "$nm_output" ]]; then
         emit_check "module_signature" "skip" "could not read symbols from module"
-        return
+        return 0
     fi
 
     if printf '%s\n' "$nm_output" | grep -q "ngx_http_markdown_filter_module"; then
@@ -426,19 +460,20 @@ check_module_signature() {
             '{"symbol":"ngx_http_markdown_filter_module","found":false}' \
             "The module file may be corrupt or built for a different nginx version"
     fi
+    return 0
 }
 
 # Check 6: Rust converter linkage
 check_rust_linkage() {
     if [[ -z "$FOUND_MODULE_PATH" ]]; then
         emit_check "rust_linkage" "skip" "module .so not found, cannot check Rust linkage"
-        return
+        return 0
     fi
 
     # Check if nm is available
     if ! command -v nm >/dev/null 2>&1; then
         emit_check "rust_linkage" "skip" "nm not available (install binutils)"
-        return
+        return 0
     fi
 
     local nm_output
@@ -446,7 +481,7 @@ check_rust_linkage() {
 
     if [[ -z "$nm_output" ]]; then
         emit_check "rust_linkage" "skip" "could not read symbols from module"
-        return
+        return 0
     fi
 
     # Look for known Rust FFI exports
@@ -454,7 +489,7 @@ check_rust_linkage() {
     local found_count=0
 
     local sym
-    for sym in markdown_convert markdown_converter_new markdown_converter_free markdown_result_free markdown_negotiate_accept markdown_decide_eligibility; do
+    for sym in markdown_abi_version markdown_convert markdown_converter_new markdown_converter_free markdown_result_free markdown_negotiate_accept markdown_decide_eligibility; do
         if printf '%s\n' "$nm_output" | grep -qw "$sym"; then
             found_count=$((found_count + 1))
             if [[ -z "$rust_symbols" ]]; then
@@ -473,6 +508,7 @@ check_rust_linkage() {
             '{"found_count":0}' \
             "Module may be missing Rust converter linkage or built without FFI exports"
     fi
+    return 0
 }
 
 # Check 7: OS/arch/libc detection
@@ -555,6 +591,7 @@ check_os_arch() {
 
     emit_check "os_arch" "pass" "${DETECTED_OS}/${DETECTED_ARCH}${DETECTED_LIBC:+ (${DETECTED_LIBC}${DETECTED_LIBC_VERSION:+ ${DETECTED_LIBC_VERSION}})}" \
         "$details_json"
+    return 0
 }
 
 # Check 8: package type detection
@@ -629,39 +666,23 @@ check_package_type() {
         emit_check "package_type" "skip" "could not detect nginx installation method" \
             '{"type":"unknown"}'
     fi
+    return 0
 }
 
 # Recommendation: suggest release artifact based on detected environment
 recommend_artifact() {
-    # Only recommend if we have OS and arch info
-    if [[ -z "$DETECTED_OS" || -z "$DETECTED_ARCH" ]]; then
-        return
+    # release-binaries.yml currently publishes Linux glibc/musl artifacts
+    # named with the target NGINX version, libc family, and architecture.
+    if [[ "$DETECTED_OS" != "linux"
+        || -z "$DETECTED_NGINX_VERSION"
+        || -z "$DETECTED_LIBC"
+        || -z "$DETECTED_ARCH" ]]
+    then
+        return 0
     fi
 
-    local artifact_name=""
-    local artifact_suffix=""
-
-    case "$DETECTED_OS" in
-        linux)
-            artifact_suffix="linux-${DETECTED_ARCH}"
-            if [[ "$DETECTED_LIBC" == "musl" ]]; then
-                artifact_suffix="${artifact_suffix}-musl"
-            elif [[ -n "$DETECTED_LIBC_VERSION" ]]; then
-                artifact_suffix="${artifact_suffix}-glibc${DETECTED_LIBC_VERSION}"
-            fi
-            ;;
-        macos)
-            artifact_suffix="macos-${DETECTED_ARCH}"
-            ;;
-        freebsd)
-            artifact_suffix="freebsd-${DETECTED_ARCH}"
-            ;;
-        *)
-            return
-            ;;
-    esac
-
-    artifact_name="nginx-markdown-module-${artifact_suffix}.tar.gz"
+    local artifact_name
+    artifact_name="ngx_http_markdown_filter_module-${DETECTED_NGINX_VERSION}-${DETECTED_LIBC}-${DETECTED_ARCH}.tar.gz"
     RECOMMENDATION_JSON='{"artifact":"'"$(json_escape "$artifact_name")"'","os":"'"$DETECTED_OS"'","arch":"'"$DETECTED_ARCH"'"'
     if [[ -n "$DETECTED_LIBC" ]]; then
         RECOMMENDATION_JSON="${RECOMMENDATION_JSON}"',"libc":"'"$DETECTED_LIBC"'"'
@@ -670,6 +691,7 @@ recommend_artifact() {
         RECOMMENDATION_JSON="${RECOMMENDATION_JSON}"',"libc_version":"'"$DETECTED_LIBC_VERSION"'"'
     fi
     RECOMMENDATION_JSON="${RECOMMENDATION_JSON}"'}'
+    return 0
 }
 
 ##############################################################################
@@ -690,6 +712,7 @@ output_json() {
         "$CHECKS_JSON" \
         "$TOTAL" "$PASSED" "$FAILED" "$WARNINGS" "$SKIPPED" \
         "$rec_field"
+    return 0
 }
 
 output_human() {
@@ -707,6 +730,7 @@ output_human() {
     fi
     printf '%s\n' "─────────────────────────────────" >&2
     printf '%s\n' "Summary: ${PASSED} passed, ${FAILED} failed, ${WARNINGS} warnings, ${SKIPPED} skipped (${TOTAL} total)" >&2
+    return 0
 }
 
 ##############################################################################
@@ -771,9 +795,9 @@ main() {
 
     # Exit code
     if [[ $FAILED -gt 0 ]]; then
-        exit 1
+        return 1
     fi
-    exit 0
+    return 0
 }
 
 main "$@"

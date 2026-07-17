@@ -26,7 +26,10 @@
 //! 3. Otherwise the trusted forwarded data is parsed and **strictly
 //!    validated** (trusted source is not blindly believed): the `Forwarded`
 //!    header (RFC 7239) takes precedence over `X-Forwarded-*`; multi-hop
-//!    comma chains take the left-most (closest to client) value.
+//!    comma chains take the **right-most** element (closest to the trusted
+//!    proxy) so a client-prepended malicious `host=` cannot poison the base
+//!    URL.  The left-most element is attacker-controlled when the client
+//!    pre-builds the header before the trusted proxy appends its own.
 //! 4. Invalid host/proto values fall back to the `Host` header or a safe
 //!    default with an explicit reason code.
 //!
@@ -264,7 +267,7 @@ pub fn is_trusted_source(source_ip: &str, trusted: &[Cidr]) -> bool {
     trusted.iter().any(|cidr| cidr.contains(ip))
 }
 
-/// Parsed view of the left-most element of an RFC 7239 `Forwarded` header.
+/// Parsed view of the right-most element of an RFC 7239 `Forwarded` header.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ForwardedHeader {
     /// `host=` parameter value (quotes stripped), if present.
@@ -273,21 +276,29 @@ pub struct ForwardedHeader {
     pub proto: Option<String>,
 }
 
-/// Parse the left-most element of an RFC 7239 `Forwarded` header.
+/// Parse the right-most element of an RFC 7239 `Forwarded` header.
 ///
 /// Multi-hop chains are comma-separated; trusted proxies append on the right,
-/// so the left-most element is the value closest to the original client.
+/// so the right-most element is the value set by the trusted proxy (the
+/// directly-connected source we validated).  The left-most element is
+/// closest to the original client and is attacker-controlled when the
+/// client pre-builds a `Forwarded` header before the trusted proxy appends
+/// its own.  Using the right-most element prevents the client from
+/// poisoning the base URL via a pre-pended malicious `host=`.
+///
 /// Each element is a list of `;`-separated `key=value` pairs.  Quoted values
 /// (`host="example.com:8080"`) are unquoted.  Returns `None` when the header
-/// is empty or the left-most element carries neither `host` nor `proto`.
+/// is empty or the right-most element carries neither `host` nor `proto`.
 pub fn parse_forwarded_header(s: &str) -> Option<ForwardedHeader> {
-    let first = s.split(',').next()?.trim();
-    if first.is_empty() {
+    // Use the right-most (last) comma-separated element: this is the value
+    // the trusted proxy appended.  The left-most is client-controlled.
+    let last = s.rsplit(',').next()?.trim();
+    if last.is_empty() {
         return None;
     }
 
     let mut result = ForwardedHeader::default();
-    for pair in first.split(';') {
+    for pair in last.split(';') {
         let pair = pair.trim();
         let Some((key, value)) = pair.split_once('=') else {
             continue;
@@ -459,6 +470,12 @@ pub struct BaseUrlInput<'a> {
     pub x_forwarded_host: Option<&'a str>,
     /// `Host` request header value, if present.
     pub host: Option<&'a str>,
+    /// The direct connection scheme from `r->schema` (e.g. "https"),
+    /// used as the base URL scheme when falling back to the Host header
+    /// or the safe default.  This preserves the actual connection
+    /// protocol for direct (non-proxied) HTTPS requests so relative
+    /// links are not erroneously resolved as http://.
+    pub direct_scheme: Option<&'a str>,
 }
 
 /// Pure base-URL trust decision (spec 47 small API).
@@ -469,12 +486,20 @@ pub struct BaseUrlInput<'a> {
 pub fn decide_base_url(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecision {
     // 1. Trust not configured → ignore forwarded headers.
     if !input.trusted_configured {
-        return host_fallback(input.host, BaseUrlReason::TrustedProxiesNotConfigured);
+        return host_fallback(
+            input.host,
+            input.direct_scheme,
+            BaseUrlReason::TrustedProxiesNotConfigured,
+        );
     }
 
     // 2. Untrusted source (including Unix socket) → ignore forwarded headers.
     if input.is_unix_socket || !is_trusted_source(input.source_ip, trusted) {
-        return host_fallback(input.host, BaseUrlReason::ForwardedHeaderUntrusted);
+        return host_fallback(
+            input.host,
+            input.direct_scheme,
+            BaseUrlReason::ForwardedHeaderUntrusted,
+        );
     }
 
     // 3. Trusted source: still strictly validate the forwarded data.
@@ -484,7 +509,11 @@ pub fn decide_base_url(input: &BaseUrlInput, trusted: &[Cidr]) -> BaseUrlDecisio
     }
 
     // 4. No usable forwarded data → fall back to Host / default.
-    host_fallback(input.host, BaseUrlReason::FallbackToHost)
+    host_fallback(
+        input.host,
+        input.direct_scheme,
+        BaseUrlReason::FallbackToHost,
+    )
 }
 
 /// Try to build a base URL from the trusted forwarded data.
@@ -505,10 +534,15 @@ fn decide_from_forwarded(input: &BaseUrlInput) -> Option<BaseUrlDecision> {
         if raw_host.is_some() {
             return Some(host_fallback(
                 input.host,
+                input.direct_scheme,
                 BaseUrlReason::ForwardedInvalidHost,
             ));
         }
-        return Some(host_fallback(input.host, BaseUrlReason::FallbackToHost));
+        return Some(host_fallback(
+            input.host,
+            input.direct_scheme,
+            BaseUrlReason::FallbackToHost,
+        ));
     };
 
     // Validate proto when provided; default to https when absent.
@@ -518,6 +552,7 @@ fn decide_from_forwarded(input: &BaseUrlInput) -> Option<BaseUrlDecision> {
             None => {
                 return Some(host_fallback(
                     input.host,
+                    input.direct_scheme,
                     BaseUrlReason::ForwardedInvalidProto,
                 ));
             }
@@ -534,9 +569,10 @@ fn decide_from_forwarded(input: &BaseUrlInput) -> Option<BaseUrlDecision> {
 
 /// Resolve the candidate (host, proto, source) from forwarded inputs.
 ///
-/// Prefers the RFC 7239 `Forwarded` header (left-most element); falls back to
-/// `X-Forwarded-Host` / `X-Forwarded-Proto`.  Returns `None` when neither is
-/// present.
+/// Prefers the RFC 7239 `Forwarded` header (right-most element, which is the
+/// value set by the trusted proxy — see [`parse_forwarded_header`] for the
+/// security rationale); falls back to `X-Forwarded-Host` /
+/// `X-Forwarded-Proto`.  Returns `None` when neither is present.
 fn resolve_forwarded_candidate(
     input: &BaseUrlInput,
 ) -> Option<(Option<String>, Option<String>, BaseUrlSource)> {
@@ -568,12 +604,26 @@ fn resolve_forwarded_candidate(
 
 /// Build a decision from the `Host` header, or the safe default when the
 /// `Host` header is absent/invalid.
-fn host_fallback(host: Option<&str>, reason: BaseUrlReason) -> BaseUrlDecision {
+///
+/// Uses `direct_scheme` (from `r->schema`) when provided, defaulting to
+/// "http" for backward compatibility.  This preserves the actual connection
+/// protocol for direct HTTPS requests so relative links are not erroneously
+/// resolved as http://.
+fn host_fallback(
+    host: Option<&str>,
+    direct_scheme: Option<&str>,
+    reason: BaseUrlReason,
+) -> BaseUrlDecision {
+    let scheme = direct_scheme
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("http");
+
     if let Some(h) = host
         && let Some(valid) = validate_host(h.trim())
     {
         return BaseUrlDecision {
-            base_url: format!("http://{valid}"),
+            base_url: format!("{scheme}://{valid}"),
             reason,
             source: BaseUrlSource::Host,
         };
@@ -727,9 +777,12 @@ mod tests {
     }
 
     #[test]
-    fn forwarded_multi_hop_takes_leftmost() {
-        let p = parse_forwarded_header("host=client.example.com, host=proxy.internal").unwrap();
-        assert_eq!(p.host.as_deref(), Some("client.example.com"));
+    fn forwarded_multi_hop_takes_rightmost() {
+        // Trusted proxies append on the right; the right-most element is
+        // the one set by the trusted proxy.  The left-most is client-
+        // controlled and must not be used.
+        let p = parse_forwarded_header("host=client.evil.com, host=proxy.internal").unwrap();
+        assert_eq!(p.host.as_deref(), Some("proxy.internal"));
     }
 
     #[test]
@@ -825,6 +878,7 @@ mod tests {
             x_forwarded_proto: None,
             x_forwarded_host: None,
             host: Some("origin.example.com"),
+            direct_scheme: None,
         }
     }
 
@@ -876,14 +930,29 @@ mod tests {
     }
 
     #[test]
-    fn decide_forwarded_multi_hop_leftmost() {
+    fn decide_forwarded_multi_hop_rightmost() {
         let t = cidrs(&["10.0.0.0/8"]);
         let mut input = trusted_input("10.1.2.3");
-        input.forwarded = Some("host=client.example.com, host=proxy.internal");
+        input.forwarded = Some("host=client.evil.com, host=proxy.internal");
         let d = decide_base_url(&input, &t);
         assert_eq!(d.source, BaseUrlSource::Forwarded);
         // proto absent → defaults to https
-        assert_eq!(d.base_url, "https://client.example.com");
+        assert_eq!(d.base_url, "https://proxy.internal");
+    }
+
+    #[test]
+    fn decide_forwarded_client_prepend_rejected() {
+        // A client pre-builds a Forwarded header with a malicious host,
+        // then the trusted proxy appends its own element on the right.
+        // The module must use the right-most (proxy) element, not the
+        // client-prepended left-most one.
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.forwarded = Some("host=evil.com;proto=http, host=api.example.com;proto=https");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.source, BaseUrlSource::Forwarded);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);
+        assert_eq!(d.base_url, "https://api.example.com");
     }
 
     #[test]
@@ -945,5 +1014,42 @@ mod tests {
         input.x_forwarded_host = Some("api.example.com");
         input.x_forwarded_proto = Some("https");
         assert_eq!(decide_base_url(&input, &t), decide_base_url(&input, &t));
+    }
+
+    #[test]
+    fn decide_direct_https_preserves_scheme() {
+        // No trusted proxies configured → Host header fallback.
+        // direct_scheme=https from r->schema must produce https:// URL.
+        let mut input = trusted_input("10.0.0.1");
+        input.trusted_configured = false;
+        input.direct_scheme = Some("https");
+        let d = decide_base_url(&input, &[]);
+        assert_eq!(d.source, BaseUrlSource::Host);
+        assert_eq!(d.base_url, "https://origin.example.com");
+    }
+
+    #[test]
+    fn decide_untrusted_source_https_preserves_scheme() {
+        // Untrusted source, no forwarded headers used.
+        // Direct HTTPS connection should still use https:// scheme.
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("203.0.113.7");
+        input.x_forwarded_host = Some("spoof.example.com");
+        input.direct_scheme = Some("https");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderUntrusted);
+        assert_eq!(d.base_url, "https://origin.example.com");
+    }
+
+    #[test]
+    fn decide_no_host_https_falls_back_to_default() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("203.0.113.7");
+        input.host = None;
+        input.direct_scheme = Some("https");
+        let d = decide_base_url(&input, &t);
+        assert_eq!(d.reason, BaseUrlReason::FallbackToDefault);
+        assert_eq!(d.source, BaseUrlSource::Default);
+        assert_eq!(d.base_url, DEFAULT_BASE_URL);
     }
 }

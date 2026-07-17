@@ -126,6 +126,20 @@
         "make release-gates-check-080"
       ]
     },
+    "v090-gates": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-gates-check-090"
+      ]
+    },
+    "v091-gates": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-gates-check-091",
+        "make perf-evidence-check"
+      ],
+      "notes": "0.9.1 release gate: blocking performance evidence gate for RC tags; perf-evidence-check is non-blocking report-only mode"
+    },
     "release-governance": {
       "phase": "focused-semantic",
       "commands": [
@@ -229,6 +243,10 @@
         "precommit_error",
         "terminal_sent",
         "raw deflate",
+        "zlib-wrapped deflate",
+        "gzip",
+        "gzip member",
+        "gzip trailer",
         "truncated stream"
       ],
       "verification_families": [

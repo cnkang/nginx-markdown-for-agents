@@ -69,6 +69,28 @@ else
         "got exit ${exit_code}: $(cat "${output_file}")"
 fi
 
+ffi_src_dir="${tmp_dir}/ffi-src"
+mkdir -p "${ffi_src_dir}"
+cat >"${ffi_src_dir}/ngx_http_markdown_conversion_impl.h" <<'C'
+void test(void) {
+    if (decision.base_url_len > out_cap) return;
+    log((size_t) decision.base_url_len);
+}
+C
+
+output_file="${tmp_dir}/ffi-width.out"
+exit_code=0
+(cd "${tmp_dir}" && bash "${DETECTOR}" "${ffi_src_dir}") >"${output_file}" 2>&1 || exit_code=$?
+if [[ "${exit_code}" -eq 0 ]] \
+    && grep -q 'same-width cast after out_cap guard' "${output_file}" \
+    && ! grep -q 'WARNING.*base_url_len' "${output_file}"
+then
+    pass "guarded uintptr_t FFI length is not reported as ssize_t -> exit 0"
+else
+    fail "guarded uintptr_t FFI length is not reported as ssize_t -> exit 0" \
+        "got exit ${exit_code}: $(cat "${output_file}")"
+fi
+
 printf '\n  Results: %d passed, %d failed\n' "${PASS_COUNT}" "${FAIL_COUNT}"
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then
     exit 1

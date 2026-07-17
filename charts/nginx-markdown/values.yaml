@@ -102,7 +102,8 @@ markdown:
 
   # Streaming configuration
   streaming:
-    engine: "auto"
+    # Processing-path policy: off | auto | force
+    mode: "auto"
     budget: "2m"
     threshold: "1m"
     shadow: false

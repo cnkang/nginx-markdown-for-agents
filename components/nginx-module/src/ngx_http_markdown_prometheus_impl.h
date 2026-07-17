@@ -43,6 +43,87 @@ ngx_http_markdown_prometheus_walk_path_tree(
     u_char *end);
 #endif
 
+
+static u_char *
+ngx_http_markdown_metrics_write_prometheus_perf(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_perf_snapshot_t *perf)
+{
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_inflight_current "
+        "Number of markdown conversions currently in-flight "
+        "in this worker.\n"
+        "# TYPE nginx_markdown_inflight_current gauge\n"
+        "nginx_markdown_inflight_current %uA\n\n",
+        perf->inflight.current);
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_inflight_high_watermark "
+        "Peak number of concurrent in-flight conversions "
+        "observed in this worker.\n"
+        "# TYPE nginx_markdown_inflight_high_watermark gauge\n"
+        "nginx_markdown_inflight_high_watermark %uA\n\n",
+        perf->inflight.high_watermark);
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_overload_total "
+        "Total requests rejected because the per-worker "
+        "inflight limit was reached.\n"
+        "# TYPE nginx_markdown_overload_total counter\n"
+        "nginx_markdown_overload_total %uA\n\n",
+        perf->inflight.overload_total);
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_backpressure_total "
+        "Body-filter output returned NGX_AGAIN (backpressure events).\n"
+        "# TYPE nginx_markdown_backpressure_total counter\n"
+        "nginx_markdown_backpressure_total %uA\n\n",
+        perf->backpressure_total);
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_backpressure_resume_total "
+        "Pending drain completed with NGX_OK (backpressure resumes).\n"
+        "# TYPE nginx_markdown_backpressure_resume_total counter\n"
+        "nginx_markdown_backpressure_resume_total %uA\n\n",
+        perf->backpressure_resume_total);
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_pending_output_high_watermark_bytes "
+        "Peak pending output bytes observed (CAS gauge).\n"
+        "# TYPE nginx_markdown_pending_output_high_watermark_bytes gauge\n"
+        "nginx_markdown_pending_output_high_watermark_bytes %uA\n\n",
+        perf->pending_output_high_watermark_bytes);
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_decompression_streaming_total "
+        "Decompression operations routed to streaming path.\n"
+        "# TYPE nginx_markdown_decompression_streaming_total counter\n"
+        "nginx_markdown_decompression_streaming_total %uA\n\n",
+        perf->decompression_streaming_total);
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_decompression_fullbuffer_total "
+        "Decompression operations routed to full-buffer path.\n"
+        "# TYPE nginx_markdown_decompression_fullbuffer_total counter\n"
+        "nginx_markdown_decompression_fullbuffer_total %uA\n\n",
+        perf->decompression_fullbuffer_total);
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_perf_decompression_budget_exceeded_total "
+        "Decompression budget exceeded triggering fail-open "
+        "(perf counter).\n"
+        "# TYPE nginx_markdown_perf_decompression_budget_exceeded_total "
+        "counter\n"
+        "nginx_markdown_perf_decompression_budget_exceeded_total %uA\n\n",
+        perf->decompression_budget_exceeded_total);
+    p = ngx_slprintf(p, end,
+        "# HELP nginx_markdown_zero_copy_output_total "
+        "Output chains delivered via zero-copy on NGX_OK.\n"
+        "# TYPE nginx_markdown_zero_copy_output_total counter\n"
+        "nginx_markdown_zero_copy_output_total %uA\n\n",
+        perf->zero_copy_output_total);
+    return ngx_slprintf(p, end,
+        "# HELP nginx_markdown_copied_output_total "
+        "Output chains delivered via buffer copy on NGX_OK.\n"
+        "# TYPE nginx_markdown_copied_output_total counter\n"
+        "nginx_markdown_copied_output_total %uA\n\n",
+        perf->copied_output_total);
+}
+
+
 /*
  * Render a metrics snapshot as Prometheus text exposition format.
  *
@@ -127,7 +208,7 @@ ngx_http_markdown_metrics_write_prometheus(
         snapshot->skips.conditional,
         snapshot->skips.config);
 
-    /* failures_total{reason=...} — lowercase snake_case per schema v1 */
+    /* failures_total{reason=...} — bounded failure categories. */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_failures_total "
         "Conversion failures by reason.\n"
@@ -135,9 +216,9 @@ ngx_http_markdown_metrics_write_prometheus(
         "nginx_markdown_failures_total"
         "{reason=\"conversion_error\"} %uA\n"
         "nginx_markdown_failures_total"
-        "{reason=\"memory_budget_exceeded\"} %uA\n"
+        "{reason=\"resource_limit\"} %uA\n"
         "nginx_markdown_failures_total"
-        "{reason=\"ffi_panic\"} %uA\n"
+        "{reason=\"system_error\"} %uA\n"
         "\n",
         snapshot->failures_conversion,
         snapshot->failures_resource_limit,
@@ -517,7 +598,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "# TYPE nginx_markdown_parse_timeouts_total counter\n"
         "nginx_markdown_parse_timeouts_total %uA\n"
         "\n",
-        snapshot->parse_interrupts.parse_timeouts_total);
+        snapshot->results.parse_interrupts.parse_timeouts_total);
 
     /* parse_budget_exceeded_total */
     p = ngx_slprintf(p, end,
@@ -526,7 +607,7 @@ ngx_http_markdown_metrics_write_prometheus(
         "# TYPE nginx_markdown_parse_budget_exceeded_total counter\n"
         "nginx_markdown_parse_budget_exceeded_total %uA\n"
         "\n",
-        snapshot->parse_interrupts.parse_budget_exceeded_total);
+        snapshot->results.parse_interrupts.parse_budget_exceeded_total);
 
     /* delivery_total (separate from decision_total) */
     p = ngx_slprintf(p, end,
@@ -547,7 +628,7 @@ ngx_http_markdown_metrics_write_prometheus(
         snapshot->results.decision_count);
 
     /*
-     * conversion_duration_seconds{le=...}
+     * conversion_latency_bucket_total{le=...}
      *
      * Emitted as cumulative buckets: each le value includes
      * all observations at or below that threshold.
@@ -555,19 +636,17 @@ ngx_http_markdown_metrics_write_prometheus(
      */
     p = ngx_slprintf(p, end,
         "# HELP "
-        "nginx_markdown_conversion_duration_seconds "
-        "Cumulative conversion count per latency bucket "
-        "(not a native Prometheus histogram; "
-        "no _sum/_count).\n"
+        "nginx_markdown_conversion_latency_bucket_total "
+        "Cumulative conversion count per latency boundary.\n"
         "# TYPE "
-        "nginx_markdown_conversion_duration_seconds gauge\n"
-        "nginx_markdown_conversion_duration_seconds"
+        "nginx_markdown_conversion_latency_bucket_total counter\n"
+        "nginx_markdown_conversion_latency_bucket_total"
         "{le=\"0.01\"} %uA\n"
-        "nginx_markdown_conversion_duration_seconds"
+        "nginx_markdown_conversion_latency_bucket_total"
         "{le=\"0.1\"} %uA\n"
-        "nginx_markdown_conversion_duration_seconds"
+        "nginx_markdown_conversion_latency_bucket_total"
         "{le=\"1.0\"} %uA\n"
-        "nginx_markdown_conversion_duration_seconds"
+        "nginx_markdown_conversion_latency_bucket_total"
         "{le=\"+Inf\"} %uA\n",
         snapshot->conversion_latency.le_10ms,
         snapshot->conversion_latency.le_10ms
@@ -617,32 +696,8 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->per_path.overflow_count);
 
-    p = ngx_slprintf(p, end,
-        "# HELP nginx_markdown_inflight_current "
-        "Number of markdown conversions currently in-flight "
-        "in this worker.\n"
-        "# TYPE nginx_markdown_inflight_current gauge\n"
-        "nginx_markdown_inflight_current %uA\n"
-        "\n",
-        snapshot->inflight.current);
-
-    p = ngx_slprintf(p, end,
-        "# HELP nginx_markdown_inflight_high_watermark "
-        "Peak number of concurrent in-flight conversions "
-        "observed in this worker.\n"
-        "# TYPE nginx_markdown_inflight_high_watermark gauge\n"
-        "nginx_markdown_inflight_high_watermark %uA\n"
-        "\n",
-        snapshot->inflight.high_watermark);
-
-    p = ngx_slprintf(p, end,
-        "# HELP nginx_markdown_overload_total "
-        "Total requests rejected because the per-worker "
-        "inflight limit was reached.\n"
-        "# TYPE nginx_markdown_overload_total counter\n"
-        "nginx_markdown_overload_total %uA\n"
-        "\n",
-        snapshot->inflight.overload_total);
+    p = ngx_http_markdown_metrics_write_prometheus_perf(
+        p, end, &snapshot->perf);
 
     /*
      * Per-path individual entries: walk the SHM RB-tree to emit

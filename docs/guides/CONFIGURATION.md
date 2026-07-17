@@ -19,11 +19,16 @@ The NGINX Markdown filter module provides fine-grained control over HTML-to-Mark
 
 ### Maintenance and Scope Notes
 
-- Directive names and accepted values in this guide are intended to match the module implementation in `components/nginx-module/src/ngx_http_markdown_filter_module.c`.
+- Directive names and accepted values in this guide are intended to match the
+  command table in
+  `components/nginx-module/src/ngx_http_markdown_config_directives_impl.h`.
 - Example configurations are operational templates, not guaranteed drop-in configs for every deployment.
 - For build/runtime preparation steps, use `BUILD_INSTRUCTIONS.md` and `INSTALLATION.md`.
 - Metrics endpoint examples use `/markdown-metrics` as a placeholder path. Use your configured `location` path if different.
 - For “which directive changes which runtime branch,” use [../architecture/CONFIG_BEHAVIOR_MAP.md](../architecture/CONFIG_BEHAVIOR_MAP.md) instead of duplicating that rationale here.
+- For the 1.0 stability classification and evidence for every command-table
+  entry, wire schema, and internal FFI group, use the
+  [Public Surface Inventory](../architecture/PUBLIC_SURFACE_INVENTORY.md).
 
 ### Configuration Contexts
 
@@ -89,7 +94,6 @@ An explicit directive always wins over the profile default for the same field.
 | `markdown_accept` | strict | strict | wildcard | strict |
 | `markdown_cache_validation` | full | ims_only | off | ims_only |
 | `markdown_streaming` | off | auto | force | auto |
-| `markdown_streaming_engine` | auto | auto | auto | auto |
 | `markdown_limits memory=` | 8m | 8m | 8m | 10m |
 | `markdown_limits timeout=` | 2s | 2s | 2s | 5s |
 | `markdown_limits streaming_buffer=` | — | 256k | 256k | 2m |
@@ -253,6 +257,32 @@ output you are willing to process.
 markdown_decompress_max_size 20m;
 ```
 
+#### markdown_auto_decompress
+
+**Syntax:** `markdown_auto_decompress on | off;`
+**Default:** `on`
+**Context:** http, server, location
+
+Controls whether the module automatically decompresses upstream compressed
+responses (gzip, deflate, brotli) before passing them to the Markdown conversion
+engine. When set to `off`, compressed responses are passed through to the client
+untouched and unconverted. When set to `on`, the module decompresses supported
+formats within the limits of `markdown_decompress_max_size`.
+
+Under the `streaming_first` profile with `markdown_auto_decompress on` and
+`markdown_cache_validation` not set to `full`, gzip and deflate responses
+(zlib-wrapped RFC 1950 or raw RFC 1951 deflate) are routed through streaming
+decompression for lower TTFB. Brotli remains on bounded full-buffer
+decompression. `streaming_first` is a preference for codecs and validation
+requirements supported by the streaming engine, not a guarantee for every
+content encoding.
+
+**Example:**
+```nginx
+# Disable automatic decompression; let compressed content pass through
+markdown_auto_decompress off;
+```
+
 #### markdown_parse_timeout
 
 **Syntax:** `markdown_parse_timeout <time>;`
@@ -288,8 +318,8 @@ markdown_parser_budget 32m;
 
 #### markdown_limits
 
-**Syntax:** `markdown_limits memory=<size> timeout=<time> streaming_buffer=<size> max_inflight=<N>;`  
-**Default:** `memory=10m timeout=5s streaming_buffer=2m max_inflight=64`  
+**Syntax:** `markdown_limits memory=<size> timeout=<time> streaming_buffer=<size> max_inflight=<N>;`
+**Default:** `memory=10m timeout=5s streaming_buffer=2m max_inflight=64`
 **Context:** http, server, location
 
 Unified limits block (Config V2, 0.9.0). Consolidates the removed
@@ -306,8 +336,9 @@ unspecified keys inherit (per-key inheritance).
   (0.9.0 production-protection default 64; enforced by the worker inflight
   guard).
 
-`nginx -t` rejects duplicate keys, unknown keys, zero values, and malformed
-size/time/integer values.
+`nginx -t` rejects duplicate keys, unknown keys, zero values for `memory`,
+`timeout`, and `streaming_buffer`, and malformed size/time/integer values.
+A `max_inflight` value of `0` means unlimited (no enforcement).
 
 **Example:**
 ```nginx
@@ -324,7 +355,7 @@ markdown_limits memory=8m timeout=2s streaming_buffer=256k max_inflight=64;
 
 #### markdown_error_policy
 
-**Syntax:** `markdown_error_policy pass | fail_closed | status <code>;`  
+**Syntax:** `markdown_error_policy pass | fail_closed | status <code>;`
 **Default:** `pass`  
 **Context:** http, server, location
 
@@ -359,17 +390,17 @@ full-buffer and streaming paths).
 
 #### markdown_flavor
 
-**Syntax:** `markdown_flavor commonmark | gfm | mdx | org-mode;`
+**Syntax:** `markdown_flavor commonmark | gfm;`
 **Default:** `commonmark`  
 **Context:** http, server, location
 
 Markdown flavor to generate:
 - `commonmark`: CommonMark specification (standard)
 - `gfm`: GitHub Flavored Markdown (includes tables, strikethrough, task lists)
-- `mdx`: experimental MDX-oriented selector; output fidelity depends on the
-  active converter integration
-- `org-mode`: experimental Org-mode-oriented selector; output fidelity depends
-  on the active converter integration
+
+The former experimental `mdx` and `org-mode` values never had distinct
+production conversion semantics and are removed in v0.9.1. `nginx -t` rejects
+either value and tells operators to select `commonmark` or `gfm` explicitly.
 
 **Example:**
 ```nginx
@@ -431,8 +462,8 @@ url: "https://example.com/page"
 
 #### markdown_accept
 
-**Syntax:** `markdown_accept strict | wildcard | force;`  
-**Default:** `strict`  
+**Syntax:** `markdown_accept strict | wildcard | force;`
+**Default:** `strict`
 **Context:** http, server, location
 
 Accept-header negotiation policy. Replaces the removed
@@ -507,8 +538,8 @@ markdown_auth_cookies session* auth_token PHPSESSID wordpress_logged_in_*;
 
 #### markdown_cache_validation
 
-**Syntax:** `markdown_cache_validation off | ims_only | full;`  
-**Default:** `ims_only`  
+**Syntax:** `markdown_cache_validation off | ims_only | full;`
+**Default:** `ims_only`
 **Context:** http, server, location
 
 Cache-validation policy. Consolidates the removed `markdown_etag` and
@@ -725,8 +756,8 @@ Key properties:
    are strictly validated (control characters, comma chains, userinfo `@`, path
    `/`/`?`, port range, IPv6 brackets, raw Unicode IDN). Invalid values fall back
    to the `Host` header or a safe default. The `Forwarded` header takes
-   precedence over `X-Forwarded-*`; multi-hop comma chains use the left-most
-   (closest-to-client) value.
+   precedence over `X-Forwarded-*`; multi-hop comma chains use the right-most
+   (closest-to-trusted-proxy) value to prevent client-prepended spoofing.
 
 **Example:**
 ```nginx
@@ -773,12 +804,9 @@ auto-mode threshold control.
 **Default:** `auto`
 **Context:** http, server, location
 
-Streaming *enablement* policy (Config V2, 0.9.0). This is the selector that
-decides **whether** streaming is attempted; it is distinct from
-`markdown_streaming_engine`, which selects **which** streaming backend
-implementation is used. The two are independent and both remain first-class
-directives — `markdown_streaming` is not an alias for
-`markdown_streaming_engine`.
+This is the sole public selector for the full-buffer and streaming processing
+paths. Backend implementation selection is internal and is not an independent
+operator contract.
 
 - `off` — never stream; always use the full-buffer path.
 - `auto` — stream large responses (Content-Length at or above
@@ -806,41 +834,23 @@ markdown_cache_validation ims_only;
 markdown_streaming auto;
 ```
 
-#### markdown_streaming_engine
+#### markdown_streaming_engine (removed in v0.9.1)
 
-**Syntax:** `markdown_streaming_engine off | on | auto;`
-**Default:** `auto`
-**Context:** http, server, location
+The implementation-level selector is now a reject-only legacy directive. It
+duplicated `markdown_streaming` without providing an independent supported
+operator choice. `nginx -t` fails with a value-specific migration hint; there
+is no silent alias.
 
-Controls whether the streaming conversion engine is used. When `off`,
-all requests use the full-buffer conversion path.
-When `auto`, the engine is selected automatically per-request.
-
-- `off`: Disable streaming. All requests use the full-buffer path.
-- `on`: Enable streaming for all eligible requests.
-- `auto`: Enable streaming with automatic fallback to full-buffer when the streaming
-  engine encounters unsupported features (e.g., tables requiring full-buffer processing).
-
-**Note**: `$variable` support was removed in v0.8.0. The directive only accepts
-the enum values `off`, `on`, and `auto`. If your configuration uses a variable
-(e.g. `markdown_streaming_engine $flag`), `nginx -t` will reject it.
-
-**Example:**
-```nginx
-# Enable streaming for all requests
-markdown_streaming_engine on;
-
-# Auto mode with fallback
-markdown_streaming_engine auto;
-
-# Disable streaming
-markdown_streaming_engine off;
-```
+| Removed configuration | Required v0.9.1 configuration |
+|-----------------------|--------------------------------|
+| `markdown_streaming_engine off;` | `markdown_streaming off;` |
+| `markdown_streaming_engine auto;` | `markdown_streaming auto;` |
+| `markdown_streaming_engine on;` | `markdown_streaming force;` |
 
 #### markdown_streaming_budget
 
-**Syntax:** `markdown_streaming_budget <size>;`  
-**Status:** REMOVED in 0.9.0 — use `markdown_limits streaming_buffer=<size>`  
+**Syntax:** `markdown_streaming_budget <size>;`
+**Status:** REMOVED in 0.9.0 — use `markdown_limits streaming_buffer=<size>`
 **Context:** http, server, location
 
 Config V2 consolidates resource limits in `markdown_limits`. In 0.9.0,
@@ -871,7 +881,7 @@ Key points for operators:
 
 - A single `markdown_error_policy` directive controls both paths. There is no
   per-path override.
-- When `markdown_streaming_engine` is `off` (or resolves to off), the streaming
+- When `markdown_streaming` is `off`, the streaming
   pre-commit path is never entered; `markdown_error_policy` applies only to the
   full-buffer path.
 - Neither the pre-0.9.0 directives nor `markdown_error_policy` controls the
@@ -970,18 +980,54 @@ guidance.
 ```nginx
 # Phase 0: shadow mode verification
 markdown_filter on;
-markdown_streaming_engine off;
+markdown_streaming off;
 markdown_streaming_shadow on;
 
 # Phase 1+: disable shadow after verification
 markdown_streaming_shadow off;
 ```
 
+#### markdown_streaming_zero_copy (v0.9.1)
+
+**Syntax:** `markdown_streaming_zero_copy on | off;`
+**Default:** `off`
+**Context:** http, server, location
+
+Enables zero-copy output for streaming chunks. When enabled, non-terminal
+streaming output buffers reference Rust-owned memory directly via the buffer
+factory, avoiding an intermediate pool-copy. A pool cleanup handler ensures
+the Rust buffer is freed on request teardown.
+
+Terminal `last_buf` chunks and chunks produced during backpressure always use
+pool-copy regardless of this setting.
+
+**Rollback:** Set to `off` and reload (`nginx -s reload`). New requests
+immediately use the pool-copy path. See
+[Performance Rollout and Rollback Guide](performance-rollout-091.md) for details.
+
+**Metrics:**
+
+| Metric | Description |
+|--------|-------------|
+| `zero_copy_output_total` | Chunks delivered via zero-copy path |
+| `copied_output_total` | Chunks delivered via pool-copy path |
+
+**Example:**
+
+```nginx
+location /docs {
+    markdown_filter on;
+    markdown_streaming force;
+    markdown_streaming_zero_copy on;
+    proxy_pass http://backend;
+}
+```
+
 #### Streaming Candidacy Directives (v0.8.0)
 
 The following directives were introduced in v0.8.0 to give operators fine-grained
 control over which responses enter the streaming conversion path and how the
-streaming engine batches output. They complement `markdown_streaming_engine` and
+streaming engine batches output. They complement `markdown_streaming` and
 the streaming buffer setting in `markdown_limits` (see above).
 
 ##### markdown_stream_threshold
@@ -1076,7 +1122,7 @@ markdown_stream_flush_min 64k;
 
 Space-separated list of MIME types to exclude from streaming conversion. These
 types are added to the built-in hard exclusions and never enter the streaming
-path, regardless of `markdown_streaming_engine` setting.
+path, regardless of the `markdown_streaming` setting.
 
 User-configured exclusions are **additive** to the built-in hard exclusions:
 
@@ -1103,7 +1149,7 @@ markdown_stream_excluded_types text/csv application/xml application/rss+xml;
 ```nginx
 http {
     markdown_filter on;
-    markdown_streaming_engine on;
+    markdown_streaming force;
     markdown_stream_threshold 1m;
 
     server {
@@ -1121,7 +1167,7 @@ http {
 ```nginx
 location /large-docs {
     # Only stream responses >= 2 MB
-    markdown_streaming_engine auto;
+    markdown_streaming auto;
     markdown_stream_threshold 2m;
 
     # Larger pre-commit buffer for complex pages
@@ -1137,7 +1183,7 @@ location /large-docs {
 **Adding custom excluded types:**
 ```nginx
 location /api {
-    markdown_streaming_engine auto;
+    markdown_streaming auto;
 
     # Exclude CSV and XML feeds from streaming
     markdown_stream_excluded_types text/csv application/atom+xml;
@@ -1150,7 +1196,7 @@ location /api {
 ```nginx
 location /legacy {
     # Force full-buffer path regardless of response size
-    markdown_streaming_engine off;
+    markdown_streaming off;
     proxy_pass http://backend;
 }
 ```
@@ -1205,14 +1251,14 @@ configured together.
 
 | Directive Pair | Interaction Summary |
 |----------------|---------------------|
-| `markdown_streaming_engine` + `markdown_filter` | Streaming only applies when `markdown_filter` is `on` (or resolves to a truthy value). If the filter is disabled, the streaming engine setting is irrelevant — no conversion of any kind occurs. |
-| `markdown_streaming_engine` + `markdown_limits` | The unified `markdown_limits memory=<size>` sets the full-buffer ceiling, while `markdown_limits streaming_buffer=<size>` sets the streaming working-buffer ceiling. |
-| `markdown_streaming_engine` + `markdown_error_policy` | The unified error policy applies to both full-buffer and streaming pre-commit failures. See the [error policy section](#markdown_error_policy) above. |
-| `markdown_streaming_engine` + `markdown_cache_validation` | ETags are generated from converted output. For full-buffer responses, the complete Markdown is available before headers are sent, so ETag generation works normally. For streaming responses that have crossed the commit boundary, response headers (including `Content-Type: text/markdown`) are already sent — ETag cannot be retroactively added. Streaming responses do **not** carry an ETag header. When `markdown_cache_validation` is `full` (the `strict_cache` profile default), the streaming selector always selects full-buffer because full ETag support requires the complete converted output before headers. To actually activate streaming in `auto` mode, use `markdown_cache_validation ims_only` or `off` (the default for `balanced` and built-in). |
-| `markdown_stream_threshold` + `Content-Length` | When the upstream response includes a `Content-Length` header and the value is below `markdown_stream_threshold`, the response always uses the full-buffer path regardless of `markdown_streaming_engine on`. This is a size-based eligibility gate, not an error. |
+| `markdown_streaming` + `markdown_filter` | Streaming only applies when `markdown_filter` is `on` (or resolves to a truthy value). If the filter is disabled, the streaming policy is irrelevant — no conversion of any kind occurs. |
+| `markdown_streaming` + `markdown_limits` | The unified `markdown_limits memory=<size>` sets the full-buffer ceiling, while `markdown_limits streaming_buffer=<size>` sets the streaming working-buffer ceiling. |
+| `markdown_streaming` + `markdown_error_policy` | The unified error policy applies to both full-buffer and streaming pre-commit failures. See the [error policy section](#markdown_error_policy) above. |
+| `markdown_streaming` + `markdown_cache_validation` | ETags are generated from converted output. For full-buffer responses, the complete Markdown is available before headers are sent, so ETag generation works normally. For streaming responses that have crossed the commit boundary, response headers (including `Content-Type: text/markdown`) are already sent — ETag cannot be retroactively added. Streaming responses do **not** carry an ETag header. When `markdown_cache_validation` is `full` (the `strict_cache` profile default), the streaming selector always selects full-buffer because full ETag support requires the complete converted output before headers. To actually activate streaming in `auto` mode, use `markdown_cache_validation ims_only` or `off` (the default for `balanced` and built-in). |
+| `markdown_stream_threshold` + `Content-Length` | In `auto` mode, a known length below `markdown_stream_threshold` selects full-buffer. `force` bypasses the size threshold after hard eligibility and cache-validation gates. |
 | `markdown_stream_excluded_types` + `markdown_content_types` | Both must permit the content type for streaming conversion. `markdown_content_types` controls whether the module processes a response at all (any path). `markdown_stream_excluded_types` is an additional filter that prevents specific types from entering the streaming path. A type excluded from streaming may still be converted via full-buffer if it passes the general eligibility checks. |
 | `markdown_stream_precommit_buffer` + `markdown_error_policy` | The pre-commit buffer enables fail-open replay: if an error occurs before the commit boundary, the buffered original HTML is replayed to the client. When `markdown_stream_precommit_buffer 0` (replay disabled), any pre-commit error immediately triggers the `markdown_error_policy` without replay capability. |
-| `markdown_streaming_engine auto` + explicit value | When `markdown_streaming_engine` is set to a fixed value (`off`, `on`, or `auto`), it applies for the entire request lifecycle. Use different values at different configuration levels (http/server/location) for per-path control. |
+| `markdown_streaming` + explicit value | A fixed `off`, `auto`, or `force` value applies for the entire request lifecycle. Use different values at different configuration levels (http/server/location) for per-path control. |
 
 **Non-obvious behaviors to watch for:**
 
@@ -1235,9 +1281,9 @@ configured together.
    close to `markdown_limits streaming_buffer=<size>` leaves little room for
    converter working memory and may trigger budget-exceeded errors.
 
-5. **Streaming engine configuration inheritance.** A `markdown_streaming_engine`
+5. **Streaming policy inheritance.** A `markdown_streaming`
    directive at the `http` level is inherited by all `server`/`location` blocks.
-   Override with an explicit value (`off`, `on`, `auto`) in specific locations to
+   Override with an explicit value (`off`, `auto`, `force`) in specific locations to
    exclude them from the inherited setting.
 
 6. **Default `ims_only` allows streaming.** The default cache validation
@@ -1252,7 +1298,7 @@ configured together.
 http {
     markdown_filter on;
     markdown_limits memory=4m;           # Applies to both paths
-    markdown_streaming_engine auto;
+    markdown_streaming auto;
     markdown_stream_threshold 1m;
     markdown_cache_validation ims_only;  # Allows streaming + IMS
 
@@ -1458,13 +1504,25 @@ markdown_chars_per_token 38;
 
 ### OpenTelemetry Integration
 
+> **Stability:** The OTel family is explicitly experimental before 1.0. Span
+> creation and request-scoped export through an internal subrequest are
+> implemented. Collector-backed E2E coverage is not yet part of the release
+> contract. Five unimplemented or duplicate controls are reject-only in 0.9.1;
+> `nginx -t` fails instead of accepting settings with no runtime effect. See the
+> [Public Surface Inventory](../architecture/PUBLIC_SURFACE_INVENTORY.md#active-experimental-and-incomplete-otel-directives).
+
 #### markdown_otel
 
 **Syntax:** `markdown_otel on | off;`
 **Default:** `off`
 **Context:** http, server, location
 
-Enable OpenTelemetry span creation for conversion requests. When enabled, each conversion creates a span with attributes for flavor, engine, content_type, input/output bytes, and reason code.
+Enable OpenTelemetry span creation for conversion requests. When enabled, each
+conversion creates a span with attributes for flavor, engine, content_type,
+input/output bytes, and reason code. Spans do not include the full request URI
+by default. When a request URI is present, the module emits the low-cardinality
+`uri_route=redacted` label instead to avoid leaking private path data and to
+avoid high-cardinality trace attributes.
 
 **Example:**
 ```nginx
@@ -1499,60 +1557,55 @@ markdown_otel_endpoint /_otel_export;
 #### markdown_otel_tracing
 
 **Syntax:** `markdown_otel_tracing on | off;`
-**Default:** `off`
 **Context:** http, server, location
+**Status:** reject-only in 0.9.1
 
-Enable OTel span creation for conversion request tracing. When enabled, each conversion creates a span with trace context propagation and conversion attributes.
+This duplicate enable switch is no longer accepted. Use `markdown_otel on;`.
 
 ---
 
 #### markdown_otel_metrics
 
 **Syntax:** `markdown_otel_metrics on | off;`
-**Default:** `off`
 **Context:** http, server, location
+**Status:** reject-only in 0.9.1
 
-Enable OTel metrics export via OTLP protocol.
+OTLP metrics export is not implemented. Use a `markdown_metrics` location for
+the module's JSON, text, or Prometheus metrics endpoint.
 
 ---
 
 #### markdown_otel_service_name
 
 **Syntax:** `markdown_otel_service_name <name>;`
-**Default:** `nginx-markdown`
 **Context:** http, server, location
+**Status:** reject-only in 0.9.1
 
-Service name label for OTel resource attributes.
-
-**Example:**
-```nginx
-markdown_otel_service_name my-nginx-markdown;
-```
+The span renderer currently uses the fixed service name `nginx-markdown`.
+Service-name override is not implemented, so this directive fails `nginx -t`.
 
 ---
 
 #### markdown_otel_span_buffer_size
 
 **Syntax:** `markdown_otel_span_buffer_size <number>;`
-**Default:** `1024`
 **Context:** http, server, location
+**Status:** reject-only in 0.9.1
 
-Buffer size for spans when the collector is unreachable. Buffered spans are retried on the next export window.
+The request-scoped exporter has no retry queue. This directive fails
+`nginx -t` instead of pretending to configure buffering.
 
 ---
 
 #### markdown_otel_export_timeout
 
 **Syntax:** `markdown_otel_export_timeout <time>;`
-**Default:** `5s`
 **Context:** http, server, location
+**Status:** reject-only in 0.9.1
 
-Timeout for OTLP HTTP export requests.
-
-**Example:**
-```nginx
-markdown_otel_export_timeout 10s;
-```
+The subrequest exporter does not implement a module-owned timeout. This
+directive fails `nginx -t`; configure proxy timeouts on the internal export
+location when required.
 
 ---
 
@@ -1565,32 +1618,9 @@ markdown_otel_export_timeout 10s;
 **Context:** http, server, location
 **Status:** REMOVED in 0.9.0 — no direct replacement
 
-Routes responses whose body size is at or above the configured threshold to the incremental processing path. When set to `off` (the default), all responses use the existing full-buffer path and behavior is identical to a build without this feature.
-
-**Valid Units:** `k` (kilobytes), `m` (megabytes)
-
-**Example:**
-```nginx
-# Route responses >= 512KB to incremental path
-markdown_large_body_threshold 512k;
-
-# Disable incremental path (default)
-markdown_large_body_threshold off;
-```
-
-**Behavior:**
-- `off` (default): All responses use the full-buffer conversion path
-- `<size>`: Responses at or above the threshold use the incremental conversion path
-
-**Notes:**
-- The incremental path requires the Rust converter to be built with the `incremental` feature (`cargo build --release --features incremental`). If the feature is not compiled but a threshold is configured, the module logs a warning and falls back to the full-buffer path.
-- HEAD requests, 304 responses, and fail-open replays always use the full-buffer path regardless of the threshold setting.
-- Path selection is based on `Content-Length` when available; for chunked responses without `Content-Length`, the module buffers first and evaluates the threshold against the buffered size.
-- Path hit counters (`fullbuffer_path_hits`, `incremental_path_hits`) are exposed through the `markdown_metrics` endpoint.
-- **Hard Limit**: The Rust incremental converter enforces a strict 64 MiB (`64 * 1024 * 1024` bytes) maximum buffer limit. Responses exceeding this size will trigger a `MemoryLimit` error, resulting in the `markdown_error_policy` policy being applied.
-
-
-For the design rationale and rollout guidance, see [LARGE_RESPONSE_DESIGN.md](../architecture/LARGE_RESPONSE_DESIGN.md) and [LARGE_RESPONSE_ROLLOUT.md](LARGE_RESPONSE_ROLLOUT.md).
+This directive is reject-only and must not appear in an active configuration.
+Use `markdown_streaming off|auto|force` with `markdown_stream_threshold` and
+the bounded streaming controls instead.
 
 ---
 
@@ -1835,6 +1865,13 @@ markdown_max_size 5m;
 markdown_limits memory=5m;
 ```
 
+Two additional compatibility names are also reject-only:
+
+| Removed directive | Required replacement |
+|-------------------|----------------------|
+| `markdown_etag_policy` | `markdown_cache_validation` |
+| `markdown_forwarded_headers` | `markdown_trusted_proxies <CIDR>...` |
+
 ---
 
 ### Removed Directives
@@ -1870,7 +1907,7 @@ http {
     
     # Configure resource limits
     markdown_limits memory=10m;
-    markdown_timeout 5s;
+    markdown_limits timeout=5s;
     
     # Use fail-open strategy (recommended)
     markdown_error_policy pass;
@@ -2040,7 +2077,7 @@ http {
     
     # Conservative resource limits
     markdown_limits memory=5m;
-    markdown_timeout 3s;
+    markdown_limits timeout=3s;
     
     # Fail-closed for critical applications
     markdown_error_policy fail_closed;
@@ -2086,7 +2123,7 @@ http {
     
     # Aggressive resource limits
     markdown_limits memory=2m;
-    markdown_timeout 1s;
+    markdown_limits timeout=1s;
     
     # Fail-open for availability
     markdown_error_policy pass;
@@ -2133,7 +2170,7 @@ http {
     # Global defaults
     markdown_filter on;
     markdown_limits memory=10m;
-    markdown_timeout 5s;
+    markdown_limits timeout=5s;
     markdown_error_policy pass;
     
     # Tenant A: Public documentation site
@@ -2169,7 +2206,7 @@ http {
         
         location / {
             markdown_limits memory=5m;  # Smaller limit
-            markdown_timeout 2s;   # Faster timeout
+            markdown_limits timeout=2s;   # Faster timeout
             markdown_cache_validation ims_only;
             proxy_pass http://backend-c;
             
@@ -2272,7 +2309,7 @@ http {
 http {
     markdown_filter on;
     markdown_limits memory=10m;
-    markdown_timeout 5s;
+    markdown_limits timeout=5s;
     
     server {
         server_name api.example.com;
@@ -2285,11 +2322,11 @@ http {
     
     server {
         server_name docs.example.com;
-        markdown_timeout 3s;  # Override timeout
+        markdown_limits timeout=3s;  # Override timeout
         
         location / {
             # Inherits: markdown_filter on (from http)
-            # Inherits: markdown_timeout 3s (from server)
+            # Inherits: markdown_limits timeout=3s (from server)
             # Inherits: markdown_limits memory=10m (from http)
         }
     }
@@ -2304,17 +2341,17 @@ http {
 http {
     markdown_filter on;
     markdown_limits memory=10m;
-    markdown_timeout 5s;
+    markdown_limits timeout=5s;
     markdown_flavor commonmark;
     
     server {
-        markdown_timeout 3s;  # Override
+        markdown_limits timeout=3s;  # Override
          
         location /docs {
             markdown_flavor gfm;  # Override
             markdown_limits memory=5m; # Override
             # Inherits: markdown_filter on (from http)
-            # Inherits: markdown_timeout 3s (from server)
+            # Inherits: markdown_limits timeout=3s (from server)
         }
         
         location /api {
@@ -2345,7 +2382,7 @@ http {
     # Global defaults for all sites
     markdown_filter on;
     markdown_limits memory=10m;
-    markdown_timeout 5s;
+    markdown_limits timeout=5s;
     markdown_error_policy pass;
     
     server {
@@ -2380,7 +2417,7 @@ Always configure resource limits to prevent resource exhaustion:
 ```nginx
 # Conservative limits for production
 markdown_limits memory=5m;      # Limit response size
-markdown_timeout 3s;       # Limit conversion time
+markdown_limits timeout=3s;       # Limit conversion time
 ```
 
 **Recommendations:**
@@ -2495,6 +2532,10 @@ server {
 
 ## Performance Tuning
 
+> For detailed performance profile comparison, tuning ranges per deployment
+> pattern, and production example configurations, see the
+> [Performance Profile Comparison and Tuning Guide](performance-profiles.md).
+
 ### 1. Optimize Resource Limits
 
 Balance between functionality and performance:
@@ -2502,7 +2543,7 @@ Balance between functionality and performance:
 ```nginx
 # Aggressive limits for high-traffic sites
 markdown_limits memory=2m;      # Smaller limit
-markdown_timeout 1s;       # Faster timeout
+markdown_limits timeout=1s;       # Faster timeout
 ```
 
 **Tuning Guidelines:**
@@ -2654,7 +2695,7 @@ http {
     # Markdown filter global settings
     markdown_filter on;
     markdown_limits memory=10m;
-    markdown_timeout 5s;
+    markdown_limits timeout=5s;
     markdown_error_policy pass;
     markdown_flavor commonmark;
     markdown_auth_policy allow;
@@ -2744,7 +2785,7 @@ http {
     # Markdown filter with verbose logging
     markdown_filter on;
     markdown_limits memory=10m;
-    markdown_timeout 10s;  # Longer timeout for debugging
+    markdown_limits timeout=10s;  # Longer timeout for debugging
     markdown_error_policy pass;
     markdown_flavor gfm;
     markdown_token_estimate on;
@@ -2794,7 +2835,7 @@ http {
     # Aggressive markdown filter settings
     markdown_filter on;
     markdown_limits memory=2m;
-    markdown_timeout 1s;
+    markdown_limits timeout=1s;
     markdown_error_policy pass;
     markdown_flavor commonmark;
     markdown_token_estimate off;
@@ -2977,3 +3018,4 @@ tail -f /var/log/nginx/error.log | grep "conversion time"
 | 0.8.0 | 2026-06-16 | Codex | Added missing directive documentation: `markdown_content_types`, `markdown_prune_noise`, `markdown_prune_selectors`, `markdown_prune_protection_selectors`, `markdown_llm_provider`, `markdown_chars_per_token`, OpenTelemetry family (`markdown_otel`, `markdown_otel_endpoint`, `markdown_otel_tracing`, `markdown_otel_metrics`, `markdown_otel_service_name`, `markdown_otel_span_buffer_size`, `markdown_otel_export_timeout`), `markdown_metrics_per_path`, `markdown_metrics_per_path_cardinality`; added deprecated directives section for `markdown_max_size` and `markdown_streaming_auto_threshold` |
 | 0.8.3 | 2026-06-26 | Kang | No configuration changes; version alignment with 0.8.3 release |
 | 0.9.0 | 2026-06-28 | Kang | Added Profiles section (`markdown_profile` directive, three profiles, merge order, forced fields, conflict rules) |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

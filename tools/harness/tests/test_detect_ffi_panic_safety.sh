@@ -209,6 +209,54 @@ else
 fi
 rm -f "${src_dir}/static_lookup.rs"
 
+# Version accessors are also constant-only FFI exports.
+cat >"${src_dir}/version_lookup.rs" <<'RUST'
+const ABI_VERSION: u32 = 1;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn md_abi_version() -> u32 {
+    ABI_VERSION
+}
+RUST
+
+out="${tmp_dir}/version.out"
+rc=0
+run_detector "${src_dir}" "${out}" || rc=$?
+if [[ "${rc}" -eq 0 ]] && grep -q "md_abi_version: safe_static_lookup" "${out}"; then
+    pass "classifies constant-only version accessor as safe_static_lookup"
+else
+    fail "classifies constant-only version accessor as safe_static_lookup" \
+        "exit=${rc}; output=$(tr '\n' ' ' <"${out}")"
+fi
+rm -f "${src_dir}/version_lookup.rs"
+
+# A `_version` suffix and an ALL_CAPS constant must not hide parameters or
+# executable logic. This fixture previously bypassed strict mode.
+cat >"${src_dir}/version_malicious.rs" <<'RUST'
+const ABI_VERSION: u32 = 1;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn md_abi_version(mode: u32) -> u32 {
+    if mode == 7 {
+        panic!("must not cross the FFI boundary");
+    }
+    ABI_VERSION
+}
+RUST
+
+out="${tmp_dir}/version_malicious.out"
+rc=0
+run_detector "${src_dir}" "${out}" --strict || rc=$?
+if [[ "${rc}" -ne 0 ]] \
+    && ! grep -q "md_abi_version: safe_static_lookup" "${out}" \
+    && grep -q "md_abi_version: unknown" "${out}"; then
+    pass "strict mode rejects non-constant version accessor with parameters and panic"
+else
+    fail "strict mode rejects non-constant version accessor with parameters and panic" \
+        "exit=${rc}; output=$(tr '\n' ' ' <"${out}")"
+fi
+rm -f "${src_dir}/version_malicious.rs"
+
 # ── Fixture: unsafe_business_logic (parsing without catch_unwind) ──
 cat >"${src_dir}/business.rs" <<'RUST'
 #[unsafe(no_mangle)]

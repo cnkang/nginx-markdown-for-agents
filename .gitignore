@@ -61,8 +61,12 @@ tools/corpus/samples/
 tools/corpus/test-corpus-conversion/target/
 
 # Generated large test fixtures (regenerated via tests/corpus/large/generate-large-fixtures.sh)
-tests/corpus/large/*.html
-tests/corpus/large/*.meta.json
+# The 1 MiB fixture is required by the 0.9.1 benchmark evidence gate and
+# is committed; larger fixtures (10 MiB, 64 MiB) are generated on demand.
+tests/corpus/large/large-10mb.html
+tests/corpus/large/large-10mb.meta.json
+tests/corpus/large/large-64mb.html
+tests/corpus/large/large-64mb.meta.json
 
 # Generic build output
 build/

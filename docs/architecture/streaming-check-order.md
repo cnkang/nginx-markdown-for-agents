@@ -122,7 +122,7 @@ the request passes through without ever reaching the streaming path selector.
 - **Location**: `ngx_http_markdown_eligibility.c`, inside
   `ngx_http_markdown_check_eligibility()`.
 - **Code**: `ngx_http_markdown_check_size_limit(r, conf)` -- checks
-  Content-Length against `markdown_max_size`.
+  Content-Length against `markdown_limits memory=<size>`.
 - **Ordering**: Executes at step 4, inside eligibility check.
 - **Note**: When Content-Length is absent (chunked), the check passes and size
   enforcement is deferred to the body filter (budget tracking during streaming

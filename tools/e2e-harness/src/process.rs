@@ -27,6 +27,7 @@ impl NginxProcess {
     /// # Arguments
     ///
     /// * `nginx_bin` - Path to the NGINX binary.
+    /// * `runtime_prefix` - Isolated prefix for NGINX runtime paths.
     /// * `config_path` - Path to the `nginx.conf`.
     /// * `base_url` - Base URL for readiness probing.
     /// * `timeout` - Maximum time to wait for readiness.
@@ -36,24 +37,29 @@ impl NginxProcess {
     /// An `NginxProcess` handle on success.
     pub fn start(
         nginx_bin: &Path,
+        runtime_prefix: &Path,
         config_path: &Path,
         base_url: &str,
         timeout: Duration,
     ) -> Result<Self> {
-        let mut child = Command::new(nginx_bin)
-            .arg("-c")
-            .arg(config_path)
-            .arg("-g")
-            .arg("daemon off;")
-            .spawn()?;
+        Self::start_command(
+            build_nginx_command(nginx_bin, runtime_prefix, config_path),
+            base_url,
+            timeout,
+        )
+    }
 
+    fn start_command(mut command: Command, base_url: &str, timeout: Duration) -> Result<Self> {
+        let child = command.spawn()?;
         let pid = child.id();
-        wait_ready_with_child(Some(&mut child), base_url, timeout)?;
-        Ok(NginxProcess {
+        let mut process = NginxProcess {
             child: Some(child),
             pid,
             timeout,
-        })
+        };
+
+        wait_ready_with_child(process.child.as_mut(), base_url, timeout)?;
+        Ok(process)
     }
 
     /// Wait for NGINX to become ready by probing the base URL.
@@ -69,6 +75,18 @@ impl NginxProcess {
         // Keep the method for external callers and tests.
         wait_ready_with_child(None, base_url, timeout)
     }
+}
+
+fn build_nginx_command(nginx_bin: &Path, runtime_prefix: &Path, config_path: &Path) -> Command {
+    let mut command = Command::new(nginx_bin);
+    command
+        .arg("-p")
+        .arg(runtime_prefix)
+        .arg("-c")
+        .arg(config_path)
+        .arg("-g")
+        .arg("daemon off;");
+    command
 }
 
 fn wait_ready_with_child(
@@ -111,6 +129,15 @@ impl NginxProcess {
     /// * `timeout` - Maximum time to wait after SIGTERM before SIGKILL.
     pub fn stop_graceful(&mut self, timeout: Duration) -> Result<()> {
         if let Some(child) = self.child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(_status)) => {
+                    self.child = None;
+                    return Ok(());
+                }
+                Ok(None) => {}
+                Err(e) => bail!("Error checking NGINX child status: {e}"),
+            }
+
             #[cfg(unix)]
             {
                 let _ = Command::new("kill")
@@ -169,5 +196,125 @@ impl Drop for NginxProcess {
         if self.child.is_some() {
             let _ = self.stop_force();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    #[cfg(unix)]
+    unsafe extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+        fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+    }
+
+    #[cfg(unix)]
+    struct ProcessCleanupGuard(Option<i32>);
+
+    #[cfg(unix)]
+    impl Drop for ProcessCleanupGuard {
+        fn drop(&mut self) {
+            if let Some(pid) = self.0 {
+                unsafe {
+                    kill(pid, 9);
+                    waitpid(pid, std::ptr::null_mut(), 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nginx_command_uses_isolated_runtime_prefix() {
+        let command = build_nginx_command(
+            Path::new("/opt/nginx/sbin/nginx"),
+            Path::new("/tmp/e2e-runtime"),
+            Path::new("/tmp/e2e-runtime/nginx.conf"),
+        );
+        let args: Vec<&OsStr> = command.get_args().collect();
+
+        assert_eq!(
+            args,
+            [
+                OsStr::new("-p"),
+                OsStr::new("/tmp/e2e-runtime"),
+                OsStr::new("-c"),
+                OsStr::new("/tmp/e2e-runtime/nginx.conf"),
+                OsStr::new("-g"),
+                OsStr::new("daemon off;"),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn start_reaps_child_when_readiness_times_out() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let pid_file = temp.path().join("fake-nginx.pid");
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg(format!("echo $$ > '{}'; exec sleep 30", pid_file.display()));
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
+        drop(listener);
+
+        let error = match NginxProcess::start_command(
+            command,
+            &format!("http://127.0.0.1:{port}/"),
+            Duration::from_millis(150),
+        ) {
+            Ok(_) => panic!("fake NGINX unexpectedly passed readiness"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("did not become ready"),
+            "unexpected start failure: {error:#}"
+        );
+
+        let pid_deadline = Instant::now() + Duration::from_secs(1);
+        while !pid_file.exists() && Instant::now() < pid_deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let pid: i32 = std::fs::read_to_string(&pid_file)?.trim().parse()?;
+        let mut cleanup = ProcessCleanupGuard(Some(pid));
+        let wait_result = unsafe { waitpid(pid, std::ptr::null_mut(), 1) };
+        assert_eq!(
+            wait_result, -1,
+            "child PID {pid} was still running or left as a zombie"
+        );
+        cleanup.0 = None;
+
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn graceful_stop_does_not_signal_after_child_was_reaped() -> Result<()> {
+        let mut exited_child = Command::new("/usr/bin/true").spawn()?;
+        exited_child.wait()?;
+
+        let mut sentinel = Command::new("/bin/sleep").arg("30").spawn()?;
+        let mut process = NginxProcess {
+            child: Some(exited_child),
+            // Simulate the kernel reusing the reaped child's PID.
+            pid: sentinel.id(),
+            timeout: Duration::from_secs(1),
+        };
+
+        process.stop_graceful(Duration::from_millis(50))?;
+        let sentinel_status = sentinel.try_wait()?;
+        if sentinel_status.is_none() {
+            sentinel.kill()?;
+        }
+        sentinel.wait()?;
+
+        assert!(
+            sentinel_status.is_none(),
+            "graceful stop signalled a PID after its managed child was reaped"
+        );
+        Ok(())
     }
 }

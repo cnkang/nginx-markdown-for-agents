@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +38,7 @@ GITHUB_WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 CFLITE_PR_WORKFLOW = "cflite_pr.yml"
 CFLITE_BATCH_WORKFLOW = "cflite_batch.yml"
 CFLITE_CRON_WORKFLOW = "cflite_cron.yml"
+CLUSTERFUZZ_DOCKERFILE = ".clusterfuzzlite/Dockerfile"
 MANIFEST_PATH = REPO_ROOT / "docs" / "harness" / "routing-manifest.json"
 E2E_HARNESS_DIR = REPO_ROOT / "tools" / "e2e-harness"
 E2E_HARNESS_CARGO = E2E_HARNESS_DIR / "Cargo.toml"
@@ -62,6 +64,28 @@ MIGRATED_SCENARIO_WRAPPERS = {
     "tools/e2e/verify_auth_cache_e2e.sh": "auth-cache",
     "tools/e2e/verify_status_codes_e2e.sh": "status-codes",
 }
+DOCKER_RUNTIME_PATHS = (
+    CLUSTERFUZZ_DOCKERFILE,
+    "examples/docker/Dockerfile.official-nginx-source-build",
+    "tools/build_release/Dockerfile.install-example",
+)
+NGINX_NON_ROOT_REQUIRED_SNIPPETS = (
+    "USER nginx",
+    "EXPOSE 8080",
+    "pid /tmp/nginx.pid;",
+    "client_body_temp_path /tmp/client_temp;",
+)
+CLUSTERFUZZ_NON_ROOT_REQUIRED_SNIPPETS = (
+    "mkdir -p /rustc",
+    "chown fuzzer:fuzzer /rustc",
+    "touch /usr/lib/libFuzzingEngine.a",
+    "chown fuzzer:fuzzer /usr/lib/libFuzzingEngine.a",
+)
+TRIVY_REQUIRED_LOCAL_EXCLUSIONS = (
+    ".codeartsdoer",
+    ".kiro",
+    "build",
+)
 
 
 @dataclass(frozen=True)
@@ -160,6 +184,35 @@ def _result(name: str, status: str, detail: str) -> CheckResult:
         A frozen CheckResult dataclass instance.
     """
     return CheckResult(name=name, status=status, detail=detail)
+
+
+def _is_git_ignored(path: Path) -> bool:
+    """Return whether Git excludes *path* from the repository worktree.
+
+    Tracked files are not reported as ignored by ``git check-ignore`` even
+    when a matching ignore pattern exists, so repository-owned adapters remain
+    eligible for validation.  If Git is unavailable or *path* is outside the
+    repository, preserve the existing behavior and treat it as non-ignored.
+    """
+    try:
+        relative_path = path.relative_to(REPO_ROOT)
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(REPO_ROOT),
+                "check-ignore",
+                "--quiet",
+                "--",
+                str(relative_path),
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, ValueError):
+        return False
+    return result.returncode == 0
 
 
 def _check_manifest_structure(manifest: dict) -> CheckResult:
@@ -643,6 +696,30 @@ def check_cfl_workflows() -> CheckResult:
     if batch_missing:
         issues.append(f"{CFLITE_BATCH_WORKFLOW} missing storage-repo configuration")
 
+    # The build action creates absent workspace directories as root before it
+    # starts the project image. Pre-creation keeps build-out owned by the
+    # GitHub runner UID shared by the final non-root fuzzer user.
+    for workflow_name in (
+        CFLITE_PR_WORKFLOW,
+        CFLITE_BATCH_WORKFLOW,
+        CFLITE_CRON_WORKFLOW,
+    ):
+        workflow = GITHUB_WORKFLOWS_DIR / workflow_name
+        output_missing = _required_patterns(
+            workflow,
+            {
+                "non-root build-out preparation": (
+                    r"run:\s*mkdir -p build-out[\s\S]*"
+                    r"google/clusterfuzzlite/actions/build_fuzzers@"
+                )
+            },
+        )
+        if output_missing:
+            issues.append(
+                f"{workflow_name} must pre-create build-out "
+                "before build_fuzzers"
+            )
+
     if issues:
         return _result("cfl-workflows", FAIL, "; ".join(issues))
 
@@ -656,9 +733,11 @@ def check_cfl_workflows() -> CheckResult:
 def _check_optional_kiro(manifest: dict, full: bool) -> CheckResult:
     """Check optional .kiro/steering adapters for drift against harness truth surfaces.
 
-    If no adapters are present, returns SKIP_NOT_PRESENT.  If adapters
-    exist but lack required links, returns WARN_NEEDS_AUTHOR_REVIEW in
-    quick mode or FAIL in full mode.
+    If no non-ignored adapters are present, returns SKIP_NOT_PRESENT.  Git-
+    ignored adapters are user-local state outside repository validation;
+    tracked adapters remain eligible even when an ignore pattern matches.
+    If eligible adapters lack required links, returns
+    WARN_NEEDS_AUTHOR_REVIEW in quick mode or FAIL in full mode.
 
     Args:
         manifest: Parsed routing manifest dictionary.
@@ -669,12 +748,18 @@ def _check_optional_kiro(manifest: dict, full: bool) -> CheckResult:
         absent, or need author review.
     """
     adapters = manifest.get("truth_surfaces", {}).get("optional_adapters", [])
-    present = [REPO_ROOT / rel for rel in adapters if (REPO_ROOT / rel).exists()]
+    present = [
+        REPO_ROOT / rel
+        for rel in adapters
+        if (REPO_ROOT / rel).exists()
+        and not _is_git_ignored(REPO_ROOT / rel)
+    ]
     if not present:
         return _result(
             "kiro-adapters",
             SKIP_NOT_PRESENT,
-            ".kiro/steering is absent, skipping optional adapter checks",
+            ".kiro/steering is absent or git-ignored, skipping optional "
+            "adapter checks",
         )
 
     missing_links: list[str] = []
@@ -801,7 +886,7 @@ def check_clusterfuzzlite_build_config() -> CheckResult:
     """
     required_files = [
         ".clusterfuzzlite/project.yaml",
-        ".clusterfuzzlite/Dockerfile",
+        CLUSTERFUZZ_DOCKERFILE,
         ".clusterfuzzlite/build.sh",
     ]
     if missing := [
@@ -849,6 +934,129 @@ def check_clusterfuzzlite_build_config() -> CheckResult:
         "clusterfuzzlite-build-config",
         PASS,
         "ClusterFuzzLite build config is complete and valid",
+    )
+
+
+def _dockerfile_final_user(content: str) -> str | None:
+    """Return the final Dockerfile USER principal, excluding any group."""
+    for raw_line in reversed(content.splitlines()):
+        parts = raw_line.strip().split(None, 1)
+        if len(parts) == 2 and parts[0].upper() == "USER":
+            return parts[1].split()[0].split(":", 1)[0].lower()
+    return None
+
+
+def _final_docker_stage_args(content: str) -> set[str]:
+    """Return ARG names declared after the final FROM instruction."""
+    final_stage_args: set[str] = set()
+    for raw_line in content.splitlines():
+        parts = raw_line.strip().split(None, 1)
+        if parts and parts[0].upper() == "FROM":
+            final_stage_args.clear()
+        elif len(parts) == 2 and parts[0].upper() == "ARG":
+            final_stage_args.add(parts[1].split("=", 1)[0])
+    return final_stage_args
+
+
+def _docker_runtime_content_issues(
+    relative_path: str, content: str
+) -> list[str]:
+    """Return non-root and NGINX runtime contract issues for one Dockerfile."""
+    issues: list[str] = []
+    final_user = _dockerfile_final_user(content)
+    if final_user is None:
+        issues.append(f"{relative_path} missing final USER")
+    elif final_user in {"0", "root"}:
+        issues.append(f"{relative_path} final USER must be non-root")
+
+    if relative_path == CLUSTERFUZZ_DOCKERFILE:
+        issues.extend(_clusterfuzz_non_root_issues(relative_path, content))
+        return issues
+    issues.extend(
+        f"{relative_path} missing '{snippet}'"
+        for snippet in NGINX_NON_ROOT_REQUIRED_SNIPPETS
+        if snippet not in content
+    )
+    if relative_path.endswith("Dockerfile.install-example"):
+        stage_args = _final_docker_stage_args(content)
+        if not {"MODULE_REF", "INSTALL_SHA256"}.issubset(stage_args):
+            issues.append(
+                f"{relative_path} missing stage ARG declarations"
+            )
+    return issues
+
+
+def _clusterfuzz_non_root_issues(
+    relative_path: str, content: str
+) -> list[str]:
+    """Return missing non-root write contracts for ClusterFuzzLite."""
+    missing = [
+        snippet
+        for snippet in CLUSTERFUZZ_NON_ROOT_REQUIRED_SNIPPETS
+        if snippet not in content
+    ]
+    issues: list[str] = []
+    if any("/rustc" in snippet for snippet in missing):
+        issues.append(f"{relative_path} missing writable /rustc contract")
+    if any("/usr/lib/libFuzzingEngine.a" in snippet for snippet in missing):
+        issues.append(
+            f"{relative_path} missing writable "
+            "/usr/lib/libFuzzingEngine.a contract"
+        )
+    return issues
+
+
+def check_docker_runtime_security() -> CheckResult:
+    """Verify tracked runnable Dockerfiles use a non-root final user.
+
+    The NGINX runtime images must also use an unprivileged port and writable
+    PID/body-temp paths so the non-root declaration is operational rather than
+    a static-scanner-only change.
+    """
+    issues: list[str] = []
+    for relative_path in DOCKER_RUNTIME_PATHS:
+        path = REPO_ROOT / relative_path
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            issues.append(f"{relative_path} unreadable: {exc}")
+            continue
+        issues.extend(_docker_runtime_content_issues(relative_path, content))
+
+    if issues:
+        return _result("docker-runtime-security", FAIL, "; ".join(issues))
+    return _result(
+        "docker-runtime-security",
+        PASS,
+        "tracked runnable Dockerfiles use operational non-root runtimes",
+    )
+
+
+def check_trivy_local_scan_scope() -> CheckResult:
+    """Verify local Trivy scans exclude ignored adapters and build output."""
+    makefile = REPO_ROOT / "Makefile"
+    try:
+        content = makefile.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return _result(
+            "trivy-local-scope", FAIL, f"Makefile unreadable: {exc}"
+        )
+
+    missing = [
+        directory
+        for directory in TRIVY_REQUIRED_LOCAL_EXCLUSIONS
+        if f"--skip-dirs {directory}" not in content
+    ]
+    if missing:
+        return _result(
+            "trivy-local-scope",
+            FAIL,
+            "local Trivy scan includes ignored paths: " + ", ".join(missing),
+        )
+    return _result(
+        "trivy-local-scope",
+        PASS,
+        "local Trivy scan excludes ignored adapters and generated reports",
     )
 
 
@@ -1028,6 +1236,8 @@ def collect_results(full: bool = False) -> list[CheckResult]:
         _check_e2e_migration_policy(),
         _check_recent_analysis_reports(),
         check_clusterfuzzlite_build_config(),
+        check_docker_runtime_security(),
+        check_trivy_local_scan_scope(),
         check_cfl_workflows(),
         check_batch_prune_pairing(),
         check_fuzz_target_determinism(),

@@ -53,10 +53,13 @@ No changes. The module buffers the complete response body, optionally decompress
 
 When the threshold router selects the incremental path, the NGINX module still buffers the complete response body (and decompresses it if needed), then hands the full buffer to the Rust `IncrementalConverter` via FFI in a single call sequence:
 
-1. `markdown_incremental_new()` — create a converter instance with the current `ConversionOptions`
+1. `markdown_incremental_new_with_code()` — create a converter instance with the current `ConversionOptions` and retain the status code
 2. `markdown_incremental_feed()` — called once with the complete buffered body (`ctx->buffer.data`)
 3. `markdown_incremental_finalize()` — produce the final `MarkdownResult`
-4. `markdown_incremental_free()` — release the converter (only on error paths; `finalize` consumes the handle on success)
+4. `markdown_incremental_free()` — release the converter only when `feed`
+   fails or `finalize` rejects invalid arguments; after valid non-NULL
+   arguments are accepted, `finalize` consumes the handle regardless of its
+   return code
 
 True per-upstream-chunk feeding from NGINX (calling `feed` as each body chunk arrives from upstream) is not implemented yet and remains a future change. The current implementation buffers first, then delegates to the incremental Rust API.
 
@@ -69,7 +72,7 @@ In practical terms, the current incremental path should be understood as:
 It should not yet be understood as a true streaming or peak-memory-reduction path. The request body still exists as a full NGINX-side buffer, and the Rust incremental API currently accumulates fed bytes internally before parsing.
 
 > [!NOTE]
-> **64 MiB Hard Limit**: To prevent uncontrolled memory growth before true streaming is implemented, the `IncrementalConverter` in Rust enforces a strict 64 MiB buffer limit. If the sum of fed chunks exceeds this size, `feed_chunk` returns a `MemoryLimit` error, triggering the C module's `markdown_on_error` policy.
+> **64 MiB Hard Limit**: To prevent uncontrolled memory growth before true streaming is implemented, the `IncrementalConverter` in Rust enforces a strict 64 MiB buffer limit. If the sum of fed chunks exceeds this size, `feed_chunk` returns a `MemoryLimit` error, triggering the C module's `markdown_error_policy`.
 
 > [!WARNING]
 > **Architecture Warning: Do not increase the 64 MiB limit**
@@ -84,9 +87,17 @@ The incremental API is compiled only when the `incremental` Rust feature flag is
 
 ## Threshold Router
 
+> ⚠️ **RETIRED IN 0.9.0** — The `markdown_large_body_threshold` directive is a
+> **reject-only stub** in 0.9.0+. Setting it in `nginx.conf` causes `nginx -t`
+> to fail with a migration hint. There is no Config V2 replacement. The
+> internal `routing.large_body_threshold` struct field persists for the
+> feature-gated incremental path, but the threshold is no longer
+> user-configurable. The following sections are retained as historical design
+> reference for pre-0.9.0 deployments.
+
 The Threshold Router is the decision point in the NGINX C module that selects which processing path a request follows.
 
-### Configuration Directive
+### Configuration Directive (pre-0.9.0)
 
 ```nginx
 # Default: incremental path disabled
@@ -179,12 +190,12 @@ Exported only when `incremental` feature is enabled:
 
 | FFI Function | Purpose |
 |-------------|---------|
-| `markdown_incremental_new()` | Create converter instance |
+| `markdown_incremental_new_with_code()` | Create converter instance with explicit status |
 | `markdown_incremental_feed()` | Feed a chunk of input data |
 | `markdown_incremental_finalize()` | Finalize and return result |
 | `markdown_incremental_free()` | Free converter resources |
 
-Existing FFI function signatures are not modified.
+The pre-v1 ABI reset removed the redundant NULL-only constructor.
 
 ## Special Path Semantics
 
@@ -220,7 +231,7 @@ For all inputs that produce correct results through the full-buffer path, the in
 
 | Error Scenario | Handling | User-Visible Behavior |
 |---------------|----------|----------------------|
-| `feed_chunk()` failure | Returns `ConversionError`; C module applies `markdown_on_error` policy | fail-open: original HTML; fail-closed: 502 |
+| `feed_chunk()` failure | Returns `ConversionError`; C module applies `markdown_error_policy` | fail-open: original HTML; fail-closed: 502 |
 | `finalize()` failure | Same as above | Same as above |
 | Missing `Content-Length` | Buffer first, decide path after threshold comparison | Transparent to client |
 | `incremental` feature not compiled but threshold configured | Ignore threshold, use full-buffer path, log warning | `error.log` warning; conversion still works |

@@ -123,7 +123,18 @@ ngx_http_markdown_reject_or_fail_open_buffered_response(
     ngx_int_t  rc;
 
     if (conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT) {
-        return NGX_ERROR;
+        /*
+         * Use ngx_http_filter_finalize_request to send the configured
+         * error status (429/503/502).  In the body filter, returning a
+         * positive HTTP status code directly is unreliable — NGINX's
+         * upstream body output path only special-cases NGX_ERROR.
+         * ngx_http_filter_finalize_request sets r->headers_out.status
+         * and routes through the finalizer to generate the correct
+         * error response.
+         */
+        return ngx_http_filter_finalize_request(r,
+            &ngx_http_markdown_filter_module,
+            (ngx_int_t) conf->error_status);
     }
 
     rc = ngx_http_markdown_fail_open_buffered_response(
@@ -214,7 +225,15 @@ ngx_http_markdown_handle_decompression_alloc_error(
 }
 
 
-/* Wrap the buffered compressed payload into a chain for the decompressor. */
+/*
+ * Wrap the buffered compressed payload into a chain for the decompressor.
+ *
+ * After body-filter accumulation, ctx->buffer.data is always a single
+ * contiguous ngx_alloc-backed allocation (Rule 43 invariant).  When
+ * this invariant holds we reference the buffer directly without a
+ * linearize copy, reducing one full memcpy from the decompression
+ * hot path.
+ */
 static ngx_int_t
 ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
                                            ngx_http_markdown_ctx_t *ctx,
@@ -223,7 +242,25 @@ ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
 {
     ngx_buf_t *compressed_buf;
 
-    compressed_buf = ngx_create_temp_buf(r->pool, ctx->buffer.size);
+    if (ctx->buffer.size > 0 && ctx->buffer.data == NULL) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                     "markdown: buffered payload "
+                     "pointer is NULL with non-zero "
+                     "size, size=%uz, category=system",
+                     ctx->buffer.size);
+        return ngx_http_markdown_handle_decompression_alloc_error(
+            r, ctx, conf,
+            NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
+    }
+
+    /*
+     * Contiguity fast path: ctx->buffer.data is a single ngx_alloc
+     * allocation after body-filter accumulation.  Reference it
+     * directly without copying to avoid the linearize memcpy.
+     * The buffer remains valid through the decompression call
+     * because apply_decompressed_payload runs only after success.
+     */
+    compressed_buf = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
     if (compressed_buf == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: failed to create "
@@ -234,21 +271,9 @@ ngx_http_markdown_prepare_compressed_chain(ngx_http_request_t *r,
             "- returning original content");
     }
 
-    if (ctx->buffer.size > 0) {
-        if (ctx->buffer.data == NULL) {
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: buffered payload "
-                         "pointer is NULL with non-zero "
-                         "size, size=%uz, category=system",
-                         ctx->buffer.size);
-            return ngx_http_markdown_handle_decompression_alloc_error(
-                r, ctx, conf,
-                NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
-        }
-
-        ngx_memcpy(compressed_buf->pos, ctx->buffer.data, ctx->buffer.size);
-    }
-    compressed_buf->last = compressed_buf->pos + ctx->buffer.size;
+    compressed_buf->pos = ctx->buffer.data;
+    compressed_buf->last = ctx->buffer.data + ctx->buffer.size;
+    compressed_buf->memory = 1;
     compressed_buf->last_buf = 1;
 
     *compressed_chain = ngx_alloc_chain_link(r->pool);
@@ -273,8 +298,8 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
                                              const ngx_http_markdown_conf_t *conf,
                                              const ngx_chain_t *decompressed_chain)
 {
-    const u_char *decompressed_data;
-    u_char       *target_data;
+    u_char  *decompressed_data;
+    size_t   decompressed_size;
 
     if (decompressed_chain == NULL || decompressed_chain->buf == NULL) {
         const ngx_str_t *compression_name;
@@ -304,11 +329,15 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
         && decompressed_chain->buf->last == NULL)
     {
         ctx->decompression.decompressed_size = 0;
-        decompressed_data = NULL;
-    } else if (decompressed_chain->buf->pos == NULL
-               || decompressed_chain->buf->last == NULL
-               || (uintptr_t) decompressed_chain->buf->last
-                  < (uintptr_t) decompressed_chain->buf->pos)
+        ctx->buffer.size = 0;
+        ctx->decompression.done = 1;
+        return NGX_OK;
+    }
+
+    if (decompressed_chain->buf->pos == NULL
+        || decompressed_chain->buf->last == NULL
+        || (uintptr_t) decompressed_chain->buf->last
+           < (uintptr_t) decompressed_chain->buf->pos)
     {
         const ngx_str_t *compression_name;
 
@@ -322,62 +351,74 @@ ngx_http_markdown_apply_decompressed_payload(ngx_http_request_t *r,
                      "category=system",
                      compression_name);
 
+        /*
+         * The buffer pos may point to ngx_alloc'd memory from
+         * decompress_via_rust.  Free it to prevent a leak.
+         */
+        if (decompressed_chain->buf->pos != NULL) {
+            ngx_free(decompressed_chain->buf->pos);
+        }
+
         return ngx_http_markdown_handle_decompression_alloc_error(
             r, ctx, conf,
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
-    } else {
-        ctx->decompression.decompressed_size =
-            decompressed_chain->buf->last - decompressed_chain->buf->pos;
-        decompressed_data = decompressed_chain->buf->pos;
     }
 
-    target_data = ctx->buffer.data;
+    decompressed_size =
+        decompressed_chain->buf->last - decompressed_chain->buf->pos;
+    decompressed_data = decompressed_chain->buf->pos;
 
-    if (ctx->decompression.decompressed_size > ctx->buffer.capacity) {
-        /*
-         * buffer.data is allocated via ngx_alloc() (see buffer.c:36-39
-         * contract) and must be released with ngx_free(). Do NOT switch
-         * to ngx_pfree/ngx_pnalloc without coordinating with the
-         * resizable buffer design in ngx_http_markdown_buffer.c.
-         */
-        u_char *new_data = ngx_alloc(ctx->decompression.decompressed_size, r->connection->log);
-        if (new_data == NULL) {
-            const ngx_str_t *compression_name;
+    /*
+     * Phase 1: Budget check — verify the decompressor output does
+     * not exceed markdown_decompress_max_size before swapping.
+     * On failure, free the decompressor output and trigger
+     * fail-open with the original compressed ctx->buffer.data
+     * intact (Requirement 5.4).
+     */
+    if (decompressed_size > conf->decompress.max_size) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown: decompressed output "
+                     "exceeds budget, size=%uz, "
+                     "max=%uz, category=resource_limit",
+                     decompressed_size,
+                     conf->decompress.max_size);
 
-            compression_name = ngx_http_markdown_compression_name(
-                ctx->decompression.type);
+        ngx_free(decompressed_data);
 
-            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                         "markdown: failed to "
-                         "allocate decompressed buffer, "
-                         "compression=%V, size=%uz, "
-                         "category=system",
-                         compression_name,
-                         ctx->decompression.decompressed_size);
-
-            return ngx_http_markdown_handle_decompression_alloc_error(
-                r, ctx, conf,
-                NGX_HTTP_MARKDOWN_ERROR_SYSTEM, NULL);
-        }
-
-        target_data = new_data;
+        return ngx_http_markdown_handle_decompression_alloc_error(
+            r, ctx, conf,
+            NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
+            "markdown: fail-open strategy "
+            "- decompressed output exceeds budget");
     }
 
-    if (ctx->decompression.decompressed_size > 0 && target_data != decompressed_data) {
-        ngx_memcpy(target_data, decompressed_data, ctx->decompression.decompressed_size);
+    /*
+     * Phase 2: Direct buffer swap — the decompressor output is
+     * already in an ngx_alloc buffer (Rule 43).  Free the old
+     * compressed buffer and swap in the decompressed pointer
+     * directly without an intermediate memcpy.
+     *
+     * Invariant: on success, ctx->buffer.data points to the new
+     * decompressed buffer; on failure (handled above), the
+     * original compressed buffer remains intact for fail-open.
+     */
+    ctx->decompression.decompressed_size = decompressed_size;
+
+    if (ctx->buffer.data != NULL) {
+        ngx_free(ctx->buffer.data);
     }
 
-    if (target_data != ctx->buffer.data) {
-        if (ctx->buffer.data != NULL) {
-            ngx_free(ctx->buffer.data);
-        }
-
-        ctx->buffer.data = target_data;
-        ctx->buffer.capacity = ctx->decompression.decompressed_size;
-    }
-
-    ctx->buffer.size = ctx->decompression.decompressed_size;
+    ctx->buffer.data = decompressed_data;
+    ctx->buffer.size = decompressed_size;
+    ctx->buffer.capacity = decompressed_size;
     ctx->decompression.done = 1;
+
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: direct buffer swap "
+                  "completed, old compressed buffer "
+                  "freed, new size=%uz, capacity=%uz",
+                  ctx->buffer.size, ctx->buffer.capacity);
+
     return NGX_OK;
 }
 
@@ -786,6 +827,79 @@ ngx_http_markdown_linearize_chain(ngx_http_request_t *r,
     *out_size = total;
     return NGX_OK;
 }
+
+
+static ngx_int_t
+ngx_http_markdown_decompression_format(
+    ngx_http_markdown_compression_type_e type,
+    uint8_t *format)
+{
+    switch (type) {
+    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
+        *format = 0;
+        return NGX_OK;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
+        *format = 1;
+        return NGX_OK;
+    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
+        *format = 2;
+        return NGX_OK;
+    default:
+        return NGX_DECLINED;
+    }
+}
+
+
+static ngx_int_t
+ngx_http_markdown_decompression_input(
+    ngx_http_request_t *r,
+    const ngx_chain_t *compressed_chain,
+    u_char **input_buf,
+    size_t *input_size)
+{
+    if (compressed_chain->next == NULL
+        && compressed_chain->buf != NULL
+        && compressed_chain->buf->pos != NULL
+        && compressed_chain->buf->last != NULL
+        && (uintptr_t) compressed_chain->buf->last
+           >= (uintptr_t) compressed_chain->buf->pos)
+    {
+        *input_buf = compressed_chain->buf->pos;
+        *input_size = compressed_chain->buf->last
+                      - compressed_chain->buf->pos;
+        if (*input_size == 0) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "markdown: contiguous chain has zero-length buffer");
+            return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+        }
+
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+            "markdown: skipping linearize copy, buffer contiguous, "
+            "size=%uz", *input_size);
+        return NGX_OK;
+    }
+
+    return ngx_http_markdown_linearize_chain(
+        r, compressed_chain, input_buf, input_size);
+}
+
+
+static ngx_int_t
+ngx_http_markdown_decompression_error(uint32_t ffi_rc)
+{
+    switch (ffi_rc) {
+    case 101:
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    case 102:
+        return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+    case 103:
+        return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+    case 104:
+    case 105:
+    default:
+        return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
+    }
+}
 #endif /* !NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
 
 
@@ -837,38 +951,31 @@ ngx_http_markdown_decompress_via_rust(
     uint8_t                format;
     size_t                 input_size;
     u_char                *input_buf;
-    u_char                *pool_copy;
+    u_char                *output_buf;
     ngx_buf_t             *b;
     ngx_chain_t           *cl;
-    ngx_int_t              rc_linear;
+    ngx_int_t              rc;
 
     /*
      * Map NGINX compression type to Rust format code:
      *   GZIP=1 -> 0, DEFLATE=2 -> 1, BROTLI=3 -> 2
      */
-    switch (ctx->decompression.type) {
-    case NGX_HTTP_MARKDOWN_COMPRESSION_GZIP:
-        format = 0;
-        break;
-    case NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE:
-        format = 1;
-        break;
-    case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
-        format = 2;
-        break;
-    default:
-        return NGX_DECLINED;
+    rc = ngx_http_markdown_decompression_format(
+        ctx->decompression.type, &format);
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     /*
-     * Linearize the chain into a contiguous buffer.  The chain from
-     * prepare_compressed_chain is typically a single buffer, but we
-     * handle multi-buffer chains defensively.
+     * Contiguity fast path: when the chain has a single buffer with
+     * valid pos/last pointers, use it directly without linearizing.
+     * This is the common case after body-filter accumulation where
+     * ctx->buffer.data is a single ngx_alloc allocation (Rule 43).
      */
-    rc_linear = ngx_http_markdown_linearize_chain(
+    rc = ngx_http_markdown_decompression_input(
         r, compressed_chain, &input_buf, &input_size);
-    if (rc_linear != NGX_OK) {
-        return rc_linear;
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     /* Initialize the result struct before the FFI call. */
@@ -902,20 +1009,7 @@ ngx_http_markdown_decompress_via_rust(
                      "failed, rc=%ud, error_category=%ud",
                      ffi_rc, result.error_category);
 
-        switch (ffi_rc) {
-        case 101:
-            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
-        case 102:
-            return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
-        case 103:
-            return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
-        case 104:
-            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
-        case 105:
-            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
-        default:
-            return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
-        }
+        return ngx_http_markdown_decompression_error(ffi_rc);
     }
 
     /*
@@ -973,13 +1067,21 @@ ngx_http_markdown_decompress_via_rust(
         return NGX_OK;
     }
 
-    pool_copy = ngx_palloc(r->pool, (size_t) result.output_len);
-    if (pool_copy == NULL) {
+    /*
+     * Allocate the output buffer with ngx_alloc (Rule 43) so that
+     * apply_decompressed_payload can perform a direct pointer swap
+     * into ctx->buffer.data without an additional memcpy.  The
+     * caller (apply_decompressed_payload) takes ownership of this
+     * allocation and is responsible for ngx_free on all paths.
+     */
+    output_buf = ngx_alloc((size_t) result.output_len,
+                          r->connection->log);
+    if (output_buf == NULL) {
         markdown_decompress_free(&result);
         return NGX_ERROR;
     }
 
-    ngx_memcpy(pool_copy, result.output, (size_t) result.output_len);
+    ngx_memcpy(output_buf, result.output, (size_t) result.output_len);
 
     {
         size_t  output_len;
@@ -990,19 +1092,21 @@ ngx_http_markdown_decompress_via_rust(
         /* Free the Rust-owned buffer before building the chain. */
         markdown_decompress_free(&result);
 
-        /* Wrap the pool-copied output in an ngx_buf_t / ngx_chain_t. */
+        /* Wrap the ngx_alloc'd output in an ngx_buf_t / chain. */
         b = ngx_calloc_buf(r->pool);
         if (b == NULL) {
+            ngx_free(output_buf);
             return NGX_ERROR;
         }
 
-        b->pos = pool_copy;
-        b->last = pool_copy + output_len;
+        b->pos = output_buf;
+        b->last = output_buf + output_len;
         b->memory = 1;
         b->last_buf = 1;
 
         cl = ngx_alloc_chain_link(r->pool);
         if (cl == NULL) {
+            ngx_free(output_buf);
             return NGX_ERROR;
         }
 
@@ -1051,61 +1155,12 @@ ngx_http_markdown_decompress_via_rust(
  *               failure); the error handler has already logged and
  *               incremented failure metrics
  */
-static ngx_int_t
-ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
-                                                   ngx_http_markdown_ctx_t *ctx,
-                                                   const ngx_http_markdown_conf_t *conf)
+static inline ngx_int_t
+ngx_http_markdown_handle_decompress_result(ngx_http_request_t *r,
+                                           ngx_http_markdown_ctx_t *ctx,
+                                           const ngx_http_markdown_conf_t *conf,
+                                           ngx_int_t decompress_rc)
 {
-    ngx_chain_t  *compressed_chain = NULL;
-    ngx_chain_t  *decompressed_chain = NULL;
-    ngx_int_t     decompress_rc;
-    ngx_int_t     rc;
-
-    /*
-     * Skip decompression entirely when no compressed content was
-     * detected (needed == 0) or when decompression already ran
-     * (done == 1).  The latter guards against double invocation
-     * if the body filter is re-entered.
-     */
-    if (!ctx->decompression.needed || ctx->decompression.done) {
-        return NGX_OK;
-    }
-
-    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown: starting decompression, "
-                  "type=%d, size=%uz bytes",
-                  ctx->decompression.type, ctx->buffer.size);
-
-    /*
-     * Record the attempt metric and snapshot the compressed size
-     * before the decompressor consumes the buffer, because the
-     * decompressor may reallocate or replace ctx->buffer.data.
-     */
-    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.attempted);
-    ctx->decompression.compressed_size = ctx->buffer.size;
-
-    /*
-     * Phase 1: wrap ctx->buffer into a single-element chain that
-     * the Rust decompressor can consume.  The helper copies the
-     * buffer contents into a temporary pool buffer so the
-     * decompressor owns a stable snapshot.
-     */
-    rc = ngx_http_markdown_prepare_compressed_chain(
-        r, ctx, conf, &compressed_chain);
-    if (rc != NGX_OK) {
-        return rc;
-    }
-
-    /*
-     * Phase 2: invoke the bounded Rust FFI decompressor.
-     * The decompressor returns domain-specific error codes that
-     * classify the failure mode rather than mapping everything
-     * to NGX_ERROR, which allows us to pick the correct metric
-     * and error category for each failure path.
-     */
-    decompress_rc = ngx_http_markdown_decompress_via_rust(
-        r, ctx, conf, compressed_chain, &decompressed_chain);
-
     /*
      * NGX_DECLINED means the compression type is not supported
      * by the linked decompressor library.  Treat as a conversion
@@ -1130,6 +1185,8 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
      */
     if (decompress_rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            perf.decompression_budget_exceeded_total);
         return ngx_http_markdown_handle_decompression_alloc_error(
             r, ctx, conf,
             NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT,
@@ -1206,12 +1263,89 @@ ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
             "- returning original content");
     }
 
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_body_filter_decompress_if_needed(ngx_http_request_t *r,
+                                                   ngx_http_markdown_ctx_t *ctx,
+                                                   const ngx_http_markdown_conf_t *conf)
+{
+    ngx_chain_t  *compressed_chain = NULL;
+    ngx_chain_t  *decompressed_chain = NULL;
+    ngx_int_t     decompress_rc;
+    ngx_int_t     rc;
+
     /*
-     * Phase 3: success path -- copy the decompressed output back
-     * into ctx->buffer (replacing the compressed data) and record
-     * success metrics.  Both helpers log on failure and the caller
-     * propagates the return code directly.
+     * Skip decompression entirely when no compressed content was
+     * detected (needed == 0) or when decompression already ran
+     * (done == 1).  The latter guards against double invocation
+     * if the body filter is re-entered.
      */
+    if (!ctx->decompression.needed || ctx->decompression.done) {
+        return NGX_OK;
+    }
+
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: starting decompression, "
+                  "type=%d, size=%uz bytes",
+                  ctx->decompression.type, ctx->buffer.size);
+
+    /*
+     * Contiguity assertion: after body-filter accumulation,
+     * ctx->buffer.data is always a single contiguous ngx_alloc-
+     * backed allocation (Rule 43 invariant).  Log at debug level
+     * to verify this invariant holds at runtime.
+     */
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: buffer contiguity "
+                  "verified, data=%p, size=%uz "
+                  "(single ngx_alloc allocation)",
+                  ctx->buffer.data, ctx->buffer.size);
+
+    /*
+     * Record the attempt metric and snapshot the compressed size
+     * before the decompressor consumes the buffer, because the
+     * decompressor may reallocate or replace ctx->buffer.data.
+     * Increment decompression_fullbuffer_total at entry to the
+     * full-buffer decompression path (Req 4.6).
+     */
+    NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.attempted);
+    NGX_HTTP_MARKDOWN_METRIC_INC(perf.decompression_fullbuffer_total);
+    ctx->decompression.compressed_size = ctx->buffer.size;
+
+    /*
+     * Phase 1: wrap ctx->buffer into a single-element chain that
+     * the Rust decompressor can consume.  The buffer is already
+     * contiguous (Rule 43), so the helper references it directly
+     * without a linearize copy.
+     */
+    rc = ngx_http_markdown_prepare_compressed_chain(
+        r, ctx, conf, &compressed_chain);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
+    /*
+     * Phase 2: invoke the bounded Rust FFI decompressor.
+     * The decompressor returns domain-specific error codes that
+     * classify the failure mode rather than mapping everything
+     * to NGX_ERROR, which allows us to pick the correct metric
+     * and error category for each failure path.
+     */
+    decompress_rc = ngx_http_markdown_decompress_via_rust(
+        r, ctx, conf, compressed_chain, &decompressed_chain);
+
+    /*
+     * Phase 3: result handling and success apply
+     */
+    rc = ngx_http_markdown_handle_decompress_result(
+        r, ctx, conf, decompress_rc);
+    if (rc != NGX_OK) {
+        return rc;
+    }
+
     rc = ngx_http_markdown_apply_decompressed_payload(
         r, ctx, conf, decompressed_chain);
     if (rc != NGX_OK) {

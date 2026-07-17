@@ -7,5 +7,6 @@
 #          pytest tools/release/legacy/tests/
 #          pytest tests/property/
 hypothesis==6.135.2
+prometheus-client==0.25.0
 pytest==9.0.3
 pyyaml==6.0.2

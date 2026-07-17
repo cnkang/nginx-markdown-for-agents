@@ -14,7 +14,10 @@ on:
       - "packaging/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
+      - "examples/production/**"
       - "charts/**"
+      - ".sonar/**"
+      - ".sonarcloud.properties"
       - "Makefile"
       - "README.md"
       - "README_zh-CN.md"
@@ -33,7 +36,10 @@ on:
       - "packaging/**"
       - "examples/nginx-configs/**"
       - "examples/kubernetes/**"
+      - "examples/production/**"
       - "charts/**"
+      - ".sonar/**"
+      - ".sonarcloud.properties"
       - "Makefile"
       - "README.md"
       - "README_zh-CN.md"
@@ -108,11 +114,20 @@ jobs:
               - 'README_zh-CN.md'
               - 'tools/docs/**'
               - 'tools/harness/**'
+              - 'tools/e2e/**'
+              - 'tools/sonar/**'
               - 'tools/release-matrix.json'
+              - 'components/nginx-module/src/**'
+              - 'components/nginx-module/tests/e2e/**'
+              - 'components/rust-converter/src/**'
+              - 'tests/e2e/**'
               - 'examples/nginx-configs/**'
               - 'examples/kubernetes/**'
+              - 'examples/production/**'
               - 'charts/**'
               - 'packaging/**'
+              - '.sonar/**'
+              - '.sonarcloud.properties'
             rust:
               - 'components/rust-converter/**'
               - 'Makefile'
@@ -126,6 +141,7 @@ jobs:
               - 'tests/corpus/**'
               - 'tools/e2e/**'
               - 'tools/e2e-harness/**'
+              - 'tools/ci/verify_non_streaming_nginx_module.sh'
               - 'Makefile'
             perf:
               - 'components/rust-converter/**'
@@ -134,8 +150,18 @@ jobs:
             matrix_release:
               - 'tools/release/matrix/**'
               - 'tools/release-matrix.json'
-              - 'tools/release/gates/validate_*_070.py'
-              - 'tools/release/gates/validate_*_080.py'
+              - 'tools/release/gates/validate_k8s_manifests.py'
+              - 'tools/release/gates/validate_metrics.py'
+              - 'tools/release/gates/validate_package_metadata.py'
+              - 'tools/release/gates/validate_reason_codes.py'
+              - 'tools/release/gates/validate_fuzz_packaging.py'
+              - 'tools/release/gates/validate_config_directives.py'
+              - 'tools/release/gates/validate_release_gates_070.py'
+              - 'tools/release/gates/validate_release_gates_080.py'
+              - 'tools/release/gates/validate_release_gates_090.py'
+              - 'tools/perf/evidence_gate.py'
+              - 'tools/perf/doctor_advice.py'
+              - 'tools/perf/run_module_benchmark.sh'
             corpus_tools:
               - 'tools/corpus/**'
             workflows:
@@ -179,6 +205,8 @@ jobs:
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -221,6 +249,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
+          toolchain: 1.97.0
           components: rustfmt,clippy
 
       - name: Cache Rust build artifacts
@@ -356,6 +385,8 @@ jobs:
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -363,6 +394,9 @@ jobs:
           workspaces: |
             components/rust-converter -> target
           cache-bin: false
+
+      - name: Verify non-streaming production module linkage
+        run: ./tools/ci/verify_non_streaming_nginx_module.sh
 
       - name: Run delegated If-Modified-Since runtime validation
         id: ims_runtime
@@ -431,7 +465,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.91.1
+          toolchain: 1.97.0
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -481,7 +515,7 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.91.1
+          toolchain: 1.97.0
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -607,6 +641,8 @@ jobs:
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -646,6 +682,8 @@ jobs:
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.97.0
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -716,7 +754,8 @@ jobs:
     if: >-
       always() &&
       (needs.changes.outputs.rust == 'true' || needs.changes.outputs.nginx == 'true' ||
-       needs.changes.outputs.docs == 'true' || needs.changes.outputs.workflows == 'true')
+       needs.changes.outputs.docs == 'true' || needs.changes.outputs.workflows == 'true' ||
+       needs.changes.outputs.perf == 'true' || needs.changes.outputs.matrix_release == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     continue-on-error: true

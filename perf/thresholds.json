@@ -1,6 +1,15 @@
 {
   "schema_version": "1.0.0",
   "description": "Dual-threshold configuration for performance gating. Warning thresholds produce alerts but do not block PR merges. Blocking thresholds prevent PR merges when exceeded. For higher_is_better metrics, negative percentages indicate a regression (decrease). Platform-specific entries take precedence; the 'default' entry is the fallback for platforms without an explicit section.",
+  "module_level": {
+    "description": "Module-level benchmark thresholds for 0.9.1 release gate (Spec 65). Values represent maximum allowed regression percentages vs baseline, except fallback_rate_abs which is an absolute cap (0.0-1.0).",
+    "p50_latency_small_pct": 10,
+    "p95_latency_small_pct": 15,
+    "p50_latency_large_pct": 5,
+    "ttfb_streaming_large_pct": 10,
+    "fallback_rate_abs": 0.05,
+    "memory_slope_pct": 20
+  },
   "platforms": {
     "linux-x86_64": {
       "small": {

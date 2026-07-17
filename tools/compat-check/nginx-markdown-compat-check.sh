@@ -40,8 +40,8 @@
 #   - No unsanitized path interpolation (AGENTS.md Rule 12)
 #
 # SEE ALSO:
-#   - .kiro/specs/31-0.7.0-release-package-compatibility/requirements.md §8
-#   - .kiro/specs/31-0.7.0-release-package-compatibility/design.md §Components 4
+#   - .kiro/specs/archive/31-0.7.0-release-package-compatibility/requirements.md §8
+#   - .kiro/specs/archive/31-0.7.0-release-package-compatibility/design.md §Components 4
 # ---------------------------------------------------------------------------
 
 set -e
@@ -50,7 +50,7 @@ set -e
 # Constants
 # ---------------------------------------------------------------------------
 SCRIPT_NAME="$(basename "$0")"
-PROJECT_VERSION="0.7.0"
+PROJECT_VERSION="0.9.1"
 
 # Supported NGINX versions (nginx.org stable)
 SUPPORTED_NGINX_VERSIONS="1.26.3"

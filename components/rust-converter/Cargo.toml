@@ -1,8 +1,8 @@
 [package]
 name = "nginx-markdown-converter"
-version = "0.9.0"
+version = "0.9.1"
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.97"
 authors = ["NGINX Markdown for Agents Contributors"]
 description = "Rust-based HTML to Markdown conversion engine for NGINX"
 license = "BSD-2-Clause"
@@ -14,10 +14,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 # HTML5 parser - handles malformed markup gracefully
-html5ever = "0.38"
+html5ever = "0.39"
 # DOM tree representation
-markup5ever_rcdom = "0.38"
-# Fast hashing for ETags (using version compatible with older Rust)
+markup5ever_rcdom = "0.39"
+# Fast hashing for ETags
 blake3 = "1.8"
 # Hex encoding for ETag generation
 hex = "0.4"
@@ -29,11 +29,6 @@ encoding_rs = "0.8"
 flate2 = "1.0"
 # Brotli decompression for bounded decompression FFI
 brotli = "8.0"
-# Serialization framework for diagnostics schema
-serde = { version = "1.0", features = ["derive"] }
-# JSON serialization for diagnostics endpoint output
-serde_json = "1.0"
-
 [dev-dependencies]
 # Property-based testing framework
 proptest = "1.11"
@@ -41,6 +36,8 @@ proptest = "1.11"
 libc = "0.2"
 # Parse known-difference registry for streaming parity harness
 toml = "1.1"
+# JSON reports emitted by examples and test/evidence harnesses
+serde_json = "1.0"
 
 [features]
 default = ["prune_noise_regions", "streaming", "incremental"]

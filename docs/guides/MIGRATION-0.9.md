@@ -53,7 +53,7 @@ The following breaking changes require configuration and/or tooling updates:
 
 6. **Metrics consolidation** — per-reason metric keys (e.g.,
    `markdown_skipped_accept_total`) are replaced by unified metric families
-   with a `reason` label (e.g., `markdown_skipped_total{reason="skipped_accept"}`).
+   with a `reason` label (e.g., `nginx_markdown_skips_total{reason="skipped_accept"}`).
 
 ---
 
@@ -250,10 +250,10 @@ sed -i 's/markdown_parse_timeouts_total/markdown_errors_total{reason="timeout"}/
 
 | 0.8.x Alert Query | 0.9.0 Alert Query |
 |-------------------|-------------------|
-| `rate(markdown_parse_timeouts_total[5m]) > 0` | `rate(markdown_errors_total{reason="timeout"}[5m]) > 0` |
-| `rate(markdown_failed_open_total[5m]) > 0.01` | `rate(markdown_failed_open_total{reason="failed_open"}[5m]) > 0.01` |
-| `sum(rate(markdown_ffi_call_errors_total[5m]))` | `rate(markdown_errors_total{reason="ffi_panic"}[5m])` |
-| `nginx_markdown_skips_total{reason="SKIP_ACCEPT"}` | `markdown_skipped_total{reason="skipped_accept"}` |
+| `rate(markdown_parse_timeouts_total[5m]) > 0` | `rate(nginx_markdown_failures_total{reason="timeout"}[5m]) > 0` |
+| `rate(markdown_failed_open_total[5m]) > 0.01` | `rate(nginx_markdown_failopen_total[5m]) > 0.01` |
+| `sum(rate(markdown_ffi_call_errors_total[5m]))` | `rate(nginx_markdown_failures_total{reason="system_error"}[5m])` |
+| `nginx_markdown_skips_total{reason="SKIP_ACCEPT"}` | `nginx_markdown_skips_total{reason="skipped_accept"}` |
 
 #### Key Changes for Alert Authors
 
@@ -289,10 +289,9 @@ sed -i 's/markdown_parse_timeouts_total/markdown_errors_total{reason="timeout"}/
 | Setting | `balanced` | `strict_cache` | `streaming_first` |
 |---------|-----------|---------------|-------------------|
 | Error policy | `pass` | `pass` | `pass` |
-| Conditional requests | `ims_only` | `full_support` | `off` |
-| Streaming engine | `auto` | `off` | `on` |
-| Cache validation | `off` | `full` | `off` |
-| Max inflight | 64 | 32 | 128 |
+| Cache validation | `ims_only` | `full` | `off` |
+| Streaming | `auto` | `off` | `force` |
+| Max inflight | 64 | 64 | 64 |
 
 ---
 
@@ -407,7 +406,7 @@ http {
 | `markdown_max_size` / `markdown_memory_budget` + timeout + budget | → `markdown_limits memory=64m timeout=5s max_inflight=64` | Consolidated key-value limits directive |
 | `markdown_on_wildcard` | → `markdown_accept wildcard` | New directive syntax for Accept matching control |
 | _(none)_ | + `markdown_profile balanced` | Profile system provides tested production defaults |
-| Metrics queries | Use `markdown_skipped_total{reason="..."}` | Per-reason counters consolidated into unified families |
+| Metrics queries | Use `nginx_markdown_skips_total{reason="..."}` | Per-reason counters consolidated into unified families |
 
 ---
 

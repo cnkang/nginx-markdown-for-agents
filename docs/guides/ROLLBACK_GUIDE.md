@@ -21,8 +21,8 @@ flowchart TD
     Trigger["Rollback Trigger"] --> Type{"Trigger Type"}
     Type -->|High error rate| Disable["markdown_filter off"]
     Type -->|Conversion failures| Narrow["Narrow scope to<br/>specific paths only"]
-    Type -->|Performance issue| IncreaseLimit["Increase markdown_max_size<br/>or markdown_timeout"]
-    Type -->|Streaming issues| DisableStream["markdown_streaming_engine off"]
+    Type -->|Performance issue| IncreaseLimit["Increase markdown_limits<br/>memory or timeout"]
+    Type -->|Streaming issues| DisableStream["markdown_streaming off"]
     Disable --> Verify["Verify HTML responses<br/>work correctly"]
     Narrow --> Verify
     IncreaseLimit --> Verify
@@ -168,7 +168,7 @@ nginx -t && nginx -s reload
 
 #### Verify
 
-Follow the [Verification Steps](#verification-steps) section. The key signal is `SKIP_CONFIG` appearing in decision logs for the affected traffic.
+Follow the [Verification Steps](#verification-steps) section. The key signal is `disabled` appearing in decision logs for the affected traffic.
 
 ---
 
@@ -286,7 +286,7 @@ nginx -t && nginx -s reload
 
 #### Verify
 
-Follow the [Verification Steps](#verification-steps) section. Confirm that the excluded path or host now produces `SKIP_CONFIG` in decision logs, while other paths continue converting.
+Follow the [Verification Steps](#verification-steps) section. Confirm that the excluded path or host now produces `disabled` in decision logs, while other paths continue converting.
 
 ---
 
@@ -340,7 +340,7 @@ nginx -t && nginx -s reload
 
 #### Verify
 
-Follow the [Verification Steps](#verification-steps) section. The key signal is that `ELIGIBLE_FAILED_CLOSED` entries stop appearing in decision logs and are replaced by `ELIGIBLE_FAILED_OPEN` entries. Clients receive original HTML instead of 502 errors when conversion fails.
+Follow the [Verification Steps](#verification-steps) section. The key signal is that `failed_closed` entries stop appearing in decision logs and are replaced by `failed_open` entries. Clients receive original HTML instead of 502 errors when conversion fails.
 
 ---
 
@@ -362,7 +362,7 @@ If `conversions_failed` is growing faster than expected relative to `conversions
 
 ### Latency Exceeding Timeout
 
-Conversion latency approaches or exceeds the configured `markdown_timeout`. Check the latency bucket distribution:
+Conversion latency approaches or exceeds the configured `markdown_limits timeout=`. Check the latency bucket distribution:
 
 ```bash
 curl -s http://localhost/markdown-metrics | \
@@ -398,21 +398,21 @@ Any observation checkpoint result that does not meet the "safe to continue" crit
 
 After applying any rollback method, verify that the change took effect. Run these checks in order.
 
-### 1. Check Logs for SKIP_CONFIG
+### 1. Check Logs for `disabled`
 
-After disabling conversion (Methods A and B), the decision log should show `SKIP_CONFIG` for affected traffic:
+After disabling conversion (Methods A and B), the decision log should show `disabled` for affected traffic:
 
 ```bash
-# Watch for new SKIP_CONFIG entries after reload
+# Watch for new disabled entries after reload
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep "reason=SKIP_CONFIG" | tail -10
+  grep "reason=disabled" | tail -10
 ```
 
-For Method C (restoring fail-open), check that `ELIGIBLE_FAILED_CLOSED` entries stop and `ELIGIBLE_FAILED_OPEN` entries appear instead:
+For Method C (restoring fail-open), check that `failed_closed` entries stop and `failed_open` entries appear instead:
 
 ```bash
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep -E "reason=ELIGIBLE_FAILED_(OPEN|CLOSED)" | tail -10
+  grep -E "reason=failed_(open|closed)" | tail -10
 ```
 
 ### 2. Confirm Metrics Stop Incrementing
@@ -467,9 +467,9 @@ Copy-paste rollback sequence for the most common scenario (disable all conversio
 # 2. Test and reload
 nginx -t && nginx -s reload
 
-# 3. Verify: check for SKIP_CONFIG in logs
+# 3. Verify: check for disabled in logs
 grep "markdown decision:" /var/log/nginx/error.log | \
-  grep "reason=SKIP_CONFIG" | tail -5
+  grep "reason=disabled" | tail -5
 
 # 4. Verify: confirm conversion metrics stopped
 curl -s http://localhost/markdown-metrics | \
@@ -483,9 +483,34 @@ curl -sD - -o /dev/null \
 ```
 
 
+---
+
+## Performance Optimization Rollback (0.9.1)
+
+The 0.9.1 release introduces performance optimizations with independent
+rollback paths. For detailed rollback procedures specific to zero-copy
+streaming output, streaming decompression, and full-buffer copy reduction,
+see the dedicated [Performance Rollout and Rollback Guide](performance-rollout-091.md).
+
+### Quick Summary
+
+| Optimization | Rollback |
+|--------------|----------|
+| Zero-copy streaming output | `markdown_streaming_zero_copy off` + reload |
+| Streaming decompression | Switch profile from `streaming_first` to `balanced` or set `markdown_auto_decompress off` + reload |
+| Full-buffer copy reduction | Code revert + binary rebuild (no config toggle — internal implementation detail) |
+
+All config-based rollbacks take effect for new requests immediately after
+`nginx -s reload`. In-flight requests complete with their existing
+configuration.
+
+---
+
 ## Document Updates
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-05 | Kiro | Added 0.9.1 performance optimization rollback cross-reference |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

@@ -68,7 +68,7 @@ ROLLBACK_KEYWORDS = (
 )
 FFI_VALIDATION_KEYWORDS = (
     "entry->key", "entry->value", "entry->key_len", "entry->value_len",
-    "FFIHeaderEntry", "FFIAcceptResult", "FFIDecisionResult",
+    "FFIHeaderEntry", "FFIAcceptResult",
     "validate_ffi", "ffi_guard", "defensive.*FFI",
 )
 POSTCOMMIT_KEYWORDS = (

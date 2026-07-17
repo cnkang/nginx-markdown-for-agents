@@ -15,6 +15,9 @@ Scorecard.
 - `Makefile`
 - Rust `Cargo.toml` / `Cargo.lock` files
 - shell scripts under `tools/`, `packaging/`, and `examples/`
+- `.clusterfuzzlite/Dockerfile`
+- `examples/docker/Dockerfile.official-nginx-source-build`
+- `tools/build_release/Dockerfile.install-example`
 
 ## Required Sync Points
 
@@ -25,14 +28,20 @@ Scorecard.
 - Trivy, SBOM generation, and Scorecard are report-oriented visibility checks
   on PR, push, scheduled, and manual triggers until a blocking threshold is
   explicitly adopted.
+- Local Trivy scans exclude Git-ignored adapter state and generated report
+  directories, while clean CI checkouts still scan all repository content.
 - Third-party Actions remain pinned to immutable SHAs with version comments.
 - Generated scan outputs, SBOMs, and tool caches stay out of git.
+- Runnable Dockerfiles use a non-root final user. NGINX images use port 8080
+  plus writable `/tmp` PID/temp paths; fuzz images preserve writable source,
+  build, and output mounts for the ClusterFuzzLite action.
 
 ## Focused Verification
 
 ```bash
 make security-static
 make supply-chain
+make harness-check
 make docs-check
 ```
 

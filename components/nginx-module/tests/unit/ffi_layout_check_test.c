@@ -53,32 +53,6 @@ test_ffi_accept_result_field_access(void)
 
 
 static void
-test_ffi_conditional_result_field_access(void)
-{
-    FFIConditionalResult r;
-    memset(&r, 0, sizeof(r));
-
-    r.result_code = 0;
-    r.matched_etag_len = 0;
-
-    TEST_ASSERT(r.result_code == 0, "result_code must be 0 for NotModified");
-}
-
-
-static void
-test_ffi_decision_result_field_access(void)
-{
-    FFIDecisionResult r;
-    memset(&r, 0, sizeof(r));
-
-    r.decision = 0;
-    r.reason_code = 0;
-
-    TEST_ASSERT(r.decision == 0, "decision must be 0 for Convert");
-}
-
-
-static void
 test_error_codes_compile(void)
 {
     TEST_ASSERT(ERROR_SUCCESS == 0, "ERROR_SUCCESS must be 0");
@@ -101,6 +75,16 @@ test_error_codes_compile(void)
     TEST_ASSERT(DECOMP_CATEGORY_TRUNCATED_INPUT == 103, "DECOMP_CATEGORY_TRUNCATED_INPUT must be 103");
     TEST_ASSERT(DECOMP_CATEGORY_IO_ERROR == 104, "DECOMP_CATEGORY_IO_ERROR must be 104");
     TEST_ASSERT(DECOMP_CATEGORY_INVALID_ARGS == 105, "DECOMP_CATEGORY_INVALID_ARGS must be 105");
+}
+
+
+static void
+test_abi_version_alignment(void)
+{
+    TEST_ASSERT(ngx_http_markdown_ffi_abi_matches(MARKDOWN_ABI_VERSION),
+        "matching ABI version must be accepted");
+    TEST_ASSERT(!ngx_http_markdown_ffi_abi_matches(MARKDOWN_ABI_VERSION + 1),
+        "mismatched ABI version must be rejected");
 }
 
 
@@ -178,9 +162,8 @@ main(void)
 {
     test_markdown_result_field_access();
     test_ffi_accept_result_field_access();
-    test_ffi_conditional_result_field_access();
-    test_ffi_decision_result_field_access();
     test_error_codes_compile();
+    test_abi_version_alignment();
     test_markdown_options_field_access();
     test_ffi_header_entry_field_access();
     test_ffi_header_plan_field_access();

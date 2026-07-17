@@ -18,10 +18,19 @@ Automatic decompression is the built-in fallback path for this scenario.
     (RFC 7230 §4.2.2). If the zlib-wrapped attempt fails with a format
     error, the buffered path automatically retries with raw deflate
     (RFC 1951 only) for compatibility with older servers (Microsoft IIS,
-    older Java servlets). The streaming path supports only zlib-wrapped
-    deflate; raw deflate responses in streaming mode will trigger the
-    the configured `markdown_error_policy` strategy (fail-open by default).
-- Supports `br` when Brotli support is compiled in.
+    older Java servlets). The streaming path sniffs the first two bytes and
+    supports both zlib-wrapped and raw deflate without replay.
+  - Gzip uses streaming gzip framing under the streaming-eligible gates;
+    member boundaries may cross feeds, trailers are validated, and a truncated
+    final member is rejected.
+  - When policy selects full-buffer conversion, both the default Rust FFI
+    decoder and the C no-Rust fallback consume every concatenated gzip member,
+    reject a truncated later member, and enforce one response-wide output
+    budget. Deflate (zlib-wrapped or raw) must completely consume its
+    compressed payload; trailing bytes after `Z_STREAM_END` are rejected as
+    `FORMAT_ERROR` (deflate does not support concatenated members).
+- Supports `br` when Brotli support is compiled in; Brotli remains on bounded
+  full-buffer decompression in 0.9.1.
 - Uses a fast path for uncompressed responses (no decompression work).
 - Applies `markdown_error_policy` strategy on decompression failures.
 
@@ -64,7 +73,7 @@ Decompression failures (corrupt data, resource limits, system errors):
 ## Safety and Resource Controls
 
 - Decompressed output is bounded by `markdown_decompress_max_size` (introduced in v0.7.0).
-  When not explicitly set, it inherits the value of `markdown_max_size` as a fallback.
+  When not explicitly set, it inherits the value of `markdown_limits memory=<size>` as a fallback.
 - Input/output buffers are validated before use.
 - Memory is allocated from request pools and cleaned automatically.
 - Error paths perform structured cleanup.
@@ -106,10 +115,10 @@ For operational troubleshooting:
 ## Resource Budgets (v0.7.0)
 
 The `markdown_decompress_max_size` directive controls the maximum decompressed
-output size independently from `markdown_max_size`. This prevents memory
+output size independently from `markdown_limits memory=<size>`. This prevents memory
 exhaustion from highly compressible (zip-bomb) upstream content.
 
-- **Default**: inherits `markdown_max_size` when not explicitly set
+- **Default**: inherits `markdown_limits memory=<size>` when not explicitly set
 - **Directive**: `markdown_decompress_max_size <size>;`
 - **Error code**: `ERROR_DECOMPRESSION_BUDGET_EXCEEDED` (9)
 - **Error category**: `NGX_HTTP_MARKDOWN_ERROR_RESOURCE_LIMIT`
@@ -127,14 +136,14 @@ to the `ConversionError` enum in Rust and are categorized in C:
 
 | Rust Error Variant | FFI Code | C Error Category | Description |
 |--------------------|----------|-------------------|-------------|
-| `DecompressionBudgetExceeded` | 9 | `RESOURCE_LIMIT` | Decompressed output exceeds `decompress_max_size` |
-| `ConversionError::Timeout` | 3 | `RESOURCE_LIMIT` | Decompression timed out |
-| `ConversionError::MemoryLimit` | 4 | `RESOURCE_LIMIT` | Memory allocation during decompression exceeded limit |
-| `ConversionError::Parse` | 1 | `CONVERSION` | Invalid compressed data (corrupt gzip/deflate/brotli) |
+| `DecompressionBudgetExceeded` | 9 | `resource_limit` | Decompressed output exceeds `decompress_max_size` |
+| `ConversionError::Timeout` | 3 | `resource_limit` | Decompression timed out |
+| `ConversionError::MemoryLimit` | 4 | `resource_limit` | Memory allocation during decompression exceeded limit |
+| `ConversionError::Parse` | 1 | `conversion` | Invalid compressed data (corrupt gzip/deflate/brotli) |
 
 The `ngx_http_markdown_classify_error()` function maps FFI error codes to
-the three-level error category enum (`CONVERSION`, `RESOURCE_LIMIT`,
-`SYSTEM`), ensuring correct Prometheus counter routing and log annotation.
+| the three-level error category enum (`conversion`, `resource_limit`,
+| `system`), ensuring correct Prometheus counter routing and log annotation.
 
 ## Document Updates
 
@@ -143,3 +152,5 @@ the three-level error category enum (`CONVERSION`, `RESOURCE_LIMIT`,
 | 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.7.0 | 2026-05-17 | Kang | Added Resource Budgets and Error Categories sections for v0.7.0 |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.9.1 | 2026-07-14 | Codex | Document full-buffer concatenated-gzip handling, later-member truncation rejection, and cumulative budget enforcement |

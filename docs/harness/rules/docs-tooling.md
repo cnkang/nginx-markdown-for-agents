@@ -38,6 +38,17 @@ Required:
   default plain-text format uses human-readable labels that differ from JSON
   keys and Prometheus series names; omitting `Accept` causes false negatives
   when grepping for snake_case keys.
+- `tools/harness/detect_doc_sync.py` owns the blocking v0.9.1 public-config
+  drift contract. It reads the current worktree directly, including untracked
+  files under the owned production/example/E2E/Sonar surfaces. It verifies the
+  active `markdown_streaming` registration, reject-only
+  `markdown_streaming_engine` stub, Helm `markdown.streaming.mode` mapping,
+  removal of production `stream.engine`/`STREAM_ENGINE` symbols, the
+  commonmark/gfm-only flavor contract with explicit mdx/org-mode rejection,
+  and the exact off-to-off, auto-to-auto, on-to-force migration table.
+- This detector is blocking in the existing CI docs job through
+  `make docs-check` and also runs through `make harness-security-checks`; its
+  positive and negative fixtures run through `make test-harness`.
 
 ### 49. THIRD-PARTY-NOTICES drift with dependency changes
 Required:

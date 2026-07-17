@@ -1,14 +1,12 @@
 //! Metric label validation and normalization.
 //!
-//! Defines the allowed label keys for the observability schema v1 and provides
-//! functions to validate, block, and normalize label values. Only whitelisted
-//! labels may appear in Prometheus metrics output; high-cardinality labels are
-//! explicitly blocked.
+//! Defines a repository-internal Rust label policy and helpers for proposed
+//! Rust-owned metrics. The production NGINX Prometheus renderer is implemented
+//! in C and has its own bounded label set, including an explicitly enabled and
+//! cardinality-capped `path` label. This module must not be treated as the
+//! production wire-label registry.
 
-/// Allowed metric label keys for the observability schema v1.
-///
-/// Only these labels may be used in Prometheus metrics output.
-/// This whitelist prevents high-cardinality label explosion.
+/// Allowed label keys for the internal Rust metrics model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MetricLabel {
     /// The reason code for the decision (from `ReasonCode::as_str()`).
@@ -50,7 +48,7 @@ pub const ALL_LABELS: [MetricLabel; 4] = [
     MetricLabel::CacheValidation,
 ];
 
-/// High-cardinality labels that must NEVER be used in metrics output.
+/// High-cardinality labels forbidden in the internal Rust metrics model.
 ///
 /// These labels would create unbounded time series and are explicitly blocked.
 const BLOCKED_LABELS: &[&str] = &[
@@ -68,7 +66,7 @@ const BLOCKED_LABELS: &[&str] = &[
     "session_id",
 ];
 
-/// Returns `true` if the given label key is in the whitelist.
+/// Returns `true` if the key is in the internal Rust whitelist.
 ///
 /// Matching is case-insensitive.
 ///

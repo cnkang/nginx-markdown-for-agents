@@ -57,6 +57,21 @@ Required:
   filesystem/IaC scans, SPDX SBOM generation, and OpenSSF Scorecard on PR,
   push, scheduled, and manual triggers. Do not describe it as a hard blocking
   gate unless the project adopts explicit threshold semantics.
+- Local Trivy filesystem scans exclude Git-ignored adapters, caches, build
+  output, and prior reports. At minimum `.kiro/`, `.codeartsdoer/`, and
+  `build/` stay out of scope; clean CI checkouts remain fully scanned.
+- Tracked runnable Dockerfiles must end with a non-root `USER`. NGINX runtime
+  images must pair that user with an unprivileged listener and writable PID and
+  temporary paths. ClusterFuzzLite images must keep the toolchain readable and
+  the source/build/output directories writable under the actual fuzz action
+  mount contract, including ownership of the `/rustc` source-staging directory
+  and the fixed
+  `/usr/lib/libFuzzingEngine.a` archive installed by the compile wrapper. Grant
+  access to that file only, not the full system library directory. Do not
+  suppress Trivy's missing-user finding when those runtime changes are
+  feasible. ClusterFuzzLite workflows must pre-create the bind-mounted
+  `build-out` directory as the runner user before the root container action
+  initializes its workspace.
 - Third-party actions in these workflows must be pinned to immutable commit
   SHAs with human-readable version comments.
 - Generated scan output, SBOM files, tool caches, and vulnerability databases
@@ -70,3 +85,4 @@ Verification:
 - `make security-semgrep`
 - `make security-cargo-deny`
 - `make supply-chain` when Trivy and Syft are locally available
+- `make harness-check` for the tracked Docker runtime contract

@@ -15,6 +15,10 @@
 #include "markdown_converter.h"
 
 
+#define NGX_HTTP_MARKDOWN_HTTP_DATE_LEN \
+    (sizeof("Mon, 28 Sep 1970 06:00:00 GMT") - 1)
+
+
 /*
  * Find a request header by name in nginx's generic linked-list container.
  *
@@ -327,12 +331,10 @@ ngx_http_markdown_collect_conditional_headers(ngx_http_request_t *r,
              * conditional decision can compare it against
              * If-Modified-Since.
              */
-            const u_char *end;
-
-            end = ngx_http_time(lm_time_buf,
-                                r->headers_out.last_modified_time);
+            (void) ngx_http_time(lm_time_buf,
+                                 r->headers_out.last_modified_time);
             *lm_data = lm_time_buf;
-            *lm_len = (size_t) (end - lm_time_buf);
+            *lm_len = NGX_HTTP_MARKDOWN_HTTP_DATE_LEN;
 
             ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                           "markdown: formatted last_modified_time=%T "
@@ -404,7 +406,7 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
     const u_char            *lm_data;
     size_t                   lm_len;
     ngx_flag_t               needs_entity_etag;
-    u_char                   lm_time_buf[32];
+    u_char                   lm_time_buf[NGX_HTTP_MARKDOWN_HTTP_DATE_LEN + 1];
 
     if (conf->policy.conditional_requests == NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,

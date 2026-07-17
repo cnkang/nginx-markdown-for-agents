@@ -310,15 +310,6 @@ markdown_trusted_proxies_free(struct MarkdownTrustedProxies *handle)
 
 /* FFI conflict detection stub — moved after markdown_converter.h include */
 
-/* Stream engine handler stub */
-static char *
-ngx_http_markdown_stream_engine_handler(ngx_conf_t *cf,
-    ngx_command_t *cmd, void *conf)
-{
-    UNUSED(cf); UNUSED(cmd); UNUSED(conf);
-    return NGX_CONF_OK;
-}
-
 static ngx_int_t g_compile_complex_rc;
 
 typedef struct {
@@ -488,16 +479,10 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->decompress.parser_budget = NGX_CONF_UNSET_SIZE;
     mcf->routing.large_body_threshold = NGX_CONF_UNSET_SIZE;
     mcf->routing.max_inflight = NGX_CONF_UNSET_UINT;
-    mcf->ops.trust_forwarded_headers = NGX_CONF_UNSET;
     mcf->ops.metrics_format = NGX_CONF_UNSET_UINT;
     mcf->ops.metrics_per_path = NGX_CONF_UNSET;
     mcf->ops.diagnostics_enabled = NGX_CONF_UNSET;
     mcf->ops.otel_enabled = NGX_CONF_UNSET;
-    mcf->ops.otel_tracing = NGX_CONF_UNSET;
-    mcf->ops.otel_metrics = NGX_CONF_UNSET;
-    mcf->ops.otel_span_buffer_size = NGX_CONF_UNSET_UINT;
-    mcf->ops.otel_export_timeout = NGX_CONF_UNSET_MSEC;
-    mcf->stream.engine = NGX_CONF_UNSET_UINT;
     mcf->stream.policy = NGX_CONF_UNSET_UINT;
     mcf->stream.policy_explicit = -1;
     mcf->stream.threshold = NGX_CONF_UNSET_SIZE;
@@ -505,12 +490,9 @@ init_conf(ngx_http_markdown_conf_t *mcf)
     mcf->stream.precommit_buffer = NGX_CONF_UNSET_SIZE;
     mcf->stream.flush_min = NGX_CONF_UNSET_SIZE;
     mcf->stream.excluded_types = NGX_CONF_UNSET_PTR;
-    mcf->stream.on_error = NGX_CONF_UNSET_UINT;
-    mcf->stream.on_error_explicit = -1;
     mcf->stream.budget = NGX_CONF_UNSET_SIZE;
     mcf->stream.budget_explicit = -1;
     mcf->stream.shadow = -1;
-    mcf->stream.shadow_explicit = -1;
     mcf->advanced.prune_noise = NGX_CONF_UNSET;
     mcf->advanced.prune_selectors = NGX_CONF_UNSET_PTR;
     mcf->advanced.prune_protection_selectors = NGX_CONF_UNSET_PTR;
@@ -684,8 +666,6 @@ test_profile_defaults_strict_cache_merge(void)
         "strict_cache enables full cache validation");
     TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF,
         "strict_cache disables streaming policy");
-    TEST_ASSERT(child.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF,
-        "strict_cache disables streaming engine");
     TEST_ASSERT(child.max_size == 8 * 1024 * 1024,
         "strict_cache memory default is 8m");
     TEST_ASSERT(child.timeout == 2000,
@@ -732,8 +712,6 @@ test_profile_defaults_streaming_first_merge(void)
         "streaming_first disables cache validation");
     TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
         "streaming_first forces streaming policy");
-    TEST_ASSERT(child.stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON,
-        "streaming_first enables streaming engine");
     TEST_ASSERT(child.stream.budget == 256 * 1024,
         "streaming_first streaming buffer default is 256k");
 
@@ -1016,6 +994,177 @@ test_profile_inheritance_child_wins(void)
         "child explicit profile not overridden");
 
     TEST_PASS("child profile overrides parent");
+}
+
+static void
+test_hierarchical_profile_merge_child_defaults(void)
+{
+    ngx_conf_t               cf;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char                    *rc;
+
+    TEST_SUBSECTION("hierarchical merge: child profile defaults override parent profile values");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    init_conf(&parent);
+    init_conf(&child);
+
+    parent.profile.name = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
+    parent.profile.set = 1;
+
+    child.profile.name = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+    child.profile.set = 1;
+
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+
+    TEST_ASSERT(rc == NGX_CONF_OK, "merge should pass");
+
+    TEST_ASSERT(child.accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD,
+        "child streaming_first wildcard overrides parent balanced strict");
+    TEST_ASSERT(child.policy.conditional_requests ==
+        NGX_HTTP_MARKDOWN_CONDITIONAL_DISABLED,
+        "child streaming_first disabled cache validation overrides parent ims_only");
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
+        "child streaming_first force overrides parent balanced auto");
+    TEST_ASSERT(child.on_error == NGX_HTTP_MARKDOWN_ON_ERROR_PASS,
+        "child streaming_first pass error policy overrides parent balanced pass");
+
+    TEST_PASS("hierarchical merge: child profile defaults win over parent profile values");
+}
+
+static void
+test_hierarchical_profile_merge_preserves_explicit_parent(void)
+{
+    ngx_conf_t               cf;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char                    *rc;
+
+    TEST_SUBSECTION("hierarchical merge: explicit parent directive preserved across profile change");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    init_conf(&parent);
+    init_conf(&child);
+
+    parent.profile.name = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
+    parent.profile.set = 1;
+    parent.max_size = 32 * 1024 * 1024;
+
+    /* Simulate the real parse order: explicit fields are set before merge. */
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+    {
+        ngx_http_markdown_conf_t tmp_parent;
+        init_conf(&tmp_parent);
+        tmp_parent.profile.name = NGX_HTTP_MARKDOWN_PROFILE_NONE;
+        ngx_http_markdown_merge_conf(&cf, &tmp_parent, &parent);
+    }
+
+    child.profile.name = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+    child.profile.set = 1;
+
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+
+    TEST_ASSERT(rc == NGX_CONF_OK, "merge should pass");
+
+    /* Explicit parent directive (memory=32m) must be inherited */
+    TEST_ASSERT(child.max_size == 32 * 1024 * 1024,
+        "explicit parent memory=32m preserved across profile change");
+
+    /* But profile-managed fields still take child profile defaults */
+    TEST_ASSERT(child.accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD,
+        "child streaming_first wildcard still applies for non-explicit fields");
+
+    TEST_PASS("hierarchical merge: explicit parent directive preserved");
+}
+
+static void
+test_hierarchical_profile_merge_preserves_explicit_parent_default_value(void)
+{
+    ngx_conf_t               cf;
+    ngx_http_markdown_conf_t root;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char                    *rc;
+
+    TEST_SUBSECTION("hierarchical merge: explicit parent value equal to profile default");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    init_conf(&root);
+    init_conf(&parent);
+    init_conf(&child);
+
+    parent.profile.name = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
+    parent.profile.set = 1;
+    parent.accept_policy = NGX_HTTP_MARKDOWN_ACCEPT_STRICT;
+
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &root, &parent);
+    TEST_ASSERT(rc == NGX_CONF_OK, "parent merge should pass");
+
+    child.profile.name = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+    child.profile.set = 1;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+    TEST_ASSERT(rc == NGX_CONF_OK, "child merge should pass");
+    TEST_ASSERT(child.accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_STRICT,
+        "explicit parent strict must survive even when it equals parent default");
+
+    TEST_PASS("explicit parent default-valued directive preserved");
+}
+
+static void
+test_child_profile_overrides_merged_builtin_parent_defaults(void)
+{
+    ngx_conf_t               cf;
+    ngx_http_markdown_conf_t root;
+    ngx_http_markdown_conf_t parent;
+    ngx_http_markdown_conf_t child;
+    char                    *rc;
+
+    TEST_SUBSECTION("hierarchical merge: child profile replaces builtin parent defaults");
+
+    memset(&cf, 0, sizeof(cf));
+    cf.pool = &g_pool;
+    init_conf(&root);
+    init_conf(&parent);
+    init_conf(&child);
+
+    g_stub_conflicts.conflicts = NULL;
+    g_stub_conflicts.count = 0;
+    g_stub_conflict_called = 0;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &root, &parent);
+    TEST_ASSERT(rc == NGX_CONF_OK, "builtin parent merge should pass");
+    TEST_ASSERT(parent.profile.set == 0, "parent profile remains unset");
+
+    child.profile.name = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+    child.profile.set = 1;
+
+    rc = ngx_http_markdown_merge_conf(&cf, &parent, &child);
+    TEST_ASSERT(rc == NGX_CONF_OK, "child merge should pass");
+    TEST_ASSERT(child.accept_policy == NGX_HTTP_MARKDOWN_ACCEPT_WILDCARD,
+        "child profile must replace inherited builtin accept default");
+    TEST_ASSERT(child.stream.policy == NGX_HTTP_MARKDOWN_STREAMING_FORCE,
+        "child profile must replace inherited builtin streaming default");
+
+    TEST_PASS("child profile replaces builtin parent defaults");
 }
 
 static void
@@ -1330,6 +1479,10 @@ main(void)
     /* Task 9.9: Profile inheritance */
     test_profile_inheritance();
     test_profile_inheritance_child_wins();
+    test_hierarchical_profile_merge_child_defaults();
+    test_hierarchical_profile_merge_preserves_explicit_parent();
+    test_hierarchical_profile_merge_preserves_explicit_parent_default_value();
+    test_child_profile_overrides_merged_builtin_parent_defaults();
     test_cache_validation_explicit_inheritance();
 
     /* Task 9.10: No-profile built-in defaults */

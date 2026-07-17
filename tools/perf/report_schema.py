@@ -135,6 +135,60 @@ def validate_report(report: dict) -> list[str]:
     return errors
 
 
+def validate_module_benchmark(report: dict) -> list[str]:
+    """Validate a 0.9.1 module benchmark report against the schema."""
+    errors = []
+    if "module_benchmark" not in report:
+        return ["missing top-level key: 'module_benchmark'"]
+
+    mb = report["module_benchmark"]
+    if not isinstance(mb, dict):
+        return ["'module_benchmark' must be a dict"]
+
+    required_top = {"version", "timestamp", "scenarios", "memory_slope"}
+    errors.extend(validate_required_fields(mb, required_top, "module_benchmark"))
+
+    scenarios = mb.get("scenarios", [])
+    if not isinstance(scenarios, list):
+        errors.append("scenarios must be a list")
+    else:
+        _validate_module_scenarios(scenarios, errors)
+
+    if "memory_slope" in mb and not isinstance(mb["memory_slope"], dict):
+        errors.append("memory_slope must be a dict")
+    else:
+        ms = mb.get("memory_slope", {})
+        required_ms = {"rss_per_input_mb", "r_squared"}
+        errors.extend(validate_required_fields(ms, required_ms, "memory_slope"))
+
+    return errors
+
+
+def _validate_module_scenarios(scenarios: list, errors: list[str]) -> None:
+    required_sc = {"name", "profile", "compression", "transfer_encoding", "concurrency", "status"}
+    for i, sc in enumerate(scenarios):
+        if not isinstance(sc, dict):
+            errors.append(f"scenarios[{i}] must be a dict")
+            continue
+        errors.extend(validate_required_fields(sc, required_sc, f"scenarios[{i}]"))
+        if sc.get("status") == "completed" and "metrics" not in sc:
+            errors.append(f"scenarios[{i}] missing 'metrics' for completed status")
+        elif "metrics" in sc:
+            _validate_module_metrics(sc["metrics"], f"scenarios[{i}].metrics", errors)
+
+
+def _validate_module_metrics(m: object, context: str, errors: list[str]) -> None:
+    if not isinstance(m, dict):
+        errors.append(f"{context} must be a dict")
+        return
+    required_metrics = {
+        "rps", "latency_p50_ms", "latency_p95_ms", "latency_p99_ms",
+        "ttfb_p50_ms", "ttfb_p95_ms", "ttlb_p50_ms", "worker_rss_mb",
+        "streaming_ratio", "fullbuffer_ratio", "fallback_rate"
+    }
+    errors.extend(validate_required_fields(m, required_metrics, context))
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point for report validation."""
     if argv is None:
@@ -151,7 +205,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: failed to load report: {e}", file=sys.stderr)
         return 1
 
-    errors = validate_report(report)
+    # ponytail: automatically determine whether it is module or corpus report and validate
+    if "module_benchmark" in report:
+        errors = validate_module_benchmark(report)
+    else:
+        errors = validate_report(report)
     if errors:
         print(f"Validation failed with {len(errors)} error(s):")
         for err in errors:

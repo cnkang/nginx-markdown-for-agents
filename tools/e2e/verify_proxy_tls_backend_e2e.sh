@@ -162,6 +162,7 @@ path_is_within_dir() {
     *) return 1 ;;
   esac
 
+  # shellcheck disable=SC2317
   return 0
 }
 
@@ -248,20 +249,29 @@ else
   tar -xzf "${BUILDROOT}/nginx.tar.gz" -C "${BUILDROOT}/src" --strip-components=1
   (
     cd "${BUILDROOT}/src"
-    if command -v brew >/dev/null 2>&1; then
-      openssl_prefix="$(brew --prefix openssl@3 2>/dev/null || true)"
-      if [[ -n "${openssl_prefix}" ]]; then
-        export CPPFLAGS="-I${openssl_prefix}/include ${CPPFLAGS:-}"
-        export LDFLAGS="-L${openssl_prefix}/lib ${LDFLAGS:-}"
-      fi
+    configure_arg=""
+    markdown_export_nginx_dependency_env openssl@3
+    cc_opt="${NGINX_CC_OPT:-}"
+    cc_opt="${cc_opt:+${cc_opt} }${CPPFLAGS:-}"
+    ld_opt="${NGINX_LD_OPT:-}"
+    ld_opt="${ld_opt:+${ld_opt} }${LDFLAGS:-}"
+    configure_args=(
+      --with-http_ssl_module
+      --without-http_rewrite_module
+      --prefix="${RUNTIME}"
+      --add-module="${WORKSPACE_ROOT}/components/nginx-module"
+    )
+    while IFS= read -r configure_arg; do
+      configure_args+=("${configure_arg}")
+    done < <(markdown_emit_nginx_configure_env "${cc_opt}" "${ld_opt}")
+    if ! ./configure "${configure_args[@]}" > "${RAW_DIR}/nginx-build.log" 2>&1 \
+      || ! make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >> "${RAW_DIR}/nginx-build.log" 2>&1 \
+      || ! make install >> "${RAW_DIR}/nginx-build.log" 2>&1
+    then
+      markdown_print_nginx_build_failure_diagnostics \
+        "${BUILDROOT}" "${RAW_DIR}/nginx-build.log"
+      exit 1
     fi
-    ./configure \
-      --with-http_ssl_module \
-      --without-http_rewrite_module \
-      --prefix="${RUNTIME}" \
-      --add-module="${WORKSPACE_ROOT}/components/nginx-module" >/dev/null
-    make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" >/dev/null
-    make install >/dev/null
   )
   NGINX_EXECUTABLE="${RUNTIME}/sbin/nginx"
 fi

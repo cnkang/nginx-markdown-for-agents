@@ -50,6 +50,8 @@ class SkipsSnapshot:
     auth: int = 0
     range: int = 0
     accept: int = 0
+    no_accept: int = 0
+    conditional: int = 0
 
 
 @dataclass
@@ -137,37 +139,27 @@ def render_prometheus(snap: MetricsSnapshot) -> str:
         "nginx_markdown_skips_total", "counter",
         "Requests skipped by reason.",
         [
-            (snap.skips.method,
-             {"reason": "SKIP_METHOD"}),
-            (snap.skips.status,
-             {"reason": "SKIP_STATUS"}),
-            (snap.skips.content_type,
-             {"reason": "SKIP_CONTENT_TYPE"}),
-            (snap.skips.size,
-             {"reason": "SKIP_SIZE"}),
-            (snap.skips.streaming,
-             {"reason": "SKIP_STREAMING"}),
-            (snap.skips.auth,
-             {"reason": "SKIP_AUTH"}),
-            (snap.skips.range,
-             {"reason": "SKIP_RANGE"}),
-            (snap.skips.accept,
-             {"reason": "SKIP_ACCEPT"}),
-            (snap.skips.config,
-             {"reason": "SKIP_CONFIG"}),
+            (
+                snap.skips.method + snap.skips.status
+                + snap.skips.content_type + snap.skips.size
+                + snap.skips.streaming + snap.skips.auth
+                + snap.skips.range,
+                {"reason": "not_eligible"},
+            ),
+            (snap.skips.accept, {"reason": "skipped_accept"}),
+            (snap.skips.no_accept, {"reason": "skipped_no_accept"}),
+            (snap.skips.conditional, {"reason": "skipped_conditional"}),
+            (snap.skips.config, {"reason": "disabled"}),
         ],
     )
 
     emit_family(
         "nginx_markdown_failures_total", "counter",
-        "Conversion failures by stage.",
+        "Conversion failures by reason.",
         [
-            (snap.failures_conversion,
-             {"stage": "FAIL_CONVERSION"}),
-            (snap.failures_resource_limit,
-             {"stage": "FAIL_RESOURCE_LIMIT"}),
-            (snap.failures_system,
-             {"stage": "FAIL_SYSTEM"}),
+            (snap.failures_conversion, {"reason": "conversion_error"}),
+            (snap.failures_resource_limit, {"reason": "resource_limit"}),
+            (snap.failures_system, {"reason": "system_error"}),
         ],
     )
 
@@ -232,9 +224,8 @@ def render_prometheus(snap: MetricsSnapshot) -> str:
     le_inf = le_1000 + snap.conversion_latency_gt_1000ms
 
     emit_family(
-        "nginx_markdown_conversion_duration_seconds", "gauge",
-        "Cumulative conversion count per latency bucket "
-        "(not a native Prometheus histogram; no _sum/_count).",
+        "nginx_markdown_conversion_latency_bucket_total", "counter",
+        "Cumulative conversion count per latency boundary.",
         [
             (le_10, {"le": "0.01"}),
             (le_100, {"le": "0.1"}),
@@ -317,7 +308,7 @@ EXPECTED_FAMILIES = {
     "nginx_markdown_estimated_token_savings_total",
     "nginx_markdown_decompressions_total",
     "nginx_markdown_decompression_failures_total",
-    "nginx_markdown_conversion_duration_seconds",
+    "nginx_markdown_conversion_latency_bucket_total",
 }
 
 ALLOWED_LABEL_KEYS = {"reason", "stage", "format", "le"}
@@ -327,14 +318,19 @@ FORBIDDEN_LABELS = {
     "referer", "remote_addr",
 }
 
-REASON_VALUES = {
-    "SKIP_CONFIG", "SKIP_METHOD", "SKIP_STATUS",
-    "SKIP_CONTENT_TYPE", "SKIP_SIZE", "SKIP_STREAMING",
-    "SKIP_AUTH", "SKIP_RANGE", "SKIP_ACCEPT",
+SKIP_REASON_VALUES = {
+    "not_eligible", "skipped_accept", "skipped_no_accept",
+    "skipped_conditional", "disabled",
 }
 
+FAILURE_REASON_VALUES = {
+    "conversion_error", "resource_limit", "system_error",
+}
+
+REASON_VALUES = SKIP_REASON_VALUES | FAILURE_REASON_VALUES
+
 STAGE_VALUES = {
-    "FAIL_CONVERSION", "FAIL_RESOURCE_LIMIT", "FAIL_SYSTEM",
+    "precommit_failopen", "precommit_reject", "postcommit_error",
 }
 
 FORMAT_VALUES = {"gzip", "deflate", "brotli"}
@@ -343,7 +339,7 @@ LE_VALUES = {"0.01", "0.1", "1.0", "+Inf"}
 
 SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
-EXPECTED_TIME_SERIES_COUNT = 28
+EXPECTED_TIME_SERIES_COUNT = 24
 
 
 # -------------------------------------------------------------------
@@ -404,28 +400,29 @@ def test_round_trip_serialization(snap):
     check("nginx_markdown_passthrough_total",
           snap.conversions_bypassed + snap.failopen_count)
 
+    not_eligible = (
+        snap.skips.method + snap.skips.status
+        + snap.skips.content_type + snap.skips.size
+        + snap.skips.streaming + snap.skips.auth
+        + snap.skips.range
+    )
     for reason, val in [
-        ("SKIP_METHOD", snap.skips.method),
-        ("SKIP_STATUS", snap.skips.status),
-        ("SKIP_CONTENT_TYPE", snap.skips.content_type),
-        ("SKIP_SIZE", snap.skips.size),
-        ("SKIP_STREAMING", snap.skips.streaming),
-        ("SKIP_AUTH", snap.skips.auth),
-        ("SKIP_RANGE", snap.skips.range),
-        ("SKIP_ACCEPT", snap.skips.accept),
-        ("SKIP_CONFIG", snap.skips.config),
+        ("not_eligible", not_eligible),
+        ("skipped_accept", snap.skips.accept),
+        ("skipped_no_accept", snap.skips.no_accept),
+        ("skipped_conditional", snap.skips.conditional),
+        ("disabled", snap.skips.config),
     ]:
         check("nginx_markdown_skips_total", val,
               {"reason": reason})
 
-    for stage, val in [
-        ("FAIL_CONVERSION", snap.failures_conversion),
-        ("FAIL_RESOURCE_LIMIT",
-         snap.failures_resource_limit),
-        ("FAIL_SYSTEM", snap.failures_system),
+    for reason, val in [
+        ("conversion_error", snap.failures_conversion),
+        ("resource_limit", snap.failures_resource_limit),
+        ("system_error", snap.failures_system),
     ]:
         check("nginx_markdown_failures_total", val,
-              {"stage": stage})
+              {"reason": reason})
 
     check("nginx_markdown_failopen_total",
           snap.failopen_count)
@@ -460,7 +457,7 @@ def test_round_trip_serialization(snap):
         ("1.0", le_1000),
         ("+Inf", le_inf),
     ]:
-        check("nginx_markdown_conversion_duration_seconds",
+        check("nginx_markdown_conversion_latency_bucket_total",
               val, {"le": le_val})
 
 
@@ -888,12 +885,12 @@ def test_counter_accounting_invariant(snap):
 
     sum_skips = sum(
         get("nginx_markdown_skips_total", {"reason": r})
-        for r in REASON_VALUES
+        for r in SKIP_REASON_VALUES
     )
 
     sum_failures = sum(
-        get("nginx_markdown_failures_total", {"stage": s})
-        for s in STAGE_VALUES
+        get("nginx_markdown_failures_total", {"reason": reason})
+        for reason in FAILURE_REASON_VALUES
     )
 
     assert passthrough == sum_skips + failopen, (

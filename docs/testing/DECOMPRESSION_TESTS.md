@@ -128,6 +128,28 @@ make -C components/nginx-module/tests unit-config_merge
 
 ### Integration Tests
 
+#### 7. Deflate Trailing-Data Integrity Tests
+
+**Status:** ✅ Implemented (0.9.1)
+
+**Coverage:**
+- zlib-wrapped deflate + trailing garbage in same chunk → `FORMAT_ERROR`
+- raw deflate + trailing garbage in same chunk → `FORMAT_ERROR`
+- deflate complete in one chunk, trailing garbage in next chunk → `FORMAT_ERROR`
+- deflate complete, empty subsequent chunk → safe no-op (OK)
+- clean deflate (no trailing data) still succeeds (zlib-wrapped and raw)
+- gzip concatenated members still succeed (anti-regression, one-feed and cross-feed)
+- full-buffer zlib-wrapped deflate + trailing garbage → `FORMAT_ERROR`
+- full-buffer raw deflate + trailing garbage → `FORMAT_ERROR`
+- full-buffer clean deflate still succeeds (zlib-wrapped and raw)
+- full-buffer gzip concatenated members still succeed (anti-regression)
+
+**How to Run:**
+```bash
+make -C components/nginx-module/tests unit-streaming_decomp
+make -C components/nginx-module/tests unit-decompression_production
+```
+
 #### Integration Test Suite (`test_decompression_integration.sh`)
 
 **Status:** ✅ Implemented
@@ -163,7 +185,7 @@ make -C components/nginx-module/tests unit-config_merge
 
 6. **Size Limit Enforcement**
    - Upstream returns large compressed content
-   - Decompressed size exceeds `markdown_max_size`
+   - Decompressed size exceeds `markdown_limits memory=<size>`
    - Module applies fail-open strategy
    - Logs error with category=resource_limit
 

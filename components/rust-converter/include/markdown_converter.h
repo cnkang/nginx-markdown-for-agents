@@ -27,6 +27,15 @@
 #define ERROR_CLASS_COUNT 10
 
 /**
+ * Coordinated Rust/C boundary version for the bundled module.
+ *
+ * The NGINX module compares this compile-time expectation with the value
+ * returned by `markdown_abi_version()` during preconfiguration. Increment
+ * this value for every incompatible FFI layout or export reset.
+ */
+#define MARKDOWN_ABI_VERSION 1
+
+/**
  * Success - no error occurred.
  */
 #define ERROR_SUCCESS 0
@@ -231,12 +240,6 @@
 #define DECIDE_BASE_URL_INVALID 1
 
 /**
- * `markdown_decide_streaming` sentinel: no block reason (request is
- * streaming-eligible).
- */
-#define STREAMING_BLOCK_REASON_NONE 255
-
-/**
  * Sentinel value for "not set" in FFI enum fields (u8).
  */
 #define FFI_CONFIG_NOT_SET_U8 255
@@ -271,36 +274,6 @@
  */
 #define FFI_PROFILE_STREAMING_FIRST 3
 
-/**
- * FFI error policy kind: pass (fail-open, default).
- */
-#define FFI_ERROR_POLICY_PASS 0
-
-/**
- * FFI error policy kind: return specified status code.
- */
-#define FFI_ERROR_POLICY_STATUS 1
-
-/**
- * FFI error policy kind: fail_closed (return 502).
- */
-#define FFI_ERROR_POLICY_FAIL_CLOSED 2
-
-/**
- * FFI error behavior kind: pass through original response.
- */
-#define FFI_ERROR_BEHAVIOR_PASS_THROUGH 0
-
-/**
- * FFI error behavior kind: return specified HTTP status code.
- */
-#define FFI_ERROR_BEHAVIOR_RETURN_STATUS 1
-
-/**
- * FFI error behavior kind: terminate connection (post-commit).
- */
-#define FFI_ERROR_BEHAVIOR_TERMINATE 2
-
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
  * Maximum accumulated buffer size in bytes (64 MiB).
@@ -330,7 +303,7 @@ typedef uint8_t FFIConflictLevel;
 /**
  * Opaque handle wrapping an [`IncrementalConverter`] for the C ABI.
  *
- * The handle is produced by [`markdown_incremental_new`] and consumed by
+ * The handle is produced by [`markdown_incremental_new_with_code`] and consumed by
  * either [`markdown_incremental_finalize`] (which produces output) or
  * [`markdown_incremental_free`] (which drops without output).  The C caller
  * owns the handle for its entire lifetime.
@@ -397,20 +370,16 @@ typedef struct StreamingConverterHandle StreamingConverterHandle;
  * Conversion options passed from C to Rust.
  *
  * This full-buffer ABI keeps its own explicit `#[repr(C)]` layout instead of
- * sharing fields with `StreamingOptions`. The duplicate option fields are an
- * intentional FFI stability tradeoff: full-buffer and streaming callers each
- * get a clear, independently versioned C contract. Any shared semantic change
- * must update both structs, generated headers, layout tests, and docs in the
- * same change set; structural reuse belongs in a future breaking ABI version.
+ * sharing fields with `StreamingOptions`. The two callers have different
+ * lifecycles, while shared semantics still update atomically across both
+ * structs, generated headers, layout tests, and docs.
  */
 typedef struct MarkdownOptions {
   /**
    * Markdown flavor selector.
    *
-   * `0` selects CommonMark-compatible output, `1` selects the GFM
-   * extension set, `2` selects experimental MDX-oriented behavior, and `3`
-   * selects experimental Org-mode-oriented behavior. Other values are
-   * rejected during option decoding.
+   * `0` selects CommonMark-compatible output and `1` selects the GFM
+   * extension set. Other values are rejected during option decoding.
    */
   uint32_t flavor;
   /**
@@ -503,7 +472,7 @@ typedef struct MarkdownOptions {
    * Unified memory budget in bytes (0 = use per-engine defaults).
    *
    * When non-zero, NGINX may use this value to derive full-buffer
-   * max_size when no explicit markdown_max_size is set. Rust
+   * max_size when no explicit markdown_limits memory= is set. Rust
    * currently enforces this budget only for streaming/incremental
    * paths; full-buffer relies on NGINX-side buffering limits.
    * Populated from `markdown_limits memory=<size>` (Config V2).
@@ -723,26 +692,6 @@ typedef struct FFIEligibilityInput {
 } FFIEligibilityInput;
 
 /**
- * Result of a conditional request check (If-None-Match / If-Modified-Since).
- *
- * Returned by `markdown_check_conditional` FFI function.
- *
- * Fields:
- * - `result_code`: 0 = not modified (send 304), 1 = proceed (no match or no conditional headers)
- * - `matched_etag_len`: Length of the matched ETag value (reserved, currently always 0)
- */
-typedef struct FFIConditionalResult {
-  /**
-   * 0 = not_modified (send 304), 1 = proceed (modified or no conditional headers)
-   */
-  uint8_t result_code;
-  /**
-   * Length of matched ETag value (reserved for future use, currently 0).
-   */
-  uint32_t matched_etag_len;
-} FFIConditionalResult;
-
-/**
  * Input snapshot for `markdown_decide_conditional` (spec 49).
  *
  * All byte fields are borrowed from the C caller for the duration of the
@@ -818,100 +767,6 @@ typedef struct FFIConditionalDecision {
    */
   uint8_t evaluated_header;
 } FFIConditionalDecision;
-
-/**
- * Input snapshot for `markdown_decide_streaming` (spec 49).
- *
- * This struct exposes neither `ngx_http_request_t *` nor any NGINX pool;
- * the C side marshals the policy/engine selectors, the effective
- * `cache_validation` mode, request/response flags, and sizing fields.
- */
-typedef struct FFIStreamingInput {
-  /**
-   * `markdown_streaming` policy: 0 = off, 1 = auto, 2 = force.
-   */
-  uint8_t policy;
-  /**
-   * `markdown_streaming_engine`: 0 = off, 1 = auto, 2 = on.
-   */
-  uint8_t engine;
-  /**
-   * Effective `markdown_cache_validation` mode: 0 = off, 1 = ims_only,
-   * 2 = full.
-   */
-  uint8_t cache_validation;
-  /**
-   * 1 if the request method is `HEAD`, else 0.
-   */
-  uint8_t is_head;
-  /**
-   * 1 if the conditional decision yielded `304 Not Modified`, else 0.
-   */
-  uint8_t is_not_modified;
-  /**
-   * 1 if the request carried a `Range` header, else 0.
-   */
-  uint8_t has_range;
-  /**
-   * 1 if request or response carried `Cache-Control: no-transform`.
-   */
-  uint8_t no_transform;
-  /**
-   * 1 if the upstream response carried a `Content-Encoding`, else 0.
-   */
-  uint8_t has_content_encoding;
-  /**
-   * 1 if the upstream `Content-Length` is known, else 0.
-   */
-  uint8_t content_length_known;
-  /**
-   * Upstream `Content-Length` in bytes (meaningful when known).
-   */
-  uint64_t content_length;
-  /**
-   * `markdown_stream_threshold` in bytes (auto-mode trigger).
-   */
-  uint64_t streaming_threshold;
-} FFIStreamingInput;
-
-/**
- * Result of `markdown_decide_streaming` (spec 49).
- */
-typedef struct FFIStreamingDecision {
-  /**
-   * 1 if the request may take the streaming path, else 0.
-   */
-  uint8_t eligible;
-  /**
-   * `StreamingBlockReason` discriminant when `eligible == 0`, or
-   * `STREAMING_BLOCK_REASON_NONE` (255) when `eligible == 1`.
-   */
-  uint8_t block_reason;
-} FFIStreamingDecision;
-
-/**
- * Result of a decision engine evaluation.
- *
- * Returned by `markdown_make_decision` FFI function.
- *
- * Fields:
- * - `decision`: 0 = convert, 1 = skip
- * - `reason_code`: Canonical `ReasonCode` discriminant for the decision
- *   (e.g. `Converted` = 0, `SkippedAccept` = 1, `NotEligible` = 14,
- *   `Disabled` = 15). The value can be passed directly to
- *   `markdown_reason_code_str()` / `markdown_reason_code_metric_key()`.
- */
-typedef struct FFIDecisionResult {
-  /**
-   * 0 = convert, 1 = skip
-   */
-  uint8_t decision;
-  /**
-   * Canonical `ReasonCode` discriminant for the decision
-   * (`Converted` = 0 when `decision` == 0).
-   */
-  uint8_t reason_code;
-} FFIDecisionResult;
 
 /**
  * Opaque Rust-owned handle that keeps header-plan backing storage alive.
@@ -1043,6 +898,16 @@ typedef struct FFIBaseUrlInput {
    * 1 if `markdown_trusted_proxies` was configured (even as `off`).
    */
   uint8_t trusted_configured;
+  /**
+   * Direct connection scheme bytes from `r->schema` (e.g. "https"),
+   * NULL/0 if absent.  Used as the base URL scheme when falling back
+   * to the Host header so direct HTTPS requests preserve https://.
+   */
+  const uint8_t *direct_scheme;
+  /**
+   * Length of `direct_scheme`.
+   */
+  uintptr_t direct_scheme_len;
 } FFIBaseUrlInput;
 
 /**
@@ -1240,44 +1105,6 @@ typedef struct FFIEffectiveConfig {
 } FFIEffectiveConfig;
 
 /**
- * FFI-safe error policy enum (spec 51).
- *
- * The C side derives this from the `markdown_error_policy` directive value
- * and passes it to `markdown_decide_error_behavior`.
- */
-typedef struct FFIErrorPolicy {
-  /**
-   * Policy kind: 0 = pass, 1 = status, 2 = fail_closed.
-   */
-  uint8_t kind;
-  /**
-   * HTTP status code (meaningful only when kind == 1).
-   */
-  uint16_t status_code;
-} FFIErrorPolicy;
-
-/**
- * FFI-safe error behavior enum (spec 51).
- *
- * Returned by `markdown_decide_error_behavior` to tell the C error handler
- * what action to take.
- */
-typedef struct FFIErrorBehavior {
-  /**
-   * Behavior kind: 0 = pass_through, 1 = return_status, 2 = terminate.
-   */
-  uint8_t kind;
-  /**
-   * HTTP status code (meaningful only when kind == 1).
-   */
-  uint16_t status_code;
-  /**
-   * 1 if behavior was forced (post-commit), 0 if policy-driven.
-   */
-  uint8_t forced;
-} FFIErrorBehavior;
-
-/**
  * Get the string representation of a reason code by its numeric value.
  *
  * Returns a pointer to a static string and writes the length to `out_len`.
@@ -1311,41 +1138,14 @@ const uint8_t *markdown_reason_code_metric_key(uint32_t code, uintptr_t *out_len
 uint32_t markdown_reason_code_count(void);
 
 /**
- * Get a default diagnostics JSON schema v1 string.
+ * Return the bundled Rust/C boundary version.
  *
- * Returns a pointer to a heap-allocated JSON byte buffer and writes the
- * byte length (excluding any NUL terminator) to `out_len`. The returned
- * buffer is NUL-terminated for convenience but `out_len` does NOT include
- * the terminator.
- *
- * On failure (NULL `out_len`, serialization error, or caught panic) returns
- * NULL and sets `*out_len = 0`.
- *
- * The caller must free the returned buffer by calling
- * [`markdown_free_diagnostics`] with the same pointer and length.
- *
- * # Safety
- *
- * The caller must ensure that `out_len` either is NULL (in which case the
- * function returns NULL immediately) or points to writable storage for a
- * `usize`.
+ * This accessor is intentionally trivial and panic-free. The NGINX module
+ * calls it during preconfiguration and refuses to parse directives or install
+ * filters when the returned value differs from the generated-header
+ * expectation.
  */
-uint8_t *markdown_get_diagnostics_schema(uintptr_t *out_len);
-
-/**
- * Free a diagnostics JSON string previously returned by
- * [`markdown_get_diagnostics_schema`].
- *
- * # Safety
- *
- * The caller must ensure that:
- * - `ptr` was returned by `markdown_get_diagnostics_schema` and has not
- *   already been freed
- * - `len` is the value written to `out_len` by that call
- *
- * After this call, `ptr` is invalid and must not be dereferenced.
- */
-void markdown_free_diagnostics(uint8_t *ptr, uintptr_t len);
+uint32_t markdown_abi_version(void);
 
 /**
  * Allocate a new converter handle for use across multiple FFI calls.
@@ -1389,8 +1189,10 @@ void markdown_convert(struct MarkdownConverterHandle *handle,
  * # Safety
  *
  * The caller must ensure that `result` either is NULL or points to a valid
- * `MarkdownResult` previously initialized by `markdown_convert()`. Passing the
- * same result twice is allowed because the function resets pointers to NULL.
+ * `MarkdownResult` previously initialized by `markdown_convert()`,
+ * `markdown_incremental_finalize()`, or `markdown_streaming_finalize()`.
+ * Passing the same result twice is allowed because the function resets
+ * pointers to NULL.
  */
 void markdown_result_free(struct MarkdownResult *result);
 
@@ -1458,28 +1260,6 @@ void markdown_negotiate_accept(const uint8_t *accept_header,
 uint8_t markdown_decide_eligibility(const struct FFIEligibilityInput *input);
 
 /**
- * Evaluate HTTP conditional request headers (If-None-Match / If-Modified-Since).
- *
- * Returns the conditional result through the `result` output parameter.
- *
- * # Safety
- *
- * The caller must ensure that:
- * - All string pointers either point to readable UTF-8 bytes of the given length
- *   or are NULL when the corresponding length is 0
- * - `result` points to writable storage for a `FFIConditionalResult`
- */
-void markdown_check_conditional(const uint8_t *if_none_match,
-                                uintptr_t if_none_match_len,
-                                const uint8_t *entity_etag,
-                                uintptr_t entity_etag_len,
-                                const uint8_t *if_modified_since,
-                                uintptr_t if_modified_since_len,
-                                const uint8_t *last_modified,
-                                uintptr_t last_modified_len,
-                                struct FFIConditionalResult *result);
-
-/**
  * Decide the conditional-request outcome (spec 49): cache-validation mode,
  * `If-None-Match` over `If-Modified-Since` precedence, and `Range` /
  * `no-transform` bypass.
@@ -1506,47 +1286,6 @@ void markdown_decide_conditional(const struct FFIConditionalInput *input,
                                  struct FFIConditionalDecision *out);
 
 /**
- * Decide whether the request may take the streaming path (spec 49).
- *
- * This is the Rust single source of truth wrapping
- * `crate::decision::streaming::decide_streaming`. The result is written
- * through the `out` output parameter.
- *
- * On NULL `input`/`out` or on a caught panic, the output is the safe
- * fallback: not eligible (the full-buffer path), with no block reason
- * reported (`STREAMING_BLOCK_REASON_NONE`).
- *
- * # Safety
- *
- * The caller must ensure that:
- * - `input` is NULL or points to a readable `FFIStreamingInput`
- * - `out` is NULL or points to writable storage for an
- *   `FFIStreamingDecision`
- */
-void markdown_decide_streaming(const struct FFIStreamingInput *input,
-                               struct FFIStreamingDecision *out);
-
-/**
- * Evaluate the conversion decision engine.
- *
- * Returns the decision through the `result` output parameter.
- *
- * # Safety
- *
- * The caller must ensure that `result` points to writable storage
- * for a `FFIDecisionResult`.
- */
-void markdown_make_decision(uint8_t enabled,
-                            uint8_t eligible,
-                            uint8_t accept_prefers_markdown,
-                            uint8_t accept_header_present,
-                            uint8_t conditional_not_modified,
-                            uint8_t decompression_ok,
-                            uint8_t parse_timed_out,
-                            uint8_t parse_budget_exceeded,
-                            struct FFIDecisionResult *result);
-
-/**
  * Build a header plan for a successful Markdown conversion.
  * The returned plan contains Rust-owned buffers. The C caller must release
  * the plan via `markdown_header_plan_free`.
@@ -1564,53 +1303,6 @@ void markdown_build_header_plan(const uint8_t *content_type,
                                 uintptr_t content_type_len,
                                 uint8_t has_etag,
                                 struct FFIHeaderPlan *result);
-
-/**
- * Validate a URL for use in Markdown link destinations.
- *
- * Returns 1 if the URL is safe, 0 if it contains control characters
- * or dangerous schemes.
- *
- * # Safety
- *
- * The caller must ensure that `url` either points to `url_len` readable
- * bytes or is NULL when `url_len == 0`.
- */
-uint8_t markdown_validate_url(const uint8_t *url, uintptr_t url_len);
-
-/**
- * Check if a URL uses a dangerous scheme (javascript:, data:, etc.).
- *
- * Returns 1 if dangerous, 0 if safe.
- *
- * # Safety
- *
- * The caller must ensure that `url` either points to `url_len` readable
- * bytes or is NULL when `url_len == 0`.
- */
-uint8_t markdown_is_dangerous_url(const uint8_t *url, uintptr_t url_len);
-
-/**
- * Build a base URL from X-Forwarded-Host and X-Forwarded-Proto headers.
- *
- * Parses the forwarded headers and constructs a validated base URL
- * (e.g., "https://api.example.com"). The result is written into the
- * caller-provided buffer. Returns the number of bytes written, or 0
- * if the headers are absent, empty, or contain invalid characters.
- *
- * # Safety
- *
- * The caller must ensure that:
- * - `x_forwarded_host` either points to `host_len` readable bytes or is NULL
- * - `x_forwarded_proto` either points to `proto_len` readable bytes or is NULL
- * - `out_buf` points to at least `out_buf_cap` writable bytes
- */
-uintptr_t markdown_build_base_url(const uint8_t *x_forwarded_host,
-                                  uintptr_t host_len,
-                                  const uint8_t *x_forwarded_proto,
-                                  uintptr_t proto_len,
-                                  uint8_t *out_buf,
-                                  uintptr_t out_buf_cap);
 
 /**
  * Allocate a new, empty trusted-proxy CIDR set (spec 47).
@@ -1698,9 +1390,9 @@ void markdown_header_plan_free(struct FFIHeaderPlan *plan);
  *
  * C callers **MUST** use this function instead of `memset(&opts, 0, sizeof(opts))`
  * or literal struct initialization (`MarkdownOptions opts = {0}`). The helper
- * guarantees that all fields — including any future tail-appended fields — are
- * set to valid defaults. After calling this function, the caller may override
- * individual fields as needed.
+ * sets every field in the current ABI layout to a valid default. Any future
+ * layout change still requires an ABI version increment. After calling this
+ * function, the caller may override individual fields as needed.
  *
  * Default values:
  * - `flavor`: 0 (CommonMark)
@@ -1727,8 +1419,9 @@ void markdown_options_init(struct MarkdownOptions *result);
  * Zero-initialize a MarkdownResult struct.
  *
  * The C caller should use this instead of manual = {0} or memset
- * to guarantee all fields (including any future tail-appended fields)
- * start in a valid zero state.
+ * to guarantee all fields in the current ABI layout start in a valid zero
+ * state. This helper does not make differently sized struct versions
+ * interoperable.
  *
  * # Safety
  *
@@ -1736,36 +1429,6 @@ void markdown_options_init(struct MarkdownOptions *result);
  * for a `MarkdownResult`.
  */
 void markdown_result_init(struct MarkdownResult *result);
-
-/**
- * Zero-initialize an FFIAcceptResult struct.
- *
- * # Safety
- *
- * The caller must ensure that `result` points to writable storage
- * for an `FFIAcceptResult`.
- */
-void markdown_accept_result_init(struct FFIAcceptResult *result);
-
-/**
- * Zero-initialize an FFIConditionalResult struct.
- *
- * # Safety
- *
- * The caller must ensure that `result` points to writable storage
- * for an `FFIConditionalResult`.
- */
-void markdown_conditional_result_init(struct FFIConditionalResult *result);
-
-/**
- * Zero-initialize an FFIDecisionResult struct.
- *
- * # Safety
- *
- * The caller must ensure that `result` points to writable storage
- * for an `FFIDecisionResult`.
- */
-void markdown_decision_result_init(struct FFIDecisionResult *result);
 
 /**
  * Zero-initialize an FFIHeaderPlan struct.
@@ -1888,43 +1551,6 @@ struct FFIConflictList markdown_detect_conflicts(uint8_t profile,
 void markdown_free_conflicts(struct FFIConflictList *list);
 
 /**
- * Decide error handling behavior for a given error class and policy (spec 51).
- *
- * This is the FFI entry point for the unified error policy decision.
- * The C error handler calls this to determine what action to take.
- *
- * # Parameters
- *
- * - `error_class`: The `FFIErrorClass` discriminant identifying the error.
- * - `policy`: The `FFIErrorPolicy` derived from `markdown_error_policy`.
- * - `out`: Output pointer for the resulting `FFIErrorBehavior`.
- *
- * # Returns
- *
- * `0` on success, `1` if `out` is NULL or `error_class` is invalid.
- *
- * # Safety
- *
- * The caller must ensure that `out` is NULL or points to writable storage
- * for an `FFIErrorBehavior`.
- */
-uint8_t markdown_decide_error_behavior(uint8_t error_class,
-                                       struct FFIErrorPolicy policy,
-                                       struct FFIErrorBehavior *out);
-
-/**
- * Map an error class to its reason code discriminant (spec 51).
- *
- * Returns the `ReasonCode` discriminant (u8) for the given error class.
- * Returns `u8::MAX` (255) if the error class is invalid.
- *
- * # Safety
- *
- * No pointer parameters; always safe to call.
- */
-uint8_t markdown_error_to_reason_code(uint8_t error_class);
-
-/**
  * Classify a raw FFI error code into its `ErrorClass` discriminant.
  *
  * This is the FFI entry point that maps the raw `ERROR_*` constants
@@ -1944,7 +1570,7 @@ uint8_t markdown_classify_error_code(uint32_t error_code);
 
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
- * Create a new incremental converter handle for incremental Markdown processing.
+ * Create a new incremental converter handle and return an explicit status code.
  *
  * The returned handle is an opaque pointer owned by the caller and must be
  * either finalized with `markdown_incremental_finalize` or freed with
@@ -1957,15 +1583,10 @@ uint8_t markdown_classify_error_code(uint32_t error_code);
  * - The returned pointer is heap-allocated; the caller owns it and must not
  *   dereference it except via the `markdown_incremental_*` family of functions.
  *
- * # Returns
- *
- * A non-NULL handle on success, or NULL if `options` is NULL, if `MarkdownOptions`
- * cannot be decoded, or if an internal panic is caught.
- *
  * # Examples
  *
  * ```no_run
- * use nginx_markdown_converter::ffi::{MarkdownOptions, markdown_incremental_new, markdown_incremental_free};
+ * use nginx_markdown_converter::ffi::{MarkdownOptions, markdown_incremental_new_with_code, markdown_incremental_free};
  * // Construct and fully initialize MarkdownOptions for your environment.
  * let opts = MarkdownOptions {
  *     flavor: 0,
@@ -1990,20 +1611,17 @@ uint8_t markdown_classify_error_code(uint32_t error_code);
  *     parser_memory_budget: 0,
  *     flush_threshold: 0,
  * };
- * let handle = unsafe { markdown_incremental_new(&opts) };
+ * let mut handle = std::ptr::null_mut();
+ * let code = unsafe { markdown_incremental_new_with_code(&opts, &mut handle) };
+ * assert_eq!(code, 0);
  * assert!(!handle.is_null());
  * // Either finalize to produce output or free when done without producing output.
  * unsafe { markdown_incremental_free(handle) };
  * ```
- * Create a new incremental converter handle and return an explicit status code.
  *
- * This API is the recommended constructor for C callers that need actionable
+ * This constructor gives C callers actionable
  * failure classification. On success, `*out_handle` receives a non-NULL handle.
  * On error, `*out_handle` is set to NULL and the function returns an error code.
- *
- * Unlike [`markdown_incremental_new`], this function does not write to stderr,
- * making it suitable for use as a library function within NGINX where all
- * diagnostics should go through `ngx_log_error()`.
  *
  * # Safety
  *
@@ -2024,29 +1642,13 @@ uint32_t markdown_incremental_new_with_code(const struct MarkdownOptions *option
 
 #if defined(MARKDOWN_INCREMENTAL_ENABLED)
 /**
- * Convenience wrapper around [`markdown_incremental_new_with_code`] that
- * returns only the handle pointer.
- *
- * On failure, returns NULL. For actionable error classification, prefer
- * [`markdown_incremental_new_with_code`].
- *
- * # Safety
- *
- * - `options` must point to a valid, properly aligned `MarkdownOptions` that
- *   remains readable for the duration of this call, or be NULL.
- */
-struct IncrementalConverterHandle *markdown_incremental_new(const struct MarkdownOptions *options);
-#endif
-
-#if defined(MARKDOWN_INCREMENTAL_ENABLED)
-/**
  * Buffers a provided input chunk for later conversion.
  *
  * Accepts an empty chunk (`data_len == 0`) as a no-op.
  *
  * # Safety
  *
- * * `handle` must be a live pointer returned by [`markdown_incremental_new`].
+ * * `handle` must be a live pointer returned by [`markdown_incremental_new_with_code`].
  * * `data` must point to at least `data_len` readable bytes, or be NULL when `data_len` is 0`.
  *
  * # Returns
@@ -2057,10 +1659,11 @@ struct IncrementalConverterHandle *markdown_incremental_new(const struct Markdow
  *
  * ```no_run
  * use std::ptr;
- * use nginx_markdown_converter::ffi::{markdown_incremental_new, markdown_incremental_feed, markdown_incremental_free};
+ * use nginx_markdown_converter::ffi::{markdown_incremental_new_with_code, markdown_incremental_feed, markdown_incremental_free};
  * unsafe {
  *     let options = ptr::null(); // populate as needed
- *     let handle = markdown_incremental_new(options);
+ *     let mut handle = ptr::null_mut();
+ *     let _ = markdown_incremental_new_with_code(options, &mut handle);
  *     if !handle.is_null() {
  *         // feed a chunk
  *         let _ = markdown_incremental_feed(handle, b"hello".as_ptr(), 5);
@@ -2079,20 +1682,23 @@ uint32_t markdown_incremental_feed(struct IncrementalConverterHandle *handle,
 /**
  * Finalize an incremental converter, consume its handle, and write the conversion output or error into `result`.
  *
- * The call always consumes the provided `handle`; after this function returns (whether success, failure,
- * or internal panic) the handle is invalid and must not be used again or freed by the caller.
+ * The call consumes `handle` after validating that both arguments are
+ * non-NULL. Once consumed, the handle is invalid whether conversion succeeds,
+ * fails, or panics. If either argument is NULL, `ERROR_INVALID_INPUT` is
+ * returned without consuming a non-NULL handle.
  *
  * # Safety
  *
- * - `handle` must be a live pointer returned by `markdown_incremental_new` that has not already been
+ * - `handle` must be a live pointer returned by `markdown_incremental_new_with_code` that has not already been
  *   finalized or freed. This function takes ownership of the handle and will free it during execution.
  * - `result` must be a valid, writable pointer to a `MarkdownResult`. Any buffers previously owned by
  *   `result` must either be NULL/zero-length or must have been previously returned by this API.
  *
  * # Returns
  *
- * `ERROR_SUCCESS` (0) on success, or a non-zero error code on failure. In all cases `result` is populated
- * with either the produced markdown (and optional ETag/token estimate) or an error code and message.
+ * `ERROR_SUCCESS` (0) on success, or a non-zero error code on failure. When
+ * `result` is non-NULL, it is populated with either the produced Markdown
+ * (and optional ETag/token estimate) or an error code and message.
  *
  * # Examples
  *
@@ -2115,16 +1721,18 @@ uint32_t markdown_incremental_finalize(struct IncrementalConverterHandle *handle
  *
  * Use this function to release resources when the conversion is being
  * abandoned (e.g. on error or cancellation).  If the handle has already
- * been consumed by [`markdown_incremental_finalize`], do **not** call
- * this function — `finalize` always consumes the handle regardless of
- * its return code, and calling `free` afterwards is a double-free.
+ * been consumed by [`markdown_incremental_finalize`], do **not** call this
+ * function: after non-NULL argument validation, `finalize` consumes the
+ * handle regardless of its return code. If `finalize` rejected a NULL
+ * `result`, it did not consume a non-NULL handle and this function remains
+ * the required cleanup path.
  *
  * Passing NULL is a safe no-op.
  *
  * # Safety
  *
  * * `handle` must be NULL or a live pointer returned by
- *   [`markdown_incremental_new`] that has not been finalized or freed.
+ *   [`markdown_incremental_new_with_code`] that has not been finalized or freed.
  */
 void markdown_incremental_free(struct IncrementalConverterHandle *handle);
 #endif
@@ -2155,29 +1763,6 @@ uint32_t markdown_streaming_new_with_code(const struct MarkdownOptions *options,
 
 #if defined(MARKDOWN_STREAMING_ENABLED)
 /**
- * Create a new streaming converter handle.
- *
- * The returned handle is an opaque pointer owned by the caller and must be
- * consumed by exactly one of `markdown_streaming_finalize`,
- * `markdown_streaming_abort`, or `markdown_streaming_free`.
- *
- * # Safety
- *
- * - `options` must point to a valid, properly aligned `MarkdownOptions` that
- *   remains readable for the duration of this call.
- * - The returned pointer is heap-allocated; the caller owns it and must not
- *   dereference it except via the `markdown_streaming_*` family of functions.
- *
- * # Returns
- *
- * A non-NULL handle on success, or NULL if `options` is NULL, if
- * `MarkdownOptions` cannot be decoded, or if an internal panic is caught.
- */
-struct StreamingConverterHandle *markdown_streaming_new(const struct MarkdownOptions *options);
-#endif
-
-#if defined(MARKDOWN_STREAMING_ENABLED)
-/**
  * Feed a chunk of HTML input and receive any ready Markdown output.
  *
  * On success (`ERROR_SUCCESS`), `*out_data` and `*out_len` are set to the
@@ -2190,7 +1775,7 @@ struct StreamingConverterHandle *markdown_streaming_new(const struct MarkdownOpt
  *
  * # Safety
  *
- * - `handle` must be a live pointer returned by [`markdown_streaming_new`].
+ * - `handle` must be a live pointer returned by [`markdown_streaming_new_with_code`].
  * - `data` must point to at least `data_len` readable bytes, or be NULL
  *   when `data_len` is 0.
  * - `out_data` must be a valid, writable pointer to `*mut u8`.
@@ -2215,64 +1800,19 @@ uint32_t markdown_streaming_feed(struct StreamingConverterHandle *handle,
 
 #if defined(MARKDOWN_STREAMING_ENABLED)
 /**
- * Signal end-of-input to the streaming converter, flush remaining output,
- * and consume the handle.
- *
- * This is a lightweight finish path for C callers that only need the final
- * flushed Markdown bytes and a status code — without the full
- * [`MarkdownResult`] metadata (ETag, token estimate, peak memory) that
- * [`markdown_streaming_finalize`] provides.
- *
- * On success (`ERROR_SUCCESS`), `*out_data` and `*out_len` are set to the
- * final Markdown output buffer allocated by Rust. The caller must free this
- * buffer via [`markdown_streaming_output_free`]. If the final flush produces
- * no additional output, `*out_data` is NULL and `*out_len` is 0.
- *
- * This call always consumes the provided `handle` when validation passes
- * (handle is non-NULL and output pointers are non-NULL); after this function
- * returns successfully the handle is invalid and must not be passed to any
- * other `markdown_streaming_*` function. If validation fails (NULL handle or
- * NULL output pointers), `ERROR_INVALID_INPUT` is returned and the handle is
- * NOT consumed — the caller remains responsible for freeing or aborting it.
- * Violating this rule causes a double-free (CWE-415).
- *
- * # Safety
- *
- * - `handle` must be a live pointer returned by [`markdown_streaming_new`]
- *   that has not already been finalized, aborted, freed, or finished.
- * - `out_data` must be a valid, writable pointer to `*mut u8`.
- * - `out_len` must be a valid, writable pointer to `usize`.
- *
- * # Returns
- *
- * - `ERROR_SUCCESS` (0) — conversion completed normally, output available
- * - `ERROR_STREAMING_FALLBACK` (7) — unsupported content detected (pre-commit)
- * - `ERROR_POST_COMMIT` (8) — error after partial output committed
- * - `ERROR_TIMEOUT` (3) — cooperative timeout exceeded during flush
- * - `ERROR_BUDGET_EXCEEDED` (6) — memory budget exceeded during flush
- * - `ERROR_INVALID_INPUT` (5) — NULL handle or output pointers
- * - `ERROR_INTERNAL` (99) — caught panic
- */
-uint32_t markdown_streaming_finish(struct StreamingConverterHandle *handle,
-                                   uint8_t **out_data,
-                                   uintptr_t *out_len);
-#endif
-
-#if defined(MARKDOWN_STREAMING_ENABLED)
-/**
  * Finalize a streaming conversion, consume the handle, and write the result.
  *
  * This call consumes the provided `handle` when validation passes (both
- * `handle` and `result` are non-NULL); after successful consumption the
- * handle is invalid and must not be used again or freed by the caller.
+ * `handle` and `result` are non-NULL); once consumed, the handle is invalid
+ * regardless of the return code and must not be used again by the caller.
  * If validation fails (NULL `handle` or NULL `result`), `ERROR_INVALID_INPUT`
  * is returned and the handle is NOT consumed — the caller remains responsible
  * for freeing or aborting it.
  *
  * # Safety
  *
- * - `handle` must be a live pointer returned by `markdown_streaming_new`
- *   that has not already been finalized, aborted, or freed.
+ * - `handle` must be a live pointer returned by `markdown_streaming_new_with_code`
+ *   that has not already been finalized or aborted.
  * - `result` must be a valid, writable pointer to a `MarkdownResult`. Any
  *   buffers previously owned by `result` must either be NULL/zero-length
  *   or must have been previously returned by this API.
@@ -2299,8 +1839,8 @@ uint32_t markdown_streaming_finalize(struct StreamingConverterHandle *handle,
  * # Safety
  *
  * - `handle` must be NULL or a live pointer returned by
- *   [`markdown_streaming_new`] that has not been finalized, aborted,
- *   or freed.
+ *   [`markdown_streaming_new_with_code`] that has not been finalized or
+ *   aborted.
  */
 void markdown_streaming_abort(struct StreamingConverterHandle *handle);
 #endif
@@ -2330,14 +1870,15 @@ void markdown_streaming_abort(struct StreamingConverterHandle *handle);
  * This call consumes the handle after validation succeeds (the handle and
  * output pointers are non-NULL). If validation fails, `ERROR_INVALID_INPUT`
  * is returned and the handle is not consumed; the caller remains responsible
- * for aborting or freeing it. All other return codes consume the handle. In
+ * for aborting it. All other return codes consume the handle. In
  * particular, a caught panic (`ERROR_INTERNAL`) can only occur after
  * `Box::from_raw` has taken ownership, so the handle is consumed in that case.
  *
  * # Safety
  *
- * - `handle` must be a live pointer returned by [`markdown_streaming_new`]
- *   that has not already been finalized, aborted, freed, or finished.
+ * - `handle` must be a live pointer returned by
+ *   [`markdown_streaming_new_with_code`] that has not already been finalized
+ *   or aborted.
  * - `out_data` must be a valid, writable pointer to `*mut u8`.
  * - `out_len` must be a valid, writable pointer to `usize`.
  *
@@ -2357,31 +1898,8 @@ uint32_t markdown_streaming_safe_finish(struct StreamingConverterHandle *handle,
 
 #if defined(MARKDOWN_STREAMING_ENABLED)
 /**
- * Free a streaming converter handle without finalizing.
- *
- * Use this function to release resources when the conversion is being
- * abandoned in an error path where neither `finalize` nor `abort` was
- * called. If the handle has already been consumed by `finalize` or
- * `abort`, do **not** call this function — that would be a double-free.
- *
- * Passing NULL is a safe no-op.
- *
- * This delegates to [`markdown_streaming_abort`] which has identical
- * semantics (both consume the handle by dropping it).
- *
- * # Safety
- *
- * - `handle` must be NULL or a live pointer returned by
- *   [`markdown_streaming_new`] that has not been finalized, aborted,
- *   or freed.
- */
-void markdown_streaming_free(struct StreamingConverterHandle *handle);
-#endif
-
-#if defined(MARKDOWN_STREAMING_ENABLED)
-/**
- * Free a Markdown output buffer returned by [`markdown_streaming_feed`]
- * or [`markdown_streaming_finish`].
+ * Free a Markdown output buffer returned by [`markdown_streaming_feed`] or
+ * [`markdown_streaming_safe_finish`].
  *
  * This is the **only** valid way to release output buffers produced by the
  * streaming FFI. The buffer is allocated by the Rust global allocator; C
@@ -2389,7 +1907,7 @@ void markdown_streaming_free(struct StreamingConverterHandle *handle);
  * deallocator — doing so is undefined behaviour due to allocator mismatch.
  *
  * The `data` pointer and `len` must be exactly the values written to
- * `out_data` and `out_len` by a previous `feed` or `finish` call.
+ * `out_data` and `out_len` by a previous `feed` or `safe_finish` call.
  * Passing `(NULL, 0)` is a safe no-op, which simplifies error-path cleanup.
  *
  * # Typical usage pattern (NGINX integration)
@@ -2407,7 +1925,7 @@ void markdown_streaming_free(struct StreamingConverterHandle *handle);
  * # Safety
  *
  * - `data` must be NULL or a pointer previously returned via
- *   `markdown_streaming_feed`'s or `markdown_streaming_finish`'s
+ *   `markdown_streaming_feed`'s or `markdown_streaming_safe_finish`'s
  *   `out_data` parameter.
  * - `len` must be the corresponding `out_len` value from the same call.
  * - Each `(data, len)` pair must be freed exactly once. Double-free is
@@ -2416,32 +1934,6 @@ void markdown_streaming_free(struct StreamingConverterHandle *handle);
  *   dereferenced.
  */
 void markdown_streaming_output_free(uint8_t *data, uintptr_t len);
-#endif
-
-#if defined(MARKDOWN_STREAMING_ENABLED)
-/**
- * Return the NUL-terminated reason string from the last `feed` or `finish`
- * call that signalled fallback or error.
- *
- * `handle` must be a live streaming handle. The returned pointer is owned by
- * Rust and valid only until the next `feed`, `finish`, `abort`, or handle-free
- * call on the same handle (whichever comes first). The C caller must not free
- * or modify the returned pointer. If C needs to preserve the reason across
- * calls, it must copy the string immediately into an NGINX pool or another
- * caller-owned buffer. Using a reason pointer after handle release is invalid.
- *
- * Returns NULL when no reason is available (i.e. the last call returned
- * `ERROR_SUCCESS` or the handle is NULL).
- *
- * # Safety
- *
- * - `handle` must be NULL or a live pointer returned by
- *   [`markdown_streaming_new`] that has not been finalized, aborted,
- *   or freed.
- * - The returned `*const c_char` must not be used after the next `feed`,
- *   `finish`, `abort`, or `free` call on the same handle.
- */
-const char *markdown_streaming_reason(const struct StreamingConverterHandle *handle);
 #endif
 
 #endif  /* NGINX_MARKDOWN_CONVERTER_H */

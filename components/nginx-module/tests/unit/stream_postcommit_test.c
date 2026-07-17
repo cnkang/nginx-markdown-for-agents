@@ -127,9 +127,23 @@ struct ngx_http_request_s {
 /* Include the module header for types */
 #include "../../src/ngx_http_markdown_filter_module.h"
 
+ngx_module_t ngx_http_markdown_filter_module;
+
 static ngx_int_t (*ngx_http_next_body_filter)(ngx_http_request_t *r,
     ngx_chain_t *in);
 #include "../../src/ngx_http_markdown_filter_chain_impl.h"
+
+void
+ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes)
+{
+    UNUSED(bytes);
+}
+
+void
+ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
+{
+    UNUSED(bytes);
+}
 
 /* Include the decision engine source directly */
 #include "../../src/ngx_http_markdown_stream_state.h"
@@ -798,10 +812,16 @@ static void test_safe_finish_backpressure_preserves_pending_chain(void)
                 "backpressured send bypassed the poison top filter");
     TEST_ASSERT(ctx.streaming.pending_output == test_output_filter_chain,
                 "pending chain should be the pool-owned output chain");
-    TEST_ASSERT(ctx.streaming.pending_has_data == 1,
+    TEST_ASSERT(ctx.streaming.pending_meta.has_data == 1,
                 "pending chain should be marked as data-bearing");
-    TEST_ASSERT(ctx.streaming.pending_output_bytes == sizeof(closing) - 1,
+    TEST_ASSERT(ctx.streaming.pending_meta.bytes == sizeof(closing) - 1,
                 "pending byte count should match closing length");
+    TEST_ASSERT(ctx.streaming.pending_meta.main_terminal == 1,
+                "main terminal metadata must survive NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.pending_meta.subrequest_terminal == 0,
+                "main terminal must not set subrequest metadata");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
+                "NGX_AGAIN must not confirm main terminal delivery");
     TEST_ASSERT((test_request.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
                 "request should be marked buffered on backpressure");
     TEST_ASSERT(test_output_free_called == 1,
@@ -851,6 +871,55 @@ static void test_safe_finish_then_abort_does_not_double_send(void)
     TEST_ASSERT(test_output_filter_called == 1,
                 "abort after safe_finish should not send second terminal");
     TEST_PASS("safe_finish followed by abort is terminal-idempotent");
+}
+
+static void test_subrequest_terminal_delivery_lifecycle(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_request_t main_request;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&main_request, 0, sizeof(main_request));
+    test_request.main = &main_request;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+    TEST_ASSERT(rc == NGX_OK, "subrequest safe_finish should succeed");
+    TEST_ASSERT(ctx.streaming.main_terminal_sent == 0,
+                "subrequest terminal must not latch main terminal state");
+    TEST_ASSERT(ctx.streaming.subrequest_terminal_sent == 1,
+                "subrequest terminal should latch after confirmed delivery");
+    TEST_ASSERT(test_output_filter_buf->last_buf == 0,
+                "subrequest terminal must not carry last_buf");
+    TEST_ASSERT(test_output_filter_buf->last_in_chain == 1,
+                "subrequest terminal must carry last_in_chain");
+
+    rc = ngx_http_markdown_stream_postcommit_abort(&test_request, &ctx);
+    TEST_ASSERT(rc == NGX_OK, "subrequest abort after finish should be OK");
+    TEST_ASSERT(test_output_filter_called == 1,
+                "confirmed subrequest terminal must not be sent twice");
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&main_request, 0, sizeof(main_request));
+    test_request.main = &main_request;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    test_output_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_stream_postcommit_safe_finish(
+        &test_request, &ctx);
+    TEST_ASSERT(rc == NGX_AGAIN,
+                "subrequest terminal backpressure should propagate");
+    TEST_ASSERT(ctx.streaming.subrequest_terminal_sent == 0,
+                "NGX_AGAIN must not confirm subrequest terminal delivery");
+    TEST_ASSERT(ctx.streaming.pending_meta.main_terminal == 0,
+                "subrequest pending chain must not set main metadata");
+    TEST_ASSERT(ctx.streaming.pending_meta.subrequest_terminal == 1,
+                "subrequest terminal metadata must survive NGX_AGAIN");
+    TEST_PASS("subrequest terminal delivery lifecycle is request-aware");
 }
 
 static void test_safe_finish_invalid_state(void)
@@ -1272,8 +1341,10 @@ static void test_safe_finish_no_closing_bytes_backpressure(void)
                 "should propagate NGX_AGAIN");
     TEST_ASSERT(ctx.streaming.pending_output != NULL,
                 "pending_output should be set on backpressure");
-    TEST_ASSERT(ctx.streaming.pending_has_data == 0,
+    TEST_ASSERT(ctx.streaming.pending_meta.has_data == 0,
                 "pending_has_data should be 0 (terminal only)");
+    TEST_ASSERT(ctx.streaming.pending_meta.main_terminal == 1,
+                "terminal-only metadata must survive NGX_AGAIN");
     TEST_ASSERT(
         (test_request.buffered & NGX_HTTP_MARKDOWN_BUFFERED) != 0,
         "request should be marked buffered");
@@ -1308,7 +1379,7 @@ static void test_on_error_terminal_only_again_no_abort(void)
 
     ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
     ctx.stream_sm.headers_committed = 1;
-    conf.stream.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
 
     /* Rust safe_finish succeeds with no closing bytes */
     test_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
@@ -1456,6 +1527,7 @@ int main(void)
     test_safe_finish_no_closing_bytes_backpressure();
     test_safe_finish_idempotent_reentry();
     test_safe_finish_then_abort_does_not_double_send();
+    test_subrequest_terminal_delivery_lifecycle();
     test_safe_finish_invalid_state();
     test_safe_finish_null_params();
     test_safe_finish_send_terminal_fails();

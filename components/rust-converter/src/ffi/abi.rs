@@ -1,10 +1,9 @@
 //! FFI ABI type definitions and error code constants.
 //!
 //! This module defines the C-compatible (`#[repr(C)]`) structs and constants
-//! that form the stable ABI boundary between the NGINX C module and the Rust
-//! conversion engine. Every type defined here is shared across the FFI
-//! boundary and must maintain layout compatibility with the corresponding
-//! C declarations in `markdown_converter.h`.
+//! that form the versioned internal boundary between the bundled NGINX C
+//! module and Rust conversion engine. Every shared type must match the
+//! corresponding C declaration in `markdown_converter.h`.
 //!
 //! # Error Codes
 //!
@@ -16,8 +15,10 @@
 //!
 //! # Struct Layout Stability
 //!
-//! **Adding fields to any `#[repr(C)]` struct is a breaking ABI change.**
-//! When a field is added, both copies of `markdown_converter.h` (in
+//! **Every size or layout change to a shared `#[repr(C)]` struct is an ABI
+//! change, including a tail-field append.** When a field is added, removed,
+//! reordered, or changed, increment `MARKDOWN_ABI_VERSION` and update both copies of
+//! `markdown_converter.h` (in
 //! `components/rust-converter/include/` and `components/nginx-module/src/`)
 //! must be updated in the same change set. See AGENTS.md Rule 15 for the
 //! complete FFI struct synchronization checklist.
@@ -30,6 +31,13 @@
 //!   borrowed from the C caller for the duration of the FFI call only.
 
 use crate::etag_generator::ETagGenerator;
+
+/// Coordinated Rust/C boundary version for the bundled module.
+///
+/// The NGINX module compares this compile-time expectation with the value
+/// returned by `markdown_abi_version()` during preconfiguration. Increment
+/// this value for every incompatible FFI layout or export reset.
+pub const MARKDOWN_ABI_VERSION: u32 = 1;
 
 /// Success - no error occurred.
 pub const ERROR_SUCCESS: u32 = 0;
@@ -115,19 +123,15 @@ pub const DECOMP_CATEGORY_INVALID_ARGS: u32 = 105;
 /// Conversion options passed from C to Rust.
 ///
 /// This full-buffer ABI keeps its own explicit `#[repr(C)]` layout instead of
-/// sharing fields with `StreamingOptions`. The duplicate option fields are an
-/// intentional FFI stability tradeoff: full-buffer and streaming callers each
-/// get a clear, independently versioned C contract. Any shared semantic change
-/// must update both structs, generated headers, layout tests, and docs in the
-/// same change set; structural reuse belongs in a future breaking ABI version.
+/// sharing fields with `StreamingOptions`. The two callers have different
+/// lifecycles, while shared semantics still update atomically across both
+/// structs, generated headers, layout tests, and docs.
 #[repr(C)]
 pub struct MarkdownOptions {
     /// Markdown flavor selector.
     ///
-    /// `0` selects CommonMark-compatible output, `1` selects the GFM
-    /// extension set, `2` selects experimental MDX-oriented behavior, and `3`
-    /// selects experimental Org-mode-oriented behavior. Other values are
-    /// rejected during option decoding.
+    /// `0` selects CommonMark-compatible output and `1` selects the GFM
+    /// extension set. Other values are rejected during option decoding.
     pub flavor: u32,
     /// Cooperative conversion timeout in milliseconds.
     ///
@@ -190,7 +194,7 @@ pub struct MarkdownOptions {
     /// Unified memory budget in bytes (0 = use per-engine defaults).
     ///
     /// When non-zero, NGINX may use this value to derive full-buffer
-    /// max_size when no explicit markdown_max_size is set. Rust
+    /// max_size when no explicit markdown_limits memory= is set. Rust
     /// currently enforces this budget only for streaming/incremental
     /// paths; full-buffer relies on NGINX-side buffering limits.
     /// Populated from `markdown_limits memory=<size>` (Config V2).
@@ -477,6 +481,12 @@ pub struct FFIBaseUrlInput {
     pub is_unix_socket: u8,
     /// 1 if `markdown_trusted_proxies` was configured (even as `off`).
     pub trusted_configured: u8,
+    /// Direct connection scheme bytes from `r->schema` (e.g. "https"),
+    /// NULL/0 if absent.  Used as the base URL scheme when falling back
+    /// to the Host header so direct HTTPS requests preserve https://.
+    pub direct_scheme: *const u8,
+    /// Length of `direct_scheme`.
+    pub direct_scheme_len: usize,
 }
 
 /// Result of `markdown_decide_base_url` (spec 47).
@@ -492,40 +502,6 @@ pub struct FFIBaseUrlDecision {
     pub reason: u8,
     /// `BaseUrlSource` discriminant.
     pub source: u8,
-}
-
-/// Result of a conditional request check (If-None-Match / If-Modified-Since).
-///
-/// Returned by `markdown_check_conditional` FFI function.
-///
-/// Fields:
-/// - `result_code`: 0 = not modified (send 304), 1 = proceed (no match or no conditional headers)
-/// - `matched_etag_len`: Length of the matched ETag value (reserved, currently always 0)
-#[repr(C)]
-pub struct FFIConditionalResult {
-    /// 0 = not_modified (send 304), 1 = proceed (modified or no conditional headers)
-    pub result_code: u8,
-    /// Length of matched ETag value (reserved for future use, currently 0).
-    pub matched_etag_len: u32,
-}
-
-/// Result of a decision engine evaluation.
-///
-/// Returned by `markdown_make_decision` FFI function.
-///
-/// Fields:
-/// - `decision`: 0 = convert, 1 = skip
-/// - `reason_code`: Canonical `ReasonCode` discriminant for the decision
-///   (e.g. `Converted` = 0, `SkippedAccept` = 1, `NotEligible` = 14,
-///   `Disabled` = 15). The value can be passed directly to
-///   `markdown_reason_code_str()` / `markdown_reason_code_metric_key()`.
-#[repr(C)]
-pub struct FFIDecisionResult {
-    /// 0 = convert, 1 = skip
-    pub decision: u8,
-    /// Canonical `ReasonCode` discriminant for the decision
-    /// (`Converted` = 0 when `decision` == 0).
-    pub reason_code: u8,
 }
 
 /// Input snapshot for `markdown_decide_conditional` (spec 49).
@@ -573,52 +549,6 @@ pub struct FFIConditionalDecision {
     /// `ConditionalHeader` discriminant: 0 = none, 1 = if_none_match,
     /// 2 = if_modified_since.
     pub evaluated_header: u8,
-}
-
-/// Input snapshot for `markdown_decide_streaming` (spec 49).
-///
-/// This struct exposes neither `ngx_http_request_t *` nor any NGINX pool;
-/// the C side marshals the policy/engine selectors, the effective
-/// `cache_validation` mode, request/response flags, and sizing fields.
-#[repr(C)]
-pub struct FFIStreamingInput {
-    /// `markdown_streaming` policy: 0 = off, 1 = auto, 2 = force.
-    pub policy: u8,
-    /// `markdown_streaming_engine`: 0 = off, 1 = auto, 2 = on.
-    pub engine: u8,
-    /// Effective `markdown_cache_validation` mode: 0 = off, 1 = ims_only,
-    /// 2 = full.
-    pub cache_validation: u8,
-    /// 1 if the request method is `HEAD`, else 0.
-    pub is_head: u8,
-    /// 1 if the conditional decision yielded `304 Not Modified`, else 0.
-    pub is_not_modified: u8,
-    /// 1 if the request carried a `Range` header, else 0.
-    pub has_range: u8,
-    /// 1 if request or response carried `Cache-Control: no-transform`.
-    pub no_transform: u8,
-    /// 1 if the upstream response carried a `Content-Encoding`, else 0.
-    pub has_content_encoding: u8,
-    /// 1 if the upstream `Content-Length` is known, else 0.
-    pub content_length_known: u8,
-    /// Upstream `Content-Length` in bytes (meaningful when known).
-    pub content_length: u64,
-    /// `markdown_stream_threshold` in bytes (auto-mode trigger).
-    pub streaming_threshold: u64,
-}
-
-/// `markdown_decide_streaming` sentinel: no block reason (request is
-/// streaming-eligible).
-pub const STREAMING_BLOCK_REASON_NONE: u8 = 255;
-
-/// Result of `markdown_decide_streaming` (spec 49).
-#[repr(C)]
-pub struct FFIStreamingDecision {
-    /// 1 if the request may take the streaming path, else 0.
-    pub eligible: u8,
-    /// `StreamingBlockReason` discriminant when `eligible == 0`, or
-    /// `STREAMING_BLOCK_REASON_NONE` (255) when `eligible == 1`.
-    pub block_reason: u8,
 }
 
 /// A single header operation in a header plan.
@@ -839,8 +769,8 @@ pub const FFI_PROFILE_STREAMING_FIRST: u8 = 3;
 
 /// FFI-safe error class enum (spec 51).
 ///
-/// Maps 1:1 to `crate::error::classification::ErrorClass`. The C side passes
-/// this to `markdown_decide_error_behavior` to identify the error category.
+/// Maps 1:1 to `crate::error::classification::ErrorClass`. The C side receives
+/// this value from `markdown_classify_error_code`.
 ///
 /// Discriminants are frozen for the 1.0 stability contract.
 #[repr(u8)]
@@ -867,48 +797,6 @@ pub enum FFIErrorClass {
     /// Streaming conversion failed mid-flight.
     StreamingMidFlightError = 9,
 }
-
-/// FFI-safe error policy enum (spec 51).
-///
-/// The C side derives this from the `markdown_error_policy` directive value
-/// and passes it to `markdown_decide_error_behavior`.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FFIErrorPolicy {
-    /// Policy kind: 0 = pass, 1 = status, 2 = fail_closed.
-    pub kind: u8,
-    /// HTTP status code (meaningful only when kind == 1).
-    pub status_code: u16,
-}
-
-/// FFI error policy kind: pass (fail-open, default).
-pub const FFI_ERROR_POLICY_PASS: u8 = 0;
-/// FFI error policy kind: return specified status code.
-pub const FFI_ERROR_POLICY_STATUS: u8 = 1;
-/// FFI error policy kind: fail_closed (return 502).
-pub const FFI_ERROR_POLICY_FAIL_CLOSED: u8 = 2;
-
-/// FFI-safe error behavior enum (spec 51).
-///
-/// Returned by `markdown_decide_error_behavior` to tell the C error handler
-/// what action to take.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FFIErrorBehavior {
-    /// Behavior kind: 0 = pass_through, 1 = return_status, 2 = terminate.
-    pub kind: u8,
-    /// HTTP status code (meaningful only when kind == 1).
-    pub status_code: u16,
-    /// 1 if behavior was forced (post-commit), 0 if policy-driven.
-    pub forced: u8,
-}
-
-/// FFI error behavior kind: pass through original response.
-pub const FFI_ERROR_BEHAVIOR_PASS_THROUGH: u8 = 0;
-/// FFI error behavior kind: return specified HTTP status code.
-pub const FFI_ERROR_BEHAVIOR_RETURN_STATUS: u8 = 1;
-/// FFI error behavior kind: terminate connection (post-commit).
-pub const FFI_ERROR_BEHAVIOR_TERMINATE: u8 = 2;
 
 #[cfg(test)]
 mod layout_tests {
@@ -974,22 +862,6 @@ mod layout_tests {
     }
 
     #[test]
-    fn test_ffi_conditional_result_layout() {
-        use std::mem::{align_of, size_of};
-
-        assert_eq!(size_of::<FFIConditionalResult>(), 8);
-        assert_eq!(align_of::<FFIConditionalResult>(), 4);
-    }
-
-    #[test]
-    fn test_ffi_decision_result_layout() {
-        use std::mem::{align_of, size_of};
-
-        assert_eq!(size_of::<FFIDecisionResult>(), 2);
-        assert_eq!(align_of::<FFIDecisionResult>(), 1);
-    }
-
-    #[test]
     fn test_ffi_header_entry_layout() {
         use std::mem::{align_of, offset_of, size_of};
 
@@ -1031,7 +903,7 @@ mod layout_tests {
     fn test_ffi_base_url_input_layout() {
         use std::mem::{align_of, offset_of, size_of};
 
-        assert_eq!(size_of::<FFIBaseUrlInput>(), 96);
+        assert_eq!(size_of::<FFIBaseUrlInput>(), 112);
         assert_eq!(align_of::<FFIBaseUrlInput>(), 8);
 
         assert_eq!(offset_of!(FFIBaseUrlInput, source_ip), 0);
@@ -1047,6 +919,8 @@ mod layout_tests {
         assert_eq!(offset_of!(FFIBaseUrlInput, host_len), 80);
         assert_eq!(offset_of!(FFIBaseUrlInput, is_unix_socket), 88);
         assert_eq!(offset_of!(FFIBaseUrlInput, trusted_configured), 89);
+        assert_eq!(offset_of!(FFIBaseUrlInput, direct_scheme), 96);
+        assert_eq!(offset_of!(FFIBaseUrlInput, direct_scheme_len), 104);
     }
 
     #[test]
@@ -1104,25 +978,6 @@ mod layout_tests {
         assert_eq!(offset_of!(FFIConditionalDecision, outcome), 0);
         assert_eq!(offset_of!(FFIConditionalDecision, reason), 1);
         assert_eq!(offset_of!(FFIConditionalDecision, evaluated_header), 2);
-
-        assert_eq!(size_of::<FFIStreamingInput>(), 32);
-        assert_eq!(align_of::<FFIStreamingInput>(), 8);
-        assert_eq!(offset_of!(FFIStreamingInput, policy), 0);
-        assert_eq!(offset_of!(FFIStreamingInput, engine), 1);
-        assert_eq!(offset_of!(FFIStreamingInput, cache_validation), 2);
-        assert_eq!(offset_of!(FFIStreamingInput, is_head), 3);
-        assert_eq!(offset_of!(FFIStreamingInput, is_not_modified), 4);
-        assert_eq!(offset_of!(FFIStreamingInput, has_range), 5);
-        assert_eq!(offset_of!(FFIStreamingInput, no_transform), 6);
-        assert_eq!(offset_of!(FFIStreamingInput, has_content_encoding), 7);
-        assert_eq!(offset_of!(FFIStreamingInput, content_length_known), 8);
-        assert_eq!(offset_of!(FFIStreamingInput, content_length), 16);
-        assert_eq!(offset_of!(FFIStreamingInput, streaming_threshold), 24);
-
-        assert_eq!(size_of::<FFIStreamingDecision>(), 2);
-        assert_eq!(align_of::<FFIStreamingDecision>(), 1);
-        assert_eq!(offset_of!(FFIStreamingDecision, eligible), 0);
-        assert_eq!(offset_of!(FFIStreamingDecision, block_reason), 1);
     }
 
     #[test]
@@ -1172,22 +1027,6 @@ mod layout_tests {
         assert_eq!(offset_of!(FFIEffectiveConfig, limits_max_inflight), 32);
         assert_eq!(offset_of!(FFIEffectiveConfig, error_policy), 36);
         assert_eq!(offset_of!(FFIEffectiveConfig, diagnostics), 37);
-    }
-
-    #[test]
-    fn test_spec_51_error_policy_abi_layouts() {
-        use std::mem::{align_of, offset_of, size_of};
-
-        assert_eq!(size_of::<FFIErrorPolicy>(), 4);
-        assert_eq!(align_of::<FFIErrorPolicy>(), 2);
-        assert_eq!(offset_of!(FFIErrorPolicy, kind), 0);
-        assert_eq!(offset_of!(FFIErrorPolicy, status_code), 2);
-
-        assert_eq!(size_of::<FFIErrorBehavior>(), 6);
-        assert_eq!(align_of::<FFIErrorBehavior>(), 2);
-        assert_eq!(offset_of!(FFIErrorBehavior, kind), 0);
-        assert_eq!(offset_of!(FFIErrorBehavior, status_code), 2);
-        assert_eq!(offset_of!(FFIErrorBehavior, forced), 4);
     }
 
     #[test]
@@ -1312,7 +1151,7 @@ mod layout_tests {
     }
 
     #[test]
-    fn test_skip_reason_count_matches_decision_export() {
+    fn test_skip_reason_count_is_stable() {
         use crate::decision::SkipReason;
         let skip_reasons = [
             SkipReason::SkipAccept,
@@ -1327,7 +1166,7 @@ mod layout_tests {
         assert_eq!(
             skip_reasons.len(),
             8,
-            "SkipReason variant count ({}) must match FFI export reason_code range (1..=8)",
+            "SkipReason variant count ({}) must remain stable",
             skip_reasons.len()
         );
     }

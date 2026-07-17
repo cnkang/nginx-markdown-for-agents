@@ -1,0 +1,18 @@
+{
+  "fixture-id": "large/large-1mb",
+  "page-type": "complex-common",
+  "expected-conversion-result": "converted",
+  "input-size-bytes": 1048516,
+  "source-description": "Generated large fixture for streaming differential and bounded-memory tests",
+  "failure-corpus": false,
+  "streaming_notes": {
+    "expected_fallback": false,
+    "known_diff_ids": [
+      "DIFF-PARITY-WHITESPACE-ONLY"
+    ],
+    "high_risk_structures": [
+      "large-document",
+      "memory-boundary"
+    ]
+  }
+}

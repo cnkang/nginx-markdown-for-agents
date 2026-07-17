@@ -19,7 +19,7 @@ Related docs:
 ### Symptom
 
 Responses are converted via full-buffer even though you expected streaming.
-The `streaming_engine_choice_total{engine="streaming"}` metric stays at zero
+The `nginx_markdown_streaming_engine_choice_total{engine="streaming"}` metric stays at zero
 or does not increment for the path in question.
 
 ### Likely Cause
@@ -33,10 +33,10 @@ content type excluded.
 **Step 1 — Check engine setting:**
 
 ```bash
-nginx -T 2>/dev/null | grep -i markdown_streaming_engine
+nginx -T 2>/dev/null | grep -i markdown_streaming
 ```
 
-Expected: `markdown_streaming_engine auto;` or `on;` for the target location.
+Expected: `markdown_streaming auto;` or `force;` for the target location.
 If you see `off`, streaming is explicitly disabled.
 
 **Step 1b — Check cache_validation setting:**
@@ -109,10 +109,10 @@ Look for the `streaming` section showing current configuration state.
 
 | Finding | Fix |
 |---------|-----|
-| Engine is `off` | Set `markdown_streaming_engine auto;` and reload |
+| Engine is `off` | Set `markdown_streaming auto;` and reload |
 | `cache_validation` is `full` (`strict_cache` default) | Set `markdown_cache_validation ims_only;` or `off;` to allow streaming |
 | Response below threshold | Lower `markdown_stream_threshold` or accept full-buffer for small responses |
-| Content-Length below threshold | Expected behavior in `auto` mode; use `on` to force streaming regardless |
+| Content-Length below threshold | Expected behavior in `auto` mode; use `force` to prefer streaming regardless of size |
 | Content type excluded | Remove type from `markdown_stream_excluded_types` if streaming is desired |
 
 ---
@@ -190,7 +190,7 @@ the parser cannot handle in the bounded pre-commit window.
 
 ---
 
-## Scenario 3: "Post-commit failure — client got truncated output"
+## Scenario 3: "Post-commit failure or shortened output"
 
 ### Symptom
 
@@ -201,16 +201,21 @@ Markdown responses.  Logs show `postcommit_*` reason codes.
 ### What Happened
 
 After the streaming engine committed response headers to the client (sent
-`200 OK` with `Content-Type: text/markdown`), an unrecoverable error
-occurred.  Because headers are already on the wire, the module cannot
-transparently fall back to full-buffer.  The client receives whatever was
-flushed before the error, then the connection closes.
+`200 OK` with `Content-Type: text/markdown`), an error occurred. Because the
+headers are already on the wire, the module cannot transparently fall back to
+full-buffer or replace the status code. With `markdown_error_policy pass`, the
+Rust converter first attempts a safe finish and emits only the Markdown bytes
+needed to close open structures. With `fail_closed` or `status`, or if the safe
+finish fails, the module aborts the response and the client sees the bytes that
+were already flushed.
 
 ### Why This Is Critical
 
-Unlike pre-commit fallbacks, post-commit failures are **not recoverable**.
-The client sees partial content.  Any sustained rate above 0.01% warrants
-immediate investigation and likely rollback.
+Unlike pre-commit fallbacks, post-commit failures cannot recover the omitted
+content. A successful safe finish can preserve structurally valid Markdown,
+but the response can still be shorter than the upstream document; an abort can
+leave it truncated. Any sustained rate above 0.01% warrants immediate
+investigation and likely rollback.
 
 ### Diagnosis Steps
 
@@ -271,7 +276,7 @@ else:
 
 ```bash
 # Edit nginx.conf — add to affected location:
-#   markdown_streaming_engine off;
+#   markdown_streaming off;
 nginx -t && nginx -s reload
 ```
 
@@ -279,7 +284,7 @@ nginx -t && nginx -s reload
 
 ```bash
 # In http {} block:
-#   markdown_streaming_engine off;
+#   markdown_streaming off;
 nginx -t && nginx -s reload
 ```
 
@@ -294,8 +299,9 @@ nginx -t && nginx -s reload
 See [Rollout Cookbook — Emergency Disable](streaming-rollout-cookbook.md#emergency-disable)
 for the full disable procedure.
 
-> **Prevention is the only cure.** Post-commit failures cannot be undone for
-> the affected client.  Minimize their likelihood by:
+> **Prevention remains essential.** A safe finish can close Markdown
+> structures but cannot restore content omitted after the failure. Minimize
+> post-commit failures by:
 > - Testing in staging with realistic HTML before enabling streaming in production
 > - Using `auto` mode with a conservative `markdown_stream_threshold` (e.g., `2m`)
 > - Setting `markdown_parser_budget` high enough for your largest known documents
@@ -303,12 +309,12 @@ for the full disable procedure.
 
 ---
 
-## Scenario 6: "Clients get HTTP 500 errors when streaming is enabled"
+## Scenario 6: "Clients get 429/502/503 responses when streaming is enabled"
 
 ### Symptom
 
 After enabling streaming, clients that previously received HTML or full-buffer
-Markdown now get HTTP 500 (or 502/503) error responses.  The
+Markdown now get HTTP 429, 502, or 503 error responses. The
 JSON `streaming.precommit_reject_total` or Prometheus
 `nginx_markdown_streaming_fallback_total{phase="precommit",action="reject"}`
 metric is incrementing.
@@ -322,33 +328,35 @@ set to `fail_closed` instead of the default `pass`:
 markdown_error_policy fail_closed;
 ```
 
-With `reject`, when a pre-commit error occurs (HTML parse failure, budget
-exceeded, timeout), the module does **not** replay the original HTML to the
-client.  Instead, it returns an HTTP error.  This is a deliberate "fail-closed"
-configuration — but it means any pre-commit error becomes a client-visible
-outage.
+With `fail_closed` or an explicit `status` policy, a pre-commit error (HTML
+parse failure, budget exceeded, or timeout) does **not** replay the original
+HTML. Instead, the module returns the configured HTTP error. This is a
+deliberate non-pass configuration, but it makes any pre-commit error visible to
+the client.
 
 ### Why This Happens
 
 | Configuration | Pre-Commit Error | Client Sees |
 |---------------|-----------------|-------------|
 | `markdown_error_policy pass;` (default) | Error triggers replay of buffered HTML | Original HTML (correct, safe) |
-| `markdown_error_policy fail_closed;` | Error triggers HTTP error | 500 Internal Server Error |
+| `markdown_error_policy fail_closed;` | Error triggers HTTP error | 502 Bad Gateway |
+| `markdown_error_policy status 429;` | Error triggers HTTP error | 429 Too Many Requests |
+| `markdown_error_policy status 503;` | Error triggers HTTP error | 503 Service Unavailable |
 
-The `reject` policy is intended for strict environments where serving
-unconverted HTML is unacceptable (e.g., API documentation endpoints that
-must always return Markdown).  However, it converts any pre-commit failure
-into a client-facing outage.
+The non-pass policies are intended for strict environments where serving
+unconverted HTML is unacceptable (for example, documentation endpoints that
+must always return Markdown). They convert any pre-commit failure into a
+client-facing error.
 
 ### Diagnosis Steps
 
-**Step 1 — Confirm reject policy is active:**
+**Step 1 — Confirm a non-pass policy is active:**
 
 ```bash
 nginx -T 2>/dev/null | grep -i markdown_error_policy
 ```
 
-If you see `reject`, this is the cause.
+If you see `fail_closed`, `status 429`, or `status 503`, this is the cause.
 
 **Step 2 — Check pre-commit rejection metrics:**
 
@@ -370,7 +378,11 @@ print(f'Total pre-commit fallbacks: {total_fallback}')
 "
 ```
 
-**Step 3 — Check logs for the reject action:**
+**Step 3 — Check logs for the internal reject action:**
+
+The stable metric/log action label remains `reject` for all non-pass policies;
+the configured directive values are `fail_closed`, `status 429`, and
+`status 503`.
 
 ```bash
 grep -E 'reason="?precommit.*action="?reject' /var/log/nginx/error.log | tail -20
@@ -387,7 +399,7 @@ Example log line:
 **Step 4 — Identify affected URIs:**
 
 ```bash
-grep -E 'STREAMING_PRECOMMIT_REJECT' /var/log/nginx/error.log | \
+grep -E 'streaming_precommit_reject' /var/log/nginx/error.log | \
   grep -oP 'uri=[^ ]*' | sort | uniq -c | sort -rn | head -10
 ```
 
@@ -406,7 +418,7 @@ nginx -t && nginx -s reload
 
 ```bash
 # Edit nginx.conf:
-#   markdown_streaming_engine off;
+#   markdown_streaming off;
 nginx -t && nginx -s reload
 ```
 
@@ -429,7 +441,7 @@ print(f'Reject count: {d.get(\"streaming\", {}).get(\"precommit_reject_total\", 
 Escalate if **any** of the following are true:
 
 1. **Errors persist after disabling streaming** — if HTTP errors continue after
-   `markdown_streaming_engine off`, the issue is not streaming-specific.  It may
+   `markdown_streaming off`, the issue is not streaming-specific.  It may
    be in the full-buffer path, the upstream, or NGINX itself.
 
 2. **Errors occur in the full-buffer path too** — check:
@@ -518,8 +530,8 @@ matching branch.
 
 ```bash
 # 1. Disable streaming
-sed -i 's/markdown_streaming_engine.*/markdown_streaming_engine off;/' /etc/nginx/nginx.conf
-# Or edit manually and set: markdown_streaming_engine off;
+sed -i 's/markdown_streaming.*/markdown_streaming off;/' /etc/nginx/nginx.conf
+# Or edit manually and set: markdown_streaming off;
 
 # 2. Validate and reload
 nginx -t && nginx -s reload
@@ -538,7 +550,8 @@ print(f'Post-commit failures (should stop growing): {failures}')
 **ACTION 2 — Switch to pass policy (pre-commit reject):**
 
 ```bash
-# 1. Change error policy to fail-open (migrate from old directive if needed)
+# 1. Change error policy to fail-open
+#    (if migrating from ≤0.8.x configs, also run the sed lines below)
 sed -i 's/markdown_streaming_on_error.*/markdown_error_policy pass;/' /etc/nginx/nginx.conf
 sed -i 's/markdown_on_error.*/markdown_error_policy pass;/' /etc/nginx/nginx.conf
 # Or edit manually and set: markdown_error_policy pass;
@@ -550,14 +563,14 @@ nginx -t && nginx -s reload
 sleep 10
 curl -s -H 'Accept: text/markdown' http://localhost/previously-failing-path \
   -o /dev/null -w 'HTTP %{http_code}\n'
-# Should return 200, not 500
+# Should return 200, not the configured 429/502/503 response
 ```
 
 **ACTION 3 — Escalate (errors persist after streaming is off):**
 
 ```bash
 # 1. Confirm streaming is fully disabled
-nginx -T 2>/dev/null | grep markdown_streaming_engine
+nginx -T 2>/dev/null | grep markdown_streaming
 # Should show only "off" entries
 
 # 2. Confirm errors are still occurring
@@ -664,7 +677,7 @@ permanently (policy decision).
 
 ```nginx
 location /affected-path/ {
-    markdown_streaming_engine off;
+    markdown_streaming off;
 }
 ```
 
@@ -672,7 +685,7 @@ location /affected-path/ {
 
 ```nginx
 http {
-    markdown_streaming_engine off;
+    markdown_streaming off;
 }
 ```
 
@@ -700,8 +713,8 @@ curl -s -H 'Accept: application/json' http://localhost/markdown-metrics | \
 
 | Goal | Configuration |
 |------|---------------|
-| Disable for one location | `markdown_streaming_engine off;` in the location block |
-| Disable globally | `markdown_streaming_engine off;` in the `http` block |
+| Disable for one location | `markdown_streaming off;` in the location block |
+| Disable globally | `markdown_streaming off;` in the `http` block |
 | Raise threshold (fewer streaming candidates) | `markdown_stream_threshold 10m;` |
 | Exclude specific content types | `markdown_stream_excluded_types text/event-stream application/pdf;` |
 
@@ -731,7 +744,7 @@ default during rollout).  They confirm normal streaming operation.
 
 | Field | Value | Meaning |
 |-------|-------|---------|
-| `reason=ENGINE_STREAMING` | Reason code | Streaming engine was selected for this request |
+| `reason=engine_streaming` | Reason code | Streaming engine was selected for this request |
 | `engine=streaming` | Engine path | True streaming conversion will be used |
 | `phase=header_filter` | Decision point | Decision made during the header filter phase |
 | `action=stream` | Outcome | Request will be streamed |
@@ -751,7 +764,7 @@ default during rollout).  They confirm normal streaming operation.
 
 | Field | Value | Meaning |
 |-------|-------|---------|
-| `reason=STREAMING_CONVERT` | Reason code | Streaming conversion finished successfully |
+| `reason=streaming_convert` | Reason code | Streaming conversion finished successfully |
 | `phase=postcommit` | Phase | Conversion completed after headers were sent |
 | `action=complete` | Outcome | Full Markdown response delivered to client |
 
@@ -767,7 +780,7 @@ default during rollout).  They confirm normal streaming operation.
 
 | Field | Value | Meaning |
 |-------|-------|---------|
-| `reason=STREAMING_FALLBACK_PREBUFFER` | Reason code | Streaming abandoned before committing headers |
+| `reason=streaming_fallback_prebuffer` | Reason code | Streaming abandoned before committing headers |
 | `engine=full_buffer` | Engine path | Fell back to full-buffer conversion |
 | `phase=precommit` | Phase | Decision made before headers were sent to client |
 | `action=fallback` | Outcome | Client will receive correct output via full-buffer |
@@ -793,17 +806,17 @@ the client may receive truncated output.
 
 | Field | Value | Meaning |
 |-------|-------|---------|
-| `reason=STREAMING_FAIL_POSTCOMMIT` | Reason code | Error occurred after headers were sent |
+| `reason=streaming_fail_postcommit` | Reason code | Error occurred after headers were sent |
 | `phase=postcommit` | Phase | Past the point of no return |
 | `action=abort` | Outcome | Connection closed; client got partial output |
 | `committed=1` | Headers sent? | Yes — cannot transparently recover |
 | `fallback_available=0` | Can fall back? | No — headers already on the wire |
-| `category=FAIL_CONVERSION` | Failure class | HTML parsing failure |
+| `category=fail_conversion` | Failure class | HTML parsing failure |
 
 **Action**: **Immediate** — disable streaming for this path:
 ```nginx
 location /reports/ {
-    markdown_streaming_engine off;
+    markdown_streaming off;
 }
 ```
 Then reload: `nginx -t && nginx -s reload`
@@ -818,8 +831,8 @@ Then reload: `nginx -t && nginx -s reload`
 
 | Field | Value | Meaning |
 |-------|-------|---------|
-| `reason=STREAMING_BUDGET_EXCEEDED` | Reason code | Memory budget exhausted during streaming |
-| `category=FAIL_RESOURCE_LIMIT` | Failure class | Resource limit violation |
+| `reason=streaming_budget_exceeded` | Reason code | Memory budget exhausted during streaming |
+| `category=fail_resource_limit` | Failure class | Resource limit violation |
 | `committed=1` | Headers sent? | Cannot recover |
 
 **Action**: Disable streaming for this path, then raise
@@ -836,7 +849,7 @@ response stays in full-buffer.
 
 | Field | Value | Meaning |
 |-------|-------|---------|
-| `reason=STREAMING_PRECOMMIT_REJECT` | Reason code | Pre-commit error with reject policy |
+| `reason=streaming_precommit_reject` | Reason code | Pre-commit error with a non-pass policy |
 | `engine=rejected` | Engine path | Request rejected (error returned to client) |
 | `markdown_error_policy=fail_closed` | Error policy | Fail-closed: errors produce HTTP error responses |
 | `committed=0` | Headers sent? | No — but client still gets an error response |
@@ -845,7 +858,7 @@ response stays in full-buffer.
 ```nginx
 markdown_error_policy pass;
 # or:
-markdown_streaming_engine off;
+markdown_streaming off;
 ```
 
 ---
@@ -945,7 +958,7 @@ This shows what an unhealthy streaming deployment looks like.
 
 **Action**:
 
-1. **Immediate**: Disable streaming (`markdown_streaming_engine off`) — 12
+1. **Immediate**: Disable streaming (`markdown_streaming off`) — 12
    post-commit failures and 30 rejections mean clients are affected.
 2. **Investigate**: Check structured logs for the dominant `precommit_*`
    reason code causing the 34.9% fallback rate.
@@ -1012,7 +1025,7 @@ nginx_markdown_streaming_peak_memory_bytes 524288
 
 | Line | Meaning |
 |------|---------|
-| `engine_choice_total{engine="streaming"} 11200` | 11,200 requests used true streaming |
+| `nginx_markdown_streaming_engine_choice_total{engine="streaming"} 11200` | 11,200 requests used true streaming |
 | `fallback_total{...,action="pass"} 250` | 250 safe fallbacks (HTML passed through) |
 | `fallback_total{...,action="reject"} 0` | No client-facing rejections |
 | `failure_total{...,action="abort"} 0` | No post-commit aborts |
@@ -1034,67 +1047,42 @@ configuration and recent decision history.  Query with:
 curl -s http://localhost/nginx-markdown/diagnostics | python3 -m json.tool
 ```
 
-Example output (streaming-relevant sections):
+Selected output fields (all values and field names below are emitted by the
+C diagnostics renderer):
 
 ```json
 {
-  "version": "0.9.0",
-  "uptime_seconds": 86420,
-  "worker_pid": 1234,
   "streaming_config": {
-    "engine": "auto",
-    "error_policy": "pass",
+    "policy": "auto",
+    "policy_source": "default",
+    "on_error": "pass",
     "threshold": 1048576,
     "precommit_buffer": 262144,
     "flush_min": 4096,
-    "excluded_types": ["text/event-stream", "application/x-ndjson"],
     "threshold_explicit": false
   },
   "streaming_metrics": {
-    "candidate_total": 12450,
+    "requests_total": 11200,
     "succeeded_total": 11195,
     "failed_total": 0,
     "fallback_total": 250,
+    "candidate_total": 12450,
     "output_bytes_total": 312500000,
     "engine_choice_streaming": 11200,
-    "engine_choice_full_buffer": 1250,
-    "ttfb_last_seconds": 0.045,
-    "peak_memory_last_bytes": 524288
+    "engine_choice_full_buffer": 1250
   },
   "recent_decisions": [
     {
-      "timestamp": "2025-01-15T14:30:25Z",
-      "uri": "/api/reference",
-      "reason": "eligible",
-      "engine": "streaming",
-      "phase": "header_filter",
-      "content_length_known": false,
-      "chunked": true
+      "timestamp": 123456789,
+      "reason_code": 0,
+      "reason_code_str": "converted",
+      "duration_ms": 12
     },
     {
-      "timestamp": "2025-01-15T14:30:26Z",
-      "uri": "/api/reference",
-      "reason": "STREAMING_CONVERT",
-      "engine": "streaming",
-      "phase": "postcommit",
-      "action": "complete"
-    },
-    {
-      "timestamp": "2025-01-15T14:30:27Z",
-      "uri": "/blog/complex-post",
-      "reason": "precommit_html_error",
-      "engine": "full_buffer",
-      "phase": "precommit",
-      "action": "fallback"
-    },
-    {
-      "timestamp": "2025-01-15T14:30:28Z",
-      "uri": "/docs/overview",
-      "reason": "content_length_known",
-      "engine": "full_buffer",
-      "phase": "header_filter",
-      "content_length_known": true,
-      "content_length": 45200
+      "timestamp": 123456802,
+      "reason_code": 24,
+      "reason_code_str": "streaming_mid_flight_error",
+      "duration_ms": 4
     }
   ]
 }
@@ -1104,40 +1092,49 @@ Example output (streaming-relevant sections):
 
 | Section | What It Tells You |
 |---------|-------------------|
-| `streaming_config` | Current runtime configuration (engine mode, thresholds, excluded types) |
+| `streaming_config` | Current runtime streaming policy, error behavior, and buffer thresholds |
+| `streaming_config.policy` | Sole selector: `off`, `auto`, or `force` |
+| `streaming_config.policy_source` | Selector source: `configured`, `profile`, or `default` |
 | `streaming_config.threshold` | Responses must exceed this size (bytes) for streaming in `auto` mode |
 | `streaming_config.precommit_buffer` | Pre-commit replay buffer size (bytes) for fail-open recovery |
 | `streaming_config.flush_min` | Minimum output batch size (bytes) before flushing downstream |
 | `streaming_config.threshold_explicit` | Whether `markdown_stream_threshold` was explicitly configured |
-| `streaming_config.on_error` | What happens on errors: `pass` (serve HTML) or `reject` (return error) |
+| `streaming_config.on_error` | Exact unified error policy: `pass`, `fail_closed`, `status 429`, or `status 503` |
 | `streaming_metrics` | Cumulative counters since last NGINX start |
-| `streaming_metrics.ttfb_last_seconds` | Time-to-first-byte of the most recent streaming request |
-| `streaming_metrics.peak_memory_last_bytes` | Peak memory of the most recent streaming conversion |
-| `recent_decisions` | Last N streaming decisions with full context |
-| `recent_decisions[].reason` | The reason code for why this path was chosen |
+| `recent_decisions` | Newest-first bounded decision history |
+| `recent_decisions[].reason_code` | Numeric reason-code discriminant |
+| `recent_decisions[].reason_code_str` | Canonical reason string, or `null` for an unknown code |
+| `recent_decisions[].duration_ms` | Recorded decision duration in milliseconds |
 
 **Action**: Use this endpoint to confirm configuration is applied correctly
-and to trace individual requests during debugging.  The `recent_decisions`
-array is especially useful for understanding why a specific request did or
-did not stream.
+and to inspect recent aggregate decisions during debugging. The entries do not
+contain a URI or request identifier, so correlate them with structured logs by
+time rather than treating the array as a per-request trace.
 
 ---
 
-## Reason Code Quick Reference
+## Streaming-Relevant Canonical Reason Codes
 
 | Code | Category | Operator Concern |
 |------|----------|------------------|
-| `eligible` | Selection | None — healthy |
-| `content_length_known` | Selection | Normal for small known-size responses |
-| `below_threshold` | Selection | Normal — full-buffer used |
-| `config_disabled` | Selection | Expected when `off` is configured |
-| `excluded_content_type` | Selection | Expected for excluded types |
-| `precommit_html_error` | Fallback (safe) | Investigate HTML quality |
-| `precommit_budget` | Fallback (safe) | Consider raising budget |
-| `precommit_timeout` | Fallback (safe) | Consider raising timeout |
-| `postcommit_parse_error` | Failure (critical) | Disable streaming; investigate |
-| `postcommit_budget_exceeded` | Failure (critical) | Disable streaming; raise budget |
-| `postcommit_io_error` | Failure (critical) | Disable streaming; check connectivity |
+| `converted` | Success | Conversion completed |
+| `failed_open` | Recovery | Original HTML was delivered after a pre-commit failure; investigate a sustained rate |
+| `failed_closed` | Rejection | The configured fail-closed policy rejected the response |
+| `replay_error` | Recovery failure | Pre-commit replay could not complete; inspect error logs immediately |
+| `timeout` | Resource limit | Conversion exceeded its time budget |
+| `budget_exceeded` | Resource limit | A general conversion budget was exceeded |
+| `memory_budget_exceeded` | Resource limit | The configured memory limit was exceeded |
+| `decompression_budget_exceeded` | Decompression | Expanded content exceeded the decompression cap |
+| `decompression_format_error` | Decompression | Invalid compressed data or trailing bytes after a deflate stream |
+| `decompression_truncated_input` | Decompression | A compressed stream or member ended prematurely |
+| `header_plan_apply_error` | Commit failure | Atomic response-header planning or application failed |
+| `streaming_mid_flight_error` | Post-commit failure | Streaming failed after commit; correlate with error logs and consider disabling streaming |
+| `bypass_no_transform` | Bypass | `Cache-Control: no-transform` required passthrough |
+
+The streaming selector's detailed routing outcomes (for example full-buffer
+selection because a response is below the threshold) are engine-choice
+metrics and structured-log context, not additional reason-code registry
+values.
 
 ---
 
@@ -1149,3 +1146,4 @@ did not stream.
 | 0.8.0 | 2026-06-16 | Kang  | Added Log and Metrics Examples section with annotated log entries, JSON/Prometheus metrics examples (healthy and unhealthy), and diagnostics endpoint output |
 | 0.8.0 | 2026-06-16 | Kang  | Added Scenario 6 (fallback-disabled escalation), decision tree, concrete commands |
 | 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

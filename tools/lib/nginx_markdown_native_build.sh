@@ -10,6 +10,8 @@
 #     copy, or unsupported-platform failures.
 #   - Callers must source this file; it is not intended to run as a script.
 
+readonly MARKDOWN_OS_DARWIN="Darwin"
+
 # Args:
 #   $1 - command name to find in PATH.
 # Stdout:
@@ -42,7 +44,7 @@ markdown_ensure_native_apple_silicon() {
   local script_path="$1"
   shift || true
 
-  if [[ "$(uname -s)" != "Darwin" ]]; then
+  if [[ "$(uname -s)" != "${MARKDOWN_OS_DARWIN}" ]]; then
     return 0
   fi
 
@@ -76,8 +78,8 @@ markdown_detect_rust_target() {
   fi
 
   case "${host_os}:${host_arch}:${libc_variant}" in
-    Darwin:arm64:*) echo "aarch64-apple-darwin" ;;
-    Darwin:x86_64:*) echo "x86_64-apple-darwin" ;;
+    "${MARKDOWN_OS_DARWIN}":arm64:*) echo "aarch64-apple-darwin" ;;
+    "${MARKDOWN_OS_DARWIN}":x86_64:*) echo "x86_64-apple-darwin" ;;
     Linux:x86_64:gnu) echo "x86_64-unknown-linux-gnu" ;;
     Linux:aarch64:gnu) echo "aarch64-unknown-linux-gnu" ;;
     Linux:x86_64:musl) echo "x86_64-unknown-linux-musl" ;;
@@ -97,13 +99,124 @@ markdown_default_macos_deployment_target() {
 }
 
 markdown_export_native_build_env() {
-  if [[ "$(uname -s)" != "Darwin" ]]; then
+  if [[ "$(uname -s)" != "${MARKDOWN_OS_DARWIN}" ]]; then
     return 0
   fi
 
   if [[ -z "${MACOSX_DEPLOYMENT_TARGET:-}" ]]; then
     export MACOSX_DEPLOYMENT_TARGET
     MACOSX_DEPLOYMENT_TARGET="$(markdown_default_macos_deployment_target)"
+  fi
+
+  return 0
+}
+
+markdown_append_env_flag() {
+  local var_name="$1"
+  local flag_value="$2"
+  local current_value
+
+  eval "current_value=\"\${${var_name}:-}\""
+  case " ${current_value} " in
+    *" ${flag_value} "*) ;;
+    *) current_value="${current_value:+${current_value} }${flag_value}" ;;
+  esac
+
+  printf -v "${var_name}" '%s' "${current_value}"
+  export "${var_name?}"
+  return 0
+}
+
+markdown_homebrew_prefix() {
+  local formula="$1"
+  local prefix
+
+  if command -v brew >/dev/null 2>&1; then
+    prefix="$(brew --prefix "${formula}" 2>/dev/null || true)"
+    if [[ -n "${prefix}" && -d "${prefix}" ]]; then
+      printf '%s\n' "${prefix}"
+      return 0
+    fi
+  fi
+
+  for prefix in "/opt/homebrew/opt/${formula}" "/usr/local/opt/${formula}"; do
+    if [[ -d "${prefix}" ]]; then
+      printf '%s\n' "${prefix}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+markdown_export_nginx_dependency_env() {
+  local formula prefix
+
+  if [[ "$(uname -s)" != "${MARKDOWN_OS_DARWIN}" ]]; then
+    return 0
+  fi
+
+  for formula in "$@"; do
+    prefix="$(markdown_homebrew_prefix "${formula}" || true)"
+    if [[ -z "${prefix}" ]]; then
+      continue
+    fi
+    if [[ -d "${prefix}/include" ]]; then
+      markdown_append_env_flag CPPFLAGS "-I${prefix}/include"
+    fi
+    if [[ -d "${prefix}/lib" ]]; then
+      markdown_append_env_flag LDFLAGS "-L${prefix}/lib"
+    fi
+  done
+
+  return 0
+}
+
+markdown_emit_nginx_configure_env() {
+  local cc_opt="$1"
+  local ld_opt="$2"
+  local opt
+
+  if [[ -n "${NGINX_CONFIGURE_OPTS:-}" ]]; then
+    for opt in ${NGINX_CONFIGURE_OPTS}; do
+      printf '%s\n' "${opt}"
+    done
+  fi
+  if [[ -n "${cc_opt}" ]]; then
+    printf '%s\n' "--with-cc-opt=${cc_opt}"
+  fi
+  if [[ -n "${ld_opt}" ]]; then
+    printf '%s\n' "--with-ld-opt=${ld_opt}"
+  fi
+
+  return 0
+}
+
+markdown_print_nginx_build_failure_diagnostics() {
+  local buildroot="${1:-}"
+  local log_file="${2:-}"
+
+  echo "Native NGINX build failed." >&2
+  if [[ -n "${buildroot}" ]]; then
+    echo "Artifacts kept at: ${buildroot}" >&2
+  fi
+  if [[ -n "${log_file}" ]]; then
+    echo "Build log: ${log_file}" >&2
+  fi
+  echo "To reuse an existing module-enabled binary:" >&2
+  echo "  export NGINX_BIN=/path/to/compiled/nginx" >&2
+
+  if [[ "$(uname -s)" == "${MARKDOWN_OS_DARWIN}" ]]; then
+    echo "For Homebrew dependencies, install:" >&2
+    echo "  brew install pcre2 zlib openssl@3" >&2
+    echo "Homebrew prefixes checked: /opt/homebrew and /usr/local" >&2
+    echo "Current CPPFLAGS: ${CPPFLAGS:-<unset>}" >&2
+    echo "Current LDFLAGS: ${LDFLAGS:-<unset>}" >&2
+    echo "If auto-detection fails, pass paths explicitly, for example:" >&2
+    # shellcheck disable=SC2016
+    echo '  export CPPFLAGS="-I$(brew --prefix openssl@3)/include -I$(brew --prefix pcre2)/include -I$(brew --prefix zlib)/include ${CPPFLAGS:-}"' >&2
+    # shellcheck disable=SC2016
+    echo '  export LDFLAGS="-L$(brew --prefix openssl@3)/lib -L$(brew --prefix pcre2)/lib -L$(brew --prefix zlib)/lib ${LDFLAGS:-}"' >&2
   fi
 
   return 0
@@ -316,7 +429,7 @@ markdown_prepare_rust_converter_release() {
     }
     cargo build --target "${rust_target}" --release "$@"
 
-    if [[ "$(uname -s)" == "Darwin" ]]; then
+    if [[ "$(uname -s)" == "${MARKDOWN_OS_DARWIN}" ]]; then
       local archive_path="target/${rust_target}/release/libnginx_markdown_converter.a"
       local stale_member=""
       stale_member="$(markdown_find_newer_macos_archive_member "${archive_path}" "${MACOSX_DEPLOYMENT_TARGET}" || true)"

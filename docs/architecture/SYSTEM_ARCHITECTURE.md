@@ -198,7 +198,6 @@ This decision is documented in [ADR-0003](ADR/0003-inline-origin-near-conversion
 - Repository layout: [REPOSITORY_STRUCTURE.md](REPOSITORY_STRUCTURE.md)
 - Operator-facing behavior: [../guides/CONFIGURATION.md](../guides/CONFIGURATION.md)
 
-
 ## v0.8.0 Streaming Architecture
 
 v0.8.0 adds a true streaming path alongside the existing full-buffer path.
@@ -206,17 +205,15 @@ The NGINX module still owns request lifecycle, header ordering, policy gates,
 and backpressure handling. Rust owns conversion logic and exposes both
 full-buffer and incremental streaming FFI entrypoints.
 
-### Engine Selection and Defaults
-
-`markdown_streaming_engine` defaults to `auto`. In auto mode, known small
+### Processing-Path Selection and Defaults
+`markdown_streaming` defaults to `auto`. In auto mode, known small
 responses remain on the full-buffer path while large or chunked responses can
-enter the streaming path. The 0.8.0 threshold is
+enter the streaming path. The default threshold is
 `markdown_stream_threshold` (default `1m`). The v0.6.x
-`markdown_streaming_auto_threshold` directive has been removed in 0.8.0;
+`markdown_streaming_auto_threshold` directive has been removed;
 use `markdown_stream_threshold` directly.
 
 ### Streaming Body Filter
-
 The streaming body filter consumes upstream buffers incrementally and emits
 Markdown chunks without making the complete response body the default working
 set. Before any Markdown output is committed, the module can replay the
@@ -225,7 +222,6 @@ After commit, failures are terminal because the response representation has
 already changed.
 
 ### Streaming FFI Contract
-
 The C side passes incremental chunks, EOF state, flush thresholds, and budget
 limits through the streaming converter ABI. Rust reports structured streaming
 events and errors back to C so the module can preserve NGINX return-code
@@ -233,7 +229,6 @@ semantics, apply fallback policy before commit, and update metrics only on the
 correct success or failure path.
 
 ### Observability and Release Gate
-
 Streaming decisions, fallbacks, and post-commit failures are exposed through
 Prometheus metrics and diagnostics reason codes. The 0.8.0 release contract is
 validated by `make release-gates-check-080`, which layers streaming,
@@ -246,20 +241,17 @@ The following Rust-first subsystems were introduced in v0.7.0 to move
 pure-logic decisions from C into Rust, improving testability and safety:
 
 ### Accept Negotiator (`negotiator.rs`)
-
 Parses `Accept` headers per RFC 9110 §12.5.1, performs q-value comparison
 between `text/markdown` and `text/html`, and determines whether conversion
 should proceed. Exposed via `FFIAcceptResult` and `markdown_negotiate_accept`
 FFI.
 
 ### Conditional Request Handler (`conditional.rs`)
-
 Implements `If-None-Match` (ETag strong/weak comparison) and
 `If-Modified-Since` (HTTP-date parsing and time comparison) for 304 Not
 Modified responses. Used internally by the C conditional-request path.
 
 ### Decision Engine (`decision/mod.rs` + `decision/reason_code.rs`)
-
 Pure function `make_decision(DecisionContext) -> Decision` (where `Decision`
 is `Convert` or `Skip(SkipReason)`) that centralizes the conversion/skip
 decision logic. Each decision path maps to a canonical `ReasonCode`
@@ -267,42 +259,35 @@ discriminant (the single source of truth in `decision/reason_code.rs`) for
 logging and metrics.
 
 ### Header Plan (`header_plan.rs`)
-
 Builder for response header mutations (Content-Type, Content-Length, ETag,
 Vary). Generates an operation list that can be applied atomically by the
 C module.
 
 ### Security Extensions (`security.rs` additions)
-
 URL control-character rejection, X-Forwarded-Host/Proto parsing with host
 validation, and Markdown link label/destination escaping for injection
 prevention.
 
 ### Bounded Decompression
-
 `markdown_decompress_max_size` directive limits decompressed output
-independently from `markdown_max_size`, preventing zip-bomb attacks.
+independently from `markdown_limits memory=<size>`, preventing zip-bomb attacks.
 `DecompressionBudgetExceeded` (FFI code 9) is classified as
-`RESOURCE_LIMIT` in C.
+`resource_limit` in C.
 
 ### Parser Timeout and Budget
-
 `markdown_parse_timeout` (default 30s) and `markdown_parser_budget`
 (default 64m) directives limit parsing time and memory. New error codes
 `ParseTimeout` (10) and `ParseBudgetExceeded` (11) map to
-`RESOURCE_LIMIT`.
+`resource_limit`.
 
 ### Diagnostics Endpoint (`ngx_http_markdown_diagnostics.c`)
-
 A dedicated HTTP handler exposes runtime state at
-`/nginx-markdown/diagnostics` when `markdown_diagnostics on` is
-configured. Returns JSON containing the current config snapshot, recent
+`/nginx-markdown/diagnostics` when `markdown_diagnostics on` is configured. Returns JSON containing the current config snapshot, recent
 decision summaries (reason codes, durations), and a metrics snapshot.
 Access is restricted by `allow` CIDR configuration; external access is
 denied by default.
 
 ### Dynconf Dry-run and Last-Known-Good (`ngx_http_markdown_dynconf.c`)
-
 `markdown_dynconf_dry_run on` validates a new configuration file on HUP
 without replacing the active snapshot. Validation results include line
 numbers, field names, and error reasons. On successful reload, the
@@ -311,7 +296,6 @@ rollback restores `active_snapshot` from LKG. `applied_mtime` updates
 only after successful application (Rule 35).
 
 ### Reason Code FFI Accessor (`reason_code.rs` + FFI)
-
 Reason codes are defined as a Rust enum (single source of truth). C
 accesses reason code values and display strings through the
 `markdown_reason_code_str()` / `markdown_reason_code_metric_key()` FFI
@@ -321,19 +305,28 @@ exports (wrapped C-side by `ngx_http_markdown_get_reason_code_str()` and
 This ensures Rust enum, C usage, docs, and metrics labels stay aligned.
 
 ### Header Plan Atomic Application (`ngx_http_markdown_ffi_helpers.c`)
-
 The C module applies `FFIHeaderPlan` operations (set, delete, modify)
 atomically: all header mutations succeed or all are rolled back. This
 prevents partial header state when an allocation failure occurs mid-plan.
 The plan is built by Rust and returned as a single FFI struct; C iterates
 the operation list and applies changes to `r->headers_out`.
 
-## Document Updates
+## v0.9.1 Feature Set
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 subsystems section (negotiator, conditional, decision, header_plan, security extensions, bounded decompression, parser timeout/budget, diagnostics endpoint, dynconf dry-run/LKG, reason code FFI accessor, header plan atomic application) |
-| 0.8.0 | 2026-06-16 | Kang | Added true streaming architecture, engine-selection compatibility notes, streaming FFI/fallback boundaries, observability, and release-gates-check-080 references |
-| 0.8.0 | 2026-06-16 | Kang | Updated engine-selection section: removed compatibility bridge reference (v0.6.x compat removed in 0.8.0) |
+v0.9.1 introduces critical performance and robustness enhancements to the conversion pipeline:
+
+### Zero-Copy Output
+To reduce CPU overhead and memory pressure in high-throughput streaming paths, 0.9.1 introduces a zero-copy output mechanism. When `markdown_streaming_zero_copy` is enabled, the module can deliver converted chunks directly to the NGINX response chain with minimal internal copying.
+
+### Streaming Decompression
+Streaming conversion now supports on-the-fly gzip and deflate decompression.
+Deflate accepts both zlib-wrapped and raw framing; gzip preserves member and
+trailer integrity across arbitrary chunks and backpressure resumes. Brotli
+continues to use bounded full-buffer decompression in 0.9.1 pending dedicated
+streaming decoder-state, lifecycle, backpressure, and memory validation.
+
+### Full-Buffer Copy Reduction
+Internal optimizations have been applied to the full-buffer path to reduce unnecessary data duplication during the transition from the NGINX buffer to the Rust converter and back.
+
+### Performance Evidence & Gates
+The 0.9.1 release is guarded by strict performance evidence gates. The `make release-gates-check-091` target must pass, and performance regression is monitored via `make perf-evidence-check`. Operators can use `python3 tools/perf/doctor_advice.py` and `tools/perf/run_module_benchmark.sh` to tune the module for their specific workload.

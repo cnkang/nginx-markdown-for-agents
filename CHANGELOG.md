@@ -5,9 +5,132 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - Unreleased
+
+Final pre-v1.0 baseline-consolidation and compatibility-reset release. In
+addition to performance readiness and release evidence, this release closes
+toolchain and public-contract debt before the v1.0 compatibility freeze.
+
+v0.9.0 was released with the intention that it would be the last breaking
+release before v1.0. The freeze was deliberately extended through v0.9.1
+because v1.0 had not shipped, adoption remained limited, and the final
+toolchain, dependency, configuration, and ABI audit found cleanup worth
+completing before the long-lived contract begins.
+
+### Breaking Changes
+
+- **Rust source-build baseline raised from 1.91 to 1.97.** All first-party
+  crates now declare MSRV 1.97 and repository/CI/release builds use exact Rust
+  1.97.0. Source builders must update their toolchain (for rustup users,
+  `rustup toolchain install 1.97.0`). Prebuilt module users do not need Rust;
+  their runtime compatibility remains governed by the published NGINX,
+  OS/libc, architecture, and exact dynamic-module compatibility matrix.
+- **Streaming configuration consolidated.** `markdown_streaming off|auto|force`
+  is the sole public processing-path selector. `markdown_streaming_engine` is
+  removed from the active contract and fails `nginx -t` with exact mappings:
+  `off` to `markdown_streaming off`, `auto` to `markdown_streaming auto`, and
+  `on` to `markdown_streaming force`. The Helm value moves from
+  `markdown.streaming.engine` to `markdown.streaming.mode`. Diagnostics expose
+  the selector as `streaming_config.policy` and its origin as
+  `streaming_config.policy_source`; the old engine-named keys are removed.
+- **Non-semantic flavors removed.** `markdown_flavor mdx` and `org-mode` now
+  fail `nginx -t` with a `commonmark`/`gfm` migration hint. They were
+  experimental selectors that never produced distinct output formats.
+- **Bundled Rust/C FFI baseline reset to ABI 1.** The internal coordinated
+  boundary removes the duplicate streaming engine byte, the unimplemented
+  flavor discriminants, the reserved `FFIConditionalResult` shape and its
+  superseded conditional helper, the superseded simple base-URL builder, and
+  15 exports with no production C consumer. The removed set covers dead
+  decision/error-policy wrappers, standalone URL checks, Rust diagnostics
+  accessors, redundant init helpers, NULL-only constructors, and duplicate
+  streaming finish/free/reason paths. Production constructors use the
+  `_new_with_code` variants so failures remain classifiable.
+  NGINX now validates `markdown_abi_version()` during preconfiguration and
+  refuses startup if the linked Rust archive and generated C header disagree.
+  The converter ABI remains an internal boundary of the bundled module, not a
+  standalone third-party SDK contract.
+- **Incomplete OTel controls now fail closed at configuration time.**
+  `markdown_otel_tracing`, `markdown_otel_metrics`,
+  `markdown_otel_service_name`, `markdown_otel_span_buffer_size`, and
+  `markdown_otel_export_timeout` are reject-only because their duplicate or
+  unimplemented values had no distinct production effect. The experimental
+  tracing surface is `markdown_otel` plus `markdown_otel_endpoint`.
+- **Trusted proxy ownership is explicit.** `markdown_trusted_proxies` is now
+  accepted only in `http`; `server` and `location` uses fail `nginx -t`
+  instead of creating a Rust-owned handle without safe child inheritance.
+- **Prometheus failure and latency contracts corrected before freeze.**
+  `nginx_markdown_failures_total` now uses truthful bounded categories
+  `conversion_error`, `resource_limit`, and `system_error`. The misleading
+  gauge-like `nginx_markdown_conversion_duration_seconds{le=...}` is replaced
+  by the cumulative counter family
+  `nginx_markdown_conversion_latency_bucket_total{le=...}`.
+
+### Added
+
+- Hybrid zero-copy output path for streaming responses (`markdown_streaming_zero_copy on`,
+  default off), with NGINX pool cleanup ownership guarding Rust-backed buffers
+  across backpressure and request teardown.
+- Streaming decompression routing for gzip and deflate responses (both
+  zlib-wrapped RFC 1950 and raw RFC 1951 deflate) under `streaming_first` with
+  `markdown_auto_decompress on` and `markdown_cache_validation` not `full`.
+  Gzip is member-aware across chunks; Brotli remains bounded full-buffer.
+- Full-buffer compressed copy reduction (default on, internal optimization):
+  eliminates redundant memcpy by passing contiguous buffers directly to the
+  decompressor and swapping output via pointer assignment.
+- `markdown_auto_decompress` directive now officially registered as a
+  configurable NGINX directive (default on). Previously an internal field not
+  settable via `nginx.conf`.
+- 0.9.1 performance evidence gate chain with module-level benchmark thresholds,
+  blocking release-gate integration (`make release-gates-check-091`), and
+  deterministic perf tooling tests.
+- Performance doctor advice tool (`tools/perf/doctor_advice.py`) that analyzes
+  runtime metrics and produces actionable operator tuning recommendations.
+- Module-level benchmark harness (`tools/perf/run_module_benchmark.sh`)
+  exercising the full NGINX request lifecycle with 5 scenarios.
+- Performance rollout and rollback guidance for zero-copy output, streaming
+  decompression, and copy-reduction rollout stages.
+- Perf observability fields for backpressure, pending-output high-watermark,
+  decompression path selection, and output copy mode across metrics renderers.
+- ADRs 0020–0023 documenting zero-copy pool cleanup, gzip/deflate streaming
+  decompression routing, the performance evidence release gate, and the
+  single public streaming policy.
+
+### Fixed
+
+- `markdown_auto_decompress` was referenced in 8+ documentation files as a
+  user-configurable directive but was never registered in the `ngx_command_t`
+  table — `nginx -t` would reject user configs using it. Now properly
+  registered as a `NGX_CONF_FLAG` directive.
+- JSON perf metrics rendering now uses a production helper covered by a direct
+  renderer unit test.
+- Module benchmark tooling now uses portable temporary files, executable
+  preflight checks, BSD-compatible worker lookup, and wall-clock RPS evidence.
+- Streaming backpressure lifecycle: input disposition state machine, pending
+  output ownership, fail-open lifecycle gaps, and terminal-sent latch semantics
+  hardened across multiple commits.
+- Streaming decompression: zlib-wrapped deflate (RFC 1950) header sniffing,
+  gzip member-boundary reset with cumulative budget, truncated stream/member
+  rejection, no-progress inflate guard, and pre-/post-commit backpressure
+  lifecycle coverage. Deflate trailing-data integrity: a complete deflate
+  stream must consume every byte of compressed input; trailing bytes after
+  `Z_STREAM_END` (in the same chunk or subsequent non-empty chunks) are
+  rejected as `FORMAT_ERROR`. Gzip concatenated members remain supported.
+- Security: Forwarded header spoofing prevention (right-most element);
+  workflow input sanitization via environment variables to prevent command
+  injection; base URL FFI scheme propagation for HTTPS.
+- Configuration: profile merge preserves explicit parent directives;
+  `max_inflight=0` accepted as unlimited per documented contract;
+  error-policy reject paths return configured `error_status`.
+- Diagnostics: removed legacy directive-shaped snapshot keys, aligned the
+  streaming selector fields with `policy`/`policy_source`, and removed the
+  unexposed manual-rollback helper while retaining atomic file-based reloads
+  and last-known-good state reporting.
+
 ## [0.9.0] - 2026-07-06
 
-**Breaking release.** Last breaking opportunity before 1.0.0 API freeze.
+**Breaking release.** At release time, this was intended to be the last
+breaking opportunity before the 1.0.0 API freeze. The project later extended
+that pre-1.0 consolidation window through v0.9.1.
 
 ### Breaking Changes
 

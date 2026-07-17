@@ -9,12 +9,50 @@ Performance baselines are used to:
 - Compare full-buffer vs streaming engine performance
 - Generate evidence packs for release decisions
 
+Module-level percentage comparisons require the current report and baseline to
+use the same platform, load generator, NGINX version, and critical-scenario
+input sizes. The evidence gate reports `MISSING_EVIDENCE` rather than a
+regression verdict when these fields differ. Report-only mode retains exit zero
+for visibility; blocking release mode fails until comparable evidence exists.
+
+## Evidence Truth and Conservative Normalization
+
+Module baselines contain two different classes of data:
+
+- Truth evidence must remain verbatim from the canonical run:
+  `streaming_path_hits`, `fullbuffer_path_hits`,
+  `streaming_requests_total`, `precommit_failopen_total`,
+  `decompression_streaming_total`, `decompression_fullbuffer_total`,
+  `zero_copy_output_total`, `copied_output_total`, `baseline_rss_bytes`,
+  `peak_rss_bytes`, `input_bytes`, scenario status and metadata, platform,
+  load generator, and NGINX version.
+- Performance thresholds may be conservatively normalized: RPS may only be
+  rounded downward or lowered, while latency and TTFB may only be rounded
+  upward or raised. RPS must never be increased and latency/TTFB must never be
+  decreased to make evidence look better.
+
+Do not fabricate or improve measured evidence. Only documented conservative
+normalization of latency/throughput is allowed; path, fallback, output, memory,
+and environment evidence must remain verbatim.
+
+Retain the raw workflow artifact and record its run, source Git commit,
+adjustment rule, person or reason, and adjustment date in `baseline_policy`.
+The current `module-baseline-091.json` records commit `847f9013` and the local
+canonical run timestamp `2026-07-16T09:47:06Z`. Its original artifact location
+was not recorded, which is explicitly marked by
+`historical_audit_exception: true` as a one-baseline audit gap. The validator
+scopes that exception to the recorded source commit and audit note; future
+baseline updates must identify a retained raw artifact and must not use an
+empty, `unknown`, or `not-recorded` `source_artifact`.
+
 ## Baseline Files
 
 Each platform has a dedicated baseline file:
 - `darwin-arm64.json` - macOS on Apple Silicon
 - `linux-x86_64.json` - Linux on x86_64
 - `darwin-x86_64.json` - macOS on Intel
+- `corpus-baseline.json` - Linux x86_64 corpus quality and latency baseline
+- `module-baseline-091.json` - Linux x86_64 module-level 0.9.1 evidence baseline
 
 ## Running Benchmarks
 

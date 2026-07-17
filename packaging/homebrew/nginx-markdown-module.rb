@@ -21,11 +21,32 @@ class NginxMarkdownModule < Formula
   depends_on "cbindgen" => :build
   depends_on "nginx" => :build
   depends_on "pkgconf" => :build
-  depends_on "rust" => :build
   depends_on "openssl@3"
   depends_on "pcre2"
 
+  # The Rust toolchain is installed via the official rustup installer
+  # (https://sh.rustup.rs) rather than the Homebrew `rust` formula, because the
+  # crate MSRV (1.97, pinned in rust-toolchain.toml) can briefly exceed the
+  # Homebrew `rust` formula version.  The pinned toolchain makes the build
+  # deterministic regardless of the Homebrew `rust` formula lag.  This is done
+  # inline (not via `depends_on "rustup"`) to keep `brew audit --strict` clean,
+  # since homebrew/core forbids a `rustup` build dependency.
+  TOOLCHAIN_VERSION = "1.97.0".freeze
+
   def install
+    rustup_home = "#{buildpath}/rustup"
+    cargo_home = "#{buildpath}/cargo"
+    ENV["RUSTUP_HOME"] = rustup_home
+    ENV["CARGO_HOME"] = cargo_home
+    # Install the pinned Rust toolchain via the official rustup installer.
+    # The pipe-to-shell form is the canonical rustup bootstrap and is accepted
+    # by `brew audit --strict` (it is not flagged as a `rustup` build-time use).
+    system "bash", "-c",
+           "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | " \
+           "sh -s -- -y --profile minimal --no-modify-path " \
+           "--default-toolchain #{TOOLCHAIN_VERSION}"
+    ENV.prepend_path "PATH", "#{cargo_home}/bin"
+
     system "make", "build"
 
     nginx_version = Formula["nginx"].version.to_s

@@ -88,6 +88,19 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
 #define NGX_HTTP_MARKDOWN_PATH_STREAMING    2  /* Streaming path */
 
 /*
+ * Input disposition constants for streaming backpressure lifecycle.
+ *
+ * Decouples downstream return code (NGX_AGAIN) from input ownership:
+ * CONSUMED means Rust ate the chunk (advance pos, enqueue remainder);
+ * RETAIN means the chunk's ngx_buf_t is shared with a pending fail-open
+ * clone and must not be advanced (would corrupt undelivered HTML);
+ * TERMINAL means the input is abandoned on post-commit fatal error.
+ */
+#define NGX_HTTP_MD_INPUT_CONSUMED   0
+#define NGX_HTTP_MD_INPUT_RETAIN     1
+#define NGX_HTTP_MD_INPUT_TERMINAL   2
+
+/*
  * Request-level buffered flag for this module while it is accumulating or
  * preserving output for a later retry.
  *
@@ -105,19 +118,33 @@ typedef struct ngx_http_markdown_otel_span_s  ngx_http_markdown_otel_span_t;
 #define NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST  1
 
 /*
+ * Post-commit send failure origin classification.
+ *
+ * Set by send_output / send_zero_copy_feed_output before returning
+ * NGX_ERROR so the caller (handle_success_output) can route the
+ * failure to the correct metrics and recovery path:
+ *
+ * ALLOCATION: pool/buf/chain allocation failure (memory pressure).
+ *   Maps to ERROR_MEMORY_LIMIT, increments failures_resource_limit.
+ *
+ * DOWNSTREAM: ngx_http_next_body_filter returned definitive failure.
+ *   Does NOT increment failures_resource_limit; routes to
+ *   failures_conversion.
+ *
+ * INVARIANT: internal state error (e.g. pending-output re-entry).
+ *   Does NOT increment failures_resource_limit; routes to
+ *   failures_conversion.
+ */
+#define NGX_HTTP_MD_SEND_ORIGIN_NONE         0
+#define NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION   1
+#define NGX_HTTP_MD_SEND_ORIGIN_DOWNSTREAM   2
+#define NGX_HTTP_MD_SEND_ORIGIN_INVARIANT    3
+
+/*
  * Default streaming budget: 2 MiB
  */
 #define NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT \
     (2 * 1024 * 1024)
-
-/*
- * Streaming on_error policy constants
- *
- * Controls Pre_Commit_Phase failure behavior for the
- * markdown_streaming_on_error directive.
- */
-#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_PASS    0
-#define NGX_HTTP_MARKDOWN_STREAMING_ON_ERROR_REJECT  1
 
 /*
  * Streaming engine reason codes (streaming observability).
@@ -301,23 +328,9 @@ typedef struct {
 } ngx_http_markdown_decision_t;
 
 /*
- * Streaming engine mode constants (markdown_streaming_engine directive).
- *
- * These use a simple enum stored as ngx_uint_t
- * rather than a complex value.
- */
-#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF   0
-#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO  1
-#define NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON    2
-
-/*
  * Streaming policy mode constants (markdown_streaming directive, 0.9.0).
  *
- * markdown_streaming off|auto|force is the streaming *enablement* selector
- * (Config V2, spec 49).  It is distinct from markdown_streaming_engine,
- * which is the *implementation* selector (off|auto|on).  Do not conflate
- * the two: policy decides whether streaming is attempted, engine decides
- * which backend implementation is used.
+ * markdown_streaming off|auto|force is the sole processing-path selector.
  */
 #define NGX_HTTP_MARKDOWN_STREAMING_OFF    0
 #define NGX_HTTP_MARKDOWN_STREAMING_AUTO   1
@@ -340,6 +353,14 @@ typedef struct {
 #define NGX_HTTP_MARKDOWN_PROFILE_BALANCED         2
 #define NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST  3
 
+#define NGX_HTTP_MARKDOWN_EXPLICIT_LIMIT_MEMORY      0x0001
+#define NGX_HTTP_MARKDOWN_EXPLICIT_LIMIT_TIMEOUT     0x0002
+#define NGX_HTTP_MARKDOWN_EXPLICIT_ERROR_POLICY      0x0004
+#define NGX_HTTP_MARKDOWN_EXPLICIT_ACCEPT_POLICY     0x0008
+#define NGX_HTTP_MARKDOWN_EXPLICIT_CACHE_VALIDATION  0x0010
+#define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY     0x0020
+#define NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET     0x0080
+
 /*
  * Threshold off sentinel — used in merge and path selection logic.
  */
@@ -352,12 +373,11 @@ typedef struct {
  *   conf->on_error  = PASS (0) or REJECT (1)
  *   conf->error_status = actual HTTP status code (429/503; 502 is fail_closed default)
  *
- * The Rust FFI uses a three-value kind (FFI_ERROR_POLICY_*):
- *   0 = pass, 1 = status, 2 = fail_closed
+ * FFIExplicitConfig.error_policy uses a three-value encoding:
+ *   0 = pass, 1 = status, 2 = fail_closed.
  *
- * An explicit adapter (ngx_http_markdown_error_policy_to_ffi) must
- * translate from the C model to FFIErrorPolicy when crossing the boundary.
- * See ngx_http_markdown_config_core_impl.h for the adapter function.
+ * ngx_http_markdown_on_error_to_ffi() translates the C model when building
+ * the Rust configuration snapshot. See ngx_http_markdown_config_core_impl.h.
  */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_PASS    0  /* fail-open: return original HTML */
 #define NGX_HTTP_MARKDOWN_ON_ERROR_REJECT  1  /* fail-closed: return error status */
@@ -412,8 +432,6 @@ typedef struct {
  */
 #define NGX_HTTP_MARKDOWN_FLAVOR_COMMONMARK  0  /* CommonMark flavor */
 #define NGX_HTTP_MARKDOWN_FLAVOR_GFM         1  /* GitHub Flavored Markdown */
-#define NGX_HTTP_MARKDOWN_FLAVOR_MDX         2  /* MDX (Markdown + JSX) */
-#define NGX_HTTP_MARKDOWN_FLAVOR_ORG_MODE    3  /* Org-mode */
 
 /*
  * Configuration constants for auth_policy directive
@@ -495,24 +513,23 @@ typedef enum {
  * - parse_timeout: 30000ms (30 seconds)
  * - parser_budget: 64MB (64 * 1024 * 1024 bytes)
  * - large_body_threshold: NGX_HTTP_MARKDOWN_THRESHOLD_OFF
- * - ops.trust_forwarded_headers: 0 (off by default)
  * - ops.metrics_format: NGX_HTTP_MARKDOWN_METRICS_FORMAT_AUTO
  * - ops.diagnostics_enabled: 0 (off by default)
  * - advanced.dynconf_dry_run: 0 (off by default)
  *
  * Streaming defaults when MARKDOWN_STREAMING_ENABLED is compiled in:
- * - stream.engine: auto (1) — NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO
  * - stream.budget: NGX_HTTP_MARKDOWN_STREAMING_BUDGET_DEFAULT
- * - stream.on_error: NGX_HTTP_MARKDOWN_ON_ERROR_PASS
+ * - on_error: NGX_HTTP_MARKDOWN_ON_ERROR_PASS
  * - stream.shadow: 0 (off by default)
  * - stream.threshold: NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT (1m)
  *
  * v0.8.0 streaming config defaults (streaming configuration directives):
- * - stream.engine: auto (1)
+ * - stream.policy: auto
  * - stream.threshold: NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT (1m)
  * - stream.precommit_buffer: 262144 (256k)
  * - stream.flush_min: 16384 (16k)
  * - stream.excluded_types: NULL
+ * - stream.zero_copy: 0 (off by default)
  */
 /* sonarcloud-c:S1820: intentionally exceeded; fields are already logically
  * grouped via the ops sub-struct and #ifdef-gated streaming section.  Further
@@ -559,7 +576,6 @@ typedef struct {
     ngx_uint_t   conditional_requests;     /* markdown_cache_validation mode */
     ngx_flag_t   generate_etag;            /* markdown_cache_validation ETag */
     ngx_uint_t   streaming_policy;         /* markdown_streaming */
-    ngx_uint_t   streaming_engine;         /* markdown_streaming_engine */
     size_t       limits_memory;            /* markdown_limits memory= */
     ngx_msec_t   limits_timeout;           /* markdown_limits timeout= */
     size_t       limits_streaming_buffer;  /* markdown_limits streaming_buffer= */
@@ -615,18 +631,12 @@ typedef struct {
      * enforced by static analysis (SonarCloud rule c:S1820).
      */
     struct {
-        ngx_flag_t   trust_forwarded_headers; /* markdown_trust_forwarded_headers on|off (default: off) */
         ngx_uint_t   metrics_format;       /* markdown_metrics_format auto|prometheus (default: auto) */
         ngx_flag_t   metrics_per_path;    /* markdown_metrics_per_path on|off (default: off) */
         ngx_flag_t   diagnostics_enabled; /* markdown_diagnostics on|off (default: off) */
         ngx_array_t *diagnostics_allow;   /* markdown_diagnostics_allow CIDR list (default: NULL = loopback only) */
         ngx_flag_t   otel_enabled;       /* markdown_otel on|off (default: off) */
-        ngx_flag_t   otel_tracing;      /* markdown_otel_tracing on|off (default: off) */
-        ngx_flag_t   otel_metrics;      /* markdown_otel_metrics on|off (default: off) */
-        ngx_str_t    otel_endpoint;      /* markdown_otel_endpoint: internal NGINX URI for subrequest export (default: empty) */
-        ngx_str_t    otel_service_name;  /* markdown_otel_service_name (default: nginx-markdown) */
-        ngx_uint_t   otel_span_buffer_size; /* markdown_otel_span_buffer_size (default: 1024) */
-        ngx_msec_t   otel_export_timeout;   /* markdown_otel_export_timeout (default: 5000ms) */
+        ngx_str_t    otel_endpoint;      /* internal URI for OTel subrequest export */
     } ops;
 
     /*
@@ -636,7 +646,6 @@ typedef struct {
      * directives.  There is no compatibility layer from v0.6.x.
      */
     struct {
-        ngx_uint_t    engine;              /* markdown_streaming_engine off|auto|on */
         ngx_uint_t    policy;              /* markdown_streaming off|auto|force */
         ngx_flag_t    policy_explicit;     /* 1 if operator set markdown_streaming */
         size_t        threshold;           /* markdown_stream_threshold (default: 1m) */
@@ -644,12 +653,10 @@ typedef struct {
         size_t        precommit_buffer;    /* markdown_stream_precommit_buffer (default: 256k) */
         size_t        flush_min;           /* markdown_stream_flush_min (default: 16k) */
         ngx_array_t  *excluded_types;      /* markdown_stream_excluded_types (default: NULL) */
-        ngx_uint_t    on_error;            /* markdown_error_policy (streaming component) pass|reject */
-        ngx_flag_t    on_error_explicit;   /* 1 if operator set streaming error_policy */
         size_t        budget;              /* markdown_limits streaming_buffer (default: 2m) */
         ngx_flag_t    budget_explicit;     /* 1 if operator set streaming_buffer */
         ngx_flag_t    shadow;              /* markdown_streaming_shadow on|off */
-        ngx_flag_t    shadow_explicit;     /* 1 if operator set streaming_shadow */
+        ngx_flag_t    zero_copy;           /* markdown_streaming_zero_copy on|off (default: off) */
     } stream;
 
     /*
@@ -669,6 +676,7 @@ typedef struct {
         ngx_uint_t   name;                      /* NGX_HTTP_MARKDOWN_PROFILE_* (default: NONE) */
         ngx_flag_t   set;                       /* 1 if markdown_profile set at this scope (duplicate guard) */
         ngx_flag_t   cache_validation_explicit; /* 1 if markdown_cache_validation set (this or ancestor) */
+        ngx_uint_t   explicit_mask;             /* profile-managed directives set here or by an ancestor */
     } profile;
 } ngx_http_markdown_conf_t;
 
@@ -701,31 +709,44 @@ ngx_http_markdown_effective_body_buffer_limit(
 static ngx_inline void
 ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_conf_t *prev,
-    const ngx_http_markdown_profile_defaults_t *profile_defaults)
+    const ngx_http_markdown_profile_defaults_t *profile_defaults,
+    ngx_flag_t profile_differs)
 {
 /*
  * Helper macro: merge a single stream configuration field.
  * If the current value equals the unset sentinel, inherit from
- * the previous level or fall back to the compile-time default.
+ * the previous level or fall back to the profile/compile-time default.
+ *
+ * When profile_differs is true, the parent's profile-generated value
+ * is bypassed unless the parent explicit-mask records an operator directive.
  */
-#define NGX_MD_MERGE_STREAM(field, type, unset, dflt)                        \
+#define NGX_MD_MERGE_STREAM(field, type, unset, dflt, explicit_bit)           \
     do {                                                                      \
         if (conf->stream.field == (type) (unset)) {                          \
-            conf->stream.field = (prev->stream.field != (type) (unset))      \
-                ? prev->stream.field : (dflt);                               \
+            if (!profile_differs) {                                          \
+                conf->stream.field = (prev->stream.field != (type) (unset))   \
+                    ? prev->stream.field : (dflt);                           \
+            } else {                                                          \
+                conf->stream.field =                                          \
+                    (prev->stream.field != (type) (unset)                     \
+                     && ((explicit_bit) == 0                                  \
+                         || (prev->profile.explicit_mask & (explicit_bit))))  \
+                    ? prev->stream.field : (dflt);                           \
+            }                                                                \
         }                                                                    \
     } while (0)
 
-    NGX_MD_MERGE_STREAM(engine, ngx_uint_t, -1,
-                        profile_defaults->streaming_engine);
     NGX_MD_MERGE_STREAM(policy, ngx_uint_t, -1,
-                        profile_defaults->streaming_policy);
-    NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0);
+                        profile_defaults->streaming_policy,
+                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY);
+    NGX_MD_MERGE_STREAM(policy_explicit, ngx_flag_t, -1, 0,
+                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_POLICY);
     NGX_MD_MERGE_STREAM(threshold, size_t, -1,
-                        NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT);
-    NGX_MD_MERGE_STREAM(threshold_explicit, ngx_flag_t, -1, 0);
-    NGX_MD_MERGE_STREAM(precommit_buffer, size_t, -1, 262144);
-    NGX_MD_MERGE_STREAM(flush_min, size_t, -1, 16384);
+                        NGX_HTTP_MARKDOWN_STREAM_THRESHOLD_DEFAULT,
+                        0);
+    NGX_MD_MERGE_STREAM(threshold_explicit, ngx_flag_t, -1, 0, 0);
+    NGX_MD_MERGE_STREAM(precommit_buffer, size_t, -1, 262144, 0);
+    NGX_MD_MERGE_STREAM(flush_min, size_t, -1, 16384, 0);
 
     if (conf->stream.excluded_types == (ngx_array_t *) -1) {
         conf->stream.excluded_types =
@@ -733,14 +754,13 @@ ngx_http_markdown_merge_stream_values(ngx_http_markdown_conf_t *conf,
                 ? prev->stream.excluded_types : NULL;
     }
 
-    NGX_MD_MERGE_STREAM(on_error, ngx_uint_t, -1,
-                        profile_defaults->error_policy);
-    NGX_MD_MERGE_STREAM(on_error_explicit, ngx_flag_t, -1, 0);
     NGX_MD_MERGE_STREAM(budget, size_t, -1,
-                        profile_defaults->limits_streaming_buffer);
-    NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0);
-    NGX_MD_MERGE_STREAM(shadow, ngx_flag_t, -1, 0);
-    NGX_MD_MERGE_STREAM(shadow_explicit, ngx_flag_t, -1, 0);
+                        profile_defaults->limits_streaming_buffer,
+                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET);
+    NGX_MD_MERGE_STREAM(budget_explicit, ngx_flag_t, -1, 0,
+                        NGX_HTTP_MARKDOWN_EXPLICIT_STREAM_BUDGET);
+    NGX_MD_MERGE_STREAM(shadow, ngx_flag_t, -1, 0, 0);
+    NGX_MD_MERGE_STREAM(zero_copy, ngx_flag_t, -1, 0, 0);
 
 #undef NGX_MD_MERGE_STREAM
 }
@@ -892,7 +912,7 @@ typedef struct {
         ngx_chain_t             *pending_output;
         ngx_flag_t               pending_has_data;
     } fullbuffer;
-    
+
     /* Threshold router path selection (NGX_HTTP_MARKDOWN_PATH_FULLBUFFER or NGX_HTTP_MARKDOWN_PATH_INCREMENTAL) */
     ngx_uint_t                   processing_path;
 
@@ -989,9 +1009,12 @@ typedef struct {
         ngx_uint_t                        chunks_processed;
         ngx_uint_t                        flushes_sent;
         size_t                            total_input_bytes;
-        size_t                            total_output_bytes;
-        unsigned                          total_output_bytes_overflowed:1;
+        struct {
+            size_t                        bytes;
+            unsigned                      overflowed:1;
+        } output;
         unsigned                          main_terminal_sent:1;
+        unsigned                          subrequest_terminal_sent:1;
 
         /* TTFB tracking (from first feed to first non-empty output) */
         struct {
@@ -999,15 +1022,45 @@ typedef struct {
             ngx_flag_t                        recorded;
         } ttfb;
 
-        /* Pending output chain has non-empty data (for TTFB resume path) */
-        ngx_flag_t                        pending_has_data;
+        /*
+         * Pending-output metadata: auxiliary flags/counters describing the
+         * pending_output chain. Grouped into a sub-struct to keep the parent
+         * streaming struct below SonarCloud c:S1820 20-field limit.
+         */
+        struct {
+            /* Pending output chain has non-empty data (for TTFB resume path) */
+            ngx_flag_t                        has_data;
 
-        /* Pending output byte count (for deferred metric accounting) */
-        size_t                            pending_output_bytes;
+            /* Pending output byte count (for deferred metric accounting) */
+            size_t                            bytes;
 
-        /* Pending output is a fail-open delivery; resume_pending should
-           increment results.failopen_count on downstream success. */
-        ngx_flag_t                        pending_failopen_delivery;
+            /* Pending output delivery mode for deferred perf accounting. */
+            ngx_flag_t                        zero_copy;
+
+            /*
+             * Terminal metadata captured BEFORE the first downstream
+             * body-filter call (Rule 1/47 ownership boundary).
+             *
+             * The pending_output chain may be multi-link (fail-open replay
+             * prefix + cloned input + terminal tail).  Scanning only the
+             * chain head in resume_pending() misses a terminal tail.
+             * Re-scanning the downstream-retained chain after NGX_AGAIN is
+             * unreliable because downstream may mutate buf metadata.
+             *
+             * Instead, the caller that crosses the downstream ownership
+             * boundary captures terminal state from the full chain and
+             * stores it here.  resume_pending() consumes these latches
+             * only after downstream confirms delivery (NGX_OK/NGX_DONE),
+             * preserving Rule 47 (terminal-sent latch only after confirmed
+             * delivery).
+             *
+             * main_terminal: any link carries last_buf (main request EOF).
+             * subrequest_terminal: any link carries last_in_chain
+             *   (subrequest EOF — must NOT latch main_terminal_sent).
+             */
+            ngx_flag_t                        main_terminal;
+            ngx_flag_t                        subrequest_terminal;
+        } pending_meta;
 
         /* Pre-Commit prebuffer for fallback */
         ngx_http_markdown_buffer_t        prebuffer;
@@ -1025,6 +1078,53 @@ typedef struct {
         ngx_flag_t                        failopen_replay_initialized;
 
         /*
+         * Input/send state classification fields.
+         *
+         * Grouped into a sub-struct to keep the parent streaming struct
+         * below the SonarCloud c:S1820 20-field limit.
+         *
+         * input_disposition: decoupled from downstream return code.
+         *   NGX_HTTP_MD_INPUT_CONSUMED (0) - Rust ate the input chunk;
+         *     advance buf->pos and enqueue remainder to pending_input.
+         *   NGX_HTTP_MD_INPUT_RETAIN (1) - fail-open shared ngx_buf_t;
+         *     do NOT advance pos (would corrupt pending fail-open output).
+         *   NGX_HTTP_MD_INPUT_TERMINAL (2) - post-commit fatal; input
+         *     abandoned, release upstream buffers.
+         *
+         * last_send_failure_origin: set by send_output /
+         *   send_zero_copy_feed_output on NGX_ERROR return.
+         *   Read by handle_success_output to classify post-commit
+         *   failures into allocation, downstream, or invariant.
+         *   Reset to NONE before each send call.
+         */
+        struct {
+            ngx_uint_t                    input_disposition;
+            ngx_uint_t                    last_send_failure_origin;
+        } classify;
+
+        /*
+         * Module-owned pending input chain for backpressure continuation.
+         *
+         * When downstream returns NGX_AGAIN, the current chunk has been
+         * fed to Rust (CONSUMED) but the remaining links (cl->next) in
+         * the input chain must be retained so they are not stranded in
+         * u->busy_bufs.  Links are pool-allocated ngx_chain_t copies that
+         * share the original ngx_buf_t (no payload duplication).  NGINX
+         * keeps busy buffers alive while pos < last, so the shared bufs
+         * remain valid until we advance pos after feeding them to Rust.
+         *
+         * Also captures future non-NULL input arriving while pending
+         * output exists (the body-filter entry enqueues instead of
+         * rejecting).
+         */
+        struct {
+            ngx_chain_t              *head;
+            ngx_chain_t              *tail;
+            size_t                    bytes;
+            ngx_uint_t                links;
+        } pending_input;
+
+        /*
          * Finalize-path state latches.
          *
          * Grouped to keep the parent streaming struct below SonarCloud
@@ -1033,6 +1133,10 @@ typedef struct {
         struct {
             /* Deferred terminal last_buf (backpressure during finalize) */
             ngx_flag_t                    finalize_pending_lastbuf;
+
+            /* Upstream EOF survives output backpressure independently of
+             * whether any remainder was queued in pending_input. */
+            ngx_flag_t                    upstream_terminal_seen;
 
             /* Metrics deferred for terminal last_buf (backpressure on
              * terminal send — set when send_output(last_buf=1)
@@ -1045,6 +1149,27 @@ typedef struct {
 
             /* Continue finalize() after tail-output backpressure drains. */
             ngx_flag_t                    finalize_after_pending;
+
+            /* Pending output is a fail-open delivery; resume_pending
+             * should increment results.failopen_count on downstream
+             * success (Rule 38). */
+            ngx_flag_t                    pending_failopen_delivery;
+
+            /* Request has selected fail-open passthrough. Future input
+             * bypasses Rust and continues directly downstream. */
+            ngx_flag_t                    failopen_active;
+
+            /* Fail-open mode selected and future input could not be
+             * retained behind pending output (budget/allocation).
+             * After pending output drains, abort without a clean last_buf;
+             * known missing bytes must remain protocol-visible. */
+            ngx_flag_t                    failopen_abort_after_pending;
+            uint32_t                      failopen_abort_error_code;
+
+            /* Post-commit input failure waiting for older downstream-owned
+             * output to drain before safe_finish is allowed to run. */
+            ngx_flag_t                    postcommit_error_after_pending;
+            uint32_t                      postcommit_error_code;
         } completion;
     } streaming;
 } ngx_http_markdown_ctx_t;
@@ -1177,7 +1302,7 @@ typedef struct {
      * Total requests that entered the decision chain.
      *
      * Incremented in the header filter when a request reaches the module
-     * decision chain, including requests later classified as SKIP_CONFIG.
+     * decision chain, including requests later classified as disabled.
      * This is the broad denominator for module decision-rate calculations.
      */
     ngx_atomic_t  requests_entered;
@@ -1266,12 +1391,32 @@ typedef struct {
         ngx_atomic_t  decision_count;
         ngx_atomic_t  estimated_token_savings;
         ngx_atomic_t  replay_buffer_errors_total;
+
+        struct {
+            ngx_atomic_t  parse_timeouts_total;
+            ngx_atomic_t  parse_budget_exceeded_total;
+        } parse_interrupts;
     } results;
 
+    /*
+     * Performance metrics: backpressure, decompression path,
+     * and output delivery mode.
+     *
+     * Grouped into a sub-struct so that the parent
+     * ngx_http_markdown_metrics_t stays within the 20-field
+     * limit enforced by static analysis (SonarCloud rule
+     * c:S1820).
+     */
     struct {
-        ngx_atomic_t  parse_timeouts_total;
-        ngx_atomic_t  parse_budget_exceeded_total;
-    } parse_interrupts;
+        ngx_atomic_t  backpressure_total;
+        ngx_atomic_t  backpressure_resume_total;
+        ngx_atomic_t  pending_output_high_watermark_bytes;
+        ngx_atomic_t  decompression_streaming_total;
+        ngx_atomic_t  decompression_fullbuffer_total;
+        ngx_atomic_t  decompression_budget_exceeded_total;
+        ngx_atomic_t  zero_copy_output_total;
+        ngx_atomic_t  copied_output_total;
+    } perf;
 
     /*
      * Per-path metrics.
@@ -1297,6 +1442,16 @@ typedef struct {
         ngx_atomic_t       overflow_count;
     } per_path;
 } ngx_http_markdown_metrics_t;
+
+/*
+ * Cross-translation-unit metric ownership helpers used by postcommit output.
+ * Pending metrics are recorded when downstream returns NGX_AGAIN and the
+ * module retains the output anchor.  Copied delivery metrics are recorded only
+ * after immediate downstream delivery is confirmed; deferred delivery is
+ * accounted by the shared streaming pending-resume path.
+ */
+void ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes);
+void ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes);
 
 /*
  * Per-path metric node stored in the shared RB-tree.
@@ -1435,6 +1590,9 @@ const ngx_str_t *ngx_http_markdown_reason_skip_conditional(void);
 /* Return the BYPASS_NO_TRANSFORM reason code (RFC 9111 §5.2.2.6) */
 const ngx_str_t *ngx_http_markdown_reason_bypass_no_transform(void);
 
+/* Return the compressed-response passthrough reason in every build mode. */
+const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
+
 #ifdef MARKDOWN_STREAMING_ENABLED
 /* Streaming reason code accessors */
 const ngx_str_t *ngx_http_markdown_reason_engine_streaming(void);
@@ -1442,7 +1600,6 @@ const ngx_str_t *ngx_http_markdown_reason_streaming_convert(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_fallback(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_fail_postcommit(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_skip_unsupported(void);
-const ngx_str_t *ngx_http_markdown_reason_streaming_skip_compressed(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_budget_exceeded(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_failopen(void);
 const ngx_str_t *ngx_http_markdown_reason_streaming_precommit_reject(void);

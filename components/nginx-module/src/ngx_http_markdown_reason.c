@@ -211,14 +211,14 @@ ngx_http_markdown_reason_from_eligibility(
  *
  * LEGACY FUNCTION: This maps the coarse three-category enum to reason
  * codes.  For fine-grained error classification (InvalidDynconf,
- * DegradedSnapshot, HeaderPlanApplyError, etc.), callers should use the
- * Rust FFI `markdown_error_to_reason_code()` which maps ErrorClass
- * discriminants to their specific reason codes.
+ * DegradedSnapshot, HeaderPlanApplyError, etc.), callers should classify raw
+ * converter codes with `markdown_classify_error_code()` and log the canonical
+ * reason selected by the owning runtime path.
  *
  * The ERROR_SYSTEM → ffi_panic mapping is a simplification: not all
  * system-category errors are FFI panics, but this coarse enum does not
  * distinguish them.  New code paths should use the Rust FFI error
- * classification instead of this function.
+ * classification and canonical reason accessors instead of this function.
  *
  * Parameters:
  *   category - error category enum value
@@ -415,6 +415,20 @@ ngx_http_markdown_reason_bypass_no_transform(void)
 }
 
 
+/*
+ * Compressed responses can be skipped in both full-buffer and streaming
+ * builds, so this reason must remain available without the streaming feature.
+ */
+static ngx_str_t ngx_http_markdown_reason_streaming_skip_compressed_str =
+    ngx_string("STREAMING_SKIP_COMPRESSED");
+
+const ngx_str_t *
+ngx_http_markdown_reason_streaming_skip_compressed(void)
+{
+    return &ngx_http_markdown_reason_streaming_skip_compressed_str;
+}
+
+
 #ifdef MARKDOWN_STREAMING_ENABLED
 
 /*
@@ -436,8 +450,6 @@ static ngx_str_t ngx_http_markdown_reason_streaming_fail_postcommit_str =
     ngx_string("STREAMING_FAIL_POSTCOMMIT");
 static ngx_str_t ngx_http_markdown_reason_streaming_skip_str =
     ngx_string("STREAMING_SKIP_UNSUPPORTED");
-static ngx_str_t ngx_http_markdown_reason_streaming_skip_compressed_str =
-    ngx_string("STREAMING_SKIP_COMPRESSED");
 static ngx_str_t ngx_http_markdown_reason_streaming_budget_str =
     ngx_string("STREAMING_BUDGET_EXCEEDED");
 static ngx_str_t ngx_http_markdown_reason_streaming_precommit_failopen_str =
@@ -482,12 +494,6 @@ const ngx_str_t *
 ngx_http_markdown_reason_streaming_skip_unsupported(void)
 {
     return &ngx_http_markdown_reason_streaming_skip_str;
-}
-
-const ngx_str_t *
-ngx_http_markdown_reason_streaming_skip_compressed(void)
-{
-    return &ngx_http_markdown_reason_streaming_skip_compressed_str;
 }
 
 const ngx_str_t *

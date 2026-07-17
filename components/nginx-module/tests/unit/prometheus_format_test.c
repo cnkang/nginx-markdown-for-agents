@@ -87,7 +87,7 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         s->skips.accept,
         s->skips.config);
 
-    /* failures_total{reason=...} — schema v1 lowercase */
+    /* failures_total{reason=...} — bounded failure categories. */
     PROM_WRITE(
         "# HELP nginx_markdown_failures_total "
         "Conversion failures by reason.\n"
@@ -95,9 +95,9 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         "nginx_markdown_failures_total"
         "{reason=\"conversion_error\"} %lu\n"
         "nginx_markdown_failures_total"
-        "{reason=\"memory_budget_exceeded\"} %lu\n"
+        "{reason=\"resource_limit\"} %lu\n"
         "nginx_markdown_failures_total"
-        "{reason=\"ffi_panic\"} %lu\n"
+        "{reason=\"system_error\"} %lu\n"
         "\n",
         s->failures_conversion,
         s->failures_resource_limit,
@@ -188,22 +188,20 @@ format_prometheus(const snapshot_t *s, char *buf, size_t buf_len)
         "\n",
         s->decompressions.failed);
 
-    /* conversion_duration_seconds{le=...} (cumulative) */
+    /* conversion_latency_bucket_total{le=...} (cumulative) */
     PROM_WRITE(
         "# HELP "
-        "nginx_markdown_conversion_duration_seconds "
-        "Cumulative conversion count per latency bucket "
-        "(not a native Prometheus histogram; "
-        "no _sum/_count).\n"
+        "nginx_markdown_conversion_latency_bucket_total "
+        "Cumulative conversion count per latency boundary.\n"
         "# TYPE "
-        "nginx_markdown_conversion_duration_seconds gauge\n"
-        "nginx_markdown_conversion_duration_seconds"
+        "nginx_markdown_conversion_latency_bucket_total counter\n"
+        "nginx_markdown_conversion_latency_bucket_total"
         "{le=\"0.01\"} %lu\n"
-        "nginx_markdown_conversion_duration_seconds"
+        "nginx_markdown_conversion_latency_bucket_total"
         "{le=\"0.1\"} %lu\n"
-        "nginx_markdown_conversion_duration_seconds"
+        "nginx_markdown_conversion_latency_bucket_total"
         "{le=\"1.0\"} %lu\n"
-        "nginx_markdown_conversion_duration_seconds"
+        "nginx_markdown_conversion_latency_bucket_total"
         "{le=\"+Inf\"} %lu\n",
         s->conversion_latency.le_10ms,
         s->conversion_latency.le_10ms
@@ -238,7 +236,7 @@ static const char *metric_families[] = {
     "nginx_markdown_estimated_token_savings_total",
     "nginx_markdown_decompressions_total",
     "nginx_markdown_decompression_failures_total",
-    "nginx_markdown_conversion_duration_seconds"
+    "nginx_markdown_conversion_latency_bucket_total"
 };
 
 #define NUM_FAMILIES 13
@@ -255,8 +253,7 @@ static const char *reason_values[] = {
 #define NUM_REASONS 9
 
 static const char *stage_values[] = {
-    "conversion_error", "memory_budget_exceeded",
-    "ffi_panic"
+    "conversion_error", "resource_limit", "system_error"
 };
 #define NUM_STAGES 3
 
@@ -393,12 +390,12 @@ test_known_values(void)
         "decompressions gzip should be 20");
     TEST_ASSERT(
         contains(buf,
-            "nginx_markdown_conversion_duration_seconds"
+            "nginx_markdown_conversion_latency_bucket_total"
             "{le=\"0.01\"} 40"),
         "latency le 0.01 should be 40");
     TEST_ASSERT(
         contains(buf,
-            "nginx_markdown_conversion_duration_seconds"
+            "nginx_markdown_conversion_latency_bucket_total"
             "{le=\"+Inf\"} 80"),
         "latency le +Inf should be 40+30+8+2=80");
 

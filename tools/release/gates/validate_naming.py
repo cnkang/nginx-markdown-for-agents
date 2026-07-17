@@ -66,28 +66,31 @@ def validate_names(
     c_macros: list[str] | None = None,
     labels: list[str] | None = None,
 ) -> dict[str, list[str]]:
-    """Validate lists of names and return a dict of category → invalid names."""
+    """Validate lists of names and return a dict of category → invalid names.
+
+    Each check collects items whose ``is_invalid`` predicate returns True
+    (i.e. items that *fail* the naming convention or *match* a forbidden set).
+    """
     errors: dict[str, list[str]] = {}
 
-    if directives:
-        if bad := [n for n in directives if not is_valid_nginx_directive(n)]:
-            errors["nginx_directives"] = bad
+    # (category, items, is_invalid_predicate)
+    checks = [
+        ("nginx_directives", directives,
+         lambda n: not is_valid_nginx_directive(n)),
+        ("prometheus_metrics", metrics,
+         lambda n: not is_valid_prometheus_metric(n)),
+        ("reason_codes", reason_codes,
+         lambda c: not is_valid_reason_code(c)),
+        ("c_macros", c_macros,
+         lambda n: not is_valid_c_macro(n)),
+        ("forbidden_labels", labels, is_forbidden_label),
+    ]
 
-    if metrics:
-        if bad := [n for n in metrics if not is_valid_prometheus_metric(n)]:
-            errors["prometheus_metrics"] = bad
-
-    if reason_codes:
-        if bad := [c for c in reason_codes if not is_valid_reason_code(c)]:
-            errors["reason_codes"] = bad
-
-    if c_macros:
-        if bad := [n for n in c_macros if not is_valid_c_macro(n)]:
-            errors["c_macros"] = bad
-
-    if labels:
-        if bad := [label for label in labels if is_forbidden_label(label)]:
-            errors["forbidden_labels"] = bad
+    for category, items, is_invalid in checks:
+        if items:
+            bad = [n for n in items if is_invalid(n)]
+            if bad:
+                errors[category] = bad
 
     return errors
 

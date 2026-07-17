@@ -321,7 +321,7 @@ ngx_http_markdown_diagnostics_recording_active(void)
  *   reason - NUL-terminated reason code string (may be NULL)
  *
  * Returns:
- *   Canonical discriminant (0..17), or -1 when the string is NULL or not a
+ *   Canonical discriminant (0..24), or -1 when the string is NULL or not a
  *   canonical reason code.
  */
 ngx_int_t
@@ -352,7 +352,7 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
         { "failed_closed",                17 },
         { "conversion_error",             18 },
         { "memory_budget_exceeded",       19 },
-        /* Indices 20-24: reserved for future reason codes (not yet production-used) */
+        /* Production reason codes (indices 20-24) */
         { "overload",                     20 },
         { "invalid_dynconf",              21 },
         { "degraded_snapshot",            22 },
@@ -733,12 +733,18 @@ ngx_http_markdown_diagnostics_check_access(ngx_http_request_t *r)
 /*
  * Build the JSON diagnostics response.
  *
- * Constructs a JSON document with five top-level sections:
+ * Constructs a JSON document with eleven top-level fields:
+ *   - schema_version
  *   - config_snapshot
  *   - recent_decisions
  *   - metrics_snapshot
+ *   - streaming_metrics (when streaming support is compiled in)
  *   - dynconf_state
  *   - streaming_config
+ *   - profile
+ *   - overridden_fields
+ *   - forced_fields
+ *   - effective_config
  *
  * Allocates the output buffer from the request pool.
  *
@@ -829,8 +835,10 @@ ngx_http_markdown_diagnostics_streaming_str(ngx_uint_t val)
  * Map error_policy enum to string.
  *
  * The C model uses on_error=REJECT for both fail_closed and status modes.
- * Distinguish them by error_status: the default (502) means fail_closed,
- * any other code (429, 503) means explicit status mode.
+ * Preserve the complete directive semantics by distinguishing the default
+ * 502 fail-closed response from each allowed explicit status code.  Invalid
+ * enum/status combinations are reported as unknown rather than being
+ * presented as a valid policy.
  */
 static const char *
 ngx_http_markdown_diagnostics_error_policy_str(ngx_uint_t val,
@@ -840,10 +848,16 @@ ngx_http_markdown_diagnostics_error_policy_str(ngx_uint_t val,
     case NGX_HTTP_MARKDOWN_ON_ERROR_PASS:
         return "pass";
     case NGX_HTTP_MARKDOWN_ON_ERROR_REJECT:
-        if (error_status != NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT) {
-            return "status";
+        switch (error_status) {
+        case NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT:
+            return "fail_closed";
+        case 429:
+            return "status 429";
+        case 503:
+            return "status 503";
+        default:
+            return "unknown";
         }
-        return "fail_closed";
     default:
         return "unknown";
     }
@@ -1012,8 +1026,8 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
     u_char *p, u_char *last, const ngx_http_markdown_conf_t *conf)
 {
 #ifdef MARKDOWN_STREAMING_ENABLED
-    const char  *engine_str;
-    const char  *engine_source_str;
+    const char  *policy_str;
+    const char  *policy_source_str;
     const char  *on_error_str;
     size_t       threshold;
     size_t       precommit_buffer;
@@ -1021,29 +1035,38 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
     ngx_flag_t   threshold_explicit;
     u_char       threshold_explicit_str[sizeof("false")];
 
-    if (conf != NULL
-        && conf->stream.engine
-           != NGX_HTTP_MARKDOWN_STREAM_ENGINE_AUTO)
-    {
-        engine_source_str = "configured";
-        if (conf->stream.engine == NGX_HTTP_MARKDOWN_STREAM_ENGINE_OFF) {
-            engine_str = "off";
-        } else if (conf->stream.engine
-                   == NGX_HTTP_MARKDOWN_STREAM_ENGINE_ON)
+    if (conf != NULL) {
+        if (conf->stream.policy_explicit) {
+            policy_source_str = "configured";
+        } else if (conf->profile.name != NGX_HTTP_MARKDOWN_PROFILE_NONE)
         {
-            engine_str = "on";
+            policy_source_str = "profile";
         } else {
-            engine_str = "unknown";
+            policy_source_str = "default";
+        }
+
+        if (conf->stream.policy == NGX_HTTP_MARKDOWN_STREAMING_OFF) {
+            policy_str = "off";
+        } else if (conf->stream.policy
+                   == NGX_HTTP_MARKDOWN_STREAMING_FORCE)
+        {
+            policy_str = "force";
+        } else if (conf->stream.policy
+                   == NGX_HTTP_MARKDOWN_STREAMING_AUTO)
+        {
+            policy_str = "auto";
+        } else {
+            policy_str = "unknown";
         }
     } else {
-        engine_source_str = "default";
-        engine_str = "auto";
+        policy_source_str = "default";
+        policy_str = "auto";
     }
 
-    on_error_str = (conf != NULL
-         && conf->stream.on_error
-            == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-        ? "reject" : "pass";
+    on_error_str = (conf != NULL)
+        ? ngx_http_markdown_diagnostics_error_policy_str(
+            conf->on_error, conf->error_status)
+        : "unknown";
     threshold = (conf != NULL)
         ? conf->stream.threshold : 0;
     precommit_buffer = (conf != NULL)
@@ -1061,15 +1084,15 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
 
     p = ngx_slprintf(p, last,
         "  \"streaming_config\": {\n"
-        "    \"engine\": \"%s\",\n"
-        "    \"engine_source\": \"%s\",\n"
+        "    \"policy\": \"%s\",\n"
+        "    \"policy_source\": \"%s\",\n"
         "    \"on_error\": \"%s\",\n"
         "    \"threshold\": %uz,\n"
         "    \"precommit_buffer\": %uz,\n"
         "    \"flush_min\": %uz,\n"
         "    \"threshold_explicit\": %s\n"
         "  },\n",
-        engine_str, engine_source_str, on_error_str, threshold,
+        policy_str, policy_source_str, on_error_str, threshold,
         precommit_buffer, flush_min,
         threshold_explicit_str);
 #else
@@ -1079,6 +1102,56 @@ ngx_http_markdown_diagnostics_fmt_streaming_config(
 
     return p;
 }
+
+static ngx_int_t
+ngx_http_markdown_diagnostics_fmt_metrics_snapshot(u_char **pos,
+    u_char *last)
+{
+    ngx_http_markdown_diag_metrics_t  metrics;
+
+    ngx_http_markdown_diagnostics_collect_metrics(&metrics);
+
+    *pos = ngx_slprintf(*pos, last,
+        "  \"metrics_snapshot\": {\n"
+        "    \"conversions_total\": %uA,\n"
+        "    \"delivery_total\": %uA,\n"
+        "    \"requests_total\": %uA,\n"
+        "    \"failopen_total\": %uA,\n"
+        "    \"overload_total\": %uA,\n"
+        "    \"backpressure_total\": %uA\n"
+        "  },\n",
+        metrics.conversions_total,
+        metrics.delivery_total,
+        metrics.requests_total,
+        metrics.failopen_total,
+        metrics.overload_total,
+        metrics.backpressure_total);
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    *pos = ngx_slprintf(*pos, last,
+        "  \"streaming_metrics\": {\n"
+        "    \"requests_total\": %uA,\n"
+        "    \"succeeded_total\": %uA,\n"
+        "    \"failed_total\": %uA,\n"
+        "    \"fallback_total\": %uA,\n"
+        "    \"candidate_total\": %uA,\n"
+        "    \"output_bytes_total\": %uA,\n"
+        "    \"engine_choice_streaming\": %uA,\n"
+        "    \"engine_choice_full_buffer\": %uA\n"
+        "  },\n",
+        metrics.streaming_requests_total,
+        metrics.streaming_succeeded_total,
+        metrics.streaming_failed_total,
+        metrics.streaming_fallback_total,
+        metrics.streaming_candidate_total,
+        metrics.streaming_output_bytes_total,
+        metrics.engine_choice_streaming,
+        metrics.engine_choice_full_buffer);
+#endif
+
+    return (*pos < last) ? NGX_OK : NGX_ERROR;
+}
+
 
 static ngx_int_t
 ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
@@ -1093,7 +1166,6 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     size_t                               snap_len;
     ngx_int_t                            rc;
     const ngx_http_markdown_diag_state_t      *state;
-    ngx_http_markdown_diag_metrics_t     metrics;
     ngx_http_markdown_diag_dynconf_t     dynconf;
 
     state = ngx_http_markdown_diagnostics_get_state();
@@ -1230,43 +1302,11 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
 
     p = ngx_slprintf(p, last, "],\n");
 
-    /* --- metrics_snapshot section --- */
-    ngx_http_markdown_diagnostics_collect_metrics(&metrics);
-
-    p = ngx_slprintf(p, last,
-        "  \"metrics_snapshot\": {\n"
-        "    \"conversions_total\": %uA,\n"
-        "    \"delivery_total\": %uA,\n"
-        "    \"requests_total\": %uA,\n"
-        "    \"failopen_total\": %uA\n"
-        "  },\n",
-        metrics.conversions_total,
-        metrics.delivery_total,
-        metrics.requests_total,
-        metrics.failopen_total);
-
-#ifdef MARKDOWN_STREAMING_ENABLED
-    /* Streaming metrics JSON section */
-    p = ngx_slprintf(p, last,
-        "  \"streaming_metrics\": {\n"
-        "    \"requests_total\": %uA,\n"
-        "    \"succeeded_total\": %uA,\n"
-        "    \"failed_total\": %uA,\n"
-        "    \"fallback_total\": %uA,\n"
-        "    \"candidate_total\": %uA,\n"
-        "    \"output_bytes_total\": %uA,\n"
-        "    \"engine_choice_streaming\": %uA,\n"
-        "    \"engine_choice_full_buffer\": %uA\n"
-        "  },\n",
-        metrics.streaming_requests_total,
-        metrics.streaming_succeeded_total,
-        metrics.streaming_failed_total,
-        metrics.streaming_fallback_total,
-        metrics.streaming_candidate_total,
-        metrics.streaming_output_bytes_total,
-        metrics.engine_choice_streaming,
-        metrics.engine_choice_full_buffer);
-#endif
+    if (ngx_http_markdown_diagnostics_fmt_metrics_snapshot(&p, last)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
 
     /* --- dynconf_state section --- */
     ngx_http_markdown_diagnostics_get_dynconf_state(&dynconf);

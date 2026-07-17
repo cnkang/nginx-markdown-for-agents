@@ -32,7 +32,7 @@ This project is inspired by Cloudflare's announcement but provides a self-hostab
 ### What are the system requirements?
 
 - **NGINX**: 1.24.0 or higher
-- **Rust**: 1.91.0 or higher (for building)
+- **Rust**: 1.97.0 or higher (for source builds only)
 - **Operating System**: macOS or Linux (x86_64 or aarch64)
 - **Memory**: Minimum 512MB RAM per worker (more for large documents)
 
@@ -146,7 +146,11 @@ See [Performance Tuning](guides/OPERATIONS.md#performance-tuning) for details.
 
 ### Does it support streaming?
 
-Yes. Since 0.6.0, the streaming engine is the default conversion path (`markdown_streaming_engine auto`). It performs bounded-memory incremental Markdown generation for eligible responses. Full-buffer conversion remains available as a fallback when explicitly selected or when the streaming path cannot handle a response. Chunked transfer responses are supported by both engines.
+Yes. `markdown_streaming auto` is the default processing-path policy. It uses
+bounded-memory incremental conversion for eligible large or chunked responses
+and retains full-buffer conversion for small responses and hard-blocked cases.
+Use `markdown_streaming off` to require full-buffer processing or
+`markdown_streaming force` to prefer streaming for every eligible response.
 
 See [Request Lifecycle](architecture/REQUEST_LIFECYCLE.md) and [ADR-0002](architecture/ADR/0002-full-buffering-approach.md) for the reasoning behind this design.
 
@@ -194,7 +198,7 @@ Yes, but you may need to:
 
 ### What about compressed responses?
 
-The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`) as part of the conversion path via the `markdown_auto_decompress` directive (default: on). The decompression budget is independently controlled by `markdown_decompress_max_size` (default: same as `markdown_max_size`).
+The module automatically detects and decompresses supported upstream compressed content (`gzip`, `br`, `deflate`) as part of the conversion path via the `markdown_auto_decompress` directive (default: on). The decompression budget is independently controlled by `markdown_decompress_max_size` (default: same as `markdown_limits memory=<size>`).
 
 **Recommended decompression strategies** (in order of preference):
 
@@ -498,7 +502,7 @@ Check the repository for sponsorship information (if available).
 
 ---
 
-*Last updated: May 19, 2026*
+*Last updated: July 13, 2026*
 
 
 ## Document Updates
@@ -508,3 +512,4 @@ Check the repository for sponsorship information (if available).
 | 0.7.0 | 2026-05-19 | Kang | Added decompression budget guidance, v0.7.0 error codes and directives |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

@@ -1,6 +1,8 @@
 #ifndef NGX_HTTP_MARKDOWN_METRICS_IMPL_H
 #define NGX_HTTP_MARKDOWN_METRICS_IMPL_H
 
+#include "ngx_http_markdown_metrics_json_perf_impl.h"
+
 /*
  * Metrics endpoint implementation.
  *
@@ -99,13 +101,13 @@ typedef struct {
         ngx_atomic_uint_t decision_count;
         ngx_atomic_uint_t estimated_token_savings;
         ngx_atomic_uint_t replay_buffer_errors_total;
-    } results;
 
-    /* Parse interrupt metrics (v0.7.0) */
-    struct {
-        ngx_atomic_uint_t parse_timeouts_total;
-        ngx_atomic_uint_t parse_budget_exceeded_total;
-    } parse_interrupts;
+        /* Parse interrupt metrics (v0.7.0) */
+        struct {
+            ngx_atomic_uint_t parse_timeouts_total;
+            ngx_atomic_uint_t parse_budget_exceeded_total;
+        } parse_interrupts;
+    } results;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
     /* Streaming metrics */
@@ -155,12 +157,8 @@ typedef struct {
         ngx_atomic_uint_t overflow_count;
     } per_path;
 
-    /* Inflight guard metrics (spec 52, per-worker) */
-    struct {
-        ngx_atomic_uint_t current;
-        ngx_atomic_uint_t high_watermark;
-        ngx_atomic_uint_t overload_total;
-    } inflight;
+    /* Performance metrics (backpressure, decompression path, output mode) */
+    ngx_http_markdown_metrics_perf_snapshot_t perf;
 } ngx_http_markdown_metrics_snapshot_t;
 
 typedef struct {
@@ -358,10 +356,10 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
 #endif
     snapshot->results.estimated_token_savings = metrics->results.estimated_token_savings;
 
-    snapshot->parse_interrupts.parse_timeouts_total =
-        metrics->parse_interrupts.parse_timeouts_total;
-    snapshot->parse_interrupts.parse_budget_exceeded_total =
-        metrics->parse_interrupts.parse_budget_exceeded_total;
+    snapshot->results.parse_interrupts.parse_timeouts_total =
+        metrics->results.parse_interrupts.parse_timeouts_total;
+    snapshot->results.parse_interrupts.parse_budget_exceeded_total =
+        metrics->results.parse_interrupts.parse_budget_exceeded_total;
 
     snapshot->decompressions.budget_exceeded_total =
         metrics->decompressions.budget_exceeded_total;
@@ -388,12 +386,30 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
      * Inflight counter is per-worker (not in shared memory),
      * so read directly from the global counter instance.
      */
-    snapshot->inflight.current =
+    snapshot->perf.inflight.current =
         (ngx_atomic_uint_t) ngx_http_markdown_inflight_current();
-    snapshot->inflight.high_watermark =
+    snapshot->perf.inflight.high_watermark =
         (ngx_atomic_uint_t) ngx_http_markdown_inflight_high_watermark();
-    snapshot->inflight.overload_total =
+    snapshot->perf.inflight.overload_total =
         (ngx_atomic_uint_t) ngx_http_markdown_inflight_overload_total();
+
+    /* Performance metrics (backpressure, decompression path, output mode) */
+    snapshot->perf.backpressure_total =
+        metrics->perf.backpressure_total;
+    snapshot->perf.backpressure_resume_total =
+        metrics->perf.backpressure_resume_total;
+    snapshot->perf.pending_output_high_watermark_bytes =
+        metrics->perf.pending_output_high_watermark_bytes;
+    snapshot->perf.decompression_streaming_total =
+        metrics->perf.decompression_streaming_total;
+    snapshot->perf.decompression_fullbuffer_total =
+        metrics->perf.decompression_fullbuffer_total;
+    snapshot->perf.decompression_budget_exceeded_total =
+        metrics->perf.decompression_budget_exceeded_total;
+    snapshot->perf.zero_copy_output_total =
+        metrics->perf.zero_copy_output_total;
+    snapshot->perf.copied_output_total =
+        metrics->perf.copied_output_total;
 }
 
 static ngx_flag_t ngx_http_markdown_metrics_value_contains(
@@ -738,7 +754,6 @@ ngx_http_markdown_metrics_write_json(
      * after this function returns.
      */
     p = ngx_slprintf(p, end,
-
         /* Conversion attempt and outcome counters */
         "{\n"
         "  \"conversions_attempted\": %uA,\n"
@@ -913,8 +928,8 @@ ngx_http_markdown_metrics_write_json(
         snapshot->results.delivery_count,
         snapshot->results.decision_count,
         snapshot->results.estimated_token_savings,
-        snapshot->parse_interrupts.parse_timeouts_total,
-        snapshot->parse_interrupts.parse_budget_exceeded_total,
+        snapshot->results.parse_interrupts.parse_timeouts_total,
+        snapshot->results.parse_interrupts.parse_budget_exceeded_total,
         snapshot->per_path.path_entries,
         snapshot->per_path.path_conversions,
         snapshot->per_path.path_conversion_time_sum_ms,
@@ -987,14 +1002,10 @@ ngx_http_markdown_metrics_write_json(
     }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
-    /* Close the "paths" array, the "per_path" object, and the root object. */
-    p = ngx_slprintf(p, end,
-        "\n"
-        "    ]\n"
-        "  }\n"
-        "}");
-
-    return p;
+    p = ngx_slprintf(p, end, "\n    ]\n  },\n");
+    p = ngx_http_markdown_metrics_write_json_perf(
+        p, end, &snapshot->perf);
+    return ngx_slprintf(p, end, "}");
 }
 
 
@@ -1013,6 +1024,34 @@ ngx_http_markdown_metrics_write_json(
  * @param output_bytes_avg Average output size in bytes per successful conversion.
  * @returns Pointer to the buffer position immediately after the written data; if the buffer was too small the pointer will be equal to `end`.
  */
+static u_char *
+ngx_http_markdown_metrics_write_text_perf(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_perf_snapshot_t *perf)
+{
+    return ngx_slprintf(p, end,
+        "\n"
+        "Performance Metrics:\n"
+        "- Backpressure Total: %uA\n"
+        "- Backpressure Resume Total: %uA\n"
+        "- Pending Output High Watermark (bytes): %uA\n"
+        "- Decompression Streaming Total: %uA\n"
+        "- Decompression Full-Buffer Total: %uA\n"
+        "- Decompression Budget Exceeded Total: %uA\n"
+        "- Zero-Copy Output Total: %uA\n"
+        "- Copied Output Total: %uA\n",
+        perf->backpressure_total,
+        perf->backpressure_resume_total,
+        perf->pending_output_high_watermark_bytes,
+        perf->decompression_streaming_total,
+        perf->decompression_fullbuffer_total,
+        perf->decompression_budget_exceeded_total,
+        perf->zero_copy_output_total,
+        perf->copied_output_total);
+}
+
+
 static u_char *
 ngx_http_markdown_metrics_write_text(
     u_char *p,
@@ -1037,7 +1076,6 @@ ngx_http_markdown_metrics_write_text(
      * after this function returns.
      */
     p = ngx_slprintf(p, end,
-
         /* Header and conversion outcome summary */
         "Markdown Filter Metrics\n"
         "=======================\n"
@@ -1213,13 +1251,14 @@ ngx_http_markdown_metrics_write_text(
         snapshot->results.delivery_count,
         snapshot->results.decision_count,
         snapshot->results.estimated_token_savings,
-        snapshot->parse_interrupts.parse_timeouts_total,
-        snapshot->parse_interrupts.parse_budget_exceeded_total,
+        snapshot->results.parse_interrupts.parse_timeouts_total,
+        snapshot->results.parse_interrupts.parse_budget_exceeded_total,
         snapshot->per_path.path_entries,
         snapshot->per_path.path_conversions,
         snapshot->per_path.path_conversion_time_sum_ms,
         snapshot->per_path.overflow_count);
 
+    p = ngx_http_markdown_metrics_write_text_perf(p, end, &snapshot->perf);
     /*
      * Per-path individual entries: walk the SHM RB-tree to emit
      * each path as a plain-text line after the aggregate section.

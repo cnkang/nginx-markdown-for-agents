@@ -43,14 +43,11 @@
 //!   panics crossing the C boundary. `markdown_convert` and the streaming /
 //!   incremental converters convert caught panics into error codes and
 //!   messages; `markdown_decompress_bounded` (which runs attacker-controlled
-//!   bytes through flate2/brotli) and `markdown_check_conditional` wrap their
+//!   bytes through flate2/brotli) and conditional-decision exports wrap their
 //!   fallible core in `catch_unwind` and fall back to a safe result on panic.
-//! - The remaining small exports (`markdown_negotiate_accept`,
-//!   `markdown_make_decision`, `markdown_build_header_plan`,
-//!   `markdown_validate_url`, `markdown_is_dangerous_url`,
-//!   `markdown_build_base_url`, and the `markdown_reason_code_*` accessors)
-//!   operate only on borrowed primitives / `&str` and contain no panicking
-//!   operations, so they are panic-free by construction.
+//! - Only explicitly verified constant/static lookups, such as
+//!   `markdown_abi_version` and the `markdown_reason_code_*` accessors, avoid
+//!   `catch_unwind`. Initialization helpers only write deterministic values.
 //! - In all cases, C code will never observe Rust unwinding.
 //!
 //! ## Pointer Validation
@@ -69,7 +66,6 @@
 
 pub(crate) mod abi;
 mod convert;
-mod diagnostics;
 mod exports;
 mod memory;
 mod options;
@@ -87,16 +83,13 @@ pub use abi::{
     ERROR_DECOMPRESSION_BUDGET_EXCEEDED, ERROR_ENCODING, ERROR_INTERNAL, ERROR_INVALID_INPUT,
     ERROR_MEMORY_LIMIT, ERROR_PARSE, ERROR_PARSE_BUDGET_EXCEEDED, ERROR_PARSE_TIMEOUT,
     ERROR_SUCCESS, ERROR_TIMEOUT, FFI_CONFIG_NOT_SET_U8, FFI_CONFIG_NOT_SET_U32,
-    FFI_CONFIG_NOT_SET_U64, FFI_ERROR_BEHAVIOR_PASS_THROUGH, FFI_ERROR_BEHAVIOR_RETURN_STATUS,
-    FFI_ERROR_BEHAVIOR_TERMINATE, FFI_ERROR_POLICY_FAIL_CLOSED, FFI_ERROR_POLICY_PASS,
-    FFI_ERROR_POLICY_STATUS, FFI_PROFILE_BALANCED, FFI_PROFILE_NONE, FFI_PROFILE_STREAMING_FIRST,
-    FFI_PROFILE_STRICT_CACHE, FFIAcceptResult, FFIBaseUrlDecision, FFIBaseUrlInput,
-    FFIConditionalResult, FFIConflict, FFIConflictLevel, FFIConflictList, FFIDecisionResult,
-    FFIDecompResult, FFIEffectiveConfig, FFIErrorBehavior, FFIErrorClass, FFIErrorPolicy,
-    FFIExplicitConfig, FFIProfile, MarkdownConverterHandle, MarkdownOptions, MarkdownResult,
-    MarkdownTrustedProxies, NEGOTIATE_REASON_CONVERT, NEGOTIATE_REASON_EXPLICIT_REJECT,
-    NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED, NEGOTIATE_REASON_NO_ACCEPT,
-    NEGOTIATE_WILDCARD_ALLOW, NEGOTIATE_WILDCARD_STRICT,
+    FFI_CONFIG_NOT_SET_U64, FFI_PROFILE_BALANCED, FFI_PROFILE_NONE, FFI_PROFILE_STREAMING_FIRST,
+    FFI_PROFILE_STRICT_CACHE, FFIAcceptResult, FFIBaseUrlDecision, FFIBaseUrlInput, FFIConflict,
+    FFIConflictLevel, FFIConflictList, FFIDecompResult, FFIEffectiveConfig, FFIErrorClass,
+    FFIExplicitConfig, FFIProfile, MARKDOWN_ABI_VERSION, MarkdownConverterHandle, MarkdownOptions,
+    MarkdownResult, MarkdownTrustedProxies, NEGOTIATE_REASON_CONVERT,
+    NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED,
+    NEGOTIATE_REASON_NO_ACCEPT, NEGOTIATE_WILDCARD_ALLOW, NEGOTIATE_WILDCARD_STRICT,
 };
 
 #[cfg(feature = "streaming")]
@@ -104,26 +97,23 @@ pub use abi::{
     ERROR_BUDGET_EXCEEDED, ERROR_POST_COMMIT, ERROR_STREAMING_FALLBACK, POST_COMMIT_ABORT,
     POST_COMMIT_SAFE_FINISH,
 };
-pub use diagnostics::{markdown_free_diagnostics, markdown_get_diagnostics_schema};
 pub use exports::{
-    markdown_check_conditional, markdown_classify_error_code, markdown_convert,
-    markdown_converter_free, markdown_converter_new, markdown_decide_base_url,
-    markdown_decide_error_behavior, markdown_decomp_result_init, markdown_decompress_bounded,
-    markdown_decompress_free, markdown_detect_conflicts, markdown_error_to_reason_code,
-    markdown_free_conflicts, markdown_make_decision, markdown_negotiate_accept,
-    markdown_result_free, markdown_trusted_proxies_free, markdown_trusted_proxies_new,
-    markdown_trusted_proxies_push,
+    markdown_abi_version, markdown_classify_error_code, markdown_convert, markdown_converter_free,
+    markdown_converter_new, markdown_decide_base_url, markdown_decomp_result_init,
+    markdown_decompress_bounded, markdown_decompress_free, markdown_detect_conflicts,
+    markdown_free_conflicts, markdown_negotiate_accept, markdown_result_free,
+    markdown_trusted_proxies_free, markdown_trusted_proxies_new, markdown_trusted_proxies_push,
 };
 
 #[cfg(feature = "incremental")]
 pub use incremental::{
     IncrementalConverterHandle, markdown_incremental_feed, markdown_incremental_finalize,
-    markdown_incremental_free, markdown_incremental_new,
+    markdown_incremental_free, markdown_incremental_new_with_code,
 };
 
 #[cfg(feature = "streaming")]
 pub use streaming::{
     StreamingConverterHandle, StreamingOptions, markdown_streaming_abort, markdown_streaming_feed,
-    markdown_streaming_finalize, markdown_streaming_finish, markdown_streaming_free,
-    markdown_streaming_new, markdown_streaming_output_free, markdown_streaming_safe_finish,
+    markdown_streaming_finalize, markdown_streaming_new_with_code, markdown_streaming_output_free,
+    markdown_streaming_safe_finish,
 };

@@ -80,6 +80,15 @@ The script builds the release binary, runs benchmarks, generates a
 Measurement Report, invokes the threshold engine for a Verdict Report,
 and prints a text summary to stderr.
 
+### 0.9.1 Release Gate Evidence
+For the 0.9.1 release, evidence is gathered via the following targets:
+- `make release-gates-check-091`: (Blocking) Verifies all core architectural and functional requirements.
+- `make perf-evidence-check`: (Non-blocking) Verifies that 0.9.1 meets performance baselines across the target matrix.
+
+For deep analysis, use:
+- `python3 tools/perf/doctor_advice.py`: Analyzes measurement reports and suggests configuration tuning.
+- `tools/perf/run_module_benchmark.sh`: Runs a standalone benchmark of the module.
+
 When invoked directly, `threshold_engine.py` emits the Verdict Report JSON to
 stdout and diagnostics to stderr. Redirect stdout to the intended artifact;
 the Python process does not accept a caller-controlled output path.
@@ -95,6 +104,32 @@ generated on the target platform:
    uploaded `perf-baseline-<platform>.json` artifact.
 2. Submit the generated baseline file via PR.
 3. When no baseline exists, the engine skips comparison (exit 0).
+
+### Canonical Module Baseline Policy
+
+Do not fabricate or improve measured evidence. Only documented conservative
+normalization of latency/throughput is allowed; path, fallback, output, memory,
+and environment evidence must remain verbatim.
+
+The immutable truth fields are `streaming_path_hits`, `fullbuffer_path_hits`,
+`streaming_requests_total`, `precommit_failopen_total`,
+`decompression_streaming_total`, `decompression_fullbuffer_total`,
+`zero_copy_output_total`, `copied_output_total`, `baseline_rss_bytes`,
+`peak_rss_bytes`, `input_bytes`, scenario status and metadata, platform, load
+generator, and NGINX version. RPS may only be rounded downward or lowered;
+latency and TTFB may only be rounded upward or raised. Never increase RPS,
+decrease latency/TTFB, or alter truth evidence.
+
+Keep the raw workflow artifact and record the artifact/run, source Git commit,
+adjustment rule, person or reason, and date in `baseline_policy`. Missing raw
+artifact provenance is an audit failure to disclose, not a reason to invent a
+workflow identifier.
+
+The checked-in 0.9.1 baseline is the only accepted historical exception. It
+uses `historical_audit_exception: true`, the original source commit, and an
+explicit audit note because its raw artifact was not retained. Machine
+validation rejects unlocatable `source_artifact` values for every future
+conservatively normalized baseline.
 
 ## Troubleshooting
 
@@ -137,3 +172,4 @@ above to bootstrap.
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-08 | Agent | Updated performance gate evidence and tool references for 0.9.1 release |

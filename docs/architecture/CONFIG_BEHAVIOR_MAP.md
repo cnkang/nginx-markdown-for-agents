@@ -26,24 +26,22 @@ flowchart LR
         MW["markdown_accept"]
         AP["markdown_auth_policy"]
         AC["markdown_auth_cookies"]
-        CT["markdown_conditional_requests"]
-        ET["markdown_etag"]
+        CV["markdown_cache_validation"]
         LV["markdown_log_verbosity"]
-        SE["markdown_streaming_engine"]
+        SP["markdown_streaming"]
+        PR["markdown_profile"]
+        AD["markdown_auto_decompress"]
     end
 
     subgraph BodyPhase["Body Filter Phase"]
-        MS["markdown_memory_budget"]
-        TO["markdown_timeout"]
+        ML["markdown_limits"]
         OE["markdown_error_policy"]
         FL["markdown_flavor"]
         BC["markdown_buffer_chunked"]
         ST["markdown_stream_types"]
         TF["markdown_trusted_proxies"]
-        LBT["markdown_large_body_threshold"]
-        SB["markdown_streaming_budget"]
-        SOE["markdown_streaming_on_error"]
         SS["markdown_streaming_shadow"]
+        ZC["markdown_streaming_zero_copy"]
     end
 
     subgraph Metrics["Metrics"]
@@ -78,23 +76,14 @@ flowchart LR
 
 ## Resource and Failure Controls
 
-### `markdown_memory_budget`
+### `markdown_limits`
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Caps the size of responses the module will buffer and attempt to convert |
-| Lifecycle impact | Body-phase buffering and fail-open/fail-closed branch |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_buffer.c`, `components/nginx-module/src/ngx_http_markdown_payload_impl.h` |
-| Practical note | This is one of the main guards around the full-buffering architecture. Large documents often hit this branch first. |
-
-### `markdown_timeout`
-
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Limits how long conversion may run in the Rust engine |
-| Lifecycle impact | FFI conversion call and conversion failure classification |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/rust-converter/src/ffi.rs`, `components/rust-converter/src/converter.rs` |
-| Practical note | A timeout is not a header-phase decision. It takes effect only after the request has already entered the conversion path. |
+| Behavior | Unified resource limits block: `memory=<size>`, `timeout=<time>`, `streaming_buffer=<size>`, `max_inflight=<N>` (Config V2, 0.9.0) |
+| Lifecycle impact | Body-phase buffering budget, conversion timeout, streaming memory, and inflight guard |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_buffer.c`, `components/nginx-module/src/ngx_http_markdown_config_handlers_impl.h` |
+| Practical note | Consolidates the removed `markdown_max_size`, `markdown_memory_budget`, `markdown_timeout`, and `markdown_streaming_budget` directives. Any subset of keys may be given; unspecified keys inherit. |
 
 ### `markdown_error_policy`
 
@@ -114,7 +103,7 @@ flowchart LR
 | Behavior | Selects the Markdown flavor emitted by the Rust converter |
 | Lifecycle impact | Rust conversion options preparation before FFI call |
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/rust-converter/src/converter.rs` |
-| Practical note | This changes output semantics, not request eligibility. |
+| Practical note | `commonmark` and `gfm` are the supported values. The former `mdx` and `org-mode` selectors are rejected in v0.9.1 because they never provided distinct conversion semantics. |
 
 ### `markdown_token_estimate`
 
@@ -156,23 +145,14 @@ flowchart LR
 
 ## Cache and Conditional Request Behavior
 
-### `markdown_etag`
+### `markdown_cache_validation`
 
 | Aspect | Detail |
 |--------|--------|
-| Behavior | Enables or disables Markdown-variant ETag generation |
-| Lifecycle impact | Rust conversion options and success-path header updates |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/nginx-module/src/ngx_http_markdown_headers.c`, `components/rust-converter/src/etag_generator.rs` |
-| Practical note | This affects downstream cache behavior, not whether conversion is attempted. |
-
-### `markdown_conditional_requests`
-
-| Aspect | Detail |
-|--------|--------|
-| Behavior | Controls how aggressively the module handles Markdown-variant conditional requests |
-| Lifecycle impact | Conditional resolution branch after buffering and before full conversion |
-| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/nginx-module/src/ngx_http_markdown_conditional.c` |
-| Practical note | This directive changes the branch between “send 304”, “reuse a conditional result”, and “continue to full conversion”. |
+| Behavior | Controls conditional request handling and ETag generation: `off`, `ims_only`, or `full` (Config V2, 0.9.0) |
+| Lifecycle impact | Conditional resolution branch after buffering and before full conversion; ETag generation on success path |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_conversion_impl.h`, `components/nginx-module/src/ngx_http_markdown_conditional.c`, `components/nginx-module/src/ngx_http_markdown_headers.c` |
+| Practical note | Replaces the removed `markdown_etag` and `markdown_conditional_requests` directives. `full` generates a transformed ETag; `ims_only` supports If-Modified-Since via upstream Last-Modified; `off` disables both. |
 
 ## Logging and Observability
 
@@ -214,23 +194,41 @@ flowchart LR
 | Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_eligibility.c` |
 | Practical note | Treat this as an explicit bypass list for response shapes that do not fit the buffering model well. |
 
-## Cross-Cutting Behavior Not Controlled by a Public Directive
+### `markdown_profile`
 
-Some important runtime behavior is part of the architecture even though it is not currently exposed as a top-level directive.
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Applies a named preset of defaults (`balanced`, `strict_cache`, `streaming_first`) to simplify configuration |
+| Lifecycle impact | Config merge phase; overrides built-in defaults before explicit directives are applied |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_config_core_impl.h`, Rust `Profile` enum |
+| Practical note | Use this to quickly align with a known deployment pattern. Explicit directives still override profile defaults. |
 
-Examples include:
+### `markdown_auto_decompress`
 
-- the small C/Rust FFI boundary
-- automatic decompression support as implemented in the module
-- base URL construction for link resolution
-- metrics counter collection inside the worker process
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Automatically decompresses upstream responses (gzip, deflate, br) before conversion |
+| Lifecycle impact | Header filter detection; body filter decompression flow |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_decompression.c` |
+| Practical note | Default is `on`. If `off`, compressed responses are passed through unchanged. |
 
-These are best understood through:
+### `markdown_streaming`
 
-- [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md)
-- [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md)
-- [ADR/0001-use-rust-for-conversion.md](ADR/0001-use-rust-for-conversion.md)
-- [ADR/0002-full-buffering-approach.md](ADR/0002-full-buffering-approach.md)
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Selects the processing path: `off` requires full-buffer, `auto` routes by size/response shape, and `force` prefers streaming for every eligible response |
+| Lifecycle impact | Header-phase routing and body-filter path selection after hard eligibility and cache-validation gates |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_request_impl.h`, `components/nginx-module/src/ngx_http_markdown_streaming_impl.h` |
+| Practical note | This is the sole public streaming selector in v0.9.1. The removed `markdown_streaming_engine` directive is reject-only and reports the exact migration. |
+
+### `markdown_streaming_zero_copy`
+
+| Aspect | Detail |
+|--------|--------|
+| Behavior | Enables zero-copy output path for streaming conversion to reduce internal copying |
+| Lifecycle impact | Streaming body filter output path |
+| Implementation areas | `components/nginx-module/src/ngx_http_markdown_zerocopy_buf.h` |
+| Practical note | Opt-in feature (default `off`). Use in high-throughput environments to reduce CPU/memory overhead. |
 
 ## Practical Use Cases
 
@@ -251,9 +249,8 @@ Then move to [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md) and trace header-phase
 Start with:
 
 - `markdown_error_policy`
-- `markdown_memory_budget`
-- `markdown_timeout`
-- `markdown_conditional_requests`
+- `markdown_limits`
+- `markdown_cache_validation`
 
 Then inspect the failure branches in [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md).
 
@@ -262,10 +259,10 @@ Then inspect the failure branches in [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md
 Mostly:
 
 - `markdown_flavor`
-- `markdown_timeout`
+- `markdown_limits`
 - `markdown_token_estimate`
 - `markdown_front_matter`
-- `markdown_etag`
+- `markdown_cache_validation`
 
 Those are the knobs most directly reflected in the conversion options passed through FFI.
 
@@ -276,3 +273,5 @@ Those are the knobs most directly reflected in the conversion options passed thr
 |---------|------|--------|---------|
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.9.1 | 2026-07-14 | Codex | Make markdown_streaming the sole public processing-path selector and document removal of non-semantic flavor values |

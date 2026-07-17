@@ -19,13 +19,12 @@ This page is the readable overlay, not the machine-owned truth.
 | `observability-metrics` | focused semantic | `make docs-check`, `make release-gates-check` |
 | `v070-gates` | focused semantic | `make release-gates-check-070`, `make test-rust`, `make check-headers` |
 | `v080-gates` | focused semantic | `make release-gates-check-080` |
-| `release-governance` | focused semantic | `make release-gates-check-080`, `make release-gates-check`, `make release-gates-check-strict`, `make release-gates-check-055` |
+| `release-governance` | focused semantic | `make release-gates-check-080`, `make release-gates-check`, `make release-gates-check-strict` |
 | `release-manifest` | focused semantic | `python3 packaging/scripts/test_release_manifest.py`, `make release-gates-check` |
 | `version-consistency` | focused semantic | `bash tools/harness/detect_version_consistency.sh`, `make harness-security-checks` |
 | `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e` |
 | `release-quality` | umbrella | `make harness-check-full` |
 | `coverage-gate` | focused semantic | `make coverage-gate` |
-| `release-governance-060` | focused semantic | `make release-gates-check-060` |
 | `packaging-e2e` | umbrella | `dpkg-deb --info`, `rpm -qip`, `helm lint` |
 | `e2e-harness-rust` | focused semantic | `make test-e2e-rust` |
 

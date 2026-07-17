@@ -43,7 +43,7 @@ The Rust conversion engine uses html5ever 0.38 in two modes:
 
 Since mid-parse interruption is not feasible, v0.7.0 uses:
 
-1. **Input size bounding** (`markdown_max_size`): Prevents unbounded input
+1. **Input size bounding** (`markdown_limits memory=<size>`): Prevents unbounded input
    from reaching the parser.
 2. **Cooperative timeout** (`markdown_parse_timeout`, default 30s): Checked
    at checkpoints during DOM traversal (every 100 nodes) and at pipeline
@@ -67,3 +67,4 @@ Since mid-parse interruption is not feasible, v0.7.0 uses:
 |---------|------|--------|---------|
 | 0.7.0 | 2026-05-17 | Kang | Initial parser interrupt feasibility analysis |
 | 0.7.0 | 2026-05-17 | Kang | Expanded with html5ever API details; cross-ref PARSER_BUDGET.md |
+| 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |

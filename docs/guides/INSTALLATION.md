@@ -180,10 +180,10 @@ operate your own package repository.
 ### DEB Artifacts (Ubuntu / Debian)
 
 Replace `VERSION` below with the release version you are installing, for
-example `0.9.0`.  `NGINX_VERSION` must match the NGINX ABI you run.
+example `0.9.1`.  `NGINX_VERSION` must match the NGINX ABI you run.
 
 ```bash
-VERSION=0.9.0
+VERSION=0.9.1
 NGINX_VERSION=1.26.3
 ARCH=amd64
 
@@ -196,10 +196,10 @@ sudo apt install "./nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VE
 ### RPM Artifacts (AlmaLinux / Amazon Linux / RHEL)
 
 Replace `VERSION` below with the release version you are installing, for
-example `0.9.0`.  `NGINX_VERSION` must match the NGINX ABI you run.
+example `0.9.1`.  `NGINX_VERSION` must match the NGINX ABI you run.
 
 ```bash
-VERSION=0.9.0
+VERSION=0.9.1
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 
@@ -250,13 +250,16 @@ This follows the official-image multi-stage pattern:
 2. Install build dependencies in the build stage.
 3. Clone this repository inside the image.
 4. Compile the module in the build stage.
-5. Copy the resulting `.so` into a clean official `nginx` runtime image.
+5. Copy the resulting `.so` into a clean official `nginx` runtime stage.
+6. Run NGINX as the image's unprivileged `nginx` user on port `8080`, with
+   PID and temporary files under `/tmp`.
 
 ### Platform-Specific Build Notes
 
 - **Alpine-based** official images use `nginx-mod-dev`, which provides a matching NGINX source tree in the container.
 - **Debian-based** official images do not currently provide a matching `nginx-dev` package, so the Dockerfile downloads the exact matching NGINX source tarball for the build stage only.
-- In all cases, the runtime container remains the unmodified official `nginx` image.
+- In all cases, the runtime stage keeps the official `nginx` image and adds
+  only the module, example content, and the non-root runtime configuration.
 
 ### Build Examples
 
@@ -301,7 +304,7 @@ docker build \
 ### Run and Verify
 
 ```bash
-docker run --rm -p 8080:80 nginx-markdown:mainline
+docker run --rm -p 8080:8080 nginx-markdown:mainline
 
 # Markdown conversion
 curl -sD - -o /dev/null -H "Accept: text/markdown" http://127.0.0.1:8080/
@@ -329,8 +332,8 @@ If you use a custom NGINX build, or a platform not supported by the pre-built bi
 
 | Component | Minimum Version | Purpose |
 |-----------|----------------|---------|
-| **Rust Toolchain** | 1.91.0+ | Building the Rust converter |
-| **Cargo** | 1.91.0+ | Rust package manager (included with Rust) |
+| **Rust Toolchain** | 1.97.0+ | Building the Rust converter |
+| **Cargo** | 1.97.0+ | Rust package manager (included with Rust) |
 | **cbindgen** | 0.29.2 | Generating C header files from Rust |
 | **NGINX** | 1.24.0+ | Web server (source code required for module compilation) |
 | **GCC/Clang** | GCC 4.8+ or Clang 3.4+ | C compiler for NGINX module |
@@ -425,7 +428,7 @@ tar -xzf nginx-1.24.0.tar.gz
 
 ```bash
 # Check Rust version
-rustc --version  # Should be 1.91.0 or higher
+rustc --version  # Should be 1.97.0 or higher
 
 # Check Cargo version
 cargo --version
@@ -527,7 +530,15 @@ export MODULE_PATH=/path/to/nginx-markdown-for-agents/components/nginx-module
 
 Dynamic modules can be loaded/unloaded without recompiling NGINX.
 
+The default shown below matches the Rust library's Cargo default features. If
+you built Rust with a different final feature set, export the matching
+comma-separated `NGX_MARKDOWN_RUST_FEATURES` value before `./configure`. Use
+`NGX_MARKDOWN_RUST_FEATURES=none` with `cargo build --no-default-features`.
+The module configuration consumes this explicit contract instead of probing
+the LLVM LTO archive with the system `nm`.
+
 ```bash
+export NGX_MARKDOWN_RUST_FEATURES=default
 ./configure \
     --prefix=/usr/local/nginx \
     --with-compat \
@@ -541,6 +552,7 @@ Dynamic modules can be loaded/unloaded without recompiling NGINX.
 Static modules are compiled directly into the NGINX binary.
 
 ```bash
+export NGX_MARKDOWN_RUST_FEATURES=default
 ./configure \
     --prefix=/usr/local/nginx \
     --add-module=$MODULE_PATH \
@@ -1165,7 +1177,7 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
    Manual download is intended only for air-gapped or troubleshooting scenarios — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # On a connected machine — substitute <release_tag>, <nginx_version>, <os_type>, and <arch>
-   # <release_tag> must match the current release (e.g. v0.9.0)
+   # <release_tag> must match the current release (e.g. v0.9.1)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
    ```
@@ -1203,7 +1215,7 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
    Manual download is intended only for troubleshooting — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
    # Download the binary and checksum file — substitute <release_tag>, <nginx_version>, <os_type>, <arch>
-   # <release_tag> must match the current release (e.g. v0.9.0)
+   # <release_tag> must match the current release (e.g. v0.9.1)
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
    wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
 
@@ -1348,7 +1360,9 @@ SKIP_ROOT_CHECK=1 bash tools/install.sh
 
 If you fetch `tools/install.sh` remotely during image build, pin and verify its digest.
 The example [`tools/build_release/Dockerfile.install-example`](../../tools/build_release/Dockerfile.install-example)
-expects `INSTALL_SHA256` and checks the script before execution.
+expects `INSTALL_SHA256` and checks the script before execution. It also drops
+to the image's `nginx` user for runtime, listens on unprivileged port `8080`,
+and moves the NGINX PID and temporary paths to `/tmp`.
 
 For a fully self-contained Docker build, use the [Docker Source Build](#5-secondary-docker-source-build) method instead.
 
@@ -1451,7 +1465,7 @@ brew install pcre
 # Update Rust toolchain
 rustup update
 
-# Check Rust version (must be 1.91.0+)
+# Check Rust version (must be 1.97.0+)
 rustc --version
 
 # Clean and rebuild

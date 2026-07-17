@@ -2,7 +2,7 @@
 name = "e2e-harness"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.97"
 authors = ["NGINX Markdown for Agents Contributors"]
 description = "Rust-first E2E test harness for nginx-markdown-for-agents"
 license = "BSD-2-Clause"
@@ -17,7 +17,7 @@ clap = { version = "4.5", features = ["derive", "env"] }
 # Async runtime for fixture backends and HTTP helpers
 tokio = { version = "1.44", features = ["full"] }
 # HTTP client for scenario assertions
-reqwest = { version = "0.12", default-features = false, features = ["blocking"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking"] }
 # Embedded HTTP server for fixture backends
 axum = "0.8"
 # JSON serialization for reports and invocation metadata

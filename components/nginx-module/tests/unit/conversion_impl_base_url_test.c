@@ -116,6 +116,8 @@ struct FFIBaseUrlInput {
     uintptr_t                            x_forwarded_host_len;
     const uint8_t                       *host;
     uintptr_t                            host_len;
+    const uint8_t                       *direct_scheme;
+    uintptr_t                            direct_scheme_len;
     uint8_t                              is_unix_socket;
     uint8_t                              trusted_configured;
 };
@@ -187,7 +189,6 @@ static ngx_uint_t g_reason_streaming_shadow_calls = 0;
 static ngx_uint_t g_streaming_new_with_code_calls = 0;
 static ngx_uint_t g_streaming_feed_calls = 0;
 static ngx_uint_t g_streaming_finish_calls = 0;
-static ngx_uint_t g_streaming_free_calls = 0;
 static ngx_uint_t g_abort_calls = 0;
 static ngx_uint_t g_output_free_calls = 0;
 static ngx_uint_t g_pnalloc_fail_once = 0;
@@ -382,13 +383,6 @@ markdown_streaming_finalize(struct StreamingConverterHandle *handle,
     return g_streaming_finalize_rc;
 }
 
-void
-markdown_streaming_free(struct StreamingConverterHandle *handle)
-{
-    UNUSED(handle);
-    g_streaming_free_calls++;
-}
-
 typedef struct ngx_list_part_s ngx_list_part_t;
 typedef struct ngx_table_elt_s ngx_table_elt_t;
 typedef struct ngx_http_headers_in_s ngx_http_headers_in_t;
@@ -519,6 +513,13 @@ static volatile int g_metric_add_sink;
 #ifndef NGX_HTTP_MARKDOWN_METRIC_INC
 #define NGX_HTTP_MARKDOWN_METRIC_INC(name) (g_metric_inc_sink = 1)
 #endif
+#ifndef NGX_HTTP_MARKDOWN_METRIC_WATERMARK
+#define NGX_HTTP_MARKDOWN_METRIC_WATERMARK(field, value)                              \
+    do {                                                                              \
+        g_metric_add_sink = 1;                                                       \
+        UNUSED(value);                                                                \
+    } while (0)
+#endif
 #ifndef ngx_log_debug2
 #define ngx_log_debug2(level, log, err, fmt, arg1, arg2) \
     UNUSED(level); UNUSED(log); UNUSED(err); UNUSED(fmt); UNUSED(arg1); UNUSED(arg2)
@@ -612,23 +613,6 @@ ngx_alloc_chain_link(ngx_pool_t *pool)
         return NULL;
     }
     return calloc(1, sizeof(ngx_chain_t));
-}
-
-static ngx_inline ngx_int_t
-ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
-{
-    for (size_t i = 0; i < n; i++) {
-        u_char c1;
-        u_char c2;
-
-        c1 = (u_char) tolower((unsigned char) s1[i]);
-        c2 = (u_char) tolower((unsigned char) s2[i]);
-        if (c1 != c2) {
-            return (ngx_int_t) c1 - (ngx_int_t) c2;
-        }
-    }
-
-    return 0;
 }
 
 #ifndef ngx_timeofday
@@ -1015,7 +999,6 @@ reset_stub_state(void)
     g_streaming_new_with_code_calls = 0;
     g_streaming_feed_calls = 0;
     g_streaming_finish_calls = 0;
-    g_streaming_free_calls = 0;
     g_abort_calls = 0;
     g_output_free_calls = 0;
     g_pnalloc_fail_once = 0;
@@ -1647,8 +1630,6 @@ test_shadow_compare_prepare_options_failure(void)
                 "shadow compare must not feed streaming after option failure");
     TEST_ASSERT(g_streaming_finish_calls == 0,
                 "shadow compare must not finish streaming after option failure");
-    TEST_ASSERT(g_streaming_free_calls == 0,
-                "shadow compare must not free streaming after option failure");
 
     TEST_PASS("shadow compare aborts on prepare options failure");
 }
@@ -1690,8 +1671,6 @@ test_find_request_header_multi_part(void)
     r.headers_in.headers.part.elts = headers_part1;
     r.headers_in.headers.part.nelts = 1;
     r.headers_in.headers.part.next = &part2;
-
-    conf.ops.trust_forwarded_headers = 1;
 
     /* Search for X-Forwarded-Proto — should find it in part 2 */
     result = ngx_http_markdown_find_request_header_value(

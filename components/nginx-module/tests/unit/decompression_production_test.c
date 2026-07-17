@@ -268,6 +268,37 @@ zlib_compress(const u_char *input, size_t input_len, u_char *out,
     return out_cap;
 }
 
+/*
+ * Compress input as raw deflate (RFC 1951, no zlib wrapper).
+ * Used to test the full-buffer raw deflate fallback path and its
+ * trailing-data rejection.
+ */
+static size_t
+raw_deflate_compress(const u_char *input, size_t input_len, u_char *out,
+    size_t out_cap)
+{
+    z_stream stream;
+    int rc;
+
+    memset(&stream, 0, sizeof(stream));
+
+    rc = deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+                      -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
+    TEST_ASSERT(rc == Z_OK, "deflateInit2 should initialize raw deflate stream");
+
+    stream.next_in = (Bytef *) input;
+    stream.avail_in = (uInt) input_len;
+    stream.next_out = out;
+    stream.avail_out = (uInt) out_cap;
+
+    rc = deflate(&stream, Z_FINISH);
+    TEST_ASSERT(rc == Z_STREAM_END, "raw deflate compression should finish");
+
+    out_cap = stream.total_out;
+    deflateEnd(&stream);
+    return out_cap;
+}
+
 static void
 test_chain_helpers_boundaries(void)
 {
@@ -428,6 +459,199 @@ test_gzip_success(void)
                 "decompressed length should match plain input");
     TEST_ASSERT(memcmp(out->buf->pos, plain, sizeof(plain) - 1) == 0,
                 "decompressed bytes should match plain input");
+}
+
+static void
+test_gzip_concatenated_members(void)
+{
+    static const u_char first[] = "<html><body>";
+    static const u_char second[] = "joined</body></html>";
+    u_char compressed[512];
+    size_t first_len;
+    size_t second_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t rc;
+
+    first_len = gzip_compress(first, sizeof(first) - 1,
+                              compressed, sizeof(compressed));
+    second_len = gzip_compress(second, sizeof(second) - 1,
+                               compressed + first_len,
+                               sizeof(compressed) - first_len);
+
+    init_request(&r);
+    in = make_chain(compressed, first_len + second_len, &in_buf);
+    out = NULL;
+
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "concatenated gzip members should decompress");
+    TEST_ASSERT(out != NULL && out->buf != NULL,
+                "concatenated gzip should create output chain");
+    TEST_ASSERT((size_t) (out->buf->last - out->buf->pos)
+                    == sizeof(first) + sizeof(second) - 2,
+                "concatenated gzip length should include every member");
+    TEST_ASSERT(memcmp(out->buf->pos, first, sizeof(first) - 1) == 0,
+                "concatenated gzip should preserve first member");
+    TEST_ASSERT(memcmp(out->buf->pos + sizeof(first) - 1,
+                       second, sizeof(second) - 1) == 0,
+                "concatenated gzip should append later members");
+}
+
+static void
+test_gzip_concatenated_truncated_second_member(void)
+{
+    static const u_char first[] = "first member";
+    static const u_char second[] = "second member must finish";
+    u_char compressed[512];
+    size_t first_len;
+    size_t second_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t rc;
+
+    first_len = gzip_compress(first, sizeof(first) - 1,
+                              compressed, sizeof(compressed));
+    second_len = gzip_compress(second, sizeof(second) - 1,
+                               compressed + first_len,
+                               sizeof(compressed) - first_len);
+
+    init_request(&r);
+    in = make_chain(compressed, first_len + second_len - 4, &in_buf);
+    out = NULL;
+
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out);
+
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT,
+                "truncated later gzip member should be rejected");
+}
+
+static void
+test_gzip_concatenated_members_share_budget(void)
+{
+    u_char first[160];
+    u_char second[160];
+    u_char compressed[512];
+    size_t first_len;
+    size_t second_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t rc;
+
+    memset(first, 'A', sizeof(first));
+    memset(second, 'B', sizeof(second));
+    first_len = gzip_compress(first, sizeof(first),
+                              compressed, sizeof(compressed));
+    second_len = gzip_compress(second, sizeof(second),
+                               compressed + first_len,
+                               sizeof(compressed) - first_len);
+
+    init_request(&r);
+    g_conf.decompress.max_size = 256;
+    in = make_chain(compressed, first_len + second_len, &in_buf);
+    out = NULL;
+
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out);
+
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
+                "gzip members should share one decompression budget");
+}
+
+static void
+test_gzip_empty_later_member_at_exact_budget(void)
+{
+    u_char first[256];
+    u_char compressed[512];
+    size_t first_len;
+    size_t second_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t rc;
+
+    memset(first, 'A', sizeof(first));
+    first_len = gzip_compress(first, sizeof(first),
+                              compressed, sizeof(compressed));
+    second_len = gzip_compress((const u_char *) "", 0,
+                               compressed + first_len,
+                               sizeof(compressed) - first_len);
+
+    init_request(&r);
+    g_conf.decompress.max_size = sizeof(first);
+    in = make_chain(compressed, first_len + second_len, &in_buf);
+    out = NULL;
+
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "empty later gzip member should fit an exact budget");
+    TEST_ASSERT((size_t) (out->buf->last - out->buf->pos) == sizeof(first),
+                "empty later gzip member should not change output length");
+}
+
+static void
+test_gzip_later_member_grows_at_member_boundary(void)
+{
+    u_char first[64];
+    static const u_char second[] = "second";
+    u_char compressed[512];
+    u_char *output_data;
+    size_t first_len;
+    size_t second_len;
+    size_t output_size;
+    size_t total_out;
+    z_stream stream;
+    ngx_http_request_t r;
+    ngx_int_t rc;
+
+    memset(first, 'A', sizeof(first));
+    first_len = gzip_compress(first, sizeof(first),
+                              compressed, sizeof(compressed));
+    second_len = gzip_compress(second, sizeof(second) - 1,
+                               compressed + first_len,
+                               sizeof(compressed) - first_len);
+
+    init_request(&r);
+    g_conf.decompress.max_size = 256;
+    output_size = sizeof(first);
+    output_data = ngx_pnalloc(r.pool, output_size);
+    TEST_ASSERT(output_data != NULL, "member-boundary output alloc");
+
+    memset(&stream, 0, sizeof(stream));
+    stream.next_in = compressed;
+    stream.avail_in = (uInt) (first_len + second_len);
+    stream.next_out = output_data;
+    stream.avail_out = (uInt) output_size;
+    TEST_ASSERT(inflateInit2(&stream, MAX_WBITS + 16) == Z_OK,
+                "member-boundary inflate init");
+
+    rc = ngx_http_markdown_inflate_loop(&r, &g_conf, &stream,
+        &output_data, &output_size, NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        &total_out);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "later gzip member should grow a full current buffer");
+    TEST_ASSERT(total_out == sizeof(first) + sizeof(second) - 1,
+                "member-boundary growth should preserve total output");
+    TEST_ASSERT(memcmp(output_data, first, sizeof(first)) == 0,
+                "member-boundary growth should preserve first member");
+    TEST_ASSERT(memcmp(output_data + sizeof(first),
+                       second, sizeof(second) - 1) == 0,
+                "member-boundary growth should append later member");
+
+    inflateEnd(&stream);
 }
 
 static void
@@ -698,8 +922,16 @@ test_handle_inflate_stall_direct(void)
     u_char *output_data;
     size_t output_size;
     ngx_int_t rc;
+    ngx_http_markdown_inflate_ctx_t ctx;
 
     init_request(&r);
+    ctx.request = &r;
+    ctx.conf = &g_conf;
+    ctx.stream = &stream;
+    ctx.output_data = &output_data;
+    ctx.output_size = &output_size;
+    ctx.type = NGX_HTTP_MARKDOWN_COMPRESSION_GZIP;
+    ctx.completed_out = 0;
 
     /* Branch 1: avail_out==0 -> should grow buffer and return NGX_AGAIN */
     output_data = output_buf;
@@ -710,8 +942,7 @@ test_handle_inflate_stall_direct(void)
     stream.avail_in = 10;
     stream.total_out = 256;
     rc = ngx_http_markdown_handle_inflate_stall(
-        &r, &g_conf, &stream, &output_data, &output_size,
-        NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
     TEST_ASSERT(rc == NGX_AGAIN,
                 "handle_inflate_stall should return AGAIN when avail_out==0");
 
@@ -723,8 +954,7 @@ test_handle_inflate_stall_direct(void)
     stream.avail_out = 100;
     stream.avail_in = 0;
     rc = ngx_http_markdown_handle_inflate_stall(
-        &r, &g_conf, &stream, &output_data, &output_size,
-        NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT,
                 "handle_inflate_stall should detect truncated input");
 
@@ -736,8 +966,7 @@ test_handle_inflate_stall_direct(void)
     stream.avail_out = 50;
     stream.avail_in = 10;
     rc = ngx_http_markdown_handle_inflate_stall(
-        &r, &g_conf, &stream, &output_data, &output_size,
-        NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, "Z_BUF_ERROR");
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, "Z_BUF_ERROR");
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
                 "handle_inflate_stall should return stall_code on unexpected stall");
 
@@ -750,8 +979,7 @@ test_handle_inflate_stall_direct(void)
     stream.avail_in = 10;
     stream.total_out = 256;
     rc = ngx_http_markdown_handle_inflate_stall(
-        &r, &g_conf, &stream, &output_data, &output_size,
-        NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
                 "handle_inflate_stall should propagate budget exceeded from grow");
 }
@@ -921,6 +1149,189 @@ test_gzip_truncated_input(void)
 }
 
 /*
+ * Test that zlib-wrapped deflate with trailing garbage is rejected as
+ * FORMAT_ERROR.  A complete deflate stream must consume every byte of
+ * the compressed payload; any remaining input after Z_STREAM_END is
+ * trailing data that must not be silently accepted.
+ */
+static void
+test_deflate_zlib_trailing_data(void)
+{
+    static const u_char plain[] = "<html><p>zlib deflate trailing</p></html>";
+    u_char compressed[256];
+    u_char combined[512];
+    size_t compressed_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t rc;
+
+    compressed_len = zlib_compress(plain, sizeof(plain) - 1,
+                                   compressed, sizeof(compressed));
+
+    /* Append trailing garbage after the valid zlib-wrapped deflate stream */
+    memcpy(combined, compressed, compressed_len);
+    memcpy(combined + compressed_len, "TRAILING_GARBAGE", 16);
+
+    init_request(&r);
+    in = make_chain(combined, compressed_len + 16, &in_buf);
+    out = NULL;
+
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE, &in, &out);
+
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+                "zlib-wrapped deflate with trailing garbage should be FORMAT_ERROR");
+    TEST_ASSERT(out == NULL,
+                "trailing-data error should not produce output chain");
+}
+
+/*
+ * Test that raw deflate with trailing garbage is rejected as FORMAT_ERROR.
+ * The raw deflate fallback path (triggered after zlib-wrapped FORMAT_ERROR)
+ * must also enforce complete input consumption.
+ */
+static void
+test_deflate_raw_trailing_data(void)
+{
+    static const u_char plain[] = "<html><p>raw deflate trailing</p></html>";
+    u_char compressed[256];
+    u_char combined[512];
+    size_t compressed_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t rc;
+
+    compressed_len = raw_deflate_compress(plain, sizeof(plain) - 1,
+                                          compressed, sizeof(compressed));
+
+    /* Append trailing garbage after the valid raw deflate stream */
+    memcpy(combined, compressed, compressed_len);
+    memcpy(combined + compressed_len, "RAW_TRAILING_GARBAGE", 20);
+
+    init_request(&r);
+    in = make_chain(combined, compressed_len + 20, &in_buf);
+    out = NULL;
+
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE, &in, &out);
+
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+                "raw deflate with trailing garbage should be FORMAT_ERROR");
+    TEST_ASSERT(out == NULL,
+                "raw trailing-data error should not produce output chain");
+}
+
+/*
+ * Test that clean deflate (no trailing data) still succeeds for both
+ * zlib-wrapped and raw deflate formats.  This is the positive control
+ * ensuring the trailing-data guard does not over-reject valid streams.
+ */
+static void
+test_deflate_clean_still_succeeds(void)
+{
+    static const u_char plain[] = "<html><p>clean deflate full-buffer</p></html>";
+    u_char zlib_compressed[256];
+    u_char raw_compressed[256];
+    size_t zlib_len;
+    size_t raw_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t rc;
+
+    zlib_len = zlib_compress(plain, sizeof(plain) - 1,
+                             zlib_compressed, sizeof(zlib_compressed));
+    raw_len = raw_deflate_compress(plain, sizeof(plain) - 1,
+                                    raw_compressed, sizeof(raw_compressed));
+
+    /* zlib-wrapped deflate, clean stream */
+    init_request(&r);
+    in = make_chain(zlib_compressed, zlib_len, &in_buf);
+    out = NULL;
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE, &in, &out);
+    TEST_ASSERT(rc == NGX_OK,
+                "clean zlib-wrapped deflate should succeed");
+    TEST_ASSERT(out != NULL && out->buf != NULL,
+                "clean zlib-wrapped deflate should produce output");
+    TEST_ASSERT((size_t)(out->buf->last - out->buf->pos) == sizeof(plain) - 1,
+                "clean zlib-wrapped deflate length should match");
+    TEST_ASSERT(memcmp(out->buf->pos, plain, sizeof(plain) - 1) == 0,
+                "clean zlib-wrapped deflate bytes should match");
+
+    /* raw deflate, clean stream — the fallback path should also succeed */
+    init_request(&r);
+    in = make_chain(raw_compressed, raw_len, &in_buf);
+    out = NULL;
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE, &in, &out);
+    /*
+     * Raw deflate data does not have a zlib header, so the first
+     * inflateInit2(MAX_WBITS) attempt will fail with FORMAT_ERROR and
+     * the fallback retry with -MAX_WBITS should succeed.
+     */
+    TEST_ASSERT(rc == NGX_OK,
+                "clean raw deflate should succeed via fallback");
+    TEST_ASSERT(out != NULL && out->buf != NULL,
+                "clean raw deflate should produce output");
+    TEST_ASSERT((size_t)(out->buf->last - out->buf->pos) == sizeof(plain) - 1,
+                "clean raw deflate length should match");
+    TEST_ASSERT(memcmp(out->buf->pos, plain, sizeof(plain) - 1) == 0,
+                "clean raw deflate bytes should match");
+}
+
+/*
+ * Test that gzip concatenated members still succeed after the deflate
+ * trailing-data fix.  This is the full-buffer anti-regression guard:
+ * the trailing-data rejection applies only to deflate, not gzip.
+ */
+static void
+test_gzip_concatenated_not_regressed(void)
+{
+    static const u_char first[] = "<p>first gzip member</p>";
+    static const u_char second[] = "<p>second gzip member</p>";
+    u_char compressed[512];
+    size_t first_len;
+    size_t second_len;
+    ngx_buf_t in_buf;
+    ngx_chain_t in;
+    ngx_chain_t *out;
+    ngx_http_request_t r;
+    ngx_int_t rc;
+
+    first_len = gzip_compress(first, sizeof(first) - 1,
+                               compressed, sizeof(compressed));
+    second_len = gzip_compress(second, sizeof(second) - 1,
+                                compressed + first_len,
+                                sizeof(compressed) - first_len);
+
+    init_request(&r);
+    in = make_chain(compressed, first_len + second_len, &in_buf);
+    out = NULL;
+
+    rc = ngx_http_markdown_decompress(&r,
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out);
+
+    TEST_ASSERT(rc == NGX_OK,
+                "concatenated gzip members should still succeed");
+    TEST_ASSERT(out != NULL && out->buf != NULL,
+                "concatenated gzip should produce output");
+    TEST_ASSERT((size_t)(out->buf->last - out->buf->pos)
+                == sizeof(first) - 1 + sizeof(second) - 1,
+                "concatenated gzip output length should include both members");
+    TEST_ASSERT(memcmp(out->buf->pos, first, sizeof(first) - 1) == 0,
+                "first gzip member output should match");
+    TEST_ASSERT(memcmp(out->buf->pos + sizeof(first) - 1,
+                       second, sizeof(second) - 1) == 0,
+                "second gzip member output should match");
+}
+
+/*
  * Test brotli dispatch returns NGX_DECLINED when brotli is not
  * compiled in (the #else branch of decompress_brotli).
  */
@@ -949,6 +1360,11 @@ main(void)
     test_detect_compression_variants();
     test_dispatch_non_decompressing_cases();
     test_gzip_success();
+    test_gzip_concatenated_members();
+    test_gzip_concatenated_truncated_second_member();
+    test_gzip_concatenated_members_share_budget();
+    test_gzip_empty_later_member_at_exact_budget();
+    test_gzip_later_member_grows_at_member_boundary();
     test_deflate_success();
     test_gzip_empty_input_error();
     test_gzip_allocation_and_budget_setup_errors();
@@ -960,6 +1376,10 @@ main(void)
     test_gzip_buffer_growth();
     test_gzip_budget_exceeded_during_growth();
     test_gzip_truncated_input();
+    test_deflate_zlib_trailing_data();
+    test_deflate_raw_trailing_data();
+    test_deflate_clean_still_succeeds();
+    test_gzip_concatenated_not_regressed();
     test_brotli_not_compiled_in();
 
     TEST_PASS("decompression_production: all tests passed");
