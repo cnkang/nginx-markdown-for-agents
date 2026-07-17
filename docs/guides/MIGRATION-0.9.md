@@ -289,10 +289,9 @@ sed -i 's/markdown_parse_timeouts_total/markdown_errors_total{reason="timeout"}/
 | Setting | `balanced` | `strict_cache` | `streaming_first` |
 |---------|-----------|---------------|-------------------|
 | Error policy | `pass` | `pass` | `pass` |
-| Conditional requests | `ims_only` | `full_support` | `off` |
-| Streaming engine | `auto` | `off` | `on` |
-| Cache validation | `off` | `full` | `off` |
-| Max inflight | 64 | 32 | 128 |
+| Cache validation | `ims_only` | `full` | `off` |
+| Streaming | `auto` | `off` | `force` |
+| Max inflight | 64 | 64 | 64 |
 
 ---
 

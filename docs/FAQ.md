@@ -502,7 +502,7 @@ Check the repository for sponsorship information (if available).
 
 ---
 
-*Last updated: May 19, 2026*
+*Last updated: July 13, 2026*
 
 
 ## Document Updates

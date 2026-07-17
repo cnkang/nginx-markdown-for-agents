@@ -541,10 +541,10 @@ curl -H "Accept: text/markdown" http://localhost/test
 
 ### Migration Notes
 
-#### Upgrading to 0.3.x
+#### Upgrading to 0.9.x
 
 - `fullbuffer_path_hits` and `incremental_path_hits` have been moved to the end of `ngx_http_markdown_metrics_t`. If you use shared-memory metrics, a graceful reload is sufficient; no data migration is needed.
-- The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter to use the incremental processing path. Note: the `markdown_large_body_threshold` directive was retired in 0.9.0 with no direct Config V2 replacement; the incremental-path threshold is not user-configurable.
+- The `incremental` feature is off by default. Enable it with `--features incremental` when building the Rust converter to use the incremental processing path. Note: the `markdown_large_body_threshold` directive was retired in 0.9.0; its threshold-routing role is now served by `markdown_stream_threshold` (v0.8.0+, default 1m) under the `markdown_streaming auto` policy.
 - `X-Forwarded-Host` and `X-Forwarded-Proto` headers are no longer trusted by default for base URL construction. If NGINX sits behind a trusted reverse proxy that sets these headers, add its proxy range in the `http` context, for example `markdown_trusted_proxies 10.0.0.0/8;`. Forwarded headers remain ignored for direct peers outside the configured CIDRs.
 
 #### Upgrading to 0.2.x
@@ -1017,7 +1017,7 @@ When the streaming engine is enabled, the engine selector emits a reason code in
 
 #### Streaming Reason Codes
 
-When the streaming engine is active (`markdown_streaming force`), the following reason codes are emitted at streaming decision points:
+When the streaming engine is active (`markdown_streaming auto` or `force`), the following reason codes are emitted at streaming decision points:
 
 | Reason Code | Family | Severity | Description | Suggested Operator Action |
 |---|---|---|---|---|
