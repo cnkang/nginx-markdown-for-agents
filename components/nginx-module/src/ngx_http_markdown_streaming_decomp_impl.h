@@ -656,7 +656,7 @@ ngx_http_markdown_streaming_decomp_reset_gzip_member(
  */
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_check_deflate_trailing(
-    ngx_http_markdown_streaming_decomp_t *decomp,
+    const ngx_http_markdown_streaming_decomp_t *decomp,
     u_char **heap_buf_ptr,
     ngx_log_t *log)
 {
