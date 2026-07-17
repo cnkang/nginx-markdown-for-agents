@@ -57,11 +57,11 @@ What other options were considered and why were they not chosen?
 | [0001](0001-use-rust-for-conversion.md) | Use Rust for HTML-to-Markdown Conversion | Accepted | 2026-02-27 |
 | [0002](0002-full-buffering-approach.md) | Full Buffering Approach for v1 | Accepted | 2026-02-27 |
 | [0003](0003-inline-origin-near-conversion.md) | Inline Origin-Near Conversion | Accepted | 2026-03-18 |
-| [0004](0004-streaming-bounded-memory-conversion.md) | Streaming Conversion with Bounded Memory and Controlled Fallback | Proposed | 2026-03-23 |
+| [0004](0004-streaming-bounded-memory-conversion.md) | Streaming Conversion with Bounded Memory and Controlled Fallback | Accepted | 2026-03-23 |
 | [0005](0005-repo-owned-harness.md) | Repo-Owned Harness for Agent Workflow and Spec Routing | Accepted | 2026-04-13 |
-| [0006](0006-otel-integration.md) | OpenTelemetry Integration Architecture | Proposed | 2026-04-28 |
-| [0007](0007-streaming-default.md) | Streaming Engine as Default (auto mode) | Proposed | 2026-04-28 |
-| [0008](0008-noise-pruning-default.md) | Noise Pruning Enabled by Default | Proposed | 2026-04-28 |
+| [0006](0006-otel-integration.md) | OpenTelemetry Integration Architecture | Accepted | 2026-04-28 |
+| [0007](0007-streaming-default.md) | Streaming Engine as Default (auto mode) | Superseded by ADR-0023 | 2026-04-28 |
+| [0008](0008-noise-pruning-default.md) | Noise Pruning Enabled by Default | Accepted | 2026-04-28 |
 | [0009](0009-rust-first-e2e-test-architecture.md) | Rust-First E2E Test Architecture with Hybrid Runtime Coverage | Accepted | 2026-05-13 |
 | [0010](0010-v070-rust-first-boundary-evolution.md) | v0.7.0 Rust-First Boundary Evolution | Accepted | 2026-05-17 |
 | [0011](0011-true-streaming-contract.md) | True Streaming Contract | Accepted | 2026-06-04 |
