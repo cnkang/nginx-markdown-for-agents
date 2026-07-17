@@ -238,7 +238,7 @@ Request arrives
 
 When multiple limits are hit simultaneously, the first detected wins:
 
-1. Input size (`markdown_max_size`) — checked first, before FFI call
+1. Input size (`markdown_limits memory=<size>`) — checked first, before FFI call
 2. Parse timeout (`markdown_parse_timeout`) — checked at each checkpoint
 3. Memory budget (`markdown_parser_budget`) — checked on each allocation
 

@@ -11,8 +11,9 @@ steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.9.1)**, the project includes a dual-engine
-conversion model (streaming default with full-buffer fallback), Rust-first
+As of the **current release line (0.9.1)**, the project includes a
+streaming-default conversion model with full-buffer fallback,
+Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
 logic, and header plan application, independent decompression budget with parse
 timeout and parser budget directives, runtime diagnostics endpoint, dynconf
@@ -206,7 +207,7 @@ The 0.3.0 release includes:
 - Image conversion now preserves the `title` attribute in Markdown syntax; missing/blocked image URLs emit `alt` text as plain text
 - Media elements (`video`, `audio`) now have their `src` URL extracted as a Markdown link; video `poster` thumbnails extracted as Markdown images
 - Image map `<area>` elements now have their `href` extracted as Markdown links
-- X-Forwarded-Host/Proto headers are no longer trusted by default; added `markdown_trusted_proxies on|off` directive (default: off)
+- X-Forwarded-Host/Proto headers are no longer trusted by default; added CIDR-based `markdown_trusted_proxies <CIDR>...` directive (default: off — no forwarded headers honored)
 - Decompression buffer estimation now logs a warning when the estimated output exceeds 50 MB
 - CI jobs for clang compiler and AddressSanitizer/UndefinedBehaviorSanitizer smoke tests
 - SonarCloud Quality Gate Status badge in both English and Chinese READMEs
@@ -384,10 +385,16 @@ and adds profile-based deployments, while preserving upgrade paths from 0.8.x.
   replace 0.8.x legacy directives.
 - **Profile system**: `markdown_profile` (strict_cache, balanced, streaming_first)
   for one-line preset deployments.
-- **0.8.x migration**: All 0.8.x configs work unchanged; legacy aliases
-  silently remap to new directives.
+- **0.8.x migration**: 0.9.0 is a breaking release; legacy directive
+  names are rejected at `nginx -t` with a migration hint. See
+  [MIGRATION-0.9.md](../guides/MIGRATION-0.9.md) for the full mapping.
 - Breaking: removed `markdown_max_size`, `markdown_timeout`,
-  `markdown_streaming_budget`, `markdown_conditional_requests` as standalone directives.
+  `markdown_streaming_budget`, `markdown_on_error`,
+  `markdown_streaming_on_error`, `markdown_etag`,
+  `markdown_conditional_requests`, `markdown_trust_forwarded_headers`,
+  `markdown_on_wildcard`, `markdown_large_body_threshold`,
+  `markdown_streaming_engine` (0.9.1), and
+  `markdown_streaming_auto_threshold` (0.8.0) as standalone directives.
 
 #### 0.8.3 (last 0.8.x patch)
 
@@ -642,11 +649,12 @@ See `examples/docker/` for Docker build examples.
 ## Summary
 
 **NGINX Markdown for Agents** is on the 0.9.x release line (latest patch:
-0.9.0). The project provides
+0.9.0; 0.9.1 in RC preparation). The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
-dual-engine model, with bounded-memory streaming as the default path and
-full-buffer conversion as the fallback. Version 0.8.0 formalizes the true
-streaming contract (RFC 0008, ADR-0011), introduces the streaming fallback
+streaming-default conversion model, with bounded-memory streaming as the
+default path and full-buffer conversion as the fallback. Version 0.8.0
+formalizes the true streaming contract (RFC 0008, ADR-0011), introduces
+the streaming fallback
 state machine (ADR-0012), aligns the auto-mode streaming policy with the true
 streaming contract definition (ADR-0013), and consolidates platform and
 version support declarations into a release matrix source of truth (ADR-0014).

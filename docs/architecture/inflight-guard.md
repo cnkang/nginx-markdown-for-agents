@@ -76,7 +76,7 @@ markdown_limits max_inflight=64;
 - **Value 0**: Unlimited (no inflight guard)
 
 The default value of 64 is chosen to protect typical deployments where:
-- Each conversion may hold a response buffer up to `markdown_max_size` (10 MB default)
+- Each conversion may hold a response buffer up to `markdown_limits memory=<size>` (10 MB built-in default)
 - 64 × 10 MB = 640 MB peak memory per worker, which fits comfortably in most server configurations
 - Legitimate crawlers rarely exceed 10-20 concurrent requests to a single origin
 
