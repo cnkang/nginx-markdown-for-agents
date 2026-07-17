@@ -646,6 +646,96 @@ ngx_http_markdown_streaming_decomp_reset_gzip_member(
 
 
 /*
+ * Check for trailing bytes after Z_STREAM_END for deflate streams.
+ * Deflate (zlib-wrapped or raw) does not support concatenated members;
+ * any remaining avail_in after Z_STREAM_END is trailing data that does
+ * not belong to the stream.
+ *
+ * Returns NGX_OK if no trailing bytes, NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
+ * if trailing bytes detected.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_check_deflate_trailing(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    u_char **heap_buf_ptr,
+    ngx_log_t *log)
+{
+    if (decomp->state.zlib.avail_in > 0) {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+            "markdown: "
+            "deflate stream ended with %ud trailing bytes "
+            "(avail_in > 0 after Z_STREAM_END)",
+            decomp->state.zlib.avail_in);
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+
+/*
+ * Grow the output buffer when avail_out == 0.
+ *
+ * Returns NGX_OK on success, NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED
+ * if the budget is exhausted, or NGX_ERROR on allocation/conversion failure.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_grow_output_buf(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    u_char **buf_ptr,
+    size_t *buf_size_ptr,
+    u_char **heap_buf_ptr,
+    int *using_heap_ptr,
+    ngx_log_t *log)
+{
+    size_t  remaining;
+    size_t  old_size;
+
+    remaining = 0;
+    if (decomp->max_decompressed_size > 0) {
+        remaining = decomp->max_decompressed_size
+                    - decomp->total_decompressed;
+        if (*buf_size_ptr >= remaining) {
+            ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+        }
+    }
+
+    old_size = *buf_size_ptr;
+
+    if (ngx_http_markdown_streaming_decomp_expand_buf(
+            heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    *using_heap_ptr = 1;
+
+    decomp->state.zlib.next_out = *buf_ptr + old_size;
+    {
+        uInt  avail_out;
+
+        if (ngx_http_markdown_streaming_decomp_size_to_uint(
+                *buf_size_ptr - old_size, &avail_out))
+        {
+            ngx_log_error(NGX_LOG_ERR, log, 0,
+                "markdown: "
+                "expanded buffer free space %uz exceeds "
+                "zlib uInt max",
+                *buf_size_ptr - old_size);
+            ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+            return NGX_ERROR;
+        }
+        decomp->state.zlib.avail_out = avail_out;
+    }
+
+    return NGX_OK;
+}
+
+
+/*
  * Step return codes:
  *   1  - done (Z_STREAM_END or avail_in == 0)
  *   0  - continue iterating
@@ -727,25 +817,12 @@ ngx_http_markdown_streaming_decomp_inflate_step(
 
     if (zrc == Z_STREAM_END) {
         if (decomp->type != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
-            /*
-             * deflate (zlib-wrapped or raw) does not support concatenated
-             * members the way gzip does.  A complete deflate stream must
-             * consume every byte of the compressed payload; any remaining
-             * avail_in after Z_STREAM_END is trailing data that does not
-             * belong to the stream.  Silently accepting it would let an
-             * illegal Content-Encoding: deflate response be truncated and
-             * treated as a successful conversion.  Reject it as a format
-             * error and route through the existing error classification so
-             * markdown_error_policy decides pass/reject behavior.
-             */
-            if (decomp->state.zlib.avail_in > 0) {
-                ngx_log_error(NGX_LOG_ERR, log, 0,
-                    "markdown: "
-                    "deflate stream ended with %ud trailing bytes "
-                    "(avail_in > 0 after Z_STREAM_END)",
-                    decomp->state.zlib.avail_in);
-                ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-                return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+            ngx_int_t  check_rc;
+
+            check_rc = ngx_http_markdown_streaming_decomp_check_deflate_trailing(
+                decomp, heap_buf_ptr, log);
+            if (check_rc != NGX_OK) {
+                return (int) check_rc;
             }
             decomp->finished = 1;
             return 1;
@@ -775,51 +852,14 @@ ngx_http_markdown_streaming_decomp_inflate_step(
     }
 
     if (decomp->state.zlib.avail_out == 0) {
-        size_t  remaining;
-        size_t  old_size;
+        ngx_int_t  grow_rc;
 
-        remaining = 0;
-        if (decomp->max_decompressed_size > 0) {
-            remaining = decomp->max_decompressed_size
-                        - decomp->total_decompressed;
-            if (*buf_size_ptr >= remaining) {
-                ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-                return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
-            }
-        }
-
-        old_size = *buf_size_ptr;
-
-        if (ngx_http_markdown_streaming_decomp_expand_buf(
-                heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log)
-            != NGX_OK)
-        {
-            return -1;
-        }
-
-        *using_heap_ptr = 1;
-
-        /*
-         * Expansion may cap growth at max_size, so resume at the old
-         * end (already-produced bytes remain intact at [0, old_size))
-         * and expose the actually-available space as avail_out.
-         */
-        decomp->state.zlib.next_out = *buf_ptr + old_size;
-        {
-            uInt  avail_out;
-
-            if (ngx_http_markdown_streaming_decomp_size_to_uint(
-                    *buf_size_ptr - old_size, &avail_out))
-            {
-                ngx_log_error(NGX_LOG_ERR, log, 0,
-                    "markdown: "
-                    "expanded buffer free space %uz exceeds "
-                    "zlib uInt max",
-                    *buf_size_ptr - old_size);
-                ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-                return NGX_ERROR;
-            }
-            decomp->state.zlib.avail_out = avail_out;
+        grow_rc = ngx_http_markdown_streaming_decomp_grow_output_buf(
+            decomp, buf_ptr, buf_size_ptr, heap_buf_ptr,
+            using_heap_ptr, log);
+        if (grow_rc != NGX_OK) {
+            return (grow_rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED)
+                ? (int) grow_rc : -1;
         }
     }
 

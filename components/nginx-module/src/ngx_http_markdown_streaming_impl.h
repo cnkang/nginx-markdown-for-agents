@@ -4615,6 +4615,52 @@ ngx_http_markdown_streaming_chain_has_terminal(ngx_chain_t *in,
 
 
 /*
+ * Handle last_buf finalization in the streaming body filter.
+ *
+ * When an upstream terminal buffer arrives, reset the terminal flag and
+ * call finalize_request.  If finalize returns NGX_DECLINED and the
+ * request is not eligible for streaming, route through failopen_passthrough.
+ *
+ * Returns the finalize/passthrough rc, or NGX_OK if no finalization needed.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_finalize_on_last_buf(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_chain_t *in,
+    ngx_flag_t last_buf)
+{
+    ngx_int_t  rc;
+
+    if (!last_buf) {
+        return NGX_OK;
+    }
+
+    ctx->streaming.completion.upstream_terminal_seen = 0;
+    rc = ngx_http_markdown_streaming_finalize_request(
+        r, ctx, conf);
+
+    if (rc == NGX_DECLINED && !ctx->eligible) {
+        /*
+         * Call failopen_passthrough first; only set the latch
+         * after successful downstream delivery.  Setting the
+         * latch before the call would cause a backpressure
+         * (NGX_AGAIN) re-entry to skip the resume path and
+         * lose pending output.  (Rule 47)
+         */
+        rc = ngx_http_markdown_streaming_failopen_passthrough(
+            r, ctx, in);
+        if (rc == NGX_OK) {
+            ctx->failopen_completed = 1;
+        }
+    }
+
+    return rc;
+}
+
+
+/*
  * Handle new non-NULL input arriving while streaming pending_output
  * is non-NULL (downstream backpressure active).
  *
@@ -4822,31 +4868,8 @@ ngx_http_markdown_streaming_body_filter(
     }
 
     /* Handle last_buf: finalize */
-    if (last_buf) {
-        ctx->streaming.completion.upstream_terminal_seen = 0;
-        rc = ngx_http_markdown_streaming_finalize_request(
-            r, ctx, conf);
-
-        if (rc == NGX_DECLINED && !ctx->eligible) {
-            /*
-             * Call failopen_passthrough first; only set the latch
-             * after successful downstream delivery.  Setting the
-             * latch before the call would cause a backpressure
-             * (NGX_AGAIN) re-entry to skip the resume path and
-             * lose pending output.  (Rule 47)
-             */
-            rc = ngx_http_markdown_streaming_failopen_passthrough(
-                r, ctx, in);
-            if (rc == NGX_OK) {
-                ctx->failopen_completed = 1;
-            }
-            return rc;
-        }
-
-        return rc;
-    }
-
-    return NGX_OK;
+    return ngx_http_markdown_streaming_finalize_on_last_buf(
+        r, ctx, conf, in, last_buf);
 }
 
 #endif /* MARKDOWN_STREAMING_ENABLED */
