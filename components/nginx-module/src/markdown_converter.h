@@ -313,6 +313,15 @@ typedef uint8_t FFIConflictLevel;
  * * `inner` — The [`IncrementalConverter`] instance that accumulates input
  *   chunks and performs the conversion.  Owned by the handle; moved into
  *   on construction and consumed on finalization.
+ * * `parser_memory_budget` — The per-handle parser memory budget in bytes
+ *   (0 means use the compiled-in default).  Enforced during
+ *   `markdown_incremental_feed` against accumulated parsing state.
+ * * `buffered_input_bytes` — Bytes of input currently buffered inside the
+ *   handle before being fed to the parser.  Bounded by the parser budget
+ *   and `MAX_BUFFER_SIZE`.
+ * * `buffered_tag_openers` — Conservative cumulative count of `<` bytes in
+ *   accepted input.  Together with accumulated input bytes, this estimates
+ *   parser and DOM working-set growth; it is not an unclosed-tag count.
  * * `generate_etag` — Whether to compute and emit a BLAKE3-based ETag in
  *   the final result.  Set once at construction from `MarkdownOptions`;
  *   immutable thereafter.
@@ -796,7 +805,7 @@ typedef struct FFIHeaderEntry {
    */
   uint8_t op_type;
   /**
-   * Pointer to header name (borrowed).
+   * Pointer to header name (NUL-terminated, borrowed from plan; NULL for set-etag-placeholder).
    */
   const uint8_t *key;
   /**
@@ -804,11 +813,11 @@ typedef struct FFIHeaderEntry {
    */
   uintptr_t key_len;
   /**
-   * Pointer to header value (NULL for delete).
+   * Pointer to header value (NUL-terminated, borrowed from plan; NULL for delete, delete-all, and set-etag-placeholder).
    */
   const uint8_t *value;
   /**
-   * Length of header value.
+   * Length of header value (0 for delete, delete-all, and set-etag-placeholder).
    */
   uintptr_t value_len;
 } FFIHeaderEntry;
@@ -1407,6 +1416,9 @@ void markdown_header_plan_free(struct FFIHeaderPlan *plan);
  * - `memory_budget`: 0 (use per-engine defaults)
  * - `llm_provider`: 0 (default)
  * - `chars_per_token_fixed`: 0 (use default ratio)
+ * - `parse_timeout_ms`: 0 (fall back to `timeout_ms`)
+ * - `parser_memory_budget`: 0 (no per-handle limit; use engine default)
+ * - `flush_threshold`: 0 (use default streaming flush threshold)
  *
  * # Safety
  *
