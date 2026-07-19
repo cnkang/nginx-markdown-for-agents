@@ -480,7 +480,7 @@ ngx_http_markdown_stream_postcommit_capture_pending(
 
 static void
 ngx_http_markdown_stream_postcommit_latch_terminal(
-    ngx_http_request_t *r,
+    const ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     const ngx_buf_t *buf,
     ngx_int_t rc)
