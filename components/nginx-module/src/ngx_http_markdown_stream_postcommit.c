@@ -306,12 +306,42 @@ ngx_http_markdown_stream_postcommit_abort(
                    "markdown postcommit abort: "
                    "initiating protocol-safe abort");
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    {
+        /*
+         * One-shot abort metric: record only on the first genuine
+         * transition into POST_COMMIT_ABORT when terminal has not
+         * already been sent (e.g., by safe_finish).
+         *
+         * Guard conditions (any true → skip metric):
+         *   1. Already in POST_COMMIT_ABORT (idempotent re-entry)
+         *   2. Terminal output already delivered for this request type
+         *
+         * The state transition below is idempotent (same value on
+         * re-entry), so we use the pre-transition state to distinguish
+         * first entry from re-entry.
+         */
+        ngx_http_markdown_stream_state_e  prev_state;
+        ngx_flag_t                        terminal_already_sent;
+
+        prev_state = ctx->stream_sm.state;
+
+        terminal_already_sent = (r == r->main)
+            ? ctx->streaming.main_terminal_sent
+            : ctx->streaming.subrequest_terminal_sent;
+
+        /* Transition to POST_COMMIT_ABORT */
+        ctx->stream_sm.state = NGX_HTTP_MD_STATE_POST_COMMIT_ABORT;
+
+        if (prev_state != NGX_HTTP_MD_STATE_POST_COMMIT_ABORT
+            && !terminal_already_sent)
+        {
+            ngx_http_markdown_metrics_record_postcommit_abort();
+        }
+    }
+#else
     /* Transition to POST_COMMIT_ABORT */
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_POST_COMMIT_ABORT;
-
-#ifdef MARKDOWN_STREAMING_ENABLED
-    NGX_HTTP_MARKDOWN_METRIC_INC(
-        streaming.streaming_failure_postcommit_abort);
 #endif
 
     /*

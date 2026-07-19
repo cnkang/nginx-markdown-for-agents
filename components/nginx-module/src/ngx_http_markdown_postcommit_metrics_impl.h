@@ -50,6 +50,19 @@ ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
     NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
 }
 
+/*
+ * Record a postcommit abort metric increment.
+ * Called from the postcommit TU after the one-shot guard passes.
+ * Caller is responsible for ensuring one-shot semantics (only call
+ * on the first genuine abort transition when terminal has not been sent).
+ */
+void
+ngx_http_markdown_metrics_record_postcommit_abort(void)
+{
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        streaming.streaming_failure_postcommit_abort);
+}
+
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 #endif /* NGX_HTTP_MARKDOWN_POSTCOMMIT_METRICS_IMPL_H */
