@@ -38,6 +38,7 @@ The following scenarios are implemented in `tools/e2e-harness/src/scenarios/`:
 - `conditional-requests`
 - `auth-cache`
 - `status-codes`
+- `brotli-streaming`
 
 For these scenarios, shell entrypoints are wrappers that delegate to
 `e2e-harness scenario <name>`.
