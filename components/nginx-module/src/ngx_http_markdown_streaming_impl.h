@@ -2506,6 +2506,12 @@ ngx_http_markdown_streaming_send_feed_output(
  *   ALLOCATION → failures_resource_limit + budget_exceeded_total
  *   DOWNSTREAM/INVARIANT → failures_conversion only
  *
+ * Note: this path does NOT increment streaming_failure_postcommit_abort.
+ * That metric is reserved for protocol-safe abort attempts (via
+ * postcommit_abort) that send an empty terminal chain.  Hard aborts
+ * reset the connection without a clean HTTP closure and are tracked
+ * solely by the failure_reason metrics above.
+ *
  * Returns:
  *   NGX_ERROR unconditionally (hard failure)
  */

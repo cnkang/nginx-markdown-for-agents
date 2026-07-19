@@ -145,9 +145,13 @@ ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
     UNUSED(bytes);
 }
 
+/* Track postcommit_abort metric invocations */
+static int test_abort_metric_count;
+
 void
 ngx_http_markdown_metrics_record_postcommit_abort(void)
 {
+    test_abort_metric_count++;
 }
 
 /* Include the decision engine source directly */
@@ -347,6 +351,7 @@ static void test_setup(void)
     test_output_free_called = 0;
     test_output_free_data = NULL;
     test_output_free_len = 0;
+    test_abort_metric_count = 0;
 }
 
 
@@ -1502,6 +1507,230 @@ static void test_guard_fails_html_comment(void)
 }
 
 
+/*
+ * Production-path test: first direct abort via stream_on_error increments
+ * the abort metric exactly once.
+ *
+ * Exercises the full production call chain:
+ *   stream_on_error → decision engine → state pre-transition →
+ *   postcommit_abort → metric helper
+ *
+ * This validates the independent-latch fix: even though stream_on_error
+ * sets ctx->stream_sm.state = POST_COMMIT_ABORT before calling
+ * postcommit_abort(), the metric must still be recorded on first entry.
+ */
+static void test_on_error_abort_metric_first_call(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+
+    /* Downstream accepts terminal chain */
+    test_output_filter_rc = NGX_OK;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+
+    TEST_ASSERT(rc == NGX_OK,
+        "on_error reject from COMMITTED returns NGX_OK");
+    TEST_ASSERT(ctx.stream_sm.state == NGX_HTTP_MD_STATE_POST_COMMIT_ABORT,
+        "state must be POST_COMMIT_ABORT");
+    TEST_ASSERT(test_abort_metric_count == 1,
+        "abort metric must be incremented exactly once on first abort");
+    TEST_ASSERT(ctx.streaming.completion.postcommit_abort_recorded == 1,
+        "postcommit_abort_recorded latch must be set");
+    TEST_PASS("on_error abort metric first call increments (production path)");
+}
+
+
+/*
+ * Production-path test: repeated on_error abort does NOT double-count
+ * the abort metric (idempotent re-entry).
+ */
+static void test_on_error_abort_metric_idempotent(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+
+    /* Downstream accepts terminal chain */
+    test_output_filter_rc = NGX_OK;
+
+    /* First call */
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK, "first on_error abort succeeds");
+    TEST_ASSERT(test_abort_metric_count == 1, "metric == 1 after first");
+
+    /* Second call (idempotent re-entry) */
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK, "second on_error abort succeeds");
+    TEST_ASSERT(test_abort_metric_count == 1,
+        "abort metric must remain 1 after idempotent re-entry");
+    TEST_PASS("on_error abort metric idempotent (no double-count)");
+}
+
+
+/*
+ * Production-path test: abort after NGX_AGAIN resume still counts
+ * the metric only once.
+ *
+ * Simulates: first call returns NGX_AGAIN (backpressure), then a
+ * second direct call to postcommit_abort (after resume) — metric
+ * must still be 1.  The second call may succeed or fail depending
+ * on downstream state, but the metric must not double-count.
+ */
+static void test_on_error_abort_metric_after_again(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+
+    /* First call: downstream returns NGX_AGAIN (backpressure) */
+    test_output_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "on_error abort returns NGX_AGAIN on backpressure");
+    TEST_ASSERT(test_abort_metric_count == 1,
+        "abort metric must be 1 even when send returns NGX_AGAIN");
+    TEST_ASSERT(ctx.streaming.completion.postcommit_abort_recorded == 1,
+        "latch must be set on first attempt regardless of send result");
+
+    /* Simulate re-entry after resume: downstream now accepts */
+    test_output_filter_rc = NGX_OK;
+    test_output_filter_called = 0;
+    rc = ngx_http_markdown_stream_postcommit_abort(&test_request, &ctx);
+
+    /* The re-entry send outcome is implementation-specific, but the
+     * metric must NOT double-count. */
+    TEST_ASSERT(test_abort_metric_count == 1,
+        "abort metric must remain 1 after resume re-entry");
+    TEST_PASS("on_error abort metric stable across NGX_AGAIN resume");
+}
+
+
+/*
+ * Production-path test: abort metric suppressed when terminal was already
+ * sent (e.g., safe_finish succeeded, then abort is erroneously called).
+ */
+static void test_abort_metric_suppressed_terminal_already_sent(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_POST_COMMIT_SAFE_FINISH;
+    ctx.streaming.main_terminal_sent = 1;
+    test_request.main = &test_request;
+
+    /* Terminal already sent — abort metric must not fire */
+    test_output_filter_rc = NGX_OK;
+    rc = ngx_http_markdown_stream_postcommit_abort(&test_request, &ctx);
+    TEST_ASSERT(rc == NGX_OK, "abort succeeds");
+    TEST_ASSERT(test_abort_metric_count == 0,
+        "abort metric must be 0 when terminal was already sent");
+    TEST_ASSERT(ctx.streaming.completion.postcommit_abort_recorded == 0,
+        "latch must not be set when terminal was already sent");
+    TEST_PASS("abort metric suppressed when terminal already sent");
+}
+
+
+/*
+ * Production-path test: terminal send definitive failure (NGX_ERROR)
+ * still records the abort metric (the attempt happened, even though
+ * delivery failed).
+ */
+static void test_abort_metric_recorded_on_send_failure(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+
+    /* Downstream fails definitively */
+    test_output_filter_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "on_error abort propagates send failure");
+    TEST_ASSERT(test_abort_metric_count == 1,
+        "abort metric must be 1 even when send fails (attempt counted)");
+    TEST_ASSERT(ctx.streaming.completion.postcommit_abort_recorded == 1,
+        "latch must be set even on send failure");
+    TEST_PASS("abort metric recorded even on terminal send failure");
+}
+
+
+/*
+ * Production-path test: safe_finish fallback to abort still records
+ * the abort metric through the production on_error path.
+ *
+ * Scenario: on_error=pass, safe_finish fails → falls back to abort.
+ * The handle must be non-NULL so the Rust safe_finish path is taken.
+ */
+static void test_on_error_safe_finish_fallback_abort_metric(void)
+{
+    ngx_http_markdown_ctx_t ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_int_t rc;
+
+    test_setup();
+    memset(&ctx, 0, sizeof(ctx));
+    memset(&conf, 0, sizeof(conf));
+
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    ctx.streaming.handle =
+        (struct StreamingConverterHandle *) (uintptr_t) 0x1;
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_PASS;
+
+    /* Make safe_finish return an unexpected code (not SAFE_FINISH) */
+    test_safe_finish_rc = 99;
+    test_output_filter_rc = NGX_OK;
+
+    rc = ngx_http_markdown_stream_on_error(&test_request, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_OK,
+        "safe_finish failure falls back to abort successfully");
+    TEST_ASSERT(test_abort_metric_count == 1,
+        "abort metric must be 1 after safe_finish fallback to abort");
+    TEST_ASSERT(ctx.streaming.completion.postcommit_abort_recorded == 1,
+        "latch must be set after fallback abort");
+    TEST_PASS("safe_finish fallback to abort records abort metric");
+}
+
+
 int main(void)
 {
     TEST_SECTION("Post-commit Safety Property (streaming fallback state machine, post-commit safety)");
@@ -1553,6 +1782,14 @@ int main(void)
 
     TEST_SECTION("Post-commit on_error terminal-only NGX_AGAIN regression");
     test_on_error_terminal_only_again_no_abort();
+
+    TEST_SECTION("Post-commit abort metric production-path (one-shot latch)");
+    test_on_error_abort_metric_first_call();
+    test_on_error_abort_metric_idempotent();
+    test_on_error_abort_metric_after_again();
+    test_abort_metric_suppressed_terminal_already_sent();
+    test_abort_metric_recorded_on_send_failure();
+    test_on_error_safe_finish_fallback_abort_metric();
 
     printf("\n  All post-commit safety tests passed\n\n");
     return 0;

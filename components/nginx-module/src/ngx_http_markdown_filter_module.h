@@ -1187,6 +1187,12 @@ typedef struct {
              * must NOT retry the terminal via abort — propagate the send
              * failure directly. */
             ngx_flag_t                    safe_finish_terminal_send_failed;
+
+            /* One-shot latch: protocol-safe abort metric has been recorded
+             * for this request.  Independent of stream_sm.state because
+             * callers (stream_on_error) may pre-transition the state before
+             * invoking postcommit_abort(). */
+            ngx_flag_t                    postcommit_abort_recorded;
         } completion;
     } streaming;
 } ngx_http_markdown_ctx_t;
