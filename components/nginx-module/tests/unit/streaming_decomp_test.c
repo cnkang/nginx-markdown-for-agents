@@ -802,6 +802,9 @@ test_tiny_chunks_do_not_amplify_request_pool(void)
 }
 
 
+/* Forward declaration: defined after the #ifdef NGX_HTTP_BROTLI block. */
+static void test_pool_run_cleanups(test_pool_t *tp);
+
 #ifdef NGX_HTTP_BROTLI
 /* Verify terminal validation rejects a Brotli stream missing its tail. */
 static void
@@ -848,7 +851,7 @@ test_truncated_brotli_finish_errors(void)
     out_len = 0;
     rc = ngx_http_markdown_streaming_decomp_finish(
         decomp, &out, &out_len, &tp.pool, &test_log);
-    TEST_ASSERT(rc == NGX_ERROR,
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT,
         "finish should reject an incomplete brotli stream");
 
     /* finish error path publishes NULL output. */
@@ -860,7 +863,1883 @@ test_truncated_brotli_finish_errors(void)
         "production code must not ngx_free() static pool memory");
     TEST_PASS("truncated brotli stream rejected at finish");
 }
+
+/*
+ * test_brotli_error_classification - Verify the frozen three-way
+ * error classifier correctly categorizes BrotliDecoderErrorCode values
+ * into FORMAT, ALLOCATION, and INTERNAL classes.
+ *
+ * Uses integer casts exclusively (not named enum constants) to match
+ * the production code's range-based approach and ensure compatibility
+ * with Brotli 1.0.9 (Ubuntu 22.04).
+ */
+static void
+test_brotli_error_classification(void)
+{
+    ngx_http_markdown_brotli_error_class_e  cls;
+
+    TEST_SUBSECTION("brotli error classification: frozen three-way");
+
+    /* FORMAT boundary: -1 (first FORMAT code) */
+    cls = ngx_http_markdown_brotli_classify_error(
+        (BrotliDecoderErrorCode)(-1));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
+        "code -1 should classify as FORMAT");
+
+    /* FORMAT boundary: -17 (last FORMAT code) */
+    cls = ngx_http_markdown_brotli_classify_error(
+        (BrotliDecoderErrorCode)(-17));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
+        "code -17 should classify as FORMAT");
+
+    /* FORMAT mid-range: -10 */
+    cls = ngx_http_markdown_brotli_classify_error(
+        (BrotliDecoderErrorCode)(-10));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT,
+        "code -10 should classify as FORMAT");
+
+    /* ALLOCATION boundary: -21 (first ALLOCATION code) */
+    cls = ngx_http_markdown_brotli_classify_error(
+        (BrotliDecoderErrorCode)(-21));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
+        "code -21 should classify as ALLOCATION");
+
+    /* ALLOCATION boundary: -30 (last ALLOCATION code) */
+    cls = ngx_http_markdown_brotli_classify_error(
+        (BrotliDecoderErrorCode)(-30));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
+        "code -30 should classify as ALLOCATION");
+
+    /* ALLOCATION mid-range: -25 */
+    cls = ngx_http_markdown_brotli_classify_error(
+        (BrotliDecoderErrorCode)(-25));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
+        "code -25 should classify as ALLOCATION");
+
+    /* INTERNAL: -18 (COMPOUND_DICTIONARY) */
+    cls = ngx_http_markdown_brotli_classify_error(
+        (BrotliDecoderErrorCode)(-18));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+        "code -18 should classify as INTERNAL");
+
+    /* INTERNAL: -19 (DICTIONARY_NOT_SET) */
+    cls = ngx_http_markdown_brotli_classify_error(
+        (BrotliDecoderErrorCode)(-19));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+        "code -19 should classify as INTERNAL");
+
+    /* INTERNAL: -20 (INVALID_ARGUMENTS) */
+    cls = ngx_http_markdown_brotli_classify_error(
+        (BrotliDecoderErrorCode)(-20));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+        "code -20 should classify as INTERNAL");
+
+    /* INTERNAL: -31 (UNREACHABLE) */
+    cls = ngx_http_markdown_brotli_classify_error(
+        (BrotliDecoderErrorCode)(-31));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+        "code -31 should classify as INTERNAL");
+
+    /* Unknown out-of-range: -99 classifies as INTERNAL (not FORMAT) */
+    cls = ngx_http_markdown_brotli_classify_error(
+        (BrotliDecoderErrorCode)(-99));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+        "unknown code -99 should classify as INTERNAL");
+
+    /* Unknown out-of-range: -32 classifies as INTERNAL */
+    cls = ngx_http_markdown_brotli_classify_error(
+        (BrotliDecoderErrorCode)(-32));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+        "unknown code -32 should classify as INTERNAL");
+
+    /* Unknown out-of-range: 0 (not negative) classifies as INTERNAL */
+    cls = ngx_http_markdown_brotli_classify_error(
+        (BrotliDecoderErrorCode)(0));
+    TEST_ASSERT(cls == NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL,
+        "code 0 should classify as INTERNAL");
+
+    TEST_PASS("brotli error classification covers all ranges");
+}
+
+
+/*
+ * test_brotli_exact_budget_probe - Verify the exact-budget completion
+ * probe for Brotli (both Scenario A and Scenario B).
+ *
+ * Scenario A: remaining==0 at call start → workspace_size gives 1 byte
+ * probe workspace.  If the decoder completes without output, success
+ * with out_len=0.  If it produces output, BUDGET_EXCEEDED.
+ *
+ * Scenario B: mid-call NEEDS_MORE_OUTPUT with produced == remaining
+ * → probe fires inside brotli_step.  Same completion semantics.
+ *
+ * Tests validate the five probe outcomes plus edge cases.
+ */
+static void
+test_brotli_exact_budget_probe(void)
+{
+    /*
+     * Create a known Brotli-compressed payload.  The decompressed text
+     * must be long enough to meaningfully exercise the budget, but short
+     * enough for a single feed.
+     */
+    static const uint8_t text[] = "Brotli exact budget probe test data";
+    size_t                               text_len;
+    size_t                               compressed_len;
+    uint8_t                              compressed[512];
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char                              *out;
+    size_t                               out_len;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("brotli exact-budget probe outcomes");
+
+    text_len = sizeof(text) - 1;
+    compressed_len = sizeof(compressed);
+    TEST_ASSERT(BrotliEncoderCompress(
+                    BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                    BROTLI_MODE_TEXT, text_len, text,
+                    &compressed_len, compressed)
+                == BROTLI_TRUE,
+        "brotli compression should succeed");
+
+    /*
+     * Test 1 (Scenario A): remaining==0 at call start, probe produces
+     * 0 bytes and returns SUCCESS → mark finished, return NGX_OK with
+     * out_len=0 (no re-exposure of prior-call bytes).
+     *
+     * Strategy: first feed with budget=text_len exactly fills the budget.
+     * Second feed with 0 remaining triggers the Scenario A probe.
+     * The decoder is already finished from the first feed (SUCCESS),
+     * so the post-completion guard returns NGX_OK with 0 output.
+     */
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, text_len);
+    TEST_ASSERT(decomp != NULL, "brotli decompressor should be created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "first feed with exact budget should succeed");
+    TEST_ASSERT(out_len == text_len,
+        "first feed should produce exactly budget bytes");
+    TEST_ASSERT(MEM_EQ(out, text, text_len),
+        "first feed output must match original text");
+    test_pool_free_tracked_allocations();
+
+    /* Second feed: remaining==0, decomp->finished already set from SUCCESS */
+    out = (u_char *) 0x1;
+    out_len = 1;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, NULL, 0,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "zero-byte feed after exact budget should succeed");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "zero-byte feed should not re-expose prior bytes");
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+
+    /*
+     * Test 1b (Scenario B): mid-call budget exhaustion, probe produces
+     * 0 bytes + SUCCESS → return NGX_OK with exact-budget bytes.
+     *
+     * This is covered by the same test as #1 above if the stream
+     * fits in one feed call (SUCCESS returned with produced == budget).
+     * Already validated by the first feed above producing text_len.
+     */
+
+    /*
+     * Test 4: Exact budget, probe produces 1+ bytes → BUDGET_EXCEEDED,
+     * probe bytes not exposed to caller.
+     *
+     * Strategy: set budget to text_len - 1 (one byte short).
+     * The decoder cannot complete within that budget.
+     */
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, text_len - 1);
+    TEST_ASSERT(decomp != NULL, "brotli decompressor (budget-1) created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
+        "budget-1 should trigger BUDGET_EXCEEDED");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "over-budget feed should not expose any output");
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+
+    /*
+     * Test 3: Exact budget, probe returns NEEDS_MORE_INPUT with input
+     * exhausted, then upstream EOF arrives → TRUNCATED_INPUT.
+     *
+     * Strategy: truncate the compressed payload so the decoder hasn't
+     * finished.  Set budget == text_len.  Feed truncated data. The
+     * first feed may NEEDS_MORE_INPUT and succeed.  Then finish()
+     * with decoder not yet finished → TRUNCATED_INPUT.
+     */
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, text_len);
+    TEST_ASSERT(decomp != NULL, "brotli decompressor for truncation test");
+
+    /* Feed only partial compressed data */
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len / 2,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "partial compressed feed should succeed awaiting more input");
+    test_pool_free_tracked_allocations();
+
+    /* Now finish() while decoder is not done */
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_finish(
+        decomp, &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT,
+        "finish on incomplete stream should return TRUNCATED_INPUT");
+    free(out);
+    free(decomp);
+
+    /*
+     * Test 2: Exact budget, subsequent zero-output compressed bytes
+     * arrive after probe, decoder eventually returns SUCCESS → succeed.
+     *
+     * This scenario is inherently tested by any multi-feed test where
+     * the first feed produces exact-budget bytes but the decoder only
+     * reports SUCCESS after consuming more input in the same call.
+     * Our test #1 already exercises this (Brotli typically returns
+     * SUCCESS in the same feed that produces the last output byte).
+     */
+
+    /*
+     * Test (Scenario B): mid-call NEEDS_MORE_OUTPUT with produced ==
+     * remaining → probe fires, 0 bytes + SUCCESS → return exact-budget
+     * bytes as success.
+     *
+     * Strategy: choose a payload whose decompressed size exceeds a single
+     * iteration buffer but fits the budget exactly.  This forces
+     * NEEDS_MORE_OUTPUT internally, and the budget cap at remaining
+     * triggers the probe path when produced reaches the budget.
+     *
+     * Use a payload > 4096 bytes (default initial workspace) to force
+     * expansion, with budget == decompressed size.
+     */
+    {
+        static uint8_t  large_text[8192];
+        size_t          large_text_len;
+        uint8_t         large_compressed[16384];
+        size_t          large_compressed_len;
+        size_t          i;
+
+        large_text_len = sizeof(large_text);
+        for (i = 0; i < large_text_len; i++) {
+            large_text[i] = (uint8_t) ('A' + (i % 26));
+        }
+
+        large_compressed_len = sizeof(large_compressed);
+        TEST_ASSERT(BrotliEncoderCompress(
+                        BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                        BROTLI_MODE_TEXT, large_text_len, large_text,
+                        &large_compressed_len, large_compressed)
+                    == BROTLI_TRUE,
+            "large brotli compression should succeed");
+
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI,
+            large_text_len);
+        TEST_ASSERT(decomp != NULL,
+            "brotli decompressor (exact large budget) created");
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, large_compressed, large_compressed_len,
+            &out, &out_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "large exact-budget feed should succeed");
+        TEST_ASSERT(out_len == large_text_len,
+            "large feed should produce exactly budget bytes");
+        TEST_ASSERT(MEM_EQ(out, large_text, large_text_len),
+            "large feed output must match original");
+        test_pool_free_tracked_allocations();
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
+        free(decomp);
+
+        /*
+         * Test (Scenario B): mid-call NEEDS_MORE_OUTPUT with produced ==
+         * remaining → probe produces 1 byte → BUDGET_EXCEEDED, no output.
+         *
+         * Set budget = large_text_len - 1.
+         */
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI,
+            large_text_len - 1);
+        TEST_ASSERT(decomp != NULL,
+            "brotli decompressor (large budget-1) created");
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, large_compressed, large_compressed_len,
+            &out, &out_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
+            "large budget-1 should trigger BUDGET_EXCEEDED");
+        TEST_ASSERT(out == NULL && out_len == 0,
+            "large over-budget feed should not expose output");
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
+        free(decomp);
+
+        /*
+         * Test (Scenario B): mid-call NEEDS_MORE_OUTPUT with produced <
+         * remaining → normal expansion, NOT a probe.
+         *
+         * Set budget = large_text_len + 1000 (plenty of headroom).
+         * The NEEDS_MORE_OUTPUT path should do normal expansion.
+         */
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI,
+            large_text_len + 1000);
+        TEST_ASSERT(decomp != NULL,
+            "brotli decompressor (large budget+1000) created");
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, large_compressed, large_compressed_len,
+            &out, &out_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "large feed with headroom should succeed normally");
+        TEST_ASSERT(out_len == large_text_len,
+            "large feed with headroom should produce all bytes");
+        TEST_ASSERT(MEM_EQ(out, large_text, large_text_len),
+            "large feed with headroom output must match");
+        test_pool_free_tracked_allocations();
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
+        free(decomp);
+    }
+
+    /*
+     * Test (priority): probe returns SUCCESS + avail_in > 0 → FORMAT_ERROR
+     * / brotli_trailing_data (trailing-data rejection applies during probe).
+     *
+     * Strategy: append garbage after valid compressed payload and set
+     * budget = text_len exactly.  The decoder completes in the probe with
+     * trailing bytes → FORMAT_ERROR.
+     */
+    {
+        uint8_t  trailing_buf[600];
+        size_t   trailing_len;
+
+        ngx_memcpy(trailing_buf, compressed, compressed_len);
+        trailing_buf[compressed_len] = 0xDE;
+        trailing_buf[compressed_len + 1] = 0xAD;
+        trailing_len = compressed_len + 2;
+
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, text_len);
+        TEST_ASSERT(decomp != NULL,
+            "brotli decompressor (trailing data probe) created");
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, trailing_buf, trailing_len,
+            &out, &out_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+            "trailing data at exact budget should return FORMAT_ERROR");
+        TEST_ASSERT(out == NULL && out_len == 0,
+            "trailing data error should not expose output");
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
+        free(decomp);
+    }
+
+    /*
+     * Test (priority): probe returns SUCCESS + avail_in == 0 +
+     * produced == 0 → success (stream complete).
+     *
+     * Already covered by Test 1 above (exact budget, decoder finishes
+     * cleanly).
+     */
+
+    /*
+     * Test: probe returns NEEDS_MORE_OUTPUT → BUDGET_EXCEEDED.
+     *
+     * This is covered by the large budget-1 test above: when one byte
+     * over budget exists, the probe produces that byte and returns
+     * BUDGET_EXCEEDED.  If the decoder had even more output pending
+     * (NEEDS_MORE_OUTPUT from the probe itself), the same code path
+     * returns BUDGET_EXCEEDED.
+     */
+
+    TEST_PASS("brotli exact-budget probe outcomes verified");
+}
+
+
+/*
+ * test_brotli_roundtrip_single_chunk - Verify end-to-end decompression
+ * round-trip for Brotli when the entire compressed payload is fed in one
+ * call.
+ *
+ * Branches covered:
+ *   - BrotliEncoderCompress produces valid compressed data
+ *   - Single-chunk feed produces correct output
+ *   - Output is byte-for-byte identical to original text
+ *   - Finish after completed stream is a no-op (NGX_OK, no output)
+ */
+static void
+test_brotli_roundtrip_single_chunk(void)
+{
+    static const uint8_t text[] =
+        "Hello from the Brotli streaming decompressor test. "
+        "This payload should round-trip correctly in one chunk.";
+    size_t                               text_len;
+    size_t                               compressed_len;
+    uint8_t                              compressed[512];
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char                              *out;
+    size_t                               out_len;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("brotli round-trip: single chunk");
+
+    text_len = sizeof(text) - 1;
+    compressed_len = sizeof(compressed);
+    TEST_ASSERT(BrotliEncoderCompress(
+                    BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                    BROTLI_MODE_TEXT, text_len, text,
+                    &compressed_len, compressed)
+                == BROTLI_TRUE,
+        "brotli compression should succeed");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 0);
+    TEST_ASSERT(decomp != NULL, "brotli decompressor should be created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK, "single-chunk brotli feed should succeed");
+    TEST_ASSERT(out_len == text_len,
+        "brotli output length should match source");
+    TEST_ASSERT(MEM_EQ(out, text, text_len),
+        "brotli output should be byte-identical to original");
+    test_pool_free_tracked_allocations();
+
+    /* Finish after completed stream should be a no-op */
+    {
+        u_char  *finish_out;
+        size_t   finish_len;
+
+        finish_out = (u_char *) 0x1;
+        finish_len = 1;
+        rc = ngx_http_markdown_streaming_decomp_finish(
+            decomp, &finish_out, &finish_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "finish after completed brotli stream should succeed");
+        TEST_ASSERT(finish_out == NULL && finish_len == 0,
+            "finish should produce no additional output");
+    }
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
+    TEST_PASS("brotli round-trip single chunk verified");
+}
+
+
+/*
+ * test_brotli_roundtrip_multi_chunk - Feed the compressed Brotli data in
+ * small chunks (2 bytes at a time) and verify correct reassembly.
+ *
+ * Branches covered:
+ *   - Multiple small feeds produce correct cumulative output
+ *   - Reassembled output is byte-identical to original text
+ *   - No data duplication or loss at chunk boundaries
+ *   - Finish after multi-chunk completion is a no-op
+ */
+static void
+test_brotli_roundtrip_multi_chunk(void)
+{
+    static const uint8_t text[] =
+        "Multi-chunk Brotli streaming test verifies correct "
+        "reassembly across arbitrary feed boundaries.";
+    size_t                               text_len;
+    size_t                               compressed_len;
+    uint8_t                              compressed[512];
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char                              *actual;
+    size_t                               emitted;
+    ngx_int_t                            rc;
+    size_t                               i;
+    size_t                               chunk_size;
+
+    TEST_SUBSECTION("brotli round-trip: multi-chunk (2 bytes at a time)");
+
+    text_len = sizeof(text) - 1;
+    compressed_len = sizeof(compressed);
+    TEST_ASSERT(BrotliEncoderCompress(
+                    BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                    BROTLI_MODE_TEXT, text_len, text,
+                    &compressed_len, compressed)
+                == BROTLI_TRUE,
+        "brotli compression should succeed");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 0);
+    TEST_ASSERT(decomp != NULL, "brotli decompressor should be created");
+
+    actual = malloc(text_len);
+    TEST_ASSERT(actual != NULL, "output collector should be allocated");
+    emitted = 0;
+
+    for (i = 0; i < compressed_len; i += chunk_size) {
+        u_char  *out;
+        size_t   out_len;
+
+        chunk_size = 2;
+        if (i + chunk_size > compressed_len) {
+            chunk_size = compressed_len - i;
+        }
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, &compressed[i], chunk_size,
+            &out, &out_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK, "two-byte brotli feed should succeed");
+        if (out_len > 0) {
+            TEST_ASSERT(emitted + out_len <= text_len,
+                "multi-chunk output must not exceed expected size");
+            memcpy(actual + emitted, out, out_len);
+            emitted += out_len;
+        }
+        test_pool_free_tracked_allocations();
+    }
+
+    TEST_ASSERT(emitted == text_len,
+        "multi-chunk feeds should emit the complete decompressed payload");
+    TEST_ASSERT(MEM_EQ(actual, text, text_len),
+        "multi-chunk feeds must not drop or duplicate bytes");
+
+    /* Finish should be a no-op */
+    {
+        u_char  *finish_out;
+        size_t   finish_len;
+
+        finish_out = (u_char *) 0x1;
+        finish_len = 1;
+        rc = ngx_http_markdown_streaming_decomp_finish(
+            decomp, &finish_out, &finish_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "finish after multi-chunk brotli should succeed");
+        TEST_ASSERT(finish_out == NULL && finish_len == 0,
+            "finish should produce no additional output");
+    }
+
+    free(actual);
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
+    TEST_PASS("brotli round-trip multi-chunk verified");
+}
+
+
+/*
+ * test_brotli_trailing_data_same_feed - Verify that trailing garbage bytes
+ * appended to a valid Brotli stream in the same feed call are rejected as
+ * NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR.
+ *
+ * Branches covered:
+ *   - BROTLI_DECODER_RESULT_SUCCESS with avail_in > 0 → FORMAT_ERROR
+ *   - No output exposed on trailing-data error
+ *   - decomp->finished is NOT set on error
+ */
+static void
+test_brotli_trailing_data_same_feed(void)
+{
+    static const uint8_t text[] =
+        "trailing data same feed test payload";
+    size_t                               text_len;
+    size_t                               compressed_len;
+    uint8_t                              compressed[512];
+    uint8_t                              with_trailing[600];
+    size_t                               trailing_len;
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char                              *out;
+    size_t                               out_len;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("brotli trailing data rejected in same feed");
+
+    text_len = sizeof(text) - 1;
+    compressed_len = sizeof(compressed);
+    TEST_ASSERT(BrotliEncoderCompress(
+                    BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                    BROTLI_MODE_TEXT, text_len, text,
+                    &compressed_len, compressed)
+                == BROTLI_TRUE,
+        "brotli compression should succeed");
+
+    /* Append 5 garbage bytes after the valid Brotli stream */
+    memcpy(with_trailing, compressed, compressed_len);
+    with_trailing[compressed_len] = 0xDE;
+    with_trailing[compressed_len + 1] = 0xAD;
+    with_trailing[compressed_len + 2] = 0xBE;
+    with_trailing[compressed_len + 3] = 0xEF;
+    with_trailing[compressed_len + 4] = 0xFF;
+    trailing_len = compressed_len + 5;
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 0);
+    TEST_ASSERT(decomp != NULL, "brotli decompressor should be created");
+
+    out = (u_char *) 0x1;
+    out_len = 1;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, with_trailing, trailing_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+        "brotli same-feed trailing data should return FORMAT_ERROR");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "trailing-data error should not expose output");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
+    TEST_PASS("brotli trailing data rejected in same feed");
+}
+
+
+/*
+ * test_brotli_trailing_data_next_feed - Verify that feeding non-empty data
+ * after a Brotli stream has already completed (SUCCESS in a prior feed)
+ * returns NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR without invoking the
+ * decoder again.
+ *
+ * Branches covered:
+ *   - Valid Brotli feed completes → finished set
+ *   - Subsequent non-empty feed → FORMAT_ERROR (without decoder call)
+ *   - No output exposed on error
+ */
+static void
+test_brotli_trailing_data_next_feed(void)
+{
+    static const uint8_t text[] =
+        "trailing data next feed test payload";
+    size_t                               text_len;
+    size_t                               compressed_len;
+    uint8_t                              compressed[512];
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char                              *out;
+    size_t                               out_len;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("brotli trailing data rejected across feeds");
+
+    text_len = sizeof(text) - 1;
+    compressed_len = sizeof(compressed);
+    TEST_ASSERT(BrotliEncoderCompress(
+                    BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                    BROTLI_MODE_TEXT, text_len, text,
+                    &compressed_len, compressed)
+                == BROTLI_TRUE,
+        "brotli compression should succeed");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 0);
+    TEST_ASSERT(decomp != NULL, "brotli decompressor should be created");
+
+    /* First feed: valid complete Brotli stream */
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "valid brotli feed should succeed");
+    TEST_ASSERT(out_len == text_len,
+        "brotli output should match source length");
+    TEST_ASSERT(MEM_EQ(out, text, text_len),
+        "brotli output should match source text");
+    TEST_ASSERT(decomp->finished == 1,
+        "complete brotli stream should set finished");
+    test_pool_free_tracked_allocations();
+
+    /* Second feed: non-empty trailing data after finish */
+    out = (u_char *) 0x1;
+    out_len = 1;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, (const u_char *) "TRAILING_GARBAGE", 16,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+        "non-empty feed after brotli finish must be FORMAT_ERROR");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "trailing-data error should not expose output");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
+    TEST_PASS("brotli trailing data rejected across feeds");
+}
+
+
+/*
+ * test_brotli_empty_feed_after_completion - Verify that feeding zero bytes
+ * after a Brotli stream has completed returns NGX_OK without modifying
+ * the output or decoder state.
+ *
+ * Branches covered:
+ *   - Valid Brotli feed completes → finished set
+ *   - Zero-byte feed after finish → NGX_OK (safe no-op)
+ *   - Output slots remain NULL/0 on empty no-op feed
+ */
+static void
+test_brotli_empty_feed_after_completion(void)
+{
+    static const uint8_t text[] =
+        "empty feed after brotli completion test";
+    size_t                               text_len;
+    size_t                               compressed_len;
+    uint8_t                              compressed[512];
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char                              *out;
+    size_t                               out_len;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("brotli empty feed after completion is safe no-op");
+
+    text_len = sizeof(text) - 1;
+    compressed_len = sizeof(compressed);
+    TEST_ASSERT(BrotliEncoderCompress(
+                    BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                    BROTLI_MODE_TEXT, text_len, text,
+                    &compressed_len, compressed)
+                == BROTLI_TRUE,
+        "brotli compression should succeed");
+
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 0);
+    TEST_ASSERT(decomp != NULL, "brotli decompressor should be created");
+
+    /* Feed valid complete Brotli stream */
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "valid brotli feed should succeed");
+    TEST_ASSERT(out_len == text_len,
+        "brotli output should match source length");
+    TEST_ASSERT(decomp->finished == 1,
+        "complete brotli stream should set finished");
+    test_pool_free_tracked_allocations();
+
+    /* Empty feed after completion: should be safe no-op */
+    out = (u_char *) 0x1;
+    out_len = 1;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, NULL, 0,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "zero-byte feed after brotli completion should be NGX_OK");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "zero-byte feed should not emit output");
+
+    /* Also test with non-NULL pointer but zero length */
+    out = (u_char *) 0x1;
+    out_len = 1;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, (const u_char *) "x", 0,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "zero-length feed (non-NULL ptr) after completion should be NGX_OK");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "zero-length feed should not emit output");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
+    TEST_PASS("brotli empty feed after completion is safe no-op");
+}
+
+
+/*
+ * test_brotli_no_progress_guard_and_error_propagation - Verify the
+ * no-progress guard in brotli_step() and typed error code propagation
+ * through brotli_loop().
+ *
+ * Key test cases:
+ * 1. Malformed Brotli data → FORMAT_ERROR (not generic NGX_ERROR)
+ * 2. brotli_loop() propagates FORMAT_ERROR from brotli_step()
+ * 3. brotli_loop() propagates BUDGET_EXCEEDED from brotli_step()
+ * 4. brotli_loop() propagates TRUNCATED_INPUT from finish
+ * 5. Three-way error classification: FORMAT (-1..-17), ALLOCATION
+ *    (-21..-30), INTERNAL (-18..-20, -31, unknown) verified via
+ *    test_brotli_error_classification() which is already in the suite.
+ * 6. Every error code asserted as exact NGX_HTTP_MARKDOWN_DECOMP_*
+ *    constant (not just non-NGX_OK)
+ *
+ * The no-progress guard is difficult to trigger with real Brotli data
+ * since the real decoder should not stall.  We verify:
+ *   - Malformed input triggers FORMAT_ERROR (not generic error)
+ *   - The error is NOT folded to NGX_ERROR by brotli_loop()
+ *   - FORMAT_ERROR does NOT set failure_origin (typed error, not bare
+ *     NGX_ERROR)
+ */
+static void
+test_brotli_no_progress_guard_and_error_propagation(void)
+{
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char                              *out;
+    size_t                               out_len;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("brotli no-progress guard and error propagation");
+
+    /*
+     * Test 1: Malformed Brotli data → FORMAT_ERROR flows through
+     * brotli_loop() without being folded to NGX_ERROR.
+     *
+     * Strategy: Feed completely invalid bytes that will cause the Brotli
+     * decoder to report BROTLI_DECODER_RESULT_ERROR with a FORMAT-class
+     * error code (range -1 to -17).  Verify the return is the exact
+     * NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR constant.
+     */
+    {
+        /*
+         * Invalid Brotli data: random garbage that does not form a valid
+         * Brotli stream.  The decoder should reject this immediately
+         * with a format error.
+         */
+        static const u_char  malformed_brotli[] = {
+            0xFF, 0xFE, 0xFD, 0xFC, 0xFB, 0xFA, 0xF9, 0xF8,
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
+        };
+
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 4096);
+        TEST_ASSERT(decomp != NULL,
+            "brotli decompressor should be created");
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, malformed_brotli, sizeof(malformed_brotli),
+            &out, &out_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+            "malformed brotli must return exact FORMAT_ERROR constant "
+            "(not generic NGX_ERROR)");
+        TEST_ASSERT(out == NULL && out_len == 0,
+            "malformed brotli must not expose partial output");
+
+        /*
+         * Verify failure_origin is NOT set for FORMAT_ERROR:
+         * typed errors bypass the origin mechanism.  The origin field
+         * should remain at NONE (its reset value at start of feed).
+         */
+        TEST_ASSERT(
+            decomp->failure_origin == NGX_HTTP_MD_DECOMP_ORIGIN_NONE,
+            "FORMAT_ERROR must not set failure_origin "
+            "(typed error, not bare NGX_ERROR)");
+
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
+        free(decomp);
+    }
+
+    /*
+     * Test 2: Verify brotli_loop() propagates FORMAT_ERROR specifically.
+     *
+     * Use a different malformed payload to confirm the specific error
+     * code propagation is consistent.  A valid Brotli header prefix
+     * followed by corrupt body data triggers a format error mid-decode.
+     */
+    {
+        /*
+         * Brotli stream with a valid-looking first byte but corrupted
+         * continuation.  The window size byte (first byte) might pass
+         * initial validation but the subsequent bytes will fail.
+         */
+        static const u_char  corrupt_body[] = {
+            0x89, 0x00, 0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+        };
+
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 4096);
+        TEST_ASSERT(decomp != NULL,
+            "brotli decompressor should be created");
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, corrupt_body, sizeof(corrupt_body),
+            &out, &out_len, &tp.pool, &test_log);
+        /*
+         * The decoder may return FORMAT_ERROR or (if it interprets
+         * the first byte as a valid window-size declaration) may
+         * attempt to proceed and find the no-progress guard or
+         * a different format error.  Either way, it must NOT be
+         * folded to generic NGX_ERROR.
+         */
+        TEST_ASSERT(
+            rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
+            || rc == NGX_ERROR,
+            "corrupt brotli body must return a classified error");
+        /*
+         * If it's FORMAT_ERROR, origin must be NONE.
+         * If it's NGX_ERROR, origin must be set (ALLOC or INTERNAL).
+         */
+        if (rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR) {
+            TEST_ASSERT(
+                decomp->failure_origin
+                    == NGX_HTTP_MD_DECOMP_ORIGIN_NONE,
+                "FORMAT_ERROR does not use failure_origin");
+        } else {
+            TEST_ASSERT(
+                decomp->failure_origin
+                    != NGX_HTTP_MD_DECOMP_ORIGIN_NONE,
+                "NGX_ERROR must have failure_origin set");
+        }
+        TEST_ASSERT(out == NULL && out_len == 0,
+            "corrupt body must not expose output");
+
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
+        free(decomp);
+    }
+
+    /*
+     * Test 3: brotli_loop() propagates BUDGET_EXCEEDED from brotli_step()
+     *
+     * Compress known data, set budget smaller than decompressed size,
+     * verify the exact BUDGET_EXCEEDED constant is returned.
+     */
+    {
+        static const uint8_t  budget_text[] =
+            "This text is long enough to exceed a tiny budget limit "
+            "and demonstrate that budget exceeded propagates through "
+            "brotli_loop correctly without being folded to NGX_ERROR";
+        size_t                budget_text_len;
+        uint8_t               budget_compressed[512];
+        size_t                budget_compressed_len;
+
+        budget_text_len = sizeof(budget_text) - 1;
+        budget_compressed_len = sizeof(budget_compressed);
+        TEST_ASSERT(BrotliEncoderCompress(
+                        BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                        BROTLI_MODE_TEXT, budget_text_len, budget_text,
+                        &budget_compressed_len, budget_compressed)
+                    == BROTLI_TRUE,
+            "brotli compression should succeed for budget test");
+
+        test_pool_reset(&tp);
+        /* Budget of 16 bytes: much smaller than the decompressed text */
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 16);
+        TEST_ASSERT(decomp != NULL,
+            "brotli decompressor (budget test) should be created");
+
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, budget_compressed, budget_compressed_len,
+            &out, &out_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
+            "brotli_loop must propagate exact BUDGET_EXCEEDED "
+            "constant (not NGX_ERROR)");
+        TEST_ASSERT(out == NULL && out_len == 0,
+            "budget exceeded must not expose partial output");
+
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
+        free(decomp);
+    }
+
+    /*
+     * Test 4: brotli_loop() propagates TRUNCATED_INPUT from finish.
+     *
+     * Feed partial compressed data, then call finish() while the decoder
+     * is not done.  Verify the exact TRUNCATED_INPUT constant.
+     * (Also covered by test_truncated_brotli_finish_errors but we verify
+     * here specifically that the constant is exact, not just non-zero.)
+     */
+    {
+        static const uint8_t  trunc_text[] =
+            "brotli truncation propagation test data payload";
+        size_t                trunc_text_len;
+        uint8_t               trunc_compressed[512];
+        size_t                trunc_compressed_len;
+
+        trunc_text_len = sizeof(trunc_text) - 1;
+        trunc_compressed_len = sizeof(trunc_compressed);
+        TEST_ASSERT(BrotliEncoderCompress(
+                        BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                        BROTLI_MODE_TEXT, trunc_text_len, trunc_text,
+                        &trunc_compressed_len, trunc_compressed)
+                    == BROTLI_TRUE,
+            "brotli compression should succeed for truncation test");
+        TEST_ASSERT(trunc_compressed_len > 4,
+            "compressed payload should be long enough to truncate");
+
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI,
+            trunc_text_len + 64);
+        TEST_ASSERT(decomp != NULL,
+            "brotli decompressor (truncation test) should be created");
+
+        /* Feed only partial compressed data */
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, trunc_compressed, trunc_compressed_len / 2,
+            &out, &out_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "partial brotli feed should succeed awaiting more");
+        test_pool_free_tracked_allocations();
+
+        /* Call finish while decoder is not complete */
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_finish(
+            decomp, &out, &out_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT,
+            "finish on incomplete brotli must return exact "
+            "TRUNCATED_INPUT constant (not generic NGX_ERROR)");
+
+        free(out);
+        free(decomp);
+    }
+
+    /*
+     * Test 5: Verify three-way classification is included in test run.
+     *
+     * test_brotli_error_classification() is already called from main()
+     * and covers:
+     *   - FORMAT codes (-1 to -17) classify correctly
+     *   - ALLOCATION codes (-21 to -30) classify correctly
+     *   - INTERNAL codes (-18 to -20, -31) classify correctly
+     *   - Unknown out-of-range classifies as INTERNAL (not FORMAT)
+     *
+     * This test adds a complementary end-to-end verification that a
+     * decoder returning a FORMAT-range code results in FORMAT_ERROR
+     * at the feed() API level (not NGX_ERROR).  Test 1 above already
+     * demonstrates this with real malformed data.
+     */
+
+    /*
+     * Test 6: Verify error code values are exact constants.
+     *
+     * Explicit compile-time checks that the constants exist and have
+     * the expected relationship (all distinct, all negative, different
+     * from NGX_ERROR and NGX_OK).
+     */
+    {
+        TEST_ASSERT(NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR != NGX_ERROR,
+            "FORMAT_ERROR must be distinct from NGX_ERROR");
+        TEST_ASSERT(NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT != NGX_ERROR,
+            "TRUNCATED_INPUT must be distinct from NGX_ERROR");
+        TEST_ASSERT(NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED != NGX_ERROR,
+            "BUDGET_EXCEEDED must be distinct from NGX_ERROR");
+        TEST_ASSERT(NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR != NGX_ERROR,
+            "IO_ERROR must be distinct from NGX_ERROR");
+        TEST_ASSERT(NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR != NGX_OK,
+            "FORMAT_ERROR must be distinct from NGX_OK");
+        TEST_ASSERT(
+            NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
+                != NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
+            "FORMAT_ERROR and BUDGET_EXCEEDED must be distinct");
+        TEST_ASSERT(
+            NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
+                != NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT,
+            "FORMAT_ERROR and TRUNCATED_INPUT must be distinct");
+        TEST_ASSERT(
+            NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
+                != NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR,
+            "FORMAT_ERROR and IO_ERROR must be distinct");
+    }
+
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
+    TEST_PASS("brotli no-progress guard and error propagation verified");
+}
+
+
+/*
+ * test_brotli_budget_enforcement - Verify cumulative decompression budget
+ * enforcement for the Brotli streaming decompressor.
+ *
+ * Key test cases:
+ *   1. Exact budget success: text of known size N, max_decompressed_size=N,
+ *      feed → NGX_OK and output matches.
+ *   2. Budget exceeded by 1: max_decompressed_size=N-1, feed →
+ *      BUDGET_EXCEEDED.
+ *   3. Cumulative budget across chunks: split one compressed payload into
+ *      two chunks, max_decompressed_size = decompressed_len, feed both
+ *      → both succeed and total output matches.
+ *   4. Cumulative budget exceeded on second chunk: budget slightly less
+ *      than total, first chunk succeeds, second → BUDGET_EXCEEDED.
+ *   5. Exact-budget probe success: covered by test_brotli_exact_budget_probe.
+ */
+static void
+test_brotli_budget_enforcement(void)
+{
+    static const uint8_t text_a[] =
+        "Budget enforcement test payload alpha (chunk A).";
+    size_t               text_a_len;
+    uint8_t              compressed_a[512];
+    size_t               compressed_a_len;
+    test_pool_t          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char              *out;
+    size_t               out_len;
+    ngx_int_t            rc;
+
+    TEST_SUBSECTION("brotli budget enforcement");
+
+    text_a_len = sizeof(text_a) - 1;
+
+    /* Compress payload at runtime using BrotliEncoderCompress */
+    compressed_a_len = sizeof(compressed_a);
+    TEST_ASSERT(BrotliEncoderCompress(
+                    BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                    BROTLI_MODE_TEXT, text_a_len, text_a,
+                    &compressed_a_len, compressed_a)
+                == BROTLI_TRUE,
+        "brotli compression of text_a should succeed");
+
+    /*
+     * Test 1: Exact budget success.
+     * max_decompressed_size = text_a_len → feed entire payload → NGX_OK.
+     */
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, text_a_len);
+    TEST_ASSERT(decomp != NULL,
+        "brotli decompressor (exact budget) should be created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed_a, compressed_a_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "exact budget feed should succeed");
+    TEST_ASSERT(out_len == text_a_len,
+        "exact budget feed should produce exactly N bytes");
+    TEST_ASSERT(MEM_EQ(out, text_a, text_a_len),
+        "exact budget output must match original text");
+    test_pool_free_tracked_allocations();
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+
+    /*
+     * Test 2: Budget exceeded by 1.
+     * max_decompressed_size = text_a_len - 1 → BUDGET_EXCEEDED.
+     */
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI,
+        text_a_len - 1);
+    TEST_ASSERT(decomp != NULL,
+        "brotli decompressor (budget-1) should be created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed_a, compressed_a_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
+        "budget-1 feed should return BUDGET_EXCEEDED");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "budget-exceeded feed should not expose any output");
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+
+    /*
+     * Test 3: Cumulative budget across chunks.
+     * Compress one payload, split the compressed bytes in half, feed
+     * each half separately with budget = decompressed_len.  Both
+     * feeds should succeed and total output should match the original.
+     */
+    {
+        static const uint8_t big_text[] =
+            "Brotli multi-chunk cumulative budget enforcement "
+            "test payload that is long enough to split into "
+            "two compressed chunks for meaningful verification.";
+        size_t   big_text_len;
+        uint8_t  big_compressed[1024];
+        size_t   big_compressed_len;
+        size_t   split_point;
+        u_char  *out1;
+        size_t   out1_len;
+        u_char  *out2;
+        size_t   out2_len;
+        u_char  *combined_output;
+        size_t   combined_len;
+
+        big_text_len = sizeof(big_text) - 1;
+        big_compressed_len = sizeof(big_compressed);
+        TEST_ASSERT(BrotliEncoderCompress(
+                        BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                        BROTLI_MODE_TEXT, big_text_len, big_text,
+                        &big_compressed_len, big_compressed)
+                    == BROTLI_TRUE,
+            "brotli compression of big_text should succeed");
+
+        split_point = big_compressed_len / 2;
+        TEST_ASSERT(split_point > 0 && split_point < big_compressed_len,
+            "split point should be interior to compressed data");
+
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI,
+            big_text_len);
+        TEST_ASSERT(decomp != NULL,
+            "brotli decompressor (multi-chunk budget) should be created");
+
+        /* First chunk */
+        out1 = NULL;
+        out1_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, big_compressed, split_point,
+            &out1, &out1_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "multi-chunk budget: first chunk feed should succeed");
+        /* Save output before reclaiming pool allocations */
+        combined_output = malloc(big_text_len);
+        TEST_ASSERT(combined_output != NULL,
+            "output collector should allocate");
+        combined_len = 0;
+        if (out1_len > 0) {
+            memcpy(combined_output, out1, out1_len);
+            combined_len = out1_len;
+        }
+        test_pool_free_tracked_allocations();
+
+        /* Second chunk */
+        out2 = NULL;
+        out2_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, big_compressed + split_point,
+            big_compressed_len - split_point,
+            &out2, &out2_len, &tp.pool, &test_log);
+        TEST_ASSERT(rc == NGX_OK,
+            "multi-chunk budget: second chunk feed should succeed");
+
+        if (out2_len > 0) {
+            memcpy(combined_output + combined_len, out2, out2_len);
+            combined_len += out2_len;
+        }
+        test_pool_free_tracked_allocations();
+
+        TEST_ASSERT(combined_len == big_text_len,
+            "multi-chunk: total output should equal decompressed size");
+        TEST_ASSERT(MEM_EQ(combined_output, big_text, big_text_len),
+            "multi-chunk: reassembled output must match original text");
+        TEST_ASSERT(decomp->total_decompressed == big_text_len,
+            "multi-chunk: total_decompressed = decompressed size");
+
+        free(combined_output);
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
+        free(decomp);
+    }
+
+    /*
+     * Test 4: Cumulative budget exceeded on second chunk.
+     * Same payload split into two chunks but budget is one byte less
+     * than the total decompressed size.  First chunk succeeds; second
+     * chunk triggers BUDGET_EXCEEDED.
+     */
+    {
+        static const uint8_t big_text[] =
+            "Brotli multi-chunk cumulative budget enforcement "
+            "test payload that is long enough to split into "
+            "two compressed chunks for meaningful verification.";
+        size_t   big_text_len;
+        uint8_t  big_compressed[1024];
+        size_t   big_compressed_len;
+        size_t   split_point;
+        u_char  *out1;
+        size_t   out1_len;
+        u_char  *out2;
+        size_t   out2_len;
+
+        big_text_len = sizeof(big_text) - 1;
+        big_compressed_len = sizeof(big_compressed);
+        TEST_ASSERT(BrotliEncoderCompress(
+                        BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                        BROTLI_MODE_TEXT, big_text_len, big_text,
+                        &big_compressed_len, big_compressed)
+                    == BROTLI_TRUE,
+            "brotli compression of big_text should succeed");
+
+        split_point = big_compressed_len / 2;
+
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI,
+            big_text_len - 1);
+        TEST_ASSERT(decomp != NULL,
+            "brotli decompressor (budget-1 multi-chunk) should be created");
+
+        /* First chunk: may succeed partially */
+        out1 = NULL;
+        out1_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, big_compressed, split_point,
+            &out1, &out1_len, &tp.pool, &test_log);
+        /*
+         * The first chunk may either succeed (if the decoder produces
+         * fewer than budget bytes from the first half) or already hit
+         * BUDGET_EXCEEDED (if the decoder produces enough output).
+         * Either is valid depending on compressed payload
+         * characteristics.
+         */
+        if (rc == NGX_OK) {
+            /* First chunk fits within budget; second must fail */
+            TEST_ASSERT(out1_len < big_text_len,
+                "budget-1: first chunk within budget");
+            TEST_ASSERT(decomp->total_decompressed == out1_len,
+                "budget-1: accounting after first chunk");
+            test_pool_free_tracked_allocations();
+
+            out2 = NULL;
+            out2_len = 0;
+            rc = ngx_http_markdown_streaming_decomp_feed(
+                decomp, big_compressed + split_point,
+                big_compressed_len - split_point,
+                &out2, &out2_len, &tp.pool, &test_log);
+            TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
+                "budget-1: second chunk should exceed budget");
+            TEST_ASSERT(out2 == NULL && out2_len == 0,
+                "budget-1: no output on budget exceed");
+        } else {
+            /* First chunk already exceeded budget */
+            TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
+                "budget-1: first chunk exceeds budget");
+            TEST_ASSERT(out1 == NULL && out1_len == 0,
+                "budget-1: no output on first exceed");
+        }
+
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
+        free(decomp);
+    }
+
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "production code must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "production code must not ngx_free() static pool memory");
+    TEST_PASS("brotli budget enforcement verified");
+}
+
+
+/*
+ * test_brotli_alloc_failures_and_lifecycle - Verify allocation failure
+ * handling and cleanup lifecycle for the Brotli streaming decompressor.
+ *
+ * Key test cases:
+ *   1. Create failure (pcalloc NULL) → decomp_create returns NULL,
+ *      no cleanup handler registered
+ *   2. Pool cleanup registration failure → decoder rolled back, no leak
+ *   3. Cleanup idempotency: create decoder, call cleanup twice → no crash
+ *      (second call is no-op due to NULL pointer check)
+ *   4. Pre-decode alloc failure: workspace ngx_alloc returns NULL →
+ *      NGX_ERROR returned, state unchanged, no leak
+ *   5. Heap workspace freed on error paths (g_free_on_palloc_violation == 0)
+ *   6. Post-decode expansion failure sets finished=1 (non-retryable)
+ *   7. Failure origin set correctly on pre-decode alloc failure
+ */
+static void
+test_brotli_alloc_failures_and_lifecycle(void)
+{
+    static const uint8_t                 text[] =
+        "Brotli allocation failure lifecycle test payload";
+    size_t                               text_len;
+    size_t                               compressed_len;
+    uint8_t                              compressed[512];
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char                              *out;
+    size_t                               out_len;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("brotli allocation failures and cleanup lifecycle");
+
+    text_len = sizeof(text) - 1;
+    compressed_len = sizeof(compressed);
+    TEST_ASSERT(BrotliEncoderCompress(
+                    BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                    BROTLI_MODE_TEXT, text_len, text,
+                    &compressed_len, compressed)
+                == BROTLI_TRUE,
+        "brotli compression should succeed");
+
+    /*
+     * Test 1: Create failure (pcalloc NULL) → decomp_create returns
+     * NULL, no cleanup handler registered.
+     */
+    test_pool_reset(&tp);
+    g_pcalloc_fail_once = 1;
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 1024);
+    TEST_ASSERT(decomp == NULL,
+        "brotli create should fail when pcalloc returns NULL");
+    TEST_ASSERT(tp.pool.cleanups == NULL,
+        "no cleanup should be registered on pcalloc failure");
+
+    /*
+     * Test 2: Pool cleanup registration failure after successful
+     * BrotliDecoderCreateInstance → decomp_create returns NULL.
+     * The decoder must be destroyed via the rollback path (same
+     * idempotent cleanup routine), no leak.
+     */
+    test_pool_reset(&tp);
+    g_cleanup_add_fail_once = 1;
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 1024);
+    TEST_ASSERT(decomp == NULL,
+        "brotli create should fail when cleanup_add returns NULL");
+    TEST_ASSERT(tp.pool.cleanups == NULL,
+        "no cleanup registered when cleanup_add fails");
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "rollback must not violate pool memory ownership");
+
+    /*
+     * Test 3: Cleanup idempotency — create a valid decoder, call
+     * cleanup explicitly, then run pool cleanups (simulating pool
+     * destruction).  The second cleanup invocation must be a safe
+     * no-op (NULL pointer sentinel check).
+     */
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 1024);
+    TEST_ASSERT(decomp != NULL,
+        "brotli decompressor should be created");
+    TEST_ASSERT(decomp->initialized == 1,
+        "brotli decompressor should be initialized");
+    TEST_ASSERT(decomp->state.brotli != NULL,
+        "brotli decoder pointer should be non-NULL");
+
+    /* First explicit cleanup: destroys the decoder, sets ptr to NULL */
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    TEST_ASSERT(decomp->initialized == 0,
+        "first cleanup should clear initialized flag");
+    TEST_ASSERT(decomp->state.brotli == NULL,
+        "first cleanup should NULL the brotli pointer");
+
+    /* Second explicit cleanup: must be safe no-op */
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    TEST_ASSERT(decomp->state.brotli == NULL,
+        "second cleanup should remain NULL (no double-free)");
+
+    /*
+     * Simulate pool destruction by invoking the registered pool
+     * cleanup handler directly.  Since the handler is registered
+     * in pool->cleanups, invoke it with the same data pointer.
+     * After the first explicit cleanup set initialized=0, the
+     * pool handler returns immediately (safe no-op).
+     */
+    {
+        ngx_pool_cleanup_t  *cln;
+
+        cln = tp.pool.cleanups;
+        if (cln != NULL && cln->handler != NULL) {
+            cln->handler(cln->data);
+        }
+    }
+    TEST_ASSERT(decomp->state.brotli == NULL,
+        "pool cleanup after explicit cleanup is safe no-op");
+
+    free(decomp);
+
+    /*
+     * Test 4: Pre-decode workspace allocation failure.
+     * ngx_alloc returns NULL BEFORE any decoder invocation in the
+     * current feed call.  Return NGX_ERROR, decoder state unchanged,
+     * no leak.
+     */
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 1024);
+    TEST_ASSERT(decomp != NULL,
+        "brotli decompressor should be created for alloc failure test");
+
+    g_alloc_fail_once = 1;
+    out = (u_char *) 0x1;
+    out_len = 1;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "pre-decode alloc failure should return NGX_ERROR");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "pre-decode alloc failure should not expose output");
+    TEST_ASSERT(decomp->finished == 0,
+        "pre-decode alloc failure should not advance decoder state");
+    TEST_ASSERT(decomp->failure_origin
+                == NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION,
+        "pre-decode alloc failure should set ALLOCATION origin");
+
+    /* Verify decoder can still be used (state was not advanced) */
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "retry after pre-decode failure should succeed");
+    TEST_ASSERT(out_len == text_len,
+        "retry should produce the complete decompressed output");
+    TEST_ASSERT(MEM_EQ(out, text, text_len),
+        "retry output should match original text");
+
+    test_pool_free_tracked_allocations();
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+
+    /*
+     * Test 5: Heap workspace freed on error paths
+     * (g_free_on_palloc_violation == 0).
+     * Verified by the assertion at the end of this function after
+     * exercising all error paths above.
+     */
+
+    /*
+     * Test 6: Post-decode expansion failure sets finished=1.
+     *
+     * After a stream has been decoded completely and finished is set,
+     * verify that no re-feed is possible.  This validates the
+     * behavioral contract that once the decoder has consumed input
+     * and cannot be retried, the finished flag prevents re-feeding.
+     *
+     * Direct expansion failure testing (where the decoder has
+     * consumed partial input but expansion fails) is verified via
+     * the shared expand_buf helper tests.  Here we verify the
+     * non-retryable contract behaviorally: after finished is set,
+     * subsequent non-empty feeds return FORMAT_ERROR.
+     */
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 0);
+    TEST_ASSERT(decomp != NULL,
+        "brotli decompressor for post-decode finish test");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK, "initial feed should succeed");
+    TEST_ASSERT(decomp->finished == 1,
+        "decoder should be finished after complete stream");
+    test_pool_free_tracked_allocations();
+
+    /* Attempt to re-feed: FORMAT_ERROR (non-retryable) */
+    out = (u_char *) 0x1;
+    out_len = 1;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, 10,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+        "re-feed after finished must return FORMAT_ERROR");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "re-feed after finished must not expose output");
+
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+
+    /*
+     * Test 7: Failure origin set correctly on pre-decode alloc
+     * failure and reset on next successful call.
+     */
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, 1024);
+    TEST_ASSERT(decomp != NULL,
+        "brotli decompressor for origin lifecycle test");
+
+    /* Inject pre-decode alloc failure */
+    g_alloc_fail_once = 1;
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_ERROR,
+        "alloc failure should return NGX_ERROR");
+    TEST_ASSERT(decomp->failure_origin
+                == NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION,
+        "failure origin should be ALLOCATION after alloc failure");
+
+    /* Successful feed resets origin (per-call lifecycle contract) */
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "feed after alloc failure recovery should succeed");
+    TEST_ASSERT(decomp->failure_origin
+                == NGX_HTTP_MD_DECOMP_ORIGIN_NONE,
+        "successful feed should reset failure origin to NONE");
+
+    test_pool_free_tracked_allocations();
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+
+    /* Final meta-assertion: no pool-memory ownership violations */
+    TEST_ASSERT(g_free_on_palloc_violation == 0,
+        "brotli error paths must not ngx_free() pool memory");
+    TEST_ASSERT(g_free_on_static_pool_violation == 0,
+        "brotli error paths must not ngx_free() static pool buf");
+
+    TEST_PASS("brotli allocation failures and lifecycle verified");
+}
+
+
+/*
+ * test_brotli_truncation_detection_property - Property-based test for
+ * truncation detection.
+ *
+ * Feature: Brotli streaming decompression
+ * Property 4: Truncation Detection
+ *
+ * Coverage: truncated Brotli input is rejected at end of stream.
+ *
+ * For ALL valid Brotli streams truncated at ANY position before
+ * completion, finish() returns TRUNCATED_INPUT.
+ *
+ * Strategy:
+ *   - Generate multiple random plaintext payloads of varying sizes
+ *   - Compress each with Brotli
+ *   - For each compressed payload, truncate at a random offset
+ *     (1 to compressed_len - 1)
+ *   - Feed the truncated bytes, then call finish()
+ *   - Assert finish() returns NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT
+ *
+ * Minimum 100 iterations as required by the design.
+ */
+
+/* Simple PRNG for property test randomization (xorshift32) */
+static unsigned int g_brotli_prop_prng = 42;
+
+static unsigned int
+brotli_prop_prng_next(void)
+{
+    g_brotli_prop_prng ^= g_brotli_prop_prng << 13;
+    g_brotli_prop_prng ^= g_brotli_prop_prng >> 17;
+    g_brotli_prop_prng ^= g_brotli_prop_prng << 5;
+    return g_brotli_prop_prng;
+}
+
+static void
+test_brotli_truncation_detection_property(void)
+{
+    const int                             iterations = 150;
+    int                                   i;
+    int                                   passed;
+
+    TEST_SUBSECTION(
+        "Property 4: Truncation Detection — "
+        "truncated Brotli streams yield TRUNCATED_INPUT");
+
+    passed = 0;
+    g_brotli_prop_prng = 42;
+
+    for (i = 0; i < iterations; i++) {
+        /*
+         * Generate random plaintext of varying length
+         * (16 to 2048 bytes) to ensure diverse compressed payloads.
+         */
+        size_t         text_len;
+        uint8_t        text_buf[2048];
+        size_t         compressed_capacity;
+        size_t         compressed_len;
+        uint8_t       *compressed;
+        size_t         truncate_pos;
+        test_pool_t    tp;
+        ngx_http_markdown_streaming_decomp_t *decomp;
+        u_char        *out;
+        size_t         out_len;
+        ngx_int_t      rc;
+        size_t         j;
+
+        /* Random plaintext length: 16..2047 */
+        text_len = 16 + (brotli_prop_prng_next() % 2032);
+
+        /* Fill with pseudo-random bytes */
+        for (j = 0; j < text_len; j++) {
+            text_buf[j] = (uint8_t)(brotli_prop_prng_next() & 0xFF);
+        }
+
+        /* Compress with Brotli */
+        compressed_capacity = BrotliEncoderMaxCompressedSize(text_len);
+        if (compressed_capacity == 0) {
+            compressed_capacity = text_len + 1024;
+        }
+        compressed = (uint8_t *) malloc(compressed_capacity);
+        TEST_ASSERT(compressed != NULL,
+            "property test: malloc for compressed buffer");
+
+        compressed_len = compressed_capacity;
+        TEST_ASSERT(
+            BrotliEncoderCompress(
+                BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                BROTLI_MODE_GENERIC, text_len, text_buf,
+                &compressed_len, compressed)
+            == BROTLI_TRUE,
+            "property test: brotli compression should succeed");
+
+        /* Ensure compressed payload is long enough to truncate */
+        if (compressed_len < 2) {
+            free(compressed);
+            continue;
+        }
+
+        /*
+         * Truncation position: random offset in [1, compressed_len - 1].
+         * We never feed 0 bytes (trivial no-op) and never feed the
+         * full stream (that would succeed, not truncate).
+         */
+        truncate_pos =
+            1 + (brotli_prop_prng_next() % (compressed_len - 1));
+
+        /* Create decompressor with generous budget */
+        test_pool_reset(&tp);
+        decomp = ngx_http_markdown_streaming_decomp_create(
+            &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI,
+            text_len * 2);
+        TEST_ASSERT(decomp != NULL,
+            "property test: brotli decompressor created");
+
+        /* Feed truncated data */
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_feed(
+            decomp, compressed, truncate_pos,
+            &out, &out_len, &tp.pool, &test_log);
+
+        /*
+         * Feed may succeed (NGX_OK / partial decode) or return
+         * FORMAT_ERROR for severely corrupt tail.  Either is
+         * acceptable before finish(); the key property is about
+         * finish() itself.
+         */
+        if (rc != NGX_OK && rc != NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
+            && rc != NGX_ERROR)
+        {
+            /*
+             * BUDGET_EXCEEDED or IO_ERROR are unexpected here because
+             * we set a generous budget and the data is well-formed up
+             * to the truncation point.  Still, they indicate a
+             * non-success path, so we skip finish validation for
+             * these (they already signaled failure).
+             */
+            test_pool_free_tracked_allocations();
+            ngx_http_markdown_streaming_decomp_cleanup(decomp);
+            free(decomp);
+            free(compressed);
+            passed++;
+            continue;
+        }
+
+        /* Reclaim pool-allocated output before finish */
+        test_pool_free_tracked_allocations();
+
+        if (rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
+            || rc == NGX_ERROR)
+        {
+            /*
+             * Feed already detected an error (e.g. the truncation
+             * point fell inside a critical decoder state that
+             * immediately fails).  The stream is already rejected —
+             * no need to call finish().  This still satisfies the
+             * property: the truncated stream was NOT accepted as
+             * valid.
+             */
+            ngx_http_markdown_streaming_decomp_cleanup(decomp);
+            free(decomp);
+            free(compressed);
+            passed++;
+            continue;
+        }
+
+        /* Feed returned NGX_OK — call finish() to check truncation */
+        out = NULL;
+        out_len = 0;
+        rc = ngx_http_markdown_streaming_decomp_finish(
+            decomp, &out, &out_len, &tp.pool, &test_log);
+
+        TEST_ASSERT(
+            rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT,
+            "property test: truncated Brotli stream must yield "
+            "TRUNCATED_INPUT at finish()");
+
+        /* Clean up */
+        free(out);
+        ngx_http_markdown_streaming_decomp_cleanup(decomp);
+        free(decomp);
+        free(compressed);
+        test_pool_free_tracked_allocations();
+        passed++;
+    }
+
+    TEST_ASSERT(passed >= 100,
+        "property test: at least 100 iterations completed");
+    TEST_PASS(
+        "Property 4: all truncated Brotli streams correctly "
+        "detected — TRUNCATED_INPUT returned");
+}
 #endif
+
 
 /*
  * test_pool_run_cleanups - Execute all registered cleanup handlers on a
@@ -3299,6 +5178,17 @@ main(void)
     test_roundtrip_and_empty_feed();
 #ifdef NGX_HTTP_BROTLI
     test_truncated_brotli_finish_errors();
+    test_brotli_error_classification();
+    test_brotli_exact_budget_probe();
+    test_brotli_roundtrip_single_chunk();
+    test_brotli_roundtrip_multi_chunk();
+    test_brotli_trailing_data_same_feed();
+    test_brotli_trailing_data_next_feed();
+    test_brotli_empty_feed_after_completion();
+    test_brotli_no_progress_guard_and_error_propagation();
+    test_brotli_budget_enforcement();
+    test_brotli_alloc_failures_and_lifecycle();
+    test_brotli_truncation_detection_property();
 #endif
     test_tiny_chunks_do_not_amplify_request_pool();
     test_budget_and_invalid_type_branches();

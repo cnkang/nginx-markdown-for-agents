@@ -1170,6 +1170,17 @@ typedef struct {
              * output to drain before safe_finish is allowed to run. */
             ngx_flag_t                    postcommit_error_after_pending;
             uint32_t                      postcommit_error_code;
+
+            /* A safe-finish terminal or closing chain is downstream-owned.
+             * Record the original decoder/parser failure only after that
+             * pending chain has a definitive delivery result. */
+            ngx_flag_t                    safe_finish_error_pending;
+            uint32_t                      safe_finish_error_code;
+
+            /* Safe-finish produced closing Markdown that could not be
+             * constructed or delivered.  The Rust handle is consumed, so
+             * the caller must hard-abort instead of sending a clean terminal. */
+            ngx_flag_t                    safe_finish_output_loss;
         } completion;
     } streaming;
 } ngx_http_markdown_ctx_t;

@@ -1649,7 +1649,7 @@ uint32_t markdown_incremental_new_with_code(const struct MarkdownOptions *option
  * # Safety
  *
  * * `handle` must be a live pointer returned by [`markdown_incremental_new_with_code`].
- * * `data` must point to at least `data_len` readable bytes, or be NULL when `data_len` is 0`.
+ * * `data` must point to at least `data_len` readable bytes, or be NULL when `data_len` is 0.
  *
  * # Returns
  *

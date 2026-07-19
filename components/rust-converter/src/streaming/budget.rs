@@ -72,8 +72,8 @@ impl MemoryBudget {
     ///
     /// Behavior:
     /// - `total == 0`: return defaults.
-    /// - `total >= default.total`: keep default stage caps and override only
-    ///   `total`.
+    /// - `total >= default.total`: scale the variable stage caps in proportion
+    ///   to the configured total while keeping the charset sniff cap fixed.
     /// - `total < default.total`: scale stage caps proportionally so stage-cap
     ///   sum equals `total`.
     pub fn for_total(total: usize) -> Self {
@@ -83,7 +83,20 @@ impl MemoryBudget {
         }
 
         if total >= defaults.total {
-            return Self { total, ..defaults };
+            let scale = |value: usize| {
+                value
+                    .checked_mul(total)
+                    .and_then(|scaled| scaled.checked_div(defaults.total))
+                    .unwrap_or(usize::MAX)
+            };
+
+            return Self {
+                total,
+                state_stack: scale(defaults.state_stack),
+                output_buffer: scale(defaults.output_buffer),
+                charset_sniff: defaults.charset_sniff,
+                lookahead: scale(defaults.lookahead),
+            };
         }
 
         let weights = [
@@ -287,13 +300,13 @@ mod tests {
     }
 
     #[test]
-    fn test_for_total_large_keeps_default_stage_caps() {
+    fn test_for_total_large_scales_variable_stage_caps() {
         let budget = MemoryBudget::for_total(8 * 1024 * 1024);
         assert_eq!(budget.total, 8 * 1024 * 1024);
-        assert_eq!(budget.state_stack, 64 * 1024);
-        assert_eq!(budget.output_buffer, 256 * 1024);
+        assert_eq!(budget.state_stack, 256 * 1024);
+        assert_eq!(budget.output_buffer, 1024 * 1024);
         assert_eq!(budget.charset_sniff, 1024);
-        assert_eq!(budget.lookahead, 64 * 1024);
+        assert_eq!(budget.lookahead, 256 * 1024);
     }
 
     #[test]
@@ -304,6 +317,16 @@ mod tests {
         assert_eq!(budget.total, 256 * 1024);
         assert_eq!(sum, budget.total);
         assert!(budget.output_buffer > 0);
+    }
+
+    #[test]
+    fn test_for_total_overflow_keeps_stage_caps_conservative() {
+        let budget = MemoryBudget::for_total(usize::MAX);
+        assert_eq!(budget.total, usize::MAX);
+        assert_eq!(budget.state_stack, usize::MAX);
+        assert_eq!(budget.output_buffer, usize::MAX);
+        assert_eq!(budget.lookahead, usize::MAX);
+        assert_eq!(budget.charset_sniff, 1024);
     }
 
     #[test]
