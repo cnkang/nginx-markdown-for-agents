@@ -1469,6 +1469,7 @@ typedef struct {
  */
 void ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes);
 void ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes);
+void ngx_http_markdown_metrics_record_postcommit_abort(void);
 
 /*
  * Per-path metric node stored in the shared RB-tree.

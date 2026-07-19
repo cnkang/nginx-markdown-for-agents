@@ -1400,10 +1400,9 @@ ngx_http_markdown_streaming_record_postcommit_failure(
         NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
 
         /*
-         * Post-commit failures always take the abort path
-         * (protocol-safe disconnect).  The safe_finish counter
-         * is incremented separately if the graceful closure
-         * path itself fails.
+         * Record common post-commit failure accounting.
+         * Action-specific safe-finish/abort metrics are recorded
+         * by the corresponding action paths.
          */
 
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
