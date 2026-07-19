@@ -25,7 +25,8 @@
  *
  * 7. failure_recorded NOT pre-set before handle_output_loss() entry.
  *
- * Requirements: 11.3, 11.4
+ * These cases cover post-commit error classification and output-loss
+ * accounting across direct sends and pending-output resumes.
  */
 
 #include "../include/test_common.h"

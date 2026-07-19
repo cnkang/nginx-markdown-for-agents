@@ -43,7 +43,7 @@ def test_internal_reference_policy_rejects_spec_index_shorthand(tmp_path):
 def test_internal_reference_policy_rejects_zero_padded_spec_index(tmp_path):
     f = tmp_path / "doc.md"
     f.write_text(
-        f"The behavior follows spec {91:03d}.\n",
+        f"The behavior follows spec {7:03d}.\n",
         encoding="utf-8",
     )
     errors = check_internal_reference_policy([f], tracked_paths=set())
