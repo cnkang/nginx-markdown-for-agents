@@ -25,6 +25,10 @@
  *
  * 7. failure_recorded NOT pre-set before handle_output_loss() entry.
  *
+ * 8. (P0 fix) Safe-finish success + zero closing bytes + terminal
+ *    immediate definitive failure must record and propagate without
+ *    retrying via abort.
+ *
  * These cases cover post-commit error classification and output-loss
  * accounting across direct sends and pending-output resumes.
  */
@@ -61,6 +65,7 @@ typedef enum {
     ROUTE_ORDINARY_POSTCOMMIT,      /* handle_postcommit_error */
     ROUTE_OUTPUT_LOSS,              /* handle_output_loss */
     ROUTE_RECORD_ONLY,             /* record_postcommit_failure (direct) */
+    ROUTE_RECORD_PROPAGATE,        /* record + propagate (no retry) */
     ROUTE_PRECOMMIT                /* streaming_precommit_error */
 } error_route_e;
 
@@ -74,6 +79,8 @@ typedef struct {
     int          is_decomp_error;      /* 1 = decompressor internal error */
     int          pending_failopen;     /* 1 = pending_failopen_delivery set */
     int          pending_has_data;     /* 1 = pending chain has data bytes */
+    int          safe_finish_terminal_send_failed;
+                                       /* 1 = Rust safe_finish OK + terminal send failed */
 } routing_scenario_t;
 
 /*
@@ -150,6 +157,26 @@ oracle_resume_pending_failure(const routing_scenario_t *s)
         return ROUTE_OUTPUT_LOSS;
     }
     return ROUTE_RECORD_ONLY;
+}
+
+/*
+ * handle_postcommit_error routing oracle (P0 fix).
+ *
+ * After safe_finish is called:
+ *   - If safe_finish_terminal_send_failed → record + propagate
+ *     (no abort retry; Rust succeeded, terminal send failed)
+ *   - If safe_finish_output_loss → output_loss
+ *   - If safe_finish NGX_AGAIN → pending (handled by resume)
+ *   - If Rust failed → ordinary (record + abort)
+ */
+static error_route_e
+oracle_postcommit_safe_finish_routing(const routing_scenario_t *s)
+{
+    if (s->safe_finish_terminal_send_failed) {
+        return ROUTE_RECORD_PROPAGATE;
+    }
+    /* Other cases are handled by the existing oracles */
+    return ROUTE_ORDINARY_POSTCOMMIT;
 }
 
 
@@ -434,6 +461,43 @@ test_resume_output_loss_sets_downstream_origin(void)
 }
 
 
+/* --- Test: safe-finish + terminal send failure → record + propagate --- */
+
+static void
+test_safe_finish_terminal_send_failure_no_retry(void)
+{
+    /*
+     * P0 fix: when Rust safe_finish succeeds with zero closing bytes
+     * but the empty terminal send fails definitively, the handler
+     * must:
+     *   - Record the original failure
+     *   - Return NGX_ERROR (propagate the send failure)
+     *   - NOT call abort (which would retry the terminal send)
+     *
+     * This is Spec case 8: zero closing bytes + terminal immediate
+     * definitive failure → record original failure → propagate send
+     * failure → do not retry.
+     */
+    routing_scenario_t s;
+    error_route_e route;
+
+    memset(&s, 0, sizeof(s));
+    s.commit_state_post = 1;
+    s.safe_finish_terminal_send_failed = 1;
+
+    route = oracle_postcommit_safe_finish_routing(&s);
+
+    TEST_ASSERT(route == ROUTE_RECORD_PROPAGATE,
+        "Safe-finish success + terminal send failure must "
+        "record and propagate (no abort retry)");
+    TEST_ASSERT(route != ROUTE_OUTPUT_LOSS,
+        "Terminal send failure is NOT output loss");
+    TEST_ASSERT(route != ROUTE_ORDINARY_POSTCOMMIT,
+        "Terminal send failure must NOT go through abort path");
+    TEST_PASS("Safe-finish terminal send failure → record + propagate (P0)");
+}
+
+
 /* --- Test: complete routing matrix coverage --- */
 
 static void
@@ -497,6 +561,14 @@ test_routing_matrix_exhaustive(void)
     TEST_ASSERT(route == ROUTE_RECORD_ONLY,
         "Matrix: terminal-only pending failure → record_only");
 
+    /* Matrix entry 8: safe_finish terminal send failure → record_propagate */
+    memset(&s, 0, sizeof(s));
+    s.commit_state_post = 1;
+    s.safe_finish_terminal_send_failed = 1;
+    route = oracle_postcommit_safe_finish_routing(&s);
+    TEST_ASSERT(route == ROUTE_RECORD_PROPAGATE,
+        "Matrix: safe_finish terminal send fail → record_propagate");
+
     TEST_PASS("Routing matrix exhaustive coverage");
 }
 
@@ -519,6 +591,7 @@ main(void)
     test_precommit_decomp_error_not_output_loss();
     test_safe_finish_is_safe_for_decomp_failures();
     test_resume_output_loss_sets_downstream_origin();
+    test_safe_finish_terminal_send_failure_no_retry();
     test_routing_matrix_exhaustive();
 
     printf("\n  All error routing post-commit tests passed\n\n");

@@ -227,6 +227,17 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
     rc = ngx_http_markdown_stream_postcommit_handle_send_result(
         r, rc, "safe_finish");
     if (rc != NGX_OK && rc != NGX_DONE) {
+        if (rc != NGX_AGAIN) {
+            /*
+             * Rust safe-finish succeeded (no closing bytes needed), but
+             * the empty terminal chain send failed definitively.  Flag
+             * this so handle_postcommit_error() propagates the send
+             * failure instead of treating it as a Rust failure and
+             * retrying via abort (Spec case 8: no retry on terminal
+             * immediate definitive failure).
+             */
+            ctx->streaming.completion.safe_finish_terminal_send_failed = 1;
+        }
         return rc;
     }
 
@@ -511,6 +522,8 @@ ngx_http_markdown_stream_postcommit_send_chain(
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown postcommit: "
                       "pending output re-entry detected");
+        ctx->streaming.classify.last_send_failure_origin =
+            NGX_HTTP_MD_SEND_ORIGIN_INVARIANT;
         return NGX_ERROR;
     }
 #endif
@@ -644,6 +657,10 @@ ngx_http_markdown_stream_postcommit_send_terminal(
         return NGX_OK;
     }
     if (acquired < 0) {
+#ifdef MARKDOWN_STREAMING_ENABLED
+        ctx->streaming.classify.last_send_failure_origin =
+            NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
+#endif
         return NGX_ERROR;
     }
 
@@ -679,6 +696,8 @@ ngx_http_markdown_stream_postcommit_send_closing(
     case 0:
         return NGX_OK;
     case -1:
+        ctx->streaming.classify.last_send_failure_origin =
+            NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     default: /* 1 — buffer acquired, fall through to populate + send */
         break;

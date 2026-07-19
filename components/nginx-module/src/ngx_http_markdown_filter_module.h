@@ -1181,6 +1181,12 @@ typedef struct {
              * constructed or delivered.  The Rust handle is consumed, so
              * the caller must hard-abort instead of sending a clean terminal. */
             ngx_flag_t                    safe_finish_output_loss;
+
+            /* Rust safe-finish succeeded with zero closing bytes, but the
+             * empty terminal chain send failed definitively.  The caller
+             * must NOT retry the terminal via abort — propagate the send
+             * failure directly. */
+            ngx_flag_t                    safe_finish_terminal_send_failed;
         } completion;
     } streaming;
 } ngx_http_markdown_ctx_t;
@@ -1776,6 +1782,7 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
 #define NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR     -101
 #define NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT  -102
 #define NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR         -103
+#define NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR   -105
 
 /*
  * Internal return code for conditional-request Bypass outcome
