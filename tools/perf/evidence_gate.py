@@ -615,11 +615,13 @@ _CRITICAL_SCENARIOS = frozenset({
     "streaming-first",
     "gzip-streaming-first",
     "deflate-streaming-first",
+    "brotli-streaming-first",
 })
 _CRITICAL_STREAMING_SCENARIOS = (
     "streaming-first",
     "gzip-streaming-first",
     "deflate-streaming-first",
+    "brotli-streaming-first",
 )
 _FULLBUFFER_RATIO_COVERAGE_LABEL = (
     "fullbuffer_ratio < 1 (not all requests fell back to full-buffer)"
@@ -823,6 +825,9 @@ def _path_coverage_invariants() -> list[dict]:
         ),
         _compressed_streaming_invariant(
             "deflate-streaming-first", "deflate"
+        ),
+        _compressed_streaming_invariant(
+            "brotli-streaming-first", "brotli"
         ),
     ]
 

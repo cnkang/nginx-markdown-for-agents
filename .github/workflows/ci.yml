@@ -54,7 +54,7 @@ concurrency:
 permissions: {}
 
 # =============================================================================
-# CI Job Classification (Spec 43 — Requirement 6)
+# CI Job Classification
 # =============================================================================
 #
 # BLOCKING (release-gate equivalent — must pass for merge/release):
@@ -301,6 +301,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
+            libbrotli-dev \
+            pkg-config \
             zlib1g-dev
 
       - name: Run NGINX C unit tests
@@ -328,6 +330,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang \
+            libbrotli-dev \
+            pkg-config \
             zlib1g-dev
 
       - name: Run NGINX C smoke tests with clang
@@ -352,6 +356,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang \
+            libbrotli-dev \
+            pkg-config \
             zlib1g-dev
 
       - name: Run NGINX C smoke tests with ASan/UBSan
@@ -377,6 +383,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             curl \
+            libbrotli-dev \
             pkg-config \
             python3 \
             rsync \
@@ -426,8 +433,8 @@ jobs:
           echo "nginx_bin=${nginx_bin}" >> "${GITHUB_OUTPUT}"
 
       - name: Run chunked streaming native smoke validation
-        # Covers Spec 43 Req 1.2: native NGINX chunked/no-Content-Length E2E
-        # proving output is emitted before full upstream body is buffered.
+        # Proves native chunked output is emitted before the full upstream
+        # body is buffered.
         # CI-equivalent of: make verify-chunked-native-e2e-smoke
         env:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
@@ -438,6 +445,11 @@ jobs:
           NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
         run: ./tools/e2e/verify_large_markdown_response_e2e.sh
 
+      - name: Run Brotli streaming native E2E verification
+        env:
+          NGINX_BIN: ${{ steps.ims_runtime.outputs.nginx_bin }}
+        run: ./tools/e2e/verify_brotli_streaming_e2e.sh
+
       - name: Remove retained IMS build artifacts
         if: always()
         env:
@@ -445,6 +457,87 @@ jobs:
         run: |
           if [[ -n "${IMS_BUILDROOT}" && -d "${IMS_BUILDROOT}" ]]; then
             rm -rf "${IMS_BUILDROOT}"
+          fi
+
+  brotli-build-matrix:
+    name: Brotli Build Gate (${{ matrix.mode }}, Ubuntu 22.04)
+    needs: changes
+    if: needs.changes.outputs.nginx == 'true' || needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [on, off]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            curl \
+            libbrotli-dev \
+            pkg-config \
+            python3 \
+            rsync \
+            zlib1g-dev \
+            binutils
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: 1.97.0
+
+      - name: Build real NGINX module
+        id: module
+        env:
+          NGX_MARKDOWN_BROTLI_STREAMING: ${{ matrix.mode }}
+        run: |
+          nginx_bin_file="$(mktemp)"
+          buildroot_file="$(mktemp)"
+          ./tools/ci/verify_real_nginx_ims.sh \
+            --keep-artifacts \
+            --nginx-bin-output "${nginx_bin_file}" \
+            --buildroot-output "${buildroot_file}"
+          nginx_bin="$(cat "${nginx_bin_file}")"
+          buildroot="$(cat "${buildroot_file}")"
+          if [[ ! -x "${nginx_bin}" ]]; then
+            echo "ERROR: real NGINX build did not produce expected artifacts" >&2
+            exit 1
+          fi
+          echo "nginx_bin=${nginx_bin}" >> "${GITHUB_OUTPUT}"
+          echo "buildroot=${buildroot}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify Brotli linkage mode
+        env:
+          NGINX_BIN: ${{ steps.module.outputs.nginx_bin }}
+          MODE: ${{ matrix.mode }}
+        run: |
+          dynamic_section="$(readelf -d "${NGINX_BIN}")"
+          if [[ "${MODE}" == "on" ]]; then
+            grep -Eq 'NEEDED.*libbrotlidec\.so' <<<"${dynamic_section}" || {
+              echo "ERROR: enabled build lacks libbrotlidec dependency" >&2
+              exit 1
+            }
+          elif grep -Eq 'NEEDED.*libbrotlidec\.so' <<<"${dynamic_section}"; then
+            echo "ERROR: disabled build unexpectedly links libbrotlidec" >&2
+            exit 1
+          fi
+
+      - name: Remove retained build artifacts
+        if: always()
+        env:
+          BUILDROOT: ${{ steps.module.outputs.buildroot }}
+        run: |
+          if [[ -n "${BUILDROOT}" && -d "${BUILDROOT}" ]]; then
+            rm -rf "${BUILDROOT}"
           fi
 
   perf-artifacts:

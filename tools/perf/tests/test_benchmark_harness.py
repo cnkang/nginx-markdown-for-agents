@@ -136,7 +136,7 @@ def test_response_probe_rejects_incorrect_markdown(
     assert reason_fragment in result["failure_reason"]
 
 
-@pytest.mark.parametrize("encoding", ["gzip", "deflate"])
+@pytest.mark.parametrize("encoding", ["gzip", "deflate", "brotli"])
 def test_compressed_probe_rejects_content_encoding(encoding):
     result = validate_response_probe(
         status=200,
@@ -198,7 +198,12 @@ def test_http_500_probe_prevents_completed_scenario():
 
 
 @pytest.mark.parametrize(
-    "scenario_name", ["gzip-streaming-first", "deflate-streaming-first"]
+    "scenario_name",
+    [
+        "gzip-streaming-first",
+        "deflate-streaming-first",
+        "brotli-streaming-first",
+    ],
 )
 def test_compressed_streaming_probe_must_match_uncompressed(scenario_name):
     probes = {
@@ -372,6 +377,20 @@ def test_upstream_mock_streams_compression_in_bounded_chunks(
     assert len(chunks) > 1
     assert max(map(len, decompressed_chunks)) <= 16 * 1024
     assert b"".join(decompressed_chunks) == body
+
+
+def test_upstream_mock_streams_brotli_in_bounded_chunks():
+    """Brotli benchmark streams must bound each decompression burst."""
+    brotli = pytest.importorskip("brotli")
+    body = b"<p>highly compressible benchmark content</p>\n" * 32_768
+    chunks = MockUpstreamHandler._iter_chunked_body(body, "br")
+    decompressor = brotli.Decompressor()
+    decompressed_chunks = [decompressor.process(chunk) for chunk in chunks]
+
+    assert len(chunks) > 1
+    assert max(map(len, decompressed_chunks)) <= 16 * 1024
+    assert b"".join(decompressed_chunks) == body
+    assert decompressor.is_finished()
 
 # Canonical allowlist for bash binary paths (Rule 33: CLI-derived executables
 # must match a fixed canonical allowlist before subprocess use).

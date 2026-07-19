@@ -21,6 +21,7 @@ class NginxMarkdownModule < Formula
   depends_on "cbindgen" => :build
   depends_on "nginx" => :build
   depends_on "pkgconf" => :build
+  depends_on "brotli"
   depends_on "openssl@3"
   depends_on "pcre2"
 
@@ -47,6 +48,10 @@ class NginxMarkdownModule < Formula
            "--default-toolchain #{TOOLCHAIN_VERSION}"
     ENV.prepend_path "PATH", "#{cargo_home}/bin"
 
+    # Enable Brotli streaming decompression explicitly so the official Homebrew
+    # artifact does not rely on auto-detection alone.
+    ENV["NGX_MARKDOWN_BROTLI_STREAMING"] = "on"
+
     system "make", "build"
 
     nginx_version = Formula["nginx"].version.to_s
@@ -61,8 +66,8 @@ class NginxMarkdownModule < Formula
       args = [
         "--with-compat",
         "--add-dynamic-module=#{buildpath}/components/nginx-module",
-        "--with-cc-opt=-I#{formula_opt_include("openssl@3")} -I#{formula_opt_include("pcre2")}",
-        "--with-ld-opt=-L#{formula_opt_lib("openssl@3")} -L#{formula_opt_lib("pcre2")}",
+        "--with-cc-opt=-I#{formula_opt_include("openssl@3")} -I#{formula_opt_include("pcre2")} -I#{formula_opt_include("brotli")}",
+        "--with-ld-opt=-L#{formula_opt_lib("openssl@3")} -L#{formula_opt_lib("pcre2")} -L#{formula_opt_lib("brotli")}",
       ]
       system "./configure", *args
       system "make", "modules"
@@ -79,6 +84,18 @@ class NginxMarkdownModule < Formula
   end
 
   test do
-    assert_path_exists lib/"nginx/modules/ngx_http_markdown_filter_module.so"
+    module_path = lib/"nginx/modules/ngx_http_markdown_filter_module.so"
+    assert_path_exists module_path
+    assert_match "libbrotlidec", shell_output("otool -L #{module_path}")
+
+    (testpath/"nginx.conf").write <<~EOS
+      load_module #{module_path};
+      pid #{testpath}/nginx.pid;
+      error_log #{testpath}/error.log;
+      events {}
+      http {}
+    EOS
+    system Formula["nginx"].opt_bin/"nginx", "-t", "-p", testpath,
+           "-c", testpath/"nginx.conf"
   end
 end

@@ -62,7 +62,7 @@ usage() {
   echo >&2 "Environment:"
   echo >&2 "  NGINX_BIN   Path to nginx binary with markdown module (required)"
   echo >&2 ""
-  echo >&2 "Scenarios: plain-small, chunked-medium, gzip-large, large-body, streaming-first, gzip-streaming-first, deflate-streaming-first"
+  echo >&2 "Scenarios: plain-small, chunked-medium, gzip-large, large-body, streaming-first, gzip-streaming-first, deflate-streaming-first, brotli-streaming-first"
   exit "$exit_code"
 }
 
@@ -320,7 +320,11 @@ http {
             proxy_set_header Host \$host;
 
             markdown_filter on;
-            markdown_limits memory=64m timeout=2s streaming_buffer=256k max_inflight=64;
+            # The 1 MiB Brotli fixture can expand from one very small wire
+            # chunk. Keep both conversion and pre-commit replay buffers large
+            # enough for that valid first batch while retaining hard caps.
+            markdown_limits memory=64m timeout=2s streaming_buffer=16m max_inflight=64;
+            markdown_stream_precommit_buffer 16m;
             $profile_directives
         }
 
@@ -639,6 +643,7 @@ SCENARIOS=(
   "streaming-first|large/large-1mb.html|streaming_first|none|chunked|20"
   "gzip-streaming-first|large/large-1mb.html|streaming_first|gzip|chunked|10"
   "deflate-streaming-first|large/large-1mb.html|streaming_first|deflate|chunked|10"
+  "brotli-streaming-first|large/large-1mb.html|streaming_first|brotli|chunked|10"
 )
 
 ###############################################################################
@@ -822,6 +827,8 @@ run_scenario() {
     url_path="${url_path}?gzip=1"
   elif [[ "$SC_COMPRESSION" == "deflate" ]]; then
     url_path="${url_path}?deflate=1"
+  elif [[ "$SC_COMPRESSION" == "brotli" ]]; then
+    url_path="${url_path}?brotli=1"
   fi
 
   if [[ "$SC_TRANSFER" == "chunked" ]]; then
@@ -1072,6 +1079,7 @@ probe_bodies = {
         "streaming-first",
         "gzip-streaming-first",
         "deflate-streaming-first",
+        "brotli-streaming-first",
     )
     if (path := probe_dir / f"{name}.body").exists()
 }

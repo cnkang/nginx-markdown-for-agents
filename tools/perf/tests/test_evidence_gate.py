@@ -274,7 +274,7 @@ def test_module_baseline_contains_completed_seven_scenario_contract():
     scenarios = baseline["module_benchmark"]["scenarios"]
     by_name = {scenario["name"]: scenario for scenario in scenarios}
 
-    # Keep the complete seven-scenario contract explicit to prevent drift.
+    # Keep the complete eight-scenario contract explicit to prevent drift.
     for name in (
         "plain-small",
         "chunked-medium",
@@ -283,6 +283,7 @@ def test_module_baseline_contains_completed_seven_scenario_contract():
         "streaming-first",
         "gzip-streaming-first",
         "deflate-streaming-first",
+        "brotli-streaming-first",
     ):
         assert name in by_name, f"baseline missing scenario: {name}"
         assert by_name[name]["status"] == "completed"
@@ -314,6 +315,13 @@ def test_module_baseline_contains_completed_seven_scenario_contract():
             "deflate-streaming-first must prove deflate streaming decompression ran"
         )
         assert deflate_s["streaming_path_hits"] > 0
+
+    if "brotli-streaming-first" in by_name:
+        brotli_s = by_name["brotli-streaming-first"]["metrics"]
+        assert brotli_s["decompression_streaming_total"] > 0, (
+            "brotli-streaming-first must prove brotli streaming decompression ran"
+        )
+        assert brotli_s["streaming_path_hits"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -854,6 +862,7 @@ class TestEvidenceMetricExtraction:
                 ("streaming-first", 10, 1000),
                 ("gzip-streaming-first", 5, 500),
                 ("deflate-streaming-first", 1, 50),
+                ("brotli-streaming-first", 2, 200),
             )
         ])
         metrics = _extract_evidence_metrics(report)
@@ -868,7 +877,7 @@ class TestEvidenceMetricExtraction:
 
     @pytest.mark.parametrize(
         "degraded_scenario",
-        ["gzip-streaming-first", "deflate-streaming-first"],
+        ["gzip-streaming-first", "deflate-streaming-first", "brotli-streaming-first"],
     )
     def test_codec_fallback_controls_absolute_rate(self, degraded_scenario):
         """Any critical streaming codec regression controls the gate rate."""
@@ -877,6 +886,7 @@ class TestEvidenceMetricExtraction:
             "streaming-first",
             "gzip-streaming-first",
             "deflate-streaming-first",
+            "brotli-streaming-first",
         ):
             failopen = 100 if name == degraded_scenario else 0
             scenarios.append({
@@ -911,6 +921,7 @@ class TestEvidenceMetricExtraction:
                 ("streaming-first", 0),
                 ("gzip-streaming-first", 2),
                 ("deflate-streaming-first", 4),
+                ("brotli-streaming-first", 1),
             )
         ]
 
@@ -934,6 +945,7 @@ class TestEvidenceMetricExtraction:
                 "streaming-first",
                 "gzip-streaming-first",
                 "deflate-streaming-first",
+                "brotli-streaming-first",
             )
         ]
 
@@ -1517,6 +1529,26 @@ class TestBaselineEvidenceIntegrity:
                             "peak_rss_bytes": 3500,
                         },
                     },
+                    {
+                        "name": "brotli-streaming-first",
+                        "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "brotli",
+                        "transfer_encoding": "chunked",
+                        "metrics": {
+                            "decompression_streaming_total": 800,
+                            "streaming_path_hits": 1000,
+                            "streaming_ratio": 1.0,
+                            "fullbuffer_ratio": 0.0,
+                            "streaming_requests_total": 1000,
+                            "precommit_failopen_total": 0,
+                            "zero_copy_output_total": 500,
+                            "copied_output_total": 0,
+                            "input_bytes": 300,
+                            "baseline_rss_bytes": 3000,
+                            "peak_rss_bytes": 3500,
+                        },
+                    },
                 ],
             }
         }
@@ -1627,7 +1659,7 @@ class TestCriticalScenarioCompleteness:
         assert any(name == "large-body" for name, _ in incomplete)
 
     def test_all_completed_no_incomplete(self):
-        """All seven critical release scenarios completed returns empty."""
+        """All eight critical release scenarios completed returns empty."""
         report = {
             "scenarios": [
                 {"name": "plain-small", "status": "completed"},
@@ -1637,6 +1669,7 @@ class TestCriticalScenarioCompleteness:
                 {"name": "gzip-large", "status": "completed"},
                 {"name": "gzip-streaming-first", "status": "completed"},
                 {"name": "deflate-streaming-first", "status": "completed"},
+                {"name": "brotli-streaming-first", "status": "completed"},
             ]
         }
         assert _check_missing_scenarios(report) == []
@@ -2226,7 +2259,7 @@ class TestCompressedStreamingEvidenceCompleteness:
         assert any(name == "deflate-streaming-first" for name, _ in incomplete)
 
     def test_all_critical_scenarios_completed_passes(self):
-        """All seven critical scenarios completed → no missing/incomplete."""
+        """All eight critical scenarios completed → no missing/incomplete."""
         report = {
             "scenarios": [
                 {"name": "plain-small", "status": "completed"},
@@ -2236,6 +2269,7 @@ class TestCompressedStreamingEvidenceCompleteness:
                 {"name": "gzip-large", "status": "completed"},
                 {"name": "gzip-streaming-first", "status": "completed"},
                 {"name": "deflate-streaming-first", "status": "completed"},
+                {"name": "brotli-streaming-first", "status": "completed"},
             ]
         }
         assert _check_missing_scenarios(report) == []
@@ -2402,7 +2436,12 @@ class TestCompressedStreamingPathTruthfulness:
         )
 
     @pytest.mark.parametrize(
-        "scenario_name", ["gzip-streaming-first", "deflate-streaming-first"]
+        "scenario_name",
+        [
+            "gzip-streaming-first",
+            "deflate-streaming-first",
+            "brotli-streaming-first",
+        ],
     )
     def test_compressed_streaming_zero_output_is_violation(self, scenario_name):
         """Codec path hits without delivered output are not credible evidence."""
@@ -2433,7 +2472,12 @@ class TestCompressedStreamingPathTruthfulness:
         )
 
     @pytest.mark.parametrize(
-        "scenario_name", ["gzip-streaming-first", "deflate-streaming-first"]
+        "scenario_name",
+        [
+            "gzip-streaming-first",
+            "deflate-streaming-first",
+            "brotli-streaming-first",
+        ],
     )
     def test_compressed_streaming_all_failopen_is_violation(self, scenario_name):
         """A codec scenario with 100 percent precommit fail-open is invalid."""
@@ -2610,6 +2654,55 @@ class TestCompressedStreamingPathTruthfulness:
             for v in violations
         )
 
+    def test_brotli_streaming_first_zero_decompression_is_violation(self):
+        """Brotli evidence must prove the streaming decoder ran."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [{
+                    "name": "brotli-streaming-first",
+                    "status": "completed",
+                    "profile": "streaming_first",
+                    "compression": "brotli",
+                    "transfer_encoding": "chunked",
+                    "metrics": {
+                        "decompression_streaming_total": 0,
+                        "streaming_path_hits": 100,
+                        "streaming_ratio": 1.0,
+                    },
+                }]
+            }
+        }
+        violations = _check_path_coverage(report)
+        assert any(
+            v[0] == "brotli-streaming-first"
+            and v[1] == "decompression_streaming_total"
+            for v in violations
+        )
+
+    def test_brotli_streaming_first_invalid_metadata_is_violation(self):
+        """Brotli evidence cannot claim a different codec configuration."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [{
+                    "name": "brotli-streaming-first",
+                    "status": "completed",
+                    "profile": "streaming_first",
+                    "compression": "gzip",
+                    "transfer_encoding": "chunked",
+                    "metrics": {
+                        "decompression_streaming_total": 100,
+                        "streaming_path_hits": 100,
+                        "streaming_ratio": 1.0,
+                    },
+                }]
+            }
+        }
+        violations = _check_path_coverage(report)
+        assert any(
+            v[0] == "brotli-streaming-first" and v[1] == "compression"
+            for v in violations
+        )
+
     def test_validate_benchmark_evidence_with_full_report_passes(self):
         """A complete report with all critical scenarios and genuine paths passes."""
         report = {
@@ -2716,6 +2809,26 @@ class TestCompressedStreamingPathTruthfulness:
                         "status": "completed",
                         "profile": "streaming_first",
                         "compression": "deflate",
+                        "transfer_encoding": "chunked",
+                        "metrics": {
+                            "decompression_streaming_total": 800,
+                            "streaming_path_hits": 1000,
+                            "streaming_ratio": 1.0,
+                            "fullbuffer_ratio": 0.0,
+                            "streaming_requests_total": 1000,
+                            "precommit_failopen_total": 0,
+                            "zero_copy_output_total": 5000,
+                            "copied_output_total": 0,
+                            "input_bytes": 1_048_516,
+                            "baseline_rss_bytes": 22_000_000,
+                            "peak_rss_bytes": 29_000_000,
+                        },
+                    },
+                    {
+                        "name": "brotli-streaming-first",
+                        "status": "completed",
+                        "profile": "streaming_first",
+                        "compression": "brotli",
                         "transfer_encoding": "chunked",
                         "metrics": {
                             "decompression_streaming_total": 800,
