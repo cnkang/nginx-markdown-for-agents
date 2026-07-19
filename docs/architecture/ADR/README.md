@@ -73,10 +73,11 @@ What other options were considered and why were they not chosen?
 | [0017](0017-090-headerplan-atomic-apply.md) | 0.9.0 HeaderPlan Atomic Apply (Prepare/Commit) | Accepted | 2026-06-30 |
 | [0018](0018-090-observability-schema-v1-reason-registry.md) | 0.9.0 Observability Schema v1 and Reason Code Registry | Accepted | 2026-06-30 |
 | [0019](0019-090-production-readiness-release-gates.md) | 0.9.0 Production Readiness Release Gate Framework | Accepted | 2026-06-30 |
-| [0020](0020-091-hybrid-zero-copy-pool-cleanup.md) | Hybrid Zero-Copy Streaming Output with Pool Cleanup | Accepted | 2026-07-08 |
-| [0021](0021-091-gzip-deflate-streaming-decompression-routing.md) | Gzip and Deflate Streaming Decompression Routing | Accepted | 2026-07-08 |
-| [0022](0022-091-performance-evidence-release-gate.md) | 0.9.1 Performance Evidence Release Gate | Accepted | 2026-07-08 |
-| [0023](0023-091-single-streaming-policy.md) | Single Public Streaming Policy Before v1.0 | Accepted | 2026-07-14 |
+| [0020](0020-hybrid-zero-copy-pool-cleanup.md) | Hybrid Zero-Copy Streaming Output with Pool Cleanup | Accepted | 2026-07-08 |
+| [0021](0021-gzip-deflate-streaming-decompression-routing.md) | Gzip and Deflate Streaming Decompression Routing | Accepted | 2026-07-08 |
+| [0022](0022-performance-evidence-release-gate.md) | 0.9.1 Performance Evidence Release Gate | Accepted | 2026-07-08 |
+| [0023](0023-single-streaming-policy.md) | Single Public Streaming Policy Before v1.0 | Accepted | 2026-07-14 |
+| [0024](0024-brotli-streaming-decompression.md) | Brotli Streaming Decompression | Accepted | 2026-07-17 |
 
 ## Creating a New ADR
 
@@ -110,6 +111,7 @@ What other options were considered and why were they not chosen?
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-17 | Kiro | Added ADR-0024 (Brotli Streaming Decompression) to index |
 | 0.9.1 | 2026-07-14 | Codex | Added ADR-0023 for the final pre-v1 streaming and flavor contract reset |
 | 0.9.1 | 2026-07-08 | Kang | Added ADR-0020 (Hybrid Zero-Copy), ADR-0021 (gzip/deflate streaming routing), ADR-0022 (Perf Evidence Gate) |
 | 0.9.0 | 2026-06-30 | Kang | Added ADR-0015 (Config V2), ADR-0016 (Rust-first decision core boundary), ADR-0017 (HeaderPlan atomic apply), ADR-0018 (observability schema v1 / reason registry), ADR-0019 (0.9.0 release gate framework) — Wave 1 contract freeze |

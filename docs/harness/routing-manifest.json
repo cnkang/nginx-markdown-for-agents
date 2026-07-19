@@ -247,6 +247,9 @@
         "gzip",
         "gzip member",
         "gzip trailer",
+        "brotli",
+        "brotli trailing data",
+        "brotli no progress",
         "truncated stream"
       ],
       "verification_families": [

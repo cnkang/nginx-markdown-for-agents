@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.1] - Unreleased
+## [0.9.1] - 2026-07-19
 
 Final pre-v1.0 baseline-consolidation and compatibility-reset release. In
 addition to performance readiness and release evidence, this release closes
@@ -73,7 +73,19 @@ completing before the long-lived contract begins.
 - Streaming decompression routing for gzip and deflate responses (both
   zlib-wrapped RFC 1950 and raw RFC 1951 deflate) under `streaming_first` with
   `markdown_auto_decompress on` and `markdown_cache_validation` not `full`.
-  Gzip is member-aware across chunks; Brotli remains bounded full-buffer.
+  Gzip is member-aware across chunks.
+- Brotli streaming decompression: Brotli-compressed upstream responses now
+  decompress incrementally via the streaming path (same as gzip/deflate) under
+  `streaming_first` with `markdown_auto_decompress on` and
+  `markdown_cache_validation` not `full`. Hardened with trailing-data rejection
+  (RFC 7932 single-stream enforcement), truncation detection, no-progress
+  guard, typed error propagation, three-way error classification
+  (format/allocation/internal), exact-budget completion probes, and per-call
+  failure-origin lifecycle. Build dependency: official release builds now
+  depend on `libbrotlidec` for Brotli streaming. Configure option:
+  `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` (default auto). No new public
+  directives or ABI surface. Identical budget, error policy, and observability
+  semantics as gzip/deflate streaming paths. ADR-0024 documents the decision.
 - Full-buffer compressed copy reduction (default on, internal optimization):
   eliminates redundant memcpy by passing contiguous buffers directly to the
   decompressor and swapping output via pointer assignment.
@@ -86,14 +98,14 @@ completing before the long-lived contract begins.
 - Performance doctor advice tool (`tools/perf/doctor_advice.py`) that analyzes
   runtime metrics and produces actionable operator tuning recommendations.
 - Module-level benchmark harness (`tools/perf/run_module_benchmark.sh`)
-  exercising the full NGINX request lifecycle with 5 scenarios.
+  exercising the full NGINX request lifecycle with 8 scenarios.
 - Performance rollout and rollback guidance for zero-copy output, streaming
   decompression, and copy-reduction rollout stages.
 - Perf observability fields for backpressure, pending-output high-watermark,
   decompression path selection, and output copy mode across metrics renderers.
-- ADRs 0020–0023 documenting zero-copy pool cleanup, gzip/deflate streaming
-  decompression routing, the performance evidence release gate, and the
-  single public streaming policy.
+- ADRs 0020–0024 documenting zero-copy pool cleanup, gzip/deflate streaming
+  decompression routing, the performance evidence release gate, the single
+  public streaming policy, and Brotli streaming decompression.
 
 ### Fixed
 

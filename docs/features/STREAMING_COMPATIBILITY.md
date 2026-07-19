@@ -23,6 +23,9 @@ mode. Use it to understand behavioral differences before enabling streaming.
 | Noise pruning | ✅ | ✅ | Applied during parsing |
 | Dynamic configuration | ✅ | ✅ | Runtime engine switching supported |
 | Shadow mode | ✅ | N/A | Runs streaming in background against full-buffer result |
+| Streaming decompression (gzip) | N/A | ✅ | Member-aware; since 0.9.1 |
+| Streaming decompression (deflate) | N/A | ✅ | RFC 1950/1951 sniff; since 0.9.1 |
+| Streaming decompression (Brotli) | N/A | ✅ | Requires `NGX_HTTP_BROTLI`; since 0.9.1 |
 
 ## Legend
 
@@ -87,5 +90,6 @@ thresholds.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-18 | Kang | Added streaming decompression rows (gzip, deflate, Brotli) to compatibility matrix |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.8.0 | 2026-06-16 | Kang  | Initial feature compatibility matrix |

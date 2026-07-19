@@ -46,7 +46,7 @@ harness.
 | **Peak memory** | Response size × ~2 (buffer + converted output) | Same as strict_cache for small responses; bounded by `streaming_buffer` for large | Lower in the validated 1 MiB comparison; avoids full-response accumulation |
 | **Cache correctness** | Full — ETag generation, If-None-Match, If-Modified-Since | Partial — If-Modified-Since only (IMS via upstream Last-Modified) | None — no conditional request support |
 | **Zero-copy output (0.9.1)** | Not applicable (no streaming) | Available when streaming active + opt-in | Available + opt-in via `markdown_streaming_zero_copy on` |
-| **Streaming decompression (0.9.1)** | Not applicable (no streaming) | Not active (requires `streaming_first` profile) | Active for gzip and deflate (zlib-wrapped + raw); Brotli uses bounded full-buffer decompression |
+| **Streaming decompression (0.9.1)** | Not applicable (no streaming) | Not active (requires `streaming_first` profile) | Active for gzip, deflate (zlib-wrapped + raw), and Brotli only when `markdown_auto_decompress on`, `markdown_cache_validation` is not `full`, and the codec was compiled in |
 | **Full-buffer copy reduction (0.9.1)** | Active (internal) | Active (internal) | Active (internal) |
 
 ### Profile Selection Guide

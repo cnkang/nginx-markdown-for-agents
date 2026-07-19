@@ -113,7 +113,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 35 | dynconf-snapshot | dynconf_enabled gate; applied_mtime after successful reload; unknown keys → NGX_ERROR; startup apply |
 | 36 | harness-routing | Route recurring tooling fixes to focused security family |
 | 37 | e2e-runner | Rust-first E2E; no new Python e2e files; parity entries required |
-| 38 | streaming-backpressure | Replay buffer init/append failure → precommit_error; failopen_completed flag; delivery after downstream OK |
+| 38 | streaming-backpressure | Replay buffer init/append failure → precommit_error; failopen_completed flag; delivery after downstream NGX_OK or NGX_DONE; uniform across ALL fail-open paths (streaming, buffered, buffer-init/append, header filter) |
 | 39 | nginx-idioms | NGX_DONE terminal semantics; multi-step header atomicity; bounded snapshots fail before mutation |
 | 40 | nginx-idioms | Filter hash==0 (invalidated) headers in all lookup/iteration functions |
 | 41 | shell | Shell harness detect_*.sh scripts must use POSIX ERE ([[:space:]] not \s); grep -E for extended patterns |
@@ -180,7 +180,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 **Streaming & Backpressure** (C)
 - NGX_AGAIN resume honors chain ownership: module-owned chains persist; downstream-owned chains drain with NULL; last_buf never overwrites pending data [1]
 - Fail-open return codes correct; replay buffer init/append failure → precommit_error [2,38]
-- failopen_completed prevents duplicate finalize; failopen_count after downstream OK [38]
+- failopen_completed prevents duplicate finalize; failopen_count after downstream NGX_OK or NGX_DONE; uniform across ALL fail-open paths (streaming, buffered, buffer-init/append, header filter) [38]
 - UTF-8 tails preserved across chunk boundaries; flush at EOF; streaming tokenizer discard_bom=false, strip stream-start BOM in converter [4]
 - Full-buffer and streaming gzip/deflate preserve codec/member lifecycle; streaming state survives arbitrary chunks and backpressure resumes; gzip member resets keep response-wide budgets; truncated final streams/members are rejected; tests match production routing/formats [44]
 - Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return [47]
@@ -552,6 +552,7 @@ remediation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-19 | Kang | Strengthened Rule 38: `results.failopen_count` delivery-after-downstream-success contract applies uniformly to ALL fail-open paths (streaming, buffered, buffer-init/append, header filter); fixed C-001 buffer-init/append-failure and four header-filter fail-open paths that incremented `failopen_count` before downstream filter returned; added `failopen_delivery_after_downstream_test.c` regression test; updated `ngx_http_markdown_metric_inc_failopen` helper doc to state delivery-counter semantics; docs sync (encoding-charset Rule 44 Brotli streaming, dynconf-snapshot Rule 35 dry-run applied_mtime, streaming-backpressure Rule 38 NGX_DONE wording, streaming-check-order Engine→Policy, SYSTEM_ARCHITECTURE/PROJECT_STATUS Brotli streaming, Rust FFI doc accuracy — IncrementalConverterHandle fields, FFIHeaderEntry field docs, markdown_options_init defaults, lib.rs feature-gated default-on, ffi/convert.rs module doc, FFIErrorClass doc, exports.rs entry-point list, error/mod.rs FFI error code range, incremental.rs Markdown formatting, rust-converter README version pin, delivery_counter test notes) |
 | 0.9.1 | 2026-07-15 | Kang | Added Rules 56–59: orphan comment closers (56), #ifdef-guarded function visibility (57), workflow input injection (58), hardcoded HTTP status in reject paths (59); added detect_orphan_comment_close.py, detect_ifdef_guard_visibility.sh, detect_workflow_input_injection.sh, detect_hardcoded_http_status.sh; fixed release-rpm.yml input injection; fixed detect_doc_sync.py _iter_worktree_text_files complexity |
 | 0.9.1 | 2026-07-14 | Kang | Added `RELEASE_GATE_ALLOW_SKIP_MODULE=1` env-limited skip guard to `test-production-examples-nginx-t` (0.9.0 gate), mirroring the 091 module-benchmark skip contract; updated ADR-0019 blocking-semantics taxonomy |
 | 0.9.1 | 2026-07-08 | Kang | 0.9.1 release: hybrid zero-copy output (markdown_streaming_zero_copy default off), gzip plus zlib/raw-deflate streaming decompression routing, bounded Brotli full-buffer routing, full-buffer copy reduction, markdown_auto_decompress directive registration fix, performance evidence gate (release-gates-check-091, perf-evidence-check), doctor advice tool, ADRs 0020–0022 |

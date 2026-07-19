@@ -29,8 +29,10 @@ Automatic decompression is the built-in fallback path for this scenario.
     budget. Deflate (zlib-wrapped or raw) must completely consume its
     compressed payload; trailing bytes after `Z_STREAM_END` are rejected as
     `FORMAT_ERROR` (deflate does not support concatenated members).
-- Supports `br` when Brotli support is compiled in; Brotli remains on bounded
-  full-buffer decompression in 0.9.1.
+- Supports `br` when Brotli support is compiled in (`NGX_HTTP_BROTLI`); Brotli
+  uses streaming decompression under the same routing gates as gzip/deflate
+  in 0.9.1. Builds without `NGX_HTTP_BROTLI` route Brotli to bounded
+  full-buffer decompression via the Rust FFI path.
 - Uses a fast path for uncompressed responses (no decompression work).
 - Applies `markdown_error_policy` strategy on decompression failures.
 
@@ -149,6 +151,7 @@ The `ngx_http_markdown_classify_error()` function maps FFI error codes to
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-18 | Kang | Updated Brotli decompression: streaming path active when NGX_HTTP_BROTLI defined; full-buffer fallback for disabled builds |
 | 0.9.1 | 2026-07-14 | Codex | Document full-buffer concatenated-gzip handling, later-member truncation rejection, and cumulative budget enforcement |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.7.0 | 2026-05-17 | Kang | Added Resource Budgets and Error Categories sections for v0.7.0 |

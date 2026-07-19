@@ -28,7 +28,7 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Current Release Line 0.9.1
 
-**Status:** Unreleased development and release-candidate line. 0.9.1 introduces zero-copy output for streaming, gzip plus zlib/raw-deflate streaming decompression, bounded Brotli full-buffer routing, and full-buffer copy reduction, all guarded by strict performance evidence gates.
+**Status:** Stable release. 0.9.1 introduces zero-copy output for streaming, gzip plus zlib/raw-deflate plus Brotli streaming decompression, and full-buffer copy reduction, all guarded by strict performance evidence gates.
 
 ### Release 0.7.0 Updates
 
@@ -649,7 +649,7 @@ See `examples/docker/` for Docker build examples.
 ## Summary
 
 **NGINX Markdown for Agents** is on the 0.9.x release line (latest patch:
-0.9.0; 0.9.1 in RC preparation). The project provides
+0.9.1). The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 streaming-default conversion model, with bounded-memory streaming as the
 default path and full-buffer conversion as the fallback. Version 0.8.0

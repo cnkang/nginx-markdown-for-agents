@@ -87,6 +87,11 @@ Required:
   `last_mtime` (observed) and `applied_mtime` (confirmed after
   successful reload).  `applied_mtime` must be updated only after
   reload returns `RELOAD_APPLIED` or `RELOAD_NO_CHANGE`.
+  `applied_mtime` is also updated to `last_mtime` on
+  `RELOAD_DRY_RUN_OK` / `RELOAD_DRY_RUN_FAIL` to suppress repeated
+  re-validation of the same file content; it must not be advanced on
+  `RELOAD_INVALID_FILE` / `RELOAD_IO_ERROR` so the timer retries the
+  reload on the next poll cycle.
 - When `last_mtime != applied_mtime`, the timer handler must retry
   the reload on the next poll cycle, regardless of whether
   `dynconf_check()` detects a new mtime change.
