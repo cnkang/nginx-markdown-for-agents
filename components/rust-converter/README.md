@@ -90,8 +90,8 @@ callers use `_new_with_code` so construction failures remain classifiable.
 
 This API buffers all fed data internally and performs a single full
 parse-and-convert pass during `finalize`. The separate `streaming`
-module owns the true streaming engine path used by the 0.6.3 release
-line.
+module owns the true streaming engine path used since the 0.6.3 release
+line and is the default streaming path in 0.9.1.
 
 ### Equivalence Guarantee
 

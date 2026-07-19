@@ -18,7 +18,24 @@
 //! helpers (`markdown_options_init`, `markdown_*_result_init`) are panic-free
 //! by construction (they only call `ptr::write`).
 //!
-//! # Exported Functions
+//! # Primary Entry Points
+//!
+//! The full set of `#[unsafe(no_mangle)] pub extern "C"` exports in this
+//! module includes converter lifecycle (`markdown_converter_new`/`_free`),
+//! `markdown_convert`, result lifecycle (`markdown_result_init`/`_free`),
+//! accept negotiation (`markdown_negotiate_accept`), eligibility and
+//! conditional decisions (`markdown_decide_eligibility`,
+//! `markdown_decide_conditional`), header plan build/free/init,
+//! trusted-proxy list management (`markdown_trusted_proxies_*`),
+//! base URL decision (`markdown_decide_base_url`), bounded decompression
+//! (`markdown_decompress_bounded`, `markdown_decompress_free`,
+//! `markdown_decomp_result_init`), conflict detection/release
+//! (`markdown_detect_conflicts`, `markdown_free_conflicts`), option/result
+//! init helpers (`markdown_options_init`), and
+//! error classification (`markdown_classify_error_code`).  Incremental
+//! and streaming FFI exports live in `ffi/incremental.rs` and
+//! `ffi/streaming.rs`.  The table below lists the primary entry points;
+//! see the per-function documentation for the complete list.
 //!
 //! | Function | Purpose |
 //! |----------|---------|
@@ -882,6 +899,9 @@ unsafe fn optional_str<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
 /// - `memory_budget`: 0 (use per-engine defaults)
 /// - `llm_provider`: 0 (default)
 /// - `chars_per_token_fixed`: 0 (use default ratio)
+/// - `parse_timeout_ms`: 0 (fall back to `timeout_ms`)
+/// - `parser_memory_budget`: 0 (no per-handle limit; use engine default)
+/// - `flush_threshold`: 0 (use default streaming flush threshold)
 ///
 /// # Safety
 ///

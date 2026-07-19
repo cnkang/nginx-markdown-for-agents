@@ -41,11 +41,11 @@ pub mod parser;
 pub mod security;
 pub mod token_estimator;
 
-// Incremental processing API (feature-gated, off by default)
+// Incremental processing API (feature-gated, enabled by default)
 #[cfg(feature = "incremental")]
 pub mod incremental;
 
-// Streaming conversion API (feature-gated, off by default)
+// Streaming conversion API (feature-gated, enabled by default)
 #[cfg(feature = "streaming")]
 pub mod streaming;
 

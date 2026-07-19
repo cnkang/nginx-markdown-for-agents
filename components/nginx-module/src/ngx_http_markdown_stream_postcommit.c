@@ -211,6 +211,9 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
         rc = ngx_http_markdown_stream_postcommit_handle_send_result(
             r, rc, "safe_finish");
         if (rc != NGX_OK && rc != NGX_DONE) {
+            if (rc != NGX_AGAIN) {
+                ctx->streaming.completion.safe_finish_output_loss = 1;
+            }
             return rc;
         }
 
@@ -453,6 +456,48 @@ ngx_http_markdown_stream_postcommit_log(
  *   NGX_OK / NGX_DONE / NGX_AGAIN as returned by the body filter, or
  *   NGX_ERROR on chain-link allocation failure or pending-output re-entry.
  */
+#ifdef MARKDOWN_STREAMING_ENABLED
+static void
+ngx_http_markdown_stream_postcommit_capture_pending(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    ngx_chain_t *out,
+    ngx_flag_t has_data,
+    size_t output_bytes)
+{
+    ctx->streaming.pending_output = out;
+    ctx->streaming.pending_meta.has_data = has_data;
+    ctx->streaming.pending_meta.bytes = output_bytes;
+    ctx->streaming.pending_meta.zero_copy = 0;
+    ctx->streaming.pending_meta.main_terminal =
+        (r == r->main && out->buf->last_buf);
+    ctx->streaming.pending_meta.subrequest_terminal =
+        (r != r->main && out->buf->last_in_chain);
+    ngx_http_markdown_metrics_record_postcommit_pending(output_bytes);
+    r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+}
+
+
+static void
+ngx_http_markdown_stream_postcommit_latch_terminal(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_buf_t *buf,
+    ngx_int_t rc)
+{
+    if (rc != NGX_OK && rc != NGX_DONE) {
+        return;
+    }
+    if (r == r->main && buf->last_buf) {
+        ctx->streaming.main_terminal_sent = 1;
+    }
+    if (r != r->main && buf->last_in_chain) {
+        ctx->streaming.subrequest_terminal_sent = 1;
+    }
+}
+#endif
+
+
 static ngx_int_t
 ngx_http_markdown_stream_postcommit_send_chain(
     ngx_http_request_t *r, ngx_http_markdown_ctx_t *ctx, ngx_buf_t *b,
@@ -472,6 +517,10 @@ ngx_http_markdown_stream_postcommit_send_chain(
 
     out = ngx_alloc_chain_link(r->pool);
     if (out == NULL) {
+#ifdef MARKDOWN_STREAMING_ENABLED
+        ctx->streaming.classify.last_send_failure_origin =
+            NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
+#endif
         return NGX_ERROR;
     }
 
@@ -480,19 +529,17 @@ ngx_http_markdown_stream_postcommit_send_chain(
 
     rc = ngx_http_markdown_next_body_filter(r, out);
 
+#ifdef MARKDOWN_STREAMING_ENABLED
+    if (rc != NGX_OK && rc != NGX_DONE && rc != NGX_AGAIN) {
+        ctx->streaming.classify.last_send_failure_origin =
+            NGX_HTTP_MD_SEND_ORIGIN_DOWNSTREAM;
+    }
+#endif
+
     if (rc == NGX_AGAIN) {
 #ifdef MARKDOWN_STREAMING_ENABLED
-        ctx->streaming.pending_output = out;
-        ctx->streaming.pending_meta.has_data = pending_has_data;
-        ctx->streaming.pending_meta.bytes = pending_output_bytes;
-        ctx->streaming.pending_meta.zero_copy = 0;
-        ctx->streaming.pending_meta.main_terminal =
-            (r == r->main && b->last_buf);
-        ctx->streaming.pending_meta.subrequest_terminal =
-            (r != r->main && b->last_in_chain);
-        ngx_http_markdown_metrics_record_postcommit_pending(
-            pending_output_bytes);
-        r->buffered |= NGX_HTTP_MARKDOWN_BUFFERED;
+        ngx_http_markdown_stream_postcommit_capture_pending(
+            r, ctx, out, pending_has_data, pending_output_bytes);
 #endif
     }
 
@@ -505,20 +552,9 @@ ngx_http_markdown_stream_postcommit_send_chain(
      * downstream return, never on NGX_AGAIN.
      * Main request terminal (last_buf) latches main_terminal_sent;
      * subrequest terminal (last_in_chain) latches subrequest_terminal_sent. */
-    if (r == r->main && b->last_buf
-        && (rc == NGX_OK || rc == NGX_DONE))
-    {
 #ifdef MARKDOWN_STREAMING_ENABLED
-        ctx->streaming.main_terminal_sent = 1;
+    ngx_http_markdown_stream_postcommit_latch_terminal(r, ctx, b, rc);
 #endif
-    }
-    if (r != r->main && b->last_in_chain
-        && (rc == NGX_OK || rc == NGX_DONE))
-    {
-#ifdef MARKDOWN_STREAMING_ENABLED
-        ctx->streaming.subrequest_terminal_sent = 1;
-#endif
-    }
 
     return rc;
 }
@@ -650,6 +686,8 @@ ngx_http_markdown_stream_postcommit_send_closing(
 
     b->pos = ngx_palloc(r->pool, len);
     if (b->pos == NULL) {
+        ctx->streaming.classify.last_send_failure_origin =
+            NGX_HTTP_MD_SEND_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
 
