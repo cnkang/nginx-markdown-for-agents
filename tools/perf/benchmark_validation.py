@@ -166,6 +166,13 @@ def _is_wire_compressed(body: bytes) -> bool:
         and body[0] == 0x78
         and body[1] in (0x01, 0x5E, 0x9C, 0xDA)
     )
+    # Brotli streams have no fixed magic number, but the Brotli window byte
+    # starts with WBITS in the low 4 bits (1-24) and the stream typically
+    # begins with a metablock header.  A heuristic: if the first byte has
+    # bits [7:4] == 0 and the body does NOT look like valid UTF-8 Markdown,
+    # it might be Brotli.  However, this is unreliable.  Instead, we rely on
+    # content_encoding header detection above for Brotli — this function is
+    # a secondary guard for gzip/zlib only.
     return is_gzip or is_zlib
 
 
@@ -193,7 +200,7 @@ def compare_streaming_probe_bodies(probes: Mapping[str, bytes]) -> dict[str, str
     if reference is None:
         return {}
     failures = {}
-    for name in ("gzip-streaming-first", "deflate-streaming-first"):
+    for name in ("gzip-streaming-first", "deflate-streaming-first", "brotli-streaming-first"):
         body = probes.get(name)
         if body is not None and body != reference:
             failures[name] = "response_body_mismatch: streaming-first"

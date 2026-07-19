@@ -40,9 +40,11 @@ overrides:
     depends:
       - "nginx (>= ${NGINX_VERSION_FLOOR})"
       - "nginx (<< ${NGINX_VERSION_CEIL})"
+      - "libbrotli1"
   rpm:
     depends:
       - "nginx >= 1:${NGINX_VERSION_FLOOR}"
+      - "libbrotli"
 
 contents:
   - src: "./build/ngx_http_markdown_filter_module.so"
