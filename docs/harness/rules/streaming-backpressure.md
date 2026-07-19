@@ -68,11 +68,22 @@ Required:
 - Never use `*last_buf = 0` side-effects to suppress finalize; prefer
   explicit output flags that document the control-flow contract.
 - `results.failopen_count` must be incremented only after fail-open
-  passthrough succeeds (downstream filter returns `NGX_OK`), not at the
-  precommit_error decision point.  `streaming.precommit_failopen_total`
-  tracks decisions; `results.failopen_count` tracks successful deliveries.
-  This separation prevents inflating the delivery count when passthrough
-  later fails (for example header forwarding error, allocation failure).
+  passthrough succeeds (downstream filter returns `NGX_OK` or `NGX_DONE`,
+  i.e. `delivery_ok`), not at the precommit_error decision point.
+  `streaming.precommit_failopen_total` tracks decisions;
+  `results.failopen_count` tracks successful deliveries.  This separation
+  prevents inflating the delivery count when passthrough later fails (for
+  example header forwarding error, allocation failure).
+  This contract applies uniformly to EVERY fail-open path in the module:
+  streaming pre-commit (`send_failopen_chain` / `resume_pending`),
+  full-buffer reject_or_fail_open_buffered_response,
+  buffer-init failure (`handle_buffer_init_failure`),
+  buffer-append failure (`handle_buffer_append_failure`), and the header
+  filter fail-open paths (unsupported compression, ctx-alloc failure,
+  inflight overload, inflight cleanup-alloc failure).  The decision to
+  fail-open is recorded separately via `log_decision()` /
+  `log_failure_decision()` at the decision point; the delivery counter
+  must not be touched until the downstream filter returns.
 
 Verification:
 - `grep -rn 'failopen_replay_buf\|failopen_replay_initialized' components/nginx-module/src/`
@@ -84,6 +95,10 @@ Verification:
 - `grep -rn 'results\.failopen_count' components/nginx-module/src/`
 - Verify the increment is in `failopen_passthrough` after downstream
   success, not in `precommit_error`.
+- `grep -rn 'ngx_http_markdown_metric_inc_failopen' components/nginx-module/src/`
+- Every callsite must be inside an `if (rc == NGX_OK || rc == NGX_DONE)`
+  guard that follows a `ngx_http_next_*_filter` invocation.  A callsite
+  that precedes the downstream filter call is a Rule 38 violation.
 
 ---
 

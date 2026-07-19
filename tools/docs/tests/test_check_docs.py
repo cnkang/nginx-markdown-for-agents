@@ -40,6 +40,43 @@ def test_internal_reference_policy_rejects_spec_index_shorthand(tmp_path):
     assert any("avoid internal numbered references" in e for e in errors)
 
 
+def test_internal_reference_policy_rejects_zero_padded_spec_index(tmp_path):
+    f = tmp_path / "doc.md"
+    f.write_text(
+        f"The behavior follows spec {91:03d}.\n",
+        encoding="utf-8",
+    )
+    errors = check_internal_reference_policy([f], tracked_paths=set())
+    assert any("avoid internal numbered references" in e for e in errors)
+
+
+def test_document_updates_must_descend_by_version(tmp_path):
+    f = tmp_path / "doc.md"
+    f.write_text(
+        "## Document Updates\n\n"
+        "| Version | Date | Summary |\n"
+        "|---|---|---|\n"
+        "| 0.9.0 | 2026-01-01 | Older |\n"
+        "| 0.9.1 | 2026-02-01 | Newer |\n",
+        encoding="utf-8",
+    )
+    errors = docs_checker.check_document_updates_order([f])
+    assert any("descending chronological order" in error for error in errors)
+
+
+def test_document_updates_does_not_consume_a_later_section_table():
+    content = (
+        "## Document Updates\n\n"
+        "No update ledger is present.\n\n"
+        "## Compatibility\n\n"
+        "| Version | Support |\n"
+        "|---|---|\n"
+        "| 0.9.1 | supported |\n"
+    )
+
+    assert docs_checker._document_update_table_lines(content) == []
+
+
 def test_internal_reference_policy_rejects_kiro_directory_reference(tmp_path):
     f = tmp_path / "doc.md"
     f.write_text("See `.kiro/specs/` for details.\n", encoding="utf-8")

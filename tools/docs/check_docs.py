@@ -25,8 +25,7 @@ MAINTAINED_ROOT_DOCS = {"AGENTS.md", "README.md", "README_zh-CN.md"}
 LINK_RE = re.compile(r"(!?\[[^\]]+\]\(([^)]+)\))")
 HAN_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
 SPEC_INDEX_RE = re.compile(
-    r"\bspecs?\s*(?:1[2-9]|[2-9]\d)"
-    r"(?:\s*[-–]\s*(?:1[2-9]|[2-9]\d))?\b",
+    r"\bspecs?\s*0*\d+(?:\s*[-–]\s*0*\d+)?\b",
     re.IGNORECASE,
 )
 KIRO_PATH_RE = re.compile(r"(?P<path>\.kiro/[A-Za-z0-9._/*-]+)")
@@ -77,7 +76,8 @@ def iter_markdown_files() -> list[Path]:
     return sorted(
         p
         for p in candidates
-        if is_maintained_markdown(p.relative_to(ROOT).as_posix())
+        if p.is_file()
+        and is_maintained_markdown(p.relative_to(ROOT).as_posix())
     )
 
 
@@ -331,19 +331,54 @@ def check_internal_reference_policy(
     return errors
 
 
-def check_document_updates_order(files: list[Path]) -> list[str]:
-    """Verify that every '## Document Updates' changelog table is in descending version/date order."""
-    errors: list[str] = []
+def _parse_document_update_version(
+    version: str,
+) -> tuple[int, ...] | tuple[int, int, int, str]:
+    """Return a sortable key for a document-update version cell."""
+    normalized = version.strip().strip("`*[]()\"'")
+    if normalized.startswith("v"):
+        normalized = normalized[1:]
+    try:
+        return tuple(int(part) for part in normalized.split("."))
+    except ValueError:
+        return (0, 0, 0, normalized)
 
-    def parse_version(ver_str: str) -> tuple[int, ...] | tuple[int, int, int, str]:
-        ver_str = ver_str.strip().strip("`*[]()\"'")
-        if ver_str.startswith("v"):
-            ver_str = ver_str[1:]
-        parts = ver_str.split(".")
-        try:
-            return tuple(int(p) for p in parts)
-        except ValueError:
-            return (0, 0, 0, ver_str)
+
+def _document_update_table_lines(content: str) -> list[str]:
+    """Extract the first table under a Document Updates heading."""
+    match = re.search(r"^## Document Updates\s*$", content, re.MULTILINE | re.IGNORECASE)
+    if match is None:
+        return []
+
+    table_lines: list[str] = []
+    for line in content[match.end() :].splitlines():
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            table_lines.append(line)
+        elif table_lines or stripped.startswith("#"):
+            break
+    return table_lines
+
+
+def _document_update_rows_are_sorted(table_lines: list[str]) -> bool:
+    """Return whether table data rows descend by version and date."""
+    if len(table_lines) < 3:
+        return True
+
+    data_lines = table_lines[2:]
+    rows = []
+    for line in data_lines:
+        cells = [cell.strip() for cell in line.split("|")]
+        if len(cells) >= 3:
+            rows.append((_parse_document_update_version(cells[1]), cells[2], line))
+
+    expected = [row[2] for row in sorted(rows, key=lambda row: row[:2], reverse=True)]
+    return expected == data_lines
+
+
+def check_document_updates_order(files: list[Path]) -> list[str]:
+    """Verify Document Updates tables use descending version/date order."""
+    errors: list[str] = []
 
     for f in files:
         try:
@@ -351,43 +386,13 @@ def check_document_updates_order(files: list[Path]) -> list[str]:
         except Exception:
             continue
 
-        idx = content.find("## Document Updates")
-        if idx == -1:
-            idx = content.lower().find("## document updates")
-            if idx == -1:
-                continue
-
-        section_text = content[idx:]
-        lines = section_text.splitlines()
-
-        table_lines = []
-        table_start_idx = -1
-        for i, line in enumerate(lines):
-            if line.strip().startswith("|"):
-                if table_start_idx == -1:
-                    table_start_idx = i
-                table_lines.append(line)
-            elif table_start_idx != -1:
-                break
-
-        if len(table_lines) < 3:
-            continue
-
-        data_lines = table_lines[2:]
-        parsed_rows = []
-        for line in data_lines:
-            cells = [c.strip() for c in line.split("|")]
-            if len(cells) >= 3:
-                ver = cells[1]
-                date = cells[2]
-                parsed_rows.append((parse_version(ver), date, line))
-
-        sorted_rows = sorted(parsed_rows, key=lambda x: (x[0], x[1]), reverse=True)
-        new_data_lines = [row[2] for row in sorted_rows]
-
-        if new_data_lines != data_lines:
+        if not _document_update_rows_are_sorted(
+            _document_update_table_lines(content)
+        ):
             errors.append(
-                f"{f}: '## Document Updates' table rows must be maintained in descending chronological order (highest version and newest date on top)"
+                f"{f}: '## Document Updates' table rows must be maintained "
+                "in descending chronological order (highest version and "
+                "newest date on top)"
             )
 
     return errors

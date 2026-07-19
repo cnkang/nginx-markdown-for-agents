@@ -381,18 +381,18 @@ make supply-chain
 
 ## v0.9.1 新特性
 
-v0.9.1 正处于 RC 准备阶段，是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能就绪工作的基础上，完成 v1.0 冻结前最后一轮有意的源码构建与公共契约清理。v0.9.0 发布时原计划作为最后一个破坏性版本；由于 v1.0 尚未发布且采用规模仍有限，兼容性冻结窗口现明确延长至 v0.9.1。
+v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能就绪工作的基础上，完成 v1.0 冻结前最后一轮有意的源码构建与公共契约清理。v0.9.0 发布时原计划作为最后一个破坏性版本；由于 v1.0 尚未发布且采用规模仍有限，兼容性冻结窗口现明确延长至 v0.9.1。
 
 - **Rust 基线重置**：源码构建现在要求 Rust 1.97+；仓库、CI 和发布构建使用精确的 Rust 1.97.0 (MSRV 1.97)。预构建模块的用户不需要安装 Rust。
 - **单一流式控制**：`markdown_streaming off|auto|force` 现在是唯一处理路径选择器。重复的 `markdown_streaming_engine` 仅保留拒绝入口，并给出 off/auto/on 的精确迁移提示。
 - **明确支持的 flavor**：`markdown_flavor` 仅支持 `commonmark` 和 `gfm`。实验性的 `mdx` 与 `org-mode` 从未有独立生产语义，现会被明确拒绝。
 - **混合零拷贝流式输出**：`markdown_streaming_zero_copy on`（默认关闭，需显式开启）允许 `ngx_buf_t` 直接引用 Rust 管理的内存，省去中间的 pool-copy，降低非终端流式分块的 memcpy 开销。NGINX 请求池清理句柄确保在背压和请求销毁场景下 Rust 缓冲区的生命周期安全。
-- **流式解压路由（gzip + deflate）**：在 `streaming_first` profile 下，当 `markdown_auto_decompress on` 且 `markdown_cache_validation` 不为 `full` 时，gzip 与 deflate 响应（包括 zlib 封装 RFC 1950 和原始 RFC 1951 deflate）通过流式引擎增量解压，无需强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验；Brotli 在 0.9.1 中仍走有界全缓冲路径。
+- **流式解压路由（gzip + deflate + Brotli）**：在 `streaming_first` profile 下，当 `markdown_auto_decompress on` 且 `markdown_cache_validation` 不为 `full` 时，gzip、deflate（包括 zlib 封装 RFC 1950 和原始 RFC 1951 deflate）及 Brotli 响应通过流式引擎增量解压，无需强制全缓冲积攒。gzip member 边界和 trailer 会跨分块校验。Brotli 流式解压需要构建时的 `libbrotlidec`（通过 `NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off` 控制，官方构件默认启用）。
 - **全缓冲拷贝减少**：内部优化（默认开启，无配置项），通过将连续缓冲区直接传递给解压器并通过指针赋值交换输出，消除全缓冲压缩路径中冗余的 memcpy。
 - **`markdown_auto_decompress` 指令**：现已正式注册为可配置指令（默认开启）。此前仅为内部字段，无法通过 `nginx.conf` 设置。
 - **性能证据门禁**：模块级基准测试工具（`tools/perf/run_module_benchmark.sh`）与自动化发布门禁（`make release-gates-check-091`）在发布前强制验证延迟、TTFB、内存斜率和回退率阈值。
 - **Doctor 诊断工具**：`python3 tools/perf/doctor_advice.py` 分析运行时指标，为运维人员提供可操作的调优建议。
-- **新增 ADR**：[0020](docs/architecture/ADR/0020-091-hybrid-zero-copy-pool-cleanup.md)、[0021](docs/architecture/ADR/0021-091-gzip-deflate-streaming-decompression-routing.md)、[0022](docs/architecture/ADR/0022-091-performance-evidence-release-gate.md)。
+- **新增 ADR**：[0020](docs/architecture/ADR/0020-hybrid-zero-copy-pool-cleanup.md)、[0021](docs/architecture/ADR/0021-gzip-deflate-streaming-decompression-routing.md)、[0022](docs/architecture/ADR/0022-performance-evidence-release-gate.md)、[0023](docs/architecture/ADR/0023-single-streaming-policy.md) 和 [0024](docs/architecture/ADR/0024-brotli-streaming-decompression.md)。
 
 关于更早版本的完整变更记录（包括 v0.9.0 引入的突破性配置改动），请参阅 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -412,6 +412,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-19 | Codex | 完成 v0.9.1 正式发布摘要，补充 Brotli 流式解压、构建控制和发布证据说明。 |
 | 0.9.1 | 2026-07-17 | Kang | 优化 README 文档组织，移除旧版本的 What's New 日志，合并核心功能特性表，并梳理文档导航结构以适配 v0.9.1。 |
 | 0.9.0 | 2026-07-02 | Kang | 文档审查：新增 v0.9.0 新特性段落、MIGRATION-0.9 链接、reason code 数量修正、CHANGELOG 同步分支提交 |
 | 0.8.3 | 2026-06-26 | Kang | v0.8.3 收口：流式状态机修复、ExitMany 批量解上下文、解压缓冲区内存安全、快照容量提升、FFI Box::into_raw 修复、完整发布门禁验证 |

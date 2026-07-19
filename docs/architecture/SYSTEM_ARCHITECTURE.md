@@ -319,11 +319,14 @@ v0.9.1 introduces critical performance and robustness enhancements to the conver
 To reduce CPU overhead and memory pressure in high-throughput streaming paths, 0.9.1 introduces a zero-copy output mechanism. When `markdown_streaming_zero_copy` is enabled, the module can deliver converted chunks directly to the NGINX response chain with minimal internal copying.
 
 ### Streaming Decompression
-Streaming conversion now supports on-the-fly gzip and deflate decompression.
-Deflate accepts both zlib-wrapped and raw framing; gzip preserves member and
-trailer integrity across arbitrary chunks and backpressure resumes. Brotli
-continues to use bounded full-buffer decompression in 0.9.1 pending dedicated
-streaming decoder-state, lifecycle, backpressure, and memory validation.
+Streaming conversion now supports on-the-fly gzip, deflate, and Brotli
+decompression. Deflate accepts both zlib-wrapped and raw framing; gzip
+preserves member and trailer integrity across arbitrary chunks and
+backpressure resumes. Brotli streaming (compiled in when `NGX_HTTP_BROTLI`
+is defined) shares the streaming, backpressure, and response-wide accounting
+invariants of gzip and deflate while enforcing Brotli's single-stream
+completion rules: tail data is rejected and truncated final streams are
+detected and rejected.
 
 ### Full-Buffer Copy Reduction
 Internal optimizations have been applied to the full-buffer path to reduce unnecessary data duplication during the transition from the NGINX buffer to the Rust converter and back.

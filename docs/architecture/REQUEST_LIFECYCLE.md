@@ -125,9 +125,10 @@ Before the body arrives, the module inspects response headers to determine wheth
 Possible outcomes:
 
 - no compression detected: continue on the fast path
-- gzip or deflate detected with streaming selected and cache validation not
-  `full`: use incremental decompression before streaming conversion
-- Brotli, or a supported coding whose validation requirements force buffering:
+- gzip, deflate, or Brotli detected with streaming selected and cache
+  validation not `full`: use incremental decompression before streaming
+  conversion; Brotli requires a build with `NGX_HTTP_BROTLI`
+- a supported coding whose build or validation requirements force buffering:
   use bounded full-buffer decompression
 - unsupported compression detected: mark the request ineligible and fall back to passthrough behavior
 
@@ -152,15 +153,16 @@ These exits keep the non-conversion path cheap.
 ### 2. Process the selected path
 
 For the streaming path, each upstream chunk is incrementally decompressed when
-it uses gzip or deflate, then fed to the streaming converter. Pending input and
-output remain request-owned across downstream `NGX_AGAIN`; source positions are
-advanced only after actual consumption. Gzip member boundaries may occur
-inside a chunk or between chunks, and decompression budgets remain cumulative
-across member resets.
+it uses gzip, deflate, or a build-enabled Brotli decoder, then fed to the
+streaming converter. Pending input and output remain request-owned across
+downstream `NGX_AGAIN`; source positions are advanced only after actual
+consumption. Gzip member boundaries may occur inside a chunk or between
+chunks, Brotli is enforced as one complete stream with no trailing data, and
+decompression budgets remain cumulative.
 
 For the full-buffer path, the module buffers the upstream body until the full
 response has arrived. This path remains required for full cache validation and
-Brotli in 0.9.1.
+for Brotli when streaming decoder support is not compiled in.
 
 Full-buffer details:
 
@@ -177,8 +179,9 @@ If buffering fails because of allocation or size-limit conditions, the next bran
 ## Phase 3: Optional Full-Buffer Decompression
 
 If the full-buffer request was marked as compressed in header phase, the body
-filter decompresses the buffered payload before conversion. Streaming gzip and
-deflate have already been decompressed incrementally in Phase 2.
+filter decompresses the buffered payload before conversion. Streaming gzip,
+deflate, and build-enabled Brotli have already been decompressed incrementally
+in Phase 2.
 
 This step only runs when needed.
 
