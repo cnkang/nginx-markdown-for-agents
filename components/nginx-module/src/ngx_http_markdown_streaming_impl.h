@@ -1405,8 +1405,6 @@ ngx_http_markdown_streaming_record_postcommit_failure(
          * is incremented separately if the graceful closure
          * path itself fails.
          */
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            streaming.streaming_failure_postcommit_abort);
 
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
             "markdown: streaming post-commit failure: "

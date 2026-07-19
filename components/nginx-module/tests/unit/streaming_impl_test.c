@@ -3384,7 +3384,7 @@ test_postcommit_output_loss_body_filter_reentry_is_idempotent(void)
         && metrics.streaming.failed_total == 1
         && metrics.conversions_failed == 1
         && metrics.failures_resource_limit == 1
-        && metrics.streaming.streaming_failure_postcommit_abort == 1,
+        && metrics.streaming.streaming_failure_postcommit_abort == 0,
         "body-filter output loss must record each failure metric once");
     TEST_ASSERT(g_abort_calls == 1 && g_output_free_calls == 1,
         "body-filter output loss must abort and free exactly once");
@@ -3406,7 +3406,7 @@ test_postcommit_output_loss_body_filter_reentry_is_idempotent(void)
         && metrics.streaming.failed_total == 1
         && metrics.conversions_failed == 1
         && metrics.failures_resource_limit == 1
-        && metrics.streaming.streaming_failure_postcommit_abort == 1,
+        && metrics.streaming.streaming_failure_postcommit_abort == 0,
         "body-filter re-entry must not duplicate failure metrics");
     TEST_ASSERT(g_abort_calls == 1 && g_output_free_calls == 1,
         "body-filter re-entry must not abort or free twice");
@@ -3551,7 +3551,7 @@ test_zero_copy_pending_conflict_is_invariant_output_loss(void)
     TEST_ASSERT(metrics.streaming.postcommit_error_total == 1
         && metrics.streaming.failed_total == 1
         && metrics.conversions_failed == 1
-        && metrics.streaming.streaming_failure_postcommit_abort == 1,
+        && metrics.streaming.streaming_failure_postcommit_abort == 0,
         "zero-copy invariant failure metrics must be exactly once");
     TEST_ASSERT(g_output_free_calls == 0,
         "transferred zero-copy output must remain pool-cleanup owned");
@@ -6229,6 +6229,108 @@ test_postcommit_terminal_only_backpressure_metrics(void)
 }
 
 
+static void
+test_postcommit_terminal_immediate_failure_no_handle_no_retry(void)
+{
+    ngx_http_request_t          r;
+    ngx_http_markdown_ctx_t     ctx;
+    ngx_http_markdown_conf_t    conf;
+    ngx_pool_t                  pool;
+    ngx_connection_t            conn;
+    ngx_log_t                   log;
+    ngx_event_t                 read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_int_t                   rc;
+
+    TEST_SUBSECTION("postcommit terminal immediate failure: no handle, no retry");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    /* 1. handle is NULL */
+    ctx.streaming.handle = NULL;
+    /* 2. state is COMMITTED */
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    /* 3. downstream first terminal returns NGX_ERROR */
+    g_next_body_filter_rc = NGX_ERROR;
+
+    /* 4. call ngx_http_markdown_streaming_handle_postcommit_error() */
+    rc = ngx_http_markdown_streaming_handle_postcommit_error(
+        &r, &ctx, &conf, ERROR_MEMORY_LIMIT);
+
+    /* 5. Assert body-filter call count is 1 */
+    TEST_ASSERT(g_next_body_filter_calls == 1,
+        "body-filter call count must be exactly 1");
+    /* 6. Assert abort call count is 0 */
+    TEST_ASSERT(g_abort_calls == 0,
+        "abort call count must be exactly 0");
+    /* 7. Assert it returns NGX_ERROR */
+    TEST_ASSERT(rc == NGX_ERROR,
+        "handler must return NGX_ERROR");
+    /* 8. Assert abort metric did not increase */
+    TEST_ASSERT(metrics.streaming.streaming_failure_postcommit_abort == 0,
+        "abort metric must not increase on immediate definitive failure");
+
+    TEST_PASS("postcommit terminal immediate failure no handle no retry verified");
+}
+
+
+static void
+test_postcommit_terminal_immediate_failure_live_handle_no_retry(void)
+{
+    ngx_http_request_t          r;
+    ngx_http_markdown_ctx_t     ctx;
+    ngx_http_markdown_conf_t    conf;
+    ngx_pool_t                  pool;
+    ngx_connection_t            conn;
+    ngx_log_t                   log;
+    ngx_event_t                 read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_int_t                   rc;
+
+    TEST_SUBSECTION("postcommit terminal immediate failure: live handle, no retry");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    /* 1. handle is live */
+    ctx.streaming.handle = (struct StreamingConverterHandle *) (uintptr_t) 0x99;
+    /* 2. state is COMMITTED */
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+
+    /* Mock safe finish returning success with 0 closing bytes */
+    g_streaming_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
+    g_streaming_safe_finish_data = NULL;
+    g_streaming_safe_finish_len = 0;
+
+    /* 3. downstream first terminal returns NGX_ERROR */
+    g_next_body_filter_rc = NGX_ERROR;
+
+    /* 4. call ngx_http_markdown_streaming_handle_postcommit_error() */
+    rc = ngx_http_markdown_streaming_handle_postcommit_error(
+        &r, &ctx, &conf, ERROR_MEMORY_LIMIT);
+
+    /* 5. Assert body-filter call count is 1 */
+    TEST_ASSERT(g_next_body_filter_calls == 1,
+        "body-filter call count must be exactly 1");
+    /* 6. Assert abort call count is 0 */
+    TEST_ASSERT(g_abort_calls == 0,
+        "abort call count must be exactly 0");
+    /* 7. Assert it returns NGX_ERROR */
+    TEST_ASSERT(rc == NGX_ERROR,
+        "handler must return NGX_ERROR");
+    /* 8. Assert abort metric did not increase */
+    TEST_ASSERT(metrics.streaming.streaming_failure_postcommit_abort == 0,
+        "abort metric must not increase on immediate definitive failure");
+
+    TEST_PASS("postcommit terminal immediate failure live handle no retry verified");
+}
+
+
 /*
  * The streaming decompressor returns dedicated sentinels; the production
  * feed/finalize mappers must increment exactly one matching shared metric.
@@ -6601,6 +6703,8 @@ main(void)
     test_postcommit_pending_backpressure_metrics_are_symmetric();
     test_postcommit_copied_output_accounting_matches_after_resume();
     test_postcommit_terminal_only_backpressure_metrics();
+    test_postcommit_terminal_immediate_failure_no_handle_no_retry();
+    test_postcommit_terminal_immediate_failure_live_handle_no_retry();
     test_streaming_decompression_error_metric_mapping();
     test_streaming_decomp_error_origin_classification();
     test_streaming_stage_handler_failure_category_routing();

@@ -138,6 +138,11 @@ ngx_http_markdown_stream_postcommit_safe_finish(
     rc = ngx_http_markdown_stream_postcommit_handle_send_result(
         r, rc, "safe_finish");
     if (rc != NGX_OK && rc != NGX_DONE) {
+#ifdef MARKDOWN_STREAMING_ENABLED
+        if (rc != NGX_AGAIN) {
+            ctx->streaming.completion.safe_finish_terminal_send_failed = 1;
+        }
+#endif
         return rc;
     }
 
@@ -303,6 +308,11 @@ ngx_http_markdown_stream_postcommit_abort(
 
     /* Transition to POST_COMMIT_ABORT */
     ctx->stream_sm.state = NGX_HTTP_MD_STATE_POST_COMMIT_ABORT;
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        streaming.streaming_failure_postcommit_abort);
+#endif
 
     /*
      * Send terminal chain to close the response.
