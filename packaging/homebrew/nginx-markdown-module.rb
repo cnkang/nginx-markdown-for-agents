@@ -66,8 +66,10 @@ class NginxMarkdownModule < Formula
       args = [
         "--with-compat",
         "--add-dynamic-module=#{buildpath}/components/nginx-module",
-        "--with-cc-opt=-I#{formula_opt_include("openssl@3")} -I#{formula_opt_include("pcre2")} -I#{formula_opt_include("brotli")}",
-        "--with-ld-opt=-L#{formula_opt_lib("openssl@3")} -L#{formula_opt_lib("pcre2")} -L#{formula_opt_lib("brotli")}",
+        "--with-cc-opt=-I#{formula_opt_include("openssl@3")} " \
+        "-I#{formula_opt_include("pcre2")} -I#{formula_opt_include("brotli")}",
+        "--with-ld-opt=-L#{formula_opt_lib("openssl@3")} " \
+        "-L#{formula_opt_lib("pcre2")} -L#{formula_opt_lib("brotli")}",
       ]
       system "./configure", *args
       system "make", "modules"
@@ -95,7 +97,7 @@ class NginxMarkdownModule < Formula
       events {}
       http {}
     EOS
-    system Formula["nginx"].opt_bin/"nginx", "-t", "-p", testpath,
+    system formula_opt_bin("nginx")/"nginx", "-t", "-p", testpath,
            "-c", testpath/"nginx.conf"
   end
 end
