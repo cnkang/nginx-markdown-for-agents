@@ -585,7 +585,7 @@ ngx_http_markdown_streaming_decomp_expand_buf(
             "expand_buf size overflow, old_size=%uz",
             old_size);
         ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-        return NGX_ERROR;
+        return NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR;
     }
 
     new_size = old_size * 2;
@@ -765,13 +765,18 @@ ngx_http_markdown_streaming_decomp_grow_output_buf(
 
     old_size = *buf_size_ptr;
 
-    if (ngx_http_markdown_streaming_decomp_expand_buf(
-            heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log)
-        != NGX_OK)
     {
-        decomp->failure_origin =
-            NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
-        return NGX_ERROR;
+        ngx_int_t  expand_rc;
+
+        expand_rc = ngx_http_markdown_streaming_decomp_expand_buf(
+            heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log);
+        if (expand_rc != NGX_OK) {
+            decomp->failure_origin =
+                (expand_rc == NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR)
+                ? NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL
+                : NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+            return NGX_ERROR;
+        }
     }
 
     *using_heap_ptr = 1;
@@ -1281,13 +1286,19 @@ ngx_http_markdown_streaming_decomp_brotli_expand(
         }
     }
 
-    if (ngx_http_markdown_streaming_decomp_expand_buf(
-            heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log)
-        != NGX_OK)
     {
-        decomp->finished = 1;
-        decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
-        return NGX_ERROR;
+        ngx_int_t  expand_rc;
+
+        expand_rc = ngx_http_markdown_streaming_decomp_expand_buf(
+            heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log);
+        if (expand_rc != NGX_OK) {
+            decomp->finished = 1;
+            decomp->failure_origin =
+                (expand_rc == NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR)
+                ? NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL
+                : NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+            return NGX_ERROR;
+        }
     }
 
     *using_heap_ptr = 1;
@@ -1851,6 +1862,7 @@ ngx_http_markdown_streaming_decomp_feed(
 
     if (!decomp->initialized) {
         ngx_http_markdown_streaming_decomp_free_heap(&combined_input);
+        decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
         return NGX_ERROR;
     }
 
@@ -1968,22 +1980,23 @@ ngx_http_markdown_streaming_decomp_finish_zlib_expand(
         ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
-    /*
-     * expand_buf() frees any previous heap buffer if expansion fails,
-     * so we can safely return directly on NGX_ERROR here.
-     */
-    if (ngx_http_markdown_streaming_decomp_expand_buf(
+    {
+        ngx_int_t  expand_rc;
+
+        expand_rc = ngx_http_markdown_streaming_decomp_expand_buf(
             heap_buf_ptr, buf_ptr, buf_size_ptr,
             decomp->max_decompressed_size > 0
             ? decomp->max_decompressed_size
               - decomp->total_decompressed
             : 0,
-            log)
-        != NGX_OK)
-    {
-        decomp->failure_origin =
-            NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
-        return NGX_ERROR;
+            log);
+        if (expand_rc != NGX_OK) {
+            decomp->failure_origin =
+                (expand_rc == NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR)
+                ? NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL
+                : NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+            return NGX_ERROR;
+        }
     }
 
     *using_heap_ptr = 1;
@@ -2229,6 +2242,7 @@ ngx_http_markdown_streaming_decomp_finish(
         {
             return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
         }
+        decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
         return NGX_ERROR;
     }
 
@@ -2289,6 +2303,7 @@ ngx_http_markdown_streaming_decomp_finish(
     else {
         ngx_free(buf);
         buf = NULL;
+        decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
         return NGX_ERROR;
     }
 

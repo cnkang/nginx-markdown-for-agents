@@ -1974,6 +1974,7 @@ ngx_http_markdown_streaming_handle_postcommit_error(
         (ngx_uint_t) error_code);
 
     ctx->streaming.completion.safe_finish_output_loss = 0;
+    ctx->streaming.completion.safe_finish_terminal_send_failed = 0;
 
     rc = ngx_http_markdown_stream_postcommit_safe_finish(r, ctx);
     if (rc == NGX_OK || rc == NGX_DONE) {
@@ -1990,6 +1991,18 @@ ngx_http_markdown_streaming_handle_postcommit_error(
 
     if (ctx->streaming.completion.safe_finish_output_loss) {
         return ngx_http_markdown_streaming_handle_output_loss(r, ctx, conf);
+    }
+
+    /*
+     * Rust safe-finish succeeded with zero closing bytes, but the
+     * terminal send failed definitively.  Do NOT retry via abort —
+     * the terminal send failure is the real error.  Record the
+     * original failure and propagate the send error (Spec case 8).
+     */
+    if (ctx->streaming.completion.safe_finish_terminal_send_failed) {
+        ngx_http_markdown_streaming_record_postcommit_category(
+            r, ctx, conf, error_code);
+        return NGX_ERROR;
     }
 
     /* Rust could not produce closing output. Record the original failure
