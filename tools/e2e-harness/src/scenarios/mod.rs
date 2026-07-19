@@ -7,6 +7,7 @@
 
 pub mod accept_negotiation;
 pub mod auth_cache;
+pub mod brotli_streaming;
 pub mod common;
 pub mod conditional_requests;
 pub mod metrics_endpoint;
@@ -179,6 +180,10 @@ struct ScenarioEntry {
 /// Global scenario registry.
 static SCENARIOS: &[ScenarioEntry] = &[
     ScenarioEntry {
+        name: "brotli-streaming",
+        run: brotli_streaming::run,
+    },
+    ScenarioEntry {
         name: "smoke",
         run: smoke::run,
     },
@@ -203,6 +208,17 @@ static SCENARIOS: &[ScenarioEntry] = &[
         run: accept_negotiation::run,
     },
 ];
+
+/// Build scenario-specific upstream routes.
+pub fn fixture_spec(name: &str, listen_port: u16) -> crate::fixtures::FixtureSpec {
+    if name == "brotli-streaming" {
+        return brotli_streaming::fixture_spec(listen_port);
+    }
+    crate::fixtures::FixtureSpec {
+        listen_port: Some(listen_port),
+        routes: Vec::new(),
+    }
+}
 
 /// Return the names of all registered scenarios in registration order.
 pub fn registered_names() -> Vec<&'static str> {

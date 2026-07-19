@@ -71,6 +71,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
         verify-chunked-native-e2e verify-chunked-native-e2e-smoke verify-chunked-native-e2e-stress \
+        verify-brotli-streaming-e2e \
         verify-streaming-failure-cache-e2e \
         verify-streaming-failure-cache-e2e-plan \
         verify-metrics-endpoint-e2e verify-conditional-requests-e2e verify-config-merge-e2e \
@@ -903,6 +904,9 @@ verify-chunked-native-e2e-smoke:
 
 verify-chunked-native-e2e-stress:
 	./tools/e2e/verify_chunked_streaming_native_e2e.sh --profile stress
+
+verify-brotli-streaming-e2e:
+	./tools/e2e/verify_brotli_streaming_e2e.sh
 
 verify-streaming-failure-cache-e2e:
 	./tools/e2e/verify_streaming_failure_cache_e2e.sh $(E2E_ARGS)

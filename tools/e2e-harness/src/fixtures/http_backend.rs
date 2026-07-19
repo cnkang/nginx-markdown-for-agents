@@ -5,9 +5,10 @@
 
 #![allow(dead_code)]
 
-use crate::fixtures::{FixtureResponse, FixtureSpec, RouteBehavior};
+use crate::fixtures::{BrotliFault, FixtureResponse, FixtureSpec, RouteBehavior};
 use anyhow::{Context, Result};
 use axum::Router;
+use axum::body::{Body, Bytes};
 use axum::extract::{OriginalUri, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::IntoResponse;
@@ -118,7 +119,7 @@ fn behavior_response(
     method: Method,
     headers: HeaderMap,
     behavior: Arc<RouteBehavior>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
     match &*behavior {
         RouteBehavior::Fixed {
             status,
@@ -167,7 +168,78 @@ fn behavior_response(
             let resp = crate::fixtures::handlers::auth_handler(cookie_name, has_cookie, "auth");
             to_response(resp, &method)
         }
+        RouteBehavior::Brotli {
+            body,
+            chunk_size,
+            fault,
+        } => brotli_response(method, body, *chunk_size, fault),
     }
+}
+
+fn brotli_response(
+    method: Method,
+    source: &str,
+    chunk_size: usize,
+    fault: &BrotliFault,
+) -> axum::response::Response {
+    let compressed = match brotli_fixture_bytes(source, fault) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return plain_response(
+                method,
+                500,
+                "text/plain",
+                &format!("fixture compression failed: {error}"),
+            );
+        }
+    };
+    let chunks = compressed
+        .chunks(chunk_size.max(1))
+        .map(|chunk| Ok::<Bytes, Infallible>(Bytes::copy_from_slice(chunk)))
+        .collect::<Vec<_>>();
+    let body = if method == Method::HEAD {
+        Body::empty()
+    } else {
+        Body::from_stream(stream::iter(chunks))
+    };
+
+    axum::response::Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "text/html; charset=UTF-8")
+        .header("Content-Encoding", "br")
+        .body(body)
+        .unwrap_or_else(|error| {
+            plain_response(
+                Method::GET,
+                500,
+                "text/plain",
+                &format!("fixture response failed: {error}"),
+            )
+        })
+}
+
+fn brotli_fixture_bytes(source: &str, fault: &BrotliFault) -> Result<Vec<u8>> {
+    if matches!(fault, BrotliFault::Malformed) {
+        return Ok(vec![0xff; 64]);
+    }
+
+    let mut compressed = Vec::new();
+    {
+        let mut writer = brotli::CompressorWriter::new(&mut compressed, 4096, 5, 22);
+        writer
+            .write_all(source.as_bytes())
+            .context("failed to compress Brotli fixture")?;
+    }
+
+    match fault {
+        BrotliFault::None | BrotliFault::Malformed => {}
+        BrotliFault::TrailingData => compressed.extend_from_slice(b"trailing-data"),
+        BrotliFault::Truncated => {
+            let retained = compressed.len().saturating_sub(3);
+            compressed.truncate(retained);
+        }
+    }
+    Ok(compressed)
 }
 
 fn scenario_response(
@@ -543,3 +615,6 @@ fn to_response(resp: FixtureResponse, method: &Method) -> axum::response::Respon
 fn header_value_or_empty(value: &str) -> HeaderValue {
     HeaderValue::from_str(value).unwrap_or_else(|_| HeaderValue::from_static(""))
 }
+use futures_util::stream;
+use std::convert::Infallible;
+use std::io::Write;

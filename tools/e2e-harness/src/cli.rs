@@ -167,7 +167,6 @@ fn run_scenario(cli: &Cli, name: &str, timeout: Duration) -> Result<()> {
 ///
 /// `true` if the scenario passed, `false` otherwise.
 fn run_scenario_inner(cli: &Cli, name: &str, timeout: Duration) -> Result<bool> {
-    use crate::fixtures::FixtureSpec;
     use crate::runtime::{RuntimeMode, ScenarioRuntime};
     use crate::scenarios::ScenarioContext;
 
@@ -214,10 +213,7 @@ fn run_scenario_inner(cli: &Cli, name: &str, timeout: Duration) -> Result<bool> 
         .enable_all()
         .build()
         .context("failed to create tokio runtime for fixture backend")?;
-    let fixture_spec = FixtureSpec {
-        listen_port: Some(ctx.upstream_port),
-        routes: Vec::new(),
-    };
+    let fixture_spec = crate::scenarios::fixture_spec(name, ctx.upstream_port);
     let mut fixture = tokio_rt
         .block_on(crate::fixtures::http_backend::start_fixture(fixture_spec))
         .context("failed to start fixture backend")?;
