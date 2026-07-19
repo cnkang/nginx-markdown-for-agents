@@ -15,6 +15,7 @@ const SCENARIO: &str = "brotli-streaming";
 const SMALL_END: &str = "BROTLI_SMALL_STREAM_END";
 const LARGE_END: &str = "BROTLI_LARGE_STREAM_END";
 const PRESSURE_END: &str = "BROTLI_PRESSURE_STREAM_END";
+const SLOW_READER_BUFFER_SIZE: usize = 16 * 1024;
 
 /// Return deterministic Brotli upstream routes for this scenario.
 pub fn fixture_spec(listen_port: u16) -> FixtureSpec {
@@ -287,7 +288,7 @@ fn slow_read_response(port: u16, timeout: Duration) -> Result<Vec<u8>> {
         TcpStream::connect(("127.0.0.1", port)).context("failed to connect slow-reader socket")?;
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(timeout))?;
-    SockRef::from(&stream).set_recv_buffer_size(4096)?;
+    SockRef::from(&stream).set_recv_buffer_size(SLOW_READER_BUFFER_SIZE)?;
     stream.write_all(
         b"GET /streaming/pressure-brotli HTTP/1.1\r\n\
 Host: 127.0.0.1\r\n\
@@ -299,7 +300,7 @@ Connection: close\r\n\r\n",
 
     let deadline = Instant::now() + timeout;
     let mut response = Vec::new();
-    let mut chunk = [0_u8; 4096];
+    let mut chunk = [0_u8; SLOW_READER_BUFFER_SIZE];
     while Instant::now() < deadline {
         match stream.read(&mut chunk) {
             Ok(0) => break,
