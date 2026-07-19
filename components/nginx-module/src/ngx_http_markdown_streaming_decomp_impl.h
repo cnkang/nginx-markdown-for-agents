@@ -1115,7 +1115,6 @@ ngx_http_markdown_streaming_decomp_brotli_probe(
     size_t *out_produced,
     u_char **heap_buf_ptr,
     int *using_heap_ptr,
-    size_t remaining,
     ngx_log_t *log)
 {
     u_char              *new_buf;
@@ -1179,8 +1178,8 @@ ngx_http_markdown_streaming_decomp_brotli_probe(
         /* 2b: SUCCESS + produced==0 → stream complete */
         if (probe_produced == 0) {
             decomp->finished = 1;
-            /* Retain exact-budget bytes (remaining) as output */
-            *out_produced = remaining;
+            /* Retain the exact-budget workspace bytes as output. */
+            *out_produced = old_size;
             return 1;
         }
         /* 2c: SUCCESS + produced>0 → BUDGET_EXCEEDED */
@@ -1203,7 +1202,7 @@ ngx_http_markdown_streaming_decomp_brotli_probe(
     if (brc == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT
         && decomp->brotli_avail_in == 0)
     {
-        *out_produced = remaining;
+        *out_produced = old_size;
         return 1;
     }
 
@@ -1219,7 +1218,7 @@ ngx_http_markdown_streaming_decomp_brotli_probe(
 
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_brotli_check_progress(
-    ngx_http_markdown_streaming_decomp_t *decomp,
+    const ngx_http_markdown_streaming_decomp_t *decomp,
     BrotliDecoderResult brc,
     size_t previous_input,
     size_t previous_output,
@@ -1272,7 +1271,7 @@ ngx_http_markdown_streaming_decomp_brotli_expand(
             if (old_size == remaining && remaining < (size_t) -1) {
                 return ngx_http_markdown_streaming_decomp_brotli_probe(
                     decomp, buf_ptr, buf_size_ptr, out_produced,
-                    heap_buf_ptr, using_heap_ptr, remaining, log);
+                    heap_buf_ptr, using_heap_ptr, log);
             }
             ngx_log_error(NGX_LOG_WARN, log, 0,
                 "markdown: reason=brotli_budget_exceeded "
@@ -1447,22 +1446,21 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
         }
     }
 
-    if (using_heap) {
-        if (ngx_http_markdown_streaming_decomp_finalize_buf(
-                &heap_buf, buf_ptr, buf_size_ptr,
-                *out_produced, pool)
-            != NGX_OK)
-        {
-            /*
-             * Pool-copy failure after decode completed: the decoder
-             * has consumed all input for this call.  Mark as
-             * non-retryable and set allocation origin.
-             */
-            decomp->finished = 1;
-            decomp->failure_origin =
-                NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
-            return NGX_ERROR;
-        }
+    if (using_heap
+        && ngx_http_markdown_streaming_decomp_finalize_buf(
+               &heap_buf, buf_ptr, buf_size_ptr,
+               *out_produced, pool)
+           != NGX_OK)
+    {
+        /*
+         * Pool-copy failure after decode completed: the decoder
+         * has consumed all input for this call.  Mark as
+         * non-retryable and set allocation origin.
+         */
+        decomp->finished = 1;
+        decomp->failure_origin =
+            NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+        return NGX_ERROR;
     }
 
     return NGX_OK;

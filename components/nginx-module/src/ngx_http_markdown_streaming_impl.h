@@ -1614,26 +1614,32 @@ ngx_http_markdown_streaming_record_pending_terminal_success(
 }
 
 
-/*
- * Resume sending pending output after backpressure clears.
- */
+/* Metadata snapshot taken before downstream owns and may mutate the chain. */
+typedef struct {
+    ngx_flag_t  main_terminal;
+    ngx_flag_t  subrequest_terminal;
+    ngx_flag_t  has_data;
+    ngx_flag_t  failopen;
+    ngx_flag_t  safe_finish;
+    uint32_t    safe_finish_error;
+} ngx_http_markdown_streaming_pending_snapshot_t;
+
+
+/* Resume sending pending output after backpressure clears. */
 static ngx_int_t
 ngx_http_markdown_streaming_resume_failure(
     ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
     ngx_int_t downstream_rc,
-    ngx_flag_t pending_has_data,
-    ngx_flag_t pending_failopen,
-    ngx_flag_t pending_safe_finish,
-    uint32_t pending_error)
+    ngx_http_markdown_streaming_pending_snapshot_t pending)
 {
     ctx->streaming.completion.pending_terminal_metrics = 0;
     ctx->streaming.completion.pending_failopen_delivery = 0;
     ctx->streaming.completion.safe_finish_error_pending = 0;
     ctx->streaming.completion.safe_finish_error_code = ERROR_SUCCESS;
 
-    if (!pending_failopen && pending_has_data) {
+    if (!pending.failopen && pending.has_data) {
         ctx->streaming.classify.last_send_failure_origin =
             NGX_HTTP_MD_SEND_ORIGIN_DOWNSTREAM;
         ngx_http_markdown_streaming_sync_buffered(r, ctx);
@@ -1641,9 +1647,9 @@ ngx_http_markdown_streaming_resume_failure(
             r, ctx, conf);
     }
 
-    if (pending_safe_finish) {
+    if (pending.safe_finish) {
         ngx_http_markdown_streaming_record_postcommit_category(
-            r, ctx, conf, pending_error);
+            r, ctx, conf, pending.safe_finish_error);
     }
     ngx_http_markdown_streaming_record_postcommit_failure(r, ctx, conf);
     ngx_http_markdown_streaming_sync_buffered(r, ctx);
@@ -1691,12 +1697,7 @@ ngx_http_markdown_streaming_resume_pending(
     const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t     rc;
-    ngx_flag_t    pending_main_terminal;
-    ngx_flag_t    pending_subrequest_terminal;
-    ngx_flag_t    pending_has_data;
-    ngx_flag_t    pending_failopen;
-    ngx_flag_t    pending_safe_finish;
-    uint32_t      pending_safe_finish_error;
+    ngx_http_markdown_streaming_pending_snapshot_t  pending;
 
     if (ctx->streaming.pending_output == NULL) {
         /*
@@ -1726,15 +1727,15 @@ ngx_http_markdown_streaming_resume_pending(
      * For subrequests: subrequest_terminal indicates last_in_chain was
      *   present.  This must NOT latch main_terminal_sent.
      */
-    pending_main_terminal = ctx->streaming.pending_meta.main_terminal;
-    pending_subrequest_terminal =
+    pending.main_terminal = ctx->streaming.pending_meta.main_terminal;
+    pending.subrequest_terminal =
         ctx->streaming.pending_meta.subrequest_terminal;
-    pending_has_data = ctx->streaming.pending_meta.has_data;
-    pending_failopen =
+    pending.has_data = ctx->streaming.pending_meta.has_data;
+    pending.failopen =
         ctx->streaming.completion.pending_failopen_delivery;
-    pending_safe_finish =
+    pending.safe_finish =
         ctx->streaming.completion.safe_finish_error_pending;
-    pending_safe_finish_error =
+    pending.safe_finish_error =
         ctx->streaming.completion.safe_finish_error_code;
 
     /*
@@ -1803,12 +1804,12 @@ ngx_http_markdown_streaming_resume_pending(
      * already been confirmed downstream.
      */
     if (ngx_http_markdown_streaming_delivery_ok(rc)
-        && r == r->main && pending_main_terminal)
+        && r == r->main && pending.main_terminal)
     {
         ctx->streaming.main_terminal_sent = 1;
     }
     if (ngx_http_markdown_streaming_delivery_ok(rc)
-        && r != r->main && pending_subrequest_terminal)
+        && r != r->main && pending.subrequest_terminal)
     {
         ctx->streaming.subrequest_terminal_sent = 1;
     }
@@ -1827,13 +1828,12 @@ ngx_http_markdown_streaming_resume_pending(
      */
     if (!ngx_http_markdown_streaming_delivery_ok(rc)) {
         return ngx_http_markdown_streaming_resume_failure(
-            r, ctx, conf, rc, pending_has_data, pending_failopen,
-            pending_safe_finish, pending_safe_finish_error);
+            r, ctx, conf, rc, pending);
     }
 
     return ngx_http_markdown_streaming_resume_success(
-        r, ctx, conf, rc, pending_safe_finish,
-        pending_safe_finish_error);
+        r, ctx, conf, rc, pending.safe_finish,
+        pending.safe_finish_error);
 }
 
 
@@ -2752,17 +2752,9 @@ ngx_http_markdown_streaming_map_feed_decomp_error(
         return ERROR_MEMORY_LIMIT;
     }
 
-    if (decomp != NULL
-        && decomp->failure_origin
-           == NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL)
-    {
-        return ERROR_INTERNAL;
-    }
-
     /*
-     * Origin is NONE or decomp is NULL: invariant violation.
-     * Classify as INTERNAL (safest fallback) without incrementing
-     * decompressions.io_error_total.
+     * INTERNAL, NONE, or a NULL decompressor all fail closed as INTERNAL.
+     * Do not increment decompressions.io_error_total for these origins.
      */
     return ERROR_INTERNAL;
 }
@@ -2821,16 +2813,9 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
         return ERROR_MEMORY_LIMIT;
     }
 
-    if (decomp != NULL
-        && decomp->failure_origin
-           == NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL)
-    {
-        return ERROR_INTERNAL;
-    }
-
     /*
-     * Origin is NONE or decomp is NULL: invariant violation.
-     * Classify as INTERNAL without incrementing io_error_total.
+     * INTERNAL, NONE, or a NULL decompressor all fail closed as INTERNAL.
+     * Do not increment decompressions.io_error_total for these origins.
      */
     return ERROR_INTERNAL;
 }
