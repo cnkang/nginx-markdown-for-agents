@@ -157,15 +157,21 @@ For non-eligible requests, the module stays out of the way and the original resp
 
 ## Key Architectural Tradeoffs
 
-### Full buffering in v1
+### Dual-engine: Full buffering + Streaming (since v0.8.0)
 
-The current architecture buffers the full eligible response before conversion. That makes correctness, deterministic output, and header handling much simpler, but it also means:
+The architecture supports two conversion engines:
 
-- larger responses consume more memory
-- conversion cannot start streaming output immediately
-- very large or streaming-style content should usually be bypassed
+- **Full-buffer engine** (default for small responses): buffers the full eligible response before conversion. This makes correctness, deterministic output, and header handling simpler. Tradeoffs:
+  - larger responses consume more memory
+  - conversion cannot start streaming output immediately
+  - very large or streaming-style content should usually be bypassed
 
-This tradeoff is documented in [ADR-0002](ADR/0002-full-buffering-approach.md).
+- **Streaming engine** (since v0.8.0, enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline (charset detection → tokenization → sanitization → state machine → emission). Tradeoffs:
+  - bounded memory per request (configurable via `markdown_limits streaming_buffer=<size>`)
+  - first Markdown bytes available before upstream finishes
+  - more complex state machine (fallback to full-buffer or passthrough on errors)
+
+The full-buffer tradeoff is documented in [ADR-0002](ADR/0002-full-buffering-approach.md). The streaming contract is in [RFC-0008](RFC-0008-streaming-conversion-support-contract.md) and [ADR-0011](ADR/0011-true-streaming-contract.md).
 
 ### Shared observability state
 
@@ -319,11 +325,14 @@ v0.9.1 introduces critical performance and robustness enhancements to the conver
 To reduce CPU overhead and memory pressure in high-throughput streaming paths, 0.9.1 introduces a zero-copy output mechanism. When `markdown_streaming_zero_copy` is enabled, the module can deliver converted chunks directly to the NGINX response chain with minimal internal copying.
 
 ### Streaming Decompression
-Streaming conversion now supports on-the-fly gzip and deflate decompression.
-Deflate accepts both zlib-wrapped and raw framing; gzip preserves member and
-trailer integrity across arbitrary chunks and backpressure resumes. Brotli
-continues to use bounded full-buffer decompression in 0.9.1 pending dedicated
-streaming decoder-state, lifecycle, backpressure, and memory validation.
+Streaming conversion now supports on-the-fly gzip, deflate, and Brotli
+decompression. Deflate accepts both zlib-wrapped and raw framing; gzip
+preserves member and trailer integrity across arbitrary chunks and
+backpressure resumes. Brotli streaming (compiled in when `NGX_HTTP_BROTLI`
+is defined) shares the streaming, backpressure, and response-wide accounting
+invariants of gzip and deflate while enforcing Brotli's single-stream
+completion rules: tail data is rejected and truncated final streams are
+detected and rejected.
 
 ### Full-Buffer Copy Reduction
 Internal optimizations have been applied to the full-buffer path to reduce unnecessary data duplication during the transition from the NGINX buffer to the Rust converter and back.

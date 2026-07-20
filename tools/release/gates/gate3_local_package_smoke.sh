@@ -238,6 +238,7 @@ build_module() {
 FROM almalinux:9 AS builder
 RUN dnf install -y \\
     gcc make ca-certificates curl-minimal pcre2-devel zlib-devel openssl-devel \\
+    brotli-devel \\
     tar gzip findutils which \\
     && dnf clean all
 
@@ -276,13 +277,17 @@ RUN RUST_TARGET=\$(cat /tmp/rust_target.txt) \\
     && cargo build --release --target "\${RUST_TARGET}"
 
 # Build NGINX module (config auto-detects target triple from uname)
+ENV NGX_MARKDOWN_BROTLI_STREAMING=on
 RUN cd /tmp/nginx-\${NGINX_VERSION} \\
     && ./configure --with-compat --add-dynamic-module=/src/components/nginx-module \\
     && make modules
 
-# Copy output
+# Copy output and verify libbrotlidec linkage
 RUN mkdir -p /output \\
-    && cp /tmp/nginx-\${NGINX_VERSION}/objs/ngx_http_markdown_filter_module.so /output/
+    && cp /tmp/nginx-\${NGINX_VERSION}/objs/ngx_http_markdown_filter_module.so /output/ \\
+    && echo "--- Verifying libbrotlidec linkage ---" \\
+    && readelf -d /output/ngx_http_markdown_filter_module.so | grep -i brotli \\
+    && echo "--- libbrotlidec linkage confirmed ---"
 
 FROM ubuntu:24.04 AS packager
 ENV DEBIAN_FRONTEND=noninteractive

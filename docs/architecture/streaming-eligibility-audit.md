@@ -134,7 +134,7 @@ failure short-circuits to passthrough.
 | What | Reads `Content-Encoding` header. Detects: `gzip`, `deflate`, `br` (brotli). |
 | Location | Header filter, after eligibility passes, before context init completes |
 | On UNKNOWN | Fail-open (pass original) or reject per `on_error` policy |
-| On known format | Sets `ctx->decompression.needed = 1`; decompression occurs in the selected body-filter path. **In 0.9.1, gzip and zlib/raw deflate are streaming-eligible when the streaming/cache gates pass; `br` remains bounded full-buffer.** |
+| On known format | Sets `ctx->decompression.needed = 1`; decompression occurs in the selected body-filter path. **In 0.9.1, gzip, zlib/raw deflate, and build-enabled Brotli are streaming-eligible when the streaming/cache gates pass; Brotli builds without `NGX_HTTP_BROTLI` retain bounded full-buffer routing.** |
 
 ---
 
@@ -307,7 +307,7 @@ These semantics apply to:
 The Pre-streaming Policy Gate (Design Component 1) must ensure:
 
 1. **Checks 1-9** all run in the header filter **before** streaming candidate evaluation.
-2. **Check 10** (Content-Encoding) must route gzip and zlib/raw deflate through incremental decompression when the streaming gates pass; Brotli routes to bounded full-buffer, while unknown/disabled decompression preserves existing bypass or error-policy behavior.
+2. **Check 10** (Content-Encoding) must route gzip, zlib/raw deflate, and Brotli (when `NGX_HTTP_BROTLI` defined) through incremental decompression when the streaming gates pass; Brotli without `NGX_HTTP_BROTLI` routes to bounded full-buffer, while unknown/disabled decompression preserves existing bypass or error-policy behavior.
 3. **Hard exclusions** (check 5) must use `ngx_http_markdown_stream_type_excluded()` which is parameter-aware and case-insensitive — matching the Requirement 4: Hard Exclusions requirements.
 4. **Checks 11-18** are enforced incrementally during the body filter streaming path via the Budget Tracker (Design Component 2).
 

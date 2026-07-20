@@ -189,8 +189,15 @@ ngx_http_markdown_metric_inc_skip(
 }
 
 /*
- * Increment the fail-open counter when the configured error
- * strategy is "pass" (fail-open).
+ * Increment the fail-open delivery counter after the downstream filter
+ * has confirmed successful delivery of the original response.
+ *
+ * Rule 38/23: `results.failopen_count` is a DELIVERY counter, not a
+ * decision counter.  Callers MUST only invoke this helper after the
+ * downstream body/header filter returns `NGX_OK` or `NGX_DONE`
+ * (i.e. `delivery_ok`).  The decision to fail-open is recorded
+ * separately via `log_decision()` / `log_failure_decision()` at the
+ * decision point; this helper must not be called at the decision point.
  *
  * Centralizes the repeated guard so every fail-open path uses
  * the same check and future fail-open paths cannot drift.

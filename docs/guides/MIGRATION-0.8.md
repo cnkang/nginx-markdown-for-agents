@@ -321,6 +321,8 @@ markdown_stream_excluded_types text/csv application/atom+xml;
 
 ## Unchanged Behavior
 
+> **Note for v0.9.0+ operators:** The directives marked 'unchanged' below (including `markdown_on_error`, `markdown_on_wildcard`, `markdown_conditional_requests`, `markdown_trust_forwarded_headers`) were subsequently removed or renamed in v0.9.0. Please refer to [MIGRATION-0.9.md](MIGRATION-0.9.md) for current directive names.
+
 The following behaviors are identical between 0.7.x and 0.8.0. No operator
 action is required for these areas.
 
@@ -395,8 +397,8 @@ output parity before enabling streaming for live traffic.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
 | 0.8.0 | 2026-06-16 | Kang | Initial migration guide |
 | 0.8.0 | 2026-06-16 | Codex | Added missing streaming reason codes: `not_html`, `compressed`, `not_candidate`, `accept_mismatch` |
 | 0.8.0 | 2026-06-16 | Kang | Document FFIHeaderEntry.op_type=3, check_eligibility API change, ctx layout change, 0.6.x incompatibility, paired deployment requirement |
 | 0.8.0 | 2026-06-16 | Kang | Update for 0.6.x compat removal: markdown_streaming_auto_threshold is REMOVED (not deprecated), $variable support removed from markdown_streaming_engine, compatibility bridge functions removed |
-| 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |

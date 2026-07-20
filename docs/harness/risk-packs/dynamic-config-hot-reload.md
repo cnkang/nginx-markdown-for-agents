@@ -87,6 +87,6 @@ integration or E2E target before broader release-quality checks.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.6.0 | 2026-05-03 | Codex | Initial pack from two-week branch scan |
 | 0.6.2 | 2026-05-07 | Kang | Added effective_conf, CWE-190, CWE-22 sync points and harness-security-checks |
 | 0.6.2 | 2026-05-07 | Kang | Added dynconf_enabled isolation, applied_mtime retry contract, unknown-key atomic rejection risks and sync points; startup apply of existing dynconf file |
+| 0.6.0 | 2026-05-03 | Codex | Initial pack from two-week branch scan |

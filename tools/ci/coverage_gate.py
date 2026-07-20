@@ -58,8 +58,8 @@ class CoverageSummary:
         return (self.functions_hit / self.functions_found) * 100.0
 
 
-_LCOC_LINE_RE = re.compile(r"lines[.]\s*:\s*(\d+)\s+of\s+(\d+)")
-_LCOC_FUNC_RE = re.compile(r"functions[.]\s*:\s*(\d+)\s+of\s+(\d+)")
+_LCOV_LINE_RE = re.compile(r"lines[.]\s*:\s*(\d+)\s+of\s+(\d+)")
+_LCOV_FUNC_RE = re.compile(r"functions[.]\s*:\s*(\d+)\s+of\s+(\d+)")
 
 
 def parse_lcov_summary(lcov_path: Path) -> CoverageSummary:
@@ -74,8 +74,8 @@ def parse_lcov_summary(lcov_path: Path) -> CoverageSummary:
     resolved = validate_read_path(lcov_path, purpose="lcov input")
     text = resolved.read_text(encoding="utf-8", errors="replace")
 
-    lines_hit = _LCOC_LINE_RE.search(text)
-    func_hit = _LCOC_FUNC_RE.search(text)
+    lines_hit = _LCOV_LINE_RE.search(text)
+    func_hit = _LCOV_FUNC_RE.search(text)
 
     if lines_hit and func_hit:
         return CoverageSummary(
@@ -208,8 +208,7 @@ def check_gate(
     min_func: float,
 ) -> list[GateResult]:
     """Check line and function coverage against thresholds."""
-    results: list[GateResult] = []
-    results.append(
+    results: list[GateResult] = [
         GateResult(
             label=label,
             metric="line",
@@ -217,7 +216,7 @@ def check_gate(
             threshold=min_line,
             passed=summary.line_pct >= min_line,
         )
-    )
+    ]
     results.append(
         GateResult(
             label=label,
@@ -232,9 +231,10 @@ def check_gate(
 
 def format_results(results: list[GateResult]) -> str:
     """Format gate results as a human-readable table."""
-    lines: list[str] = []
-    lines.append(f"{'Component':<30} {'Metric':<10} {'Actual':>8} {'Threshold':>10} {'Status':<8}")
-    lines.append("-" * 70)
+    lines: list[str] = [
+        f"{'Component':<30} {'Metric':<10} {'Actual':>8} {'Threshold':>10} {'Status':<8}",
+        "-" * 70,
+    ]
     for r in results:
         status = "PASS" if r.passed else "FAIL"
         lines.append(

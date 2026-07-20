@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — Brotli full-buffer section superseded by [ADR-0024](0024-brotli-streaming-decompression.md)
 
 ## Context
 
@@ -22,7 +22,9 @@ the response.
 ## Decision
 
 Make **gzip** and **deflate** streaming-eligible under the same routing gates in
-0.9.1. Keep Brotli on bounded full-buffer decompression.
+0.9.1. The original decision kept Brotli on bounded full-buffer decompression;
+that restriction is historical and was superseded by ADR-0024, which adds
+Brotli under the same runtime gates in the final 0.9.1 implementation.
 
 The deflate inflater sniffs the first two bytes to distinguish zlib-wrapped
 (RFC 1950, RFC 9110-compliant) from raw deflate (RFC 1951). The gzip inflater
@@ -54,7 +56,8 @@ when earlier output exactly fills that budget.
 - Existing decompression and streaming counters classify routing, budget,
   pre-commit, and post-commit outcomes.
 - `streaming_first` prefers streaming when the selected codec and validation
-  requirements are supported; it does not make Brotli streaming-eligible.
+  requirements are supported. The original Brotli exclusion was superseded by
+  ADR-0024.
 
 ## Consequences
 
@@ -64,12 +67,15 @@ when earlier output exactly fills that budget.
 - Preserves gzip member/trailer integrity across arbitrary chunks and resumes.
 - Gives streaming, Rust full-buffer, and C fallback paths the same
   concatenated-member and cumulative-budget contract.
-- Keeps Brotli's decoder-state and memory validation outside the 0.9.1 scope.
+- The initial decision kept Brotli's decoder-state and memory validation out of
+  scope. This historical consequence was superseded when ADR-0024 promoted
+  Brotli within the same 0.9.1 release.
 
 ### Negative Consequences
 - Gzip member reset and cumulative-budget behavior add codec-specific state to
   the incremental decompressor.
-- Brotli responses do not receive streaming TTFB benefits in 0.9.1.
+- The initial decision did not give Brotli responses streaming TTFB benefits.
+  ADR-0024 superseded that restriction before the final 0.9.1 release.
 
 ## Alternatives Considered
 - **Keep gzip full-buffer in 0.9.1**: Rejected because the existing zlib-backed
@@ -83,6 +89,7 @@ when earlier output exactly fills that budget.
 - RFC 1950 (ZLIB Compressed Data Format)
 - RFC 1951 (DEFLATE Compressed Data Format)
 - [ADR-0019: 0.9.0 Production Readiness Release Gate Framework](0019-090-production-readiness-release-gates.md)
+- [ADR-0024: Brotli Streaming Decompression](0024-brotli-streaming-decompression.md) (supersedes Brotli full-buffer section)
 
 ## Date
 
@@ -96,6 +103,7 @@ Kang
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.1 | 2026-07-08 | Kang | Initial ADR for Streaming Decompression Routing |
+| 0.9.1 | 2026-07-17 | Kang | Added cross-reference to ADR-0024 (Brotli streaming decompression); marked Brotli full-buffer section superseded |
 | 0.9.1 | 2026-07-14 | Kang | Enabled member-aware gzip streaming alongside zlib/raw deflate; retained bounded Brotli full-buffer routing |
 | 0.9.1 | 2026-07-14 | Codex | Aligned Rust and C full-buffer gzip with the same multi-member, truncation, and response-budget contract |
+| 0.9.1 | 2026-07-08 | Kang | Initial ADR for Streaming Decompression Routing |

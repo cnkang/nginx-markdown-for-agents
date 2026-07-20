@@ -9,9 +9,7 @@ compatibility or release scope.
 
 ## Current Release State
 
-- v0.9.0 is the latest published release.
-- v0.9.1 is in release-candidate preparation and is not yet tagged or
-  published.
+- v0.9.1 is the current stable release.
 - v0.9.1 is the final pre-v1.0 baseline-consolidation and compatibility-reset
   release.
 - The intended v1.0 contract freeze begins after v0.9.1 is published.
@@ -129,14 +127,14 @@ together and pass the version-consistency gate.
 
 ## Release Evidence
 
-v0.9.1 is ready to publish only when all of the following are true:
+The v0.9.1 release was declared stable after all of the following were true:
 
 1. repository harness, docs, complexity, license, static-security, and
    supply-chain checks pass;
 2. Rust, C, FFI/header, fuzz-smoke, sanitizer, and native E2E tests pass;
 3. coverage gates and production-example tests pass;
 4. 0.9.0, 0.9.1, and aggregate release gates pass;
-5. performance evidence satisfies the release-candidate policy;
+5. performance evidence satisfies the release policy;
 6. package and platform checks match the published support matrix;
 7. the exact pushed commit has green required GitHub checks; and
 8. SonarCloud reports no open or confirmed issues for the pull request.

@@ -1,25 +1,33 @@
 /*
- * Test: feature_gate_toggle_property
- *
- * Property-based tests for dynamic feature gate toggle behavior
- * (Property 13).
- *
- * Feature: 0.9.1-performance-optimization
- * Property 13: Dynamic Feature Gate Toggle
- *
- * Validates: Requirements 10.4, 10.5
- *
- * Verifies:
- *   1. HUP reload with zero_copy OFF causes all subsequent chunks
- *      to use pool-copy path (hybrid_decision always returns
- *      POOL_COPY when gate is OFF).
- *   2. Profile switch from streaming_first to balanced/strict_cache
- *      disables streaming decompression routing without restart.
- *
- * The test models directive changes and verifies that after toggle,
- * the production decision functions produce the correct results
- * across many random input sequences.
- */
+ /* * Test: feature_gate_toggle_property
+  *
+  * Property-based tests for dynamic feature gate toggle behavior
+  * (Property 13) and Brotli compile-time feature gate toggle
+  * (Property 1 subset).
+  *
+  * Feature: 0.9.1-performance-optimization
+  * Property 13: Dynamic Feature Gate Toggle
+  * Property 1 (subset): Brotli Feature Gate Toggle — verifies that
+  *   Brotli streaming decompression is enabled/disabled at compile
+  *   time based on NGX_HTTP_BROTLI, with full-buffer fallback when
+  *   disabled.
+  *
+  * Validates: Requirements 10.4, 10.5
+  *
+  * Verifies:
+  *   1. HUP reload with zero_copy OFF causes all subsequent chunks
+  *      to use pool-copy path (hybrid_decision always returns
+  *      POOL_COPY when gate is OFF).
+  *   2. Profile switch from streaming_first to balanced/strict_cache
+  *      disables streaming decompression routing without restart.
+  *   3. Brotli compile-time gate: with NGX_HTTP_BROTLI defined,
+  *      Brotli routes to STREAMING; without it, Brotli always routes
+  *      to FULLBUFFER.
+  *
+  * The test models directive changes and verifies that after toggle,
+  * the production decision functions produce the correct results
+  * across many random input sequences.
+  */
 
 #include "../include/test_common.h"
 
@@ -150,9 +158,13 @@ ngx_http_markdown_decomp_routing_decision(
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }
 
-    /* Condition 4: encoding supported (gzip or deflate in 0.9.1) */
+    /* Condition 4: encoding supported (gzip, deflate, or brotli when compiled) */
     if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
-        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
+        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+#ifdef NGX_HTTP_BROTLI
+        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+#endif
+        ) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }
 
@@ -848,6 +860,321 @@ test_property13_no_restart_required(void)
 }
 
 /* ----------------------------------------------------------------
+ * Property 1 (compile-time subset): Brotli Feature Gate Toggle
+ *
+ * With NGX_HTTP_BROTLI defined: eligible Brotli routes to STREAMING.
+ * With NGX_HTTP_BROTLI NOT defined: Brotli always routes to
+ * FULLBUFFER (existing bounded full-buffer path).
+ *
+ * Brotli build-gate behavior is symmetric when enabled or disabled
+ * ---------------------------------------------------------------- */
+
+#define BROTLI_GATE_ITERATIONS  150
+
+/*
+ * When NGX_HTTP_BROTLI is defined:
+ *   Brotli + all conditions met → STREAMING
+ *   Brotli + any condition unmet → FULLBUFFER (or BYPASS)
+ *
+ * When NGX_HTTP_BROTLI is NOT defined:
+ *   Brotli always → FULLBUFFER regardless of other conditions
+ */
+static void
+test_property1_brotli_gate_eligible(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_decomp_route_t route;
+    int iter;
+
+    TEST_SUBSECTION(
+        "Property 1 (compile-time subset): Brotli with all "
+        "conditions met");
+
+    for (iter = 0; iter < BROTLI_GATE_ITERATIONS; iter++) {
+        prng_seed((unsigned int)(iter + 60001));
+
+        /* All conditions satisfied for streaming eligibility */
+        conf.stream.zero_copy = (ngx_flag_t)(prng_next() % 2);
+        conf.auto_decompress = 1;
+        conf.profile = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+
+        route = ngx_http_markdown_decomp_routing_decision(
+            &conf, 1,
+            NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+            NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+
+#ifdef NGX_HTTP_BROTLI
+        TEST_ASSERT(
+            route == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+            "NGX_HTTP_BROTLI defined: eligible Brotli -> "
+            "STREAMING");
+#else
+        TEST_ASSERT(
+            route == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+            "NGX_HTTP_BROTLI undefined: Brotli always -> "
+            "FULLBUFFER");
+#endif
+    }
+
+#ifdef NGX_HTTP_BROTLI
+    TEST_PASS(
+        "Property 1: NGX_HTTP_BROTLI defined -> eligible "
+        "Brotli reaches STREAMING (150 iterations)");
+#else
+    TEST_PASS(
+        "Property 1: NGX_HTTP_BROTLI undefined -> Brotli "
+        "always FULLBUFFER (150 iterations)");
+#endif
+}
+
+/*
+ * When NGX_HTTP_BROTLI is NOT defined, Brotli must always route
+ * to FULLBUFFER even if every other condition is satisfied.
+ * When NGX_HTTP_BROTLI IS defined, Brotli with any single
+ * disqualifying condition routes to FULLBUFFER.
+ */
+static void
+test_property1_brotli_gate_ineligible(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_decomp_route_t route;
+    int iter;
+    unsigned int scenario;
+
+    TEST_SUBSECTION(
+        "Property 1 (compile-time subset): Brotli with "
+        "one condition unmet");
+
+    for (iter = 0; iter < BROTLI_GATE_ITERATIONS; iter++) {
+        prng_seed((unsigned int)(iter + 70001));
+
+        /*
+         * Randomly select which single condition to violate:
+         * 0 = auto_decompress OFF
+         * 1 = streaming engine not selected
+         * 2 = cache_validation FULL
+         * 3 = profile not streaming_first
+         */
+        scenario = prng_next() % 4;
+
+        conf.stream.zero_copy = 1;
+        conf.auto_decompress = 1;
+        conf.profile = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+
+        switch (scenario) {
+        case 0:
+            conf.auto_decompress = 0;
+            route = ngx_http_markdown_decomp_routing_decision(
+                &conf, 1,
+                NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+                NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+            /* auto_decompress OFF -> FULLBUFFER for all codecs */
+            TEST_ASSERT(
+                route
+                    == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+                "Brotli + auto_decompress OFF -> FULLBUFFER");
+            break;
+
+        case 1:
+            route = ngx_http_markdown_decomp_routing_decision(
+                &conf, 0,
+                NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+                NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+            TEST_ASSERT(
+                route
+                    == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+                "Brotli + streaming not selected -> "
+                "FULLBUFFER");
+            break;
+
+        case 2:
+            route = ngx_http_markdown_decomp_routing_decision(
+                &conf, 1,
+                NGX_HTTP_MARKDOWN_CACHE_VALIDATION_FULL,
+                NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+            TEST_ASSERT(
+                route
+                    == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+                "Brotli + cache_validation FULL -> "
+                "FULLBUFFER");
+            break;
+
+        case 3:
+            conf.profile = NGX_HTTP_MARKDOWN_PROFILE_BALANCED;
+            route = ngx_http_markdown_decomp_routing_decision(
+                &conf, 1,
+                NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+                NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+            TEST_ASSERT(
+                route
+                    == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+                "Brotli + non-streaming_first profile -> "
+                "FULLBUFFER");
+            break;
+
+        default:
+            break;
+        }
+    }
+
+    TEST_PASS(
+        "Property 1: Brotli with one condition unmet -> "
+        "FULLBUFFER (150 iterations)");
+}
+
+/*
+ * Verify that without NGX_HTTP_BROTLI, NO combination of
+ * runtime conditions can produce STREAMING for Brotli.
+ * With NGX_HTTP_BROTLI, gzip/deflate remain unaffected by
+ * the Brotli gate.
+ */
+static void
+test_property1_brotli_gate_exhaustive_random(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_decomp_route_t route;
+    ngx_flag_t auto_dec, streaming_sel;
+    ngx_http_markdown_cache_validation_e cv;
+    ngx_http_markdown_profile_e prof;
+    int iter;
+
+    TEST_SUBSECTION(
+        "Property 1 (compile-time subset): Exhaustive "
+        "random Brotli gate verification");
+
+    for (iter = 0; iter < BROTLI_GATE_ITERATIONS; iter++) {
+        prng_seed((unsigned int)(iter + 80001));
+
+        /* Random configuration */
+        auto_dec = (ngx_flag_t)(prng_next() % 2);
+        streaming_sel = (ngx_flag_t)(prng_next() % 2);
+        cv = (ngx_http_markdown_cache_validation_e)
+            (prng_next() % 3);
+        prof = (ngx_http_markdown_profile_e)
+            (prng_next() % 3);
+
+        conf.stream.zero_copy = (ngx_flag_t)(prng_next() % 2);
+        conf.auto_decompress = auto_dec;
+        conf.profile = prof;
+
+        route = ngx_http_markdown_decomp_routing_decision(
+            &conf, streaming_sel, cv,
+            NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+
+#ifdef NGX_HTTP_BROTLI
+        /*
+         * With NGX_HTTP_BROTLI: STREAMING iff all four
+         * conditions hold.
+         */
+        if (auto_dec == 1
+            && prof == NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST
+            && streaming_sel == 1
+            && cv != NGX_HTTP_MARKDOWN_CACHE_VALIDATION_FULL)
+        {
+            TEST_ASSERT(
+                route
+                    == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+                "NGX_HTTP_BROTLI + all conditions -> "
+                "STREAMING");
+        } else if (auto_dec == 0
+            || prof
+               != NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST)
+        {
+            TEST_ASSERT(
+                route
+                    == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+                "NGX_HTTP_BROTLI + condition unmet -> "
+                "FULLBUFFER");
+        } else {
+            TEST_ASSERT(
+                route
+                    != NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+                "NGX_HTTP_BROTLI + partial conditions -> "
+                "not STREAMING");
+        }
+#else
+        /*
+         * Without NGX_HTTP_BROTLI: Brotli NEVER reaches
+         * STREAMING regardless of runtime conditions.
+         */
+        TEST_ASSERT(
+            route != NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+            "no NGX_HTTP_BROTLI: Brotli must never reach "
+            "STREAMING");
+        if (auto_dec == 0
+            || prof
+               != NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST)
+        {
+            TEST_ASSERT(
+                route
+                    == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+                "no NGX_HTTP_BROTLI: Brotli -> FULLBUFFER");
+        }
+#endif
+    }
+
+#ifdef NGX_HTTP_BROTLI
+    TEST_PASS(
+        "Property 1: NGX_HTTP_BROTLI defined -> Brotli "
+        "routing respects all four conditions "
+        "(150 iterations)");
+#else
+    TEST_PASS(
+        "Property 1: NGX_HTTP_BROTLI undefined -> Brotli "
+        "never reaches STREAMING (150 iterations)");
+#endif
+}
+
+/*
+ * Verify that the feature gate does NOT affect gzip/deflate
+ * routing — those codecs reach STREAMING regardless of the
+ * NGX_HTTP_BROTLI compile-time state.
+ */
+static void
+test_property1_brotli_gate_does_not_affect_other_codecs(void)
+{
+    ngx_http_markdown_conf_t conf;
+    ngx_http_markdown_decomp_route_t route_gzip;
+    ngx_http_markdown_decomp_route_t route_deflate;
+    int iter;
+
+    TEST_SUBSECTION(
+        "Property 1 (compile-time subset): Brotli gate "
+        "does not affect gzip/deflate routing");
+
+    for (iter = 0; iter < BROTLI_GATE_ITERATIONS; iter++) {
+        prng_seed((unsigned int)(iter + 90001));
+
+        /* All conditions met for streaming */
+        conf.stream.zero_copy = (ngx_flag_t)(prng_next() % 2);
+        conf.auto_decompress = 1;
+        conf.profile = NGX_HTTP_MARKDOWN_PROFILE_STREAMING_FIRST;
+
+        route_gzip = ngx_http_markdown_decomp_routing_decision(
+            &conf, 1,
+            NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+            NGX_HTTP_MARKDOWN_COMPRESSION_GZIP);
+        TEST_ASSERT(
+            route_gzip
+                == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+            "gzip -> STREAMING regardless of Brotli gate");
+
+        route_deflate = ngx_http_markdown_decomp_routing_decision(
+            &conf, 1,
+            NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+            NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE);
+        TEST_ASSERT(
+            route_deflate
+                == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+            "deflate -> STREAMING regardless of Brotli gate");
+    }
+
+    TEST_PASS(
+        "Property 1: Brotli gate does not affect "
+        "gzip/deflate routing (150 iterations)");
+}
+
+/* ----------------------------------------------------------------
  * Main
  * ---------------------------------------------------------------- */
 
@@ -878,6 +1205,21 @@ main(void)
 
     /* No-restart property */
     test_property13_no_restart_required();
+
+    /*
+     * Property 1 (compile-time subset): Brotli feature gate toggle
+     * Brotli build-gate behavior is symmetric when enabled or disabled
+     */
+    TEST_SECTION(
+        "Feature: Brotli streaming decompression\n"
+        "Property 1 (compile-time subset): "
+        "Feature Gate Toggle\n"
+        "Brotli build-gate behavior is symmetric when enabled or disabled");
+
+    test_property1_brotli_gate_eligible();
+    test_property1_brotli_gate_ineligible();
+    test_property1_brotli_gate_exhaustive_random();
+    test_property1_brotli_gate_does_not_affect_other_codecs();
 
     printf("\n");
     TEST_PASS(

@@ -339,12 +339,16 @@ If you use a custom NGINX build, or a platform not supported by the pre-built bi
 | **GCC/Clang** | GCC 4.8+ or Clang 3.4+ | C compiler for NGINX module |
 | **Make** | 3.81+ | Build automation |
 | **PCRE** | 8.0+ | Regular expression library (NGINX dependency) |
-| **zlib** | 1.2.0+ | Compression library (NGINX dependency) |
+| **zlib** | 1.2.0+ | gzip/deflate support and NGINX dependency |
+| **libbrotlidec** | 1.0.9+ | Optional: Brotli streaming decompression |
 | **OpenSSL** | 1.0.2+ | SSL/TLS support (optional, for HTTPS) |
 
 **Development Headers Required:**
 - PCRE development headers (`pcre-devel` or `libpcre3-dev`)
 - zlib development headers (`zlib-devel` or `zlib1g-dev`)
+- Brotli decoder development headers (`brotli-devel` or `libbrotli-dev`) —
+  required only for `NGX_MARKDOWN_BROTLI_STREAMING=on`; `auto` falls back to
+  the Rust bounded full-buffer decoder when they are unavailable
 - OpenSSL development headers (`openssl-devel` or `libssl-dev`) — optional
 
 ### Platform-Specific Prerequisites
@@ -359,7 +363,9 @@ sudo apt-get update
 sudo apt-get install -y build-essential
 
 # Install NGINX dependencies
-sudo apt-get install -y libpcre3 libpcre3-dev zlib1g zlib1g-dev libssl-dev
+sudo apt-get install -y libpcre3 libpcre3-dev zlib1g zlib1g-dev libssl-dev pkg-config
+# Optional, for Brotli streaming (official release artifacts enable it)
+sudo apt-get install -y libbrotli-dev
 
 # Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -381,7 +387,9 @@ tar -xzf nginx-1.24.0.tar.gz
 sudo yum groupinstall -y "Development Tools"
 
 # Install NGINX dependencies
-sudo yum install -y pcre pcre-devel zlib zlib-devel openssl openssl-devel
+sudo yum install -y pcre pcre-devel zlib zlib-devel openssl openssl-devel pkgconf-pkg-config
+# Optional, for Brotli streaming (official release artifacts enable it)
+sudo yum install -y brotli-devel
 
 # Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -406,7 +414,9 @@ xcode-select --install
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
 # Install dependencies
-brew install pcre openssl
+brew install pcre openssl pkgconf
+# Optional, for Brotli streaming (official release artifacts enable it)
+brew install brotli
 
 # Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -1620,8 +1630,9 @@ If you encounter issues not covered in this guide:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.6.3 | 2026-05-14 | Kang | Version bump to 0.6.3 and refresh release matrix for release |
-| 0.8.2 | 2026-06-21 | Kang | 0.8.x patch-line closeout: updated DEB/RPM install examples to VERSION=0.8.2 with replace-with-target-version note; refreshed SOP manual-download examples to reference v0.8.2 |
+| 0.9.1 | 2026-07-17 | Codex | Verified installation guides, curl command patterns, and dynamic package naming for the upcoming v0.9.1 release. |
 | 0.8.3 | 2026-06-26 | Kang | 0.8.x release-line closeout: updated DEB/RPM and SOP manual-download examples to VERSION=0.8.3; refreshed release-line version references to current patch |
+| 0.8.2 | 2026-06-21 | Kang | 0.8.x patch-line closeout: updated DEB/RPM install examples to VERSION=0.8.2 with replace-with-target-version note; refreshed SOP manual-download examples to reference v0.8.2 |
+| 0.6.3 | 2026-05-14 | Kang | Version bump to 0.6.3 and refresh release matrix for release |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

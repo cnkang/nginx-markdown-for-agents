@@ -84,20 +84,20 @@ Safety/engineering invariants always win; user-task controls scope and approach.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
+| 0.8.3 | 2026-06-26 | Kang | Added release-manifest and version-consistency verification families |
+| 0.8.2 | 2026-06-13 | Codex | Added security-static and supply-chain verification families plus the security-static-supply-chain risk pack |
+| 0.8.0 | 2026-06-16 | Codex | Added v080-gates verification family for release-gates-check-080; added tools/harness/tests/ to tooling-path-security risk pack paths |
+| 0.7.0 | 2026-05-31 | Kiro | Added v070-gates verification family (release-gates-check-070, test-rust, check-headers) to sync with JSON manifest |
+| 0.6.6 | 2026-05-16 | Kang | Added replay buffer keywords (replay buffer, failopen_completed, precommit_error) to runtime-streaming risk pack; updated primary surfaces to include replay buffer integrity; introduced Spec Resolver Priority section (priority-ordered resolution: agents-baseline > user-task > active-spec-pointer > agents-workflow > harness-core > replay-calibration) ensuring safety/engineering invariants always win over user-task scope |
+| 0.6.3 | 2026-05-14 | Kang | Added shell-hygiene (S7682/S1066/Rule 18) and const-correctness detection scripts; extended tooling-path-security pack paths and keywords; updated harness-security family description |
+| 0.6.3 | 2026-05-12 | Kang | Added e2e-harness-rust verification family, e2e-migration risk pack, and tools/e2e-harness/** paths to runtime-streaming and nginx-protocol-safety packs |
+| 0.6.3 | 2026-05-11 | Kang | Added harness-security verification family and tooling-path-security risk pack to route repeated tooling path-safety fixes |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.6.1 | 2026-05-06 | Kang | Added output-safety pack (Rule 27) and sync points for Rules 28–31 |
+| 0.6.0 | 2026-05-03 | Codex | Aligned coverage-gate overlay command with machine manifest |
+| 0.6.0 | 2026-05-03 | Codex | Added dynamic-config-hot-reload pack and tightened protocol/release routes from two-week branch scan |
+| 0.6.0 | 2026-04-28 | v0.6.0-planning | Added coverage-gate, release-governance-060, packaging-e2e families; otel-integration, packaging-distribution packs |
 | 0.5.5 | 2026-04-24 | Codex | Added harness-remediation routing pack |
 | 0.5.5 | 2026-04-24 | Codex | Added 60-day protocol and release governance packs |
 | 0.5.5 | 2026-04-24 | Codex | Scoped legacy release-gate validation to clones with legacy specs |
-| 0.6.0 | 2026-04-28 | v0.6.0-planning | Added coverage-gate, release-governance-060, packaging-e2e families; otel-integration, packaging-distribution packs |
-| 0.6.0 | 2026-05-03 | Codex | Aligned coverage-gate overlay command with machine manifest |
-| 0.6.0 | 2026-05-03 | Codex | Added dynamic-config-hot-reload pack and tightened protocol/release routes from two-week branch scan |
-| 0.6.1 | 2026-05-06 | Kang | Added output-safety pack (Rule 27) and sync points for Rules 28–31 |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.6.3 | 2026-05-11 | Kang | Added harness-security verification family and tooling-path-security risk pack to route repeated tooling path-safety fixes |
-| 0.6.3 | 2026-05-12 | Kang | Added e2e-harness-rust verification family, e2e-migration risk pack, and tools/e2e-harness/** paths to runtime-streaming and nginx-protocol-safety packs |
-| 0.6.3 | 2026-05-14 | Kang | Added shell-hygiene (S7682/S1066/Rule 18) and const-correctness detection scripts; extended tooling-path-security pack paths and keywords; updated harness-security family description |
-| 0.6.6 | 2026-05-16 | Kang | Added replay buffer keywords (replay buffer, failopen_completed, precommit_error) to runtime-streaming risk pack; updated primary surfaces to include replay buffer integrity; introduced Spec Resolver Priority section (priority-ordered resolution: agents-baseline > user-task > active-spec-pointer > agents-workflow > harness-core > replay-calibration) ensuring safety/engineering invariants always win over user-task scope |
-| 0.7.0 | 2026-05-31 | Kiro | Added v070-gates verification family (release-gates-check-070, test-rust, check-headers) to sync with JSON manifest |
-| 0.8.0 | 2026-06-16 | Codex | Added v080-gates verification family for release-gates-check-080; added tools/harness/tests/ to tooling-path-security risk pack paths |
-| 0.8.2 | 2026-06-13 | Codex | Added security-static and supply-chain verification families plus the security-static-supply-chain risk pack |
-| 0.8.3 | 2026-06-26 | Kang | Added release-manifest and version-consistency verification families |
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

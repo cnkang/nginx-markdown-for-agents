@@ -2095,6 +2095,8 @@ test_postcommit_and_precommit_error_paths(void)
     ngx_http_markdown_metrics = &metrics;
 
     ctx.streaming.handle = (struct StreamingConverterHandle *) (uintptr_t) 0x3;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
     g_next_body_filter_rc = NGX_OK;
     rc = ngx_http_markdown_streaming_handle_postcommit_error(
         &r, &ctx, &conf, ERROR_MEMORY_LIMIT);
@@ -3382,7 +3384,7 @@ test_postcommit_output_loss_body_filter_reentry_is_idempotent(void)
         && metrics.streaming.failed_total == 1
         && metrics.conversions_failed == 1
         && metrics.failures_resource_limit == 1
-        && metrics.streaming.streaming_failure_postcommit_abort == 1,
+        && metrics.streaming.streaming_failure_postcommit_abort == 0,
         "body-filter output loss must record each failure metric once");
     TEST_ASSERT(g_abort_calls == 1 && g_output_free_calls == 1,
         "body-filter output loss must abort and free exactly once");
@@ -3404,7 +3406,7 @@ test_postcommit_output_loss_body_filter_reentry_is_idempotent(void)
         && metrics.streaming.failed_total == 1
         && metrics.conversions_failed == 1
         && metrics.failures_resource_limit == 1
-        && metrics.streaming.streaming_failure_postcommit_abort == 1,
+        && metrics.streaming.streaming_failure_postcommit_abort == 0,
         "body-filter re-entry must not duplicate failure metrics");
     TEST_ASSERT(g_abort_calls == 1 && g_output_free_calls == 1,
         "body-filter re-entry must not abort or free twice");
@@ -3549,7 +3551,7 @@ test_zero_copy_pending_conflict_is_invariant_output_loss(void)
     TEST_ASSERT(metrics.streaming.postcommit_error_total == 1
         && metrics.streaming.failed_total == 1
         && metrics.conversions_failed == 1
-        && metrics.streaming.streaming_failure_postcommit_abort == 1,
+        && metrics.streaming.streaming_failure_postcommit_abort == 0,
         "zero-copy invariant failure metrics must be exactly once");
     TEST_ASSERT(g_output_free_calls == 0,
         "transferred zero-copy output must remain pool-cleanup owned");
@@ -4928,6 +4930,10 @@ test_pending_input_production_lifecycle(void)
     ctx.eligible = 1;
     ctx.streaming.completion.failopen_active = 0;
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    ctx.streaming.main_terminal_sent = 0;
+    ctx.streaming.subrequest_terminal_sent = 0;
     ctx.streaming.pending_output = &pending_output;
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x43;
@@ -6223,6 +6229,108 @@ test_postcommit_terminal_only_backpressure_metrics(void)
 }
 
 
+static void
+test_postcommit_terminal_immediate_failure_no_handle_no_retry(void)
+{
+    ngx_http_request_t          r;
+    ngx_http_markdown_ctx_t     ctx;
+    ngx_http_markdown_conf_t    conf;
+    ngx_pool_t                  pool;
+    ngx_connection_t            conn;
+    ngx_log_t                   log;
+    ngx_event_t                 read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_int_t                   rc;
+
+    TEST_SUBSECTION("postcommit terminal immediate failure: no handle, no retry");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    /* 1. handle is NULL */
+    ctx.streaming.handle = NULL;
+    /* 2. state is COMMITTED */
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+    /* 3. downstream first terminal returns NGX_ERROR */
+    g_next_body_filter_rc = NGX_ERROR;
+
+    /* 4. call ngx_http_markdown_streaming_handle_postcommit_error() */
+    rc = ngx_http_markdown_streaming_handle_postcommit_error(
+        &r, &ctx, &conf, ERROR_MEMORY_LIMIT);
+
+    /* 5. Assert body-filter call count is 1 */
+    TEST_ASSERT(g_next_body_filter_calls == 1,
+        "body-filter call count must be exactly 1");
+    /* 6. Assert abort call count is 0 */
+    TEST_ASSERT(g_abort_calls == 0,
+        "abort call count must be exactly 0");
+    /* 7. Assert it returns NGX_ERROR */
+    TEST_ASSERT(rc == NGX_ERROR,
+        "handler must return NGX_ERROR");
+    /* 8. Assert abort metric did not increase */
+    TEST_ASSERT(metrics.streaming.streaming_failure_postcommit_abort == 0,
+        "abort metric must not increase on immediate definitive failure");
+
+    TEST_PASS("postcommit terminal immediate failure no handle no retry verified");
+}
+
+
+static void
+test_postcommit_terminal_immediate_failure_live_handle_no_retry(void)
+{
+    ngx_http_request_t          r;
+    ngx_http_markdown_ctx_t     ctx;
+    ngx_http_markdown_conf_t    conf;
+    ngx_pool_t                  pool;
+    ngx_connection_t            conn;
+    ngx_log_t                   log;
+    ngx_event_t                 read_event;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_int_t                   rc;
+
+    TEST_SUBSECTION("postcommit terminal immediate failure: live handle, no retry");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    /* 1. handle is live */
+    ctx.streaming.handle = (struct StreamingConverterHandle *) (uintptr_t) 0x99;
+    /* 2. state is COMMITTED */
+    ctx.stream_sm.state = NGX_HTTP_MD_STATE_COMMITTED;
+    ctx.stream_sm.headers_committed = 1;
+
+    /* Mock safe finish returning success with 0 closing bytes */
+    g_streaming_safe_finish_rc = POST_COMMIT_SAFE_FINISH;
+    g_streaming_safe_finish_data = NULL;
+    g_streaming_safe_finish_len = 0;
+
+    /* 3. downstream first terminal returns NGX_ERROR */
+    g_next_body_filter_rc = NGX_ERROR;
+
+    /* 4. call ngx_http_markdown_streaming_handle_postcommit_error() */
+    rc = ngx_http_markdown_streaming_handle_postcommit_error(
+        &r, &ctx, &conf, ERROR_MEMORY_LIMIT);
+
+    /* 5. Assert body-filter call count is 1 */
+    TEST_ASSERT(g_next_body_filter_calls == 1,
+        "body-filter call count must be exactly 1");
+    /* 6. Assert abort call count is 0 */
+    TEST_ASSERT(g_abort_calls == 0,
+        "abort call count must be exactly 0");
+    /* 7. Assert it returns NGX_ERROR */
+    TEST_ASSERT(rc == NGX_ERROR,
+        "handler must return NGX_ERROR");
+    /* 8. Assert abort metric did not increase */
+    TEST_ASSERT(metrics.streaming.streaming_failure_postcommit_abort == 0,
+        "abort metric must not increase on immediate definitive failure");
+
+    TEST_PASS("postcommit terminal immediate failure live handle no retry verified");
+}
+
+
 /*
  * The streaming decompressor returns dedicated sentinels; the production
  * feed/finalize mappers must increment exactly one matching shared metric.
@@ -6243,7 +6351,7 @@ test_streaming_decompression_error_metric_mapping(void)
     ngx_http_markdown_metrics = &metrics;
 
     error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
-        NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR);
+        NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, NULL, NULL);
     TEST_ASSERT(error_code == ERROR_DECOMPRESSION_FORMAT_ERROR,
         "feed format sentinel should map to the format error code");
     TEST_ASSERT(metrics.decompressions.format_error_total == 1,
@@ -6255,7 +6363,7 @@ test_streaming_decompression_error_metric_mapping(void)
     ngx_memzero(&metrics, sizeof(metrics));
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
     error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
-        &ctx, NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT);
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT, NULL, NULL);
     TEST_ASSERT(error_code == ERROR_DECOMPRESSION_TRUNCATED_INPUT,
         "precommit truncated sentinel should retain its error code");
     TEST_ASSERT(metrics.decompressions.truncated_input_total == 1,
@@ -6266,7 +6374,7 @@ test_streaming_decompression_error_metric_mapping(void)
 
     ngx_memzero(&metrics, sizeof(metrics));
     error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
-        NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR);
+        NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, NULL, NULL);
     TEST_ASSERT(error_code == ERROR_DECOMPRESSION_IO_ERROR,
         "feed I/O sentinel should map to the I/O error code");
     TEST_ASSERT(metrics.decompressions.io_error_total == 1,
@@ -6278,7 +6386,7 @@ test_streaming_decompression_error_metric_mapping(void)
     ngx_memzero(&metrics, sizeof(metrics));
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
-        &ctx, NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT);
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT, NULL, NULL);
     TEST_ASSERT(error_code == ERROR_POST_COMMIT,
         "postcommit truncation should remain terminal postcommit failure");
     TEST_ASSERT(metrics.decompressions.truncated_input_total == 1,
@@ -6289,6 +6397,263 @@ test_streaming_decompression_error_metric_mapping(void)
 
     ngx_http_markdown_metrics = NULL;
     TEST_PASS("streaming decompression metric taxonomy remains exact");
+}
+
+/*
+ * Verify origin-based classification of bare NGX_ERROR returns from
+ * the streaming decompressor.  The mapper must read failure_origin to
+ * distinguish allocation (→ ERROR_MEMORY_LIMIT) from internal
+ * (→ ERROR_INTERNAL) failures.  Neither path increments
+ * decompressions.io_error_total.  The stage-aware handlers must then
+ * route these to the correct global failure category counter.
+ */
+static void
+test_streaming_decomp_error_origin_classification(void)
+{
+    ngx_http_markdown_ctx_t               ctx;
+    ngx_http_markdown_metrics_t           metrics;
+    ngx_http_markdown_streaming_decomp_t  decomp;
+    uint32_t                              error_code;
+
+    TEST_SUBSECTION("origin-based NGX_ERROR classification");
+    reset_globals();
+    ngx_memzero(&ctx, sizeof(ctx));
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_memzero(&decomp, sizeof(decomp));
+    ngx_http_markdown_metrics = &metrics;
+
+    /* ALLOCATION origin → ERROR_MEMORY_LIMIT, no io_error_total */
+    decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+    error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
+        NGX_ERROR, &decomp, NULL);
+    TEST_ASSERT(error_code == ERROR_MEMORY_LIMIT,
+        "ALLOCATION origin must map to ERROR_MEMORY_LIMIT");
+    TEST_ASSERT(metrics.decompressions.io_error_total == 0,
+        "ALLOCATION origin must not increment io_error_total");
+    TEST_ASSERT(metrics.decompressions.format_error_total == 0
+                && metrics.decompressions.truncated_input_total == 0
+                && metrics.decompressions.budget_exceeded_total == 0,
+        "ALLOCATION origin must not increment other typed counters");
+
+    /* INTERNAL origin → ERROR_INTERNAL, no io_error_total */
+    ngx_memzero(&metrics, sizeof(metrics));
+    decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
+    error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
+        NGX_ERROR, &decomp, NULL);
+    TEST_ASSERT(error_code == ERROR_INTERNAL,
+        "INTERNAL origin must map to ERROR_INTERNAL");
+    TEST_ASSERT(metrics.decompressions.io_error_total == 0,
+        "INTERNAL origin must not increment io_error_total");
+    TEST_ASSERT(metrics.decompressions.format_error_total == 0
+                && metrics.decompressions.truncated_input_total == 0
+                && metrics.decompressions.budget_exceeded_total == 0,
+        "INTERNAL origin must not increment other typed counters");
+
+    /* NONE origin (invariant violation) → ERROR_INTERNAL fallback */
+    ngx_memzero(&metrics, sizeof(metrics));
+    decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
+    error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
+        NGX_ERROR, &decomp, NULL);
+    TEST_ASSERT(error_code == ERROR_INTERNAL,
+        "NONE origin must fall back to ERROR_INTERNAL");
+    TEST_ASSERT(metrics.decompressions.io_error_total == 0,
+        "NONE origin must not increment io_error_total");
+
+    /* NULL decomp pointer (defensive) → ERROR_INTERNAL fallback */
+    ngx_memzero(&metrics, sizeof(metrics));
+    error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
+        NGX_ERROR, NULL, NULL);
+    TEST_ASSERT(error_code == ERROR_INTERNAL,
+        "NULL decomp must fall back to ERROR_INTERNAL");
+    TEST_ASSERT(metrics.decompressions.io_error_total == 0,
+        "NULL decomp must not increment io_error_total");
+
+    /* Finalize mapper: ALLOCATION post-commit → ERROR_MEMORY_LIMIT */
+    ngx_memzero(&metrics, sizeof(metrics));
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+    error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
+        &ctx, NGX_ERROR, &decomp, NULL);
+    TEST_ASSERT(error_code == ERROR_MEMORY_LIMIT,
+        "finalize ALLOCATION post-commit must return ERROR_MEMORY_LIMIT");
+    TEST_ASSERT(metrics.decompressions.io_error_total == 0,
+        "finalize ALLOCATION must not increment io_error_total");
+
+    /* Finalize mapper: INTERNAL pre-commit → ERROR_INTERNAL */
+    ngx_memzero(&metrics, sizeof(metrics));
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
+    error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
+        &ctx, NGX_ERROR, &decomp, NULL);
+    TEST_ASSERT(error_code == ERROR_INTERNAL,
+        "finalize INTERNAL pre-commit must return ERROR_INTERNAL");
+    TEST_ASSERT(metrics.decompressions.io_error_total == 0,
+        "finalize INTERNAL must not increment io_error_total");
+
+    /*
+     * Per-call lifecycle: allocation failure followed by internal
+     * failure in next call → second call classifies as INTERNAL.
+     */
+    ngx_memzero(&metrics, sizeof(metrics));
+    decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+    error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
+        NGX_ERROR, &decomp, NULL);
+    TEST_ASSERT(error_code == ERROR_MEMORY_LIMIT,
+        "first call: ALLOCATION → ERROR_MEMORY_LIMIT");
+
+    /* Simulate per-call reset + new failure with different origin */
+    decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
+    error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
+        NGX_ERROR, &decomp, NULL);
+    TEST_ASSERT(error_code == ERROR_INTERNAL,
+        "second call: INTERNAL must not be stale ALLOCATION");
+
+    /*
+     * Internal failure followed by allocation failure in next call.
+     */
+    ngx_memzero(&metrics, sizeof(metrics));
+    decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
+    error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
+        NGX_ERROR, &decomp, NULL);
+    TEST_ASSERT(error_code == ERROR_INTERNAL,
+        "first call: INTERNAL → ERROR_INTERNAL");
+
+    decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+    error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
+        NGX_ERROR, &decomp, NULL);
+    TEST_ASSERT(error_code == ERROR_MEMORY_LIMIT,
+        "second call: ALLOCATION must not be stale INTERNAL");
+
+    /*
+     * Typed FORMAT_ERROR after a previous allocation failure →
+     * mapper does NOT use stale ALLOCATION origin for the typed error.
+     */
+    ngx_memzero(&metrics, sizeof(metrics));
+    decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+    error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
+        NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, &decomp, NULL);
+    TEST_ASSERT(error_code == ERROR_DECOMPRESSION_FORMAT_ERROR,
+        "typed FORMAT_ERROR must not be affected by stale origin");
+    TEST_ASSERT(metrics.decompressions.format_error_total == 1,
+        "typed FORMAT_ERROR must increment format counter normally");
+    TEST_ASSERT(metrics.decompressions.io_error_total == 0,
+        "typed FORMAT_ERROR must not increment io_error_total");
+
+    ngx_http_markdown_metrics = NULL;
+    TEST_PASS("origin-based NGX_ERROR classification is correct");
+}
+
+/*
+ * Verify stage-aware handlers route ERROR_MEMORY_LIMIT to
+ * failures_resource_limit and ERROR_INTERNAL to failures_system,
+ * each exactly once per call.
+ */
+static void
+test_streaming_stage_handler_failure_category_routing(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_http_markdown_metrics_t metrics;
+
+    TEST_SUBSECTION("stage handler failure-category routing");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    ngx_memzero(&metrics, sizeof(metrics));
+    ngx_http_markdown_metrics = &metrics;
+
+    /*
+     * Pre-commit ERROR_MEMORY_LIMIT → failures_resource_limit
+     */
+    conf.on_error = NGX_HTTP_MARKDOWN_ON_ERROR_REJECT;
+    conf.error_status = NGX_HTTP_MARKDOWN_ERROR_STATUS_DEFAULT;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x42;
+
+    ngx_http_markdown_streaming_precommit_error(
+        &r, &ctx, &conf, ERROR_MEMORY_LIMIT);
+    TEST_ASSERT(metrics.failures_resource_limit == 1,
+        "precommit ERROR_MEMORY_LIMIT → failures_resource_limit == 1");
+    TEST_ASSERT(metrics.failures_system == 0,
+        "precommit ERROR_MEMORY_LIMIT must not increment failures_system");
+    TEST_ASSERT(metrics.failures_conversion == 0,
+        "precommit ERROR_MEMORY_LIMIT must not increment failures_conversion");
+
+    /*
+     * Pre-commit ERROR_INTERNAL → failures_system
+     */
+    ngx_memzero(&metrics, sizeof(metrics));
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x43;
+
+    ngx_http_markdown_streaming_precommit_error(
+        &r, &ctx, &conf, ERROR_INTERNAL);
+    TEST_ASSERT(metrics.failures_system == 1,
+        "precommit ERROR_INTERNAL → failures_system == 1");
+    TEST_ASSERT(metrics.failures_resource_limit == 0,
+        "precommit ERROR_INTERNAL must not increment failures_resource_limit");
+    TEST_ASSERT(metrics.failures_conversion == 0,
+        "precommit ERROR_INTERNAL must not increment failures_conversion");
+
+    /*
+     * Pre-commit ERROR_DECOMPRESSION_FORMAT_ERROR → failures_conversion
+     * (not a resource or system failure)
+     */
+    ngx_memzero(&metrics, sizeof(metrics));
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x44;
+
+    ngx_http_markdown_streaming_precommit_error(
+        &r, &ctx, &conf, ERROR_DECOMPRESSION_FORMAT_ERROR);
+    TEST_ASSERT(metrics.failures_conversion == 1,
+        "precommit FORMAT_ERROR → failures_conversion == 1");
+    TEST_ASSERT(metrics.failures_resource_limit == 0,
+        "precommit FORMAT_ERROR must not increment failures_resource_limit");
+    TEST_ASSERT(metrics.failures_system == 0,
+        "precommit FORMAT_ERROR must not increment failures_system");
+
+    /*
+     * Post-commit ERROR_INTERNAL → failures_system
+     */
+    ngx_memzero(&metrics, sizeof(metrics));
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
+    ctx.streaming.completion.failure_recorded = 0;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x45;
+    g_next_body_filter_rc = NGX_OK;
+
+    ngx_http_markdown_streaming_handle_postcommit_error(
+        &r, &ctx, &conf, ERROR_INTERNAL);
+    TEST_ASSERT(metrics.failures_system == 1,
+        "postcommit ERROR_INTERNAL → failures_system == 1");
+    TEST_ASSERT(metrics.failures_resource_limit == 0,
+        "postcommit ERROR_INTERNAL must not increment failures_resource_limit");
+    TEST_ASSERT(metrics.failures_conversion == 0,
+        "postcommit ERROR_INTERNAL must not increment failures_conversion");
+
+    /*
+     * Post-commit ERROR_MEMORY_LIMIT → failures_resource_limit
+     */
+    ngx_memzero(&metrics, sizeof(metrics));
+    ctx.streaming.completion.failure_recorded = 0;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x46;
+
+    ngx_http_markdown_streaming_handle_postcommit_error(
+        &r, &ctx, &conf, ERROR_MEMORY_LIMIT);
+    TEST_ASSERT(metrics.failures_resource_limit == 1,
+        "postcommit ERROR_MEMORY_LIMIT → failures_resource_limit == 1");
+    TEST_ASSERT(metrics.failures_system == 0,
+        "postcommit ERROR_MEMORY_LIMIT must not increment failures_system");
+    TEST_ASSERT(metrics.failures_conversion == 0,
+        "postcommit ERROR_MEMORY_LIMIT must not increment failures_conversion");
+
+    ngx_http_markdown_metrics = NULL;
+    TEST_PASS("stage handler failure-category routing is correct");
 }
 
 /*
@@ -6338,7 +6703,11 @@ main(void)
     test_postcommit_pending_backpressure_metrics_are_symmetric();
     test_postcommit_copied_output_accounting_matches_after_resume();
     test_postcommit_terminal_only_backpressure_metrics();
+    test_postcommit_terminal_immediate_failure_no_handle_no_retry();
+    test_postcommit_terminal_immediate_failure_live_handle_no_retry();
     test_streaming_decompression_error_metric_mapping();
+    test_streaming_decomp_error_origin_classification();
+    test_streaming_stage_handler_failure_category_routing();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

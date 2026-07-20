@@ -1067,9 +1067,12 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
  *   out - output chain with decompressed data (output parameter)
  *
  * Returns:
- *   NGX_OK       - Decompression succeeded
- *   NGX_ERROR    - Decompression failed (invalid data, size limit, etc.)
- *   NGX_DECLINED - Brotli support not compiled in (triggers fallback)
+ *   NGX_OK                           - Decompression succeeded
+ *   NGX_ERROR                        - Allocation failure
+ *   NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR - Brotli decompression failed (invalid data)
+ *   NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED - Decompressed size exceeds budget
+ *   NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT - Truncated input stream detected
+ *   NGX_DECLINED                     - Brotli support not compiled in (triggers fallback)
  *
  * Requirements: 3.1, 3.2, 3.3, 14.1
  */

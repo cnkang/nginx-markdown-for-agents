@@ -84,6 +84,63 @@ int main(void) { unsigned char buf[1]; arc4random_buf(buf, 1); return 0; }' \
     fi
 fi
 
+# Brotli streaming decompression detection.
+# NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off (default: auto)
+# When on/auto, probe for <brotli/decode.h> and libbrotlidec; on success
+# define NGX_HTTP_BROTLI and link the decoder library.
+# On auto failure, silently fall back to bounded full-buffer decompression.
+ngx_markdown_brotli_mode=${NGX_MARKDOWN_BROTLI_STREAMING:-auto}
+
+case "$ngx_markdown_brotli_mode" in
+    auto|on|off)
+        ;;
+    *)
+        echo "configuration error: invalid NGX_MARKDOWN_BROTLI_STREAMING='$ngx_markdown_brotli_mode'" >&2
+        echo "  valid values: auto, on, off" >&2
+        exit 1
+        ;;
+esac
+
+ngx_markdown_brotli_found=no
+ngx_markdown_brotli_cflags=
+ngx_markdown_brotli_libs=
+
+if [ "$ngx_markdown_brotli_mode" != "off" ]; then
+    # Resolve candidate flags with pkg-config, then prove that the compiler
+    # can include the header and link the decoder. Metadata alone is not a
+    # sufficient build capability check.
+    if command -v pkg-config >/dev/null 2>&1 \
+       && pkg-config --exists libbrotlidec 2>/dev/null; then
+        ngx_markdown_brotli_cflags=$(pkg-config --cflags libbrotlidec 2>/dev/null)
+        ngx_markdown_brotli_libs=$(pkg-config --libs libbrotlidec 2>/dev/null)
+    else
+        ngx_markdown_brotli_libs="-lbrotlidec"
+    fi
+
+    ngx_markdown_brotli_test='
+#include <brotli/decode.h>
+int main(void) {
+    BrotliDecoderState *s = BrotliDecoderCreateInstance(0, 0, 0);
+    if (s) BrotliDecoderDestroyInstance(s);
+    return 0;
+}'
+    if echo "$ngx_markdown_brotli_test" \
+       | ${CC:-cc} $ngx_markdown_brotli_cflags -x c - -o /dev/null \
+           $ngx_markdown_brotli_libs >/dev/null 2>&1; then
+        ngx_markdown_brotli_found=yes
+    fi
+
+    if [ "$ngx_markdown_brotli_found" = "yes" ]; then
+        CFLAGS="$CFLAGS -DNGX_HTTP_BROTLI${ngx_markdown_brotli_cflags:+ $ngx_markdown_brotli_cflags}"
+        ngx_module_libs="$ngx_module_libs $ngx_markdown_brotli_libs"
+    elif [ "$ngx_markdown_brotli_mode" = "on" ]; then
+        echo "configuration error: NGX_MARKDOWN_BROTLI_STREAMING=on but libbrotlidec" >&2
+        echo "  was not found. Install libbrotli-dev (Debian/Ubuntu) or" >&2
+        echo "  brotli-devel (RHEL/Fedora), or ensure pkg-config can find libbrotlidec." >&2
+        exit 1
+    fi
+fi
+
 # Keep the C compilation surface aligned with the Cargo feature set explicitly.
 # Rust 1.97 uses LLVM 22, whose LTO archives are not guaranteed to be readable
 # by the system nm.  Symbol probing can therefore silently disable matching C

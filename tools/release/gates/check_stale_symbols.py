@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that no stale 0.8.0 directives/symbols have leaked into 0.9.0.
+"""Verify that no pre-0.9.0 stale directives/symbols remain in tracked sources.
 This gate is designed to stop the 'forgot to update directive' pattern.
 """
 import shutil
@@ -98,14 +98,10 @@ def _list_tracked_files(repo: Path) -> tuple[Optional[list[str]], str]:
 
 
 def _should_scan_file(path: str) -> bool:
-    """Return whether a tracked path is part of the 0.9 release gate surface."""
+    """Return whether a tracked path is part of the pre-0.9.0 stale-symbol scan surface."""
     if not path.startswith(SCAN_PATH_PREFIXES):
         return False
-    # Allow migration docs and changelogs to reference old directive names
-    for wl in WHITELIST_PATH_PREFIXES:
-        if path.startswith(wl):
-            return False
-    return True
+    return not any(path.startswith(wl) for wl in WHITELIST_PATH_PREFIXES)
 
 
 def _find_symbol_leaks(path: str, lines: list[str], content: str) -> list[str]:
@@ -115,10 +111,11 @@ def _find_symbol_leaks(path: str, lines: list[str], content: str) -> list[str]:
     for symbol in STALE_SYMBOLS:
         if symbol not in content:
             continue
-        for i, line in enumerate(lines, 1):
-            if symbol in line:
-                findings.append(f"{path}:{i}:{line.strip()}")
-
+        findings.extend(
+            f"{path}:{i}:{line.strip()}"
+            for i, line in enumerate(lines, 1)
+            if symbol in line
+        )
     return findings
 
 
@@ -132,10 +129,11 @@ def _find_field_leaks(path: str, lines: list[str], content: str) -> list[str]:
         for field in fields:
             if field not in content:
                 continue
-            for i, line in enumerate(lines, 1):
-                if field in line:
-                    findings.append(f"{path}:{i}:{line.strip()} (stale field)")
-
+            findings.extend(
+                f"{path}:{i}:{line.strip()} (stale field)"
+                for i, line in enumerate(lines, 1)
+                if field in line
+            )
     return findings
 
 
@@ -192,7 +190,7 @@ def run_stale_symbol_check(repo: Optional[Path] = None) -> tuple[int, str, str]:
     if findings:
         return 1, "STALE SYMBOLS DETECTED:\n" + "\n".join(findings), ""
 
-    return 0, "No stale 0.8 symbols found.", ""
+    return 0, "No stale pre-0.9.0 symbols found.", ""
 
 
 def main():

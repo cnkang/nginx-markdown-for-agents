@@ -3,6 +3,8 @@
 **Version**: 0.8.0
 **Audience**: Operators upgrading from 0.5.x/0.6.x/0.7.x to 0.8.0
 
+> **v0.9.1+ operators:** `markdown_streaming_engine` has been removed and replaced by `markdown_streaming`. If you are reading this guide for the streaming behavior changes, please replace `markdown_streaming_engine off;` with `markdown_streaming off;` in your configuration files.
+
 ## Overview
 
 v0.6.0 introduced two default behavior changes. v0.8.0 removes the
@@ -227,7 +229,7 @@ curl -s -H "Accept: text/markdown" http://localhost/page | head -50
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.6.0 | 2026-04-28 | v060-prod | Initial migration guide |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.8.0 | 2026-06-16 | Kang | Updated for 0.8.0: markdown_streaming_auto_threshold removed, $variable support removed, default threshold changed to 1m |
 | 0.8.3 | 2026-06-26 | Kang | No changes; version alignment with 0.8.3 release |
+| 0.8.0 | 2026-06-16 | Kang | Updated for 0.8.0: markdown_streaming_auto_threshold removed, $variable support removed, default threshold changed to 1m |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.6.0 | 2026-04-28 | v060-prod | Initial migration guide |

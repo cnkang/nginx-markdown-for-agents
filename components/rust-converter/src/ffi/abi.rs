@@ -568,13 +568,13 @@ pub struct FFIConditionalDecision {
 pub struct FFIHeaderEntry {
     /// 0 = set, 1 = delete, 2 = set-etag-placeholder, 3 = delete-all
     pub op_type: u8,
-    /// Pointer to header name (borrowed).
+    /// Pointer to header name (NUL-terminated, borrowed from plan; NULL for set-etag-placeholder).
     pub key: *const u8,
-    /// Length of header name.
+    /// Length of header name (0 for set-etag-placeholder).
     pub key_len: usize,
-    /// Pointer to header value (NULL for delete).
+    /// Pointer to header value (NUL-terminated, borrowed from plan; NULL for delete, delete-all, and set-etag-placeholder).
     pub value: *const u8,
-    /// Length of header value.
+    /// Length of header value (0 for delete, delete-all, and set-etag-placeholder).
     pub value_len: usize,
 }
 
@@ -769,8 +769,12 @@ pub const FFI_PROFILE_STREAMING_FIRST: u8 = 3;
 
 /// FFI-safe error class enum (spec 51).
 ///
-/// Maps 1:1 to `crate::error::classification::ErrorClass`. The C side receives
-/// this value from `markdown_classify_error_code`.
+/// Mirrors `crate::error::classification::ErrorClass` with `#[repr(u8)]`
+/// discriminants.  The C side does NOT receive this typed enum; the exported
+/// classifier `markdown_classify_error_code` returns a plain `uint8_t` whose
+/// value equals the matching `ErrorClass` discriminant.  This enum is kept as
+/// the internal Rust-side mirror so the discriminant values stay co-located
+/// with the FFI contract documentation.
 ///
 /// Discriminants are frozen for the 1.0 stability contract.
 #[repr(u8)]

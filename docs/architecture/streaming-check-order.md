@@ -154,7 +154,7 @@ streaming-specific guards AFTER all security checks pass:
 4. conditional_requests full_support -> full-buffer
 5. text/event-stream -> full-buffer (defense-in-depth, already excluded at step 4)
 6. stream_types exclusion -> full-buffer (defense-in-depth)
-7. Engine == on -> streaming
+7. Policy == force -> streaming
 8. Auto mode threshold/chunked logic
 
 These are path-selection decisions, not security gates -- the security gates

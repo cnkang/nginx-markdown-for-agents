@@ -6,6 +6,11 @@
  * Also validates that the decision counter increments regardless
  * of downstream return code.
  *
+ * Scope: this unit test covers NGX_OK, NGX_AGAIN, and NGX_ERROR only.
+ * Production `ngx_http_markdown_streaming_delivery_ok()` also treats
+ * NGX_DONE as a successful delivery; the NGX_DONE delivery path is
+ * covered by the streaming body_filter test suite, not here.
+ *
  * Corresponds to task A01.12.
  *
  * Rules: 38 (delivery after downstream OK), 8 (delivery counters

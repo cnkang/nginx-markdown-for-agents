@@ -19,8 +19,8 @@
  *   - zlib-wrapped (RFC 1950, RFC 9110-compliant): MAX_WBITS
  *   - raw deflate (RFC 1951): -MAX_WBITS
  * Gzip uses MAX_WBITS + 16 and preserves gzip member boundaries across
- * arbitrary input chunks.  Brotli remains routed to the bounded full-buffer
- * path pending dedicated streaming lifecycle and backpressure validation.
+ * arbitrary input chunks. Brotli uses its incremental decoder when the
+ * optional Brotli build support is enabled.
  */
 
 #ifdef MARKDOWN_STREAMING_ENABLED
@@ -54,6 +54,20 @@ ngx_http_markdown_streaming_decomp_size_to_uint(
  * decompression paths).  The streaming decomp implementation relies
  * on the shared definition included via filter_module.h.
  */
+
+/*
+ * Failure origin tracking for bare NGX_ERROR returns.
+ *
+ * When a decompressor returns NGX_ERROR (as opposed to a typed error
+ * like FORMAT_ERROR), the outer mapper needs to know whether the
+ * failure is an allocation issue or an internal/system error to
+ * select the correct global failure category counter.
+ */
+typedef enum {
+    NGX_HTTP_MD_DECOMP_ORIGIN_NONE = 0,
+    NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION,
+    NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL
+} ngx_http_markdown_decomp_failure_origin_e;
 
 /*
  * Streaming decompressor state.
@@ -116,6 +130,14 @@ typedef struct ngx_http_markdown_streaming_decomp_s {
     ngx_flag_t                            initialized;
     /* Set only when the complete compressed HTTP response is finalized. */
     ngx_flag_t                            finished;
+
+    /*
+     * Per-call failure origin for bare NGX_ERROR returns.
+     * Set by the decoder step before returning NGX_ERROR so the
+     * outer mapper can distinguish allocation vs internal failures.
+     * Reset to NONE at the start of each feed/finish call.
+     */
+    ngx_http_markdown_decomp_failure_origin_e  failure_origin;
 } ngx_http_markdown_streaming_decomp_t;
 
 /* Forward declarations */
@@ -188,6 +210,13 @@ ngx_http_markdown_streaming_decomp_init_zlib(
 
     zrc = inflateInit2(&decomp->state.zlib, window_bits);
     if (zrc != Z_OK) {
+        if (zrc == Z_MEM_ERROR) {
+            decomp->failure_origin =
+                NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+        } else {
+            decomp->failure_origin =
+                NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
+        }
         return NGX_ERROR;
     }
 
@@ -342,21 +371,32 @@ ngx_http_markdown_streaming_decomp_feed_header(
  * Registers a pool cleanup handler for automatic teardown.
  */
 static ngx_http_markdown_streaming_decomp_t *
-ngx_http_markdown_streaming_decomp_create(
+ngx_http_markdown_streaming_decomp_create_with_origin(
     ngx_pool_t *pool,
     ngx_http_markdown_compression_type_e type,
-    size_t max_decompressed_size)
+    size_t max_decompressed_size,
+    ngx_http_markdown_decomp_failure_origin_e *origin)
 {
     ngx_http_markdown_streaming_decomp_t  *decomp;
     ngx_pool_cleanup_t                    *cln;
 
+    if (origin != NULL) {
+        *origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
+    }
+
     if (pool == NULL) {
+        if (origin != NULL) {
+            *origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
+        }
         return NULL;
     }
 
     decomp = ngx_pcalloc(pool,
         sizeof(ngx_http_markdown_streaming_decomp_t));
     if (decomp == NULL) {
+        if (origin != NULL) {
+            *origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+        }
         return NULL;
     }
 
@@ -365,6 +405,7 @@ ngx_http_markdown_streaming_decomp_create(
     decomp->total_decompressed = 0;
     decomp->initialized = 0;
     decomp->finished = 0;
+    decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
     decomp->at_gzip_member_boundary = 0;
     decomp->zlib_header_pending = 0;
     decomp->pending_header_len = 0;
@@ -382,6 +423,9 @@ ngx_http_markdown_streaming_decomp_create(
                 decomp, MAX_WBITS + 16)
             != NGX_OK)
         {
+            if (origin != NULL) {
+                *origin = decomp->failure_origin;
+            }
             return NULL;
         }
         break;
@@ -408,14 +452,13 @@ ngx_http_markdown_streaming_decomp_create(
 
 #ifdef NGX_HTTP_BROTLI
     case NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI:
-        /*
-         * Deferred path for post-0.9.1. Header routing keeps brotli on
-         * full-buffer in 0.9.1, so this branch is intentionally
-         * unreachable for supported streaming decompression.
-         */
+        /* One request owns one decoder for the complete Brotli stream. */
         decomp->state.brotli =
             BrotliDecoderCreateInstance(NULL, NULL, NULL);
         if (decomp->state.brotli == NULL) {
+            if (origin != NULL) {
+                *origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+            }
             return NULL;
         }
         decomp->initialized = 1;
@@ -423,6 +466,9 @@ ngx_http_markdown_streaming_decomp_create(
 #endif
 
     default:
+        if (origin != NULL) {
+            *origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
+        }
         return NULL;
     }
 
@@ -431,6 +477,9 @@ ngx_http_markdown_streaming_decomp_create(
     if (cln == NULL) {
         ngx_http_markdown_streaming_decomp_cleanup(
             decomp);
+        if (origin != NULL) {
+            *origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+        }
         return NULL;
     }
 
@@ -439,6 +488,18 @@ ngx_http_markdown_streaming_decomp_create(
     cln->data = decomp;
 
     return decomp;
+}
+
+
+static __attribute__((unused))
+ngx_http_markdown_streaming_decomp_t *
+ngx_http_markdown_streaming_decomp_create(
+    ngx_pool_t *pool,
+    ngx_http_markdown_compression_type_e type,
+    size_t max_decompressed_size)
+{
+    return ngx_http_markdown_streaming_decomp_create_with_origin(
+        pool, type, max_decompressed_size, NULL);
 }
 
 
@@ -524,7 +585,7 @@ ngx_http_markdown_streaming_decomp_expand_buf(
             "expand_buf size overflow, old_size=%uz",
             old_size);
         ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-        return NGX_ERROR;
+        return NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR;
     }
 
     new_size = old_size * 2;
@@ -704,11 +765,18 @@ ngx_http_markdown_streaming_decomp_grow_output_buf(
 
     old_size = *buf_size_ptr;
 
-    if (ngx_http_markdown_streaming_decomp_expand_buf(
-            heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log)
-        != NGX_OK)
     {
-        return NGX_ERROR;
+        ngx_int_t  expand_rc;
+
+        expand_rc = ngx_http_markdown_streaming_decomp_expand_buf(
+            heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log);
+        if (expand_rc != NGX_OK) {
+            decomp->failure_origin =
+                (expand_rc == NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR)
+                ? NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL
+                : NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+            return NGX_ERROR;
+        }
     }
 
     *using_heap_ptr = 1;
@@ -726,6 +794,8 @@ ngx_http_markdown_streaming_decomp_grow_output_buf(
                 "zlib uInt max",
                 *buf_size_ptr - old_size);
             ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+            decomp->failure_origin =
+                NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
             return NGX_ERROR;
         }
         decomp->state.zlib.avail_out = avail_out;
@@ -918,6 +988,8 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
                *out_produced, pool)
            != NGX_OK)
     {
+        decomp->failure_origin =
+            NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
 
@@ -934,8 +1006,308 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
  *
  * Returns:
  *   NGX_OK    - success (produced written to *out_produced)
- *   NGX_ERROR - decode error or size limit exceeded
+ *   NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED - size limit hit
+ *   NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR - malformed data
+ *   NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT - incomplete stream
+ *   NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR - I/O error
+ *   NGX_ERROR - allocation or internal failure (failure_origin set)
  */
+
+/*
+ * Three-way error classification for BrotliDecoderErrorCode.
+ *
+ * The classification uses integer-range comparisons exclusively to
+ * remain compatible with Brotli 1.0.9 (Ubuntu 22.04), which does not
+ * expose all named enum constants present in newer releases.
+ *
+ * Frozen ranges (from the Brotli specification and brotli/decode.h):
+ *   FORMAT:     codes -1 through -17
+ *   ALLOCATION: codes -21 through -30
+ *   INTERNAL:   codes -18 through -20, -31, and any unknown/out-of-range
+ */
+typedef enum {
+    NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT = 0,
+    NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION,
+    NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL
+} ngx_http_markdown_brotli_error_class_e;
+
+static ngx_http_markdown_brotli_error_class_e
+ngx_http_markdown_brotli_classify_error(BrotliDecoderErrorCode code)
+{
+    int  c;
+
+    c = (int) code;
+
+    /* FORMAT: codes -1 through -17 */
+    if (c >= -17 && c <= -1) {
+        return NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT;
+    }
+
+    /* ALLOCATION: codes -21 through -30 */
+    if (c >= -30 && c <= -21) {
+        return NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION;
+    }
+
+    /*
+     * INTERNAL: codes -18 through -20 (COMPOUND_DICTIONARY,
+     * DICTIONARY_NOT_SET, INVALID_ARGUMENTS), -31 (UNREACHABLE),
+     * and any unknown/out-of-range value.
+     */
+    return NGX_HTTP_MARKDOWN_BROTLI_ERROR_INTERNAL;
+}
+
+
+static int
+ngx_http_markdown_streaming_decomp_brotli_error(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    u_char **heap_buf_ptr,
+    ngx_log_t *log,
+    const char *stage)
+{
+    BrotliDecoderErrorCode                  err_code;
+    ngx_http_markdown_brotli_error_class_e  err_class;
+    const char                             *err_str;
+
+    err_code = BrotliDecoderGetErrorCode(decomp->state.brotli);
+    err_class = ngx_http_markdown_brotli_classify_error(err_code);
+    err_str = BrotliDecoderErrorString(err_code);
+
+    ngx_log_error(NGX_LOG_ERR, log, 0,
+        "markdown: reason=brotli_decode_error "
+        "brotli %s decode error: code=%d, %s",
+        stage, (int) err_code, err_str);
+    ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+
+    if (err_class == NGX_HTTP_MARKDOWN_BROTLI_ERROR_FORMAT) {
+        return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+    }
+
+    decomp->failure_origin =
+        (err_class == NGX_HTTP_MARKDOWN_BROTLI_ERROR_ALLOCATION)
+        ? NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION
+        : NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
+    return NGX_ERROR;
+}
+
+
+/*
+ * Brotli exact-budget completion probe (Scenario B).
+ *
+ * Called from brotli_step() when NEEDS_MORE_OUTPUT arrives with produced
+ * == remaining exactly.  Expands the transient workspace by 1 byte and
+ * invokes the decoder once more.  Interprets the probe result per the
+ * strict exact-budget priority order:
+ *
+ *  1. ERROR        → preserve classified decoder error
+ *  2. SUCCESS+trail→ FORMAT_ERROR / brotli_trailing_data
+ *  3. SUCCESS+0    → finished, return produced=remaining (exact budget)
+ *  4. SUCCESS+>0   → BUDGET_EXCEEDED (produced beyond budget)
+ *  5. produced>0   → BUDGET_EXCEEDED
+ *  6. NEEDS_MORE_OUTPUT → BUDGET_EXCEEDED
+ *  7. NEEDS_MORE_INPUT+avail_in==0+produced==0 → continue (wait for chunk)
+ *
+ * Returns the same codes as brotli_step:
+ *   1  - done (stream complete or awaiting next chunk)
+ *   NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
+ *   NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED
+ *   NGX_ERROR - allocation/internal
+ */
+static int
+ngx_http_markdown_streaming_decomp_brotli_probe(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    u_char **buf_ptr,
+    size_t *buf_size_ptr,
+    size_t *out_produced,
+    u_char **heap_buf_ptr,
+    int *using_heap_ptr,
+    ngx_log_t *log)
+{
+    u_char              *new_buf;
+    size_t               new_size;
+    size_t               old_size;
+    BrotliDecoderResult  brc;
+    size_t               probe_produced;
+
+    old_size = *buf_size_ptr;
+
+    /* Expand workspace by exactly 1 byte for the probe */
+    new_size = old_size + 1;
+    new_buf = ngx_alloc(new_size, log);
+    if (new_buf == NULL) {
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        decomp->finished = 1;
+        decomp->failure_origin =
+            NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+        return NGX_ERROR;
+    }
+
+    ngx_memcpy(new_buf, *buf_ptr, old_size);
+    ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+
+    *heap_buf_ptr = new_buf;
+    *buf_ptr = new_buf;
+    *buf_size_ptr = new_size;
+    *using_heap_ptr = 1;
+
+    /* Point decoder output at the single probe byte */
+    decomp->brotli_next_out = new_buf + old_size;
+    decomp->brotli_avail_out = 1;
+
+    brc = BrotliDecoderDecompressStream(
+        decomp->state.brotli,
+        &decomp->brotli_avail_in,
+        &decomp->brotli_next_in,
+        &decomp->brotli_avail_out,
+        &decomp->brotli_next_out, NULL);
+
+    probe_produced = 1 - decomp->brotli_avail_out;
+
+    /* Priority 1: ERROR → preserve classified error */
+    if (brc == BROTLI_DECODER_RESULT_ERROR) {
+        return ngx_http_markdown_streaming_decomp_brotli_error(
+            decomp, heap_buf_ptr, log, "probe");
+    }
+
+    /* Priority 2: SUCCESS */
+    if (brc == BROTLI_DECODER_RESULT_SUCCESS) {
+        /* 2a: trailing data → FORMAT_ERROR */
+        if (decomp->brotli_avail_in > 0) {
+            ngx_log_error(NGX_LOG_ERR, log, 0,
+                "markdown: reason=brotli_trailing_data "
+                "brotli trailing data: "
+                "%uz bytes after stream completion",
+                decomp->brotli_avail_in);
+            ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+            return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+        }
+        /* 2b: SUCCESS + produced==0 → stream complete */
+        if (probe_produced == 0) {
+            decomp->finished = 1;
+            /* Retain the exact-budget workspace bytes as output. */
+            *out_produced = old_size;
+            return 1;
+        }
+        /* 2c: SUCCESS + produced>0 → BUDGET_EXCEEDED */
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    }
+
+    /* Priority 3/5: produced>0 (non-SUCCESS/non-ERROR) → BUDGET_EXCEEDED */
+    if (probe_produced > 0) {
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    }
+
+    /* Priority 4: NEEDS_MORE_OUTPUT → BUDGET_EXCEEDED */
+    if (brc == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+    }
+
+    if (brc == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT
+        && decomp->brotli_avail_in == 0)
+    {
+        *out_produced = old_size;
+        return 1;
+    }
+
+    ngx_log_error(NGX_LOG_ERR, log, 0,
+        "markdown: brotli exact-budget probe returned invalid state "
+        "(result=%d, avail_in=%uz)",
+        (int) brc, decomp->brotli_avail_in);
+    ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+    decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
+    return NGX_ERROR;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_brotli_check_progress(
+    const ngx_http_markdown_streaming_decomp_t *decomp,
+    BrotliDecoderResult brc,
+    size_t previous_input,
+    size_t previous_output,
+    u_char **heap_buf_ptr,
+    ngx_log_t *log)
+{
+    size_t  consumed;
+    size_t  produced;
+
+    consumed = previous_input - decomp->brotli_avail_in;
+    produced = previous_output - decomp->brotli_avail_out;
+    if (consumed > 0 || produced > 0
+        || brc == BROTLI_DECODER_RESULT_SUCCESS
+        || brc == BROTLI_DECODER_RESULT_ERROR
+        || (brc == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT
+            && decomp->brotli_avail_in == 0))
+    {
+        return NGX_OK;
+    }
+
+    ngx_log_error(NGX_LOG_ERR, log, 0,
+        "markdown: reason=brotli_no_progress "
+        "brotli decoder consumed no input and produced no output "
+        "(result=%d)",
+        (int) brc);
+    ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+    return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+}
+
+
+static int
+ngx_http_markdown_streaming_decomp_brotli_expand(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    u_char **buf_ptr,
+    size_t *buf_size_ptr,
+    size_t *out_produced,
+    u_char **heap_buf_ptr,
+    int *using_heap_ptr,
+    ngx_log_t *log)
+{
+    size_t  old_size;
+    size_t  remaining;
+
+    old_size = *buf_size_ptr;
+    remaining = 0;
+    if (decomp->max_decompressed_size > 0) {
+        remaining = decomp->max_decompressed_size
+                    - decomp->total_decompressed;
+        if (old_size >= remaining) {
+            if (old_size == remaining && remaining < (size_t) -1) {
+                return ngx_http_markdown_streaming_decomp_brotli_probe(
+                    decomp, buf_ptr, buf_size_ptr, out_produced,
+                    heap_buf_ptr, using_heap_ptr, log);
+            }
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                "markdown: reason=brotli_budget_exceeded "
+                "brotli output exceeds the decompression budget");
+            ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+        }
+    }
+
+    {
+        ngx_int_t  expand_rc;
+
+        expand_rc = ngx_http_markdown_streaming_decomp_expand_buf(
+            heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log);
+        if (expand_rc != NGX_OK) {
+            decomp->finished = 1;
+            decomp->failure_origin =
+                (expand_rc == NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR)
+                ? NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL
+                : NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+            return NGX_ERROR;
+        }
+    }
+
+    *using_heap_ptr = 1;
+    decomp->brotli_next_out = *buf_ptr + old_size;
+    decomp->brotli_avail_out = *buf_size_ptr - old_size;
+    return 0;
+}
+
+
 /*
  * Core brotli iteration: single call to BrotliDecoderDecompressStream
  * with error/limit/expand handling.
@@ -943,8 +1315,10 @@ ngx_http_markdown_streaming_decomp_inflate_loop(
  * Returns:
  *  1  - done (SUCCESS or avail_in == 0)
  *  0  - continue iterating
- * -1  - error (heap_buf freed if needed)
- * -2  - budget exceeded (heap_buf freed if needed)
+ *  NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR - format error
+ *  NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED - budget exceeded
+ *  NGX_ERROR - allocation or internal error (heap_buf freed,
+ *              failure_origin set before return)
  */
 static int
 ngx_http_markdown_streaming_decomp_brotli_step(
@@ -961,11 +1335,17 @@ ngx_http_markdown_streaming_decomp_brotli_step(
     const uint8_t       *next_in;
     size_t               avail_out;
     uint8_t             *next_out;
+    size_t               prev_avail_in;
+    size_t               prev_avail_out;
 
     avail_in = decomp->brotli_avail_in;
     next_in = decomp->brotli_next_in;
     avail_out = decomp->brotli_avail_out;
     next_out = decomp->brotli_next_out;
+
+    /* Save cursors before decode for no-progress guard */
+    prev_avail_in = avail_in;
+    prev_avail_out = avail_out;
 
     brc = BrotliDecoderDecompressStream(
         decomp->state.brotli,
@@ -977,63 +1357,75 @@ ngx_http_markdown_streaming_decomp_brotli_step(
     decomp->brotli_avail_out = avail_out;
     decomp->brotli_next_out = next_out;
 
+    if (ngx_http_markdown_streaming_decomp_brotli_check_progress(
+            decomp, brc, prev_avail_in, prev_avail_out,
+            heap_buf_ptr, log)
+        != NGX_OK)
+    {
+        return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+    }
+
     if (brc == BROTLI_DECODER_RESULT_ERROR) {
-        ngx_log_error(NGX_LOG_ERR, log, 0,
-            "markdown: "
-            "brotli decode error");
-        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-        return -1;
+        return ngx_http_markdown_streaming_decomp_brotli_error(
+            decomp, heap_buf_ptr, log, "stream");
     }
 
     *out_produced = *buf_size_ptr - decomp->brotli_avail_out;
+
+    /*
+     * Priority: trailing-data (FORMAT_ERROR) outranks budget check.
+     * A decoder that reports SUCCESS with leftover compressed input
+     * is a format violation regardless of whether the budget was also
+     * exhausted.  Check SUCCESS+trailing before check_limit so that
+     * Scenario A (remaining==0, probe produces output, SUCCESS with
+     * trailing data) is classified as FORMAT_ERROR, not
+     * BUDGET_EXCEEDED.
+     */
+    if (brc == BROTLI_DECODER_RESULT_SUCCESS) {
+        if (decomp->brotli_avail_in > 0) {
+            ngx_log_error(NGX_LOG_ERR, log, 0,
+                "markdown: reason=brotli_trailing_data "
+                "brotli trailing data: "
+                "%uz bytes after stream completion",
+                decomp->brotli_avail_in);
+            ngx_http_markdown_streaming_decomp_free_heap(
+                heap_buf_ptr);
+            return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+        }
+
+        if (ngx_http_markdown_streaming_decomp_check_limit(
+                decomp, *out_produced))
+        {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                "markdown: reason=brotli_budget_exceeded "
+                "decompressed size %uz exceeds limit %uz",
+                decomp->total_decompressed + *out_produced,
+                decomp->max_decompressed_size);
+            ngx_http_markdown_streaming_decomp_free_heap(
+                heap_buf_ptr);
+            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+        }
+
+        decomp->finished = 1;
+        return 1;
+    }
 
     if (ngx_http_markdown_streaming_decomp_check_limit(
             decomp, *out_produced))
     {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-            "markdown: "
+            "markdown: reason=brotli_budget_exceeded "
             "decompressed size %uz exceeds limit %uz",
             decomp->total_decompressed + *out_produced,
             decomp->max_decompressed_size);
         ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-        return -2;  /* budget exceeded */
-    }
-
-    if (brc == BROTLI_DECODER_RESULT_SUCCESS) {
-        decomp->finished = 1;
-        return 1;
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
 
     if (brc == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
-        size_t  old_size;
-        size_t  remaining;
-
-        old_size = *buf_size_ptr;
-        remaining = 0;
-        if (decomp->max_decompressed_size > 0) {
-            remaining = decomp->max_decompressed_size
-                        - decomp->total_decompressed;
-            if (old_size >= remaining) {
-                ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-                return -2;
-            }
-        }
-
-        if (ngx_http_markdown_streaming_decomp_expand_buf(
-                heap_buf_ptr, buf_ptr, buf_size_ptr, remaining, log)
-            != NGX_OK)
-        {
-            return -1;
-        }
-
-        *using_heap_ptr = 1;
-        /*
-         * Expansion doubles the buffer. Resume writing at the old end so
-         * already-produced bytes remain intact at [0, old_size).
-         */
-        decomp->brotli_next_out = *buf_ptr + old_size;
-        decomp->brotli_avail_out = *buf_size_ptr - old_size;
-        return 0;
+        return ngx_http_markdown_streaming_decomp_brotli_expand(
+            decomp, buf_ptr, buf_size_ptr, out_produced,
+            heap_buf_ptr, using_heap_ptr, log);
     }
 
     if (decomp->brotli_avail_in == 0) {
@@ -1070,11 +1462,16 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
                 out_produced, &heap_buf,
                 &using_heap, log);
 
-        if (step_rc == -2) {
-            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+        if (step_rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED
+            || step_rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
+            || step_rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT
+            || step_rc == NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR)
+        {
+            return (ngx_int_t) step_rc;
         }
 
         if (step_rc < 0) {
+            /* Any other negative: system-level failure */
             return NGX_ERROR;
         }
 
@@ -1083,14 +1480,21 @@ ngx_http_markdown_streaming_decomp_brotli_loop(
         }
     }
 
-    if (using_heap) {
-        if (ngx_http_markdown_streaming_decomp_finalize_buf(
-                &heap_buf, buf_ptr, buf_size_ptr,
-                *out_produced, pool)
-            != NGX_OK)
-        {
-            return NGX_ERROR;
-        }
+    if (using_heap
+        && ngx_http_markdown_streaming_decomp_finalize_buf(
+               &heap_buf, buf_ptr, buf_size_ptr,
+               *out_produced, pool)
+           != NGX_OK)
+    {
+        /*
+         * Pool-copy failure after decode completed: the decoder
+         * has consumed all input for this call.  Mark as
+         * non-retryable and set allocation origin.
+         */
+        decomp->finished = 1;
+        decomp->failure_origin =
+            NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+        return NGX_ERROR;
     }
 
     return NGX_OK;
@@ -1128,6 +1532,8 @@ ngx_http_markdown_streaming_decomp_feed_zlib(
             "buffer size %uz exceeds zlib uInt max",
             *buf_size_ptr);
         ngx_http_markdown_streaming_decomp_free_heap(buf_ptr);
+        decomp->failure_origin =
+            NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
         return NGX_ERROR;
     }
 
@@ -1165,6 +1571,8 @@ ngx_http_markdown_streaming_decomp_feed_case_zlib(
             "input length %uz exceeds zlib uInt max",
             in_len);
         ngx_http_markdown_streaming_decomp_free_heap(ctx->buf_ptr);
+        decomp->failure_origin =
+            NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
         return NGX_ERROR;
     }
 
@@ -1244,6 +1652,8 @@ ngx_http_markdown_streaming_decomp_prepare_input(
     combined_len = 2 + *in_len;
     *combined_input = ngx_alloc(combined_len, log);
     if (*combined_input == NULL) {
+        decomp->failure_origin =
+            NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
 
@@ -1267,10 +1677,16 @@ ngx_http_markdown_streaming_decomp_workspace_size(
     size_t  remaining;
 
     if (in_len > (size_t) -1 / 4) {
-        *buf_size = (size_t) -1;
-    } else {
-        *buf_size = in_len * 4;
+        /*
+         * Multiplication overflow: in_len * 4 would wrap size_t.
+         * Signal explicitly so the caller maps this to INTERNAL
+         * (arithmetic overflow), not ALLOCATION (OOM from attempting
+         * ngx_alloc(SIZE_MAX)).
+         */
+        return NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR;
     }
+
+    *buf_size = in_len * 4;
     if (*buf_size < 4096) {
         *buf_size = 4096;
     }
@@ -1290,8 +1706,18 @@ ngx_http_markdown_streaming_decomp_workspace_size(
      * byte when the normal workspace reaches the remaining response budget:
      * an empty member can consume its header/trailer without output, while
      * any produced probe byte is rejected by check_limit() before exposure.
+     *
+     * Brotli uses the same probe for exact-budget completion detection:
+     * a stream at exact budget that hasn't finished needs one probe byte
+     * to determine whether the decoder completes without further output
+     * (success) or produces additional bytes (budget exceeded).
      */
-    if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+    if ((decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+#ifdef NGX_HTTP_BROTLI
+         || (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+             && !decomp->finished)
+#endif
+        )
         && *buf_size >= remaining && remaining < (size_t) -1)
     {
         *buf_size = remaining + 1;
@@ -1302,6 +1728,96 @@ ngx_http_markdown_streaming_decomp_workspace_size(
     }
 
     return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_finished_input(
+    const ngx_http_markdown_streaming_decomp_t *decomp,
+    size_t in_len,
+    ngx_log_t *log)
+{
+    if (!decomp->finished) {
+        return NGX_DECLINED;
+    }
+    if (in_len == 0
+        || decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP)
+    {
+        return NGX_OK;
+    }
+
+    ngx_log_error(NGX_LOG_ERR, log, 0,
+        "markdown: %s trailing data after stream end "
+        "(%uz bytes in finished state)",
+        (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI)
+            ? "brotli" : "deflate",
+        in_len);
+    return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_allocate_workspace(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    size_t in_len,
+    u_char **buf,
+    size_t *buf_size,
+    u_char **combined_input,
+    ngx_log_t *log)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_markdown_streaming_decomp_workspace_size(
+        decomp, in_len, buf_size);
+    if (rc == NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR) {
+        ngx_http_markdown_streaming_decomp_free_heap(combined_input);
+        decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
+        return NGX_ERROR;
+    }
+    if (rc != NGX_OK) {
+        ngx_http_markdown_streaming_decomp_free_heap(combined_input);
+        return rc;
+    }
+
+    *buf = ngx_alloc(*buf_size, log);
+    if (*buf != NULL) {
+        return NGX_OK;
+    }
+
+    ngx_http_markdown_streaming_decomp_free_heap(combined_input);
+    decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+    return NGX_ERROR;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_streaming_decomp_decode_chunk(
+    ngx_http_markdown_streaming_decomp_t *decomp,
+    const u_char *in_data,
+    size_t in_len,
+    const ngx_http_markdown_streaming_decomp_feed_ctx_t *feed_ctx,
+    u_char **combined_input)
+{
+    ngx_int_t  rc;
+
+    if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+        || decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
+    {
+        rc = ngx_http_markdown_streaming_decomp_feed_case_zlib(
+            decomp, in_data, in_len, feed_ctx);
+#ifdef NGX_HTTP_BROTLI
+    } else if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI) {
+        rc = ngx_http_markdown_streaming_decomp_feed_case_brotli(
+            decomp, in_data, in_len, feed_ctx);
+#endif
+    } else {
+        ngx_free(*feed_ctx->buf_ptr);
+        *feed_ctx->buf_ptr = NULL;
+        rc = NGX_DECLINED;
+    }
+
+    ngx_http_markdown_streaming_decomp_free_heap(combined_input);
+    return rc;
 }
 
 
@@ -1329,6 +1845,13 @@ ngx_http_markdown_streaming_decomp_feed(
     }
 
     /*
+     * Per-call failure origin lifecycle: reset to NONE so that no
+     * stale origin from a prior call can leak into the mapper if
+     * this call returns bare NGX_ERROR.
+     */
+    decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
+
+    /*
      * Defensive baseline: clear the caller-facing output slots before
      * any work begins so every error path (including the budget/alloc
      * early returns below) is guaranteed to emit empty output and never
@@ -1337,27 +1860,10 @@ ngx_http_markdown_streaming_decomp_feed(
     *out_data = NULL;
     *out_len = 0;
 
-    if (decomp->finished) {
-        /*
-         * A deflate stream that already reached Z_STREAM_END must not
-         * receive any more non-empty input.  Gzip is exempt because it
-         * supports concatenated members and the at_gzip_member_boundary
-         * state tracks a clean member boundary for the next feed.  For
-         * deflate, any subsequent non-empty chunk is trailing data that
-         * does not belong to the stream and must be rejected as a format
-         * error rather than silently discarded.  An empty chunk remains
-         * a safe no-op.
-         */
-        if (in_len > 0
-            && decomp->type != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP)
-        {
-            ngx_log_error(NGX_LOG_ERR, log, 0,
-                "markdown: "
-                "deflate trailing data after stream end "
-                "(%uz bytes in finished state)", in_len);
-            return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
-        }
-        return NGX_OK;
+    rc = ngx_http_markdown_streaming_decomp_finished_input(
+        decomp, in_len, log);
+    if (rc != NGX_DECLINED) {
+        return rc;
     }
 
     /* Empty input is a no-op */
@@ -1390,27 +1896,14 @@ ngx_http_markdown_streaming_decomp_feed(
 
     if (!decomp->initialized) {
         ngx_http_markdown_streaming_decomp_free_heap(&combined_input);
+        decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
         return NGX_ERROR;
     }
 
-    rc = ngx_http_markdown_streaming_decomp_workspace_size(
-        decomp, in_len, &buf_size);
+    rc = ngx_http_markdown_streaming_decomp_allocate_workspace(
+        decomp, in_len, &buf, &buf_size, &combined_input, log);
     if (rc != NGX_OK) {
-        ngx_http_markdown_streaming_decomp_free_heap(&combined_input);
         return rc;
-    }
-
-    /*
-     * The workspace must be reclaimable after every compressed chunk.
-     * Request-pool allocations cannot be individually freed, so reserving
-     * the 4 KiB estimate there amplifies tiny chunks for the request lifetime.
-     * The decode loops transfer only produced bytes into pool memory.
-     */
-    buf = ngx_alloc(buf_size, log);
-    if (buf == NULL) {
-        /* output already cleared above */
-        ngx_http_markdown_streaming_decomp_free_heap(&combined_input);
-        return NGX_ERROR;
     }
 
     produced = 0;
@@ -1420,47 +1913,10 @@ ngx_http_markdown_streaming_decomp_feed(
     feed_ctx.pool = pool;
     feed_ctx.log = log;
 
-    if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
-        || decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
-    {
-        ngx_int_t  inflate_rc;
-
-        inflate_rc = ngx_http_markdown_streaming_decomp_feed_case_zlib(
-            decomp, in_data, in_len, &feed_ctx);
-        /*
-         * The combined input buffer is no longer needed after inflate
-         * consumes its input (or fails).  Free it now so it doesn't
-         * leak across chunks.
-         */
-        ngx_http_markdown_streaming_decomp_free_heap(&combined_input);
-        if (inflate_rc != NGX_OK) {
-            /*
-             * The inflate loop frees the heap workspace on error via
-             * free_heap; output slots already hold NULL/0 from the
-             * defensive baseline, so no additional cleanup here.
-             */
-            return inflate_rc;
-        }
-    }
-#ifdef NGX_HTTP_BROTLI
-    else if (decomp->type == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI)
-    {
-        ngx_int_t  brotli_rc;
-
-        brotli_rc = ngx_http_markdown_streaming_decomp_feed_case_brotli(
-            decomp, in_data, in_len, &feed_ctx);
-        ngx_http_markdown_streaming_decomp_free_heap(&combined_input);
-        if (brotli_rc != NGX_OK) {
-            /* Same invariant as the zlib path above. */
-            return brotli_rc;
-        }
-    }
-#endif
-    else {
-        ngx_free(buf);
-        buf = NULL;
-        ngx_http_markdown_streaming_decomp_free_heap(&combined_input);
-        return NGX_DECLINED;
+    rc = ngx_http_markdown_streaming_decomp_decode_chunk(
+        decomp, in_data, in_len, &feed_ctx, &combined_input);
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     /*
@@ -1516,6 +1972,8 @@ ngx_http_markdown_streaming_decomp_apply_limits(
             "decompressed size overflow, total=%uz produced=%uz",
             decomp->total_decompressed,
             produced);
+        decomp->failure_origin =
+            NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
         return NGX_ERROR;
     }
 
@@ -1556,20 +2014,23 @@ ngx_http_markdown_streaming_decomp_finish_zlib_expand(
         ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
-    /*
-     * expand_buf() frees any previous heap buffer if expansion fails,
-     * so we can safely return directly on NGX_ERROR here.
-     */
-    if (ngx_http_markdown_streaming_decomp_expand_buf(
+    {
+        ngx_int_t  expand_rc;
+
+        expand_rc = ngx_http_markdown_streaming_decomp_expand_buf(
             heap_buf_ptr, buf_ptr, buf_size_ptr,
             decomp->max_decompressed_size > 0
             ? decomp->max_decompressed_size
               - decomp->total_decompressed
             : 0,
-            log)
-        != NGX_OK)
-    {
-        return NGX_ERROR;
+            log);
+        if (expand_rc != NGX_OK) {
+            decomp->failure_origin =
+                (expand_rc == NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR)
+                ? NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL
+                : NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
+            return NGX_ERROR;
+        }
     }
 
     *using_heap_ptr = 1;
@@ -1583,6 +2044,8 @@ ngx_http_markdown_streaming_decomp_finish_zlib_expand(
             "zlib uInt max",
             *buf_size_ptr - old_size);
         ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        decomp->failure_origin =
+            NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
         return NGX_ERROR;
     }
     decomp->state.zlib.avail_out = expand_out;
@@ -1627,6 +2090,8 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
             *buf_size_ptr);
         ngx_http_markdown_streaming_decomp_free_heap(&heap_buf);
         *buf_ptr = NULL;
+        decomp->failure_origin =
+            NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
         return NGX_ERROR;
     }
 
@@ -1710,6 +2175,8 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
         != NGX_OK)
     {
         *buf_ptr = NULL;
+        decomp->failure_origin =
+            NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
 
@@ -1722,7 +2189,8 @@ ngx_http_markdown_streaming_decomp_finish_zlib(
  * Finish brotli decompression.  Brotli produces no tail output; checks
  * stream completeness, marks finished, and releases the heap workspace.
  *
- * Returns NGX_OK on success, NGX_ERROR on incomplete stream.
+ * Returns NGX_OK on success, NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT on
+ * incomplete stream.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_decomp_finish_brotli(
@@ -1733,11 +2201,12 @@ ngx_http_markdown_streaming_decomp_finish_brotli(
 {
     if (!BrotliDecoderIsFinished(decomp->state.brotli)) {
         ngx_log_error(NGX_LOG_WARN, log, 0,
-            "markdown: "
-            "brotli stream not finished");
+            "markdown: reason=brotli_truncated_input "
+            "brotli stream truncated "
+            "(decoder not finished at EOF)");
         ngx_free(*buf_ptr);
         *buf_ptr = NULL;
-        return NGX_ERROR;
+        return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
     }
 
     decomp->finished = 1;
@@ -1785,6 +2254,13 @@ ngx_http_markdown_streaming_decomp_finish(
         return NGX_ERROR;
     }
 
+    /*
+     * Per-call failure origin lifecycle: reset to NONE so that no
+     * stale origin from a prior call can leak into the mapper if
+     * this call returns bare NGX_ERROR.
+     */
+    decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
+
     *out_data = NULL;
     *out_len = 0;
 
@@ -1800,6 +2276,7 @@ ngx_http_markdown_streaming_decomp_finish(
         {
             return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
         }
+        decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
         return NGX_ERROR;
     }
 
@@ -1818,6 +2295,8 @@ ngx_http_markdown_streaming_decomp_finish(
     buf_size = 4096;
     buf = ngx_alloc(buf_size, log);
     if (buf == NULL) {
+        decomp->failure_origin =
+            NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
         return NGX_ERROR;
     }
 
@@ -1858,14 +2337,28 @@ ngx_http_markdown_streaming_decomp_finish(
     else {
         ngx_free(buf);
         buf = NULL;
+        decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
         return NGX_ERROR;
     }
 
-    if (produced > (size_t) -1 - decomp->total_decompressed) {
-        decomp->total_decompressed = (size_t) -1;
-    } else {
-        decomp->total_decompressed += produced;
+    /*
+     * Apply the same overflow and budget validation used in the feed
+     * path.  An overflow in the finish tail is an internal error (the
+     * cumulative decompressed size wrapped around size_t), not a
+     * successful completion with saturated accounting.
+     */
+    {
+        ngx_int_t  limit_rc;
+
+        limit_rc = ngx_http_markdown_streaming_decomp_apply_limits(
+            decomp, produced, &buf, log);
+        if (limit_rc != NGX_OK) {
+            *out_data = NULL;
+            *out_len = 0;
+            return limit_rc;
+        }
     }
+
     *out_data = buf;
     *out_len = produced;
     return NGX_OK;

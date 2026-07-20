@@ -1,9 +1,10 @@
 #!/bin/bash
 #
 # detect_backpressure_resume.sh — Backpressure Resume Pattern Detection (v6)
-#                                  (Rule 1, 2, 38, 47, 51, 52)
+#                                  (Rule 1, 47; related: 2, 38, 51, 52)
 #
 # Detects functions that return NGX_AGAIN without proper state preservation.
+# Rules 2, 38, 51, 52 are related concerns verified by adjacent detectors.
 #
 # Usage:
 #   bash tools/harness/detect_backpressure_resume.sh [directory]

@@ -28,7 +28,7 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Current Release Line 0.9.1
 
-**Status:** Unreleased development and release-candidate line. 0.9.1 introduces zero-copy output for streaming, gzip plus zlib/raw-deflate streaming decompression, bounded Brotli full-buffer routing, and full-buffer copy reduction, all guarded by strict performance evidence gates.
+**Status:** Stable release. 0.9.1 introduces zero-copy output for streaming, gzip plus zlib/raw-deflate plus Brotli streaming decompression, and full-buffer copy reduction, all guarded by strict performance evidence gates.
 
 ### Release 0.7.0 Updates
 
@@ -649,7 +649,7 @@ See `examples/docker/` for Docker build examples.
 ## Summary
 
 **NGINX Markdown for Agents** is on the 0.9.x release line (latest patch:
-0.9.0; 0.9.1 in RC preparation). The project provides
+0.9.1). The project provides
 HTML-to-Markdown conversion through NGINX content negotiation with a
 streaming-default conversion model, with bounded-memory streaming as the
 default path and full-buffer conversion as the fallback. Version 0.8.0
@@ -694,11 +694,11 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |
-| 0.7.0 | 2026-06-03 | Kang | Version bump to 0.7.0; add Rust-first architecture, decompression budget, diagnostics, dynconf dry-run, DEB/RPM, K8s, FFI ABI verification, CI supply-chain hardening |
-| 0.8.0 | 2026-06-16 | Kang | Version bump to 0.8.0; true streaming contract, fallback state machine, streaming observability, streaming security enforcement, release matrix source of truth, streaming config directives |
-| 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
-| 0.8.3 | 2026-06-26 | Kang | 0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.8.3 | 2026-06-26 | Kang | 0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |
+| 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
+| 0.8.0 | 2026-06-16 | Kang | Version bump to 0.8.0; true streaming contract, fallback state machine, streaming observability, streaming security enforcement, release matrix source of truth, streaming config directives |
+| 0.7.0 | 2026-06-03 | Kang | Version bump to 0.7.0; add Rust-first architecture, decompression budget, diagnostics, dynconf dry-run, DEB/RPM, K8s, FFI ABI verification, CI supply-chain hardening |
+| 0.6.3 | 2026-05-13 | Kang | Version bump to 0.6.3 for release |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

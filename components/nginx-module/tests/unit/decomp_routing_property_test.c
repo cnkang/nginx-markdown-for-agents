@@ -17,7 +17,7 @@
  *   4. Encoding is supported by streaming decompressor:
  *      - deflate    -> SUPPORTED (zlib-wrapped or raw)
  *      - gzip       -> SUPPORTED (gzip-wrapped inflate)
- *      - brotli     -> NOT SUPPORTED
+ *      - brotli     -> SUPPORTED (when NGX_HTTP_BROTLI defined)
  *      - unknown    -> BYPASS (no decompression at all)
  *
  * If ANY condition is false -> full-buffer decompression for a known coding.
@@ -75,7 +75,7 @@ typedef enum {
  *   - auto_decompress OFF -> FULLBUFFER (Req 4.1)
  *   - Streaming engine not selected -> FULLBUFFER
  *   - cache_validation == full -> FULLBUFFER (Req 4.2)
- *   - Encoding not supported by streaming (brotli) -> FULLBUFFER
+ *   - Encoding not supported by streaming (brotli without NGX_HTTP_BROTLI) -> FULLBUFFER
  *   - All four conditions met -> STREAMING
  * ---------------------------------------------------------------- */
 
@@ -109,11 +109,15 @@ ngx_http_markdown_decomp_routing_decision(
 
     /*
      * Condition 4: encoding must be supported by streaming
-     * decompressor.  Gzip and deflate are supported in 0.9.1.
-     * Brotli is deferred to full-buffer.
+     * decompressor.  Gzip, deflate, and Brotli (when compiled)
+     * are supported in 0.9.1.
      */
     if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
-        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
+        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+#ifdef NGX_HTTP_BROTLI
+        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+#endif
+        ) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }
 
@@ -170,13 +174,17 @@ expected_routing(
      *   1. auto_decompress ON
      *   2. streaming engine selected
      *   3. cache_validation != full
-     *   4. encoding supported (gzip or deflate in 0.9.1)
+     *   4. encoding supported (gzip, deflate, or brotli when compiled)
      */
     if (auto_decompress == 1
         && streaming_engine_selected
         && cache_validation != NGX_HTTP_MARKDOWN_CACHE_VALIDATION_FULL
         && (encoding == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
-            || encoding == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP)) {
+            || encoding == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+#ifdef NGX_HTTP_BROTLI
+            || encoding == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+#endif
+            )) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING;
     }
 
@@ -327,13 +335,19 @@ test_property4_named_cases(void)
         result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
         "gzip encoding -> STREAMING");
 
-    /* Brotli not supported -> FULLBUFFER */
+    /* Brotli routing depends on compile-time flag */
     result = ngx_http_markdown_decomp_routing_decision(
         1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
         NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+#ifdef NGX_HTTP_BROTLI
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+        "brotli encoding -> STREAMING (NGX_HTTP_BROTLI defined)");
+#else
     TEST_ASSERT(
         result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
-        "brotli encoding -> FULLBUFFER");
+        "brotli encoding -> FULLBUFFER (NGX_HTTP_BROTLI not defined)");
+#endif
 
     /* Unknown encoding -> BYPASS */
     result = ngx_http_markdown_decomp_routing_decision(
@@ -465,9 +479,14 @@ test_property4_streaming_implies_all_conditions(void)
                 TEST_ASSERT((enc
                     == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
                     || (enc
-                    == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP),
+                    == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP)
+#ifdef NGX_HTTP_BROTLI
+                    || (enc
+                    == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI)
+#endif
+                    ,
                     "STREAMING implies "
-                    "gzip or deflate encoding");
+                    "supported encoding");
             }
         }
     }
@@ -633,7 +652,8 @@ test_property4_full_cache_always_fullbuffer(void)
 }
 
 /* ----------------------------------------------------------------
- * Only gzip and deflate can ever reach STREAMING in 0.9.1
+ * Only supported encodings (deflate, gzip, and Brotli when
+ * NGX_HTTP_BROTLI is defined) can reach STREAMING in 0.9.1
  * ---------------------------------------------------------------- */
 
 static void
@@ -648,7 +668,8 @@ test_property4_only_supported_encodings_reach_streaming(void)
     ngx_http_markdown_cache_validation_e cv;
 
     TEST_SUBSECTION(
-        "Property 4: only gzip/deflate can reach STREAMING");
+        "Property 4: only supported encodings can reach "
+        "STREAMING");
 
     for (iter = 0; iter < RANDOM_ITERATIONS; iter++) {
         prng_seed((unsigned int)(iter + 8888));
@@ -671,16 +692,309 @@ test_property4_only_supported_encodings_reach_streaming(void)
                     (enc
                      == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE)
                     || (enc
-                        == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP),
+                        == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP)
+#ifdef NGX_HTTP_BROTLI
+                    || (enc
+                        == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI)
+#endif
+                    ,
                     "STREAMING only reachable with "
-                    "gzip or deflate");
+                    "supported encodings");
             }
         }
     }
 
     TEST_PASS(
-        "Property 4: only gzip/deflate reach STREAMING "
-        "(25000 inputs)");
+        "Property 4: only supported encodings reach "
+        "STREAMING (25000 inputs)");
+}
+
+/* ================================================================
+ * Routing decision correctness for Brotli
+ *
+ * Feature: Brotli streaming decompression
+ * Property 1: Routing Decision Correctness
+ *
+ * Brotli routing follows all runtime eligibility conditions
+ *
+ * Oracle:
+ *   STREAMING iff all four conditions hold AND codec is
+ *   gzip/deflate/brotli(+compiled);
+ *   FULLBUFFER when any condition violated for a known codec;
+ *   BYPASS for NONE/UNKNOWN encoding.
+ *
+ * Minimum 200 iterations.
+ * ================================================================ */
+
+#define PROPERTY1_ITERATIONS  250
+#define PROPERTY1_SEQ_LEN      50
+
+/* ----------------------------------------------------------------
+ * Property 1: Random routing correctness (oracle match)
+ *
+ * Generates random (auto_decompress, streaming_engine,
+ * cache_validation, compression_type) tuples and verifies
+ * the routing function matches the oracle.
+ * ---------------------------------------------------------------- */
+
+static void
+test_property1_random_routing_correctness(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+    ngx_http_markdown_decomp_route_t expect;
+    ngx_flag_t auto_decomp;
+    ngx_flag_t stream_eng;
+    ngx_http_markdown_cache_validation_e cv;
+    ngx_http_markdown_compression_type_e enc;
+    int iter;
+    size_t j;
+
+    TEST_SUBSECTION(
+        "Property 1: Random routing correctness "
+        "(250 seeds x 50 inputs)");
+
+    for (iter = 0; iter < PROPERTY1_ITERATIONS; iter++) {
+        prng_seed((unsigned int)(iter + 77777));
+
+        for (j = 0; j < PROPERTY1_SEQ_LEN; j++) {
+            auto_decomp = (ngx_flag_t)(prng_next() % 2);
+            stream_eng = (ngx_flag_t)(prng_next() % 2);
+            cv = (ngx_http_markdown_cache_validation_e)
+                (prng_next() % 3);
+            enc = (ngx_http_markdown_compression_type_e)
+                (prng_next() % 5);
+
+            result =
+                ngx_http_markdown_decomp_routing_decision(
+                    auto_decomp, stream_eng, cv, enc);
+            expect = expected_routing(
+                auto_decomp, stream_eng, cv, enc);
+
+            TEST_ASSERT(result == expect,
+                "Property 1: routing must match "
+                "oracle");
+        }
+    }
+
+    TEST_PASS(
+        "Property 1: oracle match verified for 12500 "
+        "random inputs");
+}
+
+/* ----------------------------------------------------------------
+ * Property 1: Brotli-specific streaming eligibility
+ *
+ * Brotli + all conditions + NGX_HTTP_BROTLI ->
+ *          STREAMING
+ * ---------------------------------------------------------------- */
+
+static void
+test_property1_brotli_streaming_eligible(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+    ngx_http_markdown_cache_validation_e cv_values[] = {
+        NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+        NGX_HTTP_MARKDOWN_CACHE_VALIDATION_ETAG
+    };
+    size_t i;
+
+    TEST_SUBSECTION(
+        "Property 1: Brotli streaming eligibility "
+        "");
+
+    for (i = 0; i < ARRAY_SIZE(cv_values); i++) {
+        result = ngx_http_markdown_decomp_routing_decision(
+            1, 1, cv_values[i],
+            NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+
+#ifdef NGX_HTTP_BROTLI
+        TEST_ASSERT(
+            result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+            "Brotli + all conditions "
+            "+ NGX_HTTP_BROTLI -> STREAMING");
+#else
+        TEST_ASSERT(
+            result
+            == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+            "Brotli + all conditions "
+            "- NGX_HTTP_BROTLI -> FULLBUFFER");
+#endif
+    }
+
+    TEST_PASS(
+        "Property 1: Brotli streaming eligibility "
+        "verified");
+}
+
+/* ----------------------------------------------------------------
+ * Property 1: auto_decompress OFF -> not STREAMING
+ *
+ * ---------------------------------------------------------------- */
+
+static void
+test_property1_auto_decompress_off(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+    ngx_http_markdown_compression_type_e enc_decomp[] = {
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+    };
+    size_t i;
+
+    TEST_SUBSECTION(
+        "Property 1: auto_decompress OFF -> "
+        "FULLBUFFER");
+
+    for (i = 0; i < ARRAY_SIZE(enc_decomp); i++) {
+        result = ngx_http_markdown_decomp_routing_decision(
+            0, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+            enc_decomp[i]);
+        TEST_ASSERT(
+            result
+            == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+            "auto_decompress OFF -> "
+            "FULLBUFFER for all codecs");
+    }
+
+    TEST_PASS(
+        "Property 1: auto_decompress OFF forces "
+        "FULLBUFFER");
+}
+
+/* ----------------------------------------------------------------
+ * Property 1: streaming engine not selected -> FULLBUFFER
+ *
+ * ---------------------------------------------------------------- */
+
+static void
+test_property1_streaming_not_selected(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+    ngx_http_markdown_compression_type_e enc_decomp[] = {
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+    };
+    size_t i;
+
+    TEST_SUBSECTION(
+        "Property 1: streaming engine not selected "
+        "-> FULLBUFFER");
+
+    for (i = 0; i < ARRAY_SIZE(enc_decomp); i++) {
+        result = ngx_http_markdown_decomp_routing_decision(
+            1, 0, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+            enc_decomp[i]);
+        TEST_ASSERT(
+            result
+            == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+            "streaming not selected -> "
+            "FULLBUFFER for all codecs");
+    }
+
+    TEST_PASS(
+        "Property 1: streaming not selected forces "
+        "FULLBUFFER");
+}
+
+/* ----------------------------------------------------------------
+ * Property 1: cache_validation=full -> FULLBUFFER
+ *
+ * ---------------------------------------------------------------- */
+
+static void
+test_property1_cache_validation_full(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+    ngx_http_markdown_compression_type_e enc_decomp[] = {
+        NGX_HTTP_MARKDOWN_COMPRESSION_GZIP,
+        NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+    };
+    size_t i;
+
+    TEST_SUBSECTION(
+        "Property 1: cache_validation=full -> "
+        "FULLBUFFER");
+
+    for (i = 0; i < ARRAY_SIZE(enc_decomp); i++) {
+        result = ngx_http_markdown_decomp_routing_decision(
+            1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_FULL,
+            enc_decomp[i]);
+        TEST_ASSERT(
+            result
+            == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+            "cache_validation=full -> "
+            "FULLBUFFER for all codecs");
+    }
+
+    TEST_PASS(
+        "Property 1: cache_validation=full forces "
+        "FULLBUFFER");
+}
+
+/* ----------------------------------------------------------------
+ * Property 1: Contrapositive — STREAMING implies Brotli
+ * is included in supported set when NGX_HTTP_BROTLI is
+ * defined
+ * ---------------------------------------------------------------- */
+
+static void
+test_property1_streaming_includes_brotli(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+    ngx_flag_t auto_decomp;
+    ngx_flag_t stream_eng;
+    ngx_http_markdown_cache_validation_e cv;
+    ngx_http_markdown_compression_type_e enc;
+    int iter;
+    size_t j;
+    int brotli_streaming_seen;
+
+    TEST_SUBSECTION(
+        "Property 1: STREAMING reachable with Brotli "
+        "");
+
+    brotli_streaming_seen = 0;
+
+    for (iter = 0; iter < PROPERTY1_ITERATIONS; iter++) {
+        prng_seed((unsigned int)(iter + 33333));
+
+        for (j = 0; j < PROPERTY1_SEQ_LEN; j++) {
+            auto_decomp = (ngx_flag_t)(prng_next() % 2);
+            stream_eng = (ngx_flag_t)(prng_next() % 2);
+            cv = (ngx_http_markdown_cache_validation_e)
+                (prng_next() % 3);
+            enc = (ngx_http_markdown_compression_type_e)
+                (prng_next() % 5);
+
+            result =
+                ngx_http_markdown_decomp_routing_decision(
+                    auto_decomp, stream_eng, cv, enc);
+
+            if (result
+                == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING
+                && enc
+                   == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI) {
+                brotli_streaming_seen = 1;
+            }
+        }
+    }
+
+#ifdef NGX_HTTP_BROTLI
+    TEST_ASSERT(brotli_streaming_seen,
+        "Brotli must reach STREAMING "
+        "when NGX_HTTP_BROTLI defined");
+#else
+    TEST_ASSERT(!brotli_streaming_seen,
+        "Brotli must NOT reach STREAMING "
+        "when NGX_HTTP_BROTLI not defined");
+#endif
+
+    TEST_PASS(
+        "Property 1: Brotli streaming reachability "
+        "matches compile-time guard");
 }
 
 /* ----------------------------------------------------------------
@@ -713,6 +1027,24 @@ main(void)
     /* Requirement-specific property tests */
     test_property4_full_cache_always_fullbuffer();
     test_property4_only_supported_encodings_reach_streaming();
+
+    /* ============================================================
+     * Property 1: Routing Decision Correctness
+     *
+     *
+     * Brotli routing follows all runtime eligibility conditions
+     * ============================================================ */
+    TEST_SECTION(
+        "Feature: Brotli streaming decompression\n"
+        "Property 1: Routing Decision Correctness\n"
+        "Brotli routing follows all runtime eligibility conditions");
+
+    test_property1_random_routing_correctness();
+    test_property1_brotli_streaming_eligible();
+    test_property1_auto_decompress_off();
+    test_property1_streaming_not_selected();
+    test_property1_cache_validation_full();
+    test_property1_streaming_includes_brotli();
 
     printf("\n");
     TEST_PASS(

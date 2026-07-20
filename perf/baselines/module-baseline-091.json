@@ -251,6 +251,41 @@
           "copied_output_total": 0,
           "pending_output_high_watermark_bytes": 0
         }
+      },
+      {
+        "name": "brotli-streaming-first",
+        "profile": "streaming_first",
+        "compression": "brotli",
+        "transfer_encoding": "chunked",
+        "concurrency": 10,
+        "status": "completed",
+        "metrics": {
+          "rps": 23.43,
+          "latency_p50_ms": 325.0,
+          "latency_p95_ms": 1359.0,
+          "latency_p99_ms": 1451.0,
+          "ttfb_p50_ms": 9.35,
+          "ttfb_p95_ms": 9.943,
+          "ttlb_p50_ms": 325.0,
+          "worker_rss_mb": 45.21875,
+          "baseline_rss_bytes": 8404992,
+          "peak_rss_bytes": 47415296,
+          "input_bytes": 1048516,
+          "streaming_path_hits": 1030,
+          "fullbuffer_path_hits": 0,
+          "streaming_ratio": 1.0,
+          "fullbuffer_ratio": 0.0,
+          "fallback_rate": 0.0,
+          "streaming_fallback_total": 0,
+          "streaming_requests_total": 1030,
+          "precommit_failopen_total": 0,
+          "throughput_mbps": 0.0,
+          "decompression_streaming_total": 1030,
+          "decompression_fullbuffer_total": 0,
+          "zero_copy_output_total": 12360,
+          "copied_output_total": 0,
+          "pending_output_high_watermark_bytes": 0
+        }
       }
     ]
   },
@@ -266,10 +301,21 @@
       "latency_ttfb": "rounded upward or raised"
     },
     "adjustment_reason": "user-approved conservative release baseline normalization",
-    "adjustment_date": "2026-07-16"
+    "adjustment_date": "2026-07-16",
+    "scenario_sources": {
+      "brotli-streaming-first": {
+        "source_git_commit": "9734d12e4d1c4fb6e6e25852badf0ee614b170c8",
+        "source_artifact": "perf/baselines/module-baseline-brotli-091-raw.json",
+        "source_run": "1000 requests at 2026-07-19T09:03:37Z",
+        "environment": "Debian 12 bookworm, linux-x86_64, NGINX 1.30.4, libbrotlidec 1.0.9, Rust 1.97.0",
+        "execution_mode": "Docker --platform linux/amd64 on an Apple Silicon host",
+        "compression_quality": 6,
+        "normalization": "none; metrics copied from the retained raw report"
+      }
+    }
   },
   "decompression_coverage": {
-    "decompression_streaming_total": 2060,
+    "decompression_streaming_total": 3090,
     "decompression_fullbuffer_total": 1030
   }
 }

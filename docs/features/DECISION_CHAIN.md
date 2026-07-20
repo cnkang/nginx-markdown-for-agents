@@ -19,8 +19,9 @@ flowchart TD
     B -->|No| C["disabled"]
     B -->|Yes| D{"Method<br/>GET/HEAD?"}
     D -->|No| E["not_eligible"]
-    D -->|Yes| F{"Status<br/>200 or 206?"}
-    F -->|No| G["not_eligible"]
+    D -->|Yes| F{"Status<br/>200?"}
+    F -->|206| G2["not_eligible<br/>(range)"]
+    F -->|Other non-200| G["not_eligible"]
     F -->|Yes| H{"Range<br/>request?"}
     H -->|Yes| I["not_eligible"]
     H -->|No| J{"Content-Type<br/>text/html?"}
@@ -55,7 +56,7 @@ The decision chain evaluates checks in a fixed order. The first check that fails
 |-------|-------|--------------------|------------------------|
 | 1 | Scope enablement | Is `markdown_filter` enabled (`on`, `1`, `true`, `yes`, or a variable that resolves to a truthy value) for this request's location/server/http context? | `disabled` |
 | 2 | HTTP method | Is the request method `GET` or `HEAD`? Other methods (POST, PUT, DELETE, etc.) are not eligible. | `not_eligible` |
-| 3 | Response status | Is the upstream response status `200 OK` or `206 Partial Content`? Non-200/206 responses (redirects, errors, etc.) are not eligible. | `not_eligible` |
+| 3 | Response status | Is the upstream response status `200 OK`? A `206 Partial Content` status is classified as a range request (same reason code as check 4). Other non-200 responses (redirects, errors, etc.) are not eligible. | `not_eligible` |
 | 4 | Range request | Is this a range request (`Range` header present)? Range requests are not eligible because partial content cannot be converted. | `not_eligible` |
 | 5 | Content-Type | Is the upstream `Content-Type` header `text/html` (with any charset parameter)? Non-HTML content types are not eligible. | `not_eligible` |
 | 6 | Response size | Is the response body size within the configured `markdown_limits memory=` budget? Oversized responses are not eligible. | `not_eligible` |
@@ -139,7 +140,8 @@ Operators can determine request state counts from metrics and logs:
 - NOT_ENABLED: count of `reason="disabled"` in decision log entries (`grep "reason=disabled" error.log`)
 - SKIPPED: count of `reason="not_eligible"`, `reason="skipped_*"` in decision log entries
 - CONVERTED: `nginx_markdown_conversions_total` metric
-- FAILED: `nginx_markdown_failopen_total` (`failed_open`) + `nginx_markdown_failed_closed_total` (`failed_closed`)
+- FAILED_OPEN: `nginx_markdown_failopen_total` (`failed_open`)
+- FAILED_CLOSED: `nginx_markdown_failures_total{reason="failed_closed"}` (`failed_closed`)
 
 ## Reason Code Reference
 
@@ -208,7 +210,7 @@ The reason code strings are produced by the Rust `ReasonCode::as_str()` registry
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 reason codes (REPLAY_BUFFER_ERROR, DECOMPRESSION_BUDGET_EXCEEDED, PARSE_TIMEOUT, PARSE_BUDGET_EXCEEDED, SKIPPED_NO_ACCEPT, SKIPPED_CONDITIONAL) and delivery/decision counter separation |
 | 0.9.0 | 2026-07-09 | Kang | **Synchronized with observability-schema-v1 (single source of truth).** All reason codes switched to lowercase snake_case; eligibility checks 2–7 collapsed to `not_eligible`; scope-off → `disabled`; conversion outcomes → `converted`/`failed_open`/`failed_closed`; removed legacy `NGX_HTTP_MARKDOWN_INELIGIBLE_*` enum column; Accept negotiation split into `skipped_accept`/`skipped_no_accept`/`skipped_accept_reject` |
+| 0.7.0 | 2026-05-17 | Kang | Added v0.7.0 reason codes (REPLAY_BUFFER_ERROR, DECOMPRESSION_BUDGET_EXCEEDED, PARSE_TIMEOUT, PARSE_BUDGET_EXCEEDED, SKIPPED_NO_ACCEPT, SKIPPED_CONDITIONAL) and delivery/decision counter separation |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

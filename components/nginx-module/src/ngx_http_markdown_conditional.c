@@ -576,7 +576,8 @@ ngx_http_markdown_handle_if_none_match(ngx_http_request_t *r,
  *
  * @param r         The request structure
  * @param result    Conversion result (contains ETag)
- * @return          NGX_OK on success, NGX_ERROR on failure
+ * @return          NGX_DONE on success (request finalized), NGX_ERROR on failure,
+ *                  or rc from ngx_http_send_header on partial failure
  */
 ngx_int_t
 ngx_http_markdown_send_304(ngx_http_request_t *r,

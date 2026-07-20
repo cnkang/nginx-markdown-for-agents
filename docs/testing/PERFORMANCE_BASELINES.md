@@ -1,6 +1,8 @@
 # Performance Baselines (Local FFI + Conditional Microbench + NGINX E2E)
 
-**Measurement Date:** 2026-02-26  
+**Original Measurement Date:** 2026-02-26
+
+**Latest Scenario Measurement:** 2026-07-19 (Brotli streaming)
 **Scope:** Local release-build microbenchmarks for the Rust converter FFI path, the C conditional-request handler (`If-None-Match`) using the standalone test harness with real Rust FFI, and local real-NGINX HTTP E2E baselines.
 
 ## Summary
@@ -261,6 +263,48 @@ The output JSON includes a `memory_peak_method` field (`os_reported_peak` or `sa
 | large-5m | plain-html | full-buffer | — | — | — | — | Pending measurement |
 | large-5m | plain-html | incremental | — | — | — | — | Pending measurement |
 
+## Brotli Streaming Decompression — Performance Evidence
+
+The `brotli-streaming-first` scenario exercises Brotli streaming decompression
+with a 1 MiB chunked response compressed at Brotli quality 6. The retained run
+used the exact implementation commit `9734d12e`, NGINX 1.30.4, Rust 1.97.0,
+and Debian 12's libbrotlidec 1.0.9 on `linux-x86_64`.
+
+The canonical 1000-request run completed with zero failed or non-2xx requests,
+zero pre-commit fail-open events, 1030 streaming decompressions (including
+warm-up and probes), and byte-complete Markdown output. The retained raw report
+at `perf/baselines/module-baseline-brotli-091-raw.json` records the response
+status, normalized headers, body size and SHA-256, heading/tail checks, and curl
+exit status. Docker ran the x86_64 environment under host emulation, so latency
+and throughput are conservative portability evidence rather than a native
+production-capacity claim.
+
+| Metric | Recorded value |
+|--------|---------------:|
+| Requests completed / failed | 1000 / 0 |
+| Requests per second | 23.43 |
+| Latency p50 / p95 / p99 | 325 / 1359 / 1451 ms |
+| TTFB p50 / p95 | 9.350 / 9.943 ms |
+| Baseline / peak worker RSS | 8,404,992 / 47,415,296 bytes |
+| Streaming / full-buffer path hits | 1030 / 0 |
+| Pre-commit fail-open | 0 |
+| Zero-copy / copied output deliveries | 12,360 / 0 |
+
+**Metrics captured per scenario:**
+
+- `ttfb_p50_ms` — time to first decompressed byte (streaming path advantage)
+- `latency_p50_ms` / `latency_p95_ms` — total request latency
+- `streaming_requests_total` — request count routed through streaming
+- `decompression_streaming_total` — decompressions completed via streaming
+- `precommit_failopen_total` — pre-commit fail-open count (must be zero in canonical baseline)
+- `peak_rss_bytes` / `baseline_rss_bytes` — memory regression evidence
+
+The release gate requires this completed scenario, validates its metadata and
+real path counters, rejects missing output or excessive fail-open evidence,
+and evaluates latency and memory against the recorded baseline. A direct
+Brotli full-buffer comparison was not part of this retained run, so these data
+do not claim a measured relative speedup.
+
 ## Next Actions (Data-Driven)
 
 1. If optimizing for request latency, prioritize parser-path profiling/optimization before FFI micro-optimizations.
@@ -362,6 +406,6 @@ Single-request validation (`curl`, `Accept: text/markdown`):
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
