@@ -704,14 +704,14 @@ If your NGINX version is >= 1.24.0 but not listed in the matrix below, use the [
 | 1.28.3 | glibc | x86_64 | Full |
 | 1.28.3 | musl | aarch64 | Full |
 | 1.28.3 | musl | x86_64 | Full |
-| 1.30.3 | glibc | aarch64 | Full |
-| 1.30.3 | glibc | x86_64 | Full |
-| 1.30.3 | musl | aarch64 | Full |
-| 1.30.3 | musl | x86_64 | Full |
-| 1.31.2 | glibc | aarch64 | Full |
-| 1.31.2 | glibc | x86_64 | Full |
-| 1.31.2 | musl | aarch64 | Full |
-| 1.31.2 | musl | x86_64 | Full |
+| 1.30.4 | glibc | aarch64 | Full |
+| 1.30.4 | glibc | x86_64 | Full |
+| 1.30.4 | musl | aarch64 | Full |
+| 1.30.4 | musl | x86_64 | Full |
+| 1.31.3 | glibc | aarch64 | Full |
+| 1.31.3 | glibc | x86_64 | Full |
+| 1.31.3 | musl | aarch64 | Full |
+| 1.31.3 | musl | x86_64 | Full |
 <!-- END AUTO-GENERATED MATRIX -->
 
 <!-- BEGIN:release-matrix:installation-matrix -->
