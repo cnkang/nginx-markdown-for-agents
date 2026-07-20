@@ -4134,8 +4134,8 @@ test_create_helper_and_limit_branches(void)
     buf_size = (size_t) -1;
     rc = ngx_http_markdown_streaming_decomp_expand_buf(
         &heap_buf, &buf, &buf_size, 0, &test_log);
-    TEST_ASSERT(rc == NGX_ERROR,
-        "expand_buf should fail on size overflow");
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR,
+        "expand_buf should fail with OVERFLOW_ERROR on size overflow");
     TEST_ASSERT(heap_buf == NULL,
         "expand_buf overflow should clear heap pointer");
 

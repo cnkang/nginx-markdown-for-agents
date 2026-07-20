@@ -558,6 +558,15 @@ ngx_http_markdown_stream_postcommit_send_chain(
     ngx_int_t     rc;
 
 #ifdef MARKDOWN_STREAMING_ENABLED
+    /*
+     * Reset failure origin at entry so a successful send (which never
+     * sets the origin below) cannot leak a stale origin from a prior
+     * send.  Each failure branch then overwrites with the precise
+     * provenance (Spec: post-commit sender failure三分法).
+     */
+    ctx->streaming.classify.last_send_failure_origin =
+        NGX_HTTP_MD_SEND_ORIGIN_NONE;
+
     if (ctx->streaming.pending_output != NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "markdown postcommit: "
