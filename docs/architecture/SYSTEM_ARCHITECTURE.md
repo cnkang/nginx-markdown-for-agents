@@ -157,15 +157,21 @@ For non-eligible requests, the module stays out of the way and the original resp
 
 ## Key Architectural Tradeoffs
 
-### Full buffering in v1
+### Dual-engine: Full buffering + Streaming (since v0.8.0)
 
-The current architecture buffers the full eligible response before conversion. That makes correctness, deterministic output, and header handling much simpler, but it also means:
+The architecture supports two conversion engines:
 
-- larger responses consume more memory
-- conversion cannot start streaming output immediately
-- very large or streaming-style content should usually be bypassed
+- **Full-buffer engine** (default for small responses): buffers the full eligible response before conversion. This makes correctness, deterministic output, and header handling simpler. Tradeoffs:
+  - larger responses consume more memory
+  - conversion cannot start streaming output immediately
+  - very large or streaming-style content should usually be bypassed
 
-This tradeoff is documented in [ADR-0002](ADR/0002-full-buffering-approach.md).
+- **Streaming engine** (since v0.8.0, enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline (charset detection → tokenization → sanitization → state machine → emission). Tradeoffs:
+  - bounded memory per request (configurable via `markdown_limits streaming_buffer=<size>`)
+  - first Markdown bytes available before upstream finishes
+  - more complex state machine (fallback to full-buffer or passthrough on errors)
+
+The full-buffer tradeoff is documented in [ADR-0002](ADR/0002-full-buffering-approach.md). The streaming contract is in [RFC-0008](RFC-0008-streaming-conversion-support-contract.md) and [ADR-0011](ADR/0011-true-streaming-contract.md).
 
 ### Shared observability state
 
