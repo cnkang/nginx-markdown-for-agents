@@ -142,14 +142,18 @@ impl ScenarioRuntime {
     }
 }
 
-/// Write a minimal `nginx.conf` stub to `path`.
+/// Write an `nginx.conf` to `path`.
 ///
-/// The stub is intentionally minimal; scenario-specific configuration is
-/// layered on top by the scenario setup code.
+/// For the `brotli-streaming` scenario, produces a full multi-location
+/// config that loads the module .so and configures Brotli streaming
+/// routes.  For all other scenarios, writes a minimal stub that the
+/// scenario setup code layers additional configuration on top of.
 ///
 /// # Arguments
 ///
 /// * `path` - Destination path for the config file.
+/// * `scenario_name` - Scenario name used to select config layout.
+/// * `nginx_bin` - NGINX binary path (used to locate module .so).
 /// * `port` - NGINX listener port.
 /// * `upstream_port` - Upstream fixture port.
 fn write_nginx_conf_stub(

@@ -15,7 +15,7 @@
 #  11. auth cache verification (e2e-harness)
 #  12. status codes verification (e2e-harness)
 #
-# Migrated scenarios (5-9, 11-12) are delegated to the Rust e2e-harness binary.
+# Migrated scenarios (5, 8-9, 11-12) are delegated to the Rust e2e-harness binary.
 # Non-migrated scenarios remain on their canonical shell paths.
 #
 # Options:

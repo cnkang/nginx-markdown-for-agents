@@ -53,7 +53,7 @@ def _compress_brotli(data: bytes) -> bytes | None:
 
 
 def _iter_brotli_chunks(data: bytes, chunk_size: int) -> list[bytes]:
-    """Compress one Brotli stream with bounded decompression bursts."""
+    """Compress one Brotli stream preserving streaming bursts."""
     if _brotli_mod is None:
         raise RuntimeError(
             "streaming Brotli benchmarks require the Brotli Python package"
@@ -132,6 +132,9 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
         self, body: bytes, is_gzip: bool, is_deflate: bool, is_brotli: bool
     ) -> tuple[bytes, str | None]:
         """Apply requested compression codec to response body.
+
+        For Content-Encoding: gzip, the standard gzip format (RFC 1952)
+        is produced via gzip.compress().
 
         For Content-Encoding: deflate, RFC 9110 defines the format as
         zlib-wrapped deflate (RFC 1950).  The streaming decompressor

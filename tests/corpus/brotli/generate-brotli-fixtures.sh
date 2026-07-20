@@ -64,10 +64,7 @@ End of small fixture.
 EOF
 
 brotli --best -f "${SCRIPT_DIR}/small.md"
-# brotli compresses in-place by default (small.md → small.md.br), so recreate source
-# Actually, brotli --keep preserves the original:
-# Regenerate since brotli without --keep removes the source
-# Let's use --keep instead
+# brotli without --keep removes the source file; redo with --keep to preserve it.
 
 # Remove the .br we just made and redo with --keep
 rm -f "${SCRIPT_DIR}/small.md.br"

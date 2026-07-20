@@ -36,7 +36,6 @@ OUTPUT=""
 usage() {
   echo >&2 "usage: $0 --pid <pid> --interval <ms> --output <path>"
   exit 1
-  return 1
 }
 
 while [[ $# -gt 0 ]]; do
