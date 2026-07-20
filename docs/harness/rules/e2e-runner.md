@@ -82,8 +82,25 @@ Rationale:
   intended code path.
 - Explicit directives make test intent self-documenting.
 
+Naming clarity:
+- E2E location path names must clearly communicate the test's behavioral
+  intent.  Do not use path names that suggest one processing mode when the
+  config uses another (for example `/stream/` with `markdown_streaming off`).
+- Preferred naming conventions:
+  - `/streaming/`, `/streaming-*` — streaming path (`force` or profile
+    `streaming_first`)
+  - `/buffered/`, `/fullbuffer/`, `/cache-full/`, `/non-streaming/` —
+    full-buffer path (`markdown_streaming off`)
+  - `/passthrough/` — no conversion
+- Variables and fixture names should similarly reflect intent: use names
+  like `SMALL_END_TOKEN`, `OVERSIZE_LEN` over ambiguous short names.
+- When renaming a location path, update all references (curl URLs, readiness
+  probes, assertion labels, comments) in the same changeset.
+
 Verification:
 - `bash tools/harness/detect_e2e_streaming_config.sh`
 - Visual inspection: every location block with `markdown_cache_validation full`
   must have either `markdown_streaming off` or a comment explaining why `auto`
   is intentional.
+- Visual inspection: location path names match the declared `markdown_streaming`
+  mode.

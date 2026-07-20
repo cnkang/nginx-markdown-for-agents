@@ -694,7 +694,7 @@ http {
         listen 127.0.0.1:${PORT};
         server_name localhost;
 
-        location /stream/ {
+        location /buffered/ {
             markdown_filter on;
             markdown_accept wildcard;
             markdown_streaming off;
@@ -763,7 +763,7 @@ EOF
 
 echo "==> Starting NGINX on 127.0.0.1:${PORT}"
 "${NGINX_EXECUTABLE}" -p "${RUNTIME}" -c conf/nginx.conf
-markdown_wait_for_http "http://127.0.0.1:${PORT}/stream/small-valid" "NGINX" || exit 1
+markdown_wait_for_http "http://127.0.0.1:${PORT}/buffered/small-valid" "NGINX" || exit 1
 
 # Extract a numeric value from the JSON metrics endpoint by dotted path.
 # Args: $1 = dotted metric path (for example perf.backpressure_total)
@@ -831,7 +831,7 @@ assert_truncated_decompression_metric_delta() {
 echo "==> Case 1: chunked below max_size should convert to Markdown"
 small_line="$(curl -sS -D "${RAW_DIR}/small.hdr" -o "${RAW_DIR}/small.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 180 \
-  "http://127.0.0.1:${PORT}/stream/small-valid" \
+  "http://127.0.0.1:${PORT}/buffered/small-valid" \
   -w "${CURL_METRICS_FMT}")"
 echo "${small_line}" | tee "${RAW_DIR}/small.metrics" >/dev/null
 echo "${small_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "small-valid failed: ${small_line}" >&2; exit 1; }
@@ -851,7 +851,7 @@ grep -q "${SMALL_END_TOKEN}" "${RAW_DIR}/small.body" || {
 echo "==> Case 2: chunked above max_size should fail-open without truncation"
 oversize_line="$(curl -sS -D "${RAW_DIR}/oversize.hdr" -o "${RAW_DIR}/oversize.body" \
   -H "${ACCEPT_MARKDOWN_HEADER}" --max-time 240 \
-  "http://127.0.0.1:${PORT}/stream/oversize" \
+  "http://127.0.0.1:${PORT}/buffered/oversize" \
   -w "${CURL_METRICS_FMT}")"
 echo "${oversize_line}" | tee "${RAW_DIR}/oversize.metrics" >/dev/null
 echo "${oversize_line}" | grep -q "${PATTERN_HTTP_200}" || { echo "oversize failed: ${oversize_line}" >&2; exit 1; }
@@ -873,7 +873,7 @@ grep -q "${OVERSIZE_END_TOKEN}" "${RAW_DIR}/oversize.body" || {
 echo "==> Case 2b: oversized fail-open must accept later upstream chunks"
 delayed_line="$(curl -sS -D "${RAW_DIR}/delayed.hdr" \
   -o "${RAW_DIR}/delayed.body" -H "${ACCEPT_MARKDOWN_HEADER}" \
-  --max-time 240 "http://127.0.0.1:${PORT}/stream/delayed-oversize" \
+  --max-time 240 "http://127.0.0.1:${PORT}/buffered/delayed-oversize" \
   -w "${CURL_METRICS_FMT}")"
 echo "${delayed_line}" | grep -q "${PATTERN_HTTP_200}" || {
   echo "delayed oversize failed: ${delayed_line}" >&2
@@ -1620,9 +1620,9 @@ if [[ "${PROFILE}" == "stress" ]]; then
   echo "==> Stress profile: ApacheBench for chunked conversion and fail-open paths"
 
   ab -H "${ACCEPT_MARKDOWN_HEADER}" -n 60 -c 6 \
-    "http://127.0.0.1:${PORT}/stream/small-valid" > "${RAW_DIR}/ab_small.txt" 2>&1
+    "http://127.0.0.1:${PORT}/buffered/small-valid" > "${RAW_DIR}/ab_small.txt" 2>&1
   ab -H "${ACCEPT_MARKDOWN_HEADER}" -n 20 -c 2 \
-    "http://127.0.0.1:${PORT}/stream/oversize" > "${RAW_DIR}/ab_oversize.txt" 2>&1
+    "http://127.0.0.1:${PORT}/buffered/oversize" > "${RAW_DIR}/ab_oversize.txt" 2>&1
 
   small_failed="$(awk -F': *' '/Failed requests/ {print $2}' "${RAW_DIR}/ab_small.txt" | tr -d ' ')"
   small_non2xx="$(awk -F': *' '/Non-2xx responses/ {print $2}' "${RAW_DIR}/ab_small.txt" | tr -d ' ')"
