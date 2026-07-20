@@ -964,14 +964,19 @@ test_brotli_error_classification(void)
 
 /*
  * test_brotli_exact_budget_probe - Verify the exact-budget completion
- * probe for Brotli (both Scenario A and Scenario B).
+ * probe for Brotli.
  *
- * Scenario A: remaining==0 at call start → workspace_size gives 1 byte
- * probe workspace.  If the decoder completes without output, success
- * with out_len=0.  If it produces output, BUDGET_EXCEEDED.
+ * Post-completion no-op: after a first feed that fills the budget
+ * exactly, the decoder reports finished.  A subsequent feed with
+ * remaining==0 hits the finished short-circuit and returns NGX_OK
+ * with empty output (no re-exposure of prior bytes).
  *
  * Scenario B: mid-call NEEDS_MORE_OUTPUT with produced == remaining
  * → probe fires inside brotli_step.  Same completion semantics.
+ *
+ * The true Scenario A priority test (remaining < output, trailing
+ * data vs budget) is covered by
+ * test_brotli_scenario_a_trailing_data_priority().
  *
  * Tests validate the five probe outcomes plus edge cases.
  */
@@ -1005,14 +1010,13 @@ test_brotli_exact_budget_probe(void)
         "brotli compression should succeed");
 
     /*
-     * Test 1 (Scenario A): remaining==0 at call start, probe produces
-     * 0 bytes and returns SUCCESS → mark finished, return NGX_OK with
-     * out_len=0 (no re-exposure of prior-call bytes).
+     * Test 1 (post-completion no-op): remaining==0 at call start,
+     * decoder already finished from prior SUCCESS.  The finished
+     * short-circuit returns NGX_OK with out_len=0 (no re-exposure
+     * of prior-call bytes).
      *
      * Strategy: first feed with budget=text_len exactly fills the budget.
-     * Second feed with 0 remaining triggers the Scenario A probe.
-     * The decoder is already finished from the first feed (SUCCESS),
-     * so the post-completion guard returns NGX_OK with 0 output.
+     * Second feed with 0 remaining hits the finished guard directly.
      */
     test_pool_reset(&tp);
     decomp = ngx_http_markdown_streaming_decomp_create(
@@ -1295,23 +1299,30 @@ test_brotli_exact_budget_probe(void)
  * test_brotli_scenario_a_trailing_data_priority - Verify that FORMAT_ERROR
  * from trailing data has higher priority than BUDGET_EXCEEDED in Scenario A.
  *
- * Scenario A: remaining==0 at feed start, workspace_size allocates a 1-byte
- * probe workspace. The generic brotli_step runs the decoder. If the decoder
- * returns SUCCESS with trailing compressed bytes AND produced output that
- * exceeds the budget, the correct classification is FORMAT_ERROR (trailing
- * data), NOT BUDGET_EXCEEDED.
+ * Scenario A: budget < decompressed output size, so the decoder produces
+ * output that exceeds the budget AND returns SUCCESS with trailing bytes.
+ * The correct classification is FORMAT_ERROR (trailing data takes priority
+ * over budget exceeded).
  *
- * This test constructs the exact boundary condition by:
- *   1. Creating a Brotli stream with known decompressed size.
- *   2. Setting max_decompressed_size = text_len.
- *   3. Performing a first feed that fills the budget exactly.
- *   4. Appending trailing garbage to remaining compressed input.
- *   5. Feeding the trailing-garbage input in a second call where
- *      remaining==0 → must return FORMAT_ERROR, not BUDGET_EXCEEDED.
+ * This test provides true discriminating power: with the wrong priority
+ * order (budget check before trailing-data check), check_limit() would
+ * fire first and return BUDGET_EXCEEDED.  Only the correct order (trailing
+ * check before budget) produces FORMAT_ERROR.
+ *
+ * Construction:
+ *   1. Create a Brotli stream with known decompressed size text_len.
+ *   2. Set max_decompressed_size = text_len - 1 (budget < output).
+ *   3. Append trailing garbage after the valid compressed stream.
+ *   4. Feed in one call: workspace_size caps to remaining+1 = text_len
+ *      (just enough for decoder to produce full output).
+ *   5. Decoder returns SUCCESS with avail_in > 0 (trailing data) and
+ *      produced == text_len > remaining == text_len - 1.
+ *   6. Assert FORMAT_ERROR, not BUDGET_EXCEEDED.
  *
  * Branches covered:
  *   - brotli_step SUCCESS + avail_in>0 checked BEFORE check_limit
- *   - FORMAT_ERROR returned at exact-budget boundary with trailing data
+ *   - FORMAT_ERROR returned when both trailing-data and budget violations
+ *     co-exist (trailing-data wins)
  */
 static void
 test_brotli_scenario_a_trailing_data_priority(void)
@@ -1347,18 +1358,24 @@ test_brotli_scenario_a_trailing_data_priority(void)
     trailing_total = compressed_len + 3;
 
     /*
-     * First feed: set budget = text_len (exact budget). The decoder
-     * processes the entire valid stream in one shot, producing
-     * text_len bytes. Workspace from workspace_size is capped to
-     * remaining+1 = text_len+1 (probe byte). SUCCESS is returned
-     * by the decoder, avail_in > 0 (trailing data).
+     * First feed: set budget = text_len - 1 (one byte below full output).
+     * The decoder produces text_len bytes (exceeding the budget) AND
+     * returns SUCCESS with avail_in > 0 (trailing data).
      *
-     * With the correct priority (trailing data > budget), this must
-     * return FORMAT_ERROR, NOT BUDGET_EXCEEDED.
+     * This construction provides true discriminating power:
+     *   - Wrong priority (budget before trailing): check_limit fires
+     *     because produced (text_len) > remaining (text_len - 1),
+     *     returning BUDGET_EXCEEDED.
+     *   - Correct priority (trailing before budget): SUCCESS + trailing
+     *     is checked first, returning FORMAT_ERROR.
+     *
+     * Workspace from workspace_size is capped to remaining+1 = text_len
+     * (the probe byte), which is enough for the decoder to produce its
+     * full output in one shot.
      */
     test_pool_reset(&tp);
     decomp = ngx_http_markdown_streaming_decomp_create(
-        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, text_len);
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, text_len - 1);
     TEST_ASSERT(decomp != NULL,
         "brotli decompressor (Scenario A priority) created");
 
@@ -1368,10 +1385,12 @@ test_brotli_scenario_a_trailing_data_priority(void)
         decomp, trailing_buf, trailing_total,
         &out, &out_len, &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
-        "Scenario A: trailing data at exact budget must return "
+        "Scenario A: trailing data with over-budget output must return "
         "FORMAT_ERROR, not BUDGET_EXCEEDED");
     TEST_ASSERT(out == NULL && out_len == 0,
         "Scenario A: trailing-data error must not expose output");
+    TEST_ASSERT(decomp->finished == 0,
+        "Scenario A: FORMAT_ERROR must not mark stream as finished");
     ngx_http_markdown_streaming_decomp_cleanup(decomp);
     free(decomp);
 
