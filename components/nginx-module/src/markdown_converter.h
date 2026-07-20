@@ -809,7 +809,7 @@ typedef struct FFIHeaderEntry {
    */
   const uint8_t *key;
   /**
-   * Length of header name.
+   * Length of header name (0 for set-etag-placeholder).
    */
   uintptr_t key_len;
   /**

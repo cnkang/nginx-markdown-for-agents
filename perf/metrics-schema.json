@@ -360,7 +360,7 @@
                 "properties": {
                   "name": {
                     "type": "string",
-                    "enum": ["plain-small", "chunked-medium", "gzip-large", "large-body", "streaming-first", "gzip-streaming-first", "deflate-streaming-first"],
+                    "enum": ["plain-small", "chunked-medium", "gzip-large", "large-body", "streaming-first", "gzip-streaming-first", "deflate-streaming-first", "brotli-streaming-first"],
                     "description": "Scenario identifier"
                   },
                   "profile": {
