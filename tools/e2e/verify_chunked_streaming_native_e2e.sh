@@ -697,6 +697,7 @@ http {
         location /stream/ {
             markdown_filter on;
             markdown_accept wildcard;
+            markdown_streaming off;
             markdown_cache_validation full;
             markdown_limits memory=${MARKDOWN_MAX_SIZE} timeout=120s;
             markdown_error_policy pass;

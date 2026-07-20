@@ -135,6 +135,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 57 | build-safety | #ifdef-guarded function visibility: functions declared inside #ifdef FEATURE_GUARD must not be referenced outside that guard; detect_ifdef_guard_visibility.sh gates at write time |
 | 58 | security-cwe | Workflow input injection: GitHub Actions inputs must be routed through env vars before use in shell run blocks; direct ${{ inputs.* }} interpolation in run blocks is command injection; detect_workflow_input_injection.sh gates at write time |
 | 59 | nginx-idioms | Hardcoded HTTP status in reject paths: reject/error paths must return conf->error_status instead of hardcoded NGX_HTTP_BAD_GATEWAY; detect_hardcoded_http_status.sh provides advisory detection |
+| 60 | e2e-runner | E2E config directive consistency: streaming mode must match test intent; no implicit auto + blocking directive unless intentionally testing runtime-block mechanism; detect_e2e_streaming_config.sh advisory |
 
 ## Required Agent Workflow
 
@@ -258,6 +259,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Side-effect tests drive outcome through production branching, not manual mutation [14]
 - Rust: no unused helpers; #[cfg(feature)] import safety; doctests by visibility [22]
 - Coverage: 80% aggregate (90% critical paths) [25]
+- E2E nginx.conf: explicit `markdown_streaming` matching test intent; no implicit auto + blocking directive [60]
 
 **Shell** (S)
 - Use `[[` for all conditional tests (not `[`); case has default `*)`; messages to stderr; explicit return; usage matches flags [18]
@@ -552,6 +554,7 @@ remediation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-20 | Kang | Added Rule 60: E2E config directive consistency — streaming mode must match test intent; detect_e2e_streaming_config.sh advisory gate; fixed 4 E2E configs using implicit/explicit auto + cache_validation full |
 | 0.9.1 | 2026-07-19 | Kang | Strengthened Rule 38: `results.failopen_count` delivery-after-downstream-success contract applies uniformly to ALL fail-open paths (streaming, buffered, buffer-init/append, header filter); fixed C-001 buffer-init/append-failure and four header-filter fail-open paths that incremented `failopen_count` before downstream filter returned; added `failopen_delivery_after_downstream_test.c` regression test; updated `ngx_http_markdown_metric_inc_failopen` helper doc to state delivery-counter semantics; docs sync (encoding-charset Rule 44 Brotli streaming, dynconf-snapshot Rule 35 dry-run applied_mtime, streaming-backpressure Rule 38 NGX_DONE wording, streaming-check-order Engine→Policy, SYSTEM_ARCHITECTURE/PROJECT_STATUS Brotli streaming, Rust FFI doc accuracy — IncrementalConverterHandle fields, FFIHeaderEntry field docs, markdown_options_init defaults, lib.rs feature-gated default-on, ffi/convert.rs module doc, FFIErrorClass doc, exports.rs entry-point list, error/mod.rs FFI error code range, incremental.rs Markdown formatting, rust-converter README version pin, delivery_counter test notes) |
 | 0.9.1 | 2026-07-15 | Kang | Added Rules 56–59: orphan comment closers (56), #ifdef-guarded function visibility (57), workflow input injection (58), hardcoded HTTP status in reject paths (59); added detect_orphan_comment_close.py, detect_ifdef_guard_visibility.sh, detect_workflow_input_injection.sh, detect_hardcoded_http_status.sh; fixed release-rpm.yml input injection; fixed detect_doc_sync.py _iter_worktree_text_files complexity |
 | 0.9.1 | 2026-07-14 | Kang | Added `RELEASE_GATE_ALLOW_SKIP_MODULE=1` env-limited skip guard to `test-production-examples-nginx-t` (0.9.0 gate), mirroring the 091 module-benchmark skip contract; updated ADR-0019 blocking-semantics taxonomy |

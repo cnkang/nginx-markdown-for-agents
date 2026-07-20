@@ -166,6 +166,7 @@ http {
         location /full/ {
             markdown_filter on;
             markdown_accept wildcard;
+            markdown_streaming off;
             markdown_cache_validation full;
             # default memory=10m should force size-based bypass for 100m/1g
             markdown_log_verbosity warn;

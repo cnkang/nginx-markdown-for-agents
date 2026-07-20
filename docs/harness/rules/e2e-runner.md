@@ -1,6 +1,6 @@
 ---
 domain: e2e-runner
-rules: [37]
+rules: [37, 60]
 paths:
   - "tools/e2e-harness/**"
   - "tools/e2e/**"
@@ -45,3 +45,45 @@ Verification:
 - `cargo fmt --check --manifest-path tools/e2e-harness/Cargo.toml`
 - `cargo clippy --manifest-path tools/e2e-harness/Cargo.toml --all-targets --all-features -- -D warnings`
 - `make test-e2e-rust`
+
+### 60. E2E config directive consistency — streaming mode must match test intent
+
+Historical issues: PR #188, CI run 29727392197 (startup warning noise from
+contradictory `markdown_streaming auto` + `markdown_cache_validation full`).
+
+Required:
+- Every E2E test nginx.conf location block must have an explicit
+  `markdown_streaming` directive (`off`, `auto`, or `force`) that matches
+  the test's behavioral intent.  Do not rely on the implicit default (`auto`)
+  when the location also uses directives that block streaming at runtime
+  (for example `markdown_cache_validation full`).
+- When a test intends to exercise the **full-buffer** path, use
+  `markdown_streaming off`.  Do not use `markdown_streaming auto` combined
+  with a blocking directive — this is contradictory configuration that
+  generates a startup warning and obscures the test's intent.
+- When a test intends to exercise the **streaming** path, use
+  `markdown_streaming force` (or `auto` with no blocking directives).
+  Ensure the assertions actually verify streaming-specific behavior
+  (e.g., chunked transfer encoding, absence of Content-Length, streaming
+  metrics).
+- The one exception: tests that **intentionally validate the runtime-block
+  mechanism** (that is, verifying that `auto` + `full` correctly falls back
+  to full-buffer) may use the contradictory combination, but must document
+  this intent in a comment and assert streaming-block-specific indicators
+  (e.g., ETag presence, Content-Length, full-buffer metric delta).
+- `detect_e2e_streaming_config.sh` provides advisory detection of implicit
+  `auto` + blocking-directive combinations.
+
+Rationale:
+- Contradictory configs produce NGINX startup warnings that pollute CI output
+  and mask real problems.
+- Tests that claim to validate streaming but actually run full-buffer (or
+  vice versa) give false confidence and cannot detect regressions in the
+  intended code path.
+- Explicit directives make test intent self-documenting.
+
+Verification:
+- `bash tools/harness/detect_e2e_streaming_config.sh`
+- Visual inspection: every location block with `markdown_cache_validation full`
+  must have either `markdown_streaming off` or a comment explaining why `auto`
+  is intentional.
