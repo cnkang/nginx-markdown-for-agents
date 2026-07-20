@@ -36,3 +36,7 @@ updates:
     commit-message:
       prefix: "chore"
       include: scope
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action"
