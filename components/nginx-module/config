@@ -88,6 +88,7 @@ fi
 # NGX_MARKDOWN_BROTLI_STREAMING=auto|on|off (default: auto)
 # When on/auto, probe for <brotli/decode.h> and libbrotlidec; on success
 # define NGX_HTTP_BROTLI and link the decoder library.
+# On auto failure, silently fall back to bounded full-buffer decompression.
 ngx_markdown_brotli_mode=${NGX_MARKDOWN_BROTLI_STREAMING:-auto}
 
 case "$ngx_markdown_brotli_mode" in
