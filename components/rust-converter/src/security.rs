@@ -20,7 +20,7 @@
 //! # Defense Layers
 //!
 //! 1. **Input Validation**: Validate HTML structure and size before processing
-//! 2. **Element Sanitization**: Remove dangerous elements (script, embed, etc.); strip tags but preserve content for form and embedded content elements (iframe, object)
+//! 2. **Element Sanitization**: Remove dangerous elements (script, style, etc.); strip tags but preserve content for form and embedded content elements (iframe, object, embed)
 //! 3. **Attribute Sanitization**: Remove event handlers (`on*` prefix match) and dangerous attributes
 //! 4. **URL Sanitization**: Block javascript:, data:, and external URLs
 //! 5. **Entity Safety**: html5ever prevents XXE by default (no external entity resolution)
