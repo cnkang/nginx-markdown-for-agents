@@ -61,9 +61,7 @@ findings=0
 
 # --- Shell E2E scripts ---
 # Look for files that embed nginx.conf heredocs with markdown_cache_validation full
-shell_files=$(find "$SCAN_DIR/tools/e2e" -name "*.sh" -type f 2>/dev/null || true)
-
-for file in $shell_files; do
+while IFS= read -r -d '' file; do
     rel_path="${file#"${REPO_ROOT}"/}"
 
     # Find lines with markdown_cache_validation full
@@ -86,7 +84,7 @@ for file in $shell_files; do
             # Has explicit directive — check if it's "auto" with full validation
             if echo "$block_text" | grep -qE 'markdown_streaming[[:space:]]+auto'; then
                 # Check for intentional comment nearby
-                if echo "$block_text" | grep -qi 'intentional\|deliberately\|runtime.block\|forces full-buffer\|selects the full-buffer\|out of the streaming path'; then
+                if echo "$block_text" | grep -qiE 'intentional|deliberately|runtime\.block|forces full-buffer|selects the full-buffer|out of the streaming path'; then
                     continue
                 fi
                 echo "WARN: ${rel_path}:${line_num}: markdown_streaming auto + markdown_cache_validation full" >&2
@@ -102,12 +100,10 @@ for file in $shell_files; do
         fi
 
     done < <(grep -nF 'markdown_cache_validation full' "$file" || true)
-done
+done < <(find "$SCAN_DIR/tools/e2e" -name "*.sh" -type f -print0 2>/dev/null || true)
 
 # --- Rust E2E harness ---
-rust_files=$(find "$SCAN_DIR/tools/e2e-harness" -name "*.rs" -type f 2>/dev/null || true)
-
-for file in $rust_files; do
+while IFS= read -r -d '' file; do
     rel_path="${file#"${REPO_ROOT}"/}"
 
     while IFS= read -r match; do
@@ -123,7 +119,7 @@ for file in $rust_files; do
 
         if echo "$block_text" | grep -q 'markdown_streaming '; then
             if echo "$block_text" | grep -qE 'markdown_streaming[[:space:]]+auto'; then
-                if echo "$block_text" | grep -qi 'intentional\|deliberately\|runtime.block\|forces full-buffer\|selects the full-buffer\|out of the streaming path'; then
+                if echo "$block_text" | grep -qiE 'intentional|deliberately|runtime\.block|forces full-buffer|selects the full-buffer|out of the streaming path'; then
                     continue
                 fi
                 echo "WARN: ${rel_path}:${line_num}: markdown_streaming auto + markdown_cache_validation full" >&2
@@ -138,7 +134,7 @@ for file in $rust_files; do
         fi
 
     done < <(grep -nF 'markdown_cache_validation full' "$file" || true)
-done
+done < <(find "$SCAN_DIR/tools/e2e-harness" -name "*.rs" -type f -print0 2>/dev/null || true)
 
 if [[ $findings -gt 0 ]]; then
     if [[ $STRICT -eq 1 ]]; then
