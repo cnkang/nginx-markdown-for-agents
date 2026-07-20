@@ -1372,18 +1372,15 @@ ngx_http_markdown_streaming_decomp_brotli_step(
 
     *out_produced = *buf_size_ptr - decomp->brotli_avail_out;
 
-    if (ngx_http_markdown_streaming_decomp_check_limit(
-            decomp, *out_produced))
-    {
-        ngx_log_error(NGX_LOG_WARN, log, 0,
-            "markdown: reason=brotli_budget_exceeded "
-            "decompressed size %uz exceeds limit %uz",
-            decomp->total_decompressed + *out_produced,
-            decomp->max_decompressed_size);
-        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
-        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
-    }
-
+    /*
+     * Priority: trailing-data (FORMAT_ERROR) outranks budget check.
+     * A decoder that reports SUCCESS with leftover compressed input
+     * is a format violation regardless of whether the budget was also
+     * exhausted.  Check SUCCESS+trailing before check_limit so that
+     * Scenario A (remaining==0, probe produces output, SUCCESS with
+     * trailing data) is classified as FORMAT_ERROR, not
+     * BUDGET_EXCEEDED.
+     */
     if (brc == BROTLI_DECODER_RESULT_SUCCESS) {
         if (decomp->brotli_avail_in > 0) {
             ngx_log_error(NGX_LOG_ERR, log, 0,
@@ -1395,8 +1392,34 @@ ngx_http_markdown_streaming_decomp_brotli_step(
                 heap_buf_ptr);
             return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
         }
+
+        if (ngx_http_markdown_streaming_decomp_check_limit(
+                decomp, *out_produced))
+        {
+            ngx_log_error(NGX_LOG_WARN, log, 0,
+                "markdown: reason=brotli_budget_exceeded "
+                "decompressed size %uz exceeds limit %uz",
+                decomp->total_decompressed + *out_produced,
+                decomp->max_decompressed_size);
+            ngx_http_markdown_streaming_decomp_free_heap(
+                heap_buf_ptr);
+            return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+        }
+
         decomp->finished = 1;
         return 1;
+    }
+
+    if (ngx_http_markdown_streaming_decomp_check_limit(
+            decomp, *out_produced))
+    {
+        ngx_log_error(NGX_LOG_WARN, log, 0,
+            "markdown: reason=brotli_budget_exceeded "
+            "decompressed size %uz exceeds limit %uz",
+            decomp->total_decompressed + *out_produced,
+            decomp->max_decompressed_size);
+        ngx_http_markdown_streaming_decomp_free_heap(heap_buf_ptr);
+        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
 
     if (brc == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
@@ -1654,10 +1677,16 @@ ngx_http_markdown_streaming_decomp_workspace_size(
     size_t  remaining;
 
     if (in_len > (size_t) -1 / 4) {
-        *buf_size = (size_t) -1;
-    } else {
-        *buf_size = in_len * 4;
+        /*
+         * Multiplication overflow: in_len * 4 would wrap size_t.
+         * Signal explicitly so the caller maps this to INTERNAL
+         * (arithmetic overflow), not ALLOCATION (OOM from attempting
+         * ngx_alloc(SIZE_MAX)).
+         */
+        return NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR;
     }
+
+    *buf_size = in_len * 4;
     if (*buf_size < 4096) {
         *buf_size = 4096;
     }
@@ -1740,6 +1769,11 @@ ngx_http_markdown_streaming_decomp_allocate_workspace(
 
     rc = ngx_http_markdown_streaming_decomp_workspace_size(
         decomp, in_len, buf_size);
+    if (rc == NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR) {
+        ngx_http_markdown_streaming_decomp_free_heap(combined_input);
+        decomp->failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
+        return NGX_ERROR;
+    }
     if (rc != NGX_OK) {
         ngx_http_markdown_streaming_decomp_free_heap(combined_input);
         return rc;
@@ -2307,11 +2341,24 @@ ngx_http_markdown_streaming_decomp_finish(
         return NGX_ERROR;
     }
 
-    if (produced > (size_t) -1 - decomp->total_decompressed) {
-        decomp->total_decompressed = (size_t) -1;
-    } else {
-        decomp->total_decompressed += produced;
+    /*
+     * Apply the same overflow and budget validation used in the feed
+     * path.  An overflow in the finish tail is an internal error (the
+     * cumulative decompressed size wrapped around size_t), not a
+     * successful completion with saturated accounting.
+     */
+    {
+        ngx_int_t  limit_rc;
+
+        limit_rc = ngx_http_markdown_streaming_decomp_apply_limits(
+            decomp, produced, &buf, log);
+        if (limit_rc != NGX_OK) {
+            *out_data = NULL;
+            *out_len = 0;
+            return limit_rc;
+        }
     }
+
     *out_data = buf;
     *out_len = produced;
     return NGX_OK;

@@ -255,8 +255,7 @@ ngx_http_markdown_stream_postcommit_finish_via_rust(
 
 
 /*
- * Protocol-safe abort after honoring pending
- * output/backpressure state.
+ * Protocol-safe abort.
  *
  * Steps:
  *   1. Validate preconditions (must be in committed/post-commit state)

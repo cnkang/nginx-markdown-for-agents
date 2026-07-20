@@ -937,16 +937,14 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      *   (3) cache_validation NOT full (select_processing_path
      *       already forces full-buffer for full_support, so if
      *       we reach here streaming was selected → not full)
-     *   (4) encoding supported by the 0.9.1 streaming decompression
-     *       contract:
-     *       - deflate (zlib-wrapped per RFC 9110, or raw deflate):
-     *         supported via deferred header sniffing
      *       - gzip: supported with member-aware streaming inflate
-     *       - brotli: deferred, route to bounded full-buffer
-     *
-     * This check runs after select_processing_path() so that
-     * compression routing is enforced regardless of streaming policy.
-     */
+      *       - brotli: supported via incremental decoder when
+      *         NGX_HTTP_BROTLI is defined at compile time;
+      *         otherwise falls back to bounded full-buffer
+      *
+      * This check runs after select_processing_path() so that
+      * compression routing is enforced regardless of streaming policy.
+      */
     if (ngx_http_markdown_route_streaming_compression(r, ctx, conf)) {
         goto path_selected;
     }

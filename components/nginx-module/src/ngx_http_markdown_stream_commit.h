@@ -51,9 +51,9 @@
  * Two-phase commit:
  *   Phase 1: fallible operations (Vary, ETag, auth Cache-Control).
  *     If any fails, NGX_ERROR is returned before headers are sent
- *     downstream.  Earlier Phase 1 mutations (e.g. Vary added) may
- *     be present in headers_out but are invisible because the caller's
- *     fallback sends the original upstream headers.
+ *     downstream.  Phase 1 mutations are performed on a snapshot and
+ *     only applied to headers_out on Phase 2 success — no partial
+ *     mutations are visible to the fallback path.
  *   Phase 2: infallible mutations (Content-Type, Content-Length,
  *     Content-Encoding).  These always succeed.
  *
