@@ -1,25 +1,33 @@
 /*
- * Test: feature_gate_toggle_property
- *
- * Property-based tests for dynamic feature gate toggle behavior
- * (Property 13).
- *
- * Feature: 0.9.1-performance-optimization
- * Property 13: Dynamic Feature Gate Toggle
- *
- * Validates: Requirements 10.4, 10.5
- *
- * Verifies:
- *   1. HUP reload with zero_copy OFF causes all subsequent chunks
- *      to use pool-copy path (hybrid_decision always returns
- *      POOL_COPY when gate is OFF).
- *   2. Profile switch from streaming_first to balanced/strict_cache
- *      disables streaming decompression routing without restart.
- *
- * The test models directive changes and verifies that after toggle,
- * the production decision functions produce the correct results
- * across many random input sequences.
- */
+ /* * Test: feature_gate_toggle_property
+  *
+  * Property-based tests for dynamic feature gate toggle behavior
+  * (Property 13) and Brotli compile-time feature gate toggle
+  * (Property 1 subset).
+  *
+  * Feature: 0.9.1-performance-optimization
+  * Property 13: Dynamic Feature Gate Toggle
+  * Property 1 (subset): Brotli Feature Gate Toggle — verifies that
+  *   Brotli streaming decompression is enabled/disabled at compile
+  *   time based on NGX_HTTP_BROTLI, with full-buffer fallback when
+  *   disabled.
+  *
+  * Validates: Requirements 10.4, 10.5
+  *
+  * Verifies:
+  *   1. HUP reload with zero_copy OFF causes all subsequent chunks
+  *      to use pool-copy path (hybrid_decision always returns
+  *      POOL_COPY when gate is OFF).
+  *   2. Profile switch from streaming_first to balanced/strict_cache
+  *      disables streaming decompression routing without restart.
+  *   3. Brotli compile-time gate: with NGX_HTTP_BROTLI defined,
+  *      Brotli routes to STREAMING; without it, Brotli always routes
+  *      to FULLBUFFER.
+  *
+  * The test models directive changes and verifies that after toggle,
+  * the production decision functions produce the correct results
+  * across many random input sequences.
+  */
 
 #include "../include/test_common.h"
 

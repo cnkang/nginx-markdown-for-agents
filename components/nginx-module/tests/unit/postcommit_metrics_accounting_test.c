@@ -131,7 +131,7 @@ test_zero_copied_delivery_is_noop(void)
 }
 
 static void
-test_abort_metric_increments_once(void)
+test_abort_metric_increments_unconditionally(void)
 {
     ngx_http_markdown_metrics_t  metrics;
 
@@ -168,7 +168,7 @@ main(void)
     test_zero_pending_counts_without_watermark();
     test_copied_delivery_accumulates_bytes_and_events();
     test_zero_copied_delivery_is_noop();
-    test_abort_metric_increments_once();
+    test_abort_metric_increments_unconditionally();
     test_null_metrics_pointer_is_noop();
 
     TEST_PASS("postcommit production metric helper accounting");

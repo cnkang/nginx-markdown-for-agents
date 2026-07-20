@@ -6351,7 +6351,7 @@ test_streaming_decompression_error_metric_mapping(void)
     ngx_http_markdown_metrics = &metrics;
 
     error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
-        NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, NULL);
+        NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, NULL, NULL);
     TEST_ASSERT(error_code == ERROR_DECOMPRESSION_FORMAT_ERROR,
         "feed format sentinel should map to the format error code");
     TEST_ASSERT(metrics.decompressions.format_error_total == 1,
@@ -6363,7 +6363,7 @@ test_streaming_decompression_error_metric_mapping(void)
     ngx_memzero(&metrics, sizeof(metrics));
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
     error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
-        &ctx, NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT, NULL);
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT, NULL, NULL);
     TEST_ASSERT(error_code == ERROR_DECOMPRESSION_TRUNCATED_INPUT,
         "precommit truncated sentinel should retain its error code");
     TEST_ASSERT(metrics.decompressions.truncated_input_total == 1,
@@ -6374,7 +6374,7 @@ test_streaming_decompression_error_metric_mapping(void)
 
     ngx_memzero(&metrics, sizeof(metrics));
     error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
-        NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, NULL);
+        NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, NULL, NULL);
     TEST_ASSERT(error_code == ERROR_DECOMPRESSION_IO_ERROR,
         "feed I/O sentinel should map to the I/O error code");
     TEST_ASSERT(metrics.decompressions.io_error_total == 1,
@@ -6386,7 +6386,7 @@ test_streaming_decompression_error_metric_mapping(void)
     ngx_memzero(&metrics, sizeof(metrics));
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
-        &ctx, NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT, NULL);
+        &ctx, NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT, NULL, NULL);
     TEST_ASSERT(error_code == ERROR_POST_COMMIT,
         "postcommit truncation should remain terminal postcommit failure");
     TEST_ASSERT(metrics.decompressions.truncated_input_total == 1,
@@ -6425,7 +6425,7 @@ test_streaming_decomp_error_origin_classification(void)
     /* ALLOCATION origin → ERROR_MEMORY_LIMIT, no io_error_total */
     decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
     error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
-        NGX_ERROR, &decomp);
+        NGX_ERROR, &decomp, NULL);
     TEST_ASSERT(error_code == ERROR_MEMORY_LIMIT,
         "ALLOCATION origin must map to ERROR_MEMORY_LIMIT");
     TEST_ASSERT(metrics.decompressions.io_error_total == 0,
@@ -6439,7 +6439,7 @@ test_streaming_decomp_error_origin_classification(void)
     ngx_memzero(&metrics, sizeof(metrics));
     decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
     error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
-        NGX_ERROR, &decomp);
+        NGX_ERROR, &decomp, NULL);
     TEST_ASSERT(error_code == ERROR_INTERNAL,
         "INTERNAL origin must map to ERROR_INTERNAL");
     TEST_ASSERT(metrics.decompressions.io_error_total == 0,
@@ -6453,7 +6453,7 @@ test_streaming_decomp_error_origin_classification(void)
     ngx_memzero(&metrics, sizeof(metrics));
     decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_NONE;
     error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
-        NGX_ERROR, &decomp);
+        NGX_ERROR, &decomp, NULL);
     TEST_ASSERT(error_code == ERROR_INTERNAL,
         "NONE origin must fall back to ERROR_INTERNAL");
     TEST_ASSERT(metrics.decompressions.io_error_total == 0,
@@ -6462,7 +6462,7 @@ test_streaming_decomp_error_origin_classification(void)
     /* NULL decomp pointer (defensive) → ERROR_INTERNAL fallback */
     ngx_memzero(&metrics, sizeof(metrics));
     error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
-        NGX_ERROR, NULL);
+        NGX_ERROR, NULL, NULL);
     TEST_ASSERT(error_code == ERROR_INTERNAL,
         "NULL decomp must fall back to ERROR_INTERNAL");
     TEST_ASSERT(metrics.decompressions.io_error_total == 0,
@@ -6473,7 +6473,7 @@ test_streaming_decomp_error_origin_classification(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_POST;
     decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
     error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
-        &ctx, NGX_ERROR, &decomp);
+        &ctx, NGX_ERROR, &decomp, NULL);
     TEST_ASSERT(error_code == ERROR_MEMORY_LIMIT,
         "finalize ALLOCATION post-commit must return ERROR_MEMORY_LIMIT");
     TEST_ASSERT(metrics.decompressions.io_error_total == 0,
@@ -6484,7 +6484,7 @@ test_streaming_decomp_error_origin_classification(void)
     ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
     decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
     error_code = ngx_http_markdown_streaming_map_finalize_decomp_error(
-        &ctx, NGX_ERROR, &decomp);
+        &ctx, NGX_ERROR, &decomp, NULL);
     TEST_ASSERT(error_code == ERROR_INTERNAL,
         "finalize INTERNAL pre-commit must return ERROR_INTERNAL");
     TEST_ASSERT(metrics.decompressions.io_error_total == 0,
@@ -6497,14 +6497,14 @@ test_streaming_decomp_error_origin_classification(void)
     ngx_memzero(&metrics, sizeof(metrics));
     decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
     error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
-        NGX_ERROR, &decomp);
+        NGX_ERROR, &decomp, NULL);
     TEST_ASSERT(error_code == ERROR_MEMORY_LIMIT,
         "first call: ALLOCATION → ERROR_MEMORY_LIMIT");
 
     /* Simulate per-call reset + new failure with different origin */
     decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
     error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
-        NGX_ERROR, &decomp);
+        NGX_ERROR, &decomp, NULL);
     TEST_ASSERT(error_code == ERROR_INTERNAL,
         "second call: INTERNAL must not be stale ALLOCATION");
 
@@ -6514,13 +6514,13 @@ test_streaming_decomp_error_origin_classification(void)
     ngx_memzero(&metrics, sizeof(metrics));
     decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL;
     error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
-        NGX_ERROR, &decomp);
+        NGX_ERROR, &decomp, NULL);
     TEST_ASSERT(error_code == ERROR_INTERNAL,
         "first call: INTERNAL → ERROR_INTERNAL");
 
     decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
     error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
-        NGX_ERROR, &decomp);
+        NGX_ERROR, &decomp, NULL);
     TEST_ASSERT(error_code == ERROR_MEMORY_LIMIT,
         "second call: ALLOCATION must not be stale INTERNAL");
 
@@ -6531,7 +6531,7 @@ test_streaming_decomp_error_origin_classification(void)
     ngx_memzero(&metrics, sizeof(metrics));
     decomp.failure_origin = NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION;
     error_code = ngx_http_markdown_streaming_map_feed_decomp_error(
-        NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, &decomp);
+        NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR, &decomp, NULL);
     TEST_ASSERT(error_code == ERROR_DECOMPRESSION_FORMAT_ERROR,
         "typed FORMAT_ERROR must not be affected by stale origin");
     TEST_ASSERT(metrics.decompressions.format_error_total == 1,

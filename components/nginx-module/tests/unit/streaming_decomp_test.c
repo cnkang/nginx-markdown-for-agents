@@ -1292,6 +1292,118 @@ test_brotli_exact_budget_probe(void)
 
 
 /*
+ * test_brotli_scenario_a_trailing_data_priority - Verify that FORMAT_ERROR
+ * from trailing data has higher priority than BUDGET_EXCEEDED in Scenario A.
+ *
+ * Scenario A: remaining==0 at feed start, workspace_size allocates a 1-byte
+ * probe workspace. The generic brotli_step runs the decoder. If the decoder
+ * returns SUCCESS with trailing compressed bytes AND produced output that
+ * exceeds the budget, the correct classification is FORMAT_ERROR (trailing
+ * data), NOT BUDGET_EXCEEDED.
+ *
+ * This test constructs the exact boundary condition by:
+ *   1. Creating a Brotli stream with known decompressed size.
+ *   2. Setting max_decompressed_size = text_len.
+ *   3. Performing a first feed that fills the budget exactly.
+ *   4. Appending trailing garbage to remaining compressed input.
+ *   5. Feeding the trailing-garbage input in a second call where
+ *      remaining==0 → must return FORMAT_ERROR, not BUDGET_EXCEEDED.
+ *
+ * Branches covered:
+ *   - brotli_step SUCCESS + avail_in>0 checked BEFORE check_limit
+ *   - FORMAT_ERROR returned at exact-budget boundary with trailing data
+ */
+static void
+test_brotli_scenario_a_trailing_data_priority(void)
+{
+    static const uint8_t text[] = "Scenario A priority test data";
+    size_t                               text_len;
+    size_t                               compressed_len;
+    uint8_t                              compressed[512];
+    uint8_t                              trailing_buf[600];
+    size_t                               trailing_total;
+    test_pool_t                          tp;
+    ngx_http_markdown_streaming_decomp_t *decomp;
+    u_char                              *out;
+    size_t                               out_len;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("brotli Scenario A: trailing data > budget priority");
+
+    text_len = sizeof(text) - 1;
+    compressed_len = sizeof(compressed);
+    TEST_ASSERT(BrotliEncoderCompress(
+                    BROTLI_DEFAULT_QUALITY, BROTLI_DEFAULT_WINDOW,
+                    BROTLI_MODE_TEXT, text_len, text,
+                    &compressed_len, compressed)
+                == BROTLI_TRUE,
+        "brotli compression should succeed");
+
+    /* Append trailing garbage after valid stream */
+    memcpy(trailing_buf, compressed, compressed_len);
+    trailing_buf[compressed_len] = 0xDE;
+    trailing_buf[compressed_len + 1] = 0xAD;
+    trailing_buf[compressed_len + 2] = 0xBE;
+    trailing_total = compressed_len + 3;
+
+    /*
+     * First feed: set budget = text_len (exact budget). The decoder
+     * processes the entire valid stream in one shot, producing
+     * text_len bytes. Workspace from workspace_size is capped to
+     * remaining+1 = text_len+1 (probe byte). SUCCESS is returned
+     * by the decoder, avail_in > 0 (trailing data).
+     *
+     * With the correct priority (trailing data > budget), this must
+     * return FORMAT_ERROR, NOT BUDGET_EXCEEDED.
+     */
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, text_len);
+    TEST_ASSERT(decomp != NULL,
+        "brotli decompressor (Scenario A priority) created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, trailing_buf, trailing_total,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
+        "Scenario A: trailing data at exact budget must return "
+        "FORMAT_ERROR, not BUDGET_EXCEEDED");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "Scenario A: trailing-data error must not expose output");
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+
+    /*
+     * Control: same payload without trailing data should succeed with
+     * exact budget (confirms the priority fix doesn't break the
+     * normal exact-budget success path).
+     */
+    test_pool_reset(&tp);
+    decomp = ngx_http_markdown_streaming_decomp_create(
+        &tp.pool, NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI, text_len);
+    TEST_ASSERT(decomp != NULL,
+        "brotli decompressor (Scenario A control) created");
+
+    out = NULL;
+    out_len = 0;
+    rc = ngx_http_markdown_streaming_decomp_feed(
+        decomp, compressed, compressed_len,
+        &out, &out_len, &tp.pool, &test_log);
+    TEST_ASSERT(rc == NGX_OK,
+        "Scenario A control: exact budget without trailing must succeed");
+    TEST_ASSERT(out_len == text_len,
+        "Scenario A control: must produce exactly budget bytes");
+    test_pool_free_tracked_allocations();
+    ngx_http_markdown_streaming_decomp_cleanup(decomp);
+    free(decomp);
+
+    TEST_PASS("brotli Scenario A trailing-data priority verified");
+}
+
+
+/*
  * test_brotli_roundtrip_single_chunk - Verify end-to-end decompression
  * round-trip for Brotli when the entire compressed payload is fed in one
  * call.
@@ -4296,7 +4408,8 @@ test_finish_guard_and_alloc_branches(void)
  * Branches covered:
  *   - zero-length input is a no-op (no output)
  *   - initial output buffer allocation failure returns NGX_ERROR
- *   - saturated initial size (near SIZE_MAX) returns NGX_ERROR
+ *   - saturated initial size (near SIZE_MAX) returns NGX_ERROR with
+ *     failure_origin = INTERNAL (arithmetic overflow, not allocation)
  *   - output buffer size exceeding zlib uInt range returns NGX_ERROR
  */
 static void
@@ -4345,6 +4458,9 @@ test_feed_empty_and_large_size_paths(void)
         &tp.pool, &test_log);
     TEST_ASSERT(rc == NGX_ERROR,
         "feed should fail safely on saturated initial size");
+    TEST_ASSERT(decomp->failure_origin
+                == NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL,
+        "workspace_size overflow must set failure_origin to INTERNAL");
     g_alloc_return_static_once = 0;
 
     out = NULL;
@@ -4619,14 +4735,14 @@ test_finish_zlib_paths_and_helpers(void)
 
 /*
  * test_finish_wrapper_success_and_overflow_paths - Verify the finish
- * wrapper's success path and total_decompressed overflow saturation.
+ * wrapper's success path and total_decompressed overflow detection.
  *
  * Branches covered:
  *   - finish succeeds for a mocked continue-then-end inflate flow
  *   - finish marks the decompressor as finished
  *   - finish publishes tail output on success
  *   - finish accumulates produced bytes into total_decompressed
- *   - finish saturates total_decompressed to (size_t)-1 on overflow
+ *   - finish returns NGX_ERROR with INTERNAL origin on overflow
  */
 static void
 test_finish_wrapper_success_and_overflow_paths(void)
@@ -4670,11 +4786,14 @@ test_finish_wrapper_success_and_overflow_paths(void)
     out_len = 0;
     rc = ngx_http_markdown_streaming_decomp_finish(
         decomp, &out, &out_len, &tp.pool, &test_log);
-    TEST_ASSERT(rc == NGX_OK,
-        "finish should still succeed when total would overflow");
-    TEST_ASSERT(decomp->total_decompressed == (size_t) -1,
-        "finish should saturate total_decompressed on overflow");
-    /* out is pool-owned; reclaimed by the next test_pool_reset. */
+    TEST_ASSERT(rc == NGX_ERROR,
+        "finish must fail with NGX_ERROR when total would overflow");
+    TEST_ASSERT(decomp->failure_origin
+                == NGX_HTTP_MD_DECOMP_ORIGIN_INTERNAL,
+        "finish overflow must set failure_origin to INTERNAL");
+    TEST_ASSERT(out == NULL && out_len == 0,
+        "finish overflow must not expose output");
+    /* out is NULL; no pool-owned buffer to reclaim. */
     free(decomp);
 
     TEST_ASSERT(g_free_on_palloc_violation == 0,
@@ -5180,6 +5299,7 @@ main(void)
     test_truncated_brotli_finish_errors();
     test_brotli_error_classification();
     test_brotli_exact_budget_probe();
+    test_brotli_scenario_a_trailing_data_priority();
     test_brotli_roundtrip_single_chunk();
     test_brotli_roundtrip_multi_chunk();
     test_brotli_trailing_data_same_feed();

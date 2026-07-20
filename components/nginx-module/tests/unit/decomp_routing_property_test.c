@@ -652,7 +652,8 @@ test_property4_full_cache_always_fullbuffer(void)
 }
 
 /* ----------------------------------------------------------------
- * Only gzip and deflate can ever reach STREAMING in 0.9.1
+ * Only supported encodings (deflate, gzip, and Brotli when
+ * NGX_HTTP_BROTLI is defined) can reach STREAMING in 0.9.1
  * ---------------------------------------------------------------- */
 
 static void

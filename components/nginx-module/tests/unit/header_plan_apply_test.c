@@ -6,13 +6,14 @@
  *   - SET operation (new header + overwrite existing)
  *   - DELETE operation (existing + non-existing)
  *   - MODIFY operation (existing + non-existing)
- *   - Rollback on failure
+ *   - Prepare-phase abort on failure (no partial mutation)
  *   - Max entries limit enforcement
  *   - Unknown op_type handling
  *
  * Coverage targets:
  *   ngx_http_markdown_header_plan.c (apply_header_plan, plan_find_header,
- *   plan_apply_set, plan_apply_delete, plan_apply_modify, plan_rollback)
+ *   plan_prepare_set, plan_prepare_delete, plan_prepare_modify,
+ *   plan_commit_one)
  */
 
 #include "../include/test_common.h"
