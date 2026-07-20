@@ -64,12 +64,14 @@ permissions: {}
 #                              Includes: streaming tests via --all-features (Req 1)
 #   - nginx-c-tests          — C unit + integration tests (make test-nginx-unit)
 #   - coverage-gate          — C + Rust coverage (make coverage-c, coverage-rust)
-#   - runtime-regressions    — IMS + chunked streaming native E2E + large response
+#   - runtime-regressions    — IMS + chunked/Brotli streaming native E2E + large response
 #                              Includes: verify-chunked-native-e2e-smoke (Req 1.2)
+#                              Includes: verify-brotli-streaming-e2e
 #   - header-sync            — FFI header generation drift check
 #   - nginx-c-clang-smoke    — Clang cross-compiler smoke
 #   - nginx-c-sanitizers     — ASan/UBSan sanitizer smoke
 #   - matrix-release-tests   — Release-matrix Python test suite (Req 5)
+#   - brotli-build-matrix    — Brotli streaming build matrix (on/off, Ubuntu 22.04)
 #
 # EXPERIMENTAL (non-blocking — informational, continue-on-error or nightly):
 #   - perf-artifacts         — Performance baseline collection (continue-on-error: true)
