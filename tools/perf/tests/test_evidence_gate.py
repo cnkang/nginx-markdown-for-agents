@@ -262,8 +262,8 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
     assert "module-baseline-091-${{ github.sha }}" in workflow
 
 
-def test_module_baseline_contains_completed_seven_scenario_contract():
-    """The checked-in baseline contains all seven completed release scenarios."""
+def test_module_baseline_contains_completed_eight_scenario_contract():
+    """The checked-in baseline contains all eight completed release scenarios."""
     baseline_path = (
         Path(__file__).resolve().parents[3]
         / "perf"
@@ -414,7 +414,7 @@ def _make_benchmark_report(scenarios=None):
 
 
 def _load_canonical_module_baseline():
-    """Return an isolated copy of the checked-in seven-scenario baseline."""
+    """Return an isolated copy of the checked-in eight-scenario baseline."""
     baseline_path = (
         Path(__file__).resolve().parents[3]
         / "perf"
@@ -1016,8 +1016,8 @@ class TestSkippedCriticalScenarios:
         }
         assert _check_skipped_scenarios(report) == []
 
-    def test_seven_scenario_contract_rejects_skipped_chunked_medium(self):
-        """The seven-scenario release contract makes chunked-medium blocking."""
+    def test_eight_scenario_contract_rejects_skipped_chunked_medium(self):
+        """The eight-scenario release contract makes chunked-medium blocking."""
         report = {
             "scenarios": [
                 {"name": "plain-small", "status": "pass"},
@@ -1675,7 +1675,7 @@ class TestCriticalScenarioCompleteness:
         assert _check_missing_scenarios(report) == []
         assert _check_scenario_completion(report) == []
 
-    def test_seven_scenario_contract_rejects_missing_chunked_medium(self):
+    def test_eight_scenario_contract_rejects_missing_chunked_medium(self):
         """Removing chunked-medium produces missing evidence for the release gate."""
         report = _load_canonical_module_baseline()
         report["module_benchmark"]["scenarios"] = [
@@ -1692,7 +1692,7 @@ class TestCriticalScenarioCompleteness:
         ) in violations
 
     @pytest.mark.parametrize("status", ["failed", ""])
-    def test_seven_scenario_contract_rejects_incomplete_chunked_medium(
+    def test_eight_scenario_contract_rejects_incomplete_chunked_medium(
         self, status,
     ):
         """Failed or empty chunked-medium status is incomplete evidence."""
@@ -1945,7 +1945,7 @@ class TestEnvironmentCompatibility:
             "current=1048516 vs baseline=5390",
         )]
 
-    def test_seven_scenario_contract_compares_chunked_medium_input_bytes(self):
+    def test_eight_scenario_contract_compares_chunked_medium_input_bytes(self):
         """Current and baseline chunked-medium fixtures must be byte-identical."""
         current = _load_canonical_module_baseline()
         baseline = _load_canonical_module_baseline()

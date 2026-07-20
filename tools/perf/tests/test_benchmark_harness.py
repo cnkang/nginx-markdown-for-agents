@@ -620,7 +620,7 @@ class TestSchemaWellFormedness:
         self._assert_object_has_required_fields(items, "name", "status")
 
     def test_scenario_name_enum_values(self):
-        """Scenario schema freezes all seven required scenario names."""
+        """Scenario schema freezes all eight required scenario names."""
         mb_props = _load_schema()["module_benchmark"]["report_schema"]["properties"]["module_benchmark"]
         items = mb_props["properties"]["scenarios"]["items"]
         name_prop = items["properties"]["name"]
@@ -632,6 +632,7 @@ class TestSchemaWellFormedness:
             "streaming-first",
             "gzip-streaming-first",
             "deflate-streaming-first",
+            "brotli-streaming-first",
         }
         assert set(name_prop.get("enum", [])) == expected_names
         status_prop = items["properties"]["status"]
