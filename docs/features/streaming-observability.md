@@ -73,8 +73,8 @@ versions; removal requires a major version bump.
 | 8 | `streaming_block_304_response` | passthrough | `304 Not Modified` carries no body |
 
 **Note:** Reason codes are additive only. Removal requires a major version bump.
-The 9-variant enum is defined in `components/rust-converter/src/decision/streaming.rs`
-(`StreamingBlockReason`, `#[repr(u8)]`).
+
+These reason codes are defined in the NGINX C module configuration logic and reported through the unified diagnostics and metrics system. They are not part of the Rust `ReasonCode` enum in `components/rust-converter/src/decision/reason_code.rs`.
 
 ---
 
@@ -176,6 +176,6 @@ while `nginx_markdown_streaming_candidate_total` > 0:
 
 1. Check if `markdown_streaming` is set to `force` or `auto`.
 2. Verify `markdown_stream_threshold` is smaller than typical response sizes.
-3. Check the content coding and cache-validation mode: gzip and deflate can
-   stream when decompression is enabled and validation is not `full`; Brotli
-   and unsupported codings do not use streaming decompression.
+3. Check the content coding and cache-validation mode: gzip, deflate, and
+   Brotli can stream when decompression is enabled and validation is not
+   `full`; unsupported codings do not use streaming decompression.

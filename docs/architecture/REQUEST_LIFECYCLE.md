@@ -127,7 +127,7 @@ Possible outcomes:
 - no compression detected: continue on the fast path
 - gzip, deflate, or Brotli detected with streaming selected and cache
   validation not `full`: use incremental decompression before streaming
-  conversion; Brotli requires a build with `NGX_HTTP_BROTLI`
+  - Brotli requires a build with Brotli streaming enabled (`NGX_MARKDOWN_BROTLI_STREAMING=auto` probes and enables if available; `=on` forces it)
 - a supported coding whose build or validation requirements force buffering:
   use bounded full-buffer decompression
 - unsupported compression detected: mark the request ineligible and fall back to passthrough behavior

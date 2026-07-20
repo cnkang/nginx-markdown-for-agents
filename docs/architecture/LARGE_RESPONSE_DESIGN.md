@@ -1,15 +1,22 @@
 # Large Response Optimization Design
 
-This document describes the architecture for handling large HTTP responses in `nginx-markdown-for-agents`. It covers the incremental processing path, the threshold-based routing logic, the relationship to the existing full-buffer path, and the non-degradation guarantees that protect small-response performance.
+This document describes the architecture for handling large HTTP responses in `nginx-markdown-for-agents`. It covers the streaming processing path, the policy-based routing logic, the relationship to the full-buffer path, and the non-degradation guarantees that protect small-response performance.
 
 ## Context
 
-The current architecture buffers the entire upstream response body before invoking the Rust converter through FFI. This works well for small and medium responses but creates memory pressure and latency spikes for large documents (100KB+). The current optimization introduces an optional incremental processing path as a routing and API-separation step: it lets large responses follow a distinct conversion path and establishes the Rust/C interfaces needed for future streaming work, but it does not yet eliminate the full-buffer memory profile because buffering still happens before conversion.
+Since v0.8.0, the module supports **two conversion engines**:
+
+- **Full-buffer engine** (default for small responses): buffers the complete eligible response body before conversion through FFI. This remains the simplest and most tested path.
+- **Streaming engine** (enabled via `markdown_streaming`): processes HTML incrementally through a bounded-memory pipeline (charset detection → tokenization → sanitization → state machine → emission) with per-request memory limits and backpressure.
+
+The legacy incremental path (feature-gated behind the `incremental` Rust feature and routed by the retired `markdown_large_body_threshold` directive) was a stepping stone toward true streaming. It is **no longer the recommended path** for new deployments; see [RFC-0008](RFC-0008-streaming-conversion-support-contract.md) and [ADR-0023](ADR/0023-single-streaming-policy.md) for the streaming design.
 
 For background on the existing request lifecycle and buffering model, see:
 
 - [REQUEST_LIFECYCLE.md](REQUEST_LIFECYCLE.md) — full request flow from header filter through body filter, including buffering, decompression, conditional requests, and fail-open behavior
 - [PERFORMANCE_BASELINES.md](../testing/PERFORMANCE_BASELINES.md) — current FFI and E2E latency baselines, stage breakdown, and memory usage data
+- [ADR-0002](ADR/0002-full-buffering-approach.md) — why the original path uses full buffering
+- [ADR-0004](ADR/0004-streaming-bounded-memory-conversion.md) — bounded-memory streaming design
 
 ## Design Principles
 
@@ -238,10 +245,10 @@ For all inputs that produce correct results through the full-buffer path, the in
 
 ## Rollback
 
-Disabling the incremental path requires no code changes:
+Disabling the streaming path requires no code changes:
 
 ```nginx
-markdown_large_body_threshold off;
+markdown_streaming off;
 ```
 
 ```bash

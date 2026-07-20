@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| Release | 0.9.0 (in progress) |
+| Release | 0.9.1 |
 | Source of truth | `components/nginx-module/src/ngx_http_markdown_header_plan.{c,h}` |
 
 This document records the response-header mutation contract for the
