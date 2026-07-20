@@ -267,6 +267,8 @@ harness-security-checks:
 	bash tools/harness/detect_workflow_input_injection.sh
 	bash tools/harness/detect_hardcoded_http_status.sh
 	PYTHONPATH=. python3 tools/harness/detect_open_without_path_validation.py --path tools/ --strict
+	python3 tools/harness/detect_e2e_streaming_config.py --strict
+	python3 tools/harness/detect_regex_safety.py --strict
 	PYTHONPATH=. python3 tools/harness/detect_python_complexity.py
 	PYTHONPATH=. python3 tools/harness/detect_auto_generated_naming.py --strict
 	bash tools/harness/detect_version_consistency.sh
@@ -297,6 +299,8 @@ test-harness:
 	bash tools/harness/tests/test_detect_ifdef_guard_visibility.sh
 	bash tools/harness/tests/test_detect_workflow_input_injection.sh
 	bash tools/harness/tests/test_detect_hardcoded_http_status.sh
+	bash tools/harness/tests/test_detect_e2e_streaming_config.sh
+	bash tools/harness/tests/test_detect_regex_safety.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
 license-check:

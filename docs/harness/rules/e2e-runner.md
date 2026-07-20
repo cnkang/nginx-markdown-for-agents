@@ -71,7 +71,7 @@ Required:
   to full-buffer) may use the contradictory combination, but must document
   this intent in a comment and assert streaming-block-specific indicators
   (e.g., ETag presence, Content-Length, full-buffer metric delta).
-- `detect_e2e_streaming_config.sh` provides advisory detection of implicit
+- `detect_e2e_streaming_config.py` provides advisory detection of implicit
   `auto` + blocking-directive combinations.
 
 Rationale:
@@ -98,7 +98,8 @@ Naming clarity:
   probes, assertion labels, comments) in the same changeset.
 
 Verification:
-- `bash tools/harness/detect_e2e_streaming_config.sh`
+- `python3 tools/harness/detect_e2e_streaming_config.py`
+- `python3 tools/harness/detect_e2e_streaming_config.py --strict` (CI-blocking mode)
 - Visual inspection: every location block with `markdown_cache_validation full`
   must have either `markdown_streaming off` or a comment explaining why `auto`
   is intentional.
