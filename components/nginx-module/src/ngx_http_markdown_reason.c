@@ -33,6 +33,14 @@ ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
  *   1  = SkippedAccept       ("skipped_accept")
  *   2  = SkippedNoAccept     ("skipped_no_accept")
  *   3  = SkippedConditional  ("skipped_conditional")
+ *   4  = DecompressionError  ("decompression_error")
+ *   5  = DecompressionBudgetExceeded ("decompression_budget_exceeded")
+ *   6  = DecompressionFormatError ("decompression_format_error")
+ *   7  = DecompressionTruncatedInput ("decompression_truncated_input")
+ *   8  = DecompressionIoError ("decompression_io_error")
+ *   9  = Timeout             ("timeout")
+ *  10  = BudgetExceeded      ("budget_exceeded")
+ *  11  = ReplayError         ("replay_error")
  *  12  = SkippedAcceptReject ("skipped_accept_reject")
  *  13  = FfiPanic            ("ffi_panic")
  *  14  = NotEligible         ("not_eligible")
@@ -41,6 +49,12 @@ ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
  *  17  = FailedClosed        ("failed_closed")
  *  18  = ConversionError     ("conversion_error")
  *  19  = MemoryBudgetExceeded ("memory_budget_exceeded")
+ *  20  = Overload            ("overload")
+ *  21  = InvalidDynconf      ("invalid_dynconf")
+ *  22  = DegradedSnapshot    ("degraded_snapshot")
+ *  23  = HeaderPlanApplyError ("header_plan_apply_error")
+ *  24  = StreamingMidFlightError ("streaming_mid_flight_error")
+ *  25  = BypassNoTransform   ("bypass_no_transform")
  */
 #define REASON_CONVERTED                 0
 #define REASON_SKIPPED_ACCEPT            1

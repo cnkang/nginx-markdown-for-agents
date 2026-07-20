@@ -65,7 +65,8 @@ ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
  * The metric fires once per request at the first protocol-safe abort
  * attempt, regardless of whether the terminal chain delivery succeeds,
  * returns NGX_AGAIN (backpressure), or fails.  The one-shot guard is
- * implemented via ctx->streaming.completion.postcommit_abort_recorded.
+ * implemented by the caller (ngx_http_markdown_stream_postcommit_abort)
+ * via ctx->streaming.completion.postcommit_abort_recorded.
  */
 void
 ngx_http_markdown_metrics_record_postcommit_abort(void)

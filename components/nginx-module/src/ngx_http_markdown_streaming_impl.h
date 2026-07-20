@@ -1401,6 +1401,7 @@ ngx_http_markdown_streaming_record_postcommit_failure(
 
         /*
          * Record common post-commit failure accounting.
+         * Increments postcommit_error_total, failed_total, and conversions_failed.
          * Action-specific safe-finish/abort metrics are recorded
          * by the corresponding action paths.
          */
@@ -1950,9 +1951,34 @@ ngx_http_markdown_streaming_fallback_to_fullbuffer(
  * Post-Commit error handler.
  *
  * After headers or Markdown bytes have been sent, the response
- * cannot revert to HTML or send an HTTP error status.  Attempts
- * Rust safe_finish first; falls back to abort + empty last_buf
- * only if safe_finish fails.
+ * cannot revert to HTML or send an HTTP error status.
+ *
+ * Branches (in order):
+ * 1. Rust safe_finish succeeds (produces closing bytes or terminal
+ *    chain) → immediate downstream send. If send returns NGX_AGAIN,
+ *    save pending provenance as CLOSING_MARKDOWN or TERMINAL_ONLY
+ *    and defer category/recorder until resume.
+ * 2. Rust safe_finish returns NGX_AGAIN → save original error,
+ *    mark safe_finish_failure_pending=1, pending_kind=CLOSING_MARKDOWN.
+ *    On resume: success → record original category/recorder; failure
+ *    → handle_output_loss() directly.
+ * 3. Rust safe_finish returns error before producing bytes (converter
+ *    state prevents finalization) → Protocol_Safe_Abort (terminal chain
+ *    send). Record original category/recorder BEFORE abort. If terminal
+ *    send returns NGX_AGAIN, pending_kind=TERMINAL_ONLY with
+ *    failure_recorded=1.
+ * 4. Rust safe_finish produces no closing bytes, terminal-only chain
+ *    send immediately fails → record original category/recorder,
+ *    return NGX_ERROR. No abort, no retry.
+ * 5. Final fallback → postcommit_abort() (protocol-safe disconnect).
+ *    Only reached when safe_finish cannot be attempted or has
+ *    already failed in a way that precludes retry.
+ *
+ * In all branches: exactly one global failure-category increment and
+ * exactly one record_postcommit_failure() call per failed request.
+ * conversions_succeeded, streaming.succeeded_total, results.delivery_count
+ * are NOT incremented — even if closing/terminal bytes eventually
+ * deliver successfully (the delivery only completes failure accounting).
  */
 static ngx_int_t
 ngx_http_markdown_streaming_handle_postcommit_error(
@@ -2193,9 +2219,12 @@ ngx_http_markdown_streaming_precommit_error(
      * have a matching conversions_failed increment so that
      * attempted >= succeeded + failed holds.
      *
-     * For resource-limit errors, also increment
-     * failures_resource_limit for the global failure-reason
-     * breakdown (streaming security enforcement eligibility audit §3.1).
+     * Failure-reason classification (three-way):
+     *   - resource-limit errors (MEMORY_LIMIT, BUDGET_EXCEEDED,
+     *     DECOMPRESSION_BUDGET_EXCEEDED, PARSE_TIMEOUT,
+     *     PARSE_BUDGET_EXCEEDED) -> failures_resource_limit
+     *   - ERROR_INTERNAL -> failures_system
+     *   - all other errors -> failures_conversion
      */
     NGX_HTTP_MARKDOWN_METRIC_INC(conversions_failed);
 
@@ -2732,7 +2761,8 @@ ngx_http_markdown_streaming_handle_feed_result(
 static uint32_t
 ngx_http_markdown_streaming_map_feed_decomp_error(
     ngx_int_t rc,
-    const ngx_http_markdown_streaming_decomp_t *decomp)
+    const ngx_http_markdown_streaming_decomp_t *decomp,
+    ngx_log_t *log)
 {
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
@@ -2771,7 +2801,25 @@ ngx_http_markdown_streaming_map_feed_decomp_error(
     /*
      * INTERNAL, NONE, or a NULL decompressor all fail closed as INTERNAL.
      * Do not increment decompressions.io_error_total for these origins.
+     *
+     * Log an invariant violation when origin is NONE or decomp is NULL:
+     * a well-behaved decompressor must always set a specific origin
+     * before returning bare NGX_ERROR.  Silent fallback would mask
+     * future omissions.
      */
+    if (log != NULL
+        && (decomp == NULL
+            || decomp->failure_origin
+               == NGX_HTTP_MD_DECOMP_ORIGIN_NONE))
+    {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+            "markdown: invariant violation: "
+            "bare decompression NGX_ERROR without failure origin "
+            "(decomp=%p, origin=%d)",
+            decomp,
+            decomp != NULL ? (int) decomp->failure_origin : -1);
+    }
+
     return ERROR_INTERNAL;
 }
 
@@ -2779,7 +2827,8 @@ static uint32_t
 ngx_http_markdown_streaming_map_finalize_decomp_error(
     const ngx_http_markdown_ctx_t *ctx,
     ngx_int_t rc,
-    const ngx_http_markdown_streaming_decomp_t *decomp)
+    const ngx_http_markdown_streaming_decomp_t *decomp,
+    ngx_log_t *log)
 {
     if (rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED) {
         NGX_HTTP_MARKDOWN_METRIC_INC(decompressions.budget_exceeded_total);
@@ -2832,7 +2881,25 @@ ngx_http_markdown_streaming_map_finalize_decomp_error(
     /*
      * INTERNAL, NONE, or a NULL decompressor all fail closed as INTERNAL.
      * Do not increment decompressions.io_error_total for these origins.
+     *
+     * Log an invariant violation when origin is NONE or decomp is NULL:
+     * a well-behaved decompressor must always set a specific origin
+     * before returning bare NGX_ERROR.  Silent fallback would mask
+     * future omissions.
      */
+    if (log != NULL
+        && (decomp == NULL
+            || decomp->failure_origin
+               == NGX_HTTP_MD_DECOMP_ORIGIN_NONE))
+    {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+            "markdown: invariant violation: "
+            "bare decompression NGX_ERROR without failure origin "
+            "(decomp=%p, origin=%d)",
+            decomp,
+            decomp != NULL ? (int) decomp->failure_origin : -1);
+    }
+
     return ERROR_INTERNAL;
 }
 
@@ -3018,7 +3085,8 @@ ngx_http_markdown_streaming_process_chunk(
                 ngx_http_markdown_streaming_map_feed_decomp_error(
                     rc,
                     (const ngx_http_markdown_streaming_decomp_t *)
-                        ctx->streaming.decompressor);
+                        ctx->streaming.decompressor,
+                    r->connection->log);
 
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
@@ -3121,7 +3189,8 @@ ngx_http_markdown_streaming_finalize_decomp(
             ngx_http_markdown_streaming_map_finalize_decomp_error(
                 ctx, rc,
                 (const ngx_http_markdown_streaming_decomp_t *)
-                    ctx->streaming.decompressor);
+                    ctx->streaming.decompressor,
+                r->connection->log);
 
         ngx_log_error(NGX_LOG_ERR,
             r->connection->log, 0,

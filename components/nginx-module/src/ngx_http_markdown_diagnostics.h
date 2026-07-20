@@ -231,7 +231,7 @@ ngx_int_t ngx_http_markdown_diagnostics_recording_active(void);
  *   reason - NUL-terminated reason code string (may be NULL)
  *
  * Returns:
- *   Canonical discriminant (0..17), or -1 for NULL/unknown strings.
+ *   Canonical discriminant (0..24), or -1 for NULL/unknown strings.
  */
 ngx_int_t ngx_http_markdown_diagnostics_reason_to_code(const char *reason);
 

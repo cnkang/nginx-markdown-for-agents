@@ -89,9 +89,10 @@ static size_t ngx_http_markdown_diagnostics_json_size(
  *   - capacity is in (0, NGX_HTTP_MARKDOWN_DIAG_MAX_CAPACITY]
  *   - count <= capacity (no overcount)
  *   - head < capacity (valid write position)
+ *   - count <= NGX_HTTP_MARKDOWN_DIAG_MAX_CAPACITY (double-bounded count)
  *
  * Parameters:
- *   state   - diagnostics state to validate (may be NULL)
+ *   state - diagnostics state to validate (may be NULL)
  *   invalid - if non-NULL, set to 1 when ring exists but is invalid
  *
  * Returns:
@@ -1501,12 +1502,11 @@ ngx_http_markdown_log_decision_path(ngx_http_request_t *r,
 
     /*
      * Verbosity gating:
-     * - error/warn: only emit for failure outcomes
-     * - info/debug: emit for all outcomes
-     *
-     * Override: when the diagnostics endpoint is enabled, emit the decision
-     * log regardless of verbosity so the operator-facing log and the
-     * diagnostics ring stay consistent.
+     * - LOG_DEBUG: NGX_LOG_DEBUG (all outcomes)
+     * - LOG_INFO or lower + success: NGX_LOG_INFO
+     * - LOG_INFO or lower + failure: NGX_LOG_WARN
+     * - Non-failure outcomes at LOG_WARN or LOG_ERROR are suppressed entirely
+     *   (unless the diagnostics endpoint is enabled, see override below)
      */
     if (effective_verbosity <= NGX_HTTP_MARKDOWN_LOG_WARN
         && !is_failure
