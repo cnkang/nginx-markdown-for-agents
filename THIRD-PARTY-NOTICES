@@ -147,7 +147,7 @@ Section B: Rust Conversion Engine Dependencies
 
 --------------------------------------------------------------------------------
 
-9.  regex 1.13.0
+9.  regex 1.13.1
     https://github.com/rust-lang/regex
     License: MIT OR Apache-2.0
     Copyright (c) 2014 The Rust Project Developers
