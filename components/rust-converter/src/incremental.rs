@@ -83,7 +83,7 @@ impl IncrementalConverter {
     /// use nginx_markdown_converter::incremental::IncrementalConverter;
     /// let opts = ConversionOptions::default();
     /// let _conv = IncrementalConverter::new(opts);
-    /// ```ignore
+    /// ```
     pub fn new(options: ConversionOptions) -> Self {
         Self {
             options,

@@ -570,7 +570,7 @@ pub struct FFIHeaderEntry {
     pub op_type: u8,
     /// Pointer to header name (NUL-terminated, borrowed from plan; NULL for set-etag-placeholder).
     pub key: *const u8,
-    /// Length of header name.
+    /// Length of header name (0 for set-etag-placeholder).
     pub key_len: usize,
     /// Pointer to header value (NUL-terminated, borrowed from plan; NULL for delete, delete-all, and set-etag-placeholder).
     pub value: *const u8,

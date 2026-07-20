@@ -103,6 +103,8 @@ pub use exports::{
     markdown_decompress_bounded, markdown_decompress_free, markdown_detect_conflicts,
     markdown_free_conflicts, markdown_negotiate_accept, markdown_result_free,
     markdown_trusted_proxies_free, markdown_trusted_proxies_new, markdown_trusted_proxies_push,
+    markdown_options_init, markdown_result_init, markdown_header_plan_init, markdown_decide_eligibility,
+    markdown_decide_conditional, markdown_build_header_plan, markdown_header_plan_free,
 };
 
 #[cfg(feature = "incremental")]
