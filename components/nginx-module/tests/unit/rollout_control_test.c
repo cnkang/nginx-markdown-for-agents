@@ -183,10 +183,15 @@ ngx_http_markdown_decomp_routing_decision(
 
     /*
      * Condition 4: encoding must be supported by streaming
-     * decompressor. Gzip and deflate are supported in 0.9.1.
+     * decompressor. Gzip, deflate, and Brotli (when compiled)
+     * are supported in 0.9.1.
      */
     if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
-        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
+        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+#ifdef NGX_HTTP_BROTLI
+        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+#endif
+        ) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }
 

@@ -9,9 +9,11 @@ This detector blocks when it finds documentation drift. It is intentionally
 conservative to avoid false positives.
 
 Detection strategy:
-  1. Check if CHANGELOG.md mentions recent features/fixes
+  1. Check if CHANGELOG.md exists and has version entries
   2. Check if README mentions key configuration directives
-  3. Check if key public API types are referenced in docs
+  3. Check if installation guide is current and valid
+  4. Check public config contract (directive tables, chart sync,
+     Prometheus catalog, inventory, removed symbol absence)
 
 Usage:
   python3 tools/harness/detect_doc_sync.py [directory]
@@ -83,7 +85,7 @@ REMOVED_STREAM_SYMBOL_RE = re.compile(
 
 
 def check_changelog_exists(project_root: Path) -> List[str]:
-    """Check that CHANGELOG.md exists and has recent entries."""
+    """Check that CHANGELOG.md exists and has version entries."""
     changelog = project_root / 'CHANGELOG.md'
     if not changelog.exists():
         return ["CHANGELOG.md not found"]
@@ -103,30 +105,29 @@ def check_changelog_exists(project_root: Path) -> List[str]:
 def check_readme_mentions_key_features(project_root: Path) -> List[str]:
     """Check that README mentions key features."""
     warnings = []
-    
+
     for readme_name in ['README.md', 'README_zh-CN.md']:
         readme = project_root / readme_name
         if not readme.exists():
             continue
-        
+
         try:
             content = readme.read_text(encoding='utf-8')
         except Exception as exc:
             warnings.append(f"{readme_name}: unreadable: {exc}")
             continue
-        
+
         # Check for key configuration directives
         key_directives = [
             'markdown_filter',
             'markdown_limits',
             'markdown_profile',
         ]
-        for directive in key_directives:
-            if directive not in content:
-                warnings.append(
-                    f"{readme_name}: Key directive '{directive}' not mentioned"
-                )
-    
+        warnings.extend(
+            f"{readme_name}: Key directive '{directive}' not mentioned"
+            for directive in key_directives
+            if directive not in content
+        )
     return warnings
 
 
@@ -185,7 +186,7 @@ def _extract_directive_entry(content: str, directive: str) -> str | None:
         re.DOTALL,
     )
     match = pattern.search(content)
-    return match.group(1) if match is not None else None
+    return match[1] if match is not None else None
 
 
 def _check_directive_table(content: str) -> List[str]:
@@ -227,7 +228,7 @@ def _extract_flavor_handler(content: str) -> str | None:
         content,
         flags=re.DOTALL,
     )
-    return match.group(0) if match is not None else None
+    return match[0] if match is not None else None
 
 
 def _check_flavor_handler(content: str) -> List[str]:
@@ -390,12 +391,11 @@ def _check_public_inventory(directives: str, inventory: str) -> List[str]:
             )
 
     reject_section = inventory.partition("### Reject-only migration directives")[2]
-    for name in rejected:
-        if f"`{name}`" not in reject_section:
-            errors.append(
-                f"{PUBLIC_INVENTORY_PATH}: reject-only directive {name} is "
-                "missing from the reject-only registry"
-            )
+    errors.extend(
+        f"{PUBLIC_INVENTORY_PATH}: reject-only directive {name} is missing from the reject-only registry"
+        for name in rejected
+        if f"`{name}`" not in reject_section
+    )
     return errors
 
 
@@ -411,7 +411,10 @@ def _check_otel_reject_docs(directives: str, guide: str) -> List[str]:
             guide,
             flags=re.DOTALL,
         )
-        if section_match is None or "reject-only in 0.9.1" not in section_match.group(1):
+        if (
+            section_match is None
+            or "reject-only in 0.9.1" not in section_match[1]
+        ):
             errors.append(
                 f"{CONFIGURATION_GUIDE_PATH}: {name} must be documented as "
                 "reject-only in 0.9.1"
@@ -421,7 +424,6 @@ def _check_otel_reject_docs(directives: str, guide: str) -> List[str]:
 
 def _check_observability_examples(troubleshooting: str) -> List[str]:
     """Block known non-production diagnostics fields and retired metric names."""
-    errors: List[str] = []
     forbidden = {
         '"version"': "diagnostics version field",
         '"uptime_seconds"': "diagnostics uptime_seconds field",
@@ -431,11 +433,11 @@ def _check_observability_examples(troubleshooting: str) -> List[str]:
         "nginx_markdown_streaming_choice_total": "retired streaming metric name",
         "nginx_markdown_conversion_duration_seconds": "retired latency metric name",
     }
-    for token, label in forbidden.items():
-        if token in troubleshooting:
-            errors.append(
-                f"{STREAMING_TROUBLESHOOTING_PATH}: forbidden {label} is present"
-            )
+    errors: List[str] = [
+        f"{STREAMING_TROUBLESHOOTING_PATH}: forbidden {label} is present"
+        for token, label in forbidden.items()
+        if token in troubleshooting
+    ]
     return errors
 
 

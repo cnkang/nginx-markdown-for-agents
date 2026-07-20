@@ -1170,6 +1170,29 @@ typedef struct {
              * output to drain before safe_finish is allowed to run. */
             ngx_flag_t                    postcommit_error_after_pending;
             uint32_t                      postcommit_error_code;
+
+            /* A safe-finish terminal or closing chain is downstream-owned.
+             * Record the original decoder/parser failure only after that
+             * pending chain has a definitive delivery result. */
+            ngx_flag_t                    safe_finish_error_pending;
+            uint32_t                      safe_finish_error_code;
+
+            /* Safe-finish produced closing Markdown that could not be
+             * constructed or delivered.  The Rust handle is consumed, so
+             * the caller must hard-abort instead of sending a clean terminal. */
+            ngx_flag_t                    safe_finish_output_loss;
+
+            /* Rust safe-finish succeeded with zero closing bytes, but the
+             * empty terminal chain send failed definitively.  The caller
+             * must NOT retry the terminal via abort — propagate the send
+             * failure directly. */
+            ngx_flag_t                    safe_finish_terminal_send_failed;
+
+            /* One-shot latch: protocol-safe abort metric has been recorded
+             * for this request.  Independent of stream_sm.state because
+             * callers (stream_on_error) may pre-transition the state before
+             * invoking postcommit_abort(). */
+            ngx_flag_t                    postcommit_abort_recorded;
         } completion;
     } streaming;
 } ngx_http_markdown_ctx_t;
@@ -1452,6 +1475,7 @@ typedef struct {
  */
 void ngx_http_markdown_metrics_record_postcommit_pending(size_t bytes);
 void ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes);
+void ngx_http_markdown_metrics_record_postcommit_abort(void);
 
 /*
  * Per-path metric node stored in the shared RB-tree.
@@ -1765,6 +1789,7 @@ ngx_http_markdown_decompress(ngx_http_request_t *r,
 #define NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR     -101
 #define NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT  -102
 #define NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR         -103
+#define NGX_HTTP_MARKDOWN_DECOMP_OVERFLOW_ERROR   -105
 
 /*
  * Internal return code for conditional-request Bypass outcome

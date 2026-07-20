@@ -72,13 +72,7 @@ exact NGINX version it will run on.
 
 ## Build Matrix
 
-The initial release targets the following architecture and NGINX version
-combinations:
-
-| Architecture | NGINX Branch | Version | Package Formats |
-|-------------|-------------|---------|-----------------|
-| amd64 (x86_64) | stable | 1.26.x | .deb, .rpm |
-| arm64 (aarch64) | stable | 1.26.x | .deb, .rpm |
+The module is built and verified for multiple NGINX releases and platforms. For the complete, detailed compatibility breakdown, see the [Platform Compatibility Matrix](#platform-compatibility-matrix) at the bottom of this document.
 
 ### Artifact Naming
 
@@ -347,5 +341,6 @@ the module from source against your local NGINX installation.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.7.0 | 2026-05-18 | Kiro | Initial compatibility guide for prebuilt package release |
+| 0.9.1 | 2026-07-17 | Kang | Consolidated build matrix references to prevent version conflicts with dynamic support matrix for v0.9.1. |
 | 0.8.3 | 2026-06-26 | Kang | Updated artifact naming examples to 0.8.3 |
+| 0.7.0 | 2026-05-18 | Kiro | Initial compatibility guide for prebuilt package release |

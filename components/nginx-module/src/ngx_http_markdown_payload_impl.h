@@ -520,8 +520,6 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    ngx_http_markdown_metric_inc_failopen(conf);
-
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: fail-open strategy - returning original HTML");
     ngx_http_markdown_reclassify_fail_open_path(ctx);
@@ -532,6 +530,17 @@ ngx_http_markdown_handle_buffer_init_failure(ngx_http_request_t *r,
     }
 
     rc = ngx_http_next_body_filter(r, in);
+
+    /*
+     * Rule 38/23: increment failopen_count only after the downstream
+     * body filter confirms delivery (NGX_OK or NGX_DONE).  Counting at
+     * the decision point would inflate the delivery metric when the
+     * downstream send later fails (header forwarding error, allocation
+     * failure, or NGX_AGAIN that never resumes successfully).
+     */
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        ngx_http_markdown_metric_inc_failopen(conf);
+    }
 
     /*
      * Return the downstream result directly (typically NGX_OK).
@@ -582,8 +591,6 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    ngx_http_markdown_metric_inc_failopen(conf);
-
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: fail-open strategy - returning original HTML");
     ctx->eligible = 0;
@@ -593,6 +600,16 @@ ngx_http_markdown_handle_buffer_append_failure(ngx_http_request_t *r,
     }
 
     rc = ngx_http_markdown_fail_open_with_buffered_prefix(r, ctx, cl);
+
+    /*
+     * Rule 38/23: increment failopen_count only after the downstream
+     * body filter confirms delivery (NGX_OK or NGX_DONE).  Counting at
+     * the decision point would inflate the delivery metric when the
+     * replay send later fails.
+     */
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        ngx_http_markdown_metric_inc_failopen(conf);
+    }
 
     /*
      * Preserve the downstream result.  The oversized chain may not be the

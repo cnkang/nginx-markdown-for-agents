@@ -50,6 +50,31 @@ ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
     NGX_HTTP_MARKDOWN_METRIC_INC(perf.copied_output_total);
 }
 
+/*
+ * Record a protocol-safe postcommit abort metric increment.
+ *
+ * Semantics: this metric counts protocol-safe abort ATTEMPTS via
+ * postcommit_abort() — i.e., attempts to send an empty terminal
+ * chain to gracefully close a truncated streaming response.
+ *
+ * NOT counted by this metric:
+ *   - Hard aborts via handle_output_loss() (connection-reset with no
+ *     protocol-safe terminal; those are counted by the failure_reason
+ *     metrics: failures_resource_limit or failures_conversion).
+ *
+ * The metric fires once per request at the first protocol-safe abort
+ * attempt, regardless of whether the terminal chain delivery succeeds,
+ * returns NGX_AGAIN (backpressure), or fails.  The one-shot guard is
+ * implemented by the caller (ngx_http_markdown_stream_postcommit_abort)
+ * via ctx->streaming.completion.postcommit_abort_recorded.
+ */
+void
+ngx_http_markdown_metrics_record_postcommit_abort(void)
+{
+    NGX_HTTP_MARKDOWN_METRIC_INC(
+        streaming.streaming_failure_postcommit_abort);
+}
+
 #endif /* MARKDOWN_STREAMING_ENABLED */
 
 #endif /* NGX_HTTP_MARKDOWN_POSTCOMMIT_METRICS_IMPL_H */

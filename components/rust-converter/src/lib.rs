@@ -5,15 +5,31 @@
 //!
 //! # Architecture
 //!
-//! The library is structured into several modules:
-//! - `ffi`: C-compatible FFI interface for NGINX integration
+//! The library is structured into several module groups:
+//!
+//! **Conversion pipeline:**
 //! - `parser`: HTML5 parsing using html5ever
 //! - `converter`: Markdown generation from DOM tree
-//! - `charset`: Character encoding detection and handling
 //! - `metadata`: Page metadata extraction
+//! - `charset`: Character encoding detection and handling
+//! - `decompress`: Streaming-safe bounded decompression (gzip, deflate, brotli)
+//! - `security`: Input validation and sanitization
 //! - `token_estimator`: Token count estimation for LLMs
 //! - `etag_generator`: ETag generation using BLAKE3
-//! - `security`: Input validation and sanitization
+//!
+//! **HTTP decision and negotiation:**
+//! - `decision`: Pure decision engine (context → decision + reason code)
+//! - `negotiator`: Accept header negotiation (RFC 9110 q-value logic)
+//! - `conditional`: Conditional request evaluation (ETag/If-Modified-Since)
+//! - `header_plan`: Header mutation planning shared across FFI
+//! - `forwarded`: Forwarded/X-Forwarded header parsing
+//!
+//! **FFI boundary:**
+//! - `ffi`: C-compatible FFI interface for NGINX integration
+//!
+//! **Feature-gated:**
+//! - `incremental`: Incremental processing API (enabled by default)
+//! - `streaming`: Bounded-memory streaming conversion (enabled by default)
 //!
 //! # Safety
 //!
@@ -41,11 +57,11 @@ pub mod parser;
 pub mod security;
 pub mod token_estimator;
 
-// Incremental processing API (feature-gated, off by default)
+// Incremental processing API (feature-gated, enabled by default)
 #[cfg(feature = "incremental")]
 pub mod incremental;
 
-// Streaming conversion API (feature-gated, off by default)
+// Streaming conversion API (feature-gated, enabled by default)
 #[cfg(feature = "streaming")]
 pub mod streaming;
 

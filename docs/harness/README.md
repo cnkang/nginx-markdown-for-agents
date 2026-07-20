@@ -90,9 +90,9 @@ repo-owned truth surfaces (`AGENTS.md`, `docs/harness/`, `tools/harness/`,
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |
+| 0.8.3 | 2026-06-26 | Kang | Added version-consistency verification family and release-manifest verification |
+| 0.8.2 | 2026-06-13 | Codex | Added static security and supply-chain gate entrypoint |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.5 | 2026-04-24 | Codex | Added harness-remediation entrypoint |
 | 0.5.5 | 2026-04-24 | Codex | Added nginx-protocol-safety (auth/cache/conditional safety) and release-governance entrypoints |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
-| 0.8.2 | 2026-06-13 | Codex | Added static security and supply-chain gate entrypoint |
-| 0.8.3 | 2026-06-26 | Kang | Added version-consistency verification family and release-manifest verification |
+| 0.5.0 | 2026-04-21 | docs-standardization | Added update tracking section |

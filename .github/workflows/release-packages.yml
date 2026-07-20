@@ -220,6 +220,7 @@ jobs:
             curl-minimal \
             pcre2-devel \
             zlib-devel \
+            brotli-devel \
             openssl-devel \
             tar \
             gzip \
@@ -354,6 +355,7 @@ jobs:
       - name: Configure NGINX with dynamic module
         env:
           NGINX_VERSION: ${{ matrix.nginx_version }}
+          NGX_MARKDOWN_BROTLI_STREAMING: "on"
         run: |
           cd "${NGINX_SRC}"
           ./configure \
@@ -406,6 +408,20 @@ jobs:
             echo "ERROR: build/ngx_http_markdown_filter_module.so is not a valid ELF file" >&2
             exit 1
           fi
+        shell: bash
+
+      - name: Verify Brotli runtime dependency
+        run: |
+          command -v readelf >/dev/null 2>&1 || {
+            echo "ERROR: readelf not found; install binutils in the release build image" >&2
+            exit 1
+          }
+          dynamic_section="$(readelf -d build/ngx_http_markdown_filter_module.so)"
+          if ! grep -Eq 'NEEDED.*libbrotlidec\.so' <<<"${dynamic_section}"; then
+            echo "ERROR: release module is not linked to libbrotlidec" >&2
+            exit 1
+          fi
+          echo "Brotli decoder dependency verified." >&2
         shell: bash
 
       - name: Verify required FFI symbols

@@ -40,7 +40,7 @@ make docs-check
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.6.0 | 2026-04-28 | v0.6.0-planning | Initial pack definition |
+| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.6.0 | 2026-05-03 | Codex | Covered implementation-header and config/doc routing for OTel changes |
 | 0.6.0 | 2026-05-03 | Codex | Added trace-context header-list traversal sync point |
-| 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.6.0 | 2026-04-28 | v0.6.0-planning | Initial pack definition |

@@ -139,6 +139,11 @@ ngx_http_markdown_metrics_record_postcommit_copied_delivery(size_t bytes)
     UNUSED(bytes);
 }
 
+void
+ngx_http_markdown_metrics_record_postcommit_abort(void)
+{
+}
+
 /* Include the decision engine source directly */
 #include "../../src/ngx_http_markdown_stream_state.h"
 #include "../../src/ngx_http_markdown_stream_state.c"

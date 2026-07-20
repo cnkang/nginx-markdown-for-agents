@@ -2,8 +2,8 @@
  * NGINX Markdown Filter Module - Accept Header Negotiation
  *
  * Delegates Accept header content negotiation to the Rust FFI
- * (markdown_negotiate_accept) which implements RFC 7231 §5.3.2
- * q-value comparison and RFC 9110 tie-break rules.
+ * (markdown_negotiate_accept) which implements RFC 9110 §12.5.1
+ * q-value comparison and specificity tie-break rules.
  *
  * The C side retains only the NGINX request-level glue:
  * extracting the Accept header from ngx_http_request_t and
@@ -90,8 +90,8 @@ ngx_http_markdown_get_accept_header(ngx_http_request_t *r)
 /*
  * Determine if request should be converted to Markdown.
  *
- * Delegates to markdown_negotiate_accept FFI for RFC 7231 §5.3.2
- * q-value comparison with RFC 9110 tie-break rules.
+ * Delegates to markdown_negotiate_accept FFI for RFC 9110 §12.5.1
+ * q-value comparison with specificity tie-break rules.
  *
  * The FFIAcceptResult.reason field maps to skip metrics:
  *   0: Convert (text/markdown preferred)

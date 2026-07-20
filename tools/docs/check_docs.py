@@ -25,8 +25,7 @@ MAINTAINED_ROOT_DOCS = {"AGENTS.md", "README.md", "README_zh-CN.md"}
 LINK_RE = re.compile(r"(!?\[[^\]]+\]\(([^)]+)\))")
 HAN_RE = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]")
 SPEC_INDEX_RE = re.compile(
-    r"\bspecs?\s*(?:1[2-9]|[2-9]\d)"
-    r"(?:\s*[-–]\s*(?:1[2-9]|[2-9]\d))?\b",
+    r"\bspecs?\s*0*\d+(?:\s*[-–]\s*0*\d+)?\b",
     re.IGNORECASE,
 )
 KIRO_PATH_RE = re.compile(r"(?P<path>\.kiro/[A-Za-z0-9._/*-]+)")
@@ -77,7 +76,8 @@ def iter_markdown_files() -> list[Path]:
     return sorted(
         p
         for p in candidates
-        if is_maintained_markdown(p.relative_to(ROOT).as_posix())
+        if p.is_file()
+        and is_maintained_markdown(p.relative_to(ROOT).as_posix())
     )
 
 
@@ -331,6 +331,73 @@ def check_internal_reference_policy(
     return errors
 
 
+def _parse_document_update_version(
+    version: str,
+) -> tuple[int, ...] | tuple[int, int, int, str]:
+    """Return a sortable key for a document-update version cell."""
+    normalized = version.strip().strip("`*[]()\"'")
+    if normalized.startswith("v"):
+        normalized = normalized[1:]
+    try:
+        return tuple(int(part) for part in normalized.split("."))
+    except ValueError:
+        return (0, 0, 0, normalized)
+
+
+def _document_update_table_lines(content: str) -> list[str]:
+    """Extract the first table under a Document Updates heading."""
+    match = re.search(r"^## Document Updates\s*$", content, re.MULTILINE | re.IGNORECASE)
+    if match is None:
+        return []
+
+    table_lines: list[str] = []
+    for line in content[match.end() :].splitlines():
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            table_lines.append(line)
+        elif table_lines or stripped.startswith("#"):
+            break
+    return table_lines
+
+
+def _document_update_rows_are_sorted(table_lines: list[str]) -> bool:
+    """Return whether table data rows descend by version and date."""
+    if len(table_lines) < 3:
+        return True
+
+    data_lines = table_lines[2:]
+    rows = []
+    for line in data_lines:
+        cells = [cell.strip() for cell in line.split("|")]
+        if len(cells) >= 3:
+            rows.append((_parse_document_update_version(cells[1]), cells[2], line))
+
+    expected = [row[2] for row in sorted(rows, key=lambda row: row[:2], reverse=True)]
+    return expected == data_lines
+
+
+def check_document_updates_order(files: list[Path]) -> list[str]:
+    """Verify Document Updates tables use descending version/date order."""
+    errors: list[str] = []
+
+    for f in files:
+        try:
+            content = f.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+
+        if not _document_update_rows_are_sorted(
+            _document_update_table_lines(content)
+        ):
+            errors.append(
+                f"{f}: '## Document Updates' table rows must be maintained "
+                "in descending chronological order (highest version and "
+                "newest date on top)"
+            )
+
+    return errors
+
+
 def main() -> int:
     """Entry point: run all doc consistency checks and print a report.
 
@@ -351,6 +418,7 @@ def main() -> int:
         )
     )
     failures.extend(check_duplicate_sync())
+    failures.extend(check_document_updates_order(files))
 
     if failures:
         print("Documentation checks failed:")
@@ -367,6 +435,7 @@ def main() -> int:
     print("- Operator configuration examples: OK")
     print("- Unreleased/stable release status consistency: OK")
     print("- Duplicate canonical/mirror sync: OK")
+    print("- Document Updates chronological order (descending): OK")
     return 0
 
 

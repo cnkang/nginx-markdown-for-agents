@@ -68,6 +68,11 @@ typedef struct {
  *   - On NGX_AGAIN: buffer retained by module, NOT freed,
  *     pool cleanup remains registered as safety net
  *   - freed flag prevents double-free
+ *
+ * Scope: this simulator covers NGX_OK and NGX_AGAIN only.
+ * Production `ngx_http_markdown_streaming_delivery_ok()` also treats
+ * NGX_DONE as a successful delivery; that path is covered by the
+ * streaming body_filter suite.
  * ---------------------------------------------------------------- */
 
 typedef struct {

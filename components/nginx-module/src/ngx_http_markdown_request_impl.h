@@ -225,6 +225,8 @@ ngx_http_markdown_handle_unsupported_compression(
     ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf)
 {
+    ngx_int_t  rc;
+
     ctx->eligible = 0;
     ctx->error.last_category =
         NGX_HTTP_MARKDOWN_ERROR_CONVERSION;
@@ -247,8 +249,6 @@ ngx_http_markdown_handle_unsupported_compression(
         return (ngx_int_t) conf->error_status;
     }
 
-    ngx_http_markdown_metric_inc_failopen(conf);
-
     ngx_log_error(NGX_LOG_WARN,
         r->connection->log, 0,
         "markdown: unsupported "
@@ -258,7 +258,12 @@ ngx_http_markdown_handle_unsupported_compression(
     ngx_http_markdown_log_failure_decision(
         r, ctx, conf);
     ctx->headers_forwarded = 1;
-    return ngx_http_next_header_filter(r);
+    rc = ngx_http_next_header_filter(r);
+    /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        ngx_http_markdown_metric_inc_failopen(conf);
+    }
+    return rc;
 }
 
 
@@ -284,6 +289,8 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf,
     const ngx_http_markdown_effective_conf_t *eff)
 {
+    ngx_int_t  rc;
+
     ngx_log_error(NGX_LOG_CRIT, r->connection->log, 0,
                  "markdown: failed to allocate "
                  "context, category=system");
@@ -308,8 +315,6 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
         return (ngx_int_t) conf->error_status;
     }
 
-    ngx_http_markdown_metric_inc_failopen(conf);
-
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                  "markdown: context allocation "
                  "failed, returning original content "
@@ -320,7 +325,12 @@ ngx_http_markdown_handle_ctx_alloc_failure(ngx_http_request_t *r,
         ngx_http_markdown_reason_from_error_category(
             NGX_HTTP_MARKDOWN_ERROR_SYSTEM,
             r->connection->log));
-    return ngx_http_next_header_filter(r);
+    rc = ngx_http_next_header_filter(r);
+    /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        ngx_http_markdown_metric_inc_failopen(conf);
+    }
+    return rc;
 }
 
 
@@ -540,6 +550,7 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf)
 {
     ngx_int_t  inflight_rc;
+    ngx_int_t  rc;
 
     inflight_rc = ngx_http_markdown_inflight_try_increment(
         r, conf);
@@ -562,7 +573,6 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         }
 
         /* fail-open: pass through original response */
-        ngx_http_markdown_metric_inc_failopen(conf);
         ctx->eligible = 0;
         ctx->headers_forwarded = 1;
 
@@ -574,7 +584,12 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
         ngx_http_markdown_log_decision(
             r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_overload());
-        return ngx_http_next_header_filter(r);
+        rc = ngx_http_next_header_filter(r);
+        /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
+        if (rc == NGX_OK || rc == NGX_DONE) {
+            ngx_http_markdown_metric_inc_failopen(conf);
+        }
+        return rc;
     }
 
     if (inflight_rc == NGX_ERROR) {
@@ -591,13 +606,17 @@ ngx_http_markdown_check_inflight(ngx_http_request_t *r,
             return (ngx_int_t) conf->error_status;
         }
 
-        ngx_http_markdown_metric_inc_failopen(conf);
         ctx->eligible = 0;
         ctx->headers_forwarded = 1;
         ngx_http_markdown_log_decision(
             r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_failed_open());
-        return ngx_http_next_header_filter(r);
+        rc = ngx_http_next_header_filter(r);
+        /* Rule 38/23: failopen_count is a delivery counter, not a decision counter. */
+        if (rc == NGX_OK || rc == NGX_DONE) {
+            ngx_http_markdown_metric_inc_failopen(conf);
+        }
+        return rc;
     }
 
     /* NGX_OK: inflight incremented, cleanup registered */
@@ -621,7 +640,12 @@ ngx_http_markdown_route_streaming_compression(
     if (ctx->decompression.type
         == NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
         || ctx->decompression.type
-           == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP)
+           == NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+#ifdef NGX_HTTP_BROTLI
+        || ctx->decompression.type
+           == NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+#endif
+        )
     {
         NGX_HTTP_MARKDOWN_METRIC_INC(
             perf.decompression_streaming_total);
@@ -913,16 +937,14 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
      *   (3) cache_validation NOT full (select_processing_path
      *       already forces full-buffer for full_support, so if
      *       we reach here streaming was selected → not full)
-     *   (4) encoding supported by the 0.9.1 streaming decompression
-     *       contract:
-     *       - deflate (zlib-wrapped per RFC 9110, or raw deflate):
-     *         supported via deferred header sniffing
      *       - gzip: supported with member-aware streaming inflate
-     *       - brotli: deferred, route to bounded full-buffer
-     *
-     * This check runs after select_processing_path() so that
-     * compression routing is enforced regardless of streaming policy.
-     */
+      *       - brotli: supported via incremental decoder when
+      *         NGX_HTTP_BROTLI is defined at compile time;
+      *         otherwise falls back to bounded full-buffer
+      *
+      * This check runs after select_processing_path() so that
+      * compression routing is enforced regardless of streaming policy.
+      */
     if (ngx_http_markdown_route_streaming_compression(r, ctx, conf)) {
         goto path_selected;
     }

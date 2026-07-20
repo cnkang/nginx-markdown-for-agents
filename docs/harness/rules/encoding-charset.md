@@ -36,8 +36,14 @@ Historical issues: e76c1584, 13189d71, b9e5fe4d.
 Required:
 - Supported streaming content codings must match production routing and test
   payload formats.  In 0.9.1, gzip and deflate are streaming-eligible under
-  the configured decompression/cache gates; Brotli remains on the bounded
-  full-buffer path.
+  the configured decompression/cache gates.  Brotli additionally requires a
+  successful `libbrotlidec` probe under
+  `NGX_MARKDOWN_BROTLI_STREAMING=auto|on`; `off` or an `auto` probe failure
+  selects bounded full-buffer decompression instead of defining
+  `NGX_HTTP_BROTLI`.  Brotli streaming reuses the same codec/member
+  lifecycle invariants as gzip/deflate: tail data must be rejected, truncated
+  final streams must be detected and rejected, no-progress must be guarded,
+  and decompression accounting stays response-wide.
 - Codec-specific lifecycle state must survive arbitrary NGINX input chunk
   boundaries and downstream backpressure resumes.  Downstream `NGX_AGAIN`
   must not imply that compressed source input was consumed or may be advanced.
@@ -105,7 +111,7 @@ Verification:
   response budget enforcement.  Full-buffer tests must cover both the default
   Rust FFI decoder and the C fallback, including an empty later member at an
   exact output budget.
-- `grep -rn 'TRUNCATED\|truncated.*\(gzip\|deflat\)\|Z_BUF_ERROR\|Z_DATA_ERROR\|no.progress' components/rust-converter/src/ components/nginx-module/src/`
+- `grep -rn 'TRUNCATED\|truncated.*\(gzip\|deflat\|brotli\)\|Z_BUF_ERROR\|Z_DATA_ERROR\|no.progress' components/rust-converter/src/ components/nginx-module/src/`
 - Verify truncated-stream rejection propagates a budget/integrity error.
 - Verify the no-progress guard detects `Z_BUF_ERROR` with no state change.
 - `make test-rust` — streaming decompression tests cover both deflate
@@ -115,3 +121,6 @@ Verification:
 - `make verify-chunked-native-e2e-smoke` — native gzip streaming exercises
   production routing, backpressure/resume, exact output equivalence, and
   pre-/post-commit truncation behavior.
+- `tools/e2e/verify_brotli_streaming_e2e.sh` — native Brotli streaming covers
+  arbitrary chunking, full-buffer equivalence, malformed/truncated/trailing
+  input, budget fail-open, backpressure, worker survival, and runtime metrics.

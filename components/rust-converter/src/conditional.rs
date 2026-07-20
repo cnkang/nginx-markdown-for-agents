@@ -9,7 +9,7 @@
 //! ```
 //! use nginx_markdown_converter::conditional::{evaluate_conditional, ConditionalResult};
 //!
-//! // Strong ETag match → 304 Not Modified
+//! // Weak ETag match → 304 Not Modified
 //! let result = evaluate_conditional(
 //!     Some("W/\"abc123\""),  // if_none_match
 //!     Some("W/\"abc123\""),  // entity_etag

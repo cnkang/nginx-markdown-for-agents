@@ -7,8 +7,12 @@
 //!
 //! The [`ConversionError::code`] method maps each variant to a stable numeric
 //! FFI error code (1–11, 99) that is shared across the Rust↔C boundary via
-//! `markdown_converter.h`.  Adding a new variant requires updating both this
-//! mapping and the C-side classification in `ngx_http_markdown_error.c`.
+//! `markdown_converter.h`.  `markdown_converter.h` additionally defines
+//! `ERROR_SUCCESS = 0` and decompression-category codes 101–105 used by the
+//! FFI decompression result path (`FFIDecompResult.error_category`); those
+//! codes are not produced by `ConversionError::code()` itself.  Adding a
+//! new `ConversionError` variant requires updating both this mapping and
+//! the C-side classification in `ngx_http_markdown_error.c`.
 //!
 //! ## Error Classification (spec 51)
 //!

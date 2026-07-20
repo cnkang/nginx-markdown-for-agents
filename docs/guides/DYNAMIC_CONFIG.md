@@ -180,5 +180,5 @@ production environments where a bad dynconf file could affect traffic.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.7.0 | 2026-05-17 | Kang | Initial creation: LKG/rollback semantics, dry-run validation, reload behavior |
 | 0.9.0 | 2026-07-01 | Kang | Added mandatory schema_version field for version compatibility |
+| 0.7.0 | 2026-05-17 | Kang | Initial creation: LKG/rollback semantics, dry-run validation, reload behavior |

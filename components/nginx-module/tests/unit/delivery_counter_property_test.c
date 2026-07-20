@@ -10,9 +10,16 @@
  *
  * For any output attempt through ngx_http_output_filter, delivery
  * counters (zero_copy_output_total, copied_output_total) shall
- * increment by exactly 1 if and only if the return code is NGX_OK;
- * on NGX_AGAIN or any error return, neither counter shall change
- * and no Rust-owned buffer shall be freed.
+ * increment by exactly 1 if and only if the return code is NGX_OK
+ * within this simulator's conservative model; on NGX_AGAIN or any
+ * error return, neither counter shall change and no Rust-owned
+ * buffer shall be freed.
+ *
+ * NOTE: production `ngx_http_markdown_streaming_delivery_ok()` treats
+ * NGX_DONE as a successful delivery (NGX_OK || NGX_DONE).  This
+ * simulator conservatively models NGX_DONE as a non-delivery to keep
+ * the property test self-contained; the production NGX_DONE path is
+ * covered by streaming body_filter tests instead.
  *
  * Test approach (pseudo-random sequences):
  *   1. Simulate sequences of output attempts with random return
@@ -64,11 +71,12 @@ typedef enum {
 /* ----------------------------------------------------------------
  * Delivery context: models the production delivery counter logic
  *
- * Production behavior:
+ * Simulator behavior (conservative; see file-header note on NGX_DONE):
  *   - On NGX_OK for zero-copy: increment zero_copy_output_total
  *   - On NGX_OK for pool-copy: increment copied_output_total
  *   - On NGX_AGAIN: no counter change, no buffer free
- *   - On NGX_ERROR / NGX_DONE: no counter change
+ *   - On NGX_ERROR / NGX_DONE: no counter change (NGX_DONE is modeled
+ *     conservatively here; production treats it as delivery_ok)
  * ---------------------------------------------------------------- */
 
 typedef struct {
@@ -79,7 +87,8 @@ typedef struct {
 
 /*
  * Simulate an output attempt through ngx_http_output_filter.
- * This models the production counter-update logic:
+ * This models the production counter-update logic (conservative on
+ * NGX_DONE; see file-header note):
  *   - Increment the appropriate delivery counter only on NGX_OK
  *   - On NGX_AGAIN: retain buffer, no counter change
  *   - On error (NGX_ERROR, NGX_DONE): no counter change
@@ -305,7 +314,8 @@ test_property3b_ngx_again_no_counter_change(void)
  * Property 3c: No counter change on NGX_ERROR or NGX_DONE
  *
  * For any sequence of error returns, verify neither delivery
- * counter changes.
+ * counter changes.  (NGX_DONE is modeled conservatively here; see
+ * the file-header note for the production delivery_ok semantics.)
  *
  * Validates: Requirements 3.5, 3.6, 7.7
  * ---------------------------------------------------------------- */

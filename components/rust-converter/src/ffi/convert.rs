@@ -1,9 +1,12 @@
-//! Core FFI conversion logic shared by all export entry points.
+//! Core FFI conversion logic shared by full-buffer export entry points.
 //!
 //! This module implements [`convert_inner`], the single internal function that
-//! executes a full HTML-to-Markdown conversion request. All public FFI exports
-//! (`markdown_convert`, `markdown_convert_incremental`, streaming variants)
-//! delegate to this function after validating their inputs.
+//! executes a full HTML-to-Markdown conversion request. The full-buffer export
+//! `markdown_convert` delegates to this function after validating its inputs.
+//! Incremental and streaming FFI exports (`markdown_incremental_*`,
+//! `markdown_streaming_*`) do NOT delegate to `convert_inner`; they own their
+//! own incremental parse/convert state machines in `ffi/incremental.rs` and
+//! `ffi/streaming.rs`.
 //!
 //! # Conversion Pipeline
 //!

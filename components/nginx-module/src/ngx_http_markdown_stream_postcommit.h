@@ -58,13 +58,12 @@ ngx_http_markdown_stream_postcommit_safe_finish(
 
 
 /*
- * Protocol-safe abort after honoring pending output/backpressure.
+ * Protocol-safe abort.
  *
  * Terminates the streaming response chain safely:
- *   1. Flush any pending output that was already committed to
- *      downstream (honor backpressure state).
- *   2. Send a last_buf=1 terminal chain to close the HTTP response.
- *   3. Do NOT send any additional content bytes.
+ *   1. Transition to POST_COMMIT_ABORT state
+ *   2. Send a last_buf=1 terminal chain to close the HTTP response
+ *   3. Do NOT send any additional content bytes
  *
  * The downstream client receives a truncated but valid HTTP response
  * (Content-Length was removed at commit time, so truncation is valid

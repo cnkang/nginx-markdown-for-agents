@@ -34,6 +34,26 @@ pub enum RouteBehavior {
     Cache { max_age: u32, vary: Option<String> },
     /// Auth cookie detection.
     Auth { cookie_name: String },
+    /// Brotli-compressed HTML streamed in deterministic wire chunks.
+    Brotli {
+        body: String,
+        chunk_size: usize,
+        fault: BrotliFault,
+    },
+}
+
+/// Optional mutation applied after creating a valid Brotli stream.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub enum BrotliFault {
+    /// Return a valid stream.
+    #[default]
+    None,
+    /// Append bytes after the completed stream.
+    TrailingData,
+    /// Remove the final bytes from the stream.
+    Truncated,
+    /// Return deterministic bytes that are not a Brotli stream.
+    Malformed,
 }
 
 /// Complete fixture specification.

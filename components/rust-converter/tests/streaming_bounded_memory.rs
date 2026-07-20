@@ -38,6 +38,26 @@ fn make_html_of_size(target_bytes: usize) -> Vec<u8> {
     html.into_bytes()
 }
 
+/// A highly compressible response can arrive as one decompressed feed even
+/// when its wire representation is tiny. An explicitly enlarged total budget
+/// must enlarge the output-stage cap enough to accept that bounded response.
+#[test]
+fn large_single_feed_uses_explicit_total_budget() {
+    let html = include_bytes!("../../../tests/corpus/large/large-1mb.html");
+    let budget = MemoryBudget::for_total(16 * 1024 * 1024);
+    let mut converter = StreamingConverter::new(default_streaming_options(), budget);
+
+    let output = converter
+        .feed_chunk(html)
+        .expect("a 1 MiB single feed should fit a 16 MiB streaming budget");
+    let final_result = converter
+        .finalize()
+        .expect("the bounded single-feed conversion should finalize");
+
+    assert!(!output.markdown.is_empty());
+    assert!(output.markdown.len() + final_result.final_markdown.len() > 512 * 1024);
+}
+
 /// Verify that peak memory does NOT grow linearly with input size.
 ///
 /// Strategy: feed two inputs of vastly different sizes (64 KB vs 1 MB) through

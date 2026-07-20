@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""Validate v0.7.0 release gate requirements.
+
+Checks fuzz infrastructure, packaging, streaming, fuzz target coverage, and
+documentation gates required for the 0.7.0 release milestone.
+"""
 from __future__ import annotations
 
 import argparse
@@ -79,9 +84,7 @@ def read(path: Path) -> str:
 
 def _toml_document(path: Path) -> dict[str, object]:
     text = read(path)
-    if not text:
-        return {}
-    return tomllib.loads(text)
+    return tomllib.loads(text) if text else {}
 
 
 def _cargo_rust_version() -> str | None:
@@ -203,11 +206,9 @@ def _check_gate_prerequisites(
         return None, None
 
     if gate == GATE_4:
-        missing = [
-            t for t in ("kind", "kubectl", "helm")
-            if not shutil.which(t)
-        ]
-        if missing:
+        if missing := [
+            t for t in ("kind", "kubectl", "helm") if not shutil.which(t)
+        ]:
             result.skip(
                 f"{gate}:scope",
                 f"missing tools for {gate}: {', '.join(missing)}; "

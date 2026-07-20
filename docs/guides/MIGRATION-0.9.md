@@ -203,29 +203,28 @@ These 8 codes are new — they have no 0.8.x equivalent:
 
 ### Metric Family Consolidation: 0.8.x → 0.9.0
 
-0.8.x used per-reason metric keys. 0.9.0 consolidates them into 5 unified
-families with a `reason` label.
+0.8.x used per-reason metric keys. 0.9.0 consolidates them into unified metric families with a `reason` label. All metric names use the `nginx_markdown_` prefix.
 
 | 0.8.x Metric Key | 0.9.0 Metric Family | Label |
 |-------------------|---------------------|-------|
-| `markdown_conversions_total` | `markdown_conversions_total` | `reason="converted"` |
-| `markdown_skipped_accept_total` | `markdown_skipped_total` | `reason="skipped_accept"` |
-| `markdown_skipped_no_accept_total` | `markdown_skipped_total` | `reason="skipped_no_accept"` |
-| `markdown_skipped_conditional_total` | `markdown_skipped_total` | `reason="skipped_conditional"` |
-| `markdown_skipped_accept_reject_total` | `markdown_skipped_total` | `reason="skipped_accept_reject"` |
-| `markdown_skipped_not_eligible_total` | `markdown_skipped_total` | `reason="not_eligible"` |
-| `markdown_skipped_disabled_total` | `markdown_skipped_total` | `reason="disabled"` |
-| `markdown_failed_decompression_total` | `markdown_errors_total` | `reason="decompression_error"` |
-| `markdown_decompression_budget_exceeded_total` | `markdown_errors_total` | `reason="decompression_budget_exceeded"` |
-| `markdown_decompression_format_error_total` | `markdown_errors_total` | `reason="decompression_format_error"` |
-| `markdown_decompression_truncated_input_total` | `markdown_errors_total` | `reason="decompression_truncated_input"` |
-| `markdown_decompression_io_error_total` | `markdown_errors_total` | `reason="decompression_io_error"` |
-| `markdown_parse_timeouts_total` | `markdown_errors_total` | `reason="timeout"` |
-| `markdown_parse_budget_exceeded_total` | `markdown_errors_total` | `reason="budget_exceeded"` |
-| `markdown_replay_buffer_errors_total` | `markdown_errors_total` | `reason="replay_error"` |
-| `markdown_ffi_call_errors_total` | `markdown_errors_total` | `reason="ffi_panic"` |
-| `markdown_failed_open_total` | `markdown_failed_open_total` | `reason="failed_open"` |
-| `markdown_failed_closed_total` | `markdown_failed_closed_total` | `reason="failed_closed"` |
+| `nginx_markdown_conversions_total` | `nginx_markdown_conversions_total` | `reason="converted"` |
+| `nginx_markdown_skipped_accept_total` | `nginx_markdown_skips_total` | `reason="skipped_accept"` |
+| `nginx_markdown_skipped_no_accept_total` | `nginx_markdown_skips_total` | `reason="skipped_no_accept"` |
+| `nginx_markdown_skipped_conditional_total` | `nginx_markdown_skips_total` | `reason="skipped_conditional"` |
+| `nginx_markdown_skipped_accept_reject_total` | `nginx_markdown_skips_total` | `reason="skipped_accept_reject"` |
+| `nginx_markdown_skipped_not_eligible_total` | `nginx_markdown_skips_total` | `reason="not_eligible"` |
+| `nginx_markdown_skipped_disabled_total` | `nginx_markdown_skips_total` | `reason="disabled"` |
+| `nginx_markdown_failed_decompression_total` | `nginx_markdown_failures_total` | `reason="decompression_error"` |
+| `nginx_markdown_decompression_budget_exceeded_total` | `nginx_markdown_failures_total` | `reason="decompression_budget_exceeded"` |
+| `nginx_markdown_decompression_format_error_total` | `nginx_markdown_failures_total` | `reason="decompression_format_error"` |
+| `nginx_markdown_decompression_truncated_input_total` | `nginx_markdown_failures_total` | `reason="decompression_truncated_input"` |
+| `nginx_markdown_decompression_io_error_total` | `nginx_markdown_failures_total` | `reason="decompression_io_error"` |
+| `nginx_markdown_parse_timeouts_total` | `nginx_markdown_failures_total` | `reason="timeout"` |
+| `nginx_markdown_parse_budget_exceeded_total` | `nginx_markdown_failures_total` | `reason="budget_exceeded"` |
+| `nginx_markdown_replay_buffer_errors_total` | `nginx_markdown_failures_total` | `reason="replay_error"` |
+| `nginx_markdown_ffi_call_errors_total` | `nginx_markdown_failures_total` | `reason="ffi_panic"` |
+| `nginx_markdown_failed_open_total` | `nginx_markdown_failopen_total` | `reason="failed_open"` |
+| `nginx_markdown_failed_closed_total` | `nginx_markdown_failures_total` | `reason="failed_closed"` |
 
 ### Dashboard Migration Tips
 
@@ -368,8 +367,8 @@ http {
     # Accept negotiation (replaces markdown_on_wildcard)
     markdown_accept wildcard;
 
-    # Streaming configuration (unchanged directives)
-    markdown_streaming_engine auto;
+    # Streaming configuration (replaces markdown_streaming_engine in v0.9.1)
+    markdown_streaming auto;
     markdown_stream_threshold 1m;
     markdown_stream_flush_min 4k;
 

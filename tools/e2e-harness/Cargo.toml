@@ -29,6 +29,12 @@ anyhow = "1.0"
 regex = "1.10"
 # HTTP date parsing for conditional fixture behavior.
 httpdate = "1.0"
+# Deterministic Brotli-compressed upstream fixtures.
+brotli = "8.0.4"
+# Stream fixture bodies in controlled wire-sized chunks.
+futures-util = "0.3"
+# Constrain the slow-reader socket receive buffer for backpressure evidence.
+socket2 = "0.6"
 
 [dev-dependencies]
 # Property-based testing

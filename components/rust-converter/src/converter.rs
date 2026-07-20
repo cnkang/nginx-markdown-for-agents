@@ -208,9 +208,9 @@ impl Default for ConversionOptions {
 /// # Checkpoints
 ///
 /// Timeout is checked at these key points:
-/// 1. After HTML parsing
+/// 1. After metadata extraction (if enabled)
 /// 2. Every 100 DOM nodes during traversal
-/// 3. After Markdown generation
+/// 3. Before output normalization
 ///
 /// # Example
 ///

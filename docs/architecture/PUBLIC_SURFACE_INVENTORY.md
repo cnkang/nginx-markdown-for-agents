@@ -32,7 +32,7 @@ There are 63 `markdown_*` command-table entries: 44 active parser entries and
 19 reject-only migration entries.
 
 Context abbreviations below are `H` = `http`, `S` = `server`, and `L` =
-`location`. Unless a row says otherwise, active `H/S/L` values use the normal
+location. Unless a row says otherwise, active `H/S/L` values use the normal
 NGINX rule: a child inherits the parent value when unset and an explicit child
 value overrides it. `markdown_limits` inherits each key independently.
 

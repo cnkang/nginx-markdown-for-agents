@@ -2,7 +2,7 @@
 """
 Fuzz and packaging infrastructure validator for v0.7.0 release gates.
 
-Validates the 12-item checklist from v0.7.0 fuzz and packaging infrastructure requirements (Requirement 2):
+Validates the 11-item checklist from v0.7.0 fuzz and packaging infrastructure requirements (Requirement 2):
 
 1. Fuzz targets exist (fuzz/Cargo.toml lists targets)
 2. ClusterFuzzLite PR workflow exists
@@ -169,10 +169,11 @@ def check_fuzz_guide(result: ValidationResult) -> None:
 
     # Check for required harness rule references
     missing_rules = []
-    for keyword in FUZZ_GUIDE_REQUIRED_KEYWORDS:
-        if keyword not in content:
-            missing_rules.append(keyword)
-
+    missing_rules.extend(
+        keyword
+        for keyword in FUZZ_GUIDE_REQUIRED_KEYWORDS
+        if keyword not in content
+    )
     if missing_rules:
         result.fail(
             "fuzz:guide-rules",
@@ -212,11 +213,7 @@ def check_artifact_naming(result: ValidationResult) -> None:
     Checks both the nFPM config template and the release workflow to ensure
     NGINX_VERSION is incorporated into the artifact filename.
     """
-    # Check nFPM config references NGINX_VERSION
-    nfpm_content = read_safe(NFPM_CONFIG)
-    if not nfpm_content:
-        result.fail(PKG_NFPM_CONFIG_GATE, "packaging/nfpm/nfpm.yaml not found")
-    else:
+    if nfpm_content := read_safe(NFPM_CONFIG):
         if "NGINX_VERSION" in nfpm_content or "nginx_version" in nfpm_content:
             result.pass_(
                 PKG_NFPM_CONFIG_GATE,
@@ -228,6 +225,8 @@ def check_artifact_naming(result: ValidationResult) -> None:
                 "nFPM config does not reference NGINX_VERSION",
             )
 
+    else:
+        result.fail(PKG_NFPM_CONFIG_GATE, "packaging/nfpm/nfpm.yaml not found")
     # Check workflow constructs filenames with NGINX version
     wf_content = read_safe(RELEASE_PACKAGES_WORKFLOW)
     if not wf_content:

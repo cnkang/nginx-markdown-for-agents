@@ -25,22 +25,11 @@ ngx_int_t ngx_http_markdown_get_reason_code_str(uint32_t code,
 
 
 /*
- * Reason code discriminant constants from the Rust enum.
+ * Reason code discriminant constants matching the Rust ReasonCode enum.
  *
- * These MUST stay in sync with ReasonCode in reason_code.rs.
- * The canonical values are:
- *   0  = Converted           ("converted")
- *   1  = SkippedAccept       ("skipped_accept")
- *   2  = SkippedNoAccept     ("skipped_no_accept")
- *   3  = SkippedConditional  ("skipped_conditional")
- *  12  = SkippedAcceptReject ("skipped_accept_reject")
- *  13  = FfiPanic            ("ffi_panic")
- *  14  = NotEligible         ("not_eligible")
- *  15  = Disabled            ("disabled")
- *  16  = FailedOpen          ("failed_open")
- *  17  = FailedClosed        ("failed_closed")
- *  18  = ConversionError     ("conversion_error")
- *  19  = MemoryBudgetExceeded ("memory_budget_exceeded")
+ * These MUST stay in sync with ReasonCode in
+ * components/rust-converter/src/decision/reason_code.rs.
+ * See that file for the full variant list and string representations.
  */
 #define REASON_CONVERTED                 0
 #define REASON_SKIPPED_ACCEPT            1

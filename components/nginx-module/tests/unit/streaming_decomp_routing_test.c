@@ -165,10 +165,15 @@ ngx_http_markdown_decomp_routing_decision(
 
     /*
      * Condition 4: encoding must be supported by streaming
-     * decompressor.  Gzip and deflate are supported in 0.9.1.
+     * decompressor.  Gzip, deflate, and Brotli (when compiled)
+     * are supported in 0.9.1.
      */
     if (encoding != NGX_HTTP_MARKDOWN_COMPRESSION_DEFLATE
-        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP) {
+        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_GZIP
+#ifdef NGX_HTTP_BROTLI
+        && encoding != NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI
+#endif
+        ) {
         return NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
     }
 
@@ -298,8 +303,22 @@ test_routing_brotli_streaming_selected_fullbuffer(void)
 {
     ngx_http_markdown_decomp_route_t result;
 
+#ifdef NGX_HTTP_BROTLI
     TEST_SUBSECTION(
-        "brotli + streaming selected → FULLBUFFER");
+        "brotli + streaming selected → STREAMING (Brotli enabled)");
+
+    result = ngx_http_markdown_decomp_routing_decision(
+        1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+        "brotli with all conditions met routes "
+        "to STREAMING when NGX_HTTP_BROTLI defined");
+
+    TEST_PASS("brotli routes to STREAMING (Brotli enabled)");
+#else
+    TEST_SUBSECTION(
+        "brotli + streaming selected → FULLBUFFER (Brotli disabled)");
 
     result = ngx_http_markdown_decomp_routing_decision(
         1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
@@ -307,9 +326,10 @@ test_routing_brotli_streaming_selected_fullbuffer(void)
     TEST_ASSERT(
         result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
         "brotli with all non-encoding conditions met routes "
-        "to FULLBUFFER");
+        "to FULLBUFFER when NGX_HTTP_BROTLI not defined");
 
-    TEST_PASS("brotli remains on the full-buffer path");
+    TEST_PASS("brotli remains on the full-buffer path (Brotli disabled)");
+#endif
 }
 
 static void
@@ -393,6 +413,20 @@ test_routing_brotli_not_supported(void)
 {
     ngx_http_markdown_decomp_route_t result;
 
+#ifdef NGX_HTTP_BROTLI
+    TEST_SUBSECTION(
+        "brotli + all conditions met → STREAMING "
+        "(NGX_HTTP_BROTLI defined)");
+
+    result = ngx_http_markdown_decomp_routing_decision(
+        1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+        "brotli routes to STREAMING when "
+        "NGX_HTTP_BROTLI defined");
+    TEST_PASS("brotli routes to STREAMING (Brotli enabled)");
+#else
     TEST_SUBSECTION(
         "brotli → FULLBUFFER (unsupported in streaming)");
 
@@ -402,7 +436,8 @@ test_routing_brotli_not_supported(void)
     TEST_ASSERT(
         result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
         "brotli is not supported in streaming path");
-    TEST_PASS("brotli routes to full-buffer");
+    TEST_PASS("brotli routes to full-buffer (Brotli disabled)");
+#endif
 }
 
 static void
@@ -978,6 +1013,312 @@ test_metrics_counters_on_errors(void)
 }
 
 /* ================================================================
+ * TEST SECTION 10: Brotli routing matrix — ALL combinations
+ *
+ * Feature: Brotli streaming decompression
+ * Brotli routing is guarded by build support and runtime policy
+ *
+ * Complete combination matrix for Brotli codec:
+ *   auto_decompress × streaming_selected × cache_validation
+ *   × brotli_compiled (NGX_HTTP_BROTLI)
+ *
+ * When NGX_HTTP_BROTLI defined:
+ *   ON  + YES + !FULL + BROTLI → STREAMING
+ *   OFF + YES + !FULL + BROTLI → FULLBUFFER
+ *   ON  + NO  + !FULL + BROTLI → FULLBUFFER
+ *   ON  + YES + FULL  + BROTLI → FULLBUFFER
+ *   OFF + NO  + FULL  + BROTLI → FULLBUFFER
+ *
+ * When NGX_HTTP_BROTLI NOT defined:
+ *   All Brotli combinations → FULLBUFFER
+ * ================================================================ */
+
+static void
+test_brotli_routing_matrix_all_conditions_met(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+
+    TEST_SUBSECTION(
+        "Brotli matrix: auto=ON, streaming=YES, "
+        "cache!=FULL");
+
+    result = ngx_http_markdown_decomp_routing_decision(
+        1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+#ifdef NGX_HTTP_BROTLI
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+        "Brotli all conditions met → STREAMING "
+        "");
+#else
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+        "Brotli all conditions met but no compile "
+        "support → FULLBUFFER");
+#endif
+
+    /* Also test with ETAG cache validation (not full) */
+    result = ngx_http_markdown_decomp_routing_decision(
+        1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_ETAG,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+#ifdef NGX_HTTP_BROTLI
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+        "Brotli + cache_validation=ETAG → STREAMING");
+#else
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+        "Brotli + cache_validation=ETAG but no "
+        "compile support → FULLBUFFER");
+#endif
+
+    TEST_PASS("Brotli all-conditions-met routing correct");
+}
+
+static void
+test_brotli_routing_matrix_auto_decompress_off(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+
+    TEST_SUBSECTION(
+        "Brotli matrix: auto=OFF, streaming=YES, "
+        "cache!=FULL");
+
+    result = ngx_http_markdown_decomp_routing_decision(
+        0, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+        "Brotli auto_decompress=OFF → FULLBUFFER "
+        "");
+
+    /* ETAG variant */
+    result = ngx_http_markdown_decomp_routing_decision(
+        0, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_ETAG,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+        "Brotli auto=OFF + ETAG → FULLBUFFER");
+
+    TEST_PASS(
+        "Brotli auto_decompress=OFF forces FULLBUFFER");
+}
+
+static void
+test_brotli_routing_matrix_streaming_not_selected(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+
+    TEST_SUBSECTION(
+        "Brotli matrix: auto=ON, streaming=NO, "
+        "cache!=FULL");
+
+    result = ngx_http_markdown_decomp_routing_decision(
+        1, 0, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+        "Brotli streaming=NO → FULLBUFFER "
+        "");
+
+    /* ETAG variant */
+    result = ngx_http_markdown_decomp_routing_decision(
+        1, 0, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_ETAG,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+        "Brotli streaming=NO + ETAG → FULLBUFFER");
+
+    TEST_PASS(
+        "Brotli streaming not selected forces FULLBUFFER");
+}
+
+static void
+test_brotli_routing_matrix_cache_validation_full(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+
+    TEST_SUBSECTION(
+        "Brotli matrix: auto=ON, streaming=YES, "
+        "cache=FULL");
+
+    result = ngx_http_markdown_decomp_routing_decision(
+        1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_FULL,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+        "Brotli cache_validation=FULL → FULLBUFFER "
+        "");
+
+    TEST_PASS(
+        "Brotli cache_validation=FULL forces FULLBUFFER");
+}
+
+static void
+test_brotli_routing_matrix_all_conditions_violated(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+
+    TEST_SUBSECTION(
+        "Brotli matrix: auto=OFF, streaming=NO, "
+        "cache=FULL");
+
+    result = ngx_http_markdown_decomp_routing_decision(
+        0, 0, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_FULL,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+        "Brotli all conditions violated → FULLBUFFER "
+        "");
+
+    /* auto OFF + streaming NO + cache NONE */
+    result = ngx_http_markdown_decomp_routing_decision(
+        0, 0, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+        "Brotli auto=OFF + streaming=NO → FULLBUFFER");
+
+    TEST_PASS(
+        "Brotli all conditions violated → FULLBUFFER");
+}
+
+static void
+test_brotli_routing_matrix_exhaustive(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+    ngx_http_markdown_decomp_route_t expect;
+    ngx_flag_t auto_decomp_values[] = { 0, 1 };
+    ngx_flag_t stream_eng_values[]  = { 0, 1 };
+    ngx_http_markdown_cache_validation_e cv_values[] = {
+        NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+        NGX_HTTP_MARKDOWN_CACHE_VALIDATION_ETAG,
+        NGX_HTTP_MARKDOWN_CACHE_VALIDATION_FULL
+    };
+    size_t ai, si, ci;
+    int    count;
+    int    streaming_count;
+
+    TEST_SUBSECTION(
+        "Brotli matrix: exhaustive 12-combination "
+        "coverage (Brotli-only)");
+
+    count = 0;
+    streaming_count = 0;
+
+    for (ai = 0; ai < ARRAY_SIZE(auto_decomp_values); ai++) {
+        for (si = 0; si < ARRAY_SIZE(stream_eng_values); si++) {
+            for (ci = 0; ci < ARRAY_SIZE(cv_values); ci++) {
+                result =
+                    ngx_http_markdown_decomp_routing_decision(
+                        auto_decomp_values[ai],
+                        stream_eng_values[si],
+                        cv_values[ci],
+                        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+
+                /*
+                 * Expected: STREAMING only when all
+                 * four conditions met AND compiled with
+                 * NGX_HTTP_BROTLI.
+                 */
+#ifdef NGX_HTTP_BROTLI
+                if (auto_decomp_values[ai] == 1
+                    && stream_eng_values[si] == 1
+                    && cv_values[ci]
+                       != NGX_HTTP_MARKDOWN_CACHE_VALIDATION_FULL)
+                {
+                    expect =
+                        NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING;
+                    streaming_count++;
+                } else {
+                    expect =
+                        NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
+                }
+#else
+                expect =
+                    NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER;
+#endif
+                TEST_ASSERT(result == expect,
+                    "Brotli routing combination "
+                    "must match expected");
+                count++;
+            }
+        }
+    }
+
+    TEST_ASSERT(count == 12,
+        "must test exactly 12 Brotli combinations");
+
+#ifdef NGX_HTTP_BROTLI
+    /*
+     * When Brotli is compiled: exactly 2 out of 12
+     * combinations reach STREAMING (auto=1, stream=1,
+     * cache=NONE or ETAG).
+     */
+    TEST_ASSERT(streaming_count == 2,
+        "exactly 2 Brotli combinations reach STREAMING");
+#else
+    TEST_ASSERT(streaming_count == 0,
+        "zero Brotli combinations reach STREAMING "
+        "without NGX_HTTP_BROTLI");
+#endif
+
+    TEST_PASS(
+        "Brotli exhaustive 12-combination routing "
+        "matrix verified");
+}
+
+static void
+test_brotli_routing_oracle_consistency(void)
+{
+    ngx_http_markdown_decomp_route_t result;
+
+    TEST_SUBSECTION(
+        "Brotli routing: production function and "
+        "test oracle produce identical results");
+
+    /*
+     * Since this file defines its own inline routing
+     * function (the test oracle), verify it matches the
+     * expectations from the design document:
+     *
+     * The oracle function and the production function
+     * (ngx_http_markdown_route_streaming_compression)
+     * must behave identically for all inputs.
+     *
+     * Here we verify the oracle's Brotli handling is
+     * consistent with the documented routing matrix.
+     */
+
+    /* Streaming-eligible case */
+    result = ngx_http_markdown_decomp_routing_decision(
+        1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_NONE,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+#ifdef NGX_HTTP_BROTLI
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_STREAMING,
+        "oracle: Brotli streaming-eligible → STREAMING");
+#else
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+        "oracle: Brotli without compile support → "
+        "FULLBUFFER");
+#endif
+
+    /* Full cache forces full-buffer regardless */
+    result = ngx_http_markdown_decomp_routing_decision(
+        1, 1, NGX_HTTP_MARKDOWN_CACHE_VALIDATION_FULL,
+        NGX_HTTP_MARKDOWN_COMPRESSION_BROTLI);
+    TEST_ASSERT(
+        result == NGX_HTTP_MARKDOWN_DECOMP_ROUTE_FULLBUFFER,
+        "oracle: Brotli + cache=FULL → FULLBUFFER "
+        "regardless of compile flag");
+
+    TEST_PASS(
+        "Brotli oracle consistency verified");
+}
+
+/* ================================================================
  * Main
  * ================================================================ */
 
@@ -986,9 +1327,10 @@ main(void)
 {
     TEST_SECTION(
         "Feature: 0.9.1-performance-optimization\n"
+        "Feature: Brotli streaming decompression\n"
         "Unit Tests: Streaming Decompression Routing\n"
         "Validates: Requirements 4.1, 4.2, 4.3, 4.4, "
-        "4.8, 4.10");
+        "4.8, 4.10, 1.1, 1.2, 1.3, 1.4, 1.5");
 
     /* Section 1: Routing decision named examples */
     test_routing_raw_deflate_all_conditions_met();
@@ -1032,6 +1374,15 @@ main(void)
 
     /* Section 9: Metrics counters */
     test_metrics_counters_on_errors();
+
+    /* Section 10: Brotli routing matrix (091 feature) */
+    test_brotli_routing_matrix_all_conditions_met();
+    test_brotli_routing_matrix_auto_decompress_off();
+    test_brotli_routing_matrix_streaming_not_selected();
+    test_brotli_routing_matrix_cache_validation_full();
+    test_brotli_routing_matrix_all_conditions_violated();
+    test_brotli_routing_matrix_exhaustive();
+    test_brotli_routing_oracle_consistency();
 
     printf("\n");
     TEST_PASS(

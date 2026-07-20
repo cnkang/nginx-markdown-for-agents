@@ -71,6 +71,6 @@ PYTHONPATH=. pytest -q tools/perf/tests
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.6.2 | 2026-05-11 | Kang | Initial pack for recurring tooling path-security fixes and routing coverage |
-| 0.6.3 | 2026-05-14 | Kang | Extended with shell hygiene (S7682/S1066/Rule 18), const-correctness detection, and curl --head patterns |
 | 0.8.1 | 2026-06-18 | Codex | Require canonical symlink-aware containment and fixed allowlists for CLI-selected executables |
+| 0.6.3 | 2026-05-14 | Kang | Extended with shell hygiene (S7682/S1066/Rule 18), const-correctness detection, and curl --head patterns |
+| 0.6.2 | 2026-05-11 | Kang | Initial pack for recurring tooling path-security fixes and routing coverage |

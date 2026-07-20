@@ -58,6 +58,15 @@ use super::options::decode_options;
 /// * `inner` — The [`IncrementalConverter`] instance that accumulates input
 ///   chunks and performs the conversion.  Owned by the handle; moved into
 ///   on construction and consumed on finalization.
+/// * `parser_memory_budget` — The per-handle parser memory budget in bytes
+///   (0 means use the compiled-in default).  Enforced during
+///   `markdown_incremental_feed` against accumulated parsing state.
+/// * `buffered_input_bytes` — Bytes of input currently buffered inside the
+///   handle before being fed to the parser.  Bounded by the parser budget
+///   and `MAX_BUFFER_SIZE`.
+/// * `buffered_tag_openers` — Conservative cumulative count of `<` bytes in
+///   accepted input.  Together with accumulated input bytes, this estimates
+///   parser and DOM working-set growth; it is not an unclosed-tag count.
 /// * `generate_etag` — Whether to compute and emit a BLAKE3-based ETag in
 ///   the final result.  Set once at construction from `MarkdownOptions`;
 ///   immutable thereafter.
@@ -203,7 +212,7 @@ pub unsafe extern "C" fn markdown_incremental_new_with_code(
 /// # Safety
 ///
 /// * `handle` must be a live pointer returned by [`markdown_incremental_new_with_code`].
-/// * `data` must point to at least `data_len` readable bytes, or be NULL when `data_len` is 0`.
+/// * `data` must point to at least `data_len` readable bytes, or be NULL when `data_len` is 0.
 ///
 /// # Returns
 ///

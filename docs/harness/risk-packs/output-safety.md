@@ -64,5 +64,5 @@ make test-nginx-unit
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.6.1 | 2026-05-06 | Kang | Initial pack from 14-day defect pattern analysis |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.6.1 | 2026-05-06 | Kang | Initial pack from 14-day defect pattern analysis |
