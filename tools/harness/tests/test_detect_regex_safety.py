@@ -343,7 +343,7 @@ class TestErrorHandling:
             findings, errors = _scan_python_file(f, tmp_path)
             assert len(errors) >= 1
         finally:
-            os.chmod(str(f), 0o644)
+            os.chmod(str(f), 0o600)
 
     def test_missing_path_cli(self, tmp_path: Path) -> None:
         """Missing path should return non-zero via CLI."""
