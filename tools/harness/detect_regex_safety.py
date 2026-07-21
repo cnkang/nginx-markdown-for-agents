@@ -1116,11 +1116,12 @@ class _SegKind(Enum):
 
 
 def _tokenize_regex(pattern: str) -> list["_Token"]:
-    """Tokenize a regex into a flat sequence of atoms and quantifiers.
+    """Convert a regex string into a flat token sequence for heuristic analysis.
 
-    Returns a list of _Token.  Consecutive single-character literal atoms are
-    merged into a single ATOM so that multi-character literal separators
-    (e.g. ``static``) are treated as one atom.
+    The tokenizer is intentionally shallow: it tracks group nesting and
+    emits atoms/quantifiers/anchors/alternations.  Consecutive literal
+    atoms are merged so multi-character literal separators (e.g. ``static``)
+    are analyzed as one unit instead of many single-character atoms.
     """
     raw_tokens: list[_Token] = []
     i = 0
@@ -1220,11 +1221,11 @@ _CHAR_HANDLERS = {
 
 
 def _merge_literal_atoms(tokens: list[_Token]) -> list[_Token]:
-    """Merge runs of single-character literal ATOM tokens into one ATOM.
+    """Merge adjacent literal atoms so separators stay intact.
 
-    Only characters that are NOT regex metacharacters (no ``.``, ``[`` etc.,
-    no escape sequences) are merged.  This makes ``static`` a single literal
-    atom while keeping ``.``, ``[a-z]`` and ``\\d`` as standalone atoms.
+    Only non-metacharacter literals are merged.  Regex metacharacters and
+    escape sequences remain standalone tokens so the later quantifier/group
+    analysis can see the real structure.
     """
     _META = set("\\.[]()+*?{}|^$")
     merged: list[_Token] = []
@@ -1391,6 +1392,13 @@ def _pattern_between(
 
 
 def _check_nested_quantifier(pattern: str) -> str | None:
+    """Detect nested quantifier patterns that commonly cause ReDoS.
+
+    Heuristic: a capturing/non-capturing group containing an unbounded
+    quantifier is itself repeated unboundedly, unless every alternation
+    branch starts with a strong literal separator that the inner atom can't
+    consume.  Returns a human-readable reason string on match, else ``None``.
+    """
     """Check for nested quantifiers like (a+)+, (a*)+, (.+)+, (.*)+.
 
     A group with an unbounded inner quantifier that is itself repeated
