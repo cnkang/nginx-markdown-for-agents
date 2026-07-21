@@ -177,7 +177,14 @@
       "commands": [
         "make regex-security-check"
       ],
-      "notes": "AST-based ReDoS and regex safety detection for Python and Rust. Runs detect_regex_safety.py --strict plus unit and shell tests. See docs/harness/rules/parser-regex.md."
+      "notes": "AST-based ReDoS and regex safety detection for Python and shell. Runs detect_regex_safety.py --strict plus unit and shell tests. Keyword-argument support, static constant propagation, re.escape segment classification, shell command-aware pattern extraction, --strict/--fail-on-review CLI contract. See docs/harness/rules/parser-regex.md."
+    },
+    "e2e-streaming-config": {
+      "phase": "cheap-blocker",
+      "commands": [
+        "make e2e-streaming-config-check"
+      ],
+      "notes": "Block-aware detection of contradictory E2E streaming config (Rule 60): locations with markdown_cache_validation full must have explicit markdown_streaming. Comment-masked brace parsing, direct-depth nested-location isolation, fail-closed scan errors. See docs/harness/rules/e2e-runner.md."
     },
     "runtime-e2e": {
       "phase": "umbrella",

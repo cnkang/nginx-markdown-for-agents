@@ -52,11 +52,13 @@ Historical issues: PR #188, CI run 29727392197 (startup warning noise from
 contradictory `markdown_streaming auto` + `markdown_cache_validation full`).
 
 Required:
-- Every E2E test nginx.conf location block must have an explicit
-  `markdown_streaming` directive (`off`, `auto`, or `force`) that matches
-  the test's behavioral intent.  Do not rely on the implicit default (`auto`)
-  when the location also uses directives that block streaming at runtime
-  (for example `markdown_cache_validation full`).
+- E2E nginx.conf location blocks that use `markdown_cache_validation full`
+  must have an explicit `markdown_streaming` directive (`off`, `auto`, or
+  `force`).  Do not rely on the implicit default (`auto`) when the location
+  also uses `markdown_cache_validation full` — the implicit `auto` plus the
+  blocking directive generates a startup warning and obscures the test's
+  intent.  Location blocks that do NOT use `markdown_cache_validation full`
+  are out of scope for this detector and may rely on the implicit default.
 - When a test intends to exercise the **full-buffer** path, use
   `markdown_streaming off`.  Do not use `markdown_streaming auto` combined
   with a blocking directive — this is contradictory configuration that
@@ -72,7 +74,19 @@ Required:
   this intent in a comment and assert streaming-block-specific indicators
   (e.g., ETag presence, Content-Length, full-buffer metric delta).
 - `detect_e2e_streaming_config.py` provides advisory detection of implicit
-  `auto` + blocking-directive combinations.
+  `auto` + `markdown_cache_validation full` combinations, and the
+  `auto + full` contradiction.  It is block-aware (comment-masked brace
+  parsing, direct-depth directive extraction, fail-closed scan errors).
+
+Detector contract:
+- Comments containing `{` or `}` are masked before brace parsing so they
+  cannot inflate location depth or satisfy a parent location's directive.
+- A parent location's directive check only considers its direct-depth
+  directives; nested ``location`` sub-blocks do not satisfy the parent and
+  are checked independently.
+- Read failures (OSError), malformed heredocs, and unmatched braces surface
+  as scan errors.  In `--strict` mode they cause a non-zero exit.  The
+  detector never silently swallows read/parse errors with "no findings".
 
 Rationale:
 - Contradictory configs produce NGINX startup warnings that pollute CI output
@@ -100,6 +114,8 @@ Naming clarity:
 Verification:
 - `python3 tools/harness/detect_e2e_streaming_config.py`
 - `python3 tools/harness/detect_e2e_streaming_config.py --strict` (CI-blocking mode)
+- `python3 -m pytest tools/harness/tests/test_detect_e2e_streaming_config.py -q`
+- `bash tools/harness/tests/test_detect_e2e_streaming_config.sh`
 - Visual inspection: every location block with `markdown_cache_validation full`
   must have either `markdown_streaming off` or a comment explaining why `auto`
   is intentional.

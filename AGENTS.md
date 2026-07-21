@@ -135,7 +135,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 57 | build-safety | #ifdef-guarded function visibility: functions declared inside #ifdef FEATURE_GUARD must not be referenced outside that guard; detect_ifdef_guard_visibility.sh gates at write time |
 | 58 | security-cwe | Workflow input injection: GitHub Actions inputs must be routed through env vars before use in shell run blocks; direct ${{ inputs.* }} interpolation in run blocks is command injection; detect_workflow_input_injection.sh gates at write time |
 | 59 | nginx-idioms | Hardcoded HTTP status in reject paths: reject/error paths must return conf->error_status instead of hardcoded NGX_HTTP_BAD_GATEWAY; detect_hardcoded_http_status.sh provides advisory detection |
-| 60 | e2e-runner | E2E config directive consistency: streaming mode must match test intent; no implicit auto + blocking directive unless intentionally testing runtime-block mechanism; detect_e2e_streaming_config.py advisory |
+| 60 | e2e-runner | E2E config directive consistency: locations with `markdown_cache_validation full` must have explicit `markdown_streaming` (no implicit auto + blocking directive unless intentionally testing runtime-block); detect_e2e_streaming_config.py advisory gate (block-aware, fail-closed) |
 
 ## Required Agent Workflow
 
