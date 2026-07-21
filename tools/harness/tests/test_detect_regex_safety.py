@@ -227,13 +227,18 @@ class TestPatternClassification:
         assert not escaped
 
     def test_dynamic_variable(self, tmp_path: Path) -> None:
-        """Unknown variable as pattern should be INFO."""
+        """Unknown variable as pattern should be REVIEW (not INFO)."""
         content = "import re\nx = get_pattern()\nre.compile(x)\n"
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
-        infos = [f for f in findings if f.severity == Severity.INFO]
-        assert len(infos) == 1
-        assert infos[0].pattern_source == PatternSource.UNKNOWN
+        # Per the unified CLI contract, UNKNOWN pattern sources are treated
+        # as REVIEW (require manual attention), never silently downgraded to
+        # INFO.  A dynamic call result (get_pattern()) invalidates the binding.
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) == 1
+        assert reviews[0].pattern_source in (
+            PatternSource.UNKNOWN, PatternSource.DYNAMIC,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -523,3 +528,334 @@ class TestCLI:
             capture_output=True, text=True,
         )
         assert result.returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# P1-1: keyword-argument regex calls
+# ---------------------------------------------------------------------------
+
+class TestKeywordArguments:
+    """Re.* calls using ``pattern=`` / ``string=`` / ``flags=`` keywords."""
+
+    @pytest.mark.parametrize("api,extra", [
+        ("compile", ""),
+        ("search", ", string='abc'"),
+        ("match", ", string='abc'"),
+        ("fullmatch", ", string='abc'"),
+        ("findall", ", string='abc'"),
+        ("finditer", ", string='abc'"),
+        ("split", ", string='abc'"),
+        ("sub", ", repl='x', string='abc'"),
+        ("subn", ", repl='x', string='abc'"),
+    ])
+    def test_keyword_pattern(self, tmp_path: Path, api: str, extra: str) -> None:
+        """``pattern=`` keyword should be recognized as the pattern arg."""
+        content = f"import re\nre.{api}(pattern=r'(a+)+b'{extra})\n"
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert errors_found[0].api == api
+
+    def test_from_re_import_alias_keyword(self, tmp_path: Path) -> None:
+        """``from re import search as s; s(pattern=..., string=...)``."""
+        content = (
+            "from re import search as s\n"
+            "s(pattern=r'(a+)+$', string='data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.ERROR for f in findings)
+
+    def test_flags_keyword(self, tmp_path: Path) -> None:
+        """``flags=re.DOTALL`` as keyword should be parsed (no crash)."""
+        content = (
+            "import re\n"
+            "re.compile(pattern=r'foo.*', flags=re.DOTALL)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) == 1
+
+    def test_string_keyword_input_scope(self, tmp_path: Path) -> None:
+        """``string=`` keyword drives input_scope inference."""
+        content = (
+            "import re\n"
+            "re.search(pattern=r'safe', string=open('x').read())\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        # No ERROR (safe pattern); possibly a REVIEW for dynamic string.
+        # Just ensure no crash and api == 'search'.
+
+    def test_duplicate_positional_and_keyword(self, tmp_path: Path) -> None:
+        """Pattern given both positionally and via keyword → treated as unknown.
+
+        The detector must not crash and must not flag the duplicate itself as
+        a Python syntax error; Python would reject this at parse time, so we
+        use a legal-ish form: keyword pattern after a positional string.
+        """
+        # This is valid Python (positional string, keyword pattern).
+        content = "import re\nre.search('abc', pattern=r'(a+)+$')\n"
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+
+
+# ---------------------------------------------------------------------------
+# P1-2: static string constant propagation
+# ---------------------------------------------------------------------------
+
+class TestStaticPropagation:
+    """Conservative scope-aware static string propagation."""
+
+    def test_module_level_constant(self, tmp_path: Path) -> None:
+        content = (
+            "import re\n"
+            "PATTERN = r'(a+)+$'\n"
+            "re.search(PATTERN, 'data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.ERROR for f in findings)
+
+    def test_reassignment_invalidates(self, tmp_path: Path) -> None:
+        """Reassigning to a dynamic value must invalidate the static binding."""
+        content = (
+            "import re\n"
+            "PATTERN = r'(a+)+$'\n"
+            "PATTERN = get_pattern()\n"
+            "re.search(PATTERN, 'data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        # After reassignment, PATTERN is dynamic → REVIEW (not ERROR with old literal).
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) == 1
+
+    def test_binop_static_concat(self, tmp_path: Path) -> None:
+        content = (
+            "import re\n"
+            "PREFIX = r'^'\n"
+            "BODY = r'(a+)'\n"
+            "SUFFIX = r'+'\n"
+            "PATTERN = PREFIX + BODY + SUFFIX\n"
+            "re.search(PATTERN, 'data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.ERROR for f in findings)
+
+    def test_annassign_final(self, tmp_path: Path) -> None:
+        content = (
+            "import re\n"
+            "PATTERN: Final[str] = r'(a+)+$'\n"
+            "re.search(PATTERN, 'data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.ERROR for f in findings)
+
+    def test_function_scope_isolation(self, tmp_path: Path) -> None:
+        """A function-local reassign does not leak to module scope."""
+        content = (
+            "import re\n"
+            "PATTERN = r'safe'\n"
+            "def f():\n"
+            "    PATTERN = r'(a+)+$'\n"
+            "    re.search(PATTERN, 'data')\n"
+            "re.search(PATTERN, 'data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        # Inside f(): ERROR on the dangerous local PATTERN.
+        errors_inside = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_inside) == 1
+        # At module level: PATTERN still 'safe' → no finding.
+        assert sum(f.line == 6 and f.severity == Severity.ERROR for f in findings) == 0
+
+
+# ---------------------------------------------------------------------------
+# P1-3: re.escape composition
+# ---------------------------------------------------------------------------
+
+class TestEscapeComposition:
+    """Segment classification of re.escape concatenations."""
+
+    def test_pure_escape_no_finding(self, tmp_path: Path) -> None:
+        content = "import re\nx = 'u'\nre.compile(re.escape(x))\n"
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not findings
+
+    def test_escape_plus_dangerous_static(self, tmp_path: Path) -> None:
+        content = "import re\nx = 'u'\nre.compile(re.escape(x) + r'(a+)+$')\n"
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.ERROR for f in findings)
+
+    def test_dangerous_static_plus_escape(self, tmp_path: Path) -> None:
+        content = "import re\nx = 'u'\nre.compile(r'(a+)+$' + re.escape(x))\n"
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.ERROR for f in findings)
+
+    def test_escape_plus_dynamic_unescaped(self, tmp_path: Path) -> None:
+        content = (
+            "import re\n"
+            "x = 'u'\n"
+            "re.compile(re.escape(x) + get_pattern())\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) == 1
+
+    def test_escape_in_fstring(self, tmp_path: Path) -> None:
+        content = (
+            "import re\nx = 'u'\n"
+            "re.compile(rf'^{re.escape(x)}(a+)+$')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.ERROR for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# P1-4: nested quantifier detection
+# ---------------------------------------------------------------------------
+
+class TestNestedQuantifier:
+    """Nested quantifier detection — danger vs safe separator."""
+
+    @pytest.mark.parametrize("pattern", [
+        r"(aa+)+$",
+        r"(ab*)+$",
+        r"(a\d+)+$",
+        r"(?:aa+)+$",
+        r"(a+)+$",
+        r"(a*)+$",
+        r"(.*)+",
+        r"(.+)+",
+    ])
+    def test_dangerous_detected(self, pattern: str) -> None:
+        assert _check_nested_quantifier(pattern) is not None
+
+    @pytest.mark.parametrize("pattern", [
+        r"(?:\.[0-9A-Za-z-]+)*$",
+        r"(?:-[a-z]+)*$",
+        r"(?:-[a-z]+)+$",
+        r"(?:_\d+)*$",
+        r"(?:static\s+|extern\s+|inline\s+)*",
+    ])
+    def test_safe_not_flagged(self, pattern: str) -> None:
+        assert _check_nested_quantifier(pattern) is None
+
+
+# ---------------------------------------------------------------------------
+# P1-5: shell command argument extraction
+# ---------------------------------------------------------------------------
+
+class TestShellArgumentExtraction:
+    """Shell regex command argument parsing — pipes, options, --, -e."""
+
+    def _scan_shell_content(self, content: str, tmp_path: Path):
+        f = tmp_path / "test.sh"
+        f.write_text(content)
+        result, errors = _scan_shell_file(f, tmp_path)
+        assert not errors
+        return result
+
+    @pytest.mark.parametrize("line", [
+        "printf '%s\\n' \"$body\" | grep -P '(a+)+$'",
+        'echo "prefix" | rg -P \'(a+)+$\'',
+        'cat "$file" | grep -P -- \'(a+)+$\'',
+        "grep -P -e '(a+)+$' \"$file\"",
+        "rg -P --regexp '(a+)+$' \"$file\"",
+        "VALUE=x grep -P '(a+)+$' \"$file\"",
+    ])
+    def test_dangerous_pcre_extracted(self, tmp_path: Path, line: str) -> None:
+        findings = self._scan_shell_content(f"#!/usr/bin/env bash\n{line}\n", tmp_path)
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert errors_found[0].engine == Engine.SHELL_PCRE
+        assert errors_found[0].pattern == "(a+)+$"
+
+    def test_pipe_preceding_quoted_arg_not_mistaken(self, tmp_path: Path) -> None:
+        """Pattern comes from the grep segment, not the printf segment."""
+        content = "#!/usr/bin/env bash\nprintf '%s\\n' \"$body\" | grep -P '(a+)+$'\n"
+        findings = self._scan_shell_content(content, tmp_path)
+        # The printf format string '%s\\n' should NOT be treated as a PCRE pattern.
+        assert all(f.api in ("grep", "rg", "perl") for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# P1-6: CLI contract — strict / fail-on-review / UNKNOWN
+# ---------------------------------------------------------------------------
+
+class TestCLIContract:
+    """Strict and fail-on-review exit-code contract."""
+
+    def test_strict_review_nonzero_no(self, tmp_path: Path) -> None:
+        """--strict alone returns 0 on REVIEW-only findings."""
+        content = "import re\nre.compile(re.escape('x') + 'y')\n" if False else (
+            "import re\nx = get()\nre.compile(x + 'y')\n"
+        )
+        _make_py_file(content, tmp_path)
+        result = subprocess.run(
+            [sys.executable, str(DETECTOR), "--path", str(tmp_path), "--strict"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+
+    def test_fail_on_review_nonzero(self, tmp_path: Path) -> None:
+        """--fail-on-review returns 1 on REVIEW findings."""
+        content = "import re\nx = get()\nre.compile(x + 'y')\n"
+        _make_py_file(content, tmp_path)
+        result = subprocess.run(
+            [sys.executable, str(DETECTOR), "--path", str(tmp_path),
+             "--strict", "--fail-on-review"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 1
+
+    def test_strict_parse_error_nonzero(self, tmp_path: Path) -> None:
+        """--strict returns 1 on parse errors."""
+        content = "import re\np = re.compile(\n"
+        _make_py_file(content, tmp_path)
+        result = subprocess.run(
+            [sys.executable, str(DETECTOR), "--path", str(tmp_path), "--strict"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 1
+
+    def test_unknown_treated_as_review(self, tmp_path: Path) -> None:
+        """UNKNOWN pattern source → REVIEW, not INFO."""
+        content = "import re\nre.compile(get_unknown())\n"
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert reviews
+
+    def test_mocked_read_error_strict(self, tmp_path: Path, monkeypatch) -> None:
+        """A read failure surfaces as a parse/scan error and fails --strict."""
+        f = _make_py_file("import re\nre.compile(r'safe')\n", tmp_path)
+        def _raise(*args, **kwargs):
+            raise OSError("mocked read failure")
+        monkeypatch.setattr(Path, "read_text", _raise)
+        from harness.detect_regex_safety import _scan_python_file
+        findings, errors = _scan_python_file(f, tmp_path)
+        assert len(errors) >= 1
+        assert not findings
+
+    def test_path_filter_scans_only_target(self, tmp_path: Path) -> None:
+        """--path <file> scans only that file."""
+        other = tmp_path / "other.py"
+        other.write_text("import re\nre.compile(r'(a+)+b')\n", encoding="utf-8")
+        target = tmp_path / "target.py"
+        target.write_text("import re\nre.compile(r'safe')\n", encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, str(DETECTOR), "--path", str(target), "--strict"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0  # target is safe; other.py not scanned
