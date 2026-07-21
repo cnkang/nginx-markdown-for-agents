@@ -250,6 +250,13 @@ regex-security-check:
 	bash tools/harness/tests/test_detect_regex_safety.sh
 	@echo "  Regex/ReDoS Safety Check: PASSED"
 
+e2e-streaming-config-check:
+	@echo "=== E2E Streaming Config Consistency Check (Rule 60) ==="
+	python3 tools/harness/detect_e2e_streaming_config.py --strict
+	python3 -m pytest tools/harness/tests/test_detect_e2e_streaming_config.py -q --tb=short
+	bash tools/harness/tests/test_detect_e2e_streaming_config.sh
+	@echo "  E2E Streaming Config Check: PASSED"
+
 harness-security-checks:
 	bash tools/harness/detect_cwe190_casts.sh
 	PYTHONPATH=. python3 tools/harness/detect_cwe22_paths.py tools/ --strict
