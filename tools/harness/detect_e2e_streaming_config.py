@@ -70,8 +70,10 @@ _RE_INTENTIONAL_COMMENT = re.compile(
 # [ \t]* rather than \s* so the leading-whitespace match does not span
 # newlines (which would make match.start() point at an earlier line and
 # break line-number accounting).
+# Supports modifiers: location = /path {, location ^~ /prefix/ {,
+# location ~ \.html$ {, location ~* \.(png|jpg)$ {, location @named {
 _RE_LOCATION_START = re.compile(
-    r"^[ \t]*location\s+([^\s{]+)\s*\{", re.MULTILINE
+    r"^[ \t]*location\s+(?:(?:=|~\*?|\^~)\s+)?([^\s{]+)\s*\{", re.MULTILINE
 )
 
 
@@ -239,7 +241,6 @@ def _extract_location_blocks(
     """
     blocks: list[_LocationBlock] = []
     errors: list[ScanError] = []
-    consumed_offsets: set[int] = set()  # avoid double-reporting nested
     for match in _RE_LOCATION_START.finditer(masked):
         loc_path = match.group(1)
         # Compute the 1-based line number from the masked text offset.
@@ -258,17 +259,12 @@ def _extract_location_blocks(
         # preserves lengths and offsets, masked offsets == original offsets.
         content_start = match.end()
         content_end = end_pos - 1
-        # Skip nested locations whose open brace is inside an already-recorded
-        # outer block — we still want them checked independently, so do NOT
-        # skip.  The caller iterates over all blocks and uses direct-depth
-        # extraction for each.
         blocks.append(_LocationBlock(
             path=loc_path,
             content_start=content_start,
             content_end=content_end,
             line_number=line_num,
         ))
-        consumed_offsets.add(match.start())
     return blocks, errors
 
 
@@ -280,6 +276,9 @@ def _extract_direct_depth_block(
     Nested ``location`` (or any ``{ ... }``) sub-blocks are replaced with
     blank lines so that directive regexes operating on the result only see
     directives at the immediate depth of this block.
+
+    Quoted strings are respected so that braces inside quotes (e.g.
+    ``set $value "{";``) do not trigger nested-block detection.
     """
     body = text[block.content_start:block.content_end]
     masked_body = _mask_nginx_comments(body)
@@ -290,38 +289,33 @@ def _extract_direct_depth_block(
     depth = 0
     while i < n:
         ch = masked_body[i]
-        if ch == "{":
-            i, depth = _handle_nested_brace(
-                masked_body, i, n, depth, out_chars, errors,
-            )
+        if ch in ('"', "'") and depth == 0:
+            # Skip quoted strings at direct depth (braces inside don't count)
+            end = _skip_quoted_string(masked_body, i)
+            out_chars.append(masked_body[i:end])
+            i = end
             continue
-        if ch == "}" and depth > 0:
-            depth -= 1
+        if ch == "{" and depth == 0:
+            # Start of a nested block — mask it
+            close = _find_matching_brace(masked_body, i + 1)
+            if close < 0:
+                errors.append(ScanError(
+                    file_path="", line=0,
+                    message="unmatched nested opening brace in location block",
+                ))
+                out_chars.extend(
+                    "\n" if masked_body[k] == "\n" else " " for k in range(i, n)
+                )
+                i = n
+                continue
+            out_chars.extend(
+                "\n" if masked_body[k] == "\n" else " " for k in range(i, close)
+            )
+            i = close
+            continue
         out_chars.append(ch)
         i += 1
     return "".join(out_chars), errors
-
-
-def _handle_nested_brace(
-    masked_body: str, i: int, n: int, depth: int,
-    out_chars: list[str], errors: list[ScanError],
-) -> tuple[int, int]:
-    """Process a ``{`` character.  Returns (new_i, new_depth)."""
-    if depth == 0:
-        close = _find_matching_brace(masked_body, i + 1)
-        if close < 0:
-            errors.append(ScanError(
-                file_path="", line=0,
-                message="unmatched nested opening brace in location block",
-            ))
-            out_chars.extend("\n" if masked_body[k] == "\n" else " " for k in range(i, n))
-            return n, depth
-        out_chars.extend(
-            "\n" if masked_body[k] == "\n" else " " for k in range(i, close)
-        )
-        return close, depth
-    out_chars.append(masked_body[i])
-    return i + 1, depth + 1
 
 
 # ---------------------------------------------------------------------------
@@ -352,13 +346,12 @@ def _extract_nginx_from_rust(
     """Extract nginx config from Rust raw strings or escaped string literals."""
     configs: list[tuple[str, int]] = []
     errors: list[ScanError] = []
-    # Match Rust raw strings: r#"..."#, r##"..."##, etc.
-    # nosec:regex-safety -- bounded Rust raw-string fence, applied to a single
-    # source file with deterministic fence matching; no nested quantifiers.
-    raw_string_re = re.compile(r'r(#+)"(.*?)\1"', re.DOTALL)
-    for m in raw_string_re.finditer(content):
-        base_line = content[: m.start()].count("\n") + 1
-        configs.append((m.group(2), base_line))
+
+    # Scan for Rust raw strings using a deterministic character scanner.
+    # Supports: r"...", r#"..."#, r##"..."##, r###"..."###, br"...", br#"..."#
+    raw_results, raw_errors = _scan_rust_raw_strings(content)
+    configs.extend(raw_results)
+    errors.extend(raw_errors)
 
     # Match regular string literals (quoted with ") that contain escaped
     # newlines.  Use a manual scanner that respects ``\"`` escapes so the
@@ -366,6 +359,146 @@ def _extract_nginx_from_rust(
     # a trailing backslash-newline is part of the literal).
     configs.extend(_extract_rust_escaped_strings(content))
     return configs, errors
+
+
+def _scan_rust_raw_strings(
+    content: str,
+) -> tuple[list[tuple[str, int]], list[ScanError]]:
+    """Scan for Rust raw string literals using a deterministic character scanner.
+
+    Correctly handles:
+      r"content"       — zero hashes
+      r#"content"#     — one hash
+      r##"content"##   — two hashes
+      r###"content"### — three hashes
+      br"content"      — byte raw strings (optional b prefix)
+      br#"content"#    — byte raw strings with hashes
+
+    The closing fence is always: quote followed by the same number of hashes.
+
+    Returns (configs, errors) where configs is [(body, line_number), ...].
+    """
+    configs: list[tuple[str, int]] = []
+    errors: list[ScanError] = []
+    i = 0
+    n = len(content)
+
+    while i < n:
+        # Look for 'r' or 'br' prefix followed by optional '#'s and '"'
+        if content[i] == '/' and i + 1 < n and content[i + 1] == '/':
+            # Skip Rust line comment
+            i = _skip_to_eol(content, i, n)
+            continue
+        if content[i] == '/' and i + 1 < n and content[i + 1] == '*':
+            # Skip Rust block comment
+            i = _skip_rust_block_comment(content, i, n)
+            continue
+
+        raw_start, hash_count, body_start = _try_match_raw_prefix(content, i, n)
+        if raw_start < 0:
+            i += 1
+            continue
+
+        # Find the closing fence: " followed by hash_count '#' characters
+        close_idx = _find_raw_string_close(content, body_start, n, hash_count)
+        if close_idx < 0:
+            line_num = content[:raw_start].count("\n") + 1
+            errors.append(ScanError(
+                file_path="",
+                line=line_num,
+                message=(
+                    f"unterminated Rust raw string (expected closing "
+                    f"'\"{'#' * hash_count}') starting here"
+                ),
+            ))
+            # Skip past the opening to avoid infinite loop
+            i = body_start
+            continue
+
+        body = content[body_start:close_idx]
+        base_line = content[:raw_start].count("\n") + 1
+        if "location" in body and "markdown_" in body:
+            configs.append((body, base_line))
+        # Advance past the closing fence
+        i = close_idx + 1 + hash_count
+    return configs, errors
+
+
+def _try_match_raw_prefix(
+    content: str, i: int, n: int,
+) -> tuple[int, int, int]:
+    """Try to match a Rust raw string prefix at position i.
+
+    Returns (start_pos, hash_count, body_start) or (-1, 0, 0) if no match.
+    start_pos is the index of 'r' (or 'b' for byte strings).
+    body_start is the index of the first character after the opening quote.
+    """
+    pos = i
+    # Optional 'b' prefix for byte raw strings
+    if pos < n and content[pos] == 'b':
+        pos += 1
+    if pos >= n or content[pos] != 'r':
+        return -1, 0, 0
+    # Check that 'r' is not part of an identifier (preceded by alphanumeric/_)
+    if i > 0 and (content[i - 1].isalnum() or content[i - 1] == '_'):
+        return -1, 0, 0
+    pos += 1  # past 'r'
+    # Count '#' characters
+    hash_count = 0
+    while pos < n and content[pos] == '#':
+        hash_count += 1
+        pos += 1
+    # Must have opening quote
+    if pos >= n or content[pos] != '"':
+        return -1, 0, 0
+    pos += 1  # past opening '"'
+    return i, hash_count, pos
+
+
+def _find_raw_string_close(
+    content: str, body_start: int, n: int, hash_count: int,
+) -> int:
+    """Find the closing fence of a Rust raw string.
+
+    The closing fence is: '"' followed by exactly hash_count '#' characters.
+    Returns the index of the closing '"', or -1 if not found.
+    """
+    i = body_start
+    while i < n:
+        if content[i] == '"':
+            # Check if followed by the right number of hashes
+            j = i + 1
+            count = 0
+            while j < n and content[j] == '#' and count < hash_count:
+                count += 1
+                j += 1
+            if count == hash_count:
+                return i
+        i += 1
+    return -1
+
+
+def _skip_to_eol(content: str, i: int, n: int) -> int:
+    """Skip to end of line (past \\n or to end of content)."""
+    while i < n and content[i] != '\n':
+        i += 1
+    return i + 1 if i < n else i
+
+
+def _skip_rust_block_comment(content: str, i: int, n: int) -> int:
+    """Skip a Rust /* ... */ block comment (supports nesting)."""
+    depth = 1
+    i += 2  # past /*
+    while i < n - 1 and depth > 0:
+        if content[i] == '/' and content[i + 1] == '*':
+            depth += 1
+            i += 2
+        elif content[i] == '*' and content[i + 1] == '/':
+            depth -= 1
+            i += 2
+        else:
+            i += 1
+    return i
 
 
 def _extract_rust_escaped_strings(
@@ -668,14 +801,57 @@ def _scan_one_block(
     )
     stripped_direct = _strip_nginx_comments(direct_content)
     preamble = _gather_preamble(source_lines, block.line_number)
-    original_block = preamble + "\n" + config_text[
-        block.content_start:block.content_end
-    ]
+    # For intentional-comment detection, use only the preamble and the
+    # direct-depth original text (before comment stripping).  This prevents
+    # comments inside nested sub-blocks from exempting the parent.
+    original_direct = _extract_direct_depth_original(config_text, block)
+    original_block = preamble + "\n" + original_direct
     finding = _check_block(
         block.path, stripped_direct, original_block,
         rel_path, base_line, block.line_number,
     )
     return finding, errors
+
+
+def _extract_direct_depth_original(
+    text: str, block: _LocationBlock,
+) -> str:
+    """Return the block's direct-depth content WITH comments but WITHOUT nested blocks.
+
+    This is used for intentional-comment detection so that comments inside
+    nested locations do not exempt the parent block.
+    """
+    body = text[block.content_start:block.content_end]
+    masked_body = _mask_nginx_comments(body)
+    out_chars: list[str] = []
+    i = 0
+    n = len(masked_body)
+    while i < n:
+        ch = masked_body[i]
+        if ch in ('"', "'"):
+            end = _skip_quoted_string(masked_body, i)
+            # Output from original body (not masked)
+            out_chars.append(body[i:end])
+            i = end
+            continue
+        if ch == "{":
+            close = _find_matching_brace(masked_body, i + 1)
+            if close < 0:
+                # Unmatched — output rest as spaces preserving newlines
+                out_chars.extend(
+                    "\n" if body[k] == "\n" else " " for k in range(i, n)
+                )
+                i = n
+                continue
+            out_chars.extend(
+                "\n" if body[k] == "\n" else " " for k in range(i, close)
+            )
+            i = close
+            continue
+        # Output from original body (preserving comments at direct depth)
+        out_chars.append(body[i])
+        i += 1
+    return "".join(out_chars)
 
 
 def _collect_findings(
@@ -746,8 +922,6 @@ def main() -> int:
         print(e, file=sys.stderr)
     for f in findings:
         print(f, file=sys.stderr)
-
-    len(findings) > 0 or len(errors) > 0
 
     if args.strict:
         if errors:
