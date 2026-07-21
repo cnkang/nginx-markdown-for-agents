@@ -124,6 +124,9 @@ _EXCLUDE_DIRS = frozenset({
 # Pattern truncation limit for output.
 _MAX_PATTERN_DISPLAY = 80
 
+# Placeholder function name used for shell-extracted regex findings.
+_SHELL_FUNCTION_NAME = "<shell>"
+
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -345,19 +348,19 @@ class RegexASTVisitor(ast.NodeVisitor):
     # -- Function / class scope tracking ----------------------------------
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._extracted_from_visit_Lambda_2(node)
+        self._visit_scoped_node(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._extracted_from_visit_Lambda_2(node)
+        self._visit_scoped_node(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        self._extracted_from_visit_Lambda_2(node)
+        self._visit_scoped_node(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        self._extracted_from_visit_Lambda_2(node)
+        self._visit_scoped_node(node)
 
-    # TODO Rename this here and in `visit_FunctionDef`, `visit_AsyncFunctionDef`, `visit_ClassDef` and `visit_Lambda`
-    def _extracted_from_visit_Lambda_2(self, node):
+    def _visit_scoped_node(self, node: ast.AST) -> None:
+        """Enter a new scope, visit children, then leave."""
         self._enter_scope()
         self.generic_visit(node)
         self._leave_scope()
@@ -1263,22 +1266,20 @@ def _find_groups(tokens: list[_Token]) -> list[tuple[int, int, str]]:
     for idx, tok in enumerate(tokens):
         if tok.kind == _TKind.GROUP_OPEN:
             stack.append(idx)
-        elif tok.kind == _TKind.GROUP_CLOSE:
-            if stack:
-                open_idx = stack.pop()
-                # The actual content offset in the source pattern.
-                open_pos = tokens[open_idx].pos
-                close_pos = tok.pos
-                content = _pattern_between(pattern_pos_open=open_pos,
-                                           pattern_pos_close=close_pos,
-                                           tokens=tokens,
-                                           open_idx=open_idx)
-                groups.append((open_idx, idx, content))
+        elif tok.kind == _TKind.GROUP_CLOSE and stack:
+            open_idx = stack.pop()
+            # The actual content offset in the source pattern.
+            tokens[open_idx].pos
+            close_pos = tok.pos
+            content = _pattern_between(pattern_pos_close=close_pos,
+                                       tokens=tokens,
+                                       open_idx=open_idx)
+            groups.append((open_idx, idx, content))
     return groups
 
 
 def _pattern_between(
-    pattern_pos_open: int, pattern_pos_close: int,
+    pattern_pos_close: int,
     tokens: list[_Token], open_idx: int,
 ) -> str:
     """Reconstruct the group's content text from tokens."""
@@ -2104,7 +2105,7 @@ def _build_shell_finding(
     if reason is not None:
         return RegexFinding(
             severity=severity, engine=engine, file_path=rel_path,
-            line=line_num, function="<shell>", api=command, pattern=pattern,
+            line=line_num, function=_SHELL_FUNCTION_NAME, api=command, pattern=pattern,
             pattern_source=PatternSource.STATIC_LITERAL,
             input_scope="shell argument",
             reason=reason, remediation=remediation,
@@ -2112,7 +2113,7 @@ def _build_shell_finding(
     if engine == Engine.SHELL_PCRE and "$" in pattern:
         return RegexFinding(
             severity=Severity.REVIEW, engine=engine, file_path=rel_path,
-            line=line_num, function="<shell>", api=command, pattern=pattern,
+            line=line_num, function=_SHELL_FUNCTION_NAME, api=command, pattern=pattern,
             pattern_source=PatternSource.DYNAMIC, input_scope="shell variable",
             reason=(
                 "Shell pattern contains variable expansion ($) — if "
@@ -2126,7 +2127,7 @@ def _build_shell_finding(
     if engine == Engine.SHELL_PCRE and not pattern:
         return RegexFinding(
             severity=Severity.REVIEW, engine=engine, file_path=rel_path,
-            line=line_num, function="<shell>", api=command,
+            line=line_num, function=_SHELL_FUNCTION_NAME, api=command,
             pattern="<unparsed>", pattern_source=PatternSource.UNKNOWN,
             input_scope="shell argument",
             reason=(
@@ -2341,7 +2342,7 @@ def _compute_exit_code(
                 file=sys.stderr,
             )
             return 1
-        return _extracted_from__compute_exit_code_35(
+        return _report_review_and_pass(
             review_count,
             ' REVIEW finding(s) require attention (non-blocking in --strict mode)',
         )
@@ -2350,15 +2351,15 @@ def _compute_exit_code(
             f"WARN: {error_count} blocking finding(s) (advisory)",
             file=sys.stderr,
         )
-    return _extracted_from__compute_exit_code_35(
+    return _report_review_and_pass(
         review_count, ' REVIEW finding(s) (advisory)'
     )
 
 
-# TODO Rename this here and in `_compute_exit_code`
-def _extracted_from__compute_exit_code_35(review_count, arg1):
+def _report_review_and_pass(review_count: int, suffix: str) -> int:
+    """Print REVIEW summary (if any) and return exit code 0 (pass)."""
     if review_count > 0:
-        print(f"WARN: {review_count}{arg1}", file=sys.stderr)
+        print(f"WARN: {review_count}{suffix}", file=sys.stderr)
     print("OK: regex safety check passed", file=sys.stderr)
     return 0
 
