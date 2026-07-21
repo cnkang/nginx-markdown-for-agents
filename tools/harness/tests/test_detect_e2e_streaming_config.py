@@ -61,14 +61,14 @@ class TestCommentMasking:
     """Comments containing ``{`` or ``}`` must not affect brace depth."""
 
     def test_comment_with_open_brace(self) -> None:
-        blocks = self._extracted_from_test_comment_with_close_brace_2(
+        blocks = self._extract_blocks(
             "location /a {\n    # example: location /ignored {\n    markdown_cache_validation full;\n}\n"
         )
         assert len(blocks) == 1
         assert blocks[0].path == "/a"
 
     def test_comment_with_close_brace(self) -> None:
-        blocks = self._extracted_from_test_comment_with_close_brace_2(
+        blocks = self._extract_blocks(
             "location /a {\n"
             "    # close: }\n"
             "    markdown_cache_validation full;\n"
@@ -81,9 +81,8 @@ class TestCommentMasking:
         assert "/a" in paths
         assert "/b" in paths
 
-    # TODO Rename this here and in `test_comment_with_open_brace` and `test_comment_with_close_brace`
-    def _extracted_from_test_comment_with_close_brace_2(self, arg0):
-        text = arg0
+    def _extract_blocks(self, text: str) -> list[_LocationBlock]:
+        """Extract location blocks from text with comment masking."""
         masked = _mask_nginx_comments(text)
         result, errors = _extract_location_blocks(text, masked)
         assert not errors
@@ -259,14 +258,15 @@ class TestFailClosed:
         files = {
             "tools/e2e-harness/src/test.rs": (
                 'fn build() {\n'
-                '    let c = r#"http {\n'
-                '        server {\n'
-                '            location /raw/ {\n'
-                '                markdown_cache_validation full;\n'
-                '            }\n'
+                '    let c = r#"\n'
+                'http {\n'
+                '    server {\n'
+                '        location /raw/ {\n'
+                '            markdown_cache_validation full;\n'
                 '        }\n'
                 '    }\n'
-                '#";\n'
+                '}\n'
+                '"#;\n'
                 '}\n'
             ),
         }
@@ -317,3 +317,253 @@ class TestFailClosed:
         findings, errors = _scan(files, tmp_path)
         assert not errors
         assert any(f.loc_path == "/bad/" for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# Rust raw string variants
+# ---------------------------------------------------------------------------
+
+class TestRustRawStringVariants:
+    """Test Rust raw string parsing with various hash counts."""
+
+    def test_zero_hash_raw_string(self, tmp_path: Path) -> None:
+        """r\"...\" (zero hashes) should be parsed."""
+        files = {
+            "tools/e2e-harness/src/test.rs": (
+                'fn build() {\n'
+                '    let c = r"\n'
+                'location /zero/ {\n'
+                '    markdown_cache_validation full;\n'
+                '}\n'
+                '";\n'
+                '}\n'
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert any(f.loc_path == "/zero/" for f in findings)
+
+    def test_two_hash_raw_string(self, tmp_path: Path) -> None:
+        """r##\"...\"## (two hashes) should be parsed."""
+        files = {
+            "tools/e2e-harness/src/test.rs": (
+                'fn build() {\n'
+                '    let c = r##"\n'
+                'location /two/ {\n'
+                '    markdown_cache_validation full;\n'
+                '}\n'
+                '"##;\n'
+                '}\n'
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert any(f.loc_path == "/two/" for f in findings)
+
+    def test_three_hash_raw_string(self, tmp_path: Path) -> None:
+        """r###\"...\"### (three hashes) should be parsed."""
+        files = {
+            "tools/e2e-harness/src/test.rs": (
+                'fn build() {\n'
+                '    let c = r###"\n'
+                'location /three/ {\n'
+                '    markdown_cache_validation full;\n'
+                '}\n'
+                '"###;\n'
+                '}\n'
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert any(f.loc_path == "/three/" for f in findings)
+
+    def test_correct_config_no_finding(self, tmp_path: Path) -> None:
+        """Raw string with correct config produces no finding."""
+        files = {
+            "tools/e2e-harness/src/test.rs": (
+                'fn build() {\n'
+                '    let c = r#"\n'
+                'location /ok/ {\n'
+                '    markdown_cache_validation full;\n'
+                '    markdown_streaming off;\n'
+                '}\n'
+                '"#;\n'
+                '}\n'
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert not findings
+
+    def test_unterminated_raw_string(self, tmp_path: Path) -> None:
+        """Unterminated raw string produces a scan error."""
+        files = {
+            "tools/e2e-harness/src/test.rs": (
+                'fn build() {\n'
+                '    let c = r##"\n'
+                'location /broken/ {\n'
+                '    markdown_cache_validation full;\n'
+                '}\n'
+                '"#;\n'  # Wrong hash count — not properly closed
+                '}\n'
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert any("unterminated" in e.message.lower() for e in errors)
+
+    def test_rust_comment_ignored(self, tmp_path: Path) -> None:
+        """Raw strings inside Rust comments should not be scanned."""
+        files = {
+            "tools/e2e-harness/src/test.rs": (
+                '// let c = r#"\n'
+                '// location /commented/ {\n'
+                '//     markdown_cache_validation full;\n'
+                '// }\n'
+                '// "#;\n'
+                'fn main() {}\n'
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert not findings
+
+
+# ---------------------------------------------------------------------------
+# NGINX location modifier variants
+# ---------------------------------------------------------------------------
+
+class TestLocationModifiers:
+    """Test that location modifiers (=, ^~, ~, ~*) are correctly parsed."""
+
+    def test_exact_modifier(self, tmp_path: Path) -> None:
+        """location = /exact { ... } should be detected."""
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "location = /exact {\n"
+                "    markdown_cache_validation full;\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert any(f.loc_path == "/exact" for f in findings)
+
+    def test_prefix_modifier(self, tmp_path: Path) -> None:
+        """location ^~ /prefix/ { ... } should be detected."""
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "location ^~ /prefix/ {\n"
+                "    markdown_cache_validation full;\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert any(f.loc_path == "/prefix/" for f in findings)
+
+    def test_regex_modifier(self, tmp_path: Path) -> None:
+        r"""location ~ \.html$ { ... } should be detected."""
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                r"location ~ \.html$ {" "\n"
+                "    markdown_cache_validation full;\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert len(findings) == 1
+
+    def test_case_insensitive_regex_modifier(self, tmp_path: Path) -> None:
+        r"""location ~* \.(png|jpg)$ { ... } should be detected."""
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                r"location ~* \.(png|jpg)$ {" "\n"
+                "    markdown_cache_validation full;\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert len(findings) == 1
+
+    def test_named_location(self, tmp_path: Path) -> None:
+        """location @named { ... } should be detected."""
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "location @fallback {\n"
+                "    markdown_cache_validation full;\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert any(f.loc_path == "@fallback" for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# Quoted braces and comment isolation
+# ---------------------------------------------------------------------------
+
+class TestQuotedBraceAndCommentIsolation:
+    """Test that quoted braces don't affect depth and nested comments don't exempt parent."""
+
+    def test_quoted_braces_not_counted(self, tmp_path: Path) -> None:
+        """Braces inside quoted strings should not affect block depth."""
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "location /test {\n"
+                '    set $value "{";\n'
+                '    add_header X-Debug "{}";\n'
+                "    markdown_cache_validation full;\n"
+                "    markdown_streaming off;\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        # Should NOT be flagged (has explicit streaming off)
+        assert not findings
+
+    def test_nested_comment_does_not_exempt_parent(self, tmp_path: Path) -> None:
+        """Intentional comment in nested location must not exempt parent."""
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "location /parent {\n"
+                "    markdown_cache_validation full;\n"
+                "    markdown_streaming auto;\n"
+                "    location /parent/child {\n"
+                "        # intentional: validates runtime-block mechanism for child\n"
+                "        markdown_streaming off;\n"
+                "    }\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        # Parent should be flagged (auto + full, no own intentional comment)
+        parent = [f for f in findings if f.loc_path == "/parent"]
+        assert len(parent) == 1
+        # Child should not be flagged
+        assert all(f.loc_path != "/parent/child" for f in findings)
