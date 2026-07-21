@@ -33,6 +33,22 @@ pub struct FixtureMeta {
     pub known_diff_ids: Vec<String>,
     /// High-risk structures used to explain why the fixture is in the corpus.
     pub high_risk_structures: Vec<String>,
+    /// Declared byte encoding for fixtures without an explicit Content-Type.
+    pub source_encoding: Option<String>,
+    /// Explicit Content-Type used by every conversion path for this fixture.
+    pub content_type: Option<String>,
+}
+
+impl FixtureMeta {
+    /// Resolve the per-fixture Content-Type, keeping UTF-8 as the corpus default.
+    pub fn resolved_content_type(&self) -> String {
+        self.content_type.clone().unwrap_or_else(|| {
+            self.source_encoding
+                .as_ref()
+                .map(|encoding| format!("text/html; charset={encoding}"))
+                .unwrap_or_else(|| "text/html; charset=UTF-8".to_string())
+        })
+    }
 }
 
 /// Result of a streaming conversion run, including the concatenated Markdown
@@ -121,43 +137,64 @@ pub fn read_fixture_meta(path: &Path) -> FixtureMeta {
     )
     .unwrap_or_else(|err| panic!("parse {}: {err}", meta_path.display()));
 
-    let notes = value
-        .get("streaming_notes")
-        .and_then(serde_json::Value::as_object);
+    let root = value
+        .as_object()
+        .unwrap_or_else(|| panic!("{}: metadata root must be an object", meta_path.display()));
+    let notes = match root.get("streaming_notes") {
+        Some(notes) => Some(notes.as_object().unwrap_or_else(|| {
+            panic!("{}: streaming_notes must be an object", meta_path.display())
+        })),
+        None => None,
+    };
 
-    let expected_fallback = notes
-        .and_then(|notes| notes.get("expected_fallback"))
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
+    let expected_fallback = match notes.and_then(|notes| notes.get("expected_fallback")) {
+        Some(value) => value.as_bool().unwrap_or_else(|| {
+            panic!(
+                "{}: expected_fallback must be a boolean",
+                meta_path.display()
+            )
+        }),
+        None => false,
+    };
 
-    let known_diff_ids = notes
-        .and_then(|notes| notes.get("known_diff_ids"))
-        .and_then(serde_json::Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .map(ToOwned::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let high_risk_structures = notes
-        .and_then(|notes| notes.get("high_risk_structures"))
-        .and_then(serde_json::Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .map(ToOwned::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
+    let parse_string_array = |key: &str| match notes.and_then(|notes| notes.get(key)) {
+        Some(value) => value
+            .as_array()
+            .unwrap_or_else(|| panic!("{}: {key} must be an array", meta_path.display()))
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .filter(|item| !item.is_empty())
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "{}: {key} entries must be non-empty strings",
+                            meta_path.display()
+                        )
+                    })
+                    .to_owned()
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    let parse_optional_string = |key: &str| match root.get(key) {
+        Some(value) => Some(
+            value
+                .as_str()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| {
+                    panic!("{}: {key} must be a non-empty string", meta_path.display())
+                })
+                .to_owned(),
+        ),
+        None => None,
+    };
 
     FixtureMeta {
         expected_fallback,
-        known_diff_ids,
-        high_risk_structures,
+        known_diff_ids: parse_string_array("known_diff_ids"),
+        high_risk_structures: parse_string_array("high_risk_structures"),
+        source_encoding: parse_optional_string("source-encoding"),
+        content_type: parse_optional_string("content-type"),
     }
 }
 
