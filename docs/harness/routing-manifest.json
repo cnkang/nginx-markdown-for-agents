@@ -562,6 +562,7 @@
       "id": "harness-remediation",
       "doc": "docs/harness/risk-packs/harness-remediation.md",
       "primary_surfaces": [
+        "regex-safety",
         "harness-rules",
         "steering-adapters",
         "post-analysis-remediation"
@@ -575,7 +576,12 @@
         "docs/harness/**",
         ".kiro/steering/**",
         "tools/harness/**",
-        "docs/project/recent-git-harness-steering-analysis-*.md"
+        "docs/project/recent-git-harness-steering-analysis-*.md",
+        "tools/harness/detect_regex_safety.py",
+        "tools/harness/tests/test_detect_regex_safety.py",
+        "tools/harness/tests/test_detect_regex_safety.sh",
+        "docs/harness/rules/parser-regex.md",
+        "deny.toml"
       ],
       "keywords": [
         "recent git",
@@ -583,10 +589,16 @@
         "finding",
         "steering",
         "risk pack",
-        "harness rule"
+        "harness rule",
+        "regex",
+        "redos",
+        "backtracking",
+        "nosec",
+        "suppression"
       ],
       "verification_families": [
         "harness-sync",
+        "regex-security",
         "docs-tooling",
         "release-quality"
       ]
