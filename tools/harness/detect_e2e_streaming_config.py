@@ -347,7 +347,7 @@ def _gather_preamble(lines: list[str], location_line_num: int) -> str:
 # ---------------------------------------------------------------------------
 
 def _extract_nginx_from_rust(
-    content: str, file_path: str,  # noqa: ARG001 — kept for API symmetry with _extract_nginx_from_shell
+    content: str, _file_path: str,  # kept for API symmetry with _extract_nginx_from_shell
 ) -> tuple[list[tuple[str, int]], list[ScanError]]:
     """Extract nginx config from Rust raw strings or escaped string literals."""
     configs: list[tuple[str, int]] = []

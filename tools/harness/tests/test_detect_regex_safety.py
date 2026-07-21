@@ -344,7 +344,12 @@ class TestErrorHandling:
         if os.geteuid() == 0:
             pytest.skip("root bypasses file permissions")
         f = tmp_path / "unreadable.py"
-        f.write_text("import re\n", encoding="utf-8")
+        # Create file with owner-only permissions to avoid world-readable window
+        fd = os.open(str(f), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, b"import re\n")
+        finally:
+            os.close(fd)
         os.chmod(str(f), 0o000)
         try:
             _findings, errors = _scan_python_file(f, tmp_path)
@@ -798,9 +803,7 @@ class TestCLIContract:
 
     def test_strict_review_nonzero_no(self, tmp_path: Path) -> None:
         """--strict alone returns 0 on REVIEW-only findings."""
-        content = "import re\nre.compile(re.escape('x') + 'y')\n" if False else (
-            "import re\nx = get()\nre.compile(x + 'y')\n"
-        )
+        content = "import re\nx = get()\nre.compile(x + 'y')\n"
         _make_py_file(content, tmp_path)
         result = subprocess.run(
             [sys.executable, str(DETECTOR), "--path", str(tmp_path), "--strict"],
