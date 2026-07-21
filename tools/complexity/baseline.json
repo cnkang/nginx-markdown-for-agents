@@ -169,52 +169,6 @@
       "function": "compare",
       "cognitive_complexity": 23,
       "note": "Baseline comparison logic — lizard + complexipy cross-referencing"
-    },
-    {
-      "file": "tools/harness/detect_regex_safety.py",
-      "function": "_record_finding",
-      "ccn": 23,
-      "length": 71,
-      "params": 4,
-      "note": "Regex finding emission helper — multi-segment source classification and emission"
-    },
-    {
-      "file": "tools/harness/detect_regex_safety.py",
-      "function": "_skip_options_and_find_pattern",
-      "ccn": 19,
-      "length": 70,
-      "params": 4,
-      "note": "Shell regex command parser — option skipping and command-aware pattern extraction"
-    },
-    {
-      "file": "tools/harness/detect_regex_safety.py",
-      "function": "RegexASTVisitor::_record_finding",
-      "cognitive_complexity": 25,
-      "note": "AST finding emission — static/dynamic branch selection and segment analysis"
-    },
-    {
-      "file": "tools/harness/detect_regex_safety.py",
-      "function": "_parse_short_option_cluster",
-      "cognitive_complexity": 20,
-      "note": "Shell option parser — clustered short-option state machine"
-    },
-    {
-      "file": "tools/harness/detect_regex_safety.py",
-      "function": "_skip_options_and_find_pattern",
-      "cognitive_complexity": 42,
-      "note": "Shell regex command parser — long option/pipeline/heredoc branching"
-    },
-    {
-      "file": "tools/harness/detect_e2e_streaming_config.py",
-      "function": "_extract_direct_depth_original",
-      "cognitive_complexity": 24,
-      "note": "Direct-depth original-text extraction — quote/nested-block masking with original source preservation"
-    },
-    {
-      "file": "tools/harness/detect_e2e_streaming_config.py",
-      "function": "_extract_direct_depth_block",
-      "cognitive_complexity": 26,
-      "note": "Direct-depth block extraction — nested-block removal, quoted-string and unmatched-brace handling"
     }
   ]
 }
