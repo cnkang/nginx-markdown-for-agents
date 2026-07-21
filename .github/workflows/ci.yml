@@ -99,6 +99,7 @@ jobs:
       perf: ${{ steps.filter.outputs.perf }}
       matrix_release: ${{ steps.filter.outputs.matrix_release }}
       corpus_tools: ${{ steps.filter.outputs.corpus_tools }}
+      harness_tooling: ${{ steps.filter.outputs.harness_tooling }}
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - name: Checkout repository
@@ -168,6 +169,19 @@ jobs:
               - 'tools/perf/run_module_benchmark.sh'
             corpus_tools:
               - 'tools/corpus/**'
+            harness_tooling:
+              - 'AGENTS.md'
+              - 'Makefile'
+              - '.gitattributes'
+              - '.sonarcloud.properties'
+              - 'tools/harness/**'
+              - 'tools/sonar/**'
+              - 'tools/e2e/**'
+              - 'tools/e2e-harness/**'
+              - 'tests/corpus/**'
+              - 'docs/harness/**'
+              - 'tools/complexity/baseline.json'
+              - '.github/workflows/**'
             workflows:
               - '.github/workflows/**'
 
@@ -196,7 +210,7 @@ jobs:
   harness-tooling:
     name: Harness Tooling Gates
     needs: changes
-    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.workflows == 'true'
+    if: needs.changes.outputs.harness_tooling == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -220,6 +234,9 @@ jobs:
 
       - name: Run E2E streaming config detector
         run: make e2e-streaming-config-check
+
+      - name: Validate Sonar source encodings
+        run: make sonar-encoding-check
 
       - name: Run auto-generated naming detector
         run: python3 tools/harness/detect_auto_generated_naming.py tools/ --strict
