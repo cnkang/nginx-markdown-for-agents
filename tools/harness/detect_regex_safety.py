@@ -938,24 +938,6 @@ class RegexASTVisitor(ast.NodeVisitor):
 _FLAGS_POSITIONAL = 1  # default for compile
 _STRING_POSITIONAL = 1  # default for non-sub APIs
 
-# Adjust the positional indices per-API at lookup time.
-_API_FLAGS_INDEX: dict[str, int] = {
-    "compile": 1,
-    "search": 2,
-    "match": 2,
-    "fullmatch": 2,
-    "findall": 2,
-    "finditer": 2,
-    "split": 3,
-    "sub": 4,
-    "subn": 4,
-}
-_API_STRING_INDEX: dict[str, int] = {
-    "search": 1, "match": 1, "fullmatch": 1,
-    "findall": 1, "finditer": 1, "split": 1,
-    "sub": 2, "subn": 2,
-}
-
 
 class _DupArg:
     """Marker for a positional+keyword duplicate argument."""
@@ -1752,11 +1734,6 @@ _PCRE_COMMANDS = {
     "grep": ({"-P"}, {"-e", "--regexp"}),  # PCRE flag, pattern-bearing options
     "rg": ({"-P"}, {"-e", "--regexp"}),
     "perl": (set(), {"-e", "-E"}),
-}
-_ERE_COMMANDS = {
-    "grep": ({"-E"}, {"-e", "--regexp"}),
-    "sed": ({"-E"}, set()),
-    "rg": ({"-E"}, {"-e", "--regexp"}),
 }
 
 
