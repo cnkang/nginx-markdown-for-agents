@@ -1205,7 +1205,7 @@ def _resolve_scan_dirs(args: argparse.Namespace) -> tuple[list[Path], int | None
         if not scan_path.exists():
             print(f"ERROR: path does not exist: {scan_path}", file=sys.stderr)
             return [], 1
-        return [scan_path] if scan_path.is_dir() else [scan_path.parent], None
+        return [scan_path], None
     if args.directory:
         scan_path = Path(args.directory).resolve()
         if not scan_path.is_dir():
@@ -1220,11 +1220,11 @@ def _validate_scan_dirs(
 ) -> tuple[list[Path], int | None]:
     valid_dirs: list[Path] = []
     for d in scan_dirs:
-        if d.is_dir():
+        if d.is_dir() or d.is_file():
             valid_dirs.append(d)
         elif args.path or args.directory:
             print(
-                f"ERROR: scan directory does not exist: {d}",
+                f"ERROR: scan path does not exist: {d}",
                 file=sys.stderr,
             )
             return [], 1
