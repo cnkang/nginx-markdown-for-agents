@@ -1054,8 +1054,9 @@ class RegexASTVisitor(ast.NodeVisitor):
 # Positional indices for ``string`` and ``flags`` are now per-API via
 # _RE_SIGNATURES.  The following are kept as fallbacks for compiled-pattern
 # method calls where we don't have a signature (the pattern is already known).
+# Note: compiled-pattern methods don't accept flags positionally, so only the
+# string index is needed here.
 _COMPILED_STRING_POSITIONAL = 0  # compiled.search(string, ...)
-_COMPILED_FLAGS_POSITIONAL = None  # compiled methods don't accept flags positionally
 
 
 class _DupArg:
