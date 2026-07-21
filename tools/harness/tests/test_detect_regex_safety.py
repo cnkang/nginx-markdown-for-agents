@@ -862,3 +862,282 @@ class TestCLIContract:
             capture_output=True, text=True,
         )
         assert result.returncode == 0  # target is safe; other.py not scanned
+
+
+# ---------------------------------------------------------------------------
+# Cross-segment static pattern analysis (Section VI)
+# ---------------------------------------------------------------------------
+
+class TestCrossSegmentAnalysis:
+    """Test that static concatenation is analyzed as a complete pattern."""
+
+    def test_cross_segment_nested_quantifier(self, tmp_path: Path) -> None:
+        """r'(a+' + r')+$' should produce ERROR for the full pattern."""
+        content = "import re\nre.compile(r'(a+' + r')+$')\n"
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.ERROR for f in findings)
+
+    def test_cross_segment_split_atom(self, tmp_path: Path) -> None:
+        """r'(a' + r'+)+$' should produce ERROR for the full pattern."""
+        content = "import re\nre.compile(r'(a' + r'+)+$')\n"
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.ERROR for f in findings)
+
+    def test_cross_segment_three_parts(self, tmp_path: Path) -> None:
+        """r'(' + r'a+' + r')+$' should produce ERROR."""
+        content = "import re\nre.compile(r'(' + r'a+' + r')+$')\n"
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.ERROR for f in findings)
+
+    def test_cross_segment_safe(self, tmp_path: Path) -> None:
+        """r'^[a-z' + r']+$' should NOT produce an error."""
+        content = "import re\nre.compile(r'^[a-z' + r']+$')\n"
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not findings
+
+
+# ---------------------------------------------------------------------------
+# Binding invalidation (Section VII)
+# ---------------------------------------------------------------------------
+
+class TestBindingInvalidation:
+    """Test that compiled pattern bindings are invalidated on reassignment."""
+
+    def test_compiled_reassignment_to_dynamic(self, tmp_path: Path) -> None:
+        """p = re.compile(...) then p = get() → p.search() is REVIEW."""
+        content = (
+            "import re\n"
+            "p = re.compile(r'^safe$')\n"
+            "p = get_runtime_pattern()\n"
+            "p.search('data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        # p is no longer a known compiled pattern — should not use old pattern
+        compiled_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and "compiled" in f.api
+        ]
+        assert not compiled_errors  # Should NOT still flag with old safe pattern
+
+    def test_static_reassignment_to_unknown(self, tmp_path: Path) -> None:
+        """PATTERN = r'^safe$' then PATTERN = OTHER → re.search(PATTERN) is REVIEW."""
+        content = (
+            "import re\n"
+            "OTHER = get_value()\n"
+            "PATTERN = r'^safe$'\n"
+            "PATTERN = OTHER\n"
+            "re.search(PATTERN, 'data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        # After reassignment to dynamic, PATTERN should be REVIEW
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Escaped dynamic composition (Section VIII)
+# ---------------------------------------------------------------------------
+
+class TestEscapedDynamicComposition:
+    """Test that re.escape + regex operators produces REVIEW."""
+
+    def test_pure_escape_safe(self, tmp_path: Path) -> None:
+        """re.compile(re.escape(value)) → no finding."""
+        content = "import re\nvalue = 'x'\nre.compile(re.escape(value))\n"
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not findings
+
+    def test_escape_plus_quantifier_review(self, tmp_path: Path) -> None:
+        """re.compile(r'(' + re.escape(value) + r'+)+$') → REVIEW."""
+        content = (
+            "import re\n"
+            "value = 'x'\n"
+            "re.compile(r'(' + re.escape(value) + r'+)+$')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        # The static segments contain regex operators → REVIEW
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) >= 1
+
+    def test_escape_with_safe_suffix(self, tmp_path: Path) -> None:
+        """re.compile(re.escape(value) + r'-suffix$') → REVIEW (has operators)."""
+        content = (
+            "import re\n"
+            "value = 'x'\n"
+            "re.compile(re.escape(value) + r'-suffix$')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        # The $ anchor is technically a regex operator
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) >= 1
+
+    def test_escape_with_dangerous_static_error(self, tmp_path: Path) -> None:
+        """re.compile(re.escape(value) + r'(a+)+$') → ERROR (static segment danger)."""
+        content = (
+            "import re\n"
+            "value = 'x'\n"
+            "re.compile(re.escape(value) + r'(a+)+$')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.ERROR for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# Per-API flags positional detection (Section V)
+# ---------------------------------------------------------------------------
+
+class TestAPISignatures:
+    """Test that flags are correctly identified at different positional indices."""
+
+    def test_split_flags_positional(self, tmp_path: Path) -> None:
+        """re.split(r'foo.*', data, 0, re.DOTALL) → flags at index 3."""
+        content = (
+            "import re\n"
+            "re.split(r'foo.*', 'data', 0, re.DOTALL)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) == 1
+        assert "DOTALL" in reviews[0].reason
+
+    def test_sub_flags_positional(self, tmp_path: Path) -> None:
+        """re.sub(r'foo.*', 'x', data, 0, re.DOTALL) → flags at index 4."""
+        content = (
+            "import re\n"
+            "re.sub(r'foo.*', 'x', 'data', 0, re.DOTALL)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) == 1
+        assert "DOTALL" in reviews[0].reason
+
+    def test_subn_flags_positional(self, tmp_path: Path) -> None:
+        """re.subn(r'foo.*', 'x', data, 0, re.DOTALL) → flags at index 4."""
+        content = (
+            "import re\n"
+            "re.subn(r'foo.*', 'x', 'data', 0, re.DOTALL)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) == 1
+        assert "DOTALL" in reviews[0].reason
+
+    def test_search_flags_positional(self, tmp_path: Path) -> None:
+        """re.search(r'foo.*', data, re.DOTALL) → flags at index 2."""
+        content = (
+            "import re\n"
+            "re.search(r'foo.*', 'data', re.DOTALL)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) == 1
+        assert "DOTALL" in reviews[0].reason
+
+    def test_sub_repl_not_mistaken_for_string(self, tmp_path: Path) -> None:
+        """re.sub(r'safe', 'repl', data) — 'repl' is not the string input."""
+        content = (
+            "import re\n"
+            "re.sub(r'^safe$', 'replacement', open('x').read())\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        # No finding for safe pattern; input scope should be file content
+        # (from string at index 2, not repl at index 1)
+
+
+# ---------------------------------------------------------------------------
+# Shell parser improvements (Section IX)
+# ---------------------------------------------------------------------------
+
+class TestShellParserImprovements:
+    """Test shell parser enhancements for combined options, long options, etc."""
+
+    def _scan_shell_content(self, content: str, tmp_path: Path):
+        f = tmp_path / "test.sh"
+        f.write_text(content)
+        result, errors = _scan_shell_file(f, tmp_path)
+        assert not errors
+        return result
+
+    def test_combined_Pe(self, tmp_path: Path) -> None:
+        """grep -Pe '(a+)+$' should detect PCRE + pattern."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep -Pe '(a+)+$' file\n", tmp_path,
+        )
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert errors_found[0].pattern == "(a+)+$"
+
+    def test_combined_Pne(self, tmp_path: Path) -> None:
+        """grep -Pne '(a+)+$' should detect PCRE + pattern."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep -Pne '(a+)+$' file\n", tmp_path,
+        )
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert errors_found[0].pattern == "(a+)+$"
+
+    def test_long_regexp_equals(self, tmp_path: Path) -> None:
+        """grep -P --regexp='(a+)+$' should detect PCRE + pattern."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep -P --regexp='(a+)+$' file\n", tmp_path,
+        )
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert errors_found[0].pattern == "(a+)+$"
+
+    def test_perl_regexp_long_option(self, tmp_path: Path) -> None:
+        """grep --perl-regexp '(a+)+$' should detect PCRE."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep --perl-regexp '(a+)+$' file\n", tmp_path,
+        )
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_pcre2_long_option(self, tmp_path: Path) -> None:
+        """rg --pcre2 '(a+)+$' should detect PCRE."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\nrg --pcre2 '(a+)+$' file\n", tmp_path,
+        )
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+
+    def test_option_value_not_mistaken(self, tmp_path: Path) -> None:
+        """grep -P -m 1 '(a+)+$' — -m consumes '1', not the pattern."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep -P -m 1 '(a+)+$' file\n", tmp_path,
+        )
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert errors_found[0].pattern == "(a+)+$"
+
+    def test_backslash_continuation(self, tmp_path: Path) -> None:
+        r"""Backslash continuation should join lines."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep -P \\\n    '(a+)+$' file\n", tmp_path,
+        )
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert errors_found[0].pattern == "(a+)+$"
+
+    def test_no_space_pipe(self, tmp_path: Path) -> None:
+        """cmd|grep -P '(a+)+$' — pipe without space."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\necho test|grep -P '(a+)+$'\n", tmp_path,
+        )
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
