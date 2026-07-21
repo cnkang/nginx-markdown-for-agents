@@ -101,6 +101,41 @@ _RE_MODULE_FUNCS: dict[str, int] = {
     "subn": 0,
 }
 
+
+# ---------------------------------------------------------------------------
+# Per-API signature definitions (positional index for each named argument)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class _ReSignature:
+    """Positional argument indices for a specific re module function."""
+    pattern_index: int
+    string_index: int | None
+    flags_index: int | None
+
+
+# Canonical Python re module API signatures:
+#   re.compile(pattern, flags=0)
+#   re.search(pattern, string, flags=0)
+#   re.match(pattern, string, flags=0)
+#   re.fullmatch(pattern, string, flags=0)
+#   re.findall(pattern, string, flags=0)
+#   re.finditer(pattern, string, flags=0)
+#   re.split(pattern, string, maxsplit=0, flags=0)
+#   re.sub(pattern, repl, string, count=0, flags=0)
+#   re.subn(pattern, repl, string, count=0, flags=0)
+_RE_SIGNATURES: dict[str, _ReSignature] = {
+    "compile":   _ReSignature(pattern_index=0, string_index=None, flags_index=1),
+    "search":    _ReSignature(pattern_index=0, string_index=1, flags_index=2),
+    "match":     _ReSignature(pattern_index=0, string_index=1, flags_index=2),
+    "fullmatch": _ReSignature(pattern_index=0, string_index=1, flags_index=2),
+    "findall":   _ReSignature(pattern_index=0, string_index=1, flags_index=2),
+    "finditer":  _ReSignature(pattern_index=0, string_index=1, flags_index=2),
+    "split":     _ReSignature(pattern_index=0, string_index=1, flags_index=3),
+    "sub":       _ReSignature(pattern_index=0, string_index=2, flags_index=4),
+    "subn":      _ReSignature(pattern_index=0, string_index=2, flags_index=4),
+}
+
 # Compiled pattern object methods.
 _PATTERN_METHODS = frozenset({
     "search", "match", "fullmatch",
@@ -370,10 +405,34 @@ class RegexASTVisitor(ast.NodeVisitor):
     def visit_Assign(self, node: ast.Assign) -> None:
         """Track ``pattern = re.compile(...)`` and static string constants."""
         static_value = self._resolve_static_value(node.value)
-        self._record_compile_assignment(node.value, node.targets)
+        # First invalidate any prior compiled metadata for reassigned names.
         for target in node.targets:
-            self._assign_target(target, static_value)
+            self._invalidate_compiled_binding(target)
+        # Then record new compile assignments (if this is re.compile(...)).
+        self._record_compile_assignment(node.value, node.targets)
+        # Finally update scope bindings.
+        for target in node.targets:
+            self._update_scope_binding(target, static_value)
         self.generic_visit(node)
+
+    def _invalidate_compiled_binding(self, target: ast.AST) -> None:
+        """Remove compiled-pattern metadata for a target about to be reassigned."""
+        if not isinstance(target, ast.Name):
+            return
+        name = target.id
+        self._compiled_vars.pop(name, None)
+        self._var_patterns.pop(name, None)
+        self._compile_lines.pop(name, None)
+
+    def _update_scope_binding(
+        self, target: ast.AST, value: _StaticValue | None | _Sentinel,
+    ) -> None:
+        """Update scope binding for an assignment target."""
+        if not isinstance(target, ast.Name):
+            return
+        if isinstance(value, _Sentinel):
+            return
+        _scope_assign(self._scope_stack, target.id, value)
 
     def _record_compile_assignment(
         self, value: ast.AST, targets: list[ast.AST],
@@ -400,6 +459,9 @@ class RegexASTVisitor(ast.NodeVisitor):
             self.generic_visit(node)
             return
         static_value = self._resolve_static_value(node.value)
+        # Invalidate prior compiled metadata
+        self._invalidate_compiled_binding(node.target)
+        # Record new compile assignment if applicable
         if isinstance(node.value, ast.Call):
             api_name = self._identify_re_call(node.value)
             if api_name == "compile":
@@ -410,22 +472,8 @@ class RegexASTVisitor(ast.NodeVisitor):
                     self._compiled_vars[node.target.id] = api_name
                     self._var_patterns[node.target.id] = pattern_str
                     self._compile_lines[node.target.id] = node.value.lineno
-        self._assign_target(node.target, static_value)
+        self._update_scope_binding(node.target, static_value)
         self.generic_visit(node)
-
-    def _assign_target(
-        self, target: ast.AST, value: _StaticValue | None | _Sentinel,
-    ) -> None:
-        if not isinstance(target, ast.Name):
-            return
-        if isinstance(value, _Sentinel):
-            # Don't touch the binding if we could not resolve it AND it does
-            # not look like a static string assignment.  However, if the
-            # right-hand side is a non-constant call/expression, we must
-            # invalidate any prior static binding (e.g. reassignment to a
-            # runtime value).
-            return
-        _scope_assign(self._scope_stack, target.id, value)
 
     def _resolve_static_value(
         self, node: ast.AST,
@@ -715,10 +763,24 @@ class RegexASTVisitor(ast.NodeVisitor):
             pattern_source=pattern_source,
             input_scope=self._infer_input_scope(api, node),
             compile_line=compile_line,
-            flags_desc=self._describe_flags(node),
+            flags_desc=self._describe_flags(node, api),
         )
-        has_dotall = self._check_dotall(node)
+        has_dotall = self._check_dotall(node, api)
 
+        # --- Full-pattern analysis for all-static compositions (Section VI) ---
+        # When all segments are static, reassemble the complete pattern and
+        # run all ReDoS checks on the full string, not just per-segment.
+        all_static = all(s.kind == _SegKind.STATIC for s in segments)
+        if all_static and pattern_str is not None:
+            reason, _, severity = _analyze_static_pattern(pattern_str)
+            if reason is not None and severity == Severity.ERROR:
+                self._emit_error(ctx, pattern_str, reason)
+                return
+            if has_dotall and ".*" in pattern_str:
+                self._emit_dotall_review(ctx, pattern_str)
+            return
+
+        # --- Per-segment dangerous static check (for mixed compositions) ---
         static_danger = self._find_dangerous_static_segment(segments)
         if static_danger is not None:
             reason, pat = static_danger
@@ -730,15 +792,26 @@ class RegexASTVisitor(ast.NodeVisitor):
                 self._emit_dotall_review(ctx, pattern_str)
             return
 
+        # --- Escaped-dynamic composition with regex operators (Section VIII) ---
+        has_escaped = any(s.kind == _SegKind.ESCAPED_DYNAMIC for s in segments)
         has_unescaped_dynamic = any(
             s.kind in (_SegKind.DYNAMIC, _SegKind.UNKNOWN) for s in segments
         )
-        all_dynamic_escaped = (
-            any(s.kind == _SegKind.ESCAPED_DYNAMIC for s in segments)
-            and not has_unescaped_dynamic
+        has_static_regex_operators = any(
+            s.kind == _SegKind.STATIC and s.value is not None
+            and _contains_regex_operators(s.value)
+            for s in segments
         )
-        if all_dynamic_escaped:
+
+        if has_escaped and not has_unescaped_dynamic:
+            # Pure escaped + static composition
+            if has_static_regex_operators:
+                # Escaped dynamic adjacent to regex operators → REVIEW
+                self._emit_escaped_composition_review(ctx)
+                return
+            # Only escaped dynamic with no surrounding operators → safe
             return
+
         if has_unescaped_dynamic:
             self._emit_dynamic_review(ctx)
             return
@@ -844,9 +917,38 @@ class RegexASTVisitor(ast.NodeVisitor):
             compile_line=ctx.compile_line,
         ))
 
-    def _check_dotall(self, node: ast.Call) -> bool:
+    def _emit_escaped_composition_review(self, ctx: _FindingCtx) -> None:
+        self.findings.append(RegexFinding(
+            severity=Severity.REVIEW,
+            engine=Engine.PYTHON_RE,
+            file_path=self._file_path,
+            line=ctx.line, function=ctx.func_name, api=ctx.api,
+            pattern="<escaped+operators>",
+            pattern_source=PatternSource.ESCAPED_DYNAMIC,
+            input_scope=ctx.input_scope,
+            reason=(
+                "re.escape() composition with regex operators — escape only "
+                "prevents injection of the dynamic value itself; surrounding "
+                "operators may form a dangerous pattern depending on the "
+                "escaped content (e.g. re.escape('a') + '+)+$' → '(a+)+$')"
+            ),
+            remediation=(
+                "Verify that the combined pattern cannot produce nested "
+                "quantifiers or overlapping repetitions for any possible "
+                "escaped value."
+            ),
+            compile_line=ctx.compile_line,
+        ))
+
+    def _check_dotall(self, node: ast.Call, api: str) -> bool:
         """Check if re.DOTALL is passed as a flag argument."""
-        flags_arg = self._get_call_argument(node, _FLAGS_POSITIONAL, "flags")
+        sig = _RE_SIGNATURES.get(api)
+        if sig is not None and sig.flags_index is not None:
+            flags_arg = self._get_call_argument(
+                node, sig.flags_index, "flags",
+            )
+        else:
+            flags_arg = self._get_call_argument(node, 1, "flags")
         if flags_arg is None or flags_arg is _DUP_ARG:
             return False
         return self._contains_dotall(flags_arg)
@@ -859,9 +961,15 @@ class RegexASTVisitor(ast.NodeVisitor):
                     or self._contains_dotall(node.right))
         return False
 
-    def _describe_flags(self, node: ast.Call) -> str:
+    def _describe_flags(self, node: ast.Call, api: str) -> str:
         """Describe flag arguments for diagnostic output."""
-        flags_arg = self._get_call_argument(node, _FLAGS_POSITIONAL, "flags")
+        sig = _RE_SIGNATURES.get(api)
+        if sig is not None and sig.flags_index is not None:
+            flags_arg = self._get_call_argument(
+                node, sig.flags_index, "flags",
+            )
+        else:
+            flags_arg = self._get_call_argument(node, 1, "flags")
         if flags_arg is None or flags_arg is _DUP_ARG:
             return ""
         candidates: list[ast.AST] = []
@@ -886,7 +994,18 @@ class RegexASTVisitor(ast.NodeVisitor):
         """Infer the likely input scope from the API and call context."""
         if api == "compile":
             return "pattern definition"
-        string_arg = self._get_call_argument(node, _STRING_POSITIONAL, "string")
+        # Look up the correct string index for this API
+        sig = _RE_SIGNATURES.get(api)
+        if sig is not None and sig.string_index is not None:
+            string_arg = self._get_call_argument(
+                node, sig.string_index, "string",
+            )
+        elif api.startswith("compiled."):
+            string_arg = self._get_call_argument(
+                node, _COMPILED_STRING_POSITIONAL, "string",
+            )
+        else:
+            string_arg = self._get_call_argument(node, 1, "string")
         if string_arg is None or string_arg is _DUP_ARG:
             return "unknown"
         return self._infer_arg_scope(string_arg)
@@ -930,13 +1049,11 @@ class RegexASTVisitor(ast.NodeVisitor):
         return best_name
 
 
-# Positional indices for ``string`` and ``flags`` arguments across all re
-# functions (1-indexed after pattern):
-#   re.compile(pattern, flags=0)            -> flags at index 1
-#   re.search(pattern, string, flags=0)     -> string at 1, flags at 2
-#   re.sub(pattern, repl, string, count=0, flags=0) -> repl at 1, string at 2
-_FLAGS_POSITIONAL = 1  # default for compile
-_STRING_POSITIONAL = 1  # default for non-sub APIs
+# Positional indices for ``string`` and ``flags`` are now per-API via
+# _RE_SIGNATURES.  The following are kept as fallbacks for compiled-pattern
+# method calls where we don't have a signature (the pattern is already known).
+_COMPILED_STRING_POSITIONAL = 0  # compiled.search(string, ...)
+_COMPILED_FLAGS_POSITIONAL = None  # compiled methods don't accept flags positionally
 
 
 class _DupArg:
@@ -1724,6 +1841,16 @@ def _analyze_static_pattern(
     return None, "", Severity.INFO
 
 
+def _contains_regex_operators(text: str) -> bool:
+    """Check if a static segment contains regex operators (quantifiers, groups, etc.).
+
+    Used to determine whether an escaped-dynamic composition with adjacent
+    static segments might form dangerous patterns depending on the escaped value.
+    """
+    _OPERATOR_CHARS = set("+*?|()[]{}^$.")
+    return any(ch in _OPERATOR_CHARS for ch in text)
+
+
 # ---------------------------------------------------------------------------
 # Shell regex extraction
 # ---------------------------------------------------------------------------
@@ -1731,9 +1858,22 @@ def _analyze_static_pattern(
 # Commands that introduce PCRE regex usage.  Each value is the canonical
 # command name we look for; the actual flag presence is checked separately.
 _PCRE_COMMANDS = {
-    "grep": ({"-P"}, {"-e", "--regexp"}),  # PCRE flag, pattern-bearing options
-    "rg": ({"-P"}, {"-e", "--regexp"}),
+    "grep": ({"-P", "--perl-regexp"}, {"-e", "--regexp"}),
+    "rg": ({"-P", "--pcre2"}, {"-e", "--regexp"}),
     "perl": (set(), {"-e", "-E"}),
+}
+
+# Options that consume the next argument (not a pattern).  Per-command.
+_VALUE_OPTIONS: dict[str, set[str]] = {
+    "grep": {"-m", "-A", "-B", "-C", "-f", "--file", "--max-count",
+             "--after-context", "--before-context", "--context",
+             "--label", "--color", "--colour"},
+    "rg": {"-g", "--glob", "-t", "--type", "-T", "--type-not",
+            "-m", "--max-count", "-A", "--after-context",
+            "-B", "--before-context", "-C", "--context",
+            "-j", "--threads", "--max-filesize", "--max-depth",
+            "-f", "--file", "--replace", "-r"},
+    "perl": {},
 }
 
 
@@ -1742,16 +1882,22 @@ def _split_shell_pipeline(line: str) -> list[list[str]]:
 
     Splits on ``|``, ``&&``, ``||``, ``;``, and ``&``.  Returns a list of
     token lists, each representing one command segment.  Uses ``shlex`` for
-    quoting-aware tokenization.
+    quoting-aware tokenization with punctuation_chars to handle no-space
+    operators like ``cmd|grep`` and ``cmd&&grep``.
     """
+    # Handle backslash continuation: join logical lines first
+    logical_line = line.replace("\\\n", " ")
+
     try:
-        tokens = shlex.split(line, posix=True)
+        lexer = shlex.shlex(logical_line, posix=True, punctuation_chars="|&;")
+        lexer.whitespace_split = True
+        tokens = list(lexer)
     except ValueError:
         # Unbalanced quotes — fall back to whitespace split.
-        tokens = line.split()
+        tokens = logical_line.split()
     segments: list[list[str]] = [[]]
     for tok in tokens:
-        if tok in ("|", "&&", "||", ";", "&"):
+        if tok in ("|", "&&", "||", ";", "&", ";;"):
             segments.append([])
         else:
             segments[-1].append(tok)
@@ -1782,82 +1928,110 @@ def _looks_like_env_assignment(tok: str) -> bool:
 
 def _skip_options_and_find_pattern(
     tokens: list[str], pcre_flags: set[str], pattern_options: set[str],
+    cmd_base: str = "grep",
 ) -> tuple[str | None, bool]:
     """Walk a command's argument tokens and return the pattern argument.
 
     Returns (pattern, is_pcre).  ``is_pcre`` is True only when a PCRE flag is
     present.  ``pattern`` is the first non-option argument that is not a
     known flag value, or the value following a pattern-bearing option.
+
+    Handles:
+      - Long options with = (--regexp='...')
+      - Combined short options (-Pe, -Pne)
+      - Options that consume the next argument (-m 1, -A 3, -f file)
     """
     is_pcre = False
     saw_double_dash = False
+    value_opts = _VALUE_OPTIONS.get(cmd_base, set())
     i = 0
     while i < len(tokens):
         tok = tokens[i]
         if saw_double_dash:
             return tok, is_pcre
-        result = _classify_shell_option_token(
-            tok, tokens, i, pcre_flags, pattern_options,
-        )
-        if result is None:
-            # Not an option token — first positional is the pattern.
-            return tok, is_pcre
-        kind, value, advance = result
-        if kind == "double_dash":
+        if tok == "--":
             saw_double_dash = True
-        elif kind == "pattern":
-            return value, is_pcre
-        elif kind == "pcre":
-            is_pcre = True
-        i += advance
+            i += 1
+            continue
+        # Long option with = (e.g. --regexp='pattern')
+        if tok.startswith("--") and "=" in tok:
+            opt, _, val = tok.partition("=")
+            if opt in pattern_options:
+                return val, is_pcre
+            if opt in pcre_flags:
+                is_pcre = True
+            # Other long options with = are consumed (skip)
+            i += 1
+            continue
+        # Long option without = (e.g. --regexp 'pattern', --perl-regexp)
+        if tok.startswith("--"):
+            if tok in pcre_flags:
+                is_pcre = True
+                i += 1
+                continue
+            if tok in pattern_options:
+                return (tokens[i + 1], is_pcre) if i + 1 < len(tokens) else (None, is_pcre)
+            if tok in value_opts:
+                i += 2  # skip option and its value
+                continue
+            i += 1
+            continue
+        # Short option or cluster (e.g. -P, -e, -Pe, -Pne)
+        if tok.startswith("-") and len(tok) > 1:
+            result = _parse_short_option_cluster(
+                tok, tokens, i, pcre_flags, pattern_options, value_opts,
+            )
+            kind, value, advance = result
+            if kind == "pattern":
+                return value, is_pcre
+            if kind == "pcre_pattern":
+                return value, True
+            if kind == "pcre":
+                is_pcre = True
+            elif kind == "value_skip":
+                i += advance
+                continue
+            i += advance
+            continue
+        # Not an option — first positional is the pattern
+        return tok, is_pcre
     return None, is_pcre
 
 
-def _classify_shell_option_token(
+def _parse_short_option_cluster(
     tok: str, tokens: list[str], i: int,
     pcre_flags: set[str], pattern_options: set[str],
-) -> tuple[str, str | None, int] | None:
-    """Classify one option token.
-
-    Returns (kind, value, advance) where kind is one of:
-      - ``"pcre"``        : a PCRE flag; advance 1
-      - ``"pattern"``     : value is the pattern string; advance past it
-      - ``"double_dash"`` : the ``--`` separator; advance 1
-      - ``None``           : not an option token (positional argument)
-    """
-    if tok == "--":
-        return ("double_dash", None, 1)
-    if tok in pcre_flags:
-        return ("pcre", None, 1)
-    if tok in pattern_options:
-        if i + 1 < len(tokens):
-            return ("pattern", tokens[i + 1], 2)
-        return ("pattern", None, 1)
-    if tok.startswith("-") and len(tok) > 1 and not tok.startswith("---"):
-        return _classify_short_option_cluster(
-            tok, tokens, i, pcre_flags, pattern_options,
-        )
-    return None
-
-
-def _classify_short_option_cluster(
-    tok: str, tokens: list[str], i: int,
-    pcre_flags: set[str], pattern_options: set[str],
+    value_opts: set[str],
 ) -> tuple[str, str | None, int]:
+    """Parse a short option cluster like -Pe, -Pne, -m1.
+
+    Returns (kind, value, advance) where kind is:
+      - "pcre": found PCRE flag (may also find pattern)
+      - "pattern": found pattern value
+      - "value_skip": option consumed a value argument
+      - "skip": just a regular flag cluster
+    """
     cluster = tok[1:]
+    found_pcre = False
     for idx, ch in enumerate(cluster):
         flag = f"-{ch}"
+        if flag in pcre_flags:
+            found_pcre = True
+            continue
         if flag in pattern_options:
-            if rest := cluster[idx + 1 :]:
-                return ("pattern", rest, 1)
-            else:
-                return (
-                    ("pattern", tokens[i + 1], 2)
-                    if i + 1 < len(tokens)
-                    else ("pattern", None, 1)
-                )
-    # No pattern option in cluster — but may contain PCRE flag.
-    if any(f"-{ch}" in pcre_flags for ch in cluster):
+            # -e takes the rest of the cluster as pattern, or next token
+            rest = cluster[idx + 1:]
+            kind = "pcre_pattern" if found_pcre else "pattern"
+            if rest:
+                return (kind, rest, 1)
+            if i + 1 < len(tokens):
+                return (kind, tokens[i + 1], 2)
+            return (kind, None, 1)
+        if flag in value_opts:
+            # Option consumes a value: rest of cluster or next token
+            rest = cluster[idx + 1:]
+            return ("value_skip", None, 1) if rest else ("value_skip", None, 2)
+    if found_pcre:
         return ("pcre", None, 1)
     return ("skip", None, 1)
 
@@ -1868,20 +2042,27 @@ def _extract_shell_regexes(
     """Extract regex patterns from shell scripts.
 
     Returns list of (pattern, line, engine, command) tuples.
+    Handles backslash-newline continuation to form logical lines.
     """
     results: list[tuple[str, int, Engine, str]] = []
     lines = content.split("\n")
-    for i, line in enumerate(lines, 1):
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        line_num = i + 1
+        # Handle backslash continuation
+        while line.rstrip().endswith("\\") and i + 1 < len(lines):
+            line = line.rstrip()[:-1] + " " + lines[i + 1].lstrip()
+            i += 1
+        i += 1
         if not line.strip():
             continue
         if line.lstrip().startswith("#"):
             continue
         segments = _split_shell_pipeline(line)
         for seg_tokens in segments:
-            results.extend(_extract_segment_regexes(seg_tokens, i))
+            results.extend(_extract_segment_regexes(seg_tokens, line_num))
     return results
-
-
 def _extract_segment_regexes(
     seg_tokens: list[str], line_num: int,
 ) -> list[tuple[str, int, Engine, str]]:
@@ -1895,7 +2076,7 @@ def _extract_segment_regexes(
         return results
     pcre_flags, pattern_opts = _PCRE_COMMANDS[cmd_base]
     pattern, is_pcre = _skip_options_and_find_pattern(
-        seg_tokens[1:], pcre_flags, pattern_opts,
+        seg_tokens[1:], pcre_flags, pattern_opts, cmd_base,
     )
     if (
         pattern is not None
