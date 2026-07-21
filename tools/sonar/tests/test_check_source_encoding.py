@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,16 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CHECKER = REPO_ROOT / "tools" / "sonar" / "check_source_encoding.py"
 MANIFEST = REPO_ROOT / "tools" / "sonar" / "encoding_exceptions.json"
+PROPERTIES = REPO_ROOT / ".sonarcloud.properties"
+
+
+def load_checker_module():
+    """Load the checker directly so tmp_path cases do not touch repository data."""
+    spec = importlib.util.spec_from_file_location("encoding_checker_test", CHECKER)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_checker(*args: str) -> subprocess.CompletedProcess:
@@ -106,6 +117,46 @@ class TestCheckerCLI:
     def test_unknown_option_exits_nonzero(self) -> None:
         result = run_checker("--bogus-flag")
         assert result.returncode != 0
+
+
+class TestCheckerAdversarialInputs:
+    """Validate path, binary, and generated-root contracts in isolation."""
+
+    def test_manifest_rejects_escape_and_empty_contract_fields(self, tmp_path: Path) -> None:
+        checker = load_checker_module()
+        checker.REPO_ROOT = tmp_path
+        (tmp_path / "fixture.html").write_bytes(b"\xe9")
+        for payload in (
+            {"../fixture.html": {"encoding": "latin-1", "reason": "test"}},
+            {"fixture.html": {"encoding": "", "reason": "test"}},
+            {"fixture.html": {"encoding": "latin-1", "reason": 1}},
+        ):
+            manifest = tmp_path / "manifest.json"
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+            with pytest.raises(RuntimeError):
+                checker._load_manifest(manifest)
+
+    def test_extensionless_file_root_and_nul_are_checked(self, tmp_path: Path) -> None:
+        checker = load_checker_module()
+        checker.REPO_ROOT = tmp_path
+        config = tmp_path / "components" / "nginx-module" / "config"
+        config.parent.mkdir(parents=True)
+        config.write_bytes(b"ok\0bad")
+        checker.SONAR_ROOTS = [Path("components/nginx-module/config")]
+        rc, count = checker._audit_generated({})
+        assert rc == 1
+        assert count == 1
+
+
+class TestSonarConfiguration:
+    """The intentional fixture remains a test-only exclusion, never a source exclusion."""
+
+    def test_latin1_is_precisely_test_excluded(self) -> None:
+        props = PROPERTIES.read_text(encoding="utf-8")
+        assert "sonar.test.exclusions=tests/corpus/encoding/latin1.html" in props
+        source_line = next(line for line in props.splitlines() if line.startswith("sonar.exclusions="))
+        assert "latin1.html" not in source_line
+        assert "tests/corpus/**" not in source_line
 
 
 # ---------------------------------------------------------------------------

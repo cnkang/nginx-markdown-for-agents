@@ -39,6 +39,12 @@ TEXT_EXTENSIONS: frozenset[str] = frozenset({
     ".yaml", ".yml", ".xml", ".md", ".txt", ".conf", ".properties",
 })
 
+# Sonar's configured scope contains a small number of extensionless text files.
+EXPLICIT_TEXT_PATHS: frozenset[Path] = frozenset({
+    Path("components/nginx-module/config"),
+    Path("Makefile"),
+})
+
 # Source roots configured in .sonarcloud.properties.  The generated-file audit
 # recurses these directories after build/coverage preparation.
 SONAR_ROOTS: list[Path] = [
@@ -80,17 +86,29 @@ def _load_manifest(path: Path) -> dict[str, dict[str, Any]]:
     if not isinstance(data, dict):
         raise RuntimeError(f"Exception manifest {path} must be a JSON object")
     for rel, info in data.items():
+        if not isinstance(rel, str) or not rel:
+            raise RuntimeError("Exception manifest paths must be non-empty strings")
+        rel_path = Path(rel)
+        if rel_path.is_absolute() or ".." in rel_path.parts:
+            raise RuntimeError(f"Exception path must be repository-relative: {rel}")
+        target = (REPO_ROOT / rel_path).resolve()
+        try:
+            target.relative_to(REPO_ROOT.resolve())
+        except ValueError as exc:
+            raise RuntimeError(f"Exception path escapes repository: {rel}") from exc
         if not isinstance(info, dict):
             raise RuntimeError(f"Exception entry {rel} must be an object")
-        if "encoding" not in info:
-            raise RuntimeError(f"Exception entry {rel} missing 'encoding'")
-        if "reason" not in info:
-            raise RuntimeError(f"Exception entry {rel} missing 'reason'")
+        for key in ("encoding", "reason"):
+            value = info.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise RuntimeError(f"Exception entry {rel} has invalid '{key}'")
+        if not target.exists() or not target.is_file():
+            raise RuntimeError(f"Exception entry {rel} must name an existing regular file")
     return data
 
 
 def _is_text_file(path: Path) -> bool:
-    return path.suffix.lower() in TEXT_EXTENSIONS
+    return path.suffix.lower() in TEXT_EXTENSIONS or path in EXPLICIT_TEXT_PATHS
 
 
 def _should_skip_path(path: Path) -> bool:
@@ -124,6 +142,10 @@ def _validate_file(
         data = abs_path.read_bytes()
     except OSError as exc:
         failures.append(f"INVALID_UTF8 {rel} byte=-1: read error: {exc}")
+        return
+    if b"\0" in data:
+        nul_offset = data.index(b"\0")
+        failures.append(f"INVALID_UTF8 {rel} byte={nul_offset}: binary NUL byte")
         return
 
     exc_info = manifest.get(rel)
@@ -180,6 +202,9 @@ def _audit_generated(manifest: dict[str, dict[str, Any]]) -> tuple[int, int]:
         abs_root = REPO_ROOT / root
         if not abs_root.exists():
             continue
+        if abs_root.is_file():
+            files.append(abs_root)
+            continue
         for p in abs_root.rglob("*"):
             if not p.is_file():
                 continue
@@ -215,12 +240,15 @@ def _audit_manifest(manifest: dict[str, dict[str, Any]]) -> list[str]:
             continue
         try:
             data.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            utf8_valid = False
+        else:
+            utf8_valid = True
+        if utf8_valid:
             failures.append(
                 f"STALE_EXCEPTION {rel}: file is valid UTF-8, exception is unnecessary"
             )
             continue
-        except UnicodeDecodeError:
-            pass
         declared = info.get("encoding", "unknown")
         try:
             data.decode(declared, errors="strict")
