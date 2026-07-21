@@ -107,6 +107,9 @@ readonly WARNING_ALLOWLIST=(
     # Terminal helpers deliberately exit the entire benchmark process.
     "tools/perf/run_module_benchmark.sh:return:usage:function exits with caller-selected status; return is unreachable"
     "tools/perf/run_module_benchmark.sh:return:die:function exits with status 1; return is unreachable"
+    # ── tools/perf/memory_observer.sh ──
+    # usage() calls exit 1 — never actually returns; implicit return is unreachable
+    "tools/perf/memory_observer.sh:return:usage:function calls exit 1; return is unreachable"
 )
 
 # Files where specific violations are known and accepted.
