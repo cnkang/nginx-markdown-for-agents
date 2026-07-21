@@ -11,6 +11,9 @@ on:
       - "tests/**"
       - "Makefile"
       - ".sonarcloud.properties"
+      - ".gitattributes"
+      - "tools/sonar/**"
+      - "tests/corpus/**"
       - ".github/workflows/sonarcloud.yml"
   push:
     branches: [main, master]
@@ -21,6 +24,9 @@ on:
       - "tests/**"
       - "Makefile"
       - ".sonarcloud.properties"
+      - ".gitattributes"
+      - "tools/sonar/**"
+      - "tests/corpus/**"
       - ".github/workflows/sonarcloud.yml"
 
 concurrency:
@@ -55,6 +61,10 @@ jobs:
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "SONAR_TOKEN is not configured. Skipping SonarCloud scan." >&2
           fi
+
+      - name: Validate tracked source encodings
+        if: steps.token.outputs.enabled == 'true'
+        run: make sonar-encoding-check
 
       - name: Set up Rust toolchain
         if: steps.token.outputs.enabled == 'true'
@@ -127,6 +137,13 @@ jobs:
             exit 1
           fi
           echo "OK: coverage/sonar-coverage.xml ($(wc -l < coverage/sonar-coverage.xml) lines)"
+
+      - name: Validate generated source encodings
+        if: steps.token.outputs.enabled == 'true'
+        run: >
+          python3 tools/sonar/check_source_encoding.py
+          --include-exceptions
+          --include-generated
 
       - name: SonarCloud Scan
         if: steps.token.outputs.enabled == 'true'
