@@ -50,21 +50,21 @@ fn discover_fixtures(corpus_dir: &Path) -> Vec<std::path::PathBuf> {
     discover_html_fixtures(corpus_dir)
 }
 
-fn convert_full_buffer_entry(html: &[u8]) -> Result<String, ConversionError> {
-    convert_full_buffer(
-        html,
-        Some("text/html; charset=UTF-8"),
-        default_streaming_options(),
-    )
+fn convert_full_buffer_entry(
+    html: &[u8],
+    content_type: Option<&str>,
+) -> Result<String, ConversionError> {
+    convert_full_buffer(html, content_type, default_streaming_options())
 }
 
 fn convert_streaming_single_entry(
     html: &[u8],
+    content_type: Option<&str>,
     budget: nginx_markdown_converter::streaming::MemoryBudget,
 ) -> Result<String, ConversionError> {
     let run = convert_streaming_single(
         html,
-        Some("text/html; charset=UTF-8"),
+        content_type,
         default_streaming_options(),
         budget,
         None,
@@ -75,12 +75,13 @@ fn convert_streaming_single_entry(
 fn convert_streaming_chunked_entry(
     html: &[u8],
     chunk_sizes: &[usize],
+    content_type: Option<&str>,
     budget: nginx_markdown_converter::streaming::MemoryBudget,
 ) -> Result<String, ConversionError> {
     let run = convert_streaming_chunked(
         html,
         chunk_sizes,
-        Some("text/html; charset=UTF-8"),
+        content_type,
         default_streaming_options(),
         budget,
         None,
@@ -183,8 +184,9 @@ fn assert_fixture_parity(path: &Path, known_diffs: &KnownDifferences) -> Result<
     let fixture_name = fixture_relative_name(path);
     let meta = read_fixture_meta(path);
     let html = read_fixture(path);
+    let content_type = meta.resolved_content_type();
 
-    let full_buffer = convert_full_buffer_entry(&html)
+    let full_buffer = convert_full_buffer_entry(&html, Some(&content_type))
         .map_err(|err| format!("{fixture_name}: full-buffer conversion failed: {err}"))?;
 
     let chunk_sizes = {
@@ -208,8 +210,8 @@ fn assert_fixture_parity(path: &Path, known_diffs: &KnownDifferences) -> Result<
         default_streaming_budget()
     };
 
-    let single = convert_streaming_single_entry(&html, budget.clone());
-    let chunked = convert_streaming_chunked_entry(&html, &chunk_sizes, budget);
+    let single = convert_streaming_single_entry(&html, Some(&content_type), budget.clone());
+    let chunked = convert_streaming_chunked_entry(&html, &chunk_sizes, Some(&content_type), budget);
 
     match (&single, &chunked) {
         (
@@ -409,6 +411,62 @@ fn make_html_of_size(target_bytes: usize) -> Vec<u8> {
 }
 
 #[test]
+fn latin1_fixture_uses_metadata_charset_across_conversion_paths() {
+    let path = streaming_test_support::corpus_root().join("encoding/latin1.html");
+    let html = read_fixture(&path);
+    let meta = read_fixture_meta(&path);
+    let content_type = meta.resolved_content_type();
+
+    assert!(
+        html.contains(&0xe9),
+        "fixture must retain raw Latin-1 e acute"
+    );
+    assert!(
+        std::str::from_utf8(&html).is_err(),
+        "fixture must not be UTF-8"
+    );
+    let (decoded, _, had_errors) = encoding_rs::WINDOWS_1252.decode(&html);
+    assert!(
+        !had_errors,
+        "Latin-1 fixture must decode without replacement"
+    );
+    assert!(decoded.contains("café") && decoded.contains("résumé"));
+
+    let full = convert_full_buffer_entry(&html, Some(&content_type))
+        .expect("full-buffer conversion must honor source-encoding metadata");
+    assert!(full.contains("café") && full.contains("résumé"));
+
+    let single =
+        convert_streaming_single_entry(&html, Some(&content_type), default_streaming_budget())
+            .expect("single-chunk streaming must honor source-encoding metadata");
+    assert!(single.contains("café") && single.contains("résumé"));
+
+    let e_acute = html
+        .iter()
+        .position(|byte| *byte == 0xe9)
+        .expect("fixture contains a Latin-1 e acute");
+    let chunks = vec![e_acute + 1, html.len() - (e_acute + 1)];
+    let chunked = convert_streaming_chunked_entry(
+        &html,
+        &chunks,
+        Some(&content_type),
+        default_streaming_budget(),
+    )
+    .expect("chunked streaming must preserve a Latin-1 byte boundary");
+    assert!(chunked.contains("café") && chunked.contains("résumé"));
+    assert_eq!(
+        normalize_whitespace_tokens(&full),
+        normalize_whitespace_tokens(&single),
+        "full-buffer and single streaming must preserve normalized parity"
+    );
+    assert_eq!(
+        normalize_whitespace_tokens(&full),
+        normalize_whitespace_tokens(&chunked),
+        "full-buffer and chunked streaming must preserve normalized parity"
+    );
+}
+
+#[test]
 #[ignore = "evidence pack generation is expensive"]
 fn bounded_memory_and_ttfb_evidence_pack() {
     // Keep a measurable safety margin between peak-memory and input growth.
@@ -430,7 +488,7 @@ fn bounded_memory_and_ttfb_evidence_pack() {
         let html = make_html_of_size(input_size);
 
         let full_start = Instant::now();
-        let _full = convert_full_buffer_entry(&html)
+        let _full = convert_full_buffer_entry(&html, Some("text/html; charset=UTF-8"))
             .unwrap_or_else(|err| panic!("full-buffer conversion failed for {input_size}: {err}"));
         let full_elapsed = full_start.elapsed();
 
