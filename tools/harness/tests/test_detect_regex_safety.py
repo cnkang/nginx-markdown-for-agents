@@ -336,11 +336,13 @@ class TestErrorHandling:
 
     def test_unreadable_file(self, tmp_path: Path) -> None:
         """Unreadable file should produce a ScanError."""
+        if os.geteuid() == 0:
+            pytest.skip("root bypasses file permissions")
         f = tmp_path / "unreadable.py"
         f.write_text("import re\n", encoding="utf-8")
         os.chmod(str(f), 0o000)
         try:
-            findings, errors = _scan_python_file(f, tmp_path)
+            _findings, errors = _scan_python_file(f, tmp_path)
             assert len(errors) >= 1
         finally:
             os.chmod(str(f), 0o600)
@@ -427,7 +429,7 @@ class TestShellRegex:
 
     def test_grep_e_detected(self, tmp_path: Path) -> None:
         """grep -E pattern should be detected."""
-        self._extracted_from_test_shell_variable_in_pattern_3(
+        self._scan_shell_content(
             '#!/usr/bin/env bash\ngrep -E "(a+)+match" file.txt\n', tmp_path
         )
         # ERE is DFA-based — no backtracking risk, so no finding
@@ -435,7 +437,7 @@ class TestShellRegex:
 
     def test_grep_p_detected(self, tmp_path: Path) -> None:
         """grep -P pattern should be detected as PCRE."""
-        findings = self._extracted_from_test_shell_variable_in_pattern_3(
+        findings = self._scan_shell_content(
             '#!/usr/bin/env bash\ngrep -P "(a+)+match" file.txt\n', tmp_path
         )
         # PCRE with dangerous pattern should be flagged
@@ -445,16 +447,15 @@ class TestShellRegex:
 
     def test_shell_variable_in_pattern(self, tmp_path: Path) -> None:
         """Shell variable in PCRE pattern should be REVIEW."""
-        findings = self._extracted_from_test_shell_variable_in_pattern_3(
+        findings = self._scan_shell_content(
             '#!/usr/bin/env bash\nPATTERN="$USER_INPUT"\ngrep -P "$PATTERN" file.txt\n',
             tmp_path,
         )
         reviews = [f for f in findings if f.severity == Severity.REVIEW]
         assert reviews
 
-    # TODO Rename this here and in `test_grep_e_detected`, `test_grep_p_detected` and `test_shell_variable_in_pattern`
-    def _extracted_from_test_shell_variable_in_pattern_3(self, arg0, tmp_path):
-        content = arg0
+    def _scan_shell_content(self, content: str, tmp_path: Path):
+        """Write shell content to a temp file and scan it."""
         f = tmp_path / "test.sh"
         f.write_text(content)
         result, errors = _scan_shell_file(f, tmp_path)

@@ -1,7 +1,7 @@
 #!/bin/bash
 # test_detect_regex_safety.sh — CLI smoke test for detect_regex_safety.py
 # Rule 10 (parser-regex): Validates detector CLI contract.
-# macOS Bash 3.2 compatible — no associative arrays, no [[ =~ ]].
+# macOS Bash 3.2 compatible — no associative arrays, no [[ =~ ]] regex match.
 
 set -u
 
@@ -12,12 +12,16 @@ DETECTOR="${REPO_ROOT}/tools/harness/detect_regex_safety.py"
 FAILURES=0
 
 fail() {
-    echo "FAIL: $1" >&2
+    local msg="$1"
+    echo "FAIL: ${msg}" >&2
     FAILURES=$((FAILURES + 1))
+    return 0
 }
 
 pass() {
-    echo "PASS: $1"
+    local msg="$1"
+    echo "PASS: ${msg}"
+    return 0
 }
 
 # Test 1: Default scan on repository passes
@@ -48,7 +52,7 @@ fi
 echo "Test 4: Invalid path returns non-zero..."
 python3 "${DETECTOR}" --path /nonexistent/path 2>/dev/null
 RC=$?
-if [ "$RC" -ne 0 ]; then
+if [[ "$RC" -ne 0 ]]; then
     pass "invalid path non-zero (rc=$RC)"
 else
     fail "invalid path returned zero"
@@ -99,7 +103,7 @@ fi
 rm -rf "${TMPDIR_TEST}"
 
 echo "---"
-if [ "$FAILURES" -eq 0 ]; then
+if [[ "$FAILURES" -eq 0 ]]; then
     echo "All smoke tests passed."
     exit 0
 else
