@@ -1,0 +1,1 @@
+"""SonarCloud encoding checker tooling."""

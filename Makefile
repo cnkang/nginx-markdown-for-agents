@@ -250,6 +250,12 @@ regex-security-check:
 	bash tools/harness/tests/test_detect_regex_safety.sh
 	@echo "  Regex/ReDoS Safety Check: PASSED"
 
+sonar-encoding-check:
+	@echo "=== SonarCloud Source Encoding Check ==="
+	python3 tools/sonar/check_source_encoding.py --include-exceptions
+	python3 -m pytest tools/sonar/tests/test_check_source_encoding.py -q --tb=short
+	@echo "  SonarCloud Source Encoding Check: PASSED"
+
 e2e-streaming-config-check:
 	@echo "=== E2E Streaming Config Consistency Check (Rule 60) ==="
 	python3 tools/harness/detect_e2e_streaming_config.py --strict
