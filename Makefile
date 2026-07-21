@@ -62,7 +62,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
-        harness-check harness-check-full harness-security-checks test-harness \
+        harness-check harness-check-full harness-security-checks test-harness regex-security-check \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
@@ -242,6 +242,13 @@ harness-check-full:
 	$(MAKE) test-harness
 	$(MAKE) check-headers
 	$(MAKE) complexity-check
+
+regex-security-check:
+	@echo "=== Regex/ReDoS Safety Check ==="
+	python3 tools/harness/detect_regex_safety.py --strict
+	python3 -m pytest tools/harness/tests/test_detect_regex_safety.py -q --tb=short
+	bash tools/harness/tests/test_detect_regex_safety.sh
+	@echo "  Regex/ReDoS Safety Check: PASSED"
 
 harness-security-checks:
 	bash tools/harness/detect_cwe190_casts.sh
