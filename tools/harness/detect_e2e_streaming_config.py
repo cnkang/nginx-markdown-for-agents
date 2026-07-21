@@ -184,7 +184,7 @@ def _extract_nginx_from_rust(content: str) -> list[tuple[str, int]]:
     """
     configs = []
     # Match Rust raw strings: r#"..."#, r##"..."##, etc.
-    # nosec:regex-safety — backreference is bounded by Rust raw-string syntax (short fence)
+    # nosec:regex-safety -- bounded Rust raw-string fence, max_input_bytes=source_file
     raw_string_re = re.compile(r'r(#+)"(.*?)\1"', re.DOTALL)
     for m in raw_string_re.finditer(content):
         base_line = content[: m.start()].count("\n") + 1
