@@ -767,24 +767,15 @@ class RegexASTVisitor(ast.NodeVisitor):
         )
         has_dotall = self._check_dotall(node, api)
 
-        # --- Full-pattern analysis for all-static compositions (Section VI) ---
-        # When all segments are static, reassemble the complete pattern and
-        # run all ReDoS checks on the full string, not just per-segment.
-        all_static = all(s.kind == _SegKind.STATIC for s in segments)
-        if all_static and pattern_str is not None:
-            reason, _, severity = _analyze_static_pattern(pattern_str)
-            if reason is not None and severity == Severity.ERROR:
-                self._emit_error(ctx, pattern_str, reason)
-                return
-            if has_dotall and ".*" in pattern_str:
-                self._emit_dotall_review(ctx, pattern_str)
+        # All-static compositions: run full-pattern ReDoS analysis.
+        if all(s.kind == _SegKind.STATIC for s in segments) and pattern_str is not None:
+            self._emit_static_finding(ctx, pattern_str, has_dotall)
             return
 
-        # --- Per-segment dangerous static check (for mixed compositions) ---
+        # Mixed compositions: check individual dangerous static segments.
         static_danger = self._find_dangerous_static_segment(segments)
         if static_danger is not None:
-            reason, pat = static_danger
-            self._emit_error(ctx, pat, reason)
+            self._emit_error(ctx, static_danger[1], static_danger[0])
             return
 
         if pattern_str is not None:
@@ -792,32 +783,43 @@ class RegexASTVisitor(ast.NodeVisitor):
                 self._emit_dotall_review(ctx, pattern_str)
             return
 
-        # --- Escaped-dynamic composition with regex operators (Section VIII) ---
+        # Dynamic/escaped composition analysis.
+        self._emit_composition_finding(ctx, segments, pattern_source)
+
+    def _emit_static_finding(
+        self, ctx: _FindingCtx, pattern_str: str, has_dotall: bool,
+    ) -> None:
+        """Emit finding for a fully-static pattern after full ReDoS analysis."""
+        reason, _, severity = _analyze_static_pattern(pattern_str)
+        if reason is not None and severity == Severity.ERROR:
+            self._emit_error(ctx, pattern_str, reason)
+            return
+        if has_dotall and ".*" in pattern_str:
+            self._emit_dotall_review(ctx, pattern_str)
+
+    def _emit_composition_finding(
+        self, ctx: _FindingCtx, segments: list[_Segment],
+        pattern_source: PatternSource,
+    ) -> None:
+        """Emit finding for escaped/dynamic/unknown compositions."""
         has_escaped = any(s.kind == _SegKind.ESCAPED_DYNAMIC for s in segments)
         has_unescaped_dynamic = any(
             s.kind in (_SegKind.DYNAMIC, _SegKind.UNKNOWN) for s in segments
         )
-        has_static_regex_operators = any(
-            s.kind == _SegKind.STATIC and s.value is not None
-            and _contains_regex_operators(s.value)
-            for s in segments
-        )
 
         if has_escaped and not has_unescaped_dynamic:
-            # Pure escaped + static composition
-            if has_static_regex_operators:
-                # Escaped dynamic adjacent to regex operators → REVIEW
+            has_operators = any(
+                s.kind == _SegKind.STATIC and s.value is not None
+                and _contains_regex_operators(s.value)
+                for s in segments
+            )
+            if has_operators:
                 self._emit_escaped_composition_review(ctx)
-                return
-            # Only escaped dynamic with no surrounding operators → safe
             return
 
         if has_unescaped_dynamic:
             self._emit_dynamic_review(ctx)
-            return
-        if pattern_source == PatternSource.ESCAPED_DYNAMIC:
-            return
-        if pattern_source == PatternSource.UNKNOWN:
+        elif pattern_source == PatternSource.UNKNOWN:
             self._emit_unknown_review(ctx)
 
     def _lookup_compile_line(self, node: ast.Call, api: str) -> int | None:
@@ -1943,11 +1945,6 @@ def _skip_options_and_find_pattern(
     Returns (pattern, is_pcre).  ``is_pcre`` is True only when a PCRE flag is
     present.  ``pattern`` is the first non-option argument that is not a
     known flag value, or the value following a pattern-bearing option.
-
-    Handles:
-      - Long options with = (--regexp='...')
-      - Combined short options (-Pe, -Pne)
-      - Options that consume the next argument (-m 1, -A 3, -f file)
     """
     is_pcre = False
     saw_double_dash = False
@@ -1961,49 +1958,97 @@ def _skip_options_and_find_pattern(
             saw_double_dash = True
             i += 1
             continue
-        # Long option with = (e.g. --regexp='pattern')
-        if tok.startswith("--") and "=" in tok:
-            opt, _, val = tok.partition("=")
-            if opt in pattern_options:
-                return val, is_pcre
-            if opt in pcre_flags:
-                is_pcre = True
-            # Other long options with = are consumed (skip)
-            i += 1
-            continue
-        # Long option without = (e.g. --regexp 'pattern', --perl-regexp)
-        if tok.startswith("--"):
-            if tok in pcre_flags:
-                is_pcre = True
-                i += 1
-                continue
-            if tok in pattern_options:
-                return (tokens[i + 1], is_pcre) if i + 1 < len(tokens) else (None, is_pcre)
-            if tok in value_opts:
-                i += 2  # skip option and its value
-                continue
-            i += 1
-            continue
-        # Short option or cluster (e.g. -P, -e, -Pe, -Pne)
-        if tok.startswith("-") and len(tok) > 1:
-            result = _parse_short_option_cluster(
-                tok, tokens, i, pcre_flags, pattern_options, value_opts,
-            )
-            kind, value, advance = result
-            if kind == "pattern":
-                return value, is_pcre
-            if kind == "pcre_pattern":
-                return value, True
-            if kind == "pcre":
-                is_pcre = True
-            elif kind == "value_skip":
-                i += advance
-                continue
-            i += advance
-            continue
-        # Not an option — first positional is the pattern
-        return tok, is_pcre
+        action, advance = _dispatch_option_token(
+            tok, tokens, i, pcre_flags, pattern_options, value_opts, is_pcre,
+        )
+        if action == "return_pattern":
+            return advance[0], advance[1]
+        if action == "set_pcre":
+            is_pcre = True
+        elif action == "positional":
+            return tok, is_pcre
+        i += advance if isinstance(advance, int) else advance[2]
     return None, is_pcre
+
+
+def _dispatch_option_token(
+    tok: str, tokens: list[str], i: int,
+    pcre_flags: set[str], pattern_options: set[str],
+    value_opts: set[str], is_pcre: bool,
+) -> tuple[str, int | tuple]:
+    """Dispatch a single non-double-dash token.
+
+    Returns (action, payload) where action is one of:
+      "return_pattern" — payload is (value, is_pcre_final)
+      "set_pcre"       — payload is advance count
+      "skip"           — payload is advance count
+      "positional"     — payload is 1
+    """
+    if tok.startswith("--"):
+        return _dispatch_long(tok, tokens, i, pcre_flags, pattern_options, value_opts, is_pcre)
+    if tok.startswith("-") and len(tok) > 1:
+        return _dispatch_short(tok, tokens, i, pcre_flags, pattern_options, value_opts, is_pcre)
+    return "positional", 1
+
+
+def _dispatch_long(
+    tok: str, tokens: list[str], i: int,
+    pcre_flags: set[str], pattern_options: set[str],
+    value_opts: set[str], is_pcre: bool,
+) -> tuple[str, int | tuple]:
+    """Dispatch a long option token."""
+    result = _handle_long_option(tok, tokens, i, pcre_flags, pattern_options, value_opts)
+    if result is None:
+        return "skip", 1
+    kind, value, advance = result
+    if kind == "pattern":
+        return "return_pattern", (value, is_pcre, advance)
+    if kind == "pcre":
+        return "set_pcre", advance
+    return "skip", advance
+
+
+def _dispatch_short(
+    tok: str, tokens: list[str], i: int,
+    pcre_flags: set[str], pattern_options: set[str],
+    value_opts: set[str], is_pcre: bool,
+) -> tuple[str, int | tuple]:
+    """Dispatch a short option cluster token."""
+    result = _parse_short_option_cluster(tok, tokens, i, pcre_flags, pattern_options, value_opts)
+    kind, value, advance = result
+    if kind == "pattern":
+        return "return_pattern", (value, is_pcre, advance)
+    if kind == "pcre_pattern":
+        return "return_pattern", (value, True, advance)
+    if kind == "pcre":
+        return "set_pcre", advance
+    return "skip", advance
+
+
+def _handle_long_option(
+    tok: str, tokens: list[str], i: int,
+    pcre_flags: set[str], pattern_options: set[str],
+    value_opts: set[str],
+) -> tuple[str, str | None, int] | None:
+    """Classify a long option token (--foo or --foo=bar).
+
+    Returns (kind, value, advance) or None if unrecognized.
+    """
+    if "=" in tok:
+        opt, _, val = tok.partition("=")
+        if opt in pattern_options:
+            return ("pattern", val, 1)
+        if opt in pcre_flags:
+            return ("pcre", None, 1)
+        return ("skip", None, 1)
+    if tok in pcre_flags:
+        return ("pcre", None, 1)
+    if tok in pattern_options:
+        value = tokens[i + 1] if i + 1 < len(tokens) else None
+        return ("pattern", value, 2 if value else 1)
+    if tok in value_opts:
+        return ("skip", None, 2)
+    return None
 
 
 def _parse_short_option_cluster(
@@ -2015,7 +2060,7 @@ def _parse_short_option_cluster(
 
     Returns (kind, value, advance) where kind is:
       - "pcre": found PCRE flag (may also find pattern)
-      - "pattern": found pattern value
+      - "pattern" / "pcre_pattern": found pattern value
       - "value_skip": option consumed a value argument
       - "skip": just a regular flag cluster
     """
@@ -2027,21 +2072,29 @@ def _parse_short_option_cluster(
             found_pcre = True
             continue
         if flag in pattern_options:
-            # -e takes the rest of the cluster as pattern, or next token
-            rest = cluster[idx + 1:]
-            kind = "pcre_pattern" if found_pcre else "pattern"
-            if rest:
-                return (kind, rest, 1)
-            if i + 1 < len(tokens):
-                return (kind, tokens[i + 1], 2)
-            return (kind, None, 1)
+            return _resolve_pattern_in_cluster(
+                cluster, idx, tokens, i, found_pcre,
+            )
         if flag in value_opts:
-            # Option consumes a value: rest of cluster or next token
-            rest = cluster[idx + 1:]
-            return ("value_skip", None, 1) if rest else ("value_skip", None, 2)
-    if found_pcre:
-        return ("pcre", None, 1)
-    return ("skip", None, 1)
+            has_attached = bool(cluster[idx + 1:])
+            return ("value_skip", None, 1 if has_attached else 2)
+    return ("pcre", None, 1) if found_pcre else ("skip", None, 1)
+
+
+def _resolve_pattern_in_cluster(
+    cluster: str, idx: int, tokens: list[str], i: int, found_pcre: bool,
+) -> tuple[str, str | None, int]:
+    """Resolve a pattern-bearing option found within a short option cluster.
+
+    The rest of the cluster after the option character is the attached pattern
+    value; if empty, the next token is consumed.
+    """
+    rest = cluster[idx + 1:]
+    kind = "pcre_pattern" if found_pcre else "pattern"
+    if rest:
+        return (kind, rest, 1)
+    value = tokens[i + 1] if i + 1 < len(tokens) else None
+    return (kind, value, 2 if value is not None else 1)
 
 
 def _extract_shell_regexes(
