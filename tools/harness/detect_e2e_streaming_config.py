@@ -347,7 +347,7 @@ def _gather_preamble(lines: list[str], location_line_num: int) -> str:
 # ---------------------------------------------------------------------------
 
 def _extract_nginx_from_rust(
-    content: str, file_path: str,
+    content: str, file_path: str,  # noqa: ARG001 — kept for API symmetry with _extract_nginx_from_shell
 ) -> tuple[list[tuple[str, int]], list[ScanError]]:
     """Extract nginx config from Rust raw strings or escaped string literals."""
     configs: list[tuple[str, int]] = []
@@ -442,6 +442,25 @@ def _scan_rust_string(
     return start, ""
 
 
+def _try_mask_format_brace(text: str, i: int, n: int) -> int | None:
+    """Try to mask a Rust format brace at position *i*.
+
+    Returns the new index past the placeholder if ``text[i]`` starts a Rust
+    format placeholder (``{}``, ``{name}``), or ``None`` if it does not.
+    """
+    j = i + 1
+    while j < n and text[j] not in "{};\n ":
+        j += 1
+    if j >= n or text[j] != "}":
+        return None
+    if j == i + 1:
+        # Empty ``{}`` placeholder.
+        return j + 1
+    # ``{name}`` placeholder — only if content is a valid Rust identifier.
+    inner = text[i + 1:j]
+    return j + 1 if inner.replace("_", "").isalnum() else None
+
+
 def _mask_rust_format_args(text: str) -> str:
     """Replace Rust format-argument braces (``{}``, ``{name}``) with a token.
 
@@ -454,24 +473,13 @@ def _mask_rust_format_args(text: str) -> str:
     i = 0
     n = len(text)
     while i < n:
-        ch = text[i]
-        if ch == "{":
-            j = i + 1
-            while j < n and text[j] not in "{};\n ":
-                j += 1
-            if j < n and text[j] == "}" and j == i + 1:
-                # Empty ``{}`` placeholder.
+        if text[i] == "{":
+            end = _try_mask_format_brace(text, i, n)
+            if end is not None:
                 out.append("_")
-                i = j + 1
+                i = end
                 continue
-            if j < n and text[j] == "}" and j > i + 1:
-                # ``{name}`` placeholder — only if content is a Rust ident.
-                inner = text[i + 1:j]
-                if inner.replace("_", "").isalnum():
-                    out.append("_")
-                    i = j + 1
-                    continue
-        out.append(ch)
+        out.append(text[i])
         i += 1
     return "".join(out)
 
