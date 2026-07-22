@@ -173,15 +173,24 @@ def _strip_nginx_comments(text: str) -> str:
 # Brace-matching on masked (comment-free) text
 # ---------------------------------------------------------------------------
 
-def _skip_quoted_string(text: str, pos: int) -> int:
-    """Advance past a quoted string starting at pos (the quote character)."""
+def _skip_quoted_string(text: str, pos: int) -> tuple[int, bool]:
+    """Advance past a quoted string starting at pos (the quote character).
+
+    Returns (next_pos, closed).  ``closed`` is True when a matching closing
+    quote was found; False when the quote runs to the end of ``text``
+    (unterminated).  ``next_pos`` is the index after the closing quote on
+    success, or ``len(text)`` on an unterminated quote.
+    """
     quote_char = text[pos]
     i = pos + 1
-    while i < len(text) and text[i] != quote_char:
+    n = len(text)
+    while i < n and text[i] != quote_char:
         if text[i] == "\\":
             i += 1
         i += 1
-    return i + 1
+    if i < n:
+        return i + 1, True
+    return n, False
 
 
 def _find_matching_brace(text: str, start_pos: int) -> int:
@@ -189,18 +198,20 @@ def _find_matching_brace(text: str, start_pos: int) -> int:
 
     ``text`` should already be comment-masked so braces inside comments do
     not affect depth.  Returns the index after the closing brace, or -1 if
-    unmatched.
+    unmatched.  An unterminated quoted string is treated as extending to the
+    end of the text so it cannot swallow a matching brace from later lines.
     """
     depth = 1
     i = start_pos
-    while i < len(text) and depth > 0:
+    n = len(text)
+    while i < n and depth > 0:
         ch = text[i]
         if ch == "{":
             depth += 1
         elif ch == "}":
             depth -= 1
         elif ch in ('"', "'"):
-            i = _skip_quoted_string(text, i)
+            i, _ = _skip_quoted_string(text, i)
             continue
         i += 1
     return i if depth == 0 else -1
@@ -466,15 +477,19 @@ def _extract_nginx_from_rust(
 
     # Scan for Rust raw strings using a deterministic character scanner.
     # Supports: r"...", r#"..."#, r##"..."##, r###"..."###, br"...", br#"..."#
-    raw_results, raw_errors = _scan_rust_raw_strings(content)
+    # Returns the full raw-string spans so the ordinary-string scanner can
+    # skip them and avoid re-scanning `"` characters inside raw-string bodies.
+    raw_results, raw_errors, raw_spans = _scan_rust_raw_strings(content)
     configs.extend(raw_results)
     errors.extend(raw_errors)
 
     # Match regular string literals (quoted with ") that contain escaped
     # newlines.  Use a manual scanner that respects ``\"`` escapes so the
     # string can span multiple physical lines (Rust line-continuation with
-    # a trailing backslash-newline is part of the literal).
-    configs.extend(_extract_rust_escaped_strings(content, errors))
+    # a trailing backslash-newline is part of the literal).  Raw-string
+    # spans are skipped so quotes inside raw strings are not mistaken for
+    # ordinary-string boundaries.
+    configs.extend(_extract_rust_escaped_strings(content, errors, raw_spans))
     return configs, errors
 
 
@@ -485,16 +500,20 @@ def _extract_nginx_from_rust(
 
 def _scan_rust_raw_strings(
     content: str,
-) -> tuple[list[tuple[str, int]], list[ScanError]]:
+) -> tuple[list[tuple[str, int]], list[ScanError], list[tuple[int, int]]]:
     """Scan for Rust raw string literals and candidate nginx config bodies.
 
     This is a two-pass-ish reader: strip comments first, then extract
     ``r"..."``/``br"..."`` bodies with correct hash-counted fences.
     Unterminated raw strings are reported as ``ScanError``; successful
-    matches are filtered to only likely nginx config later.
+    matches are filtered to only likely nginx config later.  Also returns
+    the full character spans of every successfully-parsed raw string so
+    the ordinary-string scanner can skip them and avoid re-interpreting
+    ``"`` characters inside raw-string bodies.
     """
     configs: list[tuple[str, int]] = []
     errors: list[ScanError] = []
+    spans: list[tuple[int, int]] = []
     i = 0
     n = len(content)
 
@@ -510,10 +529,13 @@ def _scan_rust_raw_strings(
             i += 1
             continue
 
-        i = _process_raw_string_match(
+        next_i, span = _process_raw_string_match(
             content, raw_start, hash_count, body_start, n, configs, errors,
         )
-    return configs, errors
+        if span is not None:
+            spans.append(span)
+        i = next_i
+    return configs, errors, spans
 
 
 def _try_skip_rust_comment(content: str, i: int, n: int) -> int:
@@ -529,10 +551,13 @@ def _process_raw_string_match(
     content: str, raw_start: int, hash_count: int,
     body_start: int, n: int,
     configs: list[tuple[str, int]], errors: list[ScanError],
-) -> int:
+) -> tuple[int, tuple[int, int] | None]:
     """Process a matched raw string prefix and extract/report the body.
 
-    Returns the new scanner position after the raw string (or body_start on error).
+    Returns (new_position, full_span) where full_span is the
+    ``(raw_start, end_after_hashes)`` of the parsed raw string (or None on
+    an unterminated raw string so the ordinary scanner does not need to
+    handle it).
     """
     close_idx = _find_raw_string_close(content, body_start, n, hash_count)
     if close_idx < 0:
@@ -545,13 +570,14 @@ def _process_raw_string_match(
                 f"'\"{'#' * hash_count}') starting here"
             ),
         ))
-        return body_start
+        return body_start, None
 
     body = content[body_start:close_idx]
     base_line = content[:raw_start].count("\n") + 1
     if "location" in body and "markdown_" in body:
         configs.append((body, base_line))
-    return close_idx + 1 + hash_count
+    end = close_idx + 1 + hash_count
+    return end, (raw_start, end)
 
 
 def _try_match_raw_prefix(
@@ -633,15 +659,32 @@ def _skip_rust_block_comment(content: str, i: int, n: int) -> int:
 
 def _extract_rust_escaped_strings(
     content: str, errors: list[ScanError] | None = None,
+    raw_spans: list[tuple[int, int]] | None = None,
 ) -> list[tuple[str, int]]:
+    """Extract ordinary Rust string literals, skipping raw-string spans.
+
+    ``raw_spans`` is a sorted list of ``(start, end)`` byte offsets for
+    every raw string already parsed; the ordinary scanner jumps over them
+    so ``"`` characters inside raw-string bodies are not mistaken for
+    ordinary-string boundaries.  Char and byte-char literals (``'"'``,
+    ``b'"'``) are also skipped so a single quote is not treated as a
+    string delimiter.
+    """
     configs: list[tuple[str, int]] = []
+    spans = sorted(raw_spans) if raw_spans else []
+    si = 0
     i = 0
     n = len(content)
     while i < n:
-        skip_end = _try_skip_rust_comment(content, i, n)
-        if skip_end > i:
-            i = skip_end
-            continue
+        i, advanced = _maybe_skip_raw_span(spans, si, i)
+        while advanced:
+            si = advanced
+            i, advanced = _maybe_skip_raw_span(spans, si, i)
+        if i >= n:
+            break
+        i = _advance_past_skippable(content, i, n)
+        if i >= n:
+            break
         if content[i] != '"':
             i += 1
             continue
@@ -651,6 +694,59 @@ def _extract_rust_escaped_strings(
         if config is not None:
             configs.append(config)
     return configs
+
+
+def _maybe_skip_raw_span(
+    spans: list[tuple[int, int]], si: int, i: int,
+) -> tuple[int, int | None]:
+    """If ``i`` falls inside a raw-string span, return (end, new_si).
+
+    Returns ``(i, None)`` when ``i`` is not inside any remaining span so
+    the caller does not advance ``si``.  Spans ending at or before ``i``
+    are skipped by advancing ``si``.
+    """
+    while si < len(spans) and spans[si][1] <= i:
+        si += 1
+    if si < len(spans) and spans[si][0] <= i < spans[si][1]:
+        return spans[si][1], si + 1
+    return i, None
+
+
+def _advance_past_skippable(content: str, i: int, n: int) -> int:
+    """Skip a Rust comment or char/byte-char literal at ``i`` if present."""
+    skip_end = _try_skip_rust_comment(content, i, n)
+    if skip_end > i:
+        return skip_end
+    if _is_rust_char_literal(content, i, n):
+        return _skip_rust_char_literal(content, i, n)
+    return i
+
+
+def _is_rust_char_literal(content: str, i: int, n: int) -> bool:
+    """Return True if a char/byte-char literal starts at position i."""
+    pos = i
+    if pos < n and content[pos] == 'b':
+        pos += 1
+    if pos < n and content[pos] == "'":
+        return True
+    return False
+
+
+def _skip_rust_char_literal(content: str, i: int, n: int) -> int:
+    """Skip a Rust char or byte-char literal starting at i. Returns next index."""
+    pos = i
+    if pos < n and content[pos] == 'b':
+        pos += 1
+    # pos points at the opening quote.
+    if pos >= n or content[pos] != "'":
+        return i + 1
+    pos += 1
+    while pos < n and content[pos] != "'":
+        if content[pos] == "\\" and pos + 1 < n:
+            pos += 2
+            continue
+        pos += 1
+    return pos + 1 if pos < n else pos
 
 
 def _process_rust_escaped_string(
@@ -761,44 +857,184 @@ def _extract_nginx_from_shell(
 ) -> tuple[list[tuple[str, int]], list[ScanError]]:
     """Extract nginx config from shell heredocs and inline strings.
 
-    ``content`` is the full text of a shell file.  The scanner only
-    considers ``cat <<EOF ... EOF``-style heredocs and the rare case where
-    inline file content already contains nginx config.  Directive/brace
-    parsing happens later; this stage merely extracts candidate config
-    bodies.  Read/parse problems surface as ``ScanError`` and fail-strict
-    later in the pipeline.
+    ``content`` is the full text of a shell file.  The scanner uses a
+    deterministic per-line character scanner that tracks single/double
+    quotes, backslash escapes, and line comments so that ``<<EOF`` text
+    inside comments or quoted strings is never mistaken for a real
+    redirection operator.  Only genuine ``cat <<EOF`` / ``cmd <<DELIM``
+    redirections start a heredoc; the closing delimiter must appear at the
+    start of a line (``<<``) or after leading tabs only (``<<-``).
+    Directive/brace parsing happens later; this stage merely extracts
+    candidate config bodies.  Read/parse problems surface as ``ScanError``
+    and fail-strict later in the pipeline.
     """
     configs: list[tuple[str, int]] = []
     errors: list[ScanError] = []
-    # Two-phase heredoc extraction to avoid super-linear backtracking (S8786):
-    # nosec:regex-safety -- bounded heredoc opener, deterministic delimiter.
-    heredoc_open_re = re.compile(r"<<-?\s*['\"]?([A-Za-z0-9_.-]+)['\"]?\s*\n")
+    lines = content.split("\n")
     found_heredoc = False
-    for m in heredoc_open_re.finditer(content):
-        delimiter = m.group(1)
-        body_start = m.end()
-        # nosec:regex-safety -- anchored single-delimiter line match.
-        close_re = re.compile(r"^\s*" + re.escape(delimiter) + r"\s*$", re.MULTILINE)
-        close_match = close_re.search(content, body_start)
-        if not close_match:
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        opener = _find_heredoc_opener(line, i + 1)
+        if opener is None:
+            i += 1
+            continue
+        delimiter, strip_tabs, open_line = opener
+        found_heredoc = True
+        body_start_line = i + 1
+        body_lines: list[str] = []
+        close_line_idx = -1
+        j = body_start_line
+        while j < n:
+            candidate = lines[j]
+            if _is_heredoc_close(candidate, delimiter, strip_tabs):
+                close_line_idx = j
+                break
+            body_lines.append(candidate)
+            j += 1
+        if close_line_idx < 0:
             errors.append(ScanError(
-                file_path=file_path, line=0,
+                file_path=file_path, line=open_line,
                 message=(
-                    f"unterminated heredoc with delimiter '{delimiter}' — "
-                    "no closing line found"
+                    f"unterminated heredoc with delimiter '{delimiter}' "
+                    f"(opener on line {open_line}) — no closing line found"
                 ),
             ))
+            i = body_start_line
             continue
-        found_heredoc = True
-        body = content[body_start : close_match.start()]
+        body = "\n".join(body_lines)
         if "location" in body and "markdown_" in body:
-            base_line = content[: m.start()].count("\n") + 1
+            base_line = body_start_line
             configs.append((body, base_line))
+        i = close_line_idx + 1
 
     if not configs and not found_heredoc and "location" in content \
             and "markdown_cache_validation" in content:
         configs.append((content, 1))
     return configs, errors
+
+
+def _find_heredoc_opener(line: str, line_num: int) -> tuple[str, bool, int] | None:
+    """Find a real heredoc redirection operator in one shell line.
+
+    Returns (delimiter, strip_tabs, line_number) or None.  Skips
+    single-quoted, double-quoted, and backslash-escaped spans plus line
+    comments so that ``# cat <<EOF`` and ``echo "<<EOF"`` do not match.
+    The delimiter may be quoted ('EOF', "EOF"); the redirection may be
+    ``<<`` (no strip) or ``<<-`` (strip leading tabs from the close).
+    """
+    n = len(line)
+    i = 0
+    in_single = False
+    in_double = False
+    while i < n:
+        ch = line[i]
+        if in_single or in_double:
+            i, in_single, in_double = _advance_quoted_char(line, i, in_single, in_double)
+            continue
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "'":
+            in_single = True
+            i += 1
+            continue
+        if ch == '"':
+            in_double = True
+            i += 1
+            continue
+        if ch == "#":
+            return None
+        if ch == "<" and i + 1 < n and line[i + 1] == "<":
+            return _parse_heredoc_operator(line, i, line_num)
+        i += 1
+    return None
+
+
+def _advance_quoted_char(
+    line: str, i: int, in_single: bool, in_double: bool,
+) -> tuple[int, bool, bool]:
+    """Advance one character inside a quoted span, returning new state."""
+    ch = line[i]
+    if in_single:
+        return i + 1, (ch != "'"), False
+    # in_double
+    if ch == "\\":
+        return i + 2, False, True
+    return i + 1, False, (ch != '"')
+
+
+def _parse_heredoc_operator(
+    line: str, op_pos: int, line_num: int,
+) -> tuple[str, bool, int] | None:
+    """Parse the delimiter following a ``<<`` or ``<<-`` operator."""
+    j = op_pos + 2
+    strip_tabs = False
+    if j < len(line) and line[j] == "-":
+        strip_tabs = True
+        j += 1
+    # Optional whitespace before the delimiter.
+    while j < len(line) and line[j] in " \t":
+        j += 1
+    if j >= len(line):
+        return None
+    quote_char, j = _read_optional_delimiter_quote(line, j)
+    start = j
+    while j < len(line) and _is_delimiter_char(line[j], quote_char):
+        j += 1
+    delimiter = line[start:j]
+    if not delimiter:
+        return None
+    if not _delimiter_quote_closed(line, j, quote_char):
+        return None
+    # A trailing redirection target or redirection (>file) is fine; the
+    # delimiter has been captured.  Return the 1-based line number.
+    return delimiter, strip_tabs, line_num
+
+
+def _read_optional_delimiter_quote(line: str, j: int) -> tuple[str | None, int]:
+    """Return (quote_char_or_None, new_index) for a quoted/unquoted delimiter."""
+    if j < len(line) and line[j] in ("'", '"'):
+        return line[j], j + 1
+    return None, j
+
+
+def _is_delimiter_char(ch: str, quote_char: str | None) -> bool:
+    """True if ``ch`` is a valid delimiter body character."""
+    if quote_char is not None and ch == quote_char:
+        return False
+    if ch.isalnum() or ch in "_.-":
+        return True
+    return quote_char is None and ch in "/:"
+
+
+def _delimiter_quote_closed(line: str, j: int, quote_char: str | None) -> bool:
+    """For a quoted delimiter, verify the closing quote is present at j."""
+    if quote_char is None:
+        return True
+    return j < len(line) and line[j] == quote_char
+
+
+def _is_heredoc_close(line: str, delimiter: str, strip_tabs: bool) -> bool:
+    """Return True if ``line`` is a valid heredoc closing delimiter line.
+
+    For ``<<DELIM`` the delimiter must start at column 0 (no leading
+    whitespace).  For ``<<-DELIM`` only leading *tabs* are stripped before
+    comparing; spaces are not valid indentation for ``<<-``.  A trailing
+    run of spaces/tabs after the delimiter is allowed.
+    """
+    if strip_tabs:
+        k = 0
+        while k < len(line) and line[k] == "\t":
+            k += 1
+        rest = line[k:]
+    else:
+        rest = line
+    if not rest.startswith(delimiter):
+        return False
+    tail = rest[len(delimiter):]
+    return tail.strip(" \t") == ""
 
 
 # ---------------------------------------------------------------------------
@@ -916,7 +1152,16 @@ def _validate_config_structure(_text: str, masked: str) -> list[ScanError]:
     while i < n:
         ch = masked[i]
         if ch in ('"', "'"):
-            end = _skip_quoted_string(masked, i)
+            end, closed = _skip_quoted_string(masked, i)
+            if not closed:
+                line_num = masked[:i].count("\n") + 1
+                errors.append(ScanError(
+                    file_path="", line=line_num,
+                    message=f"unterminated quoted string ({ch}) starting here",
+                ))
+                # An unterminated quote swallows the rest of the section;
+                # stop structural analysis to avoid cascading false errors.
+                return errors
             i = end
             continue
         if ch == "{":
@@ -1044,7 +1289,7 @@ def _mask_nested_blocks(
     while i < n:
         ch = structural[i]
         if ch in ('"', "'"):
-            end = _skip_quoted_string(structural, i)
+            end, _ = _skip_quoted_string(structural, i)
             out_chars.append(output_source[i:end])
             i = end
             continue
