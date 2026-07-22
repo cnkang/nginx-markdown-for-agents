@@ -2257,12 +2257,31 @@ def _contains_regex_operators(text: str) -> bool:
 # Shell regex extraction
 # ---------------------------------------------------------------------------
 
-# Commands that introduce PCRE regex usage.  Each value is the canonical
-# command name we look for; the actual flag presence is checked separately.
-_PCRE_COMMANDS = {
-    "grep": ({"-P", "--perl-regexp"}, {"-e", "--regexp"}),
-    "rg": ({"-P", "--pcre2"}, {"-e", "--regexp"}),
-    "perl": (set(), {"-e", "-E"}),
+# Supported shell regex commands.  For each command we classify its options
+# into:
+#   pcre_flags       — options that switch the command to a PCRE engine
+#                      (grep -P, rg --pcre2).  perl is always PCRE.
+#   pattern_options  — options that carry a regex pattern (-e, --regexp).
+#   pattern_file_options — options that take a pattern file (-f, --file).
+#   required_value   — options that consume the next token as a value.
+#   optional_value   — options that may take a value via '=' but never
+#                      consume the next token.
+#   boolean_flags    — options that take no value (do not consume a token).
+#   default_engine   — the engine used when no PCRE flag is present:
+#                      grep/rg default engines are NOT PCRE (BRE/ERE for
+#                      grep, Rust regex NFA for rg) and must not trigger
+#                      PCRE ReDoS analysis.
+
+_PCRE_FLAGS: dict[str, set[str]] = {
+    "grep": {"-P", "--perl-regexp"},
+    "rg": {"-P", "--pcre2"},
+    "perl": set(),  # perl is always PCRE
+}
+
+_PATTERN_OPTIONS: dict[str, set[str]] = {
+    "grep": {"-e", "--regexp"},
+    "rg": {"-e", "--regexp"},
+    "perl": {"-e", "-E"},
 }
 
 _PATTERN_FILE_OPTIONS: dict[str, set[str]] = {
@@ -2273,12 +2292,14 @@ _PATTERN_FILE_OPTIONS: dict[str, set[str]] = {
 _REQUIRED_VALUE_OPTIONS: dict[str, set[str]] = {
     "grep": {"-m", "-A", "-B", "-C", "--max-count",
              "--after-context", "--before-context", "--context",
-             "--label"},
+             "--label", "-d", "--directories", "-D", "--devices",
+             "--binary-files", "--exclude", "--exclude-from",
+             "--exclude-dir", "--include"},
     "rg": {"-g", "--glob", "-t", "--type", "-T", "--type-not",
-            "-m", "--max-count", "-A", "--after-context",
-            "-B", "--before-context", "-C", "--context",
-            "-j", "--threads", "--max-filesize", "--max-depth",
-            "--replace", "-r"},
+           "-m", "--max-count", "-A", "--after-context",
+           "-B", "--before-context", "-C", "--context",
+           "-j", "--threads", "--max-filesize", "--max-depth",
+           "--replace", "-r"},
     "perl": set(),
 }
 
@@ -2288,12 +2309,39 @@ _OPTIONAL_VALUE_OPTIONS: dict[str, set[str]] = {
     "perl": set(),
 }
 
+_BOOLEAN_FLAGS: dict[str, set[str]] = {
+    "grep": {"-n", "--line-number", "-q", "--quiet", "--silent", "-i",
+             "--ignore-case", "-v", "--invert-match", "-w", "--word-regexp",
+             "-x", "--line-regexp", "-s", "--no-messages", "-h",
+             "--no-filename", "-H", "--with-filename", "-o", "--only-matching",
+             "-a", "--text", "-I", "-r", "--recursive", "-R",
+             "--dereference-recursive", "-l", "--files-with-matches", "-L",
+             "--files-without-match", "-z", "--null-data", "-U", "--binary"},
+    "rg": {"-n", "--line-number", "-i", "--ignore-case", "-v",
+           "--invert-match", "-w", "--word-regexp", "-x", "--line-regexp",
+           "-q", "--quiet", "-s", "--case-sensitive", "-S", "--smart-case",
+           "-u", "--unrestricted", "-H", "--hidden", "-l",
+           "--files-with-matches", "--no-heading", "--json", "--multiline",
+           "--multiline-dotall"},
+    "perl": set(),
+}
+
+# perl is inherently PCRE; grep/rg default engines are NOT PCRE.
+_SHELL_DEFAULT_ENGINE: dict[str, Engine | None] = {
+    "grep": None,  # BRE/ERE — not PCRE
+    "rg": None,    # Rust regex NFA — not PCRE
+    "perl": Engine.SHELL_PCRE,
+}
+
+# Commands whose regex usage we inspect.  (keyed by base command name.)
+_PCRE_COMMANDS = set(_PCRE_FLAGS)
+
 
 @dataclass
 class _ShellParseResult:
-    is_pcre: bool = False
+    engine: Engine | None = None
     inline_patterns: list[str] = field(default_factory=list)
-    pattern_file: str | None = None
+    pattern_files: list[str] = field(default_factory=list)
     has_unknown_option: bool = False
     parse_confidence: str = "high"
 
@@ -2301,30 +2349,43 @@ class _ShellParseResult:
 @dataclass(frozen=True)
 class _ShellOptionSets:
     """Classified option sets for one supported shell regex command."""
-    pcre: set[str]
+    pcre_flags: set[str]
     pattern: set[str]
     pattern_file: set[str]
     required_value: set[str]
     optional_value: set[str]
+    boolean_flags: set[str]
 
     @property
     def known(self) -> set[str]:
         """Return every option whose argument contract is known."""
         return (
-            self.pcre | self.pattern | self.pattern_file | self.required_value
-            | self.optional_value
+            self.pcre_flags | self.pattern | self.pattern_file
+            | self.required_value | self.optional_value | self.boolean_flags
         )
 
 
 def _shell_option_sets(cmd_base: str) -> _ShellOptionSets:
     """Build one complete option classification for ``cmd_base``."""
-    pcre, pattern = _PCRE_COMMANDS[cmd_base]
     return _ShellOptionSets(
-        pcre=pcre,
-        pattern=pattern,
+        pcre_flags=_PCRE_FLAGS[cmd_base],
+        pattern=_PATTERN_OPTIONS.get(cmd_base, set()),
         pattern_file=_PATTERN_FILE_OPTIONS.get(cmd_base, set()),
         required_value=_REQUIRED_VALUE_OPTIONS.get(cmd_base, set()),
         optional_value=_OPTIONAL_VALUE_OPTIONS.get(cmd_base, set()),
+        boolean_flags=_BOOLEAN_FLAGS.get(cmd_base, set()),
+    )
+
+
+def _shell_option_sets(cmd_base: str) -> _ShellOptionSets:
+    """Build one complete option classification for ``cmd_base``."""
+    return _ShellOptionSets(
+        pcre_flags=_PCRE_FLAGS[cmd_base],
+        pattern=_PATTERN_OPTIONS.get(cmd_base, set()),
+        pattern_file=_PATTERN_FILE_OPTIONS.get(cmd_base, set()),
+        required_value=_REQUIRED_VALUE_OPTIONS.get(cmd_base, set()),
+        optional_value=_OPTIONAL_VALUE_OPTIONS.get(cmd_base, set()),
+        boolean_flags=_BOOLEAN_FLAGS.get(cmd_base, set()),
     )
 
 
@@ -2383,18 +2444,24 @@ def _parse_shell_command(
     """Parse shell command tokens and extract regex-related information.
 
     Scans all tokens before deciding, collecting inline patterns,
-    pattern-file references, PCRE flag presence, and parse confidence.
+    pattern-file references, engine selection, and parse confidence.
+    When an unknown option is encountered, every subsequent non-option
+    token that is not a known option value is also collected as a
+    pattern candidate so a dangerous pattern cannot be hidden behind an
+    unrecognized option.
     """
     result = _ShellParseResult()
     options = _shell_option_sets(cmd_base)
+    # Apply the command's default engine (perl is inherently PCRE).
+    result.engine = _SHELL_DEFAULT_ENGINE.get(cmd_base)
 
     saw_double_dash = False
+    first_inline_taken = False
     i = 0
     while i < len(tokens):
         tok = tokens[i]
         if saw_double_dash:
-            if not result.inline_patterns:
-                result.inline_patterns.append(tok)
+            _collect_inline_candidate(result, tok)
             i += 1
             continue
         if tok == "--":
@@ -2407,11 +2474,21 @@ def _parse_shell_command(
         if tok.startswith("-") and len(tok) > 1:
             i = _parse_short_option(tok, tokens, i, result, options)
             continue
-        if not result.inline_patterns:
-            result.inline_patterns.append(tok)
+        # Non-option token — the first is the deterministic inline pattern;
+        # after an unknown option, additional non-option tokens are also
+        # collected so a hidden dangerous pattern is still analyzed.
+        if not first_inline_taken or result.has_unknown_option:
+            _collect_inline_candidate(result, tok)
+            first_inline_taken = True
         i += 1
 
     return result
+
+
+def _collect_inline_candidate(result: _ShellParseResult, tok: str) -> None:
+    """Append a non-option token as an inline pattern candidate (dedup)."""
+    if tok not in result.inline_patterns:
+        result.inline_patterns.append(tok)
 
 
 def _parse_long_option(
@@ -2450,23 +2527,22 @@ def _consume_shell_option(
         _mark_unknown_shell_option(result)
         return index + 1
     if kind == "pcre":
-        result.is_pcre = True
+        result.engine = Engine.SHELL_PCRE
         return index + 1
-    if kind == "optional":
+    if kind in ("optional", "boolean"):
         return index + 1
-    if kind == "pattern":
-        result.is_pcre = True
+    # pattern, file, required — these options consume a value.
     value, next_index = _option_value(attached_value, tokens, index)
     if kind == "pattern" and value is not None:
         result.inline_patterns.append(value)
     elif kind == "file" and value is not None:
-        result.pattern_file = value
+        result.pattern_files.append(value)
     return next_index
 
 
 def _shell_option_kind(option: str, options: _ShellOptionSets) -> str:
     """Return the argument contract category for one parsed option."""
-    if option in options.pcre:
+    if option in options.pcre_flags:
         return "pcre"
     if option in options.pattern:
         return "pattern"
@@ -2474,7 +2550,11 @@ def _shell_option_kind(option: str, options: _ShellOptionSets) -> str:
         return "file"
     if option in options.required_value:
         return "required"
-    return "optional" if option in options.optional_value else "unknown"
+    if option in options.optional_value:
+        return "optional"
+    if option in options.boolean_flags:
+        return "boolean"
+    return "unknown"
 
 
 def _option_value(
@@ -2505,14 +2585,20 @@ def _has_unbalanced_quotes(line: str) -> bool:
 
 
 def _extract_shell_regexes(
-    content: str,
-) -> list[tuple[str, int, Engine, str, PatternSource]]:
+    content: str, shell_file_path: Path | None = None,
+    repo_root: Path | None = None,
+) -> tuple[list[tuple[str, int, Engine, str, PatternSource]], list[ScanError]]:
     """Extract regex patterns from shell scripts.
 
-    Returns list of (pattern, line, engine, command, pattern_source) tuples.
-    Handles backslash-newline continuation to form logical lines.
+    Returns list of (pattern, line, engine, command, pattern_source) tuples
+    plus scan errors raised while resolving pattern files.  Handles
+    backslash-newline continuation to form logical lines.  Relative
+    pattern-file paths are resolved against ``shell_file_path``'s
+    directory and validated against ``repo_root`` (or REPO_ROOT) before
+    reading.
     """
     results: list[tuple[str, int, Engine, str, PatternSource]] = []
+    errors: list[ScanError] = []
     lines = content.split("\n")
     i = 0
     while i < len(lines):
@@ -2531,8 +2617,12 @@ def _extract_shell_regexes(
             continue
         segments = _split_shell_pipeline(line)
         for seg_tokens in segments:
-            results.extend(_extract_segment_regexes(seg_tokens, line_num))
-    return results
+            r, e = _extract_segment_regexes(
+                seg_tokens, line_num, shell_file_path, repo_root,
+            )
+            results.extend(r)
+            errors.extend(e)
+    return results, errors
 
 
 def _extract_segment_regexes_broken(
@@ -2551,22 +2641,36 @@ def _extract_segment_regexes_broken(
 
 def _extract_segment_regexes(
     seg_tokens: list[str], line_num: int,
-) -> list[tuple[str, int, Engine, str, PatternSource]]:
+    shell_file_path: Path | None = None,
+    repo_root: Path | None = None,
+) -> tuple[list[tuple[str, int, Engine, str, PatternSource]], list[ScanError]]:
     results: list[tuple[str, int, Engine, str, PatternSource]] = []
+    errors: list[ScanError] = []
     seg_tokens = _strip_env_assignments(seg_tokens)
     if not seg_tokens:
-        return results
+        return results, errors
     cmd = seg_tokens[0]
     cmd_base = cmd.rsplit("/", 1)[-1]
     if cmd_base not in _PCRE_COMMANDS:
-        return results
+        return results, errors
     parse = _parse_shell_command(seg_tokens[1:], cmd_base)
+    engine = parse.engine
+    # grep/rg default engines are NOT PCRE (BRE/ERE for grep, Rust regex NFA
+    # for rg).  Only perl and commands with an explicit PCRE flag produce
+    # Engine.SHELL_PCRE.  Non-PCRE inline patterns are not analyzed for
+    # catastrophic backtracking (those engines are DFA/NFA-based).
+    if engine is None:
+        engine = _SHELL_DEFAULT_ENGINE.get(cmd_base) or Engine.SHELL_ERE
     source = _shell_pattern_source(parse)
-    results.extend(_inline_shell_patterns(parse, line_num, cmd_base, source))
-    results.extend(_pattern_file_regexes(parse.pattern_file, line_num, cmd_base))
+    results.extend(_inline_shell_patterns(parse, line_num, cmd_base, engine, source))
+    file_results, file_errors = _pattern_file_regexes(
+        parse.pattern_files, line_num, cmd_base, engine, shell_file_path, repo_root,
+    )
+    results.extend(file_results)
+    errors.extend(file_errors)
     if _needs_unknown_shell_pattern(parse, cmd_base):
-        results.append(("", line_num, Engine.SHELL_PCRE, cmd_base, PatternSource.UNKNOWN))
-    return results
+        results.append(("", line_num, engine, cmd_base, PatternSource.UNKNOWN))
+    return results, errors
 
 
 def _shell_pattern_source(parse: _ShellParseResult) -> PatternSource:
@@ -2577,35 +2681,130 @@ def _shell_pattern_source(parse: _ShellParseResult) -> PatternSource:
 
 
 def _inline_shell_patterns(
-    parse: _ShellParseResult, line_num: int, cmd_base: str, source: PatternSource,
+    parse: _ShellParseResult, line_num: int, cmd_base: str,
+    engine: Engine, source: PatternSource,
 ) -> list[tuple[str, int, Engine, str, PatternSource]]:
     """Build findings for all inline patterns from one shell command."""
     return [
-        (pattern, line_num, Engine.SHELL_PCRE, cmd_base, source)
+        (pattern, line_num, engine, cmd_base, source)
         for pattern in parse.inline_patterns
     ]
 
 
 def _pattern_file_regexes(
-    pattern_file: str | None, line_num: int, cmd_base: str,
-) -> list[tuple[str, int, Engine, str, PatternSource]]:
-    """Read static pattern-file entries or emit one conservative unknown result."""
-    if pattern_file is None:
-        return []
+    pattern_files: list[str], line_num: int, cmd_base: str,
+    engine: Engine, shell_file_path: Path | None, repo_root: Path | None,
+) -> tuple[list[tuple[str, int, Engine, str, PatternSource]], list[ScanError]]:
+    """Read static pattern-file entries or emit conservative REVIEW results.
+
+    Each pattern-file path is resolved relative to the shell script's
+    directory (not the detector's cwd), validated to remain within
+    ``repo_root`` (or REPO_ROOT), then read as UTF-8.  Read, encoding, or
+    boundary failures produce a conservative UNKNOWN REVIEW candidate
+    and a ScanError rather than crashing the detector.
+    """
+    root = repo_root or REPO_ROOT
+    results: list[tuple[str, int, Engine, str, PatternSource]] = []
+    errors: list[ScanError] = []
+    for token in pattern_files:
+        resolved, resolve_err = _resolve_pattern_file(
+            token, shell_file_path, line_num, root,
+        )
+        if resolve_err is not None:
+            errors.append(resolve_err)
+            results.append(("", line_num, engine, cmd_base, PatternSource.UNKNOWN))
+            continue
+        file_results, read_errors = _read_pattern_file(
+            resolved, line_num, engine, cmd_base,
+        )
+        results.extend(file_results)
+        errors.extend(read_errors)
+    return results, errors
+
+
+def _resolve_pattern_file(
+    token: str, shell_file_path: Path | None, line_num: int,
+    repo_root: Path,
+) -> tuple[Path | None, ScanError | None]:
+    """Resolve a pattern-file token against the shell script directory.
+
+    Rejects absolute paths, ``..`` traversal, and paths that escape
+    ``repo_root`` after symlink resolution.  Returns the resolved Path or
+    a ScanError describing why resolution was refused.
+    """
+    base_dir = shell_file_path.parent if shell_file_path is not None else repo_root
+    if Path(token).is_absolute():
+        return None, ScanError(
+            file_path=str(shell_file_path or token), line=line_num,
+            message=(
+                f"pattern file {token!r} is an absolute path; only "
+                "repository-relative pattern files are allowed"
+            ),
+        )
+    if ".." in Path(token).parts:
+        return None, ScanError(
+            file_path=str(shell_file_path or token), line=line_num,
+            message=(
+                f"pattern file {token!r} contains a '..' traversal "
+                "component; refusing to read outside the repository"
+            ),
+        )
+    candidate = (base_dir / token)
     try:
-        lines = Path(pattern_file).read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return [("", line_num, Engine.SHELL_PCRE, cmd_base, PatternSource.UNKNOWN)]
-    return [
-        (line, line_num, Engine.SHELL_PCRE, cmd_base, PatternSource.STATIC_LITERAL)
-        for line in lines if line
-    ]
+        resolved = candidate.resolve()
+    except OSError as e:
+        return None, ScanError(
+            file_path=str(shell_file_path or token), line=line_num,
+            message=f"cannot resolve pattern file {token!r}: {e}",
+        )
+    if not resolved.is_relative_to(repo_root.resolve()):
+        return None, ScanError(
+            file_path=str(shell_file_path or token), line=line_num,
+            message=(
+                f"pattern file {token!r} resolves outside the repository "
+                f"root; refusing to read"
+            ),
+        )
+    return resolved, None
+
+
+def _read_pattern_file(
+    resolved: Path, line_num: int, engine: Engine, cmd_base: str,
+) -> tuple[list[tuple[str, int, Engine, str, PatternSource]], list[ScanError]]:
+    """Read one resolved pattern file and return per-line pattern tuples."""
+    results: list[tuple[str, int, Engine, str, PatternSource]] = []
+    errors: list[ScanError] = []
+    try:
+        content = resolved.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        errors.append(ScanError(
+            file_path=str(resolved), line=0,
+            message=f"pattern file is not valid UTF-8: byte {e.start}: {e.reason}",
+        ))
+        results.append(("", line_num, engine, cmd_base, PatternSource.UNKNOWN))
+        return results, errors
+    except (OSError, FileNotFoundError, PermissionError, IsADirectoryError) as e:
+        errors.append(ScanError(
+            file_path=str(resolved), line=0,
+            message=f"cannot read pattern file: {e}",
+        ))
+        results.append(("", line_num, engine, cmd_base, PatternSource.UNKNOWN))
+        return results, errors
+    for raw_line in content.split("\n"):
+        # Strip a trailing CR from CRLF line endings; grep/rg treat each
+        # line as a pattern.  Empty lines are skipped (grep treats an
+        # empty pattern line as matching everything, not as a regex).
+        pattern = raw_line.rstrip("\r")
+        if not pattern.strip():
+            continue
+        results.append((pattern, line_num, engine, cmd_base, PatternSource.STATIC_LITERAL))
+    return results, errors
 
 
 def _needs_unknown_shell_pattern(parse: _ShellParseResult, cmd_base: str) -> bool:
     """Return whether a PCRE invocation has no safely recoverable pattern."""
-    is_pcre_or_perl = parse.is_pcre or cmd_base == "perl"
-    return not parse.inline_patterns and parse.pattern_file is None and is_pcre_or_perl
+    is_pcre_or_perl = parse.engine == Engine.SHELL_PCRE or cmd_base == "perl"
+    return not parse.inline_patterns and not parse.pattern_files and is_pcre_or_perl
 
 
 def _analyze_shell_pattern(
@@ -2850,7 +3049,10 @@ def _scan_shell_file(
         return findings, errors
 
     source_lines = content.split("\n")
-    shell_regexes = _extract_shell_regexes(content)
+    shell_regexes, extract_errors = _extract_shell_regexes(
+        content, file_path, repo_root,
+    )
+    errors.extend(extract_errors)
     f, e = _process_shell_regexes(shell_regexes, source_lines, rel_path)
     findings.extend(f)
     errors.extend(e)
