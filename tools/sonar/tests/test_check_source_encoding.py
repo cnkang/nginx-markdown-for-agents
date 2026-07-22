@@ -277,5 +277,41 @@ class TestCharsetFixtures:
             assert meta_data.get("source-description") == "Content-Type and meta charset mismatch handling"
 
 
+class TestSonarRootSync:
+    """Verify SONAR_ROOTS covers all sonar.sources and sonar.tests paths."""
+
+    def test_sonar_properties_sources_covered_by_roots(self) -> None:
+        module = load_checker_module()
+        props_text = PROPERTIES.read_text(encoding="utf-8")
+        sonar_sources = None
+        sonar_tests = None
+        for line in props_text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if stripped.startswith("sonar.sources="):
+                sonar_sources = stripped[len("sonar.sources="):]
+            elif stripped.startswith("sonar.tests="):
+                sonar_tests = stripped[len("sonar.tests="):]
+        assert sonar_sources is not None, "sonar.sources not found in properties"
+        assert sonar_tests is not None, "sonar.tests not found in properties"
+        all_paths = sonar_sources.split(",") + sonar_tests.split(",")
+        root_set = {str(p) for p in module.SONAR_ROOTS}
+        for path_str in all_paths:
+            path_str = path_str.strip()
+            if not path_str:
+                continue
+            assert path_str in root_set, (
+                f"sonar path '{path_str}' not in SONAR_ROOTS; "
+                f"add Path(\"{path_str}\") to SONAR_ROOTS in check_source_encoding.py"
+            )
+
+    def test_rust_converter_src_in_roots(self) -> None:
+        module = load_checker_module()
+        root_strs = {str(p) for p in module.SONAR_ROOTS}
+        assert "components/rust-converter/src" in root_strs
+        assert "components/rust-converter/tests" in root_strs
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
