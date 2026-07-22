@@ -21,15 +21,14 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
-use streaming_test_support::known_differences::KnownDifferences;
 use nginx_markdown_converter::error::ConversionError;
+use streaming_test_support::known_differences::KnownDifferences;
 
 use streaming_test_support::{
-    check_conversion_errors, check_output_comparison,
-    convert_full_buffer, convert_streaming_chunked, convert_streaming_single,
-    default_streaming_budget, default_streaming_options, discover_html_fixtures,
-    evidence_output_path, fixture_relative_name, known_differences_path,
-    normalize_whitespace_tokens, read_fixture, read_fixture_meta,
+    check_conversion_errors, check_output_comparison, convert_full_buffer,
+    convert_streaming_chunked, convert_streaming_single, default_streaming_budget,
+    default_streaming_options, discover_html_fixtures, evidence_output_path, fixture_relative_name,
+    known_differences_path, normalize_whitespace_tokens, read_fixture, read_fixture_meta,
 };
 
 fn discover_fixtures(corpus_dir: &Path) -> Vec<std::path::PathBuf> {
@@ -108,9 +107,8 @@ fn assert_fixture_parity(path: &Path, known_diffs: &KnownDifferences) -> Result<
     let single = convert_streaming_single_entry(&html, Some(&content_type), budget.clone());
     let chunked = convert_streaming_chunked_entry(&html, &chunk_sizes, Some(&content_type), budget);
 
-    let should_compare = check_conversion_errors(
-        &fixture_name, &meta, &single, &chunked, known_diffs,
-    )?;
+    let should_compare =
+        check_conversion_errors(&fixture_name, &meta, &single, &chunked, known_diffs)?;
 
     if !should_compare {
         return Ok(());
@@ -119,7 +117,14 @@ fn assert_fixture_parity(path: &Path, known_diffs: &KnownDifferences) -> Result<
     let single = single.unwrap();
     let chunked = chunked.unwrap();
 
-    check_output_comparison(&fixture_name, &full_buffer, &single, &chunked, &meta, known_diffs)
+    check_output_comparison(
+        &fixture_name,
+        &full_buffer,
+        &single,
+        &chunked,
+        &meta,
+        known_diffs,
+    )
 }
 
 fn generate_large_fixtures_if_needed() {
