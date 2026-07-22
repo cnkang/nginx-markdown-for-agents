@@ -389,7 +389,7 @@ def _regex_quantifier_end(text: str, pos: int, length: int) -> int | None:
 
 
 def _extract_location_blocks(
-    text: str, masked: str,
+    _text: str, masked: str,
 ) -> tuple[list[_LocationBlock], list[ScanError]]:
     blocks: list[_LocationBlock] = []
     errors: list[ScanError] = []
@@ -522,9 +522,7 @@ def _try_skip_rust_comment(content: str, i: int, n: int) -> int:
         return i
     if content[i + 1] == '/':
         return _skip_to_eol(content, i, n)
-    if content[i + 1] == '*':
-        return _skip_rust_block_comment(content, i, n)
-    return i
+    return _skip_rust_block_comment(content, i, n) if content[i + 1] == '*' else i
 
 
 def _process_raw_string_match(
@@ -910,7 +908,7 @@ def _extract_config_sections(
     return [(content, 1)], []
 
 
-def _validate_config_structure(text: str, masked: str) -> list[ScanError]:
+def _validate_config_structure(_text: str, masked: str) -> list[ScanError]:
     errors: list[ScanError] = []
     depth = 0
     i = 0
