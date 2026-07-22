@@ -875,24 +875,16 @@ def _extract_nginx_from_shell(
     i = 0
     n = len(lines)
     while i < n:
-        line = lines[i]
-        opener = _find_heredoc_opener(line, i + 1)
+        opener = _find_heredoc_opener(lines[i], i + 1)
         if opener is None:
             i += 1
             continue
         delimiter, strip_tabs, open_line = opener
         found_heredoc = True
         body_start_line = i + 1
-        body_lines: list[str] = []
-        close_line_idx = -1
-        j = body_start_line
-        while j < n:
-            candidate = lines[j]
-            if _is_heredoc_close(candidate, delimiter, strip_tabs):
-                close_line_idx = j
-                break
-            body_lines.append(candidate)
-            j += 1
+        body_lines, close_line_idx = _collect_heredoc_body(
+            lines, body_start_line, delimiter, strip_tabs,
+        )
         if close_line_idx < 0:
             errors.append(ScanError(
                 file_path=file_path, line=open_line,
@@ -905,14 +897,32 @@ def _extract_nginx_from_shell(
             continue
         body = "\n".join(body_lines)
         if "location" in body and "markdown_" in body:
-            base_line = body_start_line
-            configs.append((body, base_line))
+            configs.append((body, body_start_line))
         i = close_line_idx + 1
 
     if not configs and not found_heredoc and "location" in content \
             and "markdown_cache_validation" in content:
         configs.append((content, 1))
     return configs, errors
+
+
+def _collect_heredoc_body(
+    lines: list[str], start: int, delimiter: str, strip_tabs: bool,
+) -> tuple[list[str], int]:
+    """Collect heredoc body lines until the closing delimiter.
+
+    Returns (body_lines, close_line_index).  ``close_line_index`` is -1 when
+    no closing delimiter was found.
+    """
+    n = len(lines)
+    j = start
+    body_lines: list[str] = []
+    while j < n:
+        if _is_heredoc_close(lines[j], delimiter, strip_tabs):
+            return body_lines, j
+        body_lines.append(lines[j])
+        j += 1
+    return body_lines, -1
 
 
 def _find_heredoc_opener(line: str, line_num: int) -> tuple[str, bool, int] | None:
@@ -929,27 +939,43 @@ def _find_heredoc_opener(line: str, line_num: int) -> tuple[str, bool, int] | No
     in_single = False
     in_double = False
     while i < n:
-        ch = line[i]
         if in_single or in_double:
-            i, in_single, in_double = _advance_quoted_char(line, i, in_single, in_double)
+            i, in_single, in_double = _advance_quoted_char(
+                line, i, in_single, in_double,
+            )
             continue
-        if ch == "\\":
-            i += 2
-            continue
-        if ch == "'":
-            in_single = True
-            i += 1
-            continue
-        if ch == '"':
-            in_double = True
-            i += 1
-            continue
-        if ch == "#":
-            return None
-        if ch == "<" and i + 1 < n and line[i + 1] == "<":
-            return _parse_heredoc_operator(line, i, line_num)
-        i += 1
+        advanced, in_single, in_double, result = _handle_unquoted_char(
+            line, i, n, line_num,
+        )
+        if result is not None:
+            return result
+        i = advanced
     return None
+
+
+def _handle_unquoted_char(
+    line: str, i: int, n: int, line_num: int,
+) -> tuple[int, bool, bool, tuple[str, bool, int] | None]:
+    """Handle one unquoted character; return (next_i, in_single, in_double, result).
+
+    ``result`` is a parsed heredoc opener when the char starts a ``<<``
+    redirection, None when the caller should continue scanning, or a
+    sentinel-free None when a comment ends the scan (caller returns None
+    via the loop).  The ``in_single``/``in_double`` flags are toggled when
+    a quote opens a span.
+    """
+    ch = line[i]
+    if ch == "\\":
+        return i + 2, False, False, None
+    if ch == "'":
+        return i + 1, True, False, None
+    if ch == '"':
+        return i + 1, False, True, None
+    if ch == "#":
+        return n, False, False, None
+    if ch == "<" and i + 1 < n and line[i + 1] == "<":
+        return i, False, False, _parse_heredoc_operator(line, i, line_num)
+    return i + 1, False, False, None
 
 
 def _advance_quoted_char(
