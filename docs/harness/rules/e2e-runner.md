@@ -77,6 +77,13 @@ Required:
   `auto` + `markdown_cache_validation full` combinations, and the
   `auto + full` contradiction.  It is block-aware (comment-masked brace
   parsing, direct-depth directive extraction, fail-closed scan errors).
+  Location block headers are parsed by a deterministic character scanner
+  (`_scan_location_headers`, `_parse_location_header`, `_read_location_path`)
+  instead of a regex, supporting quoted regex locations (with spaces),
+  regex quantifiers `{m,n}`, and escaped quotes.  Strict UTF-8 file reading
+  rejects encoding errors (produces ScanError).  Overall config structure
+  is validated (`_validate_config_structure`) to detect malformed configs
+  before location analysis.
 
 Detector contract:
 - Comments containing `{` or `}` are masked before brace parsing so they

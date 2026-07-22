@@ -186,6 +186,13 @@
       ],
       "notes": "Block-aware detection of contradictory E2E streaming config (Rule 60): locations with markdown_cache_validation full must have explicit markdown_streaming. Comment-masked brace parsing, direct-depth nested-location isolation, fail-closed scan errors. See docs/harness/rules/e2e-runner.md."
     },
+    "sonar-encoding": {
+      "phase": "cheap-blocker",
+      "commands": [
+        "make sonar-encoding-check"
+      ],
+      "notes": "Validates source file encoding (UTF-8, no BOM, consistent line endings) across Sonar scan roots. See tools/sonar/check_source_encoding.py."
+    },
     "runtime-e2e": {
       "phase": "umbrella",
       "commands": [
@@ -592,9 +599,13 @@
         "tools/harness/**",
         "docs/project/recent-git-harness-steering-analysis-*.md",
         "tools/harness/detect_regex_safety.py",
+        "tools/harness/detect_e2e_streaming_config.py",
         "tools/harness/tests/test_detect_regex_safety.py",
         "tools/harness/tests/test_detect_regex_safety.sh",
+        "tools/harness/tests/test_detect_e2e_streaming_config.py",
+        "tools/harness/tests/test_detect_e2e_streaming_config.sh",
         "docs/harness/rules/parser-regex.md",
+        "docs/harness/rules/e2e-runner.md",
         "deny.toml"
       ],
       "keywords": [
@@ -608,11 +619,15 @@
         "redos",
         "backtracking",
         "nosec",
-        "suppression"
+        "suppression",
+        "e2e streaming config",
+        "location scanner",
+        "fail-closed"
       ],
       "verification_families": [
         "harness-sync",
         "regex-security",
+        "e2e-streaming-config",
         "docs-tooling",
         "release-quality"
       ]

@@ -24,6 +24,7 @@ This page is the readable overlay, not the machine-owned truth.
 | `version-consistency` | focused semantic | `bash tools/harness/detect_version_consistency.sh`, `make harness-security-checks` |
 | `regex-security` | cheap blocker | `make regex-security-check` |
 | `e2e-streaming-config` | cheap blocker | `make e2e-streaming-config-check` |
+| `sonar-encoding` | cheap blocker | `make sonar-encoding-check` |
 | `runtime-e2e` | umbrella | `make verify-chunked-native-e2e-smoke`, `make verify-streaming-failure-cache-e2e` |
 | `release-quality` | umbrella | `make harness-check-full` |
 | `coverage-gate` | focused semantic | `make coverage-gate` |

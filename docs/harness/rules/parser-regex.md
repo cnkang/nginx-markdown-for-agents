@@ -22,9 +22,11 @@ Required:
   - Nested quantifiers with non-separator content: `(aa+)+`, `(a\d+)+`,
     `(.*)+`.  A group with an unbounded inner quantifier repeated by an
     unbounded outer quantifier is flagged unless every alternation branch
-    starts with a strong literal separator (a multi-char literal or a single
-    non-alphanumeric char like `-`, `_`, `.`) that the inner unbounded atom
-    cannot consume.
+  starts with a strong literal separator (a multi-char literal or a single
+  non-alphanumeric char like `-`, `_`, `.`) that the inner unbounded atom
+  cannot consume.  For multi-character separators, only the first character
+  of the separator needs to be unconsumable by the inner unbounded atom,
+  because the outer iteration must start from the separator's first character.
   - Adjacent overlapping `.*` quantifiers: `(.*)(.*)`
   - Backreferences after `.*` or `.*?`: `(.*?)\1`
   - Unbounded repetition inside repeated groups: `(.*,)+`
@@ -38,11 +40,21 @@ Required:
   compiled-pattern methods.  Both positional and keyword argument forms
   (`pattern=`, `string=`, `flags=`) are supported.  Import aliases
   (`import re as X`, `from re import Y as Z`) are resolved.
-- Conservative scope-aware static string constant propagation: module-level
-  and function-local constants (`PATTERN = r"..."`) are resolved when used as
-  patterns.  Reassignment to a non-constant value invalidates the binding.
-  Cross-module imports are NOT resolved (those resolve to REVIEW).
-- Pattern composition is decomposed into segments: `re.escape()` only
+- Scope-aware static string constant propagation using a unified `_Binding` /
+  `_Scope` model with LEGB (Local → Enclosing → Global → Builtin) lookup.
+  Module-level and function/class/lambda-local constants (`PATTERN = r"..."`)
+  are resolved when used as patterns.  Function/class/lambda parameters,
+  for/with/except/comprehension targets, and augmented assignments shadow
+  outer bindings.  Reassignment of a `re` alias to a non-`re` value
+  invalidates the alias.  Reassignment of a compiled-pattern variable to a
+  dynamic value produces REVIEW.  Unknown RHS expressions produce
+  DYNAMIC_VALUE (not the old static binding).  Cross-module imports are NOT
+  resolved (those resolve to REVIEW).
+- Tokenizer: `_merge_literal_atoms` preserves the last literal atom before a
+  quantifier as a separate atom so that separator detection is not lost when
+  adjacent literals are merged.  For example, `abc\w+` keeps `abc` as a
+  separate literal atom so the `\w+` is recognized as having a multi-char
+  literal separator prefix. into segments: `re.escape()` only
   protects its own operand; a concatenation like
   `re.escape(x) + r"(a+)+$"` is still analyzed for the static tail, and any
   dangerous static segment produces an ERROR regardless of escaped/dynamic
@@ -59,6 +71,12 @@ Required:
   is command-aware: it locates the regex command past pipes and env
   assignments, skips options, supports `-e`/`--regexp`/`-P` and `--`, and
   does not pick up patterns from preceding commands in a pipeline.
+  Shell argument parsing classifies options into three dictionaries:
+  required-value options (consume next token), optional-value options
+  (do not consume next token), and flag options (no value).  Unknown
+  options produce REVIEW.  Multiple `-e` patterns are all extracted.
+  Pattern-file options (`-f`/`--file`) produce REVIEW.  `shlex` parse
+  errors produce ScanError.
 - Rust `regex` crate uses NFA (non-backtracking) — safe by default.
   Backtracking crates (`fancy-regex`, `pcre2`, `onig`) are banned via `deny.toml`.
 - C/PCRE2: NGINX build depends on PCRE2, but the module does not own
