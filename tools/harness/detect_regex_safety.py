@@ -1909,21 +1909,31 @@ def _check_strong_separator_branch(
         nxt = branch[i + 1]
         if nxt.kind != _TKind.QUANT or not _quantifier_is_unbounded(nxt.text):
             continue
-        if len(leading_text) >= 2:
-            if _atom_matches_char_class(tok.text, leading_text[0]):
-                return (
-                    f"nested quantifier — inner '{tok.text}{nxt.text}' inside "
-                    f"outer '{outer_quant}' can consume the first character of "
-                    "the leading multi-char separator, causing exponential "
-                    "backtracking"
-                )
-            continue
-        if _literal_overlaps_atom(leading_text, tok.text):
+        reason = _strong_separator_overlap_reason(tok, nxt, leading_text, outer_quant)
+        if reason is not None:
+            return reason
+    return None
+
+
+def _strong_separator_overlap_reason(
+    tok: _Token, nxt: _Token, leading_text: str, outer_quant: str,
+) -> str | None:
+    """Return a nested-quantifier reason when the inner atom overlaps the separator."""
+    if len(leading_text) >= 2:
+        if _atom_matches_char_class(tok.text, leading_text[0]):
             return (
                 f"nested quantifier — inner '{tok.text}{nxt.text}' inside "
-                f"outer '{outer_quant}' can consume characters from the "
-                "leading literal separator, causing exponential backtracking"
+                f"outer '{outer_quant}' can consume the first character of "
+                "the leading multi-char separator, causing exponential "
+                "backtracking"
             )
+        return None
+    if _literal_overlaps_atom(leading_text, tok.text):
+        return (
+            f"nested quantifier — inner '{tok.text}{nxt.text}' inside "
+            f"outer '{outer_quant}' can consume characters from the "
+            "leading literal separator, causing exponential backtracking"
+        )
     return None
 
 
