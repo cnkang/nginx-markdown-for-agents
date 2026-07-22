@@ -159,6 +159,9 @@ _EXCLUDE_DIRS = frozenset({
 # Pattern truncation limit for output.
 _MAX_PATTERN_DISPLAY = 80
 
+# Maximum finite alternatives expanded from static collections/compositions.
+_MAX_STATIC_PATTERN_ALTERNATIVES = 256
+
 # Placeholder function name used for shell-extracted regex findings.
 _SHELL_FUNCTION_NAME = "<shell>"
 
@@ -287,6 +290,9 @@ class ScanError:
 
 class _BindingKind(Enum):
     STATIC_STRING = "STATIC_STRING"
+    STATIC_STRING_COLLECTION = "STATIC_STRING_COLLECTION"
+    STATIC_STRING_ROWS = "STATIC_STRING_ROWS"
+    ESCAPED_PATTERN = "ESCAPED_PATTERN"
     DYNAMIC_VALUE = "DYNAMIC_VALUE"
     RE_MODULE_ALIAS = "RE_MODULE_ALIAS"
     RE_FUNCTION_ALIAS = "RE_FUNCTION_ALIAS"
@@ -302,9 +308,13 @@ class _BindingKind(Enum):
 class _Binding:
     kind: _BindingKind
     static_value: str | None = None
+    static_values: tuple[str, ...] | None = None
+    static_rows: tuple[tuple[str, ...], ...] | None = None
+    pattern_segments: tuple["_Segment", ...] | None = None
     real_re_api: str | None = None
     compiled_pattern: str | None = None
     compile_line: int | None = None
+    compiled_reassigned: bool = False
 
 
 def _static_binding_value(binding: _Binding | _Sentinel) -> str | None:
@@ -599,12 +609,58 @@ class RegexASTVisitor(ast.NodeVisitor):
         self._visit_for_loop(node)
 
     def _visit_for_loop(self, node: ast.For | ast.AsyncFor) -> None:
-        self._bind_target_dynamic(node.target)
         self.visit(node.iter)
+        self._bind_for_target(node.target, node.iter)
         for child in node.body:
             self.visit(child)
         for child in node.orelse:
             self.visit(child)
+
+    def _bind_for_target(self, target: ast.AST, iterable: ast.AST) -> None:
+        """Bind loop targets to statically known pattern alternatives."""
+        binding = self._resolve_iterable_binding(iterable)
+        if isinstance(target, ast.Name) and binding is not None \
+                and binding.kind == _BindingKind.STATIC_STRING_COLLECTION:
+            _scope_assign(self._scope_stack, target.id, binding)
+            return
+        rows_are_compatible = (
+            isinstance(target, (ast.Tuple, ast.List))
+            and binding is not None
+            and binding.kind == _BindingKind.STATIC_STRING_ROWS
+            and binding.static_rows is not None
+            and all(len(row) == len(target.elts) for row in binding.static_rows)
+        )
+        if rows_are_compatible:
+            assert isinstance(target, (ast.Tuple, ast.List))
+            assert binding is not None and binding.static_rows is not None
+            for index, element in enumerate(target.elts):
+                if not isinstance(element, ast.Name):
+                    self._bind_target_dynamic(target)
+                    return
+                values = tuple(dict.fromkeys(
+                    row[index] for row in binding.static_rows
+                ))
+                _scope_assign(self._scope_stack, element.id, _Binding(
+                    kind=_BindingKind.STATIC_STRING_COLLECTION,
+                    static_values=values,
+                ))
+            return
+        self._bind_target_dynamic(target)
+
+    def _resolve_iterable_binding(self, node: ast.AST) -> _Binding | None:
+        """Resolve a loop iterable containing static strings or string rows."""
+        if rows := self._resolve_static_string_rows(node):
+            return _Binding(
+                kind=_BindingKind.STATIC_STRING_ROWS,
+                static_rows=rows,
+            )
+        values = self._resolve_static_string_collection(node)
+        if values:
+            return _Binding(
+                kind=_BindingKind.STATIC_STRING_COLLECTION,
+                static_values=values,
+            )
+        return None
 
     def visit_With(self, node: ast.With) -> None:
         self._visit_with_node(node)
@@ -650,7 +706,7 @@ class RegexASTVisitor(ast.NodeVisitor):
         self._enter_scope()
         for gen in generators:
             self.visit(gen.iter)
-            self._bind_target_dynamic(gen.target)
+            self._bind_for_target(gen.target, gen.iter)
             for if_ in gen.ifs:
                 self.visit(if_)
         if elt is not None:
@@ -759,46 +815,81 @@ class RegexASTVisitor(ast.NodeVisitor):
             return _Binding(
                 kind=_BindingKind.COMPILED_DYNAMIC_PATTERN,
                 compile_line=old.compile_line,
+                compiled_reassigned=True,
             )
         return binding
 
     def _resolve_assignment_binding(self, value: ast.AST) -> _Binding:
         if isinstance(value, ast.Call):
-            api_name = self._identify_re_call(value)
-            if api_name == "compile":
-                pattern_arg = self._get_call_argument(value, 0, "pattern")
-                pattern_str = self._resolve_pattern(pattern_arg)
-                if pattern_str is not None:
-                    return _Binding(
-                        kind=_BindingKind.COMPILED_STATIC_PATTERN,
-                        compiled_pattern=pattern_str,
-                        compile_line=value.lineno,
-                    )
-                return _Binding(
-                    kind=_BindingKind.COMPILED_DYNAMIC_PATTERN,
-                    compile_line=value.lineno,
-                )
-            if api_name is not None:
-                return _Binding(kind=_BindingKind.DYNAMIC_VALUE)
+            return self._resolve_call_binding(value)
         static = self._resolve_static_string(value)
         if static is not None:
             return _Binding(
                 kind=_BindingKind.STATIC_STRING,
                 static_value=static,
             )
-        if isinstance(value, ast.Name):
-            looked = _scope_lookup(self._scope_stack, value.id)
-            if isinstance(looked, _Sentinel):
-                return _Binding(kind=_BindingKind.DYNAMIC_VALUE)
-            if looked.kind in (
-                _BindingKind.RE_MODULE_ALIAS,
-                _BindingKind.RE_FUNCTION_ALIAS,
-            ):
+        rows = self._resolve_static_string_rows(value)
+        if rows is not None:
+            return _Binding(
+                kind=_BindingKind.STATIC_STRING_ROWS,
+                static_rows=rows,
+            )
+        values = self._resolve_static_string_collection(value)
+        if values is not None:
+            return _Binding(
+                kind=_BindingKind.STATIC_STRING_COLLECTION,
+                static_values=values,
+            )
+        escaped = self._resolve_escaped_pattern_binding(value)
+        return escaped if escaped is not None else self._resolve_name_binding(value)
+
+    def _resolve_call_binding(self, value: ast.Call) -> _Binding:
+        """Resolve a Call node to a compiled or dynamic binding."""
+        api_name = self._identify_re_call(value)
+        if api_name == "compile":
+            pattern_arg = self._get_call_argument(value, 0, "pattern")
+            pattern_str = self._resolve_pattern(pattern_arg)
+            if pattern_str is not None:
                 return _Binding(
-                    kind=looked.kind,
-                    real_re_api=looked.real_re_api,
+                    kind=_BindingKind.COMPILED_STATIC_PATTERN,
+                    compiled_pattern=pattern_str,
+                    compile_line=value.lineno,
                 )
+            return _Binding(
+                kind=_BindingKind.COMPILED_DYNAMIC_PATTERN,
+                compile_line=value.lineno,
+            )
+        return _Binding(kind=_BindingKind.DYNAMIC_VALUE)
+
+    def _resolve_escaped_pattern_binding(
+        self, value: ast.AST,
+    ) -> _Binding | None:
+        """Resolve an escaped-dynamic pattern composition to a binding."""
+        segments = self._collect_segments(value)
+        segment_kinds = {segment.kind for segment in segments}
+        if _SegKind.ESCAPED_DYNAMIC in segment_kinds \
+                and segment_kinds <= {_SegKind.STATIC, _SegKind.ESCAPED_DYNAMIC}:
+            return _Binding(
+                kind=_BindingKind.ESCAPED_PATTERN,
+                pattern_segments=tuple(segments),
+            )
+        return None
+
+    def _resolve_name_binding(self, value: ast.AST) -> _Binding:
+        """Resolve a Name node to its binding kind."""
+        if not isinstance(value, ast.Name):
             return _Binding(kind=_BindingKind.DYNAMIC_VALUE)
+        looked = _scope_lookup(self._scope_stack, value.id)
+        if isinstance(looked, _Sentinel):
+            return _Binding(kind=_BindingKind.DYNAMIC_VALUE)
+        if looked.kind in (
+            _BindingKind.RE_MODULE_ALIAS,
+            _BindingKind.RE_FUNCTION_ALIAS,
+        ):
+            return _Binding(
+                kind=looked.kind,
+                real_re_api=looked.real_re_api,
+            )
         return _Binding(kind=_BindingKind.DYNAMIC_VALUE)
 
     def _resolve_static_string(self, node: ast.AST) -> str | None:
@@ -818,6 +909,51 @@ class RegexASTVisitor(ast.NodeVisitor):
                 return looked.static_value
             return None
         return None
+
+    def _resolve_static_string_collection(
+        self, node: ast.AST,
+    ) -> tuple[str, ...] | None:
+        """Resolve a list/tuple/set whose elements are static strings."""
+        if isinstance(node, ast.Name):
+            binding = _scope_lookup(self._scope_stack, node.id)
+            if not isinstance(binding, _Sentinel) \
+                    and binding.kind == _BindingKind.STATIC_STRING_COLLECTION:
+                return binding.static_values
+            return None
+        if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return None
+        values: list[str] = []
+        for element in node.elts:
+            value = self._resolve_static_string(element)
+            if value is None:
+                return None
+            values.append(value)
+        return tuple(dict.fromkeys(values))
+
+    def _resolve_static_string_rows(
+        self, node: ast.AST,
+    ) -> tuple[tuple[str, ...], ...] | None:
+        """Resolve a list/tuple/set of fixed-width static string rows."""
+        if isinstance(node, ast.Name):
+            binding = _scope_lookup(self._scope_stack, node.id)
+            if not isinstance(binding, _Sentinel) \
+                    and binding.kind == _BindingKind.STATIC_STRING_ROWS:
+                return binding.static_rows
+            return None
+        if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return None
+        rows: list[tuple[str, ...]] = []
+        for element in node.elts:
+            if not isinstance(element, (ast.List, ast.Tuple)):
+                return None
+            row: list[str] = []
+            for cell in element.elts:
+                value = self._resolve_static_string(cell)
+                if value is None:
+                    return None
+                row.append(value)
+            rows.append(tuple(row))
+        return tuple(rows)
 
     # -- Call detection -----------------------------------------------------
 
@@ -1011,7 +1147,12 @@ class RegexASTVisitor(ast.NodeVisitor):
             right_segs = self._collect_segments(node.right)
             return left_segs + right_segs
         if isinstance(node, ast.Name):
-            return [_segment_for_binding(_scope_lookup(self._scope_stack, node.id))]
+            binding = _scope_lookup(self._scope_stack, node.id)
+            if not isinstance(binding, _Sentinel) \
+                    and binding.kind == _BindingKind.ESCAPED_PATTERN \
+                    and binding.pattern_segments is not None:
+                return list(binding.pattern_segments)
+            return [_segment_for_binding(binding)]
         if isinstance(node, ast.Call):
             if self._is_re_escape_call(node):
                 return [_Segment.escaped_dynamic()]
@@ -1076,9 +1217,15 @@ class RegexASTVisitor(ast.NodeVisitor):
         self, node: ast.Call, api: str, pattern_arg: ast.AST | None,
     ) -> None:
         compile_line = self._lookup_compile_line(node, api)
-        pattern_source, pattern_str, segments = self._classify_pattern_source(
-            pattern_arg,
-        )
+        alternatives = self._static_pattern_alternatives(pattern_arg)
+        if alternatives is None:
+            pattern_source, pattern_str, segments = self._classify_pattern_source(
+                pattern_arg,
+            )
+        else:
+            pattern_source = self._classify_static_pattern_source(pattern_arg)
+            pattern_str = None
+            segments = []
         ctx = _FindingCtx(
             line=node.lineno,
             func_name=self._enclosing_function_name(node),
@@ -1090,13 +1237,13 @@ class RegexASTVisitor(ast.NodeVisitor):
         )
         has_dotall = self._check_dotall(node, api)
 
-        if api.startswith(_COMPILED_API_PREFIX):
-            func = node.func
-            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-                looked = _scope_lookup(self._scope_stack, func.value.id)
-                if not isinstance(looked, _Sentinel) and looked.kind == _BindingKind.COMPILED_DYNAMIC_PATTERN:
-                    self._emit_dynamic_compiled_review(ctx)
-                    return
+        if alternatives is not None:
+            for alternative in alternatives:
+                self._emit_static_finding(ctx, alternative, has_dotall)
+            return
+
+        if self._check_compiled_dynamic_review(node, api, ctx):
+            return
 
         if all(s.kind == _SegKind.STATIC for s in segments) and pattern_str is not None:
             self._emit_static_finding(ctx, pattern_str, has_dotall)
@@ -1108,11 +1255,118 @@ class RegexASTVisitor(ast.NodeVisitor):
             return
 
         if pattern_str is not None:
-            if has_dotall and ".*" in pattern_str:
+            if has_dotall and _has_greedy_dot_star(pattern_str):
                 self._emit_dotall_review(ctx, pattern_str)
             return
 
         self._emit_composition_finding(ctx, segments, pattern_source)
+
+    def _classify_static_pattern_source(
+        self, pattern_arg: ast.AST,
+    ) -> PatternSource:
+        """Classify a statically-expanded pattern argument by AST node type."""
+        if isinstance(pattern_arg, ast.JoinedStr):
+            return PatternSource.STATIC_FORMATTED
+        if isinstance(pattern_arg, ast.BinOp):
+            return PatternSource.STATIC_CONCAT
+        return PatternSource.STATIC_LITERAL
+
+    def _check_compiled_dynamic_review(
+        self, node: ast.Call, api: str, ctx: _FindingCtx,
+    ) -> bool:
+        """Emit a dynamic-compiled review if applicable. Returns True if handled."""
+        if not api.startswith(_COMPILED_API_PREFIX):
+            return False
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            looked = _scope_lookup(self._scope_stack, func.value.id)
+            if not isinstance(looked, _Sentinel) \
+                    and looked.kind == _BindingKind.COMPILED_DYNAMIC_PATTERN:
+                if looked.compiled_reassigned:
+                    self._emit_dynamic_compiled_review(ctx)
+                return True
+        return False
+
+    def _static_pattern_alternatives(
+        self, pattern_arg: ast.AST | None,
+    ) -> tuple[str, ...] | None:
+        """Return bounded alternatives for a statically composed pattern."""
+        if pattern_arg is None:
+            return None
+        return self._expand_static_pattern(pattern_arg)
+
+    def _expand_static_pattern(
+        self, node: ast.AST,
+    ) -> tuple[str, ...] | None:
+        """Expand known strings and loop alternatives without widening scope."""
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return (node.value,)
+        if isinstance(node, ast.Name):
+            return self._expand_name_binding(node)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            return self._combine_static_alternatives(
+                self._expand_static_pattern(node.left),
+                self._expand_static_pattern(node.right),
+            )
+        if isinstance(node, ast.JoinedStr):
+            return self._expand_joined_str(node)
+        return None
+
+    def _expand_name_binding(
+        self, node: ast.Name,
+    ) -> tuple[str, ...] | None:
+        """Expand a name reference to its static string alternatives."""
+        binding = _scope_lookup(self._scope_stack, node.id)
+        if isinstance(binding, _Sentinel):
+            return None
+        if binding.kind == _BindingKind.STATIC_STRING \
+                and binding.static_value is not None:
+            return (binding.static_value,)
+        if binding.kind == _BindingKind.STATIC_STRING_COLLECTION:
+            if binding.static_values is None \
+                    or len(binding.static_values) \
+                    > _MAX_STATIC_PATTERN_ALTERNATIVES:
+                return None
+            return binding.static_values
+        return None
+
+    def _expand_joined_str(
+        self, node: ast.JoinedStr,
+    ) -> tuple[str, ...] | None:
+        """Expand a static f-string into bounded pattern alternatives."""
+        alternatives: tuple[str, ...] | None = ("",)
+        for value in node.values:
+            if isinstance(value, ast.Constant) \
+                    and isinstance(value.value, str):
+                part = (value.value,)
+            elif isinstance(value, ast.FormattedValue) \
+                    and value.conversion == -1 \
+                    and value.format_spec is None:
+                part = self._expand_static_pattern(value.value)
+            else:
+                return None
+            alternatives = self._combine_static_alternatives(
+                alternatives, part,
+            )
+            if alternatives is None:
+                return None
+        return alternatives
+
+    @staticmethod
+    def _combine_static_alternatives(
+        left: tuple[str, ...] | None,
+        right: tuple[str, ...] | None,
+    ) -> tuple[str, ...] | None:
+        """Return a bounded Cartesian concatenation of static alternatives."""
+        if left is None or right is None:
+            return None
+        if len(left) * len(right) > _MAX_STATIC_PATTERN_ALTERNATIVES:
+            return None
+        return tuple(dict.fromkeys(
+            left_value + right_value
+            for left_value in left
+            for right_value in right
+        ))
 
     def _emit_static_finding(
         self, ctx: _FindingCtx, pattern_str: str, has_dotall: bool,
@@ -1122,7 +1376,7 @@ class RegexASTVisitor(ast.NodeVisitor):
         if reason is not None and severity == Severity.ERROR:
             self._emit_error(ctx, pattern_str, reason)
             return
-        if has_dotall and ".*" in pattern_str:
+        if has_dotall and _has_greedy_dot_star(pattern_str):
             self._emit_dotall_review(ctx, pattern_str)
 
     def _emit_composition_finding(
@@ -1136,13 +1390,15 @@ class RegexASTVisitor(ast.NodeVisitor):
         )
 
         if has_escaped and not has_unescaped_dynamic:
-            has_operators = any(
-                s.kind == _SegKind.STATIC and s.value is not None
-                and _contains_regex_operators(s.value)
-                for s in segments
+            representative = "".join(
+                segment.value
+                if segment.kind == _SegKind.STATIC and segment.value is not None
+                else "x"
+                for segment in segments
             )
-            if has_operators:
-                self._emit_escaped_composition_review(ctx)
+            reason, _, severity = _analyze_static_pattern(representative)
+            if reason is not None and severity == Severity.ERROR:
+                self._emit_error(ctx, representative, reason)
             return
 
         if has_unescaped_dynamic:
@@ -1270,29 +1526,6 @@ class RegexASTVisitor(ast.NodeVisitor):
             remediation=(
                 "Ensure the pattern is a static literal or wrapped with "
                 "re.escape() if it incorporates dynamic values."
-            ),
-            compile_line=ctx.compile_line,
-        ))
-
-    def _emit_escaped_composition_review(self, ctx: _FindingCtx) -> None:
-        self.findings.append(RegexFinding(
-            severity=Severity.REVIEW,
-            engine=Engine.PYTHON_RE,
-            file_path=self._file_path,
-            line=ctx.line, function=ctx.func_name, api=ctx.api,
-            pattern="<escaped+operators>",
-            pattern_source=PatternSource.ESCAPED_DYNAMIC,
-            input_scope=ctx.input_scope,
-            reason=(
-                "re.escape() composition with regex operators — escape only "
-                "prevents injection of the dynamic value itself; surrounding "
-                "operators may form a dangerous pattern depending on the "
-                "escaped content (e.g. re.escape('a') + '+)+$' → '(a+)+$')"
-            ),
-            remediation=(
-                "Verify that the combined pattern cannot produce nested "
-                "quantifiers or overlapping repetitions for any possible "
-                "escaped value."
             ),
             compile_line=ctx.compile_line,
         ))
@@ -2253,14 +2486,27 @@ def _analyze_static_pattern(
     return None, "", Severity.INFO
 
 
-def _contains_regex_operators(text: str) -> bool:
-    """Check if a static segment contains regex operators (quantifiers, groups, etc.).
-
-    Used to determine whether an escaped-dynamic composition with adjacent
-    static segments might form dangerous patterns depending on the escaped value.
-    """
-    _OPERATOR_CHARS = set("+*?|()[]{}^$.")
-    return any(ch in _OPERATOR_CHARS for ch in text)
+def _has_greedy_dot_star(pattern: str) -> bool:
+    """Return whether a pattern has an unescaped greedy ``.*`` atom."""
+    in_character_class = False
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "[":
+            in_character_class = True
+        elif char == "]" and in_character_class:
+            in_character_class = False
+        elif not in_character_class and char == "." \
+                and index + 1 < len(pattern) \
+                and pattern[index + 1] == "*":
+            suffix = pattern[index + 2:index + 3]
+            if suffix not in ("?", "+"):
+                return True
+        index += 1
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -2320,20 +2566,25 @@ _OPTIONAL_VALUE_OPTIONS: dict[str, set[str]] = {
 }
 
 _BOOLEAN_FLAGS: dict[str, set[str]] = {
-    "grep": {"-n", "--line-number", "-q", "--quiet", "--silent", "-i",
+    "grep": {"-E", "--extended-regexp", "-F", "--fixed-strings", "-G",
+             "--basic-regexp", "-c", "--count", "-n", "--line-number",
+             "-q", "--quiet",
+             "--silent", "-i",
              "--ignore-case", "-v", "--invert-match", "-w", "--word-regexp",
              "-x", "--line-regexp", "-s", "--no-messages", "-h",
              "--no-filename", "-H", "--with-filename", "-o", "--only-matching",
              "-a", "--text", "-I", "-r", "--recursive", "-R",
              "--dereference-recursive", "-l", "--files-with-matches", "-L",
              "--files-without-match", "-z", "--null-data", "-U", "--binary"},
-    "rg": {"-n", "--line-number", "-i", "--ignore-case", "-v",
+    "rg": {"-F", "--fixed-strings", "-n", "--line-number", "-i",
+           "--ignore-case", "-v",
            "--invert-match", "-w", "--word-regexp", "-x", "--line-regexp",
            "-q", "--quiet", "-s", "--case-sensitive", "-S", "--smart-case",
            "-u", "--unrestricted", "-H", "--hidden", "-l",
            "--files-with-matches", "--no-heading", "--json", "--multiline",
            "--multiline-dotall"},
-    "perl": set(),
+    "perl": {"-0", "-a", "-c", "-d", "-F", "-i", "-l", "-n", "-p",
+             "-s", "-t", "-T", "-u", "-U", "-v", "-w", "-W", "-X"},
 }
 
 # perl is inherently PCRE; grep/rg default engines are NOT PCRE.
@@ -2462,7 +2713,6 @@ def _parse_shell_command(
     """
     result = _ShellParseResult()
     options = _shell_option_sets(cmd_base)
-    # Apply the command's default engine (perl is inherently PCRE).
     result.engine = _SHELL_DEFAULT_ENGINE.get(cmd_base)
 
     saw_double_dash = False
@@ -2471,7 +2721,8 @@ def _parse_shell_command(
     while i < len(tokens):
         tok = tokens[i]
         if saw_double_dash:
-            _collect_inline_candidate(result, tok)
+            _handle_post_double_dash(tok, result, cmd_base, first_inline_taken)
+            first_inline_taken = True
             i += 1
             continue
         if tok == "--":
@@ -2484,15 +2735,45 @@ def _parse_shell_command(
         if tok.startswith("-") and len(tok) > 1:
             i = _parse_short_option(tok, tokens, i, result, options)
             continue
-        # Non-option token — the first is the deterministic inline pattern;
-        # after an unknown option, additional non-option tokens are also
-        # collected so a hidden dangerous pattern is still analyzed.
-        if not first_inline_taken or result.has_unknown_option:
-            _collect_inline_candidate(result, tok)
+        if _handle_non_option_token(
+            tok, result, cmd_base, first_inline_taken
+        ):
             first_inline_taken = True
         i += 1
 
     return result
+
+
+def _handle_post_double_dash(
+    tok: str, result: _ShellParseResult, cmd_base: str,
+    first_inline_taken: bool,
+) -> None:
+    """Handle a token after ``--``."""
+    has_pattern = bool(
+        first_inline_taken
+        or result.inline_patterns
+        or result.pattern_files
+    )
+    if (not has_pattern and cmd_base != "perl") \
+            or result.has_unknown_option:
+        _collect_inline_candidate(result, tok)
+
+
+def _handle_non_option_token(
+    tok: str, result: _ShellParseResult, cmd_base: str,
+    first_inline_taken: bool,
+) -> bool:
+    """Handle a non-option token. Returns True if collected."""
+    has_pattern = bool(
+        first_inline_taken
+        or result.inline_patterns
+        or result.pattern_files
+    )
+    if (not has_pattern and cmd_base != "perl") \
+            or result.has_unknown_option:
+        _collect_inline_candidate(result, tok)
+        return True
+    return False
 
 
 def _collect_inline_candidate(result: _ShellParseResult, tok: str) -> None:
@@ -2562,9 +2843,7 @@ def _shell_option_kind(option: str, options: _ShellOptionSets) -> str:
         return "required"
     if option in options.optional_value:
         return "optional"
-    if option in options.boolean_flags:
-        return "boolean"
-    return "unknown"
+    return "boolean" if option in options.boolean_flags else "unknown"
 
 
 def _option_value(
@@ -2639,14 +2918,21 @@ def _extract_segment_regexes_broken(
     line_num: int, line: str,
 ) -> list[tuple[str, int, Engine, str, PatternSource]]:
     """Produce an unparsed result for a line with unbalanced quotes."""
-    return next(
-        (
-            [("", line_num, Engine.SHELL_PCRE, cmd, PatternSource.UNKNOWN)]
-            for cmd in _PCRE_COMMANDS
-            if cmd in line
-        ),
-        [],
-    )
+    command = _find_broken_shell_regex_command(line)
+    if command is None:
+        return []
+    return [("", line_num, Engine.SHELL_PCRE, command, PatternSource.UNKNOWN)]
+
+
+def _find_broken_shell_regex_command(line: str) -> str | None:
+    """Find an exact regex command token without trusting broken quoting."""
+    separators = "|&;()<>"
+    normalized = "".join(" " if ch in separators else ch for ch in line)
+    for token in normalized.split():
+        candidate = token.strip("'\"`").rsplit("/", 1)[-1]
+        if candidate in _PCRE_COMMANDS:
+            return candidate
+    return None
 
 
 def _extract_segment_regexes(
@@ -2793,7 +3079,7 @@ def _read_pattern_file(
         ))
         results.append(("", line_num, engine, cmd_base, PatternSource.UNKNOWN))
         return results, errors
-    except (OSError, FileNotFoundError, PermissionError, IsADirectoryError) as e:
+    except OSError as e:
         errors.append(ScanError(
             file_path=str(resolved), line=0,
             message=f"cannot read pattern file: {e}",
