@@ -176,14 +176,36 @@ class TestCheckerAdversarialInputs:
 
 
 class TestSonarConfiguration:
-    """The intentional fixture remains a test-only exclusion, never a source exclusion."""
+    """Intentional binary fixtures remain test-only exclusions."""
 
-    def test_latin1_is_precisely_test_excluded(self) -> None:
+    def test_non_utf8_fixtures_are_precisely_test_excluded(self) -> None:
         props = PROPERTIES.read_text(encoding="utf-8")
-        assert "sonar.test.exclusions=tests/corpus/encoding/latin1.html" in props
+        assert (
+            "sonar.test.exclusions=tests/corpus/encoding/latin1.html,"
+            "tests/corpus/**/*.br" in props
+        )
         source_line = next(line for line in props.splitlines() if line.startswith("sonar.exclusions="))
         assert "latin1.html" not in source_line
         assert "tests/corpus/**" not in source_line
+        exclusion = "tests/corpus/**/*.br"
+        for fixture in (REPO_ROOT / "tests" / "corpus" / "brotli").glob("*.br"):
+            assert fixture.relative_to(REPO_ROOT).match(exclusion)
+
+    def test_rust_subcrates_are_configured_for_clippy(self) -> None:
+        props = PROPERTIES.read_text(encoding="utf-8")
+        assert (
+            "sonar.rust.cargo.manifestPaths=components/rust-converter/Cargo.toml,"
+            "tools/corpus/test-corpus-conversion/Cargo.toml,"
+            "tools/e2e-harness/Cargo.toml" in props
+        )
+        for manifest in (
+            "components/rust-converter/Cargo.toml",
+            "tools/corpus/test-corpus-conversion/Cargo.toml",
+            "tools/e2e-harness/Cargo.toml",
+        ):
+            assert (REPO_ROOT / manifest).is_file()
+        assert "components/rust-converter/src" in props
+        assert "components/rust-converter/tests/**" in props
 
 
 # ---------------------------------------------------------------------------
