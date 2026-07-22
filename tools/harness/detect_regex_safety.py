@@ -162,6 +162,12 @@ _MAX_PATTERN_DISPLAY = 80
 # Placeholder function name used for shell-extracted regex findings.
 _SHELL_FUNCTION_NAME = "<shell>"
 
+# Prefix for compiled pattern method APIs (e.g., "compiled.search", "compiled.match").
+_COMPILED_API_PREFIX = "compiled."
+
+# Input scope description for shell arguments.
+_SHELL_ARG_INPUT_SCOPE = "shell argument"
+
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -430,14 +436,10 @@ class RegexASTVisitor(ast.NodeVisitor):
     # -- Function / class scope tracking ----------------------------------
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._visit_scoped_node_with_params(
-            node, node.args, [d for d in node.decorator_list],
-        )
+        self._visit_scoped_node_with_params(node, node.args, list(node.decorator_list))
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._visit_scoped_node_with_params(
-            node, node.args, [d for d in node.decorator_list],
-        )
+        self._visit_scoped_node_with_params(node, node.args, list(node.decorator_list))
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._visit_scoped_node(node)
@@ -488,14 +490,12 @@ class RegexASTVisitor(ast.NodeVisitor):
     # -- For / with / except / comprehension target shadow ----------------
 
     def visit_For(self, node: ast.For) -> None:
-        self._bind_target_dynamic(node.target)
-        self.visit(node.iter)
-        for child in node.body:
-            self.visit(child)
-        for child in node.orelse:
-            self.visit(child)
+        self._visit_for_loop(node)
 
     def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self._visit_for_loop(node)
+
+    def _visit_for_loop(self, node: ast.For | ast.AsyncFor) -> None:
         self._bind_target_dynamic(node.target)
         self.visit(node.iter)
         for child in node.body:
@@ -504,14 +504,12 @@ class RegexASTVisitor(ast.NodeVisitor):
             self.visit(child)
 
     def visit_With(self, node: ast.With) -> None:
-        for item in node.items:
-            self.visit(item.context_expr)
-            if item.optional_vars:
-                self._bind_target_dynamic(item.optional_vars)
-        for child in node.body:
-            self.visit(child)
+        self._visit_with_node(node)
 
     def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self._visit_with_node(node)
+
+    def _visit_with_node(self, node: ast.With | ast.AsyncWith) -> None:
         for item in node.items:
             self.visit(item.context_expr)
             if item.optional_vars:
@@ -604,12 +602,7 @@ class RegexASTVisitor(ast.NodeVisitor):
     ) -> None:
         if isinstance(target, ast.Name):
             name = target.id
-            if binding.kind == _BindingKind.COMPILED_STATIC_PATTERN:
-                _scope_assign(self._scope_stack, name, binding)
-            elif binding.kind == _BindingKind.COMPILED_DYNAMIC_PATTERN:
-                _scope_assign(self._scope_stack, name, binding)
-            else:
-                _scope_assign(self._scope_stack, name, binding)
+            _scope_assign(self._scope_stack, name, binding)
         elif isinstance(target, (ast.Tuple, ast.List)):
             for elt in target.elts:
                 self._assign_target(elt, _Binding(
@@ -663,9 +656,7 @@ class RegexASTVisitor(ast.NodeVisitor):
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
             left = self._resolve_static_string(node.left)
             right = self._resolve_static_string(node.right)
-            if left is not None and right is not None:
-                return left + right
-            return None
+            return left + right if left is not None and right is not None else None
         if isinstance(node, ast.Name):
             looked = _scope_lookup(self._scope_stack, node.id)
             if isinstance(looked, _Sentinel):
@@ -715,7 +706,7 @@ class RegexASTVisitor(ast.NodeVisitor):
             _BindingKind.COMPILED_STATIC_PATTERN,
             _BindingKind.COMPILED_DYNAMIC_PATTERN,
         ):
-            return self._match_compiled_call(func, var_name, looked)
+            return self._match_compiled_call(func, looked)
         return None, None
 
     def _match_re_module_call(
@@ -728,7 +719,7 @@ class RegexASTVisitor(ast.NodeVisitor):
         return (api, None) if pattern_arg is _DUP_ARG else (api, pattern_arg)
 
     def _match_compiled_call(
-        self, func: ast.Attribute, var_name: str, binding: _Binding,
+        self, func: ast.Attribute, binding: _Binding,
     ) -> tuple[str | None, ast.AST | None]:
         api = func.attr
         if api not in _PATTERN_METHODS:
@@ -736,9 +727,9 @@ class RegexASTVisitor(ast.NodeVisitor):
         if binding.kind == _BindingKind.COMPILED_STATIC_PATTERN:
             stored = binding.compiled_pattern
             if stored is not None:
-                return f"compiled.{api}", ast.Constant(value=stored)
-            return f"compiled.{api}", None
-        return f"compiled.{api}", None
+                return f"{_COMPILED_API_PREFIX}{api}", ast.Constant(value=stored)
+            return f"{_COMPILED_API_PREFIX}{api}", None
+        return f"{_COMPILED_API_PREFIX}{api}", None
 
     def _match_name_call(
         self, func: ast.Name, node: ast.Call,
@@ -918,10 +909,7 @@ class RegexASTVisitor(ast.NodeVisitor):
             return False
         func = node.func
         if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            looked = _scope_lookup(self._scope_stack, func.value.id)
-            if isinstance(looked, _Sentinel):
-                return False
-            return looked.kind == _BindingKind.RE_MODULE_ALIAS and func.attr == "escape"
+            return self._is_re_module_attr(func, "escape")
         if isinstance(func, ast.Name):
             looked = _scope_lookup(self._scope_stack, func.id)
             if isinstance(looked, _Sentinel):
@@ -949,7 +937,7 @@ class RegexASTVisitor(ast.NodeVisitor):
         )
         has_dotall = self._check_dotall(node, api)
 
-        if api.startswith("compiled."):
+        if api.startswith(_COMPILED_API_PREFIX):
             func = node.func
             if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
                 looked = _scope_lookup(self._scope_stack, func.value.id)
@@ -1010,7 +998,7 @@ class RegexASTVisitor(ast.NodeVisitor):
             self._emit_unknown_review(ctx)
 
     def _lookup_compile_line(self, node: ast.Call, api: str) -> int | None:
-        if not api.startswith("compiled."):
+        if not api.startswith(_COMPILED_API_PREFIX):
             return None
         func = node.func
         if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
@@ -1171,14 +1159,18 @@ class RegexASTVisitor(ast.NodeVisitor):
 
     def _contains_dotall(self, node: ast.AST) -> bool:
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-            looked = _scope_lookup(self._scope_stack, node.value.id)
-            if isinstance(looked, _Sentinel):
-                return False
-            return looked.kind == _BindingKind.RE_MODULE_ALIAS and node.attr == "DOTALL"
+            return self._is_re_module_attr(node, "DOTALL")
         if isinstance(node, ast.BinOp):
             return (self._contains_dotall(node.left)
                     or self._contains_dotall(node.right))
         return False
+
+    def _is_re_module_attr(self, node: ast.Attribute, attr_name: str) -> bool:
+        """Check if ``node`` accesses ``attr_name`` on an ``re`` module alias."""
+        looked = _scope_lookup(self._scope_stack, node.value.id)
+        if isinstance(looked, _Sentinel):
+            return False
+        return looked.kind == _BindingKind.RE_MODULE_ALIAS and node.attr == attr_name
 
     def _describe_flags(self, node: ast.Call, api: str) -> str:
         """Describe flag arguments for diagnostic output."""
@@ -1224,7 +1216,7 @@ class RegexASTVisitor(ast.NodeVisitor):
             string_arg = self._get_call_argument(
                 node, sig.string_index, "string",
             )
-        elif api.startswith("compiled."):
+        elif api.startswith(_COMPILED_API_PREFIX):
             string_arg = self._get_call_argument(
                 node, _COMPILED_STRING_POSITIONAL, "string",
             )
@@ -2285,15 +2277,13 @@ def _parse_short_option(
 ) -> int:
     """Parse a short option cluster, mutating result in place. Returns new index."""
     cluster = tok[1:]
-    idx = 0
-    while idx < len(cluster):
+    for idx in range(len(cluster)):
         flag = f"-{cluster[idx]}"
         rest = cluster[idx + 1:] or None
         kind = _shell_option_kind(flag, options)
         if kind in ("pattern", "file", "required"):
             return _consume_shell_option(flag, rest, tokens, i, result, options)
         _consume_shell_option(flag, None, tokens, i, result, options)
-        idx += 1
     return i + 1
 
 
@@ -2331,9 +2321,7 @@ def _shell_option_kind(option: str, options: _ShellOptionSets) -> str:
         return "file"
     if option in options.required_value:
         return "required"
-    if option in options.optional_value:
-        return "optional"
-    return "unknown"
+    return "optional" if option in options.optional_value else "unknown"
 
 
 def _option_value(
@@ -2378,7 +2366,7 @@ def _extract_shell_regexes(
         line = lines[i]
         line_num = i + 1
         while line.rstrip().endswith("\\") and i + 1 < len(lines):
-            line = line.rstrip()[:-1] + " " + lines[i + 1].lstrip()
+            line = f"{line.rstrip()[:-1]} {lines[i + 1].lstrip()}"
             i += 1
         i += 1
         if not line.strip():
@@ -2398,11 +2386,14 @@ def _extract_segment_regexes_broken(
     line_num: int, line: str,
 ) -> list[tuple[str, int, Engine, str, PatternSource]]:
     """Produce an unparsed result for a line with unbalanced quotes."""
-    for cmd in _PCRE_COMMANDS:
-        if cmd in line:
-            return [("", line_num, Engine.SHELL_PCRE, cmd,
-                     PatternSource.UNKNOWN)]
-    return []
+    return next(
+        (
+            [("", line_num, Engine.SHELL_PCRE, cmd, PatternSource.UNKNOWN)]
+            for cmd in _PCRE_COMMANDS
+            if cmd in line
+        ),
+        [],
+    )
 
 
 def _extract_segment_regexes(
@@ -2640,7 +2631,7 @@ def _build_shell_finding(
             severity=severity, engine=engine, file_path=rel_path,
             line=line_num, function=_SHELL_FUNCTION_NAME, api=command, pattern=pattern,
             pattern_source=pattern_source,
-            input_scope="shell argument",
+            input_scope=_SHELL_ARG_INPUT_SCOPE,
             reason=reason, remediation=remediation,
         )
     if engine == Engine.SHELL_PCRE and "$" in pattern:
@@ -2662,7 +2653,7 @@ def _build_shell_finding(
             severity=Severity.REVIEW, engine=engine, file_path=rel_path,
             line=line_num, function=_SHELL_FUNCTION_NAME, api=command,
             pattern="<unparsed>", pattern_source=PatternSource.UNKNOWN,
-            input_scope="shell argument",
+            input_scope=_SHELL_ARG_INPUT_SCOPE,
             reason=(
                 "PCRE flag present but pattern argument could not be "
                 "reliably extracted — manual review required"
@@ -2677,7 +2668,7 @@ def _build_shell_finding(
             severity=Severity.REVIEW, engine=engine, file_path=rel_path,
             line=line_num, function=_SHELL_FUNCTION_NAME, api=command,
             pattern=pattern, pattern_source=PatternSource.UNKNOWN,
-            input_scope="shell argument",
+            input_scope=_SHELL_ARG_INPUT_SCOPE,
             reason=(
                 "PCRE pattern extracted with low confidence due to "
                 "unrecognized options — manual review recommended"
