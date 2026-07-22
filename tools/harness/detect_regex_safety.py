@@ -297,6 +297,27 @@ class _Binding:
     compile_line: int | None = None
 
 
+def _static_binding_value(binding: _Binding | _Sentinel) -> str | None:
+    """Return a statically-known string represented by one lexical binding."""
+    if isinstance(binding, _Sentinel):
+        return None
+    if binding.kind == _BindingKind.STATIC_STRING:
+        return binding.static_value
+    if binding.kind == _BindingKind.COMPILED_STATIC_PATTERN:
+        return binding.compiled_pattern
+    return None
+
+
+def _segment_for_binding(binding: _Binding | _Sentinel) -> _Segment:
+    """Convert a lexical binding to its conservative pattern segment."""
+    static_value = _static_binding_value(binding)
+    if static_value is not None:
+        return _Segment.static(static_value)
+    if isinstance(binding, _Binding) and binding.kind == _BindingKind.DYNAMIC_VALUE:
+        return _Segment.dynamic()
+    return _Segment.unknown()
+
+
 class _Sentinel:
     pass
 
@@ -776,14 +797,7 @@ class RegexASTVisitor(ast.NodeVisitor):
         if isinstance(arg, ast.BinOp) and isinstance(arg.op, ast.Add):
             return self._resolve_binop_pattern(arg)
         if isinstance(arg, ast.Name):
-            looked = _scope_lookup(self._scope_stack, arg.id)
-            if isinstance(looked, _Sentinel):
-                return None
-            if looked.kind == _BindingKind.STATIC_STRING and looked.static_value is not None:
-                return looked.static_value
-            if looked.kind == _BindingKind.COMPILED_STATIC_PATTERN and looked.compiled_pattern is not None:
-                return looked.compiled_pattern
-            return None
+            return _static_binding_value(_scope_lookup(self._scope_stack, arg.id))
         if isinstance(arg, ast.Call) and self._is_re_escape_call(arg):
             return None
         return None
@@ -853,18 +867,7 @@ class RegexASTVisitor(ast.NodeVisitor):
             right_segs = self._collect_segments(node.right)
             return left_segs + right_segs
         if isinstance(node, ast.Name):
-            looked = _scope_lookup(self._scope_stack, node.id)
-            if isinstance(looked, _Sentinel):
-                return [_Segment.unknown()]
-            if looked.kind == _BindingKind.STATIC_STRING and looked.static_value is not None:
-                return [_Segment.static(looked.static_value)]
-            if looked.kind in (
-                _BindingKind.COMPILED_STATIC_PATTERN,
-            ) and looked.compiled_pattern is not None:
-                return [_Segment.static(looked.compiled_pattern)]
-            if looked.kind == _BindingKind.DYNAMIC_VALUE:
-                return [_Segment.dynamic()]
-            return [_Segment.unknown()]
+            return [_segment_for_binding(_scope_lookup(self._scope_stack, node.id))]
         if isinstance(node, ast.Call):
             if self._is_re_escape_call(node):
                 return [_Segment.escaped_dynamic()]
@@ -1188,26 +1191,23 @@ class RegexASTVisitor(ast.NodeVisitor):
             flags_arg = self._get_call_argument(node, 1, "flags")
         if flags_arg is None or flags_arg is _DUP_ARG:
             return ""
-        candidates: list[ast.AST] = []
-        if isinstance(flags_arg, ast.BinOp):
-            candidates = self._flatten_bitor(flags_arg)
-        else:
-            candidates = [flags_arg]
-        flags = [
-            f"re.{side.attr}" for side in candidates
-            if isinstance(side, ast.Attribute)
-            and isinstance(side.value, ast.Name)
-        ]
-        valid_flags = []
-        for side, flag_str in zip(candidates, flags):
-            if not isinstance(side, ast.Attribute) or not isinstance(side.value, ast.Name):
-                continue
-            looked = _scope_lookup(self._scope_stack, side.value.id)
-            if isinstance(looked, _Sentinel):
-                continue
-            if looked.kind == _BindingKind.RE_MODULE_ALIAS:
-                valid_flags.append(flag_str)
-        return ", ".join(valid_flags) if valid_flags else ""
+        candidates = self._flatten_bitor(flags_arg)
+        return ", ".join(filter(None, (
+            self._describe_re_flag(candidate) for candidate in candidates
+        )))
+
+    def _describe_re_flag(self, candidate: ast.AST) -> str | None:
+        """Return a canonical flag name only for a live ``re`` module alias."""
+        if not isinstance(candidate, ast.Attribute):
+            return None
+        if not isinstance(candidate.value, ast.Name):
+            return None
+        binding = _scope_lookup(self._scope_stack, candidate.value.id)
+        if isinstance(binding, _Sentinel):
+            return None
+        if binding.kind != _BindingKind.RE_MODULE_ALIAS:
+            return None
+        return f"re.{candidate.attr}"
 
     def _flatten_bitor(self, node: ast.AST) -> list[ast.AST]:
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
@@ -2153,6 +2153,36 @@ class _ShellParseResult:
     parse_confidence: str = "high"
 
 
+@dataclass(frozen=True)
+class _ShellOptionSets:
+    """Classified option sets for one supported shell regex command."""
+    pcre: set[str]
+    pattern: set[str]
+    pattern_file: set[str]
+    required_value: set[str]
+    optional_value: set[str]
+
+    @property
+    def known(self) -> set[str]:
+        """Return every option whose argument contract is known."""
+        return (
+            self.pcre | self.pattern | self.pattern_file | self.required_value
+            | self.optional_value
+        )
+
+
+def _shell_option_sets(cmd_base: str) -> _ShellOptionSets:
+    """Build one complete option classification for ``cmd_base``."""
+    pcre, pattern = _PCRE_COMMANDS[cmd_base]
+    return _ShellOptionSets(
+        pcre=pcre,
+        pattern=pattern,
+        pattern_file=_PATTERN_FILE_OPTIONS.get(cmd_base, set()),
+        required_value=_REQUIRED_VALUE_OPTIONS.get(cmd_base, set()),
+        optional_value=_OPTIONAL_VALUE_OPTIONS.get(cmd_base, set()),
+    )
+
+
 def _split_shell_pipeline(line: str) -> list[list[str]]:
     """Tokenize a shell command line into per-segment token lists.
 
@@ -2211,11 +2241,7 @@ def _parse_shell_command(
     pattern-file references, PCRE flag presence, and parse confidence.
     """
     result = _ShellParseResult()
-    pcre_flags, pattern_opts = _PCRE_COMMANDS[cmd_base]
-    file_opts = _PATTERN_FILE_OPTIONS.get(cmd_base, set())
-    req_val_opts = _REQUIRED_VALUE_OPTIONS.get(cmd_base, set())
-    opt_val_opts = _OPTIONAL_VALUE_OPTIONS.get(cmd_base, set())
-    all_known = pcre_flags | pattern_opts | file_opts | req_val_opts | opt_val_opts
+    options = _shell_option_sets(cmd_base)
 
     saw_double_dash = False
     i = 0
@@ -2231,16 +2257,10 @@ def _parse_shell_command(
             i += 1
             continue
         if tok.startswith("--"):
-            i = _parse_long_option(
-                tok, tokens, i, result, pcre_flags, pattern_opts,
-                file_opts, req_val_opts, opt_val_opts, all_known,
-            )
+            i = _parse_long_option(tok, tokens, i, result, options)
             continue
         if tok.startswith("-") and len(tok) > 1:
-            i = _parse_short_option(
-                tok, tokens, i, result, pcre_flags, pattern_opts,
-                file_opts, req_val_opts, all_known,
-            )
+            i = _parse_short_option(tok, tokens, i, result, options)
             continue
         if not result.inline_patterns:
             result.inline_patterns.append(tok)
@@ -2251,105 +2271,86 @@ def _parse_shell_command(
 
 def _parse_long_option(
     tok: str, tokens: list[str], i: int,
-    result: _ShellParseResult,
-    pcre_flags: set[str], pattern_opts: set[str],
-    file_opts: set[str], req_val_opts: set[str],
-    opt_val_opts: set[str], all_known: set[str],
+    result: _ShellParseResult, options: _ShellOptionSets,
 ) -> int:
     """Parse a long option token, mutating result in place. Returns new index."""
-    if "=" in tok:
-        opt, _, val = tok.partition("=")
-        if opt in pcre_flags:
-            result.is_pcre = True
-            return i + 1
-        if opt in pattern_opts:
-            result.is_pcre = True
-            result.inline_patterns.append(val)
-            return i + 1
-        if opt in file_opts:
-            result.pattern_file = val
-            return i + 1
-        if opt not in all_known:
-            result.has_unknown_option = True
-            result.parse_confidence = "low"
-        return i + 1
-    if tok in pcre_flags:
-        result.is_pcre = True
-        return i + 1
-    if tok in pattern_opts:
-        result.is_pcre = True
-        val = tokens[i + 1] if i + 1 < len(tokens) else None
-        if val is not None:
-            result.inline_patterns.append(val)
-            return i + 2
-        return i + 1
-    if tok in file_opts:
-        val = tokens[i + 1] if i + 1 < len(tokens) else None
-        if val is not None:
-            result.pattern_file = val
-            return i + 2
-        return i + 1
-    if tok in req_val_opts:
-        if i + 1 < len(tokens):
-            return i + 2
-        return i + 1
-    if tok in opt_val_opts:
-        return i + 1
-    result.has_unknown_option = True
-    result.parse_confidence = "low"
-    return i + 1
+    option, separator, value = tok.partition("=")
+    value = value if separator else None
+    return _consume_shell_option(option, value, tokens, i, result, options)
 
 
 def _parse_short_option(
     tok: str, tokens: list[str], i: int,
-    result: _ShellParseResult,
-    pcre_flags: set[str], pattern_opts: set[str],
-    file_opts: set[str], req_val_opts: set[str],
-    all_known: set[str],
+    result: _ShellParseResult, options: _ShellOptionSets,
 ) -> int:
     """Parse a short option cluster, mutating result in place. Returns new index."""
     cluster = tok[1:]
     idx = 0
     while idx < len(cluster):
-        ch = cluster[idx]
-        flag = f"-{ch}"
-        if flag in pcre_flags:
-            result.is_pcre = True
-            idx += 1
-            continue
-        if flag in pattern_opts:
-            result.is_pcre = True
-            rest = cluster[idx + 1:]
-            if rest:
-                result.inline_patterns.append(rest)
-                return i + 1
-            val = tokens[i + 1] if i + 1 < len(tokens) else None
-            if val is not None:
-                result.inline_patterns.append(val)
-                return i + 2
-            return i + 1
-        if flag in file_opts:
-            rest = cluster[idx + 1:]
-            if rest:
-                result.pattern_file = rest
-                return i + 1
-            val = tokens[i + 1] if i + 1 < len(tokens) else None
-            if val is not None:
-                result.pattern_file = val
-                return i + 2
-            return i + 1
-        if flag in req_val_opts:
-            rest = cluster[idx + 1:]
-            if rest:
-                return i + 1
-            if i + 1 < len(tokens):
-                return i + 2
-            return i + 1
-        if flag not in all_known:
-            result.has_unknown_option = True
-            result.parse_confidence = "low"
+        flag = f"-{cluster[idx]}"
+        rest = cluster[idx + 1:] or None
+        kind = _shell_option_kind(flag, options)
+        if kind in ("pattern", "file", "required"):
+            return _consume_shell_option(flag, rest, tokens, i, result, options)
+        _consume_shell_option(flag, None, tokens, i, result, options)
         idx += 1
     return i + 1
+
+
+def _consume_shell_option(
+    option: str, attached_value: str | None, tokens: list[str], index: int,
+    result: _ShellParseResult, options: _ShellOptionSets,
+) -> int:
+    """Apply one option contract and return the next token index."""
+    kind = _shell_option_kind(option, options)
+    if kind == "unknown":
+        _mark_unknown_shell_option(result)
+        return index + 1
+    if kind == "pcre":
+        result.is_pcre = True
+        return index + 1
+    if kind == "optional":
+        return index + 1
+    if kind == "pattern":
+        result.is_pcre = True
+    value, next_index = _option_value(attached_value, tokens, index)
+    if kind == "pattern" and value is not None:
+        result.inline_patterns.append(value)
+    elif kind == "file" and value is not None:
+        result.pattern_file = value
+    return next_index
+
+
+def _shell_option_kind(option: str, options: _ShellOptionSets) -> str:
+    """Return the argument contract category for one parsed option."""
+    if option in options.pcre:
+        return "pcre"
+    if option in options.pattern:
+        return "pattern"
+    if option in options.pattern_file:
+        return "file"
+    if option in options.required_value:
+        return "required"
+    if option in options.optional_value:
+        return "optional"
+    return "unknown"
+
+
+def _option_value(
+    attached_value: str | None, tokens: list[str], index: int,
+) -> tuple[str | None, int]:
+    """Return an attached or following required option value and next index."""
+    if attached_value is not None:
+        return attached_value, index + 1
+    if index + 1 < len(tokens):
+        return tokens[index + 1], index + 2
+    return None, index + 1
+
+
+def _mark_unknown_shell_option(result: _ShellParseResult) -> None:
+    """Downgrade parsing confidence after an unknown option changes layout."""
+    result.has_unknown_option = True
+    result.parse_confidence = "low"
 
 
 def _has_unbalanced_quotes(line: str) -> bool:
@@ -2416,29 +2417,51 @@ def _extract_segment_regexes(
     if cmd_base not in _PCRE_COMMANDS:
         return results
     parse = _parse_shell_command(seg_tokens[1:], cmd_base)
-    is_pcre_or_perl = parse.is_pcre or cmd_base == "perl"
-    psrc = PatternSource.UNKNOWN if parse.parse_confidence == "low" else PatternSource.STATIC_LITERAL
-    for pat in parse.inline_patterns:
-        results.append((pat, line_num, Engine.SHELL_PCRE, cmd_base, psrc))
-    if parse.pattern_file is not None:
-        file_psrc = PatternSource.STATIC_LITERAL
-        file_path = Path(parse.pattern_file)
-        if file_path.is_file():
-            try:
-                for file_line in file_path.read_text(encoding="utf-8").splitlines():
-                    if file_line:
-                        results.append((file_line, line_num, Engine.SHELL_PCRE,
-                                         cmd_base, file_psrc))
-            except OSError:
-                file_psrc = PatternSource.UNKNOWN
-                results.append(("", line_num, Engine.SHELL_PCRE, cmd_base, file_psrc))
-        else:
-            file_psrc = PatternSource.UNKNOWN
-            results.append(("", line_num, Engine.SHELL_PCRE, cmd_base, file_psrc))
-    if not parse.inline_patterns and parse.pattern_file is None and is_pcre_or_perl:
-        results.append(("", line_num, Engine.SHELL_PCRE, cmd_base,
-                         PatternSource.UNKNOWN))
+    source = _shell_pattern_source(parse)
+    results.extend(_inline_shell_patterns(parse, line_num, cmd_base, source))
+    results.extend(_pattern_file_regexes(parse.pattern_file, line_num, cmd_base))
+    if _needs_unknown_shell_pattern(parse, cmd_base):
+        results.append(("", line_num, Engine.SHELL_PCRE, cmd_base, PatternSource.UNKNOWN))
     return results
+
+
+def _shell_pattern_source(parse: _ShellParseResult) -> PatternSource:
+    """Classify inline shell patterns from parser confidence."""
+    if parse.parse_confidence == "low":
+        return PatternSource.UNKNOWN
+    return PatternSource.STATIC_LITERAL
+
+
+def _inline_shell_patterns(
+    parse: _ShellParseResult, line_num: int, cmd_base: str, source: PatternSource,
+) -> list[tuple[str, int, Engine, str, PatternSource]]:
+    """Build findings for all inline patterns from one shell command."""
+    return [
+        (pattern, line_num, Engine.SHELL_PCRE, cmd_base, source)
+        for pattern in parse.inline_patterns
+    ]
+
+
+def _pattern_file_regexes(
+    pattern_file: str | None, line_num: int, cmd_base: str,
+) -> list[tuple[str, int, Engine, str, PatternSource]]:
+    """Read static pattern-file entries or emit one conservative unknown result."""
+    if pattern_file is None:
+        return []
+    try:
+        lines = Path(pattern_file).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return [("", line_num, Engine.SHELL_PCRE, cmd_base, PatternSource.UNKNOWN)]
+    return [
+        (line, line_num, Engine.SHELL_PCRE, cmd_base, PatternSource.STATIC_LITERAL)
+        for line in lines if line
+    ]
+
+
+def _needs_unknown_shell_pattern(parse: _ShellParseResult, cmd_base: str) -> bool:
+    """Return whether a PCRE invocation has no safely recoverable pattern."""
+    is_pcre_or_perl = parse.is_pcre or cmd_base == "perl"
+    return not parse.inline_patterns and parse.pattern_file is None and is_pcre_or_perl
 
 
 def _analyze_shell_pattern(

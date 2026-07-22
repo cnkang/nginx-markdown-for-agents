@@ -235,29 +235,45 @@ def _scan_location_headers(
     i = 0
     n = len(masked)
     while i < n:
-        line_start = masked.rfind("\n", 0, i) + 1
-        line_num = masked[:i].count("\n") + 1
-        if not masked[line_start:i].strip() and masked[i:i + 8] == "location":
-            after = i + 8
-            if after < n and (masked[after].isalnum() or masked[after] == "_"):
-                i = after
-                continue
-            if i > line_start and masked[i - 1].isalnum():
-                i += 1
-                continue
-            loc_path, brace_off, new_i, scan_err = _parse_location_header(
-                masked, after, n, line_num,
-            )
-            if scan_err is not None:
-                errors.append(scan_err)
-                i = new_i if new_i > i else i + 1
-                continue
-            if loc_path is not None and brace_off is not None:
-                results.append((loc_path, brace_off, line_num))
-            i = new_i if new_i > i else i + 1
+        parsed = _parse_location_at(masked, i, n)
+        if parsed is None:
+            i += 1
             continue
-        i += 1
+        location, scan_err, i = parsed
+        if scan_err is not None:
+            errors.append(scan_err)
+        elif location is not None:
+            results.append(location)
     return results, errors
+
+
+def _parse_location_at(
+    masked: str, pos: int, length: int,
+) -> tuple[tuple[str, int, int] | None, ScanError | None, int] | None:
+    """Parse a location header at ``pos`` or return ``None`` when absent."""
+    line_start = masked.rfind("\n", 0, pos) + 1
+    if masked[line_start:pos].strip() or masked[pos:pos + 8] != "location":
+        return None
+    after = pos + 8
+    if _location_keyword_is_part_of_name(masked, pos, after, length, line_start):
+        return None
+    line_num = masked[:pos].count("\n") + 1
+    loc_path, brace_off, new_pos, scan_err = _parse_location_header(
+        masked, after, length, line_num,
+    )
+    next_pos = new_pos if new_pos > pos else pos + 1
+    if scan_err is not None or loc_path is None or brace_off is None:
+        return None, scan_err, next_pos
+    return (loc_path, brace_off, line_num), None, next_pos
+
+
+def _location_keyword_is_part_of_name(
+    masked: str, pos: int, after: int, length: int, line_start: int,
+) -> bool:
+    """Return whether a candidate ``location`` token is an identifier fragment."""
+    if after < length and (masked[after].isalnum() or masked[after] == "_"):
+        return True
+    return pos > line_start and masked[pos - 1].isalnum()
 
 
 def _parse_location_header(
@@ -267,59 +283,53 @@ def _parse_location_header(
 
     Returns (loc_path, brace_offset, new_pos, error).
     """
-    i = pos
-    while i < n and masked[i] in " \t":
-        i += 1
+    i = _skip_horizontal_space(masked, pos, n)
     if i >= n:
-        return None, None, i, ScanError(
-            file_path="", line=line_num,
-            message="location directive missing argument",
-        )
-    modifier = None
-    if masked[i] == "=":
-        modifier = "="
-        i += 1
-        while i < n and masked[i] in " \t":
-            i += 1
-    elif masked[i] == "^" and i + 1 < n and masked[i + 1] == "~":
-        modifier = "^~"
-        i += 2
-        while i < n and masked[i] in " \t":
-            i += 1
-    elif masked[i] == "~":
-        i += 1
-        if i < n and masked[i] == "*":
-            modifier = "~*"
-            i += 1
-        else:
-            modifier = "~"
-        while i < n and masked[i] in " \t":
-            i += 1
-    elif masked[i] == "@":
-        pass
+        return _location_header_error(i, line_num, "location directive missing argument")
+    modifier, i = _read_location_modifier(masked, i, n)
     if i >= n:
-        return None, None, i, ScanError(
-            file_path="", line=line_num,
-            message="location directive missing path after modifier",
+        return _location_header_error(
+            i, line_num, "location directive missing path after modifier",
         )
     is_regex = modifier in ("~", "~*")
     loc_path, i, quote_err = _read_location_path(masked, i, n, is_regex)
     if quote_err is not None:
         return None, None, i, quote_err
     if not loc_path:
-        return None, None, i, ScanError(
-            file_path="", line=line_num,
-            message="location directive missing argument",
-        )
-    while i < n and masked[i] in " \t":
-        i += 1
+        return _location_header_error(i, line_num, "location directive missing argument")
+    i = _skip_horizontal_space(masked, i, n)
     if i >= n or masked[i] != "{":
-        return None, None, i, ScanError(
-            file_path="", line=line_num,
-            message=f"location {loc_path} missing opening brace",
+        return _location_header_error(
+            i, line_num, f"location {loc_path} missing opening brace",
         )
     brace_off = i + 1
     return loc_path, brace_off, i + 1, None
+
+
+def _location_header_error(
+    pos: int, line_num: int, message: str,
+) -> tuple[None, None, int, ScanError]:
+    """Build a standardized location-header parser failure result."""
+    return None, None, pos, ScanError(file_path="", line=line_num, message=message)
+
+
+def _skip_horizontal_space(text: str, pos: int, length: int) -> int:
+    """Skip spaces and tabs without crossing an nginx directive line."""
+    while pos < length and text[pos] in " \t":
+        pos += 1
+    return pos
+
+
+def _read_location_modifier(text: str, pos: int, length: int) -> tuple[str | None, int]:
+    """Read an optional nginx ``location`` modifier and following whitespace."""
+    modifier = None
+    if text[pos:pos + 2] == "^~":
+        modifier, pos = "^~", pos + 2
+    elif text[pos:pos + 2] == "~*":
+        modifier, pos = "~*", pos + 2
+    elif text[pos] in "=~":
+        modifier, pos = text[pos], pos + 1
+    return modifier, _skip_horizontal_space(text, pos, length)
 
 
 def _read_location_path(
@@ -333,36 +343,49 @@ def _read_location_path(
     if i >= n:
         return "", i, None
     if masked[i] in ('"', "'"):
-        quote_char = masked[i]
-        i += 1
-        start = i
-        while i < n and masked[i] != quote_char:
-            if masked[i] == "\\" and i + 1 < n:
-                i += 2
+        return _read_quoted_location_path(masked, i, n)
+    return _read_unquoted_location_path(masked, i, n, is_regex)
+
+
+def _read_quoted_location_path(
+    text: str, pos: int, length: int,
+) -> tuple[str, int, ScanError | None]:
+    """Read a quoted nginx location path while preserving escaped quotes."""
+    quote_char = text[pos]
+    pos += 1
+    start = pos
+    while pos < length and text[pos] != quote_char:
+        pos += 2 if text[pos] == "\\" and pos + 1 < length else 1
+    if pos >= length:
+        return "", pos, ScanError(
+            file_path="", line=0, message="unterminated quoted location path",
+        )
+    return text[start:pos], pos + 1, None
+
+
+def _read_unquoted_location_path(
+    text: str, pos: int, length: int, is_regex: bool,
+) -> tuple[str, int, ScanError | None]:
+    """Read an unquoted path, retaining regex quantifier braces as path text."""
+    start = pos
+    while pos < length and text[pos] not in " \t\n":
+        if is_regex and text[pos] == "{":
+            quantifier_end = _regex_quantifier_end(text, pos, length)
+            if quantifier_end is not None:
+                pos = quantifier_end
                 continue
-            i += 1
-        if i >= n:
-            return "", i, ScanError(
-                file_path="", line=0,
-                message="unterminated quoted location path",
-            )
-        path = masked[start:i]
-        i += 1
-        return path, i, None
-    start = i
-    while i < n and masked[i] not in " \t\n{":
-        if is_regex and masked[i] == "{":
-            j = i + 1
-            while j < n and masked[j] in "0123456789,":
-                j += 1
-            if j < n and masked[j] == "}":
-                i = j + 1
-                continue
-        if masked[i] == "\\" and i + 1 < n:
-            i += 2
-            continue
-        i += 1
-    return masked[start:i], i, None
+        if text[pos] == "{":
+            break
+        pos += 2 if text[pos] == "\\" and pos + 1 < length else 1
+    return text[start:pos], pos, None
+
+
+def _regex_quantifier_end(text: str, pos: int, length: int) -> int | None:
+    """Return the position after a ``{m,n}`` regex quantifier, when present."""
+    end = pos + 1
+    while end < length and text[end] in "0123456789,":
+        end += 1
+    return end + 1 if end < length and text[end] == "}" else None
 
 
 def _extract_location_blocks(
@@ -624,24 +647,31 @@ def _extract_rust_escaped_strings(
         if content[i] != '"':
             i += 1
             continue
-        start = i
-        base_line = content[:start].count("\n") + 1
-        j, raw = _scan_rust_string(content, i, n)
-        if j <= start:
-            if errors is not None and j == start:
-                errors.append(ScanError(
-                    file_path="", line=base_line,
-                    message="unterminated Rust string literal",
-                ))
-            i += 1
-            continue
-        i = j
-        if "\\n" not in raw:
-            continue
-        unescaped = _unescape_rust_string_body(raw)
-        if "location" in unescaped and "markdown_" in unescaped:
-            configs.append((unescaped, base_line))
+        config, i, scan_error = _process_rust_escaped_string(content, i, n)
+        if scan_error is not None and errors is not None:
+            errors.append(scan_error)
+        if config is not None:
+            configs.append(config)
     return configs
+
+
+def _process_rust_escaped_string(
+    content: str, start: int, length: int,
+) -> tuple[tuple[str, int] | None, int, ScanError | None]:
+    """Extract one relevant ordinary Rust string or report an unterminated one."""
+    base_line = content[:start].count("\n") + 1
+    end, raw = _scan_rust_string(content, start, length)
+    if end <= start:
+        error = ScanError(
+            file_path="", line=base_line, message="unterminated Rust string literal",
+        )
+        return None, start + 1, error if end == start else None
+    if "\\n" not in raw:
+        return None, end, None
+    unescaped = _unescape_rust_string_body(raw)
+    if "location" not in unescaped or "markdown_" not in unescaped:
+        return None, end, None
+    return (unescaped, base_line), end, None
 
 
 def _unescape_rust_string_body(raw: str) -> str:
