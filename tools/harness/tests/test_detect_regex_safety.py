@@ -1170,7 +1170,7 @@ class TestUnknownReassignmentInvalidation:
 
     def test_unknown_reassignment_makes_safe_pattern_review(self, tmp_path: Path) -> None:
         """PATTERN = r'^safe$'; PATTERN = EXTERNAL → REVIEW."""
-        self._extracted_from_test_augassign_invalidates_3(
+        self._assert_unknown_pattern_reassignment_is_reviewed(
             "import re\n"
             "PATTERN = r'^safe$'\n"
             "PATTERN = EXTERNAL\n"
@@ -1180,7 +1180,7 @@ class TestUnknownReassignmentInvalidation:
 
     def test_unknown_reassignment_makes_dangerous_pattern_review(self, tmp_path: Path) -> None:
         """PATTERN = r'(a+)+$'; PATTERN = EXTERNAL → REVIEW, not ERROR."""
-        self._extracted_from_test_augassign_invalidates_3(
+        self._assert_unknown_pattern_reassignment_is_reviewed(
             "import re\n"
             "PATTERN = r'(a+)+$'\n"
             "PATTERN = EXTERNAL\n"
@@ -1190,7 +1190,7 @@ class TestUnknownReassignmentInvalidation:
 
     def test_augassign_invalidates(self, tmp_path: Path) -> None:
         """PATTERN = r'^safe$'; PATTERN += suffix → REVIEW."""
-        self._extracted_from_test_augassign_invalidates_3(
+        self._assert_unknown_pattern_reassignment_is_reviewed(
             "import re\n"
             "PATTERN = r'^safe$'\n"
             "PATTERN += suffix\n"
@@ -1198,9 +1198,9 @@ class TestUnknownReassignmentInvalidation:
             tmp_path,
         )
 
-    # TODO Rename this here and in `test_unknown_reassignment_makes_safe_pattern_review`, `test_unknown_reassignment_makes_dangerous_pattern_review` and `test_augassign_invalidates`
-    def _extracted_from_test_augassign_invalidates_3(self, arg0, tmp_path):
-        content = arg0
+    def _assert_unknown_pattern_reassignment_is_reviewed(
+        self, content: str, tmp_path: Path,
+    ) -> None:
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
         errors_found = [f for f in findings if f.severity == Severity.ERROR]
@@ -1504,32 +1504,32 @@ class TestAPISignatures:
 
     def test_split_flags_positional(self, tmp_path: Path) -> None:
         """re.split(r'foo.*', data, 0, re.DOTALL) → flags at index 3."""
-        self._extracted_from_test_search_flags_positional_3(
+        self._assert_positional_regex_flags_are_reviewed(
             "import re\n" "re.split(r'foo.*', 'data', 0, re.DOTALL)\n", tmp_path
         )
 
     def test_sub_flags_positional(self, tmp_path: Path) -> None:
         """re.sub(r'foo.*', 'x', data, 0, re.DOTALL) → flags at index 4."""
-        self._extracted_from_test_search_flags_positional_3(
+        self._assert_positional_regex_flags_are_reviewed(
             "import re\n" "re.sub(r'foo.*', 'x', 'data', 0, re.DOTALL)\n", tmp_path
         )
 
     def test_subn_flags_positional(self, tmp_path: Path) -> None:
         """re.subn(r'foo.*', 'x', data, 0, re.DOTALL) → flags at index 4."""
-        self._extracted_from_test_search_flags_positional_3(
+        self._assert_positional_regex_flags_are_reviewed(
             "import re\n" "re.subn(r'foo.*', 'x', 'data', 0, re.DOTALL)\n",
             tmp_path,
         )
 
     def test_search_flags_positional(self, tmp_path: Path) -> None:
         """re.search(r'foo.*', data, re.DOTALL) → flags at index 2."""
-        self._extracted_from_test_search_flags_positional_3(
+        self._assert_positional_regex_flags_are_reviewed(
             "import re\n" "re.search(r'foo.*', 'data', re.DOTALL)\n", tmp_path
         )
 
-    # TODO Rename this here and in `test_split_flags_positional`, `test_sub_flags_positional`, `test_subn_flags_positional` and `test_search_flags_positional`
-    def _extracted_from_test_search_flags_positional_3(self, arg0, tmp_path):
-        content = arg0
+    def _assert_positional_regex_flags_are_reviewed(
+        self, content: str, tmp_path: Path,
+    ) -> None:
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
         reviews = [f for f in findings if f.severity == Severity.REVIEW]
@@ -1760,19 +1760,20 @@ class TestShellEngineResolution:
 
     def test_grep_e_without_pcre_no_error(self, tmp_path: Path) -> None:
         """grep -e '(a+)+$' input.txt → no PCRE ERROR."""
-        self._extracted_from_test_rg_e_without_pcre2_no_error_3(
+        self._assert_non_pcre_shell_patterns_are_not_errors(
             "#!/usr/bin/env bash\ngrep -e '(a+)+$' input.txt\n", tmp_path
         )
 
     def test_rg_e_without_pcre2_no_error(self, tmp_path: Path) -> None:
         """rg -e '(a+)+$' input.txt → no PCRE ERROR."""
-        self._extracted_from_test_rg_e_without_pcre2_no_error_3(
+        self._assert_non_pcre_shell_patterns_are_not_errors(
             "#!/usr/bin/env bash\nrg -e '(a+)+$' input.txt\n", tmp_path
         )
 
-    # TODO Rename this here and in `test_grep_e_without_pcre_no_error` and `test_rg_e_without_pcre2_no_error`
-    def _extracted_from_test_rg_e_without_pcre2_no_error_3(self, arg0, tmp_path):
-        findings, _ = self._scan(arg0, tmp_path)
+    def _assert_non_pcre_shell_patterns_are_not_errors(
+        self, content: str, tmp_path: Path,
+    ) -> None:
+        findings, _ = self._scan(content, tmp_path)
         errors = [f for f in findings if f.severity == Severity.ERROR]
         assert not errors
 
@@ -1851,7 +1852,7 @@ class TestShellOptionContracts:
         self, tmp_path: Path,
     ) -> None:
         """A Perl program supplied by -e leaves following paths as inputs."""
-        self._extracted_from_test_unbalanced_multiline_text_does_not_create_rg_command_5(
+        self._assert_ordinary_multiline_shell_text_has_no_findings(
             "#!/usr/bin/env bash\n"
             "perl -0pi -e 's@old@new@' \"${temp_detector}\"\n",
             tmp_path,
@@ -1889,16 +1890,17 @@ class TestShellOptionContracts:
         self, tmp_path: Path,
     ) -> None:
         """The substring ``rg`` in ordinary text is not an rg command."""
-        self._extracted_from_test_unbalanced_multiline_text_does_not_create_rg_command_5(
+        self._assert_ordinary_multiline_shell_text_has_no_findings(
             "#!/usr/bin/env bash\n"
             'config_output="nginx version: nginx/1.26.3\n'
             "configure arguments: --prefix=/etc/nginx --with-compat\"\n",
             tmp_path,
         )
 
-    # TODO Rename this here and in `test_perl_in_place_cluster_does_not_promote_filename` and `test_unbalanced_multiline_text_does_not_create_rg_command`
-    def _extracted_from_test_unbalanced_multiline_text_does_not_create_rg_command_5(self, arg0, tmp_path):
-        findings, errors = self._scan(arg0, tmp_path)
+    def _assert_ordinary_multiline_shell_text_has_no_findings(
+        self, content: str, tmp_path: Path,
+    ) -> None:
+        findings, errors = self._scan(content, tmp_path)
         assert not errors
         assert not findings
 

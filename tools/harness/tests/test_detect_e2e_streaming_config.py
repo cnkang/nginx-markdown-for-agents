@@ -851,7 +851,7 @@ class TestUnterminatedQuote:
         assert len(quote_errs) == 1
 
     def test_escaped_quote_closes_correctly(self, tmp_path: Path) -> None:
-        self._extracted_from_test_quote_containing_braces_2(
+        self._assert_quoted_braces_do_not_change_scan_depth(
             "#!/usr/bin/env bash\n"
             "cat <<'EOF' > /tmp/nginx.conf\n"
             "http {\n"
@@ -867,7 +867,7 @@ class TestUnterminatedQuote:
 
     def test_quote_containing_braces(self, tmp_path: Path) -> None:
         """Braces inside a quoted string must not affect depth."""
-        self._extracted_from_test_quote_containing_braces_2(
+        self._assert_quoted_braces_do_not_change_scan_depth(
             "#!/usr/bin/env bash\n"
             "cat <<'EOF' > /tmp/nginx.conf\n"
             "http {\n"
@@ -881,11 +881,12 @@ class TestUnterminatedQuote:
             "unmatched",
         )
 
-    # TODO Rename this here and in `test_escaped_quote_closes_correctly` and `test_quote_containing_braces`
-    def _extracted_from_test_quote_containing_braces_2(self, arg0, tmp_path, arg2):
-        files = {"tools/e2e/test.sh": arg0}
+    def _assert_quoted_braces_do_not_change_scan_depth(
+        self, shell_content: str, tmp_path: Path, error_fragment: str,
+    ) -> None:
+        files = {"tools/e2e/test.sh": shell_content}
         findings, errors = _scan(files, tmp_path)
-        assert not [e for e in errors if arg2 in e.message.lower()]
+        assert not [e for e in errors if error_fragment in e.message.lower()]
         assert any(f.loc_path == "/test/" for f in findings)
 
 
