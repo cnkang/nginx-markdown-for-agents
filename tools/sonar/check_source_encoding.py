@@ -51,6 +51,8 @@ SONAR_ROOTS: list[Path] = [
     Path("components/nginx-module/src"),
     Path("components/nginx-module/config"),
     Path("components/nginx-module/tests"),
+    Path("components/rust-converter/src"),
+    Path("components/rust-converter/tests"),
     Path("tests"),
     Path("tools"),
 ]
