@@ -209,7 +209,7 @@ class TestPatternClassification:
 
     def test_fstring_dynamic(self, tmp_path: Path) -> None:
         """f-string with dynamic parts should be REVIEW."""
-        content = "import re\nx = 'abc'\nre.compile(rf'^{x}$')\n"
+        content = "import re\nx = get_pattern()\nre.compile(rf'^{x}$')\n"
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
         # Should have a REVIEW finding for dynamic pattern
@@ -970,7 +970,7 @@ class TestBindingInvalidation:
         assert not errors
         # After reassignment to dynamic, PATTERN should be REVIEW
         reviews = [f for f in findings if f.severity == Severity.REVIEW]
-        assert len(reviews) >= 1
+        assert reviews
 
 
 # ---------------------------------------------------------------------------
@@ -1015,7 +1015,7 @@ class TestScopeAwareBindings:
         inner_errors = [f for f in compiled_errors if f.line == 4]
         assert len(inner_errors) == 1
         outer_errors = [f for f in compiled_errors if f.line == 5]
-        assert len(outer_errors) == 0
+        assert not outer_errors
 
     def test_parameter_shadows_re_alias(self, tmp_path: Path) -> None:
         """def f(re): re.compile(...) — parameter shadows module alias."""
@@ -1027,7 +1027,7 @@ class TestScopeAwareBindings:
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
         errors_found = [f for f in findings if f.severity == Severity.ERROR]
-        assert len(errors_found) == 0
+        assert not errors_found
 
     def test_parameter_shadows_compiled(self, tmp_path: Path) -> None:
         """def f(p): p.search(...) — parameter shadows compiled binding."""
@@ -1041,7 +1041,7 @@ class TestScopeAwareBindings:
         compiled_findings = [
             f for f in findings if "compiled" in f.api
         ]
-        assert len(compiled_findings) == 0
+        assert not compiled_findings
 
     def test_for_target_shadows_compiled(self, tmp_path: Path) -> None:
         """for p in items: shadows compiled p; p.search() after must not use old pattern."""
@@ -1058,7 +1058,7 @@ class TestScopeAwareBindings:
             f for f in findings
             if f.severity == Severity.ERROR and "compiled" in f.api
         ]
-        assert len(compiled_errors) == 0
+        assert not compiled_errors
 
     def test_with_target_shadows_compiled(self, tmp_path: Path) -> None:
         """with factory() as p: shadows compiled p; p.search() after must not use old pattern."""
@@ -1075,7 +1075,7 @@ class TestScopeAwareBindings:
             f for f in findings
             if f.severity == Severity.ERROR and "compiled" in f.api
         ]
-        assert len(compiled_errors) == 0
+        assert not compiled_errors
 
     def test_except_target_shadows(self, tmp_path: Path) -> None:
         """except Error as p: shadows any outer compiled p."""
@@ -1094,7 +1094,7 @@ class TestScopeAwareBindings:
             f for f in findings
             if f.severity == Severity.ERROR and "compiled" in f.api
         ]
-        assert len(compiled_errors) == 0
+        assert not compiled_errors
 
     def test_lambda_parameter_shadow(self, tmp_path: Path) -> None:
         """lambda re: re.compile(...) — parameter shadows module alias."""
@@ -1105,7 +1105,7 @@ class TestScopeAwareBindings:
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
         errors_found = [f for f in findings if f.severity == Severity.ERROR]
-        assert len(errors_found) == 0
+        assert not errors_found
 
 
 # ---------------------------------------------------------------------------
@@ -1125,7 +1125,7 @@ class TestReAliasReassignment:
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
         errors_found = [f for f in findings if f.severity == Severity.ERROR]
-        assert len(errors_found) == 0
+        assert not errors_found
 
     def test_from_re_function_alias_reassignment(self, tmp_path: Path) -> None:
         """from re import compile as rc; rc = custom; rc(...) — no finding."""
@@ -1137,7 +1137,7 @@ class TestReAliasReassignment:
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
         errors_found = [f for f in findings if f.severity == Severity.ERROR]
-        assert len(errors_found) == 0
+        assert not errors_found
 
     def test_function_import_does_not_leak(self, tmp_path: Path) -> None:
         """import re inside a function does not make module-level re valid."""
@@ -1158,7 +1158,7 @@ class TestReAliasReassignment:
             f for f in findings
             if f.severity == Severity.ERROR and f.line == 4
         ]
-        assert len(outer_errors) == 0
+        assert not outer_errors
 
 
 # ---------------------------------------------------------------------------
@@ -1170,48 +1170,43 @@ class TestUnknownReassignmentInvalidation:
 
     def test_unknown_reassignment_makes_safe_pattern_review(self, tmp_path: Path) -> None:
         """PATTERN = r'^safe$'; PATTERN = EXTERNAL → REVIEW."""
-        content = (
+        self._extracted_from_test_augassign_invalidates_3(
             "import re\n"
             "PATTERN = r'^safe$'\n"
             "PATTERN = EXTERNAL\n"
-            "re.search(PATTERN, 'data')\n"
+            "re.search(PATTERN, 'data')\n",
+            tmp_path,
         )
-        findings, errors = _scan_py(content, tmp_path)
-        assert not errors
-        errors_found = [f for f in findings if f.severity == Severity.ERROR]
-        assert len(errors_found) == 0
-        reviews = [f for f in findings if f.severity == Severity.REVIEW]
-        assert len(reviews) >= 1
 
     def test_unknown_reassignment_makes_dangerous_pattern_review(self, tmp_path: Path) -> None:
         """PATTERN = r'(a+)+$'; PATTERN = EXTERNAL → REVIEW, not ERROR."""
-        content = (
+        self._extracted_from_test_augassign_invalidates_3(
             "import re\n"
             "PATTERN = r'(a+)+$'\n"
             "PATTERN = EXTERNAL\n"
-            "re.search(PATTERN, 'data')\n"
+            "re.search(PATTERN, 'data')\n",
+            tmp_path,
         )
-        findings, errors = _scan_py(content, tmp_path)
-        assert not errors
-        errors_found = [f for f in findings if f.severity == Severity.ERROR]
-        assert len(errors_found) == 0
-        reviews = [f for f in findings if f.severity == Severity.REVIEW]
-        assert len(reviews) >= 1
 
     def test_augassign_invalidates(self, tmp_path: Path) -> None:
         """PATTERN = r'^safe$'; PATTERN += suffix → REVIEW."""
-        content = (
+        self._extracted_from_test_augassign_invalidates_3(
             "import re\n"
             "PATTERN = r'^safe$'\n"
             "PATTERN += suffix\n"
-            "re.search(PATTERN, 'data')\n"
+            "re.search(PATTERN, 'data')\n",
+            tmp_path,
         )
+
+    # TODO Rename this here and in `test_unknown_reassignment_makes_safe_pattern_review`, `test_unknown_reassignment_makes_dangerous_pattern_review` and `test_augassign_invalidates`
+    def _extracted_from_test_augassign_invalidates_3(self, arg0, tmp_path):
+        content = arg0
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
         errors_found = [f for f in findings if f.severity == Severity.ERROR]
-        assert len(errors_found) == 0
+        assert not errors_found
         reviews = [f for f in findings if f.severity == Severity.REVIEW]
-        assert len(reviews) >= 1
+        assert reviews
 
     def test_delete_removes_binding(self, tmp_path: Path) -> None:
         """PATTERN = r'(a+)+$'; del PATTERN → no ERROR with old literal."""
@@ -1224,7 +1219,7 @@ class TestUnknownReassignmentInvalidation:
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
         errors_found = [f for f in findings if f.severity == Severity.ERROR]
-        assert len(errors_found) == 0
+        assert not errors_found
 
 
 # ---------------------------------------------------------------------------
@@ -1248,7 +1243,7 @@ class TestDynamicCompiledReview:
             f for f in findings
             if f.severity == Severity.ERROR and "compiled" in f.api
         ]
-        assert len(compiled_errors) == 0
+        assert not compiled_errors
         reviews = [
             f for f in findings
             if f.severity == Severity.REVIEW
@@ -1273,7 +1268,7 @@ class TestDynamicCompiledReview:
             f for f in findings
             if f.severity == Severity.ERROR and "compiled" in f.api
         ]
-        assert len(compiled_errors) == 0
+        assert not compiled_errors
         reviews = [
             f for f in findings
             if f.severity == Severity.REVIEW
@@ -1298,7 +1293,7 @@ class TestDynamicCompiledReview:
             f for f in findings
             if f.severity == Severity.ERROR and "compiled" in f.api
         ]
-        assert len(compiled_errors) == 0
+        assert not compiled_errors
         reviews = [
             f for f in findings
             if f.severity == Severity.REVIEW
@@ -1315,7 +1310,7 @@ class TestDynamicCompiledReview:
 # ---------------------------------------------------------------------------
 
 class TestEscapedDynamicComposition:
-    """Test that re.escape + regex operators produces REVIEW."""
+    """Test structural analysis of re.escape compositions."""
 
     def test_pure_escape_safe(self, tmp_path: Path) -> None:
         """re.compile(re.escape(value)) → no finding."""
@@ -1324,8 +1319,8 @@ class TestEscapedDynamicComposition:
         assert not errors
         assert not findings
 
-    def test_escape_plus_quantifier_review(self, tmp_path: Path) -> None:
-        """re.compile(r'(' + re.escape(value) + r'+)+$') → REVIEW."""
+    def test_escape_plus_nested_quantifier_error(self, tmp_path: Path) -> None:
+        """A dangerous static scaffold around an escaped atom is rejected."""
         content = (
             "import re\n"
             "value = 'x'\n"
@@ -1333,12 +1328,10 @@ class TestEscapedDynamicComposition:
         )
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
-        # The static segments contain regex operators → REVIEW
-        reviews = [f for f in findings if f.severity == Severity.REVIEW]
-        assert len(reviews) >= 1
+        assert any(f.severity == Severity.ERROR for f in findings)
 
     def test_escape_with_safe_suffix(self, tmp_path: Path) -> None:
-        """re.compile(re.escape(value) + r'-suffix$') → REVIEW (has operators)."""
+        """An escaped value plus a bounded static suffix is safe."""
         content = (
             "import re\n"
             "value = 'x'\n"
@@ -1346,9 +1339,149 @@ class TestEscapedDynamicComposition:
         )
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
-        # The $ anchor is technically a regex operator
-        reviews = [f for f in findings if f.severity == Severity.REVIEW]
-        assert len(reviews) >= 1
+        assert not findings
+
+    def test_safe_escaped_assignment_stays_safe_when_compiled(
+        self, tmp_path: Path,
+    ) -> None:
+        """Safe escaped composition remains modeled through a name binding."""
+        content = (
+            "import re\n"
+            "value = get_value()\n"
+            "pattern = rf'^{re.escape(value)}$'\n"
+            "compiled = re.compile(pattern)\n"
+            "compiled.search('bounded input')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not findings
+
+    def test_static_pattern_collection_is_analyzed_without_review(
+        self, tmp_path: Path,
+    ) -> None:
+        """Loop variables over a static pattern tuple are not dynamic."""
+        content = (
+            "import re\n"
+            "patterns = (r'^foo$', r'^bar[0-9]+$')\n"
+            "for pattern in patterns:\n"
+            "    re.search(pattern, 'bounded input')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not findings
+
+    def test_static_pattern_rows_are_analyzed_without_review(
+        self, tmp_path: Path,
+    ) -> None:
+        """Destructured loop variables retain static pattern alternatives."""
+        content = (
+            "import re\n"
+            "checks = [(r'^foo$', 'foo'), (r'^bar$', 'bar')]\n"
+            "for pattern, label in checks:\n"
+            "    re.search(pattern, label)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not findings
+
+    def test_static_pattern_comprehension_is_not_dynamic(
+        self, tmp_path: Path,
+    ) -> None:
+        """Generator targets over static patterns retain alternatives."""
+        content = (
+            "import re\n"
+            "patterns = (r'^foo$', r'^bar$')\n"
+            "matches = any(re.search(pattern, 'foo') for pattern in patterns)\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not findings
+
+    def test_static_collection_value_in_fstring_is_expanded(
+        self, tmp_path: Path,
+    ) -> None:
+        """A loop-bound f-string is checked as finite static alternatives."""
+        content = (
+            "import re\n"
+            "methods = ('GET', 'HEAD')\n"
+            "for method in methods:\n"
+            "    re.search(rf'^{method}\\s+', 'GET /')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not findings
+
+    def test_static_collection_value_in_concatenation_is_expanded(
+        self, tmp_path: Path,
+    ) -> None:
+        """A loop-bound concatenation is checked as static alternatives."""
+        content = (
+            "import re\n"
+            "prefixes = (r'^foo', r'^bar')\n"
+            "for prefix in prefixes:\n"
+            "    re.search(prefix + r'\\s+$', 'foo ')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not findings
+
+    def test_dangerous_static_fstring_alternative_still_errors(
+        self, tmp_path: Path,
+    ) -> None:
+        """Every pattern produced by f-string expansion is safety-checked."""
+        content = (
+            "import re\n"
+            "atoms = (r'a+', r'b')\n"
+            "for atom in atoms:\n"
+            "    re.search(rf'({atom})+$', 'aaaa')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.ERROR for f in findings)
+
+    def test_dangerous_static_collection_still_errors(
+        self, tmp_path: Path,
+    ) -> None:
+        """Every static collection alternative remains safety-checked."""
+        content = (
+            "import re\n"
+            "patterns = (r'^safe$', r'(a+)+$')\n"
+            "for pattern in patterns:\n"
+            "    re.search(pattern, 'bounded input')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.ERROR for f in findings)
+
+    def test_empty_static_loop_does_not_suppress_prior_pattern(
+        self, tmp_path: Path,
+    ) -> None:
+        """An empty loop must not turn a later pattern use into no finding."""
+        content = (
+            "import re\n"
+            "pattern = r'(a+)+$'\n"
+            "for pattern in ():\n"
+            "    pass\n"
+            "re.search(pattern, 'aaaa')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.REVIEW for f in findings)
+
+    def test_static_alternative_expansion_is_bounded(
+        self, tmp_path: Path,
+    ) -> None:
+        """Collections above the analysis cap remain conservative REVIEW."""
+        patterns = tuple(f"^{index}$" for index in range(257))
+        content = (
+            "import re\n"
+            f"patterns = {patterns!r}\n"
+            "for pattern in patterns:\n"
+            "    re.search(pattern, 'bounded input')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert any(f.severity == Severity.REVIEW for f in findings)
 
     def test_escape_with_dangerous_static_error(self, tmp_path: Path) -> None:
         """re.compile(re.escape(value) + r'(a+)+$') → ERROR (static segment danger)."""
@@ -1371,51 +1504,62 @@ class TestAPISignatures:
 
     def test_split_flags_positional(self, tmp_path: Path) -> None:
         """re.split(r'foo.*', data, 0, re.DOTALL) → flags at index 3."""
-        content = (
-            "import re\n"
-            "re.split(r'foo.*', 'data', 0, re.DOTALL)\n"
+        self._extracted_from_test_search_flags_positional_3(
+            "import re\n" "re.split(r'foo.*', 'data', 0, re.DOTALL)\n", tmp_path
         )
-        findings, errors = _scan_py(content, tmp_path)
-        assert not errors
-        reviews = [f for f in findings if f.severity == Severity.REVIEW]
-        assert len(reviews) == 1
-        assert "DOTALL" in reviews[0].reason
 
     def test_sub_flags_positional(self, tmp_path: Path) -> None:
         """re.sub(r'foo.*', 'x', data, 0, re.DOTALL) → flags at index 4."""
-        content = (
-            "import re\n"
-            "re.sub(r'foo.*', 'x', 'data', 0, re.DOTALL)\n"
+        self._extracted_from_test_search_flags_positional_3(
+            "import re\n" "re.sub(r'foo.*', 'x', 'data', 0, re.DOTALL)\n", tmp_path
         )
-        findings, errors = _scan_py(content, tmp_path)
-        assert not errors
-        reviews = [f for f in findings if f.severity == Severity.REVIEW]
-        assert len(reviews) == 1
-        assert "DOTALL" in reviews[0].reason
 
     def test_subn_flags_positional(self, tmp_path: Path) -> None:
         """re.subn(r'foo.*', 'x', data, 0, re.DOTALL) → flags at index 4."""
-        content = (
-            "import re\n"
-            "re.subn(r'foo.*', 'x', 'data', 0, re.DOTALL)\n"
+        self._extracted_from_test_search_flags_positional_3(
+            "import re\n" "re.subn(r'foo.*', 'x', 'data', 0, re.DOTALL)\n",
+            tmp_path,
         )
+
+    def test_search_flags_positional(self, tmp_path: Path) -> None:
+        """re.search(r'foo.*', data, re.DOTALL) → flags at index 2."""
+        self._extracted_from_test_search_flags_positional_3(
+            "import re\n" "re.search(r'foo.*', 'data', re.DOTALL)\n", tmp_path
+        )
+
+    # TODO Rename this here and in `test_split_flags_positional`, `test_sub_flags_positional`, `test_subn_flags_positional` and `test_search_flags_positional`
+    def _extracted_from_test_search_flags_positional_3(self, arg0, tmp_path):
+        content = arg0
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
         reviews = [f for f in findings if f.severity == Severity.REVIEW]
         assert len(reviews) == 1
         assert "DOTALL" in reviews[0].reason
 
-    def test_search_flags_positional(self, tmp_path: Path) -> None:
-        """re.search(r'foo.*', data, re.DOTALL) → flags at index 2."""
+    def test_lazy_dotall_pattern_does_not_emit_greedy_review(
+        self, tmp_path: Path,
+    ) -> None:
+        """A delimited lazy dot-star is not mislabeled as greedy DOTALL."""
         content = (
             "import re\n"
-            "re.search(r'foo.*', 'data', re.DOTALL)\n"
+            "re.search(r'BEGIN.*?END', 'BEGIN value END', re.DOTALL)\n"
         )
         findings, errors = _scan_py(content, tmp_path)
         assert not errors
-        reviews = [f for f in findings if f.severity == Severity.REVIEW]
-        assert len(reviews) == 1
-        assert "DOTALL" in reviews[0].reason
+        assert not findings
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [r"literal\.\*", r"[.*]+", r"BEGIN.*+END"],
+    )
+    def test_non_greedy_dot_star_forms_do_not_emit_dotall_review(
+        self, pattern: str, tmp_path: Path,
+    ) -> None:
+        """Literal, character-class, and possessive forms are not greedy."""
+        content = f"import re\nre.search({pattern!r}, 'data', re.DOTALL)\n"
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        assert not findings
 
     def test_sub_repl_not_mistaken_for_string(self, tmp_path: Path) -> None:
         """re.sub(r'safe', 'repl', data) — 'repl' is not the string input."""
@@ -1549,7 +1693,7 @@ class TestShellParserImprovements:
         f.write_text("#!/usr/bin/env bash\ngrep -P -f missing.txt input.txt\n")
         result, errors = _scan_shell_file(f, tmp_path)
         reviews = [r for r in result if r.severity == Severity.REVIEW]
-        assert len(reviews) >= 1
+        assert reviews
         assert any("cannot read" in e.message.lower() or "no such file" in e.message.lower()
                    for e in errors)
 
@@ -1588,7 +1732,7 @@ class TestShellParserImprovements:
             "#!/usr/bin/env bash\ngrep -P --unknown-opt '(a+)+$' input.txt\n", tmp_path,
         )
         all_findings = [f for f in findings if f.severity in (Severity.ERROR, Severity.REVIEW)]
-        assert len(all_findings) >= 1
+        assert all_findings
 
     def test_unbalanced_quote_scan_error(self, tmp_path: Path) -> None:
         """grep -P '(a+)+$ input.txt — unbalanced quote produces REVIEW or ScanError."""
@@ -1616,17 +1760,19 @@ class TestShellEngineResolution:
 
     def test_grep_e_without_pcre_no_error(self, tmp_path: Path) -> None:
         """grep -e '(a+)+$' input.txt → no PCRE ERROR."""
-        findings, _ = self._scan(
-            "#!/usr/bin/env bash\ngrep -e '(a+)+$' input.txt\n", tmp_path,
+        self._extracted_from_test_rg_e_without_pcre2_no_error_3(
+            "#!/usr/bin/env bash\ngrep -e '(a+)+$' input.txt\n", tmp_path
         )
-        errors = [f for f in findings if f.severity == Severity.ERROR]
-        assert not errors
 
     def test_rg_e_without_pcre2_no_error(self, tmp_path: Path) -> None:
         """rg -e '(a+)+$' input.txt → no PCRE ERROR."""
-        findings, _ = self._scan(
-            "#!/usr/bin/env bash\nrg -e '(a+)+$' input.txt\n", tmp_path,
+        self._extracted_from_test_rg_e_without_pcre2_no_error_3(
+            "#!/usr/bin/env bash\nrg -e '(a+)+$' input.txt\n", tmp_path
         )
+
+    # TODO Rename this here and in `test_grep_e_without_pcre_no_error` and `test_rg_e_without_pcre2_no_error`
+    def _extracted_from_test_rg_e_without_pcre2_no_error_3(self, arg0, tmp_path):
+        findings, _ = self._scan(arg0, tmp_path)
         errors = [f for f in findings if f.severity == Severity.ERROR]
         assert not errors
 
@@ -1682,6 +1828,35 @@ class TestShellOptionContracts:
         assert len(errors) == 1
         assert errors[0].pattern == "(a+)+$"
 
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "grep -qE '^[a-z]+$' input.txt",
+            "grep --extended-regexp --quiet '^[a-z]+$' input.txt",
+            "grep -Fq 'literal[not-regex]' input.txt",
+            "grep --fixed-strings --quiet 'literal[not-regex]' input.txt",
+        ],
+    )
+    def test_grep_engine_flags_are_known(
+        self, command: str, tmp_path: Path,
+    ) -> None:
+        """Standard grep engine flags must not downgrade parse confidence."""
+        findings, errors = self._scan(
+            f"#!/usr/bin/env bash\n{command}\n", tmp_path,
+        )
+        assert not errors
+        assert not findings
+
+    def test_perl_in_place_cluster_does_not_promote_filename(
+        self, tmp_path: Path,
+    ) -> None:
+        """A Perl program supplied by -e leaves following paths as inputs."""
+        self._extracted_from_test_unbalanced_multiline_text_does_not_create_rg_command_5(
+            "#!/usr/bin/env bash\n"
+            "perl -0pi -e 's@old@new@' \"${temp_detector}\"\n",
+            tmp_path,
+        )
+
     def test_required_value_option_consumes_next(self, tmp_path: Path) -> None:
         """grep -P --directories skip '(a+)+$' input.txt → ERROR on the pattern."""
         findings, _ = self._scan(
@@ -1709,6 +1884,23 @@ class TestShellOptionContracts:
         errors = [f for f in findings if f.severity == Severity.ERROR]
         assert len(errors) == 1
         assert errors[0].pattern == "(a+)+$"
+
+    def test_unbalanced_multiline_text_does_not_create_rg_command(
+        self, tmp_path: Path,
+    ) -> None:
+        """The substring ``rg`` in ordinary text is not an rg command."""
+        self._extracted_from_test_unbalanced_multiline_text_does_not_create_rg_command_5(
+            "#!/usr/bin/env bash\n"
+            'config_output="nginx version: nginx/1.26.3\n'
+            "configure arguments: --prefix=/etc/nginx --with-compat\"\n",
+            tmp_path,
+        )
+
+    # TODO Rename this here and in `test_perl_in_place_cluster_does_not_promote_filename` and `test_unbalanced_multiline_text_does_not_create_rg_command`
+    def _extracted_from_test_unbalanced_multiline_text_does_not_create_rg_command_5(self, arg0, tmp_path):
+        findings, errors = self._scan(arg0, tmp_path)
+        assert not errors
+        assert not findings
 
 
 class TestShellPatternFiles:
@@ -1856,7 +2048,7 @@ class TestPythonAstAdversarial:
             f for f in findings
             if f.severity == Severity.ERROR and f.line == 4
         ]
-        assert len(compiled_errors) == 0
+        assert not compiled_errors
 
     def test_function_local_del_shadows_outer_binding(self, tmp_path: Path) -> None:
         """compile + del inside a function; the post-del call must not use it."""
@@ -1879,7 +2071,7 @@ class TestPythonAstAdversarial:
             f for f in findings
             if f.severity == Severity.ERROR and f.line == 5
         ]
-        assert len(post_call_errors) == 0
+        assert not post_call_errors
 
     def test_default_positional_argument_regex(self, tmp_path: Path) -> None:
         """def f(pattern=re.compile(r'(a+)+$')) → ERROR on the default."""
@@ -1966,4 +2158,4 @@ class TestPythonAstAdversarial:
         assert not errors
         # ``re`` is shadowed by the parameter → not the module alias → no ERROR.
         errors_found = [f for f in findings if f.severity == Severity.ERROR]
-        assert len(errors_found) == 0
+        assert not errors_found
