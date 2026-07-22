@@ -20,6 +20,9 @@ use nginx_markdown_converter::error::ConversionError;
 use nginx_markdown_converter::parser::parse_html_with_charset;
 use nginx_markdown_converter::streaming::{MemoryBudget, StreamingConverter, StreamingStats};
 
+#[path = "known_differences.rs"]
+pub mod known_differences;
+
 #[cfg(feature = "incremental")]
 use nginx_markdown_converter::incremental::IncrementalConverter;
 
@@ -422,4 +425,223 @@ pub fn default_streaming_options() -> ConversionOptions {
 /// Return default memory budget for streaming tests.
 pub fn default_streaming_budget() -> MemoryBudget {
     MemoryBudget::default()
+}
+
+/// Produce a human-readable summary of the first few differences between
+/// two strings, or `"<identical>"` if they are equal.
+pub fn unified_diff_summary(expected: &str, actual: &str) -> String {
+    const MAX_DIFF_LINES: usize = 3;
+
+    if expected == actual {
+        return "<identical>".to_string();
+    }
+
+    let lhs: Vec<&str> = expected.lines().collect();
+    let rhs: Vec<&str> = actual.lines().collect();
+    let shared = lhs.len().min(rhs.len());
+    let mut diffs = Vec::new();
+
+    for idx in 0..shared {
+        if lhs[idx] != rhs[idx] {
+            diffs.push(format!(
+                "line {} differs\n- {}\n+ {}",
+                idx + 1,
+                lhs[idx],
+                rhs[idx]
+            ));
+            if diffs.len() == MAX_DIFF_LINES {
+                break;
+            }
+        }
+    }
+
+    if !diffs.is_empty() {
+        return diffs.join("\n");
+    }
+
+    if lhs.len() != rhs.len() {
+        return format!(
+            "line count differs (full-buffer={}, streaming={})",
+            lhs.len(),
+            rhs.len()
+        );
+    }
+
+    "outputs differ but first mismatch not localized".to_string()
+}
+
+/// Compare full-buffer and streaming outputs, returning whether they are
+/// identical, a known difference, or an unexpected divergence.
+pub fn compare_outputs(
+    fixture_name: &str,
+    full_buffer: &str,
+    streaming: &str,
+    known_diffs: &known_differences::KnownDifferences,
+) -> ComparisonResult {
+    if full_buffer == streaming {
+        return ComparisonResult::Identical;
+    }
+
+    let mut diff = unified_diff_summary(full_buffer, streaming);
+    if normalize_whitespace_tokens(full_buffer) == normalize_whitespace_tokens(streaming) {
+        diff = format!("whitespace-only-parity-drift\n{diff}");
+    }
+
+    let output = known_differences::OutputDifference {
+        full_buffer,
+        streaming,
+        diff: &diff,
+    };
+
+    if let Some(entry) = known_diffs.matches(fixture_name, &output) {
+        return ComparisonResult::KnownDifference {
+            diff_id: entry.id.clone(),
+            description: entry.description.clone(),
+        };
+    }
+
+    ComparisonResult::Divergence {
+        full_buffer_output: full_buffer.to_string(),
+        streaming_output: streaming.to_string(),
+        diff,
+    }
+}
+
+/// Check whether a runtime error matches a known difference entry.
+pub fn is_known_runtime_difference(
+    fixture_name: &str,
+    marker: &str,
+    detail: &str,
+    known_diffs: &known_differences::KnownDifferences,
+) -> bool {
+    let diff = format!("{marker}\n{detail}");
+    let output = known_differences::OutputDifference {
+        full_buffer: "",
+        streaming: "",
+        diff: &diff,
+    };
+    known_diffs.matches(fixture_name, &output).is_some()
+}
+
+/// Classification of how a streaming output compares to full-buffer output.
+#[derive(Debug)]
+pub enum ComparisonResult {
+    Identical,
+    KnownDifference {
+        diff_id: String,
+        description: String,
+    },
+    Divergence {
+        full_buffer_output: String,
+        streaming_output: String,
+        diff: String,
+    },
+}
+
+/// Check conversion error results and return:
+/// - `Ok(true)` if both must be compared (no errors)
+/// - `Ok(false)` if the fallback was expected and no comparison is needed
+/// - `Err(message)` on unexpected failures
+pub fn check_conversion_errors(
+    fixture_name: &str,
+    meta: &FixtureMeta,
+    single: &Result<String, ConversionError>,
+    chunked: &Result<String, ConversionError>,
+    known_diffs: &known_differences::KnownDifferences,
+) -> Result<bool, String> {
+    match (single, chunked) {
+        (
+            Err(ConversionError::StreamingFallback { .. }),
+            Err(ConversionError::StreamingFallback { .. }),
+        ) => {
+            if !meta.expected_fallback {
+                if is_known_runtime_difference(
+                    fixture_name,
+                    "streaming-fallback",
+                    "both-single-and-chunked",
+                    known_diffs,
+                ) {
+                    return Ok(false);
+                }
+                return Err(format!(
+                    "{fixture_name}: unexpected fallback (meta expected_fallback=false)"
+                ));
+            }
+            Ok(false)
+        }
+        (Err(err), _) if !matches!(err, ConversionError::StreamingFallback { .. }) => {
+            if is_known_runtime_difference(
+                fixture_name,
+                "streaming-error",
+                &err.to_string(),
+                known_diffs,
+            ) {
+                return Ok(false);
+            }
+            Err(format!("{fixture_name}: streaming single failed: {err}"))
+        }
+        (_, Err(err)) if !matches!(err, ConversionError::StreamingFallback { .. }) => {
+            if is_known_runtime_difference(
+                fixture_name,
+                "streaming-error",
+                &err.to_string(),
+                known_diffs,
+            ) {
+                return Ok(false);
+            }
+            Err(format!("{fixture_name}: streaming chunked failed: {err}"))
+        }
+        (Err(ConversionError::StreamingFallback { .. }), Ok(_))
+        | (Ok(_), Err(ConversionError::StreamingFallback { .. })) => {
+            if is_known_runtime_difference(
+                fixture_name,
+                "streaming-fallback-mismatch",
+                "single-vs-chunked",
+                known_diffs,
+            ) {
+                return Ok(false);
+            }
+            Err(format!(
+                "{fixture_name}: single/chunked fallback behavior mismatch"
+            ))
+        }
+        _ => Ok(true),
+    }
+}
+
+/// Check that both streaming outputs match full-buffer output, returning
+/// Ok(()) if identical or known, or Err(message) on divergence.
+pub fn check_output_comparison(
+    fixture_name: &str,
+    full_buffer: &str,
+    single: &str,
+    chunked: &str,
+    meta: &FixtureMeta,
+    known_diffs: &known_differences::KnownDifferences,
+) -> Result<(), String> {
+    for (label, streaming_output) in [("single", single), ("chunked", chunked)] {
+        match compare_outputs(fixture_name, full_buffer, streaming_output, known_diffs) {
+            ComparisonResult::Identical => {}
+            ComparisonResult::KnownDifference {
+                diff_id,
+                description,
+            } => {
+                if !meta.known_diff_ids.iter().any(|id| id == &diff_id) {
+                    return Err(format!(
+                        "{fixture_name}: matched known diff {diff_id} ({description}) but fixture metadata does not list it"
+                    ));
+                }
+            }
+            ComparisonResult::Divergence {
+                full_buffer_output,
+                streaming_output,
+                diff,
+            } => {
+                return Err(format!(
+                    "{fixture_name}: {label} output divergence\n{diff}\n--- full-buffer ---\n{full_buffer_output}\n--- streaming ---\n{streaming_output}"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
