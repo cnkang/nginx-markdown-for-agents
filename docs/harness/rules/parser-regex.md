@@ -47,9 +47,19 @@ Required:
   for/with/except/comprehension targets, and augmented assignments shadow
   outer bindings.  Reassignment of a `re` alias to a non-`re` value
   invalidates the alias.  Reassignment of a compiled-pattern variable to a
-  dynamic value produces REVIEW.  Unknown RHS expressions produce
-  DYNAMIC_VALUE (not the old static binding).  Cross-module imports are NOT
-  resolved (those resolve to REVIEW).
+  dynamic value upgrades the binding to `COMPILED_DYNAMIC_PATTERN` (not plain
+  `DYNAMIC_VALUE`) so subsequent `compiled.search/match/sub/findall` calls
+  emit a REVIEW referencing the original `compile_line`; this applies to
+  Assign, AnnAssign, and AugAssign.  Lexical `del` writes a DELETED tombstone
+  in the current scope instead of walking outer scopes, so a function-local
+  `del p` no longer removes a module binding; `global`/`nonlocal` are
+  partially modeled (honored for delete routing) and otherwise conservative.
+  Function/lambda defaults, decorators, return annotations, and parameter
+  annotations are evaluated in the enclosing scope before the function name
+  is bound and before the body scope is entered, matching Python's real
+  evaluation order.  Unknown RHS expressions produce DYNAMIC_VALUE (not
+  the old static binding).  Cross-module imports are NOT resolved (those
+  resolve to REVIEW).
 - Tokenizer: `_merge_literal_atoms` preserves the last literal atom before a
   quantifier as a separate atom so that separator detection is not lost when
   adjacent literals are merged.  For example, `abc\w+` keeps `abc` as a
@@ -66,16 +76,27 @@ Required:
   `INFO` (static safe).
 - UNKNOWN pattern sources are treated as REVIEW (never silently downgraded
   to INFO) so unresolvable regex origins require manual attention.
-- Shell regex: `grep -E` / `sed -E` (POSIX ERE, DFA-based, safe),
-  `grep -P` / `rg -P` / `perl` (PCRE, backtracking, risk).  Pattern extraction
-  is command-aware: it locates the regex command past pipes and env
+- Shell regex: pattern-bearing options (`-e`/`--regexp`) and PCRE-enabling
+  flags (`grep -P`/`--perl-regexp`, `rg -P`/`--pcre2`, `perl` itself) are
+  separate.  `grep -e`/`rg -e` without a PCRE flag use the command's default
+  engine (BRE/ERE for grep, Rust regex NFA for rg) and are NOT analyzed for
+  PCRE catastrophic backtracking.  Only `grep -P`, `rg -P`/`--pcre2`, and
+  `perl -e`/`-E` produce `shell-pcre` findings.  Pattern extraction is
+  command-aware: it locates the regex command past pipes and env
   assignments, skips options, supports `-e`/`--regexp`/`-P` and `--`, and
   does not pick up patterns from preceding commands in a pipeline.
-  Shell argument parsing classifies options into three dictionaries:
-  required-value options (consume next token), optional-value options
-  (do not consume next token), and flag options (no value).  Unknown
-  options produce REVIEW.  Multiple `-e` patterns are all extracted.
-  Pattern-file options (`-f`/`--file`) produce REVIEW.  `shlex` parse
+  Shell argument parsing classifies options into boolean flags (consume
+  nothing), required-value options (consume next token), optional-value
+  options (do not consume next token), pattern options, pattern-file
+  options, and PCRE flags.  After an unknown option, additional non-option
+  tokens are collected as pattern candidates so a dangerous pattern cannot
+  be hidden behind an unrecognized option.  Multiple `-e` patterns are all
+  extracted.  Pattern-file options (`-f`/`--file`, multiple supported) are
+  resolved relative to the shell script directory, validated to stay within
+  the repository root (absolute paths, `..` traversal, and symlink escapes
+  are rejected), read as UTF-8, and per-line analyzed; read/encoding
+  failures (OSError, UnicodeDecodeError, IsADirectoryError) produce a
+  ScanError plus a conservative REVIEW instead of crashing.  `shlex` parse
   errors produce ScanError.
 - Rust `regex` crate uses NFA (non-backtracking) — safe by default.
   Backtracking crates (`fancy-regex`, `pcre2`, `onig`) are banned via `deny.toml`.

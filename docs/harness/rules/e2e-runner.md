@@ -83,7 +83,17 @@ Required:
   regex quantifiers `{m,n}`, and escaped quotes.  Strict UTF-8 file reading
   rejects encoding errors (produces ScanError).  Overall config structure
   is validated (`_validate_config_structure`) to detect malformed configs
-  before location analysis.
+  before location analysis.  Unterminated quoted strings produce a single
+  root ScanError and stop further structural analysis of that section so
+  cascading false errors are avoided.  Heredoc openers are found by a
+  deterministic per-line scanner (`_find_heredoc_opener`) that skips
+  comments and quoted strings, so `# cat <<EOF` and `echo "<<EOF"` do not
+  open false heredocs; `<<` closes at column 0, `<<-` closes after leading
+  tabs only (spaces rejected).  Rust nginx config extraction uses a unified
+  scan: raw-string spans are returned to the ordinary-string scanner so `"`
+  inside raw-string bodies is not re-scanned; char and byte-char literals
+  (`'"'`, `b'"'`) are skipped so a single quote is not mistaken for a
+  string delimiter.
 
 Detector contract:
 - Comments containing `{` or `}` are masked before brace parsing so they
