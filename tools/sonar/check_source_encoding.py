@@ -64,6 +64,15 @@ REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST: Path = REPO_ROOT / "tools" / "sonar" / "encoding_exceptions.json"
 
 
+def _resolve_repository_path(path: Path, description: str) -> Path:
+    """Resolve ``path`` and reject paths outside the repository before use."""
+    candidate = path if path.is_absolute() else REPO_ROOT / path
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(REPO_ROOT.resolve()):
+        raise RuntimeError(f"{description} must remain within the repository: {path}")
+    return resolved
+
+
 def _run_git_ls_files() -> list[Path]:
     """Return all git-tracked file paths from the repository root."""
     result = subprocess.run(
@@ -76,34 +85,38 @@ def _run_git_ls_files() -> list[Path]:
     return [Path(p) for p in result.stdout.split("\0")[:-1] if p]
 
 
+def _validate_manifest_entry(rel: object, info: object) -> None:
+    """Validate one manifest key and its encoding contract."""
+    if not isinstance(rel, str) or not rel:
+        raise RuntimeError("Exception manifest paths must be non-empty strings")
+    rel_path = Path(rel)
+    if rel_path.is_absolute() or ".." in rel_path.parts:
+        raise RuntimeError(f"Exception path must be repository-relative: {rel}")
+    if not isinstance(info, dict):
+        raise RuntimeError(f"Exception entry {rel} must be an object")
+    for key in ("encoding", "reason"):
+        value = info.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise RuntimeError(f"Exception entry {rel} has invalid '{key}'")
+    target = _resolve_repository_path(rel_path, f"Exception path {rel}")
+    if not target.is_file():
+        raise RuntimeError(f"Exception entry {rel} must name an existing regular file")
+
+
 def _load_manifest(path: Path) -> dict[str, dict[str, Any]]:
-    if not path.exists():
+    manifest_path = _resolve_repository_path(path, "Exception manifest")
+    if not manifest_path.exists():
         return {}
     try:
-        data = json.loads(path.read_bytes())
+        data = json.loads(manifest_path.read_bytes())
     except (json.JSONDecodeError, OSError) as exc:
-        raise RuntimeError(f"Cannot read exception manifest {path}: {exc}") from exc
+        raise RuntimeError(
+            f"Cannot read exception manifest {manifest_path}: {exc}"
+        ) from exc
     if not isinstance(data, dict):
-        raise RuntimeError(f"Exception manifest {path} must be a JSON object")
+        raise RuntimeError(f"Exception manifest {manifest_path} must be a JSON object")
     for rel, info in data.items():
-        if not isinstance(rel, str) or not rel:
-            raise RuntimeError("Exception manifest paths must be non-empty strings")
-        rel_path = Path(rel)
-        if rel_path.is_absolute() or ".." in rel_path.parts:
-            raise RuntimeError(f"Exception path must be repository-relative: {rel}")
-        target = (REPO_ROOT / rel_path).resolve()
-        try:
-            target.relative_to(REPO_ROOT.resolve())
-        except ValueError as exc:
-            raise RuntimeError(f"Exception path escapes repository: {rel}") from exc
-        if not isinstance(info, dict):
-            raise RuntimeError(f"Exception entry {rel} must be an object")
-        for key in ("encoding", "reason"):
-            value = info.get(key)
-            if not isinstance(value, str) or not value.strip():
-                raise RuntimeError(f"Exception entry {rel} has invalid '{key}'")
-        if not target.exists() or not target.is_file():
-            raise RuntimeError(f"Exception entry {rel} must name an existing regular file")
+        _validate_manifest_entry(rel, info)
     return data
 
 
@@ -186,7 +199,12 @@ def _audit_tracked(manifest: dict[str, dict[str, Any]]) -> tuple[int, int]:
     failures: list[str] = []
 
     for path in text_files:
-        _validate_file(REPO_ROOT / path, manifest, failures, rel=str(path))
+        try:
+            abs_path = _resolve_repository_path(path, "Tracked path")
+        except RuntimeError as exc:
+            failures.append(str(exc))
+            continue
+        _validate_file(abs_path, manifest, failures, rel=str(path))
 
     if failures:
         print("\n".join(failures), file=sys.stderr)
@@ -195,28 +213,36 @@ def _audit_tracked(manifest: dict[str, dict[str, Any]]) -> tuple[int, int]:
     return 0, len(text_files)
 
 
-def _audit_generated(manifest: dict[str, dict[str, Any]]) -> tuple[int, int]:
-    """Audit files under Sonar roots (includes generated files)."""
+def _generated_files_under(root: Path) -> list[Path]:
+    """Return auditable files below one configured Sonar root."""
+    abs_root = _resolve_repository_path(root, "Sonar root")
+    if not abs_root.exists():
+        return []
+    if abs_root.is_file():
+        return [abs_root]
     files: list[Path] = []
-    for root in SONAR_ROOTS:
-        abs_root = REPO_ROOT / root
-        if not abs_root.exists():
+    for path in abs_root.rglob("*"):
+        if not path.is_file():
             continue
-        if abs_root.is_file():
-            files.append(abs_root)
-            continue
-        for p in abs_root.rglob("*"):
-            if not p.is_file():
-                continue
-            rel = p.relative_to(REPO_ROOT)
-            if _should_skip_path(rel):
-                continue
-            if _is_text_file(rel):
-                files.append(p)
+        rel = path.relative_to(REPO_ROOT)
+        if not _should_skip_path(rel) and _is_text_file(rel):
+            files.append(path)
+    return files
 
+
+def _audit_files(files: list[Path], manifest: dict[str, dict[str, Any]]) -> list[str]:
+    """Validate a collection of already repository-contained files."""
     failures: list[str] = []
     for path in files:
         _validate_file(path, manifest, failures)
+    return failures
+
+
+def _audit_generated(manifest: dict[str, dict[str, Any]]) -> tuple[int, int]:
+    """Audit files under Sonar roots (includes generated files)."""
+    files = [path for root in SONAR_ROOTS for path in _generated_files_under(root)]
+
+    failures = _audit_files(files, manifest)
 
     if failures:
         print("\n".join(failures), file=sys.stderr)
@@ -229,7 +255,11 @@ def _audit_manifest(manifest: dict[str, dict[str, Any]]) -> list[str]:
     """Verify every exception entry is valid and points to an existing file."""
     failures: list[str] = []
     for rel, info in manifest.items():
-        path = REPO_ROOT / rel
+        try:
+            path = _resolve_repository_path(Path(rel), f"Exception path {rel}")
+        except RuntimeError as exc:
+            failures.append(str(exc))
+            continue
         if not path.exists():
             failures.append(f"STALE_EXCEPTION {rel}: path does not exist")
             continue

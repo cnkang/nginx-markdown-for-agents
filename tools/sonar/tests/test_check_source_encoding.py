@@ -108,11 +108,18 @@ class TestCheckerCLI:
         assert result.returncode == 0
         assert "tracked text files" in result.stdout
 
-    def test_manifest_missing_reports_invalid_utf8(self) -> None:
+    def test_missing_repository_manifest_reports_invalid_utf8(self) -> None:
         """Without the manifest, the intentional ISO-8859-1 fixture is unlisted."""
-        result = run_checker("--manifest", "/nonexistent/manifest.json")
+        result = run_checker("--manifest", "tools/sonar/missing-manifest.json")
         assert result.returncode == 1, result.stderr
         assert "latin1.html" in result.stderr
+
+    def test_manifest_outside_repository_is_rejected(self, tmp_path: Path) -> None:
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text("{}", encoding="utf-8")
+        result = run_checker("--manifest", str(manifest))
+        assert result.returncode == 2
+        assert "within the repository" in result.stderr
 
     def test_unknown_option_exits_nonzero(self) -> None:
         result = run_checker("--bogus-flag")
@@ -135,6 +142,16 @@ class TestCheckerAdversarialInputs:
             manifest.write_text(json.dumps(payload), encoding="utf-8")
             with pytest.raises(RuntimeError):
                 checker._load_manifest(manifest)
+
+    def test_manifest_symlink_outside_repository_is_rejected(self, tmp_path: Path) -> None:
+        checker = load_checker_module()
+        checker.REPO_ROOT = tmp_path
+        outside = tmp_path.parent / "outside-manifest.json"
+        outside.write_text("{}", encoding="utf-8")
+        manifest = tmp_path / "manifest.json"
+        manifest.symlink_to(outside)
+        with pytest.raises(RuntimeError, match="within the repository"):
+            checker._load_manifest(manifest)
 
     def test_extensionless_file_root_and_nul_are_checked(self, tmp_path: Path) -> None:
         checker = load_checker_module()
