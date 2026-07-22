@@ -292,6 +292,10 @@ class _BindingKind(Enum):
     RE_FUNCTION_ALIAS = "RE_FUNCTION_ALIAS"
     COMPILED_STATIC_PATTERN = "COMPILED_STATIC_PATTERN"
     COMPILED_DYNAMIC_PATTERN = "COMPILED_DYNAMIC_PATTERN"
+    # A tombstone written by ``del`` in the lexical scope where the delete
+    # occurs.  Lookup stops at a DELETED binding instead of continuing to an
+    # enclosing scope, mirroring Python's lexical delete semantics.
+    DELETED = "DELETED"
 
 
 @dataclass
@@ -319,7 +323,11 @@ def _segment_for_binding(binding: _Binding | _Sentinel) -> _Segment:
     static_value = _static_binding_value(binding)
     if static_value is not None:
         return _Segment.static(static_value)
-    if isinstance(binding, _Binding) and binding.kind == _BindingKind.DYNAMIC_VALUE:
+    if isinstance(binding, _Binding) and binding.kind in (
+        _BindingKind.DYNAMIC_VALUE,
+        _BindingKind.COMPILED_DYNAMIC_PATTERN,
+        _BindingKind.DELETED,
+    ):
         return _Segment.dynamic()
     return _Segment.unknown()
 
@@ -350,6 +358,10 @@ def _new_scope_stack() -> list[_Scope]:
 
 
 def _scope_lookup(stack: list[_Scope], name: str) -> _Binding | _Sentinel:
+    # Walk inner-to-outer.  A DELETED tombstone in an inner scope shadows
+    # the same name in outer scopes, mirroring Python's lexical ``del``:
+    # after ``del p`` in a function, ``p`` no longer refers to the module
+    # binding while inside that function.
     for scope in reversed(stack):
         result = scope.lookup(name)
         if not isinstance(result, _Sentinel):
@@ -361,11 +373,38 @@ def _scope_assign(stack: list[_Scope], name: str, binding: _Binding) -> None:
     stack[-1].assign(name, binding)
 
 
-def _scope_delete(stack: list[_Scope], name: str) -> None:
-    for scope in reversed(stack):
-        if name in scope.bindings:
-            scope.delete(name)
-            return
+def _scope_delete(
+    stack: list[_Scope], name: str,
+    global_names: set[str] | None = None, nonlocal_names: set[str] | None = None,
+) -> None:
+    """Apply a lexical ``del name``.
+
+    Without ``global``/``nonlocal`` declarations (not yet modeled here), a
+    ``del name`` only affects the current lexical scope: if the name is
+    bound there it is removed, otherwise a DELETED tombstone is written so
+    subsequent lookups in this scope do not fall through to an enclosing
+    binding.  ``global``/``nonlocal`` declarations are recorded for a
+    conservative REVIEW (see visit_Global/visit_Nonlocal); when present,
+    the delete is applied against the module scope or the nearest enclosing
+    binding respectively to avoid mis-modeling cross-scope deletes.
+    """
+    if global_names is not None and name in global_names:
+        if len(stack) > 1 and name in stack[0].bindings:
+            stack[0].delete(name)
+        else:
+            stack[-1].assign(name, _Binding(kind=_BindingKind.DELETED))
+        return
+    if nonlocal_names is not None and name in nonlocal_names:
+        for scope in reversed(stack[1:]):
+            if name in scope.bindings:
+                scope.delete(name)
+                return
+        stack[-1].assign(name, _Binding(kind=_BindingKind.DELETED))
+        return
+    if name in stack[-1].bindings:
+        stack[-1].delete(name)
+    else:
+        stack[-1].assign(name, _Binding(kind=_BindingKind.DELETED))
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +435,13 @@ class RegexASTVisitor(ast.NodeVisitor):
         self._file_path: str = ""
         self._tree: ast.AST | None = None
         self._scope_stack: list[_Scope] = _new_scope_stack()
+        # Per-scope ``global``/``nonlocal`` declaration sets (indexed by
+        # position in the scope stack).  ``global``/``nonlocal`` are only
+        # partially modeled: a ``del`` honoring them is applied against the
+        # module/enclosing scope, and any use of these statements is recorded
+        # so callers can emit a conservative REVIEW when relevant.
+        self._global_decls: list[set[str]] = [set()]
+        self._nonlocal_decls: list[set[str]] = [set()]
 
     def set_source(self, tree: ast.AST, source_lines: list[str],
                     file_path: str) -> None:
@@ -407,9 +453,13 @@ class RegexASTVisitor(ast.NodeVisitor):
 
     def _enter_scope(self) -> None:
         self._scope_stack.append(_Scope())
+        self._global_decls.append(set())
+        self._nonlocal_decls.append(set())
 
     def _leave_scope(self) -> None:
         self._scope_stack.pop()
+        self._global_decls.pop()
+        self._nonlocal_decls.pop()
 
     # -- Import resolution --------------------------------------------------
 
@@ -436,33 +486,86 @@ class RegexASTVisitor(ast.NodeVisitor):
     # -- Function / class scope tracking ----------------------------------
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._visit_scoped_node_with_params(node, node.args, list(node.decorator_list))
+        self._visit_function_def(node, list(node.decorator_list))
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._visit_scoped_node_with_params(node, node.args, list(node.decorator_list))
+        self._visit_function_def(node, list(node.decorator_list))
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._visit_scoped_node(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        self._visit_scoped_node_with_params(node, node.args, [])
+        self._visit_lambda(node)
 
     def _visit_scoped_node(self, node: ast.AST) -> None:
         self._enter_scope()
         self.generic_visit(node)
         self._leave_scope()
 
-    def _visit_scoped_node_with_params(
-        self, node: ast.AST, args: ast.arguments,
+    def _visit_function_def(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef,
         decorators: list[ast.AST],
     ) -> None:
+        """Visit a function definition honoring Python's evaluation order.
+
+        Defaults, decorators, return annotation, and parameter annotations
+        are evaluated in the *enclosing* scope BEFORE the function name is
+        bound there and BEFORE the function body scope is entered.  Only
+        then are parameters bound (as DYNAMIC_VALUE) inside the new scope
+        and the body analyzed.
+        """
+        # 1. Decorators, evaluated in the enclosing scope.
+        for dec in decorators:
+            self.visit(dec)
+        # 2. Default value expressions (positional + keyword-only),
+        #    evaluated in the enclosing scope.
+        self._visit_function_defaults(node.args)
+        # 3. Return annotation, evaluated in the enclosing scope.
+        if getattr(node, "returns", None) is not None:
+            self.visit(node.returns)
+        # 4. Parameter annotations, evaluated in the enclosing scope.
+        self._visit_param_annotations(node.args)
+        # 5. Bind the function name in the enclosing scope as DYNAMIC_VALUE
+        #    (the function object is opaque to regex analysis).
+        _scope_assign(self._scope_stack, node.name, _Binding(
+            kind=_BindingKind.DYNAMIC_VALUE,
+        ))
+        # 6. Enter the body scope, bind parameters, then analyze the body.
         self._enter_scope()
-        self._bind_function_params(args)
-        for child in decorators:
+        self._bind_function_params(node.args)
+        for child in node.body:
             self.visit(child)
-        for child in ast.iter_child_nodes(node):
-            if child not in decorators and child is not args:
-                self.visit(child)
+        self._leave_scope()
+
+    def _visit_function_defaults(self, args: ast.arguments) -> None:
+        for default in args.defaults:
+            self.visit(default)
+        for default in args.kw_defaults:
+            if default is not None:
+                self.visit(default)
+
+    def _visit_param_annotations(self, args: ast.arguments) -> None:
+        for arg in (list(args.args) + list(args.posonlyargs)
+                    + list(args.kwonlyargs)):
+            if arg.annotation is not None:
+                self.visit(arg.annotation)
+        if args.vararg is not None and args.vararg.annotation is not None:
+            self.visit(args.vararg.annotation)
+        if args.kwarg is not None and args.kwarg.annotation is not None:
+            self.visit(args.kwarg.annotation)
+
+    def _visit_lambda(self, node: ast.Lambda) -> None:
+        """Visit a lambda honoring Python's evaluation order.
+
+        Default expressions are evaluated in the enclosing scope BEFORE the
+        lambda scope is entered.  Annotations (if any) are also evaluated in
+        the enclosing scope.
+        """
+        self._visit_function_defaults(node.args)
+        self._visit_param_annotations(node.args)
+        self._enter_scope()
+        self._bind_function_params(node.args)
+        self.visit(node.body)
         self._leave_scope()
 
     def _bind_function_params(self, args: ast.arguments) -> None:
@@ -586,15 +689,30 @@ class RegexASTVisitor(ast.NodeVisitor):
 
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
         if isinstance(node.target, ast.Name):
-            _scope_assign(self._scope_stack, node.target.id, _Binding(
-                kind=_BindingKind.DYNAMIC_VALUE,
-            ))
+            name = node.target.id
+            binding = self._reconcile_compiled_reassignment(
+                name, _Binding(kind=_BindingKind.DYNAMIC_VALUE), node.value,
+            )
+            _scope_assign(self._scope_stack, name, binding)
         self.generic_visit(node)
 
     def visit_Delete(self, node: ast.Delete) -> None:
         for target in node.targets:
             if isinstance(target, ast.Name):
-                _scope_delete(self._scope_stack, target.id)
+                _scope_delete(
+                    self._scope_stack, target.id,
+                    global_names=self._global_decls[-1],
+                    nonlocal_names=self._nonlocal_decls[-1],
+                )
+        self.generic_visit(node)
+
+    def visit_Global(self, node: ast.Global) -> None:
+        self._global_decls[-1].update(node.names)
+        # global/nonlocal are not fully modeled; record nothing further here.
+        self.generic_visit(node)
+
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+        self._nonlocal_decls[-1].update(node.names)
         self.generic_visit(node)
 
     def _assign_target(
@@ -602,12 +720,47 @@ class RegexASTVisitor(ast.NodeVisitor):
     ) -> None:
         if isinstance(target, ast.Name):
             name = target.id
+            binding = self._reconcile_compiled_reassignment(name, binding, value)
             _scope_assign(self._scope_stack, name, binding)
         elif isinstance(target, (ast.Tuple, ast.List)):
             for elt in target.elts:
                 self._assign_target(elt, _Binding(
                     kind=_BindingKind.DYNAMIC_VALUE,
                 ), value)
+
+    def _reconcile_compiled_reassignment(
+        self, name: str, binding: _Binding, value: ast.AST,
+    ) -> _Binding:
+        """Preserve compiled-regex semantics across reassignment.
+
+        If ``name`` was previously bound to a compiled pattern
+        (COMPILED_STATIC_PATTERN or COMPILED_DYNAMIC_PATTERN) and the new
+        binding is a non-compiled dynamic value, promote it to
+        COMPILED_DYNAMIC_PATTERN so subsequent ``name.search()``/etc. still
+        emit a REVIEW instead of being silently ignored as a plain
+        DYNAMIC_VALUE.  The original ``compile_line`` is carried over so
+        the finding can point back at the ``re.compile(...)`` site.
+
+        Augmented assignment (``p += ...``) is treated as a dynamic
+        reassignment of the same target and goes through the same path.
+        """
+        if binding.kind in (
+            _BindingKind.COMPILED_STATIC_PATTERN,
+            _BindingKind.COMPILED_DYNAMIC_PATTERN,
+        ):
+            return binding
+        old = _scope_lookup(self._scope_stack, name)
+        if isinstance(old, _Sentinel):
+            return binding
+        if old.kind in (
+            _BindingKind.COMPILED_STATIC_PATTERN,
+            _BindingKind.COMPILED_DYNAMIC_PATTERN,
+        ) and binding.kind == _BindingKind.DYNAMIC_VALUE:
+            return _Binding(
+                kind=_BindingKind.COMPILED_DYNAMIC_PATTERN,
+                compile_line=old.compile_line,
+            )
+        return binding
 
     def _resolve_assignment_binding(self, value: ast.AST) -> _Binding:
         if isinstance(value, ast.Call):

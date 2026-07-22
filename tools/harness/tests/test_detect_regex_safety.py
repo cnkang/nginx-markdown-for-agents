@@ -946,6 +946,16 @@ class TestBindingInvalidation:
             if f.severity == Severity.ERROR and "compiled" in f.api
         ]
         assert not compiled_errors  # Should NOT still flag with old safe pattern
+        # A REVIEW must be emitted on the compiled-method call line.
+        reviews = [
+            f for f in findings
+            if f.severity == Severity.REVIEW
+            and f.api == "compiled.search"
+            and f.line == 4
+        ]
+        assert len(reviews) == 1
+        assert reviews[0].pattern_source in (PatternSource.DYNAMIC, PatternSource.UNKNOWN)
+        assert reviews[0].compile_line == 2
 
     def test_static_reassignment_to_unknown(self, tmp_path: Path) -> None:
         """PATTERN = r'^safe$' then PATTERN = OTHER → re.search(PATTERN) is REVIEW."""
@@ -1222,10 +1232,10 @@ class TestUnknownReassignmentInvalidation:
 # ---------------------------------------------------------------------------
 
 class TestDynamicCompiledReview:
-    """Test that reassigning a compiled binding does not produce ERROR with stale pattern."""
+    """Test that reassigning a compiled binding emits a REVIEW on use."""
 
     def test_compiled_reassignment_to_dynamic_produces_review(self, tmp_path: Path) -> None:
-        """p = re.compile(safe); p = get_runtime_pattern(); p.search() — no ERROR with old pattern."""
+        """p = re.compile(safe); p = get_runtime_pattern(); p.search() → REVIEW."""
         content = (
             "import re\n"
             "p = re.compile(r'^safe$')\n"
@@ -1239,9 +1249,18 @@ class TestDynamicCompiledReview:
             if f.severity == Severity.ERROR and "compiled" in f.api
         ]
         assert len(compiled_errors) == 0
+        reviews = [
+            f for f in findings
+            if f.severity == Severity.REVIEW
+            and f.api == "compiled.search"
+            and f.line == 4
+        ]
+        assert len(reviews) == 1
+        assert reviews[0].pattern_source in (PatternSource.DYNAMIC, PatternSource.UNKNOWN)
+        assert reviews[0].compile_line == 2
 
     def test_compiled_reassignment_to_attribute_produces_review(self, tmp_path: Path) -> None:
-        """p = re.compile(safe); p = factory.pattern; p.match() — no ERROR with old pattern."""
+        """p = re.compile(safe); p = factory.pattern; p.match() → REVIEW."""
         content = (
             "import re\n"
             "p = re.compile(r'^safe$')\n"
@@ -1255,9 +1274,18 @@ class TestDynamicCompiledReview:
             if f.severity == Severity.ERROR and "compiled" in f.api
         ]
         assert len(compiled_errors) == 0
+        reviews = [
+            f for f in findings
+            if f.severity == Severity.REVIEW
+            and f.api == "compiled.match"
+            and f.line == 4
+        ]
+        assert len(reviews) == 1
+        assert reviews[0].pattern_source in (PatternSource.DYNAMIC, PatternSource.UNKNOWN)
+        assert reviews[0].compile_line == 2
 
     def test_compiled_annotation_reassignment_produces_review(self, tmp_path: Path) -> None:
-        """p = re.compile(safe); p: Pattern = unknown_pattern; p.sub() — no ERROR with old pattern."""
+        """p = re.compile(safe); p: Pattern = unknown_pattern; p.sub() → REVIEW."""
         content = (
             "import re\n"
             "p = re.compile(r'^safe$')\n"
@@ -1271,6 +1299,15 @@ class TestDynamicCompiledReview:
             if f.severity == Severity.ERROR and "compiled" in f.api
         ]
         assert len(compiled_errors) == 0
+        reviews = [
+            f for f in findings
+            if f.severity == Severity.REVIEW
+            and f.api == "compiled.sub"
+            and f.line == 4
+        ]
+        assert len(reviews) == 1
+        assert reviews[0].pattern_source in (PatternSource.DYNAMIC, PatternSource.UNKNOWN)
+        assert reviews[0].compile_line == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1547,3 +1584,175 @@ class TestShellParserImprovements:
         )
         has_error = len(errors) > 0
         assert has_finding or has_error
+
+
+# ---------------------------------------------------------------------------
+# Python AST adversarial — compiled reassignment, lexical delete, eval scope
+# (Section XIII)
+# ---------------------------------------------------------------------------
+
+class TestPythonAstAdversarial:
+    """Adversarial cases for the unified lexical binding model."""
+
+    def test_augassign_compiled_reassignment_produces_review(self, tmp_path: Path) -> None:
+        """p = re.compile(safe); p += something; p.findall() → REVIEW."""
+        content = (
+            "import re\n"
+            "p = re.compile(r'^safe$')\n"
+            "p += something\n"
+            "p.findall('data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        reviews = [
+            f for f in findings
+            if f.severity == Severity.REVIEW
+            and f.api == "compiled.findall"
+            and f.line == 4
+        ]
+        assert len(reviews) == 1
+        assert reviews[0].pattern_source in (PatternSource.DYNAMIC, PatternSource.UNKNOWN)
+        assert reviews[0].compile_line == 2
+
+    def test_function_local_del_preserves_module_error(self, tmp_path: Path) -> None:
+        """del p inside a function must not delete the module-level compiled p."""
+        content = (
+            "import re\n"
+            "p = re.compile(r'(a+)+$')\n"
+            "def cleanup():\n"
+            "    del p\n"
+            "p.search('data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        compiled_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and "compiled" in f.api and f.line == 5
+        ]
+        assert len(compiled_errors) == 1
+
+    def test_module_level_del_removes_binding(self, tmp_path: Path) -> None:
+        """del p at module scope removes the binding; later use is not ERROR."""
+        content = (
+            "import re\n"
+            "p = re.compile(r'(a+)+$')\n"
+            "del p\n"
+            "re.search(p, 'data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        compiled_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and f.line == 4
+        ]
+        assert len(compiled_errors) == 0
+
+    def test_function_local_del_shadows_outer_binding(self, tmp_path: Path) -> None:
+        """compile + del inside a function; the post-del call must not use it."""
+        content = (
+            "import re\n"
+            "def f():\n"
+            "    p = re.compile(r'(a+)+$')\n"
+            "    del p\n"
+            "    p.search('data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        # The compile call at line 3 is still an ERROR; the post-del call is not.
+        compile_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and f.api == "compile" and f.line == 3
+        ]
+        assert len(compile_errors) == 1
+        post_call_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and f.line == 5
+        ]
+        assert len(post_call_errors) == 0
+
+    def test_default_positional_argument_regex(self, tmp_path: Path) -> None:
+        """def f(pattern=re.compile(r'(a+)+$')) → ERROR on the default."""
+        content = (
+            "import re\n"
+            "def parse(pattern=re.compile(r'(a+)+$')):\n"
+            "    pass\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR and f.line == 2]
+        assert len(errors_found) == 1
+
+    def test_default_kwonly_argument_regex(self, tmp_path: Path) -> None:
+        """def f(*, pattern=re.compile(r'(a+)+$')) → ERROR on the default."""
+        content = (
+            "import re\n"
+            "def parse(*, pattern=re.compile(r'(a+)+$')):\n"
+            "    pass\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR and f.line == 2]
+        assert len(errors_found) == 1
+
+    def test_async_function_default_argument_regex(self, tmp_path: Path) -> None:
+        """async def f(pattern=re.compile(r'(a+)+$')) → ERROR on the default."""
+        content = (
+            "import re\n"
+            "async def parse(pattern=re.compile(r'(a+)+$')):\n"
+            "    pass\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR and f.line == 2]
+        assert len(errors_found) == 1
+
+    def test_lambda_default_argument_regex(self, tmp_path: Path) -> None:
+        """lambda pattern=re.compile(r'(a+)+$'): None → ERROR on the default."""
+        content = (
+            "import re\n"
+            "handler = lambda pattern=re.compile(r'(a+)+$'): None\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR and f.line == 2]
+        assert len(errors_found) == 1
+
+    def test_decorator_regex(self, tmp_path: Path) -> None:
+        """@decorator(re.compile(r'(a+)+$')) → ERROR in the enclosing scope."""
+        content = (
+            "import re\n"
+            "@decorator(re.compile(r'(a+)+$'))\n"
+            "def f():\n"
+            "    pass\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR and f.line == 2]
+        assert len(errors_found) == 1
+
+    def test_default_evaluated_before_parameter_shadow(self, tmp_path: Path) -> None:
+        """def f(re=re.compile(r'(a+)+$')) → the default ``re`` is the module."""
+        content = (
+            "import re\n"
+            "def f(re=re.compile(r'(a+)+$')):\n"
+            "    pass\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR and f.line == 2]
+        assert len(errors_found) == 1
+
+    def test_decorator_uses_enclosing_function_scope(self, tmp_path: Path) -> None:
+        """decorator's ``re`` resolves to the enclosing function parameter."""
+        content = (
+            "import re\n"
+            "def f(re):\n"
+            "    @decorator(re.compile(r'(a+)+$'))\n"
+            "    def inner():\n"
+            "        pass\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        # ``re`` is shadowed by the parameter → not the module alias → no ERROR.
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 0
