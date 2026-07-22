@@ -177,14 +177,14 @@
       "commands": [
         "make regex-security-check"
       ],
-      "notes": "AST-based ReDoS and regex safety detection for Python and shell. Runs detect_regex_safety.py --strict plus unit and shell tests. Keyword-argument support, static constant propagation, re.escape segment classification, shell command-aware pattern extraction, --strict/--fail-on-review CLI contract. See docs/harness/rules/parser-regex.md."
+      "notes": "AST-based ReDoS and regex safety detection for Python and shell. Runs detect_regex_safety.py --strict plus unit and shell tests. Scope-aware binding model (LEGB lookup, lexical del, compiled-pattern reassignment to COMPILED_DYNAMIC_PATTERN, function/lambda default+decorator evaluation scope). Shell engine resolution separates PCRE flags from pattern-bearing options (grep/rg -e without -P is NOT PCRE); boolean/required-value/unknown option contracts; pattern-file resolution relative to script dir with repo-root boundary validation and encoding/read errors. --strict/--fail-on-review CLI contract. See docs/harness/rules/parser-regex.md."
     },
     "e2e-streaming-config": {
       "phase": "cheap-blocker",
       "commands": [
         "make e2e-streaming-config-check"
       ],
-      "notes": "Block-aware detection of contradictory E2E streaming config (Rule 60): locations with markdown_cache_validation full must have explicit markdown_streaming. Comment-masked brace parsing, direct-depth nested-location isolation, fail-closed scan errors. See docs/harness/rules/e2e-runner.md."
+      "notes": "Block-aware detection of contradictory E2E streaming config (Rule 60): locations with markdown_cache_validation full must have explicit markdown_streaming. Comment-masked brace parsing, direct-depth nested-location isolation, fail-closed scan errors. Deterministic heredoc opener scanner (skips comments/quotes), << / <<- closing rules, unterminated quote detection, Rust raw/ordinary string unified scanning. See docs/harness/rules/e2e-runner.md."
     },
     "sonar-encoding": {
       "phase": "cheap-blocker",
