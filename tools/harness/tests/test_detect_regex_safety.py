@@ -25,8 +25,6 @@ from harness.detect_regex_safety import (  # noqa: E402
     Severity,
     PatternSource,
     Engine,
-    _BindingKind,
-    _Binding,
     _check_nested_quantifier,
     _check_adjacent_overlapping_quantifiers,
     _check_backreference_after_dotstar,
