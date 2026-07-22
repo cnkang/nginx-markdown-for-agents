@@ -66,15 +66,7 @@ _RE_INTENTIONAL_COMMENT = re.compile(
     r"bypass(?:es?)?\s+streaming)",
     re.IGNORECASE,
 )
-# Location block start (applied to comment-masked structural text).  Use
-# [ \t]* rather than \s* so the leading-whitespace match does not span
-# newlines (which would make match.start() point at an earlier line and
-# break line-number accounting).
-# Supports modifiers: location = /path {, location ^~ /prefix/ {,
-# location ~ \.html$ {, location ~* \.(png|jpg)$ {, location @named {
-_RE_LOCATION_START = re.compile(
-    r"^[ \t]*location\s+(?:(?:=|~\*?|\^~)\s+)?([^\s{]+)\s*\{", re.MULTILINE
-)
+
 
 
 @dataclass
@@ -229,23 +221,159 @@ class _LocationBlock:
     line_number: int  # 1-based line of the location directive
 
 
+def _scan_location_headers(
+    masked: str,
+) -> tuple[list[tuple[str, int, int]], list[ScanError]]:
+    """Scan comment-masked text for nginx location headers.
+
+    Returns list of (loc_path, brace_offset, line_number) tuples and errors.
+    Uses a deterministic character scanner instead of regex to correctly
+    handle quoted regex locations with spaces and regex quantifier braces.
+    """
+    results: list[tuple[str, int, int]] = []
+    errors: list[ScanError] = []
+    i = 0
+    n = len(masked)
+    while i < n:
+        line_start = masked.rfind("\n", 0, i) + 1
+        line_num = masked[:i].count("\n") + 1
+        if not masked[line_start:i].strip() and masked[i:i + 8] == "location":
+            after = i + 8
+            if after < n and (masked[after].isalnum() or masked[after] == "_"):
+                i = after
+                continue
+            if i > line_start and masked[i - 1].isalnum():
+                i += 1
+                continue
+            loc_path, brace_off, new_i, scan_err = _parse_location_header(
+                masked, after, n, line_num,
+            )
+            if scan_err is not None:
+                errors.append(scan_err)
+                i = new_i if new_i > i else i + 1
+                continue
+            if loc_path is not None and brace_off is not None:
+                results.append((loc_path, brace_off, line_num))
+            i = new_i if new_i > i else i + 1
+            continue
+        i += 1
+    return results, errors
+
+
+def _parse_location_header(
+    masked: str, pos: int, n: int, line_num: int,
+) -> tuple[str | None, int | None, int, ScanError | None]:
+    """Parse a single location header starting after the 'location' keyword.
+
+    Returns (loc_path, brace_offset, new_pos, error).
+    """
+    i = pos
+    while i < n and masked[i] in " \t":
+        i += 1
+    if i >= n:
+        return None, None, i, ScanError(
+            file_path="", line=line_num,
+            message="location directive missing argument",
+        )
+    modifier = None
+    if masked[i] == "=":
+        modifier = "="
+        i += 1
+        while i < n and masked[i] in " \t":
+            i += 1
+    elif masked[i] == "^" and i + 1 < n and masked[i + 1] == "~":
+        modifier = "^~"
+        i += 2
+        while i < n and masked[i] in " \t":
+            i += 1
+    elif masked[i] == "~":
+        i += 1
+        if i < n and masked[i] == "*":
+            modifier = "~*"
+            i += 1
+        else:
+            modifier = "~"
+        while i < n and masked[i] in " \t":
+            i += 1
+    elif masked[i] == "@":
+        pass
+    if i >= n:
+        return None, None, i, ScanError(
+            file_path="", line=line_num,
+            message="location directive missing path after modifier",
+        )
+    is_regex = modifier in ("~", "~*")
+    loc_path, i, quote_err = _read_location_path(masked, i, n, is_regex)
+    if quote_err is not None:
+        return None, None, i, quote_err
+    if not loc_path:
+        return None, None, i, ScanError(
+            file_path="", line=line_num,
+            message="location directive missing argument",
+        )
+    while i < n and masked[i] in " \t":
+        i += 1
+    if i >= n or masked[i] != "{":
+        return None, None, i, ScanError(
+            file_path="", line=line_num,
+            message=f"location {loc_path} missing opening brace",
+        )
+    brace_off = i + 1
+    return loc_path, brace_off, i + 1, None
+
+
+def _read_location_path(
+    masked: str, i: int, n: int, is_regex: bool,
+) -> tuple[str, int, ScanError | None]:
+    """Read the location path/regex token.
+
+    Handles quoted and unquoted forms.  For regex locations, skips
+    ``{m,n}`` quantifier braces inside the path.
+    """
+    if i >= n:
+        return "", i, None
+    if masked[i] in ('"', "'"):
+        quote_char = masked[i]
+        i += 1
+        start = i
+        while i < n and masked[i] != quote_char:
+            if masked[i] == "\\" and i + 1 < n:
+                i += 2
+                continue
+            i += 1
+        if i >= n:
+            return "", i, ScanError(
+                file_path="", line=0,
+                message="unterminated quoted location path",
+            )
+        path = masked[start:i]
+        i += 1
+        return path, i, None
+    start = i
+    while i < n and masked[i] not in " \t\n{":
+        if is_regex and masked[i] == "{":
+            j = i + 1
+            while j < n and masked[j] in "0123456789,":
+                j += 1
+            if j < n and masked[j] == "}":
+                i = j + 1
+                continue
+        if masked[i] == "\\" and i + 1 < n:
+            i += 2
+            continue
+        i += 1
+    return masked[start:i], i, None
+
+
 def _extract_location_blocks(
     text: str, masked: str,
 ) -> tuple[list[_LocationBlock], list[ScanError]]:
-    """Extract location blocks from nginx config text.
-
-    ``text`` is the original config text (used for offset→content mapping).
-    ``masked`` is the comment-masked version (used for structural scanning).
-
-    Returns (blocks, errors).  Unmatched opening braces produce ScanErrors.
-    """
     blocks: list[_LocationBlock] = []
     errors: list[ScanError] = []
-    for match in _RE_LOCATION_START.finditer(masked):
-        loc_path = match.group(1)
-        # Compute the 1-based line number from the masked text offset.
-        line_num = masked[: match.start()].count("\n") + 1
-        end_pos = _find_matching_brace(masked, match.end())
+    headers, header_errors = _scan_location_headers(masked)
+    errors.extend(header_errors)
+    for loc_path, brace_offset, line_num in headers:
+        end_pos = _find_matching_brace(masked, brace_offset)
         if end_pos < 0:
             errors.append(ScanError(
                 file_path="", line=line_num,
@@ -255,9 +383,7 @@ def _extract_location_blocks(
                 ),
             ))
             continue
-        # Map masked offsets back to original-text offsets.  Because masking
-        # preserves lengths and offsets, masked offsets == original offsets.
-        content_start = match.end()
+        content_start = brace_offset
         content_end = end_pos - 1
         blocks.append(_LocationBlock(
             path=loc_path,
@@ -325,7 +451,7 @@ def _extract_nginx_from_rust(
     # newlines.  Use a manual scanner that respects ``\"`` escapes so the
     # string can span multiple physical lines (Rust line-continuation with
     # a trailing backslash-newline is part of the literal).
-    configs.extend(_extract_rust_escaped_strings(content))
+    configs.extend(_extract_rust_escaped_strings(content, errors))
     return configs, errors
 
 
@@ -485,18 +611,16 @@ def _skip_rust_block_comment(content: str, i: int, n: int) -> int:
 
 
 def _extract_rust_escaped_strings(
-    content: str,
+    content: str, errors: list[ScanError] | None = None,
 ) -> list[tuple[str, int]]:
-    """Extract nginx config from Rust ``\"...\"`` string literals.
-
-    Rust escaped string literals are only interesting here when they span
-    physical lines via ``\\n`` continuations.  Extracted bodies are
-    unescaped and then passed through nginx-config analysis.
-    """
     configs: list[tuple[str, int]] = []
     i = 0
     n = len(content)
     while i < n:
+        skip_end = _try_skip_rust_comment(content, i, n)
+        if skip_end > i:
+            i = skip_end
+            continue
         if content[i] != '"':
             i += 1
             continue
@@ -504,6 +628,11 @@ def _extract_rust_escaped_strings(
         base_line = content[:start].count("\n") + 1
         j, raw = _scan_rust_string(content, i, n)
         if j <= start:
+            if errors is not None and j == start:
+                errors.append(ScanError(
+                    file_path="", line=base_line,
+                    message="unterminated Rust string literal",
+                ))
             i += 1
             continue
         i = j
@@ -615,7 +744,7 @@ def _extract_nginx_from_shell(
     errors: list[ScanError] = []
     # Two-phase heredoc extraction to avoid super-linear backtracking (S8786):
     # nosec:regex-safety -- bounded heredoc opener, deterministic delimiter.
-    heredoc_open_re = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?\s*\n")
+    heredoc_open_re = re.compile(r"<<-?\s*['\"]?([A-Za-z0-9_.-]+)['\"]?\s*\n")
     found_heredoc = False
     for m in heredoc_open_re.finditer(content):
         delimiter = m.group(1)
@@ -712,7 +841,13 @@ def scan_file(
         rel_path = str(file_path)
 
     try:
-        content = file_path.read_text(encoding="utf-8", errors="replace")
+        content = file_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        errors.append(ScanError(
+            file_path=rel_path, line=0,
+            message=f"file is not valid UTF-8: byte {e.start}: {e.reason}",
+        ))
+        return findings, errors
     except OSError as e:
         errors.append(ScanError(
             file_path=rel_path, line=0,
@@ -745,12 +880,52 @@ def _extract_config_sections(
     return [(content, 1)], []
 
 
+def _validate_config_structure(text: str, masked: str) -> list[ScanError]:
+    errors: list[ScanError] = []
+    depth = 0
+    i = 0
+    n = len(masked)
+    while i < n:
+        ch = masked[i]
+        if ch in ('"', "'"):
+            end = _skip_quoted_string(masked, i)
+            i = end
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth < 0:
+                line_num = masked[:i].count("\n") + 1
+                errors.append(ScanError(
+                    file_path="", line=line_num,
+                    message="unmatched closing brace (no matching '{')",
+                ))
+                depth = 0
+        i += 1
+    if depth > 0:
+        errors.append(ScanError(
+            file_path="", line=0,
+            message=f"unmatched opening brace(s): {depth} unclosed '{{'",
+        ))
+    return errors
+
+
 def _scan_config_section(
     config_text: str, base_line: int, rel_path: str,
 ) -> tuple[list[Finding], list[ScanError]]:
     findings: list[Finding] = []
     errors: list[ScanError] = []
     masked = _mask_nginx_comments(config_text)
+    struct_errors = _validate_config_structure(config_text, masked)
+    errors.extend(
+        ScanError(
+            file_path=rel_path,
+            line=base_line + se.line - 1 if se.line else 0,
+            message=se.message,
+        )
+        for se in struct_errors
+    )
     blocks, block_errors = _extract_location_blocks(config_text, masked)
     errors.extend(
         ScanError(
