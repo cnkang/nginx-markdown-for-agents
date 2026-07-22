@@ -119,7 +119,7 @@ class TestCheckerCLI:
         manifest.write_text("{}", encoding="utf-8")
         result = run_checker("--manifest", str(manifest))
         assert result.returncode == 2
-        assert "within the repository" in result.stderr
+        assert "repository-relative" in result.stderr
 
     def test_unknown_option_exits_nonzero(self) -> None:
         result = run_checker("--bogus-flag")
@@ -141,7 +141,17 @@ class TestCheckerAdversarialInputs:
             manifest = tmp_path / "manifest.json"
             manifest.write_text(json.dumps(payload), encoding="utf-8")
             with pytest.raises(RuntimeError):
-                checker._load_manifest(manifest)
+                checker._load_manifest(Path("manifest.json"))
+
+    def test_resolve_repository_path_rejects_absolute_and_parent_paths(
+        self, tmp_path: Path
+    ) -> None:
+        checker = load_checker_module()
+        checker.REPO_ROOT = tmp_path
+
+        for path in (tmp_path / "manifest.json", Path("nested/../manifest.json")):
+            with pytest.raises(RuntimeError, match="repository-relative"):
+                checker._resolve_repository_path(path, "Test path")
 
     def test_manifest_symlink_outside_repository_is_rejected(self, tmp_path: Path) -> None:
         checker = load_checker_module()
@@ -151,7 +161,7 @@ class TestCheckerAdversarialInputs:
         manifest = tmp_path / "manifest.json"
         manifest.symlink_to(outside)
         with pytest.raises(RuntimeError, match="within the repository"):
-            checker._load_manifest(manifest)
+            checker._load_manifest(Path("manifest.json"))
 
     def test_extensionless_file_root_and_nul_are_checked(self, tmp_path: Path) -> None:
         checker = load_checker_module()

@@ -61,12 +61,14 @@ SKIP_DIR_PARTS: frozenset[str] = frozenset({
 })
 
 REPO_ROOT: Path = Path(__file__).resolve().parents[2]
-DEFAULT_MANIFEST: Path = REPO_ROOT / "tools" / "sonar" / "encoding_exceptions.json"
+DEFAULT_MANIFEST: Path = Path("tools/sonar/encoding_exceptions.json")
 
 
 def _resolve_repository_path(path: Path, description: str) -> Path:
     """Resolve ``path`` and reject paths outside the repository before use."""
-    candidate = path if path.is_absolute() else REPO_ROOT / path
+    if path.is_absolute() or ".." in path.parts:
+        raise RuntimeError(f"{description} must be repository-relative: {path}")
+    candidate = REPO_ROOT / path
     resolved = candidate.resolve()
     if not resolved.is_relative_to(REPO_ROOT.resolve()):
         raise RuntimeError(f"{description} must remain within the repository: {path}")
