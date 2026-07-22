@@ -20,6 +20,8 @@ from harness.detect_e2e_streaming_config import (  # noqa: E402
     Finding,
     ScanError,
     _extract_direct_depth_block,
+    _extract_nginx_from_rust,
+    _extract_nginx_from_shell,
     _extract_location_blocks,
     _mask_nginx_comments,
     _LocationBlock,
@@ -803,3 +805,317 @@ class TestStructureValidation:
         }
         findings, errors = _scan(files, tmp_path)
         assert any("unmatched opening brace" in e.message for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Quote structure / heredoc / Rust literal adversarial (Section XIII)
+# ---------------------------------------------------------------------------
+
+class TestUnterminatedQuote:
+    """Unterminated nginx quoted strings produce a single root ScanError."""
+
+    def test_unterminated_double_quote(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "http {\n"
+                '    set $value "unterminated;\n'
+                "    location /test {\n"
+                "        markdown_cache_validation full;\n"
+                "    }\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        quote_errs = [e for e in errors if "unterminated quoted string" in e.message]
+        assert len(quote_errs) == 1
+
+    def test_unterminated_single_quote(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "http {\n"
+                "    location /test {\n"
+                "        markdown_cache_validation full;\n"
+                "        set $value 'unterminated;\n"
+                "    }\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        quote_errs = [e for e in errors if "unterminated quoted string" in e.message]
+        assert len(quote_errs) == 1
+
+    def test_escaped_quote_closes_correctly(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "http {\n"
+                '    set $value "escaped quote: \\"";\n'
+                "    location /test/ {\n"
+                "        markdown_cache_validation full;\n"
+                "    }\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not [e for e in errors if "unterminated" in e.message.lower()]
+        assert any(f.loc_path == "/test/" for f in findings)
+
+    def test_quote_containing_braces(self, tmp_path: Path) -> None:
+        """Braces inside a quoted string must not affect depth."""
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "http {\n"
+                '    set $value "{";\n'
+                "    location /test/ {\n"
+                "        markdown_cache_validation full;\n"
+                "    }\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not [e for e in errors if "unmatched" in e.message.lower()]
+        assert any(f.loc_path == "/test/" for f in findings)
+
+
+class TestHeredocOpenerScanner:
+    """Deterministic heredoc opener skips comments and quoted strings."""
+
+    def _extract(self, content: str) -> tuple[list, list]:
+        return _extract_nginx_from_shell(content, "t.sh")
+
+    def test_commented_fake_opener_ignored(self) -> None:
+        """# cat <<EOF must not open a heredoc."""
+        content = (
+            "# cat <<'EOF'\n"
+            "location /fake/ {\n"
+            "    markdown_cache_validation full;\n"
+            "}\n"
+            "EOF\n"
+        )
+        configs, errors = self._extract(content)
+        assert not errors  # no unterminated heredoc
+
+    def test_single_quoted_fake_opener_ignored(self) -> None:
+        """echo '<<EOF' must not open a heredoc."""
+        content = (
+            "echo '<<EOF'\n"
+            "cat <<EOF\n"
+            "location /real/ {\n"
+            "    markdown_cache_validation full;\n"
+            "}\n"
+            "EOF\n"
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        assert any("location" in c[0] and "/real/" in c[0] for c in configs)
+
+    def test_double_quoted_fake_opener_ignored(self) -> None:
+        """echo \"<<EOF\" must not open a heredoc."""
+        content = (
+            'echo "<<EOF"\n'
+            "cat <<EOF\n"
+            "location /real/ {\n"
+            "    markdown_cache_validation full;\n"
+            "}\n"
+            "EOF\n"
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        assert any("/real/" in c[0] for c in configs)
+
+    def test_quoted_delimiter(self) -> None:
+        """cat <<'NGINX-CONF' with matching close."""
+        content = (
+            "cat <<'NGINX-CONF'\n"
+            "location /q/ {\n"
+            "    markdown_cache_validation full;\n"
+            "}\n"
+            "NGINX-CONF\n"
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        assert any("/q/" in c[0] for c in configs)
+
+    def test_hyphen_strip_tabs_close(self) -> None:
+        """cat <<-EOF closes after leading tabs only."""
+        content = (
+            "cat <<-EOF\n"
+            "location /t/ {\n"
+            "    markdown_cache_validation full;\n"
+            "}\n"
+            "\tEOF\n"
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        assert any("/t/" in c[0] for c in configs)
+
+    def test_hyphen_space_close_rejected(self) -> None:
+        """cat <<-EOF with a space-indented close is rejected (tabs only)."""
+        content = (
+            "cat <<-EOF\n"
+            "location /t/ {\n"
+            "    markdown_cache_validation full;\n"
+            "}\n"
+            "    EOF\n"
+        )
+        configs, errors = self._extract(content)
+        assert any("unterminated" in e.message.lower() for e in errors)
+
+    def test_no_strip_space_close_rejected(self) -> None:
+        """cat <<EOF requires the close at column 0 (no leading space)."""
+        content = (
+            "cat <<EOF\n"
+            "location /t/ {\n"
+            "    markdown_cache_validation full;\n"
+            "}\n"
+            " EOF\n"
+        )
+        configs, errors = self._extract(content)
+        assert any("unterminated" in e.message.lower() for e in errors)
+
+    def test_body_contains_fake_opener_text(self) -> None:
+        """Heredoc body containing <<FAKE text does not open a new heredoc."""
+        content = (
+            "cat <<EOF\n"
+            "body has <<FAKE here\n"
+            "location /t/ {\n"
+            "    markdown_cache_validation full;\n"
+            "}\n"
+            "EOF\n"
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        assert any("/t/" in c[0] for c in configs)
+
+    def test_multiple_heredocs(self) -> None:
+        """Two sequential heredocs are both extracted."""
+        content = (
+            "cat <<EOF1\n"
+            "location /a/ {\n"
+            "    markdown_cache_validation full;\n"
+            "}\n"
+            "EOF1\n"
+            "cat <<EOF2\n"
+            "location /b/ {\n"
+            "    markdown_cache_validation full;\n"
+            "}\n"
+            "EOF2\n"
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        bodies = "".join(c[0] for c in configs)
+        assert "/a/" in bodies
+        assert "/b/" in bodies
+
+    def test_unterminated_heredoc_reports_error(self) -> None:
+        content = (
+            "cat <<EOF\n"
+            "location /t/ {\n"
+            "    markdown_cache_validation full;\n"
+            "}\n"
+        )
+        configs, errors = self._extract(content)
+        assert any("unterminated" in e.message.lower() for e in errors)
+
+
+class TestRustLiteralScanner:
+    """Rust raw/ordinary string and char literal handling."""
+
+    def _extract(self, content: str) -> tuple[list, list]:
+        return _extract_nginx_from_rust(content, "t.rs")
+
+    def test_raw_string_with_ordinary_quotes(self) -> None:
+        """Quotes inside a raw string are not re-scanned by the ordinary scanner."""
+        content = (
+            'let config = r#"\n'
+            "location /test/ {\n"
+            '    set $value "{";\n'
+            "    markdown_cache_validation full;\n"
+            "}\n"
+            '"#;\n'
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        assert any("/test/" in c[0] for c in configs)
+
+    def test_raw_string_followed_by_ordinary(self) -> None:
+        """A raw string followed by an ordinary config string extracts the ordinary one."""
+        content = (
+            'let a = r#"raw"#;\n'
+            'let b = "location /ord/ {\\n'
+            "    markdown_cache_validation full;\\n"
+            '}"\n'
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        assert any("/ord/" in c[0] for c in configs)
+
+    def test_ordinary_before_raw(self) -> None:
+        """An ordinary config string before a raw string extracts the ordinary one."""
+        content = (
+            'let b = "location /ord/ {\\n'
+            "    markdown_cache_validation full;\\n"
+            '}";\n'
+            'let a = r#"raw"#;\n'
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        assert any("/ord/" in c[0] for c in configs)
+
+    def test_char_literal_quote_not_string(self) -> None:
+        """A char literal '\"' must not be mistaken for an ordinary string."""
+        content = (
+            "let quote = '\"';\n"
+            'let b = "location /ord/ {\\n'
+            "    markdown_cache_validation full;\\n"
+            '}";\n'
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        assert any("/ord/" in c[0] for c in configs)
+
+    def test_byte_char_literal_quote_not_string(self) -> None:
+        """A byte-char literal b'\"' must not be mistaken for an ordinary string."""
+        content = (
+            "let bq = b'\"';\n"
+            'let b = "location /ord/ {\\n'
+            "    markdown_cache_validation full;\\n"
+            '}";\n'
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        assert any("/ord/" in c[0] for c in configs)
+
+    def test_nested_block_comment_with_raw(self) -> None:
+        """A raw string inside a block comment is not scanned."""
+        content = (
+            '/* r"location /fake/ { markdown_cache_validation full; }" */\n'
+            'let b = "location /real/ {\\n'
+            "    markdown_cache_validation full;\\n"
+            '}";\n'
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        assert any("/real/" in c[0] for c in configs)
+        assert not any("/fake/" in c[0] for c in configs)
+
+    def test_unterminated_raw_string_reports_error(self) -> None:
+        content = 'let a = r##"unterminated\n'
+        configs, errors = self._extract(content)
+        assert any("unterminated" in e.message.lower() for e in errors)
+
+    def test_unterminated_ordinary_string_reports_error(self) -> None:
+        content = 'let a = "location /bad/ { markdown_cache_validation full;\n}\n'
+        configs, errors = self._extract(content)
+        assert any("unterminated" in e.message.lower() for e in errors)
