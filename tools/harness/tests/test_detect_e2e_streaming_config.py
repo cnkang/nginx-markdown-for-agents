@@ -851,40 +851,41 @@ class TestUnterminatedQuote:
         assert len(quote_errs) == 1
 
     def test_escaped_quote_closes_correctly(self, tmp_path: Path) -> None:
-        files = {
-            "tools/e2e/test.sh": (
-                "#!/usr/bin/env bash\n"
-                "cat <<'EOF' > /tmp/nginx.conf\n"
-                "http {\n"
-                '    set $value "escaped quote: \\"";\n'
-                "    location /test/ {\n"
-                "        markdown_cache_validation full;\n"
-                "    }\n"
-                "}\n"
-                "EOF\n"
-            ),
-        }
-        findings, errors = _scan(files, tmp_path)
-        assert not [e for e in errors if "unterminated" in e.message.lower()]
-        assert any(f.loc_path == "/test/" for f in findings)
+        self._extracted_from_test_quote_containing_braces_2(
+            "#!/usr/bin/env bash\n"
+            "cat <<'EOF' > /tmp/nginx.conf\n"
+            "http {\n"
+            '    set $value "escaped quote: \\"";\n'
+            "    location /test/ {\n"
+            "        markdown_cache_validation full;\n"
+            "    }\n"
+            "}\n"
+            "EOF\n",
+            tmp_path,
+            "unterminated",
+        )
 
     def test_quote_containing_braces(self, tmp_path: Path) -> None:
         """Braces inside a quoted string must not affect depth."""
-        files = {
-            "tools/e2e/test.sh": (
-                "#!/usr/bin/env bash\n"
-                "cat <<'EOF' > /tmp/nginx.conf\n"
-                "http {\n"
-                '    set $value "{";\n'
-                "    location /test/ {\n"
-                "        markdown_cache_validation full;\n"
-                "    }\n"
-                "}\n"
-                "EOF\n"
-            ),
-        }
+        self._extracted_from_test_quote_containing_braces_2(
+            "#!/usr/bin/env bash\n"
+            "cat <<'EOF' > /tmp/nginx.conf\n"
+            "http {\n"
+            '    set $value "{";\n'
+            "    location /test/ {\n"
+            "        markdown_cache_validation full;\n"
+            "    }\n"
+            "}\n"
+            "EOF\n",
+            tmp_path,
+            "unmatched",
+        )
+
+    # TODO Rename this here and in `test_escaped_quote_closes_correctly` and `test_quote_containing_braces`
+    def _extracted_from_test_quote_containing_braces_2(self, arg0, tmp_path, arg2):
+        files = {"tools/e2e/test.sh": arg0}
         findings, errors = _scan(files, tmp_path)
-        assert not [e for e in errors if "unmatched" in e.message.lower()]
+        assert not [e for e in errors if arg2 in e.message.lower()]
         assert any(f.loc_path == "/test/" for f in findings)
 
 
@@ -905,6 +906,20 @@ class TestHeredocOpenerScanner:
         )
         configs, errors = self._extract(content)
         assert not errors  # no unterminated heredoc
+
+    def test_here_string_is_not_a_heredoc(self) -> None:
+        """Bash ``<<<`` input must not be parsed as a heredoc opener."""
+        content = (
+            "IFS=',' read -r -a tokens <<< \"${header_value}\"\n"
+            "cat <<EOF\n"
+            "location /real/ {\n"
+            "    markdown_cache_validation full;\n"
+            "}\n"
+            "EOF\n"
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        assert any("/real/" in config for config, _ in configs)
 
     def test_single_quoted_fake_opener_ignored(self) -> None:
         """echo '<<EOF' must not open a heredoc."""
@@ -1097,6 +1112,20 @@ class TestRustLiteralScanner:
         assert not errors
         assert any("/ord/" in c[0] for c in configs)
 
+    def test_lifetime_before_ordinary_string(self) -> None:
+        """A Rust lifetime must not hide a later ordinary config string."""
+        content = (
+            "fn config() -> &'static str {\n"
+            '    let cfg = "location /lifetime/ {\\n'
+            "        markdown_cache_validation full;\\n"
+            '    }";\n'
+            "    cfg\n"
+            "}\n"
+        )
+        configs, errors = self._extract(content)
+        assert not errors
+        assert any("/lifetime/" in config for config, _ in configs)
+
     def test_nested_block_comment_with_raw(self) -> None:
         """A raw string inside a block comment is not scanned."""
         content = (
@@ -1108,7 +1137,7 @@ class TestRustLiteralScanner:
         configs, errors = self._extract(content)
         assert not errors
         assert any("/real/" in c[0] for c in configs)
-        assert not any("/fake/" in c[0] for c in configs)
+        assert all("/fake/" not in c[0] for c in configs)
 
     def test_unterminated_raw_string_reports_error(self) -> None:
         content = 'let a = r##"unterminated\n'

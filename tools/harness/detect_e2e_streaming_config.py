@@ -188,9 +188,7 @@ def _skip_quoted_string(text: str, pos: int) -> tuple[int, bool]:
         if text[i] == "\\":
             i += 1
         i += 1
-    if i < n:
-        return i + 1, True
-    return n, False
+    return (i + 1, True) if i < n else (n, False)
 
 
 def _find_matching_brace(text: str, start_pos: int) -> int:
@@ -724,29 +722,45 @@ def _advance_past_skippable(content: str, i: int, n: int) -> int:
 
 def _is_rust_char_literal(content: str, i: int, n: int) -> bool:
     """Return True if a char/byte-char literal starts at position i."""
+    return _rust_char_literal_end(content, i, n) is not None
+
+
+def _rust_char_literal_end(content: str, i: int, n: int) -> int | None:
+    """Return the end of a Rust char literal, excluding lifetime syntax."""
     pos = i
     if pos < n and content[pos] == 'b':
         pos += 1
-    if pos < n and content[pos] == "'":
-        return True
-    return False
+    if pos >= n or content[pos] != "'":
+        return None
+    pos += 1
+    if pos >= n or content[pos] in ("'", "\n", "\r"):
+        return None
+    pos = _skip_rust_escape_sequence(content, pos, n)
+    if pos is None:
+        return None
+    return None if pos >= n or content[pos] != "'" else pos + 1
+
+
+def _skip_rust_escape_sequence(
+    content: str, pos: int, n: int,
+) -> int | None:
+    """Skip a Rust char escape sequence. Returns next position or None."""
+    if content[pos] != "\\":
+        return pos + 1
+    if pos + 1 >= n:
+        return None
+    if content[pos + 1] == "x":
+        return pos + 4
+    if content[pos + 1] == "u" and pos + 2 < n \
+            and content[pos + 2] == "{":
+        close = content.find("}", pos + 3)
+        return None if close < 0 else close + 1
+    return pos + 2
 
 
 def _skip_rust_char_literal(content: str, i: int, n: int) -> int:
     """Skip a Rust char or byte-char literal starting at i. Returns next index."""
-    pos = i
-    if pos < n and content[pos] == 'b':
-        pos += 1
-    # pos points at the opening quote.
-    if pos >= n or content[pos] != "'":
-        return i + 1
-    pos += 1
-    while pos < n and content[pos] != "'":
-        if content[pos] == "\\" and pos + 1 < n:
-            pos += 2
-            continue
-        pos += 1
-    return pos + 1 if pos < n else pos
+    return _rust_char_literal_end(content, i, n) or i + 1
 
 
 def _process_rust_escaped_string(
@@ -974,7 +988,8 @@ def _handle_unquoted_char(
     if ch == "#":
         return n, False, False, None
     if ch == "<" and i + 1 < n and line[i + 1] == "<":
-        return i, False, False, _parse_heredoc_operator(line, i, line_num)
+        result = _parse_heredoc_operator(line, i, line_num)
+        return (i if result is not None else i + 2), False, False, result
     return i + 1, False, False, None
 
 
@@ -986,9 +1001,7 @@ def _advance_quoted_char(
     if in_single:
         return i + 1, (ch != "'"), False
     # in_double
-    if ch == "\\":
-        return i + 2, False, True
-    return i + 1, False, (ch != '"')
+    return (i + 2, False, True) if ch == "\\" else (i + 1, False, ch != '"')
 
 
 def _parse_heredoc_operator(
@@ -1009,14 +1022,12 @@ def _parse_heredoc_operator(
     start = j
     while j < len(line) and _is_delimiter_char(line[j], quote_char):
         j += 1
-    delimiter = line[start:j]
-    if not delimiter:
+    if delimiter := line[start:j]:
+        return (
+            (delimiter, strip_tabs, line_num) if _delimiter_quote_closed(line, j, quote_char) else None
+        )
+    else:
         return None
-    if not _delimiter_quote_closed(line, j, quote_char):
-        return None
-    # A trailing redirection target or redirection (>file) is fine; the
-    # delimiter has been captured.  Return the 1-based line number.
-    return delimiter, strip_tabs, line_num
 
 
 def _read_optional_delimiter_quote(line: str, j: int) -> tuple[str | None, int]:
@@ -1037,9 +1048,7 @@ def _is_delimiter_char(ch: str, quote_char: str | None) -> bool:
 
 def _delimiter_quote_closed(line: str, j: int, quote_char: str | None) -> bool:
     """For a quoted delimiter, verify the closing quote is present at j."""
-    if quote_char is None:
-        return True
-    return j < len(line) and line[j] == quote_char
+    return True if quote_char is None else j < len(line) and line[j] == quote_char
 
 
 def _is_heredoc_close(line: str, delimiter: str, strip_tabs: bool) -> bool:
