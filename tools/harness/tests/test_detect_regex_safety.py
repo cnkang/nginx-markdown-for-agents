@@ -25,6 +25,8 @@ from harness.detect_regex_safety import (  # noqa: E402
     Severity,
     PatternSource,
     Engine,
+    _BindingKind,
+    _Binding,
     _check_nested_quantifier,
     _check_adjacent_overlapping_quantifiers,
     _check_backreference_after_dotstar,
@@ -352,7 +354,9 @@ class TestErrorHandling:
             os.close(fd)
         os.chmod(str(f), 0o000)
         try:
-            _findings, errors = _scan_python_file(f, tmp_path)
+            from lib.path_validation import validate_read_path
+            validated_f = validate_read_path(f, purpose="test file")
+            _findings, errors = _scan_python_file(validated_f, tmp_path)
             assert len(errors) >= 1
         finally:
             os.chmod(str(f), 0o600)
@@ -938,6 +942,316 @@ class TestBindingInvalidation:
         # After reassignment to dynamic, PATTERN should be REVIEW
         reviews = [f for f in findings if f.severity == Severity.REVIEW]
         assert len(reviews) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Scope-aware bindings (adversarial — unified lexical model)
+# ---------------------------------------------------------------------------
+
+class TestScopeAwareBindings:
+    """Test that the unified lexical binding model respects scope boundaries."""
+
+    def test_function_shadow_does_not_delete_module_binding(self, tmp_path: Path) -> None:
+        """Function-local p = object() does not invalidate module-level compiled p."""
+        content = (
+            "import re\n"
+            "p = re.compile(r'(a+)+$')\n"
+            "def configure():\n"
+            "    p = object()\n"
+            "p.search('data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        compiled_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and "compiled" in f.api
+        ]
+        assert len(compiled_errors) == 1
+
+    def test_function_compiled_binding_does_not_leak(self, tmp_path: Path) -> None:
+        """Compiled binding inside a function must not leak to module scope."""
+        content = (
+            "import re\n"
+            "def build():\n"
+            "    p = re.compile(r'(a+)+$')\n"
+            "    p.search('data')\n"
+            "p.search('data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        compiled_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and "compiled" in f.api
+        ]
+        inner_errors = [f for f in compiled_errors if f.line == 4]
+        assert len(inner_errors) == 1
+        outer_errors = [f for f in compiled_errors if f.line == 5]
+        assert len(outer_errors) == 0
+
+    def test_parameter_shadows_re_alias(self, tmp_path: Path) -> None:
+        """def f(re): re.compile(...) — parameter shadows module alias."""
+        content = (
+            "import re\n"
+            "def f(re):\n"
+            "    re.compile(r'(a+)+$')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 0
+
+    def test_parameter_shadows_compiled(self, tmp_path: Path) -> None:
+        """def f(p): p.search(...) — parameter shadows compiled binding."""
+        content = (
+            "import re\n"
+            "def f(p):\n"
+            "    p.search('data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        compiled_findings = [
+            f for f in findings if "compiled" in f.api
+        ]
+        assert len(compiled_findings) == 0
+
+    def test_for_target_shadows_compiled(self, tmp_path: Path) -> None:
+        """for p in items: shadows compiled p; p.search() after must not use old pattern."""
+        content = (
+            "import re\n"
+            "p = re.compile(r'^safe$')\n"
+            "for p in items:\n"
+            "    pass\n"
+            "p.search('data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        compiled_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and "compiled" in f.api
+        ]
+        assert len(compiled_errors) == 0
+
+    def test_with_target_shadows_compiled(self, tmp_path: Path) -> None:
+        """with factory() as p: shadows compiled p; p.search() after must not use old pattern."""
+        content = (
+            "import re\n"
+            "p = re.compile(r'^safe$')\n"
+            "with factory() as p:\n"
+            "    pass\n"
+            "p.search('data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        compiled_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and "compiled" in f.api
+        ]
+        assert len(compiled_errors) == 0
+
+    def test_except_target_shadows(self, tmp_path: Path) -> None:
+        """except Error as p: shadows any outer compiled p."""
+        content = (
+            "import re\n"
+            "p = re.compile(r'^safe$')\n"
+            "try:\n"
+            "    pass\n"
+            "except Error as p:\n"
+            "    pass\n"
+            "p.search('data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        compiled_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and "compiled" in f.api
+        ]
+        assert len(compiled_errors) == 0
+
+    def test_lambda_parameter_shadow(self, tmp_path: Path) -> None:
+        """lambda re: re.compile(...) — parameter shadows module alias."""
+        content = (
+            "import re\n"
+            "f = lambda re: re.compile(r'(a+)+$')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 0
+
+
+# ---------------------------------------------------------------------------
+# Re-alias reassignment invalidation (adversarial)
+# ---------------------------------------------------------------------------
+
+class TestReAliasReassignment:
+    """Test that reassigning re module/function aliases invalidates bindings."""
+
+    def test_re_alias_reassignment_invalidates(self, tmp_path: Path) -> None:
+        """import re; re = custom_regex; re.compile(...) — no finding."""
+        content = (
+            "import re\n"
+            "re = custom_regex\n"
+            "re.compile(r'(a+)+$')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 0
+
+    def test_from_re_function_alias_reassignment(self, tmp_path: Path) -> None:
+        """from re import compile as rc; rc = custom; rc(...) — no finding."""
+        content = (
+            "from re import compile as regex_compile\n"
+            "regex_compile = custom\n"
+            "regex_compile(r'(a+)+$')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 0
+
+    def test_function_import_does_not_leak(self, tmp_path: Path) -> None:
+        """import re inside a function does not make module-level re valid."""
+        content = (
+            "def f():\n"
+            "    import re\n"
+            "    re.compile(r'(a+)+$')\n"
+            "re.compile(r'(a+)+$')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        inner_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and f.line == 3
+        ]
+        assert len(inner_errors) == 1
+        outer_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and f.line == 4
+        ]
+        assert len(outer_errors) == 0
+
+
+# ---------------------------------------------------------------------------
+# Unknown reassignment invalidation (adversarial)
+# ---------------------------------------------------------------------------
+
+class TestUnknownReassignmentInvalidation:
+    """Test that reassigning a static binding to unknown invalidates it."""
+
+    def test_unknown_reassignment_makes_safe_pattern_review(self, tmp_path: Path) -> None:
+        """PATTERN = r'^safe$'; PATTERN = EXTERNAL → REVIEW."""
+        content = (
+            "import re\n"
+            "PATTERN = r'^safe$'\n"
+            "PATTERN = EXTERNAL\n"
+            "re.search(PATTERN, 'data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 0
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) >= 1
+
+    def test_unknown_reassignment_makes_dangerous_pattern_review(self, tmp_path: Path) -> None:
+        """PATTERN = r'(a+)+$'; PATTERN = EXTERNAL → REVIEW, not ERROR."""
+        content = (
+            "import re\n"
+            "PATTERN = r'(a+)+$'\n"
+            "PATTERN = EXTERNAL\n"
+            "re.search(PATTERN, 'data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 0
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) >= 1
+
+    def test_augassign_invalidates(self, tmp_path: Path) -> None:
+        """PATTERN = r'^safe$'; PATTERN += suffix → REVIEW."""
+        content = (
+            "import re\n"
+            "PATTERN = r'^safe$'\n"
+            "PATTERN += suffix\n"
+            "re.search(PATTERN, 'data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 0
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) >= 1
+
+    def test_delete_removes_binding(self, tmp_path: Path) -> None:
+        """PATTERN = r'(a+)+$'; del PATTERN → no ERROR with old literal."""
+        content = (
+            "import re\n"
+            "PATTERN = r'(a+)+$'\n"
+            "del PATTERN\n"
+            "re.search(PATTERN, 'data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 0
+
+
+# ---------------------------------------------------------------------------
+# Dynamic compiled review (adversarial)
+# ---------------------------------------------------------------------------
+
+class TestDynamicCompiledReview:
+    """Test that reassigning a compiled binding does not produce ERROR with stale pattern."""
+
+    def test_compiled_reassignment_to_dynamic_produces_review(self, tmp_path: Path) -> None:
+        """p = re.compile(safe); p = get_runtime_pattern(); p.search() — no ERROR with old pattern."""
+        content = (
+            "import re\n"
+            "p = re.compile(r'^safe$')\n"
+            "p = get_runtime_pattern()\n"
+            "p.search('data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        compiled_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and "compiled" in f.api
+        ]
+        assert len(compiled_errors) == 0
+
+    def test_compiled_reassignment_to_attribute_produces_review(self, tmp_path: Path) -> None:
+        """p = re.compile(safe); p = factory.pattern; p.match() — no ERROR with old pattern."""
+        content = (
+            "import re\n"
+            "p = re.compile(r'^safe$')\n"
+            "p = factory.pattern\n"
+            "p.match('data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        compiled_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and "compiled" in f.api
+        ]
+        assert len(compiled_errors) == 0
+
+    def test_compiled_annotation_reassignment_produces_review(self, tmp_path: Path) -> None:
+        """p = re.compile(safe); p: Pattern = unknown_pattern; p.sub() — no ERROR with old pattern."""
+        content = (
+            "import re\n"
+            "p = re.compile(r'^safe$')\n"
+            "p: Pattern = unknown_pattern\n"
+            "p.sub('', 'data')\n"
+        )
+        findings, errors = _scan_py(content, tmp_path)
+        assert not errors
+        compiled_errors = [
+            f for f in findings
+            if f.severity == Severity.ERROR and "compiled" in f.api
+        ]
+        assert len(compiled_errors) == 0
 
 
 # ---------------------------------------------------------------------------
