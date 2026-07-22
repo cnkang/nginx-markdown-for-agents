@@ -7,7 +7,7 @@
 #![cfg(feature = "streaming")]
 #![allow(dead_code)]
 
-use crate::known_differences::{KnownDifferences, OutputDifference};
+use crate::streaming_test_support::known_differences::{KnownDifferences, OutputDifference};
 use crate::streaming_test_support::normalize_whitespace_tokens;
 
 /// Compare full-buffer and streaming outputs, returning `Ok(())` if they match
