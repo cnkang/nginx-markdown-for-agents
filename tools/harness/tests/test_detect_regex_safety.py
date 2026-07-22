@@ -761,6 +761,27 @@ class TestNestedQuantifier:
         assert _check_nested_quantifier(pattern) is None
 
 
+class TestQuantifierAtomBinding:
+    """Quantifier-to-atom binding preservation after _merge_literal_atoms fix."""
+
+    @pytest.mark.parametrize("pattern", [
+        r"(?:-ab+)*$",
+        r"(?:prefix\d+)*$",
+        r"(?:foo[0-9]+)*$",
+        r"(?:/item-[a-z]+)*$",
+    ])
+    def test_safe_separator_with_quantified_literal(self, pattern: str) -> None:
+        assert _check_nested_quantifier(pattern) is None
+
+    @pytest.mark.parametrize("pattern", [
+        r"(aa+)+$",
+        r"(a\d+)+$",
+        r"(?:aa+)+$",
+    ])
+    def test_dangerous_nested_still_detected(self, pattern: str) -> None:
+        assert _check_nested_quantifier(pattern) is not None
+
+
 # ---------------------------------------------------------------------------
 # P1-5: shell command argument extraction
 # ---------------------------------------------------------------------------
@@ -1455,3 +1476,76 @@ class TestShellParserImprovements:
         )
         errors_found = [f for f in findings if f.severity == Severity.ERROR]
         assert len(errors_found) == 1
+
+    def test_pattern_option_before_pcre_flag(self, tmp_path: Path) -> None:
+        """grep -e '(a+)+$' -P input.txt — -e before -P must still detect PCRE."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep -e '(a+)+$' -P input.txt\n", tmp_path,
+        )
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert errors_found[0].pattern == "(a+)+$"
+
+    def test_multiple_e_patterns(self, tmp_path: Path) -> None:
+        """grep -P -e '(a+)+$' -e '(b+)+$' input.txt — both patterns detected."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep -P -e '(a+)+$' -e '(b+)+$' input.txt\n", tmp_path,
+        )
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 2
+        patterns = {f.pattern for f in errors_found}
+        assert "(a+)+$" in patterns
+        assert "(b+)+$" in patterns
+
+    def test_pattern_file_option(self, tmp_path: Path) -> None:
+        """grep -P -f patterns.txt input.txt — pattern file not readable produces REVIEW."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep -P -f patterns.txt input.txt\n", tmp_path,
+        )
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) >= 1
+
+    def test_long_file_option_equals(self, tmp_path: Path) -> None:
+        """grep -P --file=patterns.txt input.txt — pattern file via =."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep -P --file=patterns.txt input.txt\n", tmp_path,
+        )
+        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        assert len(reviews) >= 1
+
+    def test_color_no_value(self, tmp_path: Path) -> None:
+        """grep -P --color '(a+)+$' input.txt — bare --color doesn't consume next token."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep -P --color '(a+)+$' input.txt\n", tmp_path,
+        )
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert errors_found[0].pattern == "(a+)+$"
+
+    def test_color_with_value(self, tmp_path: Path) -> None:
+        """grep -P --color=always '(a+)+$' input.txt — --color=always consumes via =."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep -P --color=always '(a+)+$' input.txt\n", tmp_path,
+        )
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert errors_found[0].pattern == "(a+)+$"
+
+    def test_unknown_option_low_confidence(self, tmp_path: Path) -> None:
+        """grep -P --unknown-opt '(a+)+$' input.txt — unknown option produces finding."""
+        findings = self._scan_shell_content(
+            "#!/usr/bin/env bash\ngrep -P --unknown-opt '(a+)+$' input.txt\n", tmp_path,
+        )
+        all_findings = [f for f in findings if f.severity in (Severity.ERROR, Severity.REVIEW)]
+        assert len(all_findings) >= 1
+
+    def test_unbalanced_quote_scan_error(self, tmp_path: Path) -> None:
+        """grep -P '(a+)+$ input.txt — unbalanced quote produces REVIEW or ScanError."""
+        f = tmp_path / "test.sh"
+        f.write_text("#!/usr/bin/env bash\ngrep -P '(a+)+$ input.txt\n")
+        result, errors = _scan_shell_file(f, tmp_path)
+        has_finding = any(
+            f2.severity in (Severity.ERROR, Severity.REVIEW) for f2 in result
+        )
+        has_error = len(errors) > 0
+        assert has_finding or has_error

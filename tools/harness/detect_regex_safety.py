@@ -1758,13 +1758,20 @@ def _analyze_branch_for_nested(
 def _check_strong_separator_branch(
     branch: list[_Token], leading_text: str, outer_quant: str,
 ) -> str | None:
-    """With a strong literal separator, flag only if an inner unbounded atom
-    can consume characters from the separator."""
     for i, tok in enumerate(branch):
         if tok.kind != _TKind.ATOM or i + 1 >= len(branch):
             continue
         nxt = branch[i + 1]
         if nxt.kind != _TKind.QUANT or not _quantifier_is_unbounded(nxt.text):
+            continue
+        if len(leading_text) >= 2:
+            if _atom_matches_char_class(tok.text, leading_text[0]):
+                return (
+                    f"nested quantifier — inner '{tok.text}{nxt.text}' inside "
+                    f"outer '{outer_quant}' can consume the first character of "
+                    "the leading multi-char separator, causing exponential "
+                    "backtracking"
+                )
             continue
         if _literal_overlaps_atom(leading_text, tok.text):
             return (
@@ -2113,18 +2120,37 @@ _PCRE_COMMANDS = {
     "perl": (set(), {"-e", "-E"}),
 }
 
-# Options that consume the next argument (not a pattern).  Per-command.
-_VALUE_OPTIONS: dict[str, set[str]] = {
-    "grep": {"-m", "-A", "-B", "-C", "-f", "--file", "--max-count",
+_PATTERN_FILE_OPTIONS: dict[str, set[str]] = {
+    "grep": {"-f", "--file"},
+    "rg": {"-f", "--file"},
+}
+
+_REQUIRED_VALUE_OPTIONS: dict[str, set[str]] = {
+    "grep": {"-m", "-A", "-B", "-C", "--max-count",
              "--after-context", "--before-context", "--context",
-             "--label", "--color", "--colour"},
+             "--label"},
     "rg": {"-g", "--glob", "-t", "--type", "-T", "--type-not",
             "-m", "--max-count", "-A", "--after-context",
             "-B", "--before-context", "-C", "--context",
             "-j", "--threads", "--max-filesize", "--max-depth",
-            "-f", "--file", "--replace", "-r"},
-    "perl": {},
+            "--replace", "-r"},
+    "perl": set(),
 }
+
+_OPTIONAL_VALUE_OPTIONS: dict[str, set[str]] = {
+    "grep": {"--color", "--colour"},
+    "rg": set(),
+    "perl": set(),
+}
+
+
+@dataclass
+class _ShellParseResult:
+    is_pcre: bool = False
+    inline_patterns: list[str] = field(default_factory=list)
+    pattern_file: str | None = None
+    has_unknown_option: bool = False
+    parse_confidence: str = "high"
 
 
 def _split_shell_pipeline(line: str) -> list[list[str]]:
@@ -2176,182 +2202,180 @@ def _looks_like_env_assignment(tok: str) -> bool:
     )
 
 
-def _skip_options_and_find_pattern(
-    tokens: list[str], pcre_flags: set[str], pattern_options: set[str],
-    cmd_base: str = "grep",
-) -> tuple[str | None, bool]:
-    """Walk a command's argument tokens and return the pattern argument.
+def _parse_shell_command(
+    tokens: list[str], cmd_base: str,
+) -> _ShellParseResult:
+    """Parse shell command tokens and extract regex-related information.
 
-    Returns (pattern, is_pcre).  ``is_pcre`` is True only when a PCRE flag is
-    present.  ``pattern`` is the first non-option argument that is not a
-    known flag value, or the value following a pattern-bearing option.
+    Scans all tokens before deciding, collecting inline patterns,
+    pattern-file references, PCRE flag presence, and parse confidence.
     """
-    is_pcre = False
+    result = _ShellParseResult()
+    pcre_flags, pattern_opts = _PCRE_COMMANDS[cmd_base]
+    file_opts = _PATTERN_FILE_OPTIONS.get(cmd_base, set())
+    req_val_opts = _REQUIRED_VALUE_OPTIONS.get(cmd_base, set())
+    opt_val_opts = _OPTIONAL_VALUE_OPTIONS.get(cmd_base, set())
+    all_known = pcre_flags | pattern_opts | file_opts | req_val_opts | opt_val_opts
+
     saw_double_dash = False
-    value_opts = _VALUE_OPTIONS.get(cmd_base, set())
     i = 0
     while i < len(tokens):
         tok = tokens[i]
         if saw_double_dash:
-            return tok, is_pcre
+            if not result.inline_patterns:
+                result.inline_patterns.append(tok)
+            i += 1
+            continue
         if tok == "--":
             saw_double_dash = True
             i += 1
             continue
-        action, advance = _dispatch_option_token(
-            tok, tokens, i, pcre_flags, pattern_options, value_opts, is_pcre,
-        )
-        if action == "return_pattern":
-            return advance[0], advance[1]
-        if action == "set_pcre":
-            is_pcre = True
-        elif action == "positional":
-            return tok, is_pcre
-        i += advance if isinstance(advance, int) else advance[2]
-    return None, is_pcre
+        if tok.startswith("--"):
+            i = _parse_long_option(
+                tok, tokens, i, result, pcre_flags, pattern_opts,
+                file_opts, req_val_opts, opt_val_opts, all_known,
+            )
+            continue
+        if tok.startswith("-") and len(tok) > 1:
+            i = _parse_short_option(
+                tok, tokens, i, result, pcre_flags, pattern_opts,
+                file_opts, req_val_opts, all_known,
+            )
+            continue
+        if not result.inline_patterns:
+            result.inline_patterns.append(tok)
+        i += 1
+
+    return result
 
 
-def _dispatch_option_token(
+def _parse_long_option(
     tok: str, tokens: list[str], i: int,
-    pcre_flags: set[str], pattern_options: set[str],
-    value_opts: set[str], is_pcre: bool,
-) -> tuple[str, int | tuple]:
-    """Dispatch a single non-double-dash token.
-
-    Returns (action, payload) where action is one of:
-      "return_pattern" — payload is (value, is_pcre_final)
-      "set_pcre"       — payload is advance count
-      "skip"           — payload is advance count
-      "positional"     — payload is 1
-    """
-    if tok.startswith("--"):
-        return _dispatch_long(tok, tokens, i, pcre_flags, pattern_options, value_opts, is_pcre)
-    if tok.startswith("-") and len(tok) > 1:
-        return _dispatch_short(tok, tokens, i, pcre_flags, pattern_options, value_opts, is_pcre)
-    return "positional", 1
-
-
-def _dispatch_long(
-    tok: str, tokens: list[str], i: int,
-    pcre_flags: set[str], pattern_options: set[str],
-    value_opts: set[str], is_pcre: bool,
-) -> tuple[str, int | tuple]:
-    """Dispatch a long option token."""
-    result = _handle_long_option(tok, tokens, i, pcre_flags, pattern_options, value_opts)
-    if result is None:
-        return "skip", 1
-    kind, value, advance = result
-    if kind == "pattern":
-        return "return_pattern", (value, is_pcre, advance)
-    if kind == "pcre":
-        return "set_pcre", advance
-    return "skip", advance
-
-
-def _dispatch_short(
-    tok: str, tokens: list[str], i: int,
-    pcre_flags: set[str], pattern_options: set[str],
-    value_opts: set[str], is_pcre: bool,
-) -> tuple[str, int | tuple]:
-    """Dispatch a short option cluster token."""
-    result = _parse_short_option_cluster(tok, tokens, i, pcre_flags, pattern_options, value_opts)
-    kind, value, advance = result
-    if kind == "pattern":
-        return "return_pattern", (value, is_pcre, advance)
-    if kind == "pcre_pattern":
-        return "return_pattern", (value, True, advance)
-    if kind == "pcre":
-        return "set_pcre", advance
-    return "skip", advance
-
-
-def _handle_long_option(
-    tok: str, tokens: list[str], i: int,
-    pcre_flags: set[str], pattern_options: set[str],
-    value_opts: set[str],
-) -> tuple[str, str | None, int] | None:
-    """Classify a long option token (--foo or --foo=bar).
-
-    Returns (kind, value, advance) or None if unrecognized.
-    """
+    result: _ShellParseResult,
+    pcre_flags: set[str], pattern_opts: set[str],
+    file_opts: set[str], req_val_opts: set[str],
+    opt_val_opts: set[str], all_known: set[str],
+) -> int:
+    """Parse a long option token, mutating result in place. Returns new index."""
     if "=" in tok:
         opt, _, val = tok.partition("=")
-        if opt in pattern_options:
-            return ("pattern", val, 1)
         if opt in pcre_flags:
-            return ("pcre", None, 1)
-        return ("skip", None, 1)
+            result.is_pcre = True
+            return i + 1
+        if opt in pattern_opts:
+            result.is_pcre = True
+            result.inline_patterns.append(val)
+            return i + 1
+        if opt in file_opts:
+            result.pattern_file = val
+            return i + 1
+        if opt not in all_known:
+            result.has_unknown_option = True
+            result.parse_confidence = "low"
+        return i + 1
     if tok in pcre_flags:
-        return ("pcre", None, 1)
-    if tok in pattern_options:
-        value = tokens[i + 1] if i + 1 < len(tokens) else None
-        return ("pattern", value, 2 if value else 1)
-    if tok in value_opts:
-        return ("skip", None, 2)
-    return None
+        result.is_pcre = True
+        return i + 1
+    if tok in pattern_opts:
+        result.is_pcre = True
+        val = tokens[i + 1] if i + 1 < len(tokens) else None
+        if val is not None:
+            result.inline_patterns.append(val)
+            return i + 2
+        return i + 1
+    if tok in file_opts:
+        val = tokens[i + 1] if i + 1 < len(tokens) else None
+        if val is not None:
+            result.pattern_file = val
+            return i + 2
+        return i + 1
+    if tok in req_val_opts:
+        if i + 1 < len(tokens):
+            return i + 2
+        return i + 1
+    if tok in opt_val_opts:
+        return i + 1
+    result.has_unknown_option = True
+    result.parse_confidence = "low"
+    return i + 1
 
 
-def _parse_short_option_cluster(
+def _parse_short_option(
     tok: str, tokens: list[str], i: int,
-    pcre_flags: set[str], pattern_options: set[str],
-    value_opts: set[str],
-) -> tuple[str, str | None, int]:
-    """Parse a short option cluster like -Pe, -Pne, -m1.
-
-    Returns (kind, value, advance) where kind is:
-      - "pcre": found PCRE flag (may also find pattern)
-      - "pattern" / "pcre_pattern": found pattern value
-      - "value_skip": option consumed a value argument
-      - "skip": just a regular flag cluster
-    """
+    result: _ShellParseResult,
+    pcre_flags: set[str], pattern_opts: set[str],
+    file_opts: set[str], req_val_opts: set[str],
+    all_known: set[str],
+) -> int:
+    """Parse a short option cluster, mutating result in place. Returns new index."""
     cluster = tok[1:]
-    found_pcre = False
-    for idx, ch in enumerate(cluster):
+    idx = 0
+    while idx < len(cluster):
+        ch = cluster[idx]
         flag = f"-{ch}"
         if flag in pcre_flags:
-            found_pcre = True
+            result.is_pcre = True
+            idx += 1
             continue
-        if flag in pattern_options:
-            return _resolve_pattern_in_cluster(
-                cluster, idx, tokens, i, found_pcre,
-            )
-        if flag in value_opts:
-            has_attached = bool(cluster[idx + 1:])
-            return ("value_skip", None, 1 if has_attached else 2)
-    return ("pcre", None, 1) if found_pcre else ("skip", None, 1)
+        if flag in pattern_opts:
+            result.is_pcre = True
+            rest = cluster[idx + 1:]
+            if rest:
+                result.inline_patterns.append(rest)
+                return i + 1
+            val = tokens[i + 1] if i + 1 < len(tokens) else None
+            if val is not None:
+                result.inline_patterns.append(val)
+                return i + 2
+            return i + 1
+        if flag in file_opts:
+            rest = cluster[idx + 1:]
+            if rest:
+                result.pattern_file = rest
+                return i + 1
+            val = tokens[i + 1] if i + 1 < len(tokens) else None
+            if val is not None:
+                result.pattern_file = val
+                return i + 2
+            return i + 1
+        if flag in req_val_opts:
+            rest = cluster[idx + 1:]
+            if rest:
+                return i + 1
+            if i + 1 < len(tokens):
+                return i + 2
+            return i + 1
+        if flag not in all_known:
+            result.has_unknown_option = True
+            result.parse_confidence = "low"
+        idx += 1
+    return i + 1
 
 
-def _resolve_pattern_in_cluster(
-    cluster: str, idx: int, tokens: list[str], i: int, found_pcre: bool,
-) -> tuple[str, str | None, int]:
-    """Resolve a pattern-bearing option found within a short option cluster.
-
-    The rest of the cluster after the option character is the attached pattern
-    value; if empty, the next token is consumed.
-    """
-    rest = cluster[idx + 1:]
-    kind = "pcre_pattern" if found_pcre else "pattern"
-    if rest:
-        return (kind, rest, 1)
-    value = tokens[i + 1] if i + 1 < len(tokens) else None
-    return (kind, value, 2 if value is not None else 1)
+def _has_unbalanced_quotes(line: str) -> bool:
+    """Check if a shell line has unbalanced quotes using shlex."""
+    logical_line = line.replace("\\\n", " ")
+    try:
+        list(shlex.shlex(logical_line, posix=True, punctuation_chars="|&;"))
+    except ValueError:
+        return True
+    return False
 
 
 def _extract_shell_regexes(
     content: str,
-) -> list[tuple[str, int, Engine, str]]:
+) -> list[tuple[str, int, Engine, str, PatternSource]]:
     """Extract regex patterns from shell scripts.
 
-    Returns list of (pattern, line, engine, command) tuples.
+    Returns list of (pattern, line, engine, command, pattern_source) tuples.
     Handles backslash-newline continuation to form logical lines.
     """
-    results: list[tuple[str, int, Engine, str]] = []
+    results: list[tuple[str, int, Engine, str, PatternSource]] = []
     lines = content.split("\n")
     i = 0
     while i < len(lines):
         line = lines[i]
         line_num = i + 1
-        # Handle backslash continuation
         while line.rstrip().endswith("\\") and i + 1 < len(lines):
             line = line.rstrip()[:-1] + " " + lines[i + 1].lstrip()
             i += 1
@@ -2360,14 +2384,30 @@ def _extract_shell_regexes(
             continue
         if line.lstrip().startswith("#"):
             continue
+        if _has_unbalanced_quotes(line):
+            results.extend(_extract_segment_regexes_broken(line_num, line))
+            continue
         segments = _split_shell_pipeline(line)
         for seg_tokens in segments:
             results.extend(_extract_segment_regexes(seg_tokens, line_num))
     return results
+
+
+def _extract_segment_regexes_broken(
+    line_num: int, line: str,
+) -> list[tuple[str, int, Engine, str, PatternSource]]:
+    """Produce an unparsed result for a line with unbalanced quotes."""
+    for cmd in _PCRE_COMMANDS:
+        if cmd in line:
+            return [("", line_num, Engine.SHELL_PCRE, cmd,
+                     PatternSource.UNKNOWN)]
+    return []
+
+
 def _extract_segment_regexes(
     seg_tokens: list[str], line_num: int,
-) -> list[tuple[str, int, Engine, str]]:
-    results: list[tuple[str, int, Engine, str]] = []
+) -> list[tuple[str, int, Engine, str, PatternSource]]:
+    results: list[tuple[str, int, Engine, str, PatternSource]] = []
     seg_tokens = _strip_env_assignments(seg_tokens)
     if not seg_tokens:
         return results
@@ -2375,19 +2415,29 @@ def _extract_segment_regexes(
     cmd_base = cmd.rsplit("/", 1)[-1]
     if cmd_base not in _PCRE_COMMANDS:
         return results
-    pcre_flags, pattern_opts = _PCRE_COMMANDS[cmd_base]
-    pattern, is_pcre = _skip_options_and_find_pattern(
-        seg_tokens[1:], pcre_flags, pattern_opts, cmd_base,
-    )
-    if (
-        pattern is not None
-        and is_pcre
-        or pattern is not None
-        and cmd_base == "perl"
-    ):
-        results.append((pattern, line_num, Engine.SHELL_PCRE, cmd_base))
-    elif pattern is None and is_pcre:
-        results.append(("", line_num, Engine.SHELL_PCRE, cmd_base))
+    parse = _parse_shell_command(seg_tokens[1:], cmd_base)
+    is_pcre_or_perl = parse.is_pcre or cmd_base == "perl"
+    psrc = PatternSource.UNKNOWN if parse.parse_confidence == "low" else PatternSource.STATIC_LITERAL
+    for pat in parse.inline_patterns:
+        results.append((pat, line_num, Engine.SHELL_PCRE, cmd_base, psrc))
+    if parse.pattern_file is not None:
+        file_psrc = PatternSource.STATIC_LITERAL
+        file_path = Path(parse.pattern_file)
+        if file_path.is_file():
+            try:
+                for file_line in file_path.read_text(encoding="utf-8").splitlines():
+                    if file_line:
+                        results.append((file_line, line_num, Engine.SHELL_PCRE,
+                                         cmd_base, file_psrc))
+            except OSError:
+                file_psrc = PatternSource.UNKNOWN
+                results.append(("", line_num, Engine.SHELL_PCRE, cmd_base, file_psrc))
+        else:
+            file_psrc = PatternSource.UNKNOWN
+            results.append(("", line_num, Engine.SHELL_PCRE, cmd_base, file_psrc))
+    if not parse.inline_patterns and parse.pattern_file is None and is_pcre_or_perl:
+        results.append(("", line_num, Engine.SHELL_PCRE, cmd_base,
+                         PatternSource.UNKNOWN))
     return results
 
 
@@ -2536,12 +2586,12 @@ def _scan_python_file(
 
 
 def _process_shell_regexes(
-    shell_regexes: list[tuple[str, int, Engine, str]],
+    shell_regexes: list[tuple[str, int, Engine, str, PatternSource]],
     source_lines: list[str], rel_path: str,
 ) -> tuple[list[RegexFinding], list[ScanError]]:
     findings: list[RegexFinding] = []
     errors: list[ScanError] = []
-    for pattern, line_num, engine, command in shell_regexes:
+    for pattern, line_num, engine, command, psrc in shell_regexes:
         suppressed, justification = _check_suppression(source_lines, line_num)
         if suppressed:
             if justification is None:
@@ -2551,7 +2601,7 @@ def _process_shell_regexes(
                 ))
             continue
         finding = _build_shell_finding(pattern, line_num, engine, command,
-                                       rel_path)
+                                       rel_path, psrc)
         if finding is not None:
             findings.append(finding)
     return findings, errors
@@ -2559,13 +2609,14 @@ def _process_shell_regexes(
 
 def _build_shell_finding(
     pattern: str, line_num: int, engine: Engine, command: str, rel_path: str,
+    pattern_source: PatternSource = PatternSource.STATIC_LITERAL,
 ) -> RegexFinding | None:
     reason, remediation, severity = _analyze_shell_pattern(pattern, engine)
     if reason is not None:
         return RegexFinding(
             severity=severity, engine=engine, file_path=rel_path,
             line=line_num, function=_SHELL_FUNCTION_NAME, api=command, pattern=pattern,
-            pattern_source=PatternSource.STATIC_LITERAL,
+            pattern_source=pattern_source,
             input_scope="shell argument",
             reason=reason, remediation=remediation,
         )
@@ -2596,6 +2647,21 @@ def _build_shell_finding(
             remediation=(
                 "Restructure the command so the pattern is a single quoted "
                 "argument following the regex flag."
+            ),
+        )
+    if pattern_source == PatternSource.UNKNOWN and pattern:
+        return RegexFinding(
+            severity=Severity.REVIEW, engine=engine, file_path=rel_path,
+            line=line_num, function=_SHELL_FUNCTION_NAME, api=command,
+            pattern=pattern, pattern_source=PatternSource.UNKNOWN,
+            input_scope="shell argument",
+            reason=(
+                "PCRE pattern extracted with low confidence due to "
+                "unrecognized options — manual review recommended"
+            ),
+            remediation=(
+                "Restructure the command so the pattern is a single quoted "
+                "argument following the regex flag, or simplify the options."
             ),
         )
     return None
