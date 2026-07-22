@@ -732,7 +732,7 @@ class RegexASTVisitor(ast.NodeVisitor):
     def visit_Assign(self, node: ast.Assign) -> None:
         binding = self._resolve_assignment_binding(node.value)
         for target in node.targets:
-            self._assign_target(target, binding, node.value)
+            self._assign_target(target, binding)
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
@@ -740,14 +740,14 @@ class RegexASTVisitor(ast.NodeVisitor):
             self.generic_visit(node)
             return
         binding = self._resolve_assignment_binding(node.value)
-        self._assign_target(node.target, binding, node.value)
+        self._assign_target(node.target, binding)
         self.generic_visit(node)
 
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
         if isinstance(node.target, ast.Name):
             name = node.target.id
             binding = self._reconcile_compiled_reassignment(
-                name, _Binding(kind=_BindingKind.DYNAMIC_VALUE), node.value,
+                name, _Binding(kind=_BindingKind.DYNAMIC_VALUE),
             )
             _scope_assign(self._scope_stack, name, binding)
         self.generic_visit(node)
@@ -772,20 +772,20 @@ class RegexASTVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def _assign_target(
-        self, target: ast.AST, binding: _Binding, value: ast.AST,
+        self, target: ast.AST, binding: _Binding,
     ) -> None:
         if isinstance(target, ast.Name):
             name = target.id
-            binding = self._reconcile_compiled_reassignment(name, binding, value)
+            binding = self._reconcile_compiled_reassignment(name, binding)
             _scope_assign(self._scope_stack, name, binding)
         elif isinstance(target, (ast.Tuple, ast.List)):
             for elt in target.elts:
                 self._assign_target(elt, _Binding(
                     kind=_BindingKind.DYNAMIC_VALUE,
-                ), value)
+                ))
 
     def _reconcile_compiled_reassignment(
-        self, name: str, binding: _Binding, value: ast.AST,
+        self, name: str, binding: _Binding,
     ) -> _Binding:
         """Preserve compiled-regex semantics across reassignment.
 
