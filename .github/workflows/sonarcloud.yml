@@ -76,6 +76,17 @@ jobs:
         if: steps.token.outputs.enabled == 'true'
         run: make sonar-encoding-check
 
+      # GitHub-hosted images can contain a partial copy of this pinned
+      # toolchain.  Remove only that exact copy before installing llvm-tools.
+      - name: Remove incomplete pinned Rust toolchain
+        if: steps.token.outputs.enabled == 'true'
+        working-directory: ${{ runner.temp }}
+        shell: bash
+        run: |
+          if rustup toolchain list | grep -q '^1\.97\.0-'; then
+            rustup toolchain uninstall 1.97.0
+          fi
+
       - name: Set up Rust toolchain
         if: steps.token.outputs.enabled == 'true'
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
