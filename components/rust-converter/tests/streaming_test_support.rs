@@ -605,6 +605,9 @@ pub fn check_conversion_errors(
                 "{fixture_name}: single/chunked fallback behavior mismatch"
             ))
         }
+        (Ok(_), Ok(_)) if meta.expected_fallback => Err(format!(
+            "{fixture_name}: expected fallback but streaming produced Markdown"
+        )),
         _ => Ok(true),
     }
 }
