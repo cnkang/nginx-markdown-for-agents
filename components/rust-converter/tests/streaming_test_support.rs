@@ -140,12 +140,11 @@ pub fn read_fixture_meta(path: &Path) -> FixtureMeta {
     let root = value
         .as_object()
         .unwrap_or_else(|| panic!("{}: metadata root must be an object", meta_path.display()));
-    let notes = match root.get("streaming_notes") {
-        Some(notes) => Some(notes.as_object().unwrap_or_else(|| {
-            panic!("{}: streaming_notes must be an object", meta_path.display())
-        })),
-        None => None,
-    };
+    let notes = root.get("streaming_notes").map(|notes| {
+        notes
+            .as_object()
+            .unwrap_or_else(|| panic!("{}: streaming_notes must be an object", meta_path.display()))
+    });
 
     let expected_fallback = match notes.and_then(|notes| notes.get("expected_fallback")) {
         Some(value) => value.as_bool().unwrap_or_else(|| {
@@ -176,17 +175,16 @@ pub fn read_fixture_meta(path: &Path) -> FixtureMeta {
             .collect(),
         None => Vec::new(),
     };
-    let parse_optional_string = |key: &str| match root.get(key) {
-        Some(value) => Some(
+    let parse_optional_string = |key: &str| {
+        root.get(key).map(|value| {
             value
                 .as_str()
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or_else(|| {
                     panic!("{}: {key} must be a non-empty string", meta_path.display())
                 })
-                .to_owned(),
-        ),
-        None => None,
+                .to_owned()
+        })
     };
 
     FixtureMeta {
