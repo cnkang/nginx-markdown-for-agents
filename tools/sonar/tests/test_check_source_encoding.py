@@ -138,8 +138,9 @@ class TestCheckerAdversarialInputs:
             json.dumps({"../fixture.html": {"encoding": "latin-1", "reason": "test"}}),
             encoding="utf-8",
         )
+        manifest_path = Path("manifest.json")
         with pytest.raises(RuntimeError):
-            checker._load_manifest(Path("manifest.json"))
+            checker._load_manifest(manifest_path)
 
     def test_manifest_rejects_empty_encoding(self, tmp_path: Path) -> None:
         checker = load_checker_module()
@@ -150,8 +151,9 @@ class TestCheckerAdversarialInputs:
             json.dumps({"fixture.html": {"encoding": "", "reason": "test"}}),
             encoding="utf-8",
         )
+        manifest_path = Path("manifest.json")
         with pytest.raises(RuntimeError):
-            checker._load_manifest(Path("manifest.json"))
+            checker._load_manifest(manifest_path)
 
     def test_manifest_rejects_non_string_reason(self, tmp_path: Path) -> None:
         checker = load_checker_module()
@@ -162,24 +164,27 @@ class TestCheckerAdversarialInputs:
             json.dumps({"fixture.html": {"encoding": "latin-1", "reason": 1}}),
             encoding="utf-8",
         )
+        manifest_path = Path("manifest.json")
         with pytest.raises(RuntimeError):
-            checker._load_manifest(Path("manifest.json"))
+            checker._load_manifest(manifest_path)
 
     def test_resolve_repository_path_rejects_absolute_path(
         self, tmp_path: Path
     ) -> None:
         checker = load_checker_module()
         checker.REPO_ROOT = tmp_path
+        manifest_path = tmp_path / "manifest.json"
         with pytest.raises(RuntimeError, match="repository-relative"):
-            checker._resolve_repository_path(tmp_path / "manifest.json", "Test path")
+            checker._resolve_repository_path(manifest_path, "Test path")
 
     def test_resolve_repository_path_rejects_parent_traversal(
         self, tmp_path: Path
     ) -> None:
         checker = load_checker_module()
         checker.REPO_ROOT = tmp_path
+        manifest_path = Path("nested/../manifest.json")
         with pytest.raises(RuntimeError, match="repository-relative"):
-            checker._resolve_repository_path(Path("nested/../manifest.json"), "Test path")
+            checker._resolve_repository_path(manifest_path, "Test path")
 
     def test_manifest_symlink_outside_repository_is_rejected(self, tmp_path: Path) -> None:
         checker = load_checker_module()
@@ -188,8 +193,9 @@ class TestCheckerAdversarialInputs:
         outside.write_text("{}", encoding="utf-8")
         manifest = tmp_path / "manifest.json"
         manifest.symlink_to(outside)
+        manifest_path = Path("manifest.json")
         with pytest.raises(RuntimeError, match="within the repository"):
-            checker._load_manifest(Path("manifest.json"))
+            checker._load_manifest(manifest_path)
 
     def test_extensionless_file_root_and_nul_are_checked(self, tmp_path: Path) -> None:
         checker = load_checker_module()
