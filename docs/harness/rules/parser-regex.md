@@ -33,7 +33,10 @@ Required:
   - Overlapping alternation with quantifiers: `(a|ab)+`
   - Repeated nullable groups: `(a?)+`, `(a*)+`
   - Dynamic regex injection: CLI args, env vars, file content as patterns
-  - `re.DOTALL` with `.*` over full documents
+  - `re.DOTALL` with an unescaped greedy `.*` over full documents.  Lazy
+    `.*?`, possessive `.*+`, escaped dots, and character-class literals do
+    not trigger this broad advisory check; they still pass through the normal
+    structural ReDoS checks.
 - Python regex usage is extracted via the standard library `ast` module,
   covering: `re.compile`, `re.search`, `re.match`, `re.fullmatch`,
   `re.findall`, `re.finditer`, `re.split`, `re.sub`, `re.subn`, and
@@ -43,14 +46,22 @@ Required:
 - Scope-aware static string constant propagation using a unified `_Binding` /
   `_Scope` model with LEGB (Local → Enclosing → Global → Builtin) lookup.
   Module-level and function/class/lambda-local constants (`PATTERN = r"..."`)
-  are resolved when used as patterns.  Function/class/lambda parameters,
-  for/with/except/comprehension targets, and augmented assignments shadow
-  outer bindings.  Reassignment of a `re` alias to a non-`re` value
+  are resolved when used as patterns.  Finite static string collections and
+  fixed-width string rows are propagated through `for` loops and
+  comprehensions, including destructured targets.  Their use in f-strings or
+  string concatenation is expanded as a bounded Cartesian product (at most
+  256 alternatives), and every resulting pattern is analyzed.  Expressions
+  that exceed the bound or contain an unknown component remain REVIEW.
+  Function/class/lambda parameters, with/except targets, and augmented
+  assignments shadow outer bindings.  Reassignment of a `re` alias to a
+  non-`re` value
   invalidates the alias.  Reassignment of a compiled-pattern variable to a
   dynamic value upgrades the binding to `COMPILED_DYNAMIC_PATTERN` (not plain
   `DYNAMIC_VALUE`) so subsequent `compiled.search/match/sub/findall` calls
   emit a REVIEW referencing the original `compile_line`; this applies to
-  Assign, AnnAssign, and AugAssign.  Lexical `del` writes a DELETED tombstone
+  Assign, AnnAssign, and AugAssign.  An initially dynamic `re.compile()` emits
+  its REVIEW at the compile site only; a second compiled-method REVIEW is
+  reserved for actual reassignment.  Lexical `del` writes a DELETED tombstone
   in the current scope instead of walking outer scopes, so a function-local
   `del p` no longer removes a module binding; `global`/`nonlocal` are
   partially modeled (honored for delete routing) and otherwise conservative.
@@ -64,16 +75,16 @@ Required:
   quantifier as a separate atom so that separator detection is not lost when
   adjacent literals are merged.  For example, `abc\w+` keeps `abc` as a
   separate literal atom so the `\w+` is recognized as having a multi-char
-  literal separator prefix. into segments: `re.escape()` only
-  protects its own operand; a concatenation like
+  literal separator prefix.  Segment analysis treats `re.escape()` as
+  protecting only its own operand; a concatenation like
   `re.escape(x) + r"(a+)+$"` is still analyzed for the static tail, and any
   dangerous static segment produces an ERROR regardless of escaped/dynamic
-  neighbors.
+  neighbors.  An escaped-only composition is represented with a literal atom
+  and its static scaffold is analyzed; safe scaffolds produce no REVIEW.
 - Pattern source classification: `STATIC_LITERAL`, `STATIC_CONCAT`,
   `STATIC_FORMATTED`, `ESCAPED_DYNAMIC`, `DYNAMIC`, `UNKNOWN`.
-- Severity levels: `ERROR` (confirmed ReDoS or dangerous static segment),
-  `REVIEW` (dynamic, escaped-dynamic composition, or unresolved UNKNOWN),
-  `INFO` (static safe).
+- Severity levels: `ERROR` (confirmed ReDoS or dangerous static scaffold),
+  `REVIEW` (unescaped dynamic or unresolved UNKNOWN), `INFO` (static safe).
 - UNKNOWN pattern sources are treated as REVIEW (never silently downgraded
   to INFO) so unresolvable regex origins require manual attention.
 - Shell regex: pattern-bearing options (`-e`/`--regexp`) and PCRE-enabling
@@ -85,6 +96,10 @@ Required:
   command-aware: it locates the regex command past pipes and env
   assignments, skips options, supports `-e`/`--regexp`/`-P` and `--`, and
   does not pick up patterns from preceding commands in a pipeline.
+  Broken multi-line command recovery matches exact command tokens rather than
+  substrings in prose or arguments.  Common engine/output flags such as
+  `grep -E`/`-F`/`-G`/`-c` and `rg -F` are modeled as boolean options, so they
+  do not become spurious pattern candidates.
   Shell argument parsing classifies options into boolean flags (consume
   nothing), required-value options (consume next token), optional-value
   options (do not consume next token), pattern options, pattern-file
