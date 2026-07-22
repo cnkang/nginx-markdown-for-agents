@@ -276,39 +276,53 @@ class ScanError:
 
 
 # ---------------------------------------------------------------------------
-# Static constant propagation (scope-aware, conservative)
+# Unified lexical binding model (scope-aware, conservative)
 # ---------------------------------------------------------------------------
 
-@dataclass(frozen=True)
-class _StaticValue:
-    """A statically-resolved string value bound to a name in a scope."""
-    value: str
+class _BindingKind(Enum):
+    STATIC_STRING = "STATIC_STRING"
+    DYNAMIC_VALUE = "DYNAMIC_VALUE"
+    RE_MODULE_ALIAS = "RE_MODULE_ALIAS"
+    RE_FUNCTION_ALIAS = "RE_FUNCTION_ALIAS"
+    COMPILED_STATIC_PATTERN = "COMPILED_STATIC_PATTERN"
+    COMPILED_DYNAMIC_PATTERN = "COMPILED_DYNAMIC_PATTERN"
+
+
+@dataclass
+class _Binding:
+    kind: _BindingKind
+    static_value: str | None = None
+    real_re_api: str | None = None
+    compiled_pattern: str | None = None
+    compile_line: int | None = None
+
+
+class _Sentinel:
+    pass
+
+
+_UNRESOLVED = _Sentinel()
 
 
 @dataclass
 class _Scope:
-    """A single lexical scope holding name → static binding mappings."""
-    bindings: dict[str, _StaticValue | None] = field(default_factory=dict)
+    bindings: dict[str, _Binding] = field(default_factory=dict)
 
-    def lookup(self, name: str) -> _StaticValue | None | _Sentinel:
-        return self.bindings[name] if name in self.bindings else _UNRESOLVED
+    def lookup(self, name: str) -> _Binding | _Sentinel:
+        return self.bindings.get(name, _UNRESOLVED)
 
-    def assign(self, name: str, value: _StaticValue | None) -> None:
-        self.bindings[name] = value
+    def assign(self, name: str, binding: _Binding) -> None:
+        self.bindings[name] = binding
 
-
-class _Sentinel:
-    """Marker for 'name not in scope' (distinct from None = dynamic)."""
-
-
-_UNRESOLVED = _Sentinel()
+    def delete(self, name: str) -> None:
+        self.bindings.pop(name, None)
 
 
 def _new_scope_stack() -> list[_Scope]:
     return [_Scope()]
 
 
-def _scope_lookup(stack: list[_Scope], name: str) -> _StaticValue | None | _Sentinel:
+def _scope_lookup(stack: list[_Scope], name: str) -> _Binding | _Sentinel:
     for scope in reversed(stack):
         result = scope.lookup(name)
         if not isinstance(result, _Sentinel):
@@ -316,8 +330,15 @@ def _scope_lookup(stack: list[_Scope], name: str) -> _StaticValue | None | _Sent
     return _UNRESOLVED
 
 
-def _scope_assign(stack: list[_Scope], name: str, value: _StaticValue | None) -> None:
-    stack[-1].assign(name, value)
+def _scope_assign(stack: list[_Scope], name: str, binding: _Binding) -> None:
+    stack[-1].assign(name, binding)
+
+
+def _scope_delete(stack: list[_Scope], name: str) -> None:
+    for scope in reversed(stack):
+        if name in scope.bindings:
+            scope.delete(name)
+            return
 
 
 # ---------------------------------------------------------------------------
@@ -327,20 +348,23 @@ def _scope_assign(stack: list[_Scope], name: str, value: _StaticValue | None) ->
 class RegexASTVisitor(ast.NodeVisitor):
     """Walk a Python AST and collect regex API calls.
 
-    Resolves import aliases for the ``re`` module and ``from re import ...``
-    forms.  Tracks statically-propagated string constants across scopes so
-    ``PATTERN = r"..."`` followed by ``re.search(PATTERN, ...)`` resolves to
-    the literal.  Reassignment to a dynamic value invalidates the binding.
+    Uses a unified lexical binding model where each scope maintains its own
+    binding table.  Bindings carry kind, static value, compiled-pattern
+    metadata, and re-alias information.  Name resolution follows Python's
+    LEGB rules (inner-to-outer scope lookup).
+
+    Key invariants:
+      - Function/class/lambda parameters shadow outer bindings.
+      - Reassignment of an ``re`` alias invalidates the alias.
+      - Unknown RHS on assignment makes the target DYNAMIC_VALUE, never
+        preserves the old static binding.
+      - Compiled pattern reassignment to dynamic produces REVIEW on
+        subsequent method calls.
     """
 
     def __init__(self) -> None:
         self.findings: list[RegexFinding] = []
         self.errors: list[ScanError] = []
-        self._re_names: set[str] = {"re"}
-        self._from_re_names: dict[str, str] = {}
-        self._compiled_vars: dict[str, str] = {}
-        self._var_patterns: dict[str, str] = {}
-        self._compile_lines: dict[str, int] = {}
         self._source_lines: list[str] = []
         self._file_path: str = ""
         self._tree: ast.AST | None = None
@@ -348,7 +372,6 @@ class RegexASTVisitor(ast.NodeVisitor):
 
     def set_source(self, tree: ast.AST, source_lines: list[str],
                     file_path: str) -> None:
-        """Set the AST tree and source for this visitor."""
         self._tree = tree
         self._source_lines = source_lines
         self._file_path = file_path
@@ -364,145 +387,272 @@ class RegexASTVisitor(ast.NodeVisitor):
     # -- Import resolution --------------------------------------------------
 
     def visit_Import(self, node: ast.Import) -> None:
-        """Track ``import re`` and ``import re as alias``."""
         for alias in node.names:
             if alias.name == "re":
                 bound = alias.asname or "re"
-                self._re_names.add(bound)
+                _scope_assign(self._scope_stack, bound, _Binding(
+                    kind=_BindingKind.RE_MODULE_ALIAS,
+                ))
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        """Track ``from re import compile`` and ``from re import search as s``."""
         if node.module == "re":
             for alias in node.names:
                 real_name = alias.name
                 bound = alias.asname or alias.name
-                self._from_re_names[bound] = real_name
+                _scope_assign(self._scope_stack, bound, _Binding(
+                    kind=_BindingKind.RE_FUNCTION_ALIAS,
+                    real_re_api=real_name,
+                ))
         self.generic_visit(node)
 
     # -- Function / class scope tracking ----------------------------------
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._visit_scoped_node(node)
+        self._visit_scoped_node_with_params(
+            node, node.args, [d for d in node.decorator_list],
+        )
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._visit_scoped_node(node)
+        self._visit_scoped_node_with_params(
+            node, node.args, [d for d in node.decorator_list],
+        )
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._visit_scoped_node(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        self._visit_scoped_node(node)
+        self._visit_scoped_node_with_params(node, node.args, [])
 
     def _visit_scoped_node(self, node: ast.AST) -> None:
-        """Enter a new scope, visit children, then leave."""
         self._enter_scope()
         self.generic_visit(node)
         self._leave_scope()
 
+    def _visit_scoped_node_with_params(
+        self, node: ast.AST, args: ast.arguments,
+        decorators: list[ast.AST],
+    ) -> None:
+        self._enter_scope()
+        self._bind_function_params(args)
+        for child in decorators:
+            self.visit(child)
+        for child in ast.iter_child_nodes(node):
+            if child not in decorators and child is not args:
+                self.visit(child)
+        self._leave_scope()
+
+    def _bind_function_params(self, args: ast.arguments) -> None:
+        for arg in args.args:
+            _scope_assign(self._scope_stack, arg.arg, _Binding(
+                kind=_BindingKind.DYNAMIC_VALUE,
+            ))
+        for arg in args.posonlyargs:
+            _scope_assign(self._scope_stack, arg.arg, _Binding(
+                kind=_BindingKind.DYNAMIC_VALUE,
+            ))
+        for arg in args.kwonlyargs:
+            _scope_assign(self._scope_stack, arg.arg, _Binding(
+                kind=_BindingKind.DYNAMIC_VALUE,
+            ))
+        if args.vararg:
+            _scope_assign(self._scope_stack, args.vararg.arg, _Binding(
+                kind=_BindingKind.DYNAMIC_VALUE,
+            ))
+        if args.kwarg:
+            _scope_assign(self._scope_stack, args.kwarg.arg, _Binding(
+                kind=_BindingKind.DYNAMIC_VALUE,
+            ))
+
+    # -- For / with / except / comprehension target shadow ----------------
+
+    def visit_For(self, node: ast.For) -> None:
+        self._bind_target_dynamic(node.target)
+        self.visit(node.iter)
+        for child in node.body:
+            self.visit(child)
+        for child in node.orelse:
+            self.visit(child)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self._bind_target_dynamic(node.target)
+        self.visit(node.iter)
+        for child in node.body:
+            self.visit(child)
+        for child in node.orelse:
+            self.visit(child)
+
+    def visit_With(self, node: ast.With) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars:
+                self._bind_target_dynamic(item.optional_vars)
+        for child in node.body:
+            self.visit(child)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars:
+                self._bind_target_dynamic(item.optional_vars)
+        for child in node.body:
+            self.visit(child)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.name:
+            _scope_assign(self._scope_stack, node.name, _Binding(
+                kind=_BindingKind.DYNAMIC_VALUE,
+            ))
+        if node.type:
+            self.visit(node.type)
+        for child in node.body:
+            self.visit(child)
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_comprehension(node, node.generators, node.elt)
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_comprehension(node, node.generators, node.elt)
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_comprehension(node, node.generators, node.elt)
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._visit_comprehension(node, node.generators, None)
+
+    def _visit_comprehension(
+        self, node: ast.AST,
+        generators: list[ast.comprehension],
+        elt: ast.AST | None,
+    ) -> None:
+        self._enter_scope()
+        for gen in generators:
+            self.visit(gen.iter)
+            self._bind_target_dynamic(gen.target)
+            for if_ in gen.ifs:
+                self.visit(if_)
+        if elt is not None:
+            self.visit(elt)
+        if isinstance(node, ast.DictComp):
+            self.visit(node.key)
+            self.visit(node.value)
+        self._leave_scope()
+
+    def _bind_target_dynamic(self, target: ast.AST) -> None:
+        if isinstance(target, ast.Name):
+            _scope_assign(self._scope_stack, target.id, _Binding(
+                kind=_BindingKind.DYNAMIC_VALUE,
+            ))
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for elt in target.elts:
+                self._bind_target_dynamic(elt)
+        elif isinstance(target, ast.Starred):
+            self._bind_target_dynamic(target.value)
+
     # -- Assignment tracking -----------------------------------------------
 
     def visit_Assign(self, node: ast.Assign) -> None:
-        """Track ``pattern = re.compile(...)`` and static string constants."""
-        static_value = self._resolve_static_value(node.value)
-        # First invalidate any prior compiled metadata for reassigned names.
+        binding = self._resolve_assignment_binding(node.value)
         for target in node.targets:
-            self._invalidate_compiled_binding(target)
-        # Then record new compile assignments (if this is re.compile(...)).
-        self._record_compile_assignment(node.value, node.targets)
-        # Finally update scope bindings.
-        for target in node.targets:
-            self._update_scope_binding(target, static_value)
+            self._assign_target(target, binding, node.value)
         self.generic_visit(node)
 
-    def _invalidate_compiled_binding(self, target: ast.AST) -> None:
-        """Remove compiled-pattern metadata for a target about to be reassigned."""
-        if not isinstance(target, ast.Name):
-            return
-        name = target.id
-        self._compiled_vars.pop(name, None)
-        self._var_patterns.pop(name, None)
-        self._compile_lines.pop(name, None)
-
-    def _update_scope_binding(
-        self, target: ast.AST, value: _StaticValue | None | _Sentinel,
-    ) -> None:
-        """Update scope binding for an assignment target."""
-        if not isinstance(target, ast.Name):
-            return
-        if isinstance(value, _Sentinel):
-            return
-        _scope_assign(self._scope_stack, target.id, value)
-
-    def _record_compile_assignment(
-        self, value: ast.AST, targets: list[ast.AST],
-    ) -> None:
-        if not isinstance(value, ast.Call):
-            return
-        api_name = self._identify_re_call(value)
-        if api_name != "compile":
-            return
-        pattern_str = self._resolve_pattern(
-            self._get_call_argument(value, 0, "pattern"),
-        )
-        if pattern_str is None:
-            return
-        for target in targets:
-            if isinstance(target, ast.Name):
-                self._compiled_vars[target.id] = api_name
-                self._var_patterns[target.id] = pattern_str
-                self._compile_lines[target.id] = value.lineno
-
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-        """Track ``PATTERN: Final[str] = r"..."`` (annotated assignment)."""
         if node.value is None:
             self.generic_visit(node)
             return
-        static_value = self._resolve_static_value(node.value)
-        # Invalidate prior compiled metadata
-        self._invalidate_compiled_binding(node.target)
-        # Record new compile assignment if applicable
-        if isinstance(node.value, ast.Call):
-            api_name = self._identify_re_call(node.value)
-            if api_name == "compile":
-                pattern_str = self._resolve_pattern(self._get_call_argument(
-                    node.value, 0, "pattern",
-                ))
-                if pattern_str is not None and isinstance(node.target, ast.Name):
-                    self._compiled_vars[node.target.id] = api_name
-                    self._var_patterns[node.target.id] = pattern_str
-                    self._compile_lines[node.target.id] = node.value.lineno
-        self._update_scope_binding(node.target, static_value)
+        binding = self._resolve_assignment_binding(node.value)
+        self._assign_target(node.target, binding, node.value)
         self.generic_visit(node)
 
-    def _resolve_static_value(
-        self, node: ast.AST,
-    ) -> _StaticValue | None | _Sentinel:
-        """Resolve any AST node to a static string value, None (dynamic), or
-        _UNRESOLVED (could not analyze — leave binding untouched)."""
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        if isinstance(node.target, ast.Name):
+            _scope_assign(self._scope_stack, node.target.id, _Binding(
+                kind=_BindingKind.DYNAMIC_VALUE,
+            ))
+        self.generic_visit(node)
+
+    def visit_Delete(self, node: ast.Delete) -> None:
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                _scope_delete(self._scope_stack, target.id)
+        self.generic_visit(node)
+
+    def _assign_target(
+        self, target: ast.AST, binding: _Binding, value: ast.AST,
+    ) -> None:
+        if isinstance(target, ast.Name):
+            name = target.id
+            if binding.kind == _BindingKind.COMPILED_STATIC_PATTERN:
+                _scope_assign(self._scope_stack, name, binding)
+            elif binding.kind == _BindingKind.COMPILED_DYNAMIC_PATTERN:
+                _scope_assign(self._scope_stack, name, binding)
+            else:
+                _scope_assign(self._scope_stack, name, binding)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for elt in target.elts:
+                self._assign_target(elt, _Binding(
+                    kind=_BindingKind.DYNAMIC_VALUE,
+                ), value)
+
+    def _resolve_assignment_binding(self, value: ast.AST) -> _Binding:
+        if isinstance(value, ast.Call):
+            api_name = self._identify_re_call(value)
+            if api_name == "compile":
+                pattern_arg = self._get_call_argument(value, 0, "pattern")
+                pattern_str = self._resolve_pattern(pattern_arg)
+                if pattern_str is not None:
+                    return _Binding(
+                        kind=_BindingKind.COMPILED_STATIC_PATTERN,
+                        compiled_pattern=pattern_str,
+                        compile_line=value.lineno,
+                    )
+                return _Binding(
+                    kind=_BindingKind.COMPILED_DYNAMIC_PATTERN,
+                    compile_line=value.lineno,
+                )
+            if api_name is not None:
+                return _Binding(kind=_BindingKind.DYNAMIC_VALUE)
+        static = self._resolve_static_string(value)
+        if static is not None:
+            return _Binding(
+                kind=_BindingKind.STATIC_STRING,
+                static_value=static,
+            )
+        if isinstance(value, ast.Name):
+            looked = _scope_lookup(self._scope_stack, value.id)
+            if isinstance(looked, _Sentinel):
+                return _Binding(kind=_BindingKind.DYNAMIC_VALUE)
+            if looked.kind in (
+                _BindingKind.RE_MODULE_ALIAS,
+                _BindingKind.RE_FUNCTION_ALIAS,
+            ):
+                return _Binding(
+                    kind=looked.kind,
+                    real_re_api=looked.real_re_api,
+                )
+            return _Binding(kind=_BindingKind.DYNAMIC_VALUE)
+        return _Binding(kind=_BindingKind.DYNAMIC_VALUE)
+
+    def _resolve_static_string(self, node: ast.AST) -> str | None:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            return _StaticValue(node.value)
+            return node.value
         if isinstance(node, ast.JoinedStr):
-            resolved = self._resolve_joined_str(node)
-            return None if resolved is None else _StaticValue(resolved)
+            return self._resolve_joined_str(node)
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-            return self._resolve_binop_static(node)
+            left = self._resolve_static_string(node.left)
+            right = self._resolve_static_string(node.right)
+            if left is not None and right is not None:
+                return left + right
+            return None
         if isinstance(node, ast.Name):
             looked = _scope_lookup(self._scope_stack, node.id)
-            return _UNRESOLVED if isinstance(looked, _Sentinel) else looked
-        # A call (including re.compile) result is treated as dynamic
-        # unless it's a re.compile that we've already resolved — but
-        # that path is handled separately via _var_patterns.
-        return None
-
-    def _resolve_binop_static(self, node: ast.BinOp) -> _StaticValue | None | _Sentinel:
-        left = self._resolve_static_value(node.left)
-        right = self._resolve_static_value(node.right)
-        if isinstance(left, _Sentinel) or isinstance(right, _Sentinel):
-            return _UNRESOLVED
-        if left is None or right is None:
+            if isinstance(looked, _Sentinel):
+                return None
+            if looked.kind == _BindingKind.STATIC_STRING and looked.static_value is not None:
+                return looked.static_value
             return None
-        return _StaticValue(left.value + right.value)
+        return None
 
     # -- Call detection -----------------------------------------------------
 
@@ -535,10 +685,16 @@ class RegexASTVisitor(ast.NodeVisitor):
         if not isinstance(func.value, ast.Name):
             return None, None
         var_name = func.value.id
-        if var_name in self._re_names:
+        looked = _scope_lookup(self._scope_stack, var_name)
+        if isinstance(looked, _Sentinel):
+            return None, None
+        if looked.kind == _BindingKind.RE_MODULE_ALIAS:
             return self._match_re_module_call(func, node)
-        if var_name in self._compiled_vars:
-            return self._match_compiled_call(func, var_name)
+        if looked.kind in (
+            _BindingKind.COMPILED_STATIC_PATTERN,
+            _BindingKind.COMPILED_DYNAMIC_PATTERN,
+        ):
+            return self._match_compiled_call(func, var_name, looked)
         return None, None
 
     def _match_re_module_call(
@@ -551,24 +707,29 @@ class RegexASTVisitor(ast.NodeVisitor):
         return (api, None) if pattern_arg is _DUP_ARG else (api, pattern_arg)
 
     def _match_compiled_call(
-        self, func: ast.Attribute, var_name: str,
+        self, func: ast.Attribute, var_name: str, binding: _Binding,
     ) -> tuple[str | None, ast.AST | None]:
         api = func.attr
         if api not in _PATTERN_METHODS:
             return None, None
-        stored = self._var_patterns.get(var_name)
-        if stored is not None:
-            return f"compiled.{api}", ast.Constant(value=stored)
+        if binding.kind == _BindingKind.COMPILED_STATIC_PATTERN:
+            stored = binding.compiled_pattern
+            if stored is not None:
+                return f"compiled.{api}", ast.Constant(value=stored)
+            return f"compiled.{api}", None
         return f"compiled.{api}", None
 
     def _match_name_call(
         self, func: ast.Name, node: ast.Call,
     ) -> tuple[str | None, ast.AST | None]:
         bound = func.id
-        if bound not in self._from_re_names:
+        looked = _scope_lookup(self._scope_stack, bound)
+        if isinstance(looked, _Sentinel):
             return None, None
-        real = self._from_re_names[bound]
-        if real in _RE_MODULE_FUNCS:
+        if looked.kind != _BindingKind.RE_FUNCTION_ALIAS:
+            return None, None
+        real = looked.real_re_api
+        if real and real in _RE_MODULE_FUNCS:
             pattern_arg = self._get_call_argument(node, _RE_MODULE_FUNCS[real], "pattern")
             return (real, None) if pattern_arg is _DUP_ARG else (real, pattern_arg)
         return None, None
@@ -606,10 +767,6 @@ class RegexASTVisitor(ast.NodeVisitor):
     # -- Pattern resolution ------------------------------------------------
 
     def _resolve_pattern(self, arg: ast.AST | None) -> str | None:
-        """Resolve an AST node to a pattern string if statically determinable.
-
-        Returns None for dynamic/unknown patterns.
-        """
         if arg is None:
             return None
         if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
@@ -620,7 +777,13 @@ class RegexASTVisitor(ast.NodeVisitor):
             return self._resolve_binop_pattern(arg)
         if isinstance(arg, ast.Name):
             looked = _scope_lookup(self._scope_stack, arg.id)
-            return looked.value if isinstance(looked, _StaticValue) else None
+            if isinstance(looked, _Sentinel):
+                return None
+            if looked.kind == _BindingKind.STATIC_STRING and looked.static_value is not None:
+                return looked.static_value
+            if looked.kind == _BindingKind.COMPILED_STATIC_PATTERN and looked.compiled_pattern is not None:
+                return looked.compiled_pattern
+            return None
         if isinstance(arg, ast.Call) and self._is_re_escape_call(arg):
             return None
         return None
@@ -691,9 +854,17 @@ class RegexASTVisitor(ast.NodeVisitor):
             return left_segs + right_segs
         if isinstance(node, ast.Name):
             looked = _scope_lookup(self._scope_stack, node.id)
-            if isinstance(looked, _StaticValue):
-                return [_Segment.static(looked.value)]
-            return [_Segment.dynamic()] if looked is None else [_Segment.unknown()]
+            if isinstance(looked, _Sentinel):
+                return [_Segment.unknown()]
+            if looked.kind == _BindingKind.STATIC_STRING and looked.static_value is not None:
+                return [_Segment.static(looked.static_value)]
+            if looked.kind in (
+                _BindingKind.COMPILED_STATIC_PATTERN,
+            ) and looked.compiled_pattern is not None:
+                return [_Segment.static(looked.compiled_pattern)]
+            if looked.kind == _BindingKind.DYNAMIC_VALUE:
+                return [_Segment.dynamic()]
+            return [_Segment.unknown()]
         if isinstance(node, ast.Call):
             if self._is_re_escape_call(node):
                 return [_Segment.escaped_dynamic()]
@@ -725,25 +896,34 @@ class RegexASTVisitor(ast.NodeVisitor):
     def _classify_name_pattern(
         self, arg: ast.Name,
     ) -> tuple[PatternSource, str | None]:
-        if arg.id in self._var_patterns:
-            return PatternSource.STATIC_LITERAL, self._var_patterns[arg.id]
         looked = _scope_lookup(self._scope_stack, arg.id)
-        if isinstance(looked, _StaticValue):
-            return PatternSource.STATIC_LITERAL, looked.value
-        if looked is None:
+        if isinstance(looked, _Sentinel):
+            return PatternSource.UNKNOWN, None
+        if looked.kind == _BindingKind.COMPILED_STATIC_PATTERN and looked.compiled_pattern is not None:
+            return PatternSource.STATIC_LITERAL, looked.compiled_pattern
+        if looked.kind == _BindingKind.STATIC_STRING and looked.static_value is not None:
+            return PatternSource.STATIC_LITERAL, looked.static_value
+        if looked.kind in (
+            _BindingKind.DYNAMIC_VALUE,
+            _BindingKind.COMPILED_DYNAMIC_PATTERN,
+        ):
             return PatternSource.DYNAMIC, None
         return PatternSource.UNKNOWN, None
 
     def _is_re_escape_call(self, node: ast.AST) -> bool:
-        """Check if ``node`` is a ``re.escape(...)`` call."""
         if not isinstance(node, ast.Call):
             return False
         func = node.func
         if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            return func.value.id in self._re_names and func.attr == "escape"
+            looked = _scope_lookup(self._scope_stack, func.value.id)
+            if isinstance(looked, _Sentinel):
+                return False
+            return looked.kind == _BindingKind.RE_MODULE_ALIAS and func.attr == "escape"
         if isinstance(func, ast.Name):
-            return func.id in self._from_re_names and \
-                self._from_re_names[func.id] == "escape"
+            looked = _scope_lookup(self._scope_stack, func.id)
+            if isinstance(looked, _Sentinel):
+                return False
+            return looked.kind == _BindingKind.RE_FUNCTION_ALIAS and looked.real_re_api == "escape"
         return False
 
     # -- Finding emission ---------------------------------------------------
@@ -751,7 +931,6 @@ class RegexASTVisitor(ast.NodeVisitor):
     def _record_finding(
         self, node: ast.Call, api: str, pattern_arg: ast.AST | None,
     ) -> None:
-        """Record a finding for a regex API call."""
         compile_line = self._lookup_compile_line(node, api)
         pattern_source, pattern_str, segments = self._classify_pattern_source(
             pattern_arg,
@@ -767,12 +946,18 @@ class RegexASTVisitor(ast.NodeVisitor):
         )
         has_dotall = self._check_dotall(node, api)
 
-        # All-static compositions: run full-pattern ReDoS analysis.
+        if api.startswith("compiled."):
+            func = node.func
+            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                looked = _scope_lookup(self._scope_stack, func.value.id)
+                if not isinstance(looked, _Sentinel) and looked.kind == _BindingKind.COMPILED_DYNAMIC_PATTERN:
+                    self._emit_dynamic_compiled_review(ctx)
+                    return
+
         if all(s.kind == _SegKind.STATIC for s in segments) and pattern_str is not None:
             self._emit_static_finding(ctx, pattern_str, has_dotall)
             return
 
-        # Mixed compositions: check individual dangerous static segments.
         static_danger = self._find_dangerous_static_segment(segments)
         if static_danger is not None:
             self._emit_error(ctx, static_danger[1], static_danger[0])
@@ -783,7 +968,6 @@ class RegexASTVisitor(ast.NodeVisitor):
                 self._emit_dotall_review(ctx, pattern_str)
             return
 
-        # Dynamic/escaped composition analysis.
         self._emit_composition_finding(ctx, segments, pattern_source)
 
     def _emit_static_finding(
@@ -827,7 +1011,14 @@ class RegexASTVisitor(ast.NodeVisitor):
             return None
         func = node.func
         if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            return self._compile_lines.get(func.value.id)
+            looked = _scope_lookup(self._scope_stack, func.value.id)
+            if isinstance(looked, _Sentinel):
+                return None
+            if looked.kind in (
+                _BindingKind.COMPILED_STATIC_PATTERN,
+                _BindingKind.COMPILED_DYNAMIC_PATTERN,
+            ):
+                return looked.compile_line
         return None
 
     def _find_dangerous_static_segment(
@@ -854,6 +1045,26 @@ class RegexASTVisitor(ast.NodeVisitor):
             remediation=(
                 "Redesign the pattern to avoid overlapping quantifiers or "
                 "use a deterministic parser (splitlines, startswith, partition)."
+            ),
+            compile_line=ctx.compile_line,
+        ))
+
+    def _emit_dynamic_compiled_review(self, ctx: _FindingCtx) -> None:
+        self.findings.append(RegexFinding(
+            severity=Severity.REVIEW,
+            engine=Engine.PYTHON_RE,
+            file_path=self._file_path,
+            line=ctx.line, function=ctx.func_name, api=ctx.api,
+            pattern="<dynamic>", pattern_source=PatternSource.DYNAMIC,
+            input_scope=ctx.input_scope,
+            reason=(
+                "Compiled pattern source became dynamic after reassignment — "
+                "the pattern used in this call is no longer the statically "
+                "known safe value"
+            ),
+            remediation=(
+                "Avoid reassigning compiled pattern variables to dynamic "
+                "values, or validate the new pattern before use."
             ),
             compile_line=ctx.compile_line,
         ))
@@ -957,7 +1168,10 @@ class RegexASTVisitor(ast.NodeVisitor):
 
     def _contains_dotall(self, node: ast.AST) -> bool:
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-            return node.value.id in self._re_names and node.attr == "DOTALL"
+            looked = _scope_lookup(self._scope_stack, node.value.id)
+            if isinstance(looked, _Sentinel):
+                return False
+            return looked.kind == _BindingKind.RE_MODULE_ALIAS and node.attr == "DOTALL"
         if isinstance(node, ast.BinOp):
             return (self._contains_dotall(node.left)
                     or self._contains_dotall(node.right))
@@ -983,9 +1197,17 @@ class RegexASTVisitor(ast.NodeVisitor):
             f"re.{side.attr}" for side in candidates
             if isinstance(side, ast.Attribute)
             and isinstance(side.value, ast.Name)
-            and side.value.id in self._re_names
         ]
-        return ", ".join(flags) if flags else ""
+        valid_flags = []
+        for side, flag_str in zip(candidates, flags):
+            if not isinstance(side, ast.Attribute) or not isinstance(side.value, ast.Name):
+                continue
+            looked = _scope_lookup(self._scope_stack, side.value.id)
+            if isinstance(looked, _Sentinel):
+                continue
+            if looked.kind == _BindingKind.RE_MODULE_ALIAS:
+                valid_flags.append(flag_str)
+        return ", ".join(valid_flags) if valid_flags else ""
 
     def _flatten_bitor(self, node: ast.AST) -> list[ast.AST]:
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
@@ -1229,22 +1451,39 @@ def _merge_literal_atoms(tokens: list[_Token]) -> list[_Token]:
     Only non-metacharacter literals are merged.  Regex metacharacters and
     escape sequences remain standalone tokens so the later quantifier/group
     analysis can see the real structure.
+
+    Important: a literal that is immediately followed by a quantifier (+, *, ?, {m,n})
+    must NOT be merged with preceding literals, because the quantifier applies
+    to that specific atom only.  For example, in "-ab+", the '+' applies to 'b'
+    only, not to the entire "-ab".
     """
     _META = set("\\.[]()+*?{}|^$")
     merged: list[_Token] = []
     run_chars: list[str] = []
     run_pos = 0
-    for tok in tokens:
-        if _is_mergeable_literal(tok, _META):
+    i = 0
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i]
+        # Check if this token is a mergeable literal AND the next token is NOT a quantifier.
+        # We must not merge the last literal before a quantifier because the quantifier
+        # binds to that specific atom.
+        next_is_quant = (
+            i + 1 < n
+            and tokens[i + 1].kind == _TKind.QUANT
+        )
+        if _is_mergeable_literal(tok, _META) and not next_is_quant:
             if not run_chars:
                 run_chars = [tok.text]
                 run_pos = tok.pos
             else:
                 run_chars.append(tok.text)
+            i += 1
             continue
         _flush_run(merged, run_chars, run_pos)
         run_chars = []
         merged.append(tok)
+        i += 1
     _flush_run(merged, run_chars, run_pos)
     return merged
 

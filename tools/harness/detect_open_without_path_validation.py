@@ -90,6 +90,12 @@ EXEMPT_FILES = {
     "tools/harness/detect_cwe22_paths.py",
 }
 
+# Directories that are exempt from scanning (tests use pytest fixtures
+# like tmp_path that the static analyzer cannot fully trace).
+EXEMPT_DIRS = {
+    "tools/harness/tests",
+}
+
 
 def _is_known_validator(name: str, rel: str = "") -> bool:
     """Return True if *name* is a known validation function.
@@ -717,6 +723,16 @@ def main() -> int:
 
     py_files = sorted(scan_dir.rglob("*.py"))
     for filepath in py_files:
+        # Skip exempt directories
+        try:
+            rel = filepath.relative_to(REPO_ROOT)
+        except ValueError:
+            rel = filepath
+        rel_str = str(rel)
+        if any(rel_str.startswith(exempt) for exempt in EXEMPT_DIRS):
+            continue
+        if _display_path(filepath) in EXEMPT_FILES:
+            continue
         file_errors, file_warnings = check_file(filepath, strict=strict)
         all_errors.extend(file_errors)
         all_warnings.extend(file_warnings)
