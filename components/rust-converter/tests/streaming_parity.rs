@@ -25,7 +25,7 @@ use nginx_markdown_converter::error::ConversionError;
 use streaming_test_support::known_differences::KnownDifferences;
 
 use streaming_test_support::{
-    check_conversion_errors, check_output_comparison, convert_full_buffer,
+    FixtureMeta, check_conversion_errors, check_output_comparison, convert_full_buffer,
     convert_streaming_chunked, convert_streaming_single, default_streaming_budget,
     default_streaming_options, discover_html_fixtures, evidence_output_path, fixture_relative_name,
     known_differences_path, normalize_whitespace_tokens, read_fixture, read_fixture_meta,
@@ -185,6 +185,30 @@ fn corpus_driven_differential_harness() {
         "differential harness failures:\n{}",
         failures.join("\n\n")
     );
+}
+
+#[test]
+fn expected_fallback_rejects_successful_streaming_results() {
+    let metadata = FixtureMeta {
+        expected_fallback: true,
+        known_diff_ids: Vec::new(),
+        high_risk_structures: Vec::new(),
+        source_encoding: None,
+        content_type: None,
+    };
+    let single = Ok("single output".to_string());
+    let chunked = Ok("chunked output".to_string());
+
+    let error = check_conversion_errors(
+        "expected-fallback.html",
+        &metadata,
+        &single,
+        &chunked,
+        &KnownDifferences::default(),
+    )
+    .expect_err("successful streaming must fail an expected-fallback fixture");
+
+    assert!(error.contains("expected fallback"));
 }
 
 #[test]
