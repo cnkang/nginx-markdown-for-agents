@@ -567,3 +567,239 @@ class TestQuotedBraceAndCommentIsolation:
         assert len(parent) == 1
         # Child should not be flagged
         assert all(f.loc_path != "/parent/child" for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# Quoted regex location paths (deterministic header scanner)
+# ---------------------------------------------------------------------------
+
+class TestQuotedLocationRegex:
+    """Deterministic location header scanner handles quoted regex paths."""
+
+    def test_quoted_regex_with_spaces(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                'location ~ "^/foo bar/" {\n'
+                "    markdown_cache_validation full;\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert any("foo bar" in f.loc_path for f in findings)
+
+    def test_regex_quantifier_braces(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                r'location ~ "^/item/[0-9]{2}$" {' "\n"
+                "    markdown_cache_validation full;\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert any("[0-9]{2}" in f.loc_path for f in findings)
+
+    def test_escaped_quote_in_regex(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                r'location ~ "^/path\"end$" {' "\n"
+                "    markdown_cache_validation full;\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert any("path" in f.loc_path and "end" in f.loc_path for f in findings)
+
+    def test_missing_location_argument(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "location {\n"
+                "    markdown_cache_validation full;\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert any("missing argument" in e.message for e in errors)
+
+    def test_missing_block_opener(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "location /path\n"
+                "    markdown_cache_validation full;\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert any("missing opening brace" in e.message for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Strict UTF-8 reading
+# ---------------------------------------------------------------------------
+
+class TestStrictUTF8:
+    """Invalid UTF-8 must produce ScanError, not silent skip."""
+
+    def test_invalid_utf8_produces_scan_error(self, tmp_path: Path) -> None:
+        p = tmp_path / "tools" / "e2e" / "bad.sh"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b'\xff\xfe')
+        findings, errors = scan_file(p, tmp_path)
+        assert not findings
+        assert any("UTF-8" in e.message for e in errors)
+
+    def test_valid_utf8_no_error(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "location /ok/ {\n"
+                "    markdown_cache_validation full;\n"
+                "    markdown_streaming off;\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        encoding_errors = [e for e in errors if "UTF-8" in e.message]
+        assert not encoding_errors
+
+
+# ---------------------------------------------------------------------------
+# Heredoc delimiter variants (hyphens, dots)
+# ---------------------------------------------------------------------------
+
+class TestHeredocDelimiter:
+    """Heredoc delimiters with hyphens and dots must be recognised."""
+
+    def test_hyphen_delimiter(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'NGINX-CONF' > /tmp/nginx.conf\n"
+                "location /hyphen/ {\n"
+                "    markdown_cache_validation full;\n"
+                "}\n"
+                "NGINX-CONF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert any(f.loc_path == "/hyphen/" for f in findings)
+
+    def test_dot_delimiter(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'NGINX.CONF' > /tmp/nginx.conf\n"
+                "location /dot/ {\n"
+                "    markdown_cache_validation full;\n"
+                "}\n"
+                "NGINX.CONF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not errors
+        assert any(f.loc_path == "/dot/" for f in findings)
+
+
+# ---------------------------------------------------------------------------
+# Rust comment skipping (ordinary strings in comments)
+# ---------------------------------------------------------------------------
+
+class TestRustCommentSkipping:
+    """Ordinary strings inside Rust comments must not be scanned."""
+
+    def test_rust_line_comment_not_scanned(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e-harness/src/test.rs": (
+                '// let config = "location /fake { markdown_cache_validation full; }";\n'
+                'fn main() {}\n'
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not findings
+        assert not errors
+
+    def test_rust_block_comment_not_scanned(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e-harness/src/test.rs": (
+                '/* "location /fake { markdown_cache_validation full; }" */\n'
+                'fn main() {}\n'
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert not findings
+        assert not errors
+
+    def test_unterminated_rust_string(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e-harness/src/test.rs": (
+                'fn main() {\n'
+                '    let s = "location /bad { markdown_cache_validation full;\n'
+                '}\n'
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert any("unterminated" in e.message.lower() for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Whole-section structure validation
+# ---------------------------------------------------------------------------
+
+class TestStructureValidation:
+    """_validate_config_structure detects unbalanced braces."""
+
+    def test_unmatched_closing_brace(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "http {\n"
+                "    server {\n"
+                "        location /test {\n"
+                "            markdown_cache_validation full;\n"
+                "        }\n"
+                "    }\n"
+                "}\n"
+                "}\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert any("unmatched closing brace" in e.message for e in errors)
+
+    def test_outer_unbalanced_braces(self, tmp_path: Path) -> None:
+        files = {
+            "tools/e2e/test.sh": (
+                "#!/usr/bin/env bash\n"
+                "cat <<'EOF' > /tmp/nginx.conf\n"
+                "http {\n"
+                "    server {\n"
+                "        location /test {\n"
+                "            markdown_cache_validation full;\n"
+                "        }\n"
+                "    }\n"
+                "EOF\n"
+            ),
+        }
+        findings, errors = _scan(files, tmp_path)
+        assert any("unmatched opening brace" in e.message for e in errors)
