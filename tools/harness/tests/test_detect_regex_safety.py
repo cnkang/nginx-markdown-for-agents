@@ -1532,21 +1532,37 @@ class TestShellParserImprovements:
         assert "(a+)+$" in patterns
         assert "(b+)+$" in patterns
 
-    def test_pattern_file_option(self, tmp_path: Path) -> None:
-        """grep -P -f patterns.txt input.txt — pattern file not readable produces REVIEW."""
+    def test_pattern_file_option_reads_dangerous_pattern(self, tmp_path: Path) -> None:
+        """grep -P -f patterns.txt input.txt — dangerous pattern in file → ERROR."""
+        patterns_file = tmp_path / "patterns.txt"
+        patterns_file.write_text("(a+)+$\n", encoding="utf-8")
         findings = self._scan_shell_content(
             "#!/usr/bin/env bash\ngrep -P -f patterns.txt input.txt\n", tmp_path,
         )
-        reviews = [f for f in findings if f.severity == Severity.REVIEW]
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert errors_found[0].pattern == "(a+)+$"
+
+    def test_pattern_file_missing_produces_review_and_error(self, tmp_path: Path) -> None:
+        """grep -P -f missing.txt input.txt — missing pattern file → REVIEW + ScanError."""
+        f = tmp_path / "test.sh"
+        f.write_text("#!/usr/bin/env bash\ngrep -P -f missing.txt input.txt\n")
+        result, errors = _scan_shell_file(f, tmp_path)
+        reviews = [r for r in result if r.severity == Severity.REVIEW]
         assert len(reviews) >= 1
+        assert any("cannot read" in e.message.lower() or "no such file" in e.message.lower()
+                   for e in errors)
 
     def test_long_file_option_equals(self, tmp_path: Path) -> None:
-        """grep -P --file=patterns.txt input.txt — pattern file via =."""
+        """grep -P --file=patterns.txt input.txt — dangerous pattern via =."""
+        patterns_file = tmp_path / "patterns.txt"
+        patterns_file.write_text("(a+)+$\n", encoding="utf-8")
         findings = self._scan_shell_content(
             "#!/usr/bin/env bash\ngrep -P --file=patterns.txt input.txt\n", tmp_path,
         )
-        reviews = [f for f in findings if f.severity == Severity.REVIEW]
-        assert len(reviews) >= 1
+        errors_found = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors_found) == 1
+        assert errors_found[0].pattern == "(a+)+$"
 
     def test_color_no_value(self, tmp_path: Path) -> None:
         """grep -P --color '(a+)+$' input.txt — bare --color doesn't consume next token."""
@@ -1584,6 +1600,201 @@ class TestShellParserImprovements:
         )
         has_error = len(errors) > 0
         assert has_finding or has_error
+
+
+# ---------------------------------------------------------------------------
+# Shell engine & option adversarial (Section XIII)
+# ---------------------------------------------------------------------------
+
+class TestShellEngineResolution:
+    """grep/rg default engines are NOT PCRE; PCRE flags enable PCRE."""
+
+    def _scan(self, content: str, tmp_path: Path):
+        f = tmp_path / "test.sh"
+        f.write_text(content)
+        return _scan_shell_file(f, tmp_path)
+
+    def test_grep_e_without_pcre_no_error(self, tmp_path: Path) -> None:
+        """grep -e '(a+)+$' input.txt → no PCRE ERROR."""
+        findings, _ = self._scan(
+            "#!/usr/bin/env bash\ngrep -e '(a+)+$' input.txt\n", tmp_path,
+        )
+        errors = [f for f in findings if f.severity == Severity.ERROR]
+        assert not errors
+
+    def test_rg_e_without_pcre2_no_error(self, tmp_path: Path) -> None:
+        """rg -e '(a+)+$' input.txt → no PCRE ERROR."""
+        findings, _ = self._scan(
+            "#!/usr/bin/env bash\nrg -e '(a+)+$' input.txt\n", tmp_path,
+        )
+        errors = [f for f in findings if f.severity == Severity.ERROR]
+        assert not errors
+
+    def test_grep_e_then_p_is_error(self, tmp_path: Path) -> None:
+        """grep -e '(a+)+$' -P input.txt → ERROR (PCRE enabled)."""
+        findings, _ = self._scan(
+            "#!/usr/bin/env bash\ngrep -e '(a+)+$' -P input.txt\n", tmp_path,
+        )
+        errors = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors) == 1
+        assert errors[0].engine == Engine.SHELL_PCRE
+
+    def test_grep_p_then_e_is_error(self, tmp_path: Path) -> None:
+        """grep -P -e '(a+)+$' input.txt → ERROR."""
+        findings, _ = self._scan(
+            "#!/usr/bin/env bash\ngrep -P -e '(a+)+$' input.txt\n", tmp_path,
+        )
+        errors = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors) == 1
+
+    def test_rg_e_then_pcre2_is_error(self, tmp_path: Path) -> None:
+        """rg -e '(a+)+$' --pcre2 input.txt → ERROR."""
+        findings, _ = self._scan(
+            "#!/usr/bin/env bash\nrg -e '(a+)+$' --pcre2 input.txt\n", tmp_path,
+        )
+        errors = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors) == 1
+
+    def test_perl_e_is_pcre(self, tmp_path: Path) -> None:
+        """perl -e '(a+)+$' → ERROR (perl is inherently PCRE)."""
+        findings, _ = self._scan(
+            "#!/usr/bin/env bash\nperl -e '(a+)+$'\n", tmp_path,
+        )
+        errors = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors) == 1
+        assert errors[0].engine == Engine.SHELL_PCRE
+
+
+class TestShellOptionContracts:
+    """Boolean, required-value, and unknown option handling."""
+
+    def _scan(self, content: str, tmp_path: Path):
+        f = tmp_path / "test.sh"
+        f.write_text(content)
+        return _scan_shell_file(f, tmp_path)
+
+    def test_boolean_options(self, tmp_path: Path) -> None:
+        """grep -P -n -q -i '(a+)+$' input.txt → ERROR on the pattern."""
+        findings, _ = self._scan(
+            "#!/usr/bin/env bash\ngrep -P -n -q -i '(a+)+$' input.txt\n", tmp_path,
+        )
+        errors = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors) == 1
+        assert errors[0].pattern == "(a+)+$"
+
+    def test_required_value_option_consumes_next(self, tmp_path: Path) -> None:
+        """grep -P --directories skip '(a+)+$' input.txt → ERROR on the pattern."""
+        findings, _ = self._scan(
+            "#!/usr/bin/env bash\ngrep -P --directories skip '(a+)+$' input.txt\n",
+            tmp_path,
+        )
+        errors = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors) == 1
+        assert errors[0].pattern == "(a+)+$"
+
+    def test_unknown_option_does_not_hide_pattern(self, tmp_path: Path) -> None:
+        """grep -P --unknown-opt skip '(a+)+$' input.txt → still ERROR on pattern."""
+        findings, _ = self._scan(
+            "#!/usr/bin/env bash\ngrep -P --unknown-opt skip '(a+)+$' input.txt\n",
+            tmp_path,
+        )
+        errors = [f for f in findings if f.severity == Severity.ERROR]
+        assert any(f.pattern == "(a+)+$" for f in errors)
+
+    def test_double_dash_separator(self, tmp_path: Path) -> None:
+        """grep -P -- '(a+)+$' input.txt → pattern after -- is analyzed."""
+        findings, _ = self._scan(
+            "#!/usr/bin/env bash\ngrep -P -- '(a+)+$' input.txt\n", tmp_path,
+        )
+        errors = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors) == 1
+        assert errors[0].pattern == "(a+)+$"
+
+
+class TestShellPatternFiles:
+    """Pattern-file resolution, boundary validation, encoding."""
+
+    def _scan(self, content: str, tmp_path: Path, extra_files=None):
+        if extra_files:
+            for rel, c in extra_files.items():
+                p = tmp_path / rel
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(c, encoding="utf-8")
+        f = tmp_path / "test.sh"
+        f.write_text(content, encoding="utf-8")
+        return _scan_shell_file(f, tmp_path)
+
+    def test_relative_to_script_directory(self, tmp_path: Path) -> None:
+        """grep -P -f patterns.txt input.txt reads patterns.txt next to script."""
+        findings, _ = self._scan(
+            "#!/usr/bin/env bash\ngrep -P -f patterns.txt input.txt\n",
+            tmp_path, {"patterns.txt": "(a+)+$\n"},
+        )
+        errors = [f for f in findings if f.severity == Severity.ERROR]
+        assert len(errors) == 1
+        assert errors[0].pattern == "(a+)+$"
+
+    def test_multiple_pattern_files(self, tmp_path: Path) -> None:
+        """grep -P -f p1.txt -f p2.txt input.txt reads both files."""
+        findings, _ = self._scan(
+            "#!/usr/bin/env bash\ngrep -P -f p1.txt -f p2.txt input.txt\n",
+            tmp_path, {"p1.txt": "(a+)+$\n", "p2.txt": "(b+)+$\n"},
+        )
+        errors = [f for f in findings if f.severity == Severity.ERROR]
+        patterns = {f.pattern for f in errors}
+        assert "(a+)+$" in patterns
+        assert "(b+)+$" in patterns
+
+    def test_dangerous_pattern_in_second_file(self, tmp_path: Path) -> None:
+        """The second pattern file's dangerous pattern is detected."""
+        findings, _ = self._scan(
+            "#!/usr/bin/env bash\ngrep -P -f safe.txt -f danger.txt input.txt\n",
+            tmp_path, {"safe.txt": "^safe$\n", "danger.txt": "(a+)+$\n"},
+        )
+        errors = [f for f in findings if f.severity == Severity.ERROR]
+        assert any(f.pattern == "(a+)+$" for f in errors)
+
+    def test_missing_file_produces_scan_error(self, tmp_path: Path) -> None:
+        """A missing pattern file produces a ScanError and a REVIEW."""
+        findings, errors = self._scan(
+            "#!/usr/bin/env bash\ngrep -P -f missing.txt input.txt\n", tmp_path,
+        )
+        assert any("cannot read" in e.message.lower() or "no such" in e.message.lower()
+                    for e in errors)
+        assert any(f.severity == Severity.REVIEW for f in findings)
+
+    def test_invalid_utf8_produces_scan_error(self, tmp_path: Path) -> None:
+        """A non-UTF-8 pattern file produces a ScanError and a REVIEW."""
+        bad = tmp_path / "bad.txt"
+        bad.write_bytes(b"(a+)+\xff\xfe")
+        findings, errors = self._scan(
+            "#!/usr/bin/env bash\ngrep -P -f bad.txt input.txt\n", tmp_path,
+        )
+        assert any("utf-8" in e.message.lower() for e in errors)
+        assert any(f.severity == Severity.REVIEW for f in findings)
+
+    def test_traversal_rejected(self, tmp_path: Path) -> None:
+        """grep -P -f ../../etc/passwd input.txt → rejected."""
+        findings, errors = self._scan(
+            "#!/usr/bin/env bash\ngrep -P -f ../../etc/passwd input.txt\n", tmp_path,
+        )
+        assert any("traversal" in e.message.lower() for e in errors)
+
+    def test_absolute_path_rejected(self, tmp_path: Path) -> None:
+        """grep -P -f /tmp/external input.txt → rejected."""
+        findings, errors = self._scan(
+            "#!/usr/bin/env bash\ngrep -P -f /tmp/external input.txt\n", tmp_path,
+        )
+        assert any("absolute" in e.message.lower() for e in errors)
+
+    def test_directory_path_produces_scan_error(self, tmp_path: Path) -> None:
+        """A directory as a pattern file produces a ScanError."""
+        (tmp_path / "subdir").mkdir()
+        findings, errors = self._scan(
+            "#!/usr/bin/env bash\ngrep -P -f subdir input.txt\n", tmp_path,
+        )
+        assert any("cannot read" in e.message.lower() or "direct" in e.message.lower()
+                    for e in errors)
 
 
 # ---------------------------------------------------------------------------
