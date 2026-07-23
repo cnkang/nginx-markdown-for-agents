@@ -60,6 +60,8 @@ permissions: {}
 # BLOCKING (release-gate equivalent — must pass for merge/release):
 #   - docs-check             — Documentation consistency (make docs-check)
 #                              Includes: validate_workflow_matrix_consumers.py (Req 5)
+#   - harness-tooling        — Harness detector gates (regex-security-check,
+#                              e2e-streaming-config-check, naming detector)
 #   - rust-quality           — Rust formatting, clippy, unit tests (make test-rust)
 #                              Includes: streaming tests via --all-features (Req 1)
 #   - nginx-c-tests          — C unit + integration tests (make test-nginx-unit)
@@ -97,6 +99,7 @@ jobs:
       perf: ${{ steps.filter.outputs.perf }}
       matrix_release: ${{ steps.filter.outputs.matrix_release }}
       corpus_tools: ${{ steps.filter.outputs.corpus_tools }}
+      harness_tooling: ${{ steps.filter.outputs.harness_tooling }}
       workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - name: Checkout repository
@@ -166,6 +169,19 @@ jobs:
               - 'tools/perf/run_module_benchmark.sh'
             corpus_tools:
               - 'tools/corpus/**'
+            harness_tooling:
+              - 'AGENTS.md'
+              - 'Makefile'
+              - '.gitattributes'
+              - '.sonarcloud.properties'
+              - 'tools/harness/**'
+              - 'tools/sonar/**'
+              - 'tools/e2e/**'
+              - 'tools/e2e-harness/**'
+              - 'tests/corpus/**'
+              - 'docs/harness/**'
+              - 'tools/complexity/baseline.json'
+              - '.github/workflows/**'
             workflows:
               - '.github/workflows/**'
 
@@ -190,6 +206,40 @@ jobs:
 
       - name: Validate docs
         run: make docs-check
+
+  harness-tooling:
+    name: Harness Tooling Gates
+    needs: changes
+    if: needs.changes.outputs.harness_tooling == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14.3'
+
+      - name: Install test dependencies
+        run: python3 -m pip install --upgrade pip && python3 -m pip install pytest==8.3.5
+
+      - name: Run regex safety detector
+        run: make regex-security-check
+
+      - name: Run E2E streaming config detector
+        run: make e2e-streaming-config-check
+
+      - name: Validate Sonar source encodings
+        run: make sonar-encoding-check
+
+      - name: Run auto-generated naming detector
+        run: python3 tools/harness/detect_auto_generated_naming.py tools/ --strict
 
   header-sync:
     name: FFI Header Generation Smoke
@@ -841,11 +891,14 @@ jobs:
           name: corpus-examples
           path: perf/reports/examples/
 
-  # ─── 0.9.0 Release Gate (Experimental / Non-blocking) ────────────────────────
-  # This job validates 0.9.0 release readiness. It is experimental and does not
-  # block PR merge. It becomes blocking at the actual 0.9.0 tag release.
-  release-gate-090:
-    name: Release Gate 0.9.0 (Experimental)
+  # ─── Release Regression Gates (Non-blocking) ─────────────────────────────────
+  # Validates that release-gated features from 0.9.0 have not regressed.
+  # Runs validate_release_gates_090.py which covers 0.9.0 deliverables including
+  # production examples, doctor tool, config V2, conditional requests, and
+  # observability schema.
+  # Non-blocking in CI; blocking at actual release tags via make targets.
+  release-regression-gates:
+    name: "Release Gates: 0.9.0 Regression Validator"
     needs: [changes, rust-quality, nginx-c-tests]
     if: >-
       always() &&
@@ -868,5 +921,5 @@ jobs:
         with:
           python-version: '3.14.3'
 
-      - name: Run 0.9.0 gate validator
+      - name: Run release regression gates
         run: python3 tools/release/gates/validate_release_gates_090.py

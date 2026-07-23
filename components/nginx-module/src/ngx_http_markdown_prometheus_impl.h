@@ -29,18 +29,76 @@ u_char *ngx_slprintf(u_char *buf, u_char *last,
 #define NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED  1
 #endif
 
+#if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+#define NGX_HTTP_MARKDOWN_PROM_PATH_HEADER                              \
+    "# HELP nginx_markdown_path_conversions_total "                    \
+    "Per-path conversion count.\n"                                     \
+    "# TYPE nginx_markdown_path_conversions_total counter\n"           \
+    "# HELP nginx_markdown_path_conversion_time_ms_total "             \
+    "Per-path cumulative conversion time in ms.\n"                     \
+    "# TYPE nginx_markdown_path_conversion_time_ms_total counter\n"
+
+#define NGX_HTTP_MARKDOWN_PROM_PATH_CONVERSIONS_PREFIX                  \
+    "nginx_markdown_path_conversions_total{path=\""
+
+#define NGX_HTTP_MARKDOWN_PROM_PATH_TIME_PREFIX                         \
+    "nginx_markdown_path_conversion_time_ms_total{path=\""
+
+#define NGX_HTTP_MARKDOWN_PROM_PATH_VALUE_PREFIX  "\"} "
+
+typedef struct {
+    u_char             *pos;
+    u_char             *end;
+    size_t              tail_reserve;
+    ngx_atomic_uint_t   omitted_conversions;
+    ngx_atomic_uint_t   omitted_time_ms;
+    ngx_uint_t          omitted_nodes;
+    ngx_uint_t          failed;
+} ngx_http_markdown_prometheus_path_render_ctx_t;
+#endif
+
 /*
  * Forward declaration: in-order RB-tree walk helper for per-path
  * Prometheus output.  Defined after the main write function.
  * Only available when NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED is 1.
  */
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+static ngx_int_t
+ngx_http_markdown_prometheus_path_tail_reserve(size_t *reserve);
+
+static ngx_atomic_uint_t
+ngx_http_markdown_prometheus_saturating_add(
+    ngx_atomic_uint_t left,
+    ngx_atomic_uint_t right);
+
+static ngx_int_t
+ngx_http_markdown_prometheus_path_pair_size(
+    const u_char *path,
+    size_t path_len,
+    ngx_atomic_uint_t conversions,
+    ngx_atomic_uint_t conversion_time_ms,
+    size_t *needed);
+
+static ngx_int_t
+ngx_http_markdown_prometheus_write_path_pair(
+    ngx_http_markdown_prometheus_path_render_ctx_t *render,
+    const u_char *path,
+    size_t path_len,
+    ngx_atomic_uint_t conversions,
+    ngx_atomic_uint_t conversion_time_ms,
+    size_t needed);
+
 static u_char *
+ngx_http_markdown_metrics_write_prometheus_paths(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot);
+
+static void
 ngx_http_markdown_prometheus_walk_path_tree(
     ngx_rbtree_node_t *node,
     ngx_rbtree_node_t *sentinel,
-    u_char *p,
-    u_char *end);
+    ngx_http_markdown_prometheus_path_render_ctx_t *render);
 #endif
 
 
@@ -699,70 +757,11 @@ ngx_http_markdown_metrics_write_prometheus(
     p = ngx_http_markdown_metrics_write_prometheus_perf(
         p, end, &snapshot->perf);
 
-    /*
-     * Per-path individual entries: walk the SHM RB-tree to emit
-     * series with a "path" label for each tracked URI.
-     *
-     * The RB-tree is protected by the slab pool mutex.  We acquire
-     * the lock, walk in-order via a recursive helper, and release.
-     *
-     * Only emit if per-path tracking is active (path_entries > 0)
-     * and the SHM zone is available.
-     *
-     * This section requires full NGINX type definitions
-      * (ngx_shm_zone_t, ngx_slab_pool_t, etc.) and is guarded
-      * by NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED.  Unit tests
-      * that lack these types define the macro to 0.
-      */
-
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-    if (snapshot->per_path.path_entries > 0
-        && ngx_http_markdown_metrics_shm_zone != NULL
-        && ngx_http_markdown_metrics_shm_zone->data != NULL)
-    {
-        ngx_shm_zone_t                       *zone;
-        ngx_slab_pool_t                      *shpool;
-        ngx_http_markdown_metrics_t          *live_metrics;
-
-        zone = ngx_http_markdown_metrics_shm_zone;
-        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
-        shpool = (ngx_slab_pool_t *) zone->shm.addr;
-
-        p = ngx_slprintf(p, end,
-            "# HELP nginx_markdown_path_conversions_total "
-            "Per-path conversion count.\n"
-            "# TYPE nginx_markdown_path_conversions_total counter\n"
-            "# HELP nginx_markdown_path_conversion_time_ms_total "
-            "Per-path cumulative conversion time in ms.\n"
-            "# TYPE nginx_markdown_path_conversion_time_ms_total "
-            "counter\n");
-
-        ngx_shmtx_lock(&shpool->mutex);
-
-        p = ngx_http_markdown_prometheus_walk_path_tree(
-                live_metrics->per_path.path_tree.root,
-                &live_metrics->per_path.sentinel,
-                p, end);
-
-        ngx_shmtx_unlock(&shpool->mutex);
-
-        /*
-         * Emit __other__ pseudo-path series for overflow paths
-         * that were dropped when the cardinality limit was reached.
-         * This mirrors the JSON __other__ pseudo-path entry.
-         */
-        if (snapshot->per_path.overflow_count > 0 && p < end) {
-            p = ngx_slprintf(p, end,
-                "nginx_markdown_path_conversions_total"
-                "{path=\"__other__\"} %uA\n"
-                "nginx_markdown_path_conversion_time_ms_total"
-                "{path=\"__other__\"} 0\n",
-                snapshot->per_path.overflow_count);
-        }
-
-        if (p < end) {
-            *p++ = '\n';
-        }
+    p = ngx_http_markdown_metrics_write_prometheus_paths(
+        p, end, snapshot);
+    if (p == NULL) {
+        return NULL;
     }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
@@ -781,6 +780,123 @@ ngx_http_markdown_metrics_write_prometheus(
 
 
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
+/*
+ * Append optional path-labelled series without allowing path detail to
+ * exhaust the aggregate response.  The RB-tree is read under the SHM mutex.
+ */
+static u_char *
+ngx_http_markdown_metrics_write_prometheus_paths(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot)
+{
+    static const u_char                   other_path[] = "__other__";
+    ngx_shm_zone_t                       *zone;
+    ngx_slab_pool_t                      *shpool;
+    ngx_http_markdown_metrics_t          *live_metrics;
+    ngx_http_markdown_prometheus_path_render_ctx_t render;
+    ngx_atomic_uint_t                     other_conversions;
+    size_t                                header_size;
+    size_t                                path_needed;
+    size_t                                remaining;
+    size_t                                tail_reserve;
+    const u_char                         *header_start;
+
+    if (p == NULL || end == NULL || snapshot == NULL) {
+        return NULL;
+    }
+
+    if (snapshot->per_path.path_entries == 0
+        || ngx_http_markdown_metrics_shm_zone == NULL
+        || ngx_http_markdown_metrics_shm_zone->data == NULL)
+    {
+        return p;
+    }
+
+    if (p >= end) {
+        return p;
+    }
+
+    if (ngx_http_markdown_prometheus_path_tail_reserve(&tail_reserve)
+        != NGX_OK)
+    {
+        return NULL;
+    }
+
+    header_size = sizeof(NGX_HTTP_MARKDOWN_PROM_PATH_HEADER) - 1;
+    remaining = (size_t) (end - p);
+    if (header_size > remaining
+        || tail_reserve > remaining - header_size)
+    {
+        return p;
+    }
+
+    header_start = p;
+    p = ngx_slprintf(p, end, NGX_HTTP_MARKDOWN_PROM_PATH_HEADER);
+    if ((size_t) (p - header_start) != header_size) {
+        return NULL;
+    }
+
+    render.pos = p;
+    render.end = end;
+    render.tail_reserve = tail_reserve;
+    render.omitted_conversions = 0;
+    render.omitted_time_ms = 0;
+    render.omitted_nodes = 0;
+    render.failed = 0;
+
+    zone = ngx_http_markdown_metrics_shm_zone;
+    live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
+    shpool = (ngx_slab_pool_t *) zone->shm.addr;
+
+    ngx_shmtx_lock(&shpool->mutex);
+    ngx_http_markdown_prometheus_walk_path_tree(
+        live_metrics->per_path.path_tree.root,
+        &live_metrics->per_path.sentinel, &render);
+    ngx_shmtx_unlock(&shpool->mutex);
+
+    if (render.failed) {
+        return NULL;
+    }
+
+    p = render.pos;
+    if (snapshot->per_path.overflow_count > 0
+        || render.omitted_nodes > 0)
+    {
+        other_conversions = ngx_http_markdown_prometheus_saturating_add(
+            (ngx_atomic_uint_t) snapshot->per_path.overflow_count,
+            render.omitted_conversions);
+
+        if (ngx_http_markdown_prometheus_path_pair_size(
+                other_path, sizeof(other_path) - 1,
+                other_conversions, render.omitted_time_ms, &path_needed)
+            != NGX_OK)
+        {
+            return NULL;
+        }
+
+        remaining = (size_t) (end - p);
+        if (remaining < 1 || path_needed > remaining - 1) {
+            return NULL;
+        }
+
+        render.pos = p;
+        render.tail_reserve = 1;
+        if (ngx_http_markdown_prometheus_write_path_pair(
+                &render, other_path, sizeof(other_path) - 1,
+                other_conversions, render.omitted_time_ms, path_needed)
+            != NGX_OK)
+        {
+            return NULL;
+        }
+        p = render.pos;
+    }
+
+    *p++ = '\n';
+    return p;
+}
+
+
 /*
  * Write a two-character escape sequence (backslash + second char)
  * into the destination buffer for Prometheus label syntax.
@@ -865,6 +981,236 @@ ngx_http_markdown_escape_prometheus_label(u_char *dst, u_char *last,
 }
 
 
+static ngx_int_t
+ngx_http_markdown_prometheus_checked_size_add(size_t *total, size_t value)
+{
+    if (*total > (size_t) -1 - value) {
+        return NGX_ERROR;
+    }
+
+    *total += value;
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_prometheus_escaped_label_size(
+    const u_char *src,
+    size_t len,
+    size_t *escaped_size)
+{
+    size_t  i;
+    size_t  increment;
+    size_t  total;
+    u_char  ch;
+
+    if (escaped_size == NULL || (src == NULL && len > 0)) {
+        return NGX_ERROR;
+    }
+
+    total = 0;
+    for (i = 0; i < len; i++) {
+        ch = src[i];
+
+        switch (ch) {
+        case '\\':
+        case '"':
+        case '\n':
+        case '\r':
+        case '\t':
+            increment = 2;
+            break;
+        default:
+            increment = (ch < 0x20) ? 6 : 1;
+            break;
+        }
+
+        if (ngx_http_markdown_prometheus_checked_size_add(
+                &total, increment)
+            != NGX_OK)
+        {
+            return NGX_ERROR;
+        }
+    }
+
+    *escaped_size = total;
+    return NGX_OK;
+}
+
+
+static size_t
+ngx_http_markdown_prometheus_uint_digits(ngx_atomic_uint_t value)
+{
+    size_t  digits;
+
+    digits = 1;
+    while (value >= 10) {
+        value /= 10;
+        digits++;
+    }
+
+    return digits;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_prometheus_path_pair_size(
+    const u_char *path,
+    size_t path_len,
+    ngx_atomic_uint_t conversions,
+    ngx_atomic_uint_t conversion_time_ms,
+    size_t *needed)
+{
+    size_t  escaped_size;
+    size_t  total;
+
+    if (needed == NULL
+        || ngx_http_markdown_prometheus_escaped_label_size(
+               path, path_len, &escaped_size)
+           != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    total = sizeof(NGX_HTTP_MARKDOWN_PROM_PATH_CONVERSIONS_PREFIX) - 1
+        + sizeof(NGX_HTTP_MARKDOWN_PROM_PATH_TIME_PREFIX) - 1
+        + 2 * (sizeof(NGX_HTTP_MARKDOWN_PROM_PATH_VALUE_PREFIX) - 1)
+        + 2;
+
+    if (ngx_http_markdown_prometheus_checked_size_add(
+            &total, escaped_size)
+        != NGX_OK
+        || ngx_http_markdown_prometheus_checked_size_add(
+               &total, escaped_size) /* NOSONAR: intentional — same path label in both path_conversions and path_time metrics; S1764 */
+           != NGX_OK
+        || ngx_http_markdown_prometheus_checked_size_add(
+               &total,
+               ngx_http_markdown_prometheus_uint_digits(conversions))
+           != NGX_OK
+        || ngx_http_markdown_prometheus_checked_size_add(
+               &total,
+               ngx_http_markdown_prometheus_uint_digits(
+                   conversion_time_ms))
+           != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    *needed = total;
+    return NGX_OK;
+}
+
+
+static ngx_atomic_uint_t
+ngx_http_markdown_prometheus_saturating_add(
+    ngx_atomic_uint_t left,
+    ngx_atomic_uint_t right)
+{
+    ngx_atomic_uint_t  maximum;
+
+    maximum = (ngx_atomic_uint_t) -1;
+    if (left > maximum - right) {
+        return maximum;
+    }
+
+    return left + right;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_prometheus_path_tail_reserve(size_t *reserve)
+{
+    static const u_char  other_path[] = "__other__";
+    size_t               pair_size;
+
+    if (reserve == NULL
+        || ngx_http_markdown_prometheus_path_pair_size(
+               other_path, sizeof(other_path) - 1,
+               (ngx_atomic_uint_t) -1, (ngx_atomic_uint_t) -1,
+               &pair_size)
+           != NGX_OK
+        || pair_size == (size_t) -1)
+    {
+        return NGX_ERROR;
+    }
+
+    *reserve = pair_size + 1;
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_markdown_prometheus_write_path_pair(
+    ngx_http_markdown_prometheus_path_render_ctx_t *render,
+    const u_char *path,
+    size_t path_len,
+    ngx_atomic_uint_t conversions,
+    ngx_atomic_uint_t conversion_time_ms,
+    size_t needed)
+{
+    size_t   remaining;
+    u_char  *start;
+
+    if (render == NULL || render->pos == NULL || render->end == NULL
+        || render->pos > render->end)
+    {
+        if (render != NULL) {
+            render->failed = 1;
+        }
+        return NGX_ERROR;
+    }
+
+    remaining = (size_t) (render->end - render->pos);
+    if (render->tail_reserve > remaining
+        || needed > remaining - render->tail_reserve)
+    {
+        return NGX_DECLINED;
+    }
+
+    start = render->pos;
+    render->pos = ngx_slprintf(render->pos, render->end,
+        NGX_HTTP_MARKDOWN_PROM_PATH_CONVERSIONS_PREFIX);
+    render->pos = ngx_http_markdown_escape_prometheus_label(
+        render->pos, render->end, path, path_len);
+    render->pos = ngx_slprintf(render->pos, render->end,
+        NGX_HTTP_MARKDOWN_PROM_PATH_VALUE_PREFIX "%uA\n",
+        conversions);
+    render->pos = ngx_slprintf(render->pos, render->end,
+        NGX_HTTP_MARKDOWN_PROM_PATH_TIME_PREFIX);
+    render->pos = ngx_http_markdown_escape_prometheus_label(
+        render->pos, render->end, path, path_len);
+    render->pos = ngx_slprintf(render->pos, render->end,
+        NGX_HTTP_MARKDOWN_PROM_PATH_VALUE_PREFIX "%uA\n",
+        conversion_time_ms);
+
+    if ((size_t) (render->pos - start) != needed) {
+        render->failed = 1;
+        return NGX_ERROR;
+    }
+
+    return NGX_OK;
+}
+
+
+static void
+ngx_http_markdown_prometheus_accumulate_omitted_path(
+    ngx_http_markdown_prometheus_path_render_ctx_t *render,
+    ngx_atomic_uint_t conversions,
+    ngx_atomic_uint_t conversion_time_ms)
+{
+    render->omitted_conversions =
+        ngx_http_markdown_prometheus_saturating_add(
+            render->omitted_conversions, conversions);
+    render->omitted_time_ms =
+        ngx_http_markdown_prometheus_saturating_add(
+            render->omitted_time_ms, conversion_time_ms);
+
+    if (render->omitted_nodes != (ngx_uint_t) -1) {
+        render->omitted_nodes++;
+    }
+}
+
+
 /*
  * Recursive in-order walk of the per-path RB-tree for Prometheus output.
  *
@@ -875,52 +1221,64 @@ ngx_http_markdown_escape_prometheus_label(u_char *dst, u_char *last,
  * Parameters:
  *   node     - current RB-tree node (or sentinel to terminate)
  *   sentinel - tree sentinel node
- *   p        - current write position in the output buffer
- *   end      - one past end of the buffer
- *
- * Returns:
- *   Updated write position (clamped to end on overflow).
+ *   render   - output cursor, reserved tail budget, and omission aggregate
  */
-static u_char *
+static void
 ngx_http_markdown_prometheus_walk_path_tree(
     ngx_rbtree_node_t *node,
     ngx_rbtree_node_t *sentinel,
-    u_char *p,
-    u_char *end)
+    ngx_http_markdown_prometheus_path_render_ctx_t *render)
 {
     const ngx_http_markdown_path_metric_node_t  *pnode;
+    ngx_atomic_uint_t                            conversions;
+    ngx_atomic_uint_t                            conversion_time_ms;
+    size_t                                       needed;
+    ngx_int_t                                    rc;
 
-    if (node == sentinel || p >= end) {
-        return p;
+    if (render == NULL) {
+        return;
     }
 
-    p = ngx_http_markdown_prometheus_walk_path_tree(
-            node->left, sentinel, p, end);
-
-    if (p < end) {
-        pnode = (const ngx_http_markdown_path_metric_node_t *) node;
-
-        p = ngx_slprintf(p, end,
-            "nginx_markdown_path_conversions_total"
-            "{path=\"");
-        p = ngx_http_markdown_escape_prometheus_label(
-                p, end, pnode->path, pnode->path_len);
-        p = ngx_slprintf(p, end, "\"} %uA\n",
-            pnode->conversions);
-
-        p = ngx_slprintf(p, end,
-            "nginx_markdown_path_conversion_time_ms_total"
-            "{path=\"");
-        p = ngx_http_markdown_escape_prometheus_label(
-                p, end, pnode->path, pnode->path_len);
-        p = ngx_slprintf(p, end, "\"} %uA\n",
-            pnode->conversion_time_sum_ms);
+    if (node == NULL || sentinel == NULL) {
+        render->failed = 1;
+        return;
     }
 
-    p = ngx_http_markdown_prometheus_walk_path_tree(
-            node->right, sentinel, p, end);
+    if (node == sentinel || render->failed) {
+        return;
+    }
 
-    return p;
+    ngx_http_markdown_prometheus_walk_path_tree(
+        node->left, sentinel, render);
+    if (render->failed) {
+        return;
+    }
+
+    pnode = (const ngx_http_markdown_path_metric_node_t *) node;
+    conversions = (ngx_atomic_uint_t) pnode->conversions;
+    conversion_time_ms =
+        (ngx_atomic_uint_t) pnode->conversion_time_sum_ms;
+
+    rc = ngx_http_markdown_prometheus_path_pair_size(
+        pnode->path, (size_t) pnode->path_len, conversions,
+        conversion_time_ms, &needed);
+    if (rc != NGX_OK) {
+        render->failed = 1;
+        return;
+    }
+
+    rc = ngx_http_markdown_prometheus_write_path_pair(
+        render, pnode->path, (size_t) pnode->path_len,
+        conversions, conversion_time_ms, needed);
+    if (rc == NGX_DECLINED) {
+        ngx_http_markdown_prometheus_accumulate_omitted_path(
+            render, conversions, conversion_time_ms);
+    } else if (rc != NGX_OK) {
+        return;
+    }
+
+    ngx_http_markdown_prometheus_walk_path_tree(
+        node->right, sentinel, render);
 }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 

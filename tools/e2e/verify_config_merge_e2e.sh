@@ -400,6 +400,7 @@ http {
         # Case 5: cache_validation full at location overrides server off
         location /etag-on/ {
             markdown_filter on;
+            markdown_streaming off;
             markdown_cache_validation full;
             markdown_limits memory=10m timeout=120s;
 

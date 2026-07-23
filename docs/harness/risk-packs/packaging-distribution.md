@@ -36,6 +36,9 @@ or packaging documentation.
   pre-existing kind clusters
 - Homebrew formula checksums generated from a different source archive than
   the release/tag that the formula installs
+- Homebrew Formula program bytes coming from a different commit than the
+  release archive URL, version, and checksum
+- Mutable container tags selecting artifact-producing release builders
 - Tap publish/verification workflows drifting from the repo-owned release-gate
   and installation docs
 
@@ -88,6 +91,9 @@ or packaging documentation.
   path; custom mounts belong behind explicit opt-in values.
 - Homebrew formula repository and repo-owned formula template must stay in sync
   with release artifacts, tag timing, checksums, and post-release verification.
+- Formula hashes cover the exact bytes at the declared URL; the downloaded
+  archive content is compared with a local archive of the resolved tag commit,
+  while Formula source and version independently bind to that same commit.
 - `docs/guides/INSTALLATION.md` must document all installation methods
 - Public package installation docs must distinguish active GitHub Release
   artifacts from planned APT/YUM repositories. Do not show bare repository
@@ -105,6 +111,7 @@ helm lint charts/nginx-markdown
 helm template test charts/nginx-markdown
 python3 tools/release/gates/validate_package_metadata.py
 python3 tools/release/gates/validate_k8s_manifests.py
+make release-supply-chain-check
 make docs-check
 make release-gates-check
 ```

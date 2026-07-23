@@ -85,10 +85,10 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 8b | observability-metrics | Config nesting matches code; consumer accepts both key names; combined report reads streaming_metrics first |
 | 8c | observability-metrics | Same denominator for all averages; same inclusion predicate for numerator and sample count |
 | 9 | docs-tooling | Keep Quick Start/validators consistent; metric names match emitted keys; Accept header in verification commands |
-| 10 | parser-regex | No overlapping quantifiers; prefer deterministic parsing |
+| 10 | parser-regex | No overlapping quantifiers; prefer deterministic parsing; AST-based detection with scope-aware binding model (lexical del, compiled-pattern reassignment, function/lambda default+decorator evaluation scope) and shell argument semantics (PCRE flags separated from pattern options, boolean/required-value/unknown option contracts, pattern-file resolution with repo-root boundary validation) via `make regex-security-check` |
 | 11 | shell | macOS bash 3.2 compatible; no GNU-only flags; null-delimited traversal; empty array expansion under set -u |
 | 12 | security-cwe | Sanitize metadata-derived paths; never interpolate untrusted values |
-| 13 | ci-gating | Update workflow path filters; no redundant CI steps; pin Actions to SHA; verify download checksums; sync validator regex and release package chain gates |
+| 13 | ci-gating | Update workflow path filters; pin Actions and release builders; verify downloads before use; bind release metadata to one immutable source |
 | 14 | testing-coverage | Every bug fix needs regression test; cross-boundary and malformed-input cases; parameterized tests must consume inputs |
 | 15 | ffi-crosslang | Rust FFI changes → update all boundaries; prefer helpers over literal init; read before free |
 | 16 | testing-coverage | No dead stores; loop vars in for; every var consumed by TEST_ASSERT |
@@ -123,7 +123,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 45 | dynconf-snapshot | effective_conf NULL-safe access; cross-TU field visibility in shared headers; sentinel value consistency |
 | 46 | ffi-crosslang | FFI operations must validate NULL/empty key inputs; guards on both sides of FFI boundary; NULL/empty-input test coverage |
 | 47 | streaming-backpressure | Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return |
-| 48 | security-static-analysis | CodeQL remains primary SAST; supplemental gates stay focused, pinned, low-noise, and locally runnable; runnable Dockerfiles use operational non-root runtimes |
+| 48 | security-static-analysis | CodeQL remains primary SAST; supplemental gates stay focused and locally runnable; scope workflow secrets narrowly; runnable examples preserve runtime and credential transport safety |
 | 49 | docs-tooling | THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions; add/remove/update entries in same changeset as Cargo.lock changes |
 | 50 | nginx-idioms | Content-Type OWS separator accepts HTAB; trailing OWS excluded before parameter comparison |
 | 51 | streaming-backpressure | Auth Cache-Control commit failure routes through precommit_error; multi-header aggregation checks any_public before has_private |
@@ -135,6 +135,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 57 | build-safety | #ifdef-guarded function visibility: functions declared inside #ifdef FEATURE_GUARD must not be referenced outside that guard; detect_ifdef_guard_visibility.sh gates at write time |
 | 58 | security-cwe | Workflow input injection: GitHub Actions inputs must be routed through env vars before use in shell run blocks; direct ${{ inputs.* }} interpolation in run blocks is command injection; detect_workflow_input_injection.sh gates at write time |
 | 59 | nginx-idioms | Hardcoded HTTP status in reject paths: reject/error paths must return conf->error_status instead of hardcoded NGX_HTTP_BAD_GATEWAY; detect_hardcoded_http_status.sh provides advisory detection |
+| 60 | e2e-runner | E2E config directive consistency: locations with `markdown_cache_validation full` must have explicit `markdown_streaming` (no implicit auto + blocking directive unless intentionally testing runtime-block); detect_e2e_streaming_config.py advisory gate (block-aware, fail-closed, deterministic location scanner) |
 
 ## Required Agent Workflow
 
@@ -258,6 +259,7 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 - Side-effect tests drive outcome through production branching, not manual mutation [14]
 - Rust: no unused helpers; #[cfg(feature)] import safety; doctests by visibility [22]
 - Coverage: 80% aggregate (90% critical paths) [25]
+- E2E nginx.conf: explicit `markdown_streaming` matching test intent; no implicit auto + blocking directive [60]
 
 **Shell** (S)
 - Use `[[` for all conditional tests (not `[`); case has default `*)`; messages to stderr; explicit return; usage matches flags [18]
@@ -267,7 +269,14 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 
 **CI/Workflows** (CI)
 - GitHub Actions pinned to immutable SHA; download checksums verified [13]
+- Artifact-producing builder images use reviewed multi-architecture manifest
+  digests, not mutable tags; external source/tool bytes are checksum-verified
+  before extraction or execution [13]
+- Release source builds require a full reviewed commit ID and verify the fetched
+  commit exactly before executing repository code [13]
 - Workflow input injection: ${{ inputs.* }} must be routed through env: before use in shell run blocks; `bash tools/harness/detect_workflow_input_injection.sh` — CI gate [58]
+- Workflow secrets are step-scoped to their minimal consumer. Repository build,
+  test, setup, and coverage steps must not inherit unrelated credentials [48]
 - Validator/gate regex patterns match actual struct field paths [13]
 - Release/package workflows preserve one canonical module `.so` filename across
   NGINX build output, packaging metadata, load snippets, smoke tests, docs, and
@@ -395,11 +404,16 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   images must also listen on an unprivileged port and move PID/temp paths to
   locations writable by that user; a scanner-only `USER` declaration that
   breaks container startup is forbidden [48]
+- Deployable Basic Auth examples must use an SSL listener or a loopback-only
+  backend behind a mandatory co-located TLS terminator. Credential-bearing
+  client examples must use HTTPS [48]
 - Release artifact path traversal protection: validate manifest filenames resolve within artifact directory before accessing [54]
-- Homebrew formula SHA-256 generated from release tag git archive (not HEAD);
-  version stanza before sha256; nginx version derived from dependency
-  metadata; tap publish validates tag existence; formula gate and release
-  verify use same audit standard [13]
+- Homebrew formula SHA-256 hashes the exact bytes served by its declared URL;
+  the downloaded tag archive's normalized content must equal a local
+  `git archive` of the resolved tag commit; Formula source, version, and archive
+  identity derive from that commit; version stanza precedes sha256; nginx
+  version derives from dependency metadata; formula gate and release verify use
+  the same audit standard [13]
 
 **Python** (P)
 - Binary prerequisites validate executability [19]
@@ -552,6 +566,10 @@ remediation:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-22 | Kang | Strengthened Rule 10 and Rule 60 detector correctness (PR #188 review remediation): compiled-pattern reassignment upgrades to COMPILED_DYNAMIC_PATTERN (REVIEW with compile_line on Assign/AnnAssign/AugAssign); lexical del writes a DELETED tombstone (function-local del no longer removes module binding; global/nonlocal partially modeled); FunctionDef/AsyncFunctionDef/Lambda defaults, decorators, and annotations evaluated in the enclosing scope before the body scope; shell engine resolution separates PCRE flags (grep -P/rg --pcre2/perl) from pattern-bearing options (-e/--regexp) so grep/rg -e without -P is not PCRE; boolean/required-value/unknown option contracts (unknown options cannot hide a dangerous pattern); pattern-file resolution relative to script dir with repo-root boundary validation (rejects absolute/..) and encoding/read errors (ScanError + REVIEW); multiple -f supported. Rule 60: unterminated nginx quoted strings produce a single root ScanError and stop structural analysis; deterministic heredoc opener scanner skips comments/quoted strings (<< closes at column 0, <<- closes after tabs only); Rust raw-string spans skipped by the ordinary scanner; char/byte-char literals skipped. Strengthened weak test assertions to require REVIEW. Added adversarial tests. Docs sync (parser-regex.md, e2e-runner.md, routing-manifest notes, AGENTS.md) |
+| 0.9.1 | 2026-07-22 | Kang | Strengthened Rule 10: scope-aware binding model (LEGB lookup, parameter/for/with/except/comprehension shadowing, re-alias invalidation, compiled-pattern reassignment → REVIEW, unknown RHS → DYNAMIC_VALUE); shell argument semantics (three-class option dictionary, optional-value no-consume, unknown-option REVIEW, pattern-file REVIEW, shlex ScanError); tokenizer separator fix (preserve last literal before quantifier, multi-char separator first-character check). Strengthened Rule 60: deterministic character scanner for nginx location headers (quoted regex locations, regex quantifiers, escaped quotes), strict UTF-8 read, config structure validation, heredoc delimiter support. Added sonar-encoding verification family. Updated routing-manifest with e2e-streaming-config paths/keywords and sonar-encoding family |
+| 0.9.1 | 2026-07-21 | Kang | Added Regex/ReDoS safety gates, Python CodeQL coverage, regex engine policy, and E2E streaming configuration consistency checks |
+| 0.9.1 | 2026-07-20 | Kang | Added Rule 60: E2E config directive consistency — streaming mode must match test intent; detect_e2e_streaming_config.py advisory gate (block-aware Python rewrite); fixed 4 E2E configs using implicit/explicit auto + cache_validation full |
 | 0.9.1 | 2026-07-19 | Kang | Strengthened Rule 38: `results.failopen_count` delivery-after-downstream-success contract applies uniformly to ALL fail-open paths (streaming, buffered, buffer-init/append, header filter); fixed C-001 buffer-init/append-failure and four header-filter fail-open paths that incremented `failopen_count` before downstream filter returned; added `failopen_delivery_after_downstream_test.c` regression test; updated `ngx_http_markdown_metric_inc_failopen` helper doc to state delivery-counter semantics; docs sync (encoding-charset Rule 44 Brotli streaming, dynconf-snapshot Rule 35 dry-run applied_mtime, streaming-backpressure Rule 38 NGX_DONE wording, streaming-check-order Engine→Policy, SYSTEM_ARCHITECTURE/PROJECT_STATUS Brotli streaming, Rust FFI doc accuracy — IncrementalConverterHandle fields, FFIHeaderEntry field docs, markdown_options_init defaults, lib.rs feature-gated default-on, ffi/convert.rs module doc, FFIErrorClass doc, exports.rs entry-point list, error/mod.rs FFI error code range, incremental.rs Markdown formatting, rust-converter README version pin, delivery_counter test notes) |
 | 0.9.1 | 2026-07-15 | Kang | Added Rules 56–59: orphan comment closers (56), #ifdef-guarded function visibility (57), workflow input injection (58), hardcoded HTTP status in reject paths (59); added detect_orphan_comment_close.py, detect_ifdef_guard_visibility.sh, detect_workflow_input_injection.sh, detect_hardcoded_http_status.sh; fixed release-rpm.yml input injection; fixed detect_doc_sync.py _iter_worktree_text_files complexity |
 | 0.9.1 | 2026-07-14 | Kang | Added `RELEASE_GATE_ALLOW_SKIP_MODULE=1` env-limited skip guard to `test-production-examples-nginx-t` (0.9.0 gate), mirroring the 091 module-benchmark skip contract; updated ADR-0019 blocking-semantics taxonomy |

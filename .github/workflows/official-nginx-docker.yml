@@ -9,6 +9,9 @@ on:
       - "components/nginx-module/**"
       - "components/rust-converter/**"
       - "examples/docker/**"
+      - "packaging/checksums.sha256"
+      - "packaging/scripts/install-verified-rustup.sh"
+      - "packaging/scripts/verify-checksum.sh"
       - "tools/ci/verify_official_nginx_docker.sh"
       - ".github/workflows/official-nginx-docker.yml"
   push:
@@ -18,6 +21,9 @@ on:
       - "components/nginx-module/**"
       - "components/rust-converter/**"
       - "examples/docker/**"
+      - "packaging/checksums.sha256"
+      - "packaging/scripts/install-verified-rustup.sh"
+      - "packaging/scripts/verify-checksum.sh"
       - "tools/ci/verify_official_nginx_docker.sh"
       - ".github/workflows/official-nginx-docker.yml"
 

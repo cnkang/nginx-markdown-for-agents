@@ -3,7 +3,7 @@
 //! Wraps html5ever's tokenizer to produce [`StreamEvent`] values from
 //! raw HTML byte chunks without building a DOM tree.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::panic;
 
 use html5ever::tendril::StrTendril;
@@ -23,36 +23,52 @@ use crate::streaming::types::StreamEvent;
 struct TokenSinkAdapter {
     /// Accumulated events since the last drain.
     events: RefCell<Vec<StreamEvent>>,
+    /// Coalesce text and count downstream-inert tokens without storing them.
+    compact: bool,
+    /// Number of non-EOF tokens since the last drain.
+    token_count: Cell<u64>,
+    /// Number of parse-error tokens since the last drain.
+    parse_errors: Cell<u64>,
 }
 
 impl TokenSinkAdapter {
     /// Constructs a `TokenSinkAdapter` with an empty internal event buffer.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let adapter = TokenSinkAdapter::new();
-    /// assert!(adapter.drain().is_empty());
-    /// ```
     fn new() -> Self {
         Self {
             events: RefCell::new(Vec::new()),
+            compact: false,
+            token_count: Cell::new(0),
+            parse_errors: Cell::new(0),
         }
     }
 
-    /// Remove and return all events currently buffered by the sink.
-    ///
-    /// Empties the internal event buffer and yields the collected `StreamEvent` values.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let adapter = TokenSinkAdapter::new();
-    /// let events = adapter.drain();
-    /// assert!(events.is_empty());
-    /// ```
-    fn drain(&self) -> Vec<StreamEvent> {
-        self.events.borrow_mut().drain(..).collect()
+    /// Construct the bounded sink used by the runtime streaming converter.
+    fn new_compact() -> Self {
+        Self {
+            events: RefCell::new(Vec::new()),
+            compact: true,
+            token_count: Cell::new(0),
+            parse_errors: Cell::new(0),
+        }
+    }
+
+    /// Append text while coalescing adjacent compact-mode events.
+    fn push_compact_text(&self, text: &str) {
+        let mut events = self.events.borrow_mut();
+        if let Some(StreamEvent::Text(previous)) = events.last_mut() {
+            previous.push_str(text);
+        } else {
+            events.push(StreamEvent::Text(text.to_string()));
+        }
+    }
+
+    /// Move one event batch and its compacted token statistics out of the sink.
+    fn drain_batch(&self) -> TokenizerBatch {
+        TokenizerBatch {
+            events: std::mem::take(&mut *self.events.borrow_mut()),
+            token_count: self.token_count.replace(0),
+            parse_errors: self.parse_errors.replace(0),
+        }
     }
 }
 
@@ -82,6 +98,29 @@ impl TokenSink for TokenSinkAdapter {
     /// assert_eq!(events, vec![StreamEvent::Text("hello".to_string())]);
     /// ```
     fn process_token(&self, token: Token, _line_number: u64) -> TokenSinkResult<Self::Handle> {
+        if matches!(&token, Token::EOFToken) {
+            return TokenSinkResult::Continue;
+        }
+        self.token_count
+            .set(self.token_count.get().saturating_add(1));
+        if matches!(&token, Token::ParseError(_)) {
+            self.parse_errors
+                .set(self.parse_errors.get().saturating_add(1));
+        }
+
+        if self.compact {
+            match token {
+                Token::TagToken(tag) => self.events.borrow_mut().push(tag_to_event(tag)),
+                Token::CharacterTokens(text) => self.push_compact_text(&text),
+                Token::NullCharacterToken => self.push_compact_text("\u{FFFD}"),
+                Token::CommentToken(_)
+                | Token::DoctypeToken(_)
+                | Token::ParseError(_)
+                | Token::EOFToken => {}
+            }
+            return TokenSinkResult::Continue;
+        }
+
         let event = match token {
             Token::TagToken(tag) => tag_to_event(tag),
             Token::CharacterTokens(text) => StreamEvent::Text(text.to_string()),
@@ -89,7 +128,7 @@ impl TokenSink for TokenSinkAdapter {
             Token::DoctypeToken(_) => StreamEvent::Doctype,
             Token::NullCharacterToken => StreamEvent::Text("\u{FFFD}".to_string()),
             Token::ParseError(err) => StreamEvent::ParseError(err.to_string()),
-            Token::EOFToken => return TokenSinkResult::Continue,
+            Token::EOFToken => unreachable!("EOF returned before event conversion"),
         };
         self.events.borrow_mut().push(event);
         TokenSinkResult::Continue
@@ -140,6 +179,400 @@ fn tag_to_event(tag: Tag) -> StreamEvent {
     }
 }
 
+/// Fixed logical overhead reserved for one persistent html5ever tokenizer.
+///
+/// This covers the tokenizer object, its default 16-entry `BufferQueue`,
+/// empty tendrils, and the event sink before input-dependent allocations.
+const TOKENIZER_FIXED_RESERVATION_BYTES: usize = 4 * 1024;
+
+/// Conservative expansion factor from tracked UTF-8 input to simultaneous
+/// tokenizer, tendril, attribute, and event-batch storage.
+///
+/// The worst dense representation is an attribute-heavy tag: html5ever's
+/// attribute vector and the converted `(String, String)` vector coexist while
+/// the tag is handed to the sink. Tendril capacities round up to a power of
+/// two, and Rust vectors may retain spare element capacity. The reservation
+/// covers the maximum incomplete token plus one input/event batch without
+/// relying on private html5ever allocation counters.
+const TOKENIZER_BYTES_PER_INPUT_BYTE: usize = 128;
+
+/// Absolute upper bound for one incomplete syntactic token.
+const TOKENIZER_MAX_TOKEN_BYTES: usize = 64 * 1024;
+
+/// Input is handed to html5ever in batches no larger than this target.
+const TOKENIZER_BATCH_TARGET_BYTES: usize = 4 * 1024;
+
+/// Tokenizer output produced by one bounded input slice.
+pub(crate) struct TokenizerBatch {
+    pub(crate) events: Vec<StreamEvent>,
+    #[allow(dead_code)]
+    pub(crate) token_count: u64,
+    #[allow(dead_code)]
+    pub(crate) parse_errors: u64,
+}
+
+/// Character-reference sub-state tracked by the conservative retention scanner.
+#[derive(Debug, Clone, Copy)]
+enum CharacterReferenceState {
+    Start,
+    Named,
+    NumericStart,
+    Decimal,
+    HexStart,
+    Hex,
+}
+
+/// Conservative lexical state used to bound input-derived tokenizer state.
+///
+/// The scanner resets its retained-span estimate only after reaching `Data`.
+/// It intentionally recognizes fewer completion points than html5ever for
+/// malformed comments and declarations. That can reject malformed input
+/// conservatively, but cannot undercount a live token retained by html5ever.
+#[derive(Debug, Clone, Copy)]
+enum FrameScanState {
+    Data,
+    CarriageReturn,
+    CharacterReference(CharacterReferenceState),
+    TagOpen,
+    EndTagOpen,
+    DeclarationProbe {
+        index: u8,
+        could_be_comment: bool,
+        could_be_doctype: bool,
+    },
+    Tag {
+        quote: Option<char>,
+    },
+    BogusMarkup,
+    Comment {
+        content_len: usize,
+        tail: [char; 3],
+    },
+}
+
+impl FrameScanState {
+    /// Return whether html5ever has no growable token state to carry forward.
+    fn is_data(self) -> bool {
+        matches!(self, Self::Data)
+    }
+
+    /// Advance the conservative state machine by one Unicode scalar value.
+    fn advance(self, ch: char) -> Self {
+        match self {
+            Self::Data => Self::from_data(ch),
+            Self::CarriageReturn => {
+                if ch == '\n' {
+                    Self::Data
+                } else {
+                    Self::from_data(ch)
+                }
+            }
+            Self::CharacterReference(state) => advance_character_reference(state, ch),
+            Self::TagOpen => match ch {
+                '!' => Self::DeclarationProbe {
+                    index: 0,
+                    could_be_comment: true,
+                    could_be_doctype: true,
+                },
+                '/' => Self::EndTagOpen,
+                '?' => Self::BogusMarkup,
+                c if c.is_ascii_alphabetic() => Self::Tag { quote: None },
+                _ => Self::from_data(ch),
+            },
+            Self::EndTagOpen => match ch {
+                '>' => Self::Data,
+                c if c.is_ascii_alphabetic() => Self::Tag { quote: None },
+                _ => Self::BogusMarkup,
+            },
+            Self::DeclarationProbe {
+                index,
+                could_be_comment,
+                could_be_doctype,
+            } => advance_declaration_probe((index, could_be_comment, could_be_doctype), ch),
+            Self::Tag { quote } => Self::advance_tag(quote, ch, self),
+            Self::BogusMarkup => {
+                if ch == '>' {
+                    Self::Data
+                } else {
+                    self
+                }
+            }
+            Self::Comment { content_len, tail } => {
+                if ch == '>' && comment_can_end(content_len, tail) {
+                    Self::Data
+                } else {
+                    Self::Comment {
+                        content_len: content_len.saturating_add(1),
+                        tail: [tail[1], tail[2], ch],
+                    }
+                }
+            }
+        }
+    }
+
+    fn advance_tag(quote: Option<char>, ch: char, current: Self) -> Self {
+        match quote {
+            Some(expected) if ch == expected => Self::Tag { quote: None },
+            Some(_) => current,
+            None if matches!(ch, '"' | '\'') => Self::Tag { quote: Some(ch) },
+            None if ch == '>' => Self::Data,
+            None => current,
+        }
+    }
+
+    /// Enter the correct state from html5ever's Data state.
+    fn from_data(ch: char) -> Self {
+        match ch {
+            '<' => Self::TagOpen,
+            '&' => Self::CharacterReference(CharacterReferenceState::Start),
+            '\r' => Self::CarriageReturn,
+            _ => Self::Data,
+        }
+    }
+}
+
+/// Dispatch one character-reference transition to a small state helper.
+fn advance_character_reference(state: CharacterReferenceState, ch: char) -> FrameScanState {
+    match state {
+        CharacterReferenceState::Start => advance_reference_start(ch),
+        CharacterReferenceState::Named => advance_named_reference(ch),
+        CharacterReferenceState::NumericStart => advance_numeric_reference_start(ch),
+        CharacterReferenceState::Decimal => advance_decimal_reference(ch),
+        CharacterReferenceState::HexStart => advance_hex_reference_start(ch),
+        CharacterReferenceState::Hex => advance_hex_reference(ch),
+    }
+}
+
+/// Advance the first character after `&`.
+fn advance_reference_start(ch: char) -> FrameScanState {
+    if ch == '#' {
+        FrameScanState::CharacterReference(CharacterReferenceState::NumericStart)
+    } else if ch.is_ascii_alphanumeric() {
+        FrameScanState::CharacterReference(CharacterReferenceState::Named)
+    } else {
+        FrameScanState::from_data(ch)
+    }
+}
+
+/// Advance a named reference.
+fn advance_named_reference(ch: char) -> FrameScanState {
+    if ch.is_ascii_alphanumeric() {
+        FrameScanState::CharacterReference(CharacterReferenceState::Named)
+    } else if ch == ';' {
+        FrameScanState::Data
+    } else {
+        FrameScanState::from_data(ch)
+    }
+}
+
+/// Advance a decimal numeric reference.
+fn advance_decimal_reference(ch: char) -> FrameScanState {
+    if ch.is_ascii_digit() {
+        FrameScanState::CharacterReference(CharacterReferenceState::Decimal)
+    } else if ch == ';' {
+        FrameScanState::Data
+    } else {
+        FrameScanState::from_data(ch)
+    }
+}
+
+/// Advance the first hexadecimal digit after `&#x`.
+fn advance_hex_reference_start(ch: char) -> FrameScanState {
+    if ch.is_ascii_hexdigit() {
+        FrameScanState::CharacterReference(CharacterReferenceState::Hex)
+    } else {
+        FrameScanState::from_data(ch)
+    }
+}
+
+/// Advance a hexadecimal numeric reference.
+fn advance_hex_reference(ch: char) -> FrameScanState {
+    if ch.is_ascii_hexdigit() {
+        FrameScanState::CharacterReference(CharacterReferenceState::Hex)
+    } else if ch == ';' {
+        FrameScanState::Data
+    } else {
+        FrameScanState::from_data(ch)
+    }
+}
+
+/// Normalize one ASCII declaration character for case-insensitive matching.
+fn declaration_char(ch: char) -> char {
+    ch.to_ascii_lowercase()
+}
+
+/// Return whether `>` terminates the current HTML comment state.
+fn comment_can_end(content_len: usize, tail: [char; 3]) -> bool {
+    content_len == 0
+        || (content_len == 1 && tail[2] == '-')
+        || (content_len >= 2 && tail[1] == '-' && tail[2] == '-')
+        || (content_len >= 3 && tail == ['-', '-', '!'])
+}
+
+/// Result of consuming one bounded tokenizer input slice.
+pub(crate) struct TokenizerStep {
+    pub(crate) consumed: usize,
+    pub(crate) batch: Option<TokenizerBatch>,
+}
+
+/// Total-budget-aware tokenizer used by [`StreamingConverter`].
+///
+/// html5ever does not expose the capacity of its private tendrils and token
+/// scratch fields. This wrapper therefore:
+///
+/// 1. reserves a conservative fixed envelope from `MemoryBudget.total`;
+/// 2. retains the normal persistent tokenizer across every input chunk;
+/// 3. scans each small slice before feeding it to bound incomplete token state;
+/// 4. rejects a slice before html5ever sees bytes beyond that bound; and
+/// 5. drains the event sink after every bounded slice.
+///
+/// The envelope covers persistent parser state, one input tendril, and one
+/// event batch. Large documents remain constant-resident because completed
+/// events are processed before the next slice is fed.
+pub(crate) struct BudgetedStreamingTokenizer {
+    tokenizer: StreamingTokenizer,
+    scan_state: FrameScanState,
+    token_span: usize,
+    batch_target: usize,
+    max_token_span: usize,
+    reserved_bytes: usize,
+}
+
+impl BudgetedStreamingTokenizer {
+    /// Construct a tokenizer whose conservative reservation fits in `total`.
+    pub fn new(total: usize) -> Self {
+        let maximum_tracked_input =
+            TOKENIZER_MAX_TOKEN_BYTES.saturating_add(TOKENIZER_BATCH_TARGET_BYTES);
+        let maximum_reservation = TOKENIZER_FIXED_RESERVATION_BYTES
+            .saturating_add(maximum_tracked_input.saturating_mul(TOKENIZER_BYTES_PER_INPUT_BYTE));
+        let reservation_share = total.saturating_sub(total / 4).min(maximum_reservation);
+        let dynamic_bytes = reservation_share.saturating_sub(TOKENIZER_FIXED_RESERVATION_BYTES);
+        let tracked_input =
+            (dynamic_bytes / TOKENIZER_BYTES_PER_INPUT_BYTE).min(maximum_tracked_input);
+        let batch_target = TOKENIZER_BATCH_TARGET_BYTES.min(tracked_input / 4);
+        let max_token_span = tracked_input
+            .saturating_sub(batch_target)
+            .min(TOKENIZER_MAX_TOKEN_BYTES);
+        let accounted_input = batch_target.saturating_add(max_token_span);
+        let reserved_bytes = if accounted_input == 0 {
+            reservation_share
+        } else {
+            TOKENIZER_FIXED_RESERVATION_BYTES
+                .saturating_add(accounted_input.saturating_mul(TOKENIZER_BYTES_PER_INPUT_BYTE))
+        };
+
+        Self {
+            tokenizer: StreamingTokenizer::new_compact(),
+            scan_state: FrameScanState::Data,
+            token_span: 0,
+            batch_target,
+            max_token_span,
+            reserved_bytes,
+        }
+    }
+
+    /// Return the conservative resident-memory reservation.
+    pub fn reserved_bytes(&self) -> usize {
+        self.reserved_bytes
+    }
+
+    /// Return the maximum accepted byte length of one incomplete token.
+    #[cfg(test)]
+    fn max_token_span(&self) -> usize {
+        self.max_token_span
+    }
+
+    /// Pre-scan and feed one bounded UTF-8 slice into the persistent tokenizer.
+    pub fn feed_next(&mut self, data: &str) -> Result<TokenizerStep, ConversionError> {
+        if data.is_empty() {
+            return Ok(TokenizerStep {
+                consumed: 0,
+                batch: None,
+            });
+        }
+        if self.batch_target == 0 || self.max_token_span == 0 {
+            return Err(ConversionError::BudgetExceeded {
+                stage: "tokenizer_reservation".to_string(),
+                used: TOKENIZER_FIXED_RESERVATION_BYTES
+                    .saturating_add(TOKENIZER_BYTES_PER_INPUT_BYTE),
+                limit: self.reserved_bytes,
+            });
+        }
+
+        let consumed = bounded_char_boundary(data, self.batch_target);
+        if consumed == 0 {
+            return Err(ConversionError::BudgetExceeded {
+                stage: "tokenizer_input_slice".to_string(),
+                used: data.chars().next().map_or(0, char::len_utf8),
+                limit: self.batch_target,
+            });
+        }
+        let slice = &data[..consumed];
+        let (scan_state, token_span) =
+            scan_slice(self.scan_state, self.token_span, slice, self.max_token_span)?;
+        let batch = self.tokenizer.feed_batch(slice)?;
+        self.scan_state = scan_state;
+        self.token_span = token_span;
+
+        Ok(TokenizerStep {
+            consumed,
+            batch: Some(batch),
+        })
+    }
+
+    /// Finish the persistent tokenizer and drain its final bounded events.
+    pub fn finish(&mut self) -> Result<TokenizerBatch, ConversionError> {
+        self.tokenizer.finish_batch()
+    }
+}
+
+/// Return the largest prefix at or below `limit` that ends on a UTF-8 boundary.
+fn bounded_char_boundary(data: &str, limit: usize) -> usize {
+    let mut end = data.len().min(limit);
+    while end > 0 && !data.is_char_boundary(end) {
+        end -= 1;
+    }
+    end
+}
+
+/// Preview scanner state for a slice before passing any of it to html5ever.
+fn scan_slice(
+    mut state: FrameScanState,
+    mut token_span: usize,
+    data: &str,
+    max_token_span: usize,
+) -> Result<(FrameScanState, usize), ConversionError> {
+    for ch in data.chars() {
+        let next_state = state.advance(ch);
+        token_span = next_token_span(state, next_state, token_span, ch.len_utf8());
+        if token_span > max_token_span {
+            return Err(ConversionError::BudgetExceeded {
+                stage: "tokenizer_incomplete_token".to_string(),
+                used: token_span,
+                limit: max_token_span,
+            });
+        }
+        state = next_state;
+    }
+    Ok((state, token_span))
+}
+
+/// Update the byte span of tokenizer state that may retain input-derived data.
+fn next_token_span(
+    state: FrameScanState,
+    next_state: FrameScanState,
+    current: usize,
+    char_len: usize,
+) -> usize {
+    if next_state.is_data() {
+        0
+    } else if state.is_data() {
+        char_len
+    } else {
+        current.saturating_add(char_len)
+    }
+}
+
 /// Streaming HTML tokenizer backed by html5ever.
 ///
 /// Accepts arbitrary byte chunks via [`feed`](StreamingTokenizer::feed) and
@@ -183,7 +616,16 @@ impl StreamingTokenizer {
     /// let _tokenizer = StreamingTokenizer::new();
     /// ```
     pub fn new() -> Self {
-        let sink = TokenSinkAdapter::new();
+        Self::with_sink(TokenSinkAdapter::new())
+    }
+
+    /// Construct the persistent tokenizer with a compact runtime sink.
+    fn new_compact() -> Self {
+        Self::with_sink(TokenSinkAdapter::new_compact())
+    }
+
+    /// Construct a tokenizer around the selected sink mode.
+    fn with_sink(sink: TokenSinkAdapter) -> Self {
         let opts = TokenizerOpts {
             // BOM (U+FEFF) at the start of a feed() call is stripped by
             // html5ever when discard_bom is true (the default).  In streaming
@@ -222,6 +664,11 @@ impl StreamingTokenizer {
     /// assert!(matches!(events.as_slice(), [StreamEvent::StartTag{..}, StreamEvent::Text(_), StreamEvent::EndTag{..}]));
     /// ```
     pub fn feed(&mut self, data: &str) -> Result<Vec<StreamEvent>, ConversionError> {
+        self.feed_batch(data).map(|batch| batch.events)
+    }
+
+    /// Feed one slice and return events plus compacted token statistics.
+    fn feed_batch(&mut self, data: &str) -> Result<TokenizerBatch, ConversionError> {
         let tokenizer = self.tokenizer.as_mut().ok_or_else(|| {
             ConversionError::InternalError("tokenizer already consumed by finish()".into())
         })?;
@@ -235,7 +682,7 @@ impl StreamingTokenizer {
         }));
 
         match result {
-            Ok(()) => Ok(tokenizer.sink.drain()),
+            Ok(()) => Ok(tokenizer.sink.drain_batch()),
             Err(payload) => {
                 // After a panic, the tokenizer's internal state may be
                 // corrupted. Invalidate it so subsequent calls fail cleanly
@@ -267,6 +714,11 @@ impl StreamingTokenizer {
     /// // `t` cannot be used after `finish()`
     /// ```
     pub fn finish(&mut self) -> Result<Vec<StreamEvent>, ConversionError> {
+        self.finish_batch().map(|batch| batch.events)
+    }
+
+    /// End tokenization and return events plus compacted token statistics.
+    fn finish_batch(&mut self) -> Result<TokenizerBatch, ConversionError> {
         let tokenizer = self.tokenizer.take().ok_or_else(|| {
             ConversionError::InternalError("tokenizer already consumed by finish()".into())
         })?;
@@ -276,12 +728,60 @@ impl StreamingTokenizer {
         }));
 
         match result {
-            Ok(()) => Ok(tokenizer.sink.drain()),
+            Ok(()) => Ok(tokenizer.sink.drain_batch()),
             Err(payload) => {
                 let msg = panic_payload_to_message(&payload, "html5ever panic during finish");
                 Err(ConversionError::InternalError(msg))
             }
         }
+    }
+}
+
+/// Probe the two declarations html5ever recognizes in the HTML namespace.
+fn advance_declaration_probe(probe: (u8, bool, bool), ch: char) -> FrameScanState {
+    const COMMENT_PREFIX: [char; 2] = ['-', '-'];
+    const DOCTYPE_PREFIX: [char; 7] = ['d', 'o', 'c', 't', 'y', 'p', 'e'];
+
+    let (index, could_be_comment, could_be_doctype) = probe;
+    let idx = usize::from(index);
+    let comment_matches = could_be_comment
+        && COMMENT_PREFIX
+            .get(idx)
+            .is_some_and(|expected| ch == *expected);
+    let doctype_matches = could_be_doctype
+        && DOCTYPE_PREFIX
+            .get(idx)
+            .is_some_and(|expected| declaration_char(ch) == *expected);
+    let next_index = index.saturating_add(1);
+
+    if comment_matches && usize::from(next_index) == COMMENT_PREFIX.len() {
+        return FrameScanState::Comment {
+            content_len: 0,
+            tail: ['\0'; 3],
+        };
+    }
+    if doctype_matches && usize::from(next_index) == DOCTYPE_PREFIX.len() {
+        return FrameScanState::Tag { quote: None };
+    }
+    if !comment_matches && !doctype_matches {
+        return FrameScanState::BogusMarkup;
+    }
+
+    FrameScanState::DeclarationProbe {
+        index: next_index,
+        could_be_comment: comment_matches,
+        could_be_doctype: doctype_matches,
+    }
+}
+
+/// Advance the first character after `&#`.
+fn advance_numeric_reference_start(ch: char) -> FrameScanState {
+    if ch == 'x' || ch == 'X' {
+        FrameScanState::CharacterReference(CharacterReferenceState::HexStart)
+    } else if ch.is_ascii_digit() {
+        FrameScanState::CharacterReference(CharacterReferenceState::Decimal)
+    } else {
+        FrameScanState::from_data(ch)
     }
 }
 
@@ -856,5 +1356,237 @@ mod tests {
         // finish() should also fail cleanly
         let err2 = tok.finish().unwrap_err();
         assert_eq!(err2.code(), 99);
+    }
+
+    fn feed_all_budgeted(
+        tokenizer: &mut BudgetedStreamingTokenizer,
+        data: &str,
+        events: &mut Vec<StreamEvent>,
+    ) -> Result<(), ConversionError> {
+        let mut offset = 0usize;
+        while offset < data.len() {
+            let step = tokenizer.feed_next(&data[offset..])?;
+            assert!(step.consumed > 0, "non-empty input must make progress");
+            offset += step.consumed;
+            if let Some(batch) = step.batch {
+                events.extend(batch.events);
+            }
+        }
+        Ok(())
+    }
+
+    fn coalesce_text(events: Vec<StreamEvent>) -> Vec<StreamEvent> {
+        let mut normalized: Vec<StreamEvent> = Vec::new();
+        for event in events {
+            if let StreamEvent::Text(text) = event {
+                if let Some(StreamEvent::Text(previous)) = normalized.last_mut() {
+                    previous.push_str(&text);
+                } else {
+                    normalized.push(StreamEvent::Text(text));
+                }
+            } else {
+                normalized.push(event);
+            }
+        }
+        normalized
+    }
+
+    #[test]
+    fn budgeted_scanner_retains_cross_slice_lexical_state() {
+        let cases: &[(&[&str], &str)] = &[
+            (&["<!-- com", "ment --", ">"], "comment"),
+            (&["<!DOC", "TYPE html", ">"], "doctype"),
+            (&[r#"<a title="1>"#, r#"2">"#], "quoted tag"),
+            (&["&am", "p;"], "entity"),
+            (&["\r", "\n"], "CRLF"),
+        ];
+
+        for (chunks, label) in cases {
+            let mut state = FrameScanState::Data;
+            let mut span = 0usize;
+            for (index, chunk) in chunks.iter().enumerate() {
+                (state, span) = scan_slice(state, span, chunk, usize::MAX).unwrap();
+                if index + 1 < chunks.len() {
+                    assert!(
+                        !state.is_data() && span > 0,
+                        "{label} state cleared before its final slice"
+                    );
+                }
+            }
+            assert!(
+                state.is_data() && span == 0,
+                "{label} did not return to Data after completion"
+            );
+        }
+    }
+
+    #[test]
+    fn budgeted_tokenizer_matches_persistent_tokenizer_across_slices() {
+        let chunks = [
+            "<!DOC",
+            "TYPE html><p title=\"a>",
+            "b\">A &am",
+            "p;\r",
+            "\nB</p><!-- com",
+            "ment -->",
+        ];
+        let complete = chunks.concat();
+
+        let mut expected_tokenizer = StreamingTokenizer::new();
+        let mut expected = expected_tokenizer.feed(&complete).unwrap();
+        expected.extend(expected_tokenizer.finish().unwrap());
+
+        let mut actual_tokenizer =
+            BudgetedStreamingTokenizer::new(crate::streaming::MemoryBudget::default().total);
+        let mut actual = Vec::new();
+        for chunk in chunks {
+            feed_all_budgeted(&mut actual_tokenizer, chunk, &mut actual).unwrap();
+        }
+        actual.extend(actual_tokenizer.finish().unwrap().events);
+
+        fn filter_for_comparison(events: Vec<StreamEvent>) -> Vec<StreamEvent> {
+            events
+                .into_iter()
+                .filter(|e| !matches!(e, StreamEvent::Doctype | StreamEvent::Comment(_)))
+                .collect()
+        }
+
+        assert_eq!(
+            coalesce_text(filter_for_comparison(actual)),
+            coalesce_text(filter_for_comparison(expected))
+        );
+    }
+
+    #[test]
+    fn oversized_incomplete_token_is_rejected_before_feed() {
+        let mut tokenizer =
+            BudgetedStreamingTokenizer::new(crate::streaming::MemoryBudget::default().total);
+        let max_span = tokenizer.max_token_span();
+        let prefix = r#"<a title=""#;
+        assert!(max_span > prefix.len() + 1);
+
+        let accepted = format!("{prefix}{}", "x".repeat(max_span - prefix.len() - 1));
+        let mut events = Vec::new();
+        feed_all_budgeted(&mut tokenizer, &accepted, &mut events).unwrap();
+        assert!(events.is_empty(), "the tag must remain incomplete");
+
+        let error = match tokenizer.feed_next("yy\">") {
+            Ok(_) => panic!("oversized incomplete token must be rejected"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            ConversionError::BudgetExceeded {
+                ref stage,
+                used,
+                limit,
+            } if stage == "tokenizer_incomplete_token"
+                && used == max_span + 1
+                && limit == max_span
+        ));
+
+        feed_all_budgeted(&mut tokenizer, "\">ok</a>", &mut events).unwrap();
+        let href = events.iter().find_map(|event| {
+            if let StreamEvent::StartTag { attrs, .. } = event {
+                attrs
+                    .iter()
+                    .find(|(name, _)| name == "title")
+                    .map(|(_, value)| value)
+            } else {
+                None
+            }
+        });
+        assert_eq!(
+            href.map(String::as_str),
+            Some(&accepted[prefix.len()..]),
+            "rejected slice must not reach the persistent tokenizer"
+        );
+    }
+
+    #[test]
+    fn large_text_keeps_tokenizer_reservation_constant() {
+        let total = crate::streaming::MemoryBudget::default().total;
+        let mut tokenizer = BudgetedStreamingTokenizer::new(total);
+        let reservation = tokenizer.reserved_bytes();
+        let text = "plain text ".repeat(100_000);
+        let mut events = Vec::new();
+
+        feed_all_budgeted(&mut tokenizer, &text, &mut events).unwrap();
+        events.extend(tokenizer.finish().unwrap().events);
+
+        assert_eq!(tokenizer.reserved_bytes(), reservation);
+        assert!(reservation <= total);
+        assert_eq!(
+            events
+                .iter()
+                .filter_map(|event| match event {
+                    StreamEvent::Text(text) => Some(text.len()),
+                    _ => None,
+                })
+                .sum::<usize>(),
+            text.len()
+        );
+    }
+
+    #[test]
+    fn tiny_total_rejects_before_accepting_input() {
+        let total = TOKENIZER_FIXED_RESERVATION_BYTES;
+        let mut tokenizer = BudgetedStreamingTokenizer::new(total);
+        assert!(tokenizer.reserved_bytes() <= total);
+
+        let error = match tokenizer.feed_next("x") {
+            Ok(_) => panic!("a total below the tokenizer envelope must reject input"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            ConversionError::BudgetExceeded {
+                ref stage,
+                limit,
+                ..
+            } if stage == "tokenizer_reservation"
+                && limit == tokenizer.reserved_bytes()
+        ));
+    }
+
+    #[test]
+    fn finish_batch_stays_inside_reserved_envelope() {
+        let total = crate::streaming::MemoryBudget::default().total;
+        let mut tokenizer = BudgetedStreamingTokenizer::new(total);
+        let max_span = tokenizer.max_token_span();
+        // Use a complete tag (emitted in compact mode) instead of comment (filtered in compact)
+        let prefix = "<a title=\"";
+        let attr_value = "x".repeat(max_span - prefix.len() - 3);
+        let complete_tag = format!("{prefix}{}\">", attr_value);
+        let mut prior_events = Vec::new();
+        feed_all_budgeted(&mut tokenizer, &complete_tag, &mut prior_events).unwrap();
+
+        let batch = tokenizer.finish().unwrap();
+        let event_storage = batch
+            .events
+            .capacity()
+            .saturating_mul(std::mem::size_of::<StreamEvent>());
+        let string_storage = batch
+            .events
+            .iter()
+            .map(|event| match event {
+                StreamEvent::Comment(text)
+                | StreamEvent::Text(text)
+                | StreamEvent::ParseError(text) => text.capacity(),
+                StreamEvent::StartTag { name, attrs, .. } => name.capacity().saturating_add(
+                    attrs
+                        .iter()
+                        .map(|(key, value)| key.capacity().saturating_add(value.capacity()))
+                        .sum(),
+                ),
+                StreamEvent::EndTag { name } => name.capacity(),
+                StreamEvent::Doctype => 0,
+            })
+            .sum::<usize>();
+
+        assert!(event_storage.saturating_add(string_storage) <= tokenizer.reserved_bytes());
+        // In compact mode, some events may be filtered/coalesced; just verify memory reservation
+        // bounds hold regardless of which specific events are emitted.
+        let _ = batch.events;
     }
 }

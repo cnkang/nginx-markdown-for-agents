@@ -17,28 +17,35 @@
 #
 # USAGE:
 #   # Build with defaults (NGINX 1.26.3, F5 NGINX Ingress Controller 3.7.2):
-#   docker build -f Dockerfile.ingress -t my-ingress:latest .
+#   docker build -f Dockerfile.ingress \
+#     --build-arg MODULE_SHA="FULL_40_HEX_COMMIT_SHA" \
+#     -t my-ingress:latest .
 #
 #   # Build with custom Ingress Controller version:
 #   docker build -f Dockerfile.ingress \
 #     --build-arg NGINX_VERSION=1.26.3 \
 #     --build-arg NGINX_INGRESS_IMAGE=nginx/nginx-ingress:3.7.2 \
+#     --build-arg MODULE_SHA="FULL_40_HEX_COMMIT_SHA" \
 #     -t my-ingress:custom .
 #
 #   # Build with plain NGINX (non-Ingress deployment):
 #   docker build -f Dockerfile.ingress \
 #     --build-arg NGINX_VERSION=1.26.3 \
 #     --build-arg NGINX_INGRESS_IMAGE=nginx:1.26.3 \
+#     --build-arg MODULE_SHA="FULL_40_HEX_COMMIT_SHA" \
 #     -t my-nginx-markdown:latest .
 #
 #   # Multi-platform build:
 #   docker buildx build --platform linux/amd64,linux/arm64 \
-#     -f Dockerfile.ingress -t my-ingress:multi .
+#     -f Dockerfile.ingress \
+#     --build-arg MODULE_SHA="FULL_40_HEX_COMMIT_SHA" \
+#     -t my-ingress:multi .
 #
 # CUSTOMIZATION POINTS:
 #   - NGINX_VERSION: Target NGINX version for module compilation (must match base image)
 #   - NGINX_INGRESS_IMAGE: Base image (default: nginx/nginx-ingress:3.7.2)
-#   - MODULE_REPO / MODULE_REF: Source repository and branch/tag for the module
+#   - MODULE_REPO / MODULE_REF: Source repository and reachability hint
+#   - MODULE_SHA: Required reviewed full commit identity
 #
 # REQUIREMENTS (REQ-0700-K8S-002):
 #   - Parameterized base image version
@@ -71,6 +78,7 @@ ARG NGINX_INGRESS_IMAGE=nginx/nginx-ingress:3.7.2
 # Module source repository and ref (branch, tag, or commit SHA).
 ARG MODULE_REPO=https://github.com/cnkang/nginx-markdown-for-agents.git
 ARG MODULE_REF=main
+ARG MODULE_SHA=
 ARG TARGETARCH
 
 # ---------------------------------------------------------------------------
@@ -81,10 +89,12 @@ FROM debian:bookworm-slim AS module-build
 ARG NGINX_VERSION
 ARG MODULE_REPO
 ARG MODULE_REF
+ARG MODULE_SHA
 ARG TARGETARCH
 
-COPY packaging/checksums.sha256 /tmp/rustup-bootstrap/checksums.sha256
+COPY packaging/checksums.sha256 /opt/nginx-markdown/checksums.sha256
 COPY packaging/scripts/install-verified-rustup.sh /tmp/rustup-bootstrap/install-verified-rustup.sh
+COPY packaging/scripts/verify-checksum.sh /opt/nginx-markdown/verify-checksum.sh
 COPY packaging/scripts/verify-checksum.sh /tmp/rustup-bootstrap/verify-checksum.sh
 
 # Install build dependencies
@@ -116,24 +126,40 @@ RUN set -eux; \
       *) echo "Unsupported Rust bootstrap architecture: ${arch}" >&2; exit 1 ;; \
     esac; \
     chmod +x /tmp/rustup-bootstrap/install-verified-rustup.sh \
-      /tmp/rustup-bootstrap/verify-checksum.sh; \
+      /tmp/rustup-bootstrap/verify-checksum.sh \
+      /opt/nginx-markdown/verify-checksum.sh; \
     /tmp/rustup-bootstrap/install-verified-rustup.sh \
       --arch "${rustup_arch}" \
       --toolchain stable \
-      --checksums /tmp/rustup-bootstrap/checksums.sha256; \
+      --checksums /opt/nginx-markdown/checksums.sha256; \
     rm -rf /tmp/rustup-bootstrap; \
     cargo install --locked cbindgen
 
-# Clone module source
+# Fetch and verify the exact reviewed module commit.
 RUN set -eux; \
-    git clone --depth 1 --branch "${MODULE_REF}" "${MODULE_REPO}" /workspace/module
+    test -n "${MODULE_SHA}"; \
+    printf '%s' "${MODULE_SHA}" | grep -Eq '^[0-9a-f]{40}$'; \
+    git init /workspace/module; \
+    cd /workspace/module; \
+    git remote add origin "${MODULE_REPO}"; \
+    git fetch --depth 1 origin "${MODULE_SHA}" \
+      || git fetch --depth 1 origin "${MODULE_REF}"; \
+    actual_sha="$(git rev-parse 'FETCH_HEAD^{commit}')"; \
+    test "${actual_sha}" = "${MODULE_SHA}"; \
+    git checkout --detach "${actual_sha}"
 
 # Download and extract NGINX source (must match target NGINX version exactly)
 RUN set -eux; \
-    curl -fsSL "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
+    curl --proto '=https' --tlsv1.2 -fsSL \
+      "https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" \
       -o /tmp/nginx.tar.gz; \
+    /opt/nginx-markdown/verify-checksum.sh \
+      -f /tmp/nginx.tar.gz \
+      -i "nginx-${NGINX_VERSION}" \
+      -c /opt/nginx-markdown/checksums.sha256; \
     mkdir -p /tmp/nginx-src; \
-    tar -xzf /tmp/nginx.tar.gz -C /tmp/nginx-src --strip-components=1
+    tar -xzf /tmp/nginx.tar.gz -C /tmp/nginx-src --strip-components=1; \
+    rm -f /tmp/nginx.tar.gz
 
 # Build the Rust converter library
 WORKDIR /workspace/module

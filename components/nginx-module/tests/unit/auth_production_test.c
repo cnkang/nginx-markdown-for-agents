@@ -312,6 +312,29 @@ test_cc_has_directive_null_directive(void)
     TEST_PASS("NULL directive handled");
 }
 
+static void
+test_cc_has_directive_ignores_qualified_private(void)
+{
+    ngx_str_t value = ngx_string("private=\"Set-Cookie\"");
+    ngx_int_t rc = ngx_http_markdown_cache_control_has_directive(
+        &value, &ngx_http_markdown_private_directive);
+
+    TEST_ASSERT(rc == 0,
+                "field-qualified private is not whole-response private");
+    TEST_PASS("qualified private does not satisfy whole-response policy");
+}
+
+static void
+test_cc_has_directive_ignores_quoted_directive_text(void)
+{
+    ngx_str_t value = ngx_string("extension=\"public, private\"");
+    ngx_int_t rc = ngx_http_markdown_cache_control_has_directive(
+        &value, &ngx_http_markdown_private_directive);
+
+    TEST_ASSERT(rc == 0, "quoted private text is not a directive");
+    TEST_PASS("quoted directive text ignored");
+}
+
 /* ── cookie_matches_pattern ──────────────────────────────────── */
 
 static void
@@ -600,6 +623,31 @@ test_next_cc_token_consecutive_commas(void)
     TEST_PASS("consecutive commas handled");
 }
 
+static void
+test_next_cc_token_preserves_quoted_comma(void)
+{
+    const u_char input[] = "extension=\"public, private\", public";
+    const u_char *p = input;
+    const u_char *end = input + sizeof(input) - 1;
+    const u_char *ts;
+    const u_char *te;
+    ngx_int_t rc;
+
+    rc = ngx_http_markdown_next_cache_control_token(
+        &p, end, &ts, &te);
+    TEST_ASSERT(rc == NGX_OK, "quoted directive parsed");
+    TEST_ASSERT((size_t) (te - ts)
+                    == sizeof("extension=\"public, private\"") - 1,
+                "comma inside quoted value stays in first directive");
+
+    rc = ngx_http_markdown_next_cache_control_token(
+        &p, end, &ts, &te);
+    TEST_ASSERT(rc == NGX_OK, "second directive parsed");
+    TEST_ASSERT(ngx_http_markdown_cache_control_token_is_public(ts, te),
+                "top-level public remains independently visible");
+    TEST_PASS("quoted comma does not split Cache-Control directive");
+}
+
 /* ── skip_cache_control_separators ───────────────────────────── */
 
 static void
@@ -870,6 +918,84 @@ test_modify_cc_no_store_and_public_normalizes_public(void)
     TEST_PASS("no-store plus public normalized");
 }
 
+static void
+test_modify_cc_qualified_private_adds_bare_private(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t    *entry;
+    ngx_int_t           rc;
+
+    reset_pool();
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    entry = add_header(&r->headers_out.headers, "Cache-Control",
+                       "private=\"Set-Cookie\"", 1);
+    rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+
+    TEST_ASSERT(rc == NGX_OK, "qualified private policy update succeeds");
+    TEST_ASSERT(entry != NULL
+                && ngx_http_markdown_cache_control_has_directive(
+                       &entry->value,
+                       &ngx_http_markdown_private_directive),
+                "whole-response private is appended");
+    TEST_PASS("qualified private cannot suppress whole-response privacy");
+}
+
+static void
+test_modify_cc_quoted_text_adds_private_outside_quote(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t    *entry;
+    ngx_int_t           rc;
+
+    reset_pool();
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    entry = add_header(&r->headers_out.headers, "Cache-Control",
+                       "extension=\"private, no-store\"", 1);
+    rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+
+    TEST_ASSERT(rc == NGX_OK, "quoted extension policy update succeeds");
+    TEST_ASSERT(entry != NULL
+                && ngx_http_markdown_cache_control_has_directive(
+                       &entry->value,
+                       &ngx_http_markdown_private_directive),
+                "private is appended outside quoted extension text");
+    TEST_PASS("quoted directive text cannot spoof cache privacy");
+}
+
+static void
+test_modify_cc_malformed_value_fails_closed_atomically(void)
+{
+    ngx_http_request_t *r;
+    ngx_table_elt_t    *first;
+    ngx_table_elt_t    *second;
+    ngx_int_t           rc;
+
+    reset_pool();
+    r = make_req();
+    if (r == NULL) { TEST_FAIL("alloc failed"); return; }
+
+    first = add_header(&r->headers_out.headers, "Cache-Control",
+                       "extension=\"unterminated", 1);
+    second = add_header(&r->headers_out.headers, "Cache-Control",
+                        "max-age=60", 1);
+    rc = ngx_http_markdown_modify_cache_control_for_auth(r);
+
+    TEST_ASSERT(rc == NGX_OK, "malformed policy replacement succeeds");
+    TEST_ASSERT(first != NULL
+                && first->value.len
+                   == sizeof("private, no-store") - 1
+                && memcmp(first->value.data, "private, no-store",
+                          sizeof("private, no-store") - 1) == 0,
+                "first entry becomes conservative policy");
+    TEST_ASSERT(second != NULL && second->hash == 0,
+                "later Cache-Control entries are invalidated");
+    TEST_PASS("malformed multi-header policy fails closed atomically");
+}
+
 /* ── get_auth_patterns ───────────────────────────────────────── */
 
 static void
@@ -912,6 +1038,8 @@ main(void)
     test_cc_has_directive_null_value();
     test_cc_has_directive_empty_value();
     test_cc_has_directive_null_directive();
+    test_cc_has_directive_ignores_qualified_private();
+    test_cc_has_directive_ignores_quoted_directive_text();
 
     test_token_equals_ignore_case_match();
     test_token_equals_ignore_case_mismatch();
@@ -941,6 +1069,7 @@ main(void)
     test_next_cc_token_second();
     test_next_cc_token_exhausted();
     test_next_cc_token_consecutive_commas();
+    test_next_cc_token_preserves_quoted_comma();
 
     test_skip_cc_separators();
     test_skip_cc_separators_already_at_token();
@@ -963,6 +1092,9 @@ main(void)
     test_modify_cc_append_private();
     test_modify_cc_ignores_invalidated_no_store();
     test_modify_cc_no_store_and_public_normalizes_public();
+    test_modify_cc_qualified_private_adds_bare_private();
+    test_modify_cc_quoted_text_adds_private_outside_quote();
+    test_modify_cc_malformed_value_fails_closed_atomically();
 
     test_get_auth_patterns_null_conf();
     test_get_auth_patterns_empty_conf();

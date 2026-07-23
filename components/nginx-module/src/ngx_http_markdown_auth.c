@@ -34,6 +34,7 @@ static u_char ngx_http_markdown_cc_private[] = "private";
 static u_char ngx_http_markdown_cc_public[] = "public";
 static u_char ngx_http_markdown_cc_no_store[] = "no-store";
 static u_char ngx_http_markdown_cc_suffix_private[] = ", private";
+static u_char ngx_http_markdown_cc_conservative[] = "private, no-store";
 
 static ngx_str_t  ngx_http_markdown_no_store_directive =
     { sizeof(ngx_http_markdown_cc_no_store) - 1, ngx_http_markdown_cc_no_store };
@@ -47,15 +48,34 @@ typedef struct {
     ngx_flag_t        has_no_store;
     ngx_flag_t        has_private;
     ngx_flag_t        any_public;
+    ngx_flag_t        malformed;
 } ngx_http_markdown_cc_scan_t;
+
+typedef struct {
+    const u_char  *raw_start;
+    const u_char  *raw_end;
+    const u_char  *name_start;
+    const u_char  *name_end;
+    ngx_flag_t     has_value;
+} ngx_http_markdown_cc_directive_t;
 
 static ngx_int_t ngx_http_markdown_cookie_matches_pattern(
     const ngx_str_t *cookie_name,
     const ngx_str_t *pattern);
+static ngx_flag_t ngx_http_markdown_is_cache_control_token_char(u_char ch);
+static void ngx_http_markdown_skip_cache_control_ows(
+    const u_char **cursor, const u_char *end);
+static ngx_int_t ngx_http_markdown_parse_cache_control_quoted_value(
+    const u_char **cursor, const u_char *end);
+static ngx_int_t ngx_http_markdown_parse_cache_control_token_value(
+    const u_char **cursor, const u_char *end);
 static void ngx_http_markdown_skip_cache_control_separators(
     const u_char **cursor, const u_char *end);
 static void ngx_http_markdown_trim_cache_control_token(
     const u_char **token_start, const u_char **token_end);
+static ngx_int_t ngx_http_markdown_next_cache_control_directive(
+    const u_char **cursor, const u_char *end,
+    ngx_http_markdown_cc_directive_t *directive);
 static ngx_int_t ngx_http_markdown_next_cache_control_token(
     const u_char **cursor, const u_char *end,
     const u_char **token_start, const u_char **token_end);
@@ -71,6 +91,9 @@ static ngx_int_t ngx_http_markdown_rewrite_public_entries(
     ngx_http_request_t *r, ngx_list_t *headers);
 static ngx_int_t ngx_http_markdown_ensure_private_on_entry(
     ngx_http_request_t *r, ngx_table_elt_t *entry);
+static ngx_int_t ngx_http_markdown_replace_malformed_cache_control(
+    ngx_http_request_t *r, ngx_list_t *headers,
+    ngx_table_elt_t *first_entry);
 
 /*
  * Insert a new "Cache-Control: private" header when none exists.
@@ -183,10 +206,11 @@ ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
     size_t          new_len;
     const u_char   *p;
     const u_char   *end;
-    const u_char   *token_start;
-    const u_char   *token_end;
+    const u_char   *token_start = NULL;
+    const u_char   *token_end = NULL;
     u_char         *dst;
     ngx_flag_t      wrote_token;
+    ngx_int_t       rc;
 
     if (cache_control->value.len > (((size_t) -1) - (sizeof(ngx_http_markdown_cc_suffix_private) - 1)) / 2) {
         return NGX_ERROR;
@@ -203,9 +227,16 @@ ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
     dst = new_value;
     wrote_token = 0;
 
-    while (ngx_http_markdown_next_cache_control_token(
-               &p, end, &token_start, &token_end) == NGX_OK)
-    {
+    for (/* void */; /* void */; /* void */) {
+        rc = ngx_http_markdown_next_cache_control_token(
+            &p, end, &token_start, &token_end);
+        if (rc == NGX_DECLINED) {
+            break;
+        }
+        if (rc == NGX_ERROR) {
+            return NGX_ERROR;
+        }
+
         if (ngx_http_markdown_cache_control_token_is_public(
                 token_start, token_end))
         {
@@ -241,6 +272,97 @@ ngx_http_markdown_strip_public_and_append_private(ngx_http_request_t *r,
                   &cache_control->value);
 
     return NGX_OK;
+}
+
+/*
+ * Test whether a byte is valid in an HTTP token.
+ *
+ * Cache-Control directive names and unquoted values use the RFC HTTP token
+ * grammar. Rejecting separators and non-ASCII bytes keeps malformed input
+ * out of the policy decision instead of interpreting a convenient prefix.
+ */
+static ngx_flag_t
+ngx_http_markdown_is_cache_control_token_char(u_char ch)
+{
+    static u_char  token_punctuation[] = "!#$%&'*+-.^_`|~";
+
+    if ((ch >= '0' && ch <= '9')
+        || (ch >= 'A' && ch <= 'Z')
+        || (ch >= 'a' && ch <= 'z'))
+    {
+        return 1;
+    }
+
+    for (size_t i = 0; i < sizeof(token_punctuation) - 1; i++) {
+        if (ch == token_punctuation[i]) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+/* Advance a bounded cursor past Cache-Control optional whitespace. */
+static void
+ngx_http_markdown_skip_cache_control_ows(const u_char **cursor,
+                                         const u_char *end)
+{
+    while (*cursor < end && (**cursor == ' ' || **cursor == '\t')) {
+        (*cursor)++;
+    }
+}
+
+/*
+ * Parse one quoted-string value, including RFC quoted-pair escapes.
+ */
+static ngx_int_t
+ngx_http_markdown_parse_cache_control_quoted_value(
+    const u_char **cursor, const u_char *end)
+{
+    const u_char  *p;
+    u_char         ch;
+
+    p = *cursor;
+    if (p >= end || *p != '"') {
+        return NGX_ERROR;
+    }
+
+    p++;
+    while (p < end) {
+        ch = *p++;
+        if (ch == '"') {
+            *cursor = p;
+            return NGX_OK;
+        }
+        if (ch == '\\') {
+            if (p >= end) {
+                return NGX_ERROR;
+            }
+            ch = *p++;
+        }
+        if (ch != '\t' && (ch < 0x20 || ch == 0x7f)) {
+            return NGX_ERROR;
+        }
+    }
+
+    return NGX_ERROR;
+}
+
+/* Parse one non-empty unquoted HTTP token value. */
+static ngx_int_t
+ngx_http_markdown_parse_cache_control_token_value(
+    const u_char **cursor, const u_char *end)
+{
+    const u_char  *start;
+
+    start = *cursor;
+    while (*cursor < end
+           && ngx_http_markdown_is_cache_control_token_char(**cursor))
+    {
+        (*cursor)++;
+    }
+
+    return (*cursor == start) ? NGX_ERROR : NGX_OK;
 }
 
 /*
@@ -295,20 +417,101 @@ ngx_http_markdown_trim_cache_control_token(const u_char **token_start,
 }
 
 /*
- * Parse the next Cache-Control directive token.
+ * Parse one Cache-Control directive without splitting quoted values.
  *
- * Skips leading separators, records the token start, advances to the
- * next comma or end-of-input, and trims whitespace from the result.
+ * The parser validates the directive name and optional token/quoted-string
+ * value. Commas inside a quoted value are data, not list delimiters.
+ * Backslash-escaped quoted bytes are consumed as one unit. Malformed input
+ * returns NGX_ERROR so authenticated responses can fail closed.
  *
  * Parameters:
- *   cursor      - pointer to current parse position; advanced in-place
- *   end         - pointer one past the last byte of the header value
- *   token_start - set to the start of the trimmed token on success
- *   token_end   - set to the end of the trimmed token on success
+ *   cursor    - pointer to current parse position; advanced in-place
+ *   end       - pointer one past the last byte of the header value
+ *   directive - parsed raw/name bounds and value-presence flag
  *
  * Returns:
- *   NGX_OK      - a token was found; bounds stored in token_start/token_end
+ *   NGX_OK       - a complete directive was parsed
  *   NGX_DECLINED - no more tokens (cursor reached end)
+ *   NGX_ERROR    - malformed directive syntax
+ */
+static ngx_int_t
+ngx_http_markdown_next_cache_control_directive(
+    const u_char **cursor, const u_char *end,
+    ngx_http_markdown_cc_directive_t *directive)
+{
+    const u_char  *p;
+    ngx_int_t       rc;
+
+    if (cursor == NULL || *cursor == NULL || end == NULL
+        || directive == NULL || *cursor > end)
+    {
+        return NGX_ERROR;
+    }
+
+    ngx_http_markdown_skip_cache_control_separators(cursor, end);
+    if (*cursor >= end) {
+        return NGX_DECLINED;
+    }
+
+    p = *cursor;
+    directive->raw_start = p;
+    directive->name_start = p;
+    directive->has_value = 0;
+
+    while (p < end && ngx_http_markdown_is_cache_control_token_char(*p)) {
+        p++;
+    }
+    if (p == directive->name_start) {
+        return NGX_ERROR;
+    }
+    directive->name_end = p;
+
+    ngx_http_markdown_skip_cache_control_ows(&p, end);
+
+    if (p < end && *p == '=') {
+        directive->has_value = 1;
+        p++;
+        ngx_http_markdown_skip_cache_control_ows(&p, end);
+        if (p >= end) {
+            return NGX_ERROR;
+        }
+
+        if (*p == '"') {
+            rc = ngx_http_markdown_parse_cache_control_quoted_value(
+                &p, end);
+        } else {
+            rc = ngx_http_markdown_parse_cache_control_token_value(
+                &p, end);
+        }
+        if (rc != NGX_OK) {
+            return rc;
+        }
+
+        ngx_http_markdown_skip_cache_control_ows(&p, end);
+    }
+
+    if (p < end && *p != ',') {
+        return NGX_ERROR;
+    }
+
+    directive->raw_end = p;
+    ngx_http_markdown_trim_cache_control_token(
+        &directive->raw_start, &directive->raw_end);
+
+    if (p < end) {
+        p++;
+    }
+    *cursor = p;
+
+    return NGX_OK;
+}
+
+/*
+ * Compatibility wrapper returning the complete raw directive bounds.
+ *
+ * Existing rewrite code and focused tests use this interface. The bounds now
+ * come from the quote-aware parser above, so callers cannot split a quoted
+ * field-name list at an internal comma.
  */
 static ngx_int_t
 ngx_http_markdown_next_cache_control_token(const u_char **cursor,
@@ -316,18 +519,17 @@ ngx_http_markdown_next_cache_control_token(const u_char **cursor,
                                            const u_char **token_start,
                                            const u_char **token_end)
 {
-    ngx_http_markdown_skip_cache_control_separators(cursor, end);
-    if (*cursor >= end) {
-        return NGX_DECLINED;
+    ngx_http_markdown_cc_directive_t  directive;
+    ngx_int_t                         rc;
+
+    rc = ngx_http_markdown_next_cache_control_directive(
+        cursor, end, &directive);
+    if (rc != NGX_OK) {
+        return rc;
     }
 
-    *token_start = *cursor;
-    while (*cursor < end && **cursor != ',') {
-        (*cursor)++;
-    }
-    *token_end = *cursor;
-
-    ngx_http_markdown_trim_cache_control_token(token_start, token_end);
+    *token_start = directive.raw_start;
+    *token_end = directive.raw_end;
     return NGX_OK;
 }
 
@@ -755,51 +957,37 @@ static ngx_int_t
 ngx_http_markdown_cache_control_has_directive(const ngx_str_t *value,
     const ngx_str_t *directive)
 {
-    size_t directive_len;
-    u_char *p;
-    const u_char *end;
+    const u_char                       *p;
+    const u_char                       *end;
+    ngx_http_markdown_cc_directive_t    parsed;
+    ngx_int_t                           rc;
 
-    if (value == NULL || value->len == 0 || directive == NULL) {
+    if (value == NULL || value->len == 0 || value->data == NULL
+        || directive == NULL || directive->len == 0
+        || directive->data == NULL)
+    {
         return 0;
     }
 
-    directive_len = directive->len;
     p = value->data;
     end = p + value->len;
 
-    /* Search for directive in Cache-Control value */
-    while (p < end) {
-        /* Skip whitespace and commas */
-        while (p < end && (*p == ' ' || *p == '\t' || *p == ',')) {
-            p++;
+    for (/* void */; /* void */; /* void */) {
+        rc = ngx_http_markdown_next_cache_control_directive(
+            &p, end, &parsed);
+        if (rc != NGX_OK) {
+            return 0;
         }
 
-        if (p >= end) {
-            break;
-        }
-
-        /* Check if this token matches the directive as a complete token */
-        if ((size_t)(end - p) >= directive_len
-            && ngx_strncasecmp(p, directive->data, directive_len) == 0
-            && (p + directive_len == end
-                || p[directive_len] == ' '
-                || p[directive_len] == '\t'
-                || p[directive_len] == ','
-                || p[directive_len] == '='))
+        if (!parsed.has_value
+            && (size_t) (parsed.name_end - parsed.name_start)
+               == directive->len
+            && ngx_http_markdown_token_equals_ignore_case(
+                   parsed.name_start, directive->data, directive->len))
         {
             return 1;
         }
-
-        /* Skip to next token */
-        while (p < end && *p != ',') {
-            p++;
-        }
-        if (p < end && *p == ',') {
-            p++;
-        }
     }
-
-    return 0;
 }
 
 /*
@@ -894,33 +1082,86 @@ ngx_http_markdown_for_each_cache_control_header(ngx_http_request_t *r,
  * the first Cache-Control entry pointer.
  */
 static ngx_int_t
-ngx_http_markdown_scan_cc_visitor(ngx_http_request_t *r, /* NOSONAR: r type dictated by ngx_http_markdown_cc_visitor_t callback typedef (Rule 24) */
+ngx_http_markdown_scan_cc_visitor(ngx_http_request_t *r,
     ngx_table_elt_t *entry, void *ctx)
 {
-    ngx_http_markdown_cc_scan_t  *scan = ctx;
+    const u_char                       *p;
+    const u_char                       *end;
+    ngx_http_markdown_cc_directive_t    directive;
+    ngx_http_markdown_cc_scan_t        *scan;
+    ngx_int_t                           rc;
 
     (void) r;
+    scan = ctx;
 
     if (scan->first_entry == NULL) {
         scan->first_entry = entry;
     }
-    if (ngx_http_markdown_cache_control_has_directive(
-            &entry->value, &ngx_http_markdown_no_store_directive))
-    {
-        scan->has_no_store = 1;
+
+    if (entry->value.len == 0) {
+        return NGX_OK;
     }
-    if (ngx_http_markdown_cache_control_has_directive(
-            &entry->value, &ngx_http_markdown_private_directive))
-    {
-        scan->has_private = 1;
-    }
-    if (ngx_http_markdown_cache_control_has_directive(
-            &entry->value, &ngx_http_markdown_public_directive))
-    {
-        scan->any_public = 1;
+    if (entry->value.data == NULL) {
+        scan->malformed = 1;
+        return NGX_OK;
     }
 
-    return NGX_OK;
+    p = entry->value.data;
+    end = p + entry->value.len;
+
+    for (/* void */; /* void */; /* void */) {
+        rc = ngx_http_markdown_next_cache_control_directive(
+            &p, end, &directive);
+        if (rc == NGX_DECLINED) {
+            return NGX_OK;
+        }
+        if (rc == NGX_ERROR) {
+            scan->malformed = 1;
+            return NGX_OK;
+        }
+
+        if ((size_t) (directive.name_end - directive.name_start)
+            == ngx_http_markdown_no_store_directive.len
+            && ngx_http_markdown_token_equals_ignore_case(
+                   directive.name_start,
+                   ngx_http_markdown_no_store_directive.data,
+                   ngx_http_markdown_no_store_directive.len))
+        {
+            if (directive.has_value) {
+                scan->malformed = 1;
+            } else {
+                scan->has_no_store = 1;
+            }
+            continue;
+        }
+
+        if ((size_t) (directive.name_end - directive.name_start)
+            == ngx_http_markdown_private_directive.len
+            && ngx_http_markdown_token_equals_ignore_case(
+                   directive.name_start,
+                   ngx_http_markdown_private_directive.data,
+                   ngx_http_markdown_private_directive.len))
+        {
+            if (!directive.has_value) {
+                scan->has_private = 1;
+            }
+            continue;
+        }
+
+        if ((size_t) (directive.name_end - directive.name_start)
+            == ngx_http_markdown_public_directive.len
+            && ngx_http_markdown_token_equals_ignore_case(
+                   directive.name_start,
+                   ngx_http_markdown_public_directive.data,
+                   ngx_http_markdown_public_directive.len))
+        {
+            if (directive.has_value) {
+                scan->malformed = 1;
+            } else {
+                scan->any_public = 1;
+            }
+        }
+    }
 }
 
 
@@ -944,6 +1185,7 @@ ngx_http_markdown_scan_cache_control_headers(ngx_list_t *headers,
     scan->has_no_store = 0;
     scan->has_private = 0;
     scan->any_public = 0;
+    scan->malformed = 0;
 
     /* r is unused by the scan visitor; pass NULL since the visitor
      * only needs the entry + ctx. */
@@ -1041,6 +1283,52 @@ ngx_http_markdown_rewrite_public_entries(ngx_http_request_t *r,
 }
 
 /*
+ * Replace malformed Cache-Control state with one conservative policy.
+ *
+ * The validation pass completes before this function is called. Applying the
+ * static value cannot fail, so the multi-header update is atomic with respect
+ * to allocation failure: the first active entry becomes "private, no-store"
+ * and later active Cache-Control entries are invalidated.
+ */
+static ngx_int_t
+ngx_http_markdown_replace_malformed_cc_visitor(
+    ngx_http_request_t *r, /* NOSONAR: r type dictated by ngx_http_markdown_cc_visitor_t callback typedef (Rule 24) */
+    ngx_table_elt_t *entry, void *ctx)
+{
+    const ngx_table_elt_t  *first_entry;
+
+    (void) r;
+    first_entry = ctx;
+
+    if (entry == first_entry) {
+        entry->value.data = ngx_http_markdown_cc_conservative;
+        entry->value.len =
+            sizeof(ngx_http_markdown_cc_conservative) - 1;
+        return NGX_OK;
+    }
+
+    entry->hash = 0;
+    return NGX_OK;
+}
+
+/*
+ * Fail closed when Cache-Control cannot be parsed unambiguously.
+ */
+static ngx_int_t
+ngx_http_markdown_replace_malformed_cache_control(
+    ngx_http_request_t *r, ngx_list_t *headers,
+    ngx_table_elt_t *first_entry)
+{
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: replacing malformed Cache-Control "
+                  "with private, no-store");
+
+    return ngx_http_markdown_for_each_cache_control_header(
+        r, headers, ngx_http_markdown_replace_malformed_cc_visitor,
+        first_entry);
+}
+
+/*
  * Modify Cache-Control header for authenticated content
  *
  * Applies the following rules to ensure secure caching:
@@ -1074,6 +1362,11 @@ ngx_http_markdown_modify_cache_control_for_auth(ngx_http_request_t *r)
 
     if (scan.first_entry == NULL) {
         return ngx_http_markdown_add_private_cache_control_header(r);
+    }
+
+    if (scan.malformed) {
+        return ngx_http_markdown_replace_malformed_cache_control(
+            r, &r->headers_out.headers, scan.first_entry);
     }
 
     /*

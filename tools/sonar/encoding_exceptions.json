@@ -1,0 +1,6 @@
+{
+  "tests/corpus/encoding/latin1.html": {
+    "encoding": "ISO-8859-1",
+    "reason": "Intentional ISO-8859-1 fixture for charset transcoding tests. Contains single-byte Latin-1 characters (e.g. é=0xE9, ñ=0xF1) that are invalid UTF-8."
+  }
+}

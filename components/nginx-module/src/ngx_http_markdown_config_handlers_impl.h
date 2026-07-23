@@ -1545,6 +1545,57 @@ ngx_http_markdown_stream_threshold_handler(ngx_conf_t *cf,
 }
 
 /*
+ * Configuration directive handler: markdown_stream_precommit_buffer.
+ *
+ * Accepts positive NGINX size values (for example 256k or 1m).  Streaming
+ * consumes upstream bytes before either capability fallback or fail-open
+ * replay can run, so zero cannot preserve the recovery invariant.
+ *
+ * Parameters:
+ *   cf   - configuration context
+ *   cmd  - directive definition
+ *   conf - location configuration pointer
+ *
+ * Returns:
+ *   NGX_CONF_OK on success, NGX_CONF_ERROR on invalid or zero value
+ */
+static char *
+ngx_http_markdown_stream_precommit_buffer_handler(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf) /* NOSONAR: NGINX callback signature */
+{
+    ngx_http_markdown_conf_t *mcf = conf;
+    ngx_str_t                *value;
+    size_t                    parsed;
+
+    (void) cmd;
+
+    value = cf->args->elts;
+
+    if (mcf->stream.precommit_buffer != NGX_CONF_UNSET_SIZE) {
+        return "is duplicate";
+    }
+
+    parsed = ngx_http_markdown_parse_size(&value[1]);
+    if (parsed == (size_t) NGX_ERROR) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "invalid value \"%V\" in "
+            "\"markdown_stream_precommit_buffer\" directive",
+            &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    if (parsed == 0) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+            "\"markdown_stream_precommit_buffer\" must be "
+            "greater than zero");
+        return NGX_CONF_ERROR;
+    }
+
+    mcf->stream.precommit_buffer = parsed;
+    return NGX_CONF_OK;
+}
+
+/*
  * Configuration directive handler: markdown_stream_flush_min (v0.8.0)
  *
  * Accepts NGINX size values (e.g. 16k, 32k).

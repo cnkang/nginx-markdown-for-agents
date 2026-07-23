@@ -15,6 +15,8 @@ Scorecard.
 - `Makefile`
 - Rust `Cargo.toml` / `Cargo.lock` files
 - shell scripts under `tools/`, `packaging/`, and `examples/`
+- release and analysis workflows that receive repository secrets
+- production NGINX examples that use credential-bearing authentication
 - `.clusterfuzzlite/Dockerfile`
 - `examples/docker/Dockerfile.official-nginx-source-build`
 - `tools/build_release/Dockerfile.install-example`
@@ -31,6 +33,11 @@ Scorecard.
 - Local Trivy scans exclude Git-ignored adapter state and generated report
   directories, while clean CI checkouts still scan all repository content.
 - Third-party Actions remain pinned to immutable SHAs with version comments.
+- Workflow secrets remain step-scoped to their minimal consumer.
+- Artifact-producing builders use reviewed manifest digests, and external
+  source/tool downloads are verified before extraction or execution.
+- Basic Auth production examples use TLS directly or a loopback-only backend
+  behind a mandatory co-located TLS terminator.
 - Generated scan outputs, SBOMs, and tool caches stay out of git.
 - Runnable Dockerfiles use a non-root final user. NGINX images use port 8080
   plus writable `/tmp` PID/temp paths; fuzz images preserve writable source,
@@ -40,6 +47,7 @@ Scorecard.
 
 ```bash
 make security-static
+make release-supply-chain-check
 make supply-chain
 make harness-check
 make docs-check

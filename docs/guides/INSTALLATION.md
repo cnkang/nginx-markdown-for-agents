@@ -264,12 +264,15 @@ This follows the official-image multi-stage pattern:
 ### Build Examples
 
 ```bash
+MODULE_SHA="$(git rev-parse HEAD)"
+
 # mainline
 docker build \
   -f examples/docker/Dockerfile.official-nginx-source-build \
   --build-arg NGINX_IMAGE=nginx:mainline \
   --build-arg MODULE_REPO=https://github.com/cnkang/nginx-markdown-for-agents.git \
   --build-arg MODULE_REF=main \
+  --build-arg MODULE_SHA="${MODULE_SHA}" \
   -t nginx-markdown:mainline \
   .
 
@@ -279,6 +282,7 @@ docker build \
   --build-arg NGINX_IMAGE=nginx:mainline-alpine \
   --build-arg MODULE_REPO=https://github.com/cnkang/nginx-markdown-for-agents.git \
   --build-arg MODULE_REF=main \
+  --build-arg MODULE_SHA="${MODULE_SHA}" \
   -t nginx-markdown:mainline-alpine \
   .
 
@@ -288,6 +292,7 @@ docker build \
   --build-arg NGINX_IMAGE=nginx:stable \
   --build-arg MODULE_REPO=https://github.com/cnkang/nginx-markdown-for-agents.git \
   --build-arg MODULE_REF=main \
+  --build-arg MODULE_SHA="${MODULE_SHA}" \
   -t nginx-markdown:stable \
   .
 
@@ -297,6 +302,7 @@ docker build \
   --build-arg NGINX_IMAGE=nginx:stable-alpine \
   --build-arg MODULE_REPO=https://github.com/cnkang/nginx-markdown-for-agents.git \
   --build-arg MODULE_REF=main \
+  --build-arg MODULE_SHA="${MODULE_SHA}" \
   -t nginx-markdown:stable-alpine \
   .
 ```

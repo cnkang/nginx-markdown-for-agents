@@ -22,18 +22,17 @@ Builds the official NGINX-based Docker example from source and validates
 runtime Markdown negotiation behavior.
 
 Examples:
-  $(basename "$0") --nginx-tag mainline
+  $(basename "$0") --nginx-tag mainline --module-sha FULL_40_HEX_COMMIT_SHA
   $(basename "$0") --nginx-tag stable-alpine --port 18083
-  $(basename "$0") --nginx-tag mainline --module-ref main
-  $(basename "$0") --nginx-tag mainline --module-sha abc1234
-  $(basename "$0") --skip-build --image-name nginx-markdown-official-check:stable-amd64
+  $(basename "$0") --nginx-tag mainline --module-ref main --module-sha FULL_40_HEX_COMMIT_SHA
+  $(basename "$0") --skip-build --module-sha FULL_40_HEX_COMMIT_SHA --image-name nginx-markdown-official-check:stable-amd64
   $(basename "$0") --artifact-dir /tmp/official-nginx-docker/mainline-amd64
 
 Environment variables:
   NGINX_TAG   Default: mainline
   MODULE_REPO Default: https://github.com/cnkang/nginx-markdown-for-agents.git
-  MODULE_REF  Default: main
-  MODULE_SHA  Default: empty
+  MODULE_REF  Reachability hint. Default: main
+  MODULE_SHA  Required full 40-character lowercase commit ID
   IMAGE_NAME  Default: nginx-markdown-official-check:<sanitized-tag>
   ARTIFACT_DIR Default: empty
   PORT        Default: 18080
@@ -92,6 +91,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if ! printf '%s' "${MODULE_SHA}" | grep -Eq '^[0-9a-f]{40}$'; then
+  echo "MODULE_SHA must be a full 40-character lowercase commit ID" >&2
+  exit 2
+fi
 
 # Verify that a required command is available in PATH.
 #
@@ -200,7 +204,7 @@ append_step_summary() {
     echo "- Tag: \`${NGINX_TAG}\`"
     echo "- Image: \`${IMAGE_NAME}\`"
       echo "- Module ref: \`${MODULE_REF}\`"
-      echo "- Module sha: \`${MODULE_SHA:-<none>}\`"
+      echo "- Module sha: \`${MODULE_SHA}\`"
       echo "- Runtime UID: \`${runtime_uid:-<not-checked>}\`"
     if [[ -f "${TMP_DIR}/nginx-t.stderr" ]]; then
       if grep -q "test is successful" "${TMP_DIR}/nginx-t.stderr"; then
@@ -399,7 +403,7 @@ echo "Validation summary:"
 echo "  tag=${NGINX_TAG}"
 echo "  module_repo=${MODULE_REPO}"
 echo "  module_ref=${MODULE_REF}"
-echo "  module_sha=${MODULE_SHA:-<none>}"
+echo "  module_sha=${MODULE_SHA}"
 echo "  image_name=${IMAGE_NAME}"
 echo "  runtime_uid=${runtime_uid}"
 echo "  markdown_status=${markdown_code}"

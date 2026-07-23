@@ -3,6 +3,9 @@ domain: parser-regex
 rules: [10]
 paths:
   - "tools/**"
+  - "packaging/**"
+  - "tests/**"
+  - "skills/**"
   - "components/rust-converter/src/**"
 ---
 
@@ -15,3 +18,124 @@ Required:
 - Avoid regex patterns with overlapping quantifiers/backtracking hotspots in validators/parsers.
 - Prefer deterministic parsing (positional cells, explicit token splitting, substring checks) for structured docs/tables.
 - Treat static-analysis ReDoS findings as design issues, not cosmetic lint.
+- `detect_regex_safety.py` provides AST-based automated detection of:
+  - Nested quantifiers with non-separator content: `(aa+)+`, `(a\d+)+`,
+    `(.*)+`.  A group with an unbounded inner quantifier repeated by an
+    unbounded outer quantifier is flagged unless every alternation branch
+  starts with a strong literal separator (a multi-char literal or a single
+  non-alphanumeric char like `-`, `_`, `.`) that the inner unbounded atom
+  cannot consume.  For multi-character separators, only the first character
+  of the separator needs to be unconsumable by the inner unbounded atom,
+  because the outer iteration must start from the separator's first character.
+  - Adjacent overlapping `.*` quantifiers: `(.*)(.*)`
+  - Backreferences after `.*` or `.*?`: `(.*?)\1`
+  - Unbounded repetition inside repeated groups: `(.*,)+`
+  - Overlapping alternation with quantifiers: `(a|ab)+`
+  - Repeated nullable groups: `(a?)+`, `(a*)+`
+  - Dynamic regex injection: CLI args, env vars, file content as patterns
+  - `re.DOTALL` with an unescaped greedy `.*` over full documents.  Lazy
+    `.*?`, possessive `.*+`, escaped dots, and character-class literals do
+    not trigger this broad advisory check; they still pass through the normal
+    structural ReDoS checks.
+- Python regex usage is extracted via the standard library `ast` module,
+  covering: `re.compile`, `re.search`, `re.match`, `re.fullmatch`,
+  `re.findall`, `re.finditer`, `re.split`, `re.sub`, `re.subn`, and
+  compiled-pattern methods.  Both positional and keyword argument forms
+  (`pattern=`, `string=`, `flags=`) are supported.  Import aliases
+  (`import re as X`, `from re import Y as Z`) are resolved.
+- Scope-aware static string constant propagation using a unified `_Binding` /
+  `_Scope` model with LEGB (Local → Enclosing → Global → Builtin) lookup.
+  Module-level and function/class/lambda-local constants (`PATTERN = r"..."`)
+  are resolved when used as patterns.  Finite static string collections and
+  fixed-width string rows are propagated through `for` loops and
+  comprehensions, including destructured targets.  Their use in f-strings or
+  string concatenation is expanded as a bounded Cartesian product (at most
+  256 alternatives), and every resulting pattern is analyzed.  Expressions
+  that exceed the bound or contain an unknown component remain REVIEW.
+  Function/class/lambda parameters, with/except targets, and augmented
+  assignments shadow outer bindings.  Reassignment of a `re` alias to a
+  non-`re` value
+  invalidates the alias.  Reassignment of a compiled-pattern variable to a
+  dynamic value upgrades the binding to `COMPILED_DYNAMIC_PATTERN` (not plain
+  `DYNAMIC_VALUE`) so subsequent `compiled.search/match/sub/findall` calls
+  emit a REVIEW referencing the original `compile_line`; this applies to
+  Assign, AnnAssign, and AugAssign.  An initially dynamic `re.compile()` emits
+  its REVIEW at the compile site only; a second compiled-method REVIEW is
+  reserved for actual reassignment.  Lexical `del` writes a DELETED tombstone
+  in the current scope instead of walking outer scopes, so a function-local
+  `del p` no longer removes a module binding; `global`/`nonlocal` are
+  partially modeled (honored for delete routing) and otherwise conservative.
+  Function/lambda defaults, decorators, return annotations, and parameter
+  annotations are evaluated in the enclosing scope before the function name
+  is bound and before the body scope is entered, matching Python's real
+  evaluation order.  Unknown RHS expressions produce DYNAMIC_VALUE (not
+  the old static binding).  Cross-module imports are NOT resolved (those
+  resolve to REVIEW).
+- Tokenizer: `_merge_literal_atoms` preserves the last literal atom before a
+  quantifier as a separate atom so that separator detection is not lost when
+  adjacent literals are merged.  For example, `abc\w+` keeps `abc` as a
+  separate literal atom so the `\w+` is recognized as having a multi-char
+  literal separator prefix.  Segment analysis treats `re.escape()` as
+  protecting only its own operand; a concatenation like
+  `re.escape(x) + r"(a+)+$"` is still analyzed for the static tail, and any
+  dangerous static segment produces an ERROR regardless of escaped/dynamic
+  neighbors.  An escaped-only composition is represented with a literal atom
+  and its static scaffold is analyzed; safe scaffolds produce no REVIEW.
+- Pattern source classification: `STATIC_LITERAL`, `STATIC_CONCAT`,
+  `STATIC_FORMATTED`, `ESCAPED_DYNAMIC`, `DYNAMIC`, `UNKNOWN`.
+- Severity levels: `ERROR` (confirmed ReDoS or dangerous static scaffold),
+  `REVIEW` (unescaped dynamic or unresolved UNKNOWN), `INFO` (static safe).
+- UNKNOWN pattern sources are treated as REVIEW (never silently downgraded
+  to INFO) so unresolvable regex origins require manual attention.
+- Shell regex: pattern-bearing options (`-e`/`--regexp`) and PCRE-enabling
+  flags (`grep -P`/`--perl-regexp`, `rg -P`/`--pcre2`, `perl` itself) are
+  separate.  `grep -e`/`rg -e` without a PCRE flag use the command's default
+  engine (BRE/ERE for grep, Rust regex NFA for rg) and are NOT analyzed for
+  PCRE catastrophic backtracking.  Only `grep -P`, `rg -P`/`--pcre2`, and
+  `perl -e`/`-E` produce `shell-pcre` findings.  Pattern extraction is
+  command-aware: it locates the regex command past pipes and env
+  assignments, skips options, supports `-e`/`--regexp`/`-P` and `--`, and
+  does not pick up patterns from preceding commands in a pipeline.
+  Broken multi-line command recovery matches exact command tokens rather than
+  substrings in prose or arguments.  Common engine/output flags such as
+  `grep -E`/`-F`/`-G`/`-c` and `rg -F` are modeled as boolean options, so they
+  do not become spurious pattern candidates.
+  Shell argument parsing classifies options into boolean flags (consume
+  nothing), required-value options (consume next token), optional-value
+  options (do not consume next token), pattern options, pattern-file
+  options, and PCRE flags.  After an unknown option, additional non-option
+  tokens are collected as pattern candidates so a dangerous pattern cannot
+  be hidden behind an unrecognized option.  Multiple `-e` patterns are all
+  extracted.  Pattern-file options (`-f`/`--file`, multiple supported) are
+  resolved relative to the shell script directory, validated to stay within
+  the repository root (absolute paths, `..` traversal, and symlink escapes
+  are rejected), read as UTF-8, and per-line analyzed; read/encoding
+  failures (OSError, UnicodeDecodeError, IsADirectoryError) produce a
+  ScanError plus a conservative REVIEW instead of crashing.  `shlex` parse
+  errors produce ScanError.
+- Rust `regex` crate uses NFA (non-backtracking) — safe by default.
+  Backtracking crates (`fancy-regex`, `pcre2`, `onig`) are banned via `deny.toml`.
+- C/PCRE2: NGINX build depends on PCRE2, but the module does not own
+  PCRE2 pattern/match context. No `pcre2_compile()` or `pcre2_match()`
+  calls in module code.
+- Suppression: `# nosec:regex-safety -- <justification>` with non-empty reason.
+  File-level or directory-level suppressions are not allowed.  Suppressions
+  are checked at the call site, the preceding line, and upward through
+  consecutive comment/blank lines (up to 30) so multi-line `re.compile(...)`
+  calls can be suppressed by a comment block above the statement.
+
+CLI contract:
+- Default (no flags): advisory exit 0 regardless of findings.
+- `--strict`: exit 1 on ERROR findings, parse errors, or scan/read errors.
+  REVIEW findings are non-blocking.
+- `--fail-on-review`: implies `--strict` and additionally exits 1 on REVIEW.
+- `--format json`: structured output with `findings`, `errors`, `summary`.
+
+Verification:
+- `make regex-security-check`
+- `python3 tools/harness/detect_regex_safety.py --strict`
+- `python3 tools/harness/detect_regex_safety.py --strict --fail-on-review`
+- `python3 -m pytest tools/harness/tests/test_detect_regex_safety.py -q`
+- `bash tools/harness/tests/test_detect_regex_safety.sh`
+- CodeQL Python: `security-extended,security-and-quality`
+- SonarLint rule S8786 (super-linear regex backtracking)

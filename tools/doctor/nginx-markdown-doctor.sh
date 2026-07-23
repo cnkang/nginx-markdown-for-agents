@@ -589,7 +589,16 @@ check_os_arch() {
         details_json='{"os":"'"$DETECTED_OS"'","arch":"'"$DETECTED_ARCH"'"}'
     fi
 
-    emit_check "os_arch" "pass" "${DETECTED_OS}/${DETECTED_ARCH}${DETECTED_LIBC:+ (${DETECTED_LIBC}${DETECTED_LIBC_VERSION:+ ${DETECTED_LIBC_VERSION}})}" \
+    local platform_name="${DETECTED_OS}/${DETECTED_ARCH}"
+    if [[ -n "$DETECTED_LIBC" ]]; then
+        platform_name+=" (${DETECTED_LIBC}"
+        if [[ -n "$DETECTED_LIBC_VERSION" ]]; then
+            platform_name+=" ${DETECTED_LIBC_VERSION}"
+        fi
+        platform_name+=")"
+    fi
+
+    emit_check "os_arch" "pass" "$platform_name" \
         "$details_json"
     return 0
 }

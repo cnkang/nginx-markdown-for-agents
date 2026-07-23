@@ -81,6 +81,10 @@ _SCANNED_SUFFIXES = (".py", ".rs", ".sh", ".bash")
 
 PY_DEF_RE = re.compile(r"^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(")
 
+# nosec:regex-safety -- applied to single-line Rust source only; each
+# alternation branch requires a keyword (pub/const/unsafe/async) that cannot
+# overlap with 'fn' identifier content; alternation overlap is on the keyword
+# prefix only and does not cause backtracking on structured Rust declarations.
 RUST_FN_RE = re.compile(
     r"^\s*(?:pub\s*|pub\s*\([^)]*\)\s*|const\s*|unsafe\s*|async\s*)*"
     r"fn\s+([A-Za-z_]\w*)\s*\(",

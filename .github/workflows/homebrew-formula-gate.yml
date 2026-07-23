@@ -5,6 +5,11 @@ on:
     branches: [main, master]
     paths:
       - "packaging/homebrew/**"
+      - "packaging/checksums.sha256"
+      - "packaging/scripts/install-verified-rustup.sh"
+      - "packaging/scripts/render_homebrew_formula.py"
+      - "packaging/scripts/verify-checksum.sh"
+      - "packaging/scripts/verify_homebrew_formula.py"
       - ".github/workflows/homebrew-formula-gate.yml"
       - "Makefile"
       - "components/**"
@@ -12,6 +17,11 @@ on:
     branches: [main, master]
     paths:
       - "packaging/homebrew/**"
+      - "packaging/checksums.sha256"
+      - "packaging/scripts/install-verified-rustup.sh"
+      - "packaging/scripts/render_homebrew_formula.py"
+      - "packaging/scripts/verify-checksum.sh"
+      - "packaging/scripts/verify_homebrew_formula.py"
       - ".github/workflows/homebrew-formula-gate.yml"
       - "Makefile"
       - "components/**"
@@ -41,7 +51,10 @@ jobs:
           set -euo pipefail
           CORE_FORMULA_PATH="$(brew --repository homebrew/core)/Formula/n/nginx-markdown-module.rb"
           ARCHIVE_URL="https://github.com/${GITHUB_REPOSITORY}/archive/${GITHUB_SHA}.tar.gz"
-          ARCHIVE_SHA="$(curl -fsSL "${ARCHIVE_URL}" | shasum -a 256 | awk '{print $1}')"
+          ARCHIVE_PATH="${RUNNER_TEMP}/nginx-markdown-source.tar.gz"
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            -o "${ARCHIVE_PATH}" "${ARCHIVE_URL}"
+          ARCHIVE_SHA="$(shasum -a 256 "${ARCHIVE_PATH}" | awk '{print $1}')"
           CURRENT_VERSION="$(
             sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
               components/rust-converter/Cargo.toml | head -1
@@ -50,35 +63,18 @@ jobs:
             echo "::error::Cannot derive current version from components/rust-converter/Cargo.toml" >&2
             exit 1
           fi
-          export CORE_FORMULA_PATH ARCHIVE_URL ARCHIVE_SHA CURRENT_VERSION
-          cp ./packaging/homebrew/nginx-markdown-module.rb "${CORE_FORMULA_PATH}"
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-
-          path = Path(os.environ["CORE_FORMULA_PATH"])
-          url = os.environ["ARCHIVE_URL"]
-          sha = os.environ["ARCHIVE_SHA"]
-          version = os.environ["CURRENT_VERSION"]
-          text = path.read_text(encoding="utf-8")
-          lines = []
-          inserted_version = False
-          for line in text.splitlines():
-              stripped = line.strip()
-              if stripped.startswith("url "):
-                  lines.append(f'  url "{url}"')
-              elif stripped.startswith("sha256 "):
-                  lines.append(f'  version "{version}"')
-                  lines.append(f'  sha256 "{sha}"')
-                  inserted_version = True
-              elif stripped.startswith("version "):
-                  continue
-              else:
-                  lines.append(line)
-          if not inserted_version:
-              lines.append(f'  version "{version}"')
-          path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-          PY
+          python3 packaging/scripts/render_homebrew_formula.py \
+            --source packaging/homebrew/nginx-markdown-module.rb \
+            --url "${ARCHIVE_URL}" \
+            --sha256 "${ARCHIVE_SHA}" \
+            --version "${CURRENT_VERSION}" \
+            > "${CORE_FORMULA_PATH}"
+          python3 packaging/scripts/verify_homebrew_formula.py \
+            --trusted-template packaging/homebrew/nginx-markdown-module.rb \
+            --candidate "${CORE_FORMULA_PATH}" \
+            --url "${ARCHIVE_URL}" \
+            --sha256 "${ARCHIVE_SHA}" \
+            --version "${CURRENT_VERSION}"
           brew audit --strict nginx-markdown-module
 
       - name: Install local formula from source
