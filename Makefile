@@ -62,7 +62,7 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
-        harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check \
+        harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
@@ -271,6 +271,9 @@ harness-security-checks:
 	bash tools/harness/detect_shell_hygiene.sh tools/
 	PYTHONPATH=. python3 tools/harness/detect_const_correctness.py components/nginx-module/src
 	bash tools/harness/detect_ci_supply_chain.sh
+	PYTHONPATH=. python3 tools/harness/detect_release_supply_chain.py
+	PYTHONPATH=. python3 tools/harness/detect_workflow_secret_scope.py
+	PYTHONPATH=. python3 tools/harness/detect_production_auth_transport.py
 	bash tools/harness/detect_header_hash_filter.sh
 	bash tools/harness/detect_finalize_return.sh
 	bash tools/harness/detect_ffi_struct_init.sh
@@ -297,6 +300,17 @@ harness-security-checks:
 	PYTHONPATH=. python3 tools/harness/detect_test_assertion_coverage.py
 	PYTHONPATH=. python3 tools/harness/detect_html_sanitizer_invariants.py
 	PYTHONPATH=. python3 tools/harness/detect_doc_sync.py
+
+release-supply-chain-check:
+	@echo "=== Release Supply-Chain Contracts ==="
+	PYTHONPATH=. python3 tools/harness/detect_release_supply_chain.py
+	PYTHONPATH=. python3 tools/harness/detect_workflow_secret_scope.py
+	PYTHONPATH=. python3 tools/harness/detect_production_auth_transport.py
+	python3 -m pytest \
+		tools/harness/tests/test_security_boundary_detectors.py \
+		tools/harness/tests/test_install_verified_rustup.py \
+		-q --tb=short
+	@echo "  Release Supply-Chain Contracts: PASSED"
 
 complexity-check:
 	@echo "=== Complexity Check ==="
@@ -1052,6 +1066,7 @@ help:
 	@echo "  harness-check            - Validate harness truth surfaces and optional local adapters"
 	@echo "  harness-check-full       - Run full harness validation plus docs/release checks"
 	@echo "  harness-security-checks  - Run local static harness/security detectors"
+	@echo "  release-supply-chain-check - Validate immutable release inputs, secret scope, and auth transport"
 	@echo "  complexity-check         - Run complexity analysis (lizard + complexipy + shellcheck)"
 	@echo "  security-static          - Run actionlint, shellcheck, gitleaks, Semgrep, and cargo-deny"
 	@echo "  supply-chain             - Run Trivy filesystem/IaC scan and generate a Syft SPDX SBOM"

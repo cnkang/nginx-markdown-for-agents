@@ -88,7 +88,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 10 | parser-regex | No overlapping quantifiers; prefer deterministic parsing; AST-based detection with scope-aware binding model (lexical del, compiled-pattern reassignment, function/lambda default+decorator evaluation scope) and shell argument semantics (PCRE flags separated from pattern options, boolean/required-value/unknown option contracts, pattern-file resolution with repo-root boundary validation) via `make regex-security-check` |
 | 11 | shell | macOS bash 3.2 compatible; no GNU-only flags; null-delimited traversal; empty array expansion under set -u |
 | 12 | security-cwe | Sanitize metadata-derived paths; never interpolate untrusted values |
-| 13 | ci-gating | Update workflow path filters; no redundant CI steps; pin Actions to SHA; verify download checksums; sync validator regex and release package chain gates |
+| 13 | ci-gating | Update workflow path filters; pin Actions and release builders; verify downloads before use; bind release metadata to one immutable source |
 | 14 | testing-coverage | Every bug fix needs regression test; cross-boundary and malformed-input cases; parameterized tests must consume inputs |
 | 15 | ffi-crosslang | Rust FFI changes → update all boundaries; prefer helpers over literal init; read before free |
 | 16 | testing-coverage | No dead stores; loop vars in for; every var consumed by TEST_ASSERT |
@@ -123,7 +123,7 @@ Full rule text, historical issues, and verification commands: `docs/harness/rule
 | 45 | dynconf-snapshot | effective_conf NULL-safe access; cross-TU field visibility in shared headers; sentinel value consistency |
 | 46 | ffi-crosslang | FFI operations must validate NULL/empty key inputs; guards on both sides of FFI boundary; NULL/empty-input test coverage |
 | 47 | streaming-backpressure | Terminal-sent latch must not be set on NGX_AGAIN; latch only after successful downstream return |
-| 48 | security-static-analysis | CodeQL remains primary SAST; supplemental gates stay focused, pinned, low-noise, and locally runnable; runnable Dockerfiles use operational non-root runtimes |
+| 48 | security-static-analysis | CodeQL remains primary SAST; supplemental gates stay focused and locally runnable; scope workflow secrets narrowly; runnable examples preserve runtime and credential transport safety |
 | 49 | docs-tooling | THIRD-PARTY-NOTICES must stay in sync with resolved dependency versions; add/remove/update entries in same changeset as Cargo.lock changes |
 | 50 | nginx-idioms | Content-Type OWS separator accepts HTAB; trailing OWS excluded before parameter comparison |
 | 51 | streaming-backpressure | Auth Cache-Control commit failure routes through precommit_error; multi-header aggregation checks any_public before has_private |
@@ -269,7 +269,14 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
 
 **CI/Workflows** (CI)
 - GitHub Actions pinned to immutable SHA; download checksums verified [13]
+- Artifact-producing builder images use reviewed multi-architecture manifest
+  digests, not mutable tags; external source/tool bytes are checksum-verified
+  before extraction or execution [13]
+- Release source builds require a full reviewed commit ID and verify the fetched
+  commit exactly before executing repository code [13]
 - Workflow input injection: ${{ inputs.* }} must be routed through env: before use in shell run blocks; `bash tools/harness/detect_workflow_input_injection.sh` — CI gate [58]
+- Workflow secrets are step-scoped to their minimal consumer. Repository build,
+  test, setup, and coverage steps must not inherit unrelated credentials [48]
 - Validator/gate regex patterns match actual struct field paths [13]
 - Release/package workflows preserve one canonical module `.so` filename across
   NGINX build output, packaging metadata, load snippets, smoke tests, docs, and
@@ -397,11 +404,16 @@ Applies-to codes: **C** = nginx-module/src, **T** = tests/unit, **R** = rust-con
   images must also listen on an unprivileged port and move PID/temp paths to
   locations writable by that user; a scanner-only `USER` declaration that
   breaks container startup is forbidden [48]
+- Deployable Basic Auth examples must use an SSL listener or a loopback-only
+  backend behind a mandatory co-located TLS terminator. Credential-bearing
+  client examples must use HTTPS [48]
 - Release artifact path traversal protection: validate manifest filenames resolve within artifact directory before accessing [54]
-- Homebrew formula SHA-256 generated from release tag git archive (not HEAD);
-  version stanza before sha256; nginx version derived from dependency
-  metadata; tap publish validates tag existence; formula gate and release
-  verify use same audit standard [13]
+- Homebrew formula SHA-256 hashes the exact bytes served by its declared URL;
+  the downloaded tag archive's normalized content must equal a local
+  `git archive` of the resolved tag commit; Formula source, version, and archive
+  identity derive from that commit; version stanza precedes sha256; nginx
+  version derives from dependency metadata; formula gate and release verify use
+  the same audit standard [13]
 
 **Python** (P)
 - Binary prerequisites validate executability [19]

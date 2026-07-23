@@ -2486,25 +2486,47 @@ def _analyze_static_pattern(
     return None, "", Severity.INFO
 
 
-def _has_greedy_dot_star(pattern: str) -> bool:
-    """Return whether a pattern has an unescaped greedy ``.*`` atom."""
-    in_character_class = False
-    index = 0
-    while index < len(pattern):
-        char = pattern[index]
-        if char == "\\":
-            index += 2
+def _is_escaped(pattern: str, index: int) -> bool:
+    """Return whether the character at index is escaped."""
+    if index == 0:
+        return False
+    backslash_count = 0
+    i = index - 1
+    while i >= 0 and pattern[i] == "\\":
+        backslash_count += 1
+        i -= 1
+    return backslash_count % 2 == 1
+
+
+def _in_character_class(pattern: str, index: int) -> bool:
+    """Return whether the character at index is inside a character class."""
+    in_class = False
+    i = 0
+    while i < index:
+        char = pattern[i]
+        if _is_escaped(pattern, i):
+            i += 1
             continue
         if char == "[":
-            in_character_class = True
-        elif char == "]" and in_character_class:
-            in_character_class = False
-        elif not in_character_class and char == "." \
-                and index + 1 < len(pattern) \
-                and pattern[index + 1] == "*":
-            suffix = pattern[index + 2:index + 3]
-            if suffix not in ("?", "+"):
-                return True
+            in_class = True
+        elif char == "]" and in_class:
+            in_class = False
+        i += 1
+    return in_class
+
+
+def _has_greedy_dot_star(pattern: str) -> bool:
+    """Return whether a pattern has an unescaped greedy ``.*`` atom."""
+    index = 0
+    while index < len(pattern):
+        if _is_escaped(pattern, index):
+            index += 1
+            continue
+        if pattern[index] == "." and index + 1 < len(pattern) and pattern[index + 1] == "*":
+            if not _in_character_class(pattern, index):
+                suffix = pattern[index + 2:index + 3]
+                if suffix not in ("?", "+"):
+                    return True
         index += 1
     return False
 
