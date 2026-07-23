@@ -62,7 +62,6 @@ impl TokenSinkAdapter {
         }
     }
 
-
     /// Move one event batch and its compacted token statistics out of the sink.
     fn drain_batch(&self) -> TokenizerBatch {
         TokenizerBatch {
