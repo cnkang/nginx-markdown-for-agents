@@ -1038,7 +1038,7 @@ test_base_url_marshals_request_fields(void)
     ngx_http_request_t            r;
     ngx_http_markdown_conf_t      conf;
     ngx_http_markdown_main_conf_t main_conf;
-    ngx_table_elt_t               headers[3];
+    ngx_table_elt_t               headers[4];
     ngx_str_t                     base_url;
     struct MarkdownTrustedProxies *handle;
 
@@ -1059,14 +1059,17 @@ test_base_url_marshals_request_fields(void)
     set_str(&r.headers_in.server, "origin.example.com");
 
     set_str(&headers[0].key, "Forwarded");
-    set_str(&headers[0].value, "host=fwd.example.com;proto=https");
+    set_str(&headers[0].value, "host=client.example.com;proto=http");
     headers[0].hash = 1;
-    set_str(&headers[1].key, "X-Forwarded-Proto");
-    set_str(&headers[1].value, "https");
+    set_str(&headers[1].key, "Forwarded");
+    set_str(&headers[1].value, "host=fwd.example.com;proto=https");
     headers[1].hash = 1;
-    set_str(&headers[2].key, "X-Forwarded-Host");
-    set_str(&headers[2].value, "xfwd.example.com");
+    set_str(&headers[2].key, "X-Forwarded-Proto");
+    set_str(&headers[2].value, "https");
     headers[2].hash = 1;
+    set_str(&headers[3].key, "X-Forwarded-Host");
+    set_str(&headers[3].value, "xfwd.example.com");
+    headers[3].hash = 1;
     set_single_header_list(&r, headers, ARRAY_SIZE(headers));
 
     r.loc_conf = &conf;
@@ -1094,8 +1097,15 @@ test_base_url_marshals_request_fields(void)
     TEST_ASSERT(g_captured_base_url_input.is_unix_socket == 0,
         "is_unix_socket must be 0 for a non-unix peer");
     TEST_ASSERT(g_captured_base_url_input.forwarded_len
-            == sizeof("host=fwd.example.com;proto=https") - 1,
-        "Forwarded header must be marshaled");
+            == sizeof("host=client.example.com;proto=http, "
+                      "host=fwd.example.com;proto=https") - 1,
+        "all Forwarded field lines must be marshaled");
+    TEST_ASSERT(memcmp(
+            g_captured_base_url_input.forwarded,
+            "host=client.example.com;proto=http, "
+            "host=fwd.example.com;proto=https",
+            g_captured_base_url_input.forwarded_len) == 0,
+        "Forwarded field lines must retain wire order");
     TEST_ASSERT(g_captured_base_url_input.x_forwarded_proto_len == 5,
         "X-Forwarded-Proto must be marshaled");
     TEST_ASSERT(g_captured_base_url_input.x_forwarded_host_len
@@ -1105,6 +1115,7 @@ test_base_url_marshals_request_fields(void)
             == sizeof("origin.example.com") - 1,
         "Host must be marshaled from headers_in.server");
 
+    free((void *) (uintptr_t) g_captured_base_url_input.forwarded);
     TEST_PASS("base_url wrapper marshals all request/config fields");
 }
 
@@ -1701,6 +1712,89 @@ test_find_request_header_multi_part(void)
 }
 
 /*
+ * Test: duplicate field lines are aggregated across list parts in wire order.
+ */
+static void
+test_collect_request_header_values_multi_part(void)
+{
+    ngx_http_request_t r;
+    ngx_table_elt_t headers_part1[2];
+    ngx_table_elt_t headers_part2[1];
+    ngx_list_part_t part2;
+    ngx_str_t result;
+    ngx_int_t rc;
+
+    TEST_SUBSECTION("collect_request_header_values: duplicates");
+
+    init_request(&r);
+    memset(headers_part1, 0, sizeof(headers_part1));
+    memset(headers_part2, 0, sizeof(headers_part2));
+    memset(&part2, 0, sizeof(part2));
+
+    set_str(&headers_part1[0].key, "X-Forwarded-Host");
+    set_str(&headers_part1[0].value, "client.example");
+    headers_part1[0].hash = 1;
+    set_str(&headers_part1[1].key, "X-Forwarded-Host");
+    set_str(&headers_part1[1].value, "invalidated.example");
+    headers_part1[1].hash = 0;
+
+    set_str(&headers_part2[0].key, "X-Forwarded-Host");
+    set_str(&headers_part2[0].value, "edge.example");
+    headers_part2[0].hash = 1;
+
+    part2.elts = headers_part2;
+    part2.nelts = ARRAY_SIZE(headers_part2);
+    r.headers_in.headers.part.elts = headers_part1;
+    r.headers_in.headers.part.nelts = ARRAY_SIZE(headers_part1);
+    r.headers_in.headers.part.next = &part2;
+
+    rc = ngx_http_markdown_collect_request_header_values(
+        &r, (const u_char *) "X-Forwarded-Host",
+        sizeof("X-Forwarded-Host") - 1, &result);
+
+    TEST_ASSERT(rc == NGX_OK, "duplicate field collection should succeed");
+    assert_str_eq(&result, "client.example, edge.example",
+                  "active values must retain wire order");
+    free(result.data);
+    TEST_PASS("duplicate request headers aggregated in wire order");
+}
+
+/*
+ * Test: oversized forwarding metadata is ignored without allocating.
+ */
+static void
+test_collect_request_header_values_enforces_cap(void)
+{
+    ngx_http_request_t r;
+    ngx_table_elt_t header;
+    ngx_str_t result;
+    ngx_int_t rc;
+    u_char oversized[NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX + 1];
+
+    TEST_SUBSECTION("collect_request_header_values: bounded input");
+
+    init_request(&r);
+    memset(&header, 0, sizeof(header));
+    memset(oversized, 'a', sizeof(oversized));
+
+    set_str(&header.key, "Forwarded");
+    header.value.data = oversized;
+    header.value.len = sizeof(oversized);
+    header.hash = 1;
+    set_single_header_list(&r, &header, 1);
+
+    rc = ngx_http_markdown_collect_request_header_values(
+        &r, (const u_char *) "Forwarded",
+        sizeof("Forwarded") - 1, &result);
+
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "oversized forwarding metadata must be ignored");
+    TEST_ASSERT(result.data == NULL && result.len == 0,
+                "oversized metadata must not allocate output");
+    TEST_PASS("forwarding metadata cap enforced");
+}
+
+/*
  * Verify validate_conversion_result invariant checks: NULL markdown with
  * non-zero length triggers fail-open; NULL error_message with non-zero
  * length triggers fail-open; NULL etag with non-zero length triggers
@@ -2225,6 +2319,8 @@ main(void)
     test_prepare_conversion_options_schema_server_fallback();
     test_shadow_compare_prepare_options_failure();
     test_find_request_header_multi_part();
+    test_collect_request_header_values_multi_part();
+    test_collect_request_header_values_enforces_cap();
     test_validate_conversion_result_paths();
     test_handle_conversion_failure_paths();
     test_converter_not_initialized_path();
