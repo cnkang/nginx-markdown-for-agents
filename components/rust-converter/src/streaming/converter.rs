@@ -411,9 +411,22 @@ impl StreamingConverter {
         // fits within the total budget. The transcoded buffer will coexist
         // with other resident state (tokenizer reservation, emitter buffers,
         // utf8_tail, etc.) during the tokenizer processing loop.
-        let max_transcode = self.charset_state.max_transcode_output_len(data.len());
+
+        // Calculate the combined input length for budget checking:
+        // Include the charset state's resident bytes (sniff_buffer in Pending
+        // state) plus this chunk's data, because a Pending→Resolved transition
+        // will transcode all accumulated sniff buffer + this chunk together.
+        let total_input_for_transcode = self
+            .charset_state
+            .resident_bytes()
+            .saturating_add(data.len());
+        let max_transcode = self
+            .charset_state
+            .max_transcode_output_len(total_input_for_transcode);
         if max_transcode > 0 {
             let current_working_set = self.estimate_working_set();
+            // The transcoded output may coexist with utf8_tail during processing,
+            // so we must account for both in the pre-commit budget check.
             self.budget
                 .check_total(current_working_set, max_transcode)
                 .map_err(|e| self.wrap_error(e))?;
