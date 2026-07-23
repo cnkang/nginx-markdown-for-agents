@@ -195,12 +195,14 @@ ngx_int_t ngx_strncasecmp(u_char *s1, u_char *s2, size_t n);
  * Per-path entries add variable output depending on the number of
  * tracked paths and their URI lengths.  Each path entry is roughly
  * 80-120 bytes across formats.  With a default cardinality limit
- * of 1024 paths at ~100 bytes each, per-path output can reach
- * ~100 KiB.
+ * of 100 paths at ~100 bytes each, per-path output can reach
+ * ~10 KiB.
  *
  * The 128 KiB buffer accommodates aggregate output plus per-path
- * entries for typical deployments.  If the buffer is exhausted,
- * the renderers detect truncation and return an error.
+ * entries for typical deployments.  If the buffer is exhausted
+ * during per-path detail rendering, paths that do not fit are
+ * aggregated into an "__other__" entry so the response remains
+ * syntactically complete and the endpoint always returns HTTP 200.
  */
 #define NGX_HTTP_MARKDOWN_METRICS_BUF_SIZE  131072
 
@@ -939,9 +941,11 @@ ngx_http_markdown_metrics_write_json(
      * Per-path individual entries: walk the SHM RB-tree to emit
      * each path as a JSON object inside the "paths" array.
      *
-     * The walk emits a trailing comma after each entry.
-     * We strip the trailing comma before closing the array
-     * by backing up one byte if paths were emitted.
+     * Uses bounded rendering: entries that do not fit in the
+     * remaining buffer (after reserving space for the closing
+     * brackets and __other__ entry) are aggregated into the
+     * omitted counters.  This ensures the response is always
+     * syntactically complete and the endpoint returns HTTP 200.
      *
      * Requires full NGINX type definitions; guarded by
      * NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED.
@@ -951,53 +955,60 @@ ngx_http_markdown_metrics_write_json(
         && ngx_http_markdown_metrics_shm_zone != NULL
         && ngx_http_markdown_metrics_shm_zone->data != NULL)
     {
-        ngx_shm_zone_t                       *zone;
-        ngx_slab_pool_t                      *shpool;
-        ngx_http_markdown_metrics_t          *live_metrics;
-        const u_char                         *paths_start;
+        ngx_shm_zone_t                                *zone;
+        ngx_slab_pool_t                               *shpool;
+        ngx_http_markdown_metrics_t                   *live_metrics;
+        ngx_http_markdown_path_detail_render_ctx_t    render;
 
         zone = ngx_http_markdown_metrics_shm_zone;
         live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
         shpool = (ngx_slab_pool_t *) zone->shm.addr;
 
-        paths_start = p;
+        render.pos = p;
+        render.end = end;
+        render.tail_reserve = ngx_http_markdown_json_tail_reserve();
+        render.omitted_conversions = 0;
+        render.omitted_time_ms = 0;
+        render.omitted_nodes = 0;
+        render.entries_written = 0;
 
         ngx_shmtx_lock(&shpool->mutex);
 
-        p = ngx_http_markdown_json_walk_path_tree(
+        p = ngx_http_markdown_json_walk_path_tree_bounded(
                 live_metrics->per_path.path_tree.root,
                 &live_metrics->per_path.sentinel,
-                p, end);
+                &render);
 
         ngx_shmtx_unlock(&shpool->mutex);
 
         /*
-         * Strip the trailing comma left by the last entry.
-         * If paths were written, p > paths_start and the byte
-         * before p is ','.
-         */
-        if (p > paths_start && *(p - 1) == ',') {
-            p--;
-        }
-
-        /*
          * Emit the __other__ pseudo-path entry for overflow paths
-         * that were dropped when the cardinality limit was reached.
-         * This allows operators to see the count of untracked paths
-         * without enumerating them.
+         * that were dropped when the cardinality limit was reached,
+         * plus any paths omitted due to buffer space constraints.
          */
-        if (snapshot->per_path.overflow_count > 0 && p < end) {
-            if (p > paths_start) {
+        if ((snapshot->per_path.overflow_count > 0
+             || render.omitted_nodes > 0) && p < end)
+        {
+            ngx_atomic_uint_t  other_conversions;
+            ngx_atomic_uint_t  other_entries;
+
+            other_conversions = snapshot->per_path.overflow_count
+                + render.omitted_conversions;
+            other_entries = snapshot->per_path.overflow_count
+                + (ngx_atomic_uint_t) render.omitted_nodes;
+
+            if (render.entries_written > 0) {
                 p = ngx_slprintf(p, end, ",");
             }
             p = ngx_slprintf(p, end,
                 "\n"
                 "      {\"path\":\"__other__\","
                 "\"conversions\":%uA,"
-                "\"conversion_time_sum_ms\":0,"
+                "\"conversion_time_sum_ms\":%uA,"
                 "\"entries\":%uA}",
-                snapshot->per_path.overflow_count,
-                snapshot->per_path.overflow_count);
+                other_conversions,
+                render.omitted_time_ms,
+                other_entries);
         }
     }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
@@ -1263,6 +1274,11 @@ ngx_http_markdown_metrics_write_text(
      * Per-path individual entries: walk the SHM RB-tree to emit
      * each path as a plain-text line after the aggregate section.
      *
+     * Uses bounded rendering: entries that do not fit in the
+     * remaining buffer are aggregated into an __other__ line.
+     * This ensures the response is always syntactically complete
+     * and the endpoint returns HTTP 200.
+     *
      * Requires full NGINX type definitions; guarded by
      * NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED.
      */
@@ -1271,9 +1287,10 @@ ngx_http_markdown_metrics_write_text(
         && ngx_http_markdown_metrics_shm_zone != NULL
         && ngx_http_markdown_metrics_shm_zone->data != NULL)
     {
-        ngx_shm_zone_t                       *zone;
-        ngx_slab_pool_t                      *shpool;
-        ngx_http_markdown_metrics_t          *live_metrics;
+        ngx_shm_zone_t                                *zone;
+        ngx_slab_pool_t                               *shpool;
+        ngx_http_markdown_metrics_t                   *live_metrics;
+        ngx_http_markdown_path_detail_render_ctx_t    render;
 
         zone = ngx_http_markdown_metrics_shm_zone;
         live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
@@ -1281,14 +1298,41 @@ ngx_http_markdown_metrics_write_text(
 
         p = ngx_slprintf(p, end, "\nPer-Path Details:\n");
 
+        render.pos = p;
+        render.end = end;
+        render.tail_reserve = ngx_http_markdown_text_tail_reserve();
+        render.omitted_conversions = 0;
+        render.omitted_time_ms = 0;
+        render.omitted_nodes = 0;
+        render.entries_written = 0;
+
         ngx_shmtx_lock(&shpool->mutex);
 
-        p = ngx_http_markdown_text_walk_path_tree(
+        p = ngx_http_markdown_text_walk_path_tree_bounded(
                 live_metrics->per_path.path_tree.root,
                 &live_metrics->per_path.sentinel,
-                p, end);
+                &render);
 
         ngx_shmtx_unlock(&shpool->mutex);
+
+        if ((snapshot->per_path.overflow_count > 0
+             || render.omitted_nodes > 0) && p < end)
+        {
+            ngx_atomic_uint_t  other_conversions;
+            ngx_atomic_uint_t  other_entries;
+
+            other_conversions = snapshot->per_path.overflow_count
+                + render.omitted_conversions;
+            other_entries = snapshot->per_path.overflow_count
+                + (ngx_atomic_uint_t) render.omitted_nodes;
+
+            p = ngx_slprintf(p, end,
+                "- Path[__other__]: conversions=%uA entries=%uA "
+                "time_ms=%uA\n",
+                other_conversions,
+                other_entries,
+                render.omitted_time_ms);
+        }
     }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
@@ -1381,111 +1425,261 @@ ngx_http_markdown_escape_json_string(u_char *dst, u_char *last,
 
 
 /*
- * Recursive in-order walk of the per-path RB-tree for JSON output.
+ * Bounded rendering context for per-path detail output.
  *
- * Emits each path as a JSON object inside the "paths" array.
- * The caller is responsible for writing the opening "[" and closing "]".
- * A comma is appended after each entry; the caller strips the trailing
- * comma from the last entry before closing the array.
- *
- * Parameters:
- *   node     - current RB-tree node (or sentinel to terminate)
- *   sentinel - tree sentinel node
- *   p        - current write position in the output buffer
- *   end      - one past end of the buffer
- *
- * Returns:
- *   Updated write position (clamped to end on overflow).
+ * Shared by JSON and plain-text renderers to implement graceful
+ * degradation when the output buffer cannot accommodate all
+ * per-path entries.  Omitted entries are aggregated into an
+ * __other__ pseudo-entry so the response always remains
+ * syntactically complete and the endpoint returns HTTP 200.
  */
-static u_char *
-ngx_http_markdown_json_walk_path_tree(
-    ngx_rbtree_node_t *node,
-    ngx_rbtree_node_t *sentinel,
-    u_char *p,
-    u_char *end)
+typedef struct {
+    u_char             *pos;
+    u_char             *end;
+    size_t              tail_reserve;
+    ngx_atomic_uint_t   omitted_conversions;
+    ngx_atomic_uint_t   omitted_time_ms;
+    ngx_uint_t          omitted_nodes;
+    ngx_uint_t          entries_written;
+} ngx_http_markdown_path_detail_render_ctx_t;
+
+
+/*
+ * Estimate the maximum encoded size of one JSON per-path entry,
+ * including the trailing comma, for a path of the given length.
+ * Uses a conservative upper bound that accounts for JSON escaping
+ * (each byte may expand to \uXXXX = 6 bytes) and the maximum
+ * decimal digit count for ngx_atomic_uint_t counters.
+ */
+static size_t
+ngx_http_markdown_json_path_entry_size(size_t path_len)
 {
-    const ngx_http_markdown_path_metric_node_t  *pnode;
+    size_t  max_escaped;
+    size_t  max_digits;
 
-    if (node == sentinel || p >= end) {
-        return p;
-    }
+    max_escaped = path_len * 6;
+    max_digits = 20 * 3;
 
-    p = ngx_http_markdown_json_walk_path_tree(
-            node->left, sentinel, p, end);
-
-    if (p < end) {
-        pnode = (const ngx_http_markdown_path_metric_node_t *) node;
-
-        p = ngx_slprintf(p, end,
-            "\n"
-            "      {\"path\": \"");
-        p = ngx_http_markdown_escape_json_string(
-                p, end, pnode->path, pnode->path_len);
-        p = ngx_slprintf(p, end,
-            "\", "
-            "\"conversions\": %uA, "
-            "\"entries\": %uA, "
-            "\"conversion_time_ms\": %uA},",
-            pnode->conversions,
-            pnode->entries,
-            pnode->conversion_time_sum_ms);
-    }
-
-    p = ngx_http_markdown_json_walk_path_tree(
-            node->right, sentinel, p, end);
-
-    return p;
+    return sizeof("\n      {\"path\": \"\", \"conversions\": , "
+                  "\"entries\": , \"conversion_time_ms\": },") - 1
+        + max_escaped + max_digits;
 }
 
 
 /*
- * Recursive in-order walk of the per-path RB-tree for plain-text output.
- *
- * Emits each path as a "- Path[...]: ..." line.
- *
- * Parameters:
- *   node     - current RB-tree node (or sentinel to terminate)
- *   sentinel - tree sentinel node
- *   p        - current write position in the output buffer
- *   end      - one past end of the buffer
- *
- * Returns:
- *   Updated write position (clamped to end on overflow).
+ * Estimate the maximum encoded size of one plain-text per-path line
+ * for a path of the given length.
  */
+static size_t
+ngx_http_markdown_text_path_entry_size(size_t path_len)
+{
+    size_t  max_escaped;
+    size_t  max_digits;
+
+    max_escaped = path_len * 6;
+    max_digits = 20 * 3;
+
+    return sizeof("- Path[]: conversions= entries= time_ms=\n") - 1
+        + max_escaped + max_digits;
+}
+
+
+/*
+ * Estimate the maximum encoded size of the __other__ JSON entry.
+ */
+static size_t
+ngx_http_markdown_json_other_entry_size(void)
+{
+    return sizeof("\n      {\"path\":\"__other__\","
+                  "\"conversions\":,"
+                  "\"conversion_time_sum_ms\":,"
+                  "\"entries\":}") - 1
+        + 3 * 20;
+}
+
+
+/*
+ * Estimate the maximum encoded size of the __other__ plain-text line.
+ */
+static size_t
+ngx_http_markdown_text_other_entry_size(void)
+{
+    return sizeof("- Path[__other__]: conversions= entries= time_ms=\n") - 1
+        + 3 * 20;
+}
+
+
+/*
+ * Estimate the tail reserve needed for JSON: closing the paths array,
+ * the per_path object, the perf section, and the outer closing brace.
+ */
+static size_t
+ngx_http_markdown_json_tail_reserve(void)
+{
+    return sizeof("\n    ]\n  },\n") - 1
+        + ngx_http_markdown_json_other_entry_size()
+        + 256;
+}
+
+
+/*
+ * Estimate the tail reserve needed for plain-text: the __other__ line
+ * plus a safety margin for the perf section and trailing newline.
+ */
+static size_t
+ngx_http_markdown_text_tail_reserve(void)
+{
+    return ngx_http_markdown_text_other_entry_size()
+        + 256;
+}
+
+
 static u_char *
-ngx_http_markdown_text_walk_path_tree(
+ngx_http_markdown_json_walk_path_tree_bounded(
     ngx_rbtree_node_t *node,
     ngx_rbtree_node_t *sentinel,
-    u_char *p,
-    u_char *end)
+    ngx_http_markdown_path_detail_render_ctx_t *render)
 {
     const ngx_http_markdown_path_metric_node_t  *pnode;
+    size_t                                       needed;
+    size_t                                       remaining;
 
-    if (node == sentinel || p >= end) {
-        return p;
+    if (node == sentinel || render->pos >= render->end) {
+        return render->pos;
     }
 
-    p = ngx_http_markdown_text_walk_path_tree(
-            node->left, sentinel, p, end);
+    render->pos = ngx_http_markdown_json_walk_path_tree_bounded(
+            node->left, sentinel, render);
 
-    if (p < end) {
+    remaining = (size_t) (render->end - render->pos);
+    if (remaining > render->tail_reserve) {
         pnode = (const ngx_http_markdown_path_metric_node_t *) node;
+        needed = ngx_http_markdown_json_path_entry_size(
+                     (size_t) pnode->path_len);
 
-        p = ngx_slprintf(p, end, "- Path[");
-        p = ngx_http_markdown_escape_json_string(
-                p, end, pnode->path, pnode->path_len);
-        p = ngx_slprintf(p, end,
-            "]: conversions=%uA entries=%uA "
-            "time_ms=%uA\n",
-            pnode->conversions,
-            pnode->entries,
-            pnode->conversion_time_sum_ms);
+        if (needed <= remaining - render->tail_reserve) {
+            u_char  *entry_start = render->pos;
+
+            if (render->entries_written > 0) {
+                render->pos = ngx_slprintf(render->pos, render->end, ",");
+            }
+
+            render->pos = ngx_slprintf(render->pos, render->end,
+                "\n      {\"path\": \"");
+            render->pos = ngx_http_markdown_escape_json_string(
+                render->pos, render->end,
+                pnode->path, pnode->path_len);
+            render->pos = ngx_slprintf(render->pos, render->end,
+                "\", \"conversions\": %uA, "
+                "\"entries\": %uA, "
+                "\"conversion_time_ms\": %uA}",
+                pnode->conversions,
+                pnode->entries,
+                pnode->conversion_time_sum_ms);
+
+            if (render->pos < render->end) {
+                render->entries_written++;
+            } else {
+                render->pos = entry_start;
+                render->omitted_conversions +=
+                    (ngx_atomic_uint_t) pnode->conversions;
+                render->omitted_time_ms +=
+                    (ngx_atomic_uint_t) pnode->conversion_time_sum_ms;
+                render->omitted_nodes++;
+            }
+        } else {
+            render->omitted_conversions +=
+                (ngx_atomic_uint_t) pnode->conversions;
+            render->omitted_time_ms +=
+                (ngx_atomic_uint_t) pnode->conversion_time_sum_ms;
+            render->omitted_nodes++;
+        }
+    } else {
+        const ngx_http_markdown_path_metric_node_t  *pnode2;
+        pnode2 = (const ngx_http_markdown_path_metric_node_t *) node;
+        render->omitted_conversions +=
+            (ngx_atomic_uint_t) pnode2->conversions;
+        render->omitted_time_ms +=
+            (ngx_atomic_uint_t) pnode2->conversion_time_sum_ms;
+        render->omitted_nodes++;
     }
 
-    p = ngx_http_markdown_text_walk_path_tree(
-            node->right, sentinel, p, end);
+    render->pos = ngx_http_markdown_json_walk_path_tree_bounded(
+            node->right, sentinel, render);
 
-    return p;
+    return render->pos;
+}
+
+
+static u_char *
+ngx_http_markdown_text_walk_path_tree_bounded(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    ngx_http_markdown_path_detail_render_ctx_t *render)
+{
+    const ngx_http_markdown_path_metric_node_t  *pnode;
+    size_t                                       needed;
+    size_t                                       remaining;
+
+    if (node == sentinel || render->pos >= render->end) {
+        return render->pos;
+    }
+
+    render->pos = ngx_http_markdown_text_walk_path_tree_bounded(
+            node->left, sentinel, render);
+
+    remaining = (size_t) (render->end - render->pos);
+    if (remaining > render->tail_reserve) {
+        pnode = (const ngx_http_markdown_path_metric_node_t *) node;
+        needed = ngx_http_markdown_text_path_entry_size(
+                     (size_t) pnode->path_len);
+
+        if (needed <= remaining - render->tail_reserve) {
+            u_char  *entry_start = render->pos;
+
+            render->pos = ngx_slprintf(render->pos, render->end,
+                "- Path[");
+            render->pos = ngx_http_markdown_escape_json_string(
+                render->pos, render->end,
+                pnode->path, pnode->path_len);
+            render->pos = ngx_slprintf(render->pos, render->end,
+                "]: conversions=%uA entries=%uA "
+                "time_ms=%uA\n",
+                pnode->conversions,
+                pnode->entries,
+                pnode->conversion_time_sum_ms);
+
+            if (render->pos >= render->end) {
+                render->pos = entry_start;
+                render->omitted_conversions +=
+                    (ngx_atomic_uint_t) pnode->conversions;
+                render->omitted_time_ms +=
+                    (ngx_atomic_uint_t) pnode->conversion_time_sum_ms;
+                render->omitted_nodes++;
+            } else {
+                render->entries_written++;
+            }
+        } else {
+            render->omitted_conversions +=
+                (ngx_atomic_uint_t) pnode->conversions;
+            render->omitted_time_ms +=
+                (ngx_atomic_uint_t) pnode->conversion_time_sum_ms;
+            render->omitted_nodes++;
+        }
+    } else {
+        const ngx_http_markdown_path_metric_node_t  *pnode2;
+        pnode2 = (const ngx_http_markdown_path_metric_node_t *) node;
+        render->omitted_conversions +=
+            (ngx_atomic_uint_t) pnode2->conversions;
+        render->omitted_time_ms +=
+            (ngx_atomic_uint_t) pnode2->conversion_time_sum_ms;
+        render->omitted_nodes++;
+    }
+
+    render->pos = ngx_http_markdown_text_walk_path_tree_bounded(
+            node->right, sentinel, render);
+
+    return render->pos;
 }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
@@ -1495,9 +1689,14 @@ ngx_http_markdown_text_walk_path_tree(
  * matching Content-Type header on the request.
  *
  * Returns the end pointer for the rendered body on success.
- * When Prometheus rendering exhausts the fixed-size buffer, NULL is
- * returned so the caller can fail the request with
- * NGX_HTTP_INTERNAL_SERVER_ERROR.
+ * All three formats (JSON, plain-text, Prometheus) implement bounded
+ * per-path rendering that degrades gracefully: when the buffer cannot
+ * accommodate all per-path entries, omitted entries are aggregated into
+ * an __other__ pseudo-entry so the response remains syntactically
+ * complete and the endpoint returns HTTP 200.
+ *
+ * NULL is returned only when the aggregate section itself does not fit
+ * (indicating the buffer is far too small for any useful output).
  */
 static u_char *
 ngx_http_markdown_metrics_render_response_body(
@@ -1514,18 +1713,12 @@ ngx_http_markdown_metrics_render_response_body(
     switch (format) {
 
     case NGX_HTTP_MARKDOWN_METRICS_OUTPUT_JSON:
-        /* JSON and plain text share the precomputed aggregate values. */
         p = ngx_http_markdown_metrics_write_json(
                 p, b->end, snapshot,
                 derived->conversions_completed,
                 derived->conversion_time_avg_ms,
                 derived->input_bytes_avg,
                 derived->output_bytes_avg);
-        /*
-         * Detect truncation: ngx_slprintf returns end when
-         * the buffer is exhausted.  Emit a hard failure
-         * instead of a partial JSON payload.
-         */
         if (p >= b->end) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
@@ -1538,7 +1731,6 @@ ngx_http_markdown_metrics_render_response_body(
         return p;
 
     case NGX_HTTP_MARKDOWN_METRICS_OUTPUT_PROMETHEUS:
-        /* Prometheus writer reports truncation explicitly via NULL. */
         p = ngx_http_markdown_metrics_write_prometheus(
                 p, b->end, snapshot);
         if (p == NULL) {
@@ -1561,11 +1753,6 @@ ngx_http_markdown_metrics_render_response_body(
                 derived->conversion_time_avg_ms,
                 derived->input_bytes_avg,
                 derived->output_bytes_avg);
-        /*
-         * Detect truncation: ngx_slprintf returns end when
-         * the buffer is exhausted.  Emit a hard failure
-         * instead of a partial plain-text payload.
-         */
         if (p >= b->end) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
