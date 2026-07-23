@@ -43,16 +43,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     env:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       SONAR_HOST_URL: https://sonarcloud.io
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
-        with:
-          fetch-depth: 0
-
       - name: Check Sonar token
         id: token
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         shell: bash
         run: |
           if [[ -n "${SONAR_TOKEN:-}" ]]; then
@@ -61,6 +57,12 @@ jobs:
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "SONAR_TOKEN is not configured. Skipping SonarCloud scan." >&2
           fi
+
+      - name: Checkout repository
+        if: steps.token.outputs.enabled == 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Python for source audits
         if: steps.token.outputs.enabled == 'true'
@@ -168,6 +170,8 @@ jobs:
 
       - name: SonarCloud Scan
         if: steps.token.outputs.enabled == 'true'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0
         with:
           args: >

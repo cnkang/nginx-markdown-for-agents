@@ -272,7 +272,11 @@ There is intentionally no fixed total-series claim: streaming families depend
 on the compiled feature set, and `markdown_metrics_per_path on` adds one series
 per retained path to two per-path families. Per-path tracking is off by default,
 is capped by `markdown_metrics_per_path_cardinality`, and aggregates overflow
-under `path="__other__"`.
+under `path="__other__"`. The renderer also keeps each path's conversion-count
+and conversion-time series atomic. If the bounded metrics response cannot hold
+both lines after label escaping, that path is omitted from the detailed series
+and folded into the same `__other__` pair so the aggregate scrape remains
+complete and parseable.
 
 ---
 
