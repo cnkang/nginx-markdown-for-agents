@@ -699,19 +699,34 @@ ngx_http_markdown_metrics_derive_values(
 #endif
 
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-static u_char *
-ngx_http_markdown_json_walk_path_tree(
-    ngx_rbtree_node_t *node,
-    ngx_rbtree_node_t *sentinel,
-    u_char *p,
-    u_char *end);
+typedef struct {
+    u_char             *pos;
+    u_char             *end;
+    size_t              tail_reserve;
+    ngx_atomic_uint_t   omitted_conversions;
+    ngx_atomic_uint_t   omitted_time_ms;
+    ngx_uint_t          omitted_nodes;
+    ngx_uint_t          entries_written;
+} ngx_http_markdown_path_detail_render_ctx_t;
 
 static u_char *
-ngx_http_markdown_text_walk_path_tree(
+ngx_http_markdown_json_walk_path_tree_bounded(
     ngx_rbtree_node_t *node,
     ngx_rbtree_node_t *sentinel,
-    u_char *p,
-    u_char *end);
+    ngx_http_markdown_path_detail_render_ctx_t *render);
+
+static u_char *
+ngx_http_markdown_text_walk_path_tree_bounded(
+    ngx_rbtree_node_t *node,
+    ngx_rbtree_node_t *sentinel,
+    ngx_http_markdown_path_detail_render_ctx_t *render);
+
+static size_t ngx_http_markdown_json_path_entry_size(size_t path_len);
+static size_t ngx_http_markdown_text_path_entry_size(size_t path_len);
+static size_t ngx_http_markdown_json_other_entry_size(void);
+static size_t ngx_http_markdown_text_other_entry_size(void);
+static size_t ngx_http_markdown_json_tail_reserve(void);
+static size_t ngx_http_markdown_text_tail_reserve(void);
 #endif
 
 /**
@@ -1432,16 +1447,11 @@ ngx_http_markdown_escape_json_string(u_char *dst, u_char *last,
  * per-path entries.  Omitted entries are aggregated into an
  * __other__ pseudo-entry so the response always remains
  * syntactically complete and the endpoint returns HTTP 200.
+ *
+ * The typedef is placed at file scope (before the write functions)
+ * so it is visible to both the forward-declaration block and the
+ * bounded walk function definitions below.
  */
-typedef struct {
-    u_char             *pos;
-    u_char             *end;
-    size_t              tail_reserve;
-    ngx_atomic_uint_t   omitted_conversions;
-    ngx_atomic_uint_t   omitted_time_ms;
-    ngx_uint_t          omitted_nodes;
-    ngx_uint_t          entries_written;
-} ngx_http_markdown_path_detail_render_ctx_t;
 
 
 /*
@@ -1461,7 +1471,7 @@ ngx_http_markdown_json_path_entry_size(size_t path_len)
     max_digits = 20 * 3;
 
     return sizeof("\n      {\"path\": \"\", \"conversions\": , "
-                  "\"entries\": , \"conversion_time_ms\": },") - 1
+                  "\"entries\": , \"conversion_time_sum_ms\": },") - 1
         + max_escaped + max_digits;
 }
 
