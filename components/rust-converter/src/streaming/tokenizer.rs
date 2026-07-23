@@ -33,13 +33,6 @@ struct TokenSinkAdapter {
 
 impl TokenSinkAdapter {
     /// Constructs a `TokenSinkAdapter` with an empty internal event buffer.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let adapter = TokenSinkAdapter::new();
-    /// assert!(adapter.drain().is_empty());
-    /// ```
     fn new() -> Self {
         Self {
             events: RefCell::new(Vec::new()),
@@ -69,20 +62,6 @@ impl TokenSinkAdapter {
         }
     }
 
-    /// Remove and return all events currently buffered by the sink.
-    ///
-    /// Empties the internal event buffer and yields the collected `StreamEvent` values.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let adapter = TokenSinkAdapter::new();
-    /// let events = adapter.drain();
-    /// assert!(events.is_empty());
-    /// ```
-    fn drain(&self) -> Vec<StreamEvent> {
-        self.drain_batch().events
-    }
 
     /// Move one event batch and its compacted token statistics out of the sink.
     fn drain_batch(&self) -> TokenizerBatch {
@@ -227,27 +206,10 @@ const TOKENIZER_BATCH_TARGET_BYTES: usize = 4 * 1024;
 /// Tokenizer output produced by one bounded input slice.
 pub(crate) struct TokenizerBatch {
     pub(crate) events: Vec<StreamEvent>,
+    #[allow(dead_code)]
     pub(crate) token_count: u64,
+    #[allow(dead_code)]
     pub(crate) parse_errors: u64,
-}
-
-impl TokenizerBatch {
-    /// Wrap one bounded event vector.
-    fn new(events: Vec<StreamEvent>) -> Self {
-        let token_count = u64::try_from(events.len()).unwrap_or(u64::MAX);
-        let parse_errors = u64::try_from(
-            events
-                .iter()
-                .filter(|event| matches!(event, StreamEvent::ParseError(_)))
-                .count(),
-        )
-        .unwrap_or(u64::MAX);
-        Self {
-            events,
-            token_count,
-            parse_errors,
-        }
-    }
 }
 
 /// Character-reference sub-state tracked by the conservative retention scanner.
@@ -328,13 +290,7 @@ impl FrameScanState {
                 could_be_comment,
                 could_be_doctype,
             } => advance_declaration_probe((index, could_be_comment, could_be_doctype), ch),
-            Self::Tag { quote } => match quote {
-                Some(expected) if ch == expected => Self::Tag { quote: None },
-                Some(_) => self,
-                None if matches!(ch, '"' | '\'') => Self::Tag { quote: Some(ch) },
-                None if ch == '>' => Self::Data,
-                None => self,
-            },
+            Self::Tag { quote } => Self::advance_tag(quote, ch, self),
             Self::BogusMarkup => {
                 if ch == '>' {
                     Self::Data
@@ -352,6 +308,16 @@ impl FrameScanState {
                     }
                 }
             }
+        }
+    }
+
+    fn advance_tag(quote: Option<char>, ch: char, current: Self) -> Self {
+        match quote {
+            Some(expected) if ch == expected => Self::Tag { quote: None },
+            Some(_) => current,
+            None if matches!(ch, '"' | '\'') => Self::Tag { quote: Some(ch) },
+            None if ch == '>' => Self::Data,
+            None => current,
         }
     }
 
