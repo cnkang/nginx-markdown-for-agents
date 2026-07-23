@@ -71,7 +71,7 @@ build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.
 	  dynconf_snapshot) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  effective_conf) extra_cflags="-Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  prometheus_renderer) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
-	  prometheus_per_path) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
+	  prometheus_per_path|metrics_bounded_rendering) extra_cflags="-DMARKDOWN_STREAMING_ENABLED -Wno-typedef-redefinition" ;; \
 	  accept_production|auth_production|auth_deny_security|conditional_production) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	  inflight) extra_cflags="-Iinclude/nginx_stubs -ffunction-sections" ; extra_ldflags="$(SECTION_GC_LDFLAGS)" ;; \
 	esac; \
