@@ -800,7 +800,7 @@ ngx_http_markdown_metrics_write_prometheus_paths(
     size_t                                path_needed;
     size_t                                remaining;
     size_t                                tail_reserve;
-    u_char                               *header_start;
+    const u_char                         *header_start;
 
     if (p == NULL || end == NULL || snapshot == NULL) {
         return NULL;
@@ -1081,7 +1081,7 @@ ngx_http_markdown_prometheus_path_pair_size(
             &total, escaped_size)
         != NGX_OK
         || ngx_http_markdown_prometheus_checked_size_add(
-               &total, escaped_size)
+               &total, escaped_size) /* NOSONAR: intentional — same path label in both path_conversions and path_time metrics; S1764 */
            != NGX_OK
         || ngx_http_markdown_prometheus_checked_size_add(
                &total,

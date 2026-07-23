@@ -137,6 +137,29 @@ ngx_http_markdown_find_request_header_value(ngx_http_request_t *r,
     return NULL;
 }
 
+static ngx_int_t
+ngx_http_markdown_accumulate_header_value_len(ngx_uint_t match_count,
+    size_t value_len, size_t *total_len)
+{
+    if (match_count > 0) {
+        if (*total_len > (size_t) -1 - 2) {
+            return NGX_ERROR;
+        }
+        *total_len += 2;
+    }
+    if (value_len > (size_t) -1 - *total_len) {
+        return NGX_ERROR;
+    }
+    if (*total_len > NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX
+        || value_len > NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX - *total_len)
+    {
+        return NGX_DECLINED;
+    }
+
+    *total_len += value_len;
+    return NGX_OK;
+}
+
 /*
  * Validate matching values and calculate their exact combined length.
  */
@@ -170,23 +193,13 @@ ngx_http_markdown_measure_request_header_values(
                 return NGX_ERROR;
             }
 
-            if (*match_count > 0) {
-                if (*total_len > (size_t) -1 - 2) {
-                    return NGX_ERROR;
-                }
-                *total_len += 2;
-            }
-            if (headers[i].value.len > (size_t) -1 - *total_len) {
-                return NGX_ERROR;
-            }
-            if (*total_len > NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX
-                || headers[i].value.len
-                   > NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX - *total_len)
-            {
-                return NGX_DECLINED;
+            ngx_int_t  rc;
+            rc = ngx_http_markdown_accumulate_header_value_len(
+                     *match_count, headers[i].value.len, total_len);
+            if (rc != NGX_OK) {
+                return rc;
             }
 
-            *total_len += headers[i].value.len;
             *single_value = &headers[i].value;
             (*match_count)++;
         }
