@@ -38,7 +38,7 @@ use crate::streaming::charset::CharsetState;
 use crate::streaming::emitter::IncrementalEmitter;
 use crate::streaming::sanitizer::{SanitizeDecision, StreamingSanitizer};
 use crate::streaming::state_machine::{StateMachineAction, StructuralStateMachine};
-use crate::streaming::tokenizer::StreamingTokenizer;
+use crate::streaming::tokenizer::{BudgetedStreamingTokenizer, TokenizerBatch};
 use crate::streaming::types::{
     ChunkOutput, CommitState, FallbackReason, StreamEvent, StreamingResult, StreamingStats,
 };
@@ -71,8 +71,8 @@ pub struct StreamingConverter {
     budget: MemoryBudget,
     /// Charset detector / transcoder.
     charset_state: CharsetState,
-    /// html5ever tokenizer (TokenSink adapter).
-    tokenizer: StreamingTokenizer,
+    /// Persistent html5ever tokenizer with bounded input slices and token state.
+    tokenizer: BudgetedStreamingTokenizer,
     /// Streaming security sanitizer.
     sanitizer: StreamingSanitizer,
     /// Structural state machine for document context tracking.
@@ -220,7 +220,7 @@ impl StreamingConverter {
         Self {
             options,
             charset_state: CharsetState::with_sniff_limit(budget.charset_sniff),
-            tokenizer: StreamingTokenizer::new(),
+            tokenizer: BudgetedStreamingTokenizer::new(budget.total),
             sanitizer,
             state_machine: StructuralStateMachine::new(&budget),
             emitter: IncrementalEmitter::new(&budget),
@@ -472,16 +472,8 @@ impl StreamingConverter {
             Err(_) => String::from_utf8_lossy(valid),
         };
 
-        let events = self
-            .tokenizer
-            .feed(&utf8_str)
-            .map_err(|e| self.wrap_error(e))?;
-
-        // 5. Process each token: sanitize → state machine → emitter
         let initial_flush_count = self.emitter.flush_count();
-        for event in events {
-            self.process_single_event(event)?;
-        }
+        self.process_tokenizer_input(&utf8_str)?;
 
         // 6. Collect flushed output
         let flushed = self.emitter.take_flushed();
@@ -562,22 +554,15 @@ impl StreamingConverter {
                 }
             }
             let utf8_cow = String::from_utf8_lossy(&final_bytes);
-            let events = self
-                .tokenizer
-                .feed(&utf8_cow)
-                .map_err(|e| self.wrap_error(e))?;
-            for event in events {
-                self.process_single_event(event)?;
-            }
+            self.process_tokenizer_input(&utf8_cow)?;
         }
 
         // 3. Finish tokenizer (signal end-of-input)
-        let final_events = self.tokenizer.finish().map_err(|e| self.wrap_error(e))?;
+        self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
+        let final_batch = self.tokenizer.finish().map_err(|e| self.wrap_error(e))?;
 
         // 4. Process remaining tokens
-        for event in final_events {
-            self.process_single_event(event)?;
-        }
+        self.process_tokenizer_batch(final_batch)?;
 
         // 5. Finalize state machine (auto-close unclosed contexts)
         let unclosed = self.state_machine.finalize();
@@ -691,6 +676,45 @@ impl StreamingConverter {
 
     // ── Internal helpers ────────────────────────────────────────────
 
+    /// Feed UTF-8 through bounded tokenizer slices and process each event batch
+    /// before the next slice is handed to html5ever.
+    fn process_tokenizer_input(&mut self, input: &str) -> Result<(), ConversionError> {
+        let mut offset = 0usize;
+        while offset < input.len() {
+            // Charge the full conservative tokenizer envelope before the next
+            // bounded slice is handed to html5ever.
+            self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
+            let step = self
+                .tokenizer
+                .feed_next(&input[offset..])
+                .map_err(|e| self.wrap_error(e))?;
+            if step.consumed == 0 && step.batch.is_none() {
+                return Err(self.wrap_error(ConversionError::InternalError(
+                    "budgeted tokenizer made no progress".to_string(),
+                )));
+            }
+            offset = offset.checked_add(step.consumed).ok_or_else(|| {
+                self.wrap_error(ConversionError::BudgetExceeded {
+                    stage: "tokenizer_input_offset (integer overflow)".to_string(),
+                    used: usize::MAX,
+                    limit: input.len(),
+                })
+            })?;
+            if let Some(batch) = step.batch {
+                self.process_tokenizer_batch(batch)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Process one bounded tokenizer event batch.
+    fn process_tokenizer_batch(&mut self, batch: TokenizerBatch) -> Result<(), ConversionError> {
+        for event in batch.events {
+            self.process_single_event(event)?;
+        }
+        Ok(())
+    }
+
     /// Processes a single `StreamEvent` through the sanitizer, state machine, and emitter.
     ///
     /// This advances internal streaming state (including token counts, optional head-region
@@ -731,6 +755,7 @@ impl StreamingConverter {
                 });
             }
         }
+        self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
 
         // Check for unsupported structures BEFORE sanitization.
         // The sanitizer strips elements like <form>, <iframe> (converting them
@@ -934,6 +959,7 @@ impl StreamingConverter {
         // - state machine stack
         // - metadata extracted from <head> (actual String allocations)
         // - html_title_buf (temporary <title> text before </title>)
+        // - the conservative html5ever/tendril/event reservation
         //
         // Note: `head_bytes_seen` is intentionally NOT included here.
         // It is a cumulative counter for lookahead budget enforcement
@@ -945,7 +971,8 @@ impl StreamingConverter {
             .saturating_add(self.emitter.resident_collector_bytes())
             .saturating_add(self.state_machine.stack_bytes_estimate())
             .saturating_add(self.metadata.bytes_estimate())
-            .saturating_add(self.html_title_buf.len());
+            .saturating_add(self.html_title_buf.len())
+            .saturating_add(self.tokenizer.reserved_bytes());
         self.stats.peak_memory_estimate = self.stats.peak_memory_estimate.max(working_set);
 
         // Enforce budget.total: the working set must not exceed the
@@ -2182,6 +2209,7 @@ mod tests {
     #[test]
     fn test_peak_memory_is_working_set_not_cumulative_output() {
         let mut conv = make_converter();
+        let tokenizer_reservation = conv.tokenizer.reserved_bytes();
         let mut total_output_bytes: usize = 0;
         // Feed a large-ish document in multiple chunks
         for _ in 0..50 {
@@ -2194,20 +2222,21 @@ mod tests {
         total_output_bytes = total_output_bytes.saturating_add(result.final_markdown.len());
 
         let peak = result.stats.peak_memory_estimate;
+        let dynamic_peak = peak.saturating_sub(tokenizer_reservation);
 
-        // Peak working set should be much smaller than total output.
-        // The budget total is 2 MiB; working set should be well under that.
+        // The estimate includes a fixed conservative tokenizer envelope that
+        // protects private html5ever/tendril capacity. The input-dependent
+        // portion must still remain smaller than cumulative output.
         assert!(
-            peak > 0,
-            "peak_memory_estimate should be non-zero for non-trivial input"
+            peak >= tokenizer_reservation,
+            "peak must include the tokenizer reservation"
         );
-        // Working set should not grow proportionally with output
         if total_output_bytes > 0 {
             assert!(
-                peak < total_output_bytes,
-                "peak_memory_estimate ({}) should be less than total output bytes ({}); \
-                 it should reflect in-memory working set, not cumulative output",
-                peak,
+                dynamic_peak < total_output_bytes,
+                "input-dependent peak ({}) should be less than total output bytes ({}); \
+                 it should reflect resident state, not cumulative output",
+                dynamic_peak,
                 total_output_bytes,
             );
         }
@@ -2274,6 +2303,7 @@ mod tests {
     #[test]
     fn test_peak_memory_not_inflated_by_cumulative_head_bytes() {
         let mut conv = make_converter_with_metadata();
+        let tokenizer_reservation = conv.tokenizer.reserved_bytes();
 
         // Build a large <head> with many meta tags
         let mut head = String::from("<html><head>");
@@ -2297,15 +2327,18 @@ mod tests {
         conv.feed_chunk(b"<body><p>Body paragraph.</p></body></html>")
             .unwrap();
         let result = conv.finalize().unwrap();
+        let dynamic_peak = result
+            .stats
+            .peak_memory_estimate
+            .saturating_sub(tokenizer_reservation);
 
-        // peak_memory_estimate should be much smaller than head_bytes_seen
-        // because the working set only includes the metadata strings
-        // (title, description, etc.), not the cumulative head byte count.
+        // Excluding the fixed tokenizer envelope, the input-dependent working
+        // set includes metadata strings rather than cumulative head volume.
         assert!(
-            result.stats.peak_memory_estimate < cumulative_head,
-            "peak_memory_estimate ({}) should be less than cumulative head_bytes_seen ({}); \
-             it should reflect actual in-memory state, not cumulative processing",
-            result.stats.peak_memory_estimate,
+            dynamic_peak < cumulative_head,
+            "input-dependent peak ({}) should be less than cumulative head_bytes_seen ({}); \
+             it should reflect resident state, not cumulative processing",
+            dynamic_peak,
             cumulative_head,
         );
     }
@@ -2317,6 +2350,7 @@ mod tests {
     #[test]
     fn test_peak_memory_proportional_to_metadata_not_head_volume() {
         let mut conv = make_converter_with_metadata();
+        let tokenizer_reservation = conv.tokenizer.reserved_bytes();
 
         // Large head: 200 unrecognised meta tags → lots of head_bytes_seen,
         // but only the title is actually extracted into PageMetadata.
@@ -2351,15 +2385,18 @@ mod tests {
         conv.feed_chunk(b"<body><p>Content</p></body></html>")
             .unwrap();
         let result = conv.finalize().unwrap();
+        let dynamic_peak = result
+            .stats
+            .peak_memory_estimate
+            .saturating_sub(tokenizer_reservation);
 
-        // Peak should be closer to metadata_size than to cumulative_head.
-        // Allow generous headroom for stack + emitter buffers, but it
-        // must be well below the cumulative head volume.
+        // Excluding the fixed parser envelope, peak should remain closer to
+        // metadata size than cumulative head volume.
         assert!(
-            result.stats.peak_memory_estimate < cumulative_head / 2,
-            "peak ({}) should be well below half of cumulative head ({}) — \
+            dynamic_peak < cumulative_head / 2,
+            "input-dependent peak ({}) should be well below half of cumulative head ({}) — \
              it should track metadata size (~{}), not head volume",
-            result.stats.peak_memory_estimate,
+            dynamic_peak,
             cumulative_head,
             metadata_size,
         );
@@ -2508,16 +2545,16 @@ mod tests {
     #[test]
     fn test_total_budget_counts_resident_link_text() {
         let budget = MemoryBudget {
-            total: 160,
+            total: 64 * 1024,
             state_stack: 128,
-            output_buffer: 1024,
+            output_buffer: 64 * 1024,
             charset_sniff: 16,
             lookahead: 16,
         };
         let mut conv = StreamingConverter::new(ConversionOptions::default(), budget);
 
         conv.feed_chunk(b"<body><a href='/'>").unwrap();
-        let err = conv.feed_chunk(&vec![b'x'; 512]).unwrap_err();
+        let err = conv.feed_chunk(&vec![b'x'; 64 * 1024]).unwrap_err();
 
         assert_eq!(err.code(), 6);
     }

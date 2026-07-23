@@ -60,6 +60,8 @@ static char *ngx_http_markdown_reject_streaming_engine(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf);
 /* Parse v0.8.0 markdown_stream_threshold with zero-rejection. */
 static char *ngx_http_markdown_stream_threshold_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+/* Parse markdown_stream_precommit_buffer with zero-rejection. */
+static char *ngx_http_markdown_stream_precommit_buffer_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse v0.8.0 markdown_stream_flush_min with zero-rejection. */
 static char *ngx_http_markdown_stream_flush_min_handler(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
 /* Parse v0.8.0 markdown_stream_excluded_types MIME list. */
