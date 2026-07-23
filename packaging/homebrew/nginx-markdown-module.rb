@@ -25,13 +25,10 @@ class NginxMarkdownModule < Formula
   depends_on "openssl@3"
   depends_on "pcre2"
 
-  # The Rust toolchain is installed via the official rustup installer
-  # (https://sh.rustup.rs) rather than the Homebrew `rust` formula, because the
-  # crate MSRV (1.97, pinned in rust-toolchain.toml) can briefly exceed the
-  # Homebrew `rust` formula version.  The pinned toolchain makes the build
-  # deterministic regardless of the Homebrew `rust` formula lag.  This is done
-  # inline (not via `depends_on "rustup"`) to keep `brew audit --strict` clean,
-  # since homebrew/core forbids a `rustup` build dependency.
+  # The Rust toolchain is installed with the repository's checksum-verifying
+  # rustup helper rather than the Homebrew `rust` formula, because the crate
+  # MSRV can briefly exceed Homebrew's Rust version. The helper pins the
+  # architecture-specific rustup-init bytes before execution.
   TOOLCHAIN_VERSION = "1.97.0".freeze
 
   def install
@@ -39,13 +36,13 @@ class NginxMarkdownModule < Formula
     cargo_home = "#{buildpath}/cargo"
     ENV["RUSTUP_HOME"] = rustup_home
     ENV["CARGO_HOME"] = cargo_home
-    # Install the pinned Rust toolchain via the official rustup installer.
-    # The pipe-to-shell form is the canonical rustup bootstrap and is accepted
-    # by `brew audit --strict` (it is not flagged as a `rustup` build-time use).
-    system "bash", "-c",
-           "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | " \
-           "sh -s -- -y --profile minimal --no-modify-path " \
-           "--default-toolchain #{TOOLCHAIN_VERSION}"
+    rustup_arch = Hardware::CPU.arm? ? "arm64" : "amd64"
+    system "bash",
+           (buildpath/"packaging/scripts/install-verified-rustup.sh").to_s,
+           "--os", "darwin",
+           "--arch", rustup_arch,
+           "--toolchain", TOOLCHAIN_VERSION,
+           "--checksums", (buildpath/"packaging/checksums.sha256").to_s
     ENV.prepend_path "PATH", "#{cargo_home}/bin"
 
     # Enable Brotli streaming decompression explicitly so the official Homebrew
@@ -58,8 +55,14 @@ class NginxMarkdownModule < Formula
     odie "Unable to detect Homebrew nginx version" if nginx_version.blank?
 
     nginx_archive = "nginx-#{nginx_version}.tar.gz"
-    system "curl", "-fsSL", "https://nginx.org/download/#{nginx_archive}",
+    system "curl", "--proto", "=https", "--tlsv1.2", "-fsSL",
+           "https://nginx.org/download/#{nginx_archive}",
            "-o", nginx_archive
+    system "bash",
+           (buildpath/"packaging/scripts/verify-checksum.sh").to_s,
+           "-f", nginx_archive,
+           "-i", "nginx-#{nginx_version}",
+           "-c", (buildpath/"packaging/checksums.sha256").to_s
     system "tar", "-xzf", nginx_archive
 
     cd "nginx-#{nginx_version}" do

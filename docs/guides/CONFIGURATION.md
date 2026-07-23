@@ -1076,14 +1076,11 @@ markdown_stream_threshold 5m;
 **Context:** http, server, location
 
 Size of the pre-commit replay buffer. During the streaming pre-commit phase, the
-module buffers converted output up to this size. If an error occurs before the
-commit boundary is crossed, the buffered content is discarded and the original
-HTML is replayed to the client (fail-open behavior controlled by
-`markdown_error_policy`).
-
-Setting this to `0` disables the pre-commit HTML fallback capability — errors
-during the pre-commit phase immediately trigger the configured error policy
-without replay.
+module preserves original response bytes up to this size. If an error occurs
+before the commit boundary is crossed, those bytes allow exact fail-open replay;
+they also allow a capability fallback to restart through full-buffer conversion.
+The value must be greater than zero because streaming may consume input before
+either recovery path runs.
 
 **Valid Units:** `k` (kilobytes), `m` (megabytes)
 
@@ -1094,9 +1091,6 @@ markdown_stream_precommit_buffer 256k;
 
 # Larger buffer for more replay safety margin
 markdown_stream_precommit_buffer 512k;
-
-# Disable pre-commit replay (zero allowed)
-markdown_stream_precommit_buffer 0;
 ```
 
 ##### markdown_stream_flush_min
@@ -1270,7 +1264,7 @@ configured together.
 | `markdown_streaming` + `markdown_cache_validation` | ETags are generated from converted output. For full-buffer responses, the complete Markdown is available before headers are sent, so ETag generation works normally. For streaming responses that have crossed the commit boundary, response headers (including `Content-Type: text/markdown`) are already sent — ETag cannot be retroactively added. Streaming responses do **not** carry an ETag header. When `markdown_cache_validation` is `full` (the `strict_cache` profile default), the streaming selector always selects full-buffer because full ETag support requires the complete converted output before headers. To actually activate streaming in `auto` mode, use `markdown_cache_validation ims_only` or `off` (the default for `balanced` and built-in). |
 | `markdown_stream_threshold` + `Content-Length` | In `auto` mode, a known length below `markdown_stream_threshold` selects full-buffer. `force` bypasses the size threshold after hard eligibility and cache-validation gates. |
 | `markdown_stream_excluded_types` + `markdown_content_types` | Both must permit the content type for streaming conversion. `markdown_content_types` controls whether the module processes a response at all (any path). `markdown_stream_excluded_types` is an additional filter that prevents specific types from entering the streaming path. A type excluded from streaming may still be converted via full-buffer if it passes the general eligibility checks. |
-| `markdown_stream_precommit_buffer` + `markdown_error_policy` | The pre-commit buffer enables fail-open replay: if an error occurs before the commit boundary, the buffered original HTML is replayed to the client. When `markdown_stream_precommit_buffer 0` (replay disabled), any pre-commit error immediately triggers the `markdown_error_policy` without replay capability. |
+| `markdown_stream_precommit_buffer` + `markdown_error_policy` | The positive pre-commit buffer preserves consumed upstream bytes for both fail-open replay and full-buffer capability fallback. Zero is rejected at configuration load time because either recovery path could otherwise lose an already-consumed prefix. |
 | `markdown_streaming` + explicit value | A fixed `off`, `auto`, or `force` value applies for the entire request lifecycle. Use different values at different configuration levels (http/server/location) for per-path control. |
 
 **Non-obvious behaviors to watch for:**
