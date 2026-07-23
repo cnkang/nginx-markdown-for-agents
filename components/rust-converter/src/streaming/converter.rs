@@ -414,11 +414,14 @@ impl StreamingConverter {
 
         // Calculate the combined input length for budget checking:
         // Include the charset state's resident bytes (sniff_buffer in Pending
-        // state) plus this chunk's data, because a Pending→Resolved transition
-        // will transcode all accumulated sniff buffer + this chunk together.
+        // state), any pending utf8_tail from prior chunk, and this chunk's data,
+        // because a Pending→Resolved transition will transcode all accumulated
+        // sniff buffer + this chunk together, and utf8_tail may be combined
+        // with the transcoded output during tokenizer processing.
         let total_input_for_transcode = self
             .charset_state
             .resident_bytes()
+            .saturating_add(self.utf8_tail.len())
             .saturating_add(data.len());
         let max_transcode = self
             .charset_state
