@@ -329,6 +329,8 @@ static ngx_uint_t g_buffer_append_fail_after = 0;
 static ngx_uint_t g_buffer_append_call_count = 0;
 static ngx_int_t g_forward_headers_rc = NGX_OK;
 static ngx_int_t g_body_filter_rc = NGX_OK;
+static ngx_uint_t g_body_filter_calls = 0;
+static ngx_chain_t *g_body_filter_last_in = NULL;
 static ngx_int_t g_prepare_options_rc = NGX_OK;
 static uint32_t g_new_with_code_rc = ERROR_SUCCESS;
 static ngx_flag_t g_new_with_code_null_handle = 0;
@@ -993,7 +995,8 @@ ngx_int_t
 ngx_http_markdown_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
     UNUSED(r);
-    UNUSED(in);
+    g_body_filter_calls++;
+    g_body_filter_last_in = in;
     return g_body_filter_rc;
 }
 
@@ -1365,6 +1368,8 @@ reset_globals(void)
     g_buffer_append_call_count = 0;
     g_forward_headers_rc = NGX_OK;
     g_body_filter_rc = NGX_OK;
+    g_body_filter_calls = 0;
+    g_body_filter_last_in = NULL;
     g_prepare_options_rc = NGX_OK;
     g_new_with_code_rc = ERROR_SUCCESS;
     g_new_with_code_null_handle = 0;
@@ -2235,8 +2240,124 @@ test_abort_passthrough_and_reentry_helpers(void)
         &r, &cur, 1);
     TEST_ASSERT(rc == NGX_OK,
         "reentry should synthesize terminal buffer when needed");
+    TEST_ASSERT(g_body_filter_last_in != NULL
+        && g_body_filter_last_in->buf != NULL
+        && g_body_filter_last_in->buf->last_buf == 1,
+        "main-request reentry should synthesize last_buf");
+
+    g_body_filter_rc = NGX_AGAIN;
+    rc = ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
+        &r, NULL, 1);
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "finalize-time reentry should propagate backpressure");
+    TEST_ASSERT(g_body_filter_last_in != NULL
+        && g_body_filter_last_in->buf != NULL
+        && g_body_filter_last_in->buf->last_buf == 1,
+        "NULL-chain reentry should preserve main terminal signaling");
 
     TEST_PASS("abort/passthrough/reentry helpers covered");
+}
+
+/*
+ * Verify finalize-time capability fallback re-enters full-buffer processing.
+ *
+ * The Rust handle may request full-buffer fallback only while consuming EOF.
+ * The terminal input chain is already consumed at that point, so the C layer
+ * must synthesize one terminal re-entry and propagate the full-buffer return
+ * code, including NGX_AGAIN.
+ */
+static void
+test_finalize_time_fallback_reentry(void)
+{
+    ngx_http_request_t       r;
+    ngx_http_markdown_ctx_t  ctx;
+    ngx_http_markdown_conf_t conf;
+    ngx_pool_t               pool;
+    ngx_connection_t         conn;
+    ngx_log_t                log;
+    ngx_event_t              read_event;
+    ngx_chain_t              in;
+    ngx_buf_t                in_buf;
+    ngx_int_t                rc;
+    u_char                   original[] = "body";
+    u_char                   main_buffer[1024];
+
+    TEST_SUBSECTION("finalize-time fallback re-enters full-buffer");
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+
+    ngx_memzero(&in, sizeof(in));
+    ngx_memzero(&in_buf, sizeof(in_buf));
+    in.buf = &in_buf;
+    in_buf.last_buf = 1;
+
+    ctx.eligible = 1;
+    ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x51;
+    ctx.streaming.prebuffer_initialized = 1;
+    ctx.streaming.prebuffer.data = original;
+    ctx.streaming.prebuffer.size = sizeof(original) - 1;
+    ctx.streaming.prebuffer.capacity = sizeof(original);
+    ctx.streaming.prebuffer.max_size = sizeof(original);
+    ctx.buffer_initialized = 1;
+    ctx.buffer.data = main_buffer;
+    ctx.buffer.capacity = sizeof(main_buffer);
+    ctx.buffer.max_size = 1024;
+
+    g_streaming_finalize_rc = ERROR_STREAMING_FALLBACK;
+    g_buffer_append_rc = NGX_OK;
+    g_body_filter_rc = NGX_AGAIN;
+
+    rc = ngx_http_markdown_streaming_finalize_on_last_buf(
+        &r, &ctx, &conf, &in, 1);
+
+    TEST_ASSERT(rc == NGX_AGAIN,
+        "finalize-time fallback should propagate full-buffer backpressure");
+    TEST_ASSERT(ctx.processing_path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER,
+        "finalize-time fallback should select the full-buffer path");
+    TEST_ASSERT(g_body_filter_calls == 1,
+        "finalize-time fallback should re-enter full-buffer exactly once");
+    TEST_ASSERT(g_body_filter_last_in != NULL
+        && g_body_filter_last_in->buf != NULL
+        && g_body_filter_last_in->buf->last_buf == 1,
+        "finalize-time fallback should synthesize a terminal main buffer");
+
+    reset_globals();
+    init_request_ctx_conf(&r, &ctx, &conf, &pool, &conn, &log, &read_event);
+    r.main = (ngx_http_request_t *) (uintptr_t) 0x52;
+    ctx.eligible = 1;
+    ctx.processing_path = NGX_HTTP_MARKDOWN_PATH_STREAMING;
+    ctx.streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ctx.streaming.handle = (struct StreamingConverterHandle *)
+        (uintptr_t) 0x53;
+    ctx.streaming.prebuffer_initialized = 1;
+    ctx.streaming.prebuffer.data = original;
+    ctx.streaming.prebuffer.size = sizeof(original) - 1;
+    ctx.streaming.prebuffer.capacity = sizeof(original);
+    ctx.streaming.prebuffer.max_size = sizeof(original);
+    ctx.buffer_initialized = 1;
+    ctx.buffer.data = main_buffer;
+    ctx.buffer.capacity = sizeof(main_buffer);
+    ctx.buffer.max_size = 1024;
+    g_streaming_finalize_rc = ERROR_STREAMING_FALLBACK;
+    g_body_filter_rc = NGX_OK;
+
+    rc = ngx_http_markdown_streaming_finalize_and_dispatch_fallback(
+        &r, &ctx, &conf, 1);
+
+    TEST_ASSERT(rc == NGX_OK,
+        "subrequest finalize-time fallback should re-enter successfully");
+    TEST_ASSERT(g_body_filter_calls == 1,
+        "subrequest fallback should re-enter exactly once");
+    TEST_ASSERT(g_body_filter_last_in != NULL
+        && g_body_filter_last_in->buf != NULL
+        && g_body_filter_last_in->buf->last_buf == 0
+        && g_body_filter_last_in->buf->last_in_chain == 1,
+        "subrequest fallback should synthesize last_in_chain only");
+
+    TEST_PASS("finalize-time fallback reentry is complete");
 }
 
 /*
@@ -4213,15 +4334,19 @@ test_streaming_gap_branches(void)
     g_prepare_options_rc = NGX_OK;
     g_new_with_code_rc = ERROR_SUCCESS;
     g_new_with_code_null_handle = 0;
-    rc = ngx_http_markdown_streaming_ensure_handle(&r, &ctx, &conf, &in);
-    TEST_ASSERT(rc == NGX_OK,
-        "ensure_handle should accept precommit_buffer 0");
+    rc = ngx_http_markdown_streaming_init_handle(&r, &ctx, &conf);
+    TEST_ASSERT(rc == NGX_DECLINED,
+        "runtime guard should reject precommit_buffer 0 before input");
+    TEST_ASSERT(ctx.eligible == 0,
+        "pass policy should mark zero-buffer streaming ineligible");
+    TEST_ASSERT(ctx.streaming.handle == NULL,
+        "zero-buffer guard should not create a Rust handle");
     TEST_ASSERT(ctx.streaming.prebuffer_initialized == 0,
-        "precommit_buffer 0 should leave prebuffer disabled");
+        "zero-buffer guard should leave prebuffer disabled");
     TEST_ASSERT(ctx.streaming.failopen_replay_initialized == 0,
-        "precommit_buffer 0 should leave replay buffer disabled");
+        "zero-buffer guard should leave replay buffer disabled");
     TEST_ASSERT(g_buffer_init_call_count == 0,
-        "precommit_buffer 0 should not call buffer init");
+        "zero-buffer guard should run before buffer initialization");
 
     ctx.streaming.handle = (struct StreamingConverterHandle *)
         (uintptr_t) 0x35;
@@ -6677,6 +6802,7 @@ main(void)
     test_fallback_to_fullbuffer_paths();
     test_postcommit_and_precommit_error_paths();
     test_abort_passthrough_and_reentry_helpers();
+    test_finalize_time_fallback_reentry();
     test_null_input_tracking_and_body_filter_entry();
     test_init_handle_and_chunk_result_helpers();
     test_commit_feed_and_finalize_core_paths();

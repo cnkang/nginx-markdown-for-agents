@@ -1416,22 +1416,22 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * markdown_stream_precommit_buffer <size>
      *
      * Size of the pre-commit replay buffer for streaming fallback.
-     * Zero is allowed (disables pre-commit HTML fallback capability).
+     * Must be greater than zero so capability fallback and fail-open
+     * replay can preserve every consumed upstream byte.
      *
      * Default: 256k (262144 bytes)
      * Context: http, server, location
      *
      * Example:
      *   markdown_stream_precommit_buffer 128k;
-     *   markdown_stream_precommit_buffer 0;
      */
     {
         ngx_string("markdown_stream_precommit_buffer"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_size_slot,
+        ngx_http_markdown_stream_precommit_buffer_handler,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, stream.precommit_buffer),
+        0,
         NULL
     },
 

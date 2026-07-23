@@ -237,13 +237,13 @@ ngx_http_markdown_calc_output_size(ngx_http_request_t *r, size_t input_size,
  * Grow the decompression output buffer up to decompress.max_size.
  *
  * Codec-agnostic buffer growth: computes a new size (double current used,
- * minimum +4096, capped at budget and UINT_MAX), allocates from the pool,
- * and copies existing data. The caller is responsible for updating any
- * codec-specific pointers (z_stream, brotli next_out, etc.) after this
- * function returns.
+ * minimum +4096, capped at budget and UINT_MAX), allocates an independently
+ * freeable replacement, and copies existing data. The caller is responsible
+ * for updating any codec-specific pointers (z_stream, brotli next_out, etc.)
+ * after this function returns.
  *
  * Parameters:
- *   r           - nginx request structure (for pool allocation and logging)
+ *   r           - nginx request structure (for logging)
  *   conf        - module configuration (provides decompress.max_size)
  *   output_data - pointer to current output buffer pointer (updated on success)
  *   output_size - pointer to current output buffer size (updated on success)
@@ -276,7 +276,9 @@ ngx_http_markdown_grow_output_buffer(ngx_http_request_t *r,
     } else {
         new_size = used * 2;
     }
-    if (new_size < used + 4096) {
+    if (used <= ((size_t) -1) - 4096
+        && new_size < used + 4096)
+    {
         new_size = used + 4096;
     }
     if (new_size > conf->decompress.max_size) {
@@ -294,24 +296,25 @@ ngx_http_markdown_grow_output_buffer(ngx_http_request_t *r,
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
 
-    /* Mark the old pool buffer as reusable via ngx_pfree so subsequent
-     * pnalloc calls can reclaim the space.  The memory is not returned to
-     * the OS until the request pool is destroyed; this is intentional —
-     * the output buffer is pool-owned and follows pool lifetime. */
-    new_data = ngx_pnalloc(r->pool, new_size);
+    /*
+     * The returned output is adopted by ctx->buffer.data, whose resizable
+     * backing-store contract is ngx_alloc/ngx_free.  Keep the same allocator
+     * family across every growth so ownership remains transferable.
+     */
+    new_data = ngx_alloc(new_size, r->connection->log);
     if (new_data == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: failed to reallocate decompression "
-                     "buffer (pnalloc), size=%uz, category=system",
+                     "buffer, size=%uz, category=system",
                      new_size);
         return NGX_ERROR;
     }
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                 "markdown: decompression buffer realloc "
-                "used=%uz new_size=%uz (old buffer marked reusable)",
+                "used=%uz new_size=%uz",
                 used, new_size);
     ngx_memcpy(new_data, *output_data, used);
-    ngx_pfree(r->pool, *output_data);
+    ngx_free(*output_data);
     *output_data = new_data;
     *output_size = new_size;
 
@@ -662,7 +665,7 @@ ngx_http_markdown_inflate_loop(ngx_http_request_t *r,
  *    - MAX_WBITS + 16 for gzip format
  *    - MAX_WBITS for deflate format
  * 3. Estimates output size (typically input_size * 10)
- * 4. Allocates output buffer using nginx memory pool
+ * 4. Allocates transferable output using ngx_alloc
  * 5. Performs incremental decompression using inflate(..., Z_NO_FLUSH)
  *    via ngx_http_markdown_inflate_loop()
  * 6. Grows the output buffer up to decompress.max_size when avail_out
@@ -701,8 +704,8 @@ typedef void (*ngx_http_markdown_decomp_cleanup_t)(void *decoder_state);
 
 
 /*
- * Allocate the decompression output buffer from r->pool, logging and
- * cleaning up decoder state on failure.
+ * Allocate an independently freeable decompression output buffer, logging
+ * and cleaning up decoder state on failure.
  *
  * Shared by the zlib (gzip/deflate) and brotli decompression paths so the
  * two backends cannot drift apart on the alloc-failure error path. The
@@ -710,7 +713,7 @@ typedef void (*ngx_http_markdown_decomp_cleanup_t)(void *decoder_state);
  * failure (the caller retains ownership of decoder_state on success).
  *
  * Parameters:
- *   r             - nginx request (logging + pool)
+ *   r             - nginx request (logging)
  *   output_size   - capacity to allocate
  *   cleanup       - decoder cleanup callback (NULL if no cleanup needed)
  *   decoder_state - opaque pointer forwarded to cleanup (e.g. z_stream*
@@ -727,7 +730,7 @@ ngx_http_markdown_decomp_alloc_output(ngx_http_request_t *r,
 {
     u_char  *output_data;
 
-    output_data = ngx_pnalloc(r->pool, output_size);
+    output_data = ngx_alloc(output_size, r->connection->log);
     if (output_data == NULL) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: failed to allocate decompression buffer, "
@@ -757,6 +760,16 @@ static void
 ngx_http_markdown_decomp_brotli_cleanup(void *decoder_state)
 {
     BrotliDecoderDestroyInstance((BrotliDecoderState *) decoder_state);
+}
+
+
+static ngx_int_t
+ngx_http_markdown_decomp_brotli_fail(BrotliDecoderState *decoder,
+    u_char *output_data, ngx_int_t rc)
+{
+    BrotliDecoderDestroyInstance(decoder);
+    ngx_free(output_data);
+    return rc;
 }
 #endif
 
@@ -816,7 +829,8 @@ ngx_http_markdown_decomp_collect_input(ngx_http_request_t *r,
 
 
 /*
- * Build the output chain wrapping a pool-allocated decompressed buffer.
+ * Build the output chain wrapping an independently allocated decompressed
+ * buffer.
  *
  * Shared by the zlib (gzip/deflate) and brotli decompression paths so the
  * buffer setup + chain link construction cannot drift apart.
@@ -942,7 +956,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
         return NGX_ERROR;
     }
     
-    /* Allocate output buffer using nginx memory pool (output buffer allocation from nginx pool) */
+    /* Allocate transferable output using the ctx->buffer allocator family. */
     output_data = ngx_http_markdown_decomp_alloc_output(r, output_size,
         ngx_http_markdown_decomp_zlib_cleanup, &stream);
     if (output_data == NULL) {
@@ -982,6 +996,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                              "markdown: raw deflate inflateInit2 "
                              "error: %d, category=conversion", zrc);
+                ngx_free(output_data);
                 return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
             }
 
@@ -994,11 +1009,13 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                                                      &total_decompressed);
             if (loop_rc != NGX_OK) {
                 inflateEnd(&stream);
+                ngx_free(output_data);
                 return loop_rc;
             }
             /* fallthrough to success path below */
         } else {
             inflateEnd(&stream);
+            ngx_free(output_data);
             return loop_rc;
         }
     }
@@ -1010,6 +1027,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                      "category=resource_limit",
                      total_decompressed, conf->decompress.max_size);
         inflateEnd(&stream);
+        ngx_free(output_data);
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
     
@@ -1024,6 +1042,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
                                                     total_decompressed, 1,
                                                     out) != NGX_OK)
     {
+        ngx_free(output_data);
         return NGX_ERROR;
     }
     
@@ -1055,7 +1074,7 @@ ngx_http_markdown_decompress_gzip(ngx_http_request_t *r,
  *    - Collects all input data from the chain into a single buffer
  *    - Creates brotli decoder instance
  *    - Estimates output size (typically input_size * 10)
- *    - Allocates output buffer using nginx memory pool
+ *    - Allocates transferable output using ngx_alloc
  *    - Performs decompression
  *    - Checks for errors and size limits
  *    - Creates output chain with decompressed data
@@ -1097,11 +1116,9 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t    *conf;
     
     conf = ngx_http_get_module_loc_conf(r, ngx_http_markdown_filter_module);
-    
     /* Log that we're using brotli library for decompression (brotli decompression path) */
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "markdown: using brotli library for decompression");
-    
     /* Collect all input data into a single buffer and validate its size
      * (shared with the zlib path via ngx_http_markdown_decomp_collect_input
      * so the two decompression backends cannot drift apart on size checks). */
@@ -1110,7 +1127,6 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
     {
         return NGX_ERROR;
     }
-    
     /* Create brotli decoder instance (brotli decoder instance creation) */
     decoder = BrotliDecoderCreateInstance(NULL, NULL, NULL);
     if (decoder == NULL) {
@@ -1119,7 +1135,6 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
                      "category=system");
         return NGX_ERROR;
     }
-    
     /* Estimate output size with independent decompression budget. */
     if (ngx_http_markdown_calc_output_size(r, input_size, conf->decompress.max_size, &output_size)
         != NGX_OK)
@@ -1127,14 +1142,12 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
         BrotliDecoderDestroyInstance(decoder);
         return NGX_ERROR;
     }
-    
-    /* Allocate output buffer using nginx memory pool (brotli output buffer allocation from nginx pool) */
+    /* Allocate transferable output using the ctx->buffer allocator family. */
     output_data = ngx_http_markdown_decomp_alloc_output(r, output_size,
         ngx_http_markdown_decomp_brotli_cleanup, decoder);
     if (output_data == NULL) {
         return NGX_ERROR;
     }
-    
     /* Set up decompression parameters */
     available_in = input_size;
     next_in = input_data;
@@ -1172,8 +1185,9 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
                          "markdown: brotli decompression failed, "
                          "error: %s, category=conversion",
                          error_str);
-            BrotliDecoderDestroyInstance(decoder);
-            return NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR;
+            return ngx_http_markdown_decomp_brotli_fail(
+                decoder, output_data,
+                NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR);
         }
 
         if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
@@ -1184,8 +1198,8 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
             grow_rc = ngx_http_markdown_grow_output_buffer(
                 r, conf, &output_data, &output_size, used);
             if (grow_rc != NGX_OK) {
-                BrotliDecoderDestroyInstance(decoder);
-                return grow_rc;
+                return ngx_http_markdown_decomp_brotli_fail(
+                    decoder, output_data, grow_rc);
             }
             available_out = output_size - used;
             next_out = output_data + used;
@@ -1197,16 +1211,17 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
                          "markdown: brotli decompression "
                          "incomplete, truncated input, "
                          "category=conversion");
-            BrotliDecoderDestroyInstance(decoder);
-            return NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT;
+            return ngx_http_markdown_decomp_brotli_fail(
+                decoder, output_data,
+                NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT);
         }
 
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                      "markdown: brotli decompression "
                      "incomplete, result=%d, category=conversion",
                      result);
-        BrotliDecoderDestroyInstance(decoder);
-        return NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR;
+        return ngx_http_markdown_decomp_brotli_fail(
+            decoder, output_data, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR);
     }
     
     /* Calculate actual decompressed size */
@@ -1218,8 +1233,9 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
                      "markdown: decompressed size (%uz) exceeds decompression budget (%uz), "
                      "category=resource_limit",
                      total_out, conf->decompress.max_size);
-        BrotliDecoderDestroyInstance(decoder);
-        return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
+        return ngx_http_markdown_decomp_brotli_fail(
+            decoder, output_data,
+            NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED);
     }
     
     /* Clean up decoder instance (brotli decoder cleanup) */
@@ -1233,6 +1249,7 @@ ngx_http_markdown_decompress_brotli(ngx_http_request_t *r,
                                                     total_out, 1,
                                                     out) != NGX_OK)
     {
+        ngx_free(output_data);
         return NGX_ERROR;
     }
     
