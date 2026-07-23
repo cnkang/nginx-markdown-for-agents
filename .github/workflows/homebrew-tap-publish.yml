@@ -16,7 +16,13 @@ permissions:
 jobs:
   publish:
     name: Update tap formula for ${{ github.event.release.tag_name || inputs.tag }}
-    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'release' ||
+      github.ref == format(
+        'refs/heads/{0}',
+        github.event.repository.default_branch
+      )
+    runs-on: macos-15
     env:
       FORMULA_SOURCE: packaging/homebrew/nginx-markdown-module.rb
       FORMULA_DEST: ${{ vars.HOMEBREW_FORMULA_PATH || 'Formula/nginx-markdown-module.rb' }}
@@ -28,20 +34,18 @@ jobs:
     steps:
       - name: Validate required config
         shell: bash
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -z "${TAP_REPO}" ]]; then
             echo "::error::Repository variable HOMEBREW_TAP_REPO is required (format: owner/repo)." >&2
             exit 1
           fi
-          if [[ -z "${RELEASE_TAG}" ]]; then
-            echo "::error::Release tag is required." >&2
+          if [[ ! "${TAP_REPO}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            echo "::error::HOMEBREW_TAP_REPO must use owner/repository format." >&2
             exit 1
           fi
-          if [[ -z "${HOMEBREW_TAP_TOKEN}" ]]; then
-            echo "::error::Secret HOMEBREW_TAP_TOKEN is required for pushing to the tap repository." >&2
+          if [[ -z "${RELEASE_TAG}" ]]; then
+            echo "::error::Release tag is required." >&2
             exit 1
           fi
 
@@ -51,6 +55,7 @@ jobs:
           persist-credentials: false
 
       - name: Validate release tag
+        id: release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -67,76 +72,104 @@ jobs:
           ./packaging/scripts/validate-version.sh "${version}" >/dev/null
 
           git fetch --force --depth=1 origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
-          git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}" >/dev/null
+          tag_commit="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+          tag_version="$(
+            git show "${tag_commit}:components/rust-converter/Cargo.toml" \
+              | sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+              | head -1
+          )"
+          if [[ "${tag_version}" != "${version}" ]]; then
+            echo "::error::Release tag ${RELEASE_TAG} resolves to package version ${tag_version:-<missing>}, expected ${version}." >&2
+            exit 1
+          fi
+
+          formula_blob="$(git rev-parse "${tag_commit}:${FORMULA_SOURCE}")"
+          git cat-file -e "${formula_blob}^{blob}"
 
           gh release view "${RELEASE_TAG}" --repo "${RELEASE_OWNER}/${RELEASE_REPO}" >/dev/null
+          {
+            echo "commit=${tag_commit}"
+            echo "formula_blob=${formula_blob}"
+            echo "version=${version}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Prepare formula for tagged artifact
+        id: formula
         shell: bash
+        env:
+          TAG_COMMIT: ${{ steps.release.outputs.commit }}
+          TAG_VERSION: ${{ steps.release.outputs.version }}
         run: |
           set -euo pipefail
 
           artifact_url="https://github.com/${RELEASE_OWNER}/${RELEASE_REPO}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
-          sha256="$(curl -fsSL "${artifact_url}" | sha256sum | awk '{print $1}')"
+          archive_path="${RUNNER_TEMP}/nginx-markdown-${RELEASE_TAG}.tar.gz"
+          reference_archive="${RUNNER_TEMP}/nginx-markdown-${RELEASE_TAG}.git.tar"
+          tag_formula="${RUNNER_TEMP}/nginx-markdown-tag-formula.rb"
+          rendered_formula="${RUNNER_TEMP}/nginx-markdown-module.rb"
 
-          if [[ ! -f "${FORMULA_SOURCE}" ]]; then
-            echo "::error::Formula source not found: ${FORMULA_SOURCE}" >&2
-            exit 1
-          fi
+          curl --proto '=https' --tlsv1.2 -fsSL \
+            -o "${archive_path}" "${artifact_url}"
+          git archive --format=tar --prefix=reference/ \
+            -o "${reference_archive}" "${TAG_COMMIT}"
+          python3 packaging/scripts/verify_git_archive.py \
+            --candidate "${archive_path}" \
+            --reference "${reference_archive}"
+          sha256="$(shasum -a 256 "${archive_path}" | awk '{print $1}')"
 
-          FORMULA_SOURCE="${FORMULA_SOURCE}" \
-          ARTIFACT_URL="${artifact_url}" \
-          FORMULA_SHA256="${sha256}" \
-          python3 - <<'PY'
-          import os
-          import re
-          import sys
-          from pathlib import Path
+          git show "${TAG_COMMIT}:${FORMULA_SOURCE}" > "${tag_formula}"
+          python3 packaging/scripts/verify_homebrew_formula.py \
+            --trusted-template "${FORMULA_SOURCE}" \
+            --candidate "${tag_formula}" \
+            --url "${artifact_url}" \
+            --sha256 "${sha256}" \
+            --version "${TAG_VERSION}"
+          python3 packaging/scripts/render_homebrew_formula.py \
+            --source "${tag_formula}" \
+            --url "${artifact_url}" \
+            --sha256 "${sha256}" \
+            --version "${TAG_VERSION}" \
+            > "${rendered_formula}"
+          python3 packaging/scripts/verify_homebrew_formula.py \
+            --trusted-template "${FORMULA_SOURCE}" \
+            --candidate "${rendered_formula}" \
+            --url "${artifact_url}" \
+            --sha256 "${sha256}" \
+            --version "${TAG_VERSION}"
 
-          path = Path(os.environ["FORMULA_SOURCE"])
-          artifact_url = os.environ["ARTIFACT_URL"]
-          sha256 = os.environ["FORMULA_SHA256"]
+          rendered_sha256="$(
+            shasum -a 256 "${rendered_formula}" | awk '{print $1}'
+          )"
+          {
+            echo "path=${rendered_formula}"
+            echo "archive_sha256=${sha256}"
+            echo "rendered_sha256=${rendered_sha256}"
+          } >> "$GITHUB_OUTPUT"
 
-          text = path.read_text(encoding="utf-8")
-          text, url_count = re.subn(
-              r'^  url ".*"$',
-              f'  url "{artifact_url}"',
-              text,
-              count=1,
-              flags=re.MULTILINE,
-          )
-          text, sha_count = re.subn(
-              r'^  sha256 ".*"$',
-              f'  sha256 "{sha256}"',
-              text,
-              count=1,
-              flags=re.MULTILINE,
-          )
-
-          if url_count != 1 or sha_count != 1:
-              print(
-                  f"::error::Formula replacement count mismatch: "
-                  f"url={url_count}, sha256={sha_count}",
-                  file=sys.stderr,
-              )
-              sys.exit(1)
-
-          path.write_text(text, encoding="utf-8")
-          PY
-
-          echo "Computed SHA256: ${sha256}"
+      - name: Audit exact rendered formula
+        shell: bash
+        env:
+          RENDERED_FORMULA: ${{ steps.formula.outputs.path }}
+        run: |
+          set -euo pipefail
+          core_formula="$(
+            brew --repository homebrew/core
+          )/Formula/n/nginx-markdown-module.rb"
+          cp "${RENDERED_FORMULA}" "${core_formula}"
+          brew audit --strict nginx-markdown-module
 
       - name: Checkout tap repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
         with:
           repository: ${{ env.TAP_REPO }}
           ref: ${{ env.TAP_BRANCH }}
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: tap
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Update tap formula
         shell: bash
+        env:
+          RENDERED_FORMULA: ${{ steps.formula.outputs.path }}
         run: |
           set -euo pipefail
           case "${FORMULA_DEST}" in
@@ -147,19 +180,49 @@ jobs:
           esac
           dest="tap/${FORMULA_DEST}"
           mkdir -p "$(dirname "${dest}")"
-          cp "${FORMULA_SOURCE}" "${dest}"
+          cp "${RENDERED_FORMULA}" "${dest}"
 
-      - name: Commit and push formula update
+      - name: Commit formula update
+        id: commit
         shell: bash
         run: |
           set -euo pipefail
           cd tap
+          git check-ref-format --branch "${TAP_BRANCH}" >/dev/null
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "${FORMULA_DEST}"
           if git diff --cached --quiet; then
             echo "No formula changes to commit."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git commit -m "homebrew: publish ${RELEASE_REPO} ${RELEASE_TAG}"
-          git push origin "${TAP_BRANCH}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push formula update
+        if: steps.commit.outputs.changed == 'true'
+        shell: bash
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HOMEBREW_TAP_TOKEN}" ]]; then
+            echo "::error::Secret HOMEBREW_TAP_TOKEN is required for push." >&2
+            exit 1
+          fi
+          askpass="${RUNNER_TEMP}/homebrew-tap-askpass.sh"
+          {
+            printf '%s\n' '#!/usr/bin/env bash'
+            printf '%s\n' 'case "$1" in'
+            printf '%s\n' '  *Username*) printf "%s\n" "x-access-token" ;;'
+            printf '%s\n' '  *Password*) printf "%s\n" "$HOMEBREW_TAP_TOKEN" ;;'
+            printf '%s\n' '  *) exit 1 ;;'
+            printf '%s\n' 'esac'
+            printf '%s\n' 'exit 0'
+          } > "${askpass}"
+          chmod 0700 "${askpass}"
+          cd tap
+          GIT_ASKPASS="${askpass}" GIT_TERMINAL_PROMPT=0 \
+            git push "https://github.com/${TAP_REPO}.git" \
+              "HEAD:${TAP_BRANCH}"

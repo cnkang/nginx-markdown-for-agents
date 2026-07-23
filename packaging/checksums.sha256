@@ -24,6 +24,7 @@
 2c96a946bfb0882a21744ed429770a2123ae1828c7c48665092993ddee91a918  nginx-1.28.3
 e5823dc6f45610993def93ebf6cfce68264af4958c77e874b7d20f3709001b8f  nginx-1.30.3
 af2a957c41da636ddc4f883e4523c6d140b4784dbce42000c364ae5092aa473c  nginx-1.31.2
+a7657c50811c2d92d9895395e8b873ef60398142c4db21eb647811c38f6dd525  nginx-1.31.3
 
 # --- nFPM tool binaries (Linux x86_64) ---
 # Obtained from: https://github.com/goreleaser/nfpm/releases/download/v2.46.3/checksums.txt
@@ -35,7 +36,11 @@ af2a957c41da636ddc4f883e4523c6d140b4784dbce42000c364ae5092aa473c  nginx-1.31.2
 #   https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-unknown-linux-gnu/rustup-init.sha256
 #   https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-musl/rustup-init.sha256
 #   https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-unknown-linux-musl/rustup-init.sha256
+#   https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-apple-darwin/rustup-init.sha256
+#   https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-apple-darwin/rustup-init.sha256
 20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c  rustup-init-1.28.2-x86_64-unknown-linux-gnu
 e3853c5a252fca15252d07cb23a1bdd9377a8c6f3efa01531109281ae47f841c  rustup-init-1.28.2-aarch64-unknown-linux-gnu
 e6599a1c7be58a2d8eaca66a80e0dc006d87bbcf780a58b7343d6e14c1605cb2  rustup-init-1.28.2-x86_64-unknown-linux-musl
 a97c8f56d7462908695348dd8c71ea6740c138ce303715793a690503a94fc9a9  rustup-init-1.28.2-aarch64-unknown-linux-musl
+9c331076f62b4d0edeae63d9d1c9442d5fe39b37b05025ec8d41c5ed35486496  rustup-init-1.28.2-x86_64-apple-darwin
+20ef5516c31b1ac2290084199ba77dbbcaa1406c45c1d978ca68558ef5964ef5  rustup-init-1.28.2-aarch64-apple-darwin

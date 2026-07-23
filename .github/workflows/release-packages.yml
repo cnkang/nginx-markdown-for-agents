@@ -201,7 +201,7 @@ jobs:
     name: Build - nginx-${{ matrix.nginx_version }} - ${{ matrix.arch }}
     needs: prepare
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
-    container: almalinux:9
+    container: almalinux:9@sha256:d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743
     permissions:
       contents: read
     strategy:

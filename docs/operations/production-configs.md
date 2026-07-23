@@ -13,6 +13,11 @@ verification commands, and operational notes.
 | [rag-streaming-first](../../examples/production/rag-streaming-first.conf) | `streaming_first` | RAG/AI workload with large documents and inflight guard |
 | [private-internal](../../examples/production/private-internal.conf) | `balanced` | Internal service with basic auth and restricted access |
 
+The `private-internal` example intentionally keeps its Basic-authenticated
+backend on `127.0.0.1`. A co-located TLS terminator is mandatory and must be
+the only client-facing endpoint; clients must never send credentials directly
+to the cleartext backend listener.
+
 ## Choosing a Profile
 
 - **`balanced`** — recommended starting point for most deployments. Full-buffer
