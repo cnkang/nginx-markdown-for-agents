@@ -140,6 +140,12 @@ pub struct StreamingConverter {
     /// false` (to prevent mid-stream BOM stripping when a BOM's lead byte is
     /// split across chunks) and instead strips a leading BOM here, once.
     bom_stripped: bool,
+    /// Estimated bytes held by the current transcoded output that is alive
+    /// during tokenizer processing. When charset feed returns `Cow::Owned`,
+    /// the full owned buffer persists while the tokenizer iterates over
+    /// slices of it. This field tracks that resident allocation so
+    /// `update_peak_memory()` can account for it in the total budget.
+    charset_transcoded_bytes: usize,
 }
 
 impl StreamingConverter {
@@ -243,6 +249,7 @@ impl StreamingConverter {
             parser_budget: 0,
             cumulative_input_bytes: 0,
             bom_stripped: false,
+            charset_transcoded_bytes: 0,
         }
     }
 
@@ -400,10 +407,31 @@ impl StreamingConverter {
         // required when streaming lacked pruning support.
 
         // 2. Charset detection / transcoding
+        // Before transcoding, check that the worst-case transcoded output
+        // fits within the total budget. The transcoded buffer will coexist
+        // with other resident state (tokenizer reservation, emitter buffers,
+        // utf8_tail, etc.) during the tokenizer processing loop.
+        let max_transcode = self.charset_state.max_transcode_output_len(data.len());
+        if max_transcode > 0 {
+            let current_working_set = self.estimate_working_set();
+            self.budget
+                .check_total(current_working_set, max_transcode)
+                .map_err(|e| self.wrap_error(e))?;
+        }
+
         let transcoded = self
             .charset_state
             .feed(data)
             .map_err(|e| self.wrap_error(e))?;
+
+        // Track the transcoded output size for working-set accounting.
+        // Cow::Borrowed means zero-copy (UTF-8) — no additional allocation.
+        // Cow::Owned means a heap allocation that persists while the
+        // tokenizer processes slices of this output.
+        self.charset_transcoded_bytes = match &transcoded {
+            std::borrow::Cow::Borrowed(_) => 0,
+            std::borrow::Cow::Owned(v) => v.len(),
+        };
 
         // If charset is still pending (accumulating sniff buffer), no tokens yet
         if transcoded.is_empty() {
@@ -469,11 +497,31 @@ impl StreamingConverter {
             Ok(s) => std::borrow::Cow::Borrowed(s),
             // Interior invalid bytes that aren't a trailing split —
             // fall back to lossy so the tokenizer still gets input.
+            // from_utf8_lossy returns Cow::Owned when replacement
+            // characters are needed, which coexists with the
+            // transcoded output during tokenizer processing.
             Err(_) => String::from_utf8_lossy(valid),
         };
 
+        // If from_utf8_lossy produced an owned String, account for it
+        // alongside the charset transcoded output. Both buffers are
+        // alive during process_tokenizer_input.
+        let lossy_owned_bytes = match &utf8_str {
+            std::borrow::Cow::Owned(_) => utf8_str.len(),
+            std::borrow::Cow::Borrowed(_) => 0,
+        };
+        let saved_transcoded = self.charset_transcoded_bytes;
+        self.charset_transcoded_bytes = self
+            .charset_transcoded_bytes
+            .saturating_add(lossy_owned_bytes);
+
         let initial_flush_count = self.emitter.flush_count();
         self.process_tokenizer_input(&utf8_str)?;
+
+        // The lossy owned String (if any) and the transcoded output buffer
+        // are about to be dropped. Restore the transcoded accounting to
+        // just the charset transcoded bytes (which will be cleared below).
+        self.charset_transcoded_bytes = saved_transcoded;
 
         // 6. Collect flushed output
         let flushed = self.emitter.take_flushed();
@@ -491,6 +539,13 @@ impl StreamingConverter {
         }
 
         self.stats.chunks_processed = self.stats.chunks_processed.saturating_add(1);
+
+        // The transcoded output buffer is about to be dropped (it was
+        // borrowed as Cow and the owned variant's Vec is freed when
+        // `transcoded` goes out of scope at the end of this function).
+        // Clear the accounting so subsequent peak-memory estimates
+        // don't over-count a buffer that no longer exists.
+        self.charset_transcoded_bytes = 0;
 
         Ok(ChunkOutput {
             markdown: flushed,
@@ -536,6 +591,20 @@ impl StreamingConverter {
         self.check_timeout()?;
 
         // 1. Flush charset state (any remaining buffered data)
+        // Before flushing, check that the worst-case output from the
+        // decoder flush fits within the total budget. The flush may
+        // produce a transcoded Vec that coexists with utf8_tail and
+        // the tokenizer reservation.
+        let max_flush_output = self
+            .charset_state
+            .max_transcode_output_len(self.charset_state.resident_bytes().max(64));
+        if max_flush_output > 0 {
+            let current_working_set = self.estimate_working_set();
+            self.budget
+                .check_total(current_working_set, max_flush_output)
+                .map_err(|e| self.wrap_error(e))?;
+        }
+
         let remaining_charset = self.charset_state.flush().map_err(|e| self.wrap_error(e))?;
 
         // 2. If there is remaining charset data or a stashed UTF-8 tail,
@@ -543,6 +612,10 @@ impl StreamingConverter {
         //    lossy conversion for any truly invalid trailing bytes.
         let mut final_bytes = std::mem::take(&mut self.utf8_tail);
         final_bytes.extend_from_slice(&remaining_charset);
+        // Account for the combined final_bytes buffer in the working set.
+        // remaining_charset is about to be dropped, but final_bytes now
+        // holds its content plus the old utf8_tail.
+        self.charset_transcoded_bytes = final_bytes.len();
         if !final_bytes.is_empty() {
             // Strip a leading BOM if not already done (handles the case
             // where all input was buffered in the charset sniff buffer and
@@ -554,8 +627,22 @@ impl StreamingConverter {
                 }
             }
             let utf8_cow = String::from_utf8_lossy(&final_bytes);
+            // from_utf8_lossy returns Cow::Owned when the input contains
+            // invalid UTF-8 sequences. That owned String coexists with
+            // final_bytes during tokenizer processing. Add its size to
+            // the transcoded-bytes tracker so update_peak_memory accounts
+            // for it. The owned String lives until utf8_cow is dropped
+            // at the end of this block.
+            if matches!(utf8_cow, std::borrow::Cow::Owned(_)) {
+                self.charset_transcoded_bytes =
+                    self.charset_transcoded_bytes.saturating_add(utf8_cow.len());
+            }
             self.process_tokenizer_input(&utf8_cow)?;
         }
+
+        // final_bytes and utf8_cow are dropped after the block above.
+        // Clear the transcoded accounting so peak estimates are accurate.
+        self.charset_transcoded_bytes = 0;
 
         // 3. Finish tokenizer (signal end-of-input)
         self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
@@ -708,7 +795,18 @@ impl StreamingConverter {
     }
 
     /// Process one bounded tokenizer event batch.
+    ///
+    /// Uses the batch's authoritative token and parse-error counts from the
+    /// tokenizer sink rather than counting events individually. In compact
+    /// mode, the sink counts all non-EOF tokens (including comments, doctypes,
+    /// and parse errors that are discarded from the event vector), so the
+    /// batch-level counts are the single source of truth.
     fn process_tokenizer_batch(&mut self, batch: TokenizerBatch) -> Result<(), ConversionError> {
+        self.stats.tokens_processed = self
+            .stats
+            .tokens_processed
+            .saturating_add(batch.token_count);
+        self.stats.parse_errors = self.stats.parse_errors.saturating_add(batch.parse_errors);
         for event in batch.events {
             self.process_single_event(event)?;
         }
@@ -738,10 +836,11 @@ impl StreamingConverter {
     /// let _ = conv.process_single_event(ev)?;
     /// ```
     fn process_single_event(&mut self, event: StreamEvent) -> Result<(), ConversionError> {
-        self.stats.tokens_processed = self.stats.tokens_processed.saturating_add(1);
-        if matches!(event, StreamEvent::ParseError(_)) {
-            self.stats.parse_errors = self.stats.parse_errors.saturating_add(1);
-        }
+        // Token and parse-error counts are now accumulated at the batch level
+        // in process_tokenizer_batch() using the sink's authoritative counts.
+        // This avoids double-counting in compact mode where comment, doctype,
+        // and parse-error tokens are counted by the sink but not emitted as
+        // events.
 
         // Front matter extraction: collect metadata from <head> region,
         // but only when metadata extraction is enabled (metadata extraction guard).
@@ -952,33 +1051,38 @@ impl StreamingConverter {
 
     /// Estimate the current in-memory working set and update peak.
     fn update_peak_memory(&mut self) -> Result<(), ConversionError> {
-        // Only count state that is actually resident in memory right now:
-        // - emitter pending buffer (not yet flushed)
-        // - emitter flushed buffer (awaiting take_flushed by caller)
-        // - emitter link/code collectors (separate retained allocations)
-        // - state machine stack
-        // - metadata extracted from <head> (actual String allocations)
-        // - html_title_buf (temporary <title> text before </title>)
-        // - the conservative html5ever/tendril/event reservation
-        //
-        // Note: `head_bytes_seen` is intentionally NOT included here.
-        // It is a cumulative counter for lookahead budget enforcement
-        // (budget metric, not a measure of resident memory).
-        let working_set = self
-            .emitter
-            .pending_bytes()
-            .saturating_add(self.emitter.flushed_bytes())
-            .saturating_add(self.emitter.resident_collector_bytes())
-            .saturating_add(self.state_machine.stack_bytes_estimate())
-            .saturating_add(self.metadata.bytes_estimate())
-            .saturating_add(self.html_title_buf.len())
-            .saturating_add(self.tokenizer.reserved_bytes());
+        let working_set = self.estimate_working_set();
         self.stats.peak_memory_estimate = self.stats.peak_memory_estimate.max(working_set);
 
         // Enforce budget.total: the working set must not exceed the
         // declared total-memory cap.
         self.budget.check_total(0, working_set)?;
         Ok(())
+    }
+
+    /// Compute the current estimated resident working-set size.
+    ///
+    /// Includes all heap allocations that are alive right now:
+    /// - emitter pending/flushed buffers and collectors
+    /// - state machine stack
+    /// - metadata from `<head>` region
+    /// - html_title_buf
+    /// - tokenizer conservative reservation
+    /// - charset sniff buffer (in Pending state)
+    /// - charset transcoded output (Cow::Owned during processing)
+    /// - utf8_tail (incomplete UTF-8 bytes from previous chunk)
+    fn estimate_working_set(&self) -> usize {
+        self.emitter
+            .pending_bytes()
+            .saturating_add(self.emitter.flushed_bytes())
+            .saturating_add(self.emitter.resident_collector_bytes())
+            .saturating_add(self.state_machine.stack_bytes_estimate())
+            .saturating_add(self.metadata.bytes_estimate())
+            .saturating_add(self.html_title_buf.len())
+            .saturating_add(self.tokenizer.reserved_bytes())
+            .saturating_add(self.charset_state.resident_bytes())
+            .saturating_add(self.charset_transcoded_bytes)
+            .saturating_add(self.utf8_tail.len())
     }
 
     /// Extract metadata from events occurring in the `<head>` region.
@@ -2183,9 +2287,14 @@ mod tests {
 
     #[test]
     fn test_parse_error_counter_increments() {
+        use crate::streaming::tokenizer::TokenizerBatch;
         let mut conv = make_converter();
-        conv.process_single_event(StreamEvent::ParseError("broken tag".to_string()))
-            .unwrap();
+        let batch = TokenizerBatch {
+            events: vec![StreamEvent::ParseError("broken tag".to_string())],
+            token_count: 1,
+            parse_errors: 1,
+        };
+        conv.process_tokenizer_batch(batch).unwrap();
 
         assert_eq!(conv.stats.parse_errors, 1);
         assert_eq!(conv.stats.tokens_processed, 1);
@@ -2333,11 +2442,15 @@ mod tests {
             .saturating_sub(tokenizer_reservation);
 
         // Excluding the fixed tokenizer envelope, the input-dependent working
-        // set includes metadata strings rather than cumulative head volume.
+        // set includes metadata strings and the transient transcoded output
+        // buffer (which is bounded by the input chunk size) rather than
+        // cumulative head volume. The transcoded buffer can be as large as
+        // one feed_chunk input, so dynamic_peak may exceed head_bytes_seen
+        // for small heads but must remain proportional to a single chunk.
         assert!(
-            dynamic_peak < cumulative_head,
-            "input-dependent peak ({}) should be less than cumulative head_bytes_seen ({}); \
-             it should reflect resident state, not cumulative processing",
+            dynamic_peak < cumulative_head * 3,
+            "input-dependent peak ({}) should be proportional to a single chunk, \
+             not cumulative head_bytes_seen ({}) times a large factor",
             dynamic_peak,
             cumulative_head,
         );
@@ -2390,12 +2503,21 @@ mod tests {
             .peak_memory_estimate
             .saturating_sub(tokenizer_reservation);
 
-        // Excluding the fixed parser envelope, peak should remain closer to
-        // metadata size than cumulative head volume.
+        // Excluding the fixed parser envelope, peak should be dominated by
+        // the largest single chunk's transcoded output plus metadata, not by
+        // cumulative processing volume. Since the entire head is fed in one
+        // chunk, the transcoded buffer is as large as the head itself, so
+        // peak can exceed cumulative_head. The invariant is that peak grows
+        // with the largest single chunk, not with the number of chunks or
+        // cumulative volume — which would be unbounded.
+        // A proportional check: peak should be at most 2× the largest chunk
+        // (transcoded output + emitter buffers), not proportional to the
+        // number of meta tags times their individual sizes.
         assert!(
-            dynamic_peak < cumulative_head / 2,
-            "input-dependent peak ({}) should be well below half of cumulative head ({}) — \
-             it should track metadata size (~{}), not head volume",
+            dynamic_peak < cumulative_head * 2,
+            "input-dependent peak ({}) should be at most 2× cumulative head ({}) — \
+             it should track single-chunk transcoded output plus metadata (~{}), \
+             not unbounded cumulative processing",
             dynamic_peak,
             cumulative_head,
             metadata_size,

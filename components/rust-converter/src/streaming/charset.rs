@@ -392,6 +392,40 @@ impl CharsetState {
         matches!(self, CharsetState::Resolved { .. })
     }
 
+    /// Return the estimated resident memory held by this charset state.
+    ///
+    /// Counts the sniff buffer in `Pending` state. The `Resolved` state
+    /// holds no heap allocations (the `encoding_rs::Decoder` is stack-sized).
+    /// The `Failed` variant holds a small String reason.
+    pub fn resident_bytes(&self) -> usize {
+        match self {
+            CharsetState::Pending {
+                sniff_buffer,
+                header_charset,
+                ..
+            } => sniff_buffer
+                .capacity()
+                .saturating_add(header_charset.as_ref().map_or(0, |s| s.capacity())),
+            CharsetState::Resolved { .. } => 0,
+            CharsetState::Failed(reason) => reason.capacity(),
+        }
+    }
+
+    /// Return the maximum UTF-8 output length for transcoding `input_len` bytes.
+    ///
+    /// For UTF-8 (zero-copy), returns 0 — no transcoding allocation occurs.
+    /// For other encodings, returns the decoder's reported maximum output,
+    /// or a conservative 4× fallback if the decoder cannot estimate.
+    pub fn max_transcode_output_len(&self, input_len: usize) -> usize {
+        match self {
+            CharsetState::Resolved { decoder: None } => 0,
+            CharsetState::Resolved { decoder: Some(dec) } => dec
+                .max_utf8_buffer_length(input_len)
+                .unwrap_or(input_len.saturating_mul(4)),
+            _ => input_len.saturating_mul(4),
+        }
+    }
+
     /// Indicates whether the charset detection state machine is awaiting resolution.
     ///
     /// Returns `true` if the state machine is in the `Pending` state, `false` otherwise.
