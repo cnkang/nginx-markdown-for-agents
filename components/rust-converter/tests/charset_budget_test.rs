@@ -213,16 +213,28 @@ fn finalize_decoder_output_exceeds_budget() {
 }
 
 #[test]
-fn utf8_tail_counted_in_total_budget() {
+fn utf8_tail_recovery_keeps_the_next_utf8_chunk_borrowed() {
     let budget = MemoryBudget {
         total: 64 * 1024,
         ..MemoryBudget::default()
     };
     let mut conv = StreamingConverter::new(ConversionOptions::default(), budget);
     conv.set_content_type(Some("text/html; charset=UTF-8".to_string()));
-    let chunk = b"<p>Hello</p>";
-    let r = conv.feed_chunk(chunk);
-    assert!(r.is_ok(), "UTF-8 feed should succeed: {:?}", r);
+    let first = conv.feed_chunk(b"<p>price: \xe2\x82");
+    assert!(
+        first.is_ok(),
+        "split UTF-8 prefix should be retained: {:?}",
+        first
+    );
+    let mut second = b"\xac".to_vec();
+    second.extend(std::iter::repeat_n(b'x', 256));
+    second.extend_from_slice(b"</p>");
+    let r = conv.feed_chunk(&second);
+    assert!(
+        r.is_ok(),
+        "tail recovery must not copy the full UTF-8 chunk: {:?}",
+        r
+    );
     let result = conv.finalize().expect("finalize should succeed");
     assert!(result.stats.peak_memory_estimate > 0);
 }
@@ -336,11 +348,8 @@ fn peak_memory_includes_charset_buffers() {
     let input = iso_8859_1_input(1024);
     let _ = conv.feed_chunk(&input);
     let result = conv.finalize();
-    match result {
-        Ok(r) => {
-            assert!(r.stats.peak_memory_estimate > 0, "peak should be positive");
-        }
-        Err(_) => {}
+    if let Ok(r) = result {
+        assert!(r.stats.peak_memory_estimate > 0, "peak should be positive");
     }
 }
 

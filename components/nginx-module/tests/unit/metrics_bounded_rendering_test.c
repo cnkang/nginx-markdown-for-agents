@@ -463,6 +463,7 @@ ngx_create_temp_buf(void *pool, size_t size)
 #define NGX_HTTP_HEADERS 1
 
 #include "../../src/ngx_http_markdown_metrics_impl.h"
+#include "../../src/ngx_http_markdown_prometheus_impl.h"
 
 static int
 contains(const char *haystack, const char *needle)

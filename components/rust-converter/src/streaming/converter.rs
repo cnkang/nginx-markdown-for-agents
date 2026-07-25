@@ -446,7 +446,7 @@ impl StreamingConverter {
         // tokenizer processes slices of this output.
         self.charset_transcoded_bytes = match &transcoded {
             std::borrow::Cow::Borrowed(_) => 0,
-            std::borrow::Cow::Owned(v) => v.len(),
+            std::borrow::Cow::Owned(v) => v.capacity(),
         };
 
         // If charset is still pending (accumulating sniff buffer), no tokens yet
@@ -458,86 +458,8 @@ impl StreamingConverter {
             });
         }
 
-        // 3. Tokenization: feed UTF-8 to html5ever.
-        //
-        // Prepend any trailing bytes from the previous chunk that formed
-        // an incomplete UTF-8 sequence, then split off any new incomplete
-        // tail so multibyte characters spanning chunk boundaries are
-        // preserved instead of being replaced with U+FFFD.
-        let mut effective = if self.utf8_tail.is_empty() {
-            std::borrow::Cow::Borrowed(transcoded.as_ref())
-        } else {
-            let mut combined = std::mem::take(&mut self.utf8_tail);
-            combined.extend_from_slice(&transcoded);
-            std::borrow::Cow::Owned(combined)
-        };
-
-        // 3b. Strip a leading UTF-8 BOM (U+FEFF, 0xEF 0xBB 0xBF) from the
-        // first effective byte sequence, matching the full-buffer path's
-        // `discard_bom: true` behavior.  Done here (after utf8_tail
-        // reassembly) so that a BOM split across chunks is detected as a
-        // complete 3-byte unit.  The streaming tokenizer sets
-        // `discard_bom: false` to prevent mid-stream BOM stripping when a
-        // BOM's lead byte is reassembled at the start of a new feed() call,
-        // so the stream-start BOM is handled here instead.
-        //
-        // Only set bom_stripped when we can definitively determine BOM
-        // presence: if effective starts with 0xEF but is shorter than 3
-        // bytes, the incomplete sequence is deferred to utf8_tail and the
-        // check repeats on the next chunk's reassembled bytes.
-        if !self.bom_stripped && !effective.starts_with(&[0xEF]) {
-            // First byte is not 0xEF — definitely not a BOM.
-            self.bom_stripped = true;
-        } else if !self.bom_stripped && effective.len() >= 3 {
-            self.bom_stripped = true;
-            if effective.starts_with(b"\xEF\xBB\xBF") {
-                effective = match effective {
-                    std::borrow::Cow::Borrowed(rest) => std::borrow::Cow::Borrowed(&rest[3..]),
-                    std::borrow::Cow::Owned(mut rest) => {
-                        rest.drain(..3);
-                        std::borrow::Cow::Owned(rest)
-                    }
-                };
-            }
-        }
-
-        // Find the last valid UTF-8 boundary. Any trailing bytes that
-        // start a multibyte sequence but don't complete it are stashed
-        // in utf8_tail for the next chunk.
-        let (valid, tail) = split_utf8_tail(&effective);
-        if !tail.is_empty() {
-            self.utf8_tail = tail.to_vec();
-        }
-
-        let utf8_str = match std::str::from_utf8(valid) {
-            Ok(s) => std::borrow::Cow::Borrowed(s),
-            // Interior invalid bytes that aren't a trailing split —
-            // fall back to lossy so the tokenizer still gets input.
-            // from_utf8_lossy returns Cow::Owned when replacement
-            // characters are needed, which coexists with the
-            // transcoded output during tokenizer processing.
-            Err(_) => String::from_utf8_lossy(valid),
-        };
-
-        // If from_utf8_lossy produced an owned String, account for it
-        // alongside the charset transcoded output. Both buffers are
-        // alive during process_tokenizer_input.
-        let lossy_owned_bytes = match &utf8_str {
-            std::borrow::Cow::Owned(_) => utf8_str.len(),
-            std::borrow::Cow::Borrowed(_) => 0,
-        };
-        let saved_transcoded = self.charset_transcoded_bytes;
-        self.charset_transcoded_bytes = self
-            .charset_transcoded_bytes
-            .saturating_add(lossy_owned_bytes);
-
         let initial_flush_count = self.emitter.flush_count();
-        self.process_tokenizer_input(&utf8_str)?;
-
-        // The lossy owned String (if any) and the transcoded output buffer
-        // are about to be dropped. Restore the transcoded accounting to
-        // just the charset transcoded bytes (which will be cleared below).
-        self.charset_transcoded_bytes = saved_transcoded;
+        self.process_utf8_bytes(transcoded.as_ref(), false)?;
 
         // 6. Collect flushed output
         let flushed = self.emitter.take_flushed();
@@ -623,41 +545,14 @@ impl StreamingConverter {
 
         let remaining_charset = self.charset_state.flush().map_err(|e| self.wrap_error(e))?;
 
-        // 2. If there is remaining charset data or a stashed UTF-8 tail,
-        //    combine them and feed to the tokenizer. At end-of-input we use
-        //    lossy conversion for any truly invalid trailing bytes.
-        let mut final_bytes = std::mem::take(&mut self.utf8_tail);
-        final_bytes.extend_from_slice(&remaining_charset);
-        // Account for the combined final_bytes buffer in the working set.
-        // remaining_charset is about to be dropped, but final_bytes now
-        // holds its content plus the old utf8_tail.
-        self.charset_transcoded_bytes = final_bytes.len();
-        if !final_bytes.is_empty() {
-            // Strip a leading BOM if not already done (handles the case
-            // where all input was buffered in the charset sniff buffer and
-            // only emerges at finalize).
-            if !self.bom_stripped {
-                self.bom_stripped = true;
-                if final_bytes.starts_with(b"\xEF\xBB\xBF") {
-                    final_bytes = final_bytes[3..].to_vec();
-                }
-            }
-            let utf8_cow = String::from_utf8_lossy(&final_bytes);
-            // from_utf8_lossy returns Cow::Owned when the input contains
-            // invalid UTF-8 sequences. That owned String coexists with
-            // final_bytes during tokenizer processing. Add its size to
-            // the transcoded-bytes tracker so update_peak_memory accounts
-            // for it. The owned String lives until utf8_cow is dropped
-            // at the end of this block.
-            if matches!(utf8_cow, std::borrow::Cow::Owned(_)) {
-                self.charset_transcoded_bytes =
-                    self.charset_transcoded_bytes.saturating_add(utf8_cow.len());
-            }
-            self.process_tokenizer_input(&utf8_cow)?;
-        }
+        // The decoder flush result remains borrowed by the tokenizer until
+        // this call returns.  Track its allocation capacity, not its logical
+        // length, and recover a pending UTF-8 tail without copying the whole
+        // decoder output into a second Vec.
+        self.charset_transcoded_bytes = remaining_charset.capacity();
+        self.process_utf8_bytes(&remaining_charset, true)?;
 
-        // final_bytes and utf8_cow are dropped after the block above.
-        // Clear the transcoded accounting so peak estimates are accurate.
+        // The decoder flush result is about to be dropped.
         self.charset_transcoded_bytes = 0;
 
         // 3. Finish tokenizer (signal end-of-input)
@@ -808,6 +703,82 @@ impl StreamingConverter {
             }
         }
         Ok(())
+    }
+
+    /// Restore at most one split UTF-8 code point without copying the input
+    /// chunk, then feed the remaining borrowed bytes directly to html5ever.
+    fn process_utf8_bytes(&mut self, input: &[u8], at_eof: bool) -> Result<(), ConversionError> {
+        let mut remaining = input;
+
+        if !self.utf8_tail.is_empty() {
+            let tail_len = self.utf8_tail.len();
+            let prefix_input_len = remaining.len().min(4usize.saturating_sub(tail_len));
+            let mut prefix = [0u8; 4];
+
+            prefix[..tail_len].copy_from_slice(&self.utf8_tail);
+            prefix[tail_len..tail_len + prefix_input_len]
+                .copy_from_slice(&remaining[..prefix_input_len]);
+            self.utf8_tail.clear();
+
+            self.process_utf8_slice(
+                &prefix[..tail_len + prefix_input_len],
+                at_eof && prefix_input_len == remaining.len(),
+            )?;
+            remaining = &remaining[prefix_input_len..];
+        }
+
+        self.process_utf8_slice(remaining, at_eof)
+    }
+
+    /// Process one borrowed UTF-8 slice, preserving an incomplete trailing
+    /// code point unless this is the final input slice.
+    fn process_utf8_slice(&mut self, input: &[u8], at_eof: bool) -> Result<(), ConversionError> {
+        let mut input = input;
+
+        if !self.bom_stripped && (!input.starts_with(&[0xEF]) || input.len() >= 3 || at_eof) {
+            self.bom_stripped = true;
+            if input.starts_with(b"\xEF\xBB\xBF") {
+                input = &input[3..];
+            }
+        }
+
+        let (valid, tail) = if at_eof {
+            (input, &[][..])
+        } else {
+            split_utf8_tail(input)
+        };
+        if !tail.is_empty() {
+            self.utf8_tail.extend_from_slice(tail);
+        }
+        if valid.is_empty() {
+            return Ok(());
+        }
+
+        let utf8_str = match std::str::from_utf8(valid) {
+            Ok(s) => std::borrow::Cow::Borrowed(s),
+            Err(_) => {
+                let lossy_upper_bound = valid.len().checked_mul(3).ok_or_else(|| {
+                    self.wrap_error(ConversionError::BudgetExceeded {
+                        stage: "lossy_utf8 (integer overflow)".to_string(),
+                        used: usize::MAX,
+                        limit: self.budget.total,
+                    })
+                })?;
+                self.budget
+                    .check_total(self.estimate_working_set(), lossy_upper_bound)
+                    .map_err(|e| self.wrap_error(e))?;
+                String::from_utf8_lossy(valid)
+            }
+        };
+        let saved_transcoded = self.charset_transcoded_bytes;
+        if let std::borrow::Cow::Owned(ref owned) = utf8_str {
+            self.charset_transcoded_bytes = self
+                .charset_transcoded_bytes
+                .saturating_add(owned.capacity());
+        }
+        let result = self.process_tokenizer_input(&utf8_str);
+        self.charset_transcoded_bytes = saved_transcoded;
+        result
     }
 
     /// Process one bounded tokenizer event batch.
@@ -1094,11 +1065,11 @@ impl StreamingConverter {
             .saturating_add(self.emitter.resident_collector_bytes())
             .saturating_add(self.state_machine.stack_bytes_estimate())
             .saturating_add(self.metadata.bytes_estimate())
-            .saturating_add(self.html_title_buf.len())
+            .saturating_add(self.html_title_buf.capacity())
             .saturating_add(self.tokenizer.reserved_bytes())
             .saturating_add(self.charset_state.resident_bytes())
             .saturating_add(self.charset_transcoded_bytes)
-            .saturating_add(self.utf8_tail.len())
+            .saturating_add(self.utf8_tail.capacity())
     }
 
     /// Extract metadata from events occurring in the `<head>` region.
