@@ -9,6 +9,7 @@
  */
 
 #include "../include/test_common.h"
+#include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
 #include <netinet/in.h>
@@ -621,6 +622,39 @@ test_json_overflow_produces_other(void)
     TEST_PASS("JSON overflow __other__ correct");
 }
 
+
+static void
+test_json_overflow_without_retained_paths(void)
+{
+    u_char buf[16384];
+    u_char *p;
+    ngx_http_markdown_metrics_snapshot_t s;
+    ngx_shm_zone_t *saved_zone;
+
+    TEST_SUBSECTION("JSON bounded: empty tree overflow remains visible");
+
+    init_snapshot(&s);
+    s.per_path.overflow_count = 5;
+    saved_zone = ngx_http_markdown_metrics_shm_zone;
+    ngx_http_markdown_metrics_shm_zone = NULL;
+
+    p = ngx_http_markdown_metrics_write_json(
+        buf, buf + sizeof(buf), &s, 0, 0, 0, 0);
+
+    ngx_http_markdown_metrics_shm_zone = saved_zone;
+    TEST_ASSERT(p != NULL && p < buf + sizeof(buf),
+                "overflow-only JSON renderer should succeed without SHM");
+    *p = '\0';
+    TEST_ASSERT(contains((char *) buf, "\"path\":\"__other__\""),
+                "overflow-only JSON must contain __other__");
+    TEST_ASSERT(contains((char *) buf, "\"conversions\":5"),
+                "overflow-only JSON must preserve conversion count");
+    TEST_ASSERT(p > buf && p[-1] == '}',
+                "overflow-only JSON must keep its closing brace");
+
+    TEST_PASS("JSON empty-tree overflow correct");
+}
+
 static void
 test_json_oversized_path_omitted(void)
 {
@@ -705,16 +739,20 @@ test_json_structural_completeness(void)
     *p = '\0';
 
     {
-        int brace_depth = 0;
-        size_t i;
-        for (i = 0; buf[i] != '\0'; i++) {
-            if (buf[i] == '{') brace_depth++;
-            if (buf[i] == '}') brace_depth--;
-        }
-        TEST_ASSERT(brace_depth == 0,
-                    "JSON braces must be balanced");
-        TEST_ASSERT(contains((char *) buf, "]"),
-                    "paths array must be closed with ]");
+        FILE *parser;
+        size_t written;
+        int status;
+
+        parser = popen("python3 -c 'import json, sys; json.load(sys.stdin)'",
+                       "w");
+        TEST_ASSERT(parser != NULL,
+                    "strict JSON parser should be available");
+        written = fwrite(buf, 1, (size_t) (p - buf), parser);
+        TEST_ASSERT(written == (size_t) (p - buf),
+                    "strict JSON parser must receive the complete document");
+        status = pclose(parser);
+        TEST_ASSERT(status == 0,
+                    "bounded JSON output must pass strict JSON parsing");
     }
 
     TEST_PASS("JSON structural completeness correct");
@@ -948,6 +986,37 @@ test_text_overflow_produces_other(void)
     TEST_PASS("text overflow __other__ correct");
 }
 
+
+static void
+test_text_overflow_without_retained_paths(void)
+{
+    u_char buf[16384];
+    u_char *p;
+    ngx_http_markdown_metrics_snapshot_t s;
+    ngx_shm_zone_t *saved_zone;
+
+    TEST_SUBSECTION("text bounded: empty tree overflow remains visible");
+
+    init_snapshot(&s);
+    s.per_path.overflow_count = 3;
+    saved_zone = ngx_http_markdown_metrics_shm_zone;
+    ngx_http_markdown_metrics_shm_zone = NULL;
+
+    p = ngx_http_markdown_metrics_write_text(
+        buf, buf + sizeof(buf), &s, 0, 0, 0, 0);
+
+    ngx_http_markdown_metrics_shm_zone = saved_zone;
+    TEST_ASSERT(p != NULL && p < buf + sizeof(buf),
+                "overflow-only text renderer should succeed without SHM");
+    *p = '\0';
+    TEST_ASSERT(contains((char *) buf, "Per-Path Details"),
+                "overflow-only text must have a details section");
+    TEST_ASSERT(contains((char *) buf, "Path[__other__]: conversions=3"),
+                "overflow-only text must preserve conversion count");
+
+    TEST_PASS("text empty-tree overflow correct");
+}
+
 static void
 test_text_oversized_path_omitted(void)
 {
@@ -1179,6 +1248,7 @@ main(void)
     test_json_single_path_fits();
     test_json_zero_paths();
     test_json_overflow_produces_other();
+    test_json_overflow_without_retained_paths();
     test_json_oversized_path_omitted();
     test_json_structural_completeness();
     test_json_escape_expansion();
@@ -1188,6 +1258,7 @@ main(void)
     test_text_single_path_fits();
     test_text_zero_paths();
     test_text_overflow_produces_other();
+    test_text_overflow_without_retained_paths();
     test_text_oversized_path_omitted();
     test_text_no_shm_zone();
     test_text_path_entry_size_positive();

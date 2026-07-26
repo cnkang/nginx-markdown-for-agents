@@ -1683,17 +1683,6 @@ ngx_http_markdown_json_write_path_details(
     ngx_atomic_uint_t                              other_conversions;
     ngx_atomic_uint_t                              other_entries;
 
-    if (snapshot->per_path.path_entries == 0
-        || ngx_http_markdown_metrics_shm_zone == NULL
-        || ngx_http_markdown_metrics_shm_zone->data == NULL)
-    {
-        return p;
-    }
-
-    zone = ngx_http_markdown_metrics_shm_zone;
-    live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
-    shpool = (ngx_slab_pool_t *) zone->shm.addr;
-
     render.pos = p;
     render.end = end;
     render.tail_reserve = ngx_http_markdown_json_tail_reserve();
@@ -1702,11 +1691,20 @@ ngx_http_markdown_json_write_path_details(
     render.omitted_nodes = 0;
     render.entries_written = 0;
 
-    ngx_shmtx_lock(&shpool->mutex);
-    p = ngx_http_markdown_json_walk_path_tree_bounded(
-            live_metrics->per_path.path_tree.root,
-            &live_metrics->per_path.sentinel, &render);
-    ngx_shmtx_unlock(&shpool->mutex);
+    if (snapshot->per_path.path_entries > 0
+        && ngx_http_markdown_metrics_shm_zone != NULL
+        && ngx_http_markdown_metrics_shm_zone->data != NULL)
+    {
+        zone = ngx_http_markdown_metrics_shm_zone;
+        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
+        shpool = (ngx_slab_pool_t *) zone->shm.addr;
+
+        ngx_shmtx_lock(&shpool->mutex);
+        p = ngx_http_markdown_json_walk_path_tree_bounded(
+                live_metrics->per_path.path_tree.root,
+                &live_metrics->per_path.sentinel, &render);
+        ngx_shmtx_unlock(&shpool->mutex);
+    }
 
     if ((snapshot->per_path.overflow_count == 0
          && render.omitted_nodes == 0) || p >= end)
@@ -1748,18 +1746,6 @@ ngx_http_markdown_text_write_path_details(
     ngx_atomic_uint_t                              other_conversions;
     ngx_atomic_uint_t                              other_entries;
 
-    if (snapshot->per_path.path_entries == 0
-        || ngx_http_markdown_metrics_shm_zone == NULL
-        || ngx_http_markdown_metrics_shm_zone->data == NULL)
-    {
-        return p;
-    }
-
-    zone = ngx_http_markdown_metrics_shm_zone;
-    live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
-    shpool = (ngx_slab_pool_t *) zone->shm.addr;
-
-    p = ngx_slprintf(p, end, "\nPer-Path Details:\n");
     render.pos = p;
     render.end = end;
     render.tail_reserve = ngx_http_markdown_text_tail_reserve();
@@ -1768,11 +1754,27 @@ ngx_http_markdown_text_write_path_details(
     render.omitted_nodes = 0;
     render.entries_written = 0;
 
-    ngx_shmtx_lock(&shpool->mutex);
-    p = ngx_http_markdown_text_walk_path_tree_bounded(
-            live_metrics->per_path.path_tree.root,
-            &live_metrics->per_path.sentinel, &render);
-    ngx_shmtx_unlock(&shpool->mutex);
+    if (snapshot->per_path.path_entries > 0
+        && ngx_http_markdown_metrics_shm_zone != NULL
+        && ngx_http_markdown_metrics_shm_zone->data != NULL)
+    {
+        zone = ngx_http_markdown_metrics_shm_zone;
+        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
+        shpool = (ngx_slab_pool_t *) zone->shm.addr;
+
+        p = ngx_slprintf(p, end, "\nPer-Path Details:\n");
+        render.pos = p;
+        ngx_shmtx_lock(&shpool->mutex);
+        p = ngx_http_markdown_text_walk_path_tree_bounded(
+                live_metrics->per_path.path_tree.root,
+                &live_metrics->per_path.sentinel, &render);
+        ngx_shmtx_unlock(&shpool->mutex);
+    } else if (snapshot->per_path.overflow_count > 0) {
+        p = ngx_slprintf(p, end, "\nPer-Path Details:\n");
+        render.pos = p;
+    } else {
+        return p;
+    }
 
     if ((snapshot->per_path.overflow_count == 0
          && render.omitted_nodes == 0) || p >= end)

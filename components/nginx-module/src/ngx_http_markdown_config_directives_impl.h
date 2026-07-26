@@ -834,8 +834,10 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Maximum number of distinct URI paths tracked individually in
      * the per-path RB-tree.  When this limit is reached, further
-     * unique paths are counted in the overflow_count aggregate
-     * and appear under the "__other__" pseudo-path in output.
+     * unique paths are counted in the overflow_count aggregate and
+     * appear under the "__other__" pseudo-path in output.  The same
+     * conversion aggregate also covers paths beyond the fixed retained
+     * path-length limit.
      *
      * This is a global (http-level) setting because the per-path
      * limit is stored in shared memory and applies across all
