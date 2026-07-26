@@ -710,6 +710,7 @@ typedef struct {
     u_char             *end;
     size_t              tail_reserve;
     ngx_atomic_uint_t   omitted_conversions;
+    ngx_atomic_uint_t   omitted_entries;
     ngx_atomic_uint_t   omitted_time_ms;
     ngx_uint_t          omitted_nodes;
     ngx_uint_t          entries_written;
@@ -767,16 +768,6 @@ ngx_http_markdown_metrics_saturating_size_add(size_t left, size_t right)
     }
 
     return left + right;
-}
-
-static ngx_atomic_uint_t
-ngx_http_markdown_metrics_omitted_nodes_as_atomic(size_t omitted_nodes)
-{
-    if (omitted_nodes > (size_t) ((ngx_atomic_uint_t) -1)) {
-        return (ngx_atomic_uint_t) -1;
-    }
-
-    return (ngx_atomic_uint_t) omitted_nodes;
 }
 
 /**
@@ -1550,6 +1541,9 @@ ngx_http_markdown_json_walk_path_tree_bounded(
                     ngx_http_markdown_metrics_saturating_add(
                         render->omitted_conversions,
                         pnode->conversions);
+                render->omitted_entries =
+                    ngx_http_markdown_metrics_saturating_add(
+                        render->omitted_entries, pnode->entries);
                 render->omitted_time_ms =
                     ngx_http_markdown_metrics_saturating_add(
                         render->omitted_time_ms,
@@ -1563,6 +1557,9 @@ ngx_http_markdown_json_walk_path_tree_bounded(
                 ngx_http_markdown_metrics_saturating_add(
                     render->omitted_conversions,
                     pnode->conversions);
+            render->omitted_entries =
+                ngx_http_markdown_metrics_saturating_add(
+                    render->omitted_entries, pnode->entries);
             render->omitted_time_ms =
                 ngx_http_markdown_metrics_saturating_add(
                     render->omitted_time_ms,
@@ -1576,6 +1573,8 @@ ngx_http_markdown_json_walk_path_tree_bounded(
         pnode2 = (const ngx_http_markdown_path_metric_node_t *) node;
         render->omitted_conversions = ngx_http_markdown_metrics_saturating_add(
             render->omitted_conversions, pnode2->conversions);
+        render->omitted_entries = ngx_http_markdown_metrics_saturating_add(
+            render->omitted_entries, pnode2->entries);
         render->omitted_time_ms = ngx_http_markdown_metrics_saturating_add(
             render->omitted_time_ms,
             pnode2->conversion_time_sum_ms);
@@ -1634,6 +1633,9 @@ ngx_http_markdown_text_walk_path_tree_bounded(
                     ngx_http_markdown_metrics_saturating_add(
                         render->omitted_conversions,
                         pnode->conversions);
+                render->omitted_entries =
+                    ngx_http_markdown_metrics_saturating_add(
+                        render->omitted_entries, pnode->entries);
                 render->omitted_time_ms =
                     ngx_http_markdown_metrics_saturating_add(
                         render->omitted_time_ms,
@@ -1649,6 +1651,9 @@ ngx_http_markdown_text_walk_path_tree_bounded(
                 ngx_http_markdown_metrics_saturating_add(
                     render->omitted_conversions,
                     pnode->conversions);
+            render->omitted_entries =
+                ngx_http_markdown_metrics_saturating_add(
+                    render->omitted_entries, pnode->entries);
             render->omitted_time_ms =
                 ngx_http_markdown_metrics_saturating_add(
                     render->omitted_time_ms,
@@ -1662,6 +1667,8 @@ ngx_http_markdown_text_walk_path_tree_bounded(
         pnode2 = (const ngx_http_markdown_path_metric_node_t *) node;
         render->omitted_conversions = ngx_http_markdown_metrics_saturating_add(
             render->omitted_conversions, pnode2->conversions);
+        render->omitted_entries = ngx_http_markdown_metrics_saturating_add(
+            render->omitted_entries, pnode2->entries);
         render->omitted_time_ms = ngx_http_markdown_metrics_saturating_add(
             render->omitted_time_ms,
             pnode2->conversion_time_sum_ms);
@@ -1694,6 +1701,7 @@ ngx_http_markdown_json_write_path_details(
     render.end = end;
     render.tail_reserve = ngx_http_markdown_json_tail_reserve();
     render.omitted_conversions = 0;
+    render.omitted_entries = 0;
     render.omitted_time_ms = 0;
     render.omitted_nodes = 0;
     render.entries_written = 0;
@@ -1726,9 +1734,8 @@ ngx_http_markdown_json_write_path_details(
         snapshot->per_path.unretained_conversion_time_sum_ms,
         render.omitted_time_ms);
     other_entries = ngx_http_markdown_metrics_saturating_add(
-        snapshot->per_path.overflow_count,
-        ngx_http_markdown_metrics_omitted_nodes_as_atomic(
-            render.omitted_nodes));
+        snapshot->per_path.unretained_conversions,
+        render.omitted_entries);
 
     if (render.entries_written > 0) {
         p = ngx_slprintf(p, end, ",");
@@ -1762,6 +1769,7 @@ ngx_http_markdown_text_write_path_details(
     render.end = end;
     render.tail_reserve = ngx_http_markdown_text_tail_reserve();
     render.omitted_conversions = 0;
+    render.omitted_entries = 0;
     render.omitted_time_ms = 0;
     render.omitted_nodes = 0;
     render.entries_written = 0;
@@ -1801,9 +1809,8 @@ ngx_http_markdown_text_write_path_details(
         snapshot->per_path.unretained_conversion_time_sum_ms,
         render.omitted_time_ms);
     other_entries = ngx_http_markdown_metrics_saturating_add(
-        snapshot->per_path.overflow_count,
-        ngx_http_markdown_metrics_omitted_nodes_as_atomic(
-            render.omitted_nodes));
+        snapshot->per_path.unretained_conversions,
+        render.omitted_entries);
 
     return ngx_slprintf(p, end,
         "- Path[__other__]: conversions=%uA entries=%uA "
