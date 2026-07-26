@@ -1779,7 +1779,7 @@ markdown_metrics_per_path_cardinality 200;
 **Default:** `100`
 **Context:** http only
 
-Maximum number of distinct URI paths tracked individually in the per-path RB-tree. When this limit is reached, further unique paths are counted in the overflow aggregate and appear under the `__other__` pseudo-path in output.
+Maximum number of distinct URI paths tracked individually in the per-path RB-tree. When this limit is reached, or when a URI exceeds the 1024-byte retained-path safety limit, the conversion is counted in the overflow aggregate and appears under the `__other__` pseudo-path in output. The overflow counter counts omitted conversions, not unique paths.
 
 This is a global (http-level) setting because the per-path limit is stored in shared memory and applies across all server and location blocks.
 

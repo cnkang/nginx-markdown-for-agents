@@ -162,7 +162,7 @@ All metrics use the `nginx_markdown_` prefix. Counter metrics use the `_total` s
 | `nginx_markdown_decompression_failures_total` | counter | Failed decompression attempts. |
 | `nginx_markdown_per_path_conversions_total` | counter | Aggregate conversions recorded by the bounded per-path store. |
 | `nginx_markdown_per_path_conversion_time_ms_total` | counter | Aggregate conversion time recorded by the bounded per-path store. |
-| `nginx_markdown_per_path_overflow_total` | counter | Paths folded into the bounded overflow bucket. |
+| `nginx_markdown_per_path_overflow_total` | counter | Conversions not retained individually because the per-path cardinality or path-length retention limit was reached. |
 
 ### Counter Metrics (with labels)
 
@@ -271,8 +271,10 @@ The fixed families and bounded label values are listed above and in the
 There is intentionally no fixed total-series claim: streaming families depend
 on the compiled feature set, and `markdown_metrics_per_path on` adds one series
 per retained path to two per-path families. Per-path tracking is off by default,
-is capped by `markdown_metrics_per_path_cardinality`, and aggregates overflow
-under `path="__other__"`. The renderer also keeps each path's conversion-count
+is capped by `markdown_metrics_per_path_cardinality` and by the fixed 1024-byte
+retained-path limit. Conversions omitted by either retention limit aggregate
+under `path="__other__"`; this is a conversion counter, not a unique-path count.
+The renderer also keeps each path's conversion-count
 and conversion-time series atomic. If the bounded metrics response cannot hold
 both lines after label escaping, that path is omitted from the detailed series
 and folded into the same `__other__` pair so the aggregate scrape remains
