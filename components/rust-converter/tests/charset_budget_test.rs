@@ -312,6 +312,99 @@ fn resolved_utf8_large_feed_has_no_transient_input_sized_allocation() {
 }
 
 #[test]
+fn first_explicit_utf8_feed_uses_zero_copy_budget_plan() {
+    let mut input = b"<script>".to_vec();
+    input.extend(std::iter::repeat_n(b'x', LARGE_UTF8_CHUNK));
+    input.extend_from_slice(b"</script>");
+    let budget = MemoryBudget {
+        // The real fixed tokenizer reservation plus the zero-copy working set
+        // fit in 2 MiB. The former unconditional 4x preflight adds at least
+        // 1 MiB and exceeds that same total before `feed` can run.
+        total: 2 * 1024 * 1024,
+        state_stack: 4 * 1024,
+        output_buffer: 4 * 1024,
+        charset_sniff: 1024,
+        lookahead: 4 * 1024,
+    };
+    let mut conv = make_converter_with_budget(budget, "UTF-8");
+
+    LARGE_ALLOCATIONS.store(0, Ordering::Relaxed);
+    COUNT_LARGE_ALLOCATIONS.with(|enabled| enabled.set(true));
+    let result = conv.feed_chunk(&input);
+    COUNT_LARGE_ALLOCATIONS.with(|enabled| enabled.set(false));
+
+    assert!(
+        result.is_ok(),
+        "the first explicit UTF-8 feed must not reserve 4x input: {result:?}"
+    );
+    assert_eq!(
+        LARGE_ALLOCATIONS.load(Ordering::Relaxed),
+        0,
+        "the converter must not allocate an input-sized charset buffer"
+    );
+    conv.finalize()
+        .expect("zero-copy UTF-8 feed must finalize within the fixed budget");
+}
+
+#[test]
+fn resolved_utf8_converter_feed_has_no_charset_allocation() {
+    let budget = MemoryBudget {
+        total: 64 * 1024,
+        state_stack: 4 * 1024,
+        output_buffer: 4 * 1024,
+        charset_sniff: 1024,
+        lookahead: 4 * 1024,
+    };
+    let mut conv = make_converter_with_budget(budget, "UTF-8");
+    conv.feed_chunk(b"<script>warm-up</script>")
+        .expect("warm-up must resolve UTF-8");
+    let mut input = b"<script>".to_vec();
+    input.extend(std::iter::repeat_n(b'x', LARGE_UTF8_CHUNK));
+    input.extend_from_slice(b"</script>");
+
+    LARGE_ALLOCATIONS.store(0, Ordering::Relaxed);
+    COUNT_LARGE_ALLOCATIONS.with(|enabled| enabled.set(true));
+    let result = conv.feed_chunk(&input);
+    COUNT_LARGE_ALLOCATIONS.with(|enabled| enabled.set(false));
+
+    assert!(
+        result.is_ok(),
+        "resolved UTF-8 feed must succeed: {result:?}"
+    );
+    assert_eq!(
+        LARGE_ALLOCATIONS.load(Ordering::Relaxed),
+        0,
+        "resolved converter feed must not allocate an input-sized charset buffer"
+    );
+}
+
+#[test]
+fn pending_utf8_finalize_reuses_the_sniff_buffer() {
+    let mut input = b"<script>".to_vec();
+    input.extend(std::iter::repeat_n(b'x', 32 * 1024));
+    input.extend_from_slice(b"</script>");
+    let budget = MemoryBudget {
+        // The pending sniff buffer and final Markdown fit in this budget.
+        // The former flush preflight would add over 128 KiB before the
+        // existing working set and must reject this 160 KiB budget.
+        total: 160 * 1024,
+        state_stack: 4 * 1024,
+        output_buffer: 4 * 1024,
+        charset_sniff: 64 * 1024,
+        lookahead: 4 * 1024,
+    };
+    let mut conv = StreamingConverter::new(ConversionOptions::default(), budget);
+
+    conv.feed_chunk(&input)
+        .expect("the input should remain in the pending sniff buffer");
+    let result = conv.finalize();
+    assert!(
+        result.is_ok(),
+        "UTF-8 pending finalize must not reserve 4x resident bytes: {result:?}"
+    );
+}
+
+#[test]
 fn from_utf8_lossy_owned_allocation_within_budget() {
     let budget = MemoryBudget {
         total: 64 * 1024,
