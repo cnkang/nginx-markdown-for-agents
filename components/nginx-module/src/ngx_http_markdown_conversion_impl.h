@@ -1200,6 +1200,25 @@ ngx_http_markdown_record_per_path_metrics(
         return;
     }
 
+    /* Bound the retained path bytes to avoid cardinality_limit being
+     * bypassed by a small number of very long paths.  The shared-memory
+     * slab is smaller than a request pool, so cap locally rather than
+     * relying on the surrounding NGINX request-header configuration.
+     *
+     * Use a static upper bound rather than a configurable directive to
+     * keep the surface minimal.  1024 covers structured routing paths
+     * cleanly; if a higher value is ever required, it can be promoted to
+     * a full markdown_metrics_per_path_path_max_len directive. */
+    if (r->uri.len > NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN) {
+        ngx_atomic_fetch_add(&metrics->per_path.overflow_count, 1);
+        ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
+        ngx_atomic_fetch_add(
+            &metrics->per_path.path_conversion_time_sum_ms,
+            (ngx_atomic_uint_t) elapsed_ms);
+        ngx_shmtx_unlock(&shpool->mutex);
+        return;
+    }
+
     node = ngx_slab_alloc_locked(shpool,
         sizeof(ngx_http_markdown_path_metric_node_t));
     if (node == NULL) {
