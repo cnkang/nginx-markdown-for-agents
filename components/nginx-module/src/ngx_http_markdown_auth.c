@@ -1076,34 +1076,74 @@ ngx_http_markdown_for_each_cache_control_header(ngx_http_request_t *r,
 }
 
 
-/*
- * Visitor for ngx_http_markdown_scan_cache_control_headers:
- * collects no-store / private / public directive flags and remembers
- * the first Cache-Control entry pointer.
- */
-static ngx_int_t
-ngx_http_markdown_scan_cc_visitor(ngx_http_request_t *r,
-    ngx_table_elt_t *entry, void *ctx)
+static ngx_uint_t
+ngx_http_markdown_cc_directive_matches(
+    const ngx_http_markdown_cc_directive_t *directive,
+    const ngx_str_t *expected)
+{
+    return (size_t) (directive->name_end - directive->name_start)
+           == expected->len
+           && ngx_http_markdown_token_equals_ignore_case(
+                  directive->name_start, expected->data, expected->len);
+}
+
+
+static void
+ngx_http_markdown_apply_cc_directive(ngx_http_markdown_cc_scan_t *scan,
+    const ngx_http_markdown_cc_directive_t *directive)
+{
+    if (ngx_http_markdown_cc_directive_matches(
+            directive, &ngx_http_markdown_no_store_directive))
+    {
+        if (directive->has_value) {
+            scan->malformed = 1;
+        } else {
+            scan->has_no_store = 1;
+        }
+        return;
+    }
+
+    if (ngx_http_markdown_cc_directive_matches(
+            directive, &ngx_http_markdown_private_directive))
+    {
+        if (!directive->has_value) {
+            scan->has_private = 1;
+        }
+        return;
+    }
+
+    if (ngx_http_markdown_cc_directive_matches(
+            directive, &ngx_http_markdown_public_directive))
+    {
+        if (directive->has_value) {
+            scan->malformed = 1;
+        } else {
+            scan->any_public = 1;
+        }
+    }
+}
+
+
+/* Collect no-store / private / public directives from one header entry. */
+static void
+ngx_http_markdown_scan_cc_header(ngx_table_elt_t *entry,
+    ngx_http_markdown_cc_scan_t *scan)
 {
     const u_char                       *p;
     const u_char                       *end;
     ngx_http_markdown_cc_directive_t    directive;
-    ngx_http_markdown_cc_scan_t        *scan;
     ngx_int_t                           rc;
-
-    (void) r;
-    scan = ctx;
 
     if (scan->first_entry == NULL) {
         scan->first_entry = entry;
     }
 
     if (entry->value.len == 0) {
-        return NGX_OK;
+        return;
     }
     if (entry->value.data == NULL) {
         scan->malformed = 1;
-        return NGX_OK;
+        return;
     }
 
     p = entry->value.data;
@@ -1113,54 +1153,13 @@ ngx_http_markdown_scan_cc_visitor(ngx_http_request_t *r,
         rc = ngx_http_markdown_next_cache_control_directive(
             &p, end, &directive);
         if (rc == NGX_DECLINED) {
-            return NGX_OK;
+            return;
         }
         if (rc == NGX_ERROR) {
             scan->malformed = 1;
-            return NGX_OK;
+            return;
         }
-
-        if ((size_t) (directive.name_end - directive.name_start)
-            == ngx_http_markdown_no_store_directive.len
-            && ngx_http_markdown_token_equals_ignore_case(
-                   directive.name_start,
-                   ngx_http_markdown_no_store_directive.data,
-                   ngx_http_markdown_no_store_directive.len))
-        {
-            if (directive.has_value) {
-                scan->malformed = 1;
-            } else {
-                scan->has_no_store = 1;
-            }
-            continue;
-        }
-
-        if ((size_t) (directive.name_end - directive.name_start)
-            == ngx_http_markdown_private_directive.len
-            && ngx_http_markdown_token_equals_ignore_case(
-                   directive.name_start,
-                   ngx_http_markdown_private_directive.data,
-                   ngx_http_markdown_private_directive.len))
-        {
-            if (!directive.has_value) {
-                scan->has_private = 1;
-            }
-            continue;
-        }
-
-        if ((size_t) (directive.name_end - directive.name_start)
-            == ngx_http_markdown_public_directive.len
-            && ngx_http_markdown_token_equals_ignore_case(
-                   directive.name_start,
-                   ngx_http_markdown_public_directive.data,
-                   ngx_http_markdown_public_directive.len))
-        {
-            if (directive.has_value) {
-                scan->malformed = 1;
-            } else {
-                scan->any_public = 1;
-            }
-        }
+        ngx_http_markdown_apply_cc_directive(scan, &directive);
     }
 }
 
@@ -1181,16 +1180,24 @@ static void
 ngx_http_markdown_scan_cache_control_headers(ngx_list_t *headers,
                                              ngx_http_markdown_cc_scan_t *scan)
 {
+    ngx_list_part_t  *part;
+    ngx_table_elt_t  *elts;
+
     scan->first_entry = NULL;
     scan->has_no_store = 0;
     scan->has_private = 0;
     scan->any_public = 0;
     scan->malformed = 0;
 
-    /* r is unused by the scan visitor; pass NULL since the visitor
-     * only needs the entry + ctx. */
-    (void) ngx_http_markdown_for_each_cache_control_header(NULL, headers,
-        ngx_http_markdown_scan_cc_visitor, scan);
+    part = &headers->part;
+    for (/* void */; part != NULL; part = part->next) {
+        elts = part->elts;
+        for (size_t i = 0; i < part->nelts; i++) {
+            if (ngx_http_markdown_is_cache_control_header(&elts[i])) {
+                ngx_http_markdown_scan_cc_header(&elts[i], scan);
+            }
+        }
+    }
 }
 
 /*

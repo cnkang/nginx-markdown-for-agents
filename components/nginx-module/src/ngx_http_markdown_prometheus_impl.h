@@ -91,7 +91,7 @@ ngx_http_markdown_prometheus_write_path_pair(
 static u_char *
 ngx_http_markdown_prometheus_write_other_path(
     u_char *p,
-    u_char *end,
+    const u_char *end,
     ngx_http_markdown_prometheus_path_render_ctx_t *render,
     ngx_atomic_uint_t overflow_count);
 
@@ -899,7 +899,7 @@ ngx_http_markdown_metrics_write_prometheus_paths(
 static u_char *
 ngx_http_markdown_prometheus_write_other_path(
     u_char *p,
-    u_char *end,
+    const u_char *end,
     ngx_http_markdown_prometheus_path_render_ctx_t *render,
     ngx_atomic_uint_t overflow_count)
 {
@@ -1037,7 +1037,6 @@ ngx_http_markdown_prometheus_escaped_label_size(
     size_t len,
     size_t *escaped_size)
 {
-    size_t  i;
     size_t  increment;
     size_t  total;
     u_char  ch;
@@ -1047,7 +1046,7 @@ ngx_http_markdown_prometheus_escaped_label_size(
     }
 
     total = 0;
-    for (i = 0; i < len; i++) {
+    for (size_t i = 0; i < len; i++) {
         ch = src[i];
 
         switch (ch) {
@@ -1191,7 +1190,7 @@ ngx_http_markdown_prometheus_write_path_pair(
     size_t needed)
 {
     size_t   remaining;
-    u_char  *start;
+    const u_char  *start;
 
     if (render == NULL || render->pos == NULL || render->end == NULL
         || render->pos > render->end)
@@ -1297,12 +1296,11 @@ ngx_http_markdown_prometheus_walk_path_tree(
     }
 
     pnode = (const ngx_http_markdown_path_metric_node_t *) node;
-    conversions = (ngx_atomic_uint_t) pnode->conversions;
-    conversion_time_ms =
-        (ngx_atomic_uint_t) pnode->conversion_time_sum_ms;
+    conversions = pnode->conversions;
+    conversion_time_ms = pnode->conversion_time_sum_ms;
 
     rc = ngx_http_markdown_prometheus_path_pair_size(
-        pnode->path, (size_t) pnode->path_len, conversions,
+        pnode->path, pnode->path_len, conversions,
         conversion_time_ms, &needed);
     if (rc != NGX_OK) {
         render->failed = 1;
@@ -1310,7 +1308,7 @@ ngx_http_markdown_prometheus_walk_path_tree(
     }
 
     rc = ngx_http_markdown_prometheus_write_path_pair(
-        render, pnode->path, (size_t) pnode->path_len,
+        render, pnode->path, pnode->path_len,
         conversions, conversion_time_ms, needed);
     if (rc == NGX_DECLINED) {
         ngx_http_markdown_prometheus_accumulate_omitted_path(

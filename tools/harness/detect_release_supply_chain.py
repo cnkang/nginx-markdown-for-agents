@@ -20,11 +20,11 @@ from lib.path_validation import validate_read_path  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ALMALINUX_9 = (
-    "almalinux:9@sha256:"
+    "almalinux@sha256:"
     "d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743"
 )
 ALPINE_320 = (
-    "alpine:3.20@sha256:"
+    "alpine@sha256:"
     "d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
 )
 
