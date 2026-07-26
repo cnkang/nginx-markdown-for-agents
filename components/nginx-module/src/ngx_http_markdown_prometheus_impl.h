@@ -781,8 +781,22 @@ ngx_http_markdown_metrics_write_prometheus(
 
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
 /*
- * Append optional path-labelled series without allowing path detail to
- * exhaust the aggregate response.  The RB-tree is read under the SHM mutex.
+ * Append bounded optional path-labelled series to a Prometheus response.
+ *
+ * The shared-memory RB-tree is read while holding its slab mutex.  The
+ * renderer reserves room for the aggregated __other__ pair before emitting
+ * individual paths, so cardinality detail cannot exhaust the response buffer.
+ * Entries that cannot fit are accumulated into that pair; a write-size
+ * mismatch is treated as an error rather than emitting partial series.
+ *
+ * Parameters:
+ *   p        - start of the remaining writable output buffer
+ *   end      - one byte beyond the writable output buffer
+ *   snapshot - immutable aggregate metrics snapshot
+ *
+ * Returns:
+ *   Updated write position, the unchanged position when paths cannot be
+ *   emitted safely, or NULL when an internal rendering invariant fails.
  */
 static u_char *
 ngx_http_markdown_metrics_write_prometheus_paths(
