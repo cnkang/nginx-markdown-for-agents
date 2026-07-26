@@ -1117,10 +1117,14 @@ ngx_http_markdown_prometheus_path_pair_size(
 
     if (ngx_http_markdown_prometheus_checked_size_add(
             &total, escaped_size)
+        != NGX_OK)
+    {
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_prometheus_checked_size_add(
+            &total, escaped_size)
         != NGX_OK
-        || ngx_http_markdown_prometheus_checked_size_add(
-               &total, escaped_size) /* NOSONAR: intentional — same path label in both path_conversions and path_time metrics; S1764 */
-           != NGX_OK
         || ngx_http_markdown_prometheus_checked_size_add(
                &total,
                ngx_http_markdown_prometheus_uint_digits(conversions))
