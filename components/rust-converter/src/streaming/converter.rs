@@ -146,6 +146,9 @@ pub struct StreamingConverter {
     /// slices of it. This field tracks that resident allocation so
     /// `update_peak_memory()` can account for it in the total budget.
     charset_transcoded_bytes: usize,
+    /// A rejected charset allocation plan is terminal for this converter so
+    /// a later finalize call reports the original precommit error.
+    charset_preflight_error: Option<ConversionError>,
 }
 
 impl StreamingConverter {
@@ -250,6 +253,7 @@ impl StreamingConverter {
             cumulative_input_bytes: 0,
             bom_stripped: false,
             charset_transcoded_bytes: 0,
+            charset_preflight_error: None,
         }
     }
 
@@ -382,6 +386,10 @@ impl StreamingConverter {
         // 1. Check cooperative timeout
         self.check_timeout()?;
 
+        if let Some(error) = self.charset_preflight_error.clone() {
+            return Err(self.wrap_error(error));
+        }
+
         // 1b. Parser budget enforcement (cumulative input size limit).
         // Track cumulative input bytes and reject when the total exceeds
         // the configured parser_budget. Uses input size as a proxy for
@@ -407,32 +415,23 @@ impl StreamingConverter {
         // required when streaming lacked pruning support.
 
         // 2. Charset detection / transcoding
-        // Before transcoding, check that the worst-case transcoded output
-        // fits within the total budget. The transcoded buffer will coexist
-        // with other resident state (tokenizer reservation, emitter buffers,
-        // utf8_tail, etc.) during the tokenizer processing loop.
-
-        // Calculate the combined input length for budget checking:
-        // Include the charset state's resident bytes (sniff_buffer in Pending
-        // state), any pending utf8_tail from prior chunk, and this chunk's data,
-        // because a Pending→Resolved transition will transcode all accumulated
-        // sniff buffer + this chunk together, and utf8_tail may be combined
-        // with the transcoded output during tokenizer processing.
-        let total_input_for_transcode = self
+        // CharsetState plans only allocations that this operation can add
+        // while the current working set remains live.  That keeps explicit
+        // UTF-8 feeds zero-copy while retaining a conservative preflight for
+        // unresolved and non-UTF-8 states.
+        let charset_allocation = self
             .charset_state
-            .resident_bytes()
-            .saturating_add(self.utf8_tail.len())
-            .saturating_add(data.len());
-        let max_transcode = self
-            .charset_state
-            .max_transcode_output_len(total_input_for_transcode);
-        if max_transcode > 0 {
+            .feed_allocation_upper_bound(data.len())
+            .map_err(|e| self.wrap_error(e))?;
+        if charset_allocation > 0 {
             let current_working_set = self.estimate_working_set();
-            // The transcoded output may coexist with utf8_tail during processing,
-            // so we must account for both in the pre-commit budget check.
-            self.budget
-                .check_total(current_working_set, max_transcode)
-                .map_err(|e| self.wrap_error(e))?;
+            if let Err(error) = self
+                .budget
+                .check_total(current_working_set, charset_allocation)
+            {
+                self.charset_preflight_error = Some(error.clone());
+                return Err(self.wrap_error(error));
+            }
         }
 
         let transcoded = self
@@ -528,19 +527,26 @@ impl StreamingConverter {
         // Check timeout
         self.check_timeout()?;
 
+        if let Some(error) = self.charset_preflight_error.take() {
+            return Err(self.wrap_error(error));
+        }
+
         // 1. Flush charset state (any remaining buffered data)
-        // Before flushing, check that the worst-case output from the
-        // decoder flush fits within the total budget. The flush may
-        // produce a transcoded Vec that coexists with utf8_tail and
-        // the tokenizer reservation.
-        let max_flush_output = self
+        // CharsetState distinguishes a UTF-8 pending sniff buffer (returned
+        // in place) from a decoder flush that must allocate output.
+        let flush_allocation = self
             .charset_state
-            .max_transcode_output_len(self.charset_state.resident_bytes().max(64));
-        if max_flush_output > 0 {
+            .flush_allocation_upper_bound()
+            .map_err(|e| self.wrap_error(e))?;
+        if flush_allocation > 0 {
             let current_working_set = self.estimate_working_set();
-            self.budget
-                .check_total(current_working_set, max_flush_output)
-                .map_err(|e| self.wrap_error(e))?;
+            if let Err(error) = self
+                .budget
+                .check_total(current_working_set, flush_allocation)
+            {
+                self.charset_preflight_error = Some(error.clone());
+                return Err(self.wrap_error(error));
+            }
         }
 
         let remaining_charset = self.charset_state.flush().map_err(|e| self.wrap_error(e))?;
