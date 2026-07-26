@@ -710,8 +710,19 @@ impl StreamingConverter {
     fn process_utf8_bytes(&mut self, input: &[u8], at_eof: bool) -> Result<(), ConversionError> {
         let mut remaining = input;
 
-        if !self.utf8_tail.is_empty() {
+        while !self.utf8_tail.is_empty() && (!remaining.is_empty() || at_eof) {
             let tail_len = self.utf8_tail.len();
+            if tail_len > 3 {
+                return Err(self.wrap_error(ConversionError::InternalError(
+                    "UTF-8 tail exceeded one incomplete code point".to_string(),
+                )));
+            }
+
+            if remaining.is_empty() {
+                let tail = std::mem::take(&mut self.utf8_tail);
+                return self.process_utf8_slice(&tail, true);
+            }
+
             let prefix_input_len = remaining.len().min(4usize.saturating_sub(tail_len));
             let mut prefix = [0u8; 4];
 
@@ -727,7 +738,11 @@ impl StreamingConverter {
             remaining = &remaining[prefix_input_len..];
         }
 
-        self.process_utf8_slice(remaining, at_eof)
+        if remaining.is_empty() {
+            Ok(())
+        } else {
+            self.process_utf8_slice(remaining, at_eof)
+        }
     }
 
     /// Process one borrowed UTF-8 slice, preserving an incomplete trailing
@@ -748,7 +763,7 @@ impl StreamingConverter {
             split_utf8_tail(input)
         };
         if !tail.is_empty() {
-            self.utf8_tail.extend_from_slice(tail);
+            self.store_utf8_tail(tail)?;
         }
         if valid.is_empty() {
             return Ok(());
@@ -779,6 +794,17 @@ impl StreamingConverter {
         let result = self.process_tokenizer_input(&utf8_str);
         self.charset_transcoded_bytes = saved_transcoded;
         result
+    }
+
+    fn store_utf8_tail(&mut self, tail: &[u8]) -> Result<(), ConversionError> {
+        if !self.utf8_tail.is_empty() || tail.len() > 3 {
+            return Err(self.wrap_error(ConversionError::InternalError(
+                "UTF-8 tail must contain one incomplete code point".to_string(),
+            )));
+        }
+
+        self.utf8_tail.extend_from_slice(tail);
+        Ok(())
     }
 
     /// Process one bounded tokenizer event batch.
@@ -1557,6 +1583,7 @@ fn split_utf8_tail(bytes: &[u8]) -> (&[u8], &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     /// Create a `StreamingConverter` with UTF-8 content type preconfigured.
     ///
@@ -3271,6 +3298,181 @@ mod tests {
                 String::from_utf8_lossy(&chunked[start..chunked_end])
             );
         }
+    }
+
+    #[test]
+    fn test_utf8_tail_remains_one_incomplete_code_point() {
+        let mut conv = make_converter();
+
+        conv.process_utf8_bytes(b"<p>\xE2", false)
+            .expect("one-byte UTF-8 tail should be retained");
+        assert_eq!(conv.utf8_tail, [0xE2]);
+
+        conv.process_utf8_bytes(&[0x00, 0x00, 0xE2, 0xF0, 0x80], false)
+            .expect("pending tail recovery must not append a second tail");
+        assert!(conv.utf8_tail.len() <= 3);
+        assert_eq!(conv.utf8_tail, [0xF0, 0x80]);
+
+        conv.process_utf8_bytes(&[0x80, 0x80, b'<'], false)
+            .expect("completed tail should not leave a stale continuation");
+        assert!(conv.utf8_tail.is_empty());
+    }
+
+    #[test]
+    fn test_utf8_tail_lengths_flush_at_eof() {
+        for tail in [&[0xE2][..], &[0xE2, 0x82][..], &[0xF0, 0x90, 0x80][..]] {
+            let mut conv = make_converter();
+
+            conv.process_utf8_bytes(tail, false)
+                .expect("incomplete UTF-8 tail should be retained");
+            assert_eq!(conv.utf8_tail, tail);
+            assert!(conv.utf8_tail.len() <= 3);
+
+            conv.process_utf8_bytes(&[], true)
+                .expect("EOF must flush the final incomplete sequence");
+            assert!(conv.utf8_tail.is_empty());
+        }
+    }
+
+    fn decode_base64_fixture(encoded: &str) -> Vec<u8> {
+        let mut output = Vec::new();
+        let mut value = 0u32;
+        let mut bits = 0u32;
+
+        for byte in encoded.bytes().filter(|byte| !byte.is_ascii_whitespace()) {
+            let sextet = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => break,
+                _ => panic!("invalid base64 fixture byte"),
+            };
+            value = (value << 6) | u32::from(sextet);
+            bits += 6;
+            while bits >= 8 {
+                bits -= 8;
+                output.push((value >> bits) as u8);
+                value &= (1 << bits) - 1;
+            }
+        }
+
+        output
+    }
+
+    fn assert_clusterfuzz_utf8_tail_fixture_does_not_panic(input: &[u8]) {
+        let mut conv = make_converter();
+        let mut cursor = 0usize;
+
+        for (index, byte) in input.iter().take(64).enumerate() {
+            let remaining = input.len().saturating_sub(cursor);
+            if remaining == 0 {
+                break;
+            }
+            let raw = if index % 8 == 0 {
+                usize::from(*byte).saturating_mul(8).max(1)
+            } else {
+                usize::from(*byte % 32).max(1)
+            };
+            let end = cursor.saturating_add(raw).min(input.len());
+            if conv.feed_chunk(&input[cursor..end]).is_err() {
+                break;
+            }
+            cursor = end;
+            assert!(conv.utf8_tail.len() <= 3);
+        }
+        if cursor < input.len() {
+            let _ = conv.feed_chunk(&input[cursor..]);
+            assert!(conv.utf8_tail.len() <= 3);
+        }
+        conv.process_utf8_bytes(&[], true)
+            .expect("EOF must flush the minimized regression tail");
+        assert!(conv.utf8_tail.is_empty());
+        let _ = conv.finalize();
+    }
+
+    #[test]
+    fn test_clusterfuzz_utf8_tail_original_regression_does_not_panic() {
+        let input =
+            decode_base64_fixture(include_str!("fixtures/clusterfuzz_utf8_tail_original.b64"));
+
+        assert_clusterfuzz_utf8_tail_fixture_does_not_panic(&input);
+    }
+
+    #[test]
+    fn test_clusterfuzz_utf8_tail_minimized_regression_does_not_panic() {
+        let input =
+            decode_base64_fixture(include_str!("fixtures/clusterfuzz_utf8_tail_minimized.b64"));
+
+        assert_clusterfuzz_utf8_tail_fixture_does_not_panic(&input);
+    }
+
+    #[test]
+    fn test_utf8_tail_invariant_for_bytewise_and_mixed_boundaries() {
+        let input = b"\xEF\xBB\xBF<p>\xE2\x82\xAC \xF0\x9F\x98\x80</p>\xE2\x82";
+
+        for width in [1usize, 2, 3, 5] {
+            let mut conv = make_converter();
+            for chunk in input.chunks(width) {
+                conv.process_utf8_bytes(chunk, false)
+                    .expect("boundary split must not fail precommit");
+                assert!(conv.utf8_tail.len() <= 3);
+            }
+            conv.process_utf8_bytes(&[], true)
+                .expect("EOF must flush every final UTF-8 tail");
+            assert!(conv.utf8_tail.is_empty());
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_utf8_tail_is_single_incomplete_code_point(
+            input in proptest::collection::vec(any::<u8>(), 0..256),
+            widths in proptest::collection::vec(1usize..32, 1..32),
+        ) {
+            let mut conv = make_converter();
+            let mut offset = 0usize;
+
+            for width in widths {
+                if offset >= input.len() {
+                    break;
+                }
+                let end = offset.saturating_add(width).min(input.len());
+                let _ = conv.process_utf8_bytes(&input[offset..end], false);
+                prop_assert!(conv.utf8_tail.len() <= 3);
+                offset = end;
+            }
+            if offset < input.len() {
+                let _ = conv.process_utf8_bytes(&input[offset..], false);
+                prop_assert!(conv.utf8_tail.len() <= 3);
+            }
+            let _ = conv.process_utf8_bytes(&[], true);
+            prop_assert!(conv.utf8_tail.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_oversized_utf8_tail_is_a_precommit_error() {
+        let mut conv = make_converter();
+        conv.utf8_tail.extend_from_slice(&[0xF0, 0x90, 0x80, 0x80]);
+
+        let err = conv
+            .process_utf8_bytes(b"x", false)
+            .expect_err("corrupt UTF-8 tail must not panic");
+        assert!(matches!(err, ConversionError::InternalError(_)));
+    }
+
+    #[test]
+    fn test_oversized_utf8_tail_is_wrapped_postcommit() {
+        let mut conv = make_converter();
+        conv.commit_state = CommitState::PostCommit;
+        conv.utf8_tail.extend_from_slice(&[0xF0, 0x90, 0x80, 0x80]);
+
+        let err = conv
+            .process_utf8_bytes(b"x", false)
+            .expect_err("corrupt UTF-8 tail must not panic postcommit");
+        assert!(matches!(err, ConversionError::PostCommitError { .. }));
     }
 
     /// Parser budget enforcement: when the cumulative input bytes exceed
