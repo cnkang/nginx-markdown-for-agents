@@ -1543,11 +1543,11 @@ ngx_http_markdown_json_walk_path_tree_bounded(
                 render->omitted_conversions =
                     ngx_http_markdown_metrics_saturating_add(
                         render->omitted_conversions,
-                        (ngx_atomic_uint_t) pnode->conversions);
+                        pnode->conversions);
                 render->omitted_time_ms =
                     ngx_http_markdown_metrics_saturating_add(
                         render->omitted_time_ms,
-                        (ngx_atomic_uint_t) pnode->conversion_time_sum_ms);
+                        pnode->conversion_time_sum_ms);
                 render->omitted_nodes =
                     ngx_http_markdown_metrics_saturating_size_add(
                         render->omitted_nodes, 1);
@@ -1556,11 +1556,11 @@ ngx_http_markdown_json_walk_path_tree_bounded(
             render->omitted_conversions =
                 ngx_http_markdown_metrics_saturating_add(
                     render->omitted_conversions,
-                    (ngx_atomic_uint_t) pnode->conversions);
+                    pnode->conversions);
             render->omitted_time_ms =
                 ngx_http_markdown_metrics_saturating_add(
                     render->omitted_time_ms,
-                    (ngx_atomic_uint_t) pnode->conversion_time_sum_ms);
+                    pnode->conversion_time_sum_ms);
             render->omitted_nodes =
                 ngx_http_markdown_metrics_saturating_size_add(
                     render->omitted_nodes, 1);
@@ -1569,10 +1569,10 @@ ngx_http_markdown_json_walk_path_tree_bounded(
         const ngx_http_markdown_path_metric_node_t  *pnode2;
         pnode2 = (const ngx_http_markdown_path_metric_node_t *) node;
         render->omitted_conversions = ngx_http_markdown_metrics_saturating_add(
-            render->omitted_conversions, (ngx_atomic_uint_t) pnode2->conversions);
+            render->omitted_conversions, pnode2->conversions);
         render->omitted_time_ms = ngx_http_markdown_metrics_saturating_add(
             render->omitted_time_ms,
-            (ngx_atomic_uint_t) pnode2->conversion_time_sum_ms);
+            pnode2->conversion_time_sum_ms);
         render->omitted_nodes = ngx_http_markdown_metrics_saturating_size_add(
             render->omitted_nodes, 1);
     }
@@ -1627,11 +1627,11 @@ ngx_http_markdown_text_walk_path_tree_bounded(
                 render->omitted_conversions =
                     ngx_http_markdown_metrics_saturating_add(
                         render->omitted_conversions,
-                        (ngx_atomic_uint_t) pnode->conversions);
+                        pnode->conversions);
                 render->omitted_time_ms =
                     ngx_http_markdown_metrics_saturating_add(
                         render->omitted_time_ms,
-                        (ngx_atomic_uint_t) pnode->conversion_time_sum_ms);
+                        pnode->conversion_time_sum_ms);
                 render->omitted_nodes =
                     ngx_http_markdown_metrics_saturating_size_add(
                         render->omitted_nodes, 1);
@@ -1642,11 +1642,11 @@ ngx_http_markdown_text_walk_path_tree_bounded(
             render->omitted_conversions =
                 ngx_http_markdown_metrics_saturating_add(
                     render->omitted_conversions,
-                    (ngx_atomic_uint_t) pnode->conversions);
+                    pnode->conversions);
             render->omitted_time_ms =
                 ngx_http_markdown_metrics_saturating_add(
                     render->omitted_time_ms,
-                    (ngx_atomic_uint_t) pnode->conversion_time_sum_ms);
+                    pnode->conversion_time_sum_ms);
             render->omitted_nodes =
                 ngx_http_markdown_metrics_saturating_size_add(
                     render->omitted_nodes, 1);
@@ -1655,10 +1655,10 @@ ngx_http_markdown_text_walk_path_tree_bounded(
         const ngx_http_markdown_path_metric_node_t  *pnode2;
         pnode2 = (const ngx_http_markdown_path_metric_node_t *) node;
         render->omitted_conversions = ngx_http_markdown_metrics_saturating_add(
-            render->omitted_conversions, (ngx_atomic_uint_t) pnode2->conversions);
+            render->omitted_conversions, pnode2->conversions);
         render->omitted_time_ms = ngx_http_markdown_metrics_saturating_add(
             render->omitted_time_ms,
-            (ngx_atomic_uint_t) pnode2->conversion_time_sum_ms);
+            pnode2->conversion_time_sum_ms);
         render->omitted_nodes = ngx_http_markdown_metrics_saturating_size_add(
             render->omitted_nodes, 1);
     }
