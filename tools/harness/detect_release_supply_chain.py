@@ -9,6 +9,7 @@ that can promote externally supplied bytes into distributed artifacts.
 from __future__ import annotations
 
 import re
+from urllib.parse import urlsplit
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -128,7 +129,7 @@ def check_homebrew_formula(text: str) -> list[Finding]:
     """Validate verified Rust and NGINX bootstraps in the Formula."""
     path = "packaging/homebrew/nginx-markdown-module.rb"
     findings: list[Finding] = []
-    if re.search(r"https://sh[.]rustup[.]rs", text):
+    if _has_rustup_pipe_bootstrap(text):
         findings.append(
             Finding(path, "Formula must not execute the network rustup script")
         )
@@ -155,6 +156,25 @@ def check_homebrew_formula(text: str) -> list[Finding]:
         )
     )
     return findings
+
+
+def _has_rustup_pipe_bootstrap(text: str) -> bool:
+    """Recognize executable curl/wget pipes to the official rustup host only."""
+    pipe_to_shell = re.compile(
+        r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:env\s+)?(?:sh|bash|zsh)\b"
+    )
+    executable_source = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    for match in re.finditer(r"\bsystem\b", executable_source):
+        command = executable_source[match.start() : match.start() + 512]
+        if pipe_to_shell.search(command) is None:
+            continue
+        for candidate in re.findall(r"https?://[^\s\"'|]+", command):
+            parsed = urlsplit(candidate)
+            if parsed.scheme == "https" and parsed.hostname == "sh.rustup.rs":
+                return True
+    return False
 
 
 def check_homebrew_publisher(text: str) -> list[Finding]:
