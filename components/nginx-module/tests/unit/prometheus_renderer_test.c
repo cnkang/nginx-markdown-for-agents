@@ -147,6 +147,8 @@ typedef struct { /* SONAR_NOTE */
         ngx_atomic_t  path_conversions;
         ngx_atomic_t  path_conversion_time_sum_ms;
         ngx_atomic_t  overflow_count;
+        ngx_atomic_t  unretained_conversions;
+        ngx_atomic_t  unretained_conversion_time_sum_ms;
     } per_path;
     ngx_http_markdown_metrics_perf_snapshot_t perf;
 } ngx_http_markdown_metrics_snapshot_t;

@@ -93,7 +93,8 @@ ngx_http_markdown_prometheus_write_other_path(
     u_char *p,
     const u_char *end,
     ngx_http_markdown_prometheus_path_render_ctx_t *render,
-    ngx_atomic_uint_t overflow_count);
+    ngx_atomic_uint_t unretained_conversions,
+    ngx_atomic_uint_t unretained_time_ms);
 
 static u_char *
 ngx_http_markdown_metrics_write_prometheus_paths(
@@ -828,7 +829,9 @@ ngx_http_markdown_metrics_write_prometheus_paths(
     have_retained_paths = snapshot->per_path.path_entries > 0
         && ngx_http_markdown_metrics_shm_zone != NULL
         && ngx_http_markdown_metrics_shm_zone->data != NULL;
-    if (!have_retained_paths && snapshot->per_path.overflow_count == 0) {
+    if (!have_retained_paths
+        && snapshot->per_path.unretained_conversions == 0)
+    {
         return p;
     }
 
@@ -881,11 +884,12 @@ ngx_http_markdown_metrics_write_prometheus_paths(
     }
 
     p = render.pos;
-    if (snapshot->per_path.overflow_count > 0
+    if (snapshot->per_path.unretained_conversions > 0
         || render.omitted_nodes > 0)
     {
         p = ngx_http_markdown_prometheus_write_other_path(
-            p, end, &render, snapshot->per_path.overflow_count);
+            p, end, &render, snapshot->per_path.unretained_conversions,
+            snapshot->per_path.unretained_conversion_time_sum_ms);
         if (p == NULL) {
             return NULL;
         }
@@ -901,7 +905,8 @@ ngx_http_markdown_prometheus_write_other_path(
     u_char *p,
     const u_char *end,
     ngx_http_markdown_prometheus_path_render_ctx_t *render,
-    ngx_atomic_uint_t overflow_count)
+    ngx_atomic_uint_t unretained_conversions,
+    ngx_atomic_uint_t unretained_time_ms)
 {
     static const u_char      other_path[] = "__other__";
     ngx_atomic_uint_t        other_conversions;
@@ -909,10 +914,11 @@ ngx_http_markdown_prometheus_write_other_path(
     size_t                   remaining;
 
     other_conversions = ngx_http_markdown_prometheus_saturating_add(
-        overflow_count, render->omitted_conversions);
+        unretained_conversions, render->omitted_conversions);
     if (ngx_http_markdown_prometheus_path_pair_size(
             other_path, sizeof(other_path) - 1, other_conversions,
-            render->omitted_time_ms, &needed) != NGX_OK)
+            ngx_http_markdown_prometheus_saturating_add(
+                unretained_time_ms, render->omitted_time_ms), &needed) != NGX_OK)
     {
         return NULL;
     }
@@ -925,8 +931,10 @@ ngx_http_markdown_prometheus_write_other_path(
     render->pos = p;
     render->tail_reserve = 1;
     if (ngx_http_markdown_prometheus_write_path_pair(
-            render, other_path, sizeof(other_path) - 1,
-            other_conversions, render->omitted_time_ms, needed) != NGX_OK)
+        render, other_path, sizeof(other_path) - 1,
+            other_conversions,
+            ngx_http_markdown_prometheus_saturating_add(
+                unretained_time_ms, render->omitted_time_ms), needed) != NGX_OK)
     {
         return NULL;
     }

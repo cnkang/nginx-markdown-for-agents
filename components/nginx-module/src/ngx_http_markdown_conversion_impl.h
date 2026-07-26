@@ -1192,6 +1192,10 @@ ngx_http_markdown_record_per_path_metrics(
         >= metrics->per_path.cardinality_limit)
     {
         ngx_atomic_fetch_add(&metrics->per_path.overflow_count, 1);
+        ngx_atomic_fetch_add(&metrics->per_path.unretained_conversions, 1);
+        ngx_atomic_fetch_add(
+            &metrics->per_path.unretained_conversion_time_sum_ms,
+            (ngx_atomic_uint_t) elapsed_ms);
         ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
         ngx_atomic_fetch_add(
             &metrics->per_path.path_conversion_time_sum_ms,
@@ -1211,6 +1215,10 @@ ngx_http_markdown_record_per_path_metrics(
      * a full markdown_metrics_per_path_path_max_len directive. */
     if (r->uri.len > NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN) {
         ngx_atomic_fetch_add(&metrics->per_path.overflow_count, 1);
+        ngx_atomic_fetch_add(&metrics->per_path.unretained_conversions, 1);
+        ngx_atomic_fetch_add(
+            &metrics->per_path.unretained_conversion_time_sum_ms,
+            (ngx_atomic_uint_t) elapsed_ms);
         ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
         ngx_atomic_fetch_add(
             &metrics->per_path.path_conversion_time_sum_ms,
@@ -1222,6 +1230,10 @@ ngx_http_markdown_record_per_path_metrics(
     node = ngx_slab_alloc_locked(shpool,
         sizeof(ngx_http_markdown_path_metric_node_t));
     if (node == NULL) {
+        ngx_atomic_fetch_add(&metrics->per_path.unretained_conversions, 1);
+        ngx_atomic_fetch_add(
+            &metrics->per_path.unretained_conversion_time_sum_ms,
+            (ngx_atomic_uint_t) elapsed_ms);
         ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
         ngx_atomic_fetch_add(
             &metrics->per_path.path_conversion_time_sum_ms,
@@ -1233,6 +1245,10 @@ ngx_http_markdown_record_per_path_metrics(
     node->path = ngx_slab_alloc_locked(shpool, r->uri.len);
     if (node->path == NULL) {
         ngx_slab_free_locked(shpool, node);
+        ngx_atomic_fetch_add(&metrics->per_path.unretained_conversions, 1);
+        ngx_atomic_fetch_add(
+            &metrics->per_path.unretained_conversion_time_sum_ms,
+            (ngx_atomic_uint_t) elapsed_ms);
         ngx_atomic_fetch_add(&metrics->per_path.path_conversions, 1);
         ngx_atomic_fetch_add(
             &metrics->per_path.path_conversion_time_sum_ms,

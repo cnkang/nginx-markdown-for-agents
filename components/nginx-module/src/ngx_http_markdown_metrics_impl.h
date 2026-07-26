@@ -155,6 +155,8 @@ typedef struct {
         ngx_atomic_uint_t path_conversions;
         ngx_atomic_uint_t path_conversion_time_sum_ms;
         ngx_atomic_uint_t overflow_count;
+        ngx_atomic_uint_t unretained_conversions;
+        ngx_atomic_uint_t unretained_conversion_time_sum_ms;
     } per_path;
 
     /* Performance metrics (backpressure, decompression path, output mode) */
@@ -383,6 +385,10 @@ ngx_http_markdown_collect_metrics_snapshot(ngx_http_markdown_metrics_snapshot_t 
         metrics->per_path.path_conversion_time_sum_ms;
     snapshot->per_path.overflow_count =
         metrics->per_path.overflow_count;
+    snapshot->per_path.unretained_conversions =
+        metrics->per_path.unretained_conversions;
+    snapshot->per_path.unretained_conversion_time_sum_ms =
+        metrics->per_path.unretained_conversion_time_sum_ms;
 
     /*
      * Inflight counter is per-worker (not in shared memory),
@@ -1682,6 +1688,7 @@ ngx_http_markdown_json_write_path_details(
     ngx_http_markdown_path_detail_render_ctx_t    render;
     ngx_atomic_uint_t                              other_conversions;
     ngx_atomic_uint_t                              other_entries;
+    ngx_atomic_uint_t                              other_time_ms;
 
     render.pos = p;
     render.end = end;
@@ -1706,14 +1713,18 @@ ngx_http_markdown_json_write_path_details(
         ngx_shmtx_unlock(&shpool->mutex);
     }
 
-    if ((snapshot->per_path.overflow_count == 0
+    if ((snapshot->per_path.unretained_conversions == 0
          && render.omitted_nodes == 0) || p >= end)
     {
         return p;
     }
 
     other_conversions = ngx_http_markdown_metrics_saturating_add(
-        snapshot->per_path.overflow_count, render.omitted_conversions);
+        snapshot->per_path.unretained_conversions,
+        render.omitted_conversions);
+    other_time_ms = ngx_http_markdown_metrics_saturating_add(
+        snapshot->per_path.unretained_conversion_time_sum_ms,
+        render.omitted_time_ms);
     other_entries = ngx_http_markdown_metrics_saturating_add(
         snapshot->per_path.overflow_count,
         ngx_http_markdown_metrics_omitted_nodes_as_atomic(
@@ -1729,7 +1740,7 @@ ngx_http_markdown_json_write_path_details(
         "\"conversions\":%uA,"
         "\"conversion_time_sum_ms\":%uA,"
         "\"entries\":%uA}",
-        other_conversions, render.omitted_time_ms, other_entries);
+        other_conversions, other_time_ms, other_entries);
 }
 
 
@@ -1745,6 +1756,7 @@ ngx_http_markdown_text_write_path_details(
     ngx_http_markdown_path_detail_render_ctx_t    render;
     ngx_atomic_uint_t                              other_conversions;
     ngx_atomic_uint_t                              other_entries;
+    ngx_atomic_uint_t                              other_time_ms;
 
     render.pos = p;
     render.end = end;
@@ -1769,21 +1781,25 @@ ngx_http_markdown_text_write_path_details(
                 live_metrics->per_path.path_tree.root,
                 &live_metrics->per_path.sentinel, &render);
         ngx_shmtx_unlock(&shpool->mutex);
-    } else if (snapshot->per_path.overflow_count > 0) {
+    } else if (snapshot->per_path.unretained_conversions > 0) {
         p = ngx_slprintf(p, end, "\nPer-Path Details:\n");
         render.pos = p;
     } else {
         return p;
     }
 
-    if ((snapshot->per_path.overflow_count == 0
+    if ((snapshot->per_path.unretained_conversions == 0
          && render.omitted_nodes == 0) || p >= end)
     {
         return p;
     }
 
     other_conversions = ngx_http_markdown_metrics_saturating_add(
-        snapshot->per_path.overflow_count, render.omitted_conversions);
+        snapshot->per_path.unretained_conversions,
+        render.omitted_conversions);
+    other_time_ms = ngx_http_markdown_metrics_saturating_add(
+        snapshot->per_path.unretained_conversion_time_sum_ms,
+        render.omitted_time_ms);
     other_entries = ngx_http_markdown_metrics_saturating_add(
         snapshot->per_path.overflow_count,
         ngx_http_markdown_metrics_omitted_nodes_as_atomic(
@@ -1792,7 +1808,7 @@ ngx_http_markdown_text_write_path_details(
     return ngx_slprintf(p, end,
         "- Path[__other__]: conversions=%uA entries=%uA "
         "time_ms=%uA\n",
-        other_conversions, other_entries, render.omitted_time_ms);
+        other_conversions, other_entries, other_time_ms);
 }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
