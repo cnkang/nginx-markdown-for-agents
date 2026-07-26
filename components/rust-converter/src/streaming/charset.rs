@@ -219,11 +219,19 @@ impl CharsetState {
         if let Some(charset) = header_charset.as_deref() {
             let mut state = self.resolve_for_feed(charset)?;
             if sniff_buffer.is_empty() {
+                if matches!(&state, CharsetState::Resolved { decoder: None }) {
+                    *self = state;
+                    return Ok(Cow::Borrowed(data));
+                }
                 let result = self.transcode_for_feed(&mut state, data)?;
                 *self = state;
                 return Ok(Cow::Owned(result));
             }
             sniff_buffer.extend_from_slice(data);
+            if matches!(&state, CharsetState::Resolved { decoder: None }) {
+                *self = state;
+                return Ok(Cow::Owned(sniff_buffer));
+            }
             let result = self.transcode_for_feed(&mut state, &sniff_buffer)?;
             *self = state;
             return Ok(Cow::Owned(result));
@@ -247,6 +255,10 @@ impl CharsetState {
         if sniff_bytes < data.len() {
             sniff_buffer.extend_from_slice(&data[sniff_bytes..]);
         }
+        if matches!(&state, CharsetState::Resolved { decoder: None }) {
+            *self = state;
+            return Ok(Cow::Owned(sniff_buffer));
+        }
         let result = self.transcode_for_feed(&mut state, &sniff_buffer)?;
         *self = state;
         Ok(Cow::Owned(result))
@@ -257,14 +269,15 @@ impl CharsetState {
         decoder: Option<encoding_rs::Decoder>,
         data: &'a [u8],
     ) -> Result<Cow<'a, [u8]>, ConversionError> {
+        if decoder.is_none() {
+            *self = CharsetState::Resolved { decoder: None };
+            return Ok(Cow::Borrowed(data));
+        }
+
         let mut state = CharsetState::Resolved { decoder };
         let result = self.transcode_for_feed(&mut state, data)?;
         *self = state;
-        if result == data {
-            Ok(Cow::Borrowed(data))
-        } else {
-            Ok(Cow::Owned(result))
-        }
+        Ok(Cow::Owned(result))
     }
 
     pub fn feed<'a>(&mut self, data: &'a [u8]) -> Result<Cow<'a, [u8]>, ConversionError> {
@@ -332,6 +345,10 @@ impl CharsetState {
                     *self = CharsetState::Failed(format!("{}", e));
                     e
                 })?;
+                if matches!(&new_state, CharsetState::Resolved { decoder: None }) {
+                    *self = new_state;
+                    return Ok(sniff_buffer);
+                }
                 let result = transcode_data(&mut new_state, &sniff_buffer).map_err(|e| {
                     *self = CharsetState::Failed(format!("{}", e));
                     e
@@ -519,7 +536,8 @@ fn resolve_charset(charset: &str) -> Result<(CharsetState, bool), ConversionErro
 /// Transcodes a byte slice according to the charset resolved in `state`.
 ///
 /// Returns a UTF-8 byte vector produced by decoding `data` using the `Resolved` state's decoder.
-/// - If `state` is `Resolved { decoder: None }`, the input bytes are treated as UTF-8 and returned as-is (copied).
+/// - If `state` is `Resolved { decoder: None }`, this function is not used:
+///   callers return a borrowed input slice without allocating.
 /// - If `state` is `Resolved { decoder: Some(dec) }`, the decoder is used to convert `data` to UTF-8; decoding errors produce `ConversionError::EncodingError`.
 /// - If `data` is empty, an empty `Vec<u8>` is returned.
 /// - If `state` is not `Resolved`, an `EncodingError` is returned.
@@ -527,25 +545,15 @@ fn resolve_charset(charset: &str) -> Result<(CharsetState, bool), ConversionErro
 /// # Examples
 ///
 /// ```ignore
-/// // UTF-8 path: decoder == None
-/// use nginx_markdown_converter::streaming::charset::CharsetState;
-///
-/// let mut state = CharsetState::Resolved { decoder: None };
-/// let out = transcode_data(&mut state, b"hello").unwrap();
-/// assert_eq!(out, b"hello");
-/// ```
 fn transcode_data(state: &mut CharsetState, data: &[u8]) -> Result<Vec<u8>, ConversionError> {
     if data.is_empty() {
         return Ok(Vec::new());
     }
 
     match state {
-        CharsetState::Resolved { decoder: None } => {
-            // UTF-8 path: validate and return as-is
-            // We use lossy conversion to be lenient with partial sequences
-            // that may span chunk boundaries
-            Ok(data.to_vec())
-        }
+        CharsetState::Resolved { decoder: None } => Err(ConversionError::EncodingError(
+            "UTF-8 input must use the zero-copy feed path".to_string(),
+        )),
         CharsetState::Resolved { decoder: Some(dec) } => {
             // Non-UTF-8: transcode using encoding_rs
             // Calculate maximum output size

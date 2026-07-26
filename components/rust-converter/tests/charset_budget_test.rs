@@ -7,9 +7,55 @@
 
 #![cfg(feature = "streaming")]
 
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use nginx_markdown_converter::converter::ConversionOptions;
 use nginx_markdown_converter::error::ConversionError;
+use nginx_markdown_converter::streaming::charset::CharsetState;
 use nginx_markdown_converter::streaming::{MemoryBudget, StreamingConverter};
+
+const LARGE_UTF8_CHUNK: usize = 256 * 1024;
+
+struct AllocationProbe;
+
+thread_local! {
+    static COUNT_LARGE_ALLOCATIONS: Cell<bool> = const { Cell::new(false) };
+}
+
+static LARGE_ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
+
+unsafe impl GlobalAlloc for AllocationProbe {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if layout.size() >= LARGE_UTF8_CHUNK {
+            COUNT_LARGE_ALLOCATIONS.with(|enabled| {
+                if enabled.get() {
+                    LARGE_ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+                }
+            });
+        }
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        if new_size >= LARGE_UTF8_CHUNK {
+            COUNT_LARGE_ALLOCATIONS.with(|enabled| {
+                if enabled.get() {
+                    LARGE_ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+                }
+            });
+        }
+        unsafe { System.realloc(ptr, layout, new_size) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) }
+    }
+}
+
+#[global_allocator]
+static ALLOCATION_PROBE: AllocationProbe = AllocationProbe;
 
 fn make_converter_with_budget(budget: MemoryBudget, charset: &str) -> StreamingConverter {
     let mut conv = StreamingConverter::new(ConversionOptions::default(), budget);
@@ -240,6 +286,29 @@ fn utf8_tail_recovery_keeps_the_next_utf8_chunk_borrowed() {
     );
     let result = conv.finalize().expect("finalize should succeed");
     assert!(result.stats.peak_memory_estimate > 0);
+}
+
+#[test]
+fn resolved_utf8_large_feed_has_no_transient_input_sized_allocation() {
+    let mut state = CharsetState::new();
+    state.set_content_type(Some("text/html; charset=UTF-8"));
+    let first = state.feed(b"warm-up").expect("UTF-8 must resolve");
+    assert!(matches!(first, std::borrow::Cow::Borrowed(_)));
+
+    let input = vec![b'x'; LARGE_UTF8_CHUNK];
+    LARGE_ALLOCATIONS.store(0, Ordering::Relaxed);
+    COUNT_LARGE_ALLOCATIONS.with(|enabled| enabled.set(true));
+    let result = state
+        .feed(&input)
+        .expect("resolved UTF-8 feed must succeed");
+    COUNT_LARGE_ALLOCATIONS.with(|enabled| enabled.set(false));
+
+    assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+    assert_eq!(
+        LARGE_ALLOCATIONS.load(Ordering::Relaxed),
+        0,
+        "resolved UTF-8 feed must not allocate an input-sized temporary buffer"
+    );
 }
 
 #[test]
