@@ -194,7 +194,7 @@ fn multi_byte_char_across_chunk_boundary() {
 }
 
 #[test]
-fn finalize_decoder_output_exceeds_budget() {
+fn precommit_budget_rejection_remains_budget_exceeded_at_finalize() {
     let budget = MemoryBudget {
         total: 512,
         charset_sniff: 64,
@@ -202,14 +202,17 @@ fn finalize_decoder_output_exceeds_budget() {
     };
     let mut conv = make_converter_with_budget(budget, "ISO-8859-1");
     let input = iso_8859_1_input(1024);
-    let _ = conv.feed_chunk(&input);
-    let result = conv.finalize();
-    match result {
-        Ok(_) => {}
-        Err(ConversionError::BudgetExceeded { .. }) => {}
-        Err(ConversionError::PostCommitError { .. }) => {}
-        Err(other) => panic!("unexpected error: {:?}", other),
-    }
+    let err = conv
+        .feed_chunk(&input)
+        .expect_err("the tiny precommit budget must reject decoder output");
+    assert!(matches!(err, ConversionError::BudgetExceeded { .. }));
+    let finalize_err = conv
+        .finalize()
+        .expect_err("finalize must retain the precommit budget failure");
+    assert!(matches!(
+        finalize_err,
+        ConversionError::BudgetExceeded { .. }
+    ));
 }
 
 #[test]
@@ -288,9 +291,7 @@ fn precommit_budget_error_preserves_fallback_semantics() {
         Err(other) => {
             panic!("expected BudgetExceeded, got: {:?}", other);
         }
-        Ok(_) => {
-            // Very small budget may succeed if the input fits
-        }
+        Ok(_) => panic!("expected BudgetExceeded for the fixed oversized input"),
     }
 }
 
@@ -304,22 +305,22 @@ fn postcommit_budget_error_generates_correct_error() {
     let chunk1 = b"<p>Hello</p>";
     let r1 = conv.feed_chunk(chunk1);
     assert!(r1.is_ok(), "first chunk should succeed: {:?}", r1);
-    if !r1.unwrap().markdown.is_empty() {
-        let big_input = iso_8859_1_input(128 * 1024);
-        let result = conv.feed_chunk(&big_input);
-        match result {
-            Err(ConversionError::PostCommitError {
-                reason,
-                bytes_emitted,
-                ..
-            }) => {
-                assert!(bytes_emitted > 0, "should have emitted bytes before error");
-                assert!(!reason.is_empty(), "reason should not be empty");
-            }
-            Err(ConversionError::BudgetExceeded { .. }) => {}
-            Ok(_) => {}
-            Err(other) => panic!("unexpected error: {:?}", other),
+    assert!(
+        !r1.unwrap().markdown.is_empty(),
+        "first chunk must commit output before exercising postcommit wrapping"
+    );
+    let big_input = iso_8859_1_input(128 * 1024);
+    let result = conv.feed_chunk(&big_input);
+    match result {
+        Err(ConversionError::PostCommitError {
+            reason,
+            bytes_emitted,
+            ..
+        }) => {
+            assert!(bytes_emitted > 0, "should have emitted bytes before error");
+            assert!(!reason.is_empty(), "reason should not be empty");
         }
+        other => panic!("expected PostCommitError, got: {:?}", other),
     }
 }
 
@@ -346,11 +347,13 @@ fn peak_memory_includes_charset_buffers() {
     };
     let mut conv = make_converter_with_budget(budget, "ISO-8859-1");
     let input = iso_8859_1_input(1024);
-    let _ = conv.feed_chunk(&input);
-    let result = conv.finalize();
-    if let Ok(r) = result {
-        assert!(r.stats.peak_memory_estimate > 0, "peak should be positive");
-    }
+    conv.feed_chunk(&input)
+        .expect("the fixed charset input must fit the declared budget");
+    let result = conv.finalize().expect("finalize should succeed");
+    assert!(
+        result.stats.peak_memory_estimate >= input.len(),
+        "peak must account for the resident charset input"
+    );
 }
 
 #[test]
