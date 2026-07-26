@@ -1218,14 +1218,12 @@ class RegexASTVisitor(ast.NodeVisitor):
     ) -> None:
         compile_line = self._lookup_compile_line(node, api)
         alternatives = self._static_pattern_alternatives(pattern_arg)
-        if alternatives is None:
+        if alternatives is not None:
+            pattern_source = self._classify_static_pattern_source(pattern_arg)
+        else:
             pattern_source, pattern_str, segments = self._classify_pattern_source(
                 pattern_arg,
             )
-        else:
-            pattern_source = self._classify_static_pattern_source(pattern_arg)
-            pattern_str = None
-            segments = []
         ctx = _FindingCtx(
             line=node.lineno,
             func_name=self._enclosing_function_name(node),
