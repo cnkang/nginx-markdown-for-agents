@@ -128,7 +128,7 @@ def check_homebrew_formula(text: str) -> list[Finding]:
     """Validate verified Rust and NGINX bootstraps in the Formula."""
     path = "packaging/homebrew/nginx-markdown-module.rb"
     findings: list[Finding] = []
-    if "https://sh.rustup.rs" in text:
+    if re.search(r"https://sh[.]rustup[.]rs", text):
         findings.append(
             Finding(path, "Formula must not execute the network rustup script")
         )
