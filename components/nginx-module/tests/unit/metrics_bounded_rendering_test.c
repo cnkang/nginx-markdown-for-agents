@@ -8,6 +8,12 @@
  * bounded walk functions and rendering helpers.
  */
 
+#if defined(__APPLE__)
+#define _DARWIN_C_SOURCE
+#endif
+#define _DEFAULT_SOURCE
+#define _POSIX_C_SOURCE 200809L
+
 #include "../include/test_common.h"
 #include <stdio.h>
 #include <stdarg.h>
