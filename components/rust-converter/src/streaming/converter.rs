@@ -848,6 +848,63 @@ impl StreamingConverter {
     /// // The example demonstrates the callsite pattern; concrete construction is omitted.
     /// let _ = conv.process_single_event(ev)?;
     /// ```
+    fn process_head_metadata(&mut self, event: &StreamEvent) -> Result<(), ConversionError> {
+        if self.state_machine.in_head
+            && self.options.extract_metadata
+            && self.extract_metadata_from_event(event)
+            && matches!(self.commit_state, CommitState::PreCommit)
+        {
+            return Err(ConversionError::StreamingFallback {
+                reason: FallbackReason::FrontMatterOverflow,
+            });
+        }
+        Ok(())
+    }
+
+    fn unsupported_start_tag_name(event: &StreamEvent) -> Option<&str> {
+        let StreamEvent::StartTag { name, .. } = event else {
+            return None;
+        };
+        match name.as_str() {
+            "svg" | "math" | "canvas" => Some(name),
+            _ => None,
+        }
+    }
+
+    fn fallback_error_for_structure(&self, structure: &str) -> ConversionError {
+        let reason = if structure == "table" {
+            FallbackReason::TableDetected
+        } else {
+            FallbackReason::UnsupportedStructure(structure.to_owned())
+        };
+        if matches!(self.commit_state, CommitState::PreCommit) {
+            ConversionError::StreamingFallback { reason }
+        } else {
+            ConversionError::PostCommitError {
+                reason: format!("{structure} detected after commit"),
+                bytes_emitted: self.bytes_emitted,
+                original_code: 99,
+            }
+        }
+    }
+
+    fn process_implied_closures(&mut self) -> Result<(), ConversionError> {
+        let implied_closures = std::mem::take(&mut self.sanitizer.implied_closures);
+        for closed_tag in implied_closures {
+            let synthetic = StreamEvent::EndTag { name: closed_tag };
+            let action = self
+                .state_machine
+                .process_event(&synthetic)
+                .map_err(|error| self.wrap_error(error))?;
+            self.emitter
+                .process_action(&action, &mut self.state_machine)
+                .map_err(|error| self.wrap_error(error))?;
+            self.update_peak_memory()
+                .map_err(|error| self.wrap_error(error))?;
+        }
+        Ok(())
+    }
+
     fn process_single_event(&mut self, event: StreamEvent) -> Result<(), ConversionError> {
         // Token and parse-error counts are now accumulated at the batch level
         // in process_tokenizer_batch() using the sink's authoritative counts.
@@ -859,14 +916,7 @@ impl StreamingConverter {
         // but only when metadata extraction is enabled (metadata extraction guard).
         // If the <head> region exceeds the lookahead budget, trigger
         // explicit fallback on front-matter overflow.
-        if self.state_machine.in_head && self.options.extract_metadata {
-            let budget_exceeded = self.extract_metadata_from_event(&event);
-            if budget_exceeded && matches!(self.commit_state, CommitState::PreCommit) {
-                return Err(ConversionError::StreamingFallback {
-                    reason: FallbackReason::FrontMatterOverflow,
-                });
-            }
-        }
+        self.process_head_metadata(&event)?;
         self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
 
         // Check for unsupported structures BEFORE sanitization.
@@ -875,25 +925,8 @@ impl StreamingConverter {
         // However, SVG, MathML, and canvas elements represent content that cannot
         // be meaningfully converted to Markdown by the streaming path — they
         // require full-buffer conversion.
-        if let StreamEvent::StartTag { ref name, .. } = event {
-            let fallback_structure = match name.as_str() {
-                "svg" => Some("svg".to_string()),
-                "math" => Some("math".to_string()),
-                "canvas" => Some("canvas".to_string()),
-                _ => None,
-            };
-            if let Some(structure) = fallback_structure {
-                let reason = FallbackReason::UnsupportedStructure(structure.clone());
-                if matches!(self.commit_state, CommitState::PreCommit) {
-                    return Err(ConversionError::StreamingFallback { reason });
-                } else {
-                    return Err(ConversionError::PostCommitError {
-                        reason: format!("{} detected after commit", structure),
-                        bytes_emitted: self.bytes_emitted,
-                        original_code: 99,
-                    });
-                }
-            }
+        if let Some(structure) = Self::unsupported_start_tag_name(&event) {
+            return Err(self.fallback_error_for_structure(structure));
         }
 
         // Sanitize
@@ -913,20 +946,7 @@ impl StreamingConverter {
         // context stack stale, causing downstream content to be emitted
         // in the wrong block context (e.g. paragraph text glued to form
         // content).
-        let implied_closures = std::mem::take(&mut self.sanitizer.implied_closures);
-        for closed_tag in &implied_closures {
-            let synthetic = StreamEvent::EndTag {
-                name: closed_tag.clone(),
-            };
-            let action = self
-                .state_machine
-                .process_event(&synthetic)
-                .map_err(|e| self.wrap_error(e))?;
-            self.emitter
-                .process_action(&action, &mut self.state_machine)
-                .map_err(|e| self.wrap_error(e))?;
-            self.update_peak_memory().map_err(|e| self.wrap_error(e))?;
-        }
+        self.process_implied_closures()?;
 
         let sanitized_event = match decision {
             SanitizeDecision::Pass(ev) | SanitizeDecision::PassModified(ev) => ev,
@@ -946,20 +966,7 @@ impl StreamingConverter {
 
         // Check for unsupported structure fallback
         if let StateMachineAction::FallbackRequired(ref structure) = action {
-            let reason = if structure == "table" {
-                FallbackReason::TableDetected
-            } else {
-                FallbackReason::UnsupportedStructure(structure.clone())
-            };
-            if matches!(self.commit_state, CommitState::PreCommit) {
-                return Err(ConversionError::StreamingFallback { reason });
-            } else {
-                return Err(ConversionError::PostCommitError {
-                    reason: format!("{} detected after commit", structure),
-                    bytes_emitted: self.bytes_emitted,
-                    original_code: 99, /* internal: no pre-existing error */
-                });
-            }
+            return Err(self.fallback_error_for_structure(structure));
         }
 
         // Emitter
@@ -1107,11 +1114,8 @@ impl StreamingConverter {
     /// lookahead budget. Returns `true` if the budget is exceeded,
     /// signalling that the caller should trigger an Explicit_Fallback
     /// on budget exhaustion.
-    fn extract_metadata_from_event(&mut self, event: &StreamEvent) -> bool {
-        // Estimate the byte cost of this event for lookahead budget tracking.
-        // This is a rough estimate — we count tag names, attribute keys/values,
-        // and text content lengths.
-        let event_cost = match event {
+    fn metadata_event_cost(event: &StreamEvent) -> usize {
+        match event {
             StreamEvent::StartTag { name, attrs, .. } => name.len().saturating_add(
                 attrs
                     .iter()
@@ -1121,7 +1125,59 @@ impl StreamingConverter {
             StreamEvent::EndTag { name } => name.len(),
             StreamEvent::Text(t) => t.len(),
             _ => 0,
-        };
+        }
+    }
+
+    fn update_canonical_link(&mut self, attrs: &[(String, String)]) {
+        if self.canonical_found {
+            return;
+        }
+        let is_canonical = attrs.iter().any(|(key, value)| {
+            key == "rel"
+                && value
+                    .split_ascii_whitespace()
+                    .any(|token| token.eq_ignore_ascii_case("canonical"))
+        });
+        if is_canonical && let Some((_, href)) = attrs.iter().find(|(key, _)| key == "href") {
+            self.canonical_found = true;
+            self.metadata.url = self.resolve_and_sanitize_metadata_url(href);
+        }
+    }
+
+    fn process_head_start_tag(
+        &mut self,
+        name: &str,
+        attrs: &[(String, String)],
+        self_closing: bool,
+    ) {
+        match name {
+            "title" => {
+                self.collecting_title = true;
+                self.html_title_buf.clear();
+            }
+            "meta" => self.extract_meta_tag(attrs),
+            "link" => self.update_canonical_link(attrs),
+            _ => {}
+        }
+        if self_closing && name == "title" {
+            self.collecting_title = false;
+        }
+    }
+
+    fn finish_html_title(&mut self) {
+        self.collecting_title = false;
+        if !self.social_title_set && !self.html_title_set {
+            self.metadata.title = Some(self.html_title_buf.trim().to_string());
+            self.html_title_set = true;
+        }
+        self.html_title_buf.clear();
+    }
+
+    fn extract_metadata_from_event(&mut self, event: &StreamEvent) -> bool {
+        // Estimate the byte cost of this event for lookahead budget tracking.
+        // This is a rough estimate — we count tag names, attribute keys/values,
+        // and text content lengths.
+        let event_cost = Self::metadata_event_cost(event);
         let lookahead_check = self
             .budget
             .check_lookahead(self.head_bytes_seen, event_cost);
@@ -1137,53 +1193,8 @@ impl StreamingConverter {
                 name,
                 attrs,
                 self_closing,
-            } => {
-                match name.as_str() {
-                    "title" => {
-                        self.collecting_title = true;
-                        self.html_title_buf.clear();
-                    }
-                    "meta" => {
-                        self.extract_meta_tag(attrs);
-                    }
-                    "link" if !self.canonical_found => {
-                        // First `<link rel="canonical" href="...">` with an href
-                        // wins. Canonicals without href are skipped, matching
-                        // full-buffer `find_link_href_recursive` which returns
-                        // `get_attr("href")` — if None, recursion continues.
-                        let is_canonical = attrs.iter().any(|(k, v)| {
-                            k == "rel"
-                                && v.split_ascii_whitespace()
-                                    .any(|token| token.eq_ignore_ascii_case("canonical"))
-                        });
-                        if is_canonical
-                            && let Some((_, href)) = attrs.iter().find(|(k, _)| k == "href")
-                        {
-                            self.canonical_found = true;
-                            self.metadata.url = self.resolve_and_sanitize_metadata_url(href);
-                            // No href → skip this canonical, keep looking
-                        }
-                    }
-                    _ => {}
-                }
-                // Self-closing title is unusual but handle gracefully
-                if *self_closing && name == "title" {
-                    self.collecting_title = false;
-                }
-            }
-            StreamEvent::EndTag { name } if name == "title" => {
-                self.collecting_title = false;
-                // First <title> wins unconditionally (matching full-buffer
-                // find_title which returns the first match's trimmed text,
-                // even if empty). Mark html_title_set regardless of content
-                // so subsequent <title> elements are ignored.
-                if !self.social_title_set && !self.html_title_set {
-                    let trimmed = self.html_title_buf.trim().to_string();
-                    self.metadata.title = Some(trimmed);
-                    self.html_title_set = true;
-                }
-                self.html_title_buf.clear();
-            }
+            } => self.process_head_start_tag(name, attrs, *self_closing),
+            StreamEvent::EndTag { name } if name == "title" => self.finish_html_title(),
             StreamEvent::Text(text) if self.collecting_title && !text.is_empty() => {
                 // Collect raw text into the separate buffer.
                 // The final trim happens at </title> above.
@@ -1327,47 +1338,51 @@ impl StreamingConverter {
     /// assert_eq!(conv.resolve_url("https://other.test/x"), "https://other.test/x");
     /// assert_eq!(conv.resolve_url("mailto:a@example.com"), "mailto:a@example.com");
     /// ```
+    fn http_base_url_origin(base: &str) -> &str {
+        let scheme_len = if base.starts_with("https://") { 8 } else { 7 };
+        let authority = &base[scheme_len..];
+        if let Some(path_start) = authority.find('/') {
+            &base[..scheme_len + path_start]
+        } else {
+            base
+        }
+    }
+
+    fn resolve_path_against_base(base: &str, url: &str) -> String {
+        if base.ends_with('/') {
+            return format!("{base}{url}");
+        }
+        let trimmed = base.trim_end_matches('/');
+        let base_dir = match trimmed.rfind('/') {
+            Some(position)
+                if position > 0 && trimmed.as_bytes().get(position - 1) == Some(&b'/') =>
+            {
+                trimmed
+            }
+            Some(position) => &trimmed[..position],
+            None => trimmed,
+        };
+        format!("{base_dir}/{url}")
+    }
+
     fn resolve_url(&self, url: &str) -> String {
-        if !self.options.resolve_relative_urls || url.is_empty() {
+        if !self.options.resolve_relative_urls
+            || url.is_empty()
+            || Self::has_absolute_uri_scheme(url)
+            || url.starts_with("//")
+        {
             return url.to_string();
         }
-        if Self::has_absolute_uri_scheme(url) || url.starts_with("//") {
-            return url.to_string();
-        }
-        let Some(base) = self.options.base_url.as_ref() else {
+        let Some(base) = self.options.base_url.as_deref() else {
             return url.to_string();
         };
         if !base.starts_with("http://") && !base.starts_with("https://") {
             return url.to_string();
         }
         if url.starts_with('/') {
-            // Extract origin (scheme + authority)
-            let after_scheme = base
-                .strip_prefix("https://")
-                .or_else(|| base.strip_prefix("http://"))
-                .unwrap_or(base);
-            let origin = if let Some(pos) = after_scheme.find('/') {
-                let scheme_len = if base.starts_with("https://") { 8 } else { 7 };
-                &base[..scheme_len + pos]
-            } else {
-                base.as_str()
-            };
-            return format!("{}{}", origin, url);
+            return format!("{}{}", Self::http_base_url_origin(base), url);
         }
-        if base.ends_with('/') {
-            return format!("{}{}", base, url);
-        }
-        let trimmed = base.trim_end_matches('/');
-        let base_dir = if let Some(pos) = trimmed.rfind('/') {
-            if pos > 0 && trimmed.as_bytes().get(pos - 1) == Some(&b'/') {
-                trimmed
-            } else {
-                &trimmed[..pos]
-            }
-        } else {
-            trimmed
-        };
-        format!("{}/{}", base_dir, url)
+        Self::resolve_path_against_base(base, url)
     }
 
     /// Detects whether `url` begins with an absolute URI scheme per RFC 3986 §3.
