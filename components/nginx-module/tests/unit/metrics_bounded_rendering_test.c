@@ -1258,6 +1258,168 @@ test_text_no_partial_line_on_budget_exhaustion(void)
     TEST_PASS("text no partial line on exhaustion");
 }
 
+static void
+assert_text_other_values(
+    const u_char *buf,
+    ngx_atomic_uint_t conversions,
+    ngx_atomic_uint_t entries,
+    ngx_atomic_uint_t time_ms)
+{
+    const char          *line;
+    unsigned long        actual_conversions;
+    unsigned long        actual_entries;
+    unsigned long        actual_time_ms;
+
+    line = strstr((const char *) buf, "- Path[__other__]:");
+    TEST_ASSERT(line != NULL, "plain text must contain __other__");
+    TEST_ASSERT(sscanf(line,
+                       "- Path[__other__]: conversions=%lu entries=%lu time_ms=%lu",
+                       &actual_conversions, &actual_entries, &actual_time_ms) == 3,
+                "plain text __other__ values must parse");
+    TEST_ASSERT(actual_conversions == conversions,
+                "plain text __other__ conversions must match");
+    TEST_ASSERT(actual_entries == entries,
+                "plain text __other__ entries must match");
+    TEST_ASSERT(actual_time_ms == time_ms,
+                "plain text __other__ time must match");
+}
+
+static void
+assert_json_other_values(
+    const u_char *buf,
+    size_t len,
+    ngx_atomic_uint_t conversions,
+    ngx_atomic_uint_t entries,
+    ngx_atomic_uint_t time_ms)
+{
+    char    command[512];
+    FILE   *parser;
+    int     status;
+
+    snprintf(command, sizeof(command),
+             "python3 -c 'import json,sys; o=json.load(sys.stdin); "
+             "n=next(x for x in o[\"per_path\"][\"paths\"] "
+             "if x[\"path\"] == \"__other__\"); "
+             "assert (n[\"conversions\"],n[\"entries\"],"
+             "n[\"conversion_time_sum_ms\"]) == (%lu,%lu,%lu)'",
+             (unsigned long) conversions, (unsigned long) entries,
+             (unsigned long) time_ms);
+    parser = popen(command, "w");
+    TEST_ASSERT(parser != NULL, "strict JSON parser should be available");
+    TEST_ASSERT(fwrite(buf, 1, len, parser) == len,
+                "strict JSON parser must receive the complete document");
+    status = pclose(parser);
+    TEST_ASSERT(status == 0,
+                "strict JSON __other__ values must preserve conservation");
+}
+
+static void
+test_other_entries_match_unretained_conversions(void)
+{
+    u_char                                   buf[16384];
+    u_char                                  *p;
+    ngx_http_markdown_metrics_snapshot_t     s;
+    ngx_shm_zone_t                          *saved_zone;
+
+    TEST_SUBSECTION("__other__ entries: allocation failure conservation");
+
+    init_snapshot(&s);
+    s.per_path.unretained_conversions = 1;
+    s.per_path.unretained_conversion_time_sum_ms = 17;
+    saved_zone = ngx_http_markdown_metrics_shm_zone;
+    ngx_http_markdown_metrics_shm_zone = NULL;
+
+    p = ngx_http_markdown_metrics_write_json(
+        buf, buf + sizeof(buf), &s, 0, 0, 0, 0);
+    TEST_ASSERT(p != NULL && p < buf + sizeof(buf),
+                "allocation-only JSON renderer should succeed");
+    assert_json_other_values(buf, (size_t) (p - buf), 1, 1, 17);
+
+    p = ngx_http_markdown_metrics_write_text(
+        buf, buf + sizeof(buf), &s, 0, 0, 0, 0);
+    ngx_http_markdown_metrics_shm_zone = saved_zone;
+    TEST_ASSERT(p != NULL && p < buf + sizeof(buf),
+                "allocation-only plain renderer should succeed");
+    *p = '\0';
+    assert_text_other_values(buf, 1, 1, 17);
+
+    TEST_PASS("allocation failure entries match conversions");
+}
+
+static void
+test_other_entries_sum_omitted_node_entries(void)
+{
+    u_char                                   buf[16384];
+    u_char                                  *p;
+    u_char                                   path[4096];
+    size_t                                   base_size;
+    size_t                                   capacity;
+    ngx_http_markdown_metrics_snapshot_t     s;
+    ngx_http_markdown_metrics_t              live;
+    ngx_http_markdown_path_metric_node_t     node;
+    ngx_slab_pool_t                          shpool;
+
+    TEST_SUBSECTION("__other__ entries: omitted high-frequency path");
+
+    init_snapshot(&s);
+    memset(&live, 0, sizeof(live));
+    memset(&shpool, 0, sizeof(shpool));
+    init_tree(&live);
+    setup_shm(&live, &shpool);
+    memset(path, 0x01, sizeof(path));
+    p = ngx_http_markdown_metrics_write_json(
+        buf, buf + sizeof(buf), &s, 0, 0, 0, 0);
+    TEST_ASSERT(p != NULL && p < buf + sizeof(buf),
+                "aggregate-only JSON renderer should succeed");
+    base_size = (size_t) (p - buf);
+    add_node(&node, path, sizeof(path), 100, 700,
+             &live.per_path.sentinel);
+    node.entries = 100;
+    live.per_path.path_tree.root = &node.rbnode;
+    s.per_path.path_entries = 1;
+    capacity = base_size + ngx_http_markdown_json_tail_reserve();
+
+    p = ngx_http_markdown_metrics_write_json(
+        buf, buf + capacity, &s, 0, 0, 0, 0);
+    TEST_ASSERT(p != NULL && p < buf + capacity,
+                "bounded JSON omission should succeed");
+    assert_json_other_values(buf, (size_t) (p - buf), 100, 100, 700);
+
+    s.per_path.path_entries = 0;
+    p = ngx_http_markdown_metrics_write_text(
+        buf, buf + sizeof(buf), &s, 0, 0, 0, 0);
+    TEST_ASSERT(p != NULL && p < buf + sizeof(buf),
+                "aggregate-only plain renderer should succeed");
+    base_size = (size_t) (p - buf);
+    s.per_path.path_entries = 1;
+    capacity = base_size + ngx_http_markdown_text_tail_reserve();
+    p = ngx_http_markdown_metrics_write_text(
+        buf, buf + capacity, &s, 0, 0, 0, 0);
+    TEST_ASSERT(p != NULL && p < buf + capacity,
+                "bounded plain-text omission should succeed");
+    *p = '\0';
+    assert_text_other_values(buf, 100, 100, 700);
+
+    TEST_PASS("omitted high-frequency entries are conserved");
+}
+
+static void
+test_other_entries_saturate_without_wrapping(void)
+{
+    ngx_atomic_uint_t  maximum;
+
+    TEST_SUBSECTION("__other__ entries: saturating aggregation");
+
+    maximum = (ngx_atomic_uint_t) -1;
+    TEST_ASSERT(ngx_http_markdown_metrics_saturating_add(maximum - 1, 2)
+                == maximum,
+                "unretained and omitted entries must saturate");
+    TEST_ASSERT(ngx_http_markdown_metrics_saturating_add(3, 4) == 7,
+                "non-saturating entry sums must stay exact");
+
+    TEST_PASS("entry aggregation saturates without wrapping");
+}
+
 int
 main(void)
 {
@@ -1286,6 +1448,9 @@ main(void)
     test_text_tail_reserve_positive();
     test_json_no_partial_path_on_budget_exhaustion();
     test_text_no_partial_line_on_budget_exhaustion();
+    test_other_entries_match_unretained_conversions();
+    test_other_entries_sum_omitted_node_entries();
+    test_other_entries_saturate_without_wrapping();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");
