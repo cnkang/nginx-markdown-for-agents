@@ -1450,7 +1450,8 @@ typedef struct {
      * counters.  The tree is protected by the slab pool mutex.
      *
      * cardinality_limit caps the number of distinct paths stored;
-     * overflow_count tracks paths dropped when at capacity.
+     * overflow_count tracks conversions not retained because either
+     * cardinality or the retained-path length cap was reached.
      * Aggregate counters (path_conversions, path_conversion_time_sum_ms)
      * accumulate across all per-path nodes for fast rendering
      * without tree traversal.

@@ -89,6 +89,13 @@ ngx_http_markdown_prometheus_write_path_pair(
     size_t needed);
 
 static u_char *
+ngx_http_markdown_prometheus_write_other_path(
+    u_char *p,
+    u_char *end,
+    ngx_http_markdown_prometheus_path_render_ctx_t *render,
+    ngx_atomic_uint_t overflow_count);
+
+static u_char *
 ngx_http_markdown_metrics_write_prometheus_paths(
     u_char *p,
     u_char *end,
@@ -747,8 +754,8 @@ ngx_http_markdown_metrics_write_prometheus(
     /* per_path_overflow_total */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_per_path_overflow_total "
-        "Paths dropped because per-path cardinality limit was reached. "
-        "Controlled by markdown_metrics_per_path_cardinality.\n"
+        "Conversions not retained as individual paths because a per-path "
+        "retention limit was reached (cardinality or path length).\n"
         "# TYPE nginx_markdown_per_path_overflow_total counter\n"
         "nginx_markdown_per_path_overflow_total %uA\n"
         "\n",
@@ -804,26 +811,24 @@ ngx_http_markdown_metrics_write_prometheus_paths(
     u_char *end,
     const ngx_http_markdown_metrics_snapshot_t *snapshot)
 {
-    static const u_char                   other_path[] = "__other__";
     ngx_shm_zone_t                       *zone;
     ngx_slab_pool_t                      *shpool;
     ngx_http_markdown_metrics_t          *live_metrics;
     ngx_http_markdown_prometheus_path_render_ctx_t render;
-    ngx_atomic_uint_t                     other_conversions;
     size_t                                header_size;
-    size_t                                path_needed;
     size_t                                remaining;
     size_t                                tail_reserve;
     const u_char                         *header_start;
+    ngx_uint_t                            have_retained_paths;
 
     if (p == NULL || end == NULL || snapshot == NULL) {
         return NULL;
     }
 
-    if (snapshot->per_path.path_entries == 0
-        || ngx_http_markdown_metrics_shm_zone == NULL
-        || ngx_http_markdown_metrics_shm_zone->data == NULL)
-    {
+    have_retained_paths = snapshot->per_path.path_entries > 0
+        && ngx_http_markdown_metrics_shm_zone != NULL
+        && ngx_http_markdown_metrics_shm_zone->data != NULL;
+    if (!have_retained_paths && snapshot->per_path.overflow_count == 0) {
         return p;
     }
 
@@ -859,15 +864,17 @@ ngx_http_markdown_metrics_write_prometheus_paths(
     render.omitted_nodes = 0;
     render.failed = 0;
 
-    zone = ngx_http_markdown_metrics_shm_zone;
-    live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
-    shpool = (ngx_slab_pool_t *) zone->shm.addr;
+    if (have_retained_paths) {
+        zone = ngx_http_markdown_metrics_shm_zone;
+        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
+        shpool = (ngx_slab_pool_t *) zone->shm.addr;
 
-    ngx_shmtx_lock(&shpool->mutex);
-    ngx_http_markdown_prometheus_walk_path_tree(
-        live_metrics->per_path.path_tree.root,
-        &live_metrics->per_path.sentinel, &render);
-    ngx_shmtx_unlock(&shpool->mutex);
+        ngx_shmtx_lock(&shpool->mutex);
+        ngx_http_markdown_prometheus_walk_path_tree(
+            live_metrics->per_path.path_tree.root,
+            &live_metrics->per_path.sentinel, &render);
+        ngx_shmtx_unlock(&shpool->mutex);
+    }
 
     if (render.failed) {
         return NULL;
@@ -877,37 +884,54 @@ ngx_http_markdown_metrics_write_prometheus_paths(
     if (snapshot->per_path.overflow_count > 0
         || render.omitted_nodes > 0)
     {
-        other_conversions = ngx_http_markdown_prometheus_saturating_add(
-            (ngx_atomic_uint_t) snapshot->per_path.overflow_count,
-            render.omitted_conversions);
-
-        if (ngx_http_markdown_prometheus_path_pair_size(
-                other_path, sizeof(other_path) - 1,
-                other_conversions, render.omitted_time_ms, &path_needed)
-            != NGX_OK)
-        {
+        p = ngx_http_markdown_prometheus_write_other_path(
+            p, end, &render, snapshot->per_path.overflow_count);
+        if (p == NULL) {
             return NULL;
         }
-
-        remaining = (size_t) (end - p);
-        if (remaining < 1 || path_needed > remaining - 1) {
-            return NULL;
-        }
-
-        render.pos = p;
-        render.tail_reserve = 1;
-        if (ngx_http_markdown_prometheus_write_path_pair(
-                &render, other_path, sizeof(other_path) - 1,
-                other_conversions, render.omitted_time_ms, path_needed)
-            != NGX_OK)
-        {
-            return NULL;
-        }
-        p = render.pos;
     }
 
     *p++ = '\n';
     return p;
+}
+
+
+static u_char *
+ngx_http_markdown_prometheus_write_other_path(
+    u_char *p,
+    u_char *end,
+    ngx_http_markdown_prometheus_path_render_ctx_t *render,
+    ngx_atomic_uint_t overflow_count)
+{
+    static const u_char      other_path[] = "__other__";
+    ngx_atomic_uint_t        other_conversions;
+    size_t                   needed;
+    size_t                   remaining;
+
+    other_conversions = ngx_http_markdown_prometheus_saturating_add(
+        overflow_count, render->omitted_conversions);
+    if (ngx_http_markdown_prometheus_path_pair_size(
+            other_path, sizeof(other_path) - 1, other_conversions,
+            render->omitted_time_ms, &needed) != NGX_OK)
+    {
+        return NULL;
+    }
+
+    remaining = (size_t) (end - p);
+    if (remaining < 1 || needed > remaining - 1) {
+        return NULL;
+    }
+
+    render->pos = p;
+    render->tail_reserve = 1;
+    if (ngx_http_markdown_prometheus_write_path_pair(
+            render, other_path, sizeof(other_path) - 1,
+            other_conversions, render->omitted_time_ms, needed) != NGX_OK)
+    {
+        return NULL;
+    }
+
+    return render->pos;
 }
 
 

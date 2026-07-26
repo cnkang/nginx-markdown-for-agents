@@ -686,6 +686,39 @@ test_per_path_walk_with_overflow(void)
     TEST_PASS("__other__ overflow path correct");
 }
 
+
+static void
+test_per_path_overflow_without_retained_paths(void)
+{
+    u_char buf[16384];
+    u_char *p;
+    ngx_http_markdown_metrics_snapshot_t s;
+    ngx_shm_zone_t *saved_zone;
+
+    TEST_SUBSECTION("per-path empty tree retains overflow aggregate");
+
+    memset(&s, 0, sizeof(s));
+    s.per_path.overflow_count = 5;
+    saved_zone = ngx_http_markdown_metrics_shm_zone;
+    ngx_http_markdown_metrics_shm_zone = NULL;
+
+    p = ngx_http_markdown_metrics_write_prometheus(
+        buf, buf + sizeof(buf), &s);
+
+    ngx_http_markdown_metrics_shm_zone = saved_zone;
+    TEST_ASSERT(p != NULL, "overflow-only Prometheus renderer should succeed");
+    *p = '\0';
+    TEST_ASSERT(contains((char *) buf,
+                "nginx_markdown_path_conversions_total{path=\"__other__\"} 5\n"),
+                "overflow-only Prometheus must retain __other__ conversions");
+    TEST_ASSERT(contains((char *) buf,
+                "nginx_markdown_path_conversion_time_ms_total"
+                "{path=\"__other__\"} 0\n"),
+                "overflow-only Prometheus must retain __other__ time");
+
+    TEST_PASS("empty-tree overflow Prometheus correct");
+}
+
 static void
 test_per_path_response_budget_uses_other(void)
 {
@@ -914,6 +947,7 @@ main(void)
     test_prometheus_path_pair_exact_budget();
     test_prometheus_omitted_counter_saturation();
     test_per_path_walk_with_overflow();
+    test_per_path_overflow_without_retained_paths();
     test_per_path_response_budget_uses_other();
     test_per_path_walk_no_shm_zone();
     test_per_path_walk_no_path_entries();
