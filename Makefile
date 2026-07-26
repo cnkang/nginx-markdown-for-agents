@@ -233,6 +233,7 @@ release-notes:
 
 harness-check:
 	python3 tools/harness/check_harness_sync.py
+	python3 tools/harness/detect_metrics_per_path_stub_drift.py
 
 harness-check-full:
 	$(MAKE) docs-check-base
