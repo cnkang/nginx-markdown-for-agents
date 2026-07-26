@@ -1036,6 +1036,10 @@ test_record_per_path_retention_limits(void)
                 "overflow URI must retain aggregate conversions");
     TEST_ASSERT(metrics.per_path.path_conversion_time_sum_ms == 11,
                 "overflow URI must retain aggregate time");
+    TEST_ASSERT(metrics.per_path.unretained_conversions == 1,
+                "overflow URI must enter unretained conversions");
+    TEST_ASSERT(metrics.per_path.unretained_conversion_time_sum_ms == 11,
+                "overflow URI must enter unretained time");
     TEST_ASSERT(g_slab_alloc_calls == 0,
                 "oversized URI must avoid slab allocation");
 
@@ -1046,6 +1050,10 @@ test_record_per_path_retention_limits(void)
                 "repeated oversized URI updates aggregate conversions");
     TEST_ASSERT(metrics.per_path.path_conversion_time_sum_ms == 24,
                 "repeated oversized URI updates aggregate time");
+    TEST_ASSERT(metrics.per_path.unretained_conversions == 2,
+                "repeated oversized URI updates unretained conversions");
+    TEST_ASSERT(metrics.per_path.unretained_conversion_time_sum_ms == 24,
+                "repeated oversized URI updates unretained time");
     TEST_ASSERT(g_shmtx_lock_calls == g_shmtx_unlock_calls,
                 "every retained-length return path must release the SHM mutex");
 
@@ -1057,6 +1065,9 @@ test_record_per_path_retention_limits(void)
                 "cardinality limit must be enforced before retention allocation");
     TEST_ASSERT(g_slab_alloc_calls == 0,
                 "cardinality overflow must avoid slab allocation");
+    TEST_ASSERT(metrics.per_path.unretained_conversions == 1
+                && metrics.per_path.unretained_conversion_time_sum_ms == 3,
+                "cardinality overflow must enter unretained accounting");
 
     init_per_path_metrics(&metrics, &shpool, &zone, 2);
     g_slab_alloc_fail_after = 1;
@@ -1065,6 +1076,9 @@ test_record_per_path_retention_limits(void)
                 "node allocation failure must not create a retained entry");
     TEST_ASSERT(metrics.per_path.path_conversions == 1,
                 "node allocation failure must retain aggregate conversion");
+    TEST_ASSERT(metrics.per_path.unretained_conversions == 1
+                && metrics.per_path.unretained_conversion_time_sum_ms == 5,
+                "node allocation failure must enter unretained accounting");
     TEST_ASSERT(g_shmtx_lock_calls == g_shmtx_unlock_calls,
                 "node allocation failure must release the SHM mutex");
 
@@ -1075,6 +1089,9 @@ test_record_per_path_retention_limits(void)
                 "path allocation failure must not create a retained entry");
     TEST_ASSERT(metrics.per_path.path_conversions == 1,
                 "path allocation failure must retain aggregate conversion");
+    TEST_ASSERT(metrics.per_path.unretained_conversions == 1
+                && metrics.per_path.unretained_conversion_time_sum_ms == 5,
+                "path allocation failure must enter unretained accounting");
     TEST_ASSERT(g_shmtx_lock_calls == g_shmtx_unlock_calls,
                 "path allocation failure must release the SHM mutex");
 

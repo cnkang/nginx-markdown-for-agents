@@ -135,6 +135,8 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
         ngx_atomic_t  path_conversions;
         ngx_atomic_t  path_conversion_time_sum_ms;
         ngx_atomic_t  overflow_count;
+        ngx_atomic_t  unretained_conversions;
+        ngx_atomic_t  unretained_conversion_time_sum_ms;
     } per_path;
     ngx_http_markdown_metrics_perf_snapshot_t perf;
 } ngx_http_markdown_metrics_snapshot_t;
@@ -188,6 +190,8 @@ typedef struct {
     ngx_atomic_t       path_conversion_time_sum_ms;
     ngx_uint_t         cardinality_limit;
     ngx_atomic_t       overflow_count;
+    ngx_atomic_t       unretained_conversions;
+    ngx_atomic_t       unretained_conversion_time_sum_ms;
 } ngx_http_markdown_metrics_per_path_t;
 
 typedef struct {
@@ -662,6 +666,8 @@ test_per_path_walk_with_overflow(void)
 
     s.per_path.path_entries = 1;
     s.per_path.overflow_count = 5;
+    s.per_path.unretained_conversions = 5;
+    s.per_path.unretained_conversion_time_sum_ms = 50;
 
     memset(&live.per_path.sentinel, 0, sizeof(live.per_path.sentinel));
     live.per_path.sentinel.left = &live.per_path.sentinel;
@@ -699,6 +705,8 @@ test_per_path_overflow_without_retained_paths(void)
 
     memset(&s, 0, sizeof(s));
     s.per_path.overflow_count = 5;
+    s.per_path.unretained_conversions = 5;
+    s.per_path.unretained_conversion_time_sum_ms = 50;
     saved_zone = ngx_http_markdown_metrics_shm_zone;
     ngx_http_markdown_metrics_shm_zone = NULL;
 
@@ -713,7 +721,7 @@ test_per_path_overflow_without_retained_paths(void)
                 "overflow-only Prometheus must retain __other__ conversions");
     TEST_ASSERT(contains((char *) buf,
                 "nginx_markdown_path_conversion_time_ms_total"
-                "{path=\"__other__\"} 0\n"),
+                "{path=\"__other__\"} 50\n"),
                 "overflow-only Prometheus must retain __other__ time");
 
     TEST_PASS("empty-tree overflow Prometheus correct");
@@ -749,6 +757,8 @@ test_per_path_response_budget_uses_other(void)
      */
     s.per_path.path_entries = 0;
     s.per_path.overflow_count = 5;
+    s.per_path.unretained_conversions = 5;
+    s.per_path.unretained_conversion_time_sum_ms = 50;
     p = ngx_http_markdown_metrics_write_prometheus(
         buf, buf + sizeof(buf), &s);
     TEST_ASSERT(p != NULL, "aggregate-only renderer should succeed");
@@ -797,8 +807,8 @@ test_per_path_response_budget_uses_other(void)
                 "cardinality and response omissions should be combined");
     TEST_ASSERT(contains((char *) buf,
                 "nginx_markdown_path_conversion_time_ms_total"
-                "{path=\"__other__\"} 1500\n"),
-                "omitted conversion time should be retained");
+                "{path=\"__other__\"} 1550\n"),
+                "unretained and omitted conversion time should be retained");
     TEST_ASSERT(!contains((char *) buf, "\\u0001"),
                 "oversized detailed path should not be partially emitted");
 

@@ -171,8 +171,8 @@ All metrics use the `nginx_markdown_` prefix. Counter metrics use the `_total` s
 | `nginx_markdown_skips_total` | counter | `reason` | `not_eligible`, `skipped_accept`, `skipped_no_accept`, `skipped_conditional`, `disabled` | Requests skipped by reason. |
 | `nginx_markdown_failures_total` | counter | `reason` | `conversion_error`, `resource_limit`, `system_error` | Conversion failures by bounded category. |
 | `nginx_markdown_decompressions_total` | counter | `format` | `gzip`, `deflate`, `brotli` | Decompression operations by compression format. |
-| `nginx_markdown_path_conversions_total` | counter | `path` | bounded configured paths plus `__other__` | Conversions by retained path. |
-| `nginx_markdown_path_conversion_time_ms_total` | counter | `path` | bounded configured paths plus `__other__` | Cumulative conversion time by retained path. |
+| `nginx_markdown_path_conversions_total` | counter | `path` | bounded configured paths plus `__other__` | Conversions by retained path; `__other__` completes the aggregate. |
+| `nginx_markdown_path_conversion_time_ms_total` | counter | `path` | bounded configured paths plus `__other__` | Cumulative conversion time by retained path; `__other__` completes the aggregate. |
 
 ### Cumulative Latency Counters
 
@@ -274,6 +274,9 @@ per retained path to two per-path families. Per-path tracking is off by default,
 is capped by `markdown_metrics_per_path_cardinality` and by the fixed 1024-byte
 retained-path limit. Conversions omitted by either retention limit aggregate
 under `path="__other__"`; this is a conversion counter, not a unique-path count.
+Slab allocation failures are also folded into `__other__` without increasing the
+retention-limit overflow metric. For a stable snapshot, the labelled path series
+plus `__other__` equal each aggregate per-path conversion and time counter.
 The renderer also keeps each path's conversion-count
 and conversion-time series atomic. If the bounded metrics response cannot hold
 both lines after label escaping, that path is omitted from the detailed series

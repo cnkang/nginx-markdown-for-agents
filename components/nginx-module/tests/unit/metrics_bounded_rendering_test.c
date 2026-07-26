@@ -107,6 +107,8 @@ typedef struct {
     ngx_atomic_t       path_conversion_time_sum_ms;
     ngx_uint_t         cardinality_limit;
     ngx_atomic_t       overflow_count;
+    ngx_atomic_t       unretained_conversions;
+    ngx_atomic_t       unretained_conversion_time_sum_ms;
 } ngx_http_markdown_metrics_per_path_t;
 
 typedef struct {
@@ -606,6 +608,8 @@ test_json_overflow_produces_other(void)
 
     s.per_path.path_entries = 1;
     s.per_path.overflow_count = 5;
+    s.per_path.unretained_conversions = 5;
+    s.per_path.unretained_conversion_time_sum_ms = 55;
 
     {
         ngx_http_markdown_path_metric_node_t node;
@@ -641,6 +645,8 @@ test_json_overflow_without_retained_paths(void)
 
     init_snapshot(&s);
     s.per_path.overflow_count = 5;
+    s.per_path.unretained_conversions = 5;
+    s.per_path.unretained_conversion_time_sum_ms = 55;
     saved_zone = ngx_http_markdown_metrics_shm_zone;
     ngx_http_markdown_metrics_shm_zone = NULL;
 
@@ -655,6 +661,8 @@ test_json_overflow_without_retained_paths(void)
                 "overflow-only JSON must contain __other__");
     TEST_ASSERT(contains((char *) buf, "\"conversions\":5"),
                 "overflow-only JSON must preserve conversion count");
+    TEST_ASSERT(contains((char *) buf, "\"conversion_time_sum_ms\":55"),
+                "overflow-only JSON must preserve conversion time");
     TEST_ASSERT(p > buf && p[-1] == '}',
                 "overflow-only JSON must keep its closing brace");
 
@@ -975,6 +983,8 @@ test_text_overflow_produces_other(void)
 
     s.per_path.path_entries = 1;
     s.per_path.overflow_count = 3;
+    s.per_path.unretained_conversions = 3;
+    s.per_path.unretained_conversion_time_sum_ms = 30;
 
     add_node(&node, path, sizeof(path) - 1, 7, 70,
              &live.per_path.sentinel);
@@ -1005,6 +1015,8 @@ test_text_overflow_without_retained_paths(void)
 
     init_snapshot(&s);
     s.per_path.overflow_count = 3;
+    s.per_path.unretained_conversions = 3;
+    s.per_path.unretained_conversion_time_sum_ms = 30;
     saved_zone = ngx_http_markdown_metrics_shm_zone;
     ngx_http_markdown_metrics_shm_zone = NULL;
 
@@ -1019,6 +1031,8 @@ test_text_overflow_without_retained_paths(void)
                 "overflow-only text must have a details section");
     TEST_ASSERT(contains((char *) buf, "Path[__other__]: conversions=3"),
                 "overflow-only text must preserve conversion count");
+    TEST_ASSERT(contains((char *) buf, "time_ms=30"),
+                "overflow-only text must preserve conversion time");
 
     TEST_PASS("text empty-tree overflow correct");
 }

@@ -1451,7 +1451,9 @@ typedef struct {
      *
      * cardinality_limit caps the number of distinct paths stored;
      * overflow_count tracks conversions not retained because either
-     * cardinality or the retained-path length cap was reached.
+     * cardinality or the retained-path length cap was reached.  The
+     * unretained counters also include slab allocation failures so every
+     * aggregate conversion remains represented by the __other__ pseudo-path.
      * Aggregate counters (path_conversions, path_conversion_time_sum_ms)
      * accumulate across all per-path nodes for fast rendering
      * without tree traversal.
@@ -1473,6 +1475,8 @@ typedef struct {
         ngx_atomic_t       path_conversion_time_sum_ms;
         ngx_uint_t         cardinality_limit;
         ngx_atomic_t       overflow_count;
+        ngx_atomic_t       unretained_conversions;
+        ngx_atomic_t       unretained_conversion_time_sum_ms;
     } per_path;
 } ngx_http_markdown_metrics_t;
 
