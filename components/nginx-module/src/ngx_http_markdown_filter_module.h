@@ -1454,7 +1454,16 @@ typedef struct {
      * Aggregate counters (path_conversions, path_conversion_time_sum_ms)
      * accumulate across all per-path nodes for fast rendering
      * without tree traversal.
+     *
+     * NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN caps individual URI
+     * path length stored in the shared-memory RB-tree.  This local cap
+     * prevents a handful of very long paths from exhausting slab space
+     * despite cardinality_limit.  1024 covers structured routing paths.
+     * If larger paths are ever needed, promote to a full
+     * markdown_metrics_per_path_path_max_len directive.
      */
+
+#define NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN  1024
     struct {
         ngx_rbtree_t       path_tree;
         ngx_rbtree_node_t  sentinel;

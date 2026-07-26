@@ -572,6 +572,10 @@ test_json_zero_paths(void)
                 "zero paths should not produce __other__");
     TEST_ASSERT(contains((char *) buf, "\"paths\": ["),
                 "should contain empty paths array");
+    TEST_ASSERT(contains((char *) buf, "\"perf\":"),
+                "mandatory perf object must be present");
+    TEST_ASSERT(p > buf && p[-1] == '}',
+                "JSON output must end with the outer closing brace");
 
     TEST_PASS("JSON zero paths correct");
 }
@@ -643,7 +647,8 @@ test_json_oversized_path_omitted(void)
     s.per_path.overflow_count = 0;
     p = ngx_http_markdown_metrics_write_json(
         buf, buf + sizeof(buf), &s, 0, 0, 0, 0);
-    TEST_ASSERT(p != NULL, "aggregate-only renderer should succeed");
+    TEST_ASSERT(p != NULL && p < buf + sizeof(buf),
+                "aggregate-only renderer should leave room for NUL");
     base_size = (size_t) (p - buf);
 
     add_node(&node, path, sizeof(path), 42, 1500,
@@ -657,7 +662,7 @@ test_json_oversized_path_omitted(void)
     p = ngx_http_markdown_metrics_write_json(
         buf, buf + capacity, &s, 0, 0, 0, 0);
 
-    TEST_ASSERT(p != NULL && p <= buf + capacity,
+    TEST_ASSERT(p != NULL && p < buf + capacity,
                 "bounded JSON should stay within capacity");
     *p = '\0';
     TEST_ASSERT(contains((char *) buf, "__other__"),
@@ -779,6 +784,8 @@ test_json_other_time_ms_not_zero(void)
     s.per_path.path_entries = 0;
     p = ngx_http_markdown_metrics_write_json(
         buf, buf + sizeof(buf), &s, 0, 0, 0, 0);
+    TEST_ASSERT(p != NULL && p < buf + sizeof(buf),
+                "aggregate-only renderer should leave room for NUL");
     base_size = (size_t) (p - buf);
 
     add_node(&node, path, sizeof(path) - 1, 5, 999,
@@ -791,7 +798,8 @@ test_json_other_time_ms_not_zero(void)
     p = ngx_http_markdown_metrics_write_json(
         buf, buf + capacity, &s, 0, 0, 0, 0);
 
-    TEST_ASSERT(p != NULL, "renderer should succeed");
+    TEST_ASSERT(p != NULL && p < buf + capacity,
+                "renderer should succeed without exhausting the buffer");
     *p = '\0';
     TEST_ASSERT(contains((char *) buf, "__other__"),
                 "omitted path should produce __other__");
@@ -816,6 +824,25 @@ test_json_path_entry_size_positive(void)
                 "longer path should have larger entry size");
 
     TEST_PASS("json_path_entry_size positive");
+}
+
+
+static void
+test_path_entry_size_overflow_is_rejected(void)
+{
+    size_t  overflow_len;
+
+    TEST_SUBSECTION("path entry size: overflow is rejected");
+
+    overflow_len = ((size_t) -1) / 6 + 1;
+    TEST_ASSERT(ngx_http_markdown_json_path_entry_size(overflow_len)
+                == (size_t) -1,
+                "JSON path entry overflow must be omitted");
+    TEST_ASSERT(ngx_http_markdown_text_path_entry_size(overflow_len)
+                == (size_t) -1,
+                "text path entry overflow must be omitted");
+
+    TEST_PASS("path entry size overflow is rejected");
 }
 
 static void
@@ -946,6 +973,8 @@ test_text_oversized_path_omitted(void)
     s.per_path.path_entries = 0;
     p = ngx_http_markdown_metrics_write_text(
         buf, buf + sizeof(buf), &s, 0, 0, 0, 0);
+    TEST_ASSERT(p != NULL && p < buf + sizeof(buf),
+                "aggregate-only renderer should leave room for NUL");
     base_size = (size_t) (p - buf);
 
     add_node(&node, path, sizeof(path), 42, 1500,
@@ -959,7 +988,7 @@ test_text_oversized_path_omitted(void)
     p = ngx_http_markdown_metrics_write_text(
         buf, buf + capacity, &s, 0, 0, 0, 0);
 
-    TEST_ASSERT(p != NULL && p <= buf + capacity,
+    TEST_ASSERT(p != NULL && p < buf + capacity,
                 "bounded text should stay within capacity");
     *p = '\0';
     TEST_ASSERT(contains((char *) buf, "__other__"),
@@ -1014,12 +1043,19 @@ test_text_path_entry_size_positive(void)
 static void
 test_json_tail_reserve_positive(void)
 {
-    TEST_SUBSECTION("json_tail_reserve: positive");
+    size_t  expected;
 
-    TEST_ASSERT(ngx_http_markdown_json_tail_reserve() > 0,
-                "tail reserve must be positive");
+    TEST_SUBSECTION("json_tail_reserve: complete mandatory suffix");
 
-    TEST_PASS("json_tail_reserve positive");
+    expected = sizeof("\n    ]\n  },\n") - 1
+        + ngx_http_markdown_json_other_entry_size()
+        + NGX_HTTP_MARKDOWN_JSON_PERF_MAX_SIZE
+        + sizeof("}\n") - 1;
+
+    TEST_ASSERT(ngx_http_markdown_json_tail_reserve() == expected,
+                "tail reserve must include paths, __other__, perf, and brace");
+
+    TEST_PASS("json_tail_reserve covers the mandatory suffix");
 }
 
 static void
@@ -1057,6 +1093,8 @@ test_json_no_partial_path_on_budget_exhaustion(void)
     s.per_path.path_entries = 0;
     p = ngx_http_markdown_metrics_write_json(
         buf, buf + sizeof(buf), &s, 0, 0, 0, 0);
+    TEST_ASSERT(p != NULL && p < buf + sizeof(buf),
+                "aggregate-only renderer should leave room for NUL");
     base_size = (size_t) (p - buf);
 
     add_node(&node, path, sizeof(path) - 1, 1, 1,
@@ -1069,7 +1107,7 @@ test_json_no_partial_path_on_budget_exhaustion(void)
     p = ngx_http_markdown_metrics_write_json(
         buf, buf + capacity, &s, 0, 0, 0, 0);
 
-    TEST_ASSERT(p != NULL && p <= buf + capacity,
+    TEST_ASSERT(p != NULL && p < buf + capacity,
                 "bounded JSON should stay within capacity");
     *p = '\0';
 
@@ -1105,6 +1143,8 @@ test_text_no_partial_line_on_budget_exhaustion(void)
     s.per_path.path_entries = 0;
     p = ngx_http_markdown_metrics_write_text(
         buf, buf + sizeof(buf), &s, 0, 0, 0, 0);
+    TEST_ASSERT(p != NULL && p < buf + sizeof(buf),
+                "aggregate-only renderer should leave room for NUL");
     base_size = (size_t) (p - buf);
 
     add_node(&node, path, sizeof(path) - 1, 1, 1,
@@ -1117,7 +1157,7 @@ test_text_no_partial_line_on_budget_exhaustion(void)
     p = ngx_http_markdown_metrics_write_text(
         buf, buf + capacity, &s, 0, 0, 0, 0);
 
-    TEST_ASSERT(p != NULL && p <= buf + capacity,
+    TEST_ASSERT(p != NULL && p < buf + capacity,
                 "bounded text should stay within capacity");
     *p = '\0';
 
@@ -1144,6 +1184,7 @@ main(void)
     test_json_escape_expansion();
     test_json_other_time_ms_not_zero();
     test_json_path_entry_size_positive();
+    test_path_entry_size_overflow_is_rejected();
     test_text_single_path_fits();
     test_text_zero_paths();
     test_text_overflow_produces_other();

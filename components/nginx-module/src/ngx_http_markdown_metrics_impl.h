@@ -721,6 +721,18 @@ ngx_http_markdown_text_walk_path_tree_bounded(
     ngx_rbtree_node_t *sentinel,
     ngx_http_markdown_path_detail_render_ctx_t *render);
 
+static u_char *
+ngx_http_markdown_json_write_path_details(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot);
+
+static u_char *
+ngx_http_markdown_text_write_path_details(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot);
+
 static size_t ngx_http_markdown_json_path_entry_size(size_t path_len);
 static size_t ngx_http_markdown_text_path_entry_size(size_t path_len);
 static size_t ngx_http_markdown_json_other_entry_size(void);
@@ -728,6 +740,38 @@ static size_t ngx_http_markdown_text_other_entry_size(void);
 static size_t ngx_http_markdown_json_tail_reserve(void);
 static size_t ngx_http_markdown_text_tail_reserve(void);
 #endif
+
+
+static ngx_atomic_uint_t
+ngx_http_markdown_metrics_saturating_add(
+    ngx_atomic_uint_t left, ngx_atomic_uint_t right)
+{
+    if (((ngx_atomic_uint_t) -1) - left < right) {
+        return (ngx_atomic_uint_t) -1;
+    }
+
+    return left + right;
+}
+
+static size_t
+ngx_http_markdown_metrics_saturating_size_add(size_t left, size_t right)
+{
+    if (((size_t) -1) - left < right) {
+        return (size_t) -1;
+    }
+
+    return left + right;
+}
+
+static ngx_atomic_uint_t
+ngx_http_markdown_metrics_omitted_nodes_as_atomic(size_t omitted_nodes)
+{
+    if (omitted_nodes > (size_t) ((ngx_atomic_uint_t) -1)) {
+        return (ngx_atomic_uint_t) -1;
+    }
+
+    return (ngx_atomic_uint_t) omitted_nodes;
+}
 
 /**
  * Render the collected metrics snapshot as a JSON object into the provided buffer.
@@ -952,80 +996,8 @@ ngx_http_markdown_metrics_write_json(
         snapshot->per_path.path_conversion_time_sum_ms,
         snapshot->per_path.overflow_count);
 
-    /*
-     * Per-path individual entries: walk the SHM RB-tree to emit
-     * each path as a JSON object inside the "paths" array.
-     *
-     * Uses bounded rendering: entries that do not fit in the
-     * remaining buffer (after reserving space for the closing
-     * brackets and __other__ entry) are aggregated into the
-     * omitted counters.  This ensures the response is always
-     * syntactically complete and the endpoint returns HTTP 200.
-     *
-     * Requires full NGINX type definitions; guarded by
-     * NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED.
-     */
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-    if (snapshot->per_path.path_entries > 0
-        && ngx_http_markdown_metrics_shm_zone != NULL
-        && ngx_http_markdown_metrics_shm_zone->data != NULL)
-    {
-        ngx_shm_zone_t                                *zone;
-        ngx_slab_pool_t                               *shpool;
-        ngx_http_markdown_metrics_t                   *live_metrics;
-        ngx_http_markdown_path_detail_render_ctx_t    render;
-
-        zone = ngx_http_markdown_metrics_shm_zone;
-        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
-        shpool = (ngx_slab_pool_t *) zone->shm.addr;
-
-        render.pos = p;
-        render.end = end;
-        render.tail_reserve = ngx_http_markdown_json_tail_reserve();
-        render.omitted_conversions = 0;
-        render.omitted_time_ms = 0;
-        render.omitted_nodes = 0;
-        render.entries_written = 0;
-
-        ngx_shmtx_lock(&shpool->mutex);
-
-        p = ngx_http_markdown_json_walk_path_tree_bounded(
-                live_metrics->per_path.path_tree.root,
-                &live_metrics->per_path.sentinel,
-                &render);
-
-        ngx_shmtx_unlock(&shpool->mutex);
-
-        /*
-         * Emit the __other__ pseudo-path entry for overflow paths
-         * that were dropped when the cardinality limit was reached,
-         * plus any paths omitted due to buffer space constraints.
-         */
-        if ((snapshot->per_path.overflow_count > 0
-             || render.omitted_nodes > 0) && p < end)
-        {
-            ngx_atomic_uint_t  other_conversions;
-            ngx_atomic_uint_t  other_entries;
-
-            other_conversions = snapshot->per_path.overflow_count
-                + render.omitted_conversions;
-            other_entries = snapshot->per_path.overflow_count
-                + (ngx_atomic_uint_t) render.omitted_nodes;
-
-            if (render.entries_written > 0) {
-                p = ngx_slprintf(p, end, ",");
-            }
-            p = ngx_slprintf(p, end,
-                "\n"
-                "      {\"path\":\"__other__\","
-                "\"conversions\":%uA,"
-                "\"conversion_time_sum_ms\":%uA,"
-                "\"entries\":%uA}",
-                other_conversions,
-                render.omitted_time_ms,
-                other_entries);
-        }
-    }
+    p = ngx_http_markdown_json_write_path_details(p, end, snapshot);
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
     p = ngx_slprintf(p, end, "\n    ]\n  },\n");
@@ -1285,70 +1257,8 @@ ngx_http_markdown_metrics_write_text(
         snapshot->per_path.overflow_count);
 
     p = ngx_http_markdown_metrics_write_text_perf(p, end, &snapshot->perf);
-    /*
-     * Per-path individual entries: walk the SHM RB-tree to emit
-     * each path as a plain-text line after the aggregate section.
-     *
-     * Uses bounded rendering: entries that do not fit in the
-     * remaining buffer are aggregated into an __other__ line.
-     * This ensures the response is always syntactically complete
-     * and the endpoint returns HTTP 200.
-     *
-     * Requires full NGINX type definitions; guarded by
-     * NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED.
-     */
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
-    if (snapshot->per_path.path_entries > 0
-        && ngx_http_markdown_metrics_shm_zone != NULL
-        && ngx_http_markdown_metrics_shm_zone->data != NULL)
-    {
-        ngx_shm_zone_t                                *zone;
-        ngx_slab_pool_t                               *shpool;
-        ngx_http_markdown_metrics_t                   *live_metrics;
-        ngx_http_markdown_path_detail_render_ctx_t    render;
-
-        zone = ngx_http_markdown_metrics_shm_zone;
-        live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
-        shpool = (ngx_slab_pool_t *) zone->shm.addr;
-
-        p = ngx_slprintf(p, end, "\nPer-Path Details:\n");
-
-        render.pos = p;
-        render.end = end;
-        render.tail_reserve = ngx_http_markdown_text_tail_reserve();
-        render.omitted_conversions = 0;
-        render.omitted_time_ms = 0;
-        render.omitted_nodes = 0;
-        render.entries_written = 0;
-
-        ngx_shmtx_lock(&shpool->mutex);
-
-        p = ngx_http_markdown_text_walk_path_tree_bounded(
-                live_metrics->per_path.path_tree.root,
-                &live_metrics->per_path.sentinel,
-                &render);
-
-        ngx_shmtx_unlock(&shpool->mutex);
-
-        if ((snapshot->per_path.overflow_count > 0
-             || render.omitted_nodes > 0) && p < end)
-        {
-            ngx_atomic_uint_t  other_conversions;
-            ngx_atomic_uint_t  other_entries;
-
-            other_conversions = snapshot->per_path.overflow_count
-                + render.omitted_conversions;
-            other_entries = snapshot->per_path.overflow_count
-                + (ngx_atomic_uint_t) render.omitted_nodes;
-
-            p = ngx_slprintf(p, end,
-                "- Path[__other__]: conversions=%uA entries=%uA "
-                "time_ms=%uA\n",
-                other_conversions,
-                other_entries,
-                render.omitted_time_ms);
-        }
-    }
+    p = ngx_http_markdown_text_write_path_details(p, end, snapshot);
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
     return p;
@@ -1464,15 +1374,24 @@ ngx_http_markdown_escape_json_string(u_char *dst, u_char *last,
 static size_t
 ngx_http_markdown_json_path_entry_size(size_t path_len)
 {
+    size_t  fixed_size;
     size_t  max_escaped;
     size_t  max_digits;
 
+    if (path_len > ((size_t) -1) / 6) {
+        return (size_t) -1;
+    }
+
     max_escaped = path_len * 6;
     max_digits = 20 * 3;
+    fixed_size = sizeof("\n      {\"path\": \"\", \"conversions\": , "
+                        "\"entries\": , \"conversion_time_sum_ms\": },") - 1;
 
-    return sizeof("\n      {\"path\": \"\", \"conversions\": , "
-                  "\"entries\": , \"conversion_time_sum_ms\": },") - 1
-        + max_escaped + max_digits;
+    if (max_escaped > ((size_t) -1) - fixed_size - max_digits) {
+        return (size_t) -1;
+    }
+
+    return fixed_size + max_escaped + max_digits;
 }
 
 
@@ -1483,14 +1402,23 @@ ngx_http_markdown_json_path_entry_size(size_t path_len)
 static size_t
 ngx_http_markdown_text_path_entry_size(size_t path_len)
 {
+    size_t  fixed_size;
     size_t  max_escaped;
     size_t  max_digits;
 
+    if (path_len > ((size_t) -1) / 6) {
+        return (size_t) -1;
+    }
+
     max_escaped = path_len * 6;
     max_digits = 20 * 3;
+    fixed_size = sizeof("- Path[]: conversions= entries= time_ms=\n") - 1;
 
-    return sizeof("- Path[]: conversions= entries= time_ms=\n") - 1
-        + max_escaped + max_digits;
+    if (max_escaped > ((size_t) -1) - fixed_size - max_digits) {
+        return (size_t) -1;
+    }
+
+    return fixed_size + max_escaped + max_digits;
 }
 
 
@@ -1519,6 +1447,18 @@ ngx_http_markdown_text_other_entry_size(void)
 }
 
 
+static size_t
+ngx_http_markdown_json_perf_section_size(void)
+{
+    return NGX_HTTP_MARKDOWN_JSON_PERF_MAX_SIZE;
+}
+
+static size_t
+ngx_http_markdown_json_closing_brace_size(void)
+{
+    return sizeof("}\n") - 1;
+}
+
 /*
  * Estimate the tail reserve needed for JSON: closing the paths array,
  * the per_path object, the perf section, and the outer closing brace.
@@ -1527,20 +1467,29 @@ static size_t
 ngx_http_markdown_json_tail_reserve(void)
 {
     return sizeof("\n    ]\n  },\n") - 1
-        + ngx_http_markdown_json_other_entry_size()
-        + 256;
+           + ngx_http_markdown_json_other_entry_size()
+           + ngx_http_markdown_json_perf_section_size()
+           + ngx_http_markdown_json_closing_brace_size();
 }
-
 
 /*
  * Estimate the tail reserve needed for plain-text: the __other__ line
- * plus a safety margin for the perf section and trailing newline.
+ * plus exact perf section and trailing newline.
  */
 static size_t
 ngx_http_markdown_text_tail_reserve(void)
 {
     return ngx_http_markdown_text_other_entry_size()
-        + 256;
+           + sizeof("\nPerformance Metrics:\n"
+                    "- Backpressure Total: \n"
+                    "- Backpressure Resume Total: \n"
+                    "- Pending Output High Watermark (bytes): \n"
+                    "- Decompression Streaming Total: \n"
+                    "- Decompression Full-Buffer Total: \n"
+                    "- Decompression Budget Exceeded Total: \n"
+                    "- Zero-Copy Output Total: \n"
+                    "- Copied Output Total: \n") - 1
+           + 8 * 20;
 }
 
 
@@ -1582,7 +1531,7 @@ ngx_http_markdown_json_walk_path_tree_bounded(
             render->pos = ngx_slprintf(render->pos, render->end,
                 "\", \"conversions\": %uA, "
                 "\"entries\": %uA, "
-                "\"conversion_time_ms\": %uA}",
+                "\"conversion_time_sum_ms\": %uA}",
                 pnode->conversions,
                 pnode->entries,
                 pnode->conversion_time_sum_ms);
@@ -1591,27 +1540,41 @@ ngx_http_markdown_json_walk_path_tree_bounded(
                 render->entries_written++;
             } else {
                 render->pos = entry_start;
-                render->omitted_conversions +=
-                    (ngx_atomic_uint_t) pnode->conversions;
-                render->omitted_time_ms +=
-                    (ngx_atomic_uint_t) pnode->conversion_time_sum_ms;
-                render->omitted_nodes++;
+                render->omitted_conversions =
+                    ngx_http_markdown_metrics_saturating_add(
+                        render->omitted_conversions,
+                        (ngx_atomic_uint_t) pnode->conversions);
+                render->omitted_time_ms =
+                    ngx_http_markdown_metrics_saturating_add(
+                        render->omitted_time_ms,
+                        (ngx_atomic_uint_t) pnode->conversion_time_sum_ms);
+                render->omitted_nodes =
+                    ngx_http_markdown_metrics_saturating_size_add(
+                        render->omitted_nodes, 1);
             }
         } else {
-            render->omitted_conversions +=
-                (ngx_atomic_uint_t) pnode->conversions;
-            render->omitted_time_ms +=
-                (ngx_atomic_uint_t) pnode->conversion_time_sum_ms;
-            render->omitted_nodes++;
+            render->omitted_conversions =
+                ngx_http_markdown_metrics_saturating_add(
+                    render->omitted_conversions,
+                    (ngx_atomic_uint_t) pnode->conversions);
+            render->omitted_time_ms =
+                ngx_http_markdown_metrics_saturating_add(
+                    render->omitted_time_ms,
+                    (ngx_atomic_uint_t) pnode->conversion_time_sum_ms);
+            render->omitted_nodes =
+                ngx_http_markdown_metrics_saturating_size_add(
+                    render->omitted_nodes, 1);
         }
     } else {
         const ngx_http_markdown_path_metric_node_t  *pnode2;
         pnode2 = (const ngx_http_markdown_path_metric_node_t *) node;
-        render->omitted_conversions +=
-            (ngx_atomic_uint_t) pnode2->conversions;
-        render->omitted_time_ms +=
-            (ngx_atomic_uint_t) pnode2->conversion_time_sum_ms;
-        render->omitted_nodes++;
+        render->omitted_conversions = ngx_http_markdown_metrics_saturating_add(
+            render->omitted_conversions, (ngx_atomic_uint_t) pnode2->conversions);
+        render->omitted_time_ms = ngx_http_markdown_metrics_saturating_add(
+            render->omitted_time_ms,
+            (ngx_atomic_uint_t) pnode2->conversion_time_sum_ms);
+        render->omitted_nodes = ngx_http_markdown_metrics_saturating_size_add(
+            render->omitted_nodes, 1);
     }
 
     render->pos = ngx_http_markdown_json_walk_path_tree_bounded(
@@ -1661,35 +1624,173 @@ ngx_http_markdown_text_walk_path_tree_bounded(
 
             if (render->pos >= render->end) {
                 render->pos = entry_start;
-                render->omitted_conversions +=
-                    (ngx_atomic_uint_t) pnode->conversions;
-                render->omitted_time_ms +=
-                    (ngx_atomic_uint_t) pnode->conversion_time_sum_ms;
-                render->omitted_nodes++;
+                render->omitted_conversions =
+                    ngx_http_markdown_metrics_saturating_add(
+                        render->omitted_conversions,
+                        (ngx_atomic_uint_t) pnode->conversions);
+                render->omitted_time_ms =
+                    ngx_http_markdown_metrics_saturating_add(
+                        render->omitted_time_ms,
+                        (ngx_atomic_uint_t) pnode->conversion_time_sum_ms);
+                render->omitted_nodes =
+                    ngx_http_markdown_metrics_saturating_size_add(
+                        render->omitted_nodes, 1);
             } else {
                 render->entries_written++;
             }
         } else {
-            render->omitted_conversions +=
-                (ngx_atomic_uint_t) pnode->conversions;
-            render->omitted_time_ms +=
-                (ngx_atomic_uint_t) pnode->conversion_time_sum_ms;
-            render->omitted_nodes++;
+            render->omitted_conversions =
+                ngx_http_markdown_metrics_saturating_add(
+                    render->omitted_conversions,
+                    (ngx_atomic_uint_t) pnode->conversions);
+            render->omitted_time_ms =
+                ngx_http_markdown_metrics_saturating_add(
+                    render->omitted_time_ms,
+                    (ngx_atomic_uint_t) pnode->conversion_time_sum_ms);
+            render->omitted_nodes =
+                ngx_http_markdown_metrics_saturating_size_add(
+                    render->omitted_nodes, 1);
         }
     } else {
         const ngx_http_markdown_path_metric_node_t  *pnode2;
         pnode2 = (const ngx_http_markdown_path_metric_node_t *) node;
-        render->omitted_conversions +=
-            (ngx_atomic_uint_t) pnode2->conversions;
-        render->omitted_time_ms +=
-            (ngx_atomic_uint_t) pnode2->conversion_time_sum_ms;
-        render->omitted_nodes++;
+        render->omitted_conversions = ngx_http_markdown_metrics_saturating_add(
+            render->omitted_conversions, (ngx_atomic_uint_t) pnode2->conversions);
+        render->omitted_time_ms = ngx_http_markdown_metrics_saturating_add(
+            render->omitted_time_ms,
+            (ngx_atomic_uint_t) pnode2->conversion_time_sum_ms);
+        render->omitted_nodes = ngx_http_markdown_metrics_saturating_size_add(
+            render->omitted_nodes, 1);
     }
 
     render->pos = ngx_http_markdown_text_walk_path_tree_bounded(
             node->right, sentinel, render);
 
     return render->pos;
+}
+
+
+static u_char *
+ngx_http_markdown_json_write_path_details(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot)
+{
+    ngx_shm_zone_t                                *zone;
+    ngx_slab_pool_t                               *shpool;
+    ngx_http_markdown_metrics_t                   *live_metrics;
+    ngx_http_markdown_path_detail_render_ctx_t    render;
+    ngx_atomic_uint_t                              other_conversions;
+    ngx_atomic_uint_t                              other_entries;
+
+    if (snapshot->per_path.path_entries == 0
+        || ngx_http_markdown_metrics_shm_zone == NULL
+        || ngx_http_markdown_metrics_shm_zone->data == NULL)
+    {
+        return p;
+    }
+
+    zone = ngx_http_markdown_metrics_shm_zone;
+    live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
+    shpool = (ngx_slab_pool_t *) zone->shm.addr;
+
+    render.pos = p;
+    render.end = end;
+    render.tail_reserve = ngx_http_markdown_json_tail_reserve();
+    render.omitted_conversions = 0;
+    render.omitted_time_ms = 0;
+    render.omitted_nodes = 0;
+    render.entries_written = 0;
+
+    ngx_shmtx_lock(&shpool->mutex);
+    p = ngx_http_markdown_json_walk_path_tree_bounded(
+            live_metrics->per_path.path_tree.root,
+            &live_metrics->per_path.sentinel, &render);
+    ngx_shmtx_unlock(&shpool->mutex);
+
+    if ((snapshot->per_path.overflow_count == 0
+         && render.omitted_nodes == 0) || p >= end)
+    {
+        return p;
+    }
+
+    other_conversions = ngx_http_markdown_metrics_saturating_add(
+        snapshot->per_path.overflow_count, render.omitted_conversions);
+    other_entries = ngx_http_markdown_metrics_saturating_add(
+        snapshot->per_path.overflow_count,
+        ngx_http_markdown_metrics_omitted_nodes_as_atomic(
+            render.omitted_nodes));
+
+    if (render.entries_written > 0) {
+        p = ngx_slprintf(p, end, ",");
+    }
+
+    return ngx_slprintf(p, end,
+        "\n"
+        "      {\"path\":\"__other__\","
+        "\"conversions\":%uA,"
+        "\"conversion_time_sum_ms\":%uA,"
+        "\"entries\":%uA}",
+        other_conversions, render.omitted_time_ms, other_entries);
+}
+
+
+static u_char *
+ngx_http_markdown_text_write_path_details(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot)
+{
+    ngx_shm_zone_t                                *zone;
+    ngx_slab_pool_t                               *shpool;
+    ngx_http_markdown_metrics_t                   *live_metrics;
+    ngx_http_markdown_path_detail_render_ctx_t    render;
+    ngx_atomic_uint_t                              other_conversions;
+    ngx_atomic_uint_t                              other_entries;
+
+    if (snapshot->per_path.path_entries == 0
+        || ngx_http_markdown_metrics_shm_zone == NULL
+        || ngx_http_markdown_metrics_shm_zone->data == NULL)
+    {
+        return p;
+    }
+
+    zone = ngx_http_markdown_metrics_shm_zone;
+    live_metrics = (ngx_http_markdown_metrics_t *) zone->data;
+    shpool = (ngx_slab_pool_t *) zone->shm.addr;
+
+    p = ngx_slprintf(p, end, "\nPer-Path Details:\n");
+    render.pos = p;
+    render.end = end;
+    render.tail_reserve = ngx_http_markdown_text_tail_reserve();
+    render.omitted_conversions = 0;
+    render.omitted_time_ms = 0;
+    render.omitted_nodes = 0;
+    render.entries_written = 0;
+
+    ngx_shmtx_lock(&shpool->mutex);
+    p = ngx_http_markdown_text_walk_path_tree_bounded(
+            live_metrics->per_path.path_tree.root,
+            &live_metrics->per_path.sentinel, &render);
+    ngx_shmtx_unlock(&shpool->mutex);
+
+    if ((snapshot->per_path.overflow_count == 0
+         && render.omitted_nodes == 0) || p >= end)
+    {
+        return p;
+    }
+
+    other_conversions = ngx_http_markdown_metrics_saturating_add(
+        snapshot->per_path.overflow_count, render.omitted_conversions);
+    other_entries = ngx_http_markdown_metrics_saturating_add(
+        snapshot->per_path.overflow_count,
+        ngx_http_markdown_metrics_omitted_nodes_as_atomic(
+            render.omitted_nodes));
+
+    return ngx_slprintf(p, end,
+        "- Path[__other__]: conversions=%uA entries=%uA "
+        "time_ms=%uA\n",
+        other_conversions, other_entries, render.omitted_time_ms);
 }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
