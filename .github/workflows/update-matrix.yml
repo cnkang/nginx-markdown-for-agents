@@ -30,6 +30,9 @@ jobs:
       - name: Run matrix updater
         run: python3 tools/release/matrix/update_matrix.py
 
+      - name: Render release matrix docs
+        run: python3 tools/render_release_matrix_docs.py --write
+
       - name: Check for changes
         id: changes
         run: |
