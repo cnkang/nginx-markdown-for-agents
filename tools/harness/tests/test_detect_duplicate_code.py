@@ -95,13 +95,7 @@ def test_memory_duplicate_classified_direct_fix(det, tmp_path):
 
 def test_signature_duplicate_is_ignored(det, tmp_path):
     # Two function signatures with same params → signature/ignore
-    sig = """\
-    ngx_http_request_t *r,
-    ngx_chain_t *in,
-    ngx_int_t rc;
-    """
-
-    # The 5-line non-adjacent detector needs 5 matching lines; pad the sig.
+    # The 5-line non-adjacent detector needs 5 matching lines; pad the signature.
     block = """\
     ngx_http_request_t *r,
     ngx_chain_t *in,
@@ -120,6 +114,7 @@ def test_signature_duplicate_is_ignored(det, tmp_path):
     # NOT appear as direct-fix warnings.
     assert "[signature]" in joined
     assert "ignore-by-rule" in joined
+    assert not any("[signature]" in warning for warning in warnings)
 
 
 def test_structural_duplicate_is_review(det, tmp_path):
