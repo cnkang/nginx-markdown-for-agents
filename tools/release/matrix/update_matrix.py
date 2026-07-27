@@ -168,7 +168,8 @@ def _write_repo_text(path: Path, content: str) -> None:
     """Write `content` to `path` within the repository using UTF-8 encoding.
 
     The path is validated to stay under the repository root, missing parent
-    directories are created, and file mode 0o644 is used.
+    directories are created, and file mode 0o644 is used for repository
+    metadata files that are not secrets.
 
     Parameters:
         path (Path): Destination path inside the repository.
@@ -187,10 +188,10 @@ def _write_repo_text(path: Path, content: str) -> None:
         file_fd = os.open(
             safe_path.name,
             os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-            0o600,
+            0o644,
             dir_fd=parent_fd,
         )
-        os.fchmod(file_fd, 0o600)
+        os.fchmod(file_fd, 0o644)  # NOSONAR(S2612) repository metadata, not secrets
         with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
             handle.write(content)
     finally:
