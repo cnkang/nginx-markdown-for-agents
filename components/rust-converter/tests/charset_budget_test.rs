@@ -134,6 +134,34 @@ fn windows_1252_exceeding_total_budget_returns_budget_exceeded() {
 }
 
 #[test]
+fn unsupported_charset_preflight_error_persists_through_finalize_and_repeated_feed() {
+    let budget = MemoryBudget::default();
+    let mut conv = make_converter_with_budget(budget, "FAKE-ENCODING-999");
+
+    let first = conv
+        .feed_chunk(b"<p>Hello</p>")
+        .expect_err("unsupported charset must fail before feed");
+    let repeated = conv
+        .feed_chunk(b"<p>again</p>")
+        .expect_err("a failed allocation plan must remain terminal");
+    let final_error = conv
+        .finalize()
+        .expect_err("finalize must retain the allocation-plan failure");
+
+    for error in [&first, &repeated, &final_error] {
+        assert!(matches!(error, ConversionError::EncodingError(_)));
+        assert!(
+            error
+                .to_string()
+                .to_ascii_lowercase()
+                .contains("unsupported charset")
+        );
+        assert!(!error.to_string().contains("transitioning"));
+        assert_eq!(error.code(), first.code());
+    }
+}
+
+#[test]
 fn sniff_buffer_at_limit_with_transcoded_output_within_budget() {
     let budget = MemoryBudget {
         total: 64 * 1024,

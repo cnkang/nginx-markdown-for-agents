@@ -419,10 +419,13 @@ impl StreamingConverter {
         // while the current working set remains live.  That keeps explicit
         // UTF-8 feeds zero-copy while retaining a conservative preflight for
         // unresolved and non-UTF-8 states.
-        let charset_allocation = self
-            .charset_state
-            .feed_allocation_upper_bound(data.len())
-            .map_err(|e| self.wrap_error(e))?;
+        let charset_allocation = match self.charset_state.feed_allocation_upper_bound(data.len()) {
+            Ok(allocation) => allocation,
+            Err(error) => {
+                self.charset_preflight_error = Some(error.clone());
+                return Err(self.wrap_error(error));
+            }
+        };
         if charset_allocation > 0 {
             let current_working_set = self.estimate_working_set();
             if let Err(error) = self
