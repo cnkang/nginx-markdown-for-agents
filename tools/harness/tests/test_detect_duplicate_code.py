@@ -100,10 +100,7 @@ def test_signature_duplicate_is_ignored(det, tmp_path):
     ngx_chain_t *in,
     ngx_int_t rc;
     """
-    _src = f"""
-    static ngx_int_t foo({sig})
-    static ngx_int_t bar({sig})
-    """
+
     # The 5-line non-adjacent detector needs 5 matching lines; pad the sig.
     block = """\
     ngx_http_request_t *r,

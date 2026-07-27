@@ -308,16 +308,16 @@ def main() -> int:
         new_errors, worsened, ok_msgs,
     )
 
-    if args.output != "-":
+    if args.output == "-":
+        sys.stdout.write(report)
+        sys.stdout.write("\n")
+    else:
         out_path = validate_write_path_within_root(
             args.output, REPO_ROOT, purpose="baseline report",
         )
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w", encoding="utf-8") as fh:
             fh.write(report)
-
-    sys.stdout.write(report)
-    sys.stdout.write("\n")
 
     if new_errors:
         print(f"\nFAIL: {len(new_errors)} new violation(s) not in baseline", file=sys.stderr)

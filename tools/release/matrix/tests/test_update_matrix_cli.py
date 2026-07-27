@@ -14,12 +14,20 @@ import tools.release.matrix.update_matrix as um
 
 from tools.release.matrix.tests.test_update_matrix import (
     _archs,
-    _matrix_entry_with_managed_by,
     _nginx_version,
     _os_types,
     _unique_versions,
     _allow_repo_writes,
+)
 
+_matrix_entry_with_managed_by = st.fixed_dictionaries(
+    {
+        "nginx": _nginx_version,
+        "os_type": _os_types,
+        "arch": _archs,
+        "support_tier": st.just("full"),
+    },
+    optional={"managed_by": st.just("manual")},
 )
 
 # ---------------------------------------------------------------------------
