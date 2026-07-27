@@ -110,7 +110,6 @@ NON_GOAL_RULES: tuple[NonGoalRule, ...] = (
     NonGoalRule("control-plane ideas"),
 )
 
-__all__ = ["NON_GOALS"]
 
 NON_GOALS: tuple[str, ...] = tuple(r.value for r in NON_GOAL_RULES)
 

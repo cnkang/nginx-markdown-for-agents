@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from tools.lib.path_validation import validate_read_path, sanitize_path_component
+from tools.lib.path_validation import validate_read_path
 
 # Brotli compression support: prefer the Python module, fall back to CLI.
 _brotli_mod = None
@@ -72,21 +72,6 @@ def _iter_brotli_chunks(data: bytes, chunk_size: int) -> list[bytes]:
     return chunks
 
 
-_MAX_RESPONSE_BODY = 128 * 1024 * 1024
-
-
-def _sanitize_response_body(raw: bytes) -> bytes:
-    """Sanitize file-sourced response body before writing to the HTTP socket.
-
-    Strips NUL bytes and enforces a size cap so that taint trackers
-    (SonarCloud S5131) recognize this as a sanitization boundary between
-    user-influenced file selection and the response body.
-    """
-    cleaned = raw.replace(b"\x00", b"")
-    if len(cleaned) > _MAX_RESPONSE_BODY:
-        cleaned = cleaned[:_MAX_RESPONSE_BODY]
-    return cleaned
-
 
 class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
     """HTTP handler with dynamic chunking, gzip, deflate, and Brotli encoding support."""
@@ -106,7 +91,7 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(404, "File not found")
             return
 
-        body = _sanitize_response_body(file_path.read_bytes())
+        body = file_path.read_bytes()  # NOSONAR(S5131) local benchmark fixture on 127.0.0.1 serving controlled corpus files
 
         # Determine transport settings
         is_gzip = "gzip" in path_str or "gzip" in query
@@ -132,22 +117,37 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
             )
             self._send_identity_response(body, content_encoding)
 
+    @staticmethod
+    def _validate_path_component(component: str) -> str:
+        """Validate a single path component without modifying it.
+
+        Rejects traversal markers, empty segments, NUL bytes, and
+        platform path separators.  Returns the component unchanged if
+        valid so that legitimate filenames (including those containing
+        ``..`` such as ``a..b.html``) are preserved.
+        """
+        if not component or component == "." or component == "..":
+            raise ValueError(f"traversal or empty component: {component!r}")
+        if "\x00" in component or "/" in component or "\\" in component:
+            raise ValueError(f"unsafe character in component: {component!r}")
+        return component
+
     def _resolve_and_verify_path(self, path_str: str) -> Path | None:
         """Resolve and securely validate request path.
 
-        Each path component is sanitized independently so that nested
-        requests (e.g. ``subdir/file.json``) resolve beneath
-        ``corpus_dir`` as nested paths while directory separators are
-        preserved.
+        Each path component is validated independently (rejecting ``.``,
+        ``..``, NUL, and path separators) so that nested requests (e.g.
+        ``subdir/file.json``) resolve beneath ``corpus_dir`` as nested
+        paths while legitimate filenames like ``a..b.html`` are preserved.
         """
         corpus_dir = Path(os.environ.get("CORPUS_DIR", "tests/corpus")).resolve()
         try:
             stripped = path_str.lstrip("/")
-            safe_parts = [sanitize_path_component(p) for p in stripped.split("/") if p]
-            if not safe_parts:
+            parts = [self._validate_path_component(p) for p in stripped.split("/") if p]
+            if not parts:
                 return None
-            safe_relative = Path(*safe_parts)
-            file_path = (corpus_dir / safe_relative).resolve()  # codeql[py/path-injection: ignore] — each component sanitized via sanitize_path_component; validate_read_path + traversal check below
+            relative = Path(*parts)
+            file_path = (corpus_dir / relative).resolve()  # codeql[py/path-injection: ignore] — each component validated; resolve + traversal check below
             validate_read_path(str(file_path), purpose="corpus file")
             if corpus_dir not in file_path.parents and file_path != corpus_dir:
                 return None
@@ -195,7 +195,7 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
 
         for chunk in self._iter_chunked_body(body, content_encoding):
             self.wfile.write(f"{len(chunk):x}\r\n".encode())
-            self.wfile.write(chunk)
+            self.wfile.write(chunk)  # NOSONAR(S5131) body from controlled corpus via validated path
             self.wfile.write(b"\r\n")
             self.wfile.flush()
         self.wfile.write(b"0\r\n\r\n")
@@ -254,7 +254,7 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
         self._send_common_headers(content_encoding)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(body)  # NOSONAR(S5131) body from controlled corpus via validated path
 
     def _send_common_headers(self, content_encoding: str | None) -> None:
         """Send status line and shared headers common to all response modes."""
