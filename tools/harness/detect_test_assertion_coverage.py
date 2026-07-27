@@ -101,6 +101,7 @@ def _find_test_function_end(content: str, brace_start: int) -> int | None:
     brace_count = 0
     in_string = False
     raw_string_hashes = -1
+    count_brace = True
 
     i = brace_start
     while i < len(content):

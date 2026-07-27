@@ -30,6 +30,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NoReturn
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from urllib.error import URLError
@@ -125,7 +126,7 @@ def classify_version(version: str) -> str:
     return "stable" if minor % 2 == 0 else "mainline"
 
 
-def _matrix_error(message: str) -> None:
+def _matrix_error(message: str) -> NoReturn:
     """Print a matrix validation error and exit with code 1."""
     print(message, file=sys.stderr)
     sys.exit(1)
@@ -186,7 +187,7 @@ def _write_repo_text(path: Path, content: str) -> None:
         file_fd = os.open(
             safe_path.name,
             os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-            0o644,
+            0o600,
             dir_fd=parent_fd,
         )
         with os.fdopen(file_fd, "w", encoding="utf-8") as handle:

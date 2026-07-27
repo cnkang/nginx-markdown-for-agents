@@ -547,9 +547,9 @@ def _generate_compatibility_matrix(
         "## Platform Compatibility Matrix",
         "",
         "| NGINX Version | Channel | OS | libc | Arch | Artifact "
-        "| Test Level | Tier | Blocking | Workflow |",
+        + "| Test Level | Tier | Blocking | Workflow |",
         "|---------------|---------|-----|------|------|----------"
-        "|------------|------|----------|----------|",
+        + "|------------|------|----------|----------|",
     ]
 
     sorted_entries = sorted(
