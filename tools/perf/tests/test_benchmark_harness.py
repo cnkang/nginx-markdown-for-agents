@@ -341,6 +341,112 @@ def test_upstream_mock_splits_chunked_bodies():
     assert b"".join(chunks) == body
 
 
+@pytest.mark.parametrize("component", ["", ".", "..", "a/b", r"a\\b", "nul\x00name"])
+def test_upstream_mock_rejects_unsafe_path_components(component):
+    """Path validation rejects traversal, separators, and NUL bytes."""
+    with pytest.raises(ValueError):
+        MockUpstreamHandler._validate_path_component(component)
+
+
+def test_upstream_mock_preserves_nested_and_double_dot_filenames(tmp_path, monkeypatch):
+    """Valid nested paths and filenames containing ``..`` resolve unchanged."""
+    corpus_dir = tmp_path / "corpus"
+    nested_dir = corpus_dir / "subdir"
+    nested_dir.mkdir(parents=True)
+    double_dot_file = corpus_dir / "a..b.html"
+    nested_file = nested_dir / "file.json"
+    double_dot_file.write_bytes(b"double-dot")
+    nested_file.write_bytes(b"nested")
+    monkeypatch.setenv("CORPUS_DIR", str(corpus_dir))
+    handler = object.__new__(MockUpstreamHandler)
+
+    assert handler._resolve_and_verify_path("a..b.html") == double_dot_file.resolve()
+    assert handler._resolve_and_verify_path("subdir/file.json") == nested_file.resolve()
+
+
+def test_upstream_mock_rejects_symlink_escape(tmp_path, monkeypatch):
+    """A corpus symlink cannot expose a file outside the corpus root."""
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    outside_file = tmp_path / "outside.txt"
+    outside_file.write_bytes(b"outside")
+    escape_link = corpus_dir / "escape.txt"
+    try:
+        escape_link.symlink_to(outside_file)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are unavailable on this platform")
+
+    monkeypatch.setenv("CORPUS_DIR", str(corpus_dir))
+    handler = object.__new__(MockUpstreamHandler)
+
+    assert handler._resolve_and_verify_path("escape.txt") is None
+
+
+def _mock_identity_handler(path: str, writer: object) -> MockUpstreamHandler:
+    """Build a response handler with the HTTP transport methods stubbed."""
+    handler = object.__new__(MockUpstreamHandler)
+    handler.path = f"/{path}"
+    handler.wfile = writer
+    handler.send_response = lambda _status: None
+    handler.send_header = lambda *_args: None
+    handler.end_headers = lambda: None
+    handler.send_error = lambda *_args: None
+    return handler
+
+
+def test_upstream_mock_returns_corpus_bytes_without_sanitizing_nul(
+    tmp_path, monkeypatch
+):
+    """Corpus response bodies retain embedded NUL bytes byte-for-byte."""
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    body = b"before\x00after\x00"
+    (corpus_dir / "raw.bin").write_bytes(body)
+    monkeypatch.setenv("CORPUS_DIR", str(corpus_dir))
+
+    handler = _mock_identity_handler("raw.bin", io.BytesIO())
+    handler.do_GET()
+
+    assert handler.wfile.getvalue() == body
+
+
+class _CountingWriter:
+    """Record response size and edge bytes without retaining a large body."""
+
+    def __init__(self):
+        self.total = 0
+        self.first = b""
+        self.last = b""
+
+    def write(self, data: bytes) -> int:
+        if not self.total:
+            self.first = data[:8]
+        self.total += len(data)
+        self.last = data[-8:]
+        return len(data)
+
+
+def test_upstream_mock_does_not_truncate_large_corpus_response(
+    tmp_path, monkeypatch
+):
+    """Responses larger than the former 128 MiB cap are sent in full."""
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    body_size = 128 * 1024 * 1024 + 1
+    large_file = corpus_dir / "large.bin"
+    with large_file.open("wb") as handle:
+        handle.truncate(body_size)
+    monkeypatch.setenv("CORPUS_DIR", str(corpus_dir))
+    writer = _CountingWriter()
+
+    handler = _mock_identity_handler("large.bin", writer)
+    handler.do_GET()
+
+    assert writer.total == body_size
+    assert writer.first == b"\x00" * 8
+    assert writer.last == b"\x00" * 8
+
+
 @pytest.mark.parametrize(
     ("content_encoding", "wbits"),
     [("gzip", zlib.MAX_WBITS | 16), ("deflate", zlib.MAX_WBITS)],
