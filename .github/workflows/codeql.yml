@@ -69,6 +69,10 @@ jobs:
 
       - name: Initialize CodeQL for C/C++
         uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        env:
+          # Overlay databases support only build-mode: none; this job needs
+          # manual tracing to analyze the compiled production sources.
+          CODEQL_OVERLAY_DATABASE_MODE: none
         with:
           languages: c-cpp
           build-mode: manual
