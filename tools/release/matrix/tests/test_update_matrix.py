@@ -816,6 +816,7 @@ def test_write_matrix_basic(tmp_path, monkeypatch):
     assert content.endswith("\n")
     parsed = json.loads(content)
     assert parsed == data
+    assert target.stat().st_mode & 0o777 == 0o644
     # Verify 2-space indentation
     assert '  "schema_version"' in content
 
@@ -854,6 +855,7 @@ def test_write_matrix_overwrites_existing(tmp_path, monkeypatch):
     parsed = json.loads(target.read_text())
     assert "old" not in parsed
     assert parsed["schema_version"] == "1.0.0"
+    assert target.stat().st_mode & 0o777 == 0o644
 
 
 def test_write_matrix_no_temp_file_on_success(tmp_path, monkeypatch):
