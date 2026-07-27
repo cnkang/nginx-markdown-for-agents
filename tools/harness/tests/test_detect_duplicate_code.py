@@ -114,6 +114,7 @@ def test_signature_duplicate_is_ignored(det, tmp_path):
     # NOT appear as direct-fix warnings.
     assert "[signature]" in joined
     assert "ignore-by-rule" in joined
+    assert not any("[signature]" in warning for warning in warnings)
 
 
 def test_structural_duplicate_is_review(det, tmp_path):
