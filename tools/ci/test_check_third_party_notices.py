@@ -9,8 +9,8 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+import unittest.mock as mock
 from pathlib import Path
-from unittest import mock
 
 import tools.ci.check_third_party_notices as checker
 
