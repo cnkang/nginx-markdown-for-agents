@@ -474,15 +474,6 @@ _unique_versions = st.lists(_nginx_version, min_size=0, max_size=10).map(
     lambda vs: list(dict.fromkeys(vs))
 )
 
-_matrix_entry_with_managed_by = st.fixed_dictionaries(  # noqa: F841
-    {
-        "nginx": _nginx_version,
-        "os_type": _os_types,
-        "arch": _archs,
-        "support_tier": st.just("full"),
-    },
-    optional={"managed_by": st.just("manual")},
-)
 
 
 # ---------------------------------------------------------------------------

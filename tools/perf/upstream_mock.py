@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from tools.lib.path_validation import validate_read_path
+from tools.lib.path_validation import validate_read_path, sanitize_path_component
 
 # Brotli compression support: prefer the Python module, fall back to CLI.
 _brotli_mod = None
@@ -120,13 +120,13 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
         """Resolve and securely validate request path."""
         corpus_dir = Path(os.environ.get("CORPUS_DIR", "tests/corpus")).resolve()
         try:
-            safe_name = path_str.lstrip("/").replace("..", "_").replace("\\", "_")
+            safe_name = sanitize_path_component(path_str.lstrip("/"))
             file_path = (corpus_dir / safe_name).resolve()
             validate_read_path(str(file_path), purpose="corpus file")
             if corpus_dir not in file_path.parents and file_path != corpus_dir:
                 return None
             return file_path
-        except Exception:
+        except (ValueError, FileNotFoundError):
             return None
 
     def _apply_compression(

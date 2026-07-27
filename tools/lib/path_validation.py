@@ -61,7 +61,7 @@ def validate_read_path(
             f"(purpose: {purpose})"
         )
 
-    resolved = Path(os.path.normpath(raw)).resolve()
+    resolved = Path(os.path.realpath(raw))
 
     if must_exist and not resolved.exists():
         raise FileNotFoundError(

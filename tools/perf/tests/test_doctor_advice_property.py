@@ -401,8 +401,6 @@ def test_property10_exit_code_equals_max_severity(rule_ids):
 
     findings, skipped = evaluate_rules(metrics)
 
-    # Compute expected max severity from the triggered rules
-    _triggered_findings = [f for f in findings if f.rule_id in rule_ids]
 
     # At least some findings should be present (some rules may share metrics
     # and get triggered or not depending on combined values)

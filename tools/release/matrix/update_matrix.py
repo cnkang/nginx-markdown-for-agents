@@ -190,6 +190,7 @@ def _write_repo_text(path: Path, content: str) -> None:
             0o600,
             dir_fd=parent_fd,
         )
+        os.fchmod(file_fd, 0o600)
         with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
             handle.write(content)
     finally:
