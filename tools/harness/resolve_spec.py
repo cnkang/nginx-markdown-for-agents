@@ -11,14 +11,12 @@ from pathlib import Path
 
 try:
     from tools.harness.constants import (  # noqa: F401
-        FAIL,
         PASS,
         SKIP_NOT_PRESENT,
         WARN_NEEDS_AUTHOR_REVIEW,
     )
 except ModuleNotFoundError:
     from constants import (  # type: ignore[no-redef]  # noqa: F401
-        FAIL,
         PASS,
         SKIP_NOT_PRESENT,
         WARN_NEEDS_AUTHOR_REVIEW,
