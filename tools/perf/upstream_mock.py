@@ -117,11 +117,21 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
             self._send_identity_response(body, content_encoding)
 
     def _resolve_and_verify_path(self, path_str: str) -> Path | None:
-        """Resolve and securely validate request path."""
+        """Resolve and securely validate request path.
+
+        Each path component is sanitized independently so that nested
+        requests (e.g. ``subdir/file.json``) resolve beneath
+        ``corpus_dir`` as nested paths while directory separators are
+        preserved.
+        """
         corpus_dir = Path(os.environ.get("CORPUS_DIR", "tests/corpus")).resolve()
         try:
-            safe_name = sanitize_path_component(path_str.lstrip("/"))
-            file_path = (corpus_dir / safe_name).resolve()  # codeql[py/path-injection: ignore] — sanitized via sanitize_path_component + validate_read_path + traversal check below
+            stripped = path_str.lstrip("/")
+            safe_parts = [sanitize_path_component(p) for p in stripped.split("/") if p]
+            if not safe_parts:
+                return None
+            safe_relative = Path(*safe_parts)
+            file_path = (corpus_dir / safe_relative).resolve()  # codeql[py/path-injection: ignore] — each component sanitized via sanitize_path_component; validate_read_path + traversal check below
             validate_read_path(str(file_path), purpose="corpus file")
             if corpus_dir not in file_path.parents and file_path != corpus_dir:
                 return None
