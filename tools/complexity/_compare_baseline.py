@@ -309,7 +309,7 @@ def main() -> int:
     )
 
     if args.output == "-":
-        sys.stdout.write(report)
+        sys.stdout.write(report)  # codeql[py/clear-text-logging-sensitive-data: ignore] — report is a complexity comparison summary, not secrets
         sys.stdout.write("\n")
     else:
         out_path = validate_write_path_within_root(

@@ -121,7 +121,7 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
         corpus_dir = Path(os.environ.get("CORPUS_DIR", "tests/corpus")).resolve()
         try:
             safe_name = sanitize_path_component(path_str.lstrip("/"))
-            file_path = (corpus_dir / safe_name).resolve()
+            file_path = (corpus_dir / safe_name).resolve()  # codeql[py/path-injection: ignore] — sanitized via sanitize_path_component + validate_read_path + traversal check below
             validate_read_path(str(file_path), purpose="corpus file")
             if corpus_dir not in file_path.parents and file_path != corpus_dir:
                 return None
