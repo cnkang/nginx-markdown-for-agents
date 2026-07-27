@@ -120,7 +120,8 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
         """Resolve and securely validate request path."""
         corpus_dir = Path(os.environ.get("CORPUS_DIR", "tests/corpus")).resolve()
         try:
-            file_path = (corpus_dir / path_str).resolve()
+            safe_name = path_str.lstrip("/").replace("..", "_").replace("\\", "_")
+            file_path = (corpus_dir / safe_name).resolve()
             validate_read_path(str(file_path), purpose="corpus file")
             if corpus_dir not in file_path.parents and file_path != corpus_dir:
                 return None

@@ -16,6 +16,7 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -60,7 +61,7 @@ def validate_read_path(
             f"(purpose: {purpose})"
         )
 
-    resolved = Path(raw).resolve()
+    resolved = Path(os.path.normpath(raw)).resolve()
 
     if must_exist and not resolved.exists():
         raise FileNotFoundError(
