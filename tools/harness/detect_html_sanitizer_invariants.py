@@ -32,7 +32,7 @@ Exit codes:
   1 — one or more violations detected
 """
 
-import os
+
 import re
 import sys
 from pathlib import Path

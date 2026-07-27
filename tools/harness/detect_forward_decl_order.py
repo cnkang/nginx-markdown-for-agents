@@ -315,7 +315,8 @@ def main() -> int:
         try:
             scan_dir = scan_dir.resolve()
         except OSError:
-            pass
+            print(f"ERROR: cannot resolve {scan_dir}: path canonicalization failed", file=sys.stderr)
+            return 1
 
     if not scan_dir.is_dir():
         print(f"ERROR: {scan_dir} is not a directory", file=sys.stderr)

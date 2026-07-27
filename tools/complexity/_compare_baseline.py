@@ -309,7 +309,8 @@ def main() -> int:
     )
 
     if args.output == "-":
-        print(report)
+        sys.stdout.write(report)  # codeql[py/clear-text-logging-sensitive-data: ignore] — report is a complexity comparison summary, not secrets
+        sys.stdout.write("\n")
     else:
         out_path = validate_write_path_within_root(
             args.output, REPO_ROOT, purpose="baseline report",
@@ -317,7 +318,8 @@ def main() -> int:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w", encoding="utf-8") as fh:
             fh.write(report)
-        print(report)
+        sys.stdout.write(report)  # codeql[py/clear-text-logging-sensitive-data: ignore] — report is a complexity comparison summary, not secrets
+        sys.stdout.write("\n")
 
     if new_errors:
         print(f"\nFAIL: {len(new_errors)} new violation(s) not in baseline", file=sys.stderr)

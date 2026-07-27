@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
+
 import subprocess
 import sys
 import tempfile
@@ -362,7 +362,7 @@ class TestValidateManifest(unittest.TestCase):
         del manifest["packages"]
         self.manifest_path.write_text(json.dumps(manifest, indent=2))
         errors = self._validate()
-        self.assertTrue(len(errors) > 0)
+        self.assertGreater(len(errors), 0)
 
     def test_version_mismatch(self):
         self._make_valid_manifest()
@@ -374,7 +374,7 @@ class TestValidateManifest(unittest.TestCase):
         fname = "nginx-module-markdown-for-agents_0.8.3_nginx-1.28.0_amd64.deb"
         path = self.artifact_dir / fname
         path.write_bytes(b"real-content")
-        manifest = self._make_valid_manifest([
+        self._make_valid_manifest([
             {
                 "filename": fname,
                 "format": "deb",

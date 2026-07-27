@@ -15,7 +15,7 @@ Run:
 import sys
 from pathlib import Path
 
-from hypothesis import given, assume, settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 # ---------------------------------------------------------------------------

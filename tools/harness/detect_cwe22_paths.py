@@ -108,10 +108,6 @@ REPO_ROOT_DERIVED_RE = re.compile(
 )
 
 
-_TEMPFILE_VAR_RE = re.compile(
-    r"tempfile\b",
-)
-
 
 # Variables that are file descriptors (int), not paths
 FD_VAR_RE = re.compile(

@@ -110,8 +110,7 @@ NON_GOAL_RULES: tuple[NonGoalRule, ...] = (
     NonGoalRule("control-plane ideas"),
 )
 
-# Flat tuple kept for backward compatibility with property tests that
-# import NON_GOALS directly.
+
 NON_GOALS: tuple[str, ...] = tuple(r.value for r in NON_GOAL_RULES)
 
 

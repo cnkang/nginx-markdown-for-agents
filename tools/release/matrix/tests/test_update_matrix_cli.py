@@ -10,23 +10,24 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 import tools.release.matrix.update_matrix as um
-from tools.release.matrix.update_matrix import (
-    DOC_MARKER_BEGIN,
-    DOC_MARKER_END,
-    compute_matrix,
-    main,
-    parse_args,
-    update_doc_table,
-)
+
 
 from tools.release.matrix.tests.test_update_matrix import (
     _archs,
-    _matrix_entry_with_managed_by,
     _nginx_version,
     _os_types,
     _unique_versions,
     _allow_repo_writes,
-    write_matrix,
+)
+
+_matrix_entry_with_managed_by = st.fixed_dictionaries(
+    {
+        "nginx": _nginx_version,
+        "os_type": _os_types,
+        "arch": _archs,
+        "support_tier": st.just("full"),
+    },
+    optional={"managed_by": st.just("manual")},
 )
 
 # ---------------------------------------------------------------------------
@@ -44,13 +45,13 @@ def _make_doc_with_markers(before: str, after: str) -> str:
     Returns:
         str: The composed document with placeholder content between markers.
     """
-    return f"{before}\n{DOC_MARKER_BEGIN}\nold table content\n{DOC_MARKER_END}\n{after}"
+    return f"{before}\n{um.DOC_MARKER_BEGIN}\nold table content\n{um.DOC_MARKER_END}\n{after}"
 
 
 def _parse_doc_table_tuples(new_content: str) -> set[tuple[str, str, str, str]]:
     """Extract data tuples from the generated doc table between markers."""
-    begin_idx = new_content.index(DOC_MARKER_BEGIN) + len(DOC_MARKER_BEGIN)
-    end_idx = new_content.index(DOC_MARKER_END)
+    begin_idx = new_content.index(um.DOC_MARKER_BEGIN) + len(um.DOC_MARKER_BEGIN)
+    end_idx = new_content.index(um.DOC_MARKER_END)
     table_rows = new_content[begin_idx:end_idx].strip().split("\n")
     data_rows = [row for row in table_rows if row.startswith("|") and "---" not in row]
     if data_rows:
@@ -80,7 +81,7 @@ def _expected_doc_table_tuples(entries: list[dict]) -> set[tuple[str, str, str, 
 _schema_version = st.from_regex(r"[0-9]+\.[0-9]+\.[0-9]+", fullmatch=True)
 
 _surrounding_text = st.text(min_size=0, max_size=200).filter(
-    lambda t: DOC_MARKER_BEGIN not in t and DOC_MARKER_END not in t and "\r" not in t
+    lambda t: um.DOC_MARKER_BEGIN not in t and um.DOC_MARKER_END not in t and "\r" not in t
 )
 
 
@@ -109,7 +110,7 @@ def test_property5_schema_version_preservation(
     }
     _allow_repo_writes(monkeypatch, tmp_path)
     target = tmp_path / "release-matrix.json"
-    write_matrix(target, data)
+    um.write_matrix(target, data)
 
     parsed = json.loads(target.read_text())
     assert (
@@ -148,7 +149,7 @@ def test_property7_doc_table_reflects_matrix(tmp_path, entries):
     doc_path = tmp_path / "INSTALLATION.md"
     doc_path.write_text(doc_content)
 
-    new_content = update_doc_table(doc_path, entries)
+    new_content = um.update_doc_table(doc_path, entries)
 
     parsed_tuples = _parse_doc_table_tuples(new_content)
     expected_tuples = _expected_doc_table_tuples(entries)
@@ -195,10 +196,10 @@ def test_property8_doc_surrounding_content_preservation(
     doc_path = tmp_path / "INSTALLATION.md"
     doc_path.write_text(doc_content)
 
-    new_content = update_doc_table(doc_path, entries)
+    new_content = um.update_doc_table(doc_path, entries)
 
     # Content before the BEGIN marker must be preserved
-    begin_idx = new_content.index(DOC_MARKER_BEGIN)
+    begin_idx = new_content.index(um.DOC_MARKER_BEGIN)
     actual_before = new_content[:begin_idx]
     expected_before = before + "\n"
     assert actual_before == expected_before, (
@@ -208,7 +209,7 @@ def test_property8_doc_surrounding_content_preservation(
     )
 
     # Content after the END marker must be preserved
-    end_marker_end = new_content.index(DOC_MARKER_END) + len(DOC_MARKER_END)
+    end_marker_end = new_content.index(um.DOC_MARKER_END) + len(um.DOC_MARKER_END)
     actual_after = new_content[end_marker_end:]
     expected_after = "\n" + after
     assert actual_after == expected_after, (
@@ -228,31 +229,31 @@ class TestParseArgs:
 
     def test_no_flags_defaults(self):
         """Normal mode: both flags are False when no arguments given."""
-        args = parse_args([])
+        args = um.parse_args([])
         assert args.dry_run is False
         assert args.check_only is False
 
     def test_dry_run_flag(self):
         """``--dry-run`` sets dry_run=True, check_only=False."""
-        args = parse_args(["--dry-run"])
+        args = um.parse_args(["--dry-run"])
         assert args.dry_run is True
         assert args.check_only is False
 
     def test_check_only_flag(self):
         """``--check-only`` sets check_only=True, dry_run=False."""
-        args = parse_args(["--check-only"])
+        args = um.parse_args(["--check-only"])
         assert args.check_only is True
         assert args.dry_run is False
 
     def test_mutual_exclusion(self):
         """``--dry-run`` and ``--check-only`` cannot be used together."""
         with pytest.raises(SystemExit):
-            parse_args(["--dry-run", "--check-only"])
+            um.parse_args(["--dry-run", "--check-only"])
 
     def test_argv_none_uses_sys_argv(self, monkeypatch):
         """When argv is None, argparse reads from sys.argv."""
         monkeypatch.setattr(sys, "argv", ["update_matrix.py", "--dry-run"])
-        args = parse_args(None)
+        args = um.parse_args(None)
         assert args.dry_run is True
         assert args.check_only is False
 
@@ -328,7 +329,7 @@ def test_property9_read_only_modes_do_not_modify_files(tmp_path, versions, monke
     matrix_data = {
         "schema_version": "1.0.0",
         "updated_at": "2025-07-14T00:00:00Z",
-        "matrix": compute_matrix(["1.24.0"], ["glibc", "musl"], ["x86_64", "aarch64"]),
+        "matrix": um.compute_matrix(["1.24.0"], ["glibc", "musl"], ["x86_64", "aarch64"]),
     }
     matrix_path.write_text(json.dumps(matrix_data, indent=2) + "\n")
 
@@ -336,11 +337,11 @@ def test_property9_read_only_modes_do_not_modify_files(tmp_path, versions, monke
     doc_content = (
         "# Installation Guide\n"
         "Some intro text.\n"
-        f"{DOC_MARKER_BEGIN}\n"
+        f"{um.DOC_MARKER_BEGIN}\n"
         "| NGINX Version | OS Type | Architecture | Support Tier |\n"
         "|---------------|---------|--------------|--------------|\n"
         "| 1.24.0 | glibc | x86_64 | Full |\n"
-        f"{DOC_MARKER_END}\n"
+        f"{um.DOC_MARKER_END}\n"
         "Footer content.\n"
     )
     doc_path.write_text(doc_content)
@@ -365,7 +366,7 @@ def test_property9_read_only_modes_do_not_modify_files(tmp_path, versions, monke
     mock_html = _build_mock_html(versions)
     monkeypatch.setattr(um, "fetch_download_page", lambda _url: mock_html)
     # --- Run --dry-run ----------------------------------------------------
-    main(["--dry-run"])
+    um.main(["--dry-run"])
 
     assert (
         matrix_path.read_bytes() == matrix_before
@@ -374,7 +375,7 @@ def test_property9_read_only_modes_do_not_modify_files(tmp_path, versions, monke
     assert diff_path.read_bytes() == diff_before, "--dry-run modified matrix-diff.json"
 
     # --- Run --check-only -------------------------------------------------
-    main(["--check-only"])
+    um.main(["--check-only"])
 
     assert (
         matrix_path.read_bytes() == matrix_before
@@ -402,8 +403,8 @@ def test_property10_idempotent_matrix_computation(versions):
     os_types = ["glibc", "musl"]
     archs = ["x86_64", "aarch64"]
 
-    first = compute_matrix(versions, os_types, archs)
-    second = compute_matrix(versions, os_types, archs)
+    first = um.compute_matrix(versions, os_types, archs)
+    second = um.compute_matrix(versions, os_types, archs)
 
     # Byte-identical: serialise both to JSON and compare
     first_json = json.dumps(first, indent=2, sort_keys=True)
@@ -451,12 +452,12 @@ def _build_installation_doc(entries: list[dict]) -> str:
     return (
         "# Installation Guide\n"
         "Some intro text.\n"
-        f"{DOC_MARKER_BEGIN}\n"
+        f"{um.DOC_MARKER_BEGIN}\n"
         "| NGINX Version | OS Type | Architecture | Support Tier |\n"
         "|---------------|---------|--------------|--------------|\n"
         + "\n".join(table_rows)
         + "\n"
-        f"{DOC_MARKER_END}\n"
+        f"{um.DOC_MARKER_END}\n"
         "Footer content.\n"
     )
 
@@ -469,7 +470,7 @@ def _setup_cli_env(
     html_versions=None,
 ):
     """Create a complete temporary CLI test environment and monkeypatch module-level
-    paths and download behavior for main()/CLI tests.
+    paths and download behavior for um.main()/CLI tests.
 
     Creates these files under tmp_path:
     - release-matrix.json with auto-managed matrix entries for each version in
@@ -544,7 +545,7 @@ def test_cli_dry_run_no_file_writes(tmp_path, monkeypatch, capsys):
     matrix_before = matrix_path.read_bytes()
     doc_before = doc_path.read_bytes()
 
-    exit_code = main(["--dry-run"])
+    exit_code = um.main(["--dry-run"])
 
     assert exit_code == 0
     # Files must be untouched
@@ -573,7 +574,7 @@ def test_cli_check_only_fresh_exit_0(tmp_path, monkeypatch):
         html_versions=versions,
     )
 
-    exit_code = main(["--check-only"])
+    exit_code = um.main(["--check-only"])
     assert exit_code == 0
 
 
@@ -587,7 +588,7 @@ def test_cli_check_only_fresh_with_latest_official_versions(tmp_path, monkeypatc
         html_versions=versions,
     )
 
-    exit_code = main(["--check-only"])
+    exit_code = um.main(["--check-only"])
     assert exit_code == 0
 
 
@@ -604,7 +605,7 @@ def test_cli_check_only_ignores_release_asset_versions_not_on_download_page(
         html_versions=existing,
     )
 
-    exit_code = main(["--check-only"])
+    exit_code = um.main(["--check-only"])
     assert exit_code == 0
 
 
@@ -621,7 +622,7 @@ def test_cli_check_only_stale_exit_2(tmp_path, monkeypatch):
         html_versions=from_nginx,
     )
 
-    exit_code = main(["--check-only"])
+    exit_code = um.main(["--check-only"])
     assert exit_code == 2
 
 
@@ -645,7 +646,7 @@ def test_cli_check_only_error_exit_1(tmp_path, monkeypatch):
 
     monkeypatch.setattr(um, "fetch_download_page", raise_url_error)
 
-    exit_code = main(["--check-only"])
+    exit_code = um.main(["--check-only"])
     assert exit_code == 1
 
 
@@ -666,7 +667,7 @@ def test_cli_diff_json_structure(tmp_path, monkeypatch):
         html_versions=from_nginx,
     )
 
-    exit_code = main([])
+    exit_code = um.main([])
     assert exit_code == 0
     assert diff_path.exists()
 
@@ -691,7 +692,7 @@ def test_cli_diff_json_removed_versions(tmp_path, monkeypatch):
 
     # The default min is 1.24.0, so 1.26.3 passes. 1.24.0 disappears from
     # the latest nginx.org download page, so it gets removed from the desired matrix.
-    exit_code = main([])
+    exit_code = um.main([])
     assert exit_code == 0
     assert diff_path.exists()
 
@@ -754,7 +755,7 @@ def test_cli_rollback_on_doc_write_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr("os.replace", selective_replace)
 
-    exit_code = main([])
+    exit_code = um.main([])
     assert exit_code == 1
 
     # Matrix should be restored to its original content
@@ -782,7 +783,7 @@ def test_cli_no_change_exit_0(tmp_path, monkeypatch, capsys):
     matrix_before = matrix_path.read_bytes()
     doc_before = doc_path.read_bytes()
 
-    exit_code = main([])
+    exit_code = um.main([])
     assert exit_code == 0
 
     # No files modified
@@ -812,7 +813,7 @@ def test_cli_version_logging(tmp_path, monkeypatch, capsys):
         html_versions=from_nginx,
     )
 
-    exit_code = main([])
+    exit_code = um.main([])
     assert exit_code == 0
 
     captured = capsys.readouterr()
