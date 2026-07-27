@@ -7,7 +7,7 @@ input_bytes) and key name mismatches (max_slope_bytes_per_input_byte vs
 max_slope).
 """
 
-import json
+
 import sys
 from pathlib import Path
 

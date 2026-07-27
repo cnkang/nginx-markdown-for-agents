@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import List
 
-from hypothesis import given, settings, assume
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 # ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ from doctor_advice import (
     format_json,
     format_text,
     compute_exit_code,
-    evaluate_rules,
+
     SEVERITY_ORDER,
 )
 

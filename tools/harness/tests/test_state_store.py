@@ -7,7 +7,6 @@ non-dict entries.
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from tools.harness import state_store
 

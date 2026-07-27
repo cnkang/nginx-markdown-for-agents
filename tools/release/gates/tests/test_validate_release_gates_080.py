@@ -49,7 +49,7 @@ def test_release_package_workflow_version_matches_active_release(monkeypatch, ve
 
 def test_release_package_workflow_version_mismatch_detected(monkeypatch):
     """A mismatch between workflow and env var must be reported as FAIL."""
-    workflow_version = _workflow_cargo_version()
+    _workflow_version = _workflow_cargo_version()
     monkeypatch.setenv("RELEASE_GATE_EXPECTED_CARGO_VERSION", "0.0.0")
     result = ValidationResult()
 

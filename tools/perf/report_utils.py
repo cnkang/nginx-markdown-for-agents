@@ -8,7 +8,7 @@ import copy
 import json
 import os
 import platform as python_platform
-import re
+
 import statistics
 import sys
 from pathlib import Path
