@@ -68,7 +68,7 @@ while IFS= read -r line; do
         # Remove the call prefix up to and including the 3rd comma
         # (level, log, flags/0, format...)
         # Count commas at paren depth 0 to find where format args start
-        after_macro="${line#*ngx_log_${macro_kind}${digit}(}"
+        after_macro="${line#*ngx_log_"${macro_kind}""${digit}"(}"
 
         # Split into arguments by counting parens; the 4th argument
         # (1-indexed) is the format string.  We capture only that

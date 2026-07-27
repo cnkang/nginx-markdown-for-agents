@@ -81,7 +81,9 @@ The Dockerfile uses a multi-stage build:
 Build with default settings (NGINX 1.26.3, F5 NGINX Ingress Controller 3.7.2):
 
 ```bash
+MODULE_SHA="$(git rev-parse HEAD)"
 docker build -f examples/kubernetes/Dockerfile.ingress \
+  --build-arg MODULE_SHA="${MODULE_SHA}" \
   -t my-ingress:latest .
 ```
 
@@ -92,6 +94,7 @@ Override the NGINX version to match your Ingress Controller:
 ```bash
 docker build -f examples/kubernetes/Dockerfile.ingress \
   --build-arg NGINX_VERSION=1.24.0 \
+  --build-arg MODULE_SHA="$(git rev-parse HEAD)" \
   -t my-ingress:nginx-1.24 .
 ```
 
@@ -102,6 +105,7 @@ Use a different base Ingress Controller image:
 ```bash
 docker build -f examples/kubernetes/Dockerfile.ingress \
   --build-arg NGINX_INGRESS_IMAGE=nginx/nginx-ingress:3.7.2 \
+  --build-arg MODULE_SHA="$(git rev-parse HEAD)" \
   -t my-ingress:custom .
 ```
 
@@ -111,17 +115,21 @@ For plain NGINX (non-Ingress deployment):
 docker build -f examples/kubernetes/Dockerfile.ingress \
   --build-arg NGINX_VERSION=1.26.3 \
   --build-arg NGINX_INGRESS_IMAGE=nginx:1.26.3 \
+  --build-arg MODULE_SHA="$(git rev-parse HEAD)" \
   -t my-nginx-markdown:latest .
 ```
 
 #### Custom Module Source
 
-Build from a specific branch, tag, or fork:
+Use a branch or tag only as a reachability hint and separately provide the
+full reviewed commit identity. The build fails closed if the fetched object
+does not resolve to that exact commit:
 
 ```bash
 docker build -f examples/kubernetes/Dockerfile.ingress \
   --build-arg MODULE_REPO=https://github.com/your-org/nginx-markdown-for-agents.git \
   --build-arg MODULE_REF=v0.7.0 \
+  --build-arg MODULE_SHA="FULL_40_HEX_COMMIT_SHA" \
   -t my-ingress:v0.7.0 .
 ```
 
@@ -132,6 +140,7 @@ Build for both amd64 and arm64 architectures:
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 \
   -f examples/kubernetes/Dockerfile.ingress \
+  --build-arg MODULE_SHA="$(git rev-parse HEAD)" \
   -t my-ingress:multi .
 ```
 
@@ -147,7 +156,8 @@ The following build arguments control the image build:
 | `NGINX_VERSION` | `1.26.3` | NGINX version for module compilation. Must match the NGINX binary in the base image exactly. Minimum supported: 1.24.0. |
 | `NGINX_INGRESS_IMAGE` | `nginx/nginx-ingress:3.7.2` | Base Ingress Controller image. Can be any image containing an NGINX binary (including plain `nginx:*` images). |
 | `MODULE_REPO` | `https://github.com/cnkang/nginx-markdown-for-agents.git` | Git repository URL for the module source code. |
-| `MODULE_REF` | `main` | Git ref to checkout (branch name, tag, or commit SHA). |
+| `MODULE_REF` | `main` | Branch or tag used only as a reachability hint when direct object fetch is unavailable. |
+| `MODULE_SHA` | required | Full 40-character reviewed commit identity. The build verifies exact equality before running repository code. |
 
 ### Verification
 

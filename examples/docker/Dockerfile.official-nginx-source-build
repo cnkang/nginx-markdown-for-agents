@@ -16,8 +16,9 @@ ENV RUSTUP_HOME=/opt/rust/rustup
 ENV CARGO_HOME=/opt/rust/cargo
 ENV PATH=/opt/rust/cargo/bin:${PATH}
 
-COPY packaging/checksums.sha256 /tmp/rustup-bootstrap/checksums.sha256
+COPY packaging/checksums.sha256 /opt/nginx-markdown/checksums.sha256
 COPY packaging/scripts/install-verified-rustup.sh /tmp/rustup-bootstrap/install-verified-rustup.sh
+COPY packaging/scripts/verify-checksum.sh /opt/nginx-markdown/verify-checksum.sh
 COPY packaging/scripts/verify-checksum.sh /tmp/rustup-bootstrap/verify-checksum.sh
 
 RUN set -eux; \
@@ -71,12 +72,13 @@ RUN --mount=type=cache,target=/opt/rust/rustup,sharing=locked \
         *) echo "Unsupported Rust bootstrap architecture: ${arch}" >&2; exit 1 ;; \
       esac; \
       chmod +x /tmp/rustup-bootstrap/install-verified-rustup.sh \
-        /tmp/rustup-bootstrap/verify-checksum.sh; \
+        /tmp/rustup-bootstrap/verify-checksum.sh \
+        /opt/nginx-markdown/verify-checksum.sh; \
       /tmp/rustup-bootstrap/install-verified-rustup.sh \
         --arch "${rustup_arch}" \
         --libc "${rustup_libc}" \
         --toolchain stable \
-        --checksums /tmp/rustup-bootstrap/checksums.sha256; \
+        --checksums /opt/nginx-markdown/checksums.sha256; \
       rm -rf /tmp/rustup-bootstrap; \
     fi; \
     arch="$(uname -m)"; \
@@ -102,24 +104,32 @@ RUN --mount=type=cache,target=/opt/rust/rustup,sharing=locked \
     --mount=type=cache,target=/opt/rust/cargo/git,sharing=locked \
     --mount=type=cache,target=/opt/cargo-target,sharing=locked \
     set -eux; \
+    test -n "${MODULE_SHA}"; \
+    printf '%s' "${MODULE_SHA}" | grep -Eq '^[0-9a-f]{40}$'; \
     mkdir -p /workspace; \
-    git clone "${MODULE_REPO}" /workspace/nginx-markdown-for-agents; \
+    git init /workspace/nginx-markdown-for-agents; \
     cd /workspace/nginx-markdown-for-agents; \
-    if [ -n "${MODULE_SHA}" ]; then \
-      git fetch --depth 1 origin "${MODULE_SHA}" || git fetch --depth 1 origin "${MODULE_REF}"; \
-      git checkout --detach "${MODULE_SHA}" || git checkout --detach FETCH_HEAD; \
-    elif [ -n "${MODULE_REF}" ]; then \
-      git fetch --depth 1 origin "${MODULE_REF}" || true; \
-      git checkout "${MODULE_REF}" || git checkout FETCH_HEAD; \
-    fi; \
+    git remote add origin "${MODULE_REPO}"; \
+    git fetch --depth 1 origin "${MODULE_SHA}" \
+      || git fetch --depth 1 origin "${MODULE_REF}"; \
+    actual_sha="$(git rev-parse 'FETCH_HEAD^{commit}')"; \
+    test "${actual_sha}" = "${MODULE_SHA}"; \
+    git checkout --detach "${actual_sha}"; \
     nginx_version="$(nginx -v 2>&1 | sed -n 's#^nginx version: nginx/\([0-9.]*\)$#\1#p')"; \
     test -n "${nginx_version}"; \
     if command -v apk >/dev/null 2>&1 && [ -d "/usr/src/nginx-${nginx_version}" ]; then \
       nginx_src_root="/usr/src/nginx-${nginx_version}"; \
     else \
-      curl -fsSL "https://nginx.org/download/nginx-${nginx_version}.tar.gz" -o /tmp/nginx.tar.gz; \
+      curl --proto '=https' --tlsv1.2 -fsSL \
+        "https://nginx.org/download/nginx-${nginx_version}.tar.gz" \
+        -o /tmp/nginx.tar.gz; \
+      bash /opt/nginx-markdown/verify-checksum.sh \
+        -f /tmp/nginx.tar.gz \
+        -i "nginx-${nginx_version}" \
+        -c /opt/nginx-markdown/checksums.sha256; \
       mkdir -p /tmp/nginx-src; \
       tar -xzf /tmp/nginx.tar.gz -C /tmp/nginx-src --strip-components=1; \
+      rm -f /tmp/nginx.tar.gz; \
       nginx_src_root="/tmp/nginx-src"; \
     fi; \
     rm -rf /workspace/nginx-markdown-for-agents/components/rust-converter/target; \

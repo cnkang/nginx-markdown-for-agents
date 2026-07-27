@@ -498,8 +498,9 @@ class TestReleaseGateSnippetExpectations:
             for snippet_list in RELEASE_BUILD_GLIBC_SNIPPETS.values()
             for snippet in snippet_list
         )
-        assert "container: almalinux:9" in snippets
-        assert "ARG OS_BASE=almalinux:9" in snippets
+        assert "container: almalinux@sha256:" in snippets
+        assert "AlmaLinux 9 manifest" in snippets
+        assert "ARG OS_BASE=almalinux@sha256:" in snippets
         assert "install-verified-rustup.sh" in snippets
         assert "--toolchain none" in snippets
         assert "COPY rust-toolchain.toml /src/rust-toolchain.toml" in snippets

@@ -82,6 +82,8 @@ struct ngx_module_s {
 };
 
 void *ngx_pnalloc(ngx_pool_t *pool, size_t size);
+void *ngx_alloc(size_t size, ngx_log_t *log);
+void ngx_free(void *p);
 ngx_buf_t *ngx_calloc_buf(ngx_pool_t *pool);
 ngx_chain_t *ngx_alloc_chain_link(ngx_pool_t *pool);
 
@@ -90,9 +92,12 @@ ngx_chain_t *ngx_alloc_chain_link(ngx_pool_t *pool);
 ngx_module_t ngx_http_markdown_filter_module;
 
 static int g_pnalloc_fail_count;
+static int g_alloc_fail_count;
 static int g_calloc_buf_fail_once;
 static int g_chain_link_fail_once;
 static int g_pfree_count;
+static size_t g_heap_alloc_count;
+static size_t g_heap_free_count;
 
 ngx_http_markdown_conf_t *
 ngx_http_get_module_loc_conf(ngx_http_request_t *r, ngx_module_t module)
@@ -118,6 +123,37 @@ void *
 ngx_palloc(ngx_pool_t *pool, size_t size)
 {
     return ngx_pnalloc(pool, size);
+}
+
+void *
+ngx_alloc(size_t size, ngx_log_t *log)
+{
+    void *p;
+
+    (void) log;
+    if (g_alloc_fail_count > 0) {
+        g_alloc_fail_count--;
+        if (g_alloc_fail_count == 0) {
+            return NULL;
+        }
+    }
+
+    p = malloc(size);
+    if (p != NULL) {
+        g_heap_alloc_count++;
+    }
+    return p;
+}
+
+void
+ngx_free(void *p)
+{
+    if (p == NULL) {
+        return;
+    }
+
+    g_heap_free_count++;
+    free(p);
 }
 
 void *
@@ -147,10 +183,10 @@ ngx_alloc_chain_link(ngx_pool_t *pool)
     return ngx_pcalloc(pool, sizeof(ngx_chain_t));
 }
 
-/* Mock ngx_pfree: records the call for regression coverage of buffer growth
- * paths.  ngx_pfree is declared in ngx_palloc.h (via ngx_core.h) as
- * ngx_int_t, so we provide a compatible definition without the static
- * qualifier. */
+/*
+ * Mock ngx_pfree: records any accidental attempt to release pool memory.
+ * Transferable decompression output must exclusively use ngx_alloc/ngx_free.
+ */
 ngx_int_t
 ngx_pfree(ngx_pool_t *pool, void *p)
 {
@@ -173,9 +209,12 @@ init_request(ngx_http_request_t *r)
     memset(&g_conf, 0, sizeof(g_conf));
     g_conf.decompress.max_size = 1024 * 1024;
     g_pnalloc_fail_count = 0;
+    g_alloc_fail_count = 0;
     g_calloc_buf_fail_once = 0;
     g_chain_link_fail_once = 0;
     g_pfree_count = 0;
+    g_heap_alloc_count = 0;
+    g_heap_free_count = 0;
 
     memset(r, 0, sizeof(*r));
     r->pool = &g_pool;
@@ -214,6 +253,20 @@ make_chain(u_char *data, size_t len, ngx_buf_t *buf)
     cl.buf = buf;
     cl.next = NULL;
     return cl;
+}
+
+static void
+release_output(ngx_chain_t *out)
+{
+    if (out == NULL || out->buf == NULL || out->buf->start == NULL) {
+        return;
+    }
+
+    ngx_free(out->buf->start);
+    out->buf->pos = NULL;
+    out->buf->last = NULL;
+    out->buf->start = NULL;
+    out->buf->end = NULL;
 }
 
 static size_t
@@ -459,6 +512,9 @@ test_gzip_success(void)
                 "decompressed length should match plain input");
     TEST_ASSERT(memcmp(out->buf->pos, plain, sizeof(plain) - 1) == 0,
                 "decompressed bytes should match plain input");
+    release_output(out);
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "successful gzip output should remain independently freeable");
 }
 
 static void
@@ -500,6 +556,9 @@ test_gzip_concatenated_members(void)
     TEST_ASSERT(memcmp(out->buf->pos + sizeof(first) - 1,
                        second, sizeof(second) - 1) == 0,
                 "concatenated gzip should append later members");
+    release_output(out);
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "concatenated gzip output should be released exactly once");
 }
 
 static void
@@ -531,6 +590,8 @@ test_gzip_concatenated_truncated_second_member(void)
 
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT,
                 "truncated later gzip member should be rejected");
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "truncated later member should release decompression output");
 }
 
 static void
@@ -565,6 +626,8 @@ test_gzip_concatenated_members_share_budget(void)
 
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
                 "gzip members should share one decompression budget");
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "shared-budget failure should release decompression output");
 }
 
 static void
@@ -599,6 +662,9 @@ test_gzip_empty_later_member_at_exact_budget(void)
                 "empty later gzip member should fit an exact budget");
     TEST_ASSERT((size_t) (out->buf->last - out->buf->pos) == sizeof(first),
                 "empty later gzip member should not change output length");
+    release_output(out);
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "exact-budget output should be released exactly once");
 }
 
 static void
@@ -626,7 +692,7 @@ test_gzip_later_member_grows_at_member_boundary(void)
     init_request(&r);
     g_conf.decompress.max_size = 256;
     output_size = sizeof(first);
-    output_data = ngx_pnalloc(r.pool, output_size);
+    output_data = ngx_alloc(output_size, r.connection->log);
     TEST_ASSERT(output_data != NULL, "member-boundary output alloc");
 
     memset(&stream, 0, sizeof(stream));
@@ -652,6 +718,11 @@ test_gzip_later_member_grows_at_member_boundary(void)
                 "member-boundary growth should append later member");
 
     inflateEnd(&stream);
+    ngx_free(output_data);
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "member-boundary growth should release each heap allocation");
+    TEST_ASSERT(g_pfree_count == 0,
+                "member-boundary growth must not free through the pool");
 }
 
 static void
@@ -682,6 +753,9 @@ test_deflate_success(void)
                 "deflate decompressed length should match plain input");
     TEST_ASSERT(memcmp(out->buf->pos, plain, sizeof(plain) - 1) == 0,
                 "deflate decompressed bytes should match plain input");
+    release_output(out);
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "successful deflate output should be released exactly once");
 }
 
 static void
@@ -731,10 +805,14 @@ test_gzip_allocation_and_budget_setup_errors(void)
     init_request(&r);
     in = make_chain(compressed, compressed_len, &in_buf);
     out = NULL;
-    g_pnalloc_fail_count = 2;
+    g_alloc_fail_count = 1;
     TEST_ASSERT(ngx_http_markdown_decompress(&r,
                 NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out) == NGX_ERROR,
                 "output buffer allocation failure should error");
+    TEST_ASSERT(g_heap_alloc_count == 0 && g_heap_free_count == 0,
+                "failed output allocation should not create ownership");
+    TEST_ASSERT(g_pfree_count == 0,
+                "output allocation failures must not use pool free");
 }
 
 static void
@@ -758,6 +836,10 @@ test_gzip_output_chain_allocation_errors(void)
     TEST_ASSERT(ngx_http_markdown_decompress(&r,
                 NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out) == NGX_ERROR,
                 "output ngx_buf_t allocation failure should error");
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "ngx_buf_t failure should release decompression output");
+    TEST_ASSERT(g_pfree_count == 0,
+                "ngx_buf_t failure must not release output through the pool");
 
     init_request(&r);
     in = make_chain(compressed, compressed_len, &in_buf);
@@ -766,6 +848,10 @@ test_gzip_output_chain_allocation_errors(void)
     TEST_ASSERT(ngx_http_markdown_decompress(&r,
                 NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out) == NGX_ERROR,
                 "output chain link allocation failure should error");
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "chain-link failure should release decompression output");
+    TEST_ASSERT(g_pfree_count == 0,
+                "chain-link failure must not release output through the pool");
 }
 
 static void
@@ -785,6 +871,8 @@ test_gzip_format_error(void)
                 NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out)
                 == NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR,
                 "invalid gzip should be classified as format error");
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "format errors should release decompression output");
 }
 
 static void
@@ -811,6 +899,8 @@ test_gzip_budget_exceeded(void)
                 NGX_HTTP_MARKDOWN_COMPRESSION_GZIP, &in, &out)
                 == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
                 "output larger than budget should be classified");
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "budget errors should release decompression output");
 }
 
 /*
@@ -824,18 +914,20 @@ test_grow_output_buffer_direct(void)
     ngx_http_request_t r;
     u_char *output_data;
     size_t output_size;
+    size_t frees_before;
     u_char *initial_buf;
     ngx_int_t rc;
 
     init_request(&r);
 
     /* Normal growth: used < max_size, should succeed */
-    initial_buf = ngx_pnalloc(r.pool, 400);
+    initial_buf = ngx_alloc(400, r.connection->log);
     TEST_ASSERT(initial_buf != NULL,
-                "test setup should allocate initial pool buffer");
+                "test setup should allocate initial heap buffer");
     output_data = initial_buf;
     output_size = 400;
     g_conf.decompress.max_size = 1500;
+    frees_before = g_heap_free_count;
     rc = ngx_http_markdown_grow_output_buffer(
         &r, &g_conf, &output_data, &output_size, 300);
     TEST_ASSERT(rc == NGX_OK,
@@ -843,69 +935,89 @@ test_grow_output_buffer_direct(void)
     /* new_size = max(300*2, 300+4096) = 4396, capped at max_size=1500 */
     TEST_ASSERT(output_size == 1500,
                 "grow_output_buffer should cap at max_size");
-    TEST_ASSERT(g_pfree_count == 1,
-                "grow_output_buffer should call ngx_pfree on old buffer");
+    TEST_ASSERT(output_data != initial_buf,
+                "successful growth should replace the old buffer");
+    TEST_ASSERT(g_heap_free_count == frees_before + 1,
+                "successful growth should free the old heap buffer once");
+    ngx_free(output_data);
 
     /* Budget exceeded: used >= max_size */
-    initial_buf = ngx_pnalloc(r.pool, 400);
+    initial_buf = ngx_alloc(400, r.connection->log);
     TEST_ASSERT(initial_buf != NULL,
-                "test setup should allocate budget-case pool buffer");
+                "test setup should allocate budget-case heap buffer");
     output_data = initial_buf;
     output_size = 400;
     g_conf.decompress.max_size = 200;
+    frees_before = g_heap_free_count;
     rc = ngx_http_markdown_grow_output_buffer(
         &r, &g_conf, &output_data, &output_size, 250);
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
                 "grow_output_buffer should fail when used >= max_size");
-    TEST_ASSERT(g_pfree_count == 1,
-                "budget failure should not free the fresh old buffer");
+    TEST_ASSERT(output_data == initial_buf,
+                "budget failure should retain the old buffer");
+    TEST_ASSERT(g_heap_free_count == frees_before,
+                "budget failure should leave old-buffer ownership to caller");
+    ngx_free(output_data);
 
     /* Minimum growth: used * 2 < used + 4096, should use +4096 */
-    initial_buf = ngx_pnalloc(r.pool, 400);
+    initial_buf = ngx_alloc(400, r.connection->log);
     TEST_ASSERT(initial_buf != NULL,
-                "test setup should allocate minimum-growth pool buffer");
+                "test setup should allocate minimum-growth heap buffer");
     output_data = initial_buf;
     output_size = 400;
     g_conf.decompress.max_size = 10000;
+    frees_before = g_heap_free_count;
     rc = ngx_http_markdown_grow_output_buffer(
         &r, &g_conf, &output_data, &output_size, 100);
     TEST_ASSERT(rc == NGX_OK,
                 "grow_output_buffer should succeed for small used");
     TEST_ASSERT(output_size == 4196,
                 "grow_output_buffer should use used+4096 when 2*used < used+4096");
-    TEST_ASSERT(g_pfree_count == 2,
-                "minimum growth should free its own old buffer");
+    TEST_ASSERT(g_heap_free_count == frees_before + 1,
+                "minimum growth should free its own old heap buffer");
+    ngx_free(output_data);
 
     /* Capped by max_size */
-    initial_buf = ngx_pnalloc(r.pool, 400);
+    initial_buf = ngx_alloc(400, r.connection->log);
     TEST_ASSERT(initial_buf != NULL,
-                "test setup should allocate capped-growth pool buffer");
+                "test setup should allocate capped-growth heap buffer");
     output_data = initial_buf;
     output_size = 400;
     g_conf.decompress.max_size = 500;
+    frees_before = g_heap_free_count;
     rc = ngx_http_markdown_grow_output_buffer(
         &r, &g_conf, &output_data, &output_size, 300);
     TEST_ASSERT(rc == NGX_OK,
                 "grow_output_buffer should succeed when capped by max_size");
     TEST_ASSERT(output_size == 500,
                 "grow_output_buffer new_size should be capped at max_size");
-    TEST_ASSERT(g_pfree_count == 3,
-                "capped growth should free its own old buffer");
+    TEST_ASSERT(g_heap_free_count == frees_before + 1,
+                "capped growth should free its own old heap buffer");
+    ngx_free(output_data);
 
     /* Allocation failure */
-    initial_buf = ngx_pnalloc(r.pool, 400);
+    initial_buf = ngx_alloc(400, r.connection->log);
     TEST_ASSERT(initial_buf != NULL,
-                "test setup should allocate allocation-failure pool buffer");
+                "test setup should allocate allocation-failure heap buffer");
     output_data = initial_buf;
     output_size = 400;
     g_conf.decompress.max_size = 1500;
-    g_pnalloc_fail_count = 1;
+    g_alloc_fail_count = 1;
+    frees_before = g_heap_free_count;
     rc = ngx_http_markdown_grow_output_buffer(
         &r, &g_conf, &output_data, &output_size, 300);
     TEST_ASSERT(rc == NGX_ERROR,
                 "grow_output_buffer should fail on allocation failure");
-    TEST_ASSERT(g_pfree_count == 3,
+    TEST_ASSERT(output_data == initial_buf,
+                "allocation failure should retain the old buffer");
+    TEST_ASSERT(g_heap_free_count == frees_before,
                 "allocation failure should not free the old buffer");
+    ngx_free(output_data);
+
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "direct growth cases should balance heap ownership");
+    TEST_ASSERT(g_pfree_count == 0,
+                "grow_output_buffer must never use ngx_pfree");
 }
 
 /*
@@ -934,7 +1046,9 @@ test_handle_inflate_stall_direct(void)
     ctx.completed_out = 0;
 
     /* Branch 1: avail_out==0 -> should grow buffer and return NGX_AGAIN */
-    output_data = output_buf;
+    output_data = ngx_alloc(sizeof(output_buf), r.connection->log);
+    TEST_ASSERT(output_data != NULL,
+                "stall growth setup should allocate a heap buffer");
     output_size = 256;
     g_conf.decompress.max_size = 4096;
     memset(&stream, 0, sizeof(stream));
@@ -945,6 +1059,7 @@ test_handle_inflate_stall_direct(void)
         &ctx, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
     TEST_ASSERT(rc == NGX_AGAIN,
                 "handle_inflate_stall should return AGAIN when avail_out==0");
+    ngx_free(output_data);
 
     /* Branch 2: avail_in==0 -> truncated input */
     output_data = output_buf;
@@ -971,7 +1086,9 @@ test_handle_inflate_stall_direct(void)
                 "handle_inflate_stall should return stall_code on unexpected stall");
 
     /* Branch 4: avail_out==0 but grow fails (budget exceeded) */
-    output_data = output_buf;
+    output_data = ngx_alloc(sizeof(output_buf), r.connection->log);
+    TEST_ASSERT(output_data != NULL,
+                "budget stall setup should allocate a heap buffer");
     output_size = 256;
     g_conf.decompress.max_size = 200;
     memset(&stream, 0, sizeof(stream));
@@ -982,6 +1099,11 @@ test_handle_inflate_stall_direct(void)
         &ctx, NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR, "Z_OK");
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
                 "handle_inflate_stall should propagate budget exceeded from grow");
+    ngx_free(output_data);
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "stall handling should preserve heap-buffer ownership");
+    TEST_ASSERT(g_pfree_count == 0,
+                "stall handling must never use ngx_pfree");
 }
 
 /*
@@ -1070,6 +1192,11 @@ test_gzip_buffer_growth(void)
                 "decompressed length should match original");
     TEST_ASSERT(memcmp(out->buf->pos, plain, sizeof(plain)) == 0,
                 "decompressed content should match original");
+    release_output(out);
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "grown gzip output should release every heap generation");
+    TEST_ASSERT(g_pfree_count == 0,
+                "grown gzip output must not use pool free");
 }
 
 /*
@@ -1110,6 +1237,8 @@ test_gzip_budget_exceeded_during_growth(void)
 
     TEST_ASSERT(rc == NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED,
                 "gzip budget exceeded during growth should be classified");
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "growth budget failure should release the active output");
 }
 
 /*
@@ -1146,6 +1275,8 @@ test_gzip_truncated_input(void)
 
     TEST_ASSERT(rc != NGX_OK && rc != NGX_DECLINED,
                 "truncated gzip should return an error");
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "truncated gzip should release decompression output");
 }
 
 /*
@@ -1185,6 +1316,8 @@ test_deflate_zlib_trailing_data(void)
                 "zlib-wrapped deflate with trailing garbage should be FORMAT_ERROR");
     TEST_ASSERT(out == NULL,
                 "trailing-data error should not produce output chain");
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "zlib trailing-data error should release output");
 }
 
 /*
@@ -1223,6 +1356,8 @@ test_deflate_raw_trailing_data(void)
                 "raw deflate with trailing garbage should be FORMAT_ERROR");
     TEST_ASSERT(out == NULL,
                 "raw trailing-data error should not produce output chain");
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "raw trailing-data error should release output");
 }
 
 /*
@@ -1263,6 +1398,9 @@ test_deflate_clean_still_succeeds(void)
                 "clean zlib-wrapped deflate length should match");
     TEST_ASSERT(memcmp(out->buf->pos, plain, sizeof(plain) - 1) == 0,
                 "clean zlib-wrapped deflate bytes should match");
+    release_output(out);
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "clean zlib output should be released exactly once");
 
     /* raw deflate, clean stream — the fallback path should also succeed */
     init_request(&r);
@@ -1283,6 +1421,9 @@ test_deflate_clean_still_succeeds(void)
                 "clean raw deflate length should match");
     TEST_ASSERT(memcmp(out->buf->pos, plain, sizeof(plain) - 1) == 0,
                 "clean raw deflate bytes should match");
+    release_output(out);
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "clean raw output should be released exactly once");
 }
 
 /*
@@ -1329,6 +1470,9 @@ test_gzip_concatenated_not_regressed(void)
     TEST_ASSERT(memcmp(out->buf->pos + sizeof(first) - 1,
                        second, sizeof(second) - 1) == 0,
                 "second gzip member output should match");
+    release_output(out);
+    TEST_ASSERT(g_heap_alloc_count == g_heap_free_count,
+                "concatenated gzip output should be released exactly once");
 }
 
 /*

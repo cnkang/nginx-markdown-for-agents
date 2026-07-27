@@ -107,6 +107,160 @@ impl std::fmt::Debug for CharsetState {
 }
 
 impl CharsetState {
+    fn allocation_plan_overflow() -> ConversionError {
+        ConversionError::BudgetExceeded {
+            stage: "charset allocation plan (integer overflow)".to_string(),
+            used: usize::MAX,
+            limit: usize::MAX,
+        }
+    }
+
+    fn checked_allocation_add(left: usize, right: usize) -> Result<usize, ConversionError> {
+        left.checked_add(right)
+            .ok_or_else(Self::allocation_plan_overflow)
+    }
+
+    fn decoder_output_upper_bound(decoder: &encoding_rs::Decoder, input_len: usize) -> usize {
+        decoder
+            .max_utf8_buffer_length(input_len)
+            .unwrap_or(input_len.saturating_mul(4))
+    }
+
+    fn sniff_append_allocation_upper_bound(
+        sniff_len: usize,
+        sniff_capacity: usize,
+        input_len: usize,
+    ) -> Result<usize, ConversionError> {
+        let required = Self::checked_allocation_add(sniff_len, input_len)?;
+
+        if required <= sniff_capacity {
+            return Ok(0);
+        }
+
+        /*
+         * feed_pending reserves this exact capacity before extending.  The
+         * preflight represents the replacement allocation that can coexist
+         * with the currently-resident sniff backing store during realloc.
+         */
+        Ok(required)
+    }
+
+    fn append_to_sniff_buffer(
+        sniff_buffer: &mut Vec<u8>,
+        data: &[u8],
+    ) -> Result<(), ConversionError> {
+        let required = Self::checked_allocation_add(sniff_buffer.len(), data.len())?;
+        if required > sniff_buffer.capacity() {
+            sniff_buffer
+                .try_reserve_exact(required - sniff_buffer.len())
+                .map_err(|_| {
+                    ConversionError::MemoryLimit(
+                        "charset sniff buffer allocation failed".to_string(),
+                    )
+                })?;
+        }
+        sniff_buffer.extend_from_slice(data);
+        Ok(())
+    }
+
+    fn resolved_output_upper_bound(
+        state: &CharsetState,
+        input_len: usize,
+    ) -> Result<usize, ConversionError> {
+        match state {
+            CharsetState::Resolved { decoder: None } => Ok(0),
+            CharsetState::Resolved {
+                decoder: Some(decoder),
+            } => Ok(Self::decoder_output_upper_bound(decoder, input_len)),
+            _ => Err(ConversionError::EncodingError(
+                "charset allocation plan requires a resolved charset".to_string(),
+            )),
+        }
+    }
+
+    /// Return the maximum additional allocation that `feed` can create.
+    ///
+    /// This is deliberately an allocation plan, rather than a blanket
+    /// transcoding multiplier: existing charset resident bytes belong to the
+    /// caller's current working set, while this result contains only backing
+    /// stores that may be allocated while that set is still live.
+    pub fn feed_allocation_upper_bound(&self, input_len: usize) -> Result<usize, ConversionError> {
+        match self {
+            CharsetState::Resolved { .. } => Self::resolved_output_upper_bound(self, input_len),
+            CharsetState::Failed(reason) => Err(ConversionError::EncodingError(reason.clone())),
+            CharsetState::Pending {
+                header_charset,
+                sniff_buffer,
+                sniff_limit,
+            } => {
+                let buffered_len = sniff_buffer.len();
+
+                if let Some(charset) = header_charset.as_deref() {
+                    let (state, _) = resolve_charset(charset)?;
+                    if sniff_buffer.is_empty() {
+                        return Self::resolved_output_upper_bound(&state, input_len);
+                    }
+
+                    let sniff_allocation = Self::sniff_append_allocation_upper_bound(
+                        buffered_len,
+                        sniff_buffer.capacity(),
+                        input_len,
+                    )?;
+                    let input_len = Self::checked_allocation_add(buffered_len, input_len)?;
+                    return Self::checked_allocation_add(
+                        sniff_allocation,
+                        Self::resolved_output_upper_bound(&state, input_len)?,
+                    );
+                }
+
+                let sniff_allocation = Self::sniff_append_allocation_upper_bound(
+                    buffered_len,
+                    sniff_buffer.capacity(),
+                    input_len,
+                )?;
+                let total_len = Self::checked_allocation_add(buffered_len, input_len)?;
+                if total_len < *sniff_limit {
+                    return Ok(sniff_allocation);
+                }
+
+                /*
+                 * The prospective sniff bytes are attacker-controlled and
+                 * have not been allocated yet.  Keep the unresolved branch
+                 * conservative: it may resolve to any supported non-UTF-8
+                 * decoder, whose output can coexist with the sniff backing
+                 * store while feed_pending transitions state.
+                 */
+                Self::checked_allocation_add(sniff_allocation, total_len.saturating_mul(4))
+            }
+        }
+    }
+
+    /// Return the maximum additional allocation that `flush` can create.
+    pub fn flush_allocation_upper_bound(&self) -> Result<usize, ConversionError> {
+        match self {
+            CharsetState::Resolved { decoder: None } => Ok(0),
+            CharsetState::Resolved {
+                decoder: Some(decoder),
+            } => Ok(decoder.max_utf8_buffer_length(0).unwrap_or(64)),
+            CharsetState::Failed(reason) => Err(ConversionError::EncodingError(reason.clone())),
+            CharsetState::Pending {
+                header_charset,
+                sniff_buffer,
+                ..
+            } => {
+                if sniff_buffer.is_empty() {
+                    return Ok(0);
+                }
+                let charset = header_charset
+                    .as_deref()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| detect_charset(None, sniff_buffer));
+                let (state, _) = resolve_charset(&charset)?;
+                Self::resolved_output_upper_bound(&state, sniff_buffer.len())
+            }
+        }
+    }
+
     /// Creates a new `CharsetState` in the `Pending` state with no header charset and an empty sniff buffer.
     ///
     /// The returned state will accumulate bytes (up to the default sniff limit)
@@ -191,95 +345,107 @@ impl CharsetState {
     /// let tail = st.flush().unwrap();
     /// assert!(std::str::from_utf8(&tail).is_ok());
     /// ```
+    fn mark_failed(&mut self, error: &ConversionError) {
+        *self = CharsetState::Failed(error.to_string());
+    }
+
+    fn resolve_for_feed(&mut self, charset: &str) -> Result<CharsetState, ConversionError> {
+        resolve_charset(charset)
+            .map(|(state, _)| state)
+            .inspect_err(|error| self.mark_failed(error))
+    }
+
+    fn transcode_for_feed(
+        &mut self,
+        state: &mut CharsetState,
+        data: &[u8],
+    ) -> Result<Vec<u8>, ConversionError> {
+        transcode_data(state, data).inspect_err(|error| self.mark_failed(error))
+    }
+
+    fn feed_pending<'a>(
+        &mut self,
+        header_charset: Option<String>,
+        mut sniff_buffer: Vec<u8>,
+        sniff_limit: usize,
+        data: &'a [u8],
+    ) -> Result<Cow<'a, [u8]>, ConversionError> {
+        if let Some(charset) = header_charset.as_deref() {
+            let mut state = self.resolve_for_feed(charset)?;
+            if sniff_buffer.is_empty() {
+                if matches!(&state, CharsetState::Resolved { decoder: None }) {
+                    *self = state;
+                    return Ok(Cow::Borrowed(data));
+                }
+                let result = self.transcode_for_feed(&mut state, data)?;
+                *self = state;
+                return Ok(Cow::Owned(result));
+            }
+            Self::append_to_sniff_buffer(&mut sniff_buffer, data)?;
+            if matches!(&state, CharsetState::Resolved { decoder: None }) {
+                *self = state;
+                return Ok(Cow::Owned(sniff_buffer));
+            }
+            let result = self.transcode_for_feed(&mut state, &sniff_buffer)?;
+            *self = state;
+            return Ok(Cow::Owned(result));
+        }
+
+        let sniff_bytes = data
+            .len()
+            .min(sniff_limit.saturating_sub(sniff_buffer.len()));
+        if sniff_bytes < data.len() {
+            Self::append_to_sniff_buffer(&mut sniff_buffer, data)?;
+        } else {
+            Self::append_to_sniff_buffer(&mut sniff_buffer, &data[..sniff_bytes])?;
+        }
+        if sniff_buffer.len() < sniff_limit {
+            *self = CharsetState::Pending {
+                header_charset,
+                sniff_buffer,
+                sniff_limit,
+            };
+            return Ok(Cow::Owned(Vec::new()));
+        }
+
+        let detected = detect_charset(None, &sniff_buffer[..sniff_limit]);
+        let mut state = self.resolve_for_feed(&detected)?;
+        if matches!(&state, CharsetState::Resolved { decoder: None }) {
+            *self = state;
+            return Ok(Cow::Owned(sniff_buffer));
+        }
+        let result = self.transcode_for_feed(&mut state, &sniff_buffer)?;
+        *self = state;
+        Ok(Cow::Owned(result))
+    }
+
+    fn feed_resolved<'a>(
+        &mut self,
+        decoder: Option<encoding_rs::Decoder>,
+        data: &'a [u8],
+    ) -> Result<Cow<'a, [u8]>, ConversionError> {
+        if decoder.is_none() {
+            *self = CharsetState::Resolved { decoder: None };
+            return Ok(Cow::Borrowed(data));
+        }
+
+        let mut state = CharsetState::Resolved { decoder };
+        let result = self.transcode_for_feed(&mut state, data)?;
+        *self = state;
+        Ok(Cow::Owned(result))
+    }
+
     pub fn feed<'a>(&mut self, data: &'a [u8]) -> Result<Cow<'a, [u8]>, ConversionError> {
         // Replace self with a temporary to allow state transitions.
-        // On error, we restore a meaningful Failed state (not "transitioning").
+        // On error, helpers restore a meaningful Failed state.
         let current = std::mem::replace(self, CharsetState::Failed("transitioning".into()));
-
         match current {
             CharsetState::Pending {
                 header_charset,
-                mut sniff_buffer,
+                sniff_buffer,
                 sniff_limit,
-            } => {
-                // If header charset is set, resolve immediately
-                if let Some(cs) = header_charset.as_ref() {
-                    let (mut new_state, _) = resolve_charset(cs).map_err(|e| {
-                        *self = CharsetState::Failed(format!("{}", e));
-                        e
-                    })?;
-                    // Transcode any previously buffered data + new data
-                    let combined = if sniff_buffer.is_empty() {
-                        Cow::Borrowed(data)
-                    } else {
-                        sniff_buffer.extend_from_slice(data);
-                        Cow::Owned(sniff_buffer)
-                    };
-                    let result = transcode_data(&mut new_state, &combined).map_err(|e| {
-                        *self = CharsetState::Failed(format!("{}", e));
-                        e
-                    })?;
-                    *self = new_state;
-                    return Ok(Cow::Owned(result));
-                }
-
-                // Accumulate data in sniff buffer, capped at sniff_limit.
-                // Only retain enough bytes for charset detection; any excess
-                // from a large chunk is kept aside and transcoded after
-                // resolution, avoiding unbounded sniff buffer growth.
-                let remaining_capacity = sniff_limit.saturating_sub(sniff_buffer.len());
-                let sniff_bytes = data.len().min(remaining_capacity);
-                sniff_buffer.extend_from_slice(&data[..sniff_bytes]);
-
-                if sniff_buffer.len() >= sniff_limit {
-                    // Enough data to detect charset from HTML meta or default
-                    let detected = detect_charset(None, &sniff_buffer);
-                    let (mut new_state, _) = resolve_charset(&detected).map_err(|e| {
-                        *self = CharsetState::Failed(format!("{}", e));
-                        e
-                    })?;
-                    // Build full input for transcoding: sniff buffer + any
-                    // excess bytes from this chunk that were not added to
-                    // the sniff buffer.
-                    let full_input = if sniff_bytes < data.len() {
-                        let mut combined = sniff_buffer;
-                        combined.extend_from_slice(&data[sniff_bytes..]);
-                        combined
-                    } else {
-                        sniff_buffer
-                    };
-                    let result = transcode_data(&mut new_state, &full_input).map_err(|e| {
-                        *self = CharsetState::Failed(format!("{}", e));
-                        e
-                    })?;
-                    *self = new_state;
-                    Ok(Cow::Owned(result))
-                } else {
-                    // Not enough data yet, stay in Pending
-                    *self = CharsetState::Pending {
-                        header_charset,
-                        sniff_buffer,
-                        sniff_limit,
-                    };
-                    Ok(Cow::Owned(Vec::new()))
-                }
-            }
-
-            CharsetState::Resolved { decoder } => {
-                let mut state = CharsetState::Resolved { decoder };
-                let result = transcode_data(&mut state, data).map_err(|e| {
-                    *self = CharsetState::Failed(format!("{}", e));
-                    e
-                })?;
-                *self = state;
-                // For UTF-8 zero-copy: if result matches input exactly, return borrowed
-                if result == data {
-                    Ok(Cow::Borrowed(data))
-                } else {
-                    Ok(Cow::Owned(result))
-                }
-            }
-
+            } => self.feed_pending(header_charset, sniff_buffer, sniff_limit, data),
+            CharsetState::Resolved { decoder } => self.feed_resolved(decoder, data),
             CharsetState::Failed(reason) => {
                 *self = CharsetState::Failed(reason.clone());
                 Err(ConversionError::EncodingError(reason))
@@ -334,6 +500,10 @@ impl CharsetState {
                     *self = CharsetState::Failed(format!("{}", e));
                     e
                 })?;
+                if matches!(&new_state, CharsetState::Resolved { decoder: None }) {
+                    *self = new_state;
+                    return Ok(sniff_buffer);
+                }
                 let result = transcode_data(&mut new_state, &sniff_buffer).map_err(|e| {
                     *self = CharsetState::Failed(format!("{}", e));
                     e
@@ -390,6 +560,40 @@ impl CharsetState {
     /// ```
     pub fn is_resolved(&self) -> bool {
         matches!(self, CharsetState::Resolved { .. })
+    }
+
+    /// Return the estimated resident memory held by this charset state.
+    ///
+    /// Counts the sniff buffer in `Pending` state. The `Resolved` state
+    /// holds no heap allocations (the `encoding_rs::Decoder` is stack-sized).
+    /// The `Failed` variant holds a small String reason.
+    pub fn resident_bytes(&self) -> usize {
+        match self {
+            CharsetState::Pending {
+                sniff_buffer,
+                header_charset,
+                ..
+            } => sniff_buffer
+                .capacity()
+                .saturating_add(header_charset.as_ref().map_or(0, |s| s.capacity())),
+            CharsetState::Resolved { .. } => 0,
+            CharsetState::Failed(reason) => reason.capacity(),
+        }
+    }
+
+    /// Return the maximum UTF-8 output length for transcoding `input_len` bytes.
+    ///
+    /// For UTF-8 (zero-copy), returns 0 — no transcoding allocation occurs.
+    /// For other encodings, returns the decoder's reported maximum output,
+    /// or a conservative 4× fallback if the decoder cannot estimate.
+    pub fn max_transcode_output_len(&self, input_len: usize) -> usize {
+        match self {
+            CharsetState::Resolved { decoder: None } => 0,
+            CharsetState::Resolved { decoder: Some(dec) } => dec
+                .max_utf8_buffer_length(input_len)
+                .unwrap_or(input_len.saturating_mul(4)),
+            _ => input_len.saturating_mul(4),
+        }
     }
 
     /// Indicates whether the charset detection state machine is awaiting resolution.
@@ -487,7 +691,8 @@ fn resolve_charset(charset: &str) -> Result<(CharsetState, bool), ConversionErro
 /// Transcodes a byte slice according to the charset resolved in `state`.
 ///
 /// Returns a UTF-8 byte vector produced by decoding `data` using the `Resolved` state's decoder.
-/// - If `state` is `Resolved { decoder: None }`, the input bytes are treated as UTF-8 and returned as-is (copied).
+/// - If `state` is `Resolved { decoder: None }`, this function is not used:
+///   callers return a borrowed input slice without allocating.
 /// - If `state` is `Resolved { decoder: Some(dec) }`, the decoder is used to convert `data` to UTF-8; decoding errors produce `ConversionError::EncodingError`.
 /// - If `data` is empty, an empty `Vec<u8>` is returned.
 /// - If `state` is not `Resolved`, an `EncodingError` is returned.
@@ -495,25 +700,15 @@ fn resolve_charset(charset: &str) -> Result<(CharsetState, bool), ConversionErro
 /// # Examples
 ///
 /// ```ignore
-/// // UTF-8 path: decoder == None
-/// use nginx_markdown_converter::streaming::charset::CharsetState;
-///
-/// let mut state = CharsetState::Resolved { decoder: None };
-/// let out = transcode_data(&mut state, b"hello").unwrap();
-/// assert_eq!(out, b"hello");
-/// ```
 fn transcode_data(state: &mut CharsetState, data: &[u8]) -> Result<Vec<u8>, ConversionError> {
     if data.is_empty() {
         return Ok(Vec::new());
     }
 
     match state {
-        CharsetState::Resolved { decoder: None } => {
-            // UTF-8 path: validate and return as-is
-            // We use lossy conversion to be lenient with partial sequences
-            // that may span chunk boundaries
-            Ok(data.to_vec())
-        }
+        CharsetState::Resolved { decoder: None } => Err(ConversionError::EncodingError(
+            "UTF-8 input must use the zero-copy feed path".to_string(),
+        )),
         CharsetState::Resolved { decoder: Some(dec) } => {
             // Non-UTF-8: transcode using encoding_rs
             // Calculate maximum output size
@@ -722,6 +917,48 @@ mod tests {
             }
             other => panic!("Expected EncodingError, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn explicit_utf8_empty_sniff_feed_allocation_is_zero() {
+        let mut state = CharsetState::new();
+        state.set_content_type(Some("text/html; charset=UTF-8"));
+        assert_eq!(state.feed_allocation_upper_bound(4096).unwrap(), 0);
+    }
+
+    #[test]
+    fn explicit_non_utf8_empty_sniff_excludes_sniff_copy() {
+        let mut state = CharsetState::new();
+        state.set_content_type(Some("text/html; charset=ISO-8859-1"));
+        let (resolved, _) = resolve_charset("ISO-8859-1").unwrap();
+        let input_len = 4096;
+        assert_eq!(
+            state.feed_allocation_upper_bound(input_len).unwrap(),
+            CharsetState::resolved_output_upper_bound(&resolved, input_len).unwrap()
+        );
+    }
+
+    #[test]
+    fn explicit_utf8_existing_sniff_counts_only_required_growth() {
+        let mut state = CharsetState::new();
+        let _ = state.feed(b"abc").unwrap();
+        state.set_content_type(Some("text/html; charset=UTF-8"));
+        let input_len = 11;
+        let expected = match &state {
+            CharsetState::Pending { sniff_buffer, .. } => {
+                CharsetState::sniff_append_allocation_upper_bound(
+                    sniff_buffer.len(),
+                    sniff_buffer.capacity(),
+                    input_len,
+                )
+                .unwrap()
+            }
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            state.feed_allocation_upper_bound(input_len).unwrap(),
+            expected
+        );
     }
 
     // --- UTF-8 zero-copy path ---

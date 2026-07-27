@@ -28,7 +28,16 @@ exceptions = []
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
-deny = []
+deny = [
+  # Backtracking regex engines — Rule 10 requires non-backtracking regex (regex crate).
+  # These crates use PCRE-style backtracking which is vulnerable to ReDoS.
+  # If a dependency requires one, it must have input size limits and adversarial tests.
+  { name = "fancy-regex", reason = "Backtracking regex engine — vulnerable to ReDoS. Use 'regex' crate instead." },
+  { name = "pcre2", reason = "Backtracking PCRE2 bindings — vulnerable to ReDoS. Use 'regex' crate instead." },
+  { name = "pcre2-sys", reason = "Backtracking PCRE2 FFI bindings — vulnerable to ReDoS. Use 'regex' crate instead." },
+  { name = "onig", reason = "Backtracking Oniguruma bindings — vulnerable to ReDoS. Use 'regex' crate instead." },
+  { name = "onig_sys", reason = "Backtracking Oniguruma FFI bindings — vulnerable to ReDoS. Use 'regex' crate instead." },
+]
 skip = []
 skip-tree = []
 

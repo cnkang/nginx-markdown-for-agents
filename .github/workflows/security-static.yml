@@ -73,6 +73,12 @@ jobs:
       - name: Validate GitHub Actions workflows
         run: make security-actionlint
 
+      - name: Validate release security contracts
+        run: |
+          python3 tools/harness/detect_release_supply_chain.py
+          python3 tools/harness/detect_workflow_secret_scope.py
+          python3 tools/harness/detect_production_auth_transport.py
+
   shellcheck:
     name: shellcheck
     runs-on: ubuntu-latest

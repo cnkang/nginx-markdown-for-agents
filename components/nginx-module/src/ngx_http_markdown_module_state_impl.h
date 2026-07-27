@@ -31,11 +31,11 @@ static ngx_shm_zone_t *ngx_http_markdown_metrics_shm_zone = NULL;
  * changes (for example fields appended at the tail), this version suffix
  * prevents attaching an incompatible old allocation after hot reload.
  *
- * v7: performance metrics fields (backpressure, decompression path,
- *     output delivery mode) added to metrics struct.
+ * v8: unretained per-path conversion and time counters added to preserve
+ *     aggregate accounting when a path cannot be stored in the slab.
  */
 static ngx_str_t ngx_http_markdown_metrics_shm_name =
-    ngx_string("nginx_markdown_metrics_v7");
+    ngx_string("nginx_markdown_metrics_v8");
 static u_char ngx_http_markdown_empty_string[] = "";
 
 /* Global dynamic config watcher for this worker process.

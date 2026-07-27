@@ -292,10 +292,7 @@ pub struct ForwardedHeader {
 pub fn parse_forwarded_header(s: &str) -> Option<ForwardedHeader> {
     // Use the right-most (last) comma-separated element: this is the value
     // the trusted proxy appended.  The left-most is client-controlled.
-    let last = s.rsplit(',').next()?.trim();
-    if last.is_empty() {
-        return None;
-    }
+    let last = rightmost_nonempty_list_value(s)?;
 
     let mut result = ForwardedHeader::default();
     for pair in last.split(';') {
@@ -321,6 +318,19 @@ pub fn parse_forwarded_header(s: &str) -> Option<ForwardedHeader> {
     } else {
         Some(result)
     }
+}
+
+/// Return the right-most non-empty member of a comma-separated field value.
+///
+/// NGINX combines repeated forwarded field lines in wire order before the
+/// value reaches Rust. Trusted proxies append their value on the right, so
+/// selecting the final non-empty member prevents an earlier field line from
+/// overriding the directly connected proxy's assertion.
+fn rightmost_nonempty_list_value(value: &str) -> Option<&str> {
+    value
+        .rsplit(',')
+        .map(str::trim)
+        .find(|item| !item.is_empty())
 }
 
 /// Strip a single layer of surrounding double quotes from a token.
@@ -584,12 +594,10 @@ fn resolve_forwarded_candidate(
 
     let xfh = input
         .x_forwarded_host
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+        .and_then(rightmost_nonempty_list_value);
     let xfp = input
         .x_forwarded_proto
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+        .and_then(rightmost_nonempty_list_value);
 
     if xfh.is_none() && xfp.is_none() {
         return None;
@@ -786,6 +794,14 @@ mod tests {
     }
 
     #[test]
+    fn forwarded_repeated_field_lines_take_rightmost_nonempty() {
+        let p =
+            parse_forwarded_header("host=client.example, host=edge.example;proto=https").unwrap();
+        assert_eq!(p.host.as_deref(), Some("edge.example"));
+        assert_eq!(p.proto.as_deref(), Some("https"));
+    }
+
+    #[test]
     fn forwarded_proto_lowercased() {
         let p = parse_forwarded_header("proto=HTTPS").unwrap();
         assert_eq!(p.proto.as_deref(), Some("https"));
@@ -915,6 +931,34 @@ mod tests {
         assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);
         assert_eq!(d.source, BaseUrlSource::XForwarded);
         assert_eq!(d.base_url, "https://api.example.com");
+    }
+
+    #[test]
+    fn decide_repeated_x_forwarded_fields_use_rightmost_values() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_host = Some("client.example, edge.example");
+        input.x_forwarded_proto = Some("http, https");
+
+        let d = decide_base_url(&input, &t);
+
+        assert_eq!(d.reason, BaseUrlReason::ForwardedHeaderTrusted);
+        assert_eq!(d.source, BaseUrlSource::XForwarded);
+        assert_eq!(d.base_url, "https://edge.example");
+    }
+
+    #[test]
+    fn decide_invalid_rightmost_x_forwarded_host_does_not_use_earlier_value() {
+        let t = cidrs(&["10.0.0.0/8"]);
+        let mut input = trusted_input("10.1.2.3");
+        input.x_forwarded_host = Some("earlier.example, invalid/path");
+        input.x_forwarded_proto = Some("https");
+
+        let d = decide_base_url(&input, &t);
+
+        assert_eq!(d.reason, BaseUrlReason::ForwardedInvalidHost);
+        assert_eq!(d.source, BaseUrlSource::Host);
+        assert_eq!(d.base_url, "http://origin.example.com");
     }
 
     #[test]

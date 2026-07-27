@@ -11,13 +11,11 @@
 
 #![cfg(all(feature = "incremental", feature = "streaming"))]
 
-#[path = "known_differences.rs"]
-mod known_differences;
 #[path = "streaming_test_support.rs"]
 mod streaming_test_support;
 
-use known_differences::{KnownDifferences, OutputDifference};
 use proptest::prelude::*;
+use streaming_test_support::known_differences::{KnownDifferences, OutputDifference};
 use streaming_test_support::{
     convert_full_buffer, convert_incremental, convert_streaming_chunked, convert_streaming_single,
     default_streaming_budget, default_streaming_options, fixture_relative_name,

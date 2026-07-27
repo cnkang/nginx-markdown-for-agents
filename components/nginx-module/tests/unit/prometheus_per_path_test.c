@@ -15,8 +15,12 @@ typedef struct {
 
 typedef intptr_t  ngx_int_t;
 typedef uintptr_t ngx_uint_t;
-typedef int       ngx_atomic_t;
+typedef long      ngx_atomic_t;
 typedef unsigned long ngx_atomic_uint_t;
+
+#define NGX_OK        0
+#define NGX_ERROR    -1
+#define NGX_DECLINED -5
 
 #define ngx_string(str) { sizeof(str) - 1, (u_char *) str }
 
@@ -131,6 +135,8 @@ typedef struct { /* SONAR_NOTE: mirrors production snapshot */
         ngx_atomic_t  path_conversions;
         ngx_atomic_t  path_conversion_time_sum_ms;
         ngx_atomic_t  overflow_count;
+        ngx_atomic_t  unretained_conversions;
+        ngx_atomic_t  unretained_conversion_time_sum_ms;
     } per_path;
     ngx_http_markdown_metrics_perf_snapshot_t perf;
 } ngx_http_markdown_metrics_snapshot_t;
@@ -184,6 +190,8 @@ typedef struct {
     ngx_atomic_t       path_conversion_time_sum_ms;
     ngx_uint_t         cardinality_limit;
     ngx_atomic_t       overflow_count;
+    ngx_atomic_t       unretained_conversions;
+    ngx_atomic_t       unretained_conversion_time_sum_ms;
 } ngx_http_markdown_metrics_per_path_t;
 
 typedef struct {
@@ -216,7 +224,8 @@ ngx_slprintf(u_char *buf, u_char *last, const char *fmt, ...) /* SONAR_NOTE */
                 local_fmt[oi++] = fmt[fi++];
             }
             if (fmt[fi] == 'u' && fmt[fi + 1] == 'A') {
-                local_fmt[oi++] = 'd';
+                local_fmt[oi++] = 'l';
+                local_fmt[oi++] = 'u';
                 fi += 2;
             } else {
                 local_fmt[oi++] = fmt[fi++];
@@ -292,6 +301,19 @@ static int
 contains(const char *haystack, const char *needle)
 {
     return strstr(haystack, needle) != NULL;
+}
+
+static void
+init_path_render(
+    ngx_http_markdown_prometheus_path_render_ctx_t *render,
+    u_char *start,
+    u_char *end,
+    size_t tail_reserve)
+{
+    memset(render, 0, sizeof(*render));
+    render->pos = start;
+    render->end = end;
+    render->tail_reserve = tail_reserve;
 }
 
 static void
@@ -442,6 +464,7 @@ test_prometheus_walk_path_tree_single_node(void)
     u_char *p;
     ngx_rbtree_node_t sentinel;
     ngx_http_markdown_path_metric_node_t node;
+    ngx_http_markdown_prometheus_path_render_ctx_t render;
     u_char path[] = "/api/docs";
 
     TEST_SUBSECTION("walk_path_tree: single node");
@@ -455,10 +478,14 @@ test_prometheus_walk_path_tree_single_node(void)
     node.rbnode.left = &sentinel;
     node.rbnode.right = &sentinel;
 
-    p = ngx_http_markdown_prometheus_walk_path_tree(
-        &node.rbnode, &sentinel, buf, buf + sizeof(buf));
+    init_path_render(&render, buf, buf + sizeof(buf), 0);
+    ngx_http_markdown_prometheus_walk_path_tree(
+        &node.rbnode, &sentinel, &render);
+    p = render.pos;
 
     TEST_ASSERT(p > buf, "should produce output");
+    TEST_ASSERT(render.omitted_nodes == 0,
+                "fitting path should not be omitted");
     *p = '\0';
     TEST_ASSERT(contains((char *) buf, "nginx_markdown_path_conversions_total"),
                 "should contain conversions metric");
@@ -479,12 +506,15 @@ test_prometheus_walk_path_tree_sentinel(void)
     u_char buf[256];
     u_char *p;
     ngx_rbtree_node_t sentinel;
+    ngx_http_markdown_prometheus_path_render_ctx_t render;
 
     TEST_SUBSECTION("walk_path_tree: sentinel node terminates");
 
     memset(&sentinel, 0, sizeof(sentinel));
-    p = ngx_http_markdown_prometheus_walk_path_tree(
-        &sentinel, &sentinel, buf, buf + sizeof(buf));
+    init_path_render(&render, buf, buf + sizeof(buf), 0);
+    ngx_http_markdown_prometheus_walk_path_tree(
+        &sentinel, &sentinel, &render);
+    p = render.pos;
     TEST_ASSERT(p == buf, "sentinel node should produce no output");
 
     TEST_PASS("sentinel termination correct");
@@ -497,6 +527,7 @@ test_prometheus_walk_path_tree_buffer_full(void)
     u_char *p;
     ngx_rbtree_node_t sentinel;
     ngx_http_markdown_path_metric_node_t node;
+    ngx_http_markdown_prometheus_path_render_ctx_t render;
     u_char path[] = "/x";
 
     TEST_SUBSECTION("walk_path_tree: buffer full returns p");
@@ -509,12 +540,113 @@ test_prometheus_walk_path_tree_buffer_full(void)
     node.rbnode.left = &sentinel;
     node.rbnode.right = &sentinel;
 
-    p = ngx_http_markdown_prometheus_walk_path_tree(
-        &node.rbnode, &sentinel, buf, buf + sizeof(buf));
+    memset(buf, 'X', sizeof(buf));
+    init_path_render(&render, buf, buf + sizeof(buf), 0);
+    ngx_http_markdown_prometheus_walk_path_tree(
+        &node.rbnode, &sentinel, &render);
+    p = render.pos;
     TEST_ASSERT(p <= buf + sizeof(buf),
                 "should not write past buffer end");
+    TEST_ASSERT(p == buf,
+                "insufficient budget must not write a partial path pair");
+    TEST_ASSERT(render.omitted_nodes == 1
+                && render.omitted_conversions == 1,
+                "insufficient budget should aggregate the omitted path");
+    TEST_ASSERT(buf[0] == 'X',
+                "insufficient budget should leave output bytes untouched");
 
     TEST_PASS("buffer full handling correct");
+}
+
+static void
+test_prometheus_path_pair_exact_budget(void)
+{
+    u_char buf[512];
+    char maximum[64];
+    u_char path[] = { '/', '\\', '"', '\n', 0x01 };
+    size_t needed;
+    ngx_atomic_uint_t maximum_counter;
+    ngx_http_markdown_prometheus_path_render_ctx_t render;
+    ngx_int_t rc;
+
+    TEST_SUBSECTION("path pair: exact escaped-byte budget");
+
+    maximum_counter = (ngx_atomic_uint_t) -1;
+    TEST_ASSERT(ngx_http_markdown_prometheus_path_pair_size(
+                    path, sizeof(path), maximum_counter, maximum_counter,
+                    &needed)
+                == NGX_OK,
+                "escaped pair size should be computable");
+    TEST_ASSERT(needed < sizeof(buf),
+                "test pair should fit the backing buffer");
+
+    init_path_render(&render, buf, buf + needed, 0);
+    rc = ngx_http_markdown_prometheus_write_path_pair(
+        &render, path, sizeof(path), maximum_counter, maximum_counter,
+        needed);
+
+    TEST_ASSERT(rc == NGX_OK, "exact-fit pair should be emitted");
+    TEST_ASSERT(render.pos == buf + needed,
+                "exact-fit pair should consume its calculated size");
+    TEST_ASSERT(render.failed == 0,
+                "exact-fit pair should not flag rendering failure");
+
+    buf[needed] = '\0';
+    TEST_ASSERT(contains((char *) buf, "\\\\"),
+                "backslash expansion should be budgeted");
+    TEST_ASSERT(contains((char *) buf, "\\\""),
+                "quote expansion should be budgeted");
+    TEST_ASSERT(contains((char *) buf, "\\n"),
+                "newline expansion should be budgeted");
+    TEST_ASSERT(contains((char *) buf, "\\u0001"),
+                "control-character expansion should be budgeted");
+
+    snprintf(maximum, sizeof(maximum), "%lu",
+             (unsigned long) maximum_counter);
+    TEST_ASSERT(contains((char *) buf, maximum),
+                "maximum-width counters should render without truncation");
+
+    memset(buf, 'X', sizeof(buf));
+    init_path_render(&render, buf, buf + needed - 1, 0);
+    rc = ngx_http_markdown_prometheus_write_path_pair(
+        &render, path, sizeof(path), maximum_counter, maximum_counter,
+        needed);
+
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "one-byte-short pair should be omitted");
+    TEST_ASSERT(render.pos == buf,
+                "one-byte-short pair must not be partially emitted");
+    TEST_ASSERT(buf[0] == 'X',
+                "one-byte-short pair should leave the buffer untouched");
+
+    TEST_PASS("exact and one-byte-short pair budgets correct");
+}
+
+static void
+test_prometheus_omitted_counter_saturation(void)
+{
+    u_char buf[1];
+    ngx_atomic_uint_t maximum;
+    ngx_http_markdown_prometheus_path_render_ctx_t render;
+
+    TEST_SUBSECTION("path pair: omitted counter saturation");
+
+    maximum = (ngx_atomic_uint_t) -1;
+    init_path_render(&render, buf, buf + sizeof(buf), 0);
+    render.omitted_conversions = maximum - 2;
+    render.omitted_time_ms = maximum - 3;
+
+    ngx_http_markdown_prometheus_accumulate_omitted_path(
+        &render, 10, 20);
+
+    TEST_ASSERT(render.omitted_conversions == maximum,
+                "omitted conversions should saturate");
+    TEST_ASSERT(render.omitted_time_ms == maximum,
+                "omitted time should saturate");
+    TEST_ASSERT(render.omitted_nodes == 1,
+                "omitted path count should still advance");
+
+    TEST_PASS("omitted counter saturation correct");
 }
 
 static void
@@ -534,6 +666,8 @@ test_per_path_walk_with_overflow(void)
 
     s.per_path.path_entries = 1;
     s.per_path.overflow_count = 5;
+    s.per_path.unretained_conversions = 5;
+    s.per_path.unretained_conversion_time_sum_ms = 50;
 
     memset(&live.per_path.sentinel, 0, sizeof(live.per_path.sentinel));
     live.per_path.sentinel.left = &live.per_path.sentinel;
@@ -556,6 +690,129 @@ test_per_path_walk_with_overflow(void)
                 "should contain per-path conversions metric family");
 
     TEST_PASS("__other__ overflow path correct");
+}
+
+
+static void
+test_per_path_overflow_without_retained_paths(void)
+{
+    u_char buf[16384];
+    u_char *p;
+    ngx_http_markdown_metrics_snapshot_t s;
+    ngx_shm_zone_t *saved_zone;
+
+    TEST_SUBSECTION("per-path empty tree retains overflow aggregate");
+
+    memset(&s, 0, sizeof(s));
+    s.per_path.overflow_count = 5;
+    s.per_path.unretained_conversions = 5;
+    s.per_path.unretained_conversion_time_sum_ms = 50;
+    saved_zone = ngx_http_markdown_metrics_shm_zone;
+    ngx_http_markdown_metrics_shm_zone = NULL;
+
+    p = ngx_http_markdown_metrics_write_prometheus(
+        buf, buf + sizeof(buf), &s);
+
+    ngx_http_markdown_metrics_shm_zone = saved_zone;
+    TEST_ASSERT(p != NULL, "overflow-only Prometheus renderer should succeed");
+    *p = '\0';
+    TEST_ASSERT(contains((char *) buf,
+                "nginx_markdown_path_conversions_total{path=\"__other__\"} 5\n"),
+                "overflow-only Prometheus must retain __other__ conversions");
+    TEST_ASSERT(contains((char *) buf,
+                "nginx_markdown_path_conversion_time_ms_total"
+                "{path=\"__other__\"} 50\n"),
+                "overflow-only Prometheus must retain __other__ time");
+
+    TEST_PASS("empty-tree overflow Prometheus correct");
+}
+
+static void
+test_per_path_response_budget_uses_other(void)
+{
+    u_char buf[16384];
+    u_char path[256];
+    u_char *p;
+    size_t base_size;
+    size_t capacity;
+    size_t header_size;
+    size_t node_size;
+    size_t tail_reserve;
+    ngx_http_markdown_metrics_snapshot_t s;
+    ngx_http_markdown_metrics_t live;
+    ngx_slab_pool_t shpool;
+    ngx_http_markdown_path_metric_node_t node;
+
+    TEST_SUBSECTION("per-path response budget folds omitted pairs");
+
+    memset(&s, 0, sizeof(s));
+    memset(&live, 0, sizeof(live));
+    memset(&shpool, 0, sizeof(shpool));
+    memset(&node, 0, sizeof(node));
+    memset(path, 0x01, sizeof(path));
+
+    /*
+     * Measure the fixed aggregate output with the same-width aggregate
+     * values, then provide exactly the detailed header plus reserved tail.
+     */
+    s.per_path.path_entries = 0;
+    s.per_path.overflow_count = 5;
+    s.per_path.unretained_conversions = 5;
+    s.per_path.unretained_conversion_time_sum_ms = 50;
+    p = ngx_http_markdown_metrics_write_prometheus(
+        buf, buf + sizeof(buf), &s);
+    TEST_ASSERT(p != NULL, "aggregate-only renderer should succeed");
+    base_size = (size_t) (p - buf);
+
+    TEST_ASSERT(ngx_http_markdown_prometheus_path_tail_reserve(
+                    &tail_reserve)
+                == NGX_OK,
+                "tail reserve should be computable");
+    header_size = sizeof(NGX_HTTP_MARKDOWN_PROM_PATH_HEADER) - 1;
+    capacity = base_size + header_size + tail_reserve;
+    TEST_ASSERT(capacity < sizeof(buf),
+                "bounded integration response should fit test storage");
+
+    node.path = path;
+    node.path_len = sizeof(path);
+    node.conversions = 42;
+    node.conversion_time_sum_ms = 1500;
+    node.rbnode.left = &live.per_path.sentinel;
+    node.rbnode.right = &live.per_path.sentinel;
+    live.per_path.path_tree.root = &node.rbnode;
+
+    TEST_ASSERT(ngx_http_markdown_prometheus_path_pair_size(
+                    path, sizeof(path), 42, 1500, &node_size)
+                == NGX_OK,
+                "large escaped path size should be computable");
+    TEST_ASSERT(node_size > tail_reserve,
+                "test path should exceed the reserved summary tail");
+
+    g_shm_zone.data = &live;
+    g_shm_zone.shm.addr = &shpool;
+    ngx_http_markdown_metrics_shm_zone = &g_shm_zone;
+    s.per_path.path_entries = 1;
+
+    p = ngx_http_markdown_metrics_write_prometheus(
+        buf, buf + capacity, &s);
+
+    TEST_ASSERT(p != NULL,
+                "path detail exhaustion should preserve aggregate scrape");
+    TEST_ASSERT(p < buf + capacity,
+                "summary output should remain inside the response budget");
+    *p = '\0';
+    TEST_ASSERT(contains((char *) buf,
+                "nginx_markdown_path_conversions_total"
+                "{path=\"__other__\"} 47\n"),
+                "cardinality and response omissions should be combined");
+    TEST_ASSERT(contains((char *) buf,
+                "nginx_markdown_path_conversion_time_ms_total"
+                "{path=\"__other__\"} 1550\n"),
+                "unretained and omitted conversion time should be retained");
+    TEST_ASSERT(!contains((char *) buf, "\\u0001"),
+                "oversized detailed path should not be partially emitted");
+
+    TEST_PASS("response-budget omission summary correct");
 }
 
 static void
@@ -697,7 +954,11 @@ main(void)
     test_prometheus_walk_path_tree_single_node();
     test_prometheus_walk_path_tree_sentinel();
     test_prometheus_walk_path_tree_buffer_full();
+    test_prometheus_path_pair_exact_budget();
+    test_prometheus_omitted_counter_saturation();
     test_per_path_walk_with_overflow();
+    test_per_path_overflow_without_retained_paths();
+    test_per_path_response_budget_uses_other();
     test_per_path_walk_no_shm_zone();
     test_per_path_walk_no_path_entries();
     test_per_path_walk_with_real_nodes();

@@ -14,6 +14,14 @@ on:
       - "THIRD-PARTY-NOTICES"
       - "Makefile"
       - ".github/workflows/codeql.yml"
+      - "tools/**/*.py"
+      - "packaging/**/*.py"
+      - "tests/**/*.py"
+      - "skills/**/*.py"
+      - "deny.toml"
+      - "Makefile"
+      - "AGENTS.md"
+      - "docs/harness/**"
   push:
     branches: [main, master]
     paths:
@@ -26,6 +34,14 @@ on:
       - "THIRD-PARTY-NOTICES"
       - "Makefile"
       - ".github/workflows/codeql.yml"
+      - "tools/**/*.py"
+      - "packaging/**/*.py"
+      - "tests/**/*.py"
+      - "skills/**/*.py"
+      - "deny.toml"
+      - "Makefile"
+      - "AGENTS.md"
+      - "docs/harness/**"
   schedule:
     - cron: "37 2 * * 0"
 
@@ -48,6 +64,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+        with:
+          persist-credentials: false
 
       - name: Initialize CodeQL for C/C++
         uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
@@ -100,6 +118,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+        with:
+          persist-credentials: false
 
       - name: Initialize CodeQL for Rust
         uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
@@ -113,6 +133,33 @@ jobs:
         with:
           category: "/language:rust"
 
+  codeql-python:
+    name: CodeQL (Python Tooling)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL for Python
+        uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        with:
+          languages: python
+          build-mode: none
+          queries: security-extended,security-and-quality
+
+      - name: Run CodeQL analysis for Python
+        uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        with:
+          category: "/language:python"
+
   rust-security-audit:
     name: Rust Security Audit
     runs-on: ubuntu-latest
@@ -123,6 +170,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable

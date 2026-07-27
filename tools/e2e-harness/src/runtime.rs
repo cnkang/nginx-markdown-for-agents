@@ -247,7 +247,7 @@ http {{\n\
             markdown_filter on;\n\
             markdown_accept wildcard;\n\
             markdown_profile balanced;\n\
-            markdown_streaming auto;\n\
+            markdown_streaming off;\n\
             markdown_auto_decompress on;\n\
             markdown_cache_validation full;\n\
             markdown_limits memory=64m timeout=120s;\n\

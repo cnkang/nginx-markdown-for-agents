@@ -12,8 +12,12 @@ paths:
   - "tools/**/Cargo.toml"
   - "tools/**/Cargo.lock"
   - "tools/**/*.sh"
+  - "tools/**/*.py"
   - "packaging/**/*.sh"
+  - "packaging/**/*.py"
+  - "packaging/**/*.rb"
   - "examples/**/*.sh"
+  - "examples/**/*.conf"
   - "charts/**"
 ---
 
@@ -34,6 +38,11 @@ Required:
 - `gitleaks` must fail on real secrets, private keys, signing material, API
   keys, tokens, and passwords. Allowlist only test fixtures or placeholders
   with narrow path or regex scope.
+- Workflow secrets must be assigned only in the minimal step that consumes
+  them. Job- or workflow-level secret expressions are forbidden when setup,
+  checkout, repository build, test, or coverage steps do not need the
+  credential. Enforce this with
+  `tools/harness/detect_workflow_secret_scope.py`.
 - Local `gitleaks` execution must scan exactly Git-tracked worktree content so
   tracked edits are covered while ignored local adapters, caches, and build
   state cannot create findings for files absent from a clean checkout. Any
@@ -72,6 +81,12 @@ Required:
   feasible. ClusterFuzzLite workflows must pre-create the bind-mounted
   `build-out` directory as the runner user before the root container action
   initializes its workspace.
+- Production examples that enable Basic Auth must serve it on an SSL listener
+  or bind the cleartext backend to loopback behind a documented mandatory
+  co-located TLS terminator. Authenticated client commands must use HTTPS.
+- Release-capable builders, verified source/tool downloads, and tag-derived
+  Homebrew publication are checked by
+  `tools/harness/detect_release_supply_chain.py`.
 - Third-party actions in these workflows must be pinned to immutable commit
   SHAs with human-readable version comments.
 - Generated scan output, SBOM files, tool caches, and vulnerability databases
@@ -84,5 +99,6 @@ Verification:
 - `make security-gitleaks`
 - `make security-semgrep`
 - `make security-cargo-deny`
+- `make release-supply-chain-check`
 - `make supply-chain` when Trivy and Syft are locally available
 - `make harness-check` for the tracked Docker runtime contract

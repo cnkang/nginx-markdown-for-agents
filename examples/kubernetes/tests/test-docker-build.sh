@@ -18,6 +18,7 @@
 #   -d, --dockerfile PATH   Path to Dockerfile (default: ../Dockerfile.ingress)
 #   -t, --tag TAG           Image tag to use (default: nginx-markdown-test:latest)
 #   -c, --context PATH      Docker build context (default: repository root)
+#   --module-sha SHA        Reviewed full module commit (default: context HEAD)
 #   --no-cleanup            Keep the built image after test (default: remove)
 #   -h, --help              Show this help message
 #
@@ -62,6 +63,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DOCKERFILE="${SCRIPT_DIR}/../Dockerfile.ingress"
 IMAGE_TAG="nginx-markdown-test:latest"
 BUILD_CONTEXT=""
+MODULE_SHA=""
 CLEANUP="yes"
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -120,6 +122,28 @@ check_prerequisites() {
     return 0
 }
 
+resolve_module_sha() {
+    if [[ -z "$MODULE_SHA" ]]; then
+        if ! command -v git >/dev/null 2>&1; then
+            log_error "git is required to derive MODULE_SHA"
+            return 2
+        fi
+        MODULE_SHA="$(
+            git -C "$BUILD_CONTEXT" rev-parse --verify 'HEAD^{commit}' \
+                2>/dev/null
+        )" || {
+            log_error "Cannot derive MODULE_SHA from build context: $BUILD_CONTEXT"
+            return 2
+        }
+    fi
+
+    if ! printf '%s' "$MODULE_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+        log_error "MODULE_SHA must be a full 40-character lowercase commit ID"
+        return 2
+    fi
+    return 0
+}
+
 # Detect repository root by walking up from script directory
 detect_repo_root() {
     local dir="$SCRIPT_DIR"
@@ -144,12 +168,14 @@ test_docker_build() {
     log_info "  Dockerfile: $DOCKERFILE"
     log_info "  Context:    $BUILD_CONTEXT"
     log_info "  Tag:        $IMAGE_TAG"
+    log_info "  Module SHA: $MODULE_SHA"
 
     local build_output
     local build_rc
 
     build_output="$(docker build \
         -f "$DOCKERFILE" \
+        --build-arg "MODULE_SHA=${MODULE_SHA}" \
         -t "$IMAGE_TAG" \
         "$BUILD_CONTEXT" 2>&1)" || build_rc=$?
 
@@ -308,6 +334,14 @@ parse_args() {
                 BUILD_CONTEXT="$2"
                 shift 2
                 ;;
+            --module-sha)
+                if [[ "$#" -lt 2 ]]; then
+                    log_error "Option $1 requires an argument"
+                    return 2
+                fi
+                MODULE_SHA="$2"
+                shift 2
+                ;;
             --no-cleanup)
                 CLEANUP="no"
                 shift
@@ -345,6 +379,7 @@ main() {
     fi
 
     check_prerequisites || exit $?
+    resolve_module_sha || exit $?
 
     trap cleanup EXIT
 

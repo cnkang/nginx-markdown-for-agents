@@ -213,9 +213,10 @@ NFPM_POSTINSTALL_FORBIDDEN_SNIPPETS = [
     "/usr/share/doc/nginx-module-markdown-for-agents/README.md",
 ]
 RELEASE_BUILD_GLIBC_SNIPPETS = {
-    RELEASE_PACKAGES_WORKFLOW: ["container: almalinux:9"],
+    RELEASE_PACKAGES_WORKFLOW: ["container: almalinux@sha256:"],
     PROJECT_ROOT / "tools" / "build_release" / "Dockerfile.glibc": [
-        "ARG OS_BASE=almalinux:9",
+        "AlmaLinux 9 manifest",
+        "ARG OS_BASE=almalinux@sha256:",
         "dnf install -y",
         "install-verified-rustup.sh",
         "--toolchain none",

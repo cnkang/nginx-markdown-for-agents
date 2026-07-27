@@ -11,6 +11,9 @@ on:
       - "tests/**"
       - "Makefile"
       - ".sonarcloud.properties"
+      - ".gitattributes"
+      - "tools/sonar/**"
+      - "tests/corpus/**"
       - ".github/workflows/sonarcloud.yml"
   push:
     branches: [main, master]
@@ -21,6 +24,9 @@ on:
       - "tests/**"
       - "Makefile"
       - ".sonarcloud.properties"
+      - ".gitattributes"
+      - "tools/sonar/**"
+      - "tests/corpus/**"
       - ".github/workflows/sonarcloud.yml"
 
 concurrency:
@@ -37,16 +43,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     env:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       SONAR_HOST_URL: https://sonarcloud.io
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
-        with:
-          fetch-depth: 0
-
       - name: Check Sonar token
         id: token
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         shell: bash
         run: |
           if [[ -n "${SONAR_TOKEN:-}" ]]; then
@@ -56,12 +58,43 @@ jobs:
             echo "SONAR_TOKEN is not configured. Skipping SonarCloud scan." >&2
           fi
 
+      - name: Checkout repository
+        if: steps.token.outputs.enabled == 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python for source audits
+        if: steps.token.outputs.enabled == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14.3'
+
+      - name: Install source audit test dependencies
+        if: steps.token.outputs.enabled == 'true'
+        run: python3 -m pip install --upgrade pip && python3 -m pip install pytest==8.3.5
+
+      - name: Validate tracked source encodings
+        if: steps.token.outputs.enabled == 'true'
+        run: make sonar-encoding-check
+
+      # GitHub-hosted images can contain a partial copy of this pinned
+      # toolchain.  Remove only that exact copy before installing llvm-tools.
+      - name: Remove incomplete pinned Rust toolchain
+        if: steps.token.outputs.enabled == 'true'
+        working-directory: ${{ runner.temp }}
+        shell: bash
+        run: |
+          if rustup toolchain list | grep -q '^1\.97\.0-'; then
+            rustup toolchain uninstall 1.97.0
+          fi
+
       - name: Set up Rust toolchain
         if: steps.token.outputs.enabled == 'true'
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: 1.97.0
-          components: llvm-tools-preview
+          components: clippy,llvm-tools-preview
 
       - name: Install cargo-llvm-cov
         if: steps.token.outputs.enabled == 'true'
@@ -128,8 +161,17 @@ jobs:
           fi
           echo "OK: coverage/sonar-coverage.xml ($(wc -l < coverage/sonar-coverage.xml) lines)"
 
+      - name: Validate generated source encodings
+        if: steps.token.outputs.enabled == 'true'
+        run: >
+          python3 tools/sonar/check_source_encoding.py
+          --include-exceptions
+          --include-generated
+
       - name: SonarCloud Scan
         if: steps.token.outputs.enabled == 'true'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0
         with:
           args: >
