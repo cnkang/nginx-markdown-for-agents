@@ -13,16 +13,14 @@
 
 #![cfg(feature = "streaming")]
 
-#[path = "known_differences.rs"]
-mod known_differences;
 #[path = "support/streaming_compare_support.rs"]
 mod streaming_compare_support;
 #[path = "streaming_test_support.rs"]
 mod streaming_test_support;
 
-use known_differences::KnownDifferences;
 use nginx_markdown_converter::error::ConversionError;
 use streaming_compare_support::compare_or_known;
+use streaming_test_support::known_differences::KnownDifferences;
 use streaming_test_support::{
     convert_full_buffer, convert_streaming_chunked, convert_streaming_single,
     default_streaming_budget, default_streaming_options, known_differences_path, read_fixture,
@@ -39,19 +37,16 @@ fn assert_fixture(name: &str) {
     let fixture_name = format!("streaming/{name}.html");
     let html = read_fixture(&path);
     let meta = read_fixture_meta(&path);
+    let content_type = meta.resolved_content_type();
     let known = KnownDifferences::from_file(&known_differences_path())
         .unwrap_or_else(|err| panic!("load known differences: {err}"));
 
-    let full = convert_full_buffer(
-        &html,
-        Some("text/html; charset=UTF-8"),
-        default_streaming_options(),
-    )
-    .unwrap_or_else(|err| panic!("full-buffer conversion failed for {fixture_name}: {err}"));
+    let full = convert_full_buffer(&html, Some(&content_type), default_streaming_options())
+        .unwrap_or_else(|err| panic!("full-buffer conversion failed for {fixture_name}: {err}"));
 
     let single = convert_streaming_single(
         &html,
-        Some("text/html; charset=UTF-8"),
+        Some(&content_type),
         default_streaming_options(),
         default_streaming_budget(),
         None,
@@ -82,7 +77,7 @@ fn assert_fixture(name: &str) {
     let chunked = convert_streaming_chunked(
         &html,
         &chunks,
-        Some("text/html; charset=UTF-8"),
+        Some(&content_type),
         default_streaming_options(),
         default_streaming_budget(),
         None,

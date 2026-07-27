@@ -1,6 +1,6 @@
 ---
 domain: e2e-runner
-rules: [37]
+rules: [37, 60]
 paths:
   - "tools/e2e-harness/**"
   - "tools/e2e/**"
@@ -45,3 +45,96 @@ Verification:
 - `cargo fmt --check --manifest-path tools/e2e-harness/Cargo.toml`
 - `cargo clippy --manifest-path tools/e2e-harness/Cargo.toml --all-targets --all-features -- -D warnings`
 - `make test-e2e-rust`
+
+### 60. E2E config directive consistency — streaming mode must match test intent
+
+Historical issues: PR #188, CI run 29727392197 (startup warning noise from
+contradictory `markdown_streaming auto` + `markdown_cache_validation full`).
+
+Required:
+- E2E nginx.conf location blocks that use `markdown_cache_validation full`
+  must have an explicit `markdown_streaming` directive (`off`, `auto`, or
+  `force`).  Do not rely on the implicit default (`auto`) when the location
+  also uses `markdown_cache_validation full` — the implicit `auto` plus the
+  blocking directive generates a startup warning and obscures the test's
+  intent.  Location blocks that do NOT use `markdown_cache_validation full`
+  are out of scope for this detector and may rely on the implicit default.
+- When a test intends to exercise the **full-buffer** path, use
+  `markdown_streaming off`.  Do not use `markdown_streaming auto` combined
+  with a blocking directive — this is contradictory configuration that
+  generates a startup warning and obscures the test's intent.
+- When a test intends to exercise the **streaming** path, use
+  `markdown_streaming force` (or `auto` with no blocking directives).
+  Ensure the assertions actually verify streaming-specific behavior
+  (e.g., chunked transfer encoding, absence of Content-Length, streaming
+  metrics).
+- The one exception: tests that **intentionally validate the runtime-block
+  mechanism** (that is, verifying that `auto` + `full` correctly falls back
+  to full-buffer) may use the contradictory combination, but must document
+  this intent in a comment and assert streaming-block-specific indicators
+  (e.g., ETag presence, Content-Length, full-buffer metric delta).
+- `detect_e2e_streaming_config.py` provides advisory detection of implicit
+  `auto` + `markdown_cache_validation full` combinations, and the
+  `auto + full` contradiction.  It is block-aware (comment-masked brace
+  parsing, direct-depth directive extraction, fail-closed scan errors).
+  Location block headers are parsed by a deterministic character scanner
+  (`_scan_location_headers`, `_parse_location_header`, `_read_location_path`)
+  instead of a regex, supporting quoted regex locations (with spaces),
+  regex quantifiers `{m,n}`, and escaped quotes.  Strict UTF-8 file reading
+  rejects encoding errors (produces ScanError).  Overall config structure
+  is validated (`_validate_config_structure`) to detect malformed configs
+  before location analysis.  Unterminated quoted strings produce a single
+  root ScanError and stop further structural analysis of that section so
+  cascading false errors are avoided.  Heredoc openers are found by a
+  deterministic per-line scanner (`_find_heredoc_opener`) that skips
+  comments and quoted strings, so `# cat <<EOF` and `echo "<<EOF"` do not
+  open false heredocs; `<<` closes at column 0, `<<-` closes after leading
+  tabs only (spaces rejected).  Rust nginx config extraction uses a unified
+  scan: raw-string spans are returned to the ordinary-string scanner so `"`
+  inside raw-string bodies is not re-scanned; char and byte-char literals
+  (`'"'`, `b'"'`) are skipped so a single quote is not mistaken for a
+  string delimiter.
+
+Detector contract:
+- Comments containing `{` or `}` are masked before brace parsing so they
+  cannot inflate location depth or satisfy a parent location's directive.
+- A parent location's directive check only considers its direct-depth
+  directives; nested ``location`` sub-blocks do not satisfy the parent and
+  are checked independently.
+- Read failures (OSError), malformed heredocs, and unmatched braces surface
+  as scan errors.  In `--strict` mode they cause a non-zero exit.  The
+  detector never silently swallows read/parse errors with "no findings".
+
+Rationale:
+- Contradictory configs produce NGINX startup warnings that pollute CI output
+  and mask real problems.
+- Tests that claim to validate streaming but actually run full-buffer (or
+  vice versa) give false confidence and cannot detect regressions in the
+  intended code path.
+- Explicit directives make test intent self-documenting.
+
+Naming clarity:
+- E2E location path names must clearly communicate the test's behavioral
+  intent.  Do not use path names that suggest one processing mode when the
+  config uses another (for example `/stream/` with `markdown_streaming off`).
+- Preferred naming conventions:
+  - `/streaming/`, `/streaming-*` — streaming path (`force` or profile
+    `streaming_first`)
+  - `/buffered/`, `/fullbuffer/`, `/cache-full/`, `/non-streaming/` —
+    full-buffer path (`markdown_streaming off`)
+  - `/passthrough/` — no conversion
+- Variables and fixture names should similarly reflect intent: use names
+  like `SMALL_END_TOKEN`, `OVERSIZE_LEN` over ambiguous short names.
+- When renaming a location path, update all references (curl URLs, readiness
+  probes, assertion labels, comments) in the same changeset.
+
+Verification:
+- `python3 tools/harness/detect_e2e_streaming_config.py`
+- `python3 tools/harness/detect_e2e_streaming_config.py --strict` (CI-blocking mode)
+- `python3 -m pytest tools/harness/tests/test_detect_e2e_streaming_config.py -q`
+- `bash tools/harness/tests/test_detect_e2e_streaming_config.sh`
+- Visual inspection: every location block with `markdown_cache_validation full`
+  must have either `markdown_streaming off` or a comment explaining why `auto`
+  is intentional.
+- Visual inspection: location path names match the declared `markdown_streaming`
+  mode.

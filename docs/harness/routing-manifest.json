@@ -172,6 +172,27 @@
       ],
       "notes": "Runs lizard (CCN/length/params) on C/Rust/Python, complexipy (cognitive) on Python, shellcheck on shell. Baseline-gated: new violations fail, existing baseline violations that worsen produce warnings. See docs/harness/rules/complexity.md."
     },
+    "regex-security": {
+      "phase": "cheap-blocker",
+      "commands": [
+        "make regex-security-check"
+      ],
+      "notes": "AST-based ReDoS and regex safety detection for Python and shell. Runs detect_regex_safety.py --strict plus unit and shell tests. Scope-aware binding model (LEGB lookup, lexical del, compiled-pattern reassignment to COMPILED_DYNAMIC_PATTERN, function/lambda default+decorator evaluation scope). Shell engine resolution separates PCRE flags from pattern-bearing options (grep/rg -e without -P is NOT PCRE); boolean/required-value/unknown option contracts; pattern-file resolution relative to script dir with repo-root boundary validation and encoding/read errors. --strict/--fail-on-review CLI contract. See docs/harness/rules/parser-regex.md."
+    },
+    "e2e-streaming-config": {
+      "phase": "cheap-blocker",
+      "commands": [
+        "make e2e-streaming-config-check"
+      ],
+      "notes": "Block-aware detection of contradictory E2E streaming config (Rule 60): locations with markdown_cache_validation full must have explicit markdown_streaming. Comment-masked brace parsing, direct-depth nested-location isolation, fail-closed scan errors. Deterministic heredoc opener scanner (skips comments/quotes), << / <<- closing rules, unterminated quote detection, Rust raw/ordinary string unified scanning. See docs/harness/rules/e2e-runner.md."
+    },
+    "sonar-encoding": {
+      "phase": "cheap-blocker",
+      "commands": [
+        "make sonar-encoding-check"
+      ],
+      "notes": "Validates source file encoding (UTF-8, no BOM, consistent line endings) across Sonar scan roots. See tools/sonar/check_source_encoding.py."
+    },
     "runtime-e2e": {
       "phase": "umbrella",
       "commands": [
@@ -431,6 +452,9 @@
         "tools/harness/detect_shell_hygiene.sh",
         "tools/harness/detect_const_correctness.py",
         "tools/harness/detect_ci_supply_chain.sh",
+        "tools/harness/detect_release_supply_chain.py",
+        "tools/harness/detect_workflow_secret_scope.py",
+        "tools/harness/detect_production_auth_transport.py",
         "tools/harness/detect_finalize_return.sh",
         "tools/harness/detect_header_hash_filter.sh",
         "tools/harness/detect_ffi_struct_init.sh",
@@ -489,8 +513,14 @@
         "tools/**/Cargo.toml",
         "tools/**/Cargo.lock",
         "tools/**/*.sh",
+        "tools/harness/detect_release_supply_chain.py",
+        "tools/harness/detect_workflow_secret_scope.py",
+        "tools/harness/detect_production_auth_transport.py",
         "packaging/**/*.sh",
+        "packaging/**/*.py",
+        "packaging/**/*.rb",
         "examples/**/*.sh",
+        "examples/**/*.conf",
         "charts/**"
       ],
       "keywords": [
@@ -562,6 +592,7 @@
       "id": "harness-remediation",
       "doc": "docs/harness/risk-packs/harness-remediation.md",
       "primary_surfaces": [
+        "regex-safety",
         "harness-rules",
         "steering-adapters",
         "post-analysis-remediation"
@@ -575,7 +606,16 @@
         "docs/harness/**",
         ".kiro/steering/**",
         "tools/harness/**",
-        "docs/project/recent-git-harness-steering-analysis-*.md"
+        "docs/project/recent-git-harness-steering-analysis-*.md",
+        "tools/harness/detect_regex_safety.py",
+        "tools/harness/detect_e2e_streaming_config.py",
+        "tools/harness/tests/test_detect_regex_safety.py",
+        "tools/harness/tests/test_detect_regex_safety.sh",
+        "tools/harness/tests/test_detect_e2e_streaming_config.py",
+        "tools/harness/tests/test_detect_e2e_streaming_config.sh",
+        "docs/harness/rules/parser-regex.md",
+        "docs/harness/rules/e2e-runner.md",
+        "deny.toml"
       ],
       "keywords": [
         "recent git",
@@ -583,10 +623,20 @@
         "finding",
         "steering",
         "risk pack",
-        "harness rule"
+        "harness rule",
+        "regex",
+        "redos",
+        "backtracking",
+        "nosec",
+        "suppression",
+        "e2e streaming config",
+        "location scanner",
+        "fail-closed"
       ],
       "verification_families": [
         "harness-sync",
+        "regex-security",
+        "e2e-streaming-config",
         "docs-tooling",
         "release-quality"
       ]

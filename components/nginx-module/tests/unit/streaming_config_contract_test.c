@@ -835,26 +835,26 @@ test_valid_values(void)
     TEST_ASSERT(mcf.stream.threshold == 512 * 1024,
         "stream_threshold '512k' should parse to 524288");
 
-    /* markdown_stream_precommit_buffer: 256k (parse_size validation) */
-    {
-        ngx_str_t sz;
-        size_t    parsed;
+    /* markdown_stream_precommit_buffer: positive sizes only */
+    init_conf(&mcf);
+    set_arg(&cmd.name, "markdown_stream_precommit_buffer");
+    set_arg(&values[0], "markdown_stream_precommit_buffer");
+    set_arg(&values[1], "256k");
+    rc = ngx_http_markdown_stream_precommit_buffer_handler(
+        &cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "precommit_buffer '256k' should be accepted");
+    TEST_ASSERT(mcf.stream.precommit_buffer == 256 * 1024,
+        "precommit_buffer '256k' should parse to 262144");
 
-        set_arg(&sz, "256k");
-        parsed = ngx_http_markdown_parse_size(&sz);
-        TEST_ASSERT(parsed == 256 * 1024,
-            "precommit_buffer '256k' should parse to 262144");
-
-        set_arg(&sz, "128k");
-        parsed = ngx_http_markdown_parse_size(&sz);
-        TEST_ASSERT(parsed == 128 * 1024,
-            "precommit_buffer '128k' should parse to 131072");
-
-        set_arg(&sz, "0");
-        parsed = ngx_http_markdown_parse_size(&sz);
-        TEST_ASSERT(parsed == 0,
-            "precommit_buffer '0' is valid (disables replay)");
-    }
+    init_conf(&mcf);
+    set_arg(&values[1], "128k");
+    rc = ngx_http_markdown_stream_precommit_buffer_handler(
+        &cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_OK,
+        "precommit_buffer '128k' should be accepted");
+    TEST_ASSERT(mcf.stream.precommit_buffer == 128 * 1024,
+        "precommit_buffer '128k' should parse to 131072");
 
     /* markdown_stream_flush_min: 16k */
     init_conf(&mcf);
@@ -1019,6 +1019,24 @@ test_invalid_values(void)
     rc = ngx_http_markdown_stream_threshold_handler(&cf, &cmd, &mcf);
     TEST_ASSERT(rc == NGX_CONF_ERROR,
         "stream_threshold 'invalid' should be rejected");
+
+    /* markdown_stream_precommit_buffer: 0 (replay invariant) */
+    init_conf(&mcf);
+    set_arg(&cmd.name, "markdown_stream_precommit_buffer");
+    set_arg(&values[0], "markdown_stream_precommit_buffer");
+    set_arg(&values[1], "0");
+    rc = ngx_http_markdown_stream_precommit_buffer_handler(
+        &cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "precommit_buffer '0' should be rejected");
+
+    /* markdown_stream_precommit_buffer: invalid */
+    init_conf(&mcf);
+    set_arg(&values[1], "invalid");
+    rc = ngx_http_markdown_stream_precommit_buffer_handler(
+        &cf, &cmd, &mcf);
+    TEST_ASSERT(rc == NGX_CONF_ERROR,
+        "precommit_buffer 'invalid' should be rejected");
 
     /* markdown_stream_flush_min: 0 (must be > 0) */
     init_conf(&mcf);

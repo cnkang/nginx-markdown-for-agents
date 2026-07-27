@@ -13,8 +13,6 @@
 
 #![cfg(feature = "streaming")]
 
-#[path = "known_differences.rs"]
-mod known_differences;
 #[path = "streaming_test_support.rs"]
 mod streaming_test_support;
 
@@ -23,48 +21,35 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
-use known_differences::{KnownDifferences, OutputDifference};
 use nginx_markdown_converter::error::ConversionError;
-use streaming_test_support::{
-    convert_full_buffer, convert_streaming_chunked, convert_streaming_single,
-    default_streaming_budget, default_streaming_options, discover_html_fixtures,
-    evidence_output_path, fixture_relative_name, known_differences_path,
-    normalize_whitespace_tokens, read_fixture, read_fixture_meta,
-};
+use streaming_test_support::known_differences::KnownDifferences;
 
-#[derive(Debug)]
-enum ComparisonResult {
-    Identical,
-    KnownDifference {
-        diff_id: String,
-        description: String,
-    },
-    Divergence {
-        full_buffer_output: String,
-        streaming_output: String,
-        diff: String,
-    },
-}
+use streaming_test_support::{
+    FixtureMeta, check_conversion_errors, check_output_comparison, convert_full_buffer,
+    convert_streaming_chunked, convert_streaming_single, default_streaming_budget,
+    default_streaming_options, discover_html_fixtures, evidence_output_path, fixture_relative_name,
+    known_differences_path, normalize_whitespace_tokens, read_fixture, read_fixture_meta,
+};
 
 fn discover_fixtures(corpus_dir: &Path) -> Vec<std::path::PathBuf> {
     discover_html_fixtures(corpus_dir)
 }
 
-fn convert_full_buffer_entry(html: &[u8]) -> Result<String, ConversionError> {
-    convert_full_buffer(
-        html,
-        Some("text/html; charset=UTF-8"),
-        default_streaming_options(),
-    )
+fn convert_full_buffer_entry(
+    html: &[u8],
+    content_type: Option<&str>,
+) -> Result<String, ConversionError> {
+    convert_full_buffer(html, content_type, default_streaming_options())
 }
 
 fn convert_streaming_single_entry(
     html: &[u8],
+    content_type: Option<&str>,
     budget: nginx_markdown_converter::streaming::MemoryBudget,
 ) -> Result<String, ConversionError> {
     let run = convert_streaming_single(
         html,
-        Some("text/html; charset=UTF-8"),
+        content_type,
         default_streaming_options(),
         budget,
         None,
@@ -75,12 +60,13 @@ fn convert_streaming_single_entry(
 fn convert_streaming_chunked_entry(
     html: &[u8],
     chunk_sizes: &[usize],
+    content_type: Option<&str>,
     budget: nginx_markdown_converter::streaming::MemoryBudget,
 ) -> Result<String, ConversionError> {
     let run = convert_streaming_chunked(
         html,
         chunk_sizes,
-        Some("text/html; charset=UTF-8"),
+        content_type,
         default_streaming_options(),
         budget,
         None,
@@ -88,103 +74,13 @@ fn convert_streaming_chunked_entry(
     Ok(run.markdown)
 }
 
-fn compare_outputs(
-    fixture_name: &str,
-    full_buffer: &str,
-    streaming: &str,
-    known_diffs: &KnownDifferences,
-) -> ComparisonResult {
-    if full_buffer == streaming {
-        return ComparisonResult::Identical;
-    }
-
-    let mut diff = unified_diff_summary(full_buffer, streaming);
-    if normalize_whitespace_tokens(full_buffer) == normalize_whitespace_tokens(streaming) {
-        diff = format!("whitespace-only-parity-drift\n{diff}");
-    }
-
-    let output = OutputDifference {
-        full_buffer,
-        streaming,
-        diff: &diff,
-    };
-
-    if let Some(entry) = known_diffs.matches(fixture_name, &output) {
-        return ComparisonResult::KnownDifference {
-            diff_id: entry.id.clone(),
-            description: entry.description.clone(),
-        };
-    }
-
-    ComparisonResult::Divergence {
-        full_buffer_output: full_buffer.to_string(),
-        streaming_output: streaming.to_string(),
-        diff,
-    }
-}
-
-fn unified_diff_summary(expected: &str, actual: &str) -> String {
-    const MAX_DIFF_LINES: usize = 3;
-
-    if expected == actual {
-        return "<identical>".to_string();
-    }
-
-    let lhs: Vec<&str> = expected.lines().collect();
-    let rhs: Vec<&str> = actual.lines().collect();
-    let shared = lhs.len().min(rhs.len());
-    let mut diffs = Vec::new();
-
-    for idx in 0..shared {
-        if lhs[idx] != rhs[idx] {
-            diffs.push(format!(
-                "line {} differs\n- {}\n+ {}",
-                idx + 1,
-                lhs[idx],
-                rhs[idx]
-            ));
-            if diffs.len() == MAX_DIFF_LINES {
-                break;
-            }
-        }
-    }
-
-    if !diffs.is_empty() {
-        return diffs.join("\n");
-    }
-
-    if lhs.len() != rhs.len() {
-        return format!(
-            "line count differs (full-buffer={}, streaming={})",
-            lhs.len(),
-            rhs.len()
-        );
-    }
-
-    "outputs differ but first mismatch not localized".to_string()
-}
-
-fn is_known_runtime_difference(
-    fixture_name: &str,
-    marker: &str,
-    detail: &str,
-    known_diffs: &KnownDifferences,
-) -> bool {
-    let diff = format!("{marker}\n{detail}");
-    let output = OutputDifference {
-        full_buffer: "",
-        streaming: "",
-        diff: &diff,
-    };
-    known_diffs.matches(fixture_name, &output).is_some()
-}
-
 fn assert_fixture_parity(path: &Path, known_diffs: &KnownDifferences) -> Result<(), String> {
     let fixture_name = fixture_relative_name(path);
     let meta = read_fixture_meta(path);
     let html = read_fixture(path);
+    let content_type = meta.resolved_content_type();
 
-    let full_buffer = convert_full_buffer_entry(&html)
+    let full_buffer = convert_full_buffer_entry(&html, Some(&content_type))
         .map_err(|err| format!("{fixture_name}: full-buffer conversion failed: {err}"))?;
 
     let chunk_sizes = {
@@ -208,103 +104,27 @@ fn assert_fixture_parity(path: &Path, known_diffs: &KnownDifferences) -> Result<
         default_streaming_budget()
     };
 
-    let single = convert_streaming_single_entry(&html, budget.clone());
-    let chunked = convert_streaming_chunked_entry(&html, &chunk_sizes, budget);
+    let single = convert_streaming_single_entry(&html, Some(&content_type), budget.clone());
+    let chunked = convert_streaming_chunked_entry(&html, &chunk_sizes, Some(&content_type), budget);
 
-    match (&single, &chunked) {
-        (
-            Err(ConversionError::StreamingFallback { .. }),
-            Err(ConversionError::StreamingFallback { .. }),
-        ) => {
-            if !meta.expected_fallback {
-                if is_known_runtime_difference(
-                    &fixture_name,
-                    "streaming-fallback",
-                    "both-single-and-chunked",
-                    known_diffs,
-                ) {
-                    return Ok(());
-                }
-                return Err(format!(
-                    "{fixture_name}: unexpected fallback (meta expected_fallback=false)"
-                ));
-            }
-            return Ok(());
-        }
-        (Err(err), _) if !matches!(err, ConversionError::StreamingFallback { .. }) => {
-            if is_known_runtime_difference(
-                &fixture_name,
-                "streaming-error",
-                &err.to_string(),
-                known_diffs,
-            ) {
-                return Ok(());
-            }
-            return Err(format!("{fixture_name}: streaming single failed: {err}"));
-        }
-        (_, Err(err)) if !matches!(err, ConversionError::StreamingFallback { .. }) => {
-            if is_known_runtime_difference(
-                &fixture_name,
-                "streaming-error",
-                &err.to_string(),
-                known_diffs,
-            ) {
-                return Ok(());
-            }
-            return Err(format!("{fixture_name}: streaming chunked failed: {err}"));
-        }
-        (Err(ConversionError::StreamingFallback { .. }), Ok(_))
-        | (Ok(_), Err(ConversionError::StreamingFallback { .. })) => {
-            if is_known_runtime_difference(
-                &fixture_name,
-                "streaming-fallback-mismatch",
-                "single-vs-chunked",
-                known_diffs,
-            ) {
-                return Ok(());
-            }
-            return Err(format!(
-                "{fixture_name}: single/chunked fallback behavior mismatch"
-            ));
-        }
-        _ => {}
+    let should_compare =
+        check_conversion_errors(&fixture_name, &meta, &single, &chunked, known_diffs)?;
+
+    if !should_compare {
+        return Ok(());
     }
 
-    if meta.expected_fallback {
-        return Err(format!(
-            "{fixture_name}: expected fallback but streaming produced Markdown"
-        ));
-    }
+    let single = single.unwrap();
+    let chunked = chunked.unwrap();
 
-    let single = single.unwrap_or_else(|_| unreachable!());
-    let chunked = chunked.unwrap_or_else(|_| unreachable!());
-
-    for (label, streaming_output) in [("single", single), ("chunked", chunked)] {
-        match compare_outputs(&fixture_name, &full_buffer, &streaming_output, known_diffs) {
-            ComparisonResult::Identical => {}
-            ComparisonResult::KnownDifference {
-                diff_id,
-                description,
-            } => {
-                if !meta.known_diff_ids.iter().any(|id| id == &diff_id) {
-                    return Err(format!(
-                        "{fixture_name}: matched known diff {diff_id} ({description}) but fixture metadata does not list it"
-                    ));
-                }
-            }
-            ComparisonResult::Divergence {
-                full_buffer_output,
-                streaming_output,
-                diff,
-            } => {
-                return Err(format!(
-                    "{fixture_name}: {label} output divergence\n{diff}\n--- full-buffer ---\n{full_buffer_output}\n--- streaming ---\n{streaming_output}"
-                ));
-            }
-        }
-    }
-
-    Ok(())
+    check_output_comparison(
+        &fixture_name,
+        &full_buffer,
+        &single,
+        &chunked,
+        &meta,
+        known_diffs,
+    )
 }
 
 fn generate_large_fixtures_if_needed() {
@@ -368,6 +188,30 @@ fn corpus_driven_differential_harness() {
 }
 
 #[test]
+fn expected_fallback_rejects_successful_streaming_results() {
+    let metadata = FixtureMeta {
+        expected_fallback: true,
+        known_diff_ids: Vec::new(),
+        high_risk_structures: Vec::new(),
+        source_encoding: None,
+        content_type: None,
+    };
+    let single = Ok("single output".to_string());
+    let chunked = Ok("chunked output".to_string());
+
+    let error = check_conversion_errors(
+        "expected-fallback.html",
+        &metadata,
+        &single,
+        &chunked,
+        &KnownDifferences::default(),
+    )
+    .expect_err("successful streaming must fail an expected-fallback fixture");
+
+    assert!(error.contains("expected fallback"));
+}
+
+#[test]
 #[ignore = "large fixtures are generated and exercised in nightly/manual runs"]
 fn large_fixture_differential_harness() {
     generate_large_fixtures_if_needed();
@@ -409,6 +253,62 @@ fn make_html_of_size(target_bytes: usize) -> Vec<u8> {
 }
 
 #[test]
+fn latin1_fixture_uses_metadata_charset_across_conversion_paths() {
+    let path = streaming_test_support::corpus_root().join("encoding/latin1.html");
+    let html = read_fixture(&path);
+    let meta = read_fixture_meta(&path);
+    let content_type = meta.resolved_content_type();
+
+    assert!(
+        html.contains(&0xe9),
+        "fixture must retain raw Latin-1 e acute"
+    );
+    assert!(
+        std::str::from_utf8(&html).is_err(),
+        "fixture must not be UTF-8"
+    );
+    let (decoded, _, had_errors) = encoding_rs::WINDOWS_1252.decode(&html);
+    assert!(
+        !had_errors,
+        "Latin-1 fixture must decode without replacement"
+    );
+    assert!(decoded.contains("café") && decoded.contains("résumé"));
+
+    let full = convert_full_buffer_entry(&html, Some(&content_type))
+        .expect("full-buffer conversion must honor source-encoding metadata");
+    assert!(full.contains("café") && full.contains("résumé"));
+
+    let single =
+        convert_streaming_single_entry(&html, Some(&content_type), default_streaming_budget())
+            .expect("single-chunk streaming must honor source-encoding metadata");
+    assert!(single.contains("café") && single.contains("résumé"));
+
+    let e_acute = html
+        .iter()
+        .position(|byte| *byte == 0xe9)
+        .expect("fixture contains a Latin-1 e acute");
+    let chunks = vec![e_acute + 1, html.len() - (e_acute + 1)];
+    let chunked = convert_streaming_chunked_entry(
+        &html,
+        &chunks,
+        Some(&content_type),
+        default_streaming_budget(),
+    )
+    .expect("chunked streaming must preserve a Latin-1 byte boundary");
+    assert!(chunked.contains("café") && chunked.contains("résumé"));
+    assert_eq!(
+        normalize_whitespace_tokens(&full),
+        normalize_whitespace_tokens(&single),
+        "full-buffer and single streaming must preserve normalized parity"
+    );
+    assert_eq!(
+        normalize_whitespace_tokens(&full),
+        normalize_whitespace_tokens(&chunked),
+        "full-buffer and chunked streaming must preserve normalized parity"
+    );
+}
+
+#[test]
 #[ignore = "evidence pack generation is expensive"]
 fn bounded_memory_and_ttfb_evidence_pack() {
     // Keep a measurable safety margin between peak-memory and input growth.
@@ -430,7 +330,7 @@ fn bounded_memory_and_ttfb_evidence_pack() {
         let html = make_html_of_size(input_size);
 
         let full_start = Instant::now();
-        let _full = convert_full_buffer_entry(&html)
+        let _full = convert_full_buffer_entry(&html, Some("text/html; charset=UTF-8"))
             .unwrap_or_else(|err| panic!("full-buffer conversion failed for {input_size}: {err}"));
         let full_elapsed = full_start.elapsed();
 

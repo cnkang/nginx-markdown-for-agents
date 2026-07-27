@@ -4,6 +4,10 @@ rules: [13, 48, 54]
 paths:
   - ".github/workflows/**"
   - "Makefile"
+  - "packaging/**"
+  - "examples/**/Dockerfile*"
+  - "tools/build_release/**"
+  - "tools/harness/detect_release_supply_chain.py"
 ---
 
 ## CI Gating
@@ -40,6 +44,14 @@ Required:
     as separate steps.
   - When a new version of an external dependency is adopted, update the
     checksum file in the same change set.
+  - Artifact-producing builder images must use repository-reviewed
+    multi-architecture manifest digests. Keep a readable tag before
+    `@sha256:` where useful, but never let the tag select release builder
+    bytes.
+  - Documented secure source builds must accept a full reviewed commit ID,
+    resolve the fetched object to a commit, compare exact equality, and only
+    then execute repository build logic. A mutable ref may be a reachability
+    hint, never the authorized identity.
   - **Verified toolchain installers**: When a release workflow installs
     Rust toolchain via `rustup`, it must use a verified installer script
     (for example `tools/install-verified-rustup.sh`) that validates the
@@ -166,13 +178,18 @@ Required:
     Runtime assertions must count structured pod fields with one item per line,
     not by grepping collapsed one-line jsonpath output.
   - **Homebrew formula release integrity**:
-    - The formula SHA-256 checksum must be generated from the release tag's
-      `git archive` output (for example `git archive --format=tar.gz <tag>`),
-      not from the working-tree HEAD archive.  Using HEAD produces a different
-      checksum each time the worktree changes, causing `brew audit` failures
-      and checksum drift between the formula and the actual release artifact.
-      When a release tag is created or moved, regenerate the SHA-256 from
-      that tag and update the formula in the same changeset.
+    - The formula SHA-256 checksum must hash the exact downloaded bytes served
+      by the Formula's declared URL. Do not substitute a local `git archive`,
+      a working-tree archive, or any other byte stream even when it resolves
+      to the same commit.
+    - Resolve the release tag to one commit and source the executable Formula
+      program from that exact commit. Manual publication must not combine
+      Formula bytes from its dispatch branch with archive identity from a
+      different tag.
+    - Compare the downloaded tag archive's normalized file content, executable
+      bits, and symlink targets with a local `git archive` of that resolved
+      commit before hashing or publishing it. A URL plus a computed checksum
+      does not by itself prove which commit supplied the downloaded bytes.
     - In the Homebrew formula, the `version` stanza must appear before the
       `sha256` stanza.  `brew audit --strict` requires this ordering; a
       formula with `sha256` before `version` fails the audit even if both
@@ -200,6 +217,7 @@ Required:
 
 Verification:
 - `bash tools/harness/detect_ci_supply_chain.sh`
+- `make release-supply-chain-check`
 - `make security-static`
 - `grep -rn 'uses:' .github/workflows/ | grep -v '@[0-9a-f]\{40\}'` — should
   return no results (all actions pinned to SHA).

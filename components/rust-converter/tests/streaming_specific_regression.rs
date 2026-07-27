@@ -9,8 +9,6 @@
 
 #![cfg(feature = "streaming")]
 
-#[path = "known_differences.rs"]
-mod known_differences;
 #[path = "support/streaming_compare_support.rs"]
 mod streaming_compare_support;
 #[path = "streaming_test_support.rs"]
@@ -21,15 +19,15 @@ use std::io::{Read, Write};
 use flate2::Compression;
 use flate2::read::{GzDecoder, ZlibDecoder};
 use flate2::write::{GzEncoder, ZlibEncoder};
-use known_differences::KnownDifferences;
 use nginx_markdown_converter::converter::ConversionOptions;
 use nginx_markdown_converter::error::ConversionError;
 use nginx_markdown_converter::streaming::{MemoryBudget, StreamingConverter};
 use streaming_compare_support::compare_or_known;
+use streaming_test_support::known_differences::KnownDifferences;
 use streaming_test_support::{
     convert_full_buffer, convert_streaming_chunked, convert_streaming_single,
     default_streaming_budget, default_streaming_options, discover_html_fixtures,
-    fixture_relative_name, known_differences_path,
+    fixture_relative_name, known_differences_path, read_fixture_meta,
 };
 
 #[cfg(feature = "incremental")]
@@ -187,17 +185,17 @@ fn charset_regression_corpus_and_mismatch_fixture() {
     for fixture in discover_html_fixtures(&corpus.join("encoding")) {
         let html = std::fs::read(&fixture)
             .unwrap_or_else(|err| panic!("read fixture {}: {err}", fixture.display()));
+        let meta = read_fixture_meta(&fixture);
+        let content_type = meta.resolved_content_type();
 
-        let full = convert_full_buffer(
-            &html,
-            Some("text/html; charset=UTF-8"),
-            default_streaming_options(),
-        )
-        .unwrap_or_else(|err| panic!("full conversion failed for {}: {err}", fixture.display()));
+        let full = convert_full_buffer(&html, Some(&content_type), default_streaming_options())
+            .unwrap_or_else(|err| {
+                panic!("full conversion failed for {}: {err}", fixture.display())
+            });
 
         let streaming = convert_streaming_single(
             &html,
-            Some("text/html; charset=UTF-8"),
+            Some(&content_type),
             default_streaming_options(),
             default_streaming_budget(),
             None,

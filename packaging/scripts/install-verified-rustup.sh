@@ -2,11 +2,11 @@
 # install-verified-rustup.sh -- Install rustup-init after checksum verification.
 #
 # Usage:
-#   install-verified-rustup.sh --arch ARCH --toolchain TOOLCHAIN [--libc LIBC] [--checksums FILE] [--version VER]
+#   install-verified-rustup.sh --arch ARCH --toolchain TOOLCHAIN [--os OS] [--libc LIBC] [--checksums FILE] [--version VER]
 #
 # ARCH accepts the package workflow architecture names amd64 and arm64
-# (mapped to x86_64/aarch64 Linux targets). LIBC accepts gnu or musl
-# and defaults to gnu for existing release workflow callers.
+# (mapped to x86_64/aarch64 targets). OS accepts linux or darwin and defaults
+# to linux. LIBC accepts gnu or musl for Linux and defaults to gnu.
 # CHECKSUMS defaults to packaging/checksums.sha256.
 # VERSION defaults to rustup-init 1.28.2.
 
@@ -14,6 +14,7 @@ set -euo pipefail
 
 RUSTUP_VERSION="1.28.2"
 ARCH=""
+OS_NAME="linux"
 LIBC="gnu"
 RUST_TOOLCHAIN=""
 CHECKSUMS_FILE=""
@@ -55,6 +56,13 @@ while [[ "$#" -gt 0 ]]; do
             LIBC="$2"
             shift 2
             ;;
+        --os)
+            if [[ "$#" -lt 2 ]]; then
+                die "--os requires a value"
+            fi
+            OS_NAME="$2"
+            shift 2
+            ;;
         --checksums)
             if [[ "$#" -lt 2 ]]; then
                 die "--checksums requires a value"
@@ -88,28 +96,40 @@ if [[ -z "$RUST_TOOLCHAIN" ]]; then
     die "toolchain is required"
 fi
 
-case "$LIBC" in
-    gnu|musl)
-        ;;
-    *)
-        die "unsupported libc: $LIBC"
-        ;;
-esac
+if [[ "$OS_NAME" = "linux" ]]; then
+    case "$LIBC" in
+        gnu|musl)
+            ;;
+        *)
+            die "unsupported libc: $LIBC"
+            ;;
+    esac
+elif [[ "$OS_NAME" != "darwin" ]]; then
+    die "unsupported operating system: $OS_NAME"
+elif [[ "$LIBC" != "gnu" ]]; then
+    die "--libc is not supported with Darwin targets"
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -z "$CHECKSUMS_FILE" ]]; then
     CHECKSUMS_FILE="${SCRIPT_DIR}/../checksums.sha256"
 fi
 
-case "$ARCH" in
-    amd64|x86_64)
+case "${OS_NAME}:${ARCH}" in
+    linux:amd64|linux:x86_64)
         RUSTUP_TARGET="x86_64-unknown-linux-${LIBC}"
         ;;
-    arm64|aarch64)
+    linux:arm64|linux:aarch64)
         RUSTUP_TARGET="aarch64-unknown-linux-${LIBC}"
         ;;
+    darwin:amd64|darwin:x86_64)
+        RUSTUP_TARGET="x86_64-apple-darwin"
+        ;;
+    darwin:arm64|darwin:aarch64)
+        RUSTUP_TARGET="aarch64-apple-darwin"
+        ;;
     *)
-        die "unsupported architecture: $ARCH"
+        die "unsupported operating system/architecture: ${OS_NAME}/${ARCH}"
         ;;
 esac
 
@@ -133,4 +153,5 @@ curl --proto '=https' --tlsv1.2 -fsSL -o "$RUSTUP_INIT" "$RUSTUP_URL"
     -c "$CHECKSUMS_FILE"
 
 chmod 0755 "$RUSTUP_INIT"
-"$RUSTUP_INIT" -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN"
+"$RUSTUP_INIT" -y --profile minimal --no-modify-path \
+    --default-toolchain "$RUST_TOOLCHAIN"

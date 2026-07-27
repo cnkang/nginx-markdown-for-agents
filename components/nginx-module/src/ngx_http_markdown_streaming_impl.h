@@ -426,6 +426,13 @@ ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
     ngx_chain_t *cl,
     ngx_flag_t last_buf);
 
+static ngx_int_t
+ngx_http_markdown_streaming_finalize_and_dispatch_fallback(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_flag_t last_buf);
+
 
 /*
  * Pool cleanup handler for streaming resources.
@@ -3662,6 +3669,19 @@ ngx_http_markdown_streaming_init_handle(
         NGX_HTTP_MARKDOWN_METRIC_INC(streaming.requests_total);
     }
 
+    /*
+     * Configuration parsing rejects zero, but keep a runtime guard for
+     * dynamic or programmatic configuration paths.  Fail before Rust sees
+     * any input so fail-open can still forward the untouched current chain.
+     */
+    if (conf->stream.precommit_buffer == 0) {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+            "markdown: streaming precommit buffer is zero; "
+            "refusing to consume input without recovery storage");
+        return ngx_http_markdown_streaming_precommit_error(
+            r, ctx, conf, ERROR_INTERNAL);
+    }
+
     rc = ngx_http_markdown_prepare_conversion_options(
         r, conf, ctx->effective_conf, &options);
     if (rc != NGX_OK) {
@@ -4297,9 +4317,10 @@ ngx_http_markdown_streaming_ensure_handle(
  * Re-enter full-buffer body filter after streaming fallback.
  *
  * The current chain node was already consumed into prebuffer by
- * the streaming path, so re-entry starts at cl->next. If this was
- * the terminal node and there is no next link, synthesize an empty
- * terminal chain node to preserve end-of-stream signaling.
+ * the streaming path, so re-entry starts at cl->next. A NULL cl
+ * means finalization consumed the complete terminal chain. If
+ * there is no successor, synthesize an empty terminal chain node
+ * to preserve end-of-stream signaling.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
@@ -4309,7 +4330,7 @@ ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
 {
     ngx_chain_t  *reentry_in;
 
-    reentry_in = cl->next;
+    reentry_in = (cl != NULL) ? cl->next : NULL;
     if (reentry_in == NULL && last_buf) {
         ngx_buf_t    *term_buf;
         ngx_chain_t  *term_cl;
@@ -4333,6 +4354,41 @@ ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
     }
 
     return ngx_http_markdown_body_filter(r, reentry_in);
+}
+
+/*
+ * Finalize streaming and complete a capability fallback transition.
+ *
+ * A pre-commit capability fallback may first surface while Rust consumes
+ * end-of-input.  At that point the upstream terminal chain has already been
+ * consumed, so returning NGX_DECLINED would leave the restored full-buffer
+ * payload without another body-filter callback.  Re-enter full-buffer
+ * processing exactly once with a synthesized terminal signal.
+ *
+ * Returns:
+ *   full-buffer body-filter status for a capability fallback
+ *   finalize status for all other outcomes
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_finalize_and_dispatch_fallback(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_flag_t last_buf)
+{
+    ngx_int_t  rc;
+
+    rc = ngx_http_markdown_streaming_finalize_request(r, ctx, conf);
+
+    if (rc == NGX_DECLINED
+        && ctx->eligible
+        && ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER)
+    {
+        return ngx_http_markdown_streaming_reenter_fullbuffer_after_fallback(
+            r, NULL, last_buf);
+    }
+
+    return rc;
 }
 
 
@@ -4576,8 +4632,8 @@ ngx_http_markdown_streaming_handle_null_input(
         && ctx->eligible)
     {
         ctx->streaming.completion.upstream_terminal_seen = 0;
-        return ngx_http_markdown_streaming_finalize_request(
-            r, ctx, conf);
+        return ngx_http_markdown_streaming_finalize_and_dispatch_fallback(
+            r, ctx, conf, 1);
     }
 
     /*
@@ -4590,8 +4646,8 @@ ngx_http_markdown_streaming_handle_null_input(
      */
     if (ctx->streaming.completion.finalize_after_pending) {
         ctx->streaming.completion.finalize_after_pending = 0;
-        return ngx_http_markdown_streaming_finalize_request(
-            r, ctx, conf);
+        return ngx_http_markdown_streaming_finalize_and_dispatch_fallback(
+            r, ctx, conf, 1);
     }
 
     ngx_http_markdown_streaming_sync_buffered(r, ctx);
@@ -4843,8 +4899,8 @@ ngx_http_markdown_streaming_finalize_on_last_buf(
     }
 
     ctx->streaming.completion.upstream_terminal_seen = 0;
-    rc = ngx_http_markdown_streaming_finalize_request(
-        r, ctx, conf);
+    rc = ngx_http_markdown_streaming_finalize_and_dispatch_fallback(
+        r, ctx, conf, last_buf);
 
     if (rc == NGX_DECLINED && !ctx->eligible) {
         /*

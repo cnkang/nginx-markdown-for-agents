@@ -198,6 +198,10 @@ static uint32_t g_streaming_new_with_code_rc = 0;
 static uint32_t g_streaming_feed_rc = 0;
 static uint32_t g_streaming_finalize_rc = 0;
 static uint32_t g_streaming_new_with_code_null_handle = 0;
+static ngx_uint_t g_slab_alloc_calls = 0;
+static ngx_uint_t g_slab_alloc_fail_after = 0;
+static ngx_uint_t g_shmtx_lock_calls = 0;
+static ngx_uint_t g_shmtx_unlock_calls = 0;
 
 /* FFI stub constants and functions used by conversion_impl.h */
 #define ERROR_SUCCESS 0
@@ -676,12 +680,14 @@ static ngx_inline void
 ngx_shmtx_lock(ngx_shmtx_t *mtx)
 {
     UNUSED(mtx);
+    g_shmtx_lock_calls++;
 }
 
 static ngx_inline void
 ngx_shmtx_unlock(ngx_shmtx_t *mtx)
 {
     UNUSED(mtx);
+    g_shmtx_unlock_calls++;
 }
 
 static ngx_inline ngx_uint_t
@@ -699,6 +705,12 @@ static ngx_inline void *
 ngx_slab_alloc_locked(ngx_slab_pool_t *pool, size_t size)
 {
     UNUSED(pool);
+    g_slab_alloc_calls++;
+    if (g_slab_alloc_fail_after != 0
+        && g_slab_alloc_calls == g_slab_alloc_fail_after)
+    {
+        return NULL;
+    }
     return calloc(1, size);
 }
 
@@ -712,8 +724,7 @@ ngx_slab_free_locked(ngx_slab_pool_t *pool, void *p)
 static ngx_inline void
 ngx_rbtree_insert(ngx_rbtree_t *tree, ngx_rbtree_node_t *node)
 {
-    UNUSED(tree);
-    UNUSED(node);
+    tree->root = node;
 }
 
 /*
@@ -938,6 +949,156 @@ init_request(ngx_http_request_t *r)
     r->main = r;
 }
 
+
+static void
+init_per_path_metrics(ngx_http_markdown_metrics_t *metrics,
+    ngx_slab_pool_t *shpool, ngx_shm_zone_t *zone, ngx_uint_t limit)
+{
+    memset(metrics, 0, sizeof(*metrics));
+    memset(shpool, 0, sizeof(*shpool));
+    memset(zone, 0, sizeof(*zone));
+    metrics->per_path.sentinel.left = &metrics->per_path.sentinel;
+    metrics->per_path.sentinel.right = &metrics->per_path.sentinel;
+    metrics->per_path.sentinel.parent = &metrics->per_path.sentinel;
+    metrics->per_path.path_tree.root = &metrics->per_path.sentinel;
+    metrics->per_path.cardinality_limit = limit;
+    zone->data = metrics;
+    zone->shm.addr = shpool;
+    ngx_http_markdown_metrics_shm_zone = zone;
+    g_slab_alloc_calls = 0;
+    g_slab_alloc_fail_after = 0;
+    g_shmtx_lock_calls = 0;
+    g_shmtx_unlock_calls = 0;
+}
+
+
+static void
+test_record_per_path_retention_limits(void)
+{
+    ngx_http_markdown_conf_t    conf;
+    ngx_http_markdown_metrics_t metrics;
+    ngx_http_request_t          r;
+    ngx_shm_zone_t              zone;
+    ngx_slab_pool_t             shpool;
+    ngx_shm_zone_t             *saved_zone;
+    u_char                      exact[NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN];
+    u_char                      oversized[NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN + 1];
+
+    TEST_SUBSECTION("record per-path metrics retention limits");
+
+    memset(&conf, 0, sizeof(conf));
+    conf.ops.metrics_per_path = 1;
+    memset(exact, 'a', sizeof(exact));
+    memset(oversized, 'b', sizeof(oversized));
+    init_request(&r);
+    saved_zone = ngx_http_markdown_metrics_shm_zone;
+
+    init_per_path_metrics(&metrics, &shpool, &zone, 2);
+    r.uri.data = NULL;
+    r.uri.len = 0;
+    ngx_http_markdown_record_per_path_metrics(&r, &conf, 1);
+    TEST_ASSERT(metrics.per_path.path_entries == 0,
+                "empty URI must not create a retained entry");
+    TEST_ASSERT(g_shmtx_lock_calls == 0 && g_shmtx_unlock_calls == 0,
+                "empty or NULL URI must not take the SHM mutex");
+
+    init_per_path_metrics(&metrics, &shpool, &zone, 2);
+    r.uri.data = exact;
+    r.uri.len = sizeof(exact);
+    ngx_http_markdown_record_per_path_metrics(&r, &conf, 7);
+    TEST_ASSERT(metrics.per_path.path_entries == 1,
+                "1024-byte URI must be retained");
+    TEST_ASSERT(metrics.per_path.overflow_count == 0,
+                "exact retained-length URI must not overflow");
+    TEST_ASSERT(metrics.per_path.path_conversions == 1,
+                "retained URI must update aggregate conversions");
+    TEST_ASSERT(metrics.per_path.path_conversion_time_sum_ms == 7,
+                "retained URI must update aggregate time");
+
+    metrics.per_path.cardinality_limit = 1;
+    ngx_http_markdown_record_per_path_metrics(&r, &conf, 9);
+    TEST_ASSERT(metrics.per_path.path_entries == 1,
+                "an existing path must update after cardinality is reached");
+    TEST_ASSERT(metrics.per_path.overflow_count == 0,
+                "an existing path must not be folded into overflow");
+    TEST_ASSERT(metrics.per_path.path_conversions == 2,
+                "an existing path must retain aggregate conversions");
+
+    init_per_path_metrics(&metrics, &shpool, &zone, 2);
+    r.uri.data = oversized;
+    r.uri.len = sizeof(oversized);
+    ngx_http_markdown_record_per_path_metrics(&r, &conf, 11);
+    TEST_ASSERT(metrics.per_path.path_entries == 0,
+                "1025-byte URI must not allocate a retained node");
+    TEST_ASSERT(metrics.per_path.overflow_count == 1,
+                "1025-byte URI must increment conversion overflow");
+    TEST_ASSERT(metrics.per_path.path_conversions == 1,
+                "overflow URI must retain aggregate conversions");
+    TEST_ASSERT(metrics.per_path.path_conversion_time_sum_ms == 11,
+                "overflow URI must retain aggregate time");
+    TEST_ASSERT(metrics.per_path.unretained_conversions == 1,
+                "overflow URI must enter unretained conversions");
+    TEST_ASSERT(metrics.per_path.unretained_conversion_time_sum_ms == 11,
+                "overflow URI must enter unretained time");
+    TEST_ASSERT(g_slab_alloc_calls == 0,
+                "oversized URI must avoid slab allocation");
+
+    ngx_http_markdown_record_per_path_metrics(&r, &conf, 13);
+    TEST_ASSERT(metrics.per_path.overflow_count == 2,
+                "repeated oversized URI counts each omitted conversion");
+    TEST_ASSERT(metrics.per_path.path_conversions == 2,
+                "repeated oversized URI updates aggregate conversions");
+    TEST_ASSERT(metrics.per_path.path_conversion_time_sum_ms == 24,
+                "repeated oversized URI updates aggregate time");
+    TEST_ASSERT(metrics.per_path.unretained_conversions == 2,
+                "repeated oversized URI updates unretained conversions");
+    TEST_ASSERT(metrics.per_path.unretained_conversion_time_sum_ms == 24,
+                "repeated oversized URI updates unretained time");
+    TEST_ASSERT(g_shmtx_lock_calls == g_shmtx_unlock_calls,
+                "every retained-length return path must release the SHM mutex");
+
+    init_per_path_metrics(&metrics, &shpool, &zone, 0);
+    r.uri.data = exact;
+    r.uri.len = sizeof(exact);
+    ngx_http_markdown_record_per_path_metrics(&r, &conf, 3);
+    TEST_ASSERT(metrics.per_path.overflow_count == 1,
+                "cardinality limit must be enforced before retention allocation");
+    TEST_ASSERT(g_slab_alloc_calls == 0,
+                "cardinality overflow must avoid slab allocation");
+    TEST_ASSERT(metrics.per_path.unretained_conversions == 1
+                && metrics.per_path.unretained_conversion_time_sum_ms == 3,
+                "cardinality overflow must enter unretained accounting");
+
+    init_per_path_metrics(&metrics, &shpool, &zone, 2);
+    g_slab_alloc_fail_after = 1;
+    ngx_http_markdown_record_per_path_metrics(&r, &conf, 5);
+    TEST_ASSERT(metrics.per_path.path_entries == 0,
+                "node allocation failure must not create a retained entry");
+    TEST_ASSERT(metrics.per_path.path_conversions == 1,
+                "node allocation failure must retain aggregate conversion");
+    TEST_ASSERT(metrics.per_path.unretained_conversions == 1
+                && metrics.per_path.unretained_conversion_time_sum_ms == 5,
+                "node allocation failure must enter unretained accounting");
+    TEST_ASSERT(g_shmtx_lock_calls == g_shmtx_unlock_calls,
+                "node allocation failure must release the SHM mutex");
+
+    init_per_path_metrics(&metrics, &shpool, &zone, 2);
+    g_slab_alloc_fail_after = 2;
+    ngx_http_markdown_record_per_path_metrics(&r, &conf, 5);
+    TEST_ASSERT(metrics.per_path.path_entries == 0,
+                "path allocation failure must not create a retained entry");
+    TEST_ASSERT(metrics.per_path.path_conversions == 1,
+                "path allocation failure must retain aggregate conversion");
+    TEST_ASSERT(metrics.per_path.unretained_conversions == 1
+                && metrics.per_path.unretained_conversion_time_sum_ms == 5,
+                "path allocation failure must enter unretained accounting");
+    TEST_ASSERT(g_shmtx_lock_calls == g_shmtx_unlock_calls,
+                "path allocation failure must release the SHM mutex");
+
+    ngx_http_markdown_metrics_shm_zone = saved_zone;
+    TEST_PASS("per-path retention limits are recorded safely");
+}
+
 static void
 set_single_header_list(ngx_http_request_t *r, ngx_table_elt_t *headers,
     ngx_uint_t count)
@@ -1038,7 +1199,7 @@ test_base_url_marshals_request_fields(void)
     ngx_http_request_t            r;
     ngx_http_markdown_conf_t      conf;
     ngx_http_markdown_main_conf_t main_conf;
-    ngx_table_elt_t               headers[3];
+    ngx_table_elt_t               headers[4];
     ngx_str_t                     base_url;
     struct MarkdownTrustedProxies *handle;
 
@@ -1059,14 +1220,17 @@ test_base_url_marshals_request_fields(void)
     set_str(&r.headers_in.server, "origin.example.com");
 
     set_str(&headers[0].key, "Forwarded");
-    set_str(&headers[0].value, "host=fwd.example.com;proto=https");
+    set_str(&headers[0].value, "host=client.example.com;proto=http");
     headers[0].hash = 1;
-    set_str(&headers[1].key, "X-Forwarded-Proto");
-    set_str(&headers[1].value, "https");
+    set_str(&headers[1].key, "Forwarded");
+    set_str(&headers[1].value, "host=fwd.example.com;proto=https");
     headers[1].hash = 1;
-    set_str(&headers[2].key, "X-Forwarded-Host");
-    set_str(&headers[2].value, "xfwd.example.com");
+    set_str(&headers[2].key, "X-Forwarded-Proto");
+    set_str(&headers[2].value, "https");
     headers[2].hash = 1;
+    set_str(&headers[3].key, "X-Forwarded-Host");
+    set_str(&headers[3].value, "xfwd.example.com");
+    headers[3].hash = 1;
     set_single_header_list(&r, headers, ARRAY_SIZE(headers));
 
     r.loc_conf = &conf;
@@ -1094,8 +1258,15 @@ test_base_url_marshals_request_fields(void)
     TEST_ASSERT(g_captured_base_url_input.is_unix_socket == 0,
         "is_unix_socket must be 0 for a non-unix peer");
     TEST_ASSERT(g_captured_base_url_input.forwarded_len
-            == sizeof("host=fwd.example.com;proto=https") - 1,
-        "Forwarded header must be marshaled");
+            == sizeof("host=client.example.com;proto=http, "
+                      "host=fwd.example.com;proto=https") - 1,
+        "all Forwarded field lines must be marshaled");
+    TEST_ASSERT(memcmp(
+            g_captured_base_url_input.forwarded,
+            "host=client.example.com;proto=http, "
+            "host=fwd.example.com;proto=https",
+            g_captured_base_url_input.forwarded_len) == 0,
+        "Forwarded field lines must retain wire order");
     TEST_ASSERT(g_captured_base_url_input.x_forwarded_proto_len == 5,
         "X-Forwarded-Proto must be marshaled");
     TEST_ASSERT(g_captured_base_url_input.x_forwarded_host_len
@@ -1105,6 +1276,7 @@ test_base_url_marshals_request_fields(void)
             == sizeof("origin.example.com") - 1,
         "Host must be marshaled from headers_in.server");
 
+    free((void *) (uintptr_t) g_captured_base_url_input.forwarded);
     TEST_PASS("base_url wrapper marshals all request/config fields");
 }
 
@@ -1701,6 +1873,89 @@ test_find_request_header_multi_part(void)
 }
 
 /*
+ * Test: duplicate field lines are aggregated across list parts in wire order.
+ */
+static void
+test_collect_request_header_values_multi_part(void)
+{
+    ngx_http_request_t r;
+    ngx_table_elt_t headers_part1[2];
+    ngx_table_elt_t headers_part2[1];
+    ngx_list_part_t part2;
+    ngx_str_t result;
+    ngx_int_t rc;
+
+    TEST_SUBSECTION("collect_request_header_values: duplicates");
+
+    init_request(&r);
+    memset(headers_part1, 0, sizeof(headers_part1));
+    memset(headers_part2, 0, sizeof(headers_part2));
+    memset(&part2, 0, sizeof(part2));
+
+    set_str(&headers_part1[0].key, "X-Forwarded-Host");
+    set_str(&headers_part1[0].value, "client.example");
+    headers_part1[0].hash = 1;
+    set_str(&headers_part1[1].key, "X-Forwarded-Host");
+    set_str(&headers_part1[1].value, "invalidated.example");
+    headers_part1[1].hash = 0;
+
+    set_str(&headers_part2[0].key, "X-Forwarded-Host");
+    set_str(&headers_part2[0].value, "edge.example");
+    headers_part2[0].hash = 1;
+
+    part2.elts = headers_part2;
+    part2.nelts = ARRAY_SIZE(headers_part2);
+    r.headers_in.headers.part.elts = headers_part1;
+    r.headers_in.headers.part.nelts = ARRAY_SIZE(headers_part1);
+    r.headers_in.headers.part.next = &part2;
+
+    rc = ngx_http_markdown_collect_request_header_values(
+        &r, (const u_char *) "X-Forwarded-Host",
+        sizeof("X-Forwarded-Host") - 1, &result);
+
+    TEST_ASSERT(rc == NGX_OK, "duplicate field collection should succeed");
+    assert_str_eq(&result, "client.example, edge.example",
+                  "active values must retain wire order");
+    free(result.data);
+    TEST_PASS("duplicate request headers aggregated in wire order");
+}
+
+/*
+ * Test: oversized forwarding metadata is ignored without allocating.
+ */
+static void
+test_collect_request_header_values_enforces_cap(void)
+{
+    ngx_http_request_t r;
+    ngx_table_elt_t header;
+    ngx_str_t result;
+    ngx_int_t rc;
+    u_char oversized[NGX_HTTP_MARKDOWN_FORWARDING_INPUT_MAX + 1];
+
+    TEST_SUBSECTION("collect_request_header_values: bounded input");
+
+    init_request(&r);
+    memset(&header, 0, sizeof(header));
+    memset(oversized, 'a', sizeof(oversized));
+
+    set_str(&header.key, "Forwarded");
+    header.value.data = oversized;
+    header.value.len = sizeof(oversized);
+    header.hash = 1;
+    set_single_header_list(&r, &header, 1);
+
+    rc = ngx_http_markdown_collect_request_header_values(
+        &r, (const u_char *) "Forwarded",
+        sizeof("Forwarded") - 1, &result);
+
+    TEST_ASSERT(rc == NGX_DECLINED,
+                "oversized forwarding metadata must be ignored");
+    TEST_ASSERT(result.data == NULL && result.len == 0,
+                "oversized metadata must not allocate output");
+    TEST_PASS("forwarding metadata cap enforced");
+}
+
+/*
  * Verify validate_conversion_result invariant checks: NULL markdown with
  * non-zero length triggers fail-open; NULL error_message with non-zero
  * length triggers fail-open; NULL etag with non-zero length triggers
@@ -2225,6 +2480,8 @@ main(void)
     test_prepare_conversion_options_schema_server_fallback();
     test_shadow_compare_prepare_options_failure();
     test_find_request_header_multi_part();
+    test_collect_request_header_values_multi_part();
+    test_collect_request_header_values_enforces_cap();
     test_validate_conversion_result_paths();
     test_handle_conversion_failure_paths();
     test_converter_not_initialized_path();
@@ -2233,6 +2490,7 @@ main(void)
     test_fullbuffer_resume_pending_lifecycle();
     test_misc_conversion_helpers();
     test_conditional_bypass_bypasses_error_policy();
+    test_record_per_path_retention_limits();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

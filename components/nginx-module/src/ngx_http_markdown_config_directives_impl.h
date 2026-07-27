@@ -834,8 +834,10 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Maximum number of distinct URI paths tracked individually in
      * the per-path RB-tree.  When this limit is reached, further
-     * unique paths are counted in the overflow_count aggregate
-     * and appear under the "__other__" pseudo-path in output.
+     * unique paths are counted in the overflow_count aggregate and
+     * appear under the "__other__" pseudo-path in output.  The same
+     * conversion aggregate also covers paths beyond the fixed retained
+     * path-length limit.
      *
      * This is a global (http-level) setting because the per-path
      * limit is stored in shared memory and applies across all
@@ -1416,22 +1418,22 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * markdown_stream_precommit_buffer <size>
      *
      * Size of the pre-commit replay buffer for streaming fallback.
-     * Zero is allowed (disables pre-commit HTML fallback capability).
+     * Must be greater than zero so capability fallback and fail-open
+     * replay can preserve every consumed upstream byte.
      *
      * Default: 256k (262144 bytes)
      * Context: http, server, location
      *
      * Example:
      *   markdown_stream_precommit_buffer 128k;
-     *   markdown_stream_precommit_buffer 0;
      */
     {
         ngx_string("markdown_stream_precommit_buffer"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF
             |NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-        ngx_conf_set_size_slot,
+        ngx_http_markdown_stream_precommit_buffer_handler,
         NGX_HTTP_LOC_CONF_OFFSET,
-        offsetof(ngx_http_markdown_conf_t, stream.precommit_buffer),
+        0,
         NULL
     },
 

@@ -23,10 +23,24 @@ Set these in this repository before running the workflows:
 1. Push your release tag (for example `vX.Y.Z`).
 2. Publish a GitHub release for that tag.
 3. Workflow `Publish Homebrew Formula to Tap` will:
+   - Resolve the release tag to one immutable commit and verify its package
+     version.
+   - Read the Formula source from that exact tag commit, even for a manual
+     recovery run.
    - Download `https://github.com/<owner>/<repo>/archive/refs/tags/<tag>.tar.gz`
-   - Compute SHA-256 from the downloadable artifact
-   - Update `url` and `sha256` in `packaging/homebrew/nginx-markdown-module.rb`
+     and compare its normalized tracked-file content with a local `git archive`
+     of the resolved tag commit.
+   - Compute SHA-256 from those exact verified downloaded bytes.
+   - Update only the Formula's class-level `url`, `version`, and `sha256`
+     fields, preserving nested resource identities.
+   - Run `brew audit --strict` on the exact rendered Formula before the tap
+     credential is introduced.
    - Copy formula into your tap repository and push
+
+Manual publication is accepted only when the workflow itself runs from the
+repository's default branch. The Formula program, verified source tree,
+archive URL, version, and checksum therefore all derive from one reviewed
+release tag commit.
 
 ## Post-Release macOS Verification
 

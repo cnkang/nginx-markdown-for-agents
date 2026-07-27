@@ -217,7 +217,7 @@ The renderer's label keys are:
 | `phase`, `action` | precommit pass/reject and postcommit abort/safe_finish | `STABLE_FOR_1_0` |
 | `format` | gzip, deflate, brotli | `STABLE_FOR_1_0` |
 | `le` | fixed conversion-duration boundaries `0.01`, `0.1`, `1.0`, `+Inf` | `STABLE_FOR_1_0` |
-| `path` | explicit per-path opt-in, capped by `markdown_metrics_per_path_cardinality`, with `__other__` overflow | `STABLE_FOR_1_0` |
+| `path` | explicit per-path opt-in, bounded by cardinality and the 1024-byte retained-path limit, with `__other__` conversion overflow | `STABLE_FOR_1_0` |
 
 `nginx_markdown_streaming_engine_choice_total` is a runtime outcome metric,
 not a configuration selector. Its name remains valid even though

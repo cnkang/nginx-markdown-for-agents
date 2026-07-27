@@ -10,20 +10,19 @@
 
 #![cfg(feature = "streaming")]
 
-#[path = "known_differences.rs"]
-mod known_differences;
 #[path = "support/streaming_compare_support.rs"]
 mod streaming_compare_support;
 #[path = "streaming_test_support.rs"]
 mod streaming_test_support;
 
-use known_differences::KnownDifferences;
 use proptest::prelude::*;
 use streaming_compare_support::compare_or_known;
+use streaming_test_support::known_differences::KnownDifferences;
 use streaming_test_support::{
     convert_streaming_chunked, convert_streaming_single, default_streaming_budget,
     default_streaming_options, discover_html_fixtures, fixture_relative_name,
-    known_differences_path, single_byte_chunks, tag_boundary_chunks, utf8_mid_char_chunks,
+    known_differences_path, read_fixture_meta, single_byte_chunks, tag_boundary_chunks,
+    utf8_mid_char_chunks,
 };
 
 fn arb_streaming_html() -> impl Strategy<Value = String> {
@@ -152,10 +151,11 @@ fn corpus_single_byte_chunk_invariance() {
             let html = std::fs::read(&path)
                 .unwrap_or_else(|err| panic!("read fixture {}: {err}", path.display()));
             let fixture_name = fixture_relative_name(&path);
+            let content_type = read_fixture_meta(&path).resolved_content_type();
 
             let single = convert_streaming_single(
                 &html,
-                Some("text/html; charset=UTF-8"),
+                Some(&content_type),
                 default_streaming_options(),
                 default_streaming_budget(),
                 None,
@@ -164,7 +164,7 @@ fn corpus_single_byte_chunk_invariance() {
             let byte_by_byte = convert_streaming_chunked(
                 &html,
                 &single_byte_chunks(html.len()),
-                Some("text/html; charset=UTF-8"),
+                Some(&content_type),
                 default_streaming_options(),
                 default_streaming_budget(),
                 None,

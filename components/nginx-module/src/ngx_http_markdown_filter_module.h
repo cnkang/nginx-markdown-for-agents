@@ -1450,11 +1450,23 @@ typedef struct {
      * counters.  The tree is protected by the slab pool mutex.
      *
      * cardinality_limit caps the number of distinct paths stored;
-     * overflow_count tracks paths dropped when at capacity.
+     * overflow_count tracks conversions not retained because either
+     * cardinality or the retained-path length cap was reached.  The
+     * unretained counters also include slab allocation failures so every
+     * aggregate conversion remains represented by the __other__ pseudo-path.
      * Aggregate counters (path_conversions, path_conversion_time_sum_ms)
      * accumulate across all per-path nodes for fast rendering
      * without tree traversal.
+     *
+     * NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN caps individual URI
+     * path length stored in the shared-memory RB-tree.  This local cap
+     * prevents a handful of very long paths from exhausting slab space
+     * despite cardinality_limit.  1024 covers structured routing paths.
+     * If larger paths are ever needed, promote to a full
+     * markdown_metrics_per_path_path_max_len directive.
      */
+
+#define NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN  1024
     struct {
         ngx_rbtree_t       path_tree;
         ngx_rbtree_node_t  sentinel;
@@ -1463,6 +1475,8 @@ typedef struct {
         ngx_atomic_t       path_conversion_time_sum_ms;
         ngx_uint_t         cardinality_limit;
         ngx_atomic_t       overflow_count;
+        ngx_atomic_t       unretained_conversions;
+        ngx_atomic_t       unretained_conversion_time_sum_ms;
     } per_path;
 } ngx_http_markdown_metrics_t;
 
