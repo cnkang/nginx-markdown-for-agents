@@ -10,7 +10,7 @@ Run:
     python3 -m pytest tools/perf/tests/test_report_roundtrip.py -v
 """
 
-import json
+
 import os
 import subprocess
 import sys

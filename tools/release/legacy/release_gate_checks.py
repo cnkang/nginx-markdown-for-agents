@@ -53,14 +53,6 @@ _DESIGN_REQUIRED_FIELDS = [
     (r"0\.4\.0.*vs|long.?term|architecture.*commit|scope.*anchor|0\.5|deferred|documentation.only|no\s+runtime", "0.4.0 vs Long-Term"),
 ]
 
-# Required boundary description fields (Property 3)
-_BOUNDARY_FIELDS = [
-    "capability",
-    "0.4.0 scope",
-    "0.5.x scope",
-    "rationale",
-    "prerequisites",
-]
 
 # Required DoD checkpoints (Property 5)
 _DOD_CHECKPOINTS = [

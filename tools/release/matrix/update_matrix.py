@@ -30,6 +30,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NoReturn
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from urllib.error import URLError
@@ -125,7 +126,7 @@ def classify_version(version: str) -> str:
     return "stable" if minor % 2 == 0 else "mainline"
 
 
-def _matrix_error(message: str) -> None:
+def _matrix_error(message: str) -> NoReturn:
     """Print a matrix validation error and exit with code 1."""
     print(message, file=sys.stderr)
     sys.exit(1)
@@ -167,7 +168,8 @@ def _write_repo_text(path: Path, content: str) -> None:
     """Write `content` to `path` within the repository using UTF-8 encoding.
 
     The path is validated to stay under the repository root, missing parent
-    directories are created, and file mode 0o644 is used.
+    directories are created, and file mode 0o644 is used for repository
+    metadata files that are not secrets.
 
     Parameters:
         path (Path): Destination path inside the repository.
@@ -189,6 +191,7 @@ def _write_repo_text(path: Path, content: str) -> None:
             0o644,
             dir_fd=parent_fd,
         )
+        os.fchmod(file_fd, 0o644)  # NOSONAR(S2612) repository metadata, not secrets
         with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
             handle.write(content)
     finally:

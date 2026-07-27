@@ -10,7 +10,6 @@ import sys
 
 import pytest
 
-import harness_route
 from harness_route import (
     _find_repo_root,
     _git_diff_files,
@@ -19,9 +18,11 @@ from harness_route import (
     _match_path,
     _normalize_files,
     _pack_matches,
+    _parse_args,
     _parse_status_output,
     _validate_git_ref,
     _verification_plan,
+    subprocess as _hr_subprocess,
 )
 
 
@@ -256,7 +257,7 @@ def test_git_diff_files_uses_delete_filter(monkeypatch: pytest.MonkeyPatch) -> N
         captured["cmd"] = cmd
         return "docs/harness/README.md\n"
 
-    monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(_hr_subprocess, "check_output", fake_check_output)
     files = _git_diff_files(None)
     assert files == ["docs/harness/README.md"]
     assert "--diff-filter=d" in captured["cmd"]
@@ -269,7 +270,7 @@ def test_parse_args_validates_base_at_cli_boundary(monkeypatch: pytest.MonkeyPat
         "argv",
         ["harness_route.py", "--from-git", "--base", "HEAD~3"],
     )
-    args = harness_route._parse_args()
+    args = _parse_args()
     assert args.base == "HEAD~3"
     assert args.from_git is True
 
@@ -282,7 +283,7 @@ def test_parse_args_rejects_invalid_base_before_main(monkeypatch: pytest.MonkeyP
         ["harness_route.py", "--from-git", "--base", "main; rm -rf /"],
     )
     with pytest.raises(SystemExit):
-        harness_route._parse_args()
+        _parse_args()
 
 
 def test_git_status_files_expands_directory_with_nested_files(
@@ -302,7 +303,7 @@ def test_git_status_files_expands_directory_with_nested_files(
         """Return True only for the test directory path."""
         return path.as_posix().endswith("/some_dir")
 
-    monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(_hr_subprocess, "check_output", fake_check_output)
     monkeypatch.setattr(Path, "is_dir", fake_is_dir)
 
     assert _git_status_files() == [
@@ -327,7 +328,7 @@ def test_git_status_files_directory_without_nested_files_falls_back_to_dir(
         """Return True only for the test directory path."""
         return path.as_posix().endswith("/some_dir")
 
-    monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(_hr_subprocess, "check_output", fake_check_output)
     monkeypatch.setattr(Path, "is_dir", fake_is_dir)
 
     assert _git_status_files() == ["some_dir"]
@@ -342,14 +343,14 @@ def test_git_status_files_directory_ls_files_error_falls_back_to_dir(
         if cmd[:2] == ["git", "status"]:
             return "?? some_dir\n"
         if cmd[:2] == ["git", "ls-files"]:
-            raise harness_route.subprocess.CalledProcessError(1, cmd, output="boom")
+            raise _hr_subprocess.CalledProcessError(1, cmd, output="boom")
         raise AssertionError(f"unexpected command: {cmd}")
 
     def fake_is_dir(path: Path) -> bool:
         """Return True only for the test directory path."""
         return path.as_posix().endswith("/some_dir")
 
-    monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(_hr_subprocess, "check_output", fake_check_output)
     monkeypatch.setattr(Path, "is_dir", fake_is_dir)
 
     assert _git_status_files() == ["some_dir"]
@@ -520,7 +521,7 @@ def test_git_diff_files_accepts_tilde_ref(monkeypatch: pytest.MonkeyPatch) -> No
         captured["cmd"] = cmd
         return "some/file.py\n"
 
-    monkeypatch.setattr(harness_route.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(_hr_subprocess, "check_output", fake_check_output)
     files = _git_diff_files("HEAD~3")
     assert files == ["some/file.py"]
     assert "HEAD~3...HEAD" in captured["cmd"]

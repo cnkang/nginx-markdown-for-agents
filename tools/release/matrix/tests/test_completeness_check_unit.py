@@ -1,7 +1,7 @@
 """Unit tests for tools/release/matrix/completeness_check.py."""
 
 import json
-import tempfile
+
 from pathlib import Path
 
 import pytest

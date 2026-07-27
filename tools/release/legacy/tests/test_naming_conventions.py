@@ -4,7 +4,6 @@ Tests each function with known-good and known-bad inputs derived from
 the cross-spec naming convention reference.
 """
 
-import pytest
 
 from tools.release.legacy.naming_conventions import (
     is_valid_directive_name,

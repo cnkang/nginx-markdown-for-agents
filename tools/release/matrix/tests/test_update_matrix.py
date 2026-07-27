@@ -12,20 +12,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import tools.release.matrix.update_matrix as um
-from tools.release.matrix.update_matrix import (
-    _entry_sort_key,
-    _resolve_repo_write_path,
-    classify_version,
-    compute_matrix,
-    diff_matrix,
-    filter_versions,
-    load_matrix,
-    merge_matrix,
-    parse_release_module_versions,
-    parse_nginx_versions,
-    version_tuple,
-    write_matrix,
-)
+
 
 # ---------------------------------------------------------------------------
 # Strategies
@@ -54,7 +41,7 @@ def test_version_classification_correctness(minor, patch):
     **Validates: Requirements 1.2**
     """
     version = f"1.{minor}.{patch}"
-    result = classify_version(version)
+    result = um.classify_version(version)
     if minor % 2 == 0:
         assert (
             result == "stable"
@@ -71,7 +58,7 @@ def test_version_classification_correctness(minor, patch):
 
 
 @pytest.mark.skipif(
-    filter_versions is None, reason="filter_versions not yet implemented (Task 1.4)"
+    um.filter_versions is None, reason="filter_versions not yet implemented (Task 1.4)"
 )
 @given(
     versions=st.lists(_nginx_version, min_size=0, max_size=30),
@@ -87,12 +74,12 @@ def test_version_filtering_completeness(versions, min_version):
         versions (list[str]): Candidate version strings to filter.
         min_version (str): Minimum version string; versions less than this value must be excluded.
     """
-    filtered = filter_versions(versions, min_version)
-    min_tuple = version_tuple(min_version)
+    filtered = um.filter_versions(versions, min_version)
+    min_tuple = um.version_tuple(min_version)
 
     # Every version in the output must be >= min_version
     for v in filtered:
-        t = version_tuple(v)
+        t = um.version_tuple(v)
         assert (
             t >= min_tuple
         ), f"Filtered version {v} is below min_version {min_version}"
@@ -100,7 +87,7 @@ def test_version_filtering_completeness(versions, min_version):
     # No qualifying version from the input should be missing from the output
     filtered_set = set(filtered)
     for v in versions:
-        t = version_tuple(v)
+        t = um.version_tuple(v)
         if t >= min_tuple:
             assert (
                 v in filtered_set
@@ -152,19 +139,19 @@ _REALISTIC_HTML = """\
 
 def test_parse_realistic_html():
     """parse_nginx_versions extracts all versions from a realistic page."""
-    versions = parse_nginx_versions(_REALISTIC_HTML)
+    versions = um.parse_nginx_versions(_REALISTIC_HTML)
     assert set(versions) == {"1.27.4", "1.26.3", "1.24.0", "1.22.1"}
 
 
 def test_parse_empty_html():
     """Empty HTML yields zero versions."""
-    assert not parse_nginx_versions("")
+    assert not um.parse_nginx_versions("")
 
 
 def test_parse_no_matching_links():
     """HTML with no download links matching the pattern yields zero versions."""
     html = "<html><body><a href='/other/file.tar.gz'>nothing</a></body></html>"
-    assert not parse_nginx_versions(html)
+    assert not um.parse_nginx_versions(html)
 
 
 def test_parse_deduplication():
@@ -175,7 +162,7 @@ def test_parse_deduplication():
         '<a href="/download/nginx-1.26.3.tar.gz">link3</a>'
         '<a href="/download/nginx-1.24.0.tar.gz">link4</a>'
     )
-    versions = parse_nginx_versions(html)
+    versions = um.parse_nginx_versions(html)
     assert versions == ["1.26.3", "1.24.0"]
 
 
@@ -192,7 +179,7 @@ def test_parse_release_module_versions_extracts_assets():
         }
     )
 
-    assert parse_release_module_versions(release_json) == {"1.28.3", "1.29.8"}
+    assert um.parse_release_module_versions(release_json) == {"1.28.3", "1.29.8"}
 
 
 def test_parse_release_module_versions_ignores_nonconforming_assets():
@@ -211,14 +198,14 @@ def test_parse_release_module_versions_ignores_nonconforming_assets():
         }
     )
 
-    assert parse_release_module_versions(release_json) == {"1.29.8"}
+    assert um.parse_release_module_versions(release_json) == {"1.29.8"}
 
 
 @pytest.mark.parametrize("version", ["1", "1x26x3", "mainline"])
 def test_classify_version_rejects_malformed_strings(version):
     """Malformed versions raise ValueError instead of crashing with IndexError."""
     with pytest.raises(ValueError):
-        classify_version(version)
+        um.classify_version(version)
 
 
 def test_fetch_download_page_rejects_non_https_url(monkeypatch):
@@ -283,7 +270,7 @@ def test_load_matrix_valid(tmp_path):
     p = tmp_path / "release-matrix.json"
     p.write_text(json.dumps(matrix_data))
 
-    data, auto_entries, manual_entries = load_matrix(p)
+    data, auto_entries, manual_entries = um.load_matrix(p)
 
     assert data["schema_version"] == "1.0.0"
     assert len(auto_entries) == 1
@@ -310,7 +297,7 @@ def test_load_matrix_auto_explicit(tmp_path):
     p = tmp_path / "release-matrix.json"
     p.write_text(json.dumps(matrix_data))
 
-    _data, auto_entries, manual_entries = load_matrix(p)
+    _data, auto_entries, manual_entries = um.load_matrix(p)
 
     assert len(auto_entries) == 1
     assert len(manual_entries) == 0
@@ -332,7 +319,7 @@ def test_load_matrix_no_managed_by(tmp_path):
     p = tmp_path / "release-matrix.json"
     p.write_text(json.dumps(matrix_data))
 
-    _data, auto_entries, manual_entries = load_matrix(p)
+    _data, auto_entries, manual_entries = um.load_matrix(p)
 
     assert len(auto_entries) == 1
     assert len(manual_entries) == 0
@@ -344,7 +331,7 @@ def test_load_matrix_invalid_json(tmp_path):
     p.write_text("{not valid json")
 
     with pytest.raises(SystemExit) as exc_info:
-        load_matrix(p)
+        um.load_matrix(p)
     assert exc_info.value.code == 1
 
 
@@ -354,7 +341,7 @@ def test_load_matrix_missing_matrix_key(tmp_path):
     p.write_text(json.dumps({"schema_version": "1.0.0"}))
 
     with pytest.raises(SystemExit) as exc_info:
-        load_matrix(p)
+        um.load_matrix(p)
     assert exc_info.value.code == 1
 
 
@@ -383,7 +370,7 @@ def test_load_matrix_duplicate_manual_keys(tmp_path):
     p.write_text(json.dumps(matrix_data))
 
     with pytest.raises(SystemExit) as exc_info:
-        load_matrix(p)
+        um.load_matrix(p)
     assert exc_info.value.code == 1
 
 
@@ -404,7 +391,7 @@ def test_load_matrix_manual_entry_missing_required_keys(tmp_path, capsys):
     p.write_text(json.dumps(matrix_data))
 
     with pytest.raises(SystemExit) as exc_info:
-        load_matrix(p)
+        um.load_matrix(p)
 
     assert exc_info.value.code == 1
     captured = capsys.readouterr()
@@ -420,7 +407,7 @@ def test_resolve_repo_write_path_rejects_paths_outside_repo(tmp_path, monkeypatc
     monkeypatch.setattr(um, "REPO_ROOT", repo_root)
 
     with pytest.raises(ValueError, match="outside repository root"):
-        _resolve_repo_write_path(tmp_path / "outside.json")
+        um._resolve_repo_write_path(tmp_path / "outside.json")
 
 
 def _allow_repo_writes(monkeypatch, repo_root: Path) -> None:
@@ -455,7 +442,7 @@ def test_load_matrix_preserves_full_data(tmp_path):
     p = tmp_path / "release-matrix.json"
     p.write_text(json.dumps(matrix_data))
 
-    data, _, _ = load_matrix(p)
+    data, _, _ = um.load_matrix(p)
 
     assert data["schema_version"] == "1.0.0"
     assert data["updated_at"] == "2025-07-14T00:00:00Z"
@@ -472,7 +459,7 @@ def test_load_matrix_file_not_found(tmp_path):
     p = tmp_path / "nonexistent.json"
 
     with pytest.raises(SystemExit) as exc_info:
-        load_matrix(p)
+        um.load_matrix(p)
     assert exc_info.value.code == 1
 
 
@@ -487,15 +474,6 @@ _unique_versions = st.lists(_nginx_version, min_size=0, max_size=10).map(
     lambda vs: list(dict.fromkeys(vs))
 )
 
-_matrix_entry_with_managed_by = st.fixed_dictionaries(
-    {
-        "nginx": _nginx_version,
-        "os_type": _os_types,
-        "arch": _archs,
-        "support_tier": st.just("full"),
-    },
-    optional={"managed_by": st.just("manual")},
-)
 
 
 # ---------------------------------------------------------------------------
@@ -519,7 +497,7 @@ def test_property3_matrix_cross_product_completeness(versions):
     """
     os_types = ["glibc", "musl"]
     archs = ["x86_64", "aarch64"]
-    matrix = compute_matrix(versions, os_types, archs)
+    matrix = um.compute_matrix(versions, os_types, archs)
 
     expected_count = len(versions) * len(os_types) * len(archs)
     assert (
@@ -565,10 +543,10 @@ def test_property4_matrix_diff_precision(current_versions, desired_versions):
     os_types = ["glibc", "musl"]
     archs = ["x86_64", "aarch64"]
 
-    current_auto = compute_matrix(current_versions, os_types, archs)
-    desired_auto = compute_matrix(desired_versions, os_types, archs)
+    current_auto = um.compute_matrix(current_versions, os_types, archs)
+    desired_auto = um.compute_matrix(desired_versions, os_types, archs)
 
-    diff = diff_matrix(current_auto, desired_auto)
+    diff = um.diff_matrix(current_auto, desired_auto)
 
     current_set = set(current_versions)
     desired_set = set(desired_versions)
@@ -600,11 +578,11 @@ def test_property6_matrix_entry_sorting(versions):
     """
     os_types = ["glibc", "musl"]
     archs = ["x86_64", "aarch64"]
-    matrix = compute_matrix(versions, os_types, archs)
+    matrix = um.compute_matrix(versions, os_types, archs)
 
     for i in range(1, len(matrix)):
-        prev_key = _entry_sort_key(matrix[i - 1])
-        curr_key = _entry_sort_key(matrix[i])
+        prev_key = um._entry_sort_key(matrix[i - 1])
+        curr_key = um._entry_sort_key(matrix[i])
         assert (
             prev_key <= curr_key
         ), f"Sorting violation at index {i}: {prev_key} > {curr_key}"
@@ -648,9 +626,9 @@ def test_property11_pin_entry_preservation(auto_versions, manual_entries):
 
     os_types = ["glibc", "musl"]
     archs = ["x86_64", "aarch64"]
-    auto_entries = compute_matrix(auto_versions, os_types, archs)
+    auto_entries = um.compute_matrix(auto_versions, os_types, archs)
 
-    merged = merge_matrix(auto_entries, manual_deduped)
+    merged = um.merge_matrix(auto_entries, manual_deduped)
 
     # Every manual entry must appear in the merged output
     for manual_e in manual_deduped:
@@ -704,9 +682,9 @@ def test_property12_key_uniqueness_after_merge(auto_versions, manual_entries):
 
     os_types = ["glibc", "musl"]
     archs = ["x86_64", "aarch64"]
-    auto_entries = compute_matrix(auto_versions, os_types, archs)
+    auto_entries = um.compute_matrix(auto_versions, os_types, archs)
 
-    merged = merge_matrix(auto_entries, manual_deduped)
+    merged = um.merge_matrix(auto_entries, manual_deduped)
 
     # Check key uniqueness
     seen_keys: set[tuple[str, str, str]] = set()
@@ -767,7 +745,7 @@ def test_diff_matrix_entry_level_change():
         },
     ]
 
-    diff = diff_matrix(current, desired)
+    diff = um.diff_matrix(current, desired)
 
     # Version sets are identical — no version-level additions/removals
     assert not diff.added_versions
@@ -802,7 +780,7 @@ def test_diff_matrix_missing_platform_entry():
         },
     ]
 
-    diff = diff_matrix(current, desired)
+    diff = um.diff_matrix(current, desired)
 
     # Same version set
     assert not diff.added_versions
@@ -832,12 +810,13 @@ def test_write_matrix_basic(tmp_path, monkeypatch):
             },
         ],
     }
-    write_matrix(target, data)
+    um.write_matrix(target, data)
 
     content = target.read_text()
     assert content.endswith("\n")
     parsed = json.loads(content)
     assert parsed == data
+    assert target.stat().st_mode & 0o777 == 0o644
     # Verify 2-space indentation
     assert '  "schema_version"' in content
 
@@ -855,7 +834,7 @@ def test_write_matrix_preserves_all_fields(tmp_path, monkeypatch):
         },
         "matrix": [],
     }
-    write_matrix(target, data)
+    um.write_matrix(target, data)
 
     parsed = json.loads(target.read_text())
     assert parsed["schema_version"] == "2.0.0"
@@ -871,11 +850,12 @@ def test_write_matrix_overwrites_existing(tmp_path, monkeypatch):
     target.write_text('{"old": true}\n')
 
     data = {"schema_version": "1.0.0", "matrix": []}
-    write_matrix(target, data)
+    um.write_matrix(target, data)
 
     parsed = json.loads(target.read_text())
     assert "old" not in parsed
     assert parsed["schema_version"] == "1.0.0"
+    assert target.stat().st_mode & 0o777 == 0o644
 
 
 def test_write_matrix_no_temp_file_on_success(tmp_path, monkeypatch):
@@ -883,7 +863,7 @@ def test_write_matrix_no_temp_file_on_success(tmp_path, monkeypatch):
     _allow_repo_writes(monkeypatch, tmp_path)
     target = tmp_path / "release-matrix.json"
     data = {"schema_version": "1.0.0", "matrix": []}
-    write_matrix(target, data)
+    um.write_matrix(target, data)
 
     tmp_file = tmp_path / "release-matrix.json.tmp"
     assert not tmp_file.exists()
@@ -915,7 +895,7 @@ def test_write_matrix_cleans_up_temp_on_failure(tmp_path, monkeypatch):
 
     raised = False
     try:
-        write_matrix(target, {"schema_version": "1.0.0", "matrix": []})
+        um.write_matrix(target, {"schema_version": "1.0.0", "matrix": []})
     except OSError:
         raised = True
 

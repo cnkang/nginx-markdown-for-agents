@@ -72,6 +72,7 @@ def _iter_brotli_chunks(data: bytes, chunk_size: int) -> list[bytes]:
     return chunks
 
 
+
 class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
     """HTTP handler with dynamic chunking, gzip, deflate, and Brotli encoding support."""
 
@@ -90,7 +91,7 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(404, "File not found")
             return
 
-        body = file_path.read_bytes()
+        body = file_path.read_bytes()  # NOSONAR(S5131) local benchmark fixture on 127.0.0.1 serving controlled corpus files
 
         # Determine transport settings
         is_gzip = "gzip" in path_str or "gzip" in query
@@ -116,16 +117,42 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
             )
             self._send_identity_response(body, content_encoding)
 
+    @staticmethod
+    def _validate_path_component(component: str) -> str:
+        """Validate a single path component without modifying it.
+
+        Rejects traversal markers, empty segments, NUL bytes, and
+        platform path separators.  Returns the component unchanged if
+        valid so that legitimate filenames (including those containing
+        ``..`` such as ``a..b.html``) are preserved.
+        """
+        if not component or component == "." or component == "..":
+            raise ValueError(f"traversal or empty component: {component!r}")
+        if "\x00" in component or "/" in component or "\\" in component:
+            raise ValueError(f"unsafe character in component: {component!r}")
+        return component
+
     def _resolve_and_verify_path(self, path_str: str) -> Path | None:
-        """Resolve and securely validate request path."""
+        """Resolve and securely validate request path.
+
+        Each path component is validated independently (rejecting ``.``,
+        ``..``, NUL, and path separators) so that nested requests (e.g.
+        ``subdir/file.json``) resolve beneath ``corpus_dir`` as nested
+        paths while legitimate filenames like ``a..b.html`` are preserved.
+        """
         corpus_dir = Path(os.environ.get("CORPUS_DIR", "tests/corpus")).resolve()
         try:
-            file_path = (corpus_dir / path_str).resolve()
+            stripped = path_str.lstrip("/")
+            parts = [self._validate_path_component(p) for p in stripped.split("/") if p]
+            if not parts:
+                return None
+            relative = Path(*parts)
+            file_path = (corpus_dir / relative).resolve()  # codeql[py/path-injection: ignore] — each component validated; resolve + traversal check below
             validate_read_path(str(file_path), purpose="corpus file")
             if corpus_dir not in file_path.parents and file_path != corpus_dir:
                 return None
             return file_path
-        except Exception:
+        except (ValueError, FileNotFoundError):
             return None
 
     def _apply_compression(
@@ -168,7 +195,7 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
 
         for chunk in self._iter_chunked_body(body, content_encoding):
             self.wfile.write(f"{len(chunk):x}\r\n".encode())
-            self.wfile.write(chunk)
+            self.wfile.write(chunk)  # NOSONAR(S5131) body from controlled corpus via validated path
             self.wfile.write(b"\r\n")
             self.wfile.flush()
         self.wfile.write(b"0\r\n\r\n")
@@ -227,7 +254,7 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
         self._send_common_headers(content_encoding)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(body)  # NOSONAR(S5131) body from controlled corpus via validated path
 
     def _send_common_headers(self, content_encoding: str | None) -> None:
         """Send status line and shared headers common to all response modes."""
