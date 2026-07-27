@@ -194,14 +194,18 @@ impl CharsetState {
                 sniff_limit,
             } => {
                 let buffered_len = sniff_buffer.len();
-                let sniff_allocation = Self::sniff_append_allocation_upper_bound(
-                    buffered_len,
-                    sniff_buffer.capacity(),
-                    input_len,
-                )?;
 
                 if let Some(charset) = header_charset.as_deref() {
                     let (state, _) = resolve_charset(charset)?;
+                    if sniff_buffer.is_empty() {
+                        return Self::resolved_output_upper_bound(&state, input_len);
+                    }
+
+                    let sniff_allocation = Self::sniff_append_allocation_upper_bound(
+                        buffered_len,
+                        sniff_buffer.capacity(),
+                        input_len,
+                    )?;
                     let input_len = Self::checked_allocation_add(buffered_len, input_len)?;
                     return Self::checked_allocation_add(
                         sniff_allocation,
@@ -209,6 +213,11 @@ impl CharsetState {
                     );
                 }
 
+                let sniff_allocation = Self::sniff_append_allocation_upper_bound(
+                    buffered_len,
+                    sniff_buffer.capacity(),
+                    input_len,
+                )?;
                 let total_len = Self::checked_allocation_add(buffered_len, input_len)?;
                 if total_len < *sniff_limit {
                     return Ok(sniff_allocation);
@@ -908,6 +917,48 @@ mod tests {
             }
             other => panic!("Expected EncodingError, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn explicit_utf8_empty_sniff_feed_allocation_is_zero() {
+        let mut state = CharsetState::new();
+        state.set_content_type(Some("text/html; charset=UTF-8"));
+        assert_eq!(state.feed_allocation_upper_bound(4096).unwrap(), 0);
+    }
+
+    #[test]
+    fn explicit_non_utf8_empty_sniff_excludes_sniff_copy() {
+        let mut state = CharsetState::new();
+        state.set_content_type(Some("text/html; charset=ISO-8859-1"));
+        let (resolved, _) = resolve_charset("ISO-8859-1").unwrap();
+        let input_len = 4096;
+        assert_eq!(
+            state.feed_allocation_upper_bound(input_len).unwrap(),
+            CharsetState::resolved_output_upper_bound(&resolved, input_len).unwrap()
+        );
+    }
+
+    #[test]
+    fn explicit_utf8_existing_sniff_counts_only_required_growth() {
+        let mut state = CharsetState::new();
+        let _ = state.feed(b"abc").unwrap();
+        state.set_content_type(Some("text/html; charset=UTF-8"));
+        let input_len = 11;
+        let expected = match &state {
+            CharsetState::Pending { sniff_buffer, .. } => {
+                CharsetState::sniff_append_allocation_upper_bound(
+                    sniff_buffer.len(),
+                    sniff_buffer.capacity(),
+                    input_len,
+                )
+                .unwrap()
+            }
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            state.feed_allocation_upper_bound(input_len).unwrap(),
+            expected
+        );
     }
 
     // --- UTF-8 zero-copy path ---
