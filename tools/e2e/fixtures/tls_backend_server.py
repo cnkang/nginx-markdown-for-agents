@@ -125,7 +125,7 @@ def main() -> None:
     server = ThreadingTLSServer(("127.0.0.1", args.port), tls_ctx)
     try:
         server.serve_forever()
-    except KeyboardInterrupt:
+    except KeyboardInterrupt:  # noqa: BLE001
         pass
     finally:
         server.server_close()

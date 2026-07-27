@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 try:
-    from tools.harness.constants import (
+    from tools.harness.constants import (  # noqa: F401
         FAIL,
         PASS,
         SKIP_NOT_PRESENT,

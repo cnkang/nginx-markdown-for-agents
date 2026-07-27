@@ -36,13 +36,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
+
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from statistics import median
+
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.path_validation import validate_read_path, validate_write_path_within_root
@@ -52,11 +52,7 @@ from lib.path_validation import validate_read_path, validate_write_path_within_r
 # ---------------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from report_schema import (  # noqa: E402
-    VALID_CONVERSION_RESULTS,
-    VALID_PAGE_TYPES,
-    validate_report,
-)
+from report_schema import validate_report  # noqa: E402
 from report_utils import detect_platform, write_json  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

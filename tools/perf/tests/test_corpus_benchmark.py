@@ -19,12 +19,12 @@ from __future__ import annotations
 
 import json
 import math
-import re
+
 import sys
 from pathlib import Path
 
 import pytest
-from hypothesis import given, settings, assume
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 # ---------------------------------------------------------------------------
@@ -40,10 +40,7 @@ from run_corpus_benchmark import (
     compute_token_reduction,
 )
 from compare_reports import (
-    compare_metric,
     compare_reports,
-    judge_metric_absolute,
-    judge_metric_percent,
     verdict_to_exit_code,
 )
 from format_pr_summary import format_summary, TOKEN_DISCLAIMER

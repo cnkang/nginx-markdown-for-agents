@@ -100,7 +100,7 @@ def test_signature_duplicate_is_ignored(det, tmp_path):
     ngx_chain_t *in,
     ngx_int_t rc;
     """
-    src = f"""
+    _src = f"""
     static ngx_int_t foo({sig})
     static ngx_int_t bar({sig})
     """

@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools.ci import check_third_party_notices as checker
+import tools.ci.check_third_party_notices as checker
 
 
 class ThirdPartyNoticesTests(unittest.TestCase):

@@ -314,7 +314,7 @@ def main() -> int:
             scan_dir = REPO_ROOT / scan_dir
         try:
             scan_dir = scan_dir.resolve()
-        except OSError:
+        except OSError:  # noqa: BLE001
             pass
 
     if not scan_dir.is_dir():

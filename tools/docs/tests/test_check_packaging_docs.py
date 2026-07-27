@@ -9,7 +9,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
 
 # Allow imports from tools/docs/
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -23,8 +22,7 @@ from check_packaging_docs import (
     check_compatibility_matrix,
     check_content_negotiation_sop,
     check_no_hardcoded_release_tags,
-    check_required_sections,
-    check_shortest_success_path,
+
     check_tier_labels,
 )
 
