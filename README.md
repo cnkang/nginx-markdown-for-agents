@@ -218,18 +218,18 @@ For a complete template with more bot patterns, see [examples/nginx-configs/06-b
 
 | NGINX | Channel | OS | libc | Arch | Artifact | Tier | Blocking |
 |-------|---------|-----|------|------|----------|------|----------|
-| 1.31.2 | mainline | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.31.2 | mainline | linux | musl | arm64 | dynamic-module | supported | No |
-| 1.31.2 | mainline | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.31.2 | mainline | linux | musl | amd64 | dynamic-module | supported | No |
-| 1.31.2 | mainline | debian12 | glibc | arm64 | docker-image | supported | Yes |
-| 1.31.2 | mainline | debian12 | glibc | amd64 | docker-image | supported | Yes |
-| 1.31.2 | mainline | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
-| 1.31.2 | mainline | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
-| 1.30.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
-| 1.30.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
-| 1.30.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
-| 1.30.3 | stable | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.31.3 | mainline | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.31.3 | mainline | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.31.3 | mainline | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.31.3 | mainline | linux | musl | amd64 | dynamic-module | supported | No |
+| 1.31.3 | mainline | debian12 | glibc | arm64 | docker-image | supported | Yes |
+| 1.31.3 | mainline | debian12 | glibc | amd64 | docker-image | supported | Yes |
+| 1.31.3 | mainline | alpine3.20 | musl | arm64 | docker-image | supported | Yes |
+| 1.31.3 | mainline | alpine3.20 | musl | amd64 | docker-image | supported | Yes |
+| 1.30.4 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
+| 1.30.4 | stable | linux | musl | arm64 | dynamic-module | supported | No |
+| 1.30.4 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
+| 1.30.4 | stable | linux | musl | amd64 | dynamic-module | supported | No |
 | 1.28.3 | stable | linux | glibc | arm64 | dynamic-module | supported | Yes |
 | 1.28.3 | stable | linux | musl | arm64 | dynamic-module | supported | No |
 | 1.28.3 | stable | linux | glibc | amd64 | dynamic-module | supported | Yes |
@@ -252,7 +252,6 @@ For a complete template with more bot patterns, see [examples/nginx-configs/06-b
 | 1.24.0 | oldstable | linux | musl | arm64 | dynamic-module | supported | No |
 | 1.24.0 | oldstable | linux | glibc | amd64 | dynamic-module | supported | Yes |
 | 1.24.0 | oldstable | linux | musl | amd64 | dynamic-module | supported | No |
-
 <!-- END:release-matrix:support-matrix -->
 
 ## How It Works
