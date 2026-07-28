@@ -15,6 +15,10 @@
 #include <limits.h>
 #include <zlib.h>
 
+#ifndef NGX_MAX_SIZE_T_VALUE
+#define NGX_MAX_SIZE_T_VALUE ((size_t) -1)
+#endif
+
 /* Conditionally include brotli header if support is compiled in */
 #ifdef NGX_HTTP_BROTLI
 #include <brotli/decode.h>
@@ -350,7 +354,8 @@ ngx_http_markdown_grow_decomp_buffer(ngx_http_request_t *r,
     size_t     used;
     ngx_int_t  rc;
 
-    if (completed_out > conf->decompress.max_size
+    if (stream->total_out > NGX_MAX_SIZE_T_VALUE
+        || completed_out > conf->decompress.max_size
         || stream->total_out
            > (uLong) (conf->decompress.max_size - completed_out))
     {
@@ -481,7 +486,8 @@ ngx_http_markdown_complete_inflate_member(
 {
     ngx_int_t  rc;
 
-    if (ctx->completed_out > ctx->conf->decompress.max_size
+    if (ctx->stream->total_out > NGX_MAX_SIZE_T_VALUE
+        || ctx->completed_out > ctx->conf->decompress.max_size
         || ctx->stream->total_out
            > (uLong) (ctx->conf->decompress.max_size
                       - ctx->completed_out))
@@ -489,6 +495,7 @@ ngx_http_markdown_complete_inflate_member(
         return NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED;
     }
 
+    /* CWE-190:guarded */
     ctx->completed_out += (size_t) ctx->stream->total_out;
 
     /*

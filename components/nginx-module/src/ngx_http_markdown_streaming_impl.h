@@ -3381,12 +3381,95 @@ ngx_http_markdown_streaming_finalize_send_markdown(
 }
 
 
+/* Record final result metadata and release the FFI-owned result buffers. */
+static void
+ngx_http_markdown_streaming_record_finalize_stats(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    struct MarkdownResult *result)
+{
+    size_t  peak_memory_bytes;
+
+    if (result->etag != NULL && result->etag_len > 0) {
+        ngx_log_debug3(NGX_LOG_DEBUG_HTTP,
+            r->connection->log, 0,
+            "markdown: finalize ETag value=\"%*s\", len=%uz",
+            result->etag_len, result->etag, result->etag_len);
+        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+            "markdown: etag_len=%uz uri_len=%uz out_bytes=%uz tokens=%ui",
+            result->etag_len, r->uri.len,
+            ctx->streaming.output.bytes,
+            (ngx_uint_t) result->token_estimate);
+    }
+
+    peak_memory_bytes = result->peak_memory_estimate;
+    markdown_result_free(result);
+    ngx_log_debug4(NGX_LOG_DEBUG_HTTP,
+        r->connection->log, 0,
+        "markdown: completed chunks=%ui flushes=%ui "
+        "in_bytes=%uz out_bytes=%uz",
+        ctx->streaming.chunks_processed,
+        ctx->streaming.flushes_sent,
+        ctx->streaming.total_input_bytes,
+        ctx->streaming.output.bytes);
+
+    if (ngx_http_markdown_metrics != NULL) {
+        ngx_http_markdown_metrics->streaming.last_peak_memory_bytes =
+            (ngx_atomic_t) peak_memory_bytes;
+    }
+}
+
+/* Send the terminal last_buf and record delivery metrics after a real send. */
+static ngx_int_t
+ngx_http_markdown_streaming_finish_terminal(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_int_t final_send_rc)
+{
+    ngx_int_t  rc;
+
+    if (final_send_rc == NGX_AGAIN) {
+        ctx->streaming.completion.finalize_pending_lastbuf = 1;
+        return ngx_http_markdown_streaming_handle_backpressure(r, ctx);
+    }
+
+    rc = ngx_http_markdown_streaming_send_output(
+        r, ctx, NULL, 0, /* last_buf */ 1);
+    if (rc == NGX_OK || rc == NGX_DONE) {
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
+        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
+        NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
+        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_streaming_convert());
+        ngx_http_markdown_record_per_path_metrics(r, conf, 0);
+        if (ctx->otel_span != NULL) {
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "input_bytes", 11,
+                (int64_t) ctx->streaming.total_input_bytes);
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "output_bytes", 12,
+                (int64_t) ctx->streaming.output.bytes);
+            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
+                (const u_char *) "error_code", 10, (int64_t) 0);
+            ngx_http_markdown_otel_span_end(ctx->otel_span);
+            ngx_http_markdown_otel_span_export(ctx->otel_span,
+                r->connection->log, r);
+            ctx->otel_span = NULL;
+        }
+    } else if (rc == NGX_AGAIN) {
+        ctx->streaming.completion.pending_terminal_metrics = 1;
+    } else {
+        ngx_http_markdown_streaming_record_postcommit_failure(
+            r, ctx, conf);
+    }
+    return rc;
+}
+
 /*
- * Finalize the streaming conversion on last_buf.
- *
- * Calls markdown_streaming_finalize() to get the final
- * Markdown output and result metadata, then sends the
- * final chunk downstream.
+ * Finalize the streaming conversion on last_buf.  Decompression and Rust
+ * finalization happen before the terminal send; terminal delivery is kept in
+ * a separate helper so NGX_AGAIN cannot be mistaken for success.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_finalize_request(
@@ -3439,161 +3522,9 @@ ngx_http_markdown_streaming_finalize_request(
         return rc;
     }
 
-    /* Log ETag if available (debug observability) */
-    if (result.etag != NULL && result.etag_len > 0) {
-        ngx_log_debug3(NGX_LOG_DEBUG_HTTP,
-            r->connection->log, 0,
-            "markdown: finalize ETag "
-            "value=\"%*s\", len=%uz",
-            result.etag_len, result.etag,
-            result.etag_len);
-
-        /*
-         * Record ETag in the decision/metrics log.
-         *
-         * In streaming mode the ETag cannot appear in
-         * response headers (sent at Commit_Boundary),
-         * so we log it here for operator observability,
-         * debug correlation, and future cache-layer use.
-         */
-        ngx_log_error(NGX_LOG_INFO,
-            r->connection->log, 0,
-            "markdown: etag_len=%uz "
-            "uri_len=%uz "
-            "out_bytes=%uz tokens=%ui",
-            result.etag_len,
-            r->uri.len,
-            ctx->streaming.output.bytes,
-            (ngx_uint_t) result.token_estimate);
-    }
-
-    /*
-     * Capture peak_memory_estimate BEFORE freeing the result.
-     *
-     * The Rust FFI populates this field in MarkdownResult, but
-     * markdown_result_free() may zero or invalidate the struct.
-     * Save it to a local variable first to ensure metric stability.
-     */
-    size_t  peak_memory_bytes = result.peak_memory_estimate;
-
-    markdown_result_free(&result);
-
-    /* Log streaming conversion statistics */
-    ngx_log_debug4(NGX_LOG_DEBUG_HTTP,
-        r->connection->log, 0,
-        "markdown: completed "
-        "chunks=%ui flushes=%ui "
-        "in_bytes=%uz out_bytes=%uz",
-        ctx->streaming.chunks_processed,
-        ctx->streaming.flushes_sent,
-        ctx->streaming.total_input_bytes,
-        ctx->streaming.output.bytes);
-
-    /*
-     * Record peak memory estimate from Rust streaming stats.
-     * This is a gauge metric (per-request sample) updated on each
-     * successful streaming conversion.
-     *
-     * Always update unconditionally so the gauge reflects the
-     * most recent request, even if peak_memory_bytes is 0 (for
-     * example empty response or extremely small input).
-     *
-     * Gauge store: latest-value-wins semantics.  Direct assignment
-     * to ngx_atomic_t is not formally atomic per C11 §7.1.4¶1,
-     * but ngx_atomic_t is intptr_t-sized and naturally aligned on
-     * all NGINX platforms (x86_64, ARM64, x86), making the store
-     * word-atomic in practice.  A torn read would produce a stale
-     * byte count — acceptable for a diagnostic gauge.
-     */
-    if (ngx_http_markdown_metrics != NULL) {
-        ngx_http_markdown_metrics->streaming.last_peak_memory_bytes =
-            (ngx_atomic_t) peak_memory_bytes;
-    }
-
-    /*
-     * Send final empty last_buf to terminate the response.
-     *
-     * If the final markdown send returned NGX_AGAIN (backpressure),
-     * defer the terminal last_buf — sending it now would overwrite
-     * the pending markdown chain in send_output, causing data loss.
-     * Return NGX_AGAIN so the resume mechanism drains the pending
-     * output first; the caller will re-enter finalize on the next
-     * write event.
-     *
-     * IMPORTANT: Success metrics (succeeded_total, reason code)
-     * are NOT recorded here when final_send_rc == NGX_AGAIN.
-     * They are recorded only after the deferred last_buf is
-     * confirmed sent with NGX_OK/NGX_DONE in
-     * ngx_http_markdown_streaming_send_deferred_lastbuf(),
-     * to avoid observability drift when NGX_AGAIN is followed
-     * by a downstream send failure.
-     *
-     * When final_send_rc is NGX_OK or NGX_DONE, the send
-     * completed immediately so we record metrics here.
-     */
-    if (final_send_rc == NGX_AGAIN) {
-        ctx->streaming.completion.finalize_pending_lastbuf = 1;
-        return ngx_http_markdown_streaming_handle_backpressure(
-            r, ctx);
-    }
-
-    /*
-     * Send the terminal last_buf and record success/failure
-     * metrics based on the actual send result.
-     *
-     * This ensures consistent observability semantics:
-     * - NGX_OK/NGX_DONE: record success metrics immediately
-     * - NGX_AGAIN: defer metrics to resume_pending() via
-     *   pending_terminal_metrics latch
-     * - Other errors: record failure metrics immediately
-     */
-    rc = ngx_http_markdown_streaming_send_output(
-        r, ctx, NULL, 0, /* last_buf */ 1);
-
-    if (rc == NGX_OK || rc == NGX_DONE) {
-        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.succeeded_total);
-        NGX_HTTP_MARKDOWN_METRIC_INC(conversions_succeeded);
-        NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count);
-
-        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_streaming_convert());
-
-        ngx_http_markdown_record_per_path_metrics(r, conf, 0);
-
-        if (ctx->otel_span != NULL) {
-            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-                (const u_char *) "input_bytes", 11,
-                (int64_t) ctx->streaming.total_input_bytes);
-            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-                (const u_char *) "output_bytes", 12,
-                (int64_t) ctx->streaming.output.bytes);
-            ngx_http_markdown_otel_set_int_attr(ctx->otel_span,
-                (const u_char *) "error_code", 10,
-                (int64_t) 0);
-            ngx_http_markdown_otel_span_end(ctx->otel_span);
-            ngx_http_markdown_otel_span_export(ctx->otel_span,
-                r->connection->log, r);
-            ctx->otel_span = NULL;
-        }
-    } else if (rc == NGX_AGAIN) {
-        /*
-         * Terminal last_buf send hit backpressure. Set a latch
-         * so that resume_pending() knows to record metrics
-         * after the drain succeeds.
-         */
-        ctx->streaming.completion.pending_terminal_metrics = 1;
-    } else {
-        /*
-         * Terminal last_buf send failed with a definitive
-         * error (not backpressure). Record failure metrics
-         * to match the post-commit error policy used in
-         * resume_pending() and send_deferred_lastbuf().
-         */
-        ngx_http_markdown_streaming_record_postcommit_failure(
-            r, ctx, conf);
-    }
-
-    return rc;
+    ngx_http_markdown_streaming_record_finalize_stats(r, ctx, &result);
+    return ngx_http_markdown_streaming_finish_terminal(
+        r, ctx, conf, final_send_rc);
 }
 
 
@@ -3637,15 +3568,86 @@ ngx_http_markdown_streaming_start_otel_span(
 
 
 /*
- * Initialize the streaming handle, decompressor, and prebuffer.
+ * Initialize the decompressor and both bounded pre-commit buffers after the
+ * streaming handle has been created.  Any allocation failure is routed
+ * through the pre-commit policy before data can be consumed irreversibly.
+ */
+static ngx_int_t
+ngx_http_markdown_streaming_init_buffers(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    ngx_int_t  rc;
+
+    if (ctx->decompression.needed) {
+        ngx_http_markdown_decomp_failure_origin_e  create_origin;
+        uint32_t                                   create_error;
+
+        ctx->streaming.decompressor =
+            ngx_http_markdown_streaming_decomp_create_with_origin(
+                r->pool, ctx->decompression.type,
+                conf->decompress.max_size, &create_origin);
+        if (ctx->streaming.decompressor == NULL) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "markdown: failed to create decompressor");
+            markdown_streaming_abort(ctx->streaming.handle);
+            ctx->streaming.handle = NULL;
+            create_error = create_origin
+                == NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION
+                ? ERROR_MEMORY_LIMIT : ERROR_INTERNAL;
+            return ngx_http_markdown_streaming_precommit_error(
+                r, ctx, conf, create_error);
+        }
+    }
+
+    ctx->streaming.prebuffer_limit = conf->stream.precommit_buffer;
+    if (ctx->streaming.prebuffer_limit > 0) {
+        rc = ngx_http_markdown_buffer_init(
+            &ctx->streaming.prebuffer,
+            ctx->streaming.prebuffer_limit, r->pool);
+        if (rc != NGX_OK) {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "markdown: prebuffer init failed; "
+                "cannot guarantee fallback data integrity");
+            markdown_streaming_abort(ctx->streaming.handle);
+            ctx->streaming.handle = NULL;
+            return ngx_http_markdown_streaming_precommit_error(
+                r, ctx, conf, ERROR_MEMORY_LIMIT);
+        }
+        ctx->streaming.prebuffer_initialized = 1;
+    } else {
+        ctx->streaming.prebuffer_initialized = 0;
+    }
+
+    ctx->streaming.commit_state = NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
+    ctx->streaming.failopen_replay_initialized = 0;
+    if (ctx->streaming.prebuffer_limit > 0) {
+        rc = ngx_http_markdown_buffer_init(
+            &ctx->streaming.failopen_replay_buf,
+            ctx->streaming.prebuffer_limit, r->pool);
+        if (rc != NGX_OK) {
+            NGX_HTTP_MARKDOWN_METRIC_INC(
+                results.replay_buffer_errors_total);
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                "markdown: replay buffer init failed; "
+                "cannot guarantee fail-open data integrity");
+            markdown_streaming_abort(ctx->streaming.handle);
+            ctx->streaming.handle = NULL;
+            return ngx_http_markdown_streaming_precommit_error(
+                r, ctx, conf, ERROR_MEMORY_LIMIT);
+        }
+        ctx->streaming.failopen_replay_initialized = 1;
+    }
+    return NGX_OK;
+}
+
+/*
+ * Initialize the Rust streaming handle and request-lifetime buffers.
  *
- * Called on the first body filter invocation when the handle
- * is NULL and the request is eligible.
- *
- * Returns:
- *   NGX_OK       - handle created successfully
- *   NGX_ERROR    - fatal error (reject policy)
- *   NGX_DECLINED - non-fatal init failure (eligible cleared)
+ * Returns NGX_OK on success, NGX_ERROR for a configured reject path, or
+ * NGX_DECLINED when a pass policy has already switched the request to
+ * fail-open handling.
  */
 static ngx_int_t
 ngx_http_markdown_streaming_init_handle(
@@ -3730,117 +3732,9 @@ ngx_http_markdown_streaming_init_handle(
         ngx_http_markdown_streaming_cleanup;
     cln->data = ctx;
 
-    /* Initialize decompressor if needed */
-    if (ctx->decompression.needed) {
-        ngx_http_markdown_decomp_failure_origin_e  create_origin;
-        uint32_t                                   create_error;
-
-        ctx->streaming.decompressor =
-            ngx_http_markdown_streaming_decomp_create_with_origin(
-                r->pool,
-                ctx->decompression.type,
-                conf->decompress.max_size,
-                &create_origin);
-        if (ctx->streaming.decompressor == NULL) {
-            ngx_log_error(NGX_LOG_ERR,
-                r->connection->log, 0,
-                "markdown: failed to "
-                "create decompressor");
-            markdown_streaming_abort(
-                ctx->streaming.handle);
-            ctx->streaming.handle = NULL;
-            create_error = create_origin
-                == NGX_HTTP_MD_DECOMP_ORIGIN_ALLOCATION
-                ? ERROR_MEMORY_LIMIT : ERROR_INTERNAL;
-            return ngx_http_markdown_streaming_precommit_error(
-                r, ctx, conf, create_error);
-        }
-
-        /*
-         * Note: decompression_streaming_total is incremented at
-         * path selection time in the header filter,
-         * not here at decompressor initialization.
-         */
-    }
-
-    /* Initialize prebuffer for fallback.
-     * Use conf->stream.precommit_buffer (not streaming budget):
-     * the two budgets have different semantics — precommit_buffer
-     * controls pre-commit buffering and fail-open replay, while
-     * budget controls the Rust streaming converter memory. */
-    ctx->streaming.prebuffer_limit =
-        conf->stream.precommit_buffer;
-    if (ctx->streaming.prebuffer_limit > 0) {
-        rc = ngx_http_markdown_buffer_init(
-            &ctx->streaming.prebuffer,
-            ctx->streaming.prebuffer_limit,
-            r->pool);
-        if (rc == NGX_OK) {
-            ctx->streaming.prebuffer_initialized = 1;
-        } else {
-            /*
-             * Prebuffer initialization failed due to pool exhaustion.
-             * Without a working prebuffer, the streaming
-             * fallback-to-fullbuffer path cannot recover already-processed
-             * prefix data, so continuing streaming would silently lose data
-             * on fallback.  Treat this as a pre-commit error: fail-open
-             * (pass) or reject per the configured markdown_error_policy.
-             */
-            ngx_log_error(NGX_LOG_ERR,
-                r->connection->log, 0,
-                "markdown: prebuffer init "
-                "failed (pool exhaustion), "
-                "cannot guarantee fallback data integrity");
-            markdown_streaming_abort(
-                ctx->streaming.handle);
-            ctx->streaming.handle = NULL;
-            return ngx_http_markdown_streaming_precommit_error(
-                r, ctx, conf, ERROR_MEMORY_LIMIT);
-        }
-    } else {
-        ctx->streaming.prebuffer_initialized = 0;
-    }
-
-    ctx->streaming.commit_state =
-        NGX_HTTP_MARKDOWN_STREAMING_COMMIT_PRE;
-
-    /*
-     * Initialize fail-open replay buffer.  This buffer stores a copy
-     * of original upstream bytes consumed during Pre-Commit so that
-     * fail-open can reconstruct the full output chain from
-     * module-owned memory, rather than relying on upstream ngx_buf_t*
-     * pointer stability across filter chain invocations.
-     */
-    ctx->streaming.failopen_replay_initialized = 0;
-    if (ctx->streaming.prebuffer_limit > 0) {
-        rc = ngx_http_markdown_buffer_init(
-            &ctx->streaming.failopen_replay_buf,
-            ctx->streaming.prebuffer_limit,
-            r->pool);
-        if (rc != NGX_OK) {
-            /*
-             * Replay buffer initialization failed due to pool exhaustion.
-             * Without a working replay buffer, fail-open cannot reconstruct
-             * the original upstream prefix data on pre-commit error, so
-             * continuing streaming would silently lose data.  Treat this
-             * identically to prebuffer init failure: abort the handle and
-             * apply the configured markdown_error_policy.
-             */
-            NGX_HTTP_MARKDOWN_METRIC_INC(
-                results.replay_buffer_errors_total);
-            ngx_log_error(NGX_LOG_ERR,
-                r->connection->log, 0,
-                "markdown: replay buffer init "
-                "failed (pool exhaustion), "
-                "cannot guarantee fail-open data integrity");
-            markdown_streaming_abort(
-                ctx->streaming.handle);
-            ctx->streaming.handle = NULL;
-            return ngx_http_markdown_streaming_precommit_error(
-                r, ctx, conf, ERROR_MEMORY_LIMIT);
-        }
-
-        ctx->streaming.failopen_replay_initialized = 1;
+    rc = ngx_http_markdown_streaming_init_buffers(r, ctx, conf);
+    if (rc != NGX_OK) {
+        return rc;
     }
 
     ngx_http_markdown_streaming_start_otel_span(r, ctx, conf);

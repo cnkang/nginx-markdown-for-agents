@@ -31,13 +31,16 @@
 //! ```
 
 use regex::Regex;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 
 /// Default charset when detection fails
 const DEFAULT_CHARSET: &str = "UTF-8";
 
 /// Maximum bytes to scan for meta charset tags (first 1024 bytes)
 const META_SCAN_LIMIT: usize = 1024;
+
+static CHARSET_REGEX: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r#"(?i)charset\s*=\s*"?([^";,\s]+)"?"#).ok());
 
 /// Detect character encoding using the three-level cascade
 ///
@@ -143,17 +146,9 @@ pub fn detect_charset(content_type: Option<&str>, html: &[u8]) -> String {
 /// );
 /// ```
 pub fn extract_charset_from_content_type(content_type: &str) -> Option<String> {
-    // Regex pattern to match charset parameter
-    // Matches: charset=VALUE or charset="VALUE"
-    static CHARSET_REGEX: OnceLock<Option<Regex>> = OnceLock::new();
-    let regex =
-        CHARSET_REGEX.get_or_init(|| Regex::new(r#"(?i)charset\s*=\s*"?([^";,\s]+)"?"#).ok());
-    let regex = regex.as_ref()?;
-
-    regex
-        .captures(content_type)
-        .and_then(|caps| caps.get(1))
-        .map(|m| m.as_str().to_string())
+    let captures = CHARSET_REGEX.as_ref()?.captures(content_type)?;
+    let value = captures.get(1)?;
+    Some(value.as_str().to_string())
 }
 
 /// Extract charset from HTML meta tags

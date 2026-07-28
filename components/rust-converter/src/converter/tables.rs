@@ -39,6 +39,77 @@
 use super::*;
 
 impl MarkdownConverter {
+    fn extract_table_body(
+        &self,
+        tbody: &Handle,
+        ctx: &mut Option<&mut ConversionContext>,
+        headers: &mut Vec<String>,
+        alignments: &mut Vec<TableAlignment>,
+        rows: &mut Vec<Vec<String>>,
+    ) -> Result<(), ConversionError> {
+        if !headers.is_empty() {
+            return self.extract_table_rows(tbody, ctx.as_deref_mut(), rows);
+        }
+
+        let children = tbody.children.borrow();
+        let first_tr = children.iter().find(|candidate| {
+            matches!(
+                candidate.data,
+                NodeData::Element { ref name, .. } if name.local.as_ref() == "tr"
+            )
+        });
+        let Some(first_tr) = first_tr else {
+            return self.extract_table_rows(tbody, ctx.as_deref_mut(), rows);
+        };
+
+        self.extract_table_row_as_header(first_tr, ctx.as_deref_mut(), headers, alignments)?;
+
+        let mut is_first = true;
+        for tbody_child in children.iter() {
+            if let NodeData::Element { ref name, .. } = tbody_child.data
+                && name.local.as_ref() == "tr"
+            {
+                if is_first {
+                    is_first = false;
+                    continue;
+                }
+
+                let mut row_cells = Vec::new();
+                self.extract_table_row(tbody_child, ctx.as_deref_mut(), &mut row_cells)?;
+                rows.push(row_cells);
+            }
+        }
+        Ok(())
+    }
+
+    fn extract_table_child(
+        &self,
+        child: &Handle,
+        ctx: &mut Option<&mut ConversionContext>,
+        headers: &mut Vec<String>,
+        alignments: &mut Vec<TableAlignment>,
+        rows: &mut Vec<Vec<String>>,
+    ) -> Result<(), ConversionError> {
+        let NodeData::Element { ref name, .. } = child.data else {
+            return Ok(());
+        };
+
+        match name.local.as_ref() {
+            "thead" => self.extract_table_header(child, ctx.as_deref_mut(), headers, alignments),
+            "tbody" => self.extract_table_body(child, ctx, headers, alignments, rows),
+            "tr" if headers.is_empty() => {
+                self.extract_table_row_as_header(child, ctx.as_deref_mut(), headers, alignments)
+            }
+            "tr" => {
+                let mut row_cells = Vec::new();
+                self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells)?;
+                rows.push(row_cells);
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Handle table elements (GFM only) with optional timeout context.
     pub(super) fn handle_table_with_context(
         &self,
@@ -77,78 +148,9 @@ impl MarkdownConverter {
             }
         }
 
-        // Table cell extraction now respects the conversion budget via ctx.
         let mut ctx = ctx;
         for child in node.children.borrow().iter() {
-            if let NodeData::Element { ref name, .. } = child.data {
-                match name.local.as_ref() {
-                    "thead" => self.extract_table_header(
-                        child,
-                        ctx.as_deref_mut(),
-                        &mut headers,
-                        &mut alignments,
-                    )?,
-                    "tbody" => {
-                        if headers.is_empty() {
-                            let children = child.children.borrow();
-                            let first_tr_opt = children.iter().find(|candidate| {
-                                matches!(
-                                    candidate.data,
-                                    NodeData::Element { ref name, .. } if name.local.as_ref() == "tr"
-                                )
-                            });
-
-                            if let Some(first_tr) = first_tr_opt {
-                                self.extract_table_row_as_header(
-                                    first_tr,
-                                    ctx.as_deref_mut(),
-                                    &mut headers,
-                                    &mut alignments,
-                                )?;
-
-                                let mut is_first = true;
-                                for tbody_child in children.iter() {
-                                    if let NodeData::Element { ref name, .. } = tbody_child.data
-                                        && name.local.as_ref() == "tr"
-                                    {
-                                        if is_first {
-                                            is_first = false;
-                                            continue;
-                                        }
-
-                                        let mut row_cells = Vec::new();
-                                        self.extract_table_row(
-                                            tbody_child,
-                                            ctx.as_deref_mut(),
-                                            &mut row_cells,
-                                        )?;
-                                        rows.push(row_cells);
-                                    }
-                                }
-                            } else {
-                                self.extract_table_rows(child, ctx.as_deref_mut(), &mut rows)?;
-                            }
-                        } else {
-                            self.extract_table_rows(child, ctx.as_deref_mut(), &mut rows)?;
-                        }
-                    }
-                    "tr" => {
-                        if headers.is_empty() {
-                            self.extract_table_row_as_header(
-                                child,
-                                ctx.as_deref_mut(),
-                                &mut headers,
-                                &mut alignments,
-                            )?;
-                        } else {
-                            let mut row_cells = Vec::new();
-                            self.extract_table_row(child, ctx.as_deref_mut(), &mut row_cells)?;
-                            rows.push(row_cells);
-                        }
-                    }
-                    _ => {}
-                }
-            }
+            self.extract_table_child(child, &mut ctx, &mut headers, &mut alignments, &mut rows)?;
         }
 
         if headers.is_empty() {

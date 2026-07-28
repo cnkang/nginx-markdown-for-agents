@@ -726,50 +726,6 @@ mod tests {
             .replace('>', "&gt;")
     }
 
-    /// Encode one character using a deterministic mix of named/decimal/hex entities.
-    fn encode_entity_char(ch: char, selector: u8) -> String {
-        match ch {
-            '&' => match selector % 3 {
-                0 => "&amp;".to_string(),
-                1 => "&#38;".to_string(),
-                _ => "&#x26;".to_string(),
-            },
-            '<' => match selector % 3 {
-                0 => "&lt;".to_string(),
-                1 => "&#60;".to_string(),
-                _ => "&#x3C;".to_string(),
-            },
-            '>' => match selector % 3 {
-                0 => "&gt;".to_string(),
-                1 => "&#62;".to_string(),
-                _ => "&#x3E;".to_string(),
-            },
-            '"' => match selector % 3 {
-                0 => "&quot;".to_string(),
-                1 => "&#34;".to_string(),
-                _ => "&#x22;".to_string(),
-            },
-            '\'' => match selector % 2 {
-                0 => "&#39;".to_string(),
-                _ => "&#x27;".to_string(),
-            },
-            'A' => match selector % 3 {
-                0 => "A".to_string(),
-                1 => "&#65;".to_string(),
-                _ => "&#x41;".to_string(),
-            },
-            '€' => match selector % 2 {
-                0 => "&#8364;".to_string(),
-                _ => "&#x20AC;".to_string(),
-            },
-            '中' => match selector % 2 {
-                0 => "&#20013;".to_string(),
-                _ => "&#x4E2D;".to_string(),
-            },
-            _ => ch.to_string(),
-        }
-    }
-
     #[test]
     fn test_heading_conversion() {
         let html = b"<h1>Title</h1><h2>Subtitle</h2>";
@@ -2026,34 +1982,6 @@ mod tests {
 
     // Property 7: HTML Entity Decoding
     // Validates: FR-03.4
-    proptest! {
-        #[test]
-        fn prop_html_entities_decode_to_expected_text(
-            symbols in prop::collection::vec((0usize..8usize, any::<u8>()), 1..40),
-        ) {
-            let alphabet = ['&', '<', '>', '"', '\'', 'A', '€', '中'];
-
-            let mut encoded = String::new();
-            let mut expected = String::new();
-
-            for (idx, selector) in symbols {
-                let ch = alphabet[idx];
-                encoded.push_str(&encode_entity_char(ch, selector));
-                expected.push(ch);
-            }
-
-            let html = format!("<p>{}</p>", encoded);
-            let markdown = convert_html_for_test(&html);
-
-            prop_assert!(
-                markdown.contains(&expected),
-                "Decoded Markdown should contain expected text.\nExpected: {:?}\nActual: {:?}",
-                expected,
-                markdown
-            );
-        }
-    }
-
     // Property 8: Unicode Preservation
     // Validates: FR-03.5, FR-05.4
     proptest! {
@@ -3367,3 +3295,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "converter_complexity_tests.rs"]
+mod converter_complexity_tests;

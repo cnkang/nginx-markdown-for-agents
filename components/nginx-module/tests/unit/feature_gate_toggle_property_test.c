@@ -1,5 +1,5 @@
 /*
- /* * Test: feature_gate_toggle_property
+ * Test: feature_gate_toggle_property
   *
   * Property-based tests for dynamic feature gate toggle behavior
   * (Property 13) and Brotli compile-time feature gate toggle

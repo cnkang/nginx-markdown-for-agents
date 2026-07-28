@@ -8,13 +8,6 @@ use crate::error::ConversionError;
 use crate::streaming::budget::MemoryBudget;
 use crate::streaming::types::StreamEvent;
 
-pub(crate) fn is_safe_code_fence_language(value: &str) -> bool {
-    !value.is_empty()
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'.' | b'#' | b'-')
-        })
-}
-
 /// Document structure context tracked on the state stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StructuralContext {
@@ -98,6 +91,15 @@ pub struct StructuralStateMachine {
 }
 
 impl StructuralStateMachine {
+    pub(crate) fn is_safe_code_fence_language(value: &str) -> bool {
+        if value.is_empty() {
+            return false;
+        }
+        value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'+' | b'.' | b'#' | b'-')
+        })
+    }
+
     /// Create a StructuralStateMachine with a maximum stack depth derived from `budget`.
     ///
     /// The `state_stack` byte allowance from `MemoryBudget` is enforced using
@@ -233,7 +235,7 @@ impl StructuralStateMachine {
                                     .strip_prefix("language-")
                                     .or_else(|| class.strip_prefix("lang-"))
                             })
-                            .find(|language| is_safe_code_fence_language(language))
+                            .find(|language| Self::is_safe_code_fence_language(language))
                             .map(ToOwned::to_owned)
                     });
                     if lang.is_some() {

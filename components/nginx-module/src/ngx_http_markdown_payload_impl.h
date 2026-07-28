@@ -950,6 +950,84 @@ ngx_http_markdown_decompression_error(uint32_t ffi_rc)
  *   NGX_ERROR                               - system error
  */
 static ngx_int_t
+ngx_http_markdown_wrap_empty_decompression(
+    ngx_http_request_t *r,
+    FFIDecompResult *result,
+    size_t input_size,
+    ngx_chain_t **decompressed_chain)
+{
+    ngx_buf_t      *b;
+    ngx_chain_t    *cl;
+
+    markdown_decompress_free(result);
+    b = ngx_calloc_buf(r->pool);
+    if (b == NULL) {
+        return NGX_ERROR;
+    }
+    b->pos = NULL;
+    b->last = NULL;
+    b->memory = 1;
+    b->last_buf = 1;
+
+    cl = ngx_alloc_chain_link(r->pool);
+    if (cl == NULL) {
+        return NGX_ERROR;
+    }
+    cl->buf = b;
+    cl->next = NULL;
+    *decompressed_chain = cl;
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: rust decompress succeeded with empty output, "
+                  "input=%uz", input_size);
+    return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_markdown_wrap_decompression_output(
+    ngx_http_request_t *r,
+    FFIDecompResult *result,
+    size_t input_size,
+    ngx_chain_t **decompressed_chain)
+{
+    size_t          output_len;
+    u_char         *output_buf;
+    ngx_buf_t      *b;
+    ngx_chain_t    *cl;
+
+    output_len = (size_t) result->output_len;
+    output_buf = ngx_alloc(output_len, r->connection->log);
+    if (output_buf == NULL) {
+        markdown_decompress_free(result);
+        return NGX_ERROR;
+    }
+    ngx_memcpy(output_buf, result->output, output_len);
+    markdown_decompress_free(result);
+
+    b = ngx_calloc_buf(r->pool);
+    if (b == NULL) {
+        ngx_free(output_buf);
+        return NGX_ERROR;
+    }
+    b->pos = output_buf;
+    b->last = output_buf + output_len;
+    b->memory = 1;
+    b->last_buf = 1;
+
+    cl = ngx_alloc_chain_link(r->pool);
+    if (cl == NULL) {
+        ngx_free(output_buf);
+        return NGX_ERROR;
+    }
+    cl->buf = b;
+    cl->next = NULL;
+    *decompressed_chain = cl;
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: rust decompress succeeded, input=%uz, "
+                  "output=%uz", input_size, output_len);
+    return NGX_OK;
+}
+
+static ngx_int_t
 ngx_http_markdown_decompress_via_rust(
     ngx_http_request_t *r,
     const ngx_http_markdown_ctx_t *ctx,
@@ -968,9 +1046,6 @@ ngx_http_markdown_decompress_via_rust(
     uint8_t                format;
     size_t                 input_size;
     u_char                *input_buf;
-    u_char                *output_buf;
-    ngx_buf_t             *b;
-    ngx_chain_t           *cl;
     ngx_int_t              rc;
 
     /*
@@ -1051,93 +1126,12 @@ ngx_http_markdown_decompress_via_rust(
     }
 
     if (result.output_len == 0) {
-        /*
-         * Valid empty decompression result.  Build a zero-length
-         * buffer chain so downstream sees an empty body rather
-         * than an error.
-         */
-        markdown_decompress_free(&result);
-
-        b = ngx_calloc_buf(r->pool);
-        if (b == NULL) {
-            return NGX_ERROR;
-        }
-
-        b->pos = NULL;
-        b->last = NULL;
-        b->memory = 1;
-        b->last_buf = 1;
-
-        cl = ngx_alloc_chain_link(r->pool);
-        if (cl == NULL) {
-            return NGX_ERROR;
-        }
-
-        cl->buf = b;
-        cl->next = NULL;
-        *decompressed_chain = cl;
-
-        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown: rust decompress "
-                      "succeeded with empty output, "
-                      "input=%uz", input_size);
-        return NGX_OK;
+        return ngx_http_markdown_wrap_empty_decompression(
+            r, &result, input_size, decompressed_chain);
     }
 
-    /*
-     * Allocate the output buffer with ngx_alloc (Rule 43) so that
-     * apply_decompressed_payload can perform a direct pointer swap
-     * into ctx->buffer.data without an additional memcpy.  The
-     * caller (apply_decompressed_payload) takes ownership of this
-     * allocation and is responsible for ngx_free on all paths.
-     */
-    output_buf = ngx_alloc((size_t) result.output_len,
-                          r->connection->log);
-    if (output_buf == NULL) {
-        markdown_decompress_free(&result);
-        return NGX_ERROR;
-    }
-
-    ngx_memcpy(output_buf, result.output, (size_t) result.output_len);
-
-    {
-        size_t  output_len;
-
-        /* Save length before free resets the struct. */
-        output_len = (size_t) result.output_len;
-
-        /* Free the Rust-owned buffer before building the chain. */
-        markdown_decompress_free(&result);
-
-        /* Wrap the ngx_alloc'd output in an ngx_buf_t / chain. */
-        b = ngx_calloc_buf(r->pool);
-        if (b == NULL) {
-            ngx_free(output_buf);
-            return NGX_ERROR;
-        }
-
-        b->pos = output_buf;
-        b->last = output_buf + output_len;
-        b->memory = 1;
-        b->last_buf = 1;
-
-        cl = ngx_alloc_chain_link(r->pool);
-        if (cl == NULL) {
-            ngx_free(output_buf);
-            return NGX_ERROR;
-        }
-
-        cl->buf = b;
-        cl->next = NULL;
-        *decompressed_chain = cl;
-
-        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                      "markdown: rust decompress "
-                      "succeeded, input=%uz, output=%uz",
-                      input_size, output_len);
-    }
-
-    return NGX_OK;
+    return ngx_http_markdown_wrap_decompression_output(
+        r, &result, input_size, decompressed_chain);
 #endif /* NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
 }
 
