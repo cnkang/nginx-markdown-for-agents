@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -74,6 +75,18 @@ def _write_raw(repo: Path, name: str = "raw.json", report: dict | None = None) -
 
 def test_validate_source_run_accepts_run_url_with_attempt() -> None:
     assert _validate_source_run(_GOOD_RUN_URL) == []
+
+
+def test_finalizer_entrypoint_resolves_shared_tools() -> None:
+    """Direct CI execution must import the repository's shared tools package."""
+    script = Path(__file__).resolve().parents[1] / "finalize_module_baseline.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_validate_source_run_rejects_empty() -> None:

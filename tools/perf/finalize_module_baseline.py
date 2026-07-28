@@ -56,7 +56,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-sys.path.insert(0, str(REPO_ROOT))
+# The shared provenance and path-validation modules live under tools/lib.
+# Add their package root explicitly so direct CI execution has the same import
+# contract as the other repository-owned Python harnesses.
+sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from lib.baseline_provenance import (  # noqa: E402
     validate_iso_utc,
