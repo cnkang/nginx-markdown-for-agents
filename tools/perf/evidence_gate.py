@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -46,6 +47,11 @@ import re
 from lib.path_validation import (
     validate_read_path,
     validate_write_path_within_root,
+)
+from lib.baseline_provenance import (
+    validate_iso_utc,
+    validate_raw_commit_match,
+    validate_source_run,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -635,6 +641,10 @@ _FALLBACK_RATE_COVERAGE_LABEL = (
     "precommit_failopen_total / streaming_requests_total <= 0.05"
 )
 _HISTORICAL_BASELINE_COMMIT = "847f90139d287446882052ec78661746541aebff"
+_HISTORICAL_BASELINE_PATH = "perf/baselines/module-baseline-091.json"
+_HISTORICAL_BASELINE_SHA256 = (
+    "8080c23974d8124e6f44fa20ecca1a83fc0a6395b42fb904dfa2e1ae02f284a0"
+)
 
 
 def _is_positive(value: float | int | None) -> bool:
@@ -947,14 +957,32 @@ _SUPPORTED_POLICY_TYPES = frozenset({"verbatim_run", "conservative_normalized"})
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
-def _is_scoped_historical_exception(policy: dict) -> bool:
-    """Return True for the single historical baseline audit exception."""
-    return (
+def _is_scoped_historical_exception(report: dict) -> bool:
+    """Return True only for the immutable checked-in historical baseline."""
+    policy = report.get("baseline_policy")
+    if not isinstance(policy, dict):
+        return False
+    if not (
         policy.get("historical_audit_exception") is True
-        and isinstance(policy.get("source_git_commit"), str)
         and policy.get("source_git_commit") == _HISTORICAL_BASELINE_COMMIT
-        and bool(policy.get("audit_note"))
-    )
+        and isinstance(policy.get("audit_note"), str)
+        and bool(policy["audit_note"].strip())
+    ):
+        return False
+
+    try:
+        baseline_path = (REPO_ROOT / _HISTORICAL_BASELINE_PATH).resolve(
+            strict=True
+        )
+        baseline_path.relative_to(REPO_ROOT.resolve())
+        if _sha256_file(baseline_path) != _HISTORICAL_BASELINE_SHA256:
+            return False
+        historical_report = json.loads(
+            baseline_path.read_text(encoding="utf-8")
+        )
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return report == historical_report
 
 
 def _policy_type_violations(
@@ -1000,19 +1028,38 @@ def _conservative_normalized_violations(
 ) -> list[tuple[str, str]]:
     """Validate conservative_normalized-specific fields."""
     violations: list[tuple[str, str]] = []
-    for field in ("adjustments", "adjustment_reason", "adjustment_date"):
-        if field not in policy or policy[field] in (None, "", {}):
+    if policy.get("normalization") != "conservative":
+        violations.append((
+            f"{role}.baseline_policy",
+            "conservative_normalized policy normalization must be "
+            f"'conservative' (got {policy.get('normalization')!r})",
+        ))
+    for field in ("adjustment_reason", "adjustment_date"):
+        value = policy.get(field)
+        if not isinstance(value, str) or not value.strip():
             violations.append((
                 f"{role}.baseline_policy",
                 f"missing or empty {field}",
             ))
     adjustments = policy.get("adjustments")
-    if isinstance(adjustments, dict):
-        for field in ("rps", "latency_ttfb"):
-            if not adjustments.get(field):
+    if not isinstance(adjustments, dict):
+        violations.append((
+            f"{role}.baseline_policy",
+            "adjustments must be an object containing the exact adjustment "
+            "ledger",
+        ))
+    else:
+        unknown = sorted(set(adjustments) - {"rps", "latency_ttfb"})
+        if unknown:
+            violations.append((
+                f"{role}.baseline_policy",
+                f"adjustments contains unsupported metric groups: {unknown}",
+            ))
+        for group, entries in adjustments.items():
+            if not isinstance(entries, dict):
                 violations.append((
                     f"{role}.baseline_policy",
-                    f"missing or empty adjustments.{field}",
+                    f"adjustments.{group} must be an object",
                 ))
     return violations
 
@@ -1049,7 +1096,7 @@ def _source_artifact_violations(
                 "missing source_artifact_sha256; canonical baselines must "
                 "record the SHA-256 of the retained raw artifact",
             ))
-        elif not isinstance(raw_digest, str) or not sha256_re.match(raw_digest):
+        elif not isinstance(raw_digest, str) or not sha256_re.fullmatch(raw_digest):
             violations.append((
                 f"{role}.baseline_policy",
                 f"source_artifact_sha256 must be a 64-char lowercase hex "
@@ -1064,6 +1111,81 @@ def _source_artifact_violations(
                 f"source_artifact must be a repository-relative path without "
                 f"'..' traversal (got {artifact!r})",
             ))
+    return violations
+
+
+def _policy_provenance_violations(
+    policy: dict, role: str, policy_type: str,
+) -> list[tuple[str, str]]:
+    """Validate policy provenance shape and timestamp/URL syntax."""
+    violations = _missing_provenance_violations(policy, role)
+    violations.extend(
+        _source_commit_violations(policy, role, policy_type)
+    )
+    violations.extend(_source_run_violations(policy, role))
+    violations.extend(_measurement_timestamp_violations(policy, role))
+    return violations
+
+
+def _missing_provenance_violations(
+    policy: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Report missing or non-string common provenance fields."""
+    violations: list[tuple[str, str]] = []
+    for field in (
+        "source_git_commit", "source_run", "source_artifact",
+        "measurement_timestamp",
+    ):
+        value = policy.get(field)
+        if not isinstance(value, str) or not value.strip():
+            violations.append((
+                f"{role}.baseline_policy",
+                f"missing or empty {field}",
+            ))
+    return violations
+
+
+def _source_commit_violations(
+    policy: dict, role: str, policy_type: str,
+) -> list[tuple[str, str]]:
+    """Validate the full source Git SHA format."""
+    source_git_commit = policy.get("source_git_commit")
+    if isinstance(source_git_commit, str) and source_git_commit:
+        if not _SHA_RE.fullmatch(source_git_commit):
+            return [(
+                f"{role}.baseline_policy",
+                "source_git_commit must be a full 40-character SHA in "
+                f"lowercase for {policy_type} (got {source_git_commit!r})",
+            )]
+    return []
+
+
+def _source_run_violations(
+    policy: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Validate the source GitHub Actions run URL."""
+    violations: list[tuple[str, str]] = []
+    source_run = policy.get("source_run")
+    if isinstance(source_run, str) and source_run:
+        for reason in validate_source_run(source_run, repo_root=REPO_ROOT):
+            violations.append((f"{role}.baseline_policy", reason))
+    return violations
+
+
+def _measurement_timestamp_violations(
+    policy: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Validate an explicit UTC measurement timestamp."""
+    violations: list[tuple[str, str]] = []
+    measurement_timestamp = policy.get("measurement_timestamp")
+    if isinstance(measurement_timestamp, str) and measurement_timestamp:
+        try:
+            validate_iso_utc(
+                measurement_timestamp,
+                field=f"{role}.baseline_policy.measurement_timestamp",
+            )
+        except ValueError as exc:
+            violations.append((f"{role}.baseline_policy", str(exc)))
     return violations
 
 
@@ -1086,40 +1208,33 @@ def _baseline_policy_violations(
       - conservative_normalized: latency/throughput adjusted only downward/inward.
     """
     policy = report.get("baseline_policy")
+    if policy is None:
+        if role == "baseline":
+            return [(f"{role}.baseline_policy", "missing baseline_policy object")]
+        return []
+    if not isinstance(policy, dict):
+        return [(
+            f"{role}.baseline_policy",
+            "baseline_policy must be an object",
+        )]
     if not policy:
         if role == "baseline":
             return [(f"{role}.baseline_policy", "missing baseline_policy object")]
         return []
 
     violations: list[tuple[str, str]] = []
-    exception_is_scoped = _is_scoped_historical_exception(policy)
+    exception_is_scoped = _is_scoped_historical_exception(report)
+    if exception_is_scoped:
+        return violations
 
     type_violations, policy_type = _policy_type_violations(
         policy, role, exception_is_scoped
     )
     violations.extend(type_violations)
 
-    for field in ("source_git_commit", "source_run", "source_artifact"):
-        if field not in policy or policy[field] in (None, "", {}):
-            violations.append((
-                f"{role}.baseline_policy",
-                f"missing or empty {field}",
-            ))
-
-    source_git_commit = policy.get("source_git_commit")
-    if (
-        isinstance(source_git_commit, str)
-        and source_git_commit
-        and not exception_is_scoped
-        and policy_type in _SUPPORTED_POLICY_TYPES
-    ):
-        if not _SHA_RE.match(source_git_commit):
-            violations.append((
-                f"{role}.baseline_policy",
-                f"source_git_commit must be a full 40-character SHA for "
-                f"{policy_type} (got {source_git_commit!r})",
-            ))
-
+    violations.extend(
+        _policy_provenance_violations(policy, role, policy_type)
+    )
     violations.extend(_type_specific_violations(policy, role, policy_type))
     violations.extend(_source_artifact_violations(policy, role, exception_is_scoped))
     return violations
@@ -1132,8 +1247,9 @@ def _sha256_file(path: Path) -> str:
     """Return the lowercase hex SHA-256 digest of a file's bytes."""
     import hashlib
 
+    validated_path = validate_read_path(path, purpose="raw artifact")
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
+    with validated_path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(65536), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -1153,18 +1269,29 @@ def _verify_raw_digest(
     if not isinstance(artifact, str) or not artifact:
         return Path(), "source_artifact is not a string"
 
-    raw_path = REPO_ROOT / artifact
-    if not raw_path.exists():
-        return raw_path, f"retained raw artifact does not exist: {artifact}"
+    candidate = REPO_ROOT / artifact
+    try:
+        raw_path = candidate.resolve(strict=True)
+        raw_path.relative_to(REPO_ROOT.resolve())
+    except FileNotFoundError:
+        return candidate, f"retained raw artifact does not exist: {artifact}"
+    except (RuntimeError, ValueError) as exc:
+        return candidate, (
+            f"retained raw artifact must resolve within the repository root "
+            f"(got {artifact!r}: {exc})"
+        )
 
     raw_digest = policy.get("source_artifact_sha256")
-    if not isinstance(raw_digest, str) or not _SHA256_RE.match(raw_digest):
+    if not isinstance(raw_digest, str) or not _SHA256_RE.fullmatch(raw_digest):
         return raw_path, (
             f"source_artifact_sha256 is not a 64-char hex digest "
             f"(got {raw_digest!r})"
         )
 
-    actual_digest = _sha256_file(raw_path)
+    try:
+        actual_digest = _sha256_file(raw_path)
+    except OSError as exc:
+        return raw_path, f"failed to read retained raw artifact: {exc}"
     if actual_digest != raw_digest:
         return raw_path, (
             f"raw artifact SHA-256 mismatch: policy={raw_digest} "
@@ -1174,14 +1301,64 @@ def _verify_raw_digest(
     return raw_path, None
 
 
+def _raw_provenance_violations(
+    report: dict, raw_report: dict, policy: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Verify policy provenance fields against the retained raw report."""
+    violations: list[tuple[str, str]] = []
+    source_git_commit = policy.get("source_git_commit")
+    if isinstance(source_git_commit, str):
+        for reason in validate_raw_commit_match(raw_report, source_git_commit):
+            violations.append((f"{role}.raw_binding", reason))
+
+    raw_module_benchmark = raw_report.get("module_benchmark", {})
+    raw_timestamp = (
+        raw_module_benchmark.get("timestamp")
+        if isinstance(raw_module_benchmark, dict)
+        else None
+    )
+    policy_timestamp = policy.get("measurement_timestamp")
+    if not isinstance(raw_timestamp, str) or not raw_timestamp:
+        violations.append((
+            f"{role}.raw_binding",
+            "raw report is missing module_benchmark.timestamp",
+        ))
+    else:
+        try:
+            validate_iso_utc(
+                raw_timestamp,
+                field=f"{role}.raw_binding raw timestamp",
+            )
+        except ValueError as exc:
+            violations.append((f"{role}.raw_binding", str(exc)))
+        if policy_timestamp != raw_timestamp:
+            violations.append((
+                f"{role}.raw_binding",
+                "baseline_policy.measurement_timestamp must equal "
+                "raw.module_benchmark.timestamp",
+            ))
+    return violations
+
+
 def _raw_content_binding_violations(
     report: dict, raw_report: dict, policy_type: str, role: str,
 ) -> list[tuple[str, str]]:
     """Verify finalized content against the raw report by policy type."""
     violations: list[tuple[str, str]] = []
     if policy_type == "verbatim_run":
-        for top_key in ("module_benchmark", "decompression_coverage"):
-            if report.get(top_key) != raw_report.get(top_key):
+        finalized_without_policy = {
+            key: value for key, value in report.items()
+            if key != "baseline_policy"
+        }
+        all_keys = sorted(
+            set(finalized_without_policy) | set(raw_report)
+        )
+        for top_key in all_keys:
+            if (
+                top_key not in finalized_without_policy
+                or top_key not in raw_report
+                or finalized_without_policy[top_key] != raw_report[top_key]
+            ):
                 violations.append((
                     f"{role}.raw_binding",
                     f"verbatim_run {top_key} differs from the raw artifact; "
@@ -1191,6 +1368,11 @@ def _raw_content_binding_violations(
         violations.extend(
             _conservative_normalized_truth_violations(report, raw_report, role)
         )
+        policy = report.get("baseline_policy")
+        if isinstance(policy, dict):
+            violations.extend(
+                _adjustment_ledger_violations(report, raw_report, policy, role)
+            )
     return violations
 
 
@@ -1218,7 +1400,7 @@ def _raw_artifact_binding_violations(
     policy = report.get("baseline_policy")
     if not isinstance(policy, dict):
         return []
-    if _is_scoped_historical_exception(policy):
+    if _is_scoped_historical_exception(report):
         return []
 
     raw_path, error = _verify_raw_digest(policy, role)
@@ -1226,51 +1408,52 @@ def _raw_artifact_binding_violations(
         return [(f"{role}.raw_binding", error)]
 
     try:
-        raw_report = json.loads(raw_path.read_text(encoding="utf-8"))
+        validated_raw_path = validate_read_path(
+            raw_path, purpose="retained raw artifact"
+        )
+        raw_report = json.loads(
+            validated_raw_path.read_text(encoding="utf-8")
+        )
     except (json.JSONDecodeError, OSError) as exc:
         return [(
             f"{role}.raw_binding",
             f"failed to read raw artifact: {exc}",
         )]
+    if not isinstance(raw_report, dict):
+        return [(
+            f"{role}.raw_binding",
+            "retained raw artifact must contain a JSON object",
+        )]
 
-    return _raw_content_binding_violations(
+    provenance_violations = _raw_provenance_violations(
+        report, raw_report, policy, role
+    )
+
+    return provenance_violations + _raw_content_binding_violations(
         report, raw_report, policy.get("type"), role
     )
 
 
-_TRUTH_METRIC_FIELDS = (
-    "streaming_path_hits",
-    "fullbuffer_path_hits",
-    "streaming_requests_total",
-    "precommit_failopen_total",
-    "decompression_streaming_total",
-    "decompression_fullbuffer_total",
-    "zero_copy_output_total",
-    "copied_output_total",
-    "baseline_rss_bytes",
-    "peak_rss_bytes",
-    "input_bytes",
-)
 _ADJUSTABLE_METRIC_FIELDS = (
     "rps",
     "latency_p50_ms",
     "latency_p95_ms",
+    "latency_p99_ms",
     "ttfb_p50_ms",
+    "ttfb_p95_ms",
     "ttfb_ms",
     "ttlb_ms",
+    "ttlb_p50_ms",
 )
-_TRUTH_SCENARIO_FIELDS = (
-    "status", "reason", "profile", "compression", "transfer_encoding",
-)
-_MB_TRUTH_FIELDS = (
-    "platform", "load_generator", "nginx_version", "timestamp", "git_commit",
+_LATENCY_ADJUSTABLE_METRIC_FIELDS = frozenset(
+    field for field in _ADJUSTABLE_METRIC_FIELDS if field != "rps"
 )
 
 
 def _scenario_truth_violations(
     name: str, cur_scenario: dict | None, raw_scenario: dict, role: str,
 ) -> list[tuple[str, str]]:
-    """Validate truth-evidence identity for one scenario."""
+    """Validate one scenario and enforce conservative metric directions."""
     violations: list[tuple[str, str]] = []
     if cur_scenario is None:
         violations.append((
@@ -1278,33 +1461,95 @@ def _scenario_truth_violations(
             f"conservative_normalized removed scenario {name!r} present in raw",
         ))
         return violations
-    for field in _TRUTH_SCENARIO_FIELDS:
-        if cur_scenario.get(field) != raw_scenario.get(field):
+    scenario_fields = (set(cur_scenario) | set(raw_scenario)) - {"metrics"}
+    for field in sorted(scenario_fields):
+        if (
+            field not in cur_scenario
+            or field not in raw_scenario
+            or cur_scenario[field] != raw_scenario[field]
+        ):
             violations.append((
                 f"{role}.raw_binding",
                 f"conservative_normalized must not modify scenario {name!r} "
                 f"{field} (finalized={cur_scenario.get(field)!r} "
                 f"raw={raw_scenario.get(field)!r})",
             ))
-    cur_m = cur_scenario.get("metrics", {}) or {}
-    raw_m = raw_scenario.get("metrics", {}) or {}
-    for field in _TRUTH_METRIC_FIELDS:
-        if cur_m.get(field) != raw_m.get(field):
-            violations.append((
-                f"{role}.raw_binding",
-                f"conservative_normalized must not modify scenario {name!r} "
-                f"metric {field} (finalized={cur_m.get(field)!r} "
-                f"raw={raw_m.get(field)!r})",
-            ))
-    for field in _ADJUSTABLE_METRIC_FIELDS:
-        if field in raw_m and field not in cur_m:
-            violations.append((
-                f"{role}.raw_binding",
-                f"conservative_normalized removed adjustable metric {name!r} "
-                f"{field}; adjustments may change values but must not drop "
-                f"measured fields",
-            ))
+    return violations + _metric_truth_violations(
+        name,
+        cur_scenario.get("metrics"),
+        raw_scenario.get("metrics"),
+        role,
+    )
+
+
+def _metric_truth_violations(
+    name: str, cur_metrics: Any, raw_metrics: Any, role: str,
+) -> list[tuple[str, str]]:
+    """Validate metric keys, numeric values, and conservative directions."""
+    prefix = f"{role}.raw_binding"
+    if not isinstance(cur_metrics, dict) or not isinstance(raw_metrics, dict):
+        return [(prefix, f"scenario {name!r} metrics must be objects")]
+
+    cur_fields = set(cur_metrics)
+    raw_fields = set(raw_metrics)
+    violations: list[tuple[str, str]] = []
+    if cur_fields != raw_fields:
+        violations.append((
+            prefix,
+            f"conservative_normalized changed metric keys for scenario {name!r} "
+            f"(added={sorted(cur_fields - raw_fields)} "
+            f"removed={sorted(raw_fields - cur_fields)})",
+        ))
+
+    for field in sorted(cur_fields & raw_fields):
+        violations.extend(
+            _metric_value_violations(
+                name, field, cur_metrics[field], raw_metrics[field], prefix
+            )
+        )
     return violations
+
+
+def _metric_value_violations(
+    name: str, field: str, current: Any, raw: Any, prefix: str,
+) -> list[tuple[str, str]]:
+    """Validate one shared metric's numeric type and conservative direction."""
+    if not _is_finite_number(current) or not _is_finite_number(raw):
+        return [(
+            prefix,
+            f"scenario {name!r} metric {field} must be a finite number",
+        )]
+    return _metric_direction_violations(name, field, current, raw, prefix)
+
+
+def _metric_direction_violations(
+    name: str, field: str, current: int | float, raw: int | float, prefix: str,
+) -> list[tuple[str, str]]:
+    """Enforce the allowed direction for one finite metric value."""
+    if field == "rps" and current > raw:
+        return [(
+            prefix,
+            f"conservative_normalized may only lower rps for scenario "
+            f"{name!r} (finalized={current!r} raw={raw!r})",
+        )]
+    if field in _LATENCY_ADJUSTABLE_METRIC_FIELDS and current < raw:
+        return [(
+            prefix,
+            f"conservative_normalized may only raise {field} for scenario "
+            f"{name!r} (finalized={current!r} raw={raw!r})",
+        )]
+    if field not in _ADJUSTABLE_METRIC_FIELDS and current != raw:
+        return [(
+            prefix,
+            f"conservative_normalized must not modify scenario {name!r} "
+            f"metric {field} (finalized={current!r} raw={raw!r})",
+        )]
+    return []
+
+
+def _is_finite_number(value: Any) -> bool:
+    """Return True for JSON-compatible finite numeric values, excluding bool."""
+    return type(value) in (int, float) and math.isfinite(value)
 
 
 def _conservative_normalized_truth_violations(
@@ -1312,54 +1557,208 @@ def _conservative_normalized_truth_violations(
 ) -> list[tuple[str, str]]:
     """Verify conservative_normalized baselines only adjust throughput/latency.
 
-    Truth evidence that must be identical to the raw report:
-      * platform, load_generator, nginx_version, timestamp, git_commit
-      * scenario status, reason, profile, compression, transfer_encoding
-      * path, fallback, output, memory counters
-      * input_bytes
-      * decompression_coverage
-
     Only RPS (may decrease), latency/TTFB/TTLB (may increase) may be
-    adjusted.  The validator checks identity of truth fields; it does not
-    re-derive the adjustment direction (the finalizer records the rule).
+    adjusted. All other raw evidence must remain identical.
     """
-    violations: list[tuple[str, str]] = []
+    violations = _top_level_truth_violations(finalized, raw, role)
     cur_mb = finalized.get("module_benchmark", {})
     raw_mb = raw.get("module_benchmark", {})
+    if not isinstance(cur_mb, dict) or not isinstance(raw_mb, dict):
+        return violations + [(
+            f"{role}.raw_binding",
+            "conservative_normalized requires module_benchmark objects",
+        )]
+    violations.extend(_module_truth_violations(cur_mb, raw_mb, role))
+    violations.extend(_scenario_list_truth_violations(cur_mb, raw_mb, role))
+    return violations
 
-    for field in _MB_TRUTH_FIELDS:
-        if cur_mb.get(field) != raw_mb.get(field):
+
+def _top_level_truth_violations(
+    finalized: dict, raw: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Verify top-level evidence keys and values are unchanged."""
+    violations: list[tuple[str, str]] = []
+    raw_keys = set(raw) - {"baseline_policy"}
+    finalized_keys = set(finalized) - {"baseline_policy"}
+    if finalized_keys != raw_keys:
+        violations.append((
+            f"{role}.raw_binding",
+            "conservative_normalized changed top-level raw evidence keys "
+            f"(added={sorted(finalized_keys - raw_keys)} "
+            f"removed={sorted(raw_keys - finalized_keys)})",
+        ))
+    for field in sorted(raw_keys - {"module_benchmark"}):
+        if field not in finalized or finalized[field] != raw[field]:
+            violations.append((
+                f"{role}.raw_binding",
+                f"conservative_normalized must not modify top-level {field}",
+            ))
+    return violations
+
+
+def _module_truth_violations(
+    finalized: dict, raw: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Verify module benchmark environment and non-scenario fields."""
+    violations: list[tuple[str, str]] = []
+    for field in sorted((set(finalized) | set(raw)) - {"scenarios"}):
+        if (
+            field not in finalized
+            or field not in raw
+            or finalized[field] != raw[field]
+        ):
             violations.append((
                 f"{role}.raw_binding",
                 f"conservative_normalized must not modify module_benchmark.{field} "
-                f"(finalized={cur_mb.get(field)!r} raw={raw_mb.get(field)!r})",
+                f"(finalized={finalized.get(field)!r} raw={raw.get(field)!r})",
             ))
+    return violations
 
-    if finalized.get("decompression_coverage") != raw.get("decompression_coverage"):
-        violations.append((
+
+def _scenario_list_truth_violations(
+    finalized: dict, raw: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Verify scenario arrays and all scenario-level raw bindings."""
+    raw_scenario_list = raw.get("scenarios")
+    finalized_scenario_list = finalized.get("scenarios")
+    if not isinstance(raw_scenario_list, list) or not isinstance(
+        finalized_scenario_list, list
+    ):
+        return [(
             f"{role}.raw_binding",
-            "conservative_normalized must not modify decompression_coverage",
-        ))
+            "conservative_normalized requires scenario arrays",
+        )]
 
-    cur_scenarios = {
-        s.get("name"): s for s in cur_mb.get("scenarios", []) if isinstance(s, dict)
+    finalized_scenarios = {
+        s.get("name"): s for s in finalized_scenario_list if isinstance(s, dict)
     }
     raw_scenarios = {
-        s.get("name"): s for s in raw_mb.get("scenarios", []) if isinstance(s, dict)
+        s.get("name"): s for s in raw_scenario_list if isinstance(s, dict)
     }
+    violations: list[tuple[str, str]] = []
+    if (
+        len(finalized_scenarios) != len(finalized_scenario_list)
+        or len(raw_scenarios) != len(raw_scenario_list)
+    ):
+        violations.append((
+            f"{role}.raw_binding",
+            "conservative_normalized scenario entries must be objects with "
+            "unique names",
+        ))
     for name, raw_scenario in raw_scenarios.items():
         violations.extend(
             _scenario_truth_violations(
-                name, cur_scenarios.get(name), raw_scenario, role
+                name, finalized_scenarios.get(name), raw_scenario, role
             )
         )
-    for name in cur_scenarios:
+    for name in finalized_scenarios:
         if name not in raw_scenarios:
             violations.append((
                 f"{role}.raw_binding",
                 f"conservative_normalized added scenario {name!r} absent from raw",
             ))
     return violations
+
+
+def _actual_adjustment_ledger(finalized: dict, raw: dict) -> dict:
+    """Return the exact metric deltas between finalized and raw reports."""
+    finalized_mb = finalized.get("module_benchmark", {})
+    raw_mb = raw.get("module_benchmark", {})
+    if not isinstance(finalized_mb, dict) or not isinstance(raw_mb, dict):
+        return {}
+    finalized_scenario_list = finalized_mb.get("scenarios")
+    raw_scenario_list = raw_mb.get("scenarios")
+    if not isinstance(finalized_scenario_list, list) or not isinstance(
+        raw_scenario_list, list
+    ):
+        return {}
+    finalized_scenarios = {
+        scenario.get("name"): scenario
+        for scenario in finalized_scenario_list
+        if isinstance(scenario, dict)
+    }
+    raw_scenarios = {
+        scenario.get("name"): scenario
+        for scenario in raw_scenario_list
+        if isinstance(scenario, dict)
+    }
+    ledger: dict = {}
+    for name, raw_scenario in raw_scenarios.items():
+        scenario_ledger = _scenario_adjustment_ledger(
+            finalized_scenarios.get(name), raw_scenario
+        )
+        if "rps" in scenario_ledger:
+            ledger.setdefault("rps", {})[name] = scenario_ledger["rps"]
+        if "latency_ttfb" in scenario_ledger:
+            ledger.setdefault("latency_ttfb", {})[name] = scenario_ledger[
+                "latency_ttfb"
+            ]
+    return ledger
+
+
+def _scenario_adjustment_ledger(
+    finalized: Any, raw: dict,
+) -> dict:
+    """Return the adjustment deltas for one scenario."""
+    if not isinstance(finalized, dict):
+        return {}
+    raw_metrics = raw.get("metrics")
+    finalized_metrics = finalized.get("metrics")
+    if not isinstance(raw_metrics, dict) or not isinstance(finalized_metrics, dict):
+        return {}
+
+    ledger: dict = {}
+    for field in _ADJUSTABLE_METRIC_FIELDS:
+        if field not in raw_metrics or field not in finalized_metrics:
+            continue
+        raw_value = raw_metrics[field]
+        finalized_value = finalized_metrics[field]
+        if not (
+            _is_finite_number(raw_value)
+            and _is_finite_number(finalized_value)
+            and finalized_value != raw_value
+        ):
+            continue
+        if field == "rps":
+            ledger["rps"] = finalized_value - raw_value
+        else:
+            ledger.setdefault("latency_ttfb", {})[field] = (
+                finalized_value - raw_value
+            )
+    return ledger
+
+
+def _adjustment_ledger_violations(
+    finalized: dict, raw: dict, policy: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Require policy adjustments to describe every actual metric delta."""
+    actual = _actual_adjustment_ledger(finalized, raw)
+    declared = policy.get("adjustments")
+    if not _strict_json_equal(declared, actual):
+        return [(
+            f"{role}.raw_binding",
+            "conservative_normalized adjustments must exactly match the "
+            f"raw/finalized metric deltas (declared={declared!r} "
+            f"actual={actual!r})",
+        )]
+    return []
+
+
+def _strict_json_equal(left: Any, right: Any) -> bool:
+    """Compare JSON values without treating bool as an integer."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return (
+            set(left) == set(right)
+            and all(_strict_json_equal(left[key], right[key]) for key in left)
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _strict_json_equal(item_left, item_right)
+            for item_left, item_right in zip(left, right)
+        )
+    return left == right
 
 
 def _scenario_source_entry_violations(

@@ -8,6 +8,11 @@ import sys
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+
+from lib.path_validation import validate_read_path
+
+
 PRODUCTION = os.path.join(
     ROOT, "components", "nginx-module", "src", "ngx_http_markdown_metrics_impl.h"
 )
@@ -48,8 +53,10 @@ FIELDS = (
 
 
 def read_text(path):
-    with open(path, "r") as source:
-        return source.read()
+    # Validate every detector input before opening it, including fixed paths,
+    # so the harness itself satisfies the repository path-safety contract.
+    validated_path = validate_read_path(path, purpose="metrics stub drift")
+    return validated_path.read_text(encoding="utf-8")
 
 
 def main():
