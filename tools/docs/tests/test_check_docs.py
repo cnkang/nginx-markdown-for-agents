@@ -155,3 +155,30 @@ def test_unreleased_release_line_accepts_development_rc_status(tmp_path):
     )
 
     assert check_status(changelog, project_status) == []
+
+
+def test_unreleased_release_line_cannot_have_stable_release_notes(tmp_path):
+    """Release notes must remain pending until the release is actually cut."""
+    check_status = getattr(
+        docs_checker,
+        "check_release_status_consistency",
+        None,
+    )
+    assert callable(check_status)
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text("## [0.9.1] - Unreleased\n", encoding="utf-8")
+    project_status = tmp_path / "PROJECT_STATUS.md"
+    project_status.write_text(
+        "### Current Release Line 0.9.1\n\n"
+        "**Status:** Release candidate.\n",
+        encoding="utf-8",
+    )
+    release_notes = tmp_path / "0.9.1-release-notes.md"
+    release_notes.write_text(
+        "**Date**: 2026-07-28\n**Status**: Stable release\n",
+        encoding="utf-8",
+    )
+
+    errors = check_status(changelog, project_status, release_notes)
+
+    assert any("release notes" in error for error in errors)

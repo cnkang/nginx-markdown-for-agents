@@ -5,15 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.1] - 2026-07-28
+## [0.9.1] - Unreleased
 
 Final pre-v1.0 baseline-consolidation and compatibility-reset release. In
 addition to performance readiness and release evidence, this release closes
 toolchain and public-contract debt before the v1.0 compatibility freeze.
-
-Released on 2026-07-28. See the [v0.9.1 release notes](docs/release/0.9.1-release-notes.md)
-and [0.9.x migration guide](docs/guides/MIGRATION-0.9.md) for operator impact
-and upgrade steps.
 
 v0.9.0 was released with the intention that it would be the last breaking
 release before v1.0. The freeze was deliberately extended through v0.9.1

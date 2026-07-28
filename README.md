@@ -380,15 +380,9 @@ make supply-chain
 - [Harness Maintenance SOP](docs/guides/HARNESS_MAINTENANCE.md) — Custom lint rules and validation scripting.
 - [Frequently Asked Questions (FAQ)](docs/FAQ.md) & [Glossary](docs/glossary.md).
 
-## Released: v0.9.1 (2026-07-28)
+## What's New in v0.9.1
 
-v0.9.1 is the **final pre-v1.0 baseline consolidation and compatibility reset**.
-Released on 2026-07-28, it combines performance readiness with the last
-deliberate source-build and public-contract cleanup before the v1.0
-compatibility freeze. v0.9.0 was intended to be the last breaking release;
-the freeze was extended through v0.9.1 while v1.0 remained unpublished and
-adoption was still limited. See the [v0.9.1 release notes](docs/release/0.9.1-release-notes.md)
-and [migration guide](docs/guides/MIGRATION-0.9.md) before upgrading.
+v0.9.1 is the **final pre-v1.0 baseline consolidation and compatibility reset**. It combines performance readiness with the last deliberate source-build and public-contract cleanup before the v1.0 freeze. v0.9.0 was intended to be the last breaking release; the freeze was extended through v0.9.1 while v1.0 remained unpublished and adoption was still limited.
 
 - **Rust baseline reset**: source builds now require Rust 1.97+; repository, CI, and release builds use exact Rust 1.97.0 (MSRV 1.97). Prebuilt module users do not need Rust.
 - **Single streaming control**: `markdown_streaming off|auto|force` is now the sole processing-path selector. The duplicate `markdown_streaming_engine` directive is reject-only with exact off/auto/on migration hints.
@@ -419,7 +413,6 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.1 | 2026-07-28 | Codex | Marked v0.9.1 as released; linked the release notes and migration guidance. |
 | 0.9.1 | 2026-07-19 | Codex | Finalized the v0.9.1 release summary for Brotli streaming decompression, build controls, and release evidence. |
 | 0.9.1 | 2026-07-17 | Kang | Optimized README organization, removed historical What's New logs, consolidated capabilities table, and structured docs index for v0.9.1 release. |
 | 0.9.0 | 2026-07-02 | Kang | Doc review: added What's New v0.9.0 section, MIGRATION-0.9 link, reason code count fix, CHANGELOG sync with branch commits |

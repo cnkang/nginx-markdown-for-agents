@@ -28,11 +28,10 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Current Release Line 0.9.1
 
-**Status:** Stable release, published 2026-07-28. 0.9.1 introduces zero-copy
-output for streaming, gzip plus zlib/raw-deflate plus Brotli streaming
-decompression, and full-buffer copy reduction, all guarded by strict
-performance evidence gates. The v1.0 compatibility-freeze preparation phase is
-now active.
+**Status:** Unreleased development and release-candidate line. 0.9.1
+introduces zero-copy output for streaming, gzip plus zlib/raw-deflate plus
+Brotli streaming decompression, and full-buffer copy reduction, all guarded by
+strict performance evidence gates.
 
 ### Release 0.7.0 Updates
 
@@ -698,7 +697,6 @@ For questions, issues, or feature requests, use the [GitHub issue tracker](https
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.1 | 2026-07-28 | Codex | Recorded the v0.9.1 release date and transition to v1.0 compatibility-freeze preparation. |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.8.3 | 2026-06-26 | Kang | 0.8.3 closeout: streaming state machine fixes, ExitMany batch unwind, decompression buffer memory safety, snapshot capacity, FFI Box::into_raw fix, full release gate validation |
 | 0.8.2 | 2026-06-23 | Kang | 0.8.2 release: streaming decompression hardening, implied-closure correctness, FFI panic safety, decompression budget enforcement, security scan scoping, release-line documentation closeout |
