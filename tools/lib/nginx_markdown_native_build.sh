@@ -349,7 +349,15 @@ markdown_prepare_runtime_reuse() {
 
   markdown_copy_runtime_conf_from_nginx_bin "${nginx_bin}" "${runtime_dir}" || return 1
 
-  module_path="$(markdown_find_dynamic_markdown_module "${nginx_bin}" || true)"
+  if [[ -n "${MODULE_SO:-}" ]]; then
+    module_path="${MODULE_SO}"
+    if [[ ! -f "${module_path}" ]]; then
+      echo "Configured MODULE_SO is not a regular file: ${module_path}" >&2
+      return 1
+    fi
+  else
+    module_path="$(markdown_find_dynamic_markdown_module "${nginx_bin}" || true)"
+  fi
   if [[ -z "${module_path}" ]]; then
     return 0
   fi
