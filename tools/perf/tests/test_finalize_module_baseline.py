@@ -383,6 +383,52 @@ def test_finalizer_rejects_source_artifact_mismatch(
     ]) == 1
 
 
+def test_finalizer_rejects_output_file_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A finalized output symlink must not redirect writes outside the repo."""
+    repo = tmp_path / "repo"
+    (repo / "perf" / "baselines").mkdir(parents=True)
+    outside = tmp_path / "outside.json"
+    outside.write_text("sentinel\n", encoding="utf-8")
+    (repo / "perf" / "baselines" / "out.json").symlink_to(outside)
+    _write_raw(repo, "perf/baselines/raw.json")
+    monkeypatch.chdir(repo)
+    import finalize_module_baseline as mod
+
+    monkeypatch.setattr(mod, "REPO_ROOT", repo.resolve())
+    assert main([
+        "--raw-input", "perf/baselines/raw.json",
+        "--output", "perf/baselines/out.json",
+        "--source-git-commit", _GOOD_SHA,
+        "--source-run", _GOOD_RUN_URL,
+    ]) == 1
+    assert outside.read_text(encoding="utf-8") == "sentinel\n"
+
+
+def test_finalizer_rejects_output_parent_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A symlinked output directory must not redirect the atomic replace."""
+    repo = tmp_path / "repo"
+    (repo / "perf" / "baselines").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (repo / "perf" / "baselines" / "linked").symlink_to(outside, target_is_directory=True)
+    _write_raw(repo, "perf/baselines/raw.json")
+    monkeypatch.chdir(repo)
+    import finalize_module_baseline as mod
+
+    monkeypatch.setattr(mod, "REPO_ROOT", repo.resolve())
+    assert main([
+        "--raw-input", "perf/baselines/raw.json",
+        "--output", "perf/baselines/linked/out.json",
+        "--source-git-commit", _GOOD_SHA,
+        "--source-run", _GOOD_RUN_URL,
+    ]) == 1
+    assert not (outside / "out.json").exists()
+
+
 def test_finalizer_rejects_missing_raw_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
