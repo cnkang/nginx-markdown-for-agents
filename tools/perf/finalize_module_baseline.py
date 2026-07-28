@@ -263,7 +263,11 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
         path, REPO_ROOT, purpose="finalized baseline"
     )
     validated_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = validated_path.with_suffix(validated_path.suffix + ".tmp")
+    tmp = validate_write_path_within_root(
+        validated_path.with_suffix(validated_path.suffix + ".tmp"),
+        REPO_ROOT,
+        purpose="temporary finalized baseline",
+    )
     try:
         tmp.write_text(
             json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
