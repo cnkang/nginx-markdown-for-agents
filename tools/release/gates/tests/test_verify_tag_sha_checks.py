@@ -10,7 +10,6 @@ import pytest
 from tools.release.gates.verify_tag_sha_checks import (
     RequiredCheck,
     _load_json,
-    _latest_status_state,
     _status_errors,
     main,
     required_checks,
