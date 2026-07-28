@@ -413,29 +413,46 @@ def validate_required_checks(
 
     errors: list[str] = []
     for required in checks:
-        try:
-            matching_runs = [run for run in runs if _matches_required_check(run, required)]
-            has_matching_run = bool(matching_runs)
-            has_matching_status = (
-                statuses is not None
-                and _has_matching_status(statuses, required.context)
-            )
-        except MalformedPayloadError as error:
-            errors.append(
-                f"Malformed commit-status payload for required check "
-                f"'{required.context}': {error}"
-            )
-            continue
+        errors.extend(
+            _evaluate_one_required_check(required, runs, statuses)
+        )
+    return errors
 
-        if not has_matching_run and not has_matching_status:
-            errors.extend(_missing_errors(required))
-            continue
 
-        if has_matching_run:
-            errors.extend(_check_run_errors(required, matching_runs))
+def _evaluate_one_required_check(
+    required: RequiredCheck,
+    runs: list[dict[str, Any]],
+    statuses: Any,
+) -> list[str]:
+    """Evaluate a single required check against runs and statuses.
 
-        if has_matching_status:
-            errors.extend(_status_errors(required, statuses, has_matching_run))
+    Encapsulates the per-check logic so ``validate_required_checks`` stays
+    a simple loop.  Malformed payloads are caught and reported as blocking
+    errors for the affected context.
+    """
+    try:
+        matching_runs = [
+            run for run in runs if _matches_required_check(run, required)
+        ]
+        has_matching_run = bool(matching_runs)
+        has_matching_status = (
+            statuses is not None
+            and _has_matching_status(statuses, required.context)
+        )
+    except MalformedPayloadError as error:
+        return [
+            f"Malformed commit-status payload for required check "
+            f"'{required.context}': {error}"
+        ]
+
+    if not has_matching_run and not has_matching_status:
+        return _missing_errors(required)
+
+    errors: list[str] = []
+    if has_matching_run:
+        errors.extend(_check_run_errors(required, matching_runs))
+    if has_matching_status:
+        errors.extend(_status_errors(required, statuses, has_matching_run))
     return errors
 
 
