@@ -8,9 +8,10 @@ from pathlib import Path
 import pytest
 
 from tools.release.gates.verify_tag_sha_checks import (
+    RequiredCheck,
     _load_json,
     main,
-    required_check_contexts,
+    required_checks,
     validate_required_checks,
 )
 
@@ -26,6 +27,20 @@ def _required_rules(*contexts: str) -> list[dict[str, object]]:
     ]
 
 
+def _required_rules_with_apps(*checks: tuple[str, int | None]) -> list[dict[str, object]]:
+    return [
+        {
+            "type": "required_status_checks",
+            "parameters": {
+                "required_status_checks": [
+                    {"context": context, "integration_id": integration_id}
+                    for context, integration_id in checks
+                ]
+            },
+        }
+    ]
+
+
 def _check_run(
     name: str,
     *,
@@ -33,12 +48,31 @@ def _check_run(
     status: str = "completed",
     conclusion: str | None = "success",
     created_at: str = "2026-07-28T00:00:00Z",
+    app_id: int | None = None,
 ) -> dict[str, object]:
-    return {
+    run: dict[str, object] = {
         "id": run_id,
         "name": name,
         "status": status,
         "conclusion": conclusion,
+        "created_at": created_at,
+    }
+    if app_id is not None:
+        run["app"] = {"id": app_id}
+    return run
+
+
+def _commit_status(
+    context: str,
+    *,
+    status_id: int,
+    state: str,
+    created_at: str = "2026-07-28T00:00:00Z",
+) -> dict[str, object]:
+    return {
+        "id": status_id,
+        "context": context,
+        "state": state,
         "created_at": created_at,
     }
 
@@ -153,13 +187,15 @@ def test_main_rejects_an_absolute_input_path(
 
 
 def test_extracts_required_contexts_from_branch_effective_rules() -> None:
-    """Only active required-status-check rules contribute contexts."""
+    """Only active required-status-check rules contribute required checks."""
     rules = [
         {"type": "deletion"},
         *_required_rules("CI / test", "CI / test"),
     ]
 
-    assert required_check_contexts(rules) == ["CI / test"]
+    assert required_checks(rules) == [
+        RequiredCheck(context="CI / test", integration_id=None)
+    ]
 
 
 def test_empty_effective_rules_fail_closed() -> None:
@@ -274,3 +310,189 @@ def test_missing_or_incomplete_required_check_blocks_release() -> None:
     assert len(errors) == 2
     assert any("CI / test" in error and "in_progress" in error for error in errors)
     assert any("CI / docs" in error and "missing" in error for error in errors)
+
+
+def test_integration_id_requires_the_check_run_to_come_from_that_app() -> None:
+    """A context pinned to an app is not satisfied by another app's check run."""
+    rules = _required_rules_with_apps(("CI / test", 1234))
+
+    assert validate_required_checks(
+        rules, [_check_run("CI / test", run_id=1, app_id=1234)], branch="main"
+    ) == []
+
+    errors = validate_required_checks(
+        rules, [_check_run("CI / test", run_id=1, app_id=5678)], branch="main"
+    )
+    assert len(errors) == 1
+    assert "CI / test" in errors[0]
+    assert "app 1234" in errors[0]
+    assert "missing" in errors[0]
+
+
+def test_required_check_without_integration_id_accepts_any_source() -> None:
+    """A context without integration_id accepts check runs from any app."""
+    assert validate_required_checks(
+        _required_rules_with_apps(("CI / test", None)),
+        [_check_run("CI / test", run_id=1, app_id=5678)],
+        branch="main",
+    ) == []
+
+
+def test_integration_id_scopes_rerun_selection_to_that_app() -> None:
+    """A newer success from another app must not hide the pinned app's failure."""
+    rules = _required_rules_with_apps(("CI / test", 1234))
+    pinned_failure = _check_run(
+        "CI / test",
+        run_id=1,
+        app_id=1234,
+        conclusion="failure",
+        created_at="2026-07-28T01:00:00Z",
+    )
+    foreign_success = _check_run(
+        "CI / test",
+        run_id=2,
+        app_id=5678,
+        created_at="2026-07-28T02:00:00Z",
+    )
+
+    errors = validate_required_checks(rules, [pinned_failure, foreign_success], branch="main")
+
+    assert len(errors) == 1
+    assert "CI / test" in errors[0]
+    assert "failure" in errors[0]
+
+
+@pytest.mark.parametrize("integration_id", ["1234", 1.5, True])
+def test_invalid_integration_id_fails_closed(integration_id: object) -> None:
+    """A non-integer integration_id must be a parse error, never a pass."""
+    rules = [
+        {
+            "type": "required_status_checks",
+            "parameters": {
+                "required_status_checks": [
+                    {"context": "CI / test", "integration_id": integration_id}
+                ]
+            },
+        }
+    ]
+
+    errors = validate_required_checks(rules, [], branch="main")
+
+    assert len(errors) == 1
+    assert "integration_id" in errors[0]
+    assert "CI / test" in errors[0]
+
+
+def test_commit_status_satisfies_a_context_without_check_runs() -> None:
+    """Contexts reported through the Commit Status API are not missing."""
+    assert validate_required_checks(
+        _required_rules("external / status"),
+        [],
+        [{"statuses": [_commit_status("external / status", status_id=1, state="success")]}],
+        branch="main",
+    ) == []
+
+
+@pytest.mark.parametrize("state", ["error", "failure", "pending"])
+def test_unsuccessful_commit_status_blocks(state: str) -> None:
+    """A non-success commit status for a missing check run stays blocking."""
+    errors = validate_required_checks(
+        _required_rules("external / status"),
+        [],
+        [{"statuses": [_commit_status("external / status", status_id=1, state=state)]}],
+        branch="main",
+    )
+
+    assert len(errors) == 1
+    assert "external / status" in errors[0]
+    assert state in errors[0]
+
+
+def test_latest_commit_status_controls_the_gate() -> None:
+    """A newer failing commit status overrides an older success."""
+    older_success = _commit_status(
+        "external / status",
+        status_id=1,
+        state="success",
+        created_at="2026-07-28T00:00:00Z",
+    )
+    newer_failure = _commit_status(
+        "external / status",
+        status_id=2,
+        state="failure",
+        created_at="2026-07-28T01:00:00Z",
+    )
+
+    errors = validate_required_checks(
+        _required_rules("external / status"),
+        [],
+        [{"statuses": [older_success, newer_failure]}],
+        branch="main",
+    )
+
+    assert len(errors) == 1
+    assert "failure" in errors[0]
+
+
+def test_commit_status_cannot_satisfy_an_integration_pinned_context() -> None:
+    """A commit status cannot prove the GitHub App that produced it."""
+    errors = validate_required_checks(
+        _required_rules_with_apps(("CI / test", 1234)),
+        [],
+        [{"statuses": [_commit_status("CI / test", status_id=1, state="success")]}],
+        branch="main",
+    )
+
+    assert len(errors) == 1
+    assert "app 1234" in errors[0]
+    assert "missing" in errors[0]
+
+
+def test_context_absent_from_check_runs_and_statuses_is_missing() -> None:
+    """A context in neither API response remains a missing-check error."""
+    errors = validate_required_checks(
+        _required_rules("CI / test"), [], [{"statuses": []}], branch="main"
+    )
+
+    assert errors == ["Required check 'CI / test' is missing on the tag SHA."]
+
+
+def test_main_accepts_a_statuses_file_for_commit_status_contexts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI evaluates commit-status-only contexts from --statuses-file."""
+    repository = tmp_path / "repository"
+    input_dir = repository / ".tag-sha-checks"
+    input_dir.mkdir(parents=True)
+    (input_dir / "rules.json").write_text(
+        '[{"type": "required_status_checks", "parameters": '
+        '{"required_status_checks": [{"context": "external / status"}]}}]',
+        encoding="utf-8",
+    )
+    (input_dir / "check-runs.json").write_text('[{"check_runs": []}]', encoding="utf-8")
+    (input_dir / "statuses.json").write_text(
+        '[{"statuses": [{"id": 1, "context": "external / status", '
+        '"state": "success", "created_at": "2026-07-28T00:00:00Z"}]}]',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repository)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "verify_tag_sha_checks.py",
+            "--rules-file",
+            ".tag-sha-checks/rules.json",
+            "--check-runs-file",
+            ".tag-sha-checks/check-runs.json",
+            "--statuses-file",
+            ".tag-sha-checks/statuses.json",
+            "--tag-sha",
+            "abc123",
+            "--branch",
+            "main",
+        ],
+    )
+
+    assert main() == 0
+    assert "passed all required checks" in capsys.readouterr().out

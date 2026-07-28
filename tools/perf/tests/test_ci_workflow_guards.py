@@ -65,6 +65,8 @@ def test_release_gate_requires_exact_tag_sha_checks() -> None:
         "gh api --paginate --slurp",
         "verify_tag_sha_checks.py",
         "commits/${TAG_SHA}/check-runs",
+        "commits/${TAG_SHA}/status",
+        "--statuses-file",
     ):
         assert snippet in workflow
     gate = (repo_root / "tools" / "release" / "gates" / "verify_tag_sha_checks.py").read_text(
