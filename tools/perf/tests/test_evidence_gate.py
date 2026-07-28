@@ -1608,6 +1608,125 @@ class TestScenarioSourceEnvironment:
 
         assert any(name in reason for _check, reason in violations)
 
+    def _minimal_baseline_report(self) -> dict:
+        """An eight-scenario baseline that passes path-coverage and memory checks."""
+        scenario_defs = [
+            ("plain-small", "balanced", "none", "identity", False),
+            ("chunked-medium", "balanced", "none", "chunked", False),
+            ("gzip-large", "balanced", "gzip", "identity", False),
+            ("large-body", "balanced", "none", "identity", False),
+            ("streaming-first", "streaming_first", "none", "chunked", True),
+            ("gzip-streaming-first", "streaming_first", "gzip", "chunked", True),
+            ("deflate-streaming-first", "streaming_first", "deflate", "chunked", True),
+            ("brotli-streaming-first", "streaming_first", "brotli", "chunked", True),
+        ]
+        scenarios = []
+        for name, profile, comp, te, streaming in scenario_defs:
+            metrics = {
+                "fullbuffer_path_hits": 1030 if not streaming else 0,
+                "streaming_path_hits": 1030 if streaming else 0,
+                "streaming_ratio": 1.0 if streaming else 0.0,
+                "fullbuffer_ratio": 0.0 if streaming else 1.0,
+                "streaming_requests_total": 1030,
+                "precommit_failopen_total": 0,
+                "zero_copy_output_total": 500,
+                "copied_output_total": 0,
+                "input_bytes": 100,
+                "baseline_rss_bytes": 1000,
+                "peak_rss_bytes": 1100,
+            }
+            if name in ("gzip-large", "gzip-streaming-first"):
+                metrics["decompression_streaming_total"] = (
+                    1030 if streaming else 0
+                )
+                metrics["decompression_fullbuffer_total"] = (
+                    1030 if not streaming else 0
+                )
+            scenarios.append({
+                "name": name,
+                "status": "completed",
+                "profile": profile,
+                "compression": comp,
+                "transfer_encoding": te,
+                "metrics": metrics,
+            })
+        return {
+            "module_benchmark": {
+                "platform": "linux-x86_64",
+                "load_generator": "ab",
+                "nginx_version": "nginx version: nginx/1.24.0",
+                "scenarios": scenarios,
+            },
+        }
+
+    @pytest.mark.parametrize(
+        "type_value",
+        ["", None, 0, 1234, "anything", "verbatim", "VERBATIM_RUN"],
+    )
+    def test_baseline_policy_rejects_unsupported_or_missing_type(self, type_value):
+        """Unknown, empty, missing, and wrong-typed baseline_policy.type fail closed."""
+        report = self._minimal_baseline_report()
+        policy = {
+            "source_git_commit": "0123456789abcdef0123456789abcdef01234567",
+            "source_run": "actions/runs/999",
+            "source_artifact": "perf/baselines/raw.json",
+            "measurement_timestamp": "2026-01-01T00:00:00Z",
+            "normalization": "none",
+        }
+        if type_value is not None:
+            policy["type"] = type_value
+        report["baseline_policy"] = policy
+        violations = _validate_benchmark_evidence(report, role="baseline")
+        assert any(
+            check == "baseline.baseline_policy" and "type" in reason
+            for check, reason in violations
+        )
+
+    def test_verbatim_baseline_requires_full_sha_and_none_normalization(self):
+        """A verbatim_run policy must carry a 40-char SHA and normalization=none."""
+        report = self._minimal_baseline_report()
+        report["baseline_policy"] = {
+            "type": "verbatim_run",
+            "source_git_commit": "012345",
+            "source_run": "actions/runs/999",
+            "source_artifact": "perf/baselines/raw.json",
+            "measurement_timestamp": "2026-01-01T00:00:00Z",
+            "normalization": "adjusted",
+        }
+        violations = _validate_benchmark_evidence(report, role="baseline")
+        assert any(
+            "40-character SHA" in reason for _check, reason in violations
+        )
+        assert any(
+            "normalization must be 'none'" in reason for _check, reason in violations
+        )
+
+    def test_verbatim_baseline_requires_measurement_timestamp(self):
+        """A verbatim_run policy without measurement_timestamp is rejected."""
+        report = self._minimal_baseline_report()
+        report["baseline_policy"] = {
+            "type": "verbatim_run",
+            "source_git_commit": "0123456789abcdef0123456789abcdef01234567",
+            "source_run": "actions/runs/999",
+            "source_artifact": "perf/baselines/raw.json",
+            "normalization": "none",
+        }
+        violations = _validate_benchmark_evidence(report, role="baseline")
+        assert any("measurement_timestamp" in reason for _check, reason in violations)
+
+    def test_conservative_normalized_still_requires_adjustment_fields(self):
+        """A conservative_normalized policy must keep adjustment metadata."""
+        report = self._minimal_baseline_report()
+        report["baseline_policy"] = {
+            "type": "conservative_normalized",
+            "source_git_commit": "0123456789abcdef0123456789abcdef01234567",
+            "source_run": "actions/runs/999",
+            "source_artifact": "perf/baselines/raw.json",
+        }
+        violations = _validate_benchmark_evidence(report, role="baseline")
+        for field in ("adjustments", "adjustment_reason", "adjustment_date"):
+            assert any(field in reason for _check, reason in violations)
+
     def test_valid_baseline_requires_zero_canonical_failopen(self):
         """Canonical evidence passes at zero fail-open and rejects even 1%."""
         report = {

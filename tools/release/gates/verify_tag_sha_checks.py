@@ -163,31 +163,61 @@ def _has_matching_status(statuses: Any, context: str) -> bool:
     return _latest_status_state(statuses, context) is not None
 
 
-def _status_errors(required: RequiredCheck, statuses: Any, has_matching_run: bool) -> list[str]:
+def _status_errors(
+    required: RequiredCheck, statuses: Any, has_matching_run: bool,
+) -> list[str]:
     """Evaluate the Commit Status API result for a required context.
 
-    A commit status cannot prove which GitHub App produced it, so it never
-    satisfies a context pinned to an integration_id.  When integration_id is
-    None, the latest commit status state must be ``success``.
+    GitHub requires that when a check run and a commit status share the
+    same required context name, **both** must pass.  We never ignore a
+    legacy commit status because:
 
-    For pinned contexts (integration_id is not None):
-    - If there IS a matching check run from the correct app, the commit status
-      is ignored (GitHub treats check runs as authoritative for pinned contexts).
-    - If there is NO matching check run, the commit status cannot satisfy the
-      requirement and we return an error.
+    * The Commit Status API cannot prove which GitHub App produced a status,
+      so an app-pinned context cannot rely on it for source verification.
+      But the status still represents an independent signal for that same
+      required context name, and a failing one must block rather than be
+      silently discarded.
+
+    * Without the status, the gate is already satisfied or rejected by the
+      check-run path alone.
+
+    Policy per context:
+    - Correct-app check run exists AND no commit status: satisfied by the
+      check run.
+    - Correct-app check run exists AND commit status present: status must
+      be ``success`` too (same-name both-pass rule).
+    - No correct-app check run AND pinned context: the status cannot
+      satisfy an integration-pinned requirement.
+    - No correct-app check run AND unpinned context: status must be
+      ``success``.
     """
-    if required.integration_id is not None:
-        if has_matching_run:
-            # A check run from the correct app exists; commit status is
-            # supplementary/legacy and does not affect the gate.
+    if required.integration_id is not None and has_matching_run:
+        # A matching check run from the correct app exists.  GitHub's
+        # same-name rule still requires the commit status to pass; fail
+        # closed on any non-success status.
+        state = _latest_status_state(statuses, required.context)
+        if state is None:
+            # Same context not reported through the Commit Status API;
+            # the check run alone satisfies the pinned requirement.
             return []
-        # No matching check run from the pinned app — commit status cannot
-        # satisfy an integration-pinned requirement.
+        if state != "success":
+            return [
+                f"Required check '{required.context}' has a successful check run "
+                f"from app {required.integration_id} but a non-successful commit "
+                f"status for the same context (state={state!r}); when a check run "
+                f"and commit status share a required context name, both must pass."
+            ]
+        return []
+
+    if required.integration_id is not None:
+        # Pinned context with no matching check run: commit status cannot
+        # prove the App that produced it, so it cannot satisfy the pin.
         return [
             f"Required check '{required.context}' from app "
             f"{required.integration_id} has no matching check run on the tag SHA; "
             f"commit statuses cannot satisfy an integration-pinned context."
         ]
+
     state = _latest_status_state(statuses, required.context)
     if state is None:
         return [f"Required check '{required.context}' is missing on the tag SHA."]

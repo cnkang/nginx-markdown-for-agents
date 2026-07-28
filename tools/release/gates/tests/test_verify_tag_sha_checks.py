@@ -604,19 +604,46 @@ def test_same_name_both_fail_produces_two_errors() -> None:
     assert any("failure" in e and "commit status" in e for e in errors)
 
 
-def test_same_name_pinned_check_with_status_requires_check_run() -> None:
-    """An integration-pinned context ignores commit status when a matching check run exists."""
+def test_same_name_pinned_check_with_status_requires_both_pass() -> None:
+    """When a check run and commit status share a required context, both must pass.
+
+    Even for an integration-pinned context, the same-name rule means a
+    non-successful commit status blocks the tag; the commit Status API
+    cannot prove source, but a failing status must never be silently
+    ignored.
+    """
     rules = _required_rules_with_apps(("CI / test", 1234))
     check_run_success = _check_run("CI / test", run_id=1, conclusion="success", app_id=1234)
     status_failure = _commit_status("CI / test", status_id=1, state="failure")
-
     errors = validate_required_checks(
         rules, [check_run_success], [{"statuses": [status_failure]}], branch="main"
     )
+    assert len(errors) == 1
+    assert "CI / test" in errors[0]
+    assert "both must pass" in errors[0]
 
-    # With a valid check run from the correct app, the commit status is ignored
+
+def test_same_name_pinned_check_success_status_success_passes() -> None:
+    """Pinned context: matching check run plus successful commit status both pass."""
+    rules = _required_rules_with_apps(("CI / test", 1234))
+    check_run_success = _check_run("CI / test", run_id=1, conclusion="success", app_id=1234)
+    status_success = _commit_status("CI / test", status_id=1, state="success")
+    errors = validate_required_checks(
+        rules, [check_run_success], [{"statuses": [status_success]}], branch="main"
+    )
     assert errors == []
 
+
+def test_pinned_check_run_with_no_status_passes() -> None:
+    """Pinned context with correct-app check run and no commit status: satisfied."""
+    rules = _required_rules_with_apps(("CI / test", 1234))
+    check_run_success = _check_run("CI / test", run_id=1, conclusion="success", app_id=1234)
+    assert validate_required_checks(
+        rules, [check_run_success], [{"statuses": []}], branch="main"
+    ) == []
+    assert validate_required_checks(
+        rules, [check_run_success], branch="main"
+    ) == []
 
 def test_same_name_pinned_check_missing_with_status_blocks() -> None:
     """An integration-pinned context with no matching check run blocks regardless of status."""
@@ -642,14 +669,23 @@ def test_status_errors_helper_rejects_pinned_context_no_check_run() -> None:
     assert "integration-pinned" in errors[0]
 
 
-def test_status_errors_helper_ignores_status_when_check_run_exists_for_pinned() -> None:
-    """_status_errors ignores commit status for pinned context when matching check run exists."""
+def test_status_errors_helper_requires_status_success_with_pinned_check_run() -> None:
+    """_status_errors must require the commit status to succeed when a matching pinned check run exists."""
     required = RequiredCheck(context="CI / test", integration_id=1234)
-    statuses = [{"statuses": [_commit_status("CI / test", status_id=1, state="failure")]}]
+    # Successful status: ok
+    good = [{"statuses": [_commit_status("CI / test", status_id=1, state="success")]}]
+    assert _status_errors(required, good, has_matching_run=True) == []
+    # Failing status: must block
+    bad = [{"statuses": [_commit_status("CI / test", status_id=1, state="failure")]}]
+    errors = _status_errors(required, bad, has_matching_run=True)
+    assert len(errors) == 1
+    assert "both must pass" in errors[0]
 
-    # Matching check run exists -> status ignored
-    errors = _status_errors(required, statuses, has_matching_run=True)
-    assert errors == []
+
+def test_status_errors_helper_accepts_pinned_run_without_status() -> None:
+    """_status_errors accepts a pinned check run when there is no commit status at all."""
+    required = RequiredCheck(context="CI / test", integration_id=1234)
+    assert _status_errors(required, [{"statuses": []}], has_matching_run=True) == []
 
 
 def test_status_errors_helper_accepts_successful_status() -> None:
