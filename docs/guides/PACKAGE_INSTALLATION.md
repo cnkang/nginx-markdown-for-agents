@@ -6,8 +6,8 @@ official NGINX repository packages.
 
 ## Repository Publishing Status
 
-GitHub Releases are the current distribution channel for DEB and RPM package
-artifacts.
+GitHub Releases are the intended distribution channel for DEB and RPM package
+artifacts, but asset availability is tag-specific.
 Public APT/YUM repositories are planned but not available yet.
 They are not part of the current GA channel.
 
@@ -15,6 +15,12 @@ Bare package-manager installation commands only work after an operator
 publishes and configures a real APT or YUM repository. Until then, download the
 matching package artifact and its `SHA256SUMS` file from the same GitHub
 Release.
+
+> **Availability check:** A release candidate and its compatibility-matrix
+> entry do not make a DEB or RPM package downloadable. Before using the
+> commands below, confirm that the selected GitHub Release contains the exact
+> package and `SHA256SUMS`; otherwise use the
+> [Manual Source Build](./INSTALLATION.md#6-secondary-manual-source-build).
 
 ## Select the Matching Artifact
 
@@ -54,11 +60,11 @@ Architecture mapping:
 
 ## DEB Artifacts (Ubuntu, Debian)
 
-Replace `VERSION` below with the release version you are installing, for
-example `0.9.1`.  `NGINX_VERSION` must match the NGINX ABI you run.
+Replace `VERSION` below with a published release version. `NGINX_VERSION` must
+match the NGINX ABI you run.
 
 ```bash
-VERSION=0.9.1
+VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=amd64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"
@@ -72,11 +78,11 @@ sudo apt install "./${PKG}"
 
 ## RPM Artifacts (AlmaLinux, Amazon Linux, RHEL)
 
-Replace `VERSION` below with the release version you are installing, for
-example `0.9.1`.  `NGINX_VERSION` must match the NGINX ABI you run.
+Replace `VERSION` below with a published release version. `NGINX_VERSION` must
+match the NGINX ABI you run.
 
 ```bash
-VERSION=0.9.1
+VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v${VERSION}"

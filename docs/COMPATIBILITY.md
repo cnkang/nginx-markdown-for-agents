@@ -9,9 +9,11 @@ troubleshooting guidance for version mismatch errors.
 
 ## Supported Scope
 
-Prebuilt packages are produced **only** for selected official nginx.org stable
-releases. The module is compiled against the exact NGINX source version
-specified in the build matrix and is not a universal shared library.
+Release workflows target selected official nginx.org stable releases for
+prebuilt packages. Availability is tag-specific: a build-matrix entry does not
+guarantee that a package has been published. The module is compiled against the
+exact NGINX source version specified in the build matrix and is not a universal
+shared library.
 
 Key points:
 
@@ -82,17 +84,18 @@ prevent accidental use of an incompatible package:
 - **DEB**: `nginx-module-markdown-for-agents_{version}_nginx-{nginx_version}_{arch}.deb`
 - **RPM**: `nginx-module-markdown-for-agents-{version}-nginx{nginx_version}-1.{arch}.rpm`
 
-Examples:
+Filename template:
 
 ```
-nginx-module-markdown-for-agents_0.9.1_nginx-1.26.3_amd64.deb
-nginx-module-markdown-for-agents_0.9.1_nginx-1.26.3_arm64.deb
-nginx-module-markdown-for-agents-0.9.1-nginx1.26.3-1.x86_64.rpm
-nginx-module-markdown-for-agents-0.9.1-nginx1.26.3-1.aarch64.rpm
+nginx-module-markdown-for-agents_<VERSION>_nginx-1.26.3_amd64.deb
+nginx-module-markdown-for-agents_<VERSION>_nginx-1.26.3_arm64.deb
+nginx-module-markdown-for-agents-<VERSION>-nginx1.26.3-1.x86_64.rpm
+nginx-module-markdown-for-agents-<VERSION>-nginx1.26.3-1.aarch64.rpm
 ```
 
 Always select the package that matches both your NGINX version and CPU
-architecture.
+architecture. Before downloading, verify that the selected GitHub Release
+contains the exact package and `SHA256SUMS`; otherwise build from source.
 
 The NGINX version embedded in the artifact name is the version tested by the
 release pipeline. After upgrading NGINX, install the package built for the new
@@ -341,6 +344,7 @@ the module from source against your local NGINX installation.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-28 | Codex | Clarified that compatibility-matrix coverage does not imply a published package asset; made artifact names version-neutral templates. |
 | 0.9.1 | 2026-07-17 | Kang | Consolidated build matrix references to prevent version conflicts with dynamic support matrix for v0.9.1. |
 | 0.8.3 | 2026-06-26 | Kang | Updated artifact naming examples to 0.8.3 |
 | 0.7.0 | 2026-05-18 | Kiro | Initial compatibility guide for prebuilt package release |

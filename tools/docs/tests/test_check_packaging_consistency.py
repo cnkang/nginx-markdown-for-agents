@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from check_packaging_consistency import (
     ARTIFACT_RE,
+    ARTIFACT_TEMPLATE_RE,
     _extract_curl_hosts,
     _extract_curl_paths,
     _extract_nginx_code_blocks,
@@ -323,6 +324,12 @@ class TestArtifactRegex:
         """Verify valid artifact filenames match the regex fully."""
         assert ARTIFACT_RE.fullmatch(name)
 
+    def test_shell_template_matches(self):
+        """Verify the documented artifact shell template is accepted."""
+        assert ARTIFACT_TEMPLATE_RE.fullmatch(
+            "ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz"
+        )
+
     @pytest.mark.parametrize("name", [
         "ngx_http_markdown_filter_module-1.24.0-glibc-arm.tar.gz",
         "ngx_http_markdown_filter_module-1.24.0-uclibc-x86_64.tar.gz",
@@ -353,6 +360,18 @@ class TestCheckArtifactNames:
             "Download: ngx_http_markdown_filter_module-1.26.3-glibc-x86_64.tar.gz\n"
         )
         monkeypatch.setattr(cpc, "INSTALL_GUIDE", doc)
+        assert check_artifact_names() == []
+
+    def test_documented_shell_template_passes(self, tmp_path, monkeypatch):
+        """Verify the constrained artifact shell template is accepted."""
+        doc = tmp_path / "INSTALL.md"
+        doc.write_text(
+            "Download: "
+            "ngx_http_markdown_filter_module-"
+            "${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz\n"
+        )
+        monkeypatch.setattr(cpc, "INSTALL_GUIDE", doc)
+
         assert check_artifact_names() == []
 
     def test_invalid_artifact_flagged(self, tmp_path, monkeypatch):

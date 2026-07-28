@@ -11,9 +11,11 @@ For full troubleshooting and package-level compatibility details, see the
 
 ## Supported NGINX Versions
 
-The minimum supported NGINX version is **1.24.0**. Prebuilt packages are
-produced for selected nginx.org official stable and mainline releases listed
-in the compatibility matrix below.
+The minimum supported NGINX version is **1.24.0**. The compatibility matrix
+lists the selected nginx.org official stable and mainline releases targeted by
+the release workflows. A matrix entry does not guarantee that a package asset
+is published for a particular tag; verify the GitHub Release assets before
+downloading or build from source.
 
 > **Canonical source:** [`tools/release-matrix.json`](../../tools/release-matrix.json)
 > is the machine-readable source of truth. The table below is a human-readable
@@ -101,13 +103,13 @@ NGINX source tree and configuration.
 
 ### Architecture Constraints
 
-- Prebuilt packages are available for `x86_64` and `aarch64` only.
+- When published, prebuilt packages target `x86_64` and `aarch64` only.
 - Cross-architecture loading is not possible (an x86_64 module cannot load
   on an aarch64 NGINX binary and vice versa).
 
 ### libc Constraints
 
-- Prebuilt packages are available for both glibc and musl variants.
+- When published, prebuilt packages may target both glibc and musl variants.
 - A glibc-built module will not load on a musl-based system (e.g., Alpine
   Linux) and vice versa.
 - Use `ldd --version` to determine your libc type.
@@ -190,6 +192,6 @@ prebuilt package for an nginx.org official build, or build from source with
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.1 | 2026-07-28 | Codex | Synced the human-readable NGINX compatibility matrix with the canonical 1.30.4 and 1.31.3 release entries. |
+| 0.9.1 | 2026-07-28 | Codex | Synced the human-readable NGINX compatibility matrix with the canonical 1.30.4 and 1.31.3 release entries; clarified that matrix coverage does not guarantee published package assets. |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.7.0 | 2026-05-20 | Kiro | Initial NGINX compatibility guide for docs/guides/ |

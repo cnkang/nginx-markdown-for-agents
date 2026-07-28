@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Packaging documentation structure and content validator.
 
-Validates that the installation guide (docs/guides/INSTALLATION.md) and
-supporting files meet the required structure and content expectations for
-the packaging-first-run documentation spec.
+Validates that the installation guide (docs/guides/INSTALLATION.md), package
+distribution guide, and supporting files meet the required structure and
+content expectations for the packaging-first-run documentation spec.
 
 Checks performed:
   1.  All 11 required sections present by heading
@@ -43,6 +43,9 @@ from _packaging_constants import (
 
 ROOT = Path(__file__).resolve().parents[2]
 INSTALL_GUIDE = ROOT / "docs" / "guides" / "INSTALLATION.md"
+PACKAGE_DISTRIBUTION_GUIDE = (
+    ROOT / "docs" / "guides" / "PACKAGE_DISTRIBUTION.md"
+)
 DEMO_CONFIG = ROOT / "examples" / "nginx-configs" / "00-minimal-demo.conf"
 
 
@@ -392,6 +395,7 @@ def main() -> int:
         return 1
 
     text = _read_text(INSTALL_GUIDE)
+    package_distribution_text = _read_text(PACKAGE_DISTRIBUTION_GUIDE)
     errors: list[str] = []
 
     checks = [
@@ -411,6 +415,10 @@ def main() -> int:
         ("Demo config exists", check_demo_config_exists()),
         ("Demo config content", check_demo_config_content()),
         ("No hardcoded release tags", check_no_hardcoded_release_tags(text)),
+        (
+            "Package distribution has no hardcoded release tags",
+            check_no_hardcoded_release_tags(package_distribution_text),
+        ),
     ]
 
     for _label, errs in checks:
