@@ -750,9 +750,10 @@ jobs:
             exit 1
           fi
 
-          branch_rules="$(mktemp)"
-          check_runs="$(mktemp)"
-          trap 'rm -f "${branch_rules}" "${check_runs}"' EXIT
+          input_dir="$(mktemp -d .tag-sha-checks.XXXXXX)"
+          branch_rules="${input_dir}/branch-rules.json"
+          check_runs="${input_dir}/check-runs.json"
+          trap 'rm -f "${branch_rules}" "${check_runs}"; rmdir "${input_dir}"' EXIT
 
           # This endpoint returns the active rules that actually apply to the
           # branch, including organization-level rules, and needs only
