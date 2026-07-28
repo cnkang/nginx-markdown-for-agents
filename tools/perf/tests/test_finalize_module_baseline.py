@@ -32,11 +32,15 @@ from finalize_module_baseline import (  # noqa: E402
     _sha256_file,
     _validate_raw_commit_match,
     _validate_source_run,
+    validate_read_path,
     main,
 )
 
 _GOOD_SHA = "0123456789abcdef0123456789abcdef01234567"
-_GOOD_RUN_URL = "https://github.com/foo/bar/actions/runs/12345/attempts/2"
+_GOOD_RUN_URL = (
+    "https://github.com/cnkang/nginx-markdown-for-agents/"
+    "actions/runs/12345/attempts/2"
+)
 
 
 def _empty_raw_report() -> dict:
@@ -98,6 +102,20 @@ def test_validate_source_run_rejects_url_without_attempt() -> None:
     assert "attempts" in errors[0]
 
 
+@pytest.mark.parametrize(
+    "source_run",
+    [
+        "https://github.com/cnkang/nginx-markdown-for-agents/"
+        "actions/runs/not-a-number/attempts/2",
+        "http://github.com/cnkang/nginx-markdown-for-agents/"
+        "actions/runs/12345/attempts/2",
+    ],
+)
+def test_validate_source_run_rejects_non_canonical_urls(source_run: str) -> None:
+    """Source provenance must identify a concrete HTTPS Actions attempt."""
+    assert _validate_source_run(source_run)
+
+
 # ---------------------------------------------------------------------------
 # resolve_repo_relative
 # ---------------------------------------------------------------------------
@@ -128,10 +146,11 @@ def test_resolve_repo_relative_rejects_symlink_escape(
     outside = tmp_path / "outside.json"
     outside.write_text("{}", encoding="utf-8")
     (repo / "link.json").symlink_to(outside)
-    # REPO_ROOT is the real repo root, so we cannot easily test symlink
-    # escape against it here; instead verify the helper rejects a symlink
-    # that resolves outside via a manual root override is not supported.
-    # This test verifies the .. path rejection path instead.
+    import finalize_module_baseline as mod
+
+    monkeypatch.setattr(mod, "REPO_ROOT", repo.resolve())
+    with pytest.raises(ValueError, match="escapes repository root"):
+        _resolve_repo_relative("link.json", must_exist=True, purpose="test")
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +166,15 @@ def test_validate_raw_commit_match_accepts_prefix() -> None:
 def test_validate_raw_commit_match_rejects_mismatch() -> None:
     report = _empty_raw_report()
     report["module_benchmark"]["git_commit"] = "deadbee"
+    errors = _validate_raw_commit_match(report, _GOOD_SHA)
+    assert errors
+    assert "does not match" in errors[0]
+
+
+def test_validate_raw_commit_match_checks_full_short_sha_prefix() -> None:
+    """A mismatch after the first seven SHA characters must be rejected."""
+    report = _empty_raw_report()
+    report["module_benchmark"]["git_commit"] = "01234567dead"
     errors = _validate_raw_commit_match(report, _GOOD_SHA)
     assert errors
     assert "does not match" in errors[0]
@@ -187,6 +215,18 @@ def test_extract_raw_timestamp_rejects_invalid_iso() -> None:
     report = _empty_raw_report()
     report["module_benchmark"]["timestamp"] = "not-a-date"
     with pytest.raises(ValueError, match="ISO-8601"):
+        _extract_raw_timestamp(report)
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    ["2026-01-01T00:00:00", "2026-01-01T08:00:00+08:00"],
+)
+def test_extract_raw_timestamp_requires_utc_offset(timestamp: str) -> None:
+    """Naive and non-UTC offsets must not be labeled as UTC evidence."""
+    report = _empty_raw_report()
+    report["module_benchmark"]["timestamp"] = timestamp
+    with pytest.raises(ValueError, match="UTC offset"):
         _extract_raw_timestamp(report)
 
 
@@ -255,7 +295,9 @@ def test_finalizer_computes_correct_raw_sha256(
 
     monkeypatch.setattr(mod, "REPO_ROOT", repo.resolve())
 
-    expected = hashlib.sha256(raw.read_bytes()).hexdigest()
+    expected = hashlib.sha256(
+        validate_read_path(raw, purpose="test raw baseline").read_bytes()
+    ).hexdigest()
     out = repo / "perf" / "baselines" / "finalized.json"
     assert main([
         "--raw-input", "perf/baselines/raw.json",

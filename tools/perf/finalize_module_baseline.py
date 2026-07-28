@@ -52,17 +52,25 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 sys.path.insert(0, str(REPO_ROOT))
 
+from lib.baseline_provenance import (  # noqa: E402
+    validate_iso_utc,
+    validate_raw_commit_match,
+    validate_source_run,
+)
+from lib.path_validation import (  # noqa: E402
+    validate_read_path,
+    validate_write_path_within_root,
+)
+
 _FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SUPPORTED_POLICY_TYPES = frozenset({"verbatim_run", "conservative_normalized"})
-_HISTORICAL_BASELINE_COMMIT = "847f90139d287446882052ec78661746541aebff"
 
 
 def _resolve_repo_relative(path: str, *, must_exist: bool, purpose: str) -> Path:
@@ -99,8 +107,9 @@ def _resolve_repo_relative(path: str, *, must_exist: bool, purpose: str) -> Path
 
 def _sha256_file(path: Path) -> str:
     """Return the lowercase hex SHA-256 digest of a file's bytes."""
+    validated_path = validate_read_path(path, purpose="baseline input")
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
+    with validated_path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(65536), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -108,14 +117,7 @@ def _sha256_file(path: Path) -> str:
 
 def _validate_iso_utc(timestamp: str, *, field: str) -> str:
     """Validate a UTC ISO-8601 timestamp string and return it."""
-    if not isinstance(timestamp, str) or not timestamp.strip():
-        raise ValueError(f"{field} must be a non-empty ISO-8601 string")
-    ts = timestamp.strip()
-    try:
-        datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError as e:
-        raise ValueError(f"{field} is not valid ISO-8601: {ts!r} ({e})") from e
-    return ts
+    return validate_iso_utc(timestamp, field=field)
 
 
 def _validate_source_run(source_run: str) -> list[str]:
@@ -125,22 +127,7 @@ def _validate_source_run(source_run: str) -> list[str]:
     contains a concrete run id and an attempt so the evidence can be
     located.  Historical exceptions are handled by the caller, not here.
     """
-    errors: list[str] = []
-    if not source_run or not source_run.strip():
-        errors.append("--source-run must be non-empty")
-        return errors
-    run = source_run.strip()
-    if "actions/runs/" not in run:
-        errors.append(
-            "--source-run must be a GitHub Actions run URL containing "
-            "'actions/runs/<run-id>' (got " + repr(run) + ")"
-        )
-    if "/attempts/" not in run:
-        errors.append(
-            "--source-run must include '/attempts/<attempt>' so the exact "
-            "workflow attempt can be located (got " + repr(run) + ")"
-        )
-    return errors
+    return validate_source_run(source_run, repo_root=REPO_ROOT)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -253,11 +240,14 @@ def _parse_adjustments(adjustments: str | None) -> dict:
     if not adjustments:
         return {}
     try:
-        return json.loads(adjustments)
+        parsed = json.loads(adjustments)
     except json.JSONDecodeError as exc:
         raise ValueError(
             f"--adjustments must be valid JSON: {exc}"
         ) from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("--adjustments must be a JSON object")
+    return parsed
 
 
 def _atomic_write_json(path: Path, payload: dict) -> None:
@@ -266,14 +256,17 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
     A write failure removes the temp file and never leaves a partial
     canonical baseline behind.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    validated_path = validate_write_path_within_root(
+        path, REPO_ROOT, purpose="finalized baseline"
+    )
+    validated_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = validated_path.with_suffix(validated_path.suffix + ".tmp")
     try:
         tmp.write_text(
             json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        os.replace(tmp, path)
+        os.replace(tmp, validated_path)
     except OSError:
         with contextlib.suppress(OSError, FileNotFoundError):
             tmp.unlink(missing_ok=True)
@@ -284,23 +277,7 @@ def _validate_raw_commit_match(
     raw_report: dict, source_git_commit: str,
 ) -> list[str]:
     """Verify raw.module_benchmark.git_commit matches the declared SHA prefix."""
-    mb = raw_report.get("module_benchmark", {})
-    if not isinstance(mb, dict):
-        return ["raw report is missing a 'module_benchmark' object"]
-    raw_commit = mb.get("git_commit")
-    if not isinstance(raw_commit, str) or not raw_commit:
-        return [
-            "raw report is missing module_benchmark.git_commit; cannot verify "
-            "that the raw report came from the declared source commit"
-        ]
-    if not raw_commit.lower().startswith(source_git_commit[:7].lower()):
-        return [
-            f"raw report module_benchmark.git_commit={raw_commit!r} does not "
-            f"match the declared --source-git-commit prefix "
-            f"{source_git_commit[:7]!r}; the finalized baseline must come "
-            f"from the same commit as the raw report."
-        ]
-    return []
+    return validate_raw_commit_match(raw_report, source_git_commit)
 
 
 def _extract_raw_timestamp(raw_report: dict) -> str:
@@ -425,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
     errors: list[str] = []
-    if not _FULL_SHA_RE.match(args.source_git_commit):
+    if not _FULL_SHA_RE.fullmatch(args.source_git_commit):
         errors.append(
             f"--source-git-commit must be a full 40-character lowercase git "
             f"SHA (got {args.source_git_commit!r})"
@@ -443,7 +420,12 @@ def main(argv: list[str] | None = None) -> int:
     raw_input_path, output_path, source_artifact = io_result
 
     try:
-        raw_report = json.loads(raw_input_path.read_text(encoding="utf-8"))
+        validated_raw_input = validate_read_path(
+            raw_input_path, purpose="raw baseline report"
+        )
+        raw_report = json.loads(
+            validated_raw_input.read_text(encoding="utf-8")
+        )
     except (json.JSONDecodeError, OSError) as exc:
         print(f"ERROR: failed to read raw report: {exc}", file=sys.stderr)
         return 1
@@ -462,7 +444,7 @@ def main(argv: list[str] | None = None) -> int:
         return rc
 
     raw_sha256 = _sha256_file(raw_input_path)
-    if not _SHA256_RE.match(raw_sha256):
+    if not _SHA256_RE.fullmatch(raw_sha256):
         print(
             f"ERROR: computed raw SHA-256 is not a 64-char hex digest "
             f"(got {raw_sha256!r})",

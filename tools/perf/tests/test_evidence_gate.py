@@ -32,6 +32,8 @@ from evidence_gate import (
     _check_scenario_completion,
     _check_path_coverage,
     _check_environment_compatibility,
+    _canonical_baseline_fallback_violations,
+    _baseline_policy_violations,
     _compute_memory_slope,
     _conservative_normalized_truth_violations,
     _extract_evidence_metrics,
@@ -41,6 +43,7 @@ from evidence_gate import (
     _scenario_source_environment_violations,
     _sha256_file,
     _validate_benchmark_evidence,
+    validate_read_path,
     _write_output,
     main,
     parse_args,
@@ -193,12 +196,16 @@ def test_memory_slope_single_point_returns_zero():
 
 
 def test_tag_release_job_supplies_module_enabled_nginx():
-    workflow = (
+    workflow_path = (
         Path(__file__).resolve().parents[3]
         / ".github"
         / "workflows"
         / "release-packages.yml"
-    ).read_text(encoding="utf-8")
+    )
+    workflow = (
+        validate_read_path(workflow_path, purpose="release workflow")
+        .read_text(encoding="utf-8")
+    )
 
     # The public top-level `build` target produces both artifacts across the
     # supported matrix. `binary` is only an objs/Makefile target in 1.24.0.
@@ -240,12 +247,16 @@ def test_tag_release_job_supplies_module_enabled_nginx():
 
 def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
     """Manual baseline bootstrap produces auditable native module evidence."""
-    workflow = (
+    workflow_path = (
         Path(__file__).resolve().parents[3]
         / ".github"
         / "workflows"
         / "nightly-perf.yml"
-    ).read_text(encoding="utf-8")
+    )
+    workflow = (
+        validate_read_path(workflow_path, purpose="nightly perf workflow")
+        .read_text(encoding="utf-8")
+    )
 
     assert "bootstrap_module_baseline" in workflow
     assert "if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.bootstrap_module_baseline) }}" in workflow
@@ -1881,21 +1892,10 @@ class TestScenarioSourceEnvironment:
                     },
                 ],
             },
-            "baseline_policy": {
-                "type": "verbatim_run",
-                "source_git_commit": "847f90139d287446882052ec78661746541aebff",
-                "source_run": "canonical module benchmark at 2026-07-16T09:47:06Z",
-                "source_artifact": "perf/baselines/module-baseline-091-raw.json",
-                "measurement_timestamp": "2026-07-16T09:47:06Z",
-                "normalization": "none",
-                "historical_audit_exception": True,
-                "audit_note": (
-                    "Test fixture honoring the scoped historical exception for "
-                    "the original 0.9.1 baseline commit."
-                ),
-            },
         }
-        assert _validate_benchmark_evidence(report, role="baseline") == []
+        assert _canonical_baseline_fallback_violations(
+            report, role="baseline"
+        ) == []
 
         gzip_streaming = next(
             scenario
@@ -1903,7 +1903,9 @@ class TestScenarioSourceEnvironment:
             if scenario["name"] == "gzip-streaming-first"
         )
         gzip_streaming["metrics"]["precommit_failopen_total"] = 10
-        violations = _validate_benchmark_evidence(report, role="baseline")
+        violations = _canonical_baseline_fallback_violations(
+            report, role="baseline"
+        )
         assert any(
             check == "baseline.fallback_rate"
             and "gzip-streaming-first" in reason
@@ -3199,7 +3201,10 @@ class TestCompressedStreamingPathTruthfulness:
 # ---------------------------------------------------------------------------
 
 _FULL_SHA = "0123456789abcdef0123456789abcdef01234567"
-_RUN_URL = "https://github.com/foo/bar/actions/runs/123/attempts/1"
+_RUN_URL = (
+    "https://github.com/cnkang/nginx-markdown-for-agents/"
+    "actions/runs/123/attempts/1"
+)
 
 
 def _full_valid_raw_report() -> dict:
@@ -3464,24 +3469,223 @@ def test_raw_binding_rejects_verbatim_data_modification(
     assert any("module_benchmark" in r for _c, r in violations)
 
 
-def test_raw_binding_historical_exception_skipped(
+def test_raw_binding_verbatim_rejects_new_top_level_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The scoped historical exception skips raw binding validation."""
+    """verbatim_run permits only the policy block to be added."""
     raw = _full_valid_raw_report()
-    repo, _ = _write_raw_in_repo(tmp_path, monkeypatch, raw)
-    finalized = dict(raw)
+    repo, digest = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    finalized = copy.deepcopy(raw)
+    finalized["new_evidence"] = {"unexpected": True}
     finalized["baseline_policy"] = {
         "type": "verbatim_run",
-        "source_git_commit": "847f90139d287446882052ec78661746541aebff",
-        "source_run": "local",
+        "source_git_commit": _FULL_SHA,
+        "source_run": _RUN_URL,
         "source_artifact": "perf/baselines/raw.json",
+        "source_artifact_sha256": digest,
         "measurement_timestamp": raw["module_benchmark"]["timestamp"],
         "normalization": "none",
-        "historical_audit_exception": True,
-        "audit_note": "historical gap",
+    }
+    violations = _raw_artifact_binding_violations(finalized, role="baseline")
+    assert any("new_evidence" in reason for _check, reason in violations)
+
+
+def test_conservative_binding_distinguishes_missing_from_null() -> None:
+    """Missing raw fields must not compare equal to explicit JSON null."""
+    raw = _full_valid_raw_report()
+    raw["module_benchmark"]["optional_metadata"] = None
+    raw["module_benchmark"]["scenarios"][0]["optional_note"] = None
+    finalized = copy.deepcopy(raw)
+    del finalized["module_benchmark"]["optional_metadata"]
+    del finalized["module_benchmark"]["scenarios"][0]["optional_note"]
+
+    violations = _conservative_normalized_truth_violations(
+        finalized, raw, "baseline"
+    )
+
+    assert any("module_benchmark.optional_metadata" in reason for _check, reason in violations)
+    assert any("optional_note" in reason for _check, reason in violations)
+
+
+@pytest.mark.parametrize(
+    ("field", "raw_value", "finalized_value"),
+    [
+        ("rps", 100.0, 101.0),
+        ("latency_p50_ms", 10.0, 9.0),
+        ("latency_p95_ms", 10.0, 9.0),
+        ("latency_p99_ms", 10.0, 9.0),
+        ("ttfb_p50_ms", 10.0, 9.0),
+        ("ttfb_p95_ms", 10.0, 9.0),
+        ("ttfb_ms", 10.0, 9.0),
+        ("ttlb_ms", 10.0, 9.0),
+        ("ttlb_p50_ms", 10.0, 9.0),
+    ],
+)
+def test_conservative_normalized_rejects_reverse_adjustment(
+    field: str, raw_value: float, finalized_value: float,
+) -> None:
+    """Every adjustable metric must move only in its conservative direction."""
+    raw = _full_valid_raw_report()
+    finalized = copy.deepcopy(raw)
+    raw_metrics = raw["module_benchmark"]["scenarios"][0]["metrics"]
+    finalized_metrics = finalized["module_benchmark"]["scenarios"][0]["metrics"]
+    raw_metrics[field] = raw_value
+    finalized_metrics[field] = finalized_value
+
+    violations = _conservative_normalized_truth_violations(finalized, raw, "baseline")
+
+    assert any(field in reason for _check, reason in violations)
+
+
+@pytest.mark.parametrize("invalid", [True, "1", float("nan"), float("inf")])
+def test_conservative_normalized_rejects_non_numeric_metric(invalid: object) -> None:
+    """Boolean, string, and non-finite metric values are not evidence."""
+    raw = _full_valid_raw_report()
+    finalized = copy.deepcopy(raw)
+    raw["module_benchmark"]["scenarios"][0]["metrics"]["rps"] = 100.0
+    finalized["module_benchmark"]["scenarios"][0]["metrics"]["rps"] = invalid
+
+    violations = _conservative_normalized_truth_violations(finalized, raw, "baseline")
+
+    assert any("finite number" in reason for _check, reason in violations)
+
+
+def test_conservative_normalized_rejects_metric_key_changes() -> None:
+    """Removing or adding any raw metric is a binding violation."""
+    raw = _full_valid_raw_report()
+    finalized = copy.deepcopy(raw)
+    finalized_metrics = finalized["module_benchmark"]["scenarios"][0]["metrics"]
+    finalized_metrics.pop("input_bytes")
+    finalized_metrics["unapproved_metric"] = 1
+
+    violations = _conservative_normalized_truth_violations(finalized, raw, "baseline")
+
+    assert any("metric keys" in reason for _check, reason in violations)
+
+
+def test_raw_binding_conservative_adjustments_match_exact_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The adjustment policy must describe every actual metric delta."""
+    raw = _full_valid_raw_report()
+    raw_metrics = raw["module_benchmark"]["scenarios"][0]["metrics"]
+    raw_metrics.update({"rps": 100.0, "latency_p50_ms": 10.0})
+    repo, digest = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    finalized = copy.deepcopy(raw)
+    finalized_metrics = finalized["module_benchmark"]["scenarios"][0]["metrics"]
+    finalized_metrics.update({"rps": 90.0, "latency_p50_ms": 11.0})
+    finalized["baseline_policy"] = {
+        "type": "conservative_normalized",
+        "source_git_commit": _FULL_SHA,
+        "source_run": _RUN_URL,
+        "source_artifact": "perf/baselines/raw.json",
+        "source_artifact_sha256": digest,
+        "measurement_timestamp": raw["module_benchmark"]["timestamp"],
+        "normalization": "conservative",
+        "adjustment_reason": "approved rounding",
+        "adjustment_date": "2026-07-28",
+        "adjustments": {
+            "rps": {"plain-small": -10.0},
+            "latency_ttfb": {
+                "plain-small": {"latency_p50_ms": 1.0},
+            },
+        },
     }
     assert _raw_artifact_binding_violations(finalized, role="baseline") == []
+
+    finalized["baseline_policy"]["adjustments"]["rps"]["plain-small"] = -9.0
+    violations = _raw_artifact_binding_violations(finalized, role="baseline")
+    assert any("exactly match" in reason for _check, reason in violations)
+
+
+def test_raw_binding_rejects_symlink_escape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A raw artifact symlink may not escape the repository root."""
+    raw = _full_valid_raw_report()
+    repo, _ = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps(raw), encoding="utf-8")
+    link = repo / "perf" / "baselines" / "escape.json"
+    link.symlink_to(outside)
+    finalized = copy.deepcopy(raw)
+    finalized["baseline_policy"] = {
+        "type": "verbatim_run",
+        "source_git_commit": _FULL_SHA,
+        "source_run": _RUN_URL,
+        "source_artifact": "perf/baselines/escape.json",
+        "source_artifact_sha256": hashlib.sha256(outside.read_bytes()).hexdigest(),
+        "measurement_timestamp": raw["module_benchmark"]["timestamp"],
+        "normalization": "none",
+    }
+
+    violations = _raw_artifact_binding_violations(finalized, role="baseline")
+
+    assert any("within the repository root" in reason for _check, reason in violations)
+
+
+def test_raw_binding_rejects_directory_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A retained raw artifact must be a readable file, not a directory."""
+    raw = _full_valid_raw_report()
+    repo, _ = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    (repo / "perf" / "baselines" / "directory.json").mkdir()
+    finalized = copy.deepcopy(raw)
+    finalized["baseline_policy"] = {
+        "type": "verbatim_run",
+        "source_git_commit": _FULL_SHA,
+        "source_run": _RUN_URL,
+        "source_artifact": "perf/baselines/directory.json",
+        "source_artifact_sha256": "a" * 64,
+        "measurement_timestamp": raw["module_benchmark"]["timestamp"],
+        "normalization": "none",
+    }
+
+    violations = _raw_artifact_binding_violations(finalized, role="baseline")
+
+    assert any("failed to read retained raw artifact" in reason for _check, reason in violations)
+
+
+def test_baseline_policy_requires_structured_provenance() -> None:
+    """Malformed provenance is reported instead of being accepted or crashing."""
+    report = _full_valid_raw_report()
+    report["baseline_policy"] = {
+        "type": "verbatim_run",
+        "source_git_commit": _FULL_SHA,
+        "source_run": "https://github.com/cnkang/nginx-markdown-for-agents/"
+        "actions/runs/not-a-number/attempts/1",
+        "source_artifact": "perf/baselines/raw.json",
+        "measurement_timestamp": "2026-07-28T00:00:00+08:00",
+        "normalization": "none",
+    }
+
+    violations = _baseline_policy_violations(report, role="baseline")
+
+    assert any("source_run" in reason for _check, reason in violations)
+    assert any("UTC offset" in reason for _check, reason in violations)
+
+
+def test_baseline_policy_non_object_is_structured_violation() -> None:
+    """A non-object baseline_policy must fail closed without AttributeError."""
+    report = _full_valid_raw_report()
+    report["baseline_policy"] = "invalid"
+
+    violations = _baseline_policy_violations(report, role="baseline")
+
+    assert violations == [
+        ("baseline.baseline_policy", "baseline_policy must be an object")
+    ]
+
+
+def test_raw_binding_historical_exception_requires_exact_baseline() -> None:
+    """A changed report cannot reuse the historical exception fields."""
+    finalized = _load_canonical_module_baseline()
+    assert _raw_artifact_binding_violations(finalized, role="baseline") == []
+
+    finalized["module_benchmark"]["scenarios"][0]["metrics"]["rps"] = 1
+    violations = _raw_artifact_binding_violations(finalized, role="baseline")
+    assert any("does not exist" in reason for _check, reason in violations)
 
 
 def test_conservative_normalized_rejects_truth_metric_modification() -> None:

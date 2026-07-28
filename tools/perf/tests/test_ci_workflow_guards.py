@@ -145,7 +145,20 @@ def test_nightly_perf_uploads_debug_artifacts_on_failure() -> None:
     """The workflow must retain debug artifacts when benchmark or validation fails."""
     text = _nightly_perf_text()
     assert "module-baseline-091-debug-" in text
-    assert "if: always()" in text
+    debug_start = text.index("- name: Upload debug artifacts on failure")
+    debug_block = text[debug_start:]
+    assert "if: failure()" in debug_block
+
+
+def test_nightly_perf_uploads_canonical_only_after_all_release_gates() -> None:
+    """A canonical artifact must not survive a later gate failure."""
+    text = _nightly_perf_text()
+    upload = text.index("- name: Upload canonical module baseline")
+    evidence_gate = text.index("make perf-evidence-check")
+    release_gates = text.index("make release-gates-check-091")
+
+    assert evidence_gate < upload
+    assert release_gates < upload
 
 
 def test_nightly_perf_records_run_attempt_in_source_run() -> None:
