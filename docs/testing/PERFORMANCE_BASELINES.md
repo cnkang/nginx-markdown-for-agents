@@ -43,8 +43,9 @@ The canonical module benchmark retains response probes at
 `perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
 output path. The workflow validates non-empty `.headers`, `.body`, and `.json`
 files for all eight scenarios, verifies each probe's verdict, curl exit code,
-and body SHA-256, and cross-checks finalized `response_correctness` fields
-before uploading canonical evidence.
+body SHA-256, and requires the finalized `response_correctness` object to
+match each probe object exactly before uploading canonical evidence. Canonical
+artifacts are retained for 30 days for release audit review.
 
 CI now also records non-blocking performance artifacts from the same `perf_baseline` example. The workflow stores the full benchmark output plus `/usr/bin/time -v` captures for the medium, medium-front-matter, and large single-sample runs. Those artifacts are for regression comparison and trend review; they are not merge-blocking thresholds yet.
 
