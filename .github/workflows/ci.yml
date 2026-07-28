@@ -204,6 +204,9 @@ jobs:
         with:
           python-version: '3.14.3'
 
+      - name: Install documentation dependencies
+        run: python3 -m pip install PyYAML==6.0.2
+
       - name: Validate docs
         run: make docs-check
 

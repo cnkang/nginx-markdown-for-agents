@@ -24,8 +24,8 @@ in the compatibility matrix below.
 | 1.24.0 | oldstable | Full (prebuilt binary) |
 | 1.26.3 | stable | Full (prebuilt binary) |
 | 1.28.3 | stable | Full (prebuilt binary) |
-| 1.30.3 | stable | Full (prebuilt binary) |
-| 1.31.2 | mainline | Full (prebuilt binary) |
+| 1.30.4 | stable | Full (prebuilt binary) |
+| 1.31.3 | mainline | Full (prebuilt binary) |
 Architectures: `x86_64` (amd64) and `aarch64` (arm64), both glibc and musl.
 
 If your NGINX version is >= 1.24.0 but not listed above, build the module
@@ -190,5 +190,6 @@ prebuilt package for an nginx.org official build, or build from source with
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-28 | Codex | Synced the human-readable NGINX compatibility matrix with the canonical 1.30.4 and 1.31.3 release entries. |
 | 0.9.1 | 2026-07-13 | Kang | Align legacy directive references with 0.9.0 Config V2 implementation (markdown_limits, markdown_error_policy, markdown_accept, markdown_cache_validation; retire markdown_large_body_threshold) |
 | 0.7.0 | 2026-05-20 | Kiro | Initial NGINX compatibility guide for docs/guides/ |

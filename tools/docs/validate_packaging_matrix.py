@@ -11,7 +11,7 @@ If packaging/matrix.yaml does not exist, the script exits 0 (skip gracefully).
 
 Exit codes:
     0  Validation passed or packaging/matrix.yaml absent (skipped)
-    1  Validation failure (inconsistency detected)
+    1  Validation failure or missing required PyYAML dependency
 
 Part of release matrix source of truth.
 """
@@ -25,8 +25,7 @@ from pathlib import Path
 try:
     import yaml
 except ImportError:
-    print("WARNING: PyYAML not installed; skipping packaging matrix validation")
-    sys.exit(0)
+    yaml = None
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGING_MATRIX = ROOT / "packaging" / "matrix.yaml"
@@ -98,6 +97,13 @@ def get_release_matrix_max_tier(data: dict, version: str) -> int:
 def validate() -> list[str]:
     """Run all validation checks. Returns list of error messages."""
     errors: list[str] = []
+
+    if yaml is None:
+        errors.append(
+            "PyYAML is required to validate packaging/matrix.yaml; install "
+            "dependencies with 'python3 -m pip install -r requirements-dev.txt'"
+        )
+        return errors
 
     if not RELEASE_MATRIX.exists():
         errors.append(
