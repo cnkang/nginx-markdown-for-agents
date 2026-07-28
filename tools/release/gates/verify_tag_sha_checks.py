@@ -13,10 +13,11 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from lib.path_validation import validate_read_path  # noqa: E402
+from lib.path_validation import validate_read_path  # noqa: E402,E0401,C0413
 
-# GitHub treats these check-run conclusions as satisfying a required status
-# check (https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks).
+# GitHub treats these check-run conclusions as satisfying a required
+# status check; see
+# https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks
 # Every other conclusion (failure, cancelled, timed_out, action_required,
 # stale, startup_failure, or a missing conclusion) must keep blocking the tag.
 SUCCESSFUL_CONCLUSIONS = frozenset({"success", "skipped", "neutral"})
@@ -144,19 +145,18 @@ def _latest_status_state(statuses: Any, context: str) -> str | None:
     return state if isinstance(state, str) else None
 
 
-def _missing_check_errors(required: RequiredCheck, statuses: Any) -> list[str]:
-    """Classify a required check that has no matching check run.
+def _status_errors(required: RequiredCheck, statuses: Any) -> list[str]:
+    """Evaluate the Commit Status API result for a required context.
 
-    Required contexts may also be reported through the Commit Status API
-    instead of the Checks API, so fall back to the latest commit status
-    before declaring the check missing.  A commit status cannot prove which
-    GitHub App produced it, so it never satisfies a context pinned to an
-    integration_id.
+    A commit status cannot prove which GitHub App produced it, so it never
+    satisfies a context pinned to an integration_id.  When integration_id is
+    None, the latest commit status state must be ``success``.
     """
     if required.integration_id is not None:
         return [
             f"Required check '{required.context}' from app "
-            f"{required.integration_id} is missing on the tag SHA."
+            f"{required.integration_id} has no matching check run on the tag SHA; "
+            f"commit statuses cannot satisfy an integration-pinned context."
         ]
     state = _latest_status_state(statuses, required.context)
     if state is None:
@@ -169,6 +169,30 @@ def _missing_check_errors(required: RequiredCheck, statuses: Any) -> list[str]:
     return []
 
 
+def _missing_errors(required: RequiredCheck) -> list[str]:
+    """Error when a required context has neither a check run nor a commit status."""
+    if required.integration_id is not None:
+        return [
+            f"Required check '{required.context}' from app "
+            f"{required.integration_id} is missing on the tag SHA."
+        ]
+    return [f"Required check '{required.context}' is missing on the tag SHA."]
+
+
+def _check_run_errors(required: RequiredCheck, matching_runs: list[dict[str, Any]]) -> list[str]:
+    """Error when the latest matching check run is not successful."""
+    latest = max(matching_runs, key=_run_order_key)
+    if (
+        latest.get("status") != "completed"
+        or latest.get("conclusion") not in SUCCESSFUL_CONCLUSIONS
+    ):
+        return [
+            f"Required check '{required.context}' is not successful on the tag SHA "
+            f"(status={latest.get('status')!r}, conclusion={latest.get('conclusion')!r})."
+        ]
+    return []
+
+
 def validate_required_checks(
     active_rules: Any,
     check_runs: Any,
@@ -176,7 +200,20 @@ def validate_required_checks(
     *,
     branch: str,
 ) -> list[str]:
-    """Return fail-closed errors for required checks on the tag commit."""
+    """Return fail-closed errors for required checks on the tag commit.
+
+    GitHub requires that when a check run and a commit status share the
+    same required context name, **both** must pass.  This function
+    implements that semantics:
+
+    * Neither exists → missing.
+    * Only check run → check run must be completed with a successful
+      conclusion.
+    * Only commit status → commit status state must be ``success``
+      (unless the context is pinned to an integration_id, which commit
+      statuses cannot satisfy).
+    * Both exist → both must pass independently.
+    """
     try:
         checks = required_checks(active_rules)
     except ValueError as error:
@@ -188,19 +225,22 @@ def validate_required_checks(
     runs = _flatten_api_pages(check_runs, "check_runs")
     errors: list[str] = []
     for required in checks:
-        matching = [run for run in runs if _matches_required_check(run, required)]
-        if not matching:
-            errors.extend(_missing_check_errors(required, statuses))
+        matching_runs = [run for run in runs if _matches_required_check(run, required)]
+        has_matching_run = bool(matching_runs)
+        has_matching_status = (
+            statuses is not None
+            and _latest_status_state(statuses, required.context) is not None
+        )
+
+        if not has_matching_run and not has_matching_status:
+            errors.extend(_missing_errors(required))
             continue
-        latest = max(matching, key=_run_order_key)
-        if (
-            latest.get("status") != "completed"
-            or latest.get("conclusion") not in SUCCESSFUL_CONCLUSIONS
-        ):
-            errors.append(
-                f"Required check '{required.context}' is not successful on the tag SHA "
-                f"(status={latest.get('status')!r}, conclusion={latest.get('conclusion')!r})."
-            )
+
+        if has_matching_run:
+            errors.extend(_check_run_errors(required, matching_runs))
+
+        if has_matching_status:
+            errors.extend(_status_errors(required, statuses))
     return errors
 
 
@@ -250,7 +290,7 @@ def main() -> int:
             _load_json(args.statuses_file) if args.statuses_file else None,
             branch=args.branch,
         )
-    except (OSError, ValueError, json.JSONDecodeError) as error:
+    except (OSError, ValueError) as error:
         print(f"ERROR: Unable to read GitHub API response: {error}", file=sys.stderr)
         return 1
 

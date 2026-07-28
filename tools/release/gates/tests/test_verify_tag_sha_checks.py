@@ -10,6 +10,8 @@ import pytest
 from tools.release.gates.verify_tag_sha_checks import (
     RequiredCheck,
     _load_json,
+    _latest_status_state,
+    _status_errors,
     main,
     required_checks,
     validate_required_checks,
@@ -445,7 +447,7 @@ def test_commit_status_cannot_satisfy_an_integration_pinned_context() -> None:
 
     assert len(errors) == 1
     assert "app 1234" in errors[0]
-    assert "missing" in errors[0]
+    assert "integration-pinned" in errors[0]
 
 
 def test_context_absent_from_check_runs_and_statuses_is_missing() -> None:
@@ -496,3 +498,114 @@ def test_main_accepts_a_statuses_file_for_commit_status_contexts(
 
     assert main() == 0
     assert "passed all required checks" in capsys.readouterr().out
+
+
+def test_same_name_check_and_status_must_both_pass() -> None:
+    """When a check run and commit status share a required context, both must pass."""
+    rules = _required_rules("CI / test")
+    check_run_success = _check_run("CI / test", run_id=1, conclusion="success")
+    status_success = _commit_status("CI / test", status_id=1, state="success")
+
+    assert validate_required_checks(
+        rules, [check_run_success], [{"statuses": [status_success]}], branch="main"
+    ) == []
+
+
+def test_same_name_check_success_status_failure_blocks() -> None:
+    """A failing commit status must block even when the check run succeeds."""
+    rules = _required_rules("CI / test")
+    check_run_success = _check_run("CI / test", run_id=1, conclusion="success")
+    status_failure = _commit_status("CI / test", status_id=1, state="failure")
+
+    errors = validate_required_checks(
+        rules, [check_run_success], [{"statuses": [status_failure]}], branch="main"
+    )
+
+    assert len(errors) == 1
+    assert "CI / test" in errors[0]
+    assert "failure" in errors[0]
+
+
+def test_same_name_check_failure_status_success_blocks() -> None:
+    """A failing check run must block even when the commit status succeeds."""
+    rules = _required_rules("CI / test")
+    check_run_failure = _check_run("CI / test", run_id=1, conclusion="failure")
+    status_success = _commit_status("CI / test", status_id=1, state="success")
+
+    errors = validate_required_checks(
+        rules, [check_run_failure], [{"statuses": [status_success]}], branch="main"
+    )
+
+    assert len(errors) == 1
+    assert "CI / test" in errors[0]
+    assert "failure" in errors[0]
+
+
+def test_same_name_both_fail_produces_two_errors() -> None:
+    """When both check run and commit status fail, both errors are reported."""
+    rules = _required_rules("CI / test")
+    check_run_failure = _check_run("CI / test", run_id=1, conclusion="failure")
+    status_failure = _commit_status("CI / test", status_id=1, state="failure")
+
+    errors = validate_required_checks(
+        rules, [check_run_failure], [{"statuses": [status_failure]}], branch="main"
+    )
+
+    assert len(errors) == 2
+    assert any("failure" in e and "conclusion" in e for e in errors)
+    assert any("failure" in e and "commit status" in e for e in errors)
+
+
+def test_same_name_pinned_check_with_status_requires_check_run() -> None:
+    """An integration-pinned context ignores commit status even alongside a check run."""
+    rules = _required_rules_with_apps(("CI / test", 1234))
+    check_run_success = _check_run("CI / test", run_id=1, conclusion="success", app_id=1234)
+    status_failure = _commit_status("CI / test", status_id=1, state="failure")
+
+    errors = validate_required_checks(
+        rules, [check_run_success], [{"statuses": [status_failure]}], branch="main"
+    )
+
+    assert len(errors) == 1
+    assert "integration-pinned" in errors[0]
+
+
+def test_same_name_pinned_check_missing_with_status_blocks() -> None:
+    """An integration-pinned context with no matching check run blocks regardless of status."""
+    rules = _required_rules_with_apps(("CI / test", 1234))
+    status_success = _commit_status("CI / test", status_id=1, state="success")
+
+    errors = validate_required_checks(
+        rules, [], [{"statuses": [status_success]}], branch="main"
+    )
+
+    assert len(errors) == 1
+    assert "integration-pinned" in errors[0]
+
+
+def test_status_errors_helper_rejects_pinned_context() -> None:
+    """_status_errors must reject commit statuses for integration-pinned contexts."""
+    required = RequiredCheck(context="CI / test", integration_id=1234)
+    statuses = [{"statuses": [_commit_status("CI / test", status_id=1, state="success")]}]
+
+    errors = _status_errors(required, statuses)
+    assert len(errors) == 1
+    assert "integration-pinned" in errors[0]
+
+
+def test_status_errors_helper_accepts_successful_status() -> None:
+    """_status_errors must accept a successful commit status for unpinned contexts."""
+    required = RequiredCheck(context="CI / test", integration_id=None)
+    statuses = [{"statuses": [_commit_status("CI / test", status_id=1, state="success")]}]
+
+    assert _status_errors(required, statuses) == []
+
+
+def test_status_errors_helper_rejects_failed_status() -> None:
+    """_status_errors must reject a failing commit status for unpinned contexts."""
+    required = RequiredCheck(context="CI / test", integration_id=None)
+    statuses = [{"statuses": [_commit_status("CI / test", status_id=1, state="failure")]}]
+
+    errors = _status_errors(required, statuses)
+    assert len(errors) == 1
+    assert "failure" in errors[0]
