@@ -392,8 +392,16 @@ def write_examples(
             continue
         validated_html = validate_read_path(html_path, purpose="fixture html")
 
-        validated_html_dest = (resolved_examples_dir / f"{base_name}.html").resolve()
-        validated_md_dest = (resolved_examples_dir / f"{base_name}.md").resolve()
+        validated_html_dest = validate_write_path_within_root(
+            resolved_examples_dir / f"{base_name}.html",
+            resolved_examples_dir,
+            purpose="HTML example output",
+        )
+        validated_md_dest = validate_write_path_within_root(
+            resolved_examples_dir / f"{base_name}.md",
+            resolved_examples_dir,
+            purpose="Markdown example output",
+        )
         try:
             validated_html_dest.relative_to(resolved_examples_dir)
             validated_md_dest.relative_to(resolved_examples_dir)

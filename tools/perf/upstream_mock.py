@@ -91,7 +91,10 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(404, "File not found")
             return
 
-        body = file_path.read_bytes()  # NOSONAR(S5131) local benchmark fixture on 127.0.0.1 serving controlled corpus files
+        validated_file_path = validate_read_path(
+            file_path, purpose="corpus file"
+        )
+        body = validated_file_path.read_bytes()  # NOSONAR(S5131) local benchmark fixture on 127.0.0.1 serving controlled corpus files
 
         # Determine transport settings
         is_gzip = "gzip" in path_str or "gzip" in query
