@@ -990,6 +990,89 @@ def _baseline_policy_violations(
     return violations
 
 
+def _scenario_source_entry_violations(
+    name: str,
+    source: Any,
+    mb: dict,
+    scenario_names: set,
+    role: str,
+) -> list[tuple[str, str]]:
+    """Validate one scenario_sources entry against the canonical environment."""
+    violations: list[tuple[str, str]] = []
+    if name not in scenario_names:
+        violations.append((
+            f"{role}.baseline_policy",
+            f"scenario_sources entry '{name}' has no matching scenario",
+        ))
+    if not isinstance(source, dict):
+        violations.append((
+            f"{role}.baseline_policy",
+            f"scenario_sources entry '{name}' must be an object",
+        ))
+        return violations
+    for field in ("platform", "load_generator", "nginx_version"):
+        expected = mb.get(field, "")
+        actual = source.get(field)
+        if actual is None:
+            violations.append((
+                f"{role}.baseline_policy",
+                f"scenario '{name}' source must declare {field} so its "
+                "environment can be verified against the canonical "
+                "environment",
+            ))
+        elif actual != expected:
+            violations.append((
+                f"{role}.baseline_policy",
+                f"scenario '{name}' source environment {field}={actual!r} "
+                f"does not match canonical environment {field}={expected!r}; "
+                "split diverging scenarios into a separate baseline",
+            ))
+    return violations
+
+
+def _scenario_source_environment_violations(
+    report: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Verify per-scenario source environments match the canonical environment.
+
+    A baseline that merges scenarios measured in different runs must declare
+    each diverging scenario under ``baseline_policy.scenario_sources`` with
+    structured environment fields (``platform``, ``load_generator``,
+    ``nginx_version``) that match the top-level ``module_benchmark``
+    environment.  Mixing environments inside one baseline makes percentage
+    comparisons meaningless while the top-level environment fields still
+    pass the compatibility check, so any mismatch — or a source entry whose
+    environment cannot be verified — is an integrity violation.  Diverging
+    scenarios belong in a separate, environment-truthful baseline file.
+    """
+    policy = report.get("baseline_policy")
+    if not isinstance(policy, dict):
+        return []
+    sources = policy.get("scenario_sources")
+    if sources is None:
+        return []
+    if not isinstance(sources, dict):
+        return [(
+            f"{role}.baseline_policy",
+            "scenario_sources must be an object keyed by scenario name",
+        )]
+
+    mb = report.get("module_benchmark", {})
+    scenario_names = {
+        scenario.get("name")
+        for scenario in mb.get("scenarios", [])
+        if isinstance(scenario, dict)
+    }
+    violations: list[tuple[str, str]] = []
+    for name, source in sorted(sources.items()):
+        violations.extend(
+            _scenario_source_entry_violations(
+                name, source, mb, scenario_names, role
+            )
+        )
+    return violations
+
+
 def _check_missing_scenarios(report: dict) -> list[str]:
     """Return [name] for critical scenarios that are entirely absent.
 
@@ -1133,6 +1216,7 @@ def _validate_benchmark_evidence(
         _canonical_baseline_fallback_violations(report, role)
     )
     violations.extend(_baseline_policy_violations(report, role))
+    violations.extend(_scenario_source_environment_violations(report, role))
 
     # 5. Environment identity fields must be present and non-empty;
     #    nginx_version must also not use the legacy "unknown" placeholder.

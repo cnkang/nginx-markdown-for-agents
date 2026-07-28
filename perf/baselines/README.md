@@ -45,6 +45,38 @@ scopes that exception to the recorded source commit and audit note; future
 baseline updates must identify a retained raw artifact and must not use an
 empty, `unknown`, or `not-recorded` `source_artifact`.
 
+## Environment Consistency
+
+A single baseline file must never mix scenarios measured under different
+environments. Every scenario in `module-baseline-091.json` shares the
+top-level canonical environment (`linux-x86_64`, `ab`, NGINX 1.24.0). When a
+scenario is merged from a different run, `baseline_policy.scenario_sources`
+must declare structured `platform`, `load_generator`, and `nginx_version`
+fields for it, and the evidence gate rejects the baseline unless each of them
+matches the top-level environment. A scenario measured in a diverging
+environment must instead live in its own environment-truthful baseline file
+and must never be compared against reports from the canonical environment.
+
+`brotli-streaming-first` was measured on NGINX 1.30.4 (Docker
+`--platform linux/amd64` on an Apple Silicon host) because the canonical
+benchmark environment then lacked Brotli support. It is therefore split out
+into `module-baseline-brotli-091.json`, which records that truthful
+environment identity and references the retained raw artifact
+`module-baseline-brotli-091-raw.json`. The evidence gate consumes only
+`module-baseline-091.json`; until the canonical baseline is regenerated with
+Brotli support in the canonical environment, the gate fails closed on the
+missing `brotli-streaming-first` baseline scenario instead of comparing
+across environments.
+
+Regeneration path: run the `nightly-perf.yml` workflow with
+`workflow_dispatch` and `bootstrap_module_baseline=true`. The job builds the
+canonical NGINX version natively on `ubuntu-24.04` (x86_64) with Brotli
+support (`libbrotli-dev` plus the pinned Python `Brotli==1.2.0`), produces
+all eight scenarios in one consistent environment, validates the result
+against the evidence integrity contract, and uploads it as a retained
+artifact. Merge that artifact (with its `baseline_policy` provenance) before
+tagging a release.
+
 ## Baseline Files
 
 Each platform has a dedicated baseline file:
@@ -52,7 +84,12 @@ Each platform has a dedicated baseline file:
 - `linux-x86_64.json` - Linux on x86_64
 - `darwin-x86_64.json` - macOS on Intel
 - `corpus-baseline.json` - Linux x86_64 corpus quality and latency baseline
-- `module-baseline-091.json` - Linux x86_64 module-level 0.9.1 evidence baseline
+- `module-baseline-091.json` - Linux x86_64 module-level 0.9.1 evidence
+  baseline (canonical NGINX 1.24.0 environment)
+- `module-baseline-brotli-091.json` - Brotli streaming evidence measured on
+  NGINX 1.30.4; archival only, never compared across environments
+- `module-baseline-brotli-091-raw.json` - retained raw report for the Brotli
+  run (provenance artifact referenced by `module-baseline-brotli-091.json`)
 
 ## Running Benchmarks
 
