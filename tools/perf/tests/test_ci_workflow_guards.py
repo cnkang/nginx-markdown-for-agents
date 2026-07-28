@@ -86,3 +86,70 @@ def test_release_gate_declares_statuses_read_permission() -> None:
     )
 
     assert "statuses: read" in workflow
+
+
+# ---------------------------------------------------------------------------
+# Nightly perf workflow guards (canonical module baseline generation)
+# ---------------------------------------------------------------------------
+
+
+def _nightly_perf_text() -> str:
+    repo_root = Path(__file__).resolve().parents[3]
+    return (repo_root / ".github" / "workflows" / "nightly-perf.yml").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_nightly_perf_generates_raw_baseline() -> None:
+    """The workflow must generate the raw canonical baseline report."""
+    text = _nightly_perf_text()
+    assert "module-baseline-091-raw.json" in text
+    assert "run_module_benchmark.sh" in text
+
+
+def test_nightly_perf_uses_finalizer_with_raw_input_and_output() -> None:
+    """The finalizer must read --raw-input and write --output (not in-place)."""
+    text = _nightly_perf_text()
+    assert "finalize_module_baseline.py" in text
+    assert "--raw-input" in text
+    assert "--output" in text
+    # Must not use the old in-place --input flag.
+    assert "--input perf/baselines/module-baseline-091.json" not in text
+
+
+def test_nightly_perf_records_raw_digest() -> None:
+    """The finalizer computes source_artifact_sha256 from the raw file."""
+    text = _nightly_perf_text()
+    # The finalizer CLI does not take --source-artifact-sha256; it computes
+    # the digest internally.  Guard against re-introducing an in-place copy
+    # that bypasses the raw binding.
+    assert "cp perf/baselines/module-baseline-091-raw.json" not in text
+
+
+def test_nightly_perf_validates_finalized_baseline() -> None:
+    """The workflow must run evidence-gate validation on the finalized baseline."""
+    text = _nightly_perf_text()
+    assert "_validate_benchmark_evidence" in text
+    assert "canonical module baseline validation failed" in text
+
+
+def test_nightly_perf_uploads_raw_and_finalized() -> None:
+    """The workflow must upload both raw and finalized baseline files."""
+    text = _nightly_perf_text()
+    assert "module-baseline-091.json" in text
+    assert "module-baseline-091-raw.json" in text
+    assert "if-no-files-found: error" in text
+
+
+def test_nightly_perf_uploads_debug_artifacts_on_failure() -> None:
+    """The workflow must retain debug artifacts when benchmark or validation fails."""
+    text = _nightly_perf_text()
+    assert "module-baseline-091-debug-" in text
+    assert "if: always()" in text
+
+
+def test_nightly_perf_records_run_attempt_in_source_run() -> None:
+    """The source_run URL must include the run attempt for traceability."""
+    text = _nightly_perf_text()
+    assert "github.run_attempt" in text
+    assert "/attempts/" in text
