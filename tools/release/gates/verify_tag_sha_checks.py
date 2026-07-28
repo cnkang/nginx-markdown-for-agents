@@ -10,6 +10,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from lib.path_validation import validate_read_path  # noqa: E402
+
 
 def _flatten_api_pages(payload: Any, collection_key: str | None = None) -> list[dict[str, Any]]:
     """Flatten ``gh api --paginate --slurp`` output into API objects."""
@@ -108,9 +112,25 @@ def validate_required_checks(
     return errors
 
 
+def _resolve_repository_input(path: Path) -> Path:
+    """Resolve an input file without allowing it to escape the checkout."""
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError("input paths must be relative and cannot contain '..'")
+
+    repository_root = Path.cwd().resolve()
+    resolved = (repository_root / path).resolve(strict=True)
+    if not resolved.is_relative_to(repository_root):
+        raise ValueError("input path must remain within the repository checkout")
+    return resolved
+
+
 def _load_json(path: Path) -> Any:
     """Load a JSON API response from a workflow temporary file."""
-    with path.open(encoding="utf-8") as stream:
+    safe_path = validate_read_path(
+        _resolve_repository_input(path),
+        purpose="GitHub API response",
+    )
+    with safe_path.open(encoding="utf-8") as stream:
         return json.load(stream)
 
 
@@ -129,7 +149,7 @@ def main() -> int:
             _load_json(args.check_runs_file),
             branch=args.branch,
         )
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"ERROR: Unable to read GitHub API response: {error}", file=sys.stderr)
         return 1
 

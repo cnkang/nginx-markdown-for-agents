@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+import pytest
+
 from tools.release.gates.verify_tag_sha_checks import (
+    _load_json,
+    main,
     required_check_contexts,
     validate_required_checks,
 )
@@ -34,6 +41,115 @@ def _check_run(
         "conclusion": conclusion,
         "created_at": created_at,
     }
+
+
+def test_load_json_accepts_a_file_inside_the_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The release gate can read its generated response from the checkout."""
+    repository = tmp_path / "repository"
+    response = repository / ".tag-sha-checks" / "rules.json"
+    response.parent.mkdir(parents=True)
+    response.write_text('{"rules": []}', encoding="utf-8")
+    monkeypatch.chdir(repository)
+
+    assert _load_json(Path(".tag-sha-checks/rules.json")) == {"rules": []}
+
+
+def test_load_json_rejects_absolute_and_parent_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLI paths cannot select files outside the checkout."""
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(repository)
+
+    with pytest.raises(ValueError, match="relative"):
+        _load_json(outside)
+    with pytest.raises(ValueError, match="relative"):
+        _load_json(Path("../outside.json"))
+
+
+def test_load_json_rejects_symlink_escape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Canonicalization must not allow a checkout symlink to escape."""
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    (repository / "response.json").symlink_to(outside)
+    monkeypatch.chdir(repository)
+
+    with pytest.raises(ValueError, match="within the repository"):
+        _load_json(Path("response.json"))
+
+
+def test_main_accepts_generated_responses_inside_the_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI preserves the successful release-gate path for safe inputs."""
+    repository = tmp_path / "repository"
+    input_dir = repository / ".tag-sha-checks"
+    input_dir.mkdir(parents=True)
+    (input_dir / "rules.json").write_text(
+        '[{"type": "required_status_checks", "parameters": '
+        '{"required_status_checks": [{"context": "CI / test"}]}}]',
+        encoding="utf-8",
+    )
+    (input_dir / "check-runs.json").write_text(
+        '[{"check_runs": [{"id": 1, "name": "CI / test", '
+        '"status": "completed", "conclusion": "success"}]}]',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repository)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "verify_tag_sha_checks.py",
+            "--rules-file",
+            ".tag-sha-checks/rules.json",
+            "--check-runs-file",
+            ".tag-sha-checks/check-runs.json",
+            "--tag-sha",
+            "abc123",
+            "--branch",
+            "main",
+        ],
+    )
+
+    assert main() == 0
+    assert "passed all required checks" in capsys.readouterr().out
+
+
+def test_main_rejects_an_absolute_input_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI fails closed when an input path attempts to escape the checkout."""
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    monkeypatch.chdir(repository)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "verify_tag_sha_checks.py",
+            "--rules-file",
+            str(tmp_path / "outside.json"),
+            "--check-runs-file",
+            "unused.json",
+            "--tag-sha",
+            "abc123",
+            "--branch",
+            "main",
+        ],
+    )
+
+    assert main() == 1
+    assert "input paths must be relative" in capsys.readouterr().err
 
 
 def test_extracts_required_contexts_from_branch_effective_rules() -> None:
