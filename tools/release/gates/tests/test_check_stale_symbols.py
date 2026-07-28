@@ -17,7 +17,7 @@ def test_stale_symbol_check_ignores_whitelisted_migration_docs(tmp_path):
     exit_code, stdout, stderr = check_stale_symbols.run_stale_symbol_check(repo)
 
     assert exit_code == 0
-    assert stdout == "No stale 0.8 symbols found."
+    assert stdout == "No stale pre-0.9.0 symbols found."
     assert stderr == ""
 
 
