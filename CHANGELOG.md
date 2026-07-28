@@ -137,6 +137,20 @@ completing before the long-lived contract begins.
   streaming selector fields with `policy`/`policy_source`, and removed the
   unexposed manual-rollback helper while retaining atomic file-based reloads
   and last-known-good state reporting.
+- Complexity debt: split the remaining C and Rust production/test renderers,
+  streaming handlers, sanitizers, and traversal helpers; removed all 27
+  historical complexity baseline entries. `make complexity-check` now passes
+  with zero current and zero baseline violations across C, Rust, Python, and
+  shell checks.
+- Performance evidence provenance: the canonical 0.9.1 baseline now records
+  all eight native NGINX 1.24.0 scenarios, including Brotli streaming, and
+  binds verbatim evidence to the exact source commit, workflow run/attempt,
+  UTC timestamp, and retained raw-artifact digest. The former historical
+  exception is retained only as an immutable audit record. The measured
+  `plain-small` latency p50 is recorded as 9 ms without normalization.
+- Security and release gates: strict repository-contained path validation
+  closes the baseline finalizer's CodeQL/SonarCloud path findings, and the
+  native profile E2E helper now honors an explicit `MODULE_SO` path.
 
 ## [0.9.0] - 2026-07-06
 
