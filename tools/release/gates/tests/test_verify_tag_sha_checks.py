@@ -458,6 +458,55 @@ def test_context_absent_from_check_runs_and_statuses_is_missing() -> None:
     assert errors == ["Required check 'CI / test' is missing on the tag SHA."]
 
 
+def test_commit_status_context_case_insensitive() -> None:
+    """Commit status context matching is case-insensitive per GitHub API."""
+    assert validate_required_checks(
+        _required_rules("CI / test"),
+        [],
+        [{"statuses": [_commit_status("ci / test", status_id=1, state="success")]}],
+        branch="main",
+    ) == []
+
+
+def test_commit_status_context_case_insensitive_failure() -> None:
+    """Case-insensitive failure status still blocks."""
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [],
+        [{"statuses": [_commit_status("ci / TEST", status_id=1, state="failure")]}],
+        branch="main",
+    )
+    assert len(errors) == 1
+    assert "CI / test" in errors[0]
+    assert "failure" in errors[0]
+
+
+def test_check_run_and_status_same_context_different_case_both_required() -> None:
+    """GitHub requires both check run and commit status to pass when they share a context name (case-insensitive).
+
+    If check run succeeds but commit status (different case) fails, the gate must block.
+    """
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion="success")],
+        [{"statuses": [_commit_status("ci / test", status_id=1, state="failure")]}],
+        branch="main",
+    )
+    assert len(errors) == 1
+    assert "CI / test" in errors[0]
+    assert "failure" in errors[0]
+
+
+def test_check_run_and_status_same_context_different_case_both_pass() -> None:
+    """Both check run and commit status (different case) must pass."""
+    assert validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion="success")],
+        [{"statuses": [_commit_status("ci / test", status_id=1, state="success")]}],
+        branch="main",
+    ) == []
+
+
 def test_main_accepts_a_statuses_file_for_commit_status_contexts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -556,7 +605,7 @@ def test_same_name_both_fail_produces_two_errors() -> None:
 
 
 def test_same_name_pinned_check_with_status_requires_check_run() -> None:
-    """An integration-pinned context ignores commit status even alongside a check run."""
+    """An integration-pinned context ignores commit status when a matching check run exists."""
     rules = _required_rules_with_apps(("CI / test", 1234))
     check_run_success = _check_run("CI / test", run_id=1, conclusion="success", app_id=1234)
     status_failure = _commit_status("CI / test", status_id=1, state="failure")
@@ -565,8 +614,8 @@ def test_same_name_pinned_check_with_status_requires_check_run() -> None:
         rules, [check_run_success], [{"statuses": [status_failure]}], branch="main"
     )
 
-    assert len(errors) == 1
-    assert "integration-pinned" in errors[0]
+    # With a valid check run from the correct app, the commit status is ignored
+    assert errors == []
 
 
 def test_same_name_pinned_check_missing_with_status_blocks() -> None:
@@ -582,14 +631,25 @@ def test_same_name_pinned_check_missing_with_status_blocks() -> None:
     assert "integration-pinned" in errors[0]
 
 
-def test_status_errors_helper_rejects_pinned_context() -> None:
-    """_status_errors must reject commit statuses for integration-pinned contexts."""
+def test_status_errors_helper_rejects_pinned_context_no_check_run() -> None:
+    """_status_errors must reject commit statuses for integration-pinned contexts when no check run."""
     required = RequiredCheck(context="CI / test", integration_id=1234)
     statuses = [{"statuses": [_commit_status("CI / test", status_id=1, state="success")]}]
 
-    errors = _status_errors(required, statuses)
+    # No matching check run -> error
+    errors = _status_errors(required, statuses, has_matching_run=False)
     assert len(errors) == 1
     assert "integration-pinned" in errors[0]
+
+
+def test_status_errors_helper_ignores_status_when_check_run_exists_for_pinned() -> None:
+    """_status_errors ignores commit status for pinned context when matching check run exists."""
+    required = RequiredCheck(context="CI / test", integration_id=1234)
+    statuses = [{"statuses": [_commit_status("CI / test", status_id=1, state="failure")]}]
+
+    # Matching check run exists -> status ignored
+    errors = _status_errors(required, statuses, has_matching_run=True)
+    assert errors == []
 
 
 def test_status_errors_helper_accepts_successful_status() -> None:
@@ -597,7 +657,7 @@ def test_status_errors_helper_accepts_successful_status() -> None:
     required = RequiredCheck(context="CI / test", integration_id=None)
     statuses = [{"statuses": [_commit_status("CI / test", status_id=1, state="success")]}]
 
-    assert _status_errors(required, statuses) == []
+    assert _status_errors(required, statuses, has_matching_run=False) == []
 
 
 def test_status_errors_helper_rejects_failed_status() -> None:
@@ -605,6 +665,6 @@ def test_status_errors_helper_rejects_failed_status() -> None:
     required = RequiredCheck(context="CI / test", integration_id=None)
     statuses = [{"statuses": [_commit_status("CI / test", status_id=1, state="failure")]}]
 
-    errors = _status_errors(required, statuses)
+    errors = _status_errors(required, statuses, has_matching_run=False)
     assert len(errors) == 1
     assert "failure" in errors[0]

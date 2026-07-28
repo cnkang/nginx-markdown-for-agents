@@ -129,14 +129,27 @@ def _matches_required_check(run: dict[str, Any], required: RequiredCheck) -> boo
     return _run_app_id(run) == required.integration_id
 
 
+def _normalize_status_context(value: str) -> str:
+    """Normalize a commit status context for case-insensitive comparison.
+
+    GitHub's Commit Status API treats context as case-insensitive.
+    https://docs.github.com/en/rest/commits/statuses?apiVersion=2026-03-10
+    """
+    return value.casefold()
+
+
 def _latest_status_state(statuses: Any, context: str) -> str | None:
-    """Return the state of the newest commit status for context, if any."""
+    """Return the state of the newest commit status for context, if any.
+
+    Context matching is case-insensitive per GitHub's Commit Status API.
+    """
     if statuses is None:
         return None
+    normalized_context = _normalize_status_context(context)
     matching = [
         status
         for status in _flatten_api_pages(statuses, "statuses")
-        if status.get("context") == context
+        if _normalize_status_context(status.get("context", "")) == normalized_context
     ]
     if not matching:
         return None
@@ -145,14 +158,31 @@ def _latest_status_state(statuses: Any, context: str) -> str | None:
     return state if isinstance(state, str) else None
 
 
-def _status_errors(required: RequiredCheck, statuses: Any) -> list[str]:
+def _has_matching_status(statuses: Any, context: str) -> bool:
+    """Check if a commit status exists for the given context (case-insensitive)."""
+    return _latest_status_state(statuses, context) is not None
+
+
+def _status_errors(required: RequiredCheck, statuses: Any, has_matching_run: bool) -> list[str]:
     """Evaluate the Commit Status API result for a required context.
 
     A commit status cannot prove which GitHub App produced it, so it never
     satisfies a context pinned to an integration_id.  When integration_id is
     None, the latest commit status state must be ``success``.
+
+    For pinned contexts (integration_id is not None):
+    - If there IS a matching check run from the correct app, the commit status
+      is ignored (GitHub treats check runs as authoritative for pinned contexts).
+    - If there is NO matching check run, the commit status cannot satisfy the
+      requirement and we return an error.
     """
     if required.integration_id is not None:
+        if has_matching_run:
+            # A check run from the correct app exists; commit status is
+            # supplementary/legacy and does not affect the gate.
+            return []
+        # No matching check run from the pinned app — commit status cannot
+        # satisfy an integration-pinned requirement.
         return [
             f"Required check '{required.context}' from app "
             f"{required.integration_id} has no matching check run on the tag SHA; "
@@ -240,7 +270,7 @@ def validate_required_checks(
             errors.extend(_check_run_errors(required, matching_runs))
 
         if has_matching_status:
-            errors.extend(_status_errors(required, statuses))
+            errors.extend(_status_errors(required, statuses, has_matching_run))
     return errors
 
 

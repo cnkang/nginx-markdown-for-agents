@@ -945,19 +945,26 @@ def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
 def _baseline_policy_violations(
     report: dict, role: str,
 ) -> list[tuple[str, str]]:
-    """Validate provenance for conservatively normalized baselines."""
+    """Validate provenance for baselines.
+
+    All baseline policies must declare their provenance (source commit, run,
+    artifact).  Conservative normalized baselines have additional requirements
+    around adjustments and artifact retention.  The sole historical exception
+    is the original 0.9.1 baseline at _HISTORICAL_BASELINE_COMMIT.
+    """
     policy = report.get("baseline_policy")
-    if not policy or policy.get("type") != "conservative_normalized":
+    if not policy:
+        # No policy at all is a violation for baselines
+        if role == "baseline":
+            return [(f"{role}.baseline_policy", "missing baseline_policy object")]
         return []
 
     violations = []
+    # All baseline policies must have core provenance fields
     required = (
         "source_git_commit",
         "source_run",
         "source_artifact",
-        "adjustments",
-        "adjustment_reason",
-        "adjustment_date",
     )
     for field in required:
         if field not in policy or policy[field] in (None, "", {}):
@@ -966,15 +973,27 @@ def _baseline_policy_violations(
                 f"missing or empty {field}",
             ))
 
-    adjustments = policy.get("adjustments")
-    if isinstance(adjustments, dict):
-        for field in ("rps", "latency_ttfb"):
-            if not adjustments.get(field):
+    # Type-specific validation
+    policy_type = policy.get("type")
+    if policy_type == "conservative_normalized":
+        # Additional fields required for normalized baselines
+        for field in ("adjustments", "adjustment_reason", "adjustment_date"):
+            if field not in policy or policy[field] in (None, "", {}):
                 violations.append((
                     f"{role}.baseline_policy",
-                    f"missing or empty adjustments.{field}",
+                    f"missing or empty {field}",
                 ))
 
+        adjustments = policy.get("adjustments")
+        if isinstance(adjustments, dict):
+            for field in ("rps", "latency_ttfb"):
+                if not adjustments.get(field):
+                    violations.append((
+                        f"{role}.baseline_policy",
+                        f"missing or empty adjustments.{field}",
+                    ))
+
+    # Validate source_artifact is a real retained artifact (not placeholder)
     artifact = policy.get("source_artifact")
     historical_exception = policy.get("historical_audit_exception") is True
     exception_is_scoped = (
@@ -987,6 +1006,7 @@ def _baseline_policy_violations(
             f"{role}.baseline_policy",
             "source_artifact must identify a retained raw artifact",
         ))
+
     return violations
 
 

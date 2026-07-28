@@ -1751,7 +1751,15 @@ class TestScenarioSourceEnvironment:
                         },
                     },
                 ],
-            }
+            },
+            "baseline_policy": {
+                "type": "verbatim_run",
+                "source_git_commit": "847f90139d287446882052ec78661746541aebff",
+                "source_run": "canonical module benchmark at 2026-07-16T09:47:06Z",
+                "source_artifact": "perf/baselines/module-baseline-091-raw.json",
+                "measurement_timestamp": "2026-07-16T09:47:06Z",
+                "normalization": "none",
+            },
         }
         assert _validate_benchmark_evidence(report, role="baseline") == []
 
