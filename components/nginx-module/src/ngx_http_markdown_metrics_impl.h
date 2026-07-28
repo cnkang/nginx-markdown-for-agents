@@ -1054,6 +1054,11 @@ ngx_http_markdown_metrics_write_text_summary(
     ngx_atomic_uint_t input_bytes_avg,
     ngx_atomic_uint_t output_bytes_avg)
 {
+    /*
+     * Keep the text schema aligned with the snapshot fields and the JSON
+     * renderer.  The callers reserve the complete response buffer before
+     * entering this formatter, so ngx_slprintf may only advance to `end`.
+     */
     return ngx_slprintf(p, end,
         "Markdown Filter Metrics\n"
         "=======================\n"
@@ -1506,6 +1511,11 @@ ngx_http_markdown_json_walk_path_tree_bounded(
     size_t                                       needed;
     size_t                                       remaining;
 
+    /*
+     * In-order traversal preserves deterministic path output.  Every node
+     * either fits before the reserved tail or is folded into __other__;
+     * `render->failed` records malformed lengths for the caller.
+     */
     if (node == sentinel || render->pos >= render->end) {
         return render->pos;
     }
