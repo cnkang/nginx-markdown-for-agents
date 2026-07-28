@@ -33,9 +33,9 @@ Every canonical baseline must retain the raw workflow artifact and record the
 artifact/run, original Git commit, adjustment rule, person or reason, and date
 in machine-locatable `baseline_policy` metadata. The active 0.9.1 module
 baseline is a verbatim run from source commit
-`f81f9b7dd9be38c49a0cfdda602562a6d744fd1a`, workflow run
-`30356286227/attempts/2`, measured at `2026-07-28T12:21:50Z`, with raw digest
-`567bcde7b8f0d2406414b35265f6968564487c071672af3834c63344bbcd8ebd`.
+`f2f939808110115bd0527af1743705c1e5a42b48`, workflow run
+`30366081113/attempts/1`, measured at `2026-07-28T14:05:53Z`, with raw digest
+`fc9b53c9e9a88655ee69300a350ce1498f4afff7dd566425447b6fb65abe9708`.
 The former `historical_audit_exception` is retained only for historical audit
 coverage and is not an active release-baseline policy.
 

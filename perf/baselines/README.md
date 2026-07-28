@@ -38,10 +38,10 @@ and environment evidence must remain verbatim.
 Retain the raw workflow artifact and record its run, source Git commit,
 adjustment rule, person or reason, and adjustment date in `baseline_policy`.
 The current `module-baseline-091.json` is a verbatim eight-scenario run from
-commit `f81f9b7dd9be38c49a0cfdda602562a6d744fd1a`, measured at
-`2026-07-28T12:21:50Z` by canonical workflow run `30356286227/attempts/2`.
+commit `f2f939808110115bd0527af1743705c1e5a42b48`, measured at
+`2026-07-28T14:05:53Z` by canonical workflow run `30366081113/attempts/1`.
 Its retained raw artifact has SHA-256
-`567bcde7b8f0d2406414b35265f6968564487c071672af3834c63344bbcd8ebd`.
+`fc9b53c9e9a88655ee69300a350ce1498f4afff7dd566425447b6fb65abe9708`.
 The validator requires this source commit, run attempt, timestamp, retained
 raw artifact, and digest to remain mutually consistent.
 
