@@ -889,13 +889,13 @@ jobs:
           path: perf/reports/examples/
 
   # ─── Release Regression Gates (Non-blocking) ─────────────────────────────────
-  # Validates that release-gated features from 0.9.0 have not regressed.
-  # Runs validate_release_gates_090.py which covers 0.9.0 deliverables including
+  # Validates that release-gated features from 0.9.x have not regressed.
+  # Runs validate_release_gates_090.py which covers 0.9.x deliverables including
   # production examples, doctor tool, config V2, conditional requests, and
   # observability schema.
   # Non-blocking in CI; blocking at actual release tags via make targets.
   release-regression-gates:
-    name: "Release Gates: 0.9.0 Regression Validator"
+    name: "Release Gates: 0.9.x Regression Validator"
     needs: [changes, rust-quality, nginx-c-tests]
     if: >-
       always() &&
