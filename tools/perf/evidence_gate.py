@@ -947,11 +947,21 @@ def _baseline_policy_violations(
 ) -> list[tuple[str, str]]:
     """Validate provenance for baselines.
 
+    A baseline_policy must declare one of the supported policy types and
+    include all type-specific fields.  Unknown or missing types are
+    fail-closed: they cannot satisfy a baseline provenance requirement.
+
     All baseline policies must declare their provenance (source commit, run,
     artifact).  Conservative normalized baselines have additional requirements
     around adjustments and artifact retention.  The sole historical exception
     is the original 0.9.1 baseline at _HISTORICAL_BASELINE_COMMIT.
+
+    Supported types:
+      - verbatim_run: raw, unmodified benchmark output.
+      - conservative_normalized: latency/throughput adjusted only downward/inward.
     """
+    SUPPORTED_TYPES = frozenset({"verbatim_run", "conservative_normalized"})
+
     policy = report.get("baseline_policy")
     if not policy:
         # No policy at all is a violation for baselines
@@ -959,7 +969,35 @@ def _baseline_policy_violations(
             return [(f"{role}.baseline_policy", "missing baseline_policy object")]
         return []
 
-    violations = []
+    violations: list[tuple[str, str]] = []
+
+    # The scoped historical exception may lack structured provenance fields
+    # entirely.  Compute it early so we can defer all new type-specific
+    # requirements to future baselines while still accepting the original.
+    historical_exception = policy.get("historical_audit_exception") is True
+    exception_is_scoped = (
+        historical_exception
+        and isinstance(policy.get("source_git_commit"), str)
+        and policy.get("source_git_commit") == _HISTORICAL_BASELINE_COMMIT
+        and bool(policy.get("audit_note"))
+    )
+
+    # Type must be present and belong to the allowed set for baselines;
+    # fail-closed on unknown or missing type.  The scoped historical
+    # exception is grandfathered because it predates the type discipline.
+    if role == "baseline" and not exception_is_scoped:
+        policy_type = policy.get("type")
+        if not isinstance(policy_type, str) or not policy_type:
+            violations.append((f"{role}.baseline_policy", "missing or empty type"))
+        elif policy_type not in SUPPORTED_TYPES:
+            violations.append((
+                f"{role}.baseline_policy",
+                f"unsupported type {policy_type!r}; must be one of "
+                f"{sorted(SUPPORTED_TYPES)}",
+            ))
+    else:
+        policy_type = policy.get("type")
+
     # All baseline policies must have core provenance fields
     required = (
         "source_git_commit",
@@ -973,8 +1011,35 @@ def _baseline_policy_violations(
                 f"missing or empty {field}",
             ))
 
+    # source_git_commit for a verbatim baseline must be a full 40-character
+    # SHA so the provenance cannot be confused with a shortened commit id.
+    sha_re = re.compile(r"^[0-9a-f]{40}$")
+    source_git_commit = policy.get("source_git_commit")
+    if isinstance(source_git_commit, str) and source_git_commit and policy_type == "verbatim_run":
+        if not sha_re.match(source_git_commit):
+            violations.append((
+                f"{role}.baseline_policy",
+                f"source_git_commit must be a full 40-character SHA for "
+                f"verbatim_run (got {source_git_commit!r})",
+            ))
+
     # Type-specific validation
-    policy_type = policy.get("type")
+    if policy_type == "verbatim_run":
+        if "measurement_timestamp" not in policy or not policy.get(
+            "measurement_timestamp"
+        ):
+            violations.append((
+                f"{role}.baseline_policy",
+                "verbatim_run policy missing or empty measurement_timestamp",
+            ))
+        normalization = policy.get("normalization")
+        if normalization != "none":
+            violations.append((
+                f"{role}.baseline_policy",
+                f"verbatim_run policy normalization must be 'none' "
+                f"(got {normalization!r})",
+            ))
+
     if policy_type == "conservative_normalized":
         # Additional fields required for normalized baselines
         for field in ("adjustments", "adjustment_reason", "adjustment_date"):
@@ -993,14 +1058,10 @@ def _baseline_policy_violations(
                         f"missing or empty adjustments.{field}",
                     ))
 
-    # Validate source_artifact is a real retained artifact (not placeholder)
+    # Validate source_artifact is a real retained artifact (not placeholder).
+    # exception_is_scoped was computed earlier so the historical exception is
+    # honored consistently for type, provenance, and artifact checks.
     artifact = policy.get("source_artifact")
-    historical_exception = policy.get("historical_audit_exception") is True
-    exception_is_scoped = (
-        historical_exception
-        and policy.get("source_git_commit") == _HISTORICAL_BASELINE_COMMIT
-        and bool(policy.get("audit_note"))
-    )
     if artifact in (None, "", "not-recorded", "unknown") and not exception_is_scoped:
         violations.append((
             f"{role}.baseline_policy",

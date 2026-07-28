@@ -300,12 +300,31 @@ jobs:
           test -f "${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so"
         shell: bash
 
-      - name: Generate canonical eight-scenario module baseline
+      - name: Generate raw canonical eight-scenario module baseline
         run: |
           NGINX_BIN="${NGINX_SRC}/objs/nginx" \
           MODULE_SO="${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so" \
             tools/perf/run_module_benchmark.sh \
-            --output perf/baselines/module-baseline-091.json
+            --output perf/baselines/module-baseline-091-raw.json
+        shell: bash
+
+      - name: Record full commit SHA for baseline provenance
+        id: baseline-git
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+        shell: bash
+
+      - name: Finalize canonical module baseline with baseline_policy
+        env:
+          GITHUB_RUN_URL: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}"
+        run: |
+          cp perf/baselines/module-baseline-091-raw.json \
+             perf/baselines/module-baseline-091.json
+          python3 tools/perf/finalize_module_baseline.py \
+            --input perf/baselines/module-baseline-091.json \
+            --source-git-commit "${{ steps.baseline-git.outputs.sha }}" \
+            --source-run "${GITHUB_RUN_URL}" \
+            --source-artifact perf/baselines/module-baseline-091-raw.json
         shell: bash
 
       - name: Validate canonical module baseline
@@ -331,6 +350,7 @@ jobs:
           name: module-baseline-091-${{ github.sha }}
           path: |
             perf/baselines/module-baseline-091.json
+            perf/baselines/module-baseline-091-raw.json
             perf/baselines/module-baseline-091-probes/
           if-no-files-found: error
           retention-days: 14
