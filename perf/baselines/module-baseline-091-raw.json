@@ -548,14 +548,5 @@
   "decompression_coverage": {
     "decompression_streaming_total": 3090,
     "decompression_fullbuffer_total": 1030
-  },
-  "baseline_policy": {
-    "type": "verbatim_run",
-    "source_git_commit": "f81f9b7dd9be38c49a0cfdda602562a6d744fd1a",
-    "source_run": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/30356286227/attempts/2",
-    "source_artifact": "perf/baselines/module-baseline-091-raw.json",
-    "source_artifact_sha256": "567bcde7b8f0d2406414b35265f6968564487c071672af3834c63344bbcd8ebd",
-    "measurement_timestamp": "2026-07-28T12:21:50Z",
-    "normalization": "none"
   }
 }

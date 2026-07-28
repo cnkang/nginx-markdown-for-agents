@@ -2,7 +2,10 @@
 
 **Original Measurement Date:** 2026-02-26
 
-**Latest Scenario Measurement:** 2026-07-19 (Brotli streaming)
+**Latest Canonical Module Measurement:** 2026-07-28 (eight scenarios,
+including Brotli streaming, on native Linux x86_64 with NGINX 1.24.0)
+**Historical Scenario Measurement:** 2026-07-19 (Brotli streaming on NGINX
+1.30.4; archival only)
 **Scope:** Local release-build microbenchmarks for the Rust converter FFI path, the C conditional-request handler (`If-None-Match`) using the standalone test harness with real Rust FFI, and local real-NGINX HTTP E2E baselines.
 
 ## Summary
@@ -26,14 +29,15 @@ latency/TTFB may not be decreased, and path, fallback, output, memory, or
 environment evidence may not be changed. This makes the threshold more
 conservative without improving or fabricating measured evidence.
 
-Every normalized baseline must retain the raw workflow artifact and record the
+Every canonical baseline must retain the raw workflow artifact and record the
 artifact/run, original Git commit, adjustment rule, person or reason, and date
-in machine-locatable `baseline_policy` metadata. The current 0.9.1 module
-baseline identifies source commit `847f9013` and local run timestamp
-`2026-07-16T09:47:06Z`; its raw artifact location was not recorded and is
-explicitly documented with `historical_audit_exception: true`. The validator
-scopes that exception to this source commit and audit note; it is not an
-acceptable precedent for future normalized baselines.
+in machine-locatable `baseline_policy` metadata. The active 0.9.1 module
+baseline is a verbatim run from source commit
+`f81f9b7dd9be38c49a0cfdda602562a6d744fd1a`, workflow run
+`30356286227/attempts/2`, measured at `2026-07-28T12:21:50Z`, with raw digest
+`567bcde7b8f0d2406414b35265f6968564487c071672af3834c63344bbcd8ebd`.
+The former `historical_audit_exception` is retained only for historical audit
+coverage and is not an active release-baseline policy.
 
 CI now also records non-blocking performance artifacts from the same `perf_baseline` example. The workflow stores the full benchmark output plus `/usr/bin/time -v` captures for the medium, medium-front-matter, and large single-sample runs. Those artifacts are for regression comparison and trend review; they are not merge-blocking thresholds yet.
 

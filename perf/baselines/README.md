@@ -37,13 +37,13 @@ and environment evidence must remain verbatim.
 
 Retain the raw workflow artifact and record its run, source Git commit,
 adjustment rule, person or reason, and adjustment date in `baseline_policy`.
-The current `module-baseline-091.json` records commit `847f9013` and the local
-canonical run timestamp `2026-07-16T09:47:06Z`. Its original artifact location
-was not recorded, which is explicitly marked by
-`historical_audit_exception: true` as a one-baseline audit gap. The validator
-scopes that exception to the recorded source commit and audit note; future
-baseline updates must identify a retained raw artifact and must not use an
-empty, `unknown`, or `not-recorded` `source_artifact`.
+The current `module-baseline-091.json` is a verbatim eight-scenario run from
+commit `f81f9b7dd9be38c49a0cfdda602562a6d744fd1a`, measured at
+`2026-07-28T12:21:50Z` by canonical workflow run `30356286227/attempts/2`.
+Its retained raw artifact has SHA-256
+`567bcde7b8f0d2406414b35265f6968564487c071672af3834c63344bbcd8ebd`.
+The validator requires this source commit, run attempt, timestamp, retained
+raw artifact, and digest to remain mutually consistent.
 
 ## Raw Artifact Binding and Digest Verification
 
@@ -62,31 +62,32 @@ mismatch. Writing a digest without verifying the file is not accepted.
 ### verbatim_run vs conservative_normalized
 
 - **`verbatim_run`**: the finalized baseline is the raw report plus a
-  `baseline_policy` block. No measured metric may be modified. The
-  validator verifies that `module_benchmark` and `decompression_coverage`
-  are byte-identical between the finalized and raw files.
+  `baseline_policy` block. No raw evidence may be modified. The validator
+  compares the entire finalized report with `baseline_policy` removed against
+  the raw report.
 - **`conservative_normalized`**: RPS may only be rounded downward or
   lowered; latency/TTFB/TTLB may only be rounded upward or raised. Truth
-  evidence (path, fallback, output, memory, environment, scenario status
-  and metadata, `decompression_coverage`) must remain identical to the raw
-  report. The finalizer records the adjustment rule, reason, and date.
-  The validator machine-verifies truth-evidence identity against the raw
-  artifact.
+  evidence (path, fallback, output, memory, environment, scenario status,
+  metadata, metric keys, and `decompression_coverage`) must remain identical
+  to the raw report. The policy adjustment ledger must exactly describe every
+  changed adjustable metric and its delta. The finalizer records the
+  adjustment rule, reason, and date; the validator machine-verifies the full
+  relationship against the raw artifact.
 
 The `baseline_policy.type` is restricted to `verbatim_run` or
 `conservative_normalized`. Any other value (or a missing type) fail-closes
 the release gate. The full 40-character lowercase source Git SHA is
 required for both policy types; short SHAs, `unknown`, or placeholders are
-rejected. The sole exception is the scoped historical baseline at commit
-`847f9013`, which must not be extended to new baselines.
+rejected. The historical exception at commit `847f9013` is retained only as
+an audit record in repository history; it is no longer used by the current
+canonical baseline and must not be extended to new baselines.
 
-### Historical exception
+### Historical audit record
 
-The scoped historical audit exception applies only to the original
-`module-baseline-091.json` at commit `847f9013`. It is a single,
-non-extensible exception that allows the current code to be tested before
-the canonical baseline is regenerated. New eight-scenario baselines must
-not use this exception.
+The original pre-regeneration baseline at commit `847f9013` remains relevant
+only to historical validator tests and audit comparisons. It is not the active
+release baseline. The active 0.9.1 baseline uses `verbatim_run` provenance and
+does not use `historical_audit_exception`.
 
 ## Environment Consistency
 
@@ -100,16 +101,10 @@ matches the top-level environment. A scenario measured in a diverging
 environment must instead live in its own environment-truthful baseline file
 and must never be compared against reports from the canonical environment.
 
-`brotli-streaming-first` was measured on NGINX 1.30.4 (Docker
-`--platform linux/amd64` on an Apple Silicon host) because the canonical
-benchmark environment then lacked Brotli support. It is therefore split out
-into `module-baseline-brotli-091.json`, which records that truthful
-environment identity and references the retained raw artifact
-`module-baseline-brotli-091-raw.json`. The evidence gate consumes only
-`module-baseline-091.json`; until the canonical baseline is regenerated with
-Brotli support in the canonical environment, the gate fails closed on the
-missing `brotli-streaming-first` baseline scenario instead of comparing
-across environments.
+The active canonical run includes `brotli-streaming-first` under NGINX 1.24.0
+with the other seven scenarios. The older
+`module-baseline-brotli-091.json` remains as a truthful NGINX 1.30.4 archival
+artifact and is never mixed into current comparisons.
 
 Regeneration path: run the `nightly-perf.yml` workflow with
 `workflow_dispatch` and `bootstrap_module_baseline=true` (do not also set
@@ -120,8 +115,9 @@ consistent environment, finalizes the baseline from the retained raw report
 (computing the raw SHA-256 and taking the measurement timestamp from
 `module_benchmark.timestamp`), validates the result against the evidence
 integrity contract (including raw-digest and content-binding verification),
-and uploads both the finalized and raw files as retained artifacts. Merge
-both artifacts before tagging a release.
+and uploads both the finalized and raw files as retained artifacts. Commit
+both artifacts before tagging a release and verify the policy digest after
+materialization.
 
 ## Baseline Files
 
@@ -308,5 +304,6 @@ The baseline system integrates with CI pipelines:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
+| 0.9.1 | 2026-07-28 | Codex | Documented strict raw-artifact provenance, exact historical-exception binding, and conservative normalization rules. |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
+| 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

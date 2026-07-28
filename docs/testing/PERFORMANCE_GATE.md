@@ -125,11 +125,19 @@ adjustment rule, person or reason, and date in `baseline_policy`. Missing raw
 artifact provenance is an audit failure to disclose, not a reason to invent a
 workflow identifier.
 
-The checked-in 0.9.1 baseline is the only accepted historical exception. It
-uses `historical_audit_exception: true`, the original source commit, and an
-explicit audit note because its raw artifact was not retained. Machine
-validation rejects unlocatable `source_artifact` values for every future
-conservatively normalized baseline.
+The checked-in 0.9.1 baseline is now a verbatim eight-scenario canonical run.
+Its `baseline_policy` binds the measured data to source commit
+`f81f9b7dd9be38c49a0cfdda602562a6d744fd1a`, workflow run
+`30356286227/attempts/2`, measurement timestamp `2026-07-28T12:21:50Z`, and
+the retained raw artifact SHA-256
+`567bcde7b8f0d2406414b35265f6968564487c071672af3834c63344bbcd8ebd`.
+Machine validation recomputes that digest and requires the finalized report to
+match the raw report exactly apart from `baseline_policy`.
+
+The former `historical_audit_exception` is retained only for historical
+validator coverage and is not used by the active release baseline. Future
+baselines must identify a repository-contained raw artifact and must not use
+an empty, `unknown`, or `not-recorded` `source_artifact`.
 
 ## Troubleshooting
 
@@ -170,6 +178,7 @@ above to bootstrap.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-28 | Codex | Documented exact baseline provenance validation and the zero-entry complexity release gate. |
 | 0.9.1 | 2026-07-08 | Agent | Updated performance gate evidence and tool references for 0.9.1 release |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |
