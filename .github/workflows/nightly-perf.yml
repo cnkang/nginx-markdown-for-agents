@@ -237,6 +237,7 @@ jobs:
             build-essential \
             ca-certificates \
             curl \
+            libbrotli-dev \
             libpcre2-dev \
             libssl-dev \
             zlib1g-dev
@@ -256,7 +257,7 @@ jobs:
 
       - name: Install release-gate tooling
         run: |
-          python3 -m pip install -r requirements-dev.txt lizard complexipy
+          python3 -m pip install -r requirements-dev.txt -r requirements-perf.txt lizard complexipy
           if ! command -v cbindgen >/dev/null 2>&1 \
               || [[ "$(cbindgen --version)" != "cbindgen 0.29.2" ]]; then
             cargo install cbindgen --version 0.29.2 --locked
@@ -299,7 +300,7 @@ jobs:
           test -f "${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so"
         shell: bash
 
-      - name: Generate canonical seven-scenario module baseline
+      - name: Generate canonical eight-scenario module baseline
         run: |
           NGINX_BIN="${NGINX_SRC}/objs/nginx" \
           MODULE_SO="${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so" \

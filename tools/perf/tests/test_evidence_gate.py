@@ -35,6 +35,7 @@ from evidence_gate import (
     _extract_evidence_metrics,
     _extract_memory_points,
     _nginx_bin_available,
+    _scenario_source_environment_violations,
     _validate_benchmark_evidence,
     _write_output,
     main,
@@ -262,8 +263,14 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
     assert "module-baseline-091-${{ github.sha }}" in workflow
 
 
-def test_module_baseline_contains_completed_eight_scenario_contract():
-    """The checked-in baseline contains all eight completed release scenarios."""
+def test_module_baseline_contains_completed_environment_consistent_scenarios():
+    """The checked-in canonical baseline contains seven completed scenarios
+    that all share its declared canonical environment (linux-x86_64, ab,
+    NGINX 1.24.0).  brotli-streaming-first was measured on NGINX 1.30.4 and
+    must not be mixed into this baseline; it lives in
+    module-baseline-brotli-091.json until the canonical baseline is
+    regenerated with brotli support in the canonical environment.
+    """
     baseline_path = (
         Path(__file__).resolve().parents[3]
         / "perf"
@@ -274,7 +281,7 @@ def test_module_baseline_contains_completed_eight_scenario_contract():
     scenarios = baseline["module_benchmark"]["scenarios"]
     by_name = {scenario["name"]: scenario for scenario in scenarios}
 
-    # Keep the complete eight-scenario contract explicit to prevent drift.
+    # Keep the complete seven-scenario contract explicit to prevent drift.
     for name in (
         "plain-small",
         "chunked-medium",
@@ -283,13 +290,24 @@ def test_module_baseline_contains_completed_eight_scenario_contract():
         "streaming-first",
         "gzip-streaming-first",
         "deflate-streaming-first",
-        "brotli-streaming-first",
     ):
         assert name in by_name, f"baseline missing scenario: {name}"
         assert by_name[name]["status"] == "completed"
         assert by_name[name]["metrics"]["input_bytes"] > 0
         assert by_name[name]["metrics"]["baseline_rss_bytes"] > 0
         assert by_name[name]["metrics"]["peak_rss_bytes"] > 0
+
+    assert "brotli-streaming-first" not in by_name, (
+        "brotli-streaming-first was measured on NGINX 1.30.4 and must not be "
+        "mixed into the NGINX 1.24.0 canonical baseline; keep it in "
+        "module-baseline-brotli-091.json until the canonical baseline is "
+        "regenerated with brotli support in the canonical environment"
+    )
+    assert "scenario_sources" not in baseline.get("baseline_policy", {}), (
+        "the canonical baseline must be environment-consistent; scenarios "
+        "measured in a diverging environment belong in a separate baseline "
+        "file with its own truthful environment identity"
+    )
 
     assert baseline["module_benchmark"]["nginx_version"].startswith(
         "nginx version: nginx/"
@@ -316,12 +334,45 @@ def test_module_baseline_contains_completed_eight_scenario_contract():
         )
         assert deflate_s["streaming_path_hits"] > 0
 
-    if "brotli-streaming-first" in by_name:
-        brotli_s = by_name["brotli-streaming-first"]["metrics"]
-        assert brotli_s["decompression_streaming_total"] > 0, (
-            "brotli-streaming-first must prove brotli streaming decompression ran"
-        )
-        assert brotli_s["streaming_path_hits"] > 0
+
+def test_brotli_baseline_preserves_its_own_environment_identity():
+    """The split brotli baseline keeps its truthful NGINX 1.30.4 environment
+    identity and retained raw artifact provenance, and its scenario metrics
+    remain verbatim copies of the retained raw report."""
+    repo_root = Path(__file__).resolve().parents[3]
+    baseline_path = repo_root / "perf" / "baselines" / "module-baseline-brotli-091.json"
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+
+    mb = baseline["module_benchmark"]
+    assert mb["platform"] == "linux-x86_64"
+    assert mb["load_generator"] == "ab"
+    assert mb["nginx_version"] == "nginx version: nginx/1.30.4"
+    assert "execution_mode" in mb
+
+    scenarios = mb["scenarios"]
+    assert [scenario["name"] for scenario in scenarios] == ["brotli-streaming-first"]
+    brotli = scenarios[0]
+    assert brotli["status"] == "completed"
+    metrics = brotli["metrics"]
+    assert metrics["decompression_streaming_total"] > 0, (
+        "brotli-streaming-first must prove brotli streaming decompression ran"
+    )
+    assert metrics["streaming_path_hits"] > 0
+    assert metrics["precommit_failopen_total"] == 0
+    assert metrics["streaming_requests_total"] > 0
+
+    policy = baseline["baseline_policy"]
+    assert policy["source_artifact"] == (
+        "perf/baselines/module-baseline-brotli-091-raw.json"
+    )
+    raw_path = repo_root / policy["source_artifact"]
+    assert raw_path.exists(), "the retained raw brotli artifact must exist"
+    raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    raw_metrics = raw["module_benchmark"]["scenarios"][0]["metrics"]
+    assert metrics == raw_metrics, (
+        "brotli baseline metrics must remain verbatim copies of the retained "
+        "raw report"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1189,8 +1240,16 @@ class TestPathCoverageInvariants:
 class TestBaselineEvidenceIntegrity:
     """Baselines must pass the same integrity checks as current evidence."""
 
-    def test_current_baseline_passes_full_validation(self):
-        """The regenerated baseline passes the blocking integrity contract."""
+    def test_current_baseline_reports_only_the_split_brotli_gap(self):
+        """The checked-in baseline pins the intentional brotli evidence gap.
+
+        Until the canonical baseline is regenerated with brotli support in
+        the canonical environment, the only integrity violations allowed are
+        the fail-closed markers for the missing brotli-streaming-first
+        scenario; every present scenario must be fully valid.  Regenerating
+        a complete eight-scenario baseline makes this test fail on purpose
+        so the `== []` contract is restored with the regeneration.
+        """
         baseline_path = (
             Path(__file__).resolve().parents[3]
             / "perf"
@@ -1198,9 +1257,22 @@ class TestBaselineEvidenceIntegrity:
             / "module-baseline-091.json"
         )
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
-        assert _validate_benchmark_evidence(
-            baseline, role="baseline"
-        ) == []
+        violations = _validate_benchmark_evidence(baseline, role="baseline")
+
+        assert violations == [
+            (
+                "baseline.scenario",
+                "missing critical scenario: brotli-streaming-first",
+            ),
+            (
+                "baseline.fallback_rate",
+                "brotli-streaming-first: missing precommit_failopen_total",
+            ),
+            (
+                "baseline.fallback_rate",
+                "brotli-streaming-first: missing streaming_requests_total",
+            ),
+        ]
 
     @pytest.mark.parametrize(
         ("scenario", "field", "value"),
@@ -1296,7 +1368,10 @@ class TestBaselineEvidenceIntegrity:
         report = _load_canonical_module_baseline()
 
         assert report["baseline_policy"]["historical_audit_exception"] is True
-        assert _validate_benchmark_evidence(report, role="baseline") == []
+        violations = _validate_benchmark_evidence(report, role="baseline")
+        assert not any(
+            check == "baseline.baseline_policy" for check, _reason in violations
+        )
 
     @pytest.mark.parametrize(
         "field",
@@ -1366,6 +1441,132 @@ class TestBaselineEvidenceIntegrity:
             check == "baseline.fallback_rate"
             and "streaming-first" in reason
             and reason_fragment in reason
+            for check, reason in violations
+        )
+
+
+# ---------------------------------------------------------------------------
+# Scenario source environment consistency: a baseline must never mix
+# scenarios measured under a different environment than its top-level
+# canonical environment claims.
+# ---------------------------------------------------------------------------
+
+class TestScenarioSourceEnvironment:
+    """scenario_sources entries must prove a matching environment."""
+
+    def _baseline_with_source(self, source: dict) -> dict:
+        report = _load_canonical_module_baseline()
+        report["baseline_policy"]["scenario_sources"] = {
+            "streaming-first": source
+        }
+        return report
+
+    def test_matching_structured_environment_is_accepted(self):
+        report = self._baseline_with_source({
+            "platform": "linux-x86_64",
+            "load_generator": "ab",
+            "nginx_version": "nginx version: nginx/1.24.0",
+            "source_run": "same canonical run",
+        })
+
+        assert _scenario_source_environment_violations(
+            report, role="baseline"
+        ) == []
+
+    @pytest.mark.parametrize(
+        ("field", "actual"),
+        [
+            ("platform", "darwin-arm64"),
+            ("load_generator", "hey"),
+            ("nginx_version", "nginx version: nginx/1.30.4"),
+        ],
+    )
+    def test_diverging_source_environment_is_rejected(self, field, actual):
+        source = {
+            "platform": "linux-x86_64",
+            "load_generator": "ab",
+            "nginx_version": "nginx version: nginx/1.24.0",
+            field: actual,
+        }
+        report = self._baseline_with_source(source)
+
+        violations = _scenario_source_environment_violations(
+            report, role="baseline"
+        )
+
+        assert len(violations) == 1
+        check, reason = violations[0]
+        assert check == "baseline.baseline_policy"
+        assert "streaming-first" in reason
+        assert field in reason
+        assert "does not match canonical environment" in reason
+
+    @pytest.mark.parametrize(
+        "field", ["platform", "load_generator", "nginx_version"]
+    )
+    def test_undeclared_source_environment_field_is_rejected(self, field):
+        source = {
+            "platform": "linux-x86_64",
+            "load_generator": "ab",
+            "nginx_version": "nginx version: nginx/1.24.0",
+        }
+        del source[field]
+        report = self._baseline_with_source(source)
+
+        violations = _scenario_source_environment_violations(
+            report, role="baseline"
+        )
+
+        assert len(violations) == 1
+        check, reason = violations[0]
+        assert check == "baseline.baseline_policy"
+        assert f"must declare {field}" in reason
+
+    def test_source_entry_for_unknown_scenario_is_rejected(self):
+        report = _load_canonical_module_baseline()
+        report["baseline_policy"]["scenario_sources"] = {
+            "no-such-scenario": {
+                "platform": "linux-x86_64",
+                "load_generator": "ab",
+                "nginx_version": "nginx version: nginx/1.24.0",
+            }
+        }
+
+        violations = _scenario_source_environment_violations(
+            report, role="baseline"
+        )
+
+        assert any("no matching scenario" in reason for _check, reason in violations)
+
+    def test_non_object_scenario_sources_is_rejected(self):
+        report = _load_canonical_module_baseline()
+        report["baseline_policy"]["scenario_sources"] = ["streaming-first"]
+
+        violations = _scenario_source_environment_violations(
+            report, role="baseline"
+        )
+
+        assert violations == [
+            (
+                "baseline.baseline_policy",
+                "scenario_sources must be an object keyed by scenario name",
+            )
+        ]
+
+    def test_mixed_environment_baseline_fails_full_validation(self):
+        """A mixed-environment scenario merge surfaces in the blocking contract."""
+        report = self._baseline_with_source({
+            "platform": "linux-x86_64",
+            "load_generator": "ab",
+            "nginx_version": "nginx version: nginx/1.30.4",
+            "source_run": "1000 requests at 2026-07-19T09:03:37Z",
+        })
+
+        violations = _validate_benchmark_evidence(report, role="baseline")
+
+        assert any(
+            check == "baseline.baseline_policy"
+            and "does not match canonical environment" in reason
             for check, reason in violations
         )
 
