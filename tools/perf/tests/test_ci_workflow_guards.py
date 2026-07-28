@@ -76,3 +76,13 @@ def test_release_gate_requires_exact_tag_sha_checks() -> None:
     assert "passed all required checks" in gate
     assert "/branches/${DEFAULT_BRANCH}/protection" not in workflow
     assert "rulesets?includes_parents=true" not in workflow
+
+
+def test_release_gate_declares_statuses_read_permission() -> None:
+    """The release-gate job must declare statuses: read for the Commit Status API."""
+    repo_root = Path(__file__).resolve().parents[3]
+    workflow = (repo_root / ".github" / "workflows" / "release-packages.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "statuses: read" in workflow

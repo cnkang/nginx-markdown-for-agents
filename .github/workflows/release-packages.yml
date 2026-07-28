@@ -718,6 +718,7 @@ jobs:
     permissions:
       contents: read
       checks: read
+      statuses: read
 
     steps:
       - name: Checkout
