@@ -153,6 +153,7 @@ jobs:
               - 'perf/**'
               - 'tools/perf/**'
               - 'requirements-perf.txt'
+              - 'requirements-release.txt'
             matrix_release:
               - 'tools/release/matrix/**'
               - 'tools/release-matrix.json'

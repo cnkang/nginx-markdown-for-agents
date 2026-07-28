@@ -1,0 +1,3 @@
+# Dependencies required by the tag-only release validation job.
+-r requirements-perf.txt
+PyYAML==6.0.2

@@ -750,75 +750,26 @@ jobs:
             exit 1
           fi
 
-          required_status_checks="$(mktemp)"
+          branch_rules="$(mktemp)"
           check_runs="$(mktemp)"
-          rulesets="$(mktemp)"
-          trap 'rm -f "${required_status_checks}" "${required_status_checks}.contexts" "${check_runs}" "${rulesets}"' EXIT
+          trap 'rm -f "${branch_rules}" "${check_runs}"' EXIT
 
-          protection_url="repos/${REPOSITORY}/branches/${DEFAULT_BRANCH}/protection"
-          if gh api "${protection_url}" > "${required_status_checks}"; then
-            jq -r '
-              (.required_status_checks.contexts // [])[],
-              (.required_status_checks.checks // [])[]?.context
-            ' "${required_status_checks}" >> "${required_status_checks}.contexts"
-          else
-            : > "${required_status_checks}.contexts"
-          fi
-
-          gh api "repos/${REPOSITORY}/rulesets?includes_parents=true&in_focus=true" > "${rulesets}"
-          while IFS= read -r ruleset_id; do
-            detail="$(mktemp)"
-            if gh api "repos/${REPOSITORY}/rulesets/${ruleset_id}" > "${detail}" \
-              && jq -e --arg branch "${DEFAULT_BRANCH}" '
-                .enforcement == "active"
-                and (
-                  any((.conditions.ref_name.include // [])[];
-                    . == "~DEFAULT_BRANCH" or . == $branch)
-                )
-              ' "${detail}" >/dev/null; then
-              jq -r '
-                .rules[]?
-                | select(.type == "required_status_checks")
-                | (.parameters.required_status_checks // [])[]?.context
-              ' "${detail}" >> "${required_status_checks}.contexts"
-            fi
-            rm -f "${detail}"
-          done < <(jq -r '.[].id' "${rulesets}")
-
-          sort -u "${required_status_checks}.contexts" -o "${required_status_checks}.contexts"
-          if [[ ! -s "${required_status_checks}.contexts" ]]; then
-            echo "ERROR: ${DEFAULT_BRANCH} has no active required status checks; refusing tag release." >&2
-            exit 1
-          fi
-
-          gh api "repos/${REPOSITORY}/commits/${TAG_SHA}/check-runs?per_page=100" > "${check_runs}"
-          while IFS= read -r required_context; do
-            [[ -n "${required_context}" ]] || continue
-            matching_count="$(jq --arg context "${required_context}" '
-              [
-                .check_runs[]
-                | select(.name == $context or (.name | endswith($context)))
-              ] | length
-            ' "${check_runs}")"
-            successful_count="$(jq --arg context "${required_context}" '
-              [
-                .check_runs[]
-                | select(.status == "completed" and .conclusion == "success")
-                | select(.name == $context or (.name | endswith($context)))
-              ] | length
-            ' "${check_runs}")"
-            if [[ "${matching_count}" -eq 0 || "${successful_count}" -ne "${matching_count}" ]]; then
-              echo "ERROR: Required check '${required_context}' is not successful on ${TAG_SHA}." >&2
-              jq --arg context "${required_context}" -r '
-                .check_runs[]
-                | select(.name == $context or (.name | endswith($context)))
-                | "  name=\(.name) status=\(.status) conclusion=\(.conclusion)"
-              ' "${check_runs}" >&2
-              exit 1
-            fi
-          done < "${required_status_checks}.contexts"
-
-          echo "Tag SHA ${TAG_SHA} is contained in protected ${DEFAULT_BRANCH} and passed all required checks."
+          # This endpoint returns the active rules that actually apply to the
+          # branch, including organization-level rules, and needs only
+          # metadata read access. Classic branch protection is intentionally
+          # not guessed from a failed administration-only API call: migrate
+          # its required checks to an active ruleset before tagging.
+          gh api --paginate --slurp \
+            "repos/${REPOSITORY}/rules/branches/${DEFAULT_BRANCH}?per_page=100" \
+            > "${branch_rules}"
+          gh api --paginate --slurp \
+            "repos/${REPOSITORY}/commits/${TAG_SHA}/check-runs?per_page=100" \
+            > "${check_runs}"
+          python3 tools/release/gates/verify_tag_sha_checks.py \
+            --rules-file "${branch_rules}" \
+            --check-runs-file "${check_runs}" \
+            --tag-sha "${TAG_SHA}" \
+            --branch "${DEFAULT_BRANCH}"
         shell: bash
 
       - name: Install release gate dependencies
@@ -831,18 +782,18 @@ jobs:
             gzip \
             rpm \
             tar
-          python3 -m pip install --requirement requirements-perf.txt
+          python3 -m pip install --requirement requirements-release.txt
         shell: bash
 
       - name: Verify Python Brotli dependency
         run: |
           set -euo pipefail
-          brotli_version="$(python3 -c 'import brotli; print(brotli.__version__)')"
-          [[ "${brotli_version}" == "1.2.0" ]] || {
-            echo "ERROR: release gate requires Brotli==1.2.0, found ${brotli_version}" >&2
+          dependency_versions="$(python3 -c 'import brotli, yaml; print(brotli.__version__, yaml.__version__)')"
+          [[ "${dependency_versions}" == "1.2.0 6.0.2" ]] || {
+            echo "ERROR: release gate requires Brotli==1.2.0 and PyYAML==6.0.2, found ${dependency_versions}" >&2
             exit 1
           }
-          echo "Python Brotli ${brotli_version} is available for chunked streaming benchmarks."
+          echo "Python release dependencies ${dependency_versions} are available."
         shell: bash
 
       - name: Download all DEB artifacts

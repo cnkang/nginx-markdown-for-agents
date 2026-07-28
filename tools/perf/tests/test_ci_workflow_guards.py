@@ -34,17 +34,20 @@ def test_corpus_benchmark_job_triggers_on_corpus_tools_changes() -> None:
     assert "needs.changes.outputs.corpus_tools == 'true'" in text
 
 
-def test_release_gate_installs_and_preflights_pinned_brotli() -> None:
-    """Tag releases must install the exact Python Brotli benchmark dependency."""
+def test_release_gate_installs_and_preflights_pinned_dependencies() -> None:
+    """Tag releases must install exact Python release-gate dependencies."""
     repo_root = Path(__file__).resolve().parents[3]
     workflow = (repo_root / ".github" / "workflows" / "release-packages.yml").read_text(
         encoding="utf-8"
     )
 
     assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97" in workflow
-    assert "python3 -m pip install --requirement requirements-perf.txt" in workflow
-    assert "import brotli; print(brotli.__version__)" in workflow
+    assert "python3 -m pip install --requirement requirements-release.txt" in workflow
+    assert "import brotli, yaml; print(brotli.__version__, yaml.__version__)" in workflow
     assert "Brotli==1.2.0" in (repo_root / "requirements-perf.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "PyYAML==6.0.2" in (repo_root / "requirements-release.txt").read_text(
         encoding="utf-8"
     )
 
@@ -58,8 +61,16 @@ def test_release_gate_requires_exact_tag_sha_checks() -> None:
 
     for snippet in (
         "Verify tag SHA is main CI-approved",
+        "rules/branches/${DEFAULT_BRANCH}?per_page=100",
+        "gh api --paginate --slurp",
+        "verify_tag_sha_checks.py",
         "commits/${TAG_SHA}/check-runs",
-        "has no active required status checks; refusing tag release",
-        "passed all required checks",
     ):
         assert snippet in workflow
+    gate = (repo_root / "tools" / "release" / "gates" / "verify_tag_sha_checks.py").read_text(
+        encoding="utf-8"
+    )
+    assert "has no active required status checks; refusing tag release" in gate
+    assert "passed all required checks" in gate
+    assert "/branches/${DEFAULT_BRANCH}/protection" not in workflow
+    assert "rulesets?includes_parents=true" not in workflow
