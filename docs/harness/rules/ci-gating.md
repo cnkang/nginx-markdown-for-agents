@@ -133,6 +133,30 @@ Required:
     local-spec validators that require user-local Kiro/spec directories must not
     run in tag release CI unless those inputs are checked into the repository or
     explicitly downloaded first.
+  - Custom gates that reimplement platform gating semantics must match the
+    platform's documented success criteria exactly.  A tag gate evaluating
+    GitHub required status checks must accept every conclusion GitHub counts
+    as satisfying (`success`, `skipped`, `neutral`) and keep rejecting all
+    others; required contexts may come from both the Checks API and the
+    Commit Status API, so both sources must be evaluated before declaring a
+    context missing.
+  - When consuming structured API requirements, preserve every constraint
+    field, not just the primary identifier.  A ruleset required check carries
+    an optional `integration_id` pinning the GitHub App that must produce the
+    result; dropping it makes the custom gate strictly more permissive than
+    the ruleset it enforces.
+  - A newly added gate or validator test file must be wired into a blocking
+    CI job and into the workflow's change-detection path filter in the same
+    changeset.  A test that exists in the repository but never runs in CI is
+    not a gate; the critical tag logic must not execute for the first time
+    at tag creation.
+  - Release evidence that aggregates measurements from multiple runs must
+    validate every component's provenance environment against the declared
+    comparison environment.  Top-level environment claims (platform, load
+    generator, runtime version) do not imply component-level consistency; a
+    component measured in a diverging environment must be split into
+    environment-truthful evidence or the gate must fail closed instead of
+    comparing across environments.
   - When a newer release gate reuses prior-version validators, any assertion
     about the active project version, package version, or release line must be
     parameterized by the caller.  A prior-version validator may keep its
