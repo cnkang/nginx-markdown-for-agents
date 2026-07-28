@@ -212,6 +212,57 @@ def test_latest_rerun_is_the_only_result_that_controls_the_gate() -> None:
     assert "failure" in errors[0]
 
 
+@pytest.mark.parametrize("conclusion", ["success", "skipped", "neutral"])
+def test_completed_check_with_a_successful_conclusion_passes(conclusion: str) -> None:
+    """GitHub counts success, skipped, and neutral as satisfying required checks."""
+    assert validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion=conclusion)],
+        branch="main",
+    ) == []
+
+
+@pytest.mark.parametrize(
+    "conclusion",
+    [
+        "failure",
+        "cancelled",
+        "timed_out",
+        "action_required",
+        "stale",
+        "startup_failure",
+        None,
+    ],
+)
+def test_completed_check_with_an_unsuccessful_conclusion_blocks(
+    conclusion: str | None,
+) -> None:
+    """Every non-successful conclusion must keep blocking the tag release."""
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion=conclusion)],
+        branch="main",
+    )
+
+    assert len(errors) == 1
+    assert "CI / test" in errors[0]
+    assert "not successful" in errors[0]
+
+
+@pytest.mark.parametrize("status", ["queued", "in_progress"])
+def test_uncompleted_required_check_blocks(status: str) -> None:
+    """A required check that has not completed must keep blocking the tag."""
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, status=status, conclusion=None)],
+        branch="main",
+    )
+
+    assert len(errors) == 1
+    assert "CI / test" in errors[0]
+    assert status in errors[0]
+
+
 def test_missing_or_incomplete_required_check_blocks_release() -> None:
     """Missing and in-progress required checks must remain blocking."""
     errors = validate_required_checks(

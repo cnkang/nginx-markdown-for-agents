@@ -14,6 +14,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from lib.path_validation import validate_read_path  # noqa: E402
 
+# GitHub treats these check-run conclusions as satisfying a required status
+# check (https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks).
+# Every other conclusion (failure, cancelled, timed_out, action_required,
+# stale, startup_failure, or a missing conclusion) must keep blocking the tag.
+SUCCESSFUL_CONCLUSIONS = frozenset({"success", "skipped", "neutral"})
+
 
 def _flatten_api_pages(payload: Any, collection_key: str | None = None) -> list[dict[str, Any]]:
     """Flatten ``gh api --paginate --slurp`` output into API objects."""
@@ -104,7 +110,10 @@ def validate_required_checks(
             errors.append(f"Required check '{context}' is missing on the tag SHA.")
             continue
         latest = max(matching, key=_run_order_key)
-        if latest.get("status") != "completed" or latest.get("conclusion") != "success":
+        if (
+            latest.get("status") != "completed"
+            or latest.get("conclusion") not in SUCCESSFUL_CONCLUSIONS
+        ):
             errors.append(
                 f"Required check '{context}' is not successful on the tag SHA "
                 f"(status={latest.get('status')!r}, conclusion={latest.get('conclusion')!r})."
