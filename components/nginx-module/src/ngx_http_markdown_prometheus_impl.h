@@ -886,6 +886,11 @@ ngx_http_markdown_metrics_write_prometheus_paths(
     const u_char                         *header_start;
     ngx_uint_t                            have_retained_paths;
 
+    /*
+     * Emit only bounded path detail while preserving the aggregated totals.
+     * The reserved tail guarantees that omitted entries remain observable
+     * through the __other__ series instead of producing partial exposition.
+     */
     if (p == NULL || end == NULL || snapshot == NULL) {
         return NULL;
     }
