@@ -127,10 +127,10 @@ workflow identifier.
 
 The checked-in 0.9.1 baseline is now a verbatim eight-scenario canonical run.
 Its `baseline_policy` binds the measured data to source commit
-`f81f9b7dd9be38c49a0cfdda602562a6d744fd1a`, workflow run
-`30356286227/attempts/2`, measurement timestamp `2026-07-28T12:21:50Z`, and
+`f2f939808110115bd0527af1743705c1e5a42b48`, workflow run
+`30366081113/attempts/1`, measurement timestamp `2026-07-28T14:05:53Z`, and
 the retained raw artifact SHA-256
-`567bcde7b8f0d2406414b35265f6968564487c071672af3834c63344bbcd8ebd`.
+`fc9b53c9e9a88655ee69300a350ce1498f4afff7dd566425447b6fb65abe9708`.
 Machine validation recomputes that digest and requires the finalized report to
 match the raw report exactly apart from `baseline_policy`.
 
