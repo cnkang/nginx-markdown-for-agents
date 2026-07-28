@@ -6,8 +6,8 @@
 #          pytest tools/release/matrix/tests/
 #          pytest tools/release/legacy/tests/
 #          pytest tests/property/
+-r requirements-perf.txt
 hypothesis==6.135.2
-Brotli==1.2.0
 prometheus-client==0.25.0
 pytest==9.0.3
 pyyaml==6.0.2

@@ -1,0 +1,3 @@
+# Runtime dependencies for the blocking performance evidence gate.
+# Keep this file separate so release jobs install only benchmark prerequisites.
+Brotli==1.2.0

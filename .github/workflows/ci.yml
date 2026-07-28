@@ -152,6 +152,7 @@ jobs:
               - 'components/rust-converter/**'
               - 'perf/**'
               - 'tools/perf/**'
+              - 'requirements-perf.txt'
             matrix_release:
               - 'tools/release/matrix/**'
               - 'tools/release-matrix.json'
@@ -164,6 +165,8 @@ jobs:
               - 'tools/release/gates/validate_release_gates_070.py'
               - 'tools/release/gates/validate_release_gates_080.py'
               - 'tools/release/gates/validate_release_gates_090.py'
+              - 'tools/release/gates/validate_release_metadata.py'
+              - 'tools/release/gates/tests/test_validate_release_metadata.py'
               - 'tools/perf/evidence_gate.py'
               - 'tools/perf/doctor_advice.py'
               - 'tools/perf/run_module_benchmark.sh'
@@ -760,6 +763,9 @@ jobs:
 
       - name: Run release-matrix Python tests
         run: PYTHONPATH=. python3 -m pytest -q tools/release/matrix/tests/
+
+      - name: Run release-gate Python tests
+        run: PYTHONPATH=. python3 -m pytest -q tools/release/gates/tests/test_validate_release_metadata.py
 
   coverage-gate:
     name: Coverage Gate (80%)
