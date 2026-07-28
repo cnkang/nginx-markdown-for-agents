@@ -191,7 +191,7 @@ ngx_http_markdown_metrics_write_prometheus_perf(
 
 
 /*
- * Render a metrics snapshot as Prometheus text exposition format.
+ * Render the core (non-streaming) metrics families as Prometheus text.
  *
  * Writes HELP, TYPE, and metric lines for all module counters
  * into the buffer between p and end.  Returns a pointer past
@@ -206,7 +206,7 @@ ngx_http_markdown_metrics_write_prometheus_perf(
  *   Pointer past the last byte written
  */
 static u_char *
-ngx_http_markdown_metrics_write_prometheus(
+ngx_http_markdown_metrics_write_prometheus_base(
     u_char *p,
     u_char *end,
     const ngx_http_markdown_metrics_snapshot_t *snapshot)
@@ -310,7 +310,16 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->path_hits.incremental);
 
+    return p;
+}
+
 #ifdef MARKDOWN_STREAMING_ENABLED
+static u_char *
+ngx_http_markdown_metrics_write_prometheus_streaming(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot)
+{
     /* streaming_path_total */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_streaming_path_total "
@@ -336,6 +345,16 @@ ngx_http_markdown_metrics_write_prometheus(
         snapshot->streaming.succeeded_total,
         snapshot->streaming.failed_total,
         snapshot->streaming.fallback_total);
+
+    return p;
+}
+
+static u_char *
+ngx_http_markdown_metrics_write_prometheus_streaming_failures(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot)
+{
 
     /* streaming_failures_total{stage=...} */
     p = ngx_slprintf(p, end,
@@ -500,6 +519,16 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->streaming.selection.true_streaming_selected_total);
 
+    return p;
+}
+
+static u_char *
+ngx_http_markdown_metrics_write_prometheus_streaming_outputs(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot)
+{
+
     /* streaming_output_bytes_total */
     p = ngx_slprintf(p, end,
         "# HELP "
@@ -525,8 +554,16 @@ ngx_http_markdown_metrics_write_prometheus(
         " %uA\n"
         "\n",
         snapshot->streaming.selection.excluded_content_type_total);
-#endif
+    return p;
+}
+#endif /* MARKDOWN_STREAMING_ENABLED */
 
+static u_char *
+ngx_http_markdown_metrics_write_prometheus_totals(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot)
+{
     /* input_bytes_total */
     p = ngx_slprintf(p, end,
         "# HELP nginx_markdown_input_bytes_total "
@@ -693,6 +730,16 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->results.decision_count);
 
+    return p;
+}
+
+static u_char *
+ngx_http_markdown_metrics_write_prometheus_tail(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot)
+{
+
     /*
      * conversion_latency_bucket_total{le=...}
      *
@@ -762,6 +809,33 @@ ngx_http_markdown_metrics_write_prometheus(
         "\n",
         snapshot->per_path.overflow_count);
 
+    return p;
+}
+
+/*
+ * Render the complete metrics snapshot, including feature-gated streaming,
+ * performance, and bounded per-path families.  A NULL return means the
+ * caller's response buffer was exhausted or the bounded path renderer failed.
+ */
+static u_char *
+ngx_http_markdown_metrics_write_prometheus(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot)
+{
+    p = ngx_http_markdown_metrics_write_prometheus_base(p, end, snapshot);
+#ifdef MARKDOWN_STREAMING_ENABLED
+    p = ngx_http_markdown_metrics_write_prometheus_streaming(
+        p, end, snapshot);
+    p = ngx_http_markdown_metrics_write_prometheus_streaming_failures(
+        p, end, snapshot);
+    p = ngx_http_markdown_metrics_write_prometheus_streaming_outputs(
+        p, end, snapshot);
+#endif
+    p = ngx_http_markdown_metrics_write_prometheus_totals(
+        p, end, snapshot);
+    p = ngx_http_markdown_metrics_write_prometheus_tail(
+        p, end, snapshot);
     p = ngx_http_markdown_metrics_write_prometheus_perf(
         p, end, &snapshot->perf);
 
@@ -771,19 +845,9 @@ ngx_http_markdown_metrics_write_prometheus(
     if (p == NULL) {
         return NULL;
     }
-#endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
+#endif
 
-    /*
-     * Detect buffer exhaustion.  ngx_slprintf stops at end
-     * without signaling an error, so p == end means the
-     * output was silently truncated.  Return NULL to let
-     * the caller distinguish truncation from success.
-     */
-    if (p == end) {
-        return NULL;
-    }
-
-    return p;
+    return (p == end) ? NULL : p;
 }
 
 
@@ -835,6 +899,9 @@ ngx_http_markdown_metrics_write_prometheus_paths(
         return p;
     }
 
+    if (p > end) {
+        return NULL;
+    }
     if (p >= end) {
         return p;
     }
@@ -845,7 +912,11 @@ ngx_http_markdown_metrics_write_prometheus_paths(
         return NULL;
     }
 
+    if (p > end) {
+        return NULL;
+    }
     header_size = sizeof(NGX_HTTP_MARKDOWN_PROM_PATH_HEADER) - 1;
+    /* CWE-190:guarded */
     remaining = (size_t) (end - p);
     if (header_size > remaining
         || tail_reserve > remaining - header_size)
@@ -855,7 +926,10 @@ ngx_http_markdown_metrics_write_prometheus_paths(
 
     header_start = p;
     p = ngx_slprintf(p, end, NGX_HTTP_MARKDOWN_PROM_PATH_HEADER);
-    if ((size_t) (p - header_start) != header_size) {
+    /* CWE-190:guarded */
+    if (p < header_start || p > end
+        || (size_t) (p - header_start) != header_size)
+    {
         return NULL;
     }
 
@@ -913,6 +987,10 @@ ngx_http_markdown_prometheus_write_other_path(
     size_t                   needed;
     size_t                   remaining;
 
+    if (p == NULL || end == NULL || render == NULL || p > end) {
+        return NULL;
+    }
+
     other_conversions = ngx_http_markdown_prometheus_saturating_add(
         unretained_conversions, render->omitted_conversions);
     if (ngx_http_markdown_prometheus_path_pair_size(
@@ -923,6 +1001,10 @@ ngx_http_markdown_prometheus_write_other_path(
         return NULL;
     }
 
+    if (p > end) {
+        return NULL;
+    }
+    /* CWE-190:guarded */
     remaining = (size_t) (end - p);
     if (remaining < 1 || needed > remaining - 1) {
         return NULL;

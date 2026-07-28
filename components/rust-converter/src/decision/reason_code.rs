@@ -189,6 +189,10 @@ pub enum ReasonCode {
     BypassNoTransform = 25,
 }
 
+#[cfg(test)]
+#[path = "reason_code_complexity_tests.rs"]
+mod reason_code_complexity_tests;
+
 /// Array of all reason code variants for exhaustive iteration.
 ///
 /// This array must contain every variant of [`ReasonCode`] exactly once.
@@ -568,33 +572,6 @@ mod tests {
                 s,
                 rc
             );
-        }
-    }
-
-    /// Verify that metric keys follow Prometheus naming conventions.
-    #[test]
-    fn test_metric_keys_prometheus_format() {
-        for rc in &ALL {
-            let k = rc.metric_key();
-            assert!(!k.is_empty(), "{:?} has empty metric key", rc);
-            assert!(
-                k.starts_with("markdown_"),
-                "Metric key '{}' must start with 'markdown_'",
-                k
-            );
-            assert!(
-                k.ends_with("_total"),
-                "Metric key '{}' must end with '_total' (counter)",
-                k
-            );
-            for ch in k.chars() {
-                assert!(
-                    ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_',
-                    "Metric key '{}' contains invalid char '{}'",
-                    k,
-                    ch
-                );
-            }
         }
     }
 

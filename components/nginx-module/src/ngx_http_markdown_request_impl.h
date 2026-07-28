@@ -674,6 +674,167 @@ ngx_http_markdown_route_streaming_compression(
 #endif
 
 
+static void
+ngx_http_markdown_log_buffered_decision_path(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    const char *conditional_result,
+    const char *conversion_status,
+    const char *reason_code,
+    ngx_msec_t duration_ms)
+{
+    ngx_http_markdown_decision_path_t  dp;
+
+    dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
+    dp.conditional_result = conditional_result;
+    dp.conversion_status = conversion_status;
+    dp.reason_code = reason_code;
+    dp.duration_ms = duration_ms;
+    ngx_http_markdown_log_decision_path(
+        r, conf, ctx->effective_conf, &dp);
+}
+
+#ifdef MARKDOWN_INCREMENTAL_ENABLED
+/*
+ * Promote an unknown-length response after buffering crosses the threshold.
+ * Header-phase metrics initially count this request as full-buffer, so move
+ * that hit before recording the incremental path.
+ */
+static void
+ngx_http_markdown_update_deferred_body_path(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+    if (conf->routing.large_body_threshold == 0
+        || ctx->processing_path != NGX_HTTP_MARKDOWN_PATH_FULLBUFFER
+        || r->method == NGX_HTTP_HEAD
+        || r->headers_out.status == NGX_HTTP_NOT_MODIFIED
+        || ctx->buffer.size < conf->routing.large_body_threshold)
+    {
+        return;
+    }
+
+    ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
+    NGX_HTTP_MARKDOWN_METRIC_SAFE_DEC(path_hits.fullbuffer);
+    NGX_HTTP_MARKDOWN_METRIC_INC(path_hits.incremental);
+}
+#endif
+
+/*
+ * Handle Content-Encoding before path selection.  Returns non-zero when the
+ * caller must return *rc to the next header filter or an unsupported-format
+ * policy result; known formats remain on the normal path with decompression
+ * marked as required.
+ */
+static ngx_flag_t
+ngx_http_markdown_handle_header_compression(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf,
+    ngx_int_t *rc)
+{
+    if (ctx->decompression.type == NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
+        return 0;
+    }
+
+    if (!conf->decompress.auto_decompress) {
+        ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
+                     "markdown: Content-Encoding present "
+                     "(type=%d) but auto_decompress is off, "
+                     "passing through original content",
+                     ctx->decompression.type);
+        ctx->eligible = 0;
+        ctx->headers_forwarded = 1;
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.compression_passthrough);
+        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_streaming_skip_compressed());
+        *rc = ngx_http_next_header_filter(r);
+        return 1;
+    }
+
+    if (ctx->decompression.type == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN) {
+        *rc = ngx_http_markdown_handle_unsupported_compression(r, ctx, conf);
+        return 1;
+    }
+
+    ctx->decompression.needed = 1;
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: decompression detected "
+                  "compression type: %d",
+                  ctx->decompression.type);
+    return 0;
+}
+
+/* Select streaming/incremental/full-buffer processing after compression. */
+static void
+ngx_http_markdown_select_header_path(
+    ngx_http_request_t *r,
+    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_conf_t *conf)
+{
+#ifdef MARKDOWN_STREAMING_ENABLED
+    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.selection.candidate_total);
+
+    ngx_http_markdown_path_selection_t selection =
+        ngx_http_markdown_select_processing_path(
+            r, conf, ctx->effective_conf);
+    ctx->processing_path = selection.path;
+    ctx->streaming.reason = selection.reason;
+
+    if (ngx_http_markdown_route_streaming_compression(r, ctx, conf)) {
+        goto path_selected;
+    }
+
+    if (ctx->processing_path == NGX_HTTP_MARKDOWN_PATH_STREAMING) {
+        ctx->streaming.reason = NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE;
+        ctx->stream_sm.state = NGX_HTTP_MD_STATE_STREAMING_CANDIDATE;
+        NGX_HTTP_MARKDOWN_METRIC_INC(streaming.engine_choice.streaming);
+        NGX_HTTP_MARKDOWN_METRIC_INC(
+            streaming.selection.true_streaming_selected_total);
+        ngx_http_markdown_log_streaming_decision(
+            r, conf, ctx, "streaming");
+        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
+            ngx_http_markdown_reason_engine_streaming());
+        goto path_selected;
+    }
+
+    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.engine_choice.full_buffer);
+    ngx_http_markdown_log_streaming_decision(
+        r, conf, ctx, "full_buffer");
+#endif
+
+#ifdef MARKDOWN_INCREMENTAL_ENABLED
+    if (conf->routing.large_body_threshold > 0
+        && r->method != NGX_HTTP_HEAD
+        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED
+        && r->headers_out.content_length_n >= 0
+        && (size_t) r->headers_out.content_length_n
+           >= conf->routing.large_body_threshold)
+    {
+        ctx->processing_path = NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
+    }
+#else
+#ifndef MARKDOWN_STREAMING_ENABLED
+    if (conf->stream.threshold_explicit
+        && r->method != NGX_HTTP_HEAD
+        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
+    {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                     "markdown: markdown_stream_threshold is set, "
+                     "but streaming support was not compiled in; using "
+                     "full-buffer path");
+    }
+#endif
+#endif
+
+#ifdef MARKDOWN_STREAMING_ENABLED
+path_selected:
+    ;
+#endif
+}
+
 /**
  * Determine whether the response should be converted and, if eligible,
  * initialize a per-request Markdown conversion context for body buffering.
@@ -816,207 +977,15 @@ ngx_http_markdown_header_filter(ngx_http_request_t *r)
     /* Set context for this request */
     r->ctx[ngx_http_markdown_filter_module.ctx_index] = ctx;
 
-    /*
-     * Detect Content-Encoding ALWAYS, before streaming candidate
-     * evaluation (compression detection before streaming candidate evaluation).
-     *
-     * Compressed responses MUST NOT enter the streaming parser
-     * directly.  Detection runs unconditionally so that:
-     *
-     *  - auto_decompress ON + known format: decompress via
-     *    full-buffer or streaming decompression path.
-     *  - auto_decompress ON + unknown format: passthrough or
-     *    reject per on_error policy.
-     *  - auto_decompress OFF + any encoding present: passthrough
-     *    (compressed data must not enter parser).
-     *
-     * Covers: compression detection, auto_decompress off passthrough,
-     * unknown format handling, and compressed content exclusion from streaming
-     */
+    /* Detect Content-Encoding before selecting a streaming candidate. */
     ctx->decompression.type = ngx_http_markdown_detect_compression(r);
-
-    if (ctx->decompression.type != NGX_HTTP_MARKDOWN_COMPRESSION_NONE) {
-        if (!conf->decompress.auto_decompress) {
-            /*
-             * auto_decompress is OFF but Content-Encoding is present.
-             * Cannot safely parse compressed content — passthrough.
-             * (auto_decompress disabled: compressed content must not enter parser)
-             */
-            ngx_log_error(NGX_LOG_INFO, r->connection->log, 0,
-                         "markdown: Content-Encoding present "
-                         "(type=%d) but auto_decompress is off, "
-                         "passing through original content",
-                         ctx->decompression.type);
-            ctx->eligible = 0;
-            ctx->headers_forwarded = 1;
-            NGX_HTTP_MARKDOWN_METRIC_INC(
-                skips.compression_passthrough);
-            ngx_http_markdown_log_decision(r, conf,
-                ctx->effective_conf,
-                ngx_http_markdown_reason_streaming_skip_compressed());
-            return ngx_http_next_header_filter(r);
-
-        } else if (ctx->decompression.type
-                   == NGX_HTTP_MARKDOWN_COMPRESSION_UNKNOWN)
-        {
-            /*
-             * Unsupported compression format detected
-             *
-             * This is an expected degradation scenario, not a
-             * failure.  We gracefully degrade by returning the
-             * original content.
-             *
-             * Note: The warning log has already been emitted by
-             * ngx_http_markdown_detect_compression() with the
-             * format name.
-             *
-              * Covers: unsupported compression format handling
-             */
-            return ngx_http_markdown_handle_unsupported_compression(
-                r, ctx, conf);
-
-        } else {
-            /* Supported compression format - set flag for decompression */
-            ctx->decompression.needed = 1;
-
-            ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                          "markdown: decompression detected "
-                          "compression type: %d",
-                          ctx->decompression.type);
-        }
-    }
-
-    /*
-     * Threshold router: select processing path.
-     *
-     * HEAD requests and 304 responses always use the
-     * full-buffer path regardless of the configured
-     * threshold.  When the threshold is off (== 0), all
-     * requests also use the full-buffer path.
-     *
-     * When Content-Length is known and >= threshold, select
-     * the incremental path.  When Content-Length is absent,
-     * the decision is deferred to the body filter (buffer
-     * first, then decide once buffered size is known).
-     *
-     * Fail-open replay (returning buffered original HTML
-     * after conversion failure) always uses the full-buffer
-     * path; that is enforced at body-filter time since the
-     * replay decision happens after conversion attempt.
-     *
-     * Covers: threshold routing, HEAD/304 bypass, path selection,
-     * unknown-length deferral, fail-open replay enforcement
-     */
-
-#ifdef MARKDOWN_STREAMING_ENABLED
-    /*
-     * Policy selector: evaluate markdown_streaming once and cache the result.
-     * If streaming is selected,
-     * skip the threshold router entirely.
-     */
-    NGX_HTTP_MARKDOWN_METRIC_INC(streaming.selection.candidate_total);
-
-    ngx_http_markdown_path_selection_t selection =
-        ngx_http_markdown_select_processing_path(
-            r, conf, ctx->effective_conf);
-    ctx->processing_path = selection.path;
-    ctx->streaming.reason = selection.reason;
-
-    /*
-     * Streaming decompression routing (Req 4.1, 4.2, 4.5–4.7, 4.9):
-     *
-     * When compression is detected AND streaming was selected,
-     * decide whether to route through streaming decompression or
-     * force the full-buffer path.
-     *
-     * Streaming decompression is selected iff ALL FOUR conditions:
-     *   (1) auto_decompress on  (already verified above — otherwise
-     *       the request was passthrough'd before reaching here)
-     *   (2) streaming engine selected (ctx->processing_path ==
-     *       PATH_STREAMING at this point)
-     *   (3) cache_validation NOT full (select_processing_path
-     *       already forces full-buffer for full_support, so if
-     *       we reach here streaming was selected → not full)
-     *       - gzip: supported with member-aware streaming inflate
-      *       - brotli: supported via incremental decoder when
-      *         NGX_HTTP_BROTLI is defined at compile time;
-      *         otherwise falls back to bounded full-buffer
-      *
-      * This check runs after select_processing_path() so that
-      * compression routing is enforced regardless of streaming policy.
-      */
-    if (ngx_http_markdown_route_streaming_compression(r, ctx, conf)) {
-        goto path_selected;
-    }
-
-    if (ctx->processing_path
-        == NGX_HTTP_MARKDOWN_PATH_STREAMING)
+    if (ngx_http_markdown_handle_header_compression(
+            r, ctx, conf, &precheck_rc))
     {
-        ctx->streaming.reason =
-            NGX_HTTP_MARKDOWN_STREAM_REASON_ELIGIBLE;
-
-        /* Sync streaming fallback state machine: header selected streaming → STREAMING_CANDIDATE */
-        ctx->stream_sm.state = NGX_HTTP_MD_STATE_STREAMING_CANDIDATE;
-
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            streaming.engine_choice.streaming);
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            streaming.selection.true_streaming_selected_total);
-
-        ngx_http_markdown_log_streaming_decision(
-            r, conf, ctx, "streaming");
-
-        ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
-            ngx_http_markdown_reason_engine_streaming());
-
-        goto path_selected;
+        return precheck_rc;
     }
 
-    /*
-     * select_processing_path() returned FULLBUFFER without
-     * compression override — record engine choice here.
-     */
-    NGX_HTTP_MARKDOWN_METRIC_INC(
-        streaming.engine_choice.full_buffer);
-
-    ngx_http_markdown_log_streaming_decision(
-        r, conf, ctx, "full_buffer");
-#endif /* MARKDOWN_STREAMING_ENABLED */
-
-#ifdef MARKDOWN_INCREMENTAL_ENABLED
-    if (conf->routing.large_body_threshold > 0
-        && r->method != NGX_HTTP_HEAD
-        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED
-        && r->headers_out.content_length_n >= 0
-        && (size_t) r->headers_out.content_length_n
-           >= conf->routing.large_body_threshold)
-    {
-        ctx->processing_path =
-            NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
-    }
-    /* else: unknown Content-Length — path deferred to body filter */
-#else
-    /* Incremental path not compiled; if streaming is also not compiled
-     * and the operator explicitly set markdown_stream_threshold, warn
-     * that the threshold has no effect without streaming support. */
-#ifndef MARKDOWN_STREAMING_ENABLED
-    if (conf->stream.threshold_explicit
-        && r->method != NGX_HTTP_HEAD
-        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
-    {
-        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
-                     "markdown: markdown_stream_threshold is set, "
-                     "but streaming support was not compiled in; using "
-                     "full-buffer path");
-    }
-#endif
-#endif
-
-    /* Record path hit metric (only for eligible requests) */
-#ifdef MARKDOWN_STREAMING_ENABLED
-path_selected:
-    ;
-#endif
+    ngx_http_markdown_select_header_path(r, ctx, conf);
 
     ngx_int_t  inflight_rc;
 
@@ -1094,31 +1063,7 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
      * Covers: deferred path selection for chunked/unknown-length responses
      */
 #ifdef MARKDOWN_INCREMENTAL_ENABLED
-    if (conf->routing.large_body_threshold > 0
-        && ctx->processing_path
-            == NGX_HTTP_MARKDOWN_PATH_FULLBUFFER
-        && r->method != NGX_HTTP_HEAD
-        && r->headers_out.status != NGX_HTTP_NOT_MODIFIED
-        && ctx->buffer.size >= conf->routing.large_body_threshold)
-    {
-        ctx->processing_path =
-            NGX_HTTP_MARKDOWN_PATH_INCREMENTAL;
-
-        /*
-         * Correct the path hit counters: header filter
-         * already incremented path_hits.fullbuffer, so
-         * undo that and count incremental instead.
-         *
-         * Guard against underflow: only decrement if the
-         * counter is positive.  In theory the header filter
-         * always increments first, but a metrics zone reset
-         * (e.g. worker restart) could leave the counter at
-         * zero.
-         */
-        NGX_HTTP_MARKDOWN_METRIC_SAFE_DEC(path_hits.fullbuffer);
-        NGX_HTTP_MARKDOWN_METRIC_INC(
-            path_hits.incremental);
-    }
+    ngx_http_markdown_update_deferred_body_path(r, ctx, conf);
 #endif
 
     /*
@@ -1138,44 +1083,23 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_skip_conditional());
 
-        {
-            ngx_http_markdown_decision_path_t  dp;
-
-            dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
-            dp.conditional_result =
-                NGX_HTTP_MARKDOWN_COND_NOT_MODIFIED;
-            dp.conversion_status =
-                NGX_HTTP_MARKDOWN_CONV_SKIPPED;
-            dp.reason_code = "skipped_conditional";
-            NGX_HTTP_MARKDOWN_METRIC_INC(skips.conditional);
-            dp.duration_ms = elapsed_ms;
-            ngx_http_markdown_log_decision_path(
-                r, conf, ctx->effective_conf, &dp);
-        }
+        NGX_HTTP_MARKDOWN_METRIC_INC(skips.conditional);
+        ngx_http_markdown_log_buffered_decision_path(
+            r, ctx, conf, NGX_HTTP_MARKDOWN_COND_NOT_MODIFIED,
+            NGX_HTTP_MARKDOWN_CONV_SKIPPED,
+            "skipped_conditional", elapsed_ms);
 
         return NGX_OK;
     }
     if (rc != NGX_OK) {
         /* Conditional processing failed — log failure outcome */
         ngx_http_markdown_log_failure_decision(r, ctx, conf);
-
-        {
-            ngx_http_markdown_decision_path_t  dp;
-
-            dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
-            dp.conditional_result =
-                NGX_HTTP_MARKDOWN_COND_PROCEED;
-            dp.conversion_status =
-                NGX_HTTP_MARKDOWN_CONV_FAILED;
-            dp.reason_code = (conf->on_error
-                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? "failed_closed"
-                : "failed_open";
-            dp.duration_ms = elapsed_ms;
-            ngx_http_markdown_log_decision_path(
-                r, conf, ctx->effective_conf, &dp);
-        }
-
+        ngx_http_markdown_log_buffered_decision_path(
+            r, ctx, conf, NGX_HTTP_MARKDOWN_COND_PROCEED,
+            NGX_HTTP_MARKDOWN_CONV_FAILED,
+            conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
+                ? "failed_closed" : "failed_open",
+            elapsed_ms);
         return rc;
     }
 
@@ -1184,25 +1108,12 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
         if (rc != NGX_OK) {
             /* Conversion failed — log failure outcome */
             ngx_http_markdown_log_failure_decision(r, ctx, conf);
-
-            {
-                ngx_http_markdown_decision_path_t  dp;
-
-                dp.accept_result =
-                    NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
-                dp.conditional_result =
-                    NGX_HTTP_MARKDOWN_COND_PROCEED;
-                dp.conversion_status =
-                    NGX_HTTP_MARKDOWN_CONV_FAILED;
-                dp.reason_code = (conf->on_error
-                    == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                    ? "failed_closed"
-                    : "failed_open";
-                dp.duration_ms = elapsed_ms;
-                ngx_http_markdown_log_decision_path(
-                    r, conf, ctx->effective_conf, &dp);
-            }
-
+            ngx_http_markdown_log_buffered_decision_path(
+                r, ctx, conf, NGX_HTTP_MARKDOWN_COND_PROCEED,
+                NGX_HTTP_MARKDOWN_CONV_FAILED,
+                conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
+                    ? "failed_closed" : "failed_open",
+                elapsed_ms);
             return rc;
         }
     }
@@ -1217,20 +1128,10 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
          */
         ngx_http_markdown_log_decision(r, conf, ctx->effective_conf,
             ngx_http_markdown_reason_converted());
-
-        {
-            ngx_http_markdown_decision_path_t  dp;
-
-            dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
-            dp.conditional_result =
-                NGX_HTTP_MARKDOWN_COND_PROCEED;
-            dp.conversion_status =
-                NGX_HTTP_MARKDOWN_CONV_SUCCESS;
-            dp.reason_code = "converted";
-            dp.duration_ms = elapsed_ms;
-            ngx_http_markdown_log_decision_path(
-                r, conf, ctx->effective_conf, &dp);
-        }
+        ngx_http_markdown_log_buffered_decision_path(
+            r, ctx, conf, NGX_HTTP_MARKDOWN_COND_PROCEED,
+            NGX_HTTP_MARKDOWN_CONV_SUCCESS,
+            "converted", elapsed_ms);
 
     } else {
         /*
@@ -1240,23 +1141,12 @@ ngx_http_markdown_body_filter_convert_and_output(ngx_http_request_t *r,
          * in ngx_http_markdown_execute_conversion().
          */
         ngx_http_markdown_log_failure_decision(r, ctx, conf);
-
-        {
-            ngx_http_markdown_decision_path_t  dp;
-
-            dp.accept_result = NGX_HTTP_MARKDOWN_ACCEPT_CONVERT;
-            dp.conditional_result =
-                NGX_HTTP_MARKDOWN_COND_PROCEED;
-            dp.conversion_status =
-                NGX_HTTP_MARKDOWN_CONV_FAILED;
-            dp.reason_code = (conf->on_error
-                == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT)
-                ? "failed_closed"
-                : "failed_open";
-            dp.duration_ms = elapsed_ms;
-            ngx_http_markdown_log_decision_path(
-                r, conf, ctx->effective_conf, &dp);
-        }
+        ngx_http_markdown_log_buffered_decision_path(
+            r, ctx, conf, NGX_HTTP_MARKDOWN_COND_PROCEED,
+            NGX_HTTP_MARKDOWN_CONV_FAILED,
+            conf->on_error == NGX_HTTP_MARKDOWN_ON_ERROR_REJECT
+                ? "failed_closed" : "failed_open",
+            elapsed_ms);
 
     }
 
