@@ -119,9 +119,9 @@ def test_validate_source_run_rejects_url_without_attempt() -> None:
     "source_run",
     [
         "https://github.com/cnkang/nginx-markdown-for-agents/"
-        "actions/runs/not-a-number/attempts/2",
+        + "actions/runs/not-a-number/attempts/2",
         "http://github.com/cnkang/nginx-markdown-for-agents/"
-        "actions/runs/12345/attempts/2",
+        + "actions/runs/12345/attempts/2",
     ],
 )
 def test_validate_source_run_rejects_non_canonical_urls(source_run: str) -> None:
