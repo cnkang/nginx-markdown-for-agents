@@ -753,7 +753,8 @@ jobs:
           input_dir="$(mktemp -d .tag-sha-checks.XXXXXX)"
           branch_rules="${input_dir}/branch-rules.json"
           check_runs="${input_dir}/check-runs.json"
-          trap 'rm -f "${branch_rules}" "${check_runs}"; rmdir "${input_dir}"' EXIT
+          statuses="${input_dir}/statuses.json"
+          trap 'rm -f "${branch_rules}" "${check_runs}" "${statuses}"; rmdir "${input_dir}"' EXIT
 
           # This endpoint returns the active rules that actually apply to the
           # branch, including organization-level rules, and needs only
@@ -766,9 +767,16 @@ jobs:
           gh api --paginate --slurp \
             "repos/${REPOSITORY}/commits/${TAG_SHA}/check-runs?per_page=100" \
             > "${check_runs}"
+          # Required contexts may also be reported through the Commit Status
+          # API by external systems; fetch them so the gate does not treat
+          # such contexts as missing.
+          gh api --paginate --slurp \
+            "repos/${REPOSITORY}/commits/${TAG_SHA}/status?per_page=100" \
+            > "${statuses}"
           python3 tools/release/gates/verify_tag_sha_checks.py \
             --rules-file "${branch_rules}" \
             --check-runs-file "${check_runs}" \
+            --statuses-file "${statuses}" \
             --tag-sha "${TAG_SHA}" \
             --branch "${DEFAULT_BRANCH}"
         shell: bash

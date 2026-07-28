@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,19 @@ from lib.path_validation import validate_read_path  # noqa: E402
 # Every other conclusion (failure, cancelled, timed_out, action_required,
 # stale, startup_failure, or a missing conclusion) must keep blocking the tag.
 SUCCESSFUL_CONCLUSIONS = frozenset({"success", "skipped", "neutral"})
+
+
+@dataclass(frozen=True)
+class RequiredCheck:
+    """A required status check context plus its optional required source app.
+
+    Rulesets may pin a required context to the GitHub App that must produce
+    it via ``integration_id``; when unset, a result from any source satisfies
+    the requirement.
+    """
+
+    context: str
+    integration_id: int | None
 
 
 def _flatten_api_pages(payload: Any, collection_key: str | None = None) -> list[dict[str, Any]]:
@@ -37,8 +51,8 @@ def _flatten_api_pages(payload: Any, collection_key: str | None = None) -> list[
     return [payload]
 
 
-def _contexts_from_rule(rule: dict[str, Any]) -> list[str]:
-    """Extract contexts from one branch-effective required-check rule."""
+def _checks_from_rule(rule: dict[str, Any]) -> list[RequiredCheck]:
+    """Extract required checks from one branch-effective required-check rule."""
     if rule.get("type") != "required_status_checks":
         return []
     parameters = rule.get("parameters")
@@ -48,7 +62,7 @@ def _contexts_from_rule(rule: dict[str, Any]) -> list[str]:
     if not isinstance(checks, list):
         raise ValueError("required_status_checks rule has no check list")
 
-    contexts = []
+    required = []
     for check in checks:
         context = check.get("context") if isinstance(check, dict) else None
         if not isinstance(context, str):
@@ -56,16 +70,24 @@ def _contexts_from_rule(rule: dict[str, Any]) -> list[str]:
         context = context.strip()
         if not context:
             raise ValueError("required_status_checks rule contains an empty context")
-        contexts.append(context)
-    return contexts
+        integration_id = check.get("integration_id")
+        if integration_id is not None and (
+            isinstance(integration_id, bool) or not isinstance(integration_id, int)
+        ):
+            raise ValueError(
+                "required_status_checks rule contains an invalid integration_id "
+                f"for context '{context}'"
+            )
+        required.append(RequiredCheck(context=context, integration_id=integration_id))
+    return required
 
 
-def required_check_contexts(active_rules: Any) -> list[str]:
-    """Extract required check names from the branch-effective rules response."""
-    contexts: set[str] = set()
+def required_checks(active_rules: Any) -> list[RequiredCheck]:
+    """Extract required checks from the branch-effective rules response."""
+    checks: set[RequiredCheck] = set()
     for rule in _flatten_api_pages(active_rules):
-        contexts.update(_contexts_from_rule(rule))
-    return sorted(contexts)
+        checks.update(_checks_from_rule(rule))
+    return sorted(checks, key=lambda check: (check.context, check.integration_id or 0))
 
 
 def _timestamp(run: dict[str, Any]) -> float:
@@ -87,27 +109,88 @@ def _run_order_key(run: dict[str, Any]) -> tuple[float, int]:
     return _timestamp(run), int(run_id) if isinstance(run_id, int) else 0
 
 
+def _run_app_id(run: dict[str, Any]) -> int | None:
+    """Return the GitHub App id that produced a check run, when present."""
+    app = run.get("app")
+    if isinstance(app, dict):
+        app_id = app.get("id")
+        if isinstance(app_id, int) and not isinstance(app_id, bool):
+            return app_id
+    return None
+
+
+def _matches_required_check(run: dict[str, Any], required: RequiredCheck) -> bool:
+    """A run satisfies a required check by name and, when pinned, by source app."""
+    if run.get("name") != required.context:
+        return False
+    if required.integration_id is None:
+        return True
+    return _run_app_id(run) == required.integration_id
+
+
+def _latest_status_state(statuses: Any, context: str) -> str | None:
+    """Return the state of the newest commit status for context, if any."""
+    if statuses is None:
+        return None
+    matching = [
+        status
+        for status in _flatten_api_pages(statuses, "statuses")
+        if status.get("context") == context
+    ]
+    if not matching:
+        return None
+    latest = max(matching, key=_run_order_key)
+    state = latest.get("state")
+    return state if isinstance(state, str) else None
+
+
+def _missing_check_errors(required: RequiredCheck, statuses: Any) -> list[str]:
+    """Classify a required check that has no matching check run.
+
+    Required contexts may also be reported through the Commit Status API
+    instead of the Checks API, so fall back to the latest commit status
+    before declaring the check missing.  A commit status cannot prove which
+    GitHub App produced it, so it never satisfies a context pinned to an
+    integration_id.
+    """
+    if required.integration_id is not None:
+        return [
+            f"Required check '{required.context}' from app "
+            f"{required.integration_id} is missing on the tag SHA."
+        ]
+    state = _latest_status_state(statuses, required.context)
+    if state is None:
+        return [f"Required check '{required.context}' is missing on the tag SHA."]
+    if state != "success":
+        return [
+            f"Required check '{required.context}' is not successful on the tag SHA "
+            f"(commit status state={state!r})."
+        ]
+    return []
+
+
 def validate_required_checks(
     active_rules: Any,
     check_runs: Any,
+    statuses: Any = None,
     *,
     branch: str,
 ) -> list[str]:
     """Return fail-closed errors for required checks on the tag commit."""
     try:
-        contexts = required_check_contexts(active_rules)
+        checks = required_checks(active_rules)
     except ValueError as error:
         return [f"Unable to parse branch-effective required checks: {error}"]
 
-    if not contexts:
+    if not checks:
         return [f"{branch} has no active required status checks; refusing tag release"]
 
     runs = _flatten_api_pages(check_runs, "check_runs")
     errors: list[str] = []
-    for context in contexts:
-        matching = [run for run in runs if run.get("name") == context]
+    for required in checks:
+        matching = [run for run in runs if _matches_required_check(run, required)]
         if not matching:
-            errors.append(f"Required check '{context}' is missing on the tag SHA.")
+            errors.extend(_missing_check_errors(required, statuses))
             continue
         latest = max(matching, key=_run_order_key)
         if (
@@ -115,7 +198,7 @@ def validate_required_checks(
             or latest.get("conclusion") not in SUCCESSFUL_CONCLUSIONS
         ):
             errors.append(
-                f"Required check '{context}' is not successful on the tag SHA "
+                f"Required check '{required.context}' is not successful on the tag SHA "
                 f"(status={latest.get('status')!r}, conclusion={latest.get('conclusion')!r})."
             )
     return errors
@@ -148,6 +231,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rules-file", type=Path, required=True)
     parser.add_argument("--check-runs-file", type=Path, required=True)
+    parser.add_argument(
+        "--statuses-file",
+        type=Path,
+        default=None,
+        help="Optional combined commit status API response; required contexts "
+        "reported through the Commit Status API instead of check runs are "
+        "evaluated from it.",
+    )
     parser.add_argument("--tag-sha", required=True)
     parser.add_argument("--branch", required=True)
     args = parser.parse_args()
@@ -156,6 +247,7 @@ def main() -> int:
         errors = validate_required_checks(
             _load_json(args.rules_file),
             _load_json(args.check_runs_file),
+            _load_json(args.statuses_file) if args.statuses_file else None,
             branch=args.branch,
         )
     except (OSError, ValueError, json.JSONDecodeError) as error:
