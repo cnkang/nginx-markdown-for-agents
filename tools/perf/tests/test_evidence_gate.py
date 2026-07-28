@@ -13,6 +13,7 @@ Requirements: 9.1, 9.3, 9.4
 """
 
 import copy
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -32,10 +33,13 @@ from evidence_gate import (
     _check_path_coverage,
     _check_environment_compatibility,
     _compute_memory_slope,
+    _conservative_normalized_truth_violations,
     _extract_evidence_metrics,
     _extract_memory_points,
     _nginx_bin_available,
+    _raw_artifact_binding_violations,
     _scenario_source_environment_violations,
+    _sha256_file,
     _validate_benchmark_evidence,
     _write_output,
     main,
@@ -1622,26 +1626,7 @@ class TestScenarioSourceEnvironment:
         ]
         scenarios = []
         for name, profile, comp, te, streaming in scenario_defs:
-            metrics = {
-                "fullbuffer_path_hits": 1030 if not streaming else 0,
-                "streaming_path_hits": 1030 if streaming else 0,
-                "streaming_ratio": 1.0 if streaming else 0.0,
-                "fullbuffer_ratio": 0.0 if streaming else 1.0,
-                "streaming_requests_total": 1030,
-                "precommit_failopen_total": 0,
-                "zero_copy_output_total": 500,
-                "copied_output_total": 0,
-                "input_bytes": 100,
-                "baseline_rss_bytes": 1000,
-                "peak_rss_bytes": 1100,
-            }
-            if name in ("gzip-large", "gzip-streaming-first"):
-                metrics["decompression_streaming_total"] = (
-                    1030 if streaming else 0
-                )
-                metrics["decompression_fullbuffer_total"] = (
-                    1030 if not streaming else 0
-                )
+            metrics = self._minimal_scenario_metrics(name, streaming)
             scenarios.append({
                 "name": name,
                 "status": "completed",
@@ -1658,6 +1643,31 @@ class TestScenarioSourceEnvironment:
                 "scenarios": scenarios,
             },
         }
+
+    @staticmethod
+    def _minimal_scenario_metrics(name: str, streaming: bool) -> dict:
+        """Build the metrics dict for one minimal-baseline scenario."""
+        metrics = {
+            "fullbuffer_path_hits": 1030 if not streaming else 0,
+            "streaming_path_hits": 1030 if streaming else 0,
+            "streaming_ratio": 1.0 if streaming else 0.0,
+            "fullbuffer_ratio": 0.0 if streaming else 1.0,
+            "streaming_requests_total": 1030,
+            "precommit_failopen_total": 0,
+            "zero_copy_output_total": 500,
+            "copied_output_total": 0,
+            "input_bytes": 100,
+            "baseline_rss_bytes": 1000,
+            "peak_rss_bytes": 1100,
+        }
+        if name in ("gzip-large", "gzip-streaming-first"):
+            metrics["decompression_streaming_total"] = (
+                1030 if streaming else 0
+            )
+            metrics["decompression_fullbuffer_total"] = (
+                1030 if not streaming else 0
+            )
+        return metrics
 
     @pytest.mark.parametrize(
         "type_value",
@@ -1878,6 +1888,11 @@ class TestScenarioSourceEnvironment:
                 "source_artifact": "perf/baselines/module-baseline-091-raw.json",
                 "measurement_timestamp": "2026-07-16T09:47:06Z",
                 "normalization": "none",
+                "historical_audit_exception": True,
+                "audit_note": (
+                    "Test fixture honoring the scoped historical exception for "
+                    "the original 0.9.1 baseline commit."
+                ),
             },
         }
         assert _validate_benchmark_evidence(report, role="baseline") == []
@@ -3177,3 +3192,352 @@ class TestCompressedStreamingPathTruthfulness:
         }
         violations = _validate_benchmark_evidence(report, role="current")
         assert violations == []
+
+
+# ---------------------------------------------------------------------------
+# Raw artifact binding tests (canonical baseline hardening)
+# ---------------------------------------------------------------------------
+
+_FULL_SHA = "0123456789abcdef0123456789abcdef01234567"
+_RUN_URL = "https://github.com/foo/bar/actions/runs/123/attempts/1"
+
+
+def _full_valid_raw_report() -> dict:
+    """A complete 8-scenario raw report that passes integrity validation."""
+    return {
+        "module_benchmark": {
+            "timestamp": "2026-07-28T00:00:00Z",
+            "git_commit": _FULL_SHA[:7],
+            "platform": "linux-x86_64",
+            "load_generator": "ab",
+            "nginx_version": "nginx version: nginx/1.24.0",
+            "scenarios": [
+                {
+                    "name": "plain-small",
+                    "status": "completed",
+                    "profile": "balanced",
+                    "compression": "none",
+                    "transfer_encoding": "identity",
+                    "metrics": {
+                        "input_bytes": 100,
+                        "baseline_rss_bytes": 1000,
+                        "peak_rss_bytes": 1100,
+                        "fullbuffer_path_hits": 1,
+                        "fullbuffer_ratio": 1.0,
+                    },
+                },
+                {
+                    "name": "chunked-medium",
+                    "status": "completed",
+                    "profile": "balanced",
+                    "compression": "none",
+                    "transfer_encoding": "chunked",
+                    "metrics": {
+                        "input_bytes": 200,
+                        "baseline_rss_bytes": 1200,
+                        "peak_rss_bytes": 1400,
+                        "fullbuffer_path_hits": 1,
+                    },
+                },
+                {
+                    "name": "large-body",
+                    "status": "completed",
+                    "profile": "balanced",
+                    "compression": "none",
+                    "transfer_encoding": "identity",
+                    "metrics": {
+                        "input_bytes": 300,
+                        "baseline_rss_bytes": 2000,
+                        "peak_rss_bytes": 2200,
+                        "fullbuffer_path_hits": 1,
+                    },
+                },
+                {
+                    "name": "gzip-large",
+                    "status": "completed",
+                    "profile": "balanced",
+                    "compression": "gzip",
+                    "transfer_encoding": "identity",
+                    "metrics": {
+                        "input_bytes": 400,
+                        "baseline_rss_bytes": 2500,
+                        "peak_rss_bytes": 2800,
+                        "fullbuffer_path_hits": 1,
+                        "decompression_fullbuffer_total": 1,
+                    },
+                },
+                {
+                    "name": "streaming-first",
+                    "status": "completed",
+                    "profile": "streaming_first",
+                    "compression": "none",
+                    "transfer_encoding": "chunked",
+                    "metrics": {
+                        "input_bytes": 300,
+                        "baseline_rss_bytes": 3000,
+                        "peak_rss_bytes": 3300,
+                        "streaming_ratio": 0.8,
+                        "fullbuffer_ratio": 0.2,
+                        "streaming_path_hits": 820,
+                        "streaming_requests_total": 1000,
+                        "precommit_failopen_total": 0,
+                        "zero_copy_output_total": 500,
+                        "copied_output_total": 0,
+                    },
+                },
+                {
+                    "name": "gzip-streaming-first",
+                    "status": "completed",
+                    "profile": "streaming_first",
+                    "compression": "gzip",
+                    "transfer_encoding": "chunked",
+                    "metrics": {
+                        "input_bytes": 300,
+                        "baseline_rss_bytes": 3100,
+                        "peak_rss_bytes": 3400,
+                        "decompression_streaming_total": 800,
+                        "streaming_ratio": 0.9,
+                        "fullbuffer_ratio": 0.1,
+                        "streaming_path_hits": 900,
+                        "streaming_requests_total": 1000,
+                        "precommit_failopen_total": 0,
+                        "zero_copy_output_total": 500,
+                        "copied_output_total": 0,
+                    },
+                },
+                {
+                    "name": "deflate-streaming-first",
+                    "status": "completed",
+                    "profile": "streaming_first",
+                    "compression": "deflate",
+                    "transfer_encoding": "chunked",
+                    "metrics": {
+                        "input_bytes": 300,
+                        "baseline_rss_bytes": 3200,
+                        "peak_rss_bytes": 3500,
+                        "decompression_streaming_total": 800,
+                        "streaming_ratio": 0.9,
+                        "fullbuffer_ratio": 0.1,
+                        "streaming_path_hits": 900,
+                        "streaming_requests_total": 1000,
+                        "precommit_failopen_total": 0,
+                        "zero_copy_output_total": 500,
+                        "copied_output_total": 0,
+                    },
+                },
+                {
+                    "name": "brotli-streaming-first",
+                    "status": "completed",
+                    "profile": "streaming_first",
+                    "compression": "brotli",
+                    "transfer_encoding": "chunked",
+                    "metrics": {
+                        "input_bytes": 300,
+                        "baseline_rss_bytes": 3300,
+                        "peak_rss_bytes": 3600,
+                        "decompression_streaming_total": 800,
+                        "streaming_ratio": 1.0,
+                        "fullbuffer_ratio": 0.0,
+                        "streaming_path_hits": 1000,
+                        "streaming_requests_total": 1000,
+                        "precommit_failopen_total": 0,
+                        "zero_copy_output_total": 500,
+                        "copied_output_total": 0,
+                    },
+                },
+            ],
+        },
+        "decompression_coverage": {},
+    }
+
+
+def _write_raw_in_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, report: dict,
+) -> tuple[Path, str]:
+    """Write a raw report in a fake repo root and return (repo_root, digest)."""
+    repo = tmp_path / "repo"
+    (repo / "perf" / "baselines").mkdir(parents=True)
+    raw_path = repo / "perf" / "baselines" / "raw.json"
+    raw_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    monkeypatch.setattr(evidence_gate, "REPO_ROOT", repo.resolve())
+    digest = hashlib.sha256(raw_path.read_bytes()).hexdigest()
+    return repo, digest
+
+
+def test_raw_binding_passes_for_verbatim_with_matching_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """verbatim_run with correct source_artifact_sha256 and identical data passes."""
+    raw = _full_valid_raw_report()
+    repo, digest = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    finalized = dict(raw)
+    finalized["baseline_policy"] = {
+        "type": "verbatim_run",
+        "source_git_commit": _FULL_SHA,
+        "source_run": _RUN_URL,
+        "source_artifact": "perf/baselines/raw.json",
+        "source_artifact_sha256": digest,
+        "measurement_timestamp": raw["module_benchmark"]["timestamp"],
+        "normalization": "none",
+    }
+    assert _raw_artifact_binding_violations(finalized, role="baseline") == []
+
+
+def test_raw_binding_rejects_missing_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A canonical baseline without source_artifact_sha256 is rejected."""
+    raw = _full_valid_raw_report()
+    repo, _ = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    finalized = dict(raw)
+    finalized["baseline_policy"] = {
+        "type": "verbatim_run",
+        "source_git_commit": _FULL_SHA,
+        "source_run": _RUN_URL,
+        "source_artifact": "perf/baselines/raw.json",
+        "measurement_timestamp": raw["module_benchmark"]["timestamp"],
+        "normalization": "none",
+    }
+    violations = _raw_artifact_binding_violations(finalized, role="baseline")
+    assert any("source_artifact_sha256" in r for _c, r in violations)
+
+
+def test_raw_binding_rejects_wrong_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A digest that doesn't match the actual raw file is rejected."""
+    raw = _full_valid_raw_report()
+    repo, _ = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    finalized = dict(raw)
+    finalized["baseline_policy"] = {
+        "type": "verbatim_run",
+        "source_git_commit": _FULL_SHA,
+        "source_run": _RUN_URL,
+        "source_artifact": "perf/baselines/raw.json",
+        "source_artifact_sha256": "f" * 64,
+        "measurement_timestamp": raw["module_benchmark"]["timestamp"],
+        "normalization": "none",
+    }
+    violations = _raw_artifact_binding_violations(finalized, role="baseline")
+    assert any("mismatch" in r for _c, r in violations)
+
+
+def test_raw_binding_rejects_missing_raw_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A source_artifact that doesn't exist on disk is rejected."""
+    raw = _full_valid_raw_report()
+    repo, _ = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    finalized = dict(raw)
+    finalized["baseline_policy"] = {
+        "type": "verbatim_run",
+        "source_git_commit": _FULL_SHA,
+        "source_run": _RUN_URL,
+        "source_artifact": "perf/baselines/nonexistent.json",
+        "source_artifact_sha256": "a" * 64,
+        "measurement_timestamp": raw["module_benchmark"]["timestamp"],
+        "normalization": "none",
+    }
+    violations = _raw_artifact_binding_violations(finalized, role="baseline")
+    assert any("does not exist" in r for _c, r in violations)
+
+
+def test_raw_binding_rejects_verbatim_data_modification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """verbatim_run must not modify any measured data."""
+    raw = _full_valid_raw_report()
+    repo, digest = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    finalized = dict(raw)
+    # Modify a measured metric.
+    finalized["module_benchmark"]["scenarios"][0]["metrics"]["input_bytes"] = 999
+    finalized["baseline_policy"] = {
+        "type": "verbatim_run",
+        "source_git_commit": _FULL_SHA,
+        "source_run": _RUN_URL,
+        "source_artifact": "perf/baselines/raw.json",
+        "source_artifact_sha256": digest,
+        "measurement_timestamp": raw["module_benchmark"]["timestamp"],
+        "normalization": "none",
+    }
+    violations = _raw_artifact_binding_violations(finalized, role="baseline")
+    assert any("module_benchmark" in r for _c, r in violations)
+
+
+def test_raw_binding_historical_exception_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The scoped historical exception skips raw binding validation."""
+    raw = _full_valid_raw_report()
+    repo, _ = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    finalized = dict(raw)
+    finalized["baseline_policy"] = {
+        "type": "verbatim_run",
+        "source_git_commit": "847f90139d287446882052ec78661746541aebff",
+        "source_run": "local",
+        "source_artifact": "perf/baselines/raw.json",
+        "measurement_timestamp": raw["module_benchmark"]["timestamp"],
+        "normalization": "none",
+        "historical_audit_exception": True,
+        "audit_note": "historical gap",
+    }
+    assert _raw_artifact_binding_violations(finalized, role="baseline") == []
+
+
+def test_conservative_normalized_rejects_truth_metric_modification() -> None:
+    """conservative_normalized must not modify truth metrics."""
+    raw = _full_valid_raw_report()
+    finalized = copy.deepcopy(raw)
+    finalized["module_benchmark"]["scenarios"][0]["metrics"]["fullbuffer_path_hits"] = 999
+    violations = _conservative_normalized_truth_violations(finalized, raw, "baseline")
+    assert any("fullbuffer_path_hits" in r for _c, r in violations)
+
+
+def test_conservative_normalized_rejects_environment_modification() -> None:
+    """conservative_normalized must not modify environment fields."""
+    raw = _full_valid_raw_report()
+    finalized = copy.deepcopy(raw)
+    finalized["module_benchmark"]["nginx_version"] = "nginx/1.30.4"
+    violations = _conservative_normalized_truth_violations(finalized, raw, "baseline")
+    assert any("nginx_version" in r for _c, r in violations)
+
+
+def test_conservative_normalized_rejects_status_modification() -> None:
+    """conservative_normalized must not modify scenario status."""
+    raw = _full_valid_raw_report()
+    finalized = copy.deepcopy(raw)
+    finalized["module_benchmark"]["scenarios"][0]["status"] = "skipped"
+    violations = _conservative_normalized_truth_violations(finalized, raw, "baseline")
+    assert any("status" in r for _c, r in violations)
+
+
+def test_conservative_normalized_allows_rps_adjustment() -> None:
+    """conservative_normalized may adjust RPS without truth violations."""
+    raw = _full_valid_raw_report()
+    finalized = copy.deepcopy(raw)
+    # Add an rps field to one scenario and lower it.
+    raw["module_benchmark"]["scenarios"][0]["metrics"]["rps"] = 1000
+    finalized["module_benchmark"]["scenarios"][0]["metrics"]["rps"] = 950
+    violations = _conservative_normalized_truth_violations(finalized, raw, "baseline")
+    assert violations == []
+
+
+def test_conservative_normalized_rejects_added_scenario() -> None:
+    """conservative_normalized must not add scenarios absent from raw."""
+    raw = _full_valid_raw_report()
+    finalized = copy.deepcopy(raw)
+    finalized["module_benchmark"]["scenarios"].append(
+        {"name": "extra", "status": "completed", "metrics": {}}
+    )
+    violations = _conservative_normalized_truth_violations(finalized, raw, "baseline")
+    assert any("extra" in r for _c, r in violations)
+
+
+def test_sha256_file_matches_hashlib(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """_sha256_file computes the same digest as hashlib."""
+    path = tmp_path / "data.bin"
+    payload = b'{"key": "value"}\n'
+    path.write_bytes(payload)
+    assert _sha256_file(path) == hashlib.sha256(payload).hexdigest()

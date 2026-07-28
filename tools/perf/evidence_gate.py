@@ -38,6 +38,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -942,6 +943,130 @@ def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
     return skipped
 
 
+_SUPPORTED_POLICY_TYPES = frozenset({"verbatim_run", "conservative_normalized"})
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _is_scoped_historical_exception(policy: dict) -> bool:
+    """Return True for the single historical baseline audit exception."""
+    return (
+        policy.get("historical_audit_exception") is True
+        and isinstance(policy.get("source_git_commit"), str)
+        and policy.get("source_git_commit") == _HISTORICAL_BASELINE_COMMIT
+        and bool(policy.get("audit_note"))
+    )
+
+
+def _policy_type_violations(
+    policy: dict, role: str, exception_is_scoped: bool,
+) -> tuple[list[tuple[str, str]], str]:
+    """Validate the policy type; return (violations, resolved_type)."""
+    violations: list[tuple[str, str]] = []
+    policy_type = policy.get("type")
+    if role == "baseline" and not exception_is_scoped:
+        if not isinstance(policy_type, str) or not policy_type:
+            violations.append((f"{role}.baseline_policy", "missing or empty type"))
+        elif policy_type not in _SUPPORTED_POLICY_TYPES:
+            violations.append((
+                f"{role}.baseline_policy",
+                f"unsupported type {policy_type!r}; must be one of "
+                f"{sorted(_SUPPORTED_POLICY_TYPES)}",
+            ))
+    return violations, policy_type
+
+
+def _verbatim_run_violations(policy: dict, role: str) -> list[tuple[str, str]]:
+    """Validate verbatim_run-specific fields."""
+    violations: list[tuple[str, str]] = []
+    if "measurement_timestamp" not in policy or not policy.get(
+        "measurement_timestamp"
+    ):
+        violations.append((
+            f"{role}.baseline_policy",
+            "verbatim_run policy missing or empty measurement_timestamp",
+        ))
+    normalization = policy.get("normalization")
+    if normalization != "none":
+        violations.append((
+            f"{role}.baseline_policy",
+            f"verbatim_run policy normalization must be 'none' "
+            f"(got {normalization!r})",
+        ))
+    return violations
+
+
+def _conservative_normalized_violations(
+    policy: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Validate conservative_normalized-specific fields."""
+    violations: list[tuple[str, str]] = []
+    for field in ("adjustments", "adjustment_reason", "adjustment_date"):
+        if field not in policy or policy[field] in (None, "", {}):
+            violations.append((
+                f"{role}.baseline_policy",
+                f"missing or empty {field}",
+            ))
+    adjustments = policy.get("adjustments")
+    if isinstance(adjustments, dict):
+        for field in ("rps", "latency_ttfb"):
+            if not adjustments.get(field):
+                violations.append((
+                    f"{role}.baseline_policy",
+                    f"missing or empty adjustments.{field}",
+                ))
+    return violations
+
+
+def _type_specific_violations(
+    policy: dict, role: str, policy_type: str,
+) -> list[tuple[str, str]]:
+    """Validate type-specific fields for verbatim_run and conservative_normalized."""
+    if policy_type == "verbatim_run":
+        return _verbatim_run_violations(policy, role)
+    if policy_type == "conservative_normalized":
+        return _conservative_normalized_violations(policy, role)
+    return []
+
+
+def _source_artifact_violations(
+    policy: dict, role: str, exception_is_scoped: bool,
+) -> list[tuple[str, str]]:
+    """Validate source_artifact and source_artifact_sha256 fields."""
+    violations: list[tuple[str, str]] = []
+    artifact = policy.get("source_artifact")
+    if artifact in (None, "", "not-recorded", "unknown") and not exception_is_scoped:
+        violations.append((
+            f"{role}.baseline_policy",
+            "source_artifact must identify a retained raw artifact",
+        ))
+
+    raw_digest = policy.get("source_artifact_sha256")
+    sha256_re = re.compile(r"^[0-9a-f]{64}$")
+    if not exception_is_scoped:
+        if not raw_digest:
+            violations.append((
+                f"{role}.baseline_policy",
+                "missing source_artifact_sha256; canonical baselines must "
+                "record the SHA-256 of the retained raw artifact",
+            ))
+        elif not isinstance(raw_digest, str) or not sha256_re.match(raw_digest):
+            violations.append((
+                f"{role}.baseline_policy",
+                f"source_artifact_sha256 must be a 64-char lowercase hex "
+                f"digest (got {raw_digest!r})",
+            ))
+
+    if isinstance(artifact, str) and artifact and not exception_is_scoped:
+        components = artifact.replace("\\", "/").split("/")
+        if Path(artifact).is_absolute() or ".." in components:
+            violations.append((
+                f"{role}.baseline_policy",
+                f"source_artifact must be a repository-relative path without "
+                f"'..' traversal (got {artifact!r})",
+            ))
+    return violations
+
+
 def _baseline_policy_violations(
     report: dict, role: str,
 ) -> list[tuple[str, str]]:
@@ -960,114 +1085,280 @@ def _baseline_policy_violations(
       - verbatim_run: raw, unmodified benchmark output.
       - conservative_normalized: latency/throughput adjusted only downward/inward.
     """
-    SUPPORTED_TYPES = frozenset({"verbatim_run", "conservative_normalized"})
-
     policy = report.get("baseline_policy")
     if not policy:
-        # No policy at all is a violation for baselines
         if role == "baseline":
             return [(f"{role}.baseline_policy", "missing baseline_policy object")]
         return []
 
     violations: list[tuple[str, str]] = []
+    exception_is_scoped = _is_scoped_historical_exception(policy)
 
-    # The scoped historical exception may lack structured provenance fields
-    # entirely.  Compute it early so we can defer all new type-specific
-    # requirements to future baselines while still accepting the original.
-    historical_exception = policy.get("historical_audit_exception") is True
-    exception_is_scoped = (
-        historical_exception
-        and isinstance(policy.get("source_git_commit"), str)
-        and policy.get("source_git_commit") == _HISTORICAL_BASELINE_COMMIT
-        and bool(policy.get("audit_note"))
+    type_violations, policy_type = _policy_type_violations(
+        policy, role, exception_is_scoped
     )
+    violations.extend(type_violations)
 
-    # Type must be present and belong to the allowed set for baselines;
-    # fail-closed on unknown or missing type.  The scoped historical
-    # exception is grandfathered because it predates the type discipline.
-    if role == "baseline" and not exception_is_scoped:
-        policy_type = policy.get("type")
-        if not isinstance(policy_type, str) or not policy_type:
-            violations.append((f"{role}.baseline_policy", "missing or empty type"))
-        elif policy_type not in SUPPORTED_TYPES:
-            violations.append((
-                f"{role}.baseline_policy",
-                f"unsupported type {policy_type!r}; must be one of "
-                f"{sorted(SUPPORTED_TYPES)}",
-            ))
-    else:
-        policy_type = policy.get("type")
-
-    # All baseline policies must have core provenance fields
-    required = (
-        "source_git_commit",
-        "source_run",
-        "source_artifact",
-    )
-    for field in required:
+    for field in ("source_git_commit", "source_run", "source_artifact"):
         if field not in policy or policy[field] in (None, "", {}):
             violations.append((
                 f"{role}.baseline_policy",
                 f"missing or empty {field}",
             ))
 
-    # source_git_commit for a verbatim baseline must be a full 40-character
-    # SHA so the provenance cannot be confused with a shortened commit id.
-    sha_re = re.compile(r"^[0-9a-f]{40}$")
     source_git_commit = policy.get("source_git_commit")
-    if isinstance(source_git_commit, str) and source_git_commit and policy_type == "verbatim_run":
-        if not sha_re.match(source_git_commit):
+    if (
+        isinstance(source_git_commit, str)
+        and source_git_commit
+        and not exception_is_scoped
+        and policy_type in _SUPPORTED_POLICY_TYPES
+    ):
+        if not _SHA_RE.match(source_git_commit):
             violations.append((
                 f"{role}.baseline_policy",
                 f"source_git_commit must be a full 40-character SHA for "
-                f"verbatim_run (got {source_git_commit!r})",
+                f"{policy_type} (got {source_git_commit!r})",
             ))
 
-    # Type-specific validation
-    if policy_type == "verbatim_run":
-        if "measurement_timestamp" not in policy or not policy.get(
-            "measurement_timestamp"
-        ):
-            violations.append((
-                f"{role}.baseline_policy",
-                "verbatim_run policy missing or empty measurement_timestamp",
-            ))
-        normalization = policy.get("normalization")
-        if normalization != "none":
-            violations.append((
-                f"{role}.baseline_policy",
-                f"verbatim_run policy normalization must be 'none' "
-                f"(got {normalization!r})",
-            ))
+    violations.extend(_type_specific_violations(policy, role, policy_type))
+    violations.extend(_source_artifact_violations(policy, role, exception_is_scoped))
+    return violations
 
-    if policy_type == "conservative_normalized":
-        # Additional fields required for normalized baselines
-        for field in ("adjustments", "adjustment_reason", "adjustment_date"):
-            if field not in policy or policy[field] in (None, "", {}):
-                violations.append((
-                    f"{role}.baseline_policy",
-                    f"missing or empty {field}",
-                ))
 
-        adjustments = policy.get("adjustments")
-        if isinstance(adjustments, dict):
-            for field in ("rps", "latency_ttfb"):
-                if not adjustments.get(field):
-                    violations.append((
-                        f"{role}.baseline_policy",
-                        f"missing or empty adjustments.{field}",
-                    ))
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
-    # Validate source_artifact is a real retained artifact (not placeholder).
-    # exception_is_scoped was computed earlier so the historical exception is
-    # honored consistently for type, provenance, and artifact checks.
+
+def _sha256_file(path: Path) -> str:
+    """Return the lowercase hex SHA-256 digest of a file's bytes."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_raw_digest(
+    policy: dict, role: str,
+) -> tuple[Path, str | None]:
+    """Resolve and verify the raw artifact digest.
+
+    Returns ``(raw_path, error_message)``.  On success ``error_message``
+    is ``None`` and ``raw_path`` points to the verified raw file.  On
+    failure ``raw_path`` is a placeholder and ``error_message`` describes
+    the violation.
+    """
     artifact = policy.get("source_artifact")
-    if artifact in (None, "", "not-recorded", "unknown") and not exception_is_scoped:
+    if not isinstance(artifact, str) or not artifact:
+        return Path(), "source_artifact is not a string"
+
+    raw_path = REPO_ROOT / artifact
+    if not raw_path.exists():
+        return raw_path, f"retained raw artifact does not exist: {artifact}"
+
+    raw_digest = policy.get("source_artifact_sha256")
+    if not isinstance(raw_digest, str) or not _SHA256_RE.match(raw_digest):
+        return raw_path, (
+            f"source_artifact_sha256 is not a 64-char hex digest "
+            f"(got {raw_digest!r})"
+        )
+
+    actual_digest = _sha256_file(raw_path)
+    if actual_digest != raw_digest:
+        return raw_path, (
+            f"raw artifact SHA-256 mismatch: policy={raw_digest} "
+            f"actual={actual_digest}; the retained raw file does not match "
+            f"the finalized baseline provenance"
+        )
+    return raw_path, None
+
+
+def _raw_content_binding_violations(
+    report: dict, raw_report: dict, policy_type: str, role: str,
+) -> list[tuple[str, str]]:
+    """Verify finalized content against the raw report by policy type."""
+    violations: list[tuple[str, str]] = []
+    if policy_type == "verbatim_run":
+        for top_key in ("module_benchmark", "decompression_coverage"):
+            if report.get(top_key) != raw_report.get(top_key):
+                violations.append((
+                    f"{role}.raw_binding",
+                    f"verbatim_run {top_key} differs from the raw artifact; "
+                    f"verbatim baselines must not modify measured data",
+                ))
+    elif policy_type == "conservative_normalized":
+        violations.extend(
+            _conservative_normalized_truth_violations(report, raw_report, role)
+        )
+    return violations
+
+
+def _raw_artifact_binding_violations(
+    report: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Verify the finalized baseline is bound to its retained raw artifact.
+
+    For canonical baselines (non-historical), the validator:
+
+      * resolves ``baseline_policy.source_artifact`` against the repo root;
+      * confirms the raw file exists;
+      * recomputes its SHA-256 and compares it to
+        ``baseline_policy.source_artifact_sha256``;
+      * for ``verbatim_run``, verifies that the finalized measured data
+        (``module_benchmark`` and ``decompression_coverage``) is
+        byte-identical to the raw report (only ``baseline_policy`` may
+        differ);
+      * for ``conservative_normalized``, verifies truth evidence
+        (path, fallback, output, memory, environment, status, scenario
+        metadata) is identical to the raw report.
+
+    The historical audit exception is honored and skips raw binding.
+    """
+    policy = report.get("baseline_policy")
+    if not isinstance(policy, dict):
+        return []
+    if _is_scoped_historical_exception(policy):
+        return []
+
+    raw_path, error = _verify_raw_digest(policy, role)
+    if error:
+        return [(f"{role}.raw_binding", error)]
+
+    try:
+        raw_report = json.loads(raw_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return [(
+            f"{role}.raw_binding",
+            f"failed to read raw artifact: {exc}",
+        )]
+
+    return _raw_content_binding_violations(
+        report, raw_report, policy.get("type"), role
+    )
+
+
+_TRUTH_METRIC_FIELDS = (
+    "streaming_path_hits",
+    "fullbuffer_path_hits",
+    "streaming_requests_total",
+    "precommit_failopen_total",
+    "decompression_streaming_total",
+    "decompression_fullbuffer_total",
+    "zero_copy_output_total",
+    "copied_output_total",
+    "baseline_rss_bytes",
+    "peak_rss_bytes",
+    "input_bytes",
+)
+_ADJUSTABLE_METRIC_FIELDS = (
+    "rps",
+    "latency_p50_ms",
+    "latency_p95_ms",
+    "ttfb_p50_ms",
+    "ttfb_ms",
+    "ttlb_ms",
+)
+_TRUTH_SCENARIO_FIELDS = (
+    "status", "reason", "profile", "compression", "transfer_encoding",
+)
+_MB_TRUTH_FIELDS = (
+    "platform", "load_generator", "nginx_version", "timestamp", "git_commit",
+)
+
+
+def _scenario_truth_violations(
+    name: str, cur_scenario: dict | None, raw_scenario: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Validate truth-evidence identity for one scenario."""
+    violations: list[tuple[str, str]] = []
+    if cur_scenario is None:
         violations.append((
-            f"{role}.baseline_policy",
-            "source_artifact must identify a retained raw artifact",
+            f"{role}.raw_binding",
+            f"conservative_normalized removed scenario {name!r} present in raw",
+        ))
+        return violations
+    for field in _TRUTH_SCENARIO_FIELDS:
+        if cur_scenario.get(field) != raw_scenario.get(field):
+            violations.append((
+                f"{role}.raw_binding",
+                f"conservative_normalized must not modify scenario {name!r} "
+                f"{field} (finalized={cur_scenario.get(field)!r} "
+                f"raw={raw_scenario.get(field)!r})",
+            ))
+    cur_m = cur_scenario.get("metrics", {}) or {}
+    raw_m = raw_scenario.get("metrics", {}) or {}
+    for field in _TRUTH_METRIC_FIELDS:
+        if cur_m.get(field) != raw_m.get(field):
+            violations.append((
+                f"{role}.raw_binding",
+                f"conservative_normalized must not modify scenario {name!r} "
+                f"metric {field} (finalized={cur_m.get(field)!r} "
+                f"raw={raw_m.get(field)!r})",
+            ))
+    for field in _ADJUSTABLE_METRIC_FIELDS:
+        if field in raw_m and field not in cur_m:
+            violations.append((
+                f"{role}.raw_binding",
+                f"conservative_normalized removed adjustable metric {name!r} "
+                f"{field}; adjustments may change values but must not drop "
+                f"measured fields",
+            ))
+    return violations
+
+
+def _conservative_normalized_truth_violations(
+    finalized: dict, raw: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Verify conservative_normalized baselines only adjust throughput/latency.
+
+    Truth evidence that must be identical to the raw report:
+      * platform, load_generator, nginx_version, timestamp, git_commit
+      * scenario status, reason, profile, compression, transfer_encoding
+      * path, fallback, output, memory counters
+      * input_bytes
+      * decompression_coverage
+
+    Only RPS (may decrease), latency/TTFB/TTLB (may increase) may be
+    adjusted.  The validator checks identity of truth fields; it does not
+    re-derive the adjustment direction (the finalizer records the rule).
+    """
+    violations: list[tuple[str, str]] = []
+    cur_mb = finalized.get("module_benchmark", {})
+    raw_mb = raw.get("module_benchmark", {})
+
+    for field in _MB_TRUTH_FIELDS:
+        if cur_mb.get(field) != raw_mb.get(field):
+            violations.append((
+                f"{role}.raw_binding",
+                f"conservative_normalized must not modify module_benchmark.{field} "
+                f"(finalized={cur_mb.get(field)!r} raw={raw_mb.get(field)!r})",
+            ))
+
+    if finalized.get("decompression_coverage") != raw.get("decompression_coverage"):
+        violations.append((
+            f"{role}.raw_binding",
+            "conservative_normalized must not modify decompression_coverage",
         ))
 
+    cur_scenarios = {
+        s.get("name"): s for s in cur_mb.get("scenarios", []) if isinstance(s, dict)
+    }
+    raw_scenarios = {
+        s.get("name"): s for s in raw_mb.get("scenarios", []) if isinstance(s, dict)
+    }
+    for name, raw_scenario in raw_scenarios.items():
+        violations.extend(
+            _scenario_truth_violations(
+                name, cur_scenarios.get(name), raw_scenario, role
+            )
+        )
+    for name in cur_scenarios:
+        if name not in raw_scenarios:
+            violations.append((
+                f"{role}.raw_binding",
+                f"conservative_normalized added scenario {name!r} absent from raw",
+            ))
     return violations
 
 
@@ -1298,6 +1589,7 @@ def _validate_benchmark_evidence(
     )
     violations.extend(_baseline_policy_violations(report, role))
     violations.extend(_scenario_source_environment_violations(report, role))
+    violations.extend(_raw_artifact_binding_violations(report, role))
 
     # 5. Environment identity fields must be present and non-empty;
     #    nginx_version must also not use the legacy "unknown" placeholder.
