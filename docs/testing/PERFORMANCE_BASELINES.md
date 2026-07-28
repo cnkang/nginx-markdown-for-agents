@@ -39,6 +39,13 @@ baseline is a verbatim run from source commit
 The former `historical_audit_exception` is retained only for historical audit
 coverage and is not an active release-baseline policy.
 
+The canonical module benchmark retains response probes at
+`perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
+output path. The workflow validates non-empty `.headers`, `.body`, and `.json`
+files for all eight scenarios, verifies each probe's verdict, curl exit code,
+and body SHA-256, and cross-checks finalized `response_correctness` fields
+before uploading canonical evidence.
+
 CI now also records non-blocking performance artifacts from the same `perf_baseline` example. The workflow stores the full benchmark output plus `/usr/bin/time -v` captures for the medium, medium-front-matter, and large single-sample runs. Those artifacts are for regression comparison and trend review; they are not merge-blocking thresholds yet.
 
 Key findings from this run:

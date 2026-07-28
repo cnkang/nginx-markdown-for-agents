@@ -134,6 +134,15 @@ the retained raw artifact SHA-256
 Machine validation recomputes that digest and requires the finalized report to
 match the raw report exactly apart from `baseline_policy`.
 
+The canonical workflow retains response probes at
+`perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
+path. It validates every scenario's non-empty `.headers`, `.body`, and `.json`
+files, requires a passing probe with `curl_exit_code == 0`, verifies the body
+SHA-256, and cross-checks finalized `response_correctness` fields before
+running the performance evidence and release gates. The canonical upload is
+performed only after those checks pass and contains the finalized JSON, raw
+JSON, and this probe directory.
+
 The former `historical_audit_exception` is retained only for historical
 validator coverage and is not used by the active release baseline. Future
 baselines must identify a repository-contained raw artifact and must not use

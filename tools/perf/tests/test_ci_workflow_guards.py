@@ -100,65 +100,102 @@ def _nightly_perf_text() -> str:
     )
 
 
+def _module_baseline_job(text: str) -> str:
+    """Return only the canonical module-baseline job block."""
+    start = text.index("\n  module-baseline-091:")
+    return text[start:]
+
+
 def test_nightly_perf_generates_raw_baseline() -> None:
     """The workflow must generate the raw canonical baseline report."""
-    text = _nightly_perf_text()
-    assert "module-baseline-091-raw.json" in text
-    assert "run_module_benchmark.sh" in text
+    block = _module_baseline_job(_nightly_perf_text())
+    assert "--output perf/baselines/module-baseline-091-raw.json" in block
+    assert "run_module_benchmark.sh" in block
 
 
 def test_nightly_perf_uses_finalizer_with_raw_input_and_output() -> None:
     """The finalizer must read --raw-input and write --output (not in-place)."""
-    text = _nightly_perf_text()
-    assert "finalize_module_baseline.py" in text
-    assert "--raw-input" in text
-    assert "--output" in text
+    block = _module_baseline_job(_nightly_perf_text())
+    assert "finalize_module_baseline.py" in block
+    assert "--raw-input" in block
+    assert "--output" in block
     # Must not use the old in-place --input flag.
-    assert "--input perf/baselines/module-baseline-091.json" not in text
+    assert "--input perf/baselines/module-baseline-091.json" not in block
 
 
 def test_nightly_perf_records_raw_digest() -> None:
     """The finalizer computes source_artifact_sha256 from the raw file."""
-    text = _nightly_perf_text()
+    block = _module_baseline_job(_nightly_perf_text())
     # The finalizer CLI does not take --source-artifact-sha256; it computes
     # the digest internally.  Guard against re-introducing an in-place copy
     # that bypasses the raw binding.
-    assert "cp perf/baselines/module-baseline-091-raw.json" not in text
+    assert "cp perf/baselines/module-baseline-091-raw.json" not in block
 
 
 def test_nightly_perf_validates_finalized_baseline() -> None:
     """The workflow must run evidence-gate validation on the finalized baseline."""
-    text = _nightly_perf_text()
-    assert "_validate_benchmark_evidence" in text
-    assert "canonical module baseline validation failed" in text
+    block = _module_baseline_job(_nightly_perf_text())
+    assert "_validate_benchmark_evidence" in block
+    assert "canonical module baseline validation failed" in block
 
 
 def test_nightly_perf_uploads_raw_and_finalized() -> None:
     """The workflow must upload both raw and finalized baseline files."""
-    text = _nightly_perf_text()
-    assert "module-baseline-091.json" in text
-    assert "module-baseline-091-raw.json" in text
-    assert "if-no-files-found: error" in text
+    block = _module_baseline_job(_nightly_perf_text())
+    upload_start = block.index("- name: Upload canonical module baseline")
+    upload_block = block[upload_start:]
+    assert "perf/baselines/module-baseline-091.json" in upload_block
+    assert "perf/baselines/module-baseline-091-raw.json" in upload_block
+    assert "perf/baselines/module-baseline-091-raw-probes/" in upload_block
+    assert "if-no-files-found: error" in upload_block
+    assert "perf/baselines/module-baseline-091-probes/" not in block
 
 
 def test_nightly_perf_uploads_debug_artifacts_on_failure() -> None:
     """The workflow must retain debug artifacts when benchmark or validation fails."""
-    text = _nightly_perf_text()
-    assert "module-baseline-091-debug-" in text
-    debug_start = text.index("- name: Upload debug artifacts on failure")
-    debug_block = text[debug_start:]
+    block = _module_baseline_job(_nightly_perf_text())
+    assert "module-baseline-091-debug-" in block
+    debug_start = block.index("- name: Upload debug artifacts on failure")
+    debug_block = block[debug_start:]
     assert "if: failure()" in debug_block
+    assert "perf/baselines/module-baseline-091-raw-probes/" in debug_block
+    assert "perf/baselines/module-baseline-091-probes/" not in debug_block
 
 
 def test_nightly_perf_uploads_canonical_only_after_all_release_gates() -> None:
     """A canonical artifact must not survive a later gate failure."""
-    text = _nightly_perf_text()
-    upload = text.index("- name: Upload canonical module baseline")
-    evidence_gate = text.index("make perf-evidence-check")
-    release_gates = text.index("make release-gates-check-091")
+    block = _module_baseline_job(_nightly_perf_text())
+    upload = block.index("- name: Upload canonical module baseline")
+    evidence_gate = block.index("make perf-evidence-check")
+    release_gates = block.index("make release-gates-check-091")
 
     assert evidence_gate < upload
     assert release_gates < upload
+
+
+def test_nightly_perf_verifies_probe_completeness_before_finalization() -> None:
+    """Deleting the raw probe gate must make this workflow guard fail."""
+    block = _module_baseline_job(_nightly_perf_text())
+    verify = block.index("- name: Verify raw module probe artifacts")
+    finalize = block.index("- name: Finalize canonical module baseline")
+    verify_block = block[verify:finalize]
+
+    assert "validate_module_probe_artifacts.py" in verify_block
+    assert "--probe-dir perf/baselines/module-baseline-091-raw-probes" in verify_block
+    assert verify < finalize
+
+
+def test_nightly_perf_cross_checks_probes_against_finalized_baseline() -> None:
+    """Finalized response correctness must be checked before baseline gates."""
+    block = _module_baseline_job(_nightly_perf_text())
+    cross_check = block.index("- name: Cross-check finalized baseline response probes")
+    validate = block.index("- name: Validate canonical module baseline")
+    evidence = block.index("- name: Run canonical performance evidence check")
+    cross_check_block = block[cross_check:validate]
+
+    assert "validate_module_probe_artifacts.py" in cross_check_block
+    assert "--baseline perf/baselines/module-baseline-091.json" in cross_check_block
+    assert cross_check < validate < evidence
 
 
 def test_nightly_perf_records_run_attempt_in_source_run() -> None:

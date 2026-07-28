@@ -311,7 +311,65 @@ def test_canonical_workflow_retains_probe_artifacts():
         REPO_ROOT / ".github" / "workflows" / "nightly-perf.yml"
     ).read_text(encoding="utf-8")
 
-    assert "perf/baselines/module-baseline-091-probes/" in workflow
+    module_job = workflow[workflow.index("\n  module-baseline-091:"):]
+    assert "--output perf/baselines/module-baseline-091-raw.json" in module_job
+    assert "perf/baselines/module-baseline-091-raw-probes/" in module_job
+    assert "perf/baselines/module-baseline-091-probes/" not in module_job
+
+
+def test_module_benchmark_materializes_output_derived_probe_directory():
+    """The real harness copies probes beside each requested report output."""
+    source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'PROBE_OUTPUT_DIR="${OUTPUT_PATH%.json}-probes"' in source
+    assert 'mkdir -p "$PROBE_OUTPUT_DIR"' in source
+    assert 'cp -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"' in source
+
+
+def test_module_benchmark_materializes_all_eight_scenario_probe_triplets():
+    """All canonical scenarios run through the response-probe materializer."""
+    source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+    expected = {
+        "plain-small",
+        "chunked-medium",
+        "gzip-large",
+        "large-body",
+        "streaming-first",
+        "gzip-streaming-first",
+        "deflate-streaming-first",
+        "brotli-streaming-first",
+    }
+
+    scenario_lines = {
+        line.strip().split("|", 1)[0].strip('"')
+        for line in source.splitlines()
+        if line.lstrip().startswith('"') and line.count("|") == 5
+    }
+    assert scenario_lines == expected
+    assert 'local headers_file="$PROBE_DIR/${name}.headers"' in source
+    assert 'local body_file="$PROBE_DIR/${name}.body"' in source
+    assert 'local result_file="$PROBE_DIR/${name}.json"' in source
+
+
+def test_module_benchmark_cleanup_removes_temp_only_after_probe_materialization():
+    """Cleanup removes the temporary workdir, not output-derived probes."""
+    source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+    cleanup_start = source.index("cleanup()")
+    cleanup_end = source.index("\n}\n", cleanup_start) + 3
+    cleanup = source[cleanup_start:cleanup_end]
+
+    assert 'cp -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"' in source
+    assert 'rm -rf "$NGINX_WORKDIR"' in cleanup
+    assert "PROBE_OUTPUT_DIR" not in cleanup
+
+
+def test_module_benchmark_probe_directories_do_not_collide_by_output_basename():
+    """Probe directory derivation retains the complete report basename."""
+    source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+    derivation = 'PROBE_OUTPUT_DIR="${OUTPUT_PATH%.json}-probes"'
+
+    assert source.count(derivation) == 1
+    assert "${OUTPUT_PATH%/*}" not in source
 
 
 def test_upstream_mock_splits_chunked_bodies():

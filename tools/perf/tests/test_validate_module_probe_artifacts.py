@@ -1,0 +1,205 @@
+"""Tests for the retained module probe artifact validator."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
+from tools.perf.validate_module_probe_artifacts import (
+    RESPONSE_FIELDS,
+    SCENARIOS,
+    main,
+    validate_probe_artifacts,
+)
+
+
+def _write_probe_pack(root: Path) -> tuple[Path, Path]:
+    probe_dir = root / "perf" / "baselines" / "module-baseline-091-raw-probes"
+    probe_dir.mkdir(parents=True)
+    scenarios = []
+    for scenario in SCENARIOS:
+        body = f"# {scenario}\nTail\n".encode()
+        (probe_dir / f"{scenario}.headers").write_text(
+            "HTTP/1.1 200 OK\nContent-Type: text/markdown\n",
+            encoding="utf-8",
+        )
+        (probe_dir / f"{scenario}.body").write_bytes(body)
+        probe = {
+            "verdict": "pass",
+            "curl_exit_code": 0,
+            "body_sha256": hashlib.sha256(body).hexdigest(),
+            "body_bytes": len(body),
+            "header_artifact": f"{scenario}.headers",
+            "body_artifact": f"{scenario}.body",
+            "heading_present": True,
+            "tail_token_present": True,
+            "tail_token_count": 1,
+        }
+        (probe_dir / f"{scenario}.json").write_text(
+            json.dumps(probe), encoding="utf-8"
+        )
+        scenarios.append({"name": scenario, "response_correctness": probe.copy()})
+
+    baseline = root / "perf" / "baselines" / "module-baseline-091.json"
+    baseline.write_text(
+        json.dumps({"module_benchmark": {"scenarios": scenarios}}),
+        encoding="utf-8",
+    )
+    return probe_dir, baseline
+
+
+def _relative(root: Path, path: Path) -> str:
+    return path.relative_to(root).as_posix()
+
+
+def test_validates_all_eight_probe_triplets_and_baseline(tmp_path: Path) -> None:
+    probe_dir, baseline = _write_probe_pack(tmp_path)
+
+    errors = validate_probe_artifacts(
+        _relative(tmp_path, probe_dir),
+        baseline=_relative(tmp_path, baseline),
+        repo_root=tmp_path,
+    )
+
+    assert errors == []
+
+
+@pytest.mark.parametrize("suffix", ["headers", "body", "json"])
+def test_missing_any_required_file_fails(tmp_path: Path, suffix: str) -> None:
+    probe_dir, _baseline = _write_probe_pack(tmp_path)
+    (probe_dir / f"plain-small.{suffix}").unlink()
+
+    errors = validate_probe_artifacts(
+        _relative(tmp_path, probe_dir), repo_root=tmp_path
+    )
+
+    assert any("plain-small" in error and suffix in error for error in errors)
+
+
+def test_empty_body_fails(tmp_path: Path) -> None:
+    probe_dir, _baseline = _write_probe_pack(tmp_path)
+    (probe_dir / "gzip-large.body").write_bytes(b"")
+
+    errors = validate_probe_artifacts(
+        _relative(tmp_path, probe_dir), repo_root=tmp_path
+    )
+
+    assert any("gzip-large.body" in error and "empty" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("verdict", "fail", "verdict"),
+        ("curl_exit_code", 7, "curl_exit_code"),
+        ("header_artifact", "wrong.headers", "header_artifact"),
+        ("body_artifact", "wrong.body", "body_artifact"),
+    ],
+)
+def test_probe_json_contract_is_fail_closed(
+    tmp_path: Path, field: str, value: object, expected: str
+) -> None:
+    probe_dir, _baseline = _write_probe_pack(tmp_path)
+    path = probe_dir / "large-body.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload[field] = value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    errors = validate_probe_artifacts(
+        _relative(tmp_path, probe_dir), repo_root=tmp_path
+    )
+
+    assert any("large-body" in error and expected in error for error in errors)
+
+
+def test_body_digest_and_byte_count_are_verified(tmp_path: Path) -> None:
+    probe_dir, _baseline = _write_probe_pack(tmp_path)
+    path = probe_dir / "streaming-first.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["body_sha256"] = "0" * 64
+    payload["body_bytes"] += 1
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    errors = validate_probe_artifacts(
+        _relative(tmp_path, probe_dir), repo_root=tmp_path
+    )
+
+    assert any("streaming-first.body" in error and "SHA-256" in error for error in errors)
+    assert any("streaming-first.body" in error and "byte count" in error for error in errors)
+
+
+def test_malformed_or_non_object_probe_json_fails(tmp_path: Path) -> None:
+    probe_dir, _baseline = _write_probe_pack(tmp_path)
+    (probe_dir / "plain-small.json").write_text("{broken", encoding="utf-8")
+    (probe_dir / "chunked-medium.json").write_text("[]", encoding="utf-8")
+
+    errors = validate_probe_artifacts(
+        _relative(tmp_path, probe_dir), repo_root=tmp_path
+    )
+
+    assert any("plain-small" in error and "invalid JSON" in error for error in errors)
+    assert any("chunked-medium" in error and "not an object" in error for error in errors)
+
+
+def test_finalized_response_correctness_mismatch_fails(tmp_path: Path) -> None:
+    probe_dir, baseline = _write_probe_pack(tmp_path)
+    payload = json.loads(baseline.read_text(encoding="utf-8"))
+    payload["module_benchmark"]["scenarios"][0]["response_correctness"][
+        "tail_token_count"
+    ] = 99
+    baseline.write_text(json.dumps(payload), encoding="utf-8")
+
+    errors = validate_probe_artifacts(
+        _relative(tmp_path, probe_dir),
+        baseline=_relative(tmp_path, baseline),
+        repo_root=tmp_path,
+    )
+
+    assert any("plain-small" in error and "tail_token_count" in error for error in errors)
+
+
+def test_absolute_and_traversal_probe_paths_are_rejected(tmp_path: Path) -> None:
+    probe_dir, _baseline = _write_probe_pack(tmp_path)
+
+    absolute_errors = validate_probe_artifacts(
+        str(probe_dir), repo_root=tmp_path
+    )
+    traversal_errors = validate_probe_artifacts(
+        "perf/baselines/../outside", repo_root=tmp_path
+    )
+
+    assert any("repository-relative" in error for error in absolute_errors)
+    assert any(".." in error for error in traversal_errors)
+
+
+def test_symlink_escape_is_rejected(tmp_path: Path) -> None:
+    link = tmp_path / "perf" / "baselines" / "escaped-probes"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(Path("/tmp"), target_is_directory=True)
+
+    errors = validate_probe_artifacts(
+        "perf/baselines/escaped-probes", repo_root=tmp_path
+    )
+
+    assert any("escapes validation root" in error for error in errors)
+
+
+def test_cli_rejects_absolute_probe_path(tmp_path: Path) -> None:
+    assert main(["--probe-dir", str(tmp_path / "probes")]) == 1
+
+
+def test_response_field_contract_stays_explicit() -> None:
+    assert RESPONSE_FIELDS == (
+        "verdict",
+        "curl_exit_code",
+        "body_sha256",
+        "body_bytes",
+        "header_artifact",
+        "body_artifact",
+        "heading_present",
+        "tail_token_present",
+        "tail_token_count",
+    )

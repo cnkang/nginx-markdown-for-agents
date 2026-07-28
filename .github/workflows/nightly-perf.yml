@@ -308,6 +308,12 @@ jobs:
             --output perf/baselines/module-baseline-091-raw.json
         shell: bash
 
+      - name: Verify raw module probe artifacts
+        run: |
+          python3 tools/perf/validate_module_probe_artifacts.py \
+            --probe-dir perf/baselines/module-baseline-091-raw-probes
+        shell: bash
+
       - name: Record full commit SHA for baseline provenance
         id: baseline-git
         run: |
@@ -323,6 +329,13 @@ jobs:
             --output perf/baselines/module-baseline-091.json \
             --source-git-commit "${{ steps.baseline-git.outputs.sha }}" \
             --source-run "${GITHUB_RUN_URL}"
+        shell: bash
+
+      - name: Cross-check finalized baseline response probes
+        run: |
+          python3 tools/perf/validate_module_probe_artifacts.py \
+            --probe-dir perf/baselines/module-baseline-091-raw-probes \
+            --baseline perf/baselines/module-baseline-091.json
         shell: bash
 
       - name: Validate canonical module baseline
@@ -361,7 +374,7 @@ jobs:
           path: |
             perf/baselines/module-baseline-091.json
             perf/baselines/module-baseline-091-raw.json
-            perf/baselines/module-baseline-091-probes/
+            perf/baselines/module-baseline-091-raw-probes/
           if-no-files-found: error
           retention-days: 14
 
@@ -372,7 +385,7 @@ jobs:
           name: module-baseline-091-debug-${{ github.sha }}
           path: |
             perf/baselines/module-baseline-091-raw.json
-            perf/baselines/module-baseline-091-probes/
+            perf/baselines/module-baseline-091-raw-probes/
             perf/reports/
           if-no-files-found: ignore
           retention-days: 7
