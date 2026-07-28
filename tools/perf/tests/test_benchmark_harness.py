@@ -40,6 +40,7 @@ from tools.perf.benchmark_validation import (
     attach_response_probe,
     compare_streaming_probe_bodies,
     parse_ab_result,
+    parse_curl_header_artifact,
     parse_hey_result,
     validate_response_probe,
 )
@@ -186,6 +187,33 @@ def test_response_probe_accepts_complete_markdown():
     assert result["verdict"] == "pass"
     assert result["body_bytes"] > 0
     assert result["body_sha256"]
+
+
+def test_curl_headers_use_final_response_block_and_normalize_names():
+    status, headers = parse_curl_header_artifact(
+        "HTTP/1.1 100 Continue\r\nX-Interim: ignored\r\n\r\n"
+        "HTTP/2 200\r\nContent-Type: text/markdown\r\nVary: Accept\r\n"
+    )
+
+    assert status == 200
+    assert headers == {
+        "content-type": "text/markdown",
+        "vary": "Accept",
+    }
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "plain text",
+        "HTTP/1.1 200 OK\nMalformed-Header\n",
+        "HTTP/1.1 200 OK\nContent-Type: text/markdown\n"
+        "HTTP/1.1 200 OK\n",
+    ],
+)
+def test_curl_headers_reject_malformed_artifacts(content):
+    with pytest.raises(ValueError):
+        parse_curl_header_artifact(content)
 
 
 def test_http_500_probe_prevents_completed_scenario():

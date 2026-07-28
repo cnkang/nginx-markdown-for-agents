@@ -12,6 +12,91 @@ from dataclasses import dataclass
 from typing import Any
 
 
+_HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9a-z-]+$")
+_HTTP_STATUS_LINE_RE = re.compile(
+    r"^HTTP/\S+\s+([1-5][0-9]{2})(?:\s+.*)?$"
+)
+
+
+def _normalize_header_name(name: str) -> str:
+    normalized = name.strip().lower()
+    if not _HEADER_NAME_RE.fullmatch(normalized):
+        raise ValueError(f"invalid HTTP header name: {name!r}")
+    return normalized
+
+
+def normalize_header_mapping(headers: Mapping[str, str]) -> dict[str, str]:
+    """Normalize one HTTP header mapping using the probe contract."""
+    normalized: dict[str, str] = {}
+    for key, value in headers.items():
+        if type(key) is not str or type(value) is not str:
+            raise ValueError("HTTP header names and values must be strings")
+        normalized_key = _normalize_header_name(key)
+        if normalized_key in normalized:
+            raise ValueError(f"duplicate HTTP header name: {normalized_key}")
+        normalized[normalized_key] = value.strip()
+    return normalized
+
+
+def normalized_header_mapping_error(headers: object) -> str | None:
+    """Return a schema error for a JSON normalized-header object."""
+    if type(headers) is not dict:
+        return "headers must be an object"
+    for key, value in headers.items():
+        if type(key) is not str or type(value) is not str:
+            return "headers key/value pairs must be strings"
+        if key != key.strip() or key != key.lower():
+            return f"header key must be normalized lowercase: {key!r}"
+        try:
+            _normalize_header_name(key)
+        except ValueError as exc:
+            return str(exc)
+    return None
+
+
+def _split_header_blocks(content: str) -> list[list[str]]:
+    lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    blocks: list[list[str]] = []
+    current: list[str] = []
+    for line in lines:
+        if line == "":
+            if current:
+                blocks.append(current)
+                current = []
+            continue
+        current.append(line)
+    if current:
+        blocks.append(current)
+    return blocks
+
+
+def _parse_header_block(block: list[str]) -> tuple[int, dict[str, str]]:
+    status_match = _HTTP_STATUS_LINE_RE.fullmatch(block[0])
+    if status_match is None:
+        raise ValueError(f"invalid HTTP status line: {block[0]!r}")
+    status = int(status_match.group(1))
+    headers: dict[str, str] = {}
+    for line in block[1:]:
+        if ":" not in line:
+            raise ValueError(f"invalid HTTP header line: {line!r}")
+        key, value = line.split(":", 1)
+        normalized = normalize_header_mapping({key: value})
+        normalized_key, normalized_value = next(iter(normalized.items()))
+        if normalized_key in headers:
+            raise ValueError(f"duplicate HTTP header name: {normalized_key}")
+        headers[normalized_key] = normalized_value
+    return status, headers
+
+
+def parse_curl_header_artifact(content: str) -> tuple[int, dict[str, str]]:
+    """Parse the final valid HTTP response block from curl ``-D`` output."""
+    blocks = _split_header_blocks(content)
+    if not blocks:
+        raise ValueError("header artifact has no HTTP response block")
+    parsed_blocks = [_parse_header_block(block) for block in blocks]
+    return parsed_blocks[-1]
+
+
 def _failure(summary: dict, reason: str) -> dict:
     summary["verdict"] = "fail"
     summary["failure_reason"] = reason
@@ -100,7 +185,7 @@ def validate_response_probe(
     compressed: bool,
 ) -> dict:
     """Validate a benchmark response before accepting scenario evidence."""
-    normalized_headers = {key.lower(): value for key, value in headers.items()}
+    normalized_headers = normalize_header_mapping(headers)
     content_type = normalized_headers.get("content-type", "")
     content_encoding = normalized_headers.get("content-encoding", "")
     result = {

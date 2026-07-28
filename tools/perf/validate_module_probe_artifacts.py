@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from lib.path_validation import validate_read_path  # noqa: E402
+from perf.benchmark_validation import (  # noqa: E402
+    normalized_header_mapping_error,
+    parse_curl_header_artifact,
+)
 
 
 SCENARIOS = (
@@ -31,17 +36,23 @@ SCENARIOS = (
     "deflate-streaming-first",
     "brotli-streaming-first",
 )
-RESPONSE_FIELDS = (
-    "verdict",
-    "curl_exit_code",
-    "body_sha256",
+EXPECTED_RESPONSE_FIELDS = (
+    "http_status",
+    "headers",
+    "content_type",
+    "content_encoding",
     "body_bytes",
-    "header_artifact",
-    "body_artifact",
+    "body_sha256",
     "heading_present",
     "tail_token_present",
     "tail_token_count",
+    "verdict",
+    "failure_reason",
+    "curl_exit_code",
+    "header_artifact",
+    "body_artifact",
 )
+_BODY_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _resolve_root(path: str | Path) -> Path:
@@ -114,8 +125,19 @@ def _artifact_file(
 def _validate_probe_status(
     scenario: str, payload: dict[str, Any]
 ) -> list[str]:
-    """Require a successful probe command result."""
+    """Require successful HTTP and probe command status values."""
     errors: list[str] = []
+    http_status = payload["http_status"]
+    if type(http_status) is not int:
+        errors.append(
+            f"{scenario}: {scenario}.json: http_status must be an int, "
+            f"got {type(http_status).__name__}"
+        )
+    elif http_status != 200:
+        errors.append(
+            f"{scenario}: {scenario}.json: http_status must be 200, "
+            f"got {http_status!r}"
+        )
     if payload.get("verdict") != "pass":
         errors.append(
             f"{scenario}: {scenario}.json: verdict must be 'pass', "
@@ -132,6 +154,115 @@ def _validate_probe_status(
             f"{scenario}: {scenario}.json: curl_exit_code must be 0, "
             f"got {curl_exit_code!r}"
         )
+    return errors
+
+
+def _validate_probe_headers(
+    scenario: str, payload: dict[str, Any]
+) -> list[str]:
+    """Require a complete normalized HTTP header object."""
+    error = normalized_header_mapping_error(payload["headers"])
+    if error is None:
+        return []
+    return [f"{scenario}: {scenario}.json: {error}"]
+
+
+def _validate_probe_content_metadata(
+    scenario: str, payload: dict[str, Any]
+) -> list[str]:
+    """Require Markdown content metadata and an empty failure reason."""
+    errors: list[str] = []
+    content_type = payload["content_type"]
+    if type(content_type) is not str:
+        errors.append(
+            f"{scenario}: {scenario}.json: content_type must be a string"
+        )
+    else:
+        media_type = content_type.split(";", 1)[0].strip().lower()
+        if media_type != "text/markdown":
+            errors.append(
+                f"{scenario}: {scenario}.json: content_type must have "
+                f"text/markdown media type, got {content_type!r}"
+            )
+
+    content_encoding = payload["content_encoding"]
+    if type(content_encoding) is not str:
+        errors.append(
+            f"{scenario}: {scenario}.json: content_encoding must be a string"
+        )
+    elif content_encoding != "":
+        errors.append(
+            f"{scenario}: {scenario}.json: content_encoding must be empty, "
+            f"got {content_encoding!r}"
+        )
+
+    failure_reason = payload["failure_reason"]
+    if type(failure_reason) is not str:
+        errors.append(
+            f"{scenario}: {scenario}.json: failure_reason must be a string"
+        )
+    elif failure_reason != "":
+        errors.append(
+            f"{scenario}: {scenario}.json: failure_reason must be empty, "
+            f"got {failure_reason!r}"
+        )
+    return errors
+
+
+def _validate_probe_digest_metadata(
+    scenario: str, payload: dict[str, Any]
+) -> list[str]:
+    """Require strict body size and digest metadata types and shape."""
+    errors: list[str] = []
+    body_bytes = payload["body_bytes"]
+    if type(body_bytes) is not int:
+        errors.append(
+            f"{scenario}: {scenario}.json: body_bytes must be an int, "
+            f"got {type(body_bytes).__name__}"
+        )
+    elif body_bytes <= 0:
+        errors.append(
+            f"{scenario}: {scenario}.json: body_bytes must be > 0, "
+            f"got {body_bytes}"
+        )
+
+    body_sha256 = payload["body_sha256"]
+    if type(body_sha256) is not str or _BODY_SHA256_RE.fullmatch(body_sha256) is None:
+        errors.append(
+            f"{scenario}: {scenario}.json: body_sha256 must be 64 lowercase "
+            "hex characters"
+        )
+    return errors
+
+
+def _validate_response_schema(
+    scenario: str, payload: dict[str, Any]
+) -> list[str]:
+    """Validate the complete canonical response-correctness schema."""
+    errors: list[str] = []
+    expected = set(EXPECTED_RESPONSE_FIELDS)
+    actual = set(payload)
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing:
+        errors.append(
+            f"{scenario}: {scenario}.json: missing response fields: "
+            f"{', '.join(missing)}"
+        )
+    if extra:
+        errors.append(
+            f"{scenario}: {scenario}.json: unexpected response fields: "
+            f"{', '.join(extra)}"
+        )
+    if errors:
+        return errors
+
+    errors.extend(_validate_probe_status(scenario, payload))
+    errors.extend(_validate_probe_headers(scenario, payload))
+    errors.extend(_validate_probe_content_metadata(scenario, payload))
+    errors.extend(_validate_probe_digest_metadata(scenario, payload))
+    errors.extend(_validate_probe_artifact_names(scenario, payload))
+    errors.extend(_validate_probe_tail_contract(scenario, payload))
     return errors
 
 
@@ -204,6 +335,83 @@ def _validate_probe_body_contract(
     return errors
 
 
+def _header_mismatch_details(
+    expected: object, actual: dict[str, str]
+) -> str:
+    if not isinstance(expected, dict):
+        return f"expected headers object, got {type(expected).__name__}"
+    expected_keys = set(expected)
+    actual_keys = set(actual)
+    details: list[str] = []
+    missing = sorted(expected_keys - actual_keys)
+    extra = sorted(actual_keys - expected_keys)
+    differing = sorted(
+        key for key in expected_keys & actual_keys if expected[key] != actual[key]
+    )
+    if missing:
+        details.append(f"missing={','.join(missing)}")
+    if extra:
+        details.append(f"extra={','.join(extra)}")
+    if differing:
+        details.append(f"differing={','.join(differing)}")
+    return "; ".join(details) or "object values differ"
+
+
+def _validate_probe_header_binding(
+    scenario: str,
+    payload: dict[str, Any],
+    headers_path: Path,
+) -> list[str]:
+    """Bind the retained curl header artifact to response correctness."""
+    validated_path = validate_read_path(
+        headers_path, purpose=f"{scenario} headers artifact"
+    )
+    try:
+        status, actual_headers = parse_curl_header_artifact(
+            validated_path.read_text(encoding="utf-8", errors="replace")
+        )
+    except (OSError, UnicodeError, ValueError) as exc:
+        return [f"{scenario}: {scenario}.headers: invalid HTTP headers: {exc}"]
+
+    errors: list[str] = []
+    if status != payload.get("http_status"):
+        errors.append(
+            f"{scenario}: {scenario}.headers: status {status} does not match "
+            f"JSON http_status {payload.get('http_status')!r}"
+        )
+    expected_headers = payload.get("headers")
+    if actual_headers != expected_headers:
+        errors.append(
+            f"{scenario}: {scenario}.headers: parsed headers do not match "
+            f"JSON headers ({_header_mismatch_details(expected_headers, actual_headers)})"
+        )
+
+    actual_content_type = actual_headers.get("content-type", "")
+    if actual_content_type != payload.get("content_type"):
+        errors.append(
+            f"{scenario}: {scenario}.headers: content-type does not match "
+            f"JSON content_type {payload.get('content_type')!r}"
+        )
+    if actual_content_type.split(";", 1)[0].strip().lower() != "text/markdown":
+        errors.append(
+            f"{scenario}: {scenario}.headers: content-type must have "
+            f"text/markdown media type, got {actual_content_type!r}"
+        )
+
+    actual_content_encoding = actual_headers.get("content-encoding", "")
+    if actual_content_encoding != payload.get("content_encoding"):
+        errors.append(
+            f"{scenario}: {scenario}.headers: content-encoding does not match "
+            f"JSON content_encoding {payload.get('content_encoding')!r}"
+        )
+    if actual_content_encoding != "":
+        errors.append(
+            f"{scenario}: {scenario}.headers: content-encoding must be empty, "
+            f"got {actual_content_encoding!r}"
+        )
+    return errors
+
+
 def _validate_probe(
     scenario: str,
     probe_dir: Path,
@@ -230,22 +438,18 @@ def _validate_probe(
     if not isinstance(payload, dict):
         return None, [f"{scenario}: {scenario}.json: JSON value is not an object"]
 
-    missing_fields = [field for field in RESPONSE_FIELDS if field not in payload]
-    if missing_fields:
-        errors.append(
-            f"{scenario}: {scenario}.json: missing response fields: "
-            f"{', '.join(missing_fields)}"
-        )
-
-    errors.extend(_validate_probe_status(scenario, payload))
-    errors.extend(_validate_probe_artifact_names(scenario, payload))
-    errors.extend(_validate_probe_tail_contract(scenario, payload))
+    errors.extend(_validate_response_schema(scenario, payload))
 
     body_path = validate_read_path(
         artifacts["body"], purpose=f"{scenario} body artifact"
     )
     body = body_path.read_bytes()
     errors.extend(_validate_probe_body_contract(scenario, payload, body))
+    errors.extend(
+        _validate_probe_header_binding(
+            scenario, payload, artifacts["headers"]
+        )
+    )
     return payload, errors
 
 

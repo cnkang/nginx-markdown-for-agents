@@ -138,8 +138,12 @@ The canonical workflow retains response probes at
 `perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
 path. It validates every scenario's non-empty `.headers`, `.body`, and `.json`
 files, requires a passing probe with `curl_exit_code == 0`, verifies the body
-SHA-256, requires exact finalized/probe `response_correctness` object equality,
-and enforces strict boolean/integer tail and curl fields before
+SHA-256, validates the complete response-correctness schema, parses the final
+HTTP response block from each `.headers` file, and requires its status,
+normalized headers, Markdown content type, and empty content encoding to match
+the probe JSON. It then requires exact finalized/probe
+`response_correctness` object equality and enforces strict boolean/integer
+tail and curl fields before
 running the performance evidence and release gates. The canonical upload is
 performed only after those checks pass and contains the finalized JSON, raw
 JSON, and this probe directory. Canonical artifacts are retained for 30 days;

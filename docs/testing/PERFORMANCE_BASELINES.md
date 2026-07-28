@@ -43,7 +43,12 @@ The canonical module benchmark retains response probes at
 `perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
 output path. The workflow validates non-empty `.headers`, `.body`, and `.json`
 files for all eight scenarios, verifies each probe's verdict, curl exit code,
-body SHA-256, and requires the finalized `response_correctness` object to
+body SHA-256, and validates the complete response-correctness schema
+(`http_status`, normalized `headers`, content metadata, body metadata,
+correctness markers, verdict, failure reason, and artifact names). It parses
+the final HTTP response block from each retained `.headers` artifact and
+requires the parsed status, headers, content type, and content encoding to
+match the probe JSON. The finalized `response_correctness` object must then
 match each probe object exactly before uploading canonical evidence. Canonical
 artifacts are retained for 30 days for release audit review.
 

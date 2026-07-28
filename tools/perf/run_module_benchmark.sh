@@ -501,7 +501,10 @@ from pathlib import Path
 
 sys.path.insert(0, sys.argv[1])
 
-from tools.perf.benchmark_validation import validate_response_probe
+from tools.perf.benchmark_validation import (
+    parse_curl_header_artifact,
+    validate_response_probe,
+)
 
 status = int(sys.argv[2])
 headers_path = Path(sys.argv[3])
@@ -512,12 +515,19 @@ expected_tail = sys.argv[7]
 compressed = sys.argv[8] != "none"
 curl_exit = int(sys.argv[9])
 
+header_parse_error = ""
 headers = {}
 if headers_path.exists():
-    for line in headers_path.read_text(errors="replace").splitlines():
-        if ":" in line:
-            key, value = line.split(":", 1)
-            headers[key.strip().lower()] = value.strip()
+    try:
+        header_status, headers = parse_curl_header_artifact(
+            headers_path.read_text(encoding="utf-8", errors="replace")
+        )
+        if header_status != status:
+            header_parse_error = (
+                f"status line {header_status} does not match curl status {status}"
+            )
+    except ValueError as exc:
+        header_parse_error = str(exc)
 body = body_path.read_bytes() if body_path.exists() else b""
 fixture = fixture_path.read_text(encoding="utf-8")
 result = validate_response_probe(
@@ -532,6 +542,9 @@ result = validate_response_probe(
 result["curl_exit_code"] = curl_exit
 result["header_artifact"] = headers_path.name
 result["body_artifact"] = body_path.name
+if header_parse_error:
+    result["verdict"] = "fail"
+    result["failure_reason"] = f"header_artifact: {header_parse_error}"
 if curl_exit:
     result["verdict"] = "fail"
     result["failure_reason"] = f"curl_exit: {curl_exit}"
