@@ -10,7 +10,7 @@ integrity verification via SHA256SUMS, and GPG signature verification.
 
 | Channel | Format | Status | Signing |
 |---------|--------|--------|---------|
-| GitHub Releases | .deb + .rpm | Active for v0.7.0+ release artifacts | SHA256SUMS / GPG |
+| GitHub Releases | .deb + .rpm | Tag-specific; verify assets before downloading | SHA256SUMS / GPG when published |
 | Self-hosted APT | .deb | Planned; no public repository URL yet | GPG |
 | Self-hosted YUM | .rpm | Planned; no public repository URL yet | GPG |
 
@@ -18,6 +18,13 @@ APT/YUM repository publishing is intentionally tracked as a future distribution
 step. Until a real repository and signing key are published, installation docs
 must point users to GitHub Release package artifacts rather than bare
 `apt-get install` or `yum install` commands.
+
+The release matrix describes the package build and validation targets; it does
+not prove that a particular tag has public package assets. Before using a
+package command, verify that the target GitHub Release lists both the exact
+package and its `SHA256SUMS` file. Release candidates do not make package
+assets available. If no matching asset is published, use the
+[Manual Source Build](./INSTALLATION.md#6-secondary-manual-source-build).
 
 <!-- BEGIN:release-matrix:distribution-matrix -->
 
@@ -61,14 +68,14 @@ Components:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| VERSION | Module semantic version | 0.9.1 |
+| VERSION | Module semantic version | `<VERSION>` |
 | NGINX_VERSION | Target NGINX version (major.minor.patch) | 1.26.3 |
 | ARCH | CPU architecture (amd64, arm64) | amd64 |
 
 Example:
 
 ```text
-nginx-module-markdown-for-agents_0.9.1_nginx-1.26.3_amd64.deb
+nginx-module-markdown-for-agents_<VERSION>_nginx-1.26.3_amd64.deb
 ```
 
 ### RPM Package Naming
@@ -83,14 +90,14 @@ Components:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| VERSION | Module semantic version | 0.9.1 |
+| VERSION | Module semantic version | `<VERSION>` |
 | NGINX_VERSION | Target NGINX version (major.minor.patch) | 1.26.3 |
 | ARCH | CPU architecture (x86_64, aarch64) | x86_64 |
 
 Example:
 
 ```text
-nginx-module-markdown-for-agents-0.9.1-nginx1.26.3-1.x86_64.rpm
+nginx-module-markdown-for-agents-<VERSION>-nginx1.26.3-1.x86_64.rpm
 ```
 
 ### Architecture Mapping
@@ -113,16 +120,17 @@ nginx: [emerg] module is not binary compatible
 
 ## SHA256SUMS Verification
 
-Every release includes a `SHA256SUMS` file containing SHA-256 checksums for
-all distributed artifacts. Use this file to verify download integrity before
-installation.
+Any published package release must include a `SHA256SUMS` file containing
+SHA-256 checksums for all distributed artifacts. Use this file to verify
+download integrity before installation.
 
 ### Downloading the Checksum File
 
 Download `SHA256SUMS` from the same GitHub Release page as the package:
 
 ```bash
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.9.1/SHA256SUMS
+RELEASE_TAG="<published-release-tag>"
+curl -fsSLO "https://github.com/<org>/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}/SHA256SUMS"
 ```
 
 ### Verifying a Downloaded Package
@@ -138,10 +146,10 @@ Or verify manually:
 
 ```bash
 # Compute the checksum of the downloaded file
-sha256sum nginx-module-markdown-for-agents_0.9.1_nginx-1.26.3_amd64.deb
+sha256sum "nginx-module-markdown-for-agents_<VERSION>_nginx-1.26.3_amd64.deb"
 
 # Compare the output against the corresponding line in SHA256SUMS
-grep "nginx-module-markdown-for-agents_0.9.1_nginx-1.26.3_amd64.deb" SHA256SUMS
+grep "nginx-module-markdown-for-agents_<VERSION>_nginx-1.26.3_amd64.deb" SHA256SUMS
 ```
 
 Both values must match exactly. If they differ, do not install the package
@@ -158,8 +166,8 @@ Each line in `SHA256SUMS` follows the standard format:
 Example:
 
 ```text
-a1b2c3d4...  nginx-module-markdown-for-agents_0.9.1_nginx-1.26.3_amd64.deb
-e5f6a7b8...  nginx-module-markdown-for-agents-0.9.1-nginx1.26.3-1.x86_64.rpm
+a1b2c3d4...  nginx-module-markdown-for-agents_<VERSION>_nginx-1.26.3_amd64.deb
+e5f6a7b8...  nginx-module-markdown-for-agents-<VERSION>-nginx1.26.3-1.x86_64.rpm
 f9a0b1c2...  release-manifest.json
 ```
 
@@ -183,8 +191,9 @@ It does not by itself prove byte-for-byte reproducible builds.
 Download the manifest from the same GitHub Release page:
 
 ```bash
+RELEASE_TAG="<published-release-tag>"
 curl -fsSL -H "Accept: application/json" -o release-manifest.json \
-  https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.9.1/release-manifest.json
+  "https://github.com/<org>/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}/release-manifest.json"
 ```
 
 ## GPG Signature Verification
@@ -230,10 +239,13 @@ The recommended verification sequence:
 
 ```bash
 # 1. Download the package, checksums, signature, and manifest
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.9.1/SHA256SUMS
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.9.1/SHA256SUMS.asc
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.9.1/<package-file>
-curl -fsSLO https://github.com/<org>/nginx-markdown-for-agents/releases/download/v0.9.1/release-manifest.json
+RELEASE_TAG="<published-release-tag>"
+PACKAGE_FILE="<package-file>"
+BASE_URL="https://github.com/<org>/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
+curl -fsSLO "${BASE_URL}/SHA256SUMS"
+curl -fsSLO "${BASE_URL}/SHA256SUMS.asc"
+curl -fsSLO "${BASE_URL}/${PACKAGE_FILE}"
+curl -fsSLO "${BASE_URL}/release-manifest.json"
 
 # 2. Verify GPG signature on the checksum file
 gpg --verify SHA256SUMS.asc SHA256SUMS

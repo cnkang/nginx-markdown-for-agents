@@ -242,6 +242,10 @@ ARTIFACT_RE = re.compile(
     r"ngx_http_markdown_filter_module-"
     r"\d+\.\d+\.\d+-(glibc|musl)-(x86_64|aarch64)\.tar\.gz"
 )
+ARTIFACT_TEMPLATE_RE = re.compile(
+    r"ngx_http_markdown_filter_module-"
+    r"\$\{NGINX_VERSION\}-\$\{OS_TYPE\}-\$\{ARCH\}\.tar\.gz"
+)
 
 def check_artifact_names() -> list[str]:
     """All artifact name references in the installation guide must match the
@@ -257,7 +261,10 @@ def check_artifact_names() -> list[str]:
     errors: list[str] = [
         f"Artifact name does not match expected pattern: {candidate}"
         for candidate in candidates
-        if not ARTIFACT_RE.fullmatch(candidate)
+        if not (
+            ARTIFACT_RE.fullmatch(candidate)
+            or ARTIFACT_TEMPLATE_RE.fullmatch(candidate)
+        )
     ]
     return errors
 

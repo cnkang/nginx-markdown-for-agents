@@ -5,8 +5,10 @@
 ## Overview
 
 This guide covers installing the nginx-markdown-for-agents module from
-prebuilt `.deb` or `.rpm` packages. Prebuilt packages are available for
-selected nginx.org stable releases on Linux amd64 and arm64 architectures.
+published prebuilt `.deb` or `.rpm` packages. Package availability is
+tag-specific: verify that the selected GitHub Release contains the exact asset
+and `SHA256SUMS` before downloading. If it does not, use the
+[Manual Source Build](./INSTALLATION.md#6-secondary-manual-source-build).
 
 > **Important:** Prebuilt packages are compiled against a specific nginx.org
 > stable version. They are NOT universal shared libraries. NGINX validates
@@ -42,8 +44,8 @@ uname -m
 
 | Format | Pattern | Example |
 |--------|---------|---------|
-| DEB | `nginx-module-markdown-for-agents_{version}_nginx-{nginx_version}_{arch}.deb` | `nginx-module-markdown-for-agents_0.9.1_nginx-1.26.3_amd64.deb` |
-| RPM | `nginx-module-markdown-for-agents-{version}-nginx{nginx_version}-1.{arch}.rpm` | `nginx-module-markdown-for-agents-0.9.1-nginx1.26.3-1.x86_64.rpm` |
+| DEB | `nginx-module-markdown-for-agents_{version}_nginx-{nginx_version}_{arch}.deb` | `nginx-module-markdown-for-agents_<VERSION>_nginx-1.26.3_amd64.deb` |
+| RPM | `nginx-module-markdown-for-agents-{version}-nginx{nginx_version}-1.{arch}.rpm` | `nginx-module-markdown-for-agents-<VERSION>-nginx1.26.3-1.x86_64.rpm` |
 
 Select the package that matches your exact NGINX version and architecture.
 Using a package built for a different NGINX version will result in a binary
@@ -61,15 +63,17 @@ validated for the tested NGINX version encoded in the package name.
 ### DEB-based Systems (Ubuntu, Debian)
 
 ```bash
-# Install the package
-sudo dpkg -i nginx-module-markdown-for-agents_0.9.1_nginx-1.26.3_amd64.deb
+# Set this to the version of the package you downloaded.
+VERSION="<published-version>"
+sudo dpkg -i "nginx-module-markdown-for-agents_${VERSION}_nginx-1.26.3_amd64.deb"
 ```
 
 ### RPM-based Systems (RHEL, AlmaLinux, Amazon Linux)
 
 ```bash
-# Install the package
-sudo rpm -i nginx-module-markdown-for-agents-0.9.1-nginx1.26.3-1.x86_64.rpm
+# Set this to the version of the package you downloaded.
+VERSION="<published-version>"
+sudo rpm -i "nginx-module-markdown-for-agents-${VERSION}-nginx1.26.3-1.x86_64.rpm"
 ```
 
 The package installs:

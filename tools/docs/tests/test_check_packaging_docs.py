@@ -323,6 +323,17 @@ class TestCheckNoHardcodedReleaseTags:
         assert len(errors) == 1
         assert "v0.3.0" in errors[0]
 
+    def test_package_distribution_guide_uses_release_tag_placeholder(self):
+        """Package-distribution downloads must not point at an unreleased tag."""
+        guide = (
+            Path(__file__).resolve().parents[3]
+            / "docs"
+            / "guides"
+            / "PACKAGE_DISTRIBUTION.md"
+        )
+
+        assert check_no_hardcoded_release_tags(guide.read_text(encoding="utf-8")) == []
+
     def test_non_download_url_passes(self):
         """Verify no errors for GitHub release page URLs without download paths."""
         text = "See https://github.com/org/repo/releases for details\n"

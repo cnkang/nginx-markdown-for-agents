@@ -171,19 +171,24 @@ If you need deterministic control over compiler flags or local patching, use [Ma
 
 **Tier: Secondary** (v0.7.0+)
 
-Starting with v0.7.0, release workflows build DEB and RPM artifacts for
-supported Linux distributions and attach them to GitHub Releases. APT/YUM repository publishing is planned, but public APT/YUM repository publishing is not
-part of the current GA channel. Do not use `apt-get install
+Starting with v0.7.0, release workflows can build DEB and RPM artifacts for
+supported Linux distributions. Public GitHub Release asset availability is
+tag-specific: confirm that the target release contains the exact package and
+`SHA256SUMS` before running these commands. A release candidate or a
+compatibility-matrix entry is not a downloadable package. If no matching asset
+is published, use [Manual Source Build](#6-secondary-manual-source-build).
+APT/YUM repository publishing is planned, but public APT/YUM repository
+publishing is not part of the current GA channel. Do not use `apt-get install
 nginx-module-markdown` or `yum install nginx-module-markdown` unless you
 operate your own package repository.
 
 ### DEB Artifacts (Ubuntu / Debian)
 
-Replace `VERSION` below with the release version you are installing, for
-example `0.9.1`.  `NGINX_VERSION` must match the NGINX ABI you run.
+Replace `VERSION` below with a published release version. `NGINX_VERSION` must
+match the NGINX ABI you run.
 
 ```bash
-VERSION=0.9.1
+VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=amd64
 
@@ -195,11 +200,11 @@ sudo apt install "./nginx-module-markdown-for-agents_${VERSION}_nginx-${NGINX_VE
 
 ### RPM Artifacts (AlmaLinux / Amazon Linux / RHEL)
 
-Replace `VERSION` below with the release version you are installing, for
-example `0.9.1`.  `NGINX_VERSION` must match the NGINX ABI you run.
+Replace `VERSION` below with a published release version. `NGINX_VERSION` must
+match the NGINX ABI you run.
 
 ```bash
-VERSION=0.9.1
+VERSION="<published-version>"
 NGINX_VERSION=1.26.3
 ARCH=x86_64
 
@@ -1192,10 +1197,14 @@ The system cannot reach GitHub to download the pre-built binary or checksum file
 4. If the system is air-gapped, manually download the binary and checksum on a connected machine.
    Manual download is intended only for air-gapped or troubleshooting scenarios — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
-   # On a connected machine — substitute <release_tag>, <nginx_version>, <os_type>, and <arch>
-   # <release_tag> must match the current release (e.g. v0.9.1)
-   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
-   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
+   # Set these values from a GitHub Release that lists both assets.
+   RELEASE_TAG="<published-release-tag>"
+   NGINX_VERSION="<nginx-version>"
+   OS_TYPE="<os-type>"
+   ARCH="<arch>"
+   BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
+   wget "${BASE_URL}/ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz"
+   wget "${BASE_URL}/ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz.sha256"
    ```
 5. Transfer the files to the target system and install manually, or use the [Manual Source Build](#6-secondary-manual-source-build) instructions.
 
@@ -1230,13 +1239,17 @@ The SHA-256 hash of the downloaded binary does not match the expected checksum f
 2. If the failure persists, manually verify the checksum.
    Manual download is intended only for troubleshooting — prefer the [install script](#4-primary-install-script) for normal installations.
    ```bash
-   # Download the binary and checksum file — substitute <release_tag>, <nginx_version>, <os_type>, <arch>
-   # <release_tag> must match the current release (e.g. v0.9.1)
-   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz
-   wget https://github.com/cnkang/nginx-markdown-for-agents/releases/download/<release_tag>/ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
+   # Set these values from a GitHub Release that lists both assets.
+   RELEASE_TAG="<published-release-tag>"
+   NGINX_VERSION="<nginx-version>"
+   OS_TYPE="<os-type>"
+   ARCH="<arch>"
+   BASE_URL="https://github.com/cnkang/nginx-markdown-for-agents/releases/download/${RELEASE_TAG}"
+   wget "${BASE_URL}/ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz"
+   wget "${BASE_URL}/ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz.sha256"
 
    # Verify
-   sha256sum -c ngx_http_markdown_filter_module-<nginx_version>-<os_type>-<arch>.tar.gz.sha256
+   sha256sum -c "ngx_http_markdown_filter_module-${NGINX_VERSION}-${OS_TYPE}-${ARCH}.tar.gz.sha256"
    ```
 3. If the checksum still fails, try downloading from a different network or machine to rule out a network intermediary.
 4. If the issue persists, report it on the project's GitHub issue tracker — the release artifact may need to be re-published.
@@ -1636,6 +1649,7 @@ If you encounter issues not covered in this guide:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-28 | Codex | Clarified that Linux package commands require published tag assets and checksums; release-candidate matrix entries are not downloadable packages. |
 | 0.9.1 | 2026-07-17 | Codex | Verified installation guides, curl command patterns, and dynamic package naming for the upcoming v0.9.1 release. |
 | 0.8.3 | 2026-06-26 | Kang | 0.8.x release-line closeout: updated DEB/RPM and SOP manual-download examples to VERSION=0.8.3; refreshed release-line version references to current patch |
 | 0.8.2 | 2026-06-21 | Kang | 0.8.x patch-line closeout: updated DEB/RPM install examples to VERSION=0.8.2 with replace-with-target-version note; refreshed SOP manual-download examples to reference v0.8.2 |
