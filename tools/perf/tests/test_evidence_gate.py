@@ -279,12 +279,9 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
 
 
 def test_module_baseline_contains_completed_environment_consistent_scenarios():
-    """The checked-in canonical baseline contains seven completed scenarios
+    """The checked-in canonical baseline contains eight completed scenarios
     that all share its declared canonical environment (linux-x86_64, ab,
-    NGINX 1.24.0).  brotli-streaming-first was measured on NGINX 1.30.4 and
-    must not be mixed into this baseline; it lives in
-    module-baseline-brotli-091.json until the canonical baseline is
-    regenerated with brotli support in the canonical environment.
+    NGINX 1.24.0), including the Brotli streaming path.
     """
     baseline_path = (
         Path(__file__).resolve().parents[3]
@@ -296,7 +293,7 @@ def test_module_baseline_contains_completed_environment_consistent_scenarios():
     scenarios = baseline["module_benchmark"]["scenarios"]
     by_name = {scenario["name"]: scenario for scenario in scenarios}
 
-    # Keep the complete seven-scenario contract explicit to prevent drift.
+    # Keep the complete eight-scenario contract explicit to prevent drift.
     for name in (
         "plain-small",
         "chunked-medium",
@@ -305,6 +302,7 @@ def test_module_baseline_contains_completed_environment_consistent_scenarios():
         "streaming-first",
         "gzip-streaming-first",
         "deflate-streaming-first",
+        "brotli-streaming-first",
     ):
         assert name in by_name, f"baseline missing scenario: {name}"
         assert by_name[name]["status"] == "completed"
@@ -312,12 +310,6 @@ def test_module_baseline_contains_completed_environment_consistent_scenarios():
         assert by_name[name]["metrics"]["baseline_rss_bytes"] > 0
         assert by_name[name]["metrics"]["peak_rss_bytes"] > 0
 
-    assert "brotli-streaming-first" not in by_name, (
-        "brotli-streaming-first was measured on NGINX 1.30.4 and must not be "
-        "mixed into the NGINX 1.24.0 canonical baseline; keep it in "
-        "module-baseline-brotli-091.json until the canonical baseline is "
-        "regenerated with brotli support in the canonical environment"
-    )
     assert "scenario_sources" not in baseline.get("baseline_policy", {}), (
         "the canonical baseline must be environment-consistent; scenarios "
         "measured in a diverging environment belong in a separate baseline "
@@ -348,6 +340,14 @@ def test_module_baseline_contains_completed_environment_consistent_scenarios():
             "deflate-streaming-first must prove deflate streaming decompression ran"
         )
         assert deflate_s["streaming_path_hits"] > 0
+
+    brotli_s = by_name["brotli-streaming-first"]["metrics"]
+    assert brotli_s["decompression_streaming_total"] > 0, (
+        "brotli-streaming-first must prove Brotli streaming decompression ran"
+    )
+    assert brotli_s["streaming_path_hits"] > 0
+    assert brotli_s["precommit_failopen_total"] == 0
+    assert brotli_s["streaming_requests_total"] > 0
 
 
 def test_brotli_baseline_preserves_its_own_environment_identity():
@@ -1255,16 +1255,8 @@ class TestPathCoverageInvariants:
 class TestBaselineEvidenceIntegrity:
     """Baselines must pass the same integrity checks as current evidence."""
 
-    def test_current_baseline_reports_only_the_split_brotli_gap(self):
-        """The checked-in baseline pins the intentional brotli evidence gap.
-
-        Until the canonical baseline is regenerated with brotli support in
-        the canonical environment, the only integrity violations allowed are
-        the fail-closed markers for the missing brotli-streaming-first
-        scenario; every present scenario must be fully valid.  Regenerating
-        a complete eight-scenario baseline makes this test fail on purpose
-        so the `== []` contract is restored with the regeneration.
-        """
+    def test_current_baseline_has_no_integrity_gaps(self):
+        """The regenerated canonical eight-scenario baseline is complete."""
         baseline_path = (
             Path(__file__).resolve().parents[3]
             / "perf"
@@ -1274,20 +1266,7 @@ class TestBaselineEvidenceIntegrity:
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
         violations = _validate_benchmark_evidence(baseline, role="baseline")
 
-        assert violations == [
-            (
-                "baseline.scenario",
-                "missing critical scenario: brotli-streaming-first",
-            ),
-            (
-                "baseline.fallback_rate",
-                "brotli-streaming-first: missing precommit_failopen_total",
-            ),
-            (
-                "baseline.fallback_rate",
-                "brotli-streaming-first: missing streaming_requests_total",
-            ),
-        ]
+        assert violations == []
 
     @pytest.mark.parametrize(
         ("scenario", "field", "value"),
@@ -1305,6 +1284,9 @@ class TestBaselineEvidenceIntegrity:
             ("streaming-first", "profile", "balanced"),
             ("streaming-first", "compression", "gzip"),
             ("streaming-first", "transfer_encoding", "identity"),
+            ("brotli-streaming-first", "profile", "balanced"),
+            ("brotli-streaming-first", "compression", "gzip"),
+            ("brotli-streaming-first", "transfer_encoding", "identity"),
         ],
     )
     def test_all_scenario_metadata_mutations_fail_blocking_validation(
@@ -1332,6 +1314,7 @@ class TestBaselineEvidenceIntegrity:
             ("gzip-large", "decompression_fullbuffer_total"),
             ("gzip-streaming-first", "decompression_streaming_total"),
             ("deflate-streaming-first", "decompression_streaming_total"),
+            ("brotli-streaming-first", "decompression_streaming_total"),
         ],
     )
     def test_all_target_path_mutations_fail_blocking_validation(
@@ -1379,10 +1362,14 @@ class TestBaselineEvidenceIntegrity:
             for check, reason in violations
         )
 
-    def test_current_normalized_baseline_uses_explicit_historical_exception(self):
+    def test_current_verbatim_baseline_uses_retained_raw_artifact(self):
         report = _load_canonical_module_baseline()
 
-        assert report["baseline_policy"]["historical_audit_exception"] is True
+        assert report["baseline_policy"]["type"] == "verbatim_run"
+        assert report["baseline_policy"]["normalization"] == "none"
+        assert report["baseline_policy"]["source_artifact"].endswith(
+            "module-baseline-091-raw.json"
+        )
         violations = _validate_benchmark_evidence(report, role="baseline")
         assert not any(
             check == "baseline.baseline_policy" for check, _reason in violations
@@ -1399,11 +1386,19 @@ class TestBaselineEvidenceIntegrity:
             "adjustment_date",
         ],
     )
-    def test_normalized_baseline_requires_audit_metadata(self, field):
+    def test_conservative_normalized_baseline_requires_audit_metadata(self, field):
         report = _load_canonical_module_baseline()
         policy = report["baseline_policy"]
-        policy["historical_audit_exception"] = False
+        policy["type"] = "conservative_normalized"
+        policy["normalization"] = "conservative"
         policy["source_artifact"] = "actions/runs/123/artifacts/456"
+        policy.update(
+            {
+                "adjustments": {},
+                "adjustment_reason": "test adjustment",
+                "adjustment_date": "2026-07-28",
+            }
+        )
         policy.pop(field)
 
         violations = _validate_benchmark_evidence(report, role="baseline")
@@ -1419,7 +1414,8 @@ class TestBaselineEvidenceIntegrity:
     ):
         report = _load_canonical_module_baseline()
         policy = report["baseline_policy"]
-        policy["historical_audit_exception"] = False
+        policy["type"] = "conservative_normalized"
+        policy["normalization"] = "conservative"
         policy["source_artifact"] = placeholder
 
         violations = _validate_benchmark_evidence(report, role="baseline")
@@ -3678,14 +3674,17 @@ def test_baseline_policy_non_object_is_structured_violation() -> None:
     ]
 
 
-def test_raw_binding_historical_exception_requires_exact_baseline() -> None:
-    """A changed report cannot reuse the historical exception fields."""
+def test_raw_binding_verbatim_requires_exact_baseline() -> None:
+    """A verbatim baseline cannot diverge from its retained raw report."""
     finalized = _load_canonical_module_baseline()
     assert _raw_artifact_binding_violations(finalized, role="baseline") == []
 
     finalized["module_benchmark"]["scenarios"][0]["metrics"]["rps"] = 1
     violations = _raw_artifact_binding_violations(finalized, role="baseline")
-    assert any("does not exist" in reason for _check, reason in violations)
+    assert any(
+        "verbatim_run module_benchmark differs" in reason
+        for _check, reason in violations
+    )
 
 
 def test_conservative_normalized_rejects_truth_metric_modification() -> None:
