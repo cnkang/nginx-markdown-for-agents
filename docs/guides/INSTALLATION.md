@@ -1636,6 +1636,7 @@ If you encounter issues not covered in this guide:
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-28 | Codex | Finalized the v0.9.1 GitHub Release artifact instructions for the release announcement. |
 | 0.9.1 | 2026-07-17 | Codex | Verified installation guides, curl command patterns, and dynamic package naming for the upcoming v0.9.1 release. |
 | 0.8.3 | 2026-06-26 | Kang | 0.8.x release-line closeout: updated DEB/RPM and SOP manual-download examples to VERSION=0.8.3; refreshed release-line version references to current patch |
 | 0.8.2 | 2026-06-21 | Kang | 0.8.x patch-line closeout: updated DEB/RPM install examples to VERSION=0.8.2 with replace-with-target-version note; refreshed SOP manual-download examples to reference v0.8.2 |
