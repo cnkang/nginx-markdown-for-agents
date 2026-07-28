@@ -9,7 +9,7 @@ compatibility or release scope.
 
 ## Current Release State
 
-- v0.9.1 is the current stable release, published on 2026-07-28.
+- v0.9.1 is the current release candidate and remains unpublished.
 - v0.9.1 is the final pre-v1.0 baseline-consolidation and compatibility-reset
   release.
 - The intended v1.0 contract freeze begins after v0.9.1 is published.
@@ -151,5 +151,4 @@ evidence, not active compatibility rules.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 0.9.1 | 2026-07-28 | Codex | Recorded the v0.9.1 release and the start of v1.0 compatibility-freeze preparation. |
 | 0.9.1 | 2026-07-14 | Codex | Replaced obsolete 0.4-to-0.6 planning with the final pre-v1.0 baseline, freeze, and post-v1.0 compatibility contract |

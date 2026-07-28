@@ -234,8 +234,9 @@ def check_operator_config_examples(files: list[Path]) -> list[str]:
 def check_release_status_consistency(
     changelog_path: Path,
     project_status_path: Path,
+    release_notes_path: Path | None = None,
 ) -> list[str]:
-    """Keep an unreleased changelog line from being presented as stable."""
+    """Keep an unreleased release line from being presented as stable."""
     changelog = changelog_path.read_text(encoding="utf-8", errors="ignore")
     match = UNRELEASED_CHANGELOG_RE.search(changelog)
     if match is None:
@@ -272,6 +273,26 @@ def check_release_status_consistency(
             f"{project_status_path}: unreleased {version} must be identified as "
             "development or release-candidate status"
         )
+
+    if release_notes_path is not None:
+        release_notes = release_notes_path.read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+        if re.search(r"\*\*Status\*\*:\s*Stable release", release_notes):
+            errors.append(
+                f"{release_notes_path}: unreleased {version} cannot have stable "
+                "release notes"
+            )
+        if not re.search(
+            r"\*\*Status\*\*:\s*(?:Pending release|Release candidate|Unreleased)",
+            release_notes,
+            re.IGNORECASE,
+        ):
+            errors.append(
+                f"{release_notes_path}: unreleased {version} must be identified as "
+                "pending or release-candidate status"
+            )
     return errors
 
 
@@ -415,6 +436,7 @@ def main() -> int:
         check_release_status_consistency(
             ROOT / "CHANGELOG.md",
             ROOT / "docs" / "project" / "PROJECT_STATUS.md",
+            ROOT / "docs" / "release" / "0.9.1-release-notes.md",
         )
     )
     failures.extend(check_duplicate_sync())

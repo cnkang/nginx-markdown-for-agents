@@ -19,6 +19,8 @@ paths:
   - "docs/**"
   - "tools/harness/check_rust_baseline.py"
   - "tools/harness/detect_version_consistency.sh"
+  - "tools/docs/check_docs.py"
+  - "tools/release/gates/validate_release_metadata.py"
 ---
 
 # Version Consistency Rule
@@ -78,6 +80,14 @@ The harness detector `tools/harness/detect_version_consistency.sh` performs the 
 
 An unclassified workflow that installs Rust is a failure so a new workflow
 cannot silently introduce a floating compiler.
+
+The documentation gate also enforces release-state consistency: an
+`Unreleased` changelog entry must not be described as stable in the project
+status or release notes. The tag-only
+`tools/release/gates/validate_release_metadata.py` gate applies the inverse
+contract at publication time: the tagged version must have a concrete,
+matching date and stable status across the changelog, project status, and
+release notes.
 
 ## Exclusions
 The following are intentionally NOT checked:
