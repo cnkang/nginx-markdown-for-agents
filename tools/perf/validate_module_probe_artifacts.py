@@ -111,6 +111,99 @@ def _artifact_file(
     return path, None
 
 
+def _validate_probe_status(
+    scenario: str, payload: dict[str, Any]
+) -> list[str]:
+    """Require a successful probe command result."""
+    errors: list[str] = []
+    if payload.get("verdict") != "pass":
+        errors.append(
+            f"{scenario}: {scenario}.json: verdict must be 'pass', "
+            f"got {payload.get('verdict')!r}"
+        )
+    curl_exit_code = payload.get("curl_exit_code")
+    if type(curl_exit_code) is not int:
+        errors.append(
+            f"{scenario}: {scenario}.json: curl_exit_code must be an int, "
+            f"got {type(curl_exit_code).__name__}"
+        )
+    elif curl_exit_code != 0:
+        errors.append(
+            f"{scenario}: {scenario}.json: curl_exit_code must be 0, "
+            f"got {curl_exit_code!r}"
+        )
+    return errors
+
+
+def _validate_probe_artifact_names(
+    scenario: str, payload: dict[str, Any]
+) -> list[str]:
+    """Require probe JSON to name the fixed companion artifacts."""
+    errors: list[str] = []
+    expected_names = {
+        "header_artifact": f"{scenario}.headers",
+        "body_artifact": f"{scenario}.body",
+    }
+    for field, expected in expected_names.items():
+        if payload.get(field) != expected:
+            errors.append(
+                f"{scenario}: {scenario}.json: {field} must be "
+                f"'{expected}'"
+            )
+    return errors
+
+
+def _validate_probe_tail_contract(
+    scenario: str, payload: dict[str, Any]
+) -> list[str]:
+    """Require the correctness markers to have strict successful values."""
+    errors: list[str] = []
+    for field in ("heading_present", "tail_token_present"):
+        if payload.get(field) is not True:
+            errors.append(
+                f"{scenario}: {scenario}.json: {field} must be true, "
+                f"got {payload.get(field)!r}"
+            )
+    tail_token_count = payload.get("tail_token_count")
+    if type(tail_token_count) is not int:
+        errors.append(
+            f"{scenario}: {scenario}.json: tail_token_count must be an int, "
+            f"got {type(tail_token_count).__name__}"
+        )
+    elif tail_token_count <= 0:
+        errors.append(
+            f"{scenario}: {scenario}.json: tail_token_count must be > 0, "
+            f"got {tail_token_count}"
+        )
+    return errors
+
+
+def _validate_probe_body_contract(
+    scenario: str, payload: dict[str, Any], body: bytes
+) -> list[str]:
+    """Require strict body size metadata and match its measured digest."""
+    errors: list[str] = []
+    body_bytes = payload.get("body_bytes")
+    if type(body_bytes) is not int:
+        errors.append(
+            f"{scenario}: {scenario}.json: body_bytes must be an int, "
+            f"got {type(body_bytes).__name__}"
+        )
+    elif body_bytes != len(body):
+        errors.append(
+            f"{scenario}: {scenario}.body: byte count {len(body)} does not "
+            f"match JSON body_bytes {body_bytes!r}"
+        )
+
+    digest = hashlib.sha256(body).hexdigest()
+    if payload.get("body_sha256") != digest:
+        errors.append(
+            f"{scenario}: {scenario}.body: SHA-256 {digest} does not match "
+            f"JSON body_sha256 {payload.get('body_sha256')!r}"
+        )
+    return errors
+
+
 def _validate_probe(
     scenario: str,
     probe_dir: Path,
@@ -137,42 +230,22 @@ def _validate_probe(
     if not isinstance(payload, dict):
         return None, [f"{scenario}: {scenario}.json: JSON value is not an object"]
 
-    if payload.get("verdict") != "pass":
+    missing_fields = [field for field in RESPONSE_FIELDS if field not in payload]
+    if missing_fields:
         errors.append(
-            f"{scenario}: {scenario}.json: verdict must be 'pass', "
-            f"got {payload.get('verdict')!r}"
-        )
-    if payload.get("curl_exit_code") != 0:
-        errors.append(
-            f"{scenario}: {scenario}.json: curl_exit_code must be 0, "
-            f"got {payload.get('curl_exit_code')!r}"
-        )
-    if payload.get("header_artifact") != f"{scenario}.headers":
-        errors.append(
-            f"{scenario}: {scenario}.json: header_artifact must be "
-            f"'{scenario}.headers'"
-        )
-    if payload.get("body_artifact") != f"{scenario}.body":
-        errors.append(
-            f"{scenario}: {scenario}.json: body_artifact must be "
-            f"'{scenario}.body'"
+            f"{scenario}: {scenario}.json: missing response fields: "
+            f"{', '.join(missing_fields)}"
         )
 
-    validated_body = validate_read_path(
+    errors.extend(_validate_probe_status(scenario, payload))
+    errors.extend(_validate_probe_artifact_names(scenario, payload))
+    errors.extend(_validate_probe_tail_contract(scenario, payload))
+
+    body_path = validate_read_path(
         artifacts["body"], purpose=f"{scenario} body artifact"
     )
-    body = validated_body.read_bytes()
-    digest = hashlib.sha256(body).hexdigest()
-    if payload.get("body_sha256") != digest:
-        errors.append(
-            f"{scenario}: {scenario}.body: SHA-256 {digest} does not match "
-            f"JSON body_sha256 {payload.get('body_sha256')!r}"
-        )
-    if payload.get("body_bytes") != len(body):
-        errors.append(
-            f"{scenario}: {scenario}.body: byte count {len(body)} does not "
-            f"match JSON body_bytes {payload.get('body_bytes')!r}"
-        )
+    body = body_path.read_bytes()
+    errors.extend(_validate_probe_body_contract(scenario, payload, body))
     return payload, errors
 
 
@@ -202,11 +275,47 @@ def _baseline_scenarios(
     return mapping, errors
 
 
+def _response_difference(
+    probe: dict[str, Any], response: dict[str, Any]
+) -> str | None:
+    """Describe any complete-object mismatch between probe and baseline."""
+    if response == probe:
+        return None
+    probe_keys = set(probe)
+    response_keys = set(response)
+    details: list[str] = []
+    missing = sorted(probe_keys - response_keys)
+    extra = sorted(response_keys - probe_keys)
+    differing = sorted(
+        key for key in probe_keys & response_keys if response[key] != probe[key]
+    )
+    if missing:
+        details.append(f"missing={','.join(missing)}")
+    if extra:
+        details.append(f"extra={','.join(extra)}")
+    if differing:
+        details.append(f"differing={','.join(differing)}")
+    return "; ".join(details)
+
+
+def _response_mismatch_error(
+    name: str, probe: dict[str, Any], response: dict[str, Any]
+) -> str | None:
+    """Format a complete response-correctness mismatch, if present."""
+    difference = _response_difference(probe, response)
+    if difference is None:
+        return None
+    return (
+        f"{name}: baseline response_correctness must exactly equal "
+        f"probe JSON ({difference})"
+    )
+
+
 def _cross_check_baseline(
     probes: dict[str, dict[str, Any]],
     baseline: dict[str, Any],
 ) -> list[str]:
-    """Compare retained probe correctness fields with finalized evidence."""
+    """Compare complete retained probe objects with finalized evidence."""
     scenarios, errors = _baseline_scenarios(baseline)
     for name in SCENARIOS:
         probe = probes.get(name)
@@ -219,15 +328,9 @@ def _cross_check_baseline(
                 f"{name}: baseline response_correctness must be an object"
             )
             continue
-        for field in RESPONSE_FIELDS:
-            if field not in probe:
-                errors.append(f"{name}: probe JSON missing {field}")
-            elif field not in response:
-                errors.append(f"{name}: baseline response_correctness missing {field}")
-            elif response[field] != probe[field]:
-                errors.append(
-                    f"{name}: response_correctness.{field} differs from probe JSON"
-                )
+        mismatch = _response_mismatch_error(name, probe, response)
+        if mismatch is not None:
+            errors.append(mismatch)
     return errors
 
 

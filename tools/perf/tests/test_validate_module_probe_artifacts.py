@@ -131,6 +131,57 @@ def test_body_digest_and_byte_count_are_verified(tmp_path: Path) -> None:
     assert any("streaming-first.body" in error and "byte count" in error for error in errors)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("curl_exit_code", True, "curl_exit_code must be an int"),
+        ("heading_present", 1, "heading_present must be true"),
+        ("tail_token_present", "true", "tail_token_present must be true"),
+        ("tail_token_count", 0, "tail_token_count must be > 0"),
+        ("tail_token_count", True, "tail_token_count must be an int"),
+        ("body_bytes", "1", "body_bytes must be an int"),
+    ],
+)
+def test_probe_json_scalar_contract_is_strict(
+    tmp_path: Path, field: str, value: object, expected: str
+) -> None:
+    probe_dir, _baseline = _write_probe_pack(tmp_path)
+    path = probe_dir / "large-body.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload[field] = value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    errors = validate_probe_artifacts(
+        _relative(tmp_path, probe_dir), repo_root=tmp_path
+    )
+
+    assert any("large-body" in error and expected in error for error in errors)
+
+
+def test_baseline_response_correctness_requires_complete_object_equality(
+    tmp_path: Path,
+) -> None:
+    probe_dir, baseline = _write_probe_pack(tmp_path)
+    payload = json.loads(baseline.read_text(encoding="utf-8"))
+    payload["module_benchmark"]["scenarios"][0]["response_correctness"][
+        "http_status"
+    ] = 200
+    baseline.write_text(json.dumps(payload), encoding="utf-8")
+
+    errors = validate_probe_artifacts(
+        _relative(tmp_path, probe_dir),
+        baseline=_relative(tmp_path, baseline),
+        repo_root=tmp_path,
+    )
+
+    assert any(
+        "plain-small" in error
+        and "exactly equal" in error
+        and "extra=http_status" in error
+        for error in errors
+    )
+
+
 def test_malformed_or_non_object_probe_json_fails(tmp_path: Path) -> None:
     probe_dir, _baseline = _write_probe_pack(tmp_path)
     (probe_dir / "plain-small.json").write_text("{broken", encoding="utf-8")

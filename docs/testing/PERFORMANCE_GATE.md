@@ -138,10 +138,12 @@ The canonical workflow retains response probes at
 `perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
 path. It validates every scenario's non-empty `.headers`, `.body`, and `.json`
 files, requires a passing probe with `curl_exit_code == 0`, verifies the body
-SHA-256, and cross-checks finalized `response_correctness` fields before
+SHA-256, requires exact finalized/probe `response_correctness` object equality,
+and enforces strict boolean/integer tail and curl fields before
 running the performance evidence and release gates. The canonical upload is
 performed only after those checks pass and contains the finalized JSON, raw
-JSON, and this probe directory.
+JSON, and this probe directory. Canonical artifacts are retained for 30 days;
+failure-only debug artifacts use the shorter diagnostic retention period.
 
 The former `historical_audit_exception` is retained only for historical
 validator coverage and is not used by the active release baseline. Future

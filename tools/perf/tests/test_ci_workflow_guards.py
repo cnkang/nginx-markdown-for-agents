@@ -143,11 +143,14 @@ def test_nightly_perf_uploads_raw_and_finalized() -> None:
     """The workflow must upload both raw and finalized baseline files."""
     block = _module_baseline_job(_nightly_perf_text())
     upload_start = block.index("- name: Upload canonical module baseline")
-    upload_block = block[upload_start:]
+    debug_start = block.index("- name: Upload debug artifacts on failure")
+    upload_block = block[upload_start:debug_start]
     assert "perf/baselines/module-baseline-091.json" in upload_block
     assert "perf/baselines/module-baseline-091-raw.json" in upload_block
     assert "perf/baselines/module-baseline-091-raw-probes/" in upload_block
     assert "if-no-files-found: error" in upload_block
+    assert "retention-days: 30" in upload_block
+    assert "retention-days: 14" not in upload_block
     assert "perf/baselines/module-baseline-091-probes/" not in block
 
 
