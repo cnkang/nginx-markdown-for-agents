@@ -348,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
         baseline = load_json(str(baseline_path))
         current = load_json(str(current_path))
         thresholds = load_json(str(thresholds_path))
-    except Exception as e:
+    except (OSError, ValueError, TypeError) as e:
         print(f"ERROR: failed to load input files: {e}", file=sys.stderr)
         return 1
 

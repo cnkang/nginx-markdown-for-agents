@@ -345,7 +345,7 @@ markdown_find_dynamic_markdown_module() {
 markdown_prepare_runtime_reuse() {
   local nginx_bin="$1"
   local runtime_dir="$2"
-  local module_path
+  local module_path module_name
 
   markdown_copy_runtime_conf_from_nginx_bin "${nginx_bin}" "${runtime_dir}" || return 1
 
@@ -353,6 +353,12 @@ markdown_prepare_runtime_reuse() {
     module_path="${MODULE_SO}"
     if [[ ! -f "${module_path}" ]]; then
       echo "Configured MODULE_SO is not a regular file: ${module_path}" >&2
+      return 1
+    fi
+    module_name="${module_path##*/}"
+    if [[ "${module_name}" != *.so || \
+          "${module_name}" == *[!A-Za-z0-9_.-]* ]]; then
+      echo "Configured MODULE_SO has an unsafe module filename: ${module_name}" >&2
       return 1
     fi
   else

@@ -286,6 +286,7 @@ def test_property4_real_binary_measurement_roundtrip():
             [binary, "--single", "small", "--json-output", original],
             cwd=repo_root,
             capture_output=True,
+            check=False,
         )
         assert result.returncode == 0, (
             f"perf_baseline failed: {result.stderr.decode()}"

@@ -42,6 +42,7 @@ from evidence_gate import (
     _raw_artifact_binding_violations,
     _scenario_source_environment_violations,
     _sha256_file,
+    _strict_json_equal,
     _validate_benchmark_evidence,
     validate_read_path,
     _write_output,
@@ -3370,7 +3371,7 @@ def test_raw_binding_passes_for_verbatim_with_matching_digest(
 ) -> None:
     """verbatim_run with correct source_artifact_sha256 and identical data passes."""
     raw = _full_valid_raw_report()
-    repo, digest = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    _repo, digest = _write_raw_in_repo(tmp_path, monkeypatch, raw)
     finalized = dict(raw)
     finalized["baseline_policy"] = {
         "type": "verbatim_run",
@@ -3389,7 +3390,7 @@ def test_raw_binding_rejects_missing_digest(
 ) -> None:
     """A canonical baseline without source_artifact_sha256 is rejected."""
     raw = _full_valid_raw_report()
-    repo, _ = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    _repo, _ = _write_raw_in_repo(tmp_path, monkeypatch, raw)
     finalized = dict(raw)
     finalized["baseline_policy"] = {
         "type": "verbatim_run",
@@ -3408,7 +3409,7 @@ def test_raw_binding_rejects_wrong_digest(
 ) -> None:
     """A digest that doesn't match the actual raw file is rejected."""
     raw = _full_valid_raw_report()
-    repo, _ = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    _repo, _ = _write_raw_in_repo(tmp_path, monkeypatch, raw)
     finalized = dict(raw)
     finalized["baseline_policy"] = {
         "type": "verbatim_run",
@@ -3428,7 +3429,7 @@ def test_raw_binding_rejects_missing_raw_file(
 ) -> None:
     """A source_artifact that doesn't exist on disk is rejected."""
     raw = _full_valid_raw_report()
-    repo, _ = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    _repo, _ = _write_raw_in_repo(tmp_path, monkeypatch, raw)
     finalized = dict(raw)
     finalized["baseline_policy"] = {
         "type": "verbatim_run",
@@ -3448,7 +3449,7 @@ def test_raw_binding_rejects_verbatim_data_modification(
 ) -> None:
     """verbatim_run must not modify any measured data."""
     raw = _full_valid_raw_report()
-    repo, digest = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    _repo, digest = _write_raw_in_repo(tmp_path, monkeypatch, raw)
     finalized = dict(raw)
     # Modify a measured metric.
     finalized["module_benchmark"]["scenarios"][0]["metrics"]["input_bytes"] = 999
@@ -3470,7 +3471,7 @@ def test_raw_binding_verbatim_rejects_new_top_level_evidence(
 ) -> None:
     """verbatim_run permits only the policy block to be added."""
     raw = _full_valid_raw_report()
-    repo, digest = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    _repo, digest = _write_raw_in_repo(tmp_path, monkeypatch, raw)
     finalized = copy.deepcopy(raw)
     finalized["new_evidence"] = {"unexpected": True}
     finalized["baseline_policy"] = {
@@ -3566,7 +3567,7 @@ def test_raw_binding_conservative_adjustments_match_exact_ledger(
     raw = _full_valid_raw_report()
     raw_metrics = raw["module_benchmark"]["scenarios"][0]["metrics"]
     raw_metrics.update({"rps": 100.0, "latency_p50_ms": 10.0})
-    repo, digest = _write_raw_in_repo(tmp_path, monkeypatch, raw)
+    _repo, digest = _write_raw_in_repo(tmp_path, monkeypatch, raw)
     finalized = copy.deepcopy(raw)
     finalized_metrics = finalized["module_benchmark"]["scenarios"][0]["metrics"]
     finalized_metrics.update({"rps": 90.0, "latency_p50_ms": 11.0})
@@ -3592,6 +3593,33 @@ def test_raw_binding_conservative_adjustments_match_exact_ledger(
     finalized["baseline_policy"]["adjustments"]["rps"]["plain-small"] = -9.0
     violations = _raw_artifact_binding_violations(finalized, role="baseline")
     assert any("exactly match" in reason for _check, reason in violations)
+
+
+@pytest.mark.parametrize(
+    ("declared", "actual"),
+    [
+        (-0.2, -0.19999999999999998),
+        (1, 1.0),
+    ],
+)
+def test_strict_json_equal_accepts_numeric_ledger_rounding(
+    declared: object, actual: object
+) -> None:
+    """Adjustment ledgers compare numeric values, not type noise."""
+    assert _strict_json_equal(
+        {"rps": {"plain-small": declared}},
+        {"rps": {"plain-small": actual}},
+    )
+
+
+def test_strict_json_equal_still_rejects_meaningful_numeric_delta() -> None:
+    """Numeric tolerance must not hide a real adjustment difference."""
+    assert not _strict_json_equal({"plain-small": 1.0}, {"plain-small": 1.0000001})
+
+
+def test_strict_json_equal_still_distinguishes_bool_from_integer() -> None:
+    """JSON booleans remain distinct from integer ledger values."""
+    assert not _strict_json_equal({"plain-small": True}, {"plain-small": 1})
 
 
 def test_raw_binding_rejects_symlink_escape(
@@ -3736,9 +3764,7 @@ def test_conservative_normalized_rejects_added_scenario() -> None:
     assert any("extra" in r for _c, r in violations)
 
 
-def test_sha256_file_matches_hashlib(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_sha256_file_matches_hashlib(tmp_path: Path) -> None:
     """_sha256_file computes the same digest as hashlib."""
     path = tmp_path / "data.bin"
     payload = b'{"key": "value"}\n'

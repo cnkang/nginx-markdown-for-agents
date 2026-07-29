@@ -52,6 +52,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -61,12 +62,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # contract as the other repository-owned Python harnesses.
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
-from lib.baseline_provenance import (  # noqa: E402
+from lib.baseline_provenance import (  # noqa: E402 - direct script import
     validate_iso_utc,
     validate_raw_commit_match,
     validate_source_run,
 )
-from lib.path_validation import (  # noqa: E402
+from lib.path_validation import (  # noqa: E402 - direct script import
     validate_read_path,
     validate_write_path_within_root,
 )
@@ -263,20 +264,29 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
         path, REPO_ROOT, purpose="finalized baseline"
     )
     validated_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = validate_write_path_within_root(
-        validated_path.with_suffix(validated_path.suffix + ".tmp"),
-        REPO_ROOT,
-        purpose="temporary finalized baseline",
-    )
+    tmp: Path | None = None
     try:
-        tmp.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+        with tempfile.NamedTemporaryFile(
+            mode="w",
             encoding="utf-8",
-        )
+            dir=validated_path.parent,
+            prefix=f".{validated_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            tmp = Path(stream.name)
+            tmp = validate_write_path_within_root(
+                tmp,
+                REPO_ROOT,
+                purpose="temporary finalized baseline",
+            )
+            stream.write(json.dumps(payload, indent=2, ensure_ascii=False))
+            stream.write("\n")
         os.replace(tmp, validated_path)
-    except OSError:
-        with contextlib.suppress(OSError, FileNotFoundError):
-            tmp.unlink(missing_ok=True)
+    except (OSError, ValueError):
+        if tmp is not None:
+            with contextlib.suppress(OSError, FileNotFoundError):
+                tmp.unlink(missing_ok=True)
         raise
 
 
