@@ -239,7 +239,7 @@ def test_tag_release_job_supplies_module_enabled_nginx():
         "Release gate must explicitly select a canonical benchmark NGINX "
         "version to avoid artifact filename collisions"
     )
-    assert "module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-x86_64" in workflow, (
+    assert "module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-amd64" in workflow, (
         "Release gate must download the canonical benchmark NGINX artifact "
         "by exact name, not a wildcard pattern with merge-multiple"
     )
