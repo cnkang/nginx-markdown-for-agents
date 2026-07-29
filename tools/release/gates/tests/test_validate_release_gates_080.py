@@ -60,3 +60,18 @@ def test_release_package_workflow_version_mismatch_detected(monkeypatch):
     assert len(workflow_checks) == 1
     assert workflow_checks[0][0] == "FAIL"
     assert "0.0.0" in workflow_checks[0][1]
+
+
+def test_release_gate_downloads_canonical_amd64_module_artifact():
+    """The benchmark gate must consume the build job's amd64 artifact name."""
+
+    workflow = Path(RELEASE_PACKAGES_WORKFLOW).read_text(encoding="utf-8")
+
+    assert (
+        "name: module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-amd64"
+        in workflow
+    )
+    assert (
+        "name: module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-x86_64"
+        not in workflow
+    )
