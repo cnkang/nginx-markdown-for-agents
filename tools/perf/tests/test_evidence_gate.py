@@ -1629,6 +1629,7 @@ class TestScenarioSourceEnvironment:
         metrics = _scenario(report, "streaming-first")["metrics"]
         metrics["streaming_requests_total"] = 1000
         metrics["precommit_failopen_total"] = 50
+        metrics["fallback_rate"] = 0.05
 
         violations = _validate_benchmark_evidence(report, role="current")
 
@@ -1946,14 +1947,16 @@ class TestScenarioSourceEnvironment:
                             "fallback_rate": 0.0,
                             "streaming_fallback_total": 0,
                             "streaming_requests_total": 1030,
+                            "precommit_failopen_total": 0,
                         },
                     },
                     {
                         "name": "chunked-medium",
                         "metrics": {
-                            "fallback_rate": 1.0,
+                            "fallback_rate": 0.0,
                             "streaming_fallback_total": 1030,
                             "streaming_requests_total": 1030,
+                            "precommit_failopen_total": 0,
                         },
                     },
                 ],
@@ -1974,6 +1977,7 @@ class TestScenarioSourceEnvironment:
                             "fallback_rate": 1.0,
                             "streaming_fallback_total": 0,
                             "streaming_requests_total": 1030,
+                            "precommit_failopen_total": 0,
                         },
                     },
                 ],
@@ -2000,6 +2004,7 @@ class TestScenarioSourceEnvironment:
                             "fallback_rate": 0.0,
                             "streaming_fallback_total": 0,
                             "streaming_requests_total": 0,
+                            "precommit_failopen_total": 0,
                         },
                     },
                 ],

@@ -36,7 +36,7 @@ in machine-locatable `baseline_policy` metadata. The active 0.9.1 module
 baseline is a verbatim run from source commit
 `cab92df229b0b68cb02d88817a208e009f3ce106`, workflow run
 `30405031983/attempts/1`, measured at `2026-07-28T22:41:12Z`, with raw digest
-`d8ccb6736d70e02c91eb69d06855e47cf7c06c86539c308ea9e91861e39bf7fa`.
+`a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12`.
 The former `historical_audit_exception` is retained only for historical audit
 coverage and is not an active release-baseline policy.
 

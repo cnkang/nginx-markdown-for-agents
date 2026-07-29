@@ -42,13 +42,11 @@ ingested by `tools/perf/evidence_gate.py`) must carry all of the following:
    deflate, Brotli) must record a positive `decompression_streaming_total > 0`
    counter from a real module-enabled NGINX path, not a mock or fallback.
 2. **Fallback-rate consistency.** The stored `fallback_rate` in each scenario
-   must equal `streaming_fallback_total / streaming_requests_total` (or 0.0
+   must equal `precommit_failopen_total / streaming_requests_total` (or 0.0
    when `streaming_requests_total == 0`). The evidence gate cross-checks this
    via `_fallback_rate_consistency_violations`; a mismatch is a gate failure.
-   The threshold engine independently derives `precommit_failopen_total /
-   streaming_requests_total` for the absolute-cap check; these are distinct
-   rates (pre-commit fail-open delivery vs. streaming fallback) and must not
-   be conflated.
+   `streaming_fallback_total` remains a separate path-routing counter and must
+   not be substituted for the pre-commit fail-open ratio.
 3. **Immutable baseline retention.** Once a baseline evidence pack is
    generated and used by a release gate, it becomes an immutable audit record.
    Subsequent regeneration does not overwrite it; the old pack is preserved

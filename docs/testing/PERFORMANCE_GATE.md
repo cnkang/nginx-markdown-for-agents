@@ -130,7 +130,7 @@ Its `baseline_policy` binds the measured data to source commit
 `cab92df229b0b68cb02d88817a208e009f3ce106`, workflow run
 `30405031983/attempts/1`, measurement timestamp `2026-07-28T22:41:12Z`, and
 the retained raw artifact SHA-256
-`d8ccb6736d70e02c91eb69d06855e47cf7c06c86539c308ea9e91861e39bf7fa`.
+`a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12`.
 Machine validation recomputes that digest and requires the finalized report to
 match the raw report exactly apart from `baseline_policy`.
 
