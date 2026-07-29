@@ -9,10 +9,9 @@ compatibility or release scope.
 
 ## Current Release State
 
-- v0.9.1 is the current release candidate and remains unpublished.
-- v0.9.1 is the final pre-v1.0 baseline-consolidation and compatibility-reset
-  release.
-- The intended v1.0 contract freeze begins after v0.9.1 is published.
+- v0.9.1 has been released as the final pre-v1.0 baseline-consolidation and
+  compatibility-reset release.
+- The intended v1.0 contract freeze begins following the v0.9.1 release.
 
 At the time v0.9.0 shipped, it was intended to be the last breaking release
 before v1.0. That freeze was deliberately extended through v0.9.1 because v1.0

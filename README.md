@@ -413,6 +413,7 @@ BSD 2-Clause "Simplified" License. See [LICENSE](LICENSE).
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-29 | Kang | Release audit: finalized CHANGELOG date, release notes status, PROJECT_STATUS 0.9.1 section, VERSION_PLANNING release state, harness rule mapping (Rules 52-60), build-safety domain alignment. |
 | 0.9.1 | 2026-07-19 | Codex | Finalized the v0.9.1 release summary for Brotli streaming decompression, build controls, and release evidence. |
 | 0.9.1 | 2026-07-17 | Kang | Optimized README organization, removed historical What's New logs, consolidated capabilities table, and structured docs index for v0.9.1 release. |
 | 0.9.0 | 2026-07-02 | Kang | Doc review: added What's New v0.9.0 section, MIGRATION-0.9 link, reason code count fix, CHANGELOG sync with branch commits |
