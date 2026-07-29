@@ -16,7 +16,7 @@ related rules by domain with YAML frontmatter for path-scoped loading.
 | 10 | Parser & Regex | [parser-regex.md](parser-regex.md) | ReDoS, deterministic parsing |
 | 11, 18, 41 | Shell | [shell.md](shell.md) | portability, hygiene, POSIX ERE |
 | 12, 32, 33 | Security & CWE | [security-cwe.md](security-cwe.md) | path traversal, integer overflow |
-| 13, 48, 54 | CI Gating | [ci-gating.md](ci-gating.md) | workflow filters, artifact upload, Homebrew formula, supply chain, release artifact path traversal |
+| 13, 54 | CI Gating | [ci-gating.md](ci-gating.md) | workflow filters, artifact upload, Homebrew formula, release artifact path traversal |
 | 14, 16, 20, 22, 25 | Testing & Coverage | [testing-coverage.md](testing-coverage.md) | regression, dead stores, Rust infra |
 | 15, 46, 53 | FFI & Cross-Language | [ffi-crosslang.md](ffi-crosslang.md) | ABI, header sync, lifecycle, panic safety, handle ownership, fat-pointer safety |
 | 17 | Cognitive Complexity | [complexity.md](complexity.md) | function complexity limits |

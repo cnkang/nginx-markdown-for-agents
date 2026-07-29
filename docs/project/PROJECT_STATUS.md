@@ -401,12 +401,14 @@ breaking-release foundation.
 - **ADRs 0020–0024**: hybrid zero-copy pool cleanup, gzip/deflate streaming
   decompression routing, performance evidence release gate, single public
   streaming policy, and Brotli streaming decompression.
-- **Rules 56–60**: orphan comment closers (56), `#ifdef`-guarded function
+- **Rules 56–62**: orphan comment closers (56), `#ifdef`-guarded function
   visibility (57), workflow input injection (58), hardcoded HTTP status in
-  reject paths (59), E2E config directive consistency (60); new detectors
-  `detect_orphan_comment_close.py`, `detect_ifdef_guard_visibility.sh`,
-  `detect_workflow_input_injection.sh`, `detect_hardcoded_http_status.sh`,
-  `detect_e2e_streaming_config.py`.
+  reject paths (59), E2E config directive consistency (60), performance
+  evidence provenance invariant (61), release-matrix key normalization
+  invariant (62); new detectors `detect_orphan_comment_close.py`,
+  `detect_ifdef_guard_visibility.sh`, `detect_workflow_input_injection.sh`,
+  `detect_hardcoded_http_status.sh`, `detect_e2e_streaming_config.py`;
+  new rule documentation `release-integrity.md`.
 - **Config simplification**: `markdown_streaming off|auto|force` is the sole
   public processing-path selector; `markdown_streaming_engine` removed.
   `markdown_auto_decompress` directive registration fix.
