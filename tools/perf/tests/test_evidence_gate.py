@@ -1953,10 +1953,10 @@ class TestScenarioSourceEnvironment:
                     {
                         "name": "chunked-medium",
                         "metrics": {
-                            "fallback_rate": 0.0,
+                            "fallback_rate": 0.05,
                             "streaming_fallback_total": 1030,
-                            "streaming_requests_total": 1030,
-                            "precommit_failopen_total": 0,
+                            "streaming_requests_total": 100,
+                            "precommit_failopen_total": 5,
                         },
                     },
                 ],
@@ -1965,6 +1965,18 @@ class TestScenarioSourceEnvironment:
         assert _fallback_rate_consistency_violations(
             report, role="baseline"
         ) == []
+
+    @staticmethod
+    def _fallback_report(**metrics):
+        """Build one scenario with only the fallback-rate evidence fields."""
+        return {
+            "module_benchmark": {
+                "scenarios": [{
+                    "name": "fallback-case",
+                    "metrics": metrics,
+                }],
+            },
+        }
 
     def test_fallback_rate_consistency_fails_when_mismatched(self):
         """Violation when stored fallback_rate differs from derived value."""
@@ -1995,24 +2007,197 @@ class TestScenarioSourceEnvironment:
 
     def test_fallback_rate_consistency_zero_requests(self):
         """No violation when streaming_requests_total is 0 and rate is 0."""
-        report = {
-            "module_benchmark": {
-                "scenarios": [
-                    {
-                        "name": "plain-small",
-                        "metrics": {
-                            "fallback_rate": 0.0,
-                            "streaming_fallback_total": 0,
-                            "streaming_requests_total": 0,
-                            "precommit_failopen_total": 0,
-                        },
-                    },
-                ],
-            },
-        }
+        report = self._fallback_report(
+            fallback_rate=0.0,
+            streaming_fallback_total=0,
+            streaming_requests_total=0,
+            precommit_failopen_total=0,
+        )
         assert _fallback_rate_consistency_violations(
             report, role="baseline"
         ) == []
+
+    def test_zero_requests_with_failopen_is_rejected(self):
+        """A zero-request scenario cannot contain a fail-open event."""
+        report = self._fallback_report(
+            fallback_rate=0.0,
+            streaming_requests_total=0,
+            precommit_failopen_total=1,
+        )
+        violations = _fallback_rate_consistency_violations(report, "current")
+        assert any(
+            "field precommit_failopen_total" in reason
+            and "expected='0 when streaming_requests_total is 0'" in reason
+            for _check, reason in violations
+        )
+
+    def test_zero_requests_with_nonzero_rate_is_rejected(self):
+        """The stored rate must be zero when there were no requests."""
+        report = self._fallback_report(
+            fallback_rate=0.1,
+            streaming_requests_total=0,
+            precommit_failopen_total=0,
+        )
+        violations = _fallback_rate_consistency_violations(report, "baseline")
+        assert any(
+            "field fallback_rate" in reason
+            and "expected=0.0" in reason
+            and "counter pair" in reason
+            for _check, reason in violations
+        )
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "fallback_rate",
+            "precommit_failopen_total",
+            "streaming_requests_total",
+        ],
+    )
+    def test_missing_fallback_rate_evidence_is_rejected(self, field):
+        """Every scenario must carry all three fallback-rate fields."""
+        values = {
+            "fallback_rate": 0.0,
+            "precommit_failopen_total": 0,
+            "streaming_requests_total": 1030,
+        }
+        values.pop(field)
+        violations = _fallback_rate_consistency_violations(
+            self._fallback_report(**values), "baseline",
+        )
+        assert any(
+            f"field {field}" in reason
+            and "actual='<missing>'" in reason
+            and "counter pair" in reason
+            for _check, reason in violations
+        )
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("fallback_rate", True),
+            ("precommit_failopen_total", True),
+            ("streaming_requests_total", False),
+        ],
+    )
+    def test_boolean_fallback_evidence_is_rejected(self, field, value):
+        """Booleans must not pass Python's integer or numeric checks."""
+        values = {
+            "fallback_rate": 0.0,
+            "precommit_failopen_total": 0,
+            "streaming_requests_total": 1030,
+        }
+        values[field] = value
+        violations = _fallback_rate_consistency_violations(
+            self._fallback_report(**values), "current",
+        )
+        assert any(f"field {field}" in reason for _check, reason in violations)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("fallback_rate", "0.0"),
+            ("precommit_failopen_total", "0"),
+            ("streaming_requests_total", "1030"),
+        ],
+    )
+    def test_string_fallback_evidence_is_rejected(self, field, value):
+        """Numeric-looking strings are not valid JSON numeric evidence."""
+        values = {
+            "fallback_rate": 0.0,
+            "precommit_failopen_total": 0,
+            "streaming_requests_total": 1030,
+        }
+        values[field] = value
+        violations = _fallback_rate_consistency_violations(
+            self._fallback_report(**values), "baseline",
+        )
+        assert any(f"field {field}" in reason for _check, reason in violations)
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_nonfinite_stored_fallback_rate_is_rejected(self, value):
+        """The validator explicitly rejects json.loads NaN/Infinity values."""
+        report = self._fallback_report(
+            fallback_rate=value,
+            precommit_failopen_total=0,
+            streaming_requests_total=1030,
+        )
+        violations = _fallback_rate_consistency_violations(report, "current")
+        assert any(
+            "field fallback_rate" in reason
+            and "finite JSON number in [0.0, 1.0]" in reason
+            for _check, reason in violations
+        )
+
+    @pytest.mark.parametrize("value", [-0.1, 1.000001])
+    def test_stored_fallback_rate_must_be_bounded(self, value):
+        """Stored fallback rates must stay in the closed unit interval."""
+        report = self._fallback_report(
+            fallback_rate=value,
+            precommit_failopen_total=0,
+            streaming_requests_total=1030,
+        )
+        violations = _fallback_rate_consistency_violations(report, "baseline")
+        assert any(
+            "field fallback_rate" in reason
+            and "finite JSON number in [0.0, 1.0]" in reason
+            for _check, reason in violations
+        )
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("precommit_failopen_total", -1),
+            ("streaming_requests_total", -1),
+        ],
+    )
+    def test_negative_fallback_counter_is_rejected(self, field, value):
+        """Counters are exact non-negative integers."""
+        values = {
+            "fallback_rate": 0.0,
+            "precommit_failopen_total": 0,
+            "streaming_requests_total": 1030,
+        }
+        values[field] = value
+        violations = _fallback_rate_consistency_violations(
+            self._fallback_report(**values), "current",
+        )
+        assert any(f"field {field}" in reason for _check, reason in violations)
+
+    def test_failopen_counter_cannot_exceed_requests(self):
+        """A counter pair with fail-open events above requests is invalid."""
+        report = self._fallback_report(
+            fallback_rate=0.0,
+            precommit_failopen_total=101,
+            streaming_requests_total=100,
+        )
+        violations = _fallback_rate_consistency_violations(report, "baseline")
+        assert any(
+            "field precommit_failopen_total" in reason
+            and "expected='<= streaming_requests_total'" in reason
+            and "101" in reason
+            and "100" in reason
+            for _check, reason in violations
+        )
+
+    @pytest.mark.parametrize("role", ["current", "baseline"])
+    def test_fallback_rate_check_applies_to_current_and_baseline(self, role):
+        """Both report roles execute the same strict consistency check."""
+        report = self._fallback_report(
+            fallback_rate=1.0,
+            precommit_failopen_total=0,
+            streaming_requests_total=1030,
+        )
+        violations = _validate_benchmark_evidence(report, role=role)
+        assert any(
+            check == f"{role}.fallback_rate_consistency"
+            and "fallback-case" in reason
+            and "field fallback_rate" in reason
+            and "actual=1.0" in reason
+            and "expected=0.0" in reason
+            and "counter pair" in reason
+            for check, reason in violations
+        )
 
     def test_unknown_nginx_version_is_rejected(self):
         """An 'unknown' nginx_version fails evidence validation."""
@@ -3172,6 +3357,9 @@ class TestCompressedStreamingPathTruthfulness:
                             "input_bytes": 5390,
                             "baseline_rss_bytes": 10_000_000,
                             "peak_rss_bytes": 11_000_000,
+                            "fallback_rate": 0.0,
+                            "precommit_failopen_total": 0,
+                            "streaming_requests_total": 0,
                             "fullbuffer_path_hits": 1000,
                             "fullbuffer_ratio": 1.0,
                         },
@@ -3186,6 +3374,9 @@ class TestCompressedStreamingPathTruthfulness:
                             "input_bytes": 1_048_516,
                             "baseline_rss_bytes": 20_000_000,
                             "peak_rss_bytes": 25_000_000,
+                            "fallback_rate": 0.0,
+                            "precommit_failopen_total": 0,
+                            "streaming_requests_total": 0,
                             "fullbuffer_path_hits": 1000,
                         },
                     },
@@ -3199,6 +3390,9 @@ class TestCompressedStreamingPathTruthfulness:
                             "input_bytes": 10_000,
                             "baseline_rss_bytes": 10_000_000,
                             "peak_rss_bytes": 11_500_000,
+                            "fallback_rate": 0.0,
+                            "precommit_failopen_total": 0,
+                            "streaming_requests_total": 0,
                             "fullbuffer_path_hits": 1000,
                         },
                     },
@@ -3214,6 +3408,7 @@ class TestCompressedStreamingPathTruthfulness:
                             "streaming_path_hits": 1000,
                             "streaming_requests_total": 1000,
                             "precommit_failopen_total": 0,
+                            "fallback_rate": 0.0,
                             "zero_copy_output_total": 5000,
                             "copied_output_total": 0,
                             "input_bytes": 1_048_516,
@@ -3230,6 +3425,9 @@ class TestCompressedStreamingPathTruthfulness:
                         "metrics": {
                             "decompression_fullbuffer_total": 1030,
                             "fullbuffer_path_hits": 1030,
+                            "fallback_rate": 0.0,
+                            "precommit_failopen_total": 0,
+                            "streaming_requests_total": 0,
                             "input_bytes": 30_000,
                             "baseline_rss_bytes": 10_000_000,
                             "peak_rss_bytes": 12_000_000,
@@ -3248,6 +3446,7 @@ class TestCompressedStreamingPathTruthfulness:
                             "fullbuffer_ratio": 0.0,
                             "streaming_requests_total": 1000,
                             "precommit_failopen_total": 0,
+                            "fallback_rate": 0.0,
                             "zero_copy_output_total": 5000,
                             "copied_output_total": 0,
                             "input_bytes": 1_048_516,
@@ -3268,6 +3467,7 @@ class TestCompressedStreamingPathTruthfulness:
                             "fullbuffer_ratio": 0.0,
                             "streaming_requests_total": 1000,
                             "precommit_failopen_total": 0,
+                            "fallback_rate": 0.0,
                             "zero_copy_output_total": 5000,
                             "copied_output_total": 0,
                             "input_bytes": 1_048_516,
@@ -3288,6 +3488,7 @@ class TestCompressedStreamingPathTruthfulness:
                             "fullbuffer_ratio": 0.0,
                             "streaming_requests_total": 1000,
                             "precommit_failopen_total": 0,
+                            "fallback_rate": 0.0,
                             "zero_copy_output_total": 5000,
                             "copied_output_total": 0,
                             "input_bytes": 1_048_516,

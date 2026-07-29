@@ -1970,41 +1970,175 @@ def _canonical_baseline_fallback_violations(
     return violations
 
 
+_MISSING_EVIDENCE_VALUE = "<missing>"
+
+
+def _fallback_rate_violation(
+    role: str,
+    scenario_name: object,
+    field: str,
+    actual: object,
+    expected: object,
+    failopen_total: object,
+    requests_total: object,
+) -> tuple[str, str]:
+    """Format one fail-closed fallback-rate evidence violation."""
+    return (
+        f"{role}.fallback_rate_consistency",
+        f"scenario {scenario_name!r} field {field}: actual={actual!r}; "
+        f"expected={expected!r}; counter pair "
+        f"precommit_failopen_total={failopen_total!r}, "
+        f"streaming_requests_total={requests_total!r}",
+    )
+
+
+def _fallback_rate_scenario_metrics(
+    scenario: object,
+) -> tuple[object, dict]:
+    """Return a scenario name and its metrics object safely."""
+    if not isinstance(scenario, dict):
+        return _MISSING_EVIDENCE_VALUE, {}
+
+    metrics_value = scenario.get("metrics")
+    if not isinstance(metrics_value, dict):
+        metrics_value = scenario.get("results")
+    metrics = metrics_value if isinstance(metrics_value, dict) else scenario
+    return scenario.get("name", _MISSING_EVIDENCE_VALUE), metrics
+
+
+def _fallback_rate_field_violations(
+    role: str,
+    scenario_name: object,
+    stored: object,
+    failopen_total: object,
+    requests_total: object,
+) -> tuple[list[tuple[str, str]], bool, bool, bool]:
+    """Validate the types and bounds of the three required fields."""
+    violations: list[tuple[str, str]] = []
+
+    stored_valid = _is_finite_number(stored) and 0.0 <= stored <= 1.0
+    if not stored_valid:
+        violations.append(_fallback_rate_violation(
+            role,
+            scenario_name,
+            "fallback_rate",
+            stored,
+            "finite JSON number in [0.0, 1.0]",
+            failopen_total,
+            requests_total,
+        ))
+
+    failopen_valid = _is_exact_int(failopen_total) and failopen_total >= 0
+    if not failopen_valid:
+        violations.append(_fallback_rate_violation(
+            role,
+            scenario_name,
+            "precommit_failopen_total",
+            failopen_total,
+            "exact integer >= 0",
+            failopen_total,
+            requests_total,
+        ))
+
+    requests_valid = _is_exact_int(requests_total) and requests_total >= 0
+    if not requests_valid:
+        violations.append(_fallback_rate_violation(
+            role,
+            scenario_name,
+            "streaming_requests_total",
+            requests_total,
+            "exact integer >= 0",
+            failopen_total,
+            requests_total,
+        ))
+
+    return violations, stored_valid, failopen_valid, requests_valid
+
+
+def _fallback_rate_counter_relation(
+    role: str,
+    scenario_name: object,
+    failopen_total: int,
+    requests_total: int,
+) -> tuple[bool, list[tuple[str, str]]]:
+    """Validate the counter relationship and return whether it is usable."""
+    if requests_total == 0:
+        if failopen_total == 0:
+            return True, []
+        expected = "0 when streaming_requests_total is 0"
+    elif failopen_total <= requests_total:
+        return True, []
+    else:
+        expected = "<= streaming_requests_total"
+    return False, [_fallback_rate_violation(
+        role,
+        scenario_name,
+        "precommit_failopen_total",
+        failopen_total,
+        expected,
+        failopen_total,
+        requests_total,
+    )]
+
+
+def _fallback_rate_scenario_violations(
+    scenario: object, role: str,
+) -> list[tuple[str, str]]:
+    """Validate the strict fallback-rate schema for one scenario."""
+    scenario_name, metrics = _fallback_rate_scenario_metrics(scenario)
+    stored = metrics.get("fallback_rate", _MISSING_EVIDENCE_VALUE)
+    failopen_total = metrics.get(
+        "precommit_failopen_total", _MISSING_EVIDENCE_VALUE,
+    )
+    requests_total = metrics.get(
+        "streaming_requests_total", _MISSING_EVIDENCE_VALUE,
+    )
+    violations, stored_valid, failopen_valid, requests_valid = (
+        _fallback_rate_field_violations(
+            role, scenario_name, stored, failopen_total, requests_total,
+        )
+    )
+
+    counters_related = False
+    if failopen_valid and requests_valid:
+        counters_related, relation_violations = _fallback_rate_counter_relation(
+            role, scenario_name, failopen_total, requests_total,
+        )
+        violations.extend(relation_violations)
+
+    if stored_valid and counters_related:
+        derived = (
+            0.0
+            if requests_total == 0
+            else float(failopen_total) / float(requests_total)
+        )
+        if not math.isclose(
+            stored,
+            derived,
+            rel_tol=1e-9,
+            abs_tol=1e-9,
+        ):
+            violations.append(_fallback_rate_violation(
+                role,
+                scenario_name,
+                "fallback_rate",
+                stored,
+                derived,
+                failopen_total,
+                requests_total,
+            ))
+
+    return violations
+
+
 def _fallback_rate_consistency_violations(
     report: dict, role: str,
 ) -> list[tuple[str, str]]:
-    """Check that stored fallback_rate equals the derived value.
-
-    For each scenario that carries both a stored ``fallback_rate`` and
-    the counter pair (``precommit_failopen_total``,
-    ``streaming_requests_total``), the stored value must equal
-    ``precommit_failopen_total / streaming_requests_total`` when
-    ``streaming_requests_total > 0``, or 0.0 otherwise.
-    """
+    """Fail closed when any scenario's fallback-rate evidence is invalid."""
     scenarios = _report_scenarios(report)
     violations = []
     for scenario in scenarios:
-        name = scenario.get("name", "")
-        metrics = scenario.get("metrics") or scenario.get("results") or scenario
-        stored = metrics.get("fallback_rate")
-        failopen_total = metrics.get("precommit_failopen_total")
-        requests_total = metrics.get("streaming_requests_total")
-        if stored is None or failopen_total is None or requests_total is None:
-            continue
-        if not _is_numeric(stored):
-            continue
-        if not _is_exact_int(failopen_total) or not _is_exact_int(requests_total):
-            continue
-        if requests_total > 0:
-            derived = float(failopen_total) / float(requests_total)
-        else:
-            derived = 0.0
-        if abs(stored - derived) > 1e-9:
-            violations.append((
-                f"{role}.fallback_rate_consistency",
-                f"{name}: stored fallback_rate={stored} != "
-                f"derived {failopen_total}/{requests_total}={derived}",
-            ))
+        violations.extend(_fallback_rate_scenario_violations(scenario, role))
     return violations
 
 
