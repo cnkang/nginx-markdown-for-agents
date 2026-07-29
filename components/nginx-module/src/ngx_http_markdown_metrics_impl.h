@@ -992,6 +992,9 @@ ngx_http_markdown_metrics_write_json(
 
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
     p = ngx_http_markdown_json_write_path_details(p, end, snapshot);
+    if (p == NULL) {
+        return NULL;
+    }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
     p = ngx_slprintf(p, end, "\n    ]\n  },\n");
@@ -1251,6 +1254,9 @@ ngx_http_markdown_metrics_write_text(
     p = ngx_http_markdown_metrics_write_text_perf(p, end, &snapshot->perf);
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
     p = ngx_http_markdown_text_write_path_details(p, end, snapshot);
+    if (p == NULL) {
+        return NULL;
+    }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
     return p;
@@ -1523,6 +1529,10 @@ ngx_http_markdown_json_walk_path_tree_bounded(
     render->pos = ngx_http_markdown_json_walk_path_tree_bounded(
             node->left, sentinel, render);
 
+    if (render->failed) {
+        return render->pos;
+    }
+
     remaining = (size_t) (render->end - render->pos);
     if (remaining > render->tail_reserve) {
         pnode = (const ngx_http_markdown_path_metric_node_t *) node;
@@ -1603,6 +1613,10 @@ ngx_http_markdown_json_walk_path_tree_bounded(
             render->omitted_nodes, 1);
     }
 
+    if (render->failed) {
+        return render->pos;
+    }
+
     render->pos = ngx_http_markdown_json_walk_path_tree_bounded(
             node->right, sentinel, render);
 
@@ -1627,6 +1641,10 @@ ngx_http_markdown_text_walk_path_tree_bounded(
 
     render->pos = ngx_http_markdown_text_walk_path_tree_bounded(
             node->left, sentinel, render);
+
+    if (render->failed) {
+        return render->pos;
+    }
 
     remaining = (size_t) (render->end - render->pos);
     if (remaining > render->tail_reserve) {
@@ -1703,6 +1721,10 @@ ngx_http_markdown_text_walk_path_tree_bounded(
             render->omitted_nodes, 1);
     }
 
+    if (render->failed) {
+        return render->pos;
+    }
+
     render->pos = ngx_http_markdown_text_walk_path_tree_bounded(
             node->right, sentinel, render);
 
@@ -1747,6 +1769,10 @@ ngx_http_markdown_json_write_path_details(
                 live_metrics->per_path.path_tree.root,
                 &live_metrics->per_path.sentinel, &render);
         ngx_shmtx_unlock(&shpool->mutex);
+    }
+
+    if (render.failed) {
+        return NULL;
     }
 
     if ((snapshot->per_path.unretained_conversions == 0
@@ -1825,6 +1851,10 @@ ngx_http_markdown_text_write_path_details(
         return p;
     }
 
+    if (render.failed) {
+        return NULL;
+    }
+
     if ((snapshot->per_path.unretained_conversions == 0
          && render.omitted_nodes == 0) || p >= end)
     {
@@ -1884,7 +1914,7 @@ ngx_http_markdown_metrics_render_response_body(
                 derived->conversion_time_avg_ms,
                 derived->input_bytes_avg,
                 derived->output_bytes_avg);
-        if (p >= b->end) {
+        if (p == NULL || p >= b->end) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
                 "markdown: JSON output "
@@ -1918,7 +1948,7 @@ ngx_http_markdown_metrics_render_response_body(
                 derived->conversion_time_avg_ms,
                 derived->input_bytes_avg,
                 derived->output_bytes_avg);
-        if (p >= b->end) {
+        if (p == NULL || p >= b->end) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
                 "markdown: plain-text output "
