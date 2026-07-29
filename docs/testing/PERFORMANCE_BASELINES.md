@@ -4,6 +4,7 @@
 
 **Latest Canonical Module Measurement:** 2026-07-28 (eight scenarios,
 including Brotli streaming, on native Linux x86_64 with NGINX 1.24.0)
+
 **Historical Scenario Measurement:** 2026-07-19 (Brotli streaming on NGINX
 1.30.4; archival only)
 **Scope:** Local release-build microbenchmarks for the Rust converter FFI path, the C conditional-request handler (`If-None-Match`) using the standalone test harness with real Rust FFI, and local real-NGINX HTTP E2E baselines.
@@ -33,9 +34,9 @@ Every canonical baseline must retain the raw workflow artifact and record the
 artifact/run, original Git commit, adjustment rule, person or reason, and date
 in machine-locatable `baseline_policy` metadata. The active 0.9.1 module
 baseline is a verbatim run from source commit
-`f2f939808110115bd0527af1743705c1e5a42b48`, workflow run
-`30366081113/attempts/1`, measured at `2026-07-28T14:05:53Z`, with raw digest
-`fc9b53c9e9a88655ee69300a350ce1498f4afff7dd566425447b6fb65abe9708`.
+`cab92df229b0b68cb02d88817a208e009f3ce106`, workflow run
+`30405031983/attempts/1`, measured at `2026-07-28T22:41:12Z`, with raw digest
+`a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12`.
 The former `historical_audit_exception` is retained only for historical audit
 coverage and is not an active release-baseline policy.
 
@@ -53,6 +54,12 @@ match each probe object exactly before uploading canonical evidence. Canonical
 artifacts are retained for 30 days for release audit review.
 
 CI now also records non-blocking performance artifacts from the same `perf_baseline` example. The workflow stores the full benchmark output plus `/usr/bin/time -v` captures for the medium, medium-front-matter, and large single-sample runs. Those artifacts are for regression comparison and trend review; they are not merge-blocking thresholds yet.
+
+In module evidence, `fallback_rate` means pre-commit fail-open rate
+(`precommit_failopen_total / streaming_requests_total`). It is intentionally
+separate from `streaming_fallback_total`, which records requests routed away
+from the streaming path; the two counters must not be substituted for one
+another when interpreting a baseline.
 
 Key findings from this run:
 

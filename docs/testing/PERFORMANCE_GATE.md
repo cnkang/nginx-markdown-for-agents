@@ -127,10 +127,10 @@ workflow identifier.
 
 The checked-in 0.9.1 baseline is now a verbatim eight-scenario canonical run.
 Its `baseline_policy` binds the measured data to source commit
-`f2f939808110115bd0527af1743705c1e5a42b48`, workflow run
-`30366081113/attempts/1`, measurement timestamp `2026-07-28T14:05:53Z`, and
+`cab92df229b0b68cb02d88817a208e009f3ce106`, workflow run
+`30405031983/attempts/1`, measurement timestamp `2026-07-28T22:41:12Z`, and
 the retained raw artifact SHA-256
-`fc9b53c9e9a88655ee69300a350ce1498f4afff7dd566425447b6fb65abe9708`.
+`a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12`.
 Machine validation recomputes that digest and requires the finalized report to
 match the raw report exactly apart from `baseline_policy`.
 
@@ -153,6 +153,11 @@ The former `historical_audit_exception` is retained only for historical
 validator coverage and is not used by the active release baseline. Future
 baselines must identify a repository-contained raw artifact and must not use
 an empty, `unknown`, or `not-recorded` `source_artifact`.
+
+For module reports, `fallback_rate` is the pre-commit fail-open ratio,
+calculated from `precommit_failopen_total` and `streaming_requests_total`.
+`streaming_fallback_total` is a separate path-routing counter and does not
+enter that ratio.
 
 ## Troubleshooting
 
