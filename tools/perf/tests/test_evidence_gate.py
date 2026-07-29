@@ -503,6 +503,19 @@ def _load_canonical_module_baseline():
     return copy.deepcopy(json.loads(baseline_path.read_text(encoding="utf-8")))
 
 
+def _copy_canonical_raw_artifact(root: Path) -> None:
+    """Provide the retained raw artifact for a temporary repo root."""
+    raw_source = (
+        Path(__file__).resolve().parents[3]
+        / "perf" / "baselines" / "module-baseline-091-raw.json"
+    )
+    raw_dir = root / "perf" / "baselines"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    (raw_dir / "module-baseline-091-raw.json").write_bytes(
+        raw_source.read_bytes()
+    )
+
+
 def _scenario(report, name):
     """Return a named canonical module scenario for mutation tests."""
     return next(
@@ -2534,6 +2547,96 @@ class TestEnvironmentCompatibility:
         stderr = capsys.readouterr().err.lower()
         assert "incompatible" in stderr
         assert "percentage thresholds cannot be evaluated" in stderr
+
+
+class TestNonBlockingIntegrityVisibility:
+    """Report-only gates must expose the same integrity failures as blocking."""
+
+    @pytest.mark.parametrize(
+        ("blocking", "expected_rc"),
+        [(False, 0), (True, 1)],
+    )
+    def test_current_malformed_fallback_is_missing_evidence(
+        self, tmp_path, monkeypatch, capsys, blocking, expected_rc,
+    ):
+        """A malformed current rate cannot produce a GO verdict."""
+        report = _load_canonical_module_baseline()
+        _scenario(report, "chunked-medium")["metrics"][
+            "fallback_rate"
+        ] = float("nan")
+        output_path = tmp_path / "evidence-current.json"
+
+        _copy_canonical_raw_artifact(tmp_path)
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(evidence_gate, "_nginx_bin_available", lambda: True)
+        monkeypatch.setattr(
+            evidence_gate,
+            "_obtain_benchmark_report",
+            lambda *_args: (report, None),
+        )
+
+        exit_code = main([
+            "--mode", "blocking" if blocking else "non-blocking",
+            "--output", str(output_path),
+        ])
+
+        assert exit_code == expected_rc
+        evidence = json.loads(output_path.read_text(encoding="utf-8"))
+        assert evidence["verdict"] == "MISSING_EVIDENCE"
+        assert any(
+            breach["metric"] == "current.fallback_rate_consistency"
+            and "chunked-medium" in breach["reason"]
+            for breach in evidence["breaches"]
+        )
+        stderr = capsys.readouterr().err
+        assert "MISSING_EVIDENCE" in stderr
+        assert "Evidence gate: GO" not in stderr
+
+    @pytest.mark.parametrize(
+        ("blocking", "expected_rc"),
+        [(False, 0), (True, 1)],
+    )
+    def test_baseline_malformed_fallback_is_missing_evidence(
+        self, tmp_path, monkeypatch, capsys, blocking, expected_rc,
+    ):
+        """A malformed baseline rate cannot produce a GO verdict."""
+        baseline = _load_canonical_module_baseline()
+        _scenario(baseline, "chunked-medium")["metrics"][
+            "fallback_rate"
+        ] = float("nan")
+        baseline_dir = tmp_path / "perf" / "baselines"
+        baseline_dir.mkdir(parents=True)
+        baseline_path = baseline_dir / "module-baseline-091.json"
+        baseline_path.write_text(
+            json.dumps(baseline, allow_nan=True), encoding="utf-8",
+        )
+        _copy_canonical_raw_artifact(tmp_path)
+        output_path = tmp_path / "evidence-baseline.json"
+
+        monkeypatch.setattr(evidence_gate, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(evidence_gate, "_nginx_bin_available", lambda: True)
+        monkeypatch.setattr(
+            evidence_gate,
+            "_obtain_benchmark_report",
+            lambda *_args: (_load_canonical_module_baseline(), None),
+        )
+
+        exit_code = main([
+            "--mode", "blocking" if blocking else "non-blocking",
+            "--output", str(output_path),
+        ])
+
+        assert exit_code == expected_rc
+        evidence = json.loads(output_path.read_text(encoding="utf-8"))
+        assert evidence["verdict"] == "MISSING_EVIDENCE"
+        assert any(
+            breach["metric"] == "baseline.fallback_rate_consistency"
+            and "chunked-medium" in breach["reason"]
+            for breach in evidence["breaches"]
+        )
+        stderr = capsys.readouterr().err
+        assert "MISSING_EVIDENCE" in stderr
+        assert "Evidence gate: GO" not in stderr
 
     def test_matching_environments_no_violations(self):
         """Same platform, load_generator, nginx_version → no violations."""
