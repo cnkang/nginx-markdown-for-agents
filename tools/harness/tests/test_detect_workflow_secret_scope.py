@@ -189,4 +189,4 @@ class TestCLI:
             cwd=tmp_path,
             check=False,
         )
-        assert result.returncode in (0, 1)
+        assert result.returncode == 0, f"expected exit 0, got {result.returncode}; stderr:\n{result.stderr}"
