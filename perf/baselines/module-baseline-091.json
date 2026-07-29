@@ -106,7 +106,7 @@
           "fullbuffer_path_hits": 1030,
           "streaming_ratio": 0.0,
           "fullbuffer_ratio": 1.0,
-          "fallback_rate": 0.0,
+          "fallback_rate": 1.0,
           "streaming_fallback_total": 1030,
           "streaming_requests_total": 1030,
           "precommit_failopen_total": 0,
@@ -554,7 +554,7 @@
     "source_git_commit": "cab92df229b0b68cb02d88817a208e009f3ce106",
     "source_run": "https://github.com/cnkang/nginx-markdown-for-agents/actions/runs/30405031983/attempts/1",
     "source_artifact": "perf/baselines/module-baseline-091-raw.json",
-    "source_artifact_sha256": "a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12",
+    "source_artifact_sha256": "d8ccb6736d70e02c91eb69d06855e47cf7c06c86539c308ea9e91861e39bf7fa",
     "measurement_timestamp": "2026-07-28T22:41:12Z",
     "normalization": "none"
   }
