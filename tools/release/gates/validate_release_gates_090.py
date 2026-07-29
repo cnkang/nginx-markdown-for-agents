@@ -117,11 +117,14 @@ def check_production_examples(repo: Path) -> dict:
 
     duplicate_default_type = []
     for conf in confs:
+        # Strip comments to avoid matching commented-out directives
         uncommented = "\n".join(
             line.split("#", 1)[0] for line in conf.read_text().splitlines()
         )
         for statement in uncommented.split(";"):
             tokens = statement.split()
+            # NGINX implicitly includes text/html in gzip_types; redeclaring it
+            # is a configuration error that produces a duplicate warning.
             if tokens and tokens[0] == "gzip_types" and "text/html" in tokens[1:]:
                 duplicate_default_type.append(conf.name)
                 break
@@ -244,6 +247,13 @@ def check_inflight_guard(repo: Path) -> dict:
 
 
 def _check_removed_directives(content: str, removed: list) -> list:
+    """Verify each removed directive is present as a reject-only stub.
+
+    For every directive name in *removed*, check that the config directives
+    implementation file contains both the ngx_string("name") entry and the
+    reject handler (ngx_http_markdown_reject_removed_directive) in the
+    surrounding 700-byte block.  Return a list of problem descriptions.
+    """
     missing = []
     for name in removed:
         idx = content.find(f'ngx_string("{name}")')
@@ -257,6 +267,11 @@ def _check_removed_directives(content: str, removed: list) -> list:
 
 
 def _check_migration_guide(migration: Path) -> list:
+    """Verify the migration guide documents the memory-budget rename.
+
+    Return a list of problem descriptions (empty if the guide exists and
+    mentions markdown_memory_budget).
+    """
     missing = []
     if migration.exists():
         migration_text = migration.read_text()
@@ -359,7 +374,13 @@ def check_conditional_bypass_header_filter(repo: Path) -> dict:
 
 
 def iter_c_code_lines(block: str) -> list[str]:
-    """Return non-comment, non-empty C source lines from a short snippet."""
+    """Return non-comment, non-empty C source lines from a short snippet.
+
+    Strips both block comments (/* ... */) and skips blank lines so that
+    subsequent string searches operate on actual code, not comment text.
+    Used to verify that a code path calls a specific function rather than
+    merely mentioning it in a comment.
+    """
     code_lines = []
     in_comment = False
     for line in block.split('\n'):
@@ -387,6 +408,8 @@ def check_conditional_bypass_no_error_policy(repo: Path) -> dict:
                 "message": "conversion_impl.h not found"}
     content = conversion_impl.read_text()
     # Find the BYPASS_RESULT block and check it uses fail_open, not reject_or_fail_open
+    # (bypass is a deliberate pass-through, not an error — applying error_policy
+    # would incorrectly reject or fail-open on a valid bypass decision)
     bypass_idx = content.find("NGX_HTTP_MARKDOWN_COND_BYPASS_RESULT")
     if bypass_idx < 0:
         return {"name": "conditional_bypass_no_error_policy", "status": "fail",
@@ -394,7 +417,7 @@ def check_conditional_bypass_no_error_policy(repo: Path) -> dict:
     # Look at the block around bypass handling (1500 chars for the full comment + code)
     block = content[bypass_idx:bypass_idx + 1500]
     # Check for actual function CALL (not comment references).
-    # Filter out C comment lines: lines starting with *, /*, or ending with */
+    # Filter out C comment lines so we only match real code, not doc comments.
     code_text = ' '.join(iter_c_code_lines(block))
     if "reject_or_fail_open" in code_text:
         return {"name": "conditional_bypass_no_error_policy", "status": "fail",

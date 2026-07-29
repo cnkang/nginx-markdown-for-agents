@@ -2,6 +2,10 @@
 
 Validates immutable builder digests, ingress source verification,
 Homebrew formula identity, and release workflow contracts.
+
+Rule 13 (ci-gating): release builder images use reviewed multi-architecture
+manifest digests, not mutable tags; external source/tool bytes are
+checksum-verified before extraction or execution.
 """
 
 from __future__ import annotations
@@ -14,7 +18,6 @@ TOOLS_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(TOOLS_DIR))
 
 from harness.detect_release_supply_chain import (  # noqa: E402
-    Finding,
     check_homebrew_formula,
     check_ingress_builder,
     check_official_nginx_builder,
@@ -24,6 +27,9 @@ from harness.detect_release_supply_chain import (  # noqa: E402
 
 DETECTOR = Path(__file__).resolve().parent.parent / "detect_release_supply_chain.py"
 
+# Pinned container image digests for the two release builder families.
+# These must match the actual ARG OS_BASE values in the Dockerfiles and
+# the container: field in release-packages.yml.
 ALMALINUX_9 = (
     "almalinux@sha256:"
     "d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743"
@@ -39,7 +45,10 @@ ALPINE_320 = (
 # ---------------------------------------------------------------------------
 
 class TestBuilderDigests:
+    """check_release_builder_digests: container images must use immutable digests."""
+
     def test_correct_digests_pass(self):
+        """All three builder references use the expected pinned digests."""
         files = {
             "tools/build_release/Dockerfile.glibc": f"ARG OS_BASE={ALMALINUX_9}",
             "tools/build_release/Dockerfile.musl": f"ARG OS_BASE={ALPINE_320}",
@@ -49,6 +58,7 @@ class TestBuilderDigests:
         assert findings == []
 
     def test_stale_digest_fails(self):
+        """A mutable tag (no @sha256:...) in any builder is a finding."""
         files = {
             "tools/build_release/Dockerfile.glibc": "ARG OS_BASE=almalinux:9",
             "tools/build_release/Dockerfile.musl": f"ARG OS_BASE={ALPINE_320}",
@@ -59,6 +69,7 @@ class TestBuilderDigests:
         assert "digest" in findings[0].message.lower()
 
     def test_missing_digest_fails(self):
+        """An empty builder reference is treated as missing digest."""
         files = {
             "tools/build_release/Dockerfile.glibc": "",
             "tools/build_release/Dockerfile.musl": f"ARG OS_BASE={ALPINE_320}",
@@ -73,7 +84,10 @@ class TestBuilderDigests:
 # ---------------------------------------------------------------------------
 
 class TestIngressBuilder:
+    """check_ingress_builder: Dockerfile ingress must verify source identity."""
+
     def test_complete_verification_passes(self):
+        """Full chain: SHA arg → rev-parse → equality → checkout → download → checksum → extract."""
         text = (
             "ARG MODULE_SHA=\n"
             "RUN grep -Eq '^[0-9a-f]{40}$' <<< \"${MODULE_SHA}\"\n"
@@ -88,6 +102,7 @@ class TestIngressBuilder:
         assert findings == []
 
     def test_missing_sha_arg_fails(self):
+        """Cloning without a pinned SHA arg is a supply-chain finding."""
         text = (
             "RUN git clone https://github.com/example/repo.git\n"
             "RUN git checkout main\n"
@@ -96,6 +111,7 @@ class TestIngressBuilder:
         assert len(findings) >= 1
 
     def test_missing_rev_parse_fails(self):
+        """SHA arg present but no git rev-parse verification is a finding."""
         text = (
             "ARG MODULE_SHA=\n"
             "RUN test \"${actual_sha}\" = \"${MODULE_SHA}\"\n"
@@ -104,6 +120,7 @@ class TestIngressBuilder:
         assert len(findings) >= 1
 
     def test_missing_nginx_verify_order_fails(self):
+        """Download without checksum verification before extraction is a finding."""
         text = (
             "ARG MODULE_SHA=\n"
             "RUN grep -Eq '^[0-9a-f]{40}$' <<< \"${MODULE_SHA}\"\n"
@@ -122,7 +139,10 @@ class TestIngressBuilder:
 # ---------------------------------------------------------------------------
 
 class TestOfficialNginxBuilder:
+    """check_official_nginx_builder: NGINX tarball must be verified before extraction."""
+
     def test_correct_order_passes(self):
+        """curl → verify-checksum → tar passes the ordering check."""
         text = (
             "RUN curl -fsSL https://nginx.org/download/nginx-${nginx_version}.tar.gz -o /tmp/nginx.tar.gz\n"
             "RUN bash /opt/nginx-markdown/verify-checksum.sh /tmp/nginx.tar.gz\n"
@@ -132,6 +152,7 @@ class TestOfficialNginxBuilder:
         assert findings == []
 
     def test_missing_verify_fails(self):
+        """curl → tar without an intervening verify step is a finding."""
         text = (
             "RUN curl -fsSL https://nginx.org/download/nginx-${nginx_version}.tar.gz -o /tmp/nginx.tar.gz\n"
             "RUN tar -xzf /tmp/nginx.tar.gz\n"
@@ -145,7 +166,10 @@ class TestOfficialNginxBuilder:
 # ---------------------------------------------------------------------------
 
 class TestHomebrewFormula:
+    """check_homebrew_formula: Homebrew formula identity and structure."""
+
     def test_valid_formula_passes(self):
+        """A formula with homepage, url, sha256, and nginx deps passes."""
         text = (
             'class NginxMarkdownModule < Formula\n'
             '  desc "NGINX module for Markdown conversion"\n'
@@ -167,6 +191,7 @@ class TestHomebrewFormula:
         assert findings == []
 
     def test_missing_homepage_fails(self):
+        """A formula without a homepage field is a finding."""
         text = (
             'class NginxMarkdownModule < Formula\n'
             '  desc "NGINX module"\n'
@@ -181,6 +206,8 @@ class TestHomebrewFormula:
 # ---------------------------------------------------------------------------
 
 class TestScanRepository:
+    """scan_repository: full integration against the actual repo."""
+
     def test_actual_repo_passes(self):
         """The real repo must pass its own supply-chain checks."""
         repo_root = Path(__file__).resolve().parents[3]
@@ -193,10 +220,13 @@ class TestScanRepository:
 # ---------------------------------------------------------------------------
 
 class TestCLI:
+    """CLI contract: the detector must exit 0 or 1."""
+
     def test_cli_runs_and_returns_valid_exit_code(self, tmp_path: Path):
         result = subprocess.run(
             [sys.executable, str(DETECTOR)],
             capture_output=True, text=True,
             cwd=tmp_path,
+            check=False,
         )
         assert result.returncode in (0, 1)
