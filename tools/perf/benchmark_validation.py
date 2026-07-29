@@ -14,7 +14,8 @@ from typing import Any
 
 _HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9a-z-]+$")
 _HTTP_STATUS_LINE_RE = re.compile(
-    r"^HTTP/\S+\s+([1-5][0-9]{2})(?:\s+.*)?$"
+    r"^HTTP/[^\s]+[ \t]+([1-5]\d{2})",
+    re.ASCII,
 )
 
 
@@ -29,7 +30,7 @@ def normalize_header_mapping(headers: Mapping[str, str]) -> dict[str, str]:
     """Normalize one HTTP header mapping using the probe contract."""
     normalized: dict[str, str] = {}
     for key, value in headers.items():
-        if type(key) is not str or type(value) is not str:
+        if not isinstance(key, str) or not isinstance(value, str):
             raise ValueError("HTTP header names and values must be strings")
         normalized_key = _normalize_header_name(key)
         if normalized_key in normalized:
@@ -40,10 +41,10 @@ def normalize_header_mapping(headers: Mapping[str, str]) -> dict[str, str]:
 
 def normalized_header_mapping_error(headers: object) -> str | None:
     """Return a schema error for a JSON normalized-header object."""
-    if type(headers) is not dict:
+    if not isinstance(headers, dict):
         return "headers must be an object"
     for key, value in headers.items():
-        if type(key) is not str or type(value) is not str:
+        if not isinstance(key, str) or not isinstance(value, str):
             return "headers key/value pairs must be strings"
         if key != key.strip() or key != key.lower():
             return f"header key must be normalized lowercase: {key!r}"
@@ -71,8 +72,10 @@ def _split_header_blocks(content: str) -> list[list[str]]:
 
 
 def _parse_header_block(block: list[str]) -> tuple[int, dict[str, str]]:
-    status_match = _HTTP_STATUS_LINE_RE.fullmatch(block[0])
-    if status_match is None:
+    status_line = block[0]
+    status_match = _HTTP_STATUS_LINE_RE.match(status_line)
+    suffix = status_line[status_match.end():] if status_match else ""
+    if status_match is None or (suffix and suffix[0] not in " \t"):
         raise ValueError(f"invalid HTTP status line: {block[0]!r}")
     status = int(status_match.group(1))
     headers: dict[str, str] = {}

@@ -207,8 +207,12 @@ def test_curl_headers_use_final_response_block_and_normalize_names():
     [
         "plain text",
         "HTTP/1.1 200 OK\nMalformed-Header\n",
-        "HTTP/1.1 200 OK\nContent-Type: text/markdown\n"
-        "HTTP/1.1 200 OK\n",
+        "HTTP/1.1 200OK\n",
+        # One malformed artifact: a duplicate response status line.
+        (
+            "HTTP/1.1 200 OK\nContent-Type: text/markdown\n"
+            + "HTTP/1.1 200 OK\n"
+        ),
     ],
 )
 def test_curl_headers_reject_malformed_artifacts(content):
@@ -875,6 +879,7 @@ class TestGracefulExit:
             env=env,
             capture_output=True,
             timeout=10,
+            check=False,
         )
         assert result.returncode == 75, (
             f"Expected exit code 75, got {result.returncode}. "
@@ -891,6 +896,7 @@ class TestGracefulExit:
             env=env,
             capture_output=True,
             timeout=10,
+            check=False,
         )
         stderr = result.stderr.decode()
         assert "SKIP_NOT_PRESENT" in stderr, (
@@ -1240,6 +1246,7 @@ class TestPortCleanupOnSignals:
             env=env,
             capture_output=True,
             timeout=10,
+            check=False,
         )
         assert result.returncode == 75
 

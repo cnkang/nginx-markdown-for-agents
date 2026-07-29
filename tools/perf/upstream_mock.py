@@ -19,17 +19,17 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from tools.lib.path_validation import validate_read_path
+from tools.lib.path_validation import validate_read_path  # noqa: E402 - direct script import
 
 # Brotli compression support: prefer the Python module, fall back to CLI.
-_brotli_mod = None
-_brotli_cli: str | None = None
+BROTLI_MODULE = None
+BROTLI_CLI: str | None = None
 try:
-    import brotli as _brotli_mod  # type: ignore[no-redef]
+    import brotli as BROTLI_MODULE  # type: ignore[no-redef]
 except ImportError:
     import shutil
 
-    _brotli_cli = shutil.which("brotli")
+    BROTLI_CLI = shutil.which("brotli")
 
 
 def _compress_brotli(data: bytes) -> bytes | None:
@@ -38,14 +38,15 @@ def _compress_brotli(data: bytes) -> bytes | None:
     Returns None if neither the Python brotli module nor the brotli CLI
     is available.
     """
-    if _brotli_mod is not None:
-        return _brotli_mod.compress(data, quality=6)  # type: ignore[union-attr]
-    if _brotli_cli is not None:
+    if BROTLI_MODULE is not None:
+        return BROTLI_MODULE.compress(data, quality=6)  # type: ignore[union-attr]
+    if BROTLI_CLI is not None:
         result = subprocess.run(
-            [_brotli_cli, "--quality=6", "-"],
+            [BROTLI_CLI, "--quality=6", "-"],
             input=data,
             capture_output=True,
             timeout=30,
+            check=False,
         )
         if result.returncode == 0:
             return result.stdout
@@ -54,12 +55,12 @@ def _compress_brotli(data: bytes) -> bytes | None:
 
 def _iter_brotli_chunks(data: bytes, chunk_size: int) -> list[bytes]:
     """Compress one Brotli stream preserving streaming bursts."""
-    if _brotli_mod is None:
+    if BROTLI_MODULE is None:
         raise RuntimeError(
             "streaming Brotli benchmarks require the Brotli Python package"
         )
 
-    compressor = _brotli_mod.Compressor(quality=6)
+    compressor = BROTLI_MODULE.Compressor(quality=6)
     chunks = []
     for offset in range(0, len(data), chunk_size):
         encoded = compressor.process(data[offset : offset + chunk_size])
@@ -76,11 +77,12 @@ def _iter_brotli_chunks(data: bytes, chunk_size: int) -> list[bytes]:
 class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
     """HTTP handler with dynamic chunking, gzip, deflate, and Brotli encoding support."""
 
-    def log_message(self, format: str, *args: object) -> None:
+    def log_message(self, format_string: str, *args: object) -> None:
         """Silence standard request logging to clean terminal output."""
-        pass
+        del format_string, args
+        return
 
-    def do_GET(self) -> None:
+    def do_GET(self) -> None:  # pylint: disable=invalid-name
         """Handle GET requests dynamically serving corpus files."""
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)

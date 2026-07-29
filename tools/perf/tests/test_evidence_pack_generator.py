@@ -760,8 +760,13 @@ class TestGenerateEvidencePack:
             _make_evidence_targets(),
             parity_report=parity,
         )
-        assert pack["parity"] is not None
-        assert pack["parity"]["summary"]["pass_rate"] == pytest.approx(1.0, abs=1e-15)
+        parity_pack = pack["parity"]
+        assert isinstance(parity_pack, dict)
+        parity_summary = parity_pack.get("summary")
+        assert isinstance(parity_summary, dict)
+        assert parity_summary["pass_rate"] == pytest.approx(
+            1.0, abs=1e-15
+        )
 
     def test_parity_is_none_when_not_provided(self):
         """Parity should be None when not provided."""
@@ -913,7 +918,7 @@ class TestPrintHumanSummary:
 class TestCLI:
     """Tests for the CLI entry point."""
 
-    def test_main_succeeds_with_valid_inputs(self, tmp_path, capsys, monkeypatch):
+    def test_main_succeeds_with_valid_inputs(self, tmp_path, monkeypatch):
         """CLI should succeed with valid input files."""
         monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         monkeypatch.chdir(tmp_path)
@@ -937,7 +942,7 @@ class TestCLI:
         assert pack["schema_version"] == "1.0.0"
         assert pack["type"] == "evidence-pack"
 
-    def test_main_fails_with_missing_fullbuffer(self, tmp_path, capsys, monkeypatch):
+    def test_main_fails_with_missing_fullbuffer(self, tmp_path, monkeypatch):
         """CLI should return exit code 2 when full-buffer report is missing."""
         monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         monkeypatch.chdir(tmp_path)
@@ -953,7 +958,7 @@ class TestCLI:
         ])
         assert exit_code == 2
 
-    def test_main_fails_with_missing_streaming(self, tmp_path, capsys, monkeypatch):
+    def test_main_fails_with_missing_streaming(self, tmp_path, monkeypatch):
         """CLI should return exit code 2 when streaming report is missing."""
         monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         monkeypatch.chdir(tmp_path)
@@ -969,7 +974,7 @@ class TestCLI:
         ])
         assert exit_code == 2
 
-    def test_main_fails_with_missing_targets(self, tmp_path, capsys, monkeypatch):
+    def test_main_fails_with_missing_targets(self, tmp_path, monkeypatch):
         """CLI should return exit code 2 when evidence targets are missing."""
         monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         monkeypatch.chdir(tmp_path)
@@ -985,7 +990,7 @@ class TestCLI:
         ])
         assert exit_code == 2
 
-    def test_main_handles_malformed_json(self, tmp_path, capsys, monkeypatch):
+    def test_main_handles_malformed_json(self, tmp_path, monkeypatch):
         """CLI should return exit code 2 with malformed JSON."""
         monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         monkeypatch.chdir(tmp_path)
@@ -1004,7 +1009,7 @@ class TestCLI:
         ])
         assert exit_code == 2
 
-    def test_summary_only_mode(self, tmp_path, capsys, monkeypatch):
+    def test_summary_only_mode(self, tmp_path, monkeypatch):
         """--summary-only should print summary but not write JSON."""
         monkeypatch.setattr(epg, "REPO_ROOT", tmp_path)
         monkeypatch.chdir(tmp_path)

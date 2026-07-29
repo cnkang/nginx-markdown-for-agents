@@ -19,11 +19,16 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
-from lib.path_validation import validate_read_path  # noqa: E402
+from lib.path_validation import validate_read_path  # noqa: E402 - direct script import
 from perf.benchmark_validation import (  # noqa: E402
     normalized_header_mapping_error,
     parse_curl_header_artifact,
 )
+
+
+def _is_exact_int(value: object) -> bool:
+    """Accept JSON integers while rejecting booleans masquerading as ints."""
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 SCENARIOS = (
@@ -128,7 +133,7 @@ def _validate_probe_status(
     """Require successful HTTP and probe command status values."""
     errors: list[str] = []
     http_status = payload["http_status"]
-    if type(http_status) is not int:
+    if not _is_exact_int(http_status):
         errors.append(
             f"{scenario}: {scenario}.json: http_status must be an int, "
             f"got {type(http_status).__name__}"
@@ -144,7 +149,7 @@ def _validate_probe_status(
             f"got {payload.get('verdict')!r}"
         )
     curl_exit_code = payload.get("curl_exit_code")
-    if type(curl_exit_code) is not int:
+    if not _is_exact_int(curl_exit_code):
         errors.append(
             f"{scenario}: {scenario}.json: curl_exit_code must be an int, "
             f"got {type(curl_exit_code).__name__}"
@@ -173,7 +178,7 @@ def _validate_probe_content_metadata(
     """Require Markdown content metadata and an empty failure reason."""
     errors: list[str] = []
     content_type = payload["content_type"]
-    if type(content_type) is not str:
+    if not isinstance(content_type, str):
         errors.append(
             f"{scenario}: {scenario}.json: content_type must be a string"
         )
@@ -186,7 +191,7 @@ def _validate_probe_content_metadata(
             )
 
     content_encoding = payload["content_encoding"]
-    if type(content_encoding) is not str:
+    if not isinstance(content_encoding, str):
         errors.append(
             f"{scenario}: {scenario}.json: content_encoding must be a string"
         )
@@ -197,7 +202,7 @@ def _validate_probe_content_metadata(
         )
 
     failure_reason = payload["failure_reason"]
-    if type(failure_reason) is not str:
+    if not isinstance(failure_reason, str):
         errors.append(
             f"{scenario}: {scenario}.json: failure_reason must be a string"
         )
@@ -215,7 +220,7 @@ def _validate_probe_digest_metadata(
     """Require strict body size and digest metadata types and shape."""
     errors: list[str] = []
     body_bytes = payload["body_bytes"]
-    if type(body_bytes) is not int:
+    if not _is_exact_int(body_bytes):
         errors.append(
             f"{scenario}: {scenario}.json: body_bytes must be an int, "
             f"got {type(body_bytes).__name__}"
@@ -227,7 +232,7 @@ def _validate_probe_digest_metadata(
         )
 
     body_sha256 = payload["body_sha256"]
-    if type(body_sha256) is not str or _BODY_SHA256_RE.fullmatch(body_sha256) is None:
+    if not isinstance(body_sha256, str) or _BODY_SHA256_RE.fullmatch(body_sha256) is None:
         errors.append(
             f"{scenario}: {scenario}.json: body_sha256 must be 64 lowercase "
             "hex characters"
@@ -296,7 +301,7 @@ def _validate_probe_tail_contract(
                 f"got {payload.get(field)!r}"
             )
     tail_token_count = payload.get("tail_token_count")
-    if type(tail_token_count) is not int:
+    if not _is_exact_int(tail_token_count):
         errors.append(
             f"{scenario}: {scenario}.json: tail_token_count must be an int, "
             f"got {type(tail_token_count).__name__}"
@@ -315,7 +320,7 @@ def _validate_probe_body_contract(
     """Require strict body size metadata and match its measured digest."""
     errors: list[str] = []
     body_bytes = payload.get("body_bytes")
-    if type(body_bytes) is not int:
+    if not _is_exact_int(body_bytes):
         errors.append(
             f"{scenario}: {scenario}.json: body_bytes must be an int, "
             f"got {type(body_bytes).__name__}"
@@ -370,7 +375,7 @@ def _validate_probe_header_binding(
         status, actual_headers = parse_curl_header_artifact(
             validated_path.read_text(encoding="utf-8", errors="replace")
         )
-    except (OSError, UnicodeError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         return [f"{scenario}: {scenario}.headers: invalid HTTP headers: {exc}"]
 
     errors: list[str] = []
@@ -617,7 +622,7 @@ def main(argv: list[str] | None = None) -> int:
             baseline=args.baseline,
             repo_root=args.repo_root,
         )
-    except (FileNotFoundError, OSError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         errors = [str(exc)]
     if errors:
         for error in errors:

@@ -36,7 +36,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-
 import subprocess
 import sys
 import time
@@ -45,15 +44,18 @@ from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.path_validation import validate_read_path, validate_write_path_within_root
+from lib.path_validation import (  # pylint: disable=wrong-import-position
+    validate_read_path,
+    validate_write_path_within_root,
+)
 
 # ---------------------------------------------------------------------------
 # Make sibling modules importable when invoked directly
 # ---------------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from report_schema import validate_report  # noqa: E402
-from report_utils import detect_platform, write_json  # noqa: E402
+from report_schema import validate_report  # noqa: E402 - direct script import
+from report_utils import detect_platform, write_json  # noqa: E402 - direct script import
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CORPUS_CONVERTER_BIN = (
@@ -129,9 +131,10 @@ def get_git_commit() -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         return result.stdout.strip() if result.returncode == 0 else "unknown"
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return "unknown"
 
 
@@ -172,6 +175,7 @@ def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         return result.stdout, result.returncode, elapsed_ms
@@ -179,7 +183,7 @@ def run_converter(converter_bin: str, html_path: str) -> tuple[str, int, float]:
         elapsed_ms = time.perf_counter() - start
         elapsed_ms *= 1000.0
         return "", 1, elapsed_ms
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         elapsed_ms = time.perf_counter() - start
         elapsed_ms *= 1000.0
         return "", 1, elapsed_ms
@@ -392,17 +396,23 @@ def write_examples(
             continue
         validated_html = validate_read_path(html_path, purpose="fixture html")
 
-        validated_html_dest = validate_write_path_within_root(
-            resolved_examples_dir / f"{base_name}.html",
-            resolved_examples_dir,
-            purpose="HTML example output",
-        )
-        validated_md_dest = validate_write_path_within_root(
-            resolved_examples_dir / f"{base_name}.md",
-            resolved_examples_dir,
-            purpose="Markdown example output",
-        )
+        validated_html_dest = (
+            resolved_examples_dir / f"{base_name}.html"
+        ).resolve()
+        validated_md_dest = (
+            resolved_examples_dir / f"{base_name}.md"
+        ).resolve()
         try:
+            validate_write_path_within_root(
+                validated_html_dest,
+                resolved_examples_dir,
+                purpose="HTML example output",
+            )
+            validate_write_path_within_root(
+                validated_md_dest,
+                resolved_examples_dir,
+                purpose="Markdown example output",
+            )
             validated_html_dest.relative_to(resolved_examples_dir)
             validated_md_dest.relative_to(resolved_examples_dir)
         except ValueError:
@@ -498,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
     # Load corpus version
     try:
         corpus_version = load_corpus_version(corpus_dir)
-    except Exception as e:
+    except (OSError, ValueError) as e:
         print(f"ERROR: failed to read corpus-version.json: {e}", file=sys.stderr)
         return 1
 

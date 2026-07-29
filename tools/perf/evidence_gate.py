@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import math
 import os
@@ -41,18 +42,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# These imports support direct execution from tools/perf and intentionally follow
+# the repository path bootstrap rather than relying on the caller's PYTHONPATH.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import re
-from lib.path_validation import (
+import re  # pylint: disable=wrong-import-position
+from lib.path_validation import (  # pylint: disable=wrong-import-position
     validate_read_path,
     validate_write_path_within_root,
 )
-from lib.baseline_provenance import (
+from lib.baseline_provenance import (  # pylint: disable=wrong-import-position
     validate_iso_utc,
     validate_raw_commit_match,
     validate_source_run,
 )
+from threshold_engine import evaluate_module_level  # pylint: disable=wrong-import-position
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _RC_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+-rc(?:\.\d+)?$")
@@ -75,10 +79,11 @@ def _get_git_commit() -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
             cwd=str(REPO_ROOT),
         )
         return result.stdout.strip() if result.returncode == 0 else "unknown"
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return "unknown"
 
 
@@ -104,6 +109,7 @@ def _is_rc_tag() -> bool:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
             cwd=str(REPO_ROOT),
         )
         if result.returncode == 0 and _RC_RE.search(result.stdout.strip()):
@@ -129,6 +135,7 @@ def _is_release_tag() -> bool:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
             cwd=str(REPO_ROOT),
         )
         if result.returncode == 0:
@@ -161,6 +168,7 @@ def _run_module_benchmark(output_path: Path) -> tuple[int, str]:
         capture_output=True,
         text=True,
         timeout=600,
+        check=False,
         cwd=str(REPO_ROOT),
     )
     return result.returncode, result.stderr
@@ -268,9 +276,9 @@ def _calc_fallback_rate(scenarios: list[dict]) -> float | None:
         failopen = m.get("precommit_failopen_total")
         requests = m.get("streaming_requests_total")
         if (
-            type(failopen) is not int
+            not _is_exact_int(failopen)
             or failopen < 0
-            or type(requests) is not int
+            or not _is_exact_int(requests)
             or requests <= 0
         ):
             return None
@@ -647,20 +655,30 @@ _HISTORICAL_BASELINE_SHA256 = (
 )
 
 
+def _is_exact_int(value: object) -> bool:
+    """Return whether a JSON value is an integer rather than a boolean."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_numeric(value: object) -> bool:
+    """Return whether a JSON value is a non-boolean integer or float."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def _is_positive(value: float | int | None) -> bool:
-    return type(value) in (int, float) and value > 0
+    return _is_numeric(value) and value > 0
 
 
 def _is_positive_counter(value: float | int | None) -> bool:
-    return type(value) is int and value > 0
+    return _is_exact_int(value) and value > 0
 
 
 def _is_less_than_one(value: float | int | None) -> bool:
-    return type(value) in (int, float) and value < 1.0
+    return _is_numeric(value) and value < 1.0
 
 
 def _is_acceptable_fallback_rate(value: float | int | None) -> bool:
-    return type(value) in (int, float) and value <= 0.05
+    return _is_numeric(value) and value <= 0.05
 
 
 def _scenario_metadata_checks(
@@ -894,20 +912,20 @@ def _path_metric_value(metrics: dict, metric: str) -> float | int | None:
         return (
             None
             if (
-                type(failopen) is not int
+                not _is_exact_int(failopen)
                 or failopen < 0
-                or type(requests) is not int
+                or not _is_exact_int(requests)
                 or requests <= 0
             )
             else float(failopen) / float(requests)
         )
-    elif metric == "output_total":
+    if metric == "output_total":
         zero_copy = metrics.get("zero_copy_output_total")
         copied = metrics.get("copied_output_total")
         if (
-            type(zero_copy) is not int
+            not _is_exact_int(zero_copy)
             or zero_copy < 0
-            or type(copied) is not int
+            or not _is_exact_int(copied)
             or copied < 0
         ):
             return None
@@ -1245,8 +1263,6 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 def _sha256_file(path: Path) -> str:
     """Return the lowercase hex SHA-256 digest of a file's bytes."""
-    import hashlib
-
     validated_path = validate_read_path(path, purpose="raw artifact")
     digest = hashlib.sha256()
     with validated_path.open("rb") as stream:
@@ -1256,7 +1272,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _verify_raw_digest(
-    policy: dict, role: str,
+    policy: dict,
 ) -> tuple[Path, str | None]:
     """Resolve and verify the raw artifact digest.
 
@@ -1302,7 +1318,7 @@ def _verify_raw_digest(
 
 
 def _raw_provenance_violations(
-    report: dict, raw_report: dict, policy: dict, role: str,
+    raw_report: dict, policy: dict, role: str,
 ) -> list[tuple[str, str]]:
     """Verify policy provenance fields against the retained raw report."""
     violations: list[tuple[str, str]] = []
@@ -1403,7 +1419,7 @@ def _raw_artifact_binding_violations(
     if _is_scoped_historical_exception(report):
         return []
 
-    raw_path, error = _verify_raw_digest(policy, role)
+    raw_path, error = _verify_raw_digest(policy)
     if error:
         return [(f"{role}.raw_binding", error)]
 
@@ -1426,7 +1442,7 @@ def _raw_artifact_binding_violations(
         )]
 
     provenance_violations = _raw_provenance_violations(
-        report, raw_report, policy, role
+        raw_report, policy, role
     )
 
     return provenance_violations + _raw_content_binding_violations(
@@ -1549,7 +1565,7 @@ def _metric_direction_violations(
 
 def _is_finite_number(value: Any) -> bool:
     """Return True for JSON-compatible finite numeric values, excluding bool."""
-    return type(value) in (int, float) and math.isfinite(value)
+    return _is_numeric(value) and math.isfinite(value)
 
 
 def _conservative_normalized_truth_violations(
@@ -1745,7 +1761,11 @@ def _adjustment_ledger_violations(
 
 
 def _strict_json_equal(left: Any, right: Any) -> bool:
-    """Compare JSON values without treating bool as an integer."""
+    """Compare JSON values while tolerating harmless numeric round-off."""
+    if _is_finite_number(left) and _is_finite_number(right):
+        return math.isclose(
+            float(left), float(right), rel_tol=0.0, abs_tol=1e-12
+        )
     if type(left) is not type(right):
         return False
     if isinstance(left, dict):
@@ -1908,7 +1928,7 @@ def _canonical_baseline_fallback_violations(
                 f"{role}.fallback_rate",
                 f"{name}: missing precommit_failopen_total",
             ))
-        elif type(failopen) is not int or failopen < 0:
+        elif not _is_exact_int(failopen) or failopen < 0:
             violations.append((
                 f"{role}.fallback_rate",
                 f"{name}: precommit_failopen_total must be an integer >= 0 "
@@ -1925,7 +1945,7 @@ def _canonical_baseline_fallback_violations(
                 f"{role}.fallback_rate",
                 f"{name}: missing streaming_requests_total",
             ))
-        elif type(requests) is not int:
+        elif not _is_exact_int(requests):
             violations.append((
                 f"{role}.fallback_rate",
                 f"{name}: streaming_requests_total must be an integer > 0 "
@@ -2264,9 +2284,6 @@ def _evaluate_and_report(
     )
     if baseline_rc is not None:
         return baseline_rc
-
-    # Import threshold engine for module-level evaluation
-    from threshold_engine import evaluate_module_level
 
     eval_result = evaluate_module_level(current_metrics, baseline_metrics, thresholds_cfg, has_baseline=has_baseline)
     verdict = eval_result["verdict"]

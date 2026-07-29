@@ -49,3 +49,37 @@ def test_prepare_runtime_reuse_honors_explicit_module_path(tmp_path: Path) -> No
         runtime_dir / "modules" / "ngx_http_markdown_filter_module.so"
     )
     assert copied_module.read_bytes() == b"module-bytes"
+
+
+def test_prepare_runtime_reuse_rejects_unsafe_explicit_module_filename(
+    tmp_path: Path,
+) -> None:
+    """An explicit module override must have a safe NGINX module basename."""
+    nginx_root = tmp_path / "nginx"
+    nginx_bin = nginx_root / "sbin" / "nginx"
+    (nginx_root / "conf").mkdir(parents=True)
+    nginx_bin.parent.mkdir(parents=True)
+    (nginx_root / "conf" / "mime.types").write_text(
+        "types { text/plain txt; }\n", encoding="utf-8"
+    )
+    nginx_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    nginx_bin.chmod(0o755)
+
+    module_path = tmp_path / "module-runtime" / "unsafe module.so"
+    module_path.parent.mkdir()
+    module_path.write_bytes(b"module-bytes")
+    runtime_dir = tmp_path / "runtime"
+
+    command = f'source "{HELPER}"; markdown_prepare_runtime_reuse "{nginx_bin}" "{runtime_dir}"'
+    env = os.environ.copy()
+    env["MODULE_SO"] = str(module_path)
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 1
+    assert "unsafe module filename: unsafe module.so" in result.stderr
