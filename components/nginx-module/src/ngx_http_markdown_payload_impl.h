@@ -921,34 +921,23 @@ ngx_http_markdown_decompression_error(uint32_t ffi_rc)
 
 
 /*
- * Decompress via Rust FFI bounded decompressor.
+ * Wrap successful Rust FFI decompression results.
  *
- * Linearizes the compressed chain into a contiguous buffer, maps the
- * NGINX compression type enum to the Rust format code, and calls
- * markdown_decompress_bounded with the configured budget.
- *
- * On success, wraps the Rust-owned output in an ngx_chain_t, copies
- * it to pool memory, and frees the Rust allocation.
- *
- * Falls back to the C decompressor when the Rust library is not
- * linked (NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS defined).
+ * These helpers are used only by the Rust-backed decompression branch below.
+ * The C fallback has no FFIDecompResult output to wrap, so keep the helpers
+ * out of builds that define NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS.
  *
  * Parameters:
- *   r                - NGINX request
- *   ctx              - module context
- *   conf             - module location config
- *   compressed_chain - input chain (may have multiple buffers)
+ *   r                  - NGINX request
+ *   result             - Rust-owned decompression result
+ *   input_size         - compressed input size for debug logging
  *   decompressed_chain - output chain (single buffer on success)
  *
  * Returns:
- *   NGX_OK                                  - success
- *   NGX_DECLINED                            - unsupported format
- *   NGX_HTTP_MARKDOWN_DECOMP_BUDGET_EXCEEDED
- *   NGX_HTTP_MARKDOWN_DECOMP_FORMAT_ERROR
- *   NGX_HTTP_MARKDOWN_DECOMP_TRUNCATED_INPUT
- *   NGX_HTTP_MARKDOWN_DECOMP_IO_ERROR
- *   NGX_ERROR                               - system error
+ *   NGX_OK    - output wrapped successfully
+ *   NGX_ERROR - an NGINX pool/chain/output allocation failed
  */
+#ifndef NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS
 static ngx_int_t
 ngx_http_markdown_wrap_empty_decompression(
     ngx_http_request_t *r,
@@ -1026,6 +1015,7 @@ ngx_http_markdown_wrap_decompression_output(
                   "output=%uz", input_size, output_len);
     return NGX_OK;
 }
+#endif /* !NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
 
 static ngx_int_t
 ngx_http_markdown_decompress_via_rust(
