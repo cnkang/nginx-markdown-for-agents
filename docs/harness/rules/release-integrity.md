@@ -23,39 +23,47 @@ evidence — the gate must reject it (fail closed). This invariant collapsed
 from a seven-commit incremental design sequence and must be stated as one
 contract so future gate work starts from the complete set of fields.
 
-**Required evidence provenance fields.** Each scenario record in the
-evidence pack (written by `tools/perf/run_module_benchmark.sh` and
+**Required evidence provenance fields.** The `baseline_policy` object in each
+finalized baseline (written by `tools/perf/finalize_module_baseline.py` and
 ingested by `tools/perf/evidence_gate.py`) must carry all of the following:
 
 | Field | Meaning | Constraint |
 |-------|---------|------------|
 | `source_git_commit` | Exact source commit the benchmark ran against | Full 40-hex object ID; must not be abbreviated |
-| `source_workflow_run` | GitHub Actions workflow run identifier | Must identify the CI run that produced the evidence |
-| `source_workflow_attempt` | Workflow run attempt number | Required; distinguishes re-runs from original runs |
-| `source_artifact` | Retained raw benchmark artifact | Must be a retained file/digest, not a live re-computation |
-| `source_artifact_digest` | SHA-256 of the raw artifact | Verbatim; proves the artifact was not altered after the run |
-| `measurement_timestamp` | UTC timestamp of the measurement | ISO-8601 with timezone; not a normalized or imputed value |
-| `source_environment` | Comparison environment | Must match the baseline environment (OS, CPU, NGINX version, build flags); mixed-environment baselines are split or rejected |
+| `source_run` | GitHub Actions workflow run URL | `https://github.com/<owner>/<repo>/actions/runs/<id>/attempts/<n>`; run ID and attempt are positive integers; repo slug must match checkout |
+| `source_artifact` | Retained raw benchmark artifact path | Repository-relative path; not absolute; no `..` traversal; must not be `"not-recorded"` or `"unknown"` |
+| `source_artifact_sha256` | SHA-256 of the raw artifact file | 64-hex lowercase digest; recomputed and verified by the gate |
+| `measurement_timestamp` | UTC timestamp of the measurement | ISO-8601 with explicit UTC offset (`Z` or `+00:00`); not a normalized or imputed value |
+| `normalization` | Normalization mode applied | `"none"` for `verbatim_run`; `"conservative"` for `conservative_normalized` |
 
 **Additional contracts:**
 
-1. **Bounded metrics only.** Every numeric metric emitted into the evidence
-   pack must use a bounded category (e.g. `conversion_error`, `resource_limit`,
-   `system_error`) — no unbounded gauge-like constructs that can silently
-   absorb regressions.
-2. **Per-codec path evidence.** Each streaming decompression codec (gzip,
+1. **Per-codec path evidence.** Each streaming decompression codec (gzip,
    deflate, Brotli) must record a positive `decompression_streaming_total > 0`
    counter from a real module-enabled NGINX path, not a mock or fallback.
-3. **Fallback-rate truth.** The streaming fallback rate must be computed from
-   actual `fallback` vs `streaming` counter values and must not be normalized
-   or split by environment after collection.
-4. **Immutable baseline retention.** Once a baseline evidence pack is
+2. **Fallback-rate consistency.** The stored `fallback_rate` in each scenario
+   must equal `streaming_fallback_total / streaming_requests_total` (or 0.0
+   when `streaming_requests_total == 0`). The evidence gate cross-checks this
+   via `_fallback_rate_consistency_violations`; a mismatch is a gate failure.
+   The threshold engine independently derives `precommit_failopen_total /
+   streaming_requests_total` for the absolute-cap check; these are distinct
+   rates (pre-commit fail-open delivery vs. streaming fallback) and must not
+   be conflated.
+3. **Immutable baseline retention.** Once a baseline evidence pack is
    generated and used by a release gate, it becomes an immutable audit record.
    Subsequent regeneration does not overwrite it; the old pack is preserved
    with its own digest.
-5. **Fail closed on missing provenance.** The blocking gate
-   (`make release-gates-check-091`) must reject any scenario record that is
+4. **Fail closed on missing provenance.** The blocking gate
+   (`make release-gates-check-091`) must reject any baseline policy that is
    missing any required provenance field, rather than skipping it silently.
+5. **Raw artifact binding.** For `verbatim_run` baselines, the gate
+   recomputes the SHA-256 of the raw artifact file and verifies it matches
+   `source_artifact_sha256`; the finalized report (minus `baseline_policy`)
+   must be byte-identical to the raw report.
+6. **Scenario source environment.** If `baseline_policy.scenario_sources`
+   exists, each entry must declare `platform`, `load_generator`, and
+   `nginx_version` consistent with the top-level `module_benchmark` fields.
+   Mixed-environment baselines are split or rejected.
 
 **Verification:**
 - `RELEASE_GATE_ALLOW_SKIP_MODULE=1 make release-gates-check-091` — blocking
@@ -64,9 +72,9 @@ ingested by `tools/perf/evidence_gate.py`) must carry all of the following:
 - `make perf-evidence-check` — non-blocking report-only mode; validates the
   same invariant for PR visibility.
 - `python3 -m pytest tools/perf/tests/` — perf tooling test suite
-  (686 tests); must pass.
-- Inspect `perf/reports/evidence-091.json` and confirm each scenario record
-  carries all seven provenance fields.
+  (692 tests); must pass.
+- Inspect `perf/baselines/module-baseline-091.json` `baseline_policy` and
+  confirm it carries all six provenance fields above.
 
 **Why this rule.** Without a single contract, evidence provenance fields were
 added one at a time as blockers were discovered (seven commits). The result
@@ -133,6 +141,14 @@ sort) in the same way.
 - **`tools/perf/evidence_gate.py`**: Blocking evidence gate implementation
 
 ## History
+- **2026-07-29**: Corrected Rule 61 provenance field table to match real
+  `baseline_policy` schema: `source_run` (not `source_workflow_run` +
+  `source_workflow_attempt`), `source_artifact_sha256` (not
+  `source_artifact_digest`), `normalization` added, `source_environment`
+  moved to `scenario_sources`. Replaced "bounded metrics only" and
+  "fallback-rate truth" with accurate fallback-rate consistency contract
+  (stored vs. counter-derived) and raw-artifact binding. Added
+  `_fallback_rate_consistency_violations` to evidence gate.
 - **2026-07-29**: Added Rules 61–62 after v0.9.0→HEAD fix-commit recurrence
   analysis identified two incremental-design gaps: the 7-commit performance
   evidence provenance chain and the 5-commit release-matrix key
