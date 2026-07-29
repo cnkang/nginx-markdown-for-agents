@@ -15,6 +15,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Bootstrap repo root so sibling modules resolve under bare `python3` invocation
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 try:
     from tools.release.gates.check_stale_symbols import run_stale_symbol_check
 except ModuleNotFoundError:
