@@ -38,10 +38,10 @@ and environment evidence must remain verbatim.
 Retain the raw workflow artifact and record its run, source Git commit,
 adjustment rule, person or reason, and adjustment date in `baseline_policy`.
 The current `module-baseline-091.json` is a verbatim eight-scenario run from
-commit `f2f939808110115bd0527af1743705c1e5a42b48`, measured at
-`2026-07-28T14:05:53Z` by canonical workflow run `30366081113/attempts/1`.
+commit `cab92df229b0b68cb02d88817a208e009f3ce106`, measured at
+`2026-07-28T22:41:12Z` by canonical workflow run `30405031983/attempts/1`.
 Its retained raw artifact has SHA-256
-`fc9b53c9e9a88655ee69300a350ce1498f4afff7dd566425447b6fb65abe9708`.
+`a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12`.
 The validator requires this source commit, run attempt, timestamp, retained
 raw artifact, and digest to remain mutually consistent.
 
@@ -256,7 +256,9 @@ When `--engine streaming` or `--engine both` is used:
 - `ttlb_ms` - Time to last Markdown byte
 - `cpu_time_ms` - CPU time consumed
 - `flush_count` - Number of flush points
-- `fallback_rate` - Pre-commit fallback ratio
+- `fallback_rate` - Pre-commit fail-open ratio
+  (`precommit_failopen_total / streaming_requests_total`); this is distinct
+  from `streaming_fallback_total`, the path-routing fallback counter.
 
 ## Evidence Pack
 
