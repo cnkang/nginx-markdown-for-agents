@@ -73,7 +73,9 @@ def _check_auth_block(
         LOOPBACK.fullmatch(listener.split()[0]) is not None
         for listener in listeners
     )
-    if direct_tls or (loopback_only and TLS_CONTRACT in full_text):
+    if direct_tls:
+        return None
+    if loopback_only and _tls_contract_precedes_server_block(full_text, line):
         return None
     return Finding(
         path,
@@ -81,6 +83,22 @@ def _check_auth_block(
         "Basic Auth requires an SSL listener or a loopback-only "
         "backend with the mandatory co-located TLS contract",
     )
+
+
+def _tls_contract_precedes_server_block(
+    full_text: str,
+    server_line: int,
+) -> bool:
+    """Require the TLS-contract comment on the line immediately above server."""
+    # server_line is 1-indexed; search the preceding line in 0-indexed source.
+    source_lines = full_text.splitlines()
+    candidate_index = server_line - 2  # 1-indexed -> 0-indexed preceding line
+    if candidate_index < 0:
+        return False
+    preceding = source_lines[candidate_index].strip()
+    if not preceding.startswith("#"):
+        return False
+    return TLS_CONTRACT in preceding
 
 
 def _check_client_guidance(text: str, path: str) -> list[Finding]:

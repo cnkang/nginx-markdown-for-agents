@@ -9,8 +9,8 @@ matrices and artifact lists, verify that missing-detection is precise.
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-import sys
 from pathlib import Path
+import sys
 
 # Ensure the package root is on sys.path so the test can be invoked from
 # either the repository root or from tools/release/.
@@ -18,7 +18,10 @@ _repo_root = Path(__file__).resolve().parents[3]
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from tools.release.matrix.completeness_check import check_completeness, expected_artifact_name
+from tools.release.matrix.completeness_check import (  # noqa: E402 - path bootstrap
+    check_completeness,
+    expected_artifact_name,
+)
 
 
 # ---------------------------------------------------------------------------

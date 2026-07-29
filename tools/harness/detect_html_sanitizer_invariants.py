@@ -121,7 +121,7 @@ def _read_rust_sources(src_dir: Path) -> tuple[str, int, List[str]]:
         try:
             all_content += resolved_rust_file.read_text(encoding='utf-8') + "\n"
             scanned_files += 1
-        except Exception as exc:
+        except (OSError, UnicodeError) as exc:
             read_errors.append(f"{resolved_rust_file}: {exc}")
 
     return all_content, scanned_files, read_errors

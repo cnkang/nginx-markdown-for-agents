@@ -9,7 +9,11 @@ _repo_root = Path(__file__).resolve().parents[3]
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from tools.release.matrix.validate_doc_matrix_sync import compare_matrices, parse_doc_matrix, load_matrix_entries
+from tools.release.matrix.validate_doc_matrix_sync import (  # noqa: E402 - path bootstrap
+    compare_matrices,
+    parse_doc_matrix,
+    load_matrix_entries,
+)
 
 
 def test_parse_doc_matrix_extracts_rows_from_matrix_section(tmp_path):

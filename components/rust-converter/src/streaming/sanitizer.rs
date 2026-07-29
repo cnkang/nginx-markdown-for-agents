@@ -249,227 +249,239 @@ impl StreamingSanitizer {
     ///     _ => panic!("unexpected decision"),
     /// }
     /// ```
+    fn process_start_skip_state(
+        &mut self,
+        tag: &str,
+        effectively_self_closing: bool,
+    ) -> Option<SanitizeDecision> {
+        if self.skip_depth > 0 {
+            if !effectively_self_closing {
+                self.skip_depth = self.skip_depth.saturating_add(1);
+            }
+            return Some(SanitizeDecision::Skip);
+        }
+
+        if self.prune_depth == 0 {
+            self.close_optional_end_tags_for_start(tag);
+        }
+        if DANGEROUS_VOID_ELEMENTS.contains(&tag) {
+            return Some(SanitizeDecision::Skip);
+        }
+        if DANGEROUS_CONTAINER_ELEMENTS.contains(&tag) {
+            if !effectively_self_closing {
+                self.skip_depth = 1;
+                self.skip_element = Some(tag.to_string());
+            }
+            return Some(SanitizeDecision::Skip);
+        }
+        if self.prune_depth > 0 {
+            if !effectively_self_closing {
+                self.prune_depth = self.prune_depth.saturating_add(1);
+            }
+            return Some(SanitizeDecision::Skip);
+        }
+        if self.prune_config.enabled
+            && matches!(
+                should_prune_with_config(tag, &self.prune_config),
+                crate::converter::pruning::PruneDecision::SkipSubtree
+            )
+        {
+            if !effectively_self_closing {
+                self.prune_depth = 1;
+                self.prune_element = Some(tag.to_string());
+            }
+            return Some(SanitizeDecision::Skip);
+        }
+        None
+    }
+
+    fn remember_stripped_tag(&mut self, tag: &str, effectively_self_closing: bool) {
+        if !effectively_self_closing {
+            self.strip_stack.push(tag.to_string());
+        }
+    }
+
+    fn url_decision(tag: &str, url: Option<String>) -> SanitizeDecision {
+        match url {
+            Some(url_value) if !is_dangerous_url(&url_value) => {
+                let escaped = escape_markdown_destination(&url_value);
+                SanitizeDecision::PassModified(StreamEvent::Text(format!("[{}]({})", tag, escaped)))
+            }
+            _ => SanitizeDecision::Skip,
+        }
+    }
+
+    fn process_embedded_start(
+        &mut self,
+        tag: &str,
+        attrs: &[(String, String)],
+        effectively_self_closing: bool,
+    ) -> Option<SanitizeDecision> {
+        if !EMBEDDED_CONTENT_ELEMENTS.contains(&tag) {
+            return None;
+        }
+        self.remember_stripped_tag(tag, effectively_self_closing);
+        let url = attrs
+            .iter()
+            .find(|(key, _)| key == "src" || key == "data")
+            .map(|(_, value)| value.clone());
+        Some(Self::url_decision(tag, url))
+    }
+
+    fn process_media_start(
+        &mut self,
+        tag: &str,
+        attrs: &[(String, String)],
+        effectively_self_closing: bool,
+    ) -> Option<SanitizeDecision> {
+        if !MEDIA_CONTENT_ELEMENTS.contains(&tag) {
+            return None;
+        }
+        self.remember_stripped_tag(tag, effectively_self_closing);
+        let url = match tag {
+            "area" => attrs
+                .iter()
+                .find(|(key, _)| key == "href")
+                .or_else(|| attrs.iter().find(|(key, _)| key == "src"))
+                .map(|(_, value)| value.clone()),
+            _ => attrs
+                .iter()
+                .find(|(key, _)| key == "src")
+                .map(|(_, value)| value.clone()),
+        };
+        Some(Self::url_decision(tag, url))
+    }
+
+    fn process_form_start(
+        &mut self,
+        tag: &str,
+        effectively_self_closing: bool,
+    ) -> Option<SanitizeDecision> {
+        if !FORM_ELEMENTS.contains(&tag) && !VOID_FORM_CONTROLS.contains(&tag) {
+            return None;
+        }
+        if !effectively_self_closing && !VOID_FORM_CONTROLS.contains(&tag) {
+            self.strip_stack.push(tag.to_string());
+        }
+        Some(SanitizeDecision::Skip)
+    }
+
+    fn process_special_start(
+        &mut self,
+        tag: &str,
+        attrs: &[(String, String)],
+        effectively_self_closing: bool,
+    ) -> Option<SanitizeDecision> {
+        self.process_embedded_start(tag, attrs, effectively_self_closing)
+            .or_else(|| self.process_media_start(tag, attrs, effectively_self_closing))
+            .or_else(|| self.process_form_start(tag, effectively_self_closing))
+    }
+
+    fn process_start_tag(
+        &mut self,
+        name: String,
+        attrs: Vec<(String, String)>,
+        self_closing: bool,
+    ) -> SanitizeDecision {
+        let tag = name.as_str();
+        let effectively_self_closing = self_closing || VOID_ELEMENTS.contains(&tag);
+        if let Some(decision) = self.process_start_skip_state(tag, effectively_self_closing) {
+            return decision;
+        }
+
+        if !effectively_self_closing {
+            self.nesting_stack.push(tag.to_string());
+            self.nesting_depth = self.nesting_stack.len();
+            if self.nesting_depth > self.max_nesting_depth {
+                return SanitizeDecision::DepthExceeded;
+            }
+        }
+        if let Some(decision) = self.process_special_start(tag, &attrs, effectively_self_closing) {
+            return decision;
+        }
+
+        let cleaned_attrs = sanitize_attributes(&attrs);
+        if cleaned_attrs.len() != attrs.len() {
+            return SanitizeDecision::PassModified(StreamEvent::StartTag {
+                name,
+                attrs: cleaned_attrs,
+                self_closing,
+            });
+        }
+        SanitizeDecision::Pass(StreamEvent::StartTag {
+            name,
+            attrs,
+            self_closing,
+        })
+    }
+
+    fn update_region_depth(depth: &mut usize, element: &mut Option<String>, tag: &str) -> bool {
+        if *depth == 1 && element.as_deref() == Some(tag) {
+            *depth = 0;
+            *element = None;
+            return true;
+        }
+        if *depth > 1 {
+            *depth = depth.saturating_sub(1);
+        }
+        false
+    }
+
+    fn process_skip_end(&mut self, tag: &str) -> bool {
+        if self.skip_depth == 0 {
+            return false;
+        }
+        if Self::update_region_depth(&mut self.skip_depth, &mut self.skip_element, tag) {
+            self.pop_open_tag(tag);
+        }
+        true
+    }
+
+    fn process_prune_end(&mut self, tag: &str) -> bool {
+        if self.prune_depth == 0 {
+            return false;
+        }
+        if Self::update_region_depth(&mut self.prune_depth, &mut self.prune_element, tag) {
+            self.pop_open_tag(tag);
+        }
+        true
+    }
+
+    fn process_end_tag(&mut self, name: String) -> SanitizeDecision {
+        let tag = name.as_str();
+        if self.process_skip_end(tag) || self.process_prune_end(tag) {
+            return SanitizeDecision::Skip;
+        }
+
+        self.pop_open_tag(tag);
+        if EMBEDDED_CONTENT_ELEMENTS.contains(&tag)
+            || MEDIA_CONTENT_ELEMENTS.contains(&tag)
+            || FORM_ELEMENTS.contains(&tag)
+        {
+            if self.strip_stack.last().is_some_and(|entry| entry == tag) {
+                self.strip_stack.pop();
+            }
+            return SanitizeDecision::Skip;
+        }
+        SanitizeDecision::Pass(StreamEvent::EndTag { name })
+    }
+
     pub fn process_event(&mut self, event: StreamEvent) -> SanitizeDecision {
         self.implied_closures.clear();
-        match &event {
+        match event {
             StreamEvent::StartTag {
                 name,
                 attrs,
                 self_closing,
-            } => {
-                let tag = name.as_str();
-                let effectively_self_closing = *self_closing || VOID_ELEMENTS.contains(&tag);
-
-                // If we're inside a dangerous element, track nesting but skip everything.
-                //
-                // Design decision: `skip_depth` is an O(1) counter, not a stack.
-                // Elements nested inside a dangerous element are fully discarded
-                // (SanitizeDecision::Skip), so they never reach the emitter and
-                // don't need to be tracked by `nesting_depth`. Only `skip_depth`
-                // is incremented here so we know when the matching end tag of the
-                // outermost dangerous element closes the skip region. This means
-                // an attacker cannot bypass the nesting depth limit by deeply
-                // nesting inside a `<script>` — the nested content is harmless
-                // because it is never processed.
-                if self.skip_depth > 0 {
-                    if !effectively_self_closing {
-                        self.skip_depth = self.skip_depth.saturating_add(1);
-                    }
-                    return SanitizeDecision::Skip;
-                }
-
-                if self.prune_depth == 0 {
-                    self.close_optional_end_tags_for_start(tag);
-                }
-
-                // Dangerous elements: skip entire subtree
-                if DANGEROUS_VOID_ELEMENTS.contains(&tag) {
-                    return SanitizeDecision::Skip;
-                }
-
-                if DANGEROUS_CONTAINER_ELEMENTS.contains(&tag) {
-                    if !effectively_self_closing {
-                        self.skip_depth = 1;
-                        self.skip_element = Some(tag.to_string());
-                    }
-                    return SanitizeDecision::Skip;
-                }
-
-                // Noise-region pruning: skip entire subtree of nav, footer,
-                // aside, etc. when pruning is enabled. Uses the same depth-
-                // counter + name-aware-exit pattern as dangerous elements.
-                if self.prune_depth > 0 {
-                    if !effectively_self_closing {
-                        self.prune_depth = self.prune_depth.saturating_add(1);
-                    }
-                    return SanitizeDecision::Skip;
-                }
-
-                if self.prune_config.enabled
-                    && matches!(
-                        should_prune_with_config(tag, &self.prune_config),
-                        crate::converter::pruning::PruneDecision::SkipSubtree
-                    )
-                {
-                    if !effectively_self_closing {
-                        self.prune_depth = 1;
-                        self.prune_element = Some(tag.to_string());
-                    }
-                    return SanitizeDecision::Skip;
-                }
-
-                // Element passes all skip checks — track nesting depth.
-                if !effectively_self_closing {
-                    self.nesting_stack.push(tag.to_string());
-                    self.nesting_depth = self.nesting_stack.len();
-                    if self.nesting_depth > self.max_nesting_depth {
-                        return SanitizeDecision::DepthExceeded;
-                    }
-                }
-
-                // Embedded content elements: strip tag, extract URL
-                if EMBEDDED_CONTENT_ELEMENTS.contains(&tag) {
-                    if !effectively_self_closing {
-                        // Track which element started strip mode so mismatched
-                        // end tags (e.g., <iframe>...</form>) don't corrupt state.
-                        self.strip_stack.push(tag.to_string());
-                    }
-                    // Extract src or data URL for the caller to use
-                    let url = attrs
-                        .iter()
-                        .find(|(k, _)| k == "src" || k == "data")
-                        .map(|(_, v)| v.clone());
-                    if let Some(url_val) = url
-                        && !is_dangerous_url(&url_val)
-                    {
-                        let escaped = escape_markdown_destination(&url_val);
-                        return SanitizeDecision::PassModified(StreamEvent::Text(format!(
-                            "[{}]({})",
-                            tag, escaped
-                        )));
-                    }
-                    return SanitizeDecision::Skip;
-                }
-
-                // Media content elements: strip tag, extract src/href URL.
-                if MEDIA_CONTENT_ELEMENTS.contains(&tag) {
-                    if !effectively_self_closing {
-                        self.strip_stack.push(tag.to_string());
-                    }
-                    let url = if tag == "area" {
-                        attrs
-                            .iter()
-                            .find(|(k, _)| k == "href")
-                            .or_else(|| attrs.iter().find(|(k, _)| k == "src"))
-                            .map(|(_, v)| v.clone())
-                    } else {
-                        attrs
-                            .iter()
-                            .find(|(k, _)| k == "src")
-                            .map(|(_, v)| v.clone())
-                    };
-                    if let Some(url_val) = url
-                        && !is_dangerous_url(&url_val)
-                    {
-                        let escaped = escape_markdown_destination(&url_val);
-                        return SanitizeDecision::PassModified(StreamEvent::Text(format!(
-                            "[{}]({})",
-                            tag, escaped
-                        )));
-                    }
-                    return SanitizeDecision::Skip;
-                }
-
-                // Form elements: strip tag, keep content
-                if FORM_ELEMENTS.contains(&tag) || VOID_FORM_CONTROLS.contains(&tag) {
-                    if !effectively_self_closing && !VOID_FORM_CONTROLS.contains(&tag) {
-                        self.strip_stack.push(tag.to_string());
-                    }
-                    return SanitizeDecision::Skip;
-                }
-
-                // Clean attributes: remove event handlers and dangerous URLs
-                let cleaned_attrs = sanitize_attributes(attrs);
-                if cleaned_attrs.len() != attrs.len() {
-                    return SanitizeDecision::PassModified(StreamEvent::StartTag {
-                        name: name.clone(),
-                        attrs: cleaned_attrs,
-                        self_closing: *self_closing,
-                    });
-                }
-
-                SanitizeDecision::Pass(event)
-            }
-
-            StreamEvent::EndTag { name } => {
-                let tag = name.as_str();
-
-                // Track skip depth. When the outermost dangerous element's
-                // end tag is reached (skip_depth drops to 0), we also
-                // decrement nesting_depth by 1 to account for the dangerous
-                // element itself (which was counted when it was opened).
-                //
-                // Name-aware exit: only exit skip mode when the end tag
-                // matches the outermost dangerous element. This prevents
-                // mismatched end tags (e.g. `</div>` inside `<noscript>`)
-                // from prematurely re-enabling content — important because
-                // html5ever's tokenizer emits nested tags normally for
-                // `<noscript>` and `<applet>` (unlike `<script>`/`<style>`
-                // which use the raw-text state).
-                if self.skip_depth > 0 {
-                    if self.skip_depth == 1 {
-                        // Only the matching dangerous element can close the
-                        // skip region.
-                        if self.skip_element.as_deref() == Some(tag) {
-                            self.skip_depth = 0;
-                            self.skip_element = None;
-                            self.pop_open_tag(tag);
-                        }
-                    } else {
-                        self.skip_depth = self.skip_depth.saturating_sub(1);
-                    }
-                    return SanitizeDecision::Skip;
-                }
-
-                // Prune depth: name-aware exit, same pattern as skip_depth.
-                if self.prune_depth > 0 {
-                    if self.prune_depth == 1 {
-                        if self.prune_element.as_deref() == Some(tag) {
-                            self.prune_depth = 0;
-                            self.prune_element = None;
-                            self.pop_open_tag(tag);
-                        }
-                    } else {
-                        self.prune_depth = self.prune_depth.saturating_sub(1);
-                    }
-                    return SanitizeDecision::Skip;
-                }
-
-                self.pop_open_tag(tag);
-
-                // Strip stack tracking for embedded/form elements.
-                // Only pop if the end tag matches the most recent strip entry,
-                // preventing mismatched tags from corrupting the strip state.
-                if EMBEDDED_CONTENT_ELEMENTS.contains(&tag)
-                    || MEDIA_CONTENT_ELEMENTS.contains(&tag)
-                    || FORM_ELEMENTS.contains(&tag)
-                {
-                    if self.strip_stack.last().is_some_and(|t| t == tag) {
-                        self.strip_stack.pop();
-                    }
-                    return SanitizeDecision::Skip;
-                }
-
-                SanitizeDecision::Pass(event)
-            }
-
+            } => self.process_start_tag(name, attrs, self_closing),
+            StreamEvent::EndTag { name } => self.process_end_tag(name),
             StreamEvent::Text(_) | StreamEvent::Comment(_) => {
                 if self.skip_depth > 0 || self.prune_depth > 0 {
-                    return SanitizeDecision::Skip;
+                    SanitizeDecision::Skip
+                } else {
+                    SanitizeDecision::Pass(event)
                 }
-                SanitizeDecision::Pass(event)
             }
-
             StreamEvent::Doctype | StreamEvent::ParseError(_) => SanitizeDecision::Pass(event),
         }
     }

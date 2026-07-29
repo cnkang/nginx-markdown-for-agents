@@ -21,7 +21,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # pylint: disable=import-error,wrong-import-position
-from lib.path_validation import validate_filename_strict, validate_read_path
+from lib.path_validation import (
+    validate_filename_strict,
+    validate_read_path,
+    validate_write_path_within_root,
+)
 from report_utils import load_json  # type: ignore[attr-defined]
 # pylint: enable=import-error,wrong-import-position
 
@@ -79,13 +83,16 @@ def _write_text_with_repo_guard(
             f"Refusing to write outside repository root: {resolved_candidate}"
         )
 
-    resolved_candidate.parent.mkdir(parents=True, exist_ok=True)
-    resolved_candidate.write_text(
+    validated_candidate = validate_write_path_within_root(
+        resolved_candidate, REPO_ROOT, purpose=purpose
+    )
+    validated_candidate.parent.mkdir(parents=True, exist_ok=True)
+    validated_candidate.write_text(
         content, encoding="utf-8",
     )
     # SONAR_NOTE(S2083): Filename validated via allowlist; path constructed
     # from trusted constant PR_SUMMARY_OUTPUT_DIR; no symlink traversal
-    return resolved_candidate
+    return validated_candidate
 
 
 def format_bytes(n: int) -> str:

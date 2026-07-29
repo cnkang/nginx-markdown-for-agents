@@ -359,11 +359,12 @@ class TestErrorHandling:
         finally:
             os.chmod(str(f), 0o600)
 
-    def test_missing_path_cli(self, tmp_path: Path) -> None:
+    def test_missing_path_cli(self) -> None:
         """Missing path should return non-zero via CLI."""
         result = subprocess.run(
             [sys.executable, str(DETECTOR), "--path", "/nonexistent/path"],
             capture_output=True, text=True,
+            check=False,
         )
         assert result.returncode != 0
 
@@ -372,6 +373,7 @@ class TestErrorHandling:
         result = subprocess.run(
             [sys.executable, str(DETECTOR), "--path", str(tmp_path)],
             capture_output=True, text=True,
+            check=False,
         )
         assert result.returncode == 0
         assert "OK" in result.stderr
@@ -489,6 +491,7 @@ class TestCLI:
         result = subprocess.run(
             [sys.executable, str(DETECTOR), "--path", str(tmp_path)],
             capture_output=True, text=True,
+            check=False,
         )
         assert result.returncode == 0
 
@@ -499,6 +502,7 @@ class TestCLI:
         result = subprocess.run(
             [sys.executable, str(DETECTOR), "--path", str(tmp_path), "--strict"],
             capture_output=True, text=True,
+            check=False,
         )
         assert result.returncode == 1
 
@@ -509,6 +513,7 @@ class TestCLI:
         result = subprocess.run(
             [sys.executable, str(DETECTOR), "--path", str(tmp_path), "--format", "json"],
             capture_output=True, text=True,
+            check=False,
         )
         data = json.loads(result.stdout)
         assert "findings" in data
@@ -521,6 +526,7 @@ class TestCLI:
         result = subprocess.run(
             [sys.executable, str(DETECTOR), "--path", "/nonexistent"],
             capture_output=True, text=True,
+            check=False,
         )
         assert result.returncode != 0
 
@@ -533,6 +539,7 @@ class TestCLI:
         result = subprocess.run(
             [sys.executable, str(DETECTOR), "--path", str(spaced)],
             capture_output=True, text=True,
+            check=False,
         )
         assert result.returncode == 0
 
@@ -591,7 +598,7 @@ class TestKeywordArguments:
             "import re\n"
             "re.search(pattern=r'safe', string=open('x').read())\n"
         )
-        findings, errors = _scan_py(content, tmp_path)
+        _findings, errors = _scan_py(content, tmp_path)
         assert not errors
         # No ERROR (safe pattern); possibly a REVIEW for dynamic string.
         # Just ensure no crash and api == 'search'.
@@ -605,7 +612,7 @@ class TestKeywordArguments:
         """
         # This is valid Python (positional string, keyword pattern).
         content = "import re\nre.search('abc', pattern=r'(a+)+$')\n"
-        findings, errors = _scan_py(content, tmp_path)
+        _findings, errors = _scan_py(content, tmp_path)
         assert not errors
 
 
@@ -831,6 +838,7 @@ class TestCLIContract:
         result = subprocess.run(
             [sys.executable, str(DETECTOR), "--path", str(tmp_path), "--strict"],
             capture_output=True, text=True,
+            check=False,
         )
         assert result.returncode == 0
 
@@ -842,6 +850,7 @@ class TestCLIContract:
             [sys.executable, str(DETECTOR), "--path", str(tmp_path),
              "--strict", "--fail-on-review"],
             capture_output=True, text=True,
+            check=False,
         )
         assert result.returncode == 1
 
@@ -852,6 +861,7 @@ class TestCLIContract:
         result = subprocess.run(
             [sys.executable, str(DETECTOR), "--path", str(tmp_path), "--strict"],
             capture_output=True, text=True,
+            check=False,
         )
         assert result.returncode == 1
 
@@ -883,6 +893,7 @@ class TestCLIContract:
         result = subprocess.run(
             [sys.executable, str(DETECTOR), "--path", str(target), "--strict"],
             capture_output=True, text=True,
+            check=False,
         )
         assert result.returncode == 0  # target is safe; other.py not scanned
 
@@ -1567,7 +1578,7 @@ class TestAPISignatures:
             "import re\n"
             "re.sub(r'^safe$', 'replacement', open('x').read())\n"
         )
-        findings, errors = _scan_py(content, tmp_path)
+        _findings, errors = _scan_py(content, tmp_path)
         assert not errors
         # No finding for safe pattern; input scope should be file content
         # (from string at index 2, not repl at index 1)
@@ -1969,14 +1980,14 @@ class TestShellPatternFiles:
 
     def test_traversal_rejected(self, tmp_path: Path) -> None:
         """grep -P -f ../../etc/passwd input.txt → rejected."""
-        findings, errors = self._scan(
+        _findings, errors = self._scan(
             "#!/usr/bin/env bash\ngrep -P -f ../../etc/passwd input.txt\n", tmp_path,
         )
         assert any("traversal" in e.message.lower() for e in errors)
 
     def test_absolute_path_rejected(self, tmp_path: Path) -> None:
         """grep -P -f /tmp/external input.txt → rejected."""
-        findings, errors = self._scan(
+        _findings, errors = self._scan(
             "#!/usr/bin/env bash\ngrep -P -f /tmp/external input.txt\n", tmp_path,
         )
         assert any("absolute" in e.message.lower() for e in errors)
@@ -1984,7 +1995,7 @@ class TestShellPatternFiles:
     def test_directory_path_produces_scan_error(self, tmp_path: Path) -> None:
         """A directory as a pattern file produces a ScanError."""
         (tmp_path / "subdir").mkdir()
-        findings, errors = self._scan(
+        _findings, errors = self._scan(
             "#!/usr/bin/env bash\ngrep -P -f subdir input.txt\n", tmp_path,
         )
         assert any("cannot read" in e.message.lower() or "direct" in e.message.lower()

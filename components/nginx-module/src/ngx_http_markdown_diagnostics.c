@@ -1154,6 +1154,50 @@ ngx_http_markdown_diagnostics_fmt_metrics_snapshot(u_char **pos,
 }
 
 
+static u_char *
+ngx_http_markdown_diagnostics_fmt_recent_decisions(
+    u_char *p,
+    u_char *last,
+    const ngx_http_markdown_diag_state_t *state)
+{
+    ngx_uint_t  count;
+
+    count = ngx_http_markdown_diag_ring_valid_count(state, NULL);
+    for (ngx_uint_t i = 0; i < count; i++) {
+        ngx_uint_t  idx;
+        const ngx_http_markdown_diag_decision_t  *entry;
+        ngx_str_t   reason_str;
+
+        if (state->ring.head >= (i + 1)) {
+            idx = state->ring.head - (i + 1);
+        } else {
+            idx = state->ring.capacity - ((i + 1) - state->ring.head);
+        }
+        entry = &state->ring.entries[idx];
+
+        if (i == 0) {
+            p = ngx_slprintf(p, last, "\n");
+        }
+        if (ngx_http_markdown_get_reason_code_str(
+                (uint32_t) entry->reason_code, &reason_str) == NGX_OK)
+        {
+            p = ngx_slprintf(p, last,
+                "    {\"timestamp\": %M, \"reason_code\": %i, "
+                "\"reason_code_str\": \"%*s\", "
+                "\"duration_ms\": %M}",
+                entry->timestamp, entry->reason_code,
+                reason_str.len, reason_str.data, entry->duration_ms);
+        } else {
+            p = ngx_slprintf(p, last,
+                "    {\"timestamp\": %M, \"reason_code\": %i, "
+                "\"reason_code_str\": null, \"duration_ms\": %M}",
+                entry->timestamp, entry->reason_code, entry->duration_ms);
+        }
+        p = ngx_slprintf(p, last, i + 1 < count ? ",\n" : "\n  ");
+    }
+    return p;
+}
+
 static ngx_int_t
 ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     ngx_buf_t *b)
@@ -1234,72 +1278,8 @@ ngx_http_markdown_diagnostics_build_json(ngx_http_request_t *r,
     /* --- recent_decisions section --- */
     p = ngx_slprintf(p, last, "  \"recent_decisions\": [");
 
-    {
-        ngx_uint_t                          idx;
-        ngx_uint_t                          count;
-        const ngx_http_markdown_diag_decision_t  *entry;
-        ngx_str_t                           reason_str;
-
-        /*
-         * Use the same centralized ring validation as json_size so
-         * the iteration invariants cannot drift from the sizing logic.
-         */
-        count = ngx_http_markdown_diag_ring_valid_count(state, NULL);
-
-        /*
-         * Iterate newest-first (reverse chronological order).
-         * The newest entry is at (head - 1) mod capacity.
-         * Walk backward through 'count' entries, wrapping around.
-         */
-        for (ngx_uint_t i = 0; i < count; i++) {
-            if (state->ring.head >= (i + 1)) {
-                idx = state->ring.head - (i + 1);
-            } else {
-                idx = state->ring.capacity
-                    - ((i + 1) - state->ring.head);
-            }
-
-            entry = &state->ring.entries[idx];
-
-            if (i == 0) {
-                p = ngx_slprintf(p, last, "\n");
-            }
-
-            /*
-             * Emit both numeric reason_code and string
-             * reason_code_str (schema v1).
-             */
-            if (ngx_http_markdown_get_reason_code_str(
-                    (uint32_t) entry->reason_code, &reason_str)
-                == NGX_OK)
-            {
-                p = ngx_slprintf(p, last,
-                    "    {\"timestamp\": %M, "
-                    "\"reason_code\": %i, "
-                    "\"reason_code_str\": \"%*s\", "
-                    "\"duration_ms\": %M}",
-                    entry->timestamp,
-                    entry->reason_code,
-                    reason_str.len, reason_str.data,
-                    entry->duration_ms);
-            } else {
-                p = ngx_slprintf(p, last,
-                    "    {\"timestamp\": %M, "
-                    "\"reason_code\": %i, "
-                    "\"reason_code_str\": null, "
-                    "\"duration_ms\": %M}",
-                    entry->timestamp,
-                    entry->reason_code,
-                    entry->duration_ms);
-            }
-
-            if (i + 1 < count) {
-                p = ngx_slprintf(p, last, ",\n");
-            } else {
-                p = ngx_slprintf(p, last, "\n  ");
-            }
-        }
-    }
+    p = ngx_http_markdown_diagnostics_fmt_recent_decisions(
+        p, last, state);
 
     p = ngx_slprintf(p, last, "],\n");
 

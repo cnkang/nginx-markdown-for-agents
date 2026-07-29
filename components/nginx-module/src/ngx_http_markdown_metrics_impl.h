@@ -3,6 +3,10 @@
 
 #include "ngx_http_markdown_metrics_json_perf_impl.h"
 
+#ifndef NGX_MAX_SIZE_T_VALUE
+#define NGX_MAX_SIZE_T_VALUE ((size_t) -1)
+#endif
+
 /*
  * Metrics endpoint implementation.
  *
@@ -230,6 +234,175 @@ ngx_http_markdown_metrics_send_response(
     ngx_http_request_t *r,
     ngx_buf_t *b,
     u_char *response_end);
+
+static u_char *
+ngx_http_markdown_metrics_write_json_conversion(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot,
+    ngx_atomic_uint_t conversions_completed,
+    ngx_atomic_uint_t conversion_time_avg_ms,
+    ngx_atomic_uint_t input_bytes_avg,
+    ngx_atomic_uint_t output_bytes_avg)
+{
+    return ngx_slprintf(p, end,
+        "{\n"
+        "  \"conversions_attempted\": %uA,\n"
+        "  \"conversions_succeeded\": %uA,\n"
+        "  \"conversions_failed\": %uA,\n"
+        "  \"conversions_bypassed\": %uA,\n"
+        "  \"failures_conversion\": %uA,\n"
+        "  \"failures_resource_limit\": %uA,\n"
+        "  \"failures_system\": %uA,\n"
+        "  \"conversion_time_sum_ms\": %uA,\n"
+        "  \"conversion_completed\": %uA,\n"
+        "  \"conversion_time_avg_ms\": %uA,\n"
+        "  \"input_bytes\": %uA,\n"
+        "  \"input_bytes_avg\": %uA,\n"
+        "  \"output_bytes\": %uA,\n"
+        "  \"output_bytes_avg\": %uA,\n"
+        "  \"conversion_latency_buckets\": {\n"
+        "    \"le_10ms\": %uA,\n"
+        "    \"le_100ms\": %uA,\n"
+        "    \"le_1000ms\": %uA,\n"
+        "    \"gt_1000ms\": %uA\n"
+        "  },\n"
+        "  \"decompressions_attempted\": %uA,\n"
+        "  \"decompressions_succeeded\": %uA,\n"
+        "  \"decompressions_failed\": %uA,\n"
+        "  \"decompressions_gzip\": %uA,\n"
+        "  \"decompressions_deflate\": %uA,\n"
+        "  \"decompressions_brotli\": %uA,\n"
+        "  \"decompression_budget_exceeded_total\": %uA,\n"
+        "  \"decompression_format_error_total\": %uA,\n"
+        "  \"decompression_truncated_input_total\": %uA,\n"
+        "  \"decompression_io_error_total\": %uA,\n"
+        "  \"replay_buffer_errors_total\": %uA,\n",
+        snapshot->conversions_attempted,
+        snapshot->conversions_succeeded,
+        snapshot->conversions_failed,
+        snapshot->conversions_bypassed,
+        snapshot->failures_conversion,
+        snapshot->failures_resource_limit,
+        snapshot->failures_system,
+        snapshot->conversion_time_sum_ms,
+        conversions_completed,
+        conversion_time_avg_ms,
+        snapshot->input_bytes,
+        input_bytes_avg,
+        snapshot->output_bytes,
+        output_bytes_avg,
+        snapshot->conversion_latency.le_10ms,
+        snapshot->conversion_latency.le_100ms,
+        snapshot->conversion_latency.le_1000ms,
+        snapshot->conversion_latency.gt_1000ms,
+        snapshot->decompressions.attempted,
+        snapshot->decompressions.succeeded,
+        snapshot->decompressions.failed,
+        snapshot->decompressions.gzip,
+        snapshot->decompressions.deflate,
+        snapshot->decompressions.brotli,
+        snapshot->decompressions.budget_exceeded_total,
+        snapshot->decompressions.format_error_total,
+        snapshot->decompressions.truncated_input_total,
+        snapshot->decompressions.io_error_total,
+        snapshot->results.replay_buffer_errors_total);
+}
+
+static u_char *
+ngx_http_markdown_metrics_write_json_routing(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot)
+{
+    return ngx_slprintf(p, end,
+        "  \"fullbuffer_path_hits\": %uA,\n"
+        "  \"incremental_path_hits\": %uA,\n"
+#ifdef MARKDOWN_STREAMING_ENABLED
+        "  \"streaming_path_hits\": %uA,\n"
+        "  \"streaming\": {\n"
+        "    \"requests_total\": %uA,\n"
+        "    \"fallback_total\": %uA,\n"
+        "    \"succeeded_total\": %uA,\n"
+        "    \"failed_total\": %uA,\n"
+        "    \"postcommit_error_total\": %uA,\n"
+        "    \"precommit_failopen_total\": %uA,\n"
+        "    \"precommit_reject_total\": %uA,\n"
+        "    \"budget_exceeded_total\": %uA,\n"
+        "    \"shadow_total\": %uA,\n"
+        "    \"shadow_diff_total\": %uA,\n"
+        "    \"last_ttfb_ms\": %uA,\n"
+        "    \"last_peak_memory_bytes\": %uA\n"
+        "  },\n"
+#endif
+        "  \"requests_entered\": %uA,\n"
+        "  \"skips\": {\n"
+        "    \"config\": %uA,\n"
+        "    \"method\": %uA,\n"
+        "    \"status\": %uA,\n"
+        "    \"content_type\": %uA,\n"
+        "    \"size\": %uA,\n"
+        "    \"streaming\": %uA,\n"
+        "    \"auth\": %uA,\n"
+        "    \"range\": %uA,\n"
+        "    \"accept\": %uA,\n"
+        "    \"no_accept\": %uA,\n"
+        "    \"conditional\": %uA,\n"
+        "    \"compression_passthrough\": %uA\n"
+        "  },\n"
+        "  \"failopen_count\": %uA,\n"
+        "  \"delivery_count\": %uA,\n"
+        "  \"decision_count\": %uA,\n"
+        "  \"estimated_token_savings\": %uA,\n"
+        "  \"parse_timeouts_total\": %uA,\n"
+        "  \"parse_budget_exceeded_total\": %uA,\n"
+        "  \"per_path\": {\n"
+        "    \"path_entries\": %uA,\n"
+        "    \"path_conversions\": %uA,\n"
+        "    \"path_conversion_time_sum_ms\": %uA,\n"
+        "    \"overflow_count\": %uA,\n"
+        "    \"paths\": [",
+        snapshot->path_hits.fullbuffer,
+        snapshot->path_hits.incremental,
+#ifdef MARKDOWN_STREAMING_ENABLED
+        snapshot->path_hits.streaming,
+        snapshot->streaming.requests_total,
+        snapshot->streaming.fallback_total,
+        snapshot->streaming.succeeded_total,
+        snapshot->streaming.failed_total,
+        snapshot->streaming.postcommit_error_total,
+        snapshot->streaming.precommit_failopen_total,
+        snapshot->streaming.precommit_reject_total,
+        snapshot->streaming.budget_exceeded_total,
+        snapshot->streaming.shadow_total,
+        snapshot->streaming.shadow_diff_total,
+        snapshot->streaming.last_ttfb_ms,
+        snapshot->streaming.last_peak_memory_bytes,
+#endif
+        snapshot->requests_entered,
+        snapshot->skips.config,
+        snapshot->skips.method,
+        snapshot->skips.status,
+        snapshot->skips.content_type,
+        snapshot->skips.size,
+        snapshot->skips.streaming,
+        snapshot->skips.auth,
+        snapshot->skips.range,
+        snapshot->skips.accept,
+        snapshot->skips.no_accept,
+        snapshot->skips.conditional,
+        snapshot->skips.compression_passthrough,
+        snapshot->results.failopen_count,
+        snapshot->results.delivery_count,
+        snapshot->results.decision_count,
+        snapshot->results.estimated_token_savings,
+        snapshot->results.parse_interrupts.parse_timeouts_total,
+        snapshot->results.parse_interrupts.parse_budget_exceeded_total,
+        snapshot->per_path.path_entries,
+        snapshot->per_path.path_conversions,
+        snapshot->per_path.path_conversion_time_sum_ms,
+        snapshot->per_path.overflow_count);
+}
 
 /**
  * Capture a best-effort snapshot of the global metrics counters into the
@@ -714,6 +887,7 @@ typedef struct {
     ngx_atomic_uint_t   omitted_time_ms;
     ngx_uint_t          omitted_nodes;
     ngx_uint_t          entries_written;
+    ngx_flag_t          failed;
 } ngx_http_markdown_path_detail_render_ctx_t;
 
 static u_char *
@@ -811,190 +985,16 @@ ngx_http_markdown_metrics_write_json(
      * The caller is responsible for detecting truncation (p >= end)
      * after this function returns.
      */
-    p = ngx_slprintf(p, end,
-        /* Conversion attempt and outcome counters */
-        "{\n"
-        "  \"conversions_attempted\": %uA,\n"
-        "  \"conversions_succeeded\": %uA,\n"
-        "  \"conversions_failed\": %uA,\n"
-        "  \"conversions_bypassed\": %uA,\n"
-
-        /* Failure classification by root cause */
-        "  \"failures_conversion\": %uA,\n"
-        "  \"failures_resource_limit\": %uA,\n"
-        "  \"failures_system\": %uA,\n"
-
-        /* Performance: timing and I/O volume (raw + derived averages) */
-        "  \"conversion_time_sum_ms\": %uA,\n"
-        "  \"conversion_completed\": %uA,\n"
-        "  \"conversion_time_avg_ms\": %uA,\n"
-        "  \"input_bytes\": %uA,\n"
-        "  \"input_bytes_avg\": %uA,\n"
-        "  \"output_bytes\": %uA,\n"
-        "  \"output_bytes_avg\": %uA,\n"
-
-        /* Latency histogram buckets (cumulative, Prometheus-style) */
-        "  \"conversion_latency_buckets\": {\n"
-        "    \"le_10ms\": %uA,\n"
-        "    \"le_100ms\": %uA,\n"
-        "    \"le_1000ms\": %uA,\n"
-        "    \"gt_1000ms\": %uA\n"
-        "  },\n"
-
-        /* Decompression statistics by algorithm */
-        "  \"decompressions_attempted\": %uA,\n"
-        "  \"decompressions_succeeded\": %uA,\n"
-        "  \"decompressions_failed\": %uA,\n"
-        "  \"decompressions_gzip\": %uA,\n"
-        "  \"decompressions_deflate\": %uA,\n"
-        "  \"decompressions_brotli\": %uA,\n"
-        "  \"decompression_budget_exceeded_total\": %uA,\n"
-        "  \"decompression_format_error_total\": %uA,\n"
-        "  \"decompression_truncated_input_total\": %uA,\n"
-        "  \"decompression_io_error_total\": %uA,\n"
-        "  \"replay_buffer_errors_total\": %uA,\n"
-
-        /* Threshold-router path hit counters */
-        "  \"fullbuffer_path_hits\": %uA,\n"
-        "  \"incremental_path_hits\": %uA,\n"
-#ifdef MARKDOWN_STREAMING_ENABLED
-
-        /* Streaming engine counters (feature-gated) */
-        "  \"streaming_path_hits\": %uA,\n"
-        "  \"streaming\": {\n"
-        "    \"requests_total\": %uA,\n"
-        "    \"fallback_total\": %uA,\n"
-        "    \"succeeded_total\": %uA,\n"
-        "    \"failed_total\": %uA,\n"
-        "    \"postcommit_error_total\": %uA,\n"
-        "    \"precommit_failopen_total\": %uA,\n"
-        "    \"precommit_reject_total\": %uA,\n"
-        "    \"budget_exceeded_total\": %uA,\n"
-        "    \"shadow_total\": %uA,\n"
-        "    \"shadow_diff_total\": %uA,\n"
-        "    \"last_ttfb_ms\": %uA,\n"
-        "    \"last_peak_memory_bytes\": %uA\n"
-        "  },\n"
-#endif
-
-        /* Decision-chain entry count and per-reason skip counters */
-        "  \"requests_entered\": %uA,\n"
-        "  \"skips\": {\n"
-        "    \"config\": %uA,\n"
-        "    \"method\": %uA,\n"
-        "    \"status\": %uA,\n"
-        "    \"content_type\": %uA,\n"
-        "    \"size\": %uA,\n"
-        "    \"streaming\": %uA,\n"
-        "    \"auth\": %uA,\n"
-        "    \"range\": %uA,\n"
-        "    \"accept\": %uA,\n"
-        "    \"no_accept\": %uA,\n"
-        "    \"conditional\": %uA,\n"
-        "    \"compression_passthrough\": %uA\n"
-        "  },\n"
-
-        /* Operational totals and per-path aggregate counters */
-        "  \"failopen_count\": %uA,\n"
-        "  \"delivery_count\": %uA,\n"
-        "  \"decision_count\": %uA,\n"
-        "  \"estimated_token_savings\": %uA,\n"
-        "  \"parse_timeouts_total\": %uA,\n"
-        "  \"parse_budget_exceeded_total\": %uA,\n"
-        "  \"per_path\": {\n"
-        "    \"path_entries\": %uA,\n"
-        "    \"path_conversions\": %uA,\n"
-        "    \"path_conversion_time_sum_ms\": %uA,\n"
-        "    \"overflow_count\": %uA,\n"
-        "    \"paths\": [",
-
-        /* Conversion counters */
-        snapshot->conversions_attempted,
-        snapshot->conversions_succeeded,
-        snapshot->conversions_failed,
-        snapshot->conversions_bypassed,
-
-        /* Failure classification */
-        snapshot->failures_conversion,
-        snapshot->failures_resource_limit,
-        snapshot->failures_system,
-
-        /* Performance aggregates */
-        snapshot->conversion_time_sum_ms,
-        conversions_completed,
-        conversion_time_avg_ms,
-        snapshot->input_bytes,
-        input_bytes_avg,
-        snapshot->output_bytes,
-        output_bytes_avg,
-
-        /* Latency histogram */
-        snapshot->conversion_latency.le_10ms,
-        snapshot->conversion_latency.le_100ms,
-        snapshot->conversion_latency.le_1000ms,
-        snapshot->conversion_latency.gt_1000ms,
-
-        /* Decompression stats */
-        snapshot->decompressions.attempted,
-        snapshot->decompressions.succeeded,
-        snapshot->decompressions.failed,
-        snapshot->decompressions.gzip,
-        snapshot->decompressions.deflate,
-        snapshot->decompressions.brotli,
-        snapshot->decompressions.budget_exceeded_total,
-        snapshot->decompressions.format_error_total,
-        snapshot->decompressions.truncated_input_total,
-        snapshot->decompressions.io_error_total,
-        snapshot->results.replay_buffer_errors_total,
-
-        /* Path routing */
-        snapshot->path_hits.fullbuffer,
-        snapshot->path_hits.incremental,
-#ifdef MARKDOWN_STREAMING_ENABLED
-
-        /* Streaming counters */
-        snapshot->path_hits.streaming,
-        snapshot->streaming.requests_total,
-        snapshot->streaming.fallback_total,
-        snapshot->streaming.succeeded_total,
-        snapshot->streaming.failed_total,
-        snapshot->streaming.postcommit_error_total,
-        snapshot->streaming.precommit_failopen_total,
-        snapshot->streaming.precommit_reject_total,
-        snapshot->streaming.budget_exceeded_total,
-        snapshot->streaming.shadow_total,
-        snapshot->streaming.shadow_diff_total,
-        snapshot->streaming.last_ttfb_ms,
-        snapshot->streaming.last_peak_memory_bytes,
-#endif
-
-        /* Decision chain and operational totals */
-        snapshot->requests_entered,
-        snapshot->skips.config,
-        snapshot->skips.method,
-        snapshot->skips.status,
-        snapshot->skips.content_type,
-        snapshot->skips.size,
-        snapshot->skips.streaming,
-        snapshot->skips.auth,
-        snapshot->skips.range,
-        snapshot->skips.accept,
-        snapshot->skips.no_accept,
-        snapshot->skips.conditional,
-        snapshot->skips.compression_passthrough,
-        snapshot->results.failopen_count,
-        snapshot->results.delivery_count,
-        snapshot->results.decision_count,
-        snapshot->results.estimated_token_savings,
-        snapshot->results.parse_interrupts.parse_timeouts_total,
-        snapshot->results.parse_interrupts.parse_budget_exceeded_total,
-        snapshot->per_path.path_entries,
-        snapshot->per_path.path_conversions,
-        snapshot->per_path.path_conversion_time_sum_ms,
-        snapshot->per_path.overflow_count);
+    p = ngx_http_markdown_metrics_write_json_conversion(
+        p, end, snapshot, conversions_completed,
+        conversion_time_avg_ms, input_bytes_avg, output_bytes_avg);
+    p = ngx_http_markdown_metrics_write_json_routing(p, end, snapshot);
 
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
     p = ngx_http_markdown_json_write_path_details(p, end, snapshot);
+    if (p == NULL) {
+        return NULL;
+    }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
     p = ngx_slprintf(p, end, "\n    ]\n  },\n");
@@ -1048,7 +1048,7 @@ ngx_http_markdown_metrics_write_text_perf(
 
 
 static u_char *
-ngx_http_markdown_metrics_write_text(
+ngx_http_markdown_metrics_write_text_summary(
     u_char *p,
     u_char *end,
     const ngx_http_markdown_metrics_snapshot_t *snapshot,
@@ -1058,37 +1058,22 @@ ngx_http_markdown_metrics_write_text(
     ngx_atomic_uint_t output_bytes_avg)
 {
     /*
-     * Emit the full metrics payload as a human-readable plain-text
-     * report.  Sections mirror the JSON renderer: conversion counters,
-     * failure breakdown, performance aggregates with latency histogram,
-     * decompression stats, path routing, streaming counters, and
-     * decision-chain skip reasons.
-     *
-     * After the aggregate per-path section, if per-path tracking is
-     * active, walk the SHM RB-tree to emit individual per-path entries.
-     *
-     * The caller is responsible for detecting truncation (p >= end)
-     * after this function returns.
+     * Keep the text schema aligned with the snapshot fields and the JSON
+     * renderer.  The callers reserve the complete response buffer before
+     * entering this formatter, so ngx_slprintf may only advance to `end`.
      */
-    p = ngx_slprintf(p, end,
-        /* Header and conversion outcome summary */
+    return ngx_slprintf(p, end,
         "Markdown Filter Metrics\n"
         "=======================\n"
         "Conversions Attempted: %uA\n"
         "Conversions Succeeded: %uA\n"
         "Conversions Failed: %uA\n"
         "Conversions Bypassed: %uA\n"
-        "Conversions Completed: %uA\n"
-        "\n"
-
-        /* Failure classification by root cause */
+        "Conversions Completed: %uA\n\n"
         "Failure Breakdown:\n"
         "- Conversion Errors: %uA\n"
         "- Resource Limit Exceeded: %uA\n"
-        "- System Errors: %uA\n"
-        "\n"
-
-        /* Performance: timing, I/O volume, and latency histogram */
+        "- System Errors: %uA\n\n"
         "Performance:\n"
         "- Total Conversion Time: %uA ms\n"
         "- Average Conversion Time: %uA ms\n"
@@ -1099,10 +1084,7 @@ ngx_http_markdown_metrics_write_text(
         "- Latency <= 10ms: %uA\n"
         "- Latency <= 100ms: %uA\n"
         "- Latency <= 1000ms: %uA\n"
-        "- Latency > 1000ms: %uA\n"
-        "\n"
-
-        /* Decompression statistics by algorithm */
+        "- Latency > 1000ms: %uA\n\n"
         "Decompression Statistics:\n"
         "- Decompressions Attempted: %uA\n"
         "- Decompressions Succeeded: %uA\n"
@@ -1114,18 +1096,12 @@ ngx_http_markdown_metrics_write_text(
         "- Decompression Format Errors: %uA\n"
         "- Decompression Truncated Input: %uA\n"
         "- Decompression I/O Errors: %uA\n"
-        "- Replay Buffer Errors: %uA\n"
-        "\n"
-
-        /* Threshold-router path hit counters */
+        "- Replay Buffer Errors: %uA\n\n"
         "Path Routing:\n"
         "- Full-Buffer Path Hits: %uA\n"
         "- Incremental Path Hits: %uA\n"
 #ifdef MARKDOWN_STREAMING_ENABLED
-
-        /* Streaming engine counters (feature-gated) */
-        "- Streaming Path Hits: %uA\n"
-        "\n"
+        "- Streaming Path Hits: %uA\n\n"
         "Streaming:\n"
         "- Streaming Requests Total: %uA\n"
         "- Streaming Fallback Total: %uA\n"
@@ -1140,9 +1116,64 @@ ngx_http_markdown_metrics_write_text(
         "- Streaming Last TTFB (ms): %uA\n"
         "- Streaming Peak Memory (bytes): %uA\n"
 #endif
-        "\n"
+        "\n",
+        snapshot->conversions_attempted,
+        snapshot->conversions_succeeded,
+        snapshot->conversions_failed,
+        snapshot->conversions_bypassed,
+        conversions_completed,
+        snapshot->failures_conversion,
+        snapshot->failures_resource_limit,
+        snapshot->failures_system,
+        snapshot->conversion_time_sum_ms,
+        conversion_time_avg_ms,
+        snapshot->input_bytes,
+        input_bytes_avg,
+        snapshot->output_bytes,
+        output_bytes_avg,
+        snapshot->conversion_latency.le_10ms,
+        snapshot->conversion_latency.le_100ms,
+        snapshot->conversion_latency.le_1000ms,
+        snapshot->conversion_latency.gt_1000ms,
+        snapshot->decompressions.attempted,
+        snapshot->decompressions.succeeded,
+        snapshot->decompressions.failed,
+        snapshot->decompressions.gzip,
+        snapshot->decompressions.deflate,
+        snapshot->decompressions.brotli,
+        snapshot->decompressions.budget_exceeded_total,
+        snapshot->decompressions.format_error_total,
+        snapshot->decompressions.truncated_input_total,
+        snapshot->decompressions.io_error_total,
+        snapshot->results.replay_buffer_errors_total,
+        snapshot->path_hits.fullbuffer,
+        snapshot->path_hits.incremental
+#ifdef MARKDOWN_STREAMING_ENABLED
+        ,
+        snapshot->path_hits.streaming,
+        snapshot->streaming.requests_total,
+        snapshot->streaming.fallback_total,
+        snapshot->streaming.succeeded_total,
+        snapshot->streaming.failed_total,
+        snapshot->streaming.postcommit_error_total,
+        snapshot->streaming.precommit_failopen_total,
+        snapshot->streaming.precommit_reject_total,
+        snapshot->streaming.budget_exceeded_total,
+        snapshot->streaming.shadow_total,
+        snapshot->streaming.shadow_diff_total,
+        snapshot->streaming.last_ttfb_ms,
+        snapshot->streaming.last_peak_memory_bytes
+#endif
+        );
+}
 
-        /* Decision-chain entry count and per-reason skip counters */
+static u_char *
+ngx_http_markdown_metrics_write_text_decision(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot)
+{
+    return ngx_slprintf(p, end,
         "Decision Chain:\n"
         "- Requests Entered: %uA\n"
         "- Skips (Config): %uA\n"
@@ -1167,68 +1198,6 @@ ngx_http_markdown_metrics_write_text(
         "- Per-Path Conversions: %uA\n"
         "- Per-Path Conversion Time (ms): %uA\n"
         "- Per-Path Overflow Count: %uA\n",
-
-        /* Conversion counters */
-        snapshot->conversions_attempted,
-        snapshot->conversions_succeeded,
-        snapshot->conversions_failed,
-        snapshot->conversions_bypassed,
-        conversions_completed,
-
-        /* Failure classification */
-        snapshot->failures_conversion,
-        snapshot->failures_resource_limit,
-        snapshot->failures_system,
-
-        /* Performance aggregates */
-        snapshot->conversion_time_sum_ms,
-        conversion_time_avg_ms,
-        snapshot->input_bytes,
-        input_bytes_avg,
-        snapshot->output_bytes,
-        output_bytes_avg,
-
-        /* Latency histogram */
-        snapshot->conversion_latency.le_10ms,
-        snapshot->conversion_latency.le_100ms,
-        snapshot->conversion_latency.le_1000ms,
-        snapshot->conversion_latency.gt_1000ms,
-
-        /* Decompression stats */
-        snapshot->decompressions.attempted,
-        snapshot->decompressions.succeeded,
-        snapshot->decompressions.failed,
-        snapshot->decompressions.gzip,
-        snapshot->decompressions.deflate,
-        snapshot->decompressions.brotli,
-        snapshot->decompressions.budget_exceeded_total,
-        snapshot->decompressions.format_error_total,
-        snapshot->decompressions.truncated_input_total,
-        snapshot->decompressions.io_error_total,
-        snapshot->results.replay_buffer_errors_total,
-
-        /* Path routing */
-        snapshot->path_hits.fullbuffer,
-        snapshot->path_hits.incremental,
-#ifdef MARKDOWN_STREAMING_ENABLED
-
-        /* Streaming counters */
-        snapshot->path_hits.streaming,
-        snapshot->streaming.requests_total,
-        snapshot->streaming.fallback_total,
-        snapshot->streaming.succeeded_total,
-        snapshot->streaming.failed_total,
-        snapshot->streaming.postcommit_error_total,
-        snapshot->streaming.precommit_failopen_total,
-        snapshot->streaming.precommit_reject_total,
-        snapshot->streaming.budget_exceeded_total,
-        snapshot->streaming.shadow_total,
-        snapshot->streaming.shadow_diff_total,
-        snapshot->streaming.last_ttfb_ms,
-        snapshot->streaming.last_peak_memory_bytes,
-#endif
-
-        /* Decision chain and operational totals */
         snapshot->requests_entered,
         snapshot->skips.config,
         snapshot->skips.method,
@@ -1252,10 +1221,42 @@ ngx_http_markdown_metrics_write_text(
         snapshot->per_path.path_conversions,
         snapshot->per_path.path_conversion_time_sum_ms,
         snapshot->per_path.overflow_count);
+}
+
+static u_char *
+ngx_http_markdown_metrics_write_text(
+    u_char *p,
+    u_char *end,
+    const ngx_http_markdown_metrics_snapshot_t *snapshot,
+    ngx_atomic_uint_t conversions_completed,
+    ngx_atomic_uint_t conversion_time_avg_ms,
+    ngx_atomic_uint_t input_bytes_avg,
+    ngx_atomic_uint_t output_bytes_avg)
+{
+    /*
+     * Emit the full metrics payload as a human-readable plain-text
+     * report.  Sections mirror the JSON renderer: conversion counters,
+     * failure breakdown, performance aggregates with latency histogram,
+     * decompression stats, path routing, streaming counters, and
+     * decision-chain skip reasons.
+     *
+     * After the aggregate per-path section, if per-path tracking is
+     * active, walk the SHM RB-tree to emit individual per-path entries.
+     *
+     * The caller is responsible for detecting truncation (p >= end)
+     * after this function returns.
+     */
+    p = ngx_http_markdown_metrics_write_text_summary(
+        p, end, snapshot, conversions_completed,
+        conversion_time_avg_ms, input_bytes_avg, output_bytes_avg);
+    p = ngx_http_markdown_metrics_write_text_decision(p, end, snapshot);
 
     p = ngx_http_markdown_metrics_write_text_perf(p, end, &snapshot->perf);
 #if NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED
     p = ngx_http_markdown_text_write_path_details(p, end, snapshot);
+    if (p == NULL) {
+        return NULL;
+    }
 #endif /* NGX_HTTP_MARKDOWN_PER_PATH_WALK_ENABLED */
 
     return p;
@@ -1418,6 +1419,21 @@ ngx_http_markdown_text_path_entry_size(size_t path_len)
     return fixed_size + max_escaped + max_digits;
 }
 
+static ngx_int_t
+ngx_http_markdown_path_len_to_size(
+    const ngx_http_markdown_path_metric_node_t *node,
+    size_t *path_len)
+{
+    if (node == NULL || path_len == NULL
+        || node->path_len > NGX_MAX_SIZE_T_VALUE)
+    {
+        return NGX_ERROR;
+    }
+
+    *path_len = (size_t) node->path_len;
+    return NGX_OK;
+}
+
 
 /*
  * Estimate the maximum encoded size of the __other__ JSON entry.
@@ -1497,9 +1513,15 @@ ngx_http_markdown_json_walk_path_tree_bounded(
     ngx_http_markdown_path_detail_render_ctx_t *render)
 {
     const ngx_http_markdown_path_metric_node_t  *pnode;
+    size_t                                       path_len;
     size_t                                       needed;
     size_t                                       remaining;
 
+    /*
+     * In-order traversal preserves deterministic path output.  Every node
+     * either fits before the reserved tail or is folded into __other__;
+     * `render->failed` records malformed lengths for the caller.
+     */
     if (node == sentinel || render->pos >= render->end) {
         return render->pos;
     }
@@ -1507,11 +1529,20 @@ ngx_http_markdown_json_walk_path_tree_bounded(
     render->pos = ngx_http_markdown_json_walk_path_tree_bounded(
             node->left, sentinel, render);
 
+    if (render->failed) {
+        return render->pos;
+    }
+
     remaining = (size_t) (render->end - render->pos);
     if (remaining > render->tail_reserve) {
         pnode = (const ngx_http_markdown_path_metric_node_t *) node;
-        needed = ngx_http_markdown_json_path_entry_size(
-                     (size_t) pnode->path_len);
+        if (ngx_http_markdown_path_len_to_size(pnode, &path_len)
+            != NGX_OK)
+        {
+            render->failed = 1;
+            return render->pos;
+        }
+        needed = ngx_http_markdown_json_path_entry_size(path_len);
 
         if (needed <= remaining - render->tail_reserve) {
             u_char  *entry_start = render->pos;
@@ -1582,6 +1613,10 @@ ngx_http_markdown_json_walk_path_tree_bounded(
             render->omitted_nodes, 1);
     }
 
+    if (render->failed) {
+        return render->pos;
+    }
+
     render->pos = ngx_http_markdown_json_walk_path_tree_bounded(
             node->right, sentinel, render);
 
@@ -1596,6 +1631,7 @@ ngx_http_markdown_text_walk_path_tree_bounded(
     ngx_http_markdown_path_detail_render_ctx_t *render)
 {
     const ngx_http_markdown_path_metric_node_t  *pnode;
+    size_t                                       path_len;
     size_t                                       needed;
     size_t                                       remaining;
 
@@ -1606,11 +1642,20 @@ ngx_http_markdown_text_walk_path_tree_bounded(
     render->pos = ngx_http_markdown_text_walk_path_tree_bounded(
             node->left, sentinel, render);
 
+    if (render->failed) {
+        return render->pos;
+    }
+
     remaining = (size_t) (render->end - render->pos);
     if (remaining > render->tail_reserve) {
         pnode = (const ngx_http_markdown_path_metric_node_t *) node;
-        needed = ngx_http_markdown_text_path_entry_size(
-                     (size_t) pnode->path_len);
+        if (ngx_http_markdown_path_len_to_size(pnode, &path_len)
+            != NGX_OK)
+        {
+            render->failed = 1;
+            return render->pos;
+        }
+        needed = ngx_http_markdown_text_path_entry_size(path_len);
 
         if (needed <= remaining - render->tail_reserve) {
             u_char  *entry_start = render->pos;
@@ -1676,6 +1721,10 @@ ngx_http_markdown_text_walk_path_tree_bounded(
             render->omitted_nodes, 1);
     }
 
+    if (render->failed) {
+        return render->pos;
+    }
+
     render->pos = ngx_http_markdown_text_walk_path_tree_bounded(
             node->right, sentinel, render);
 
@@ -1705,6 +1754,7 @@ ngx_http_markdown_json_write_path_details(
     render.omitted_time_ms = 0;
     render.omitted_nodes = 0;
     render.entries_written = 0;
+    render.failed = 0;
 
     if (snapshot->per_path.path_entries > 0
         && ngx_http_markdown_metrics_shm_zone != NULL
@@ -1719,6 +1769,10 @@ ngx_http_markdown_json_write_path_details(
                 live_metrics->per_path.path_tree.root,
                 &live_metrics->per_path.sentinel, &render);
         ngx_shmtx_unlock(&shpool->mutex);
+    }
+
+    if (render.failed) {
+        return NULL;
     }
 
     if ((snapshot->per_path.unretained_conversions == 0
@@ -1773,6 +1827,7 @@ ngx_http_markdown_text_write_path_details(
     render.omitted_time_ms = 0;
     render.omitted_nodes = 0;
     render.entries_written = 0;
+    render.failed = 0;
 
     if (snapshot->per_path.path_entries > 0
         && ngx_http_markdown_metrics_shm_zone != NULL
@@ -1794,6 +1849,10 @@ ngx_http_markdown_text_write_path_details(
         render.pos = p;
     } else {
         return p;
+    }
+
+    if (render.failed) {
+        return NULL;
     }
 
     if ((snapshot->per_path.unretained_conversions == 0
@@ -1855,7 +1914,7 @@ ngx_http_markdown_metrics_render_response_body(
                 derived->conversion_time_avg_ms,
                 derived->input_bytes_avg,
                 derived->output_bytes_avg);
-        if (p >= b->end) {
+        if (p == NULL || p >= b->end) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
                 "markdown: JSON output "
@@ -1889,7 +1948,7 @@ ngx_http_markdown_metrics_render_response_body(
                 derived->conversion_time_avg_ms,
                 derived->input_bytes_avg,
                 derived->output_bytes_avg);
-        if (p >= b->end) {
+        if (p == NULL || p >= b->end) {
             ngx_log_error(NGX_LOG_ERR,
                 r->connection->log, 0,
                 "markdown: plain-text output "

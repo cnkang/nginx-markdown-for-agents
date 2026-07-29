@@ -231,8 +231,11 @@ LATENCY_METRICS = {"p50-latency-ms", "p95-latency-ms", "p99-latency-ms"}
 
 def _write_verdict_json(output_path: Path, payload: dict) -> None:
     """Write verdict JSON to an already-validated output path."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
+    validated_output_path = validate_write_path_within_root(
+        output_path, REPO_ROOT, purpose="verdict output"
+    )
+    validated_output_path.parent.mkdir(parents=True, exist_ok=True)
+    validated_output_path.write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
@@ -345,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
         baseline = load_json(str(baseline_path))
         current = load_json(str(current_path))
         thresholds = load_json(str(thresholds_path))
-    except Exception as e:
+    except (OSError, ValueError, TypeError) as e:
         print(f"ERROR: failed to load input files: {e}", file=sys.stderr)
         return 1
 

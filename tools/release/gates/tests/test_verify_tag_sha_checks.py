@@ -8,9 +8,11 @@ from pathlib import Path
 import pytest
 
 from tools.release.gates.verify_tag_sha_checks import (
+    MalformedPayloadError,
     RequiredCheck,
     _load_json,
     _status_errors,
+    _status_state_errors,
     main,
     required_checks,
     validate_required_checks,
@@ -704,3 +706,221 @@ def test_status_errors_helper_rejects_failed_status() -> None:
     errors = _status_errors(required, statuses, has_matching_run=False)
     assert len(errors) == 1
     assert "failure" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Malformed-payload fail-closed tests (Rule 13 / tag SHA verifier hardening)
+# ---------------------------------------------------------------------------
+
+
+def _status_with(context_field: object, state_field: object, status_id: int = 1) -> dict:
+    """Build a commit-status entry with arbitrary context/state field values."""
+    entry: dict = {"id": status_id, "created_at": "2026-07-28T00:00:00Z"}
+    if context_field is not _MISSING:
+        entry["context"] = context_field
+    if state_field is not _MISSING:
+        entry["state"] = state_field
+    return entry
+
+
+class _Missing:
+    """Sentinel for a missing dict key."""
+
+_MISSING = _Missing()
+
+
+def test_check_success_same_name_status_missing_state_blocks() -> None:
+    """A matching status whose 'state' field is absent must fail closed."""
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion="success")],
+        [{"statuses": [_status_with("CI / test", _MISSING)]}],
+        branch="main",
+    )
+    assert len(errors) == 1
+    assert "state" in errors[0]
+
+
+def test_check_success_same_name_status_state_null_blocks() -> None:
+    """A matching status whose state is JSON null must fail closed."""
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion="success")],
+        [{"statuses": [_status_with("CI / test", None)]}],
+        branch="main",
+    )
+    assert len(errors) == 1
+    assert "state" in errors[0]
+
+
+def test_check_success_same_name_status_state_int_blocks() -> None:
+    """A matching status whose state is a non-string (int) must fail closed."""
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion="success")],
+        [{"statuses": [_status_with("CI / test", 123)]}],
+        branch="main",
+    )
+    assert len(errors) == 1
+    assert "state" in errors[0]
+
+
+def test_pinned_check_success_malformed_same_name_status_blocks() -> None:
+    """A pinned check run success plus a malformed same-name status blocks."""
+    errors = validate_required_checks(
+        _required_rules_with_apps(("CI / test", 1234)),
+        [_check_run("CI / test", run_id=1, conclusion="success", app_id=1234)],
+        [{"statuses": [_status_with("CI / test", _MISSING)]}],
+        branch="main",
+    )
+    assert len(errors) == 1
+    assert "state" in errors[0]
+
+
+def test_status_only_context_missing_state_blocks() -> None:
+    """A status-only context (no check run) with missing state blocks."""
+    errors = validate_required_checks(
+        _required_rules("external / status"),
+        [],
+        [{"statuses": [_status_with("external / status", _MISSING)]}],
+        branch="main",
+    )
+    assert len(errors) == 1
+    assert "state" in errors[0]
+
+
+def test_status_context_null_fails_closed_no_crash() -> None:
+    """A status entry whose context is null must fail closed without crashing."""
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion="success")],
+        [{"statuses": [_status_with(None, "success")]}],
+        branch="main",
+    )
+    assert len(errors) == 1
+    assert "Malformed" in errors[0] or "context" in errors[0]
+
+
+def test_status_context_non_string_fails_closed_no_crash() -> None:
+    """A status entry whose context is an int must fail closed without crashing."""
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion="success")],
+        [{"statuses": [_status_with(12345, "success")]}],
+        branch="main",
+    )
+    assert len(errors) == 1
+    assert "Malformed" in errors[0] or "context" in errors[0]
+
+
+def test_malformed_statuses_collection_fails_closed() -> None:
+    """A 'statuses' collection that is not a list must fail closed."""
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion="success")],
+        [{"statuses": {"oops": "not a list"}}],
+        branch="main",
+    )
+    assert len(errors) == 1
+    assert "Malformed" in errors[0] or "statuses" in errors[0]
+
+
+def test_different_case_failure_status_blocks() -> None:
+    """A same-context status with different case and a failing state blocks."""
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion="success")],
+        [{"statuses": [_commit_status("ci / TEST", status_id=1, state="failure")]}],
+        branch="main",
+    )
+    assert len(errors) == 1
+    assert "failure" in errors[0]
+
+
+def test_both_valid_and_successful_passes() -> None:
+    """A valid check run and valid successful status both pass."""
+    assert validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion="success")],
+        [{"statuses": [_commit_status("CI / test", status_id=1, state="success")]}],
+        branch="main",
+    ) == []
+
+
+def test_non_dict_status_entry_fails_closed() -> None:
+    """A status entry that is not a JSON object must fail closed."""
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion="success")],
+        [{"statuses": ["not a dict"]}],
+        branch="main",
+    )
+    assert len(errors) == 1
+
+
+def test_malformed_check_runs_collection_fails_closed() -> None:
+    """A 'check_runs' collection that is not a list must fail closed."""
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [{"check_runs": {"oops": "not a list"}}],
+        branch="main",
+    )
+    assert len(errors) == 1
+    assert "Malformed" in errors[0] or "check_runs" in errors[0]
+
+
+def test_status_state_errors_helper_missing_state() -> None:
+    """_status_state_errors reports when state is missing on a present status."""
+    state, errs = _status_state_errors(
+        {"context": "CI / test"}, "CI / test"
+    )
+    assert state is None
+    assert len(errs) == 1
+    assert "state" in errs[0]
+
+
+def test_status_state_errors_helper_none_status() -> None:
+    """_status_state_errors returns no errors when no status exists."""
+    state, errs = _status_state_errors(None, "CI / test")
+    assert state is None
+    assert errs == []
+
+
+def test_normalize_status_context_rejects_non_string() -> None:
+    """_normalize_status_context rejects non-string contexts."""
+    from tools.release.gates.verify_tag_sha_checks import _normalize_status_context
+
+    with pytest.raises(MalformedPayloadError):
+        _normalize_status_context(None)
+    with pytest.raises(MalformedPayloadError):
+        _normalize_status_context(123)
+    with pytest.raises(MalformedPayloadError):
+        _normalize_status_context(["a"])
+
+def test_malformed_status_entry_in_status_path_fails_closed_no_crash() -> None:
+    """A malformed status entry returned from the status API must fail closed.
+
+    Regression test for the missing ``try/except MalformedPayloadError`` around
+    the ``_status_errors`` call path.  Before the fix this entry would surface
+    as a raw uncaught exception rather than a structured release-gate error.
+
+    We inject the error by passing a status entry whose ``context`` is ``None``;
+    ``_latest_matching_status`` rejects such entries as malformed, and the
+    new wrapper in ``_evaluate_one_required_check`` converts that to a
+    string error for the affected required check.
+    """
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion="success")],
+        [{
+            "statuses": [
+                _commit_status("CI / test", status_id=1, state="success"),
+                {"context": None, "state": "success", "id": 999},
+            ]
+        }],
+        branch="main",
+    )
+    # No raw exception; the gate reports a structured MalformedPayloadError.
+    assert len(errors) == 1
+    assert "Malformed" in errors[0]
+    assert "CI / test" in errors[0]

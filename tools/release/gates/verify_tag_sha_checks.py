@@ -37,7 +37,14 @@ class RequiredCheck:
 
 
 def _flatten_api_pages(payload: Any, collection_key: str | None = None) -> list[dict[str, Any]]:
-    """Flatten ``gh api --paginate --slurp`` output into API objects."""
+    """Flatten ``gh api --paginate --slurp`` output into API objects.
+
+    Non-dict entries inside a collection are skipped defensively.  A
+    collection key whose value is neither a list nor ``None`` is a
+    malformed payload and raises :class:`MalformedPayloadError` so the
+    release gate fail-closes instead of treating corruption as an empty
+    result.
+    """
     if isinstance(payload, list):
         flattened: list[dict[str, Any]] = []
         for page in payload:
@@ -46,10 +53,54 @@ def _flatten_api_pages(payload: Any, collection_key: str | None = None) -> list[
     if not isinstance(payload, dict):
         return []
     if collection_key is not None:
+        if collection_key not in payload:
+            # No collection key at all — treat the payload itself as a
+            # single API object (callers may pass a bare check-run dict).
+            return [payload]
         collection = payload.get(collection_key)
-        if isinstance(collection, list):
-            return [item for item in collection if isinstance(item, dict)]
+        if collection is None:
+            return []
+        if not isinstance(collection, list):
+            raise MalformedPayloadError(
+                f"API collection '{collection_key}' must be a list or null "
+                f"(got {type(collection).__name__})"
+            )
+        return [item for item in collection if isinstance(item, dict)]
     return [payload]
+
+
+def _flatten_status_pages(payload: Any) -> list[dict[str, Any]]:
+    """Flatten commit-status API pages, failing closed on non-dict entries.
+
+    Unlike :func:`_flatten_api_pages`, a status entry that is not a JSON
+    object is rejected so a corrupted Commit Status API response cannot
+    be silently treated as an empty result.
+    """
+    if isinstance(payload, list):
+        flattened: list[dict[str, Any]] = []
+        for page in payload:
+            flattened.extend(_flatten_status_pages(page))
+        return flattened
+    if not isinstance(payload, dict):
+        return []
+    if "statuses" not in payload:
+        return [payload]
+    collection = payload.get("statuses")
+    if collection is None:
+        return []
+    if not isinstance(collection, list):
+        raise MalformedPayloadError(
+            f"API collection 'statuses' must be a list or null "
+            f"(got {type(collection).__name__})"
+        )
+    entries: list[dict[str, Any]] = []
+    for item in collection:
+        if not isinstance(item, dict):
+            raise MalformedPayloadError(
+                "commit status entry must be a JSON object"
+            )
+        entries.append(item)
+    return entries
 
 
 def _checks_from_rule(rule: dict[str, Any]) -> list[RequiredCheck]:
@@ -129,38 +180,101 @@ def _matches_required_check(run: dict[str, Any], required: RequiredCheck) -> boo
     return _run_app_id(run) == required.integration_id
 
 
-def _normalize_status_context(value: str) -> str:
+class MalformedPayloadError(ValueError):
+    """Raised when GitHub API payload cannot be reliably interpreted.
+
+    A malformed payload must never be silently ignored or treated as a
+    successful release gate; the caller fails closed with an explicit
+    release-gate error instead of crashing or defaulting to success.
+    """
+
+
+def _normalize_status_context(value: Any) -> str:
     """Normalize a commit status context for case-insensitive comparison.
 
     GitHub's Commit Status API treats context as case-insensitive.
     https://docs.github.com/en/rest/commits/statuses?apiVersion=2026-03-10
+
+    Non-string or missing contexts are rejected because they cannot be
+    reliably matched; the caller fail-closes instead of guessing.
     """
+    if not isinstance(value, str):
+        raise MalformedPayloadError(
+            f"commit status context must be a string (got {type(value).__name__})"
+        )
     return value.casefold()
 
 
-def _latest_status_state(statuses: Any, context: str) -> str | None:
-    """Return the state of the newest commit status for context, if any.
+def _latest_matching_status(statuses: Any, context: str) -> dict[str, Any] | None:
+    """Return the newest commit status object matching ``context``.
 
     Context matching is case-insensitive per GitHub's Commit Status API.
+    Returns ``None`` when no commit status with that context exists.
+
+    Raises :class:`MalformedPayloadError` when a status entry that
+    appears to match is not a JSON object or lacks a usable ``context``
+    field; such payloads cannot be reliably interpreted and must fail
+    closed rather than be silently skipped.
     """
     if statuses is None:
         return None
     normalized_context = _normalize_status_context(context)
-    matching = [
-        status
-        for status in _flatten_api_pages(statuses, "statuses")
-        if _normalize_status_context(status.get("context", "")) == normalized_context
-    ]
+    matching: list[dict[str, Any]] = []
+    for status in _flatten_status_pages(statuses):
+        raw_context = status.get("context")
+        if raw_context is None:
+            # An entry with no context key cannot be matched; reject the
+            # whole payload so a broken API response never masquerades
+            # as "no matching status".
+            raise MalformedPayloadError(
+                "commit status entry is missing a 'context' field"
+            )
+        if _normalize_status_context(raw_context) == normalized_context:
+            matching.append(status)
     if not matching:
         return None
-    latest = max(matching, key=_run_order_key)
-    state = latest.get("state")
-    return state if isinstance(state, str) else None
+    return max(matching, key=_run_order_key)
+
+
+def _status_state_errors(
+    status: dict[str, Any] | None, context: str,
+) -> tuple[str | None, list[str]]:
+    """Validate the ``state`` field of a commit status.
+
+    Returns a tuple ``(state, errors)``:
+
+    * ``status`` is ``None`` → ``(None, [])`` (no matching status; the
+      caller decides whether that is acceptable for the context).
+    * ``status`` exists but ``state`` is missing, ``null``, or not a
+      recognizable string → ``(None, errors)`` so the caller fail-closes.
+    * ``state`` is a valid string → ``(state, [])``.
+    """
+    if status is None:
+        return None, []
+    state = status.get("state")
+    if state is None:
+        return None, [
+            f"Required check '{context}' has a commit status for the same "
+            f"context but its 'state' field is null; when a commit status "
+            f"exists for a required context it must report a valid state."
+        ]
+    if not isinstance(state, str):
+        return None, [
+            f"Required check '{context}' has a commit status for the same "
+            f"context but its 'state' field is not a string "
+            f"(got {type(state).__name__}); malformed GitHub API payloads "
+            f"cannot satisfy a release gate."
+        ]
+    return state, []
 
 
 def _has_matching_status(statuses: Any, context: str) -> bool:
-    """Check if a commit status exists for the given context (case-insensitive)."""
-    return _latest_status_state(statuses, context) is not None
+    """Check if a commit status exists for the given context (case-insensitive).
+
+    Malformed payloads raise :class:`MalformedPayloadError`; the caller
+    fail-closes rather than treating corruption as absence.
+    """
+    return _latest_matching_status(statuses, context) is not None
 
 
 def _status_errors(
@@ -181,6 +295,10 @@ def _status_errors(
     * Without the status, the gate is already satisfied or rejected by the
       check-run path alone.
 
+    Existence and validity are evaluated separately so a malformed status
+    payload (missing/non-string ``state``) fail-closes instead of being
+    silently treated as "no matching status".
+
     Policy per context:
     - Correct-app check run exists AND no commit status: satisfied by the
       check run.
@@ -191,12 +309,19 @@ def _status_errors(
     - No correct-app check run AND unpinned context: status must be
       ``success``.
     """
+    latest = _latest_matching_status(statuses, required.context)
+    state, state_errors = _status_state_errors(latest, required.context)
+    if state_errors:
+        # A matching status exists but its state is malformed; fail closed
+        # regardless of the check-run outcome so a corrupted payload can
+        # never satisfy a release gate.
+        return state_errors
+
     if required.integration_id is not None and has_matching_run:
         # A matching check run from the correct app exists.  GitHub's
         # same-name rule still requires the commit status to pass; fail
         # closed on any non-success status.
-        state = _latest_status_state(statuses, required.context)
-        if state is None:
+        if latest is None:
             # Same context not reported through the Commit Status API;
             # the check run alone satisfies the pinned requirement.
             return []
@@ -218,8 +343,7 @@ def _status_errors(
             f"commit statuses cannot satisfy an integration-pinned context."
         ]
 
-    state = _latest_status_state(statuses, required.context)
-    if state is None:
+    if latest is None:
         return [f"Required check '{required.context}' is missing on the tag SHA."]
     if state != "success":
         return [
@@ -282,25 +406,59 @@ def validate_required_checks(
     if not checks:
         return [f"{branch} has no active required status checks; refusing tag release"]
 
-    runs = _flatten_api_pages(check_runs, "check_runs")
+    try:
+        runs = _flatten_api_pages(check_runs, "check_runs")
+    except MalformedPayloadError as error:
+        return [f"Malformed check-runs payload: {error}"]
+
     errors: list[str] = []
     for required in checks:
-        matching_runs = [run for run in runs if _matches_required_check(run, required)]
+        errors.extend(
+            _evaluate_one_required_check(required, runs, statuses)
+        )
+    return errors
+
+
+def _evaluate_one_required_check(
+    required: RequiredCheck,
+    runs: list[dict[str, Any]],
+    statuses: Any,
+) -> list[str]:
+    """Evaluate a single required check against runs and statuses.
+
+    Encapsulates the per-check logic so ``validate_required_checks`` stays
+    a simple loop.  Malformed payloads are caught and reported as blocking
+    errors for the affected context.
+    """
+    try:
+        matching_runs = [
+            run for run in runs if _matches_required_check(run, required)
+        ]
         has_matching_run = bool(matching_runs)
         has_matching_status = (
             statuses is not None
-            and _latest_status_state(statuses, required.context) is not None
+            and _has_matching_status(statuses, required.context)
         )
+    except MalformedPayloadError as error:
+        return [
+            f"Malformed commit-status payload for required check "
+            f"'{required.context}': {error}"
+        ]
 
-        if not has_matching_run and not has_matching_status:
-            errors.extend(_missing_errors(required))
-            continue
+    if not has_matching_run and not has_matching_status:
+        return _missing_errors(required)
 
-        if has_matching_run:
-            errors.extend(_check_run_errors(required, matching_runs))
-
-        if has_matching_status:
+    errors: list[str] = []
+    if has_matching_run:
+        errors.extend(_check_run_errors(required, matching_runs))
+    if has_matching_status:
+        try:
             errors.extend(_status_errors(required, statuses, has_matching_run))
+        except MalformedPayloadError as error:
+            errors.append(
+                f"Malformed commit-status payload for required check "
+                f"'{required.context}': {error}"
+            )
     return errors
 
 

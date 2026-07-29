@@ -1218,6 +1218,7 @@ class RegexASTVisitor(ast.NodeVisitor):
     ) -> None:
         compile_line = self._lookup_compile_line(node, api)
         alternatives = self._static_pattern_alternatives(pattern_arg)
+        pattern_str: str | None = None
         if alternatives is not None:
             pattern_source = self._classify_static_pattern_source(pattern_arg)
         else:
@@ -1776,11 +1777,11 @@ def _handle_special_group(pattern: str, i: int, n: int) -> tuple[_Token, int]:
     return _Token(_TKind.GROUP_OPEN, pattern[i], i), k
 
 
-def _handle_close(pattern: str, i: int, n: int) -> tuple[_Token, int]:
+def _handle_close(pattern: str, i: int, _n: int) -> tuple[_Token, int]:
     return _Token(_TKind.GROUP_CLOSE, pattern[i], i), i + 1
 
 
-def _handle_quant_char(pattern: str, i: int, n: int) -> tuple[_Token, int]:
+def _handle_quant_char(pattern: str, i: int, _n: int) -> tuple[_Token, int]:
     return _Token(_TKind.QUANT, pattern[i], i), i + 1
 
 
@@ -1793,15 +1794,15 @@ def _handle_brace(pattern: str, i: int, n: int) -> tuple[_Token, int]:
     return _Token(_TKind.ATOM, pattern[i], i), i + 1
 
 
-def _handle_alt(pattern: str, i: int, n: int) -> tuple[_Token, int]:
+def _handle_alt(pattern: str, i: int, _n: int) -> tuple[_Token, int]:
     return _Token(_TKind.ALT, pattern[i], i), i + 1
 
 
-def _handle_anchor(pattern: str, i: int, n: int) -> tuple[_Token, int]:
+def _handle_anchor(pattern: str, i: int, _n: int) -> tuple[_Token, int]:
     return _Token(_TKind.ANCHOR, pattern[i], i), i + 1
 
 
-def _handle_dot(pattern: str, i: int, n: int) -> tuple[_Token, int]:
+def _handle_dot(pattern: str, i: int, _n: int) -> tuple[_Token, int]:
     return _Token(_TKind.ATOM, pattern[i], i), i + 1
 
 

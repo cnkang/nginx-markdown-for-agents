@@ -28,10 +28,10 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Current Release Line 0.9.1
 
-**Status:** Unreleased development and release-candidate line. 0.9.1
-introduces zero-copy output for streaming, gzip plus zlib/raw-deflate plus
-Brotli streaming decompression, and full-buffer copy reduction, all guarded by
-strict performance evidence gates.
+**Status:** Released 2026-07-29. 0.9.1 introduces zero-copy output for
+streaming, gzip plus zlib/raw-deflate plus Brotli streaming decompression,
+and full-buffer copy reduction, all guarded by strict performance evidence
+gates.
 
 ### Release 0.7.0 Updates
 
@@ -377,11 +377,51 @@ See [DEPLOYMENT_EXAMPLES.md](../guides/DEPLOYMENT_EXAMPLES.md) for configuration
 
 ### Current Release Line (0.9.x)
 
-The 0.9.x release line is the current maintained line. The initial release
-is 0.9.0 — a breaking release that consolidates the configuration surface
-and adds profile-based deployments, while preserving upgrade paths from 0.8.x.
+The 0.9.x release line is the current maintained line. The current release
+is 0.9.1 — a baseline-consolidation and compatibility-reset release that adds
+hybrid zero-copy streaming output, gzip/deflate/Brotli streaming decompression,
+performance evidence gates, and a doctor advice tool, on top of the 0.9.0
+breaking-release foundation.
 
-#### 0.9.0 (current)
+#### 0.9.1 (current)
+
+- **Hybrid zero-copy streaming output**: `markdown_streaming_zero_copy`
+  directive (default off) with pool-cleanup handler and fallback to pool-copy
+  when the zero-copy buffer factory fails.
+- **Streaming decompression routing**: gzip, zlib-wrapped deflate (RFC 1950
+  header sniffing), and Brotli bounded streaming decompression with member
+  lifecycle management and cumulative budget enforcement.
+- **Full-buffer compressed copy reduction**: header accumulation helper and
+  streaming-first routing reduce unnecessary copies for compressed responses.
+- **Performance evidence gate**: `make release-gates-check-091` (blocking for
+  release tags) plus `make perf-evidence-check` (report-only); module
+  benchmark harness exercises 8 scenarios including Brotli streaming.
+- **Doctor advice tool**: `make doctor` provides module-aware configuration
+  diagnostics and actionable fix suggestions.
+- **ADRs 0020–0024**: hybrid zero-copy pool cleanup, gzip/deflate streaming
+  decompression routing, performance evidence release gate, single public
+  streaming policy, and Brotli streaming decompression.
+- **Rules 56–62**: orphan comment closers (56), `#ifdef`-guarded function
+  visibility (57), workflow input injection (58), hardcoded HTTP status in
+  reject paths (59), E2E config directive consistency (60), performance
+  evidence provenance invariant (61), release-matrix key normalization
+  invariant (62); new detectors `detect_orphan_comment_close.py`,
+  `detect_ifdef_guard_visibility.sh`, `detect_workflow_input_injection.sh`,
+  `detect_hardcoded_http_status.sh`, `detect_e2e_streaming_config.py`;
+  new rule documentation `release-integrity.md`.
+- **Config simplification**: `markdown_streaming off|auto|force` is the sole
+  public processing-path selector; `markdown_streaming_engine` removed.
+  `markdown_auto_decompress` directive registration fix.
+- **FFI ABI reset**: bundled Rust/C boundary reset to ABI 1; NGINX validates
+  `markdown_abi_version()` during preconfiguration.
+- **Security**: right-most Forwarded element selection, Cache-Control
+  quote-aware parsing with malformed fail-closed, workflow input sanitization
+  via env vars, base URL FFI scheme propagation for HTTPS.
+- **Release infrastructure**: reproducible evidence binding, tag SHA gate
+  with commit-status and check-run dual verification, canonical benchmark
+  baseline with provenance enforcement.
+
+#### 0.9.0 (previous breaking release)
 
 - **Config V2 directives**: `markdown_error_policy`, `markdown_accept`,
   `markdown_trusted_proxies`, `markdown_limits`, `markdown_cache_validation`

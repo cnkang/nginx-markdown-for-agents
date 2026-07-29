@@ -36,6 +36,7 @@ def run_checker(*args: str) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,
+        check=False,
     )
 
 

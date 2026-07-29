@@ -68,6 +68,20 @@ def test_stale_symbol_check_fails_when_git_is_missing(monkeypatch, tmp_path):
     assert "git" in stderr
 
 
+def test_stale_symbol_check_reports_git_output_decode_failure(monkeypatch, tmp_path):
+    """Decode failures from git ls-files use the controlled gate error path."""
+    def raise_decode_error(*args, **kwargs):
+        raise UnicodeError("invalid git output")
+
+    monkeypatch.setattr(check_stale_symbols.subprocess, "run", raise_decode_error)
+
+    exit_code, stdout, stderr = check_stale_symbols.run_stale_symbol_check(tmp_path)
+
+    assert exit_code == 1
+    assert stdout == ""
+    assert "Error listing tracked files with git: invalid git output" in stderr
+
+
 def test_stale_symbol_check_fails_on_harness_rule_field_leak(tmp_path):
     """Naked old config field names in harness rules should fail."""
     repo = tmp_path

@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import run_corpus_benchmark as rcb  # noqa: E402
+from tools.lib import executable_validation  # noqa: E402
 from run_corpus_benchmark import discover_fixtures, write_examples  # noqa: E402
 
 
@@ -32,6 +33,20 @@ def test_run_converter_rejects_repo_symlink_to_external_command():
     assert output == ""
     assert exit_code == 1
     assert latency_ms == 0.0
+
+
+def test_approved_executable_rejects_writable_path_entry(monkeypatch, tmp_path):
+    """A PATH entry outside trusted system directories is not executable input."""
+    fake_git = tmp_path / "git"
+    fake_git.write_text("#!/bin/sh\n", encoding="utf-8")
+    fake_git.chmod(0o755)
+    monkeypatch.setattr(
+        executable_validation.shutil,
+        "which",
+        lambda _name: str(fake_git),
+    )
+
+    assert executable_validation.resolve_approved_executable("git") is None
 
 
 def test_discover_fixtures_persists_validated_html_path(tmp_path):

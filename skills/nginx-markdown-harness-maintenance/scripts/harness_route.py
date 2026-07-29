@@ -13,7 +13,8 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "tools", "lib"))
-from path_validation import validate_read_path  # noqa: E402
+# Direct script execution bootstraps this module root; Pylint cannot infer it.
+from path_validation import validate_read_path  # noqa: E402  # pylint: disable=import-error
 
 
 def _find_repo_root(start: Path) -> Path:

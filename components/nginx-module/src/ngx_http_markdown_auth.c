@@ -959,6 +959,8 @@ ngx_http_markdown_cache_control_has_directive(const ngx_str_t *value,
 {
     const u_char                       *p;
     const u_char                       *end;
+    const u_char                       *name_start;
+    const u_char                       *name_end;
     ngx_http_markdown_cc_directive_t    parsed;
     ngx_int_t                           rc;
 
@@ -979,11 +981,20 @@ ngx_http_markdown_cache_control_has_directive(const ngx_str_t *value,
             return 0;
         }
 
+        if (parsed.name_start == NULL || parsed.name_end == NULL
+            || parsed.name_end < parsed.name_start)
+        {
+            return 0;
+        }
+
+        name_start = parsed.name_start;
+        name_end = parsed.name_end;
+        /* CWE-190:guarded */
         if (!parsed.has_value
-            && (size_t) (parsed.name_end - parsed.name_start)
+            && (size_t) (name_end - name_start)
                == directive->len
             && ngx_http_markdown_token_equals_ignore_case(
-                   parsed.name_start, directive->data, directive->len))
+                   name_start, directive->data, directive->len))
         {
             return 1;
         }

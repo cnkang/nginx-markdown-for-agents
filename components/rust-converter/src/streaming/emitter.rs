@@ -19,7 +19,7 @@ use crate::security::escape_link_label;
 use crate::streaming::budget::MemoryBudget;
 use crate::streaming::sanitizer::is_dangerous_url;
 use crate::streaming::state_machine::{
-    StateMachineAction, StructuralContext, is_safe_code_fence_language,
+    StateMachineAction, StructuralContext, StructuralStateMachine,
 };
 
 fn longest_backtick_run(content: &str) -> usize {
@@ -462,7 +462,7 @@ impl IncrementalEmitter {
                 self.in_code_block = true;
                 self.code_fence_lang = lang
                     .as_deref()
-                    .filter(|value| is_safe_code_fence_language(value))
+                    .filter(|value| StructuralStateMachine::is_safe_code_fence_language(value))
                     .map(ToOwned::to_owned);
                 self.code_block_backtick_max = 0;
                 self.code_block_trailing_backticks = 0;
@@ -511,6 +511,56 @@ impl IncrementalEmitter {
 
     // ── Exit handlers ───────────────────────────────────────────────
 
+    fn handle_code_block_exit(&mut self, lang: &Option<String>) -> Result<(), ConversionError> {
+        let fence_len = (3usize).max(self.code_block_backtick_max + 1);
+        let fence_str = "`".repeat(fence_len);
+        let effective_lang = lang
+            .as_deref()
+            .filter(|value| StructuralStateMachine::is_safe_code_fence_language(value))
+            .map(ToOwned::to_owned)
+            .or_else(|| self.code_fence_lang.clone());
+        let opening_fence = match effective_lang {
+            Some(language) => format!("{}{}\n", fence_str, language),
+            None => format!("{}\n", fence_str),
+        };
+
+        self.write_str(&opening_fence)?;
+        let needs_separator = self.code_block_needs_closing_newline();
+        if !self.code_block_buffer.is_empty() {
+            self.check_buffer_budget(self.code_block_buffer.len())?;
+            self.buffer.extend_from_slice(&self.code_block_buffer);
+        }
+        if needs_separator {
+            self.write_raw(b"\n")?;
+        }
+        self.write_str(&format!("{}\n", fence_str))?;
+        self.in_code_block = false;
+        self.code_fence_lang = None;
+        self.code_block_backtick_max = 0;
+        self.code_block_trailing_backticks = 0;
+        self.code_block_buffer.clear();
+        self.last_was_newline = true;
+        self.needs_block_separator = true;
+        Ok(())
+    }
+
+    fn handle_link_exit(&mut self, href: &str) -> Result<(), ConversionError> {
+        self.in_link = false;
+        let text = std::mem::take(&mut self.link_text);
+        if text.trim().is_empty() {
+            return Ok(());
+        }
+
+        let escaped_text = escape_link_label(&text);
+        if href.trim().is_empty() || is_dangerous_url(href) {
+            self.write_str(&escaped_text)?;
+        } else {
+            let escaped = escape_markdown_destination(href);
+            self.write_str(&format!("[{}]({})", escaped_text, escaped))?;
+        }
+        Ok(())
+    }
+
     /// Handle closing a structural context by emitting the appropriate Markdown closing
     /// syntax, updating internal formatting state, and triggering flushes at block
     /// boundaries when required.
@@ -554,36 +604,7 @@ impl IncrementalEmitter {
                 self.write_str("\n")?;
                 self.last_was_newline = true;
             }
-            StructuralContext::CodeBlock(lang) => {
-                let fence_len = (3usize).max(self.code_block_backtick_max + 1);
-                let fence_str = "`".repeat(fence_len);
-                let effective_lang = lang
-                    .as_deref()
-                    .filter(|value| is_safe_code_fence_language(value))
-                    .map(ToOwned::to_owned)
-                    .or_else(|| self.code_fence_lang.clone());
-                let opening_fence = match effective_lang {
-                    Some(l) => format!("{}{}\n", fence_str, l),
-                    None => format!("{}\n", fence_str),
-                };
-                self.write_str(&opening_fence)?;
-                let needs_separator = self.code_block_needs_closing_newline();
-                if !self.code_block_buffer.is_empty() {
-                    self.check_buffer_budget(self.code_block_buffer.len())?;
-                    self.buffer.extend_from_slice(&self.code_block_buffer);
-                }
-                if needs_separator {
-                    self.write_raw(b"\n")?;
-                }
-                self.write_str(&format!("{}\n", fence_str))?;
-                self.in_code_block = false;
-                self.code_fence_lang = None;
-                self.code_block_backtick_max = 0;
-                self.code_block_trailing_backticks = 0;
-                self.code_block_buffer.clear();
-                self.last_was_newline = true;
-                self.needs_block_separator = true;
-            }
+            StructuralContext::CodeBlock(lang) => self.handle_code_block_exit(lang)?,
             StructuralContext::InlineCode => {
                 if self.in_link {
                     self.append_link_text("`");
@@ -595,19 +616,7 @@ impl IncrementalEmitter {
                 self.blockquote_depth = sm.blockquote_depth;
                 self.needs_block_separator = true;
             }
-            StructuralContext::Link(href) => {
-                self.in_link = false;
-                let text = std::mem::take(&mut self.link_text);
-                if !text.trim().is_empty() {
-                    let escaped_text = escape_link_label(&text);
-                    if href.trim().is_empty() || is_dangerous_url(href) {
-                        self.write_str(&escaped_text)?;
-                    } else {
-                        let escaped = escape_markdown_destination(href);
-                        self.write_str(&format!("[{}]({})", escaped_text, escaped))?;
-                    }
-                }
-            }
+            StructuralContext::Link(href) => self.handle_link_exit(href)?,
             StructuralContext::Image { .. } => {
                 // Image is fully emitted on Enter (self-closing style)
             }

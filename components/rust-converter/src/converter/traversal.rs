@@ -104,6 +104,143 @@ impl MarkdownConverter {
     }
 
     /// Internal element dispatcher shared by context and non-context entry points.
+    fn handle_void_form_control(&self, node: &Handle, output: &mut String) {
+        if let NodeData::Element { ref attrs, .. } = node.data {
+            let attrs_borrowed = attrs.borrow();
+            let input_type = attrs_borrowed
+                .iter()
+                .find(|a| a.name.local.as_ref() == "type")
+                .map(|a| a.value.to_string())
+                .unwrap_or_default()
+                .to_lowercase();
+
+            if matches!(input_type.as_str(), "hidden" | "submit" | "reset" | "image") {
+                if matches!(input_type.as_str(), "submit" | "reset")
+                    && let Some(value) = attrs_borrowed
+                        .iter()
+                        .find(|a| a.name.local.as_ref() == "value")
+                        .map(|a| a.value.to_string())
+                {
+                    let trimmed = value.trim();
+                    if !trimmed.is_empty() {
+                        output.push_str(trimmed);
+                        output.push(' ');
+                    }
+                }
+                return;
+            }
+
+            let text = attrs_borrowed
+                .iter()
+                .find(|a| a.name.local.as_ref() == "aria-label")
+                .or_else(|| {
+                    attrs_borrowed
+                        .iter()
+                        .find(|a| a.name.local.as_ref() == "placeholder")
+                })
+                .or_else(|| {
+                    attrs_borrowed
+                        .iter()
+                        .find(|a| a.name.local.as_ref() == "value")
+                })
+                .map(|a| a.value.to_string());
+
+            if let Some(text) = text {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    output.push_str(trimmed);
+                    output.push(' ');
+                }
+            }
+        }
+    }
+
+    fn handle_strip_element(
+        &self,
+        node: &Handle,
+        tag_name: &str,
+        output: &mut String,
+        depth: usize,
+        ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        self.security_validator
+            .validate_depth(depth)
+            .map_err(ConversionError::InvalidInput)?;
+
+        if self.security_validator.is_embedded_content(tag_name) {
+            let embedded = if let NodeData::Element { ref attrs, .. } = node.data {
+                let attrs_borrowed = attrs.borrow();
+                let url_attr = if tag_name == "object" { "data" } else { "src" };
+                let url = attrs_borrowed
+                    .iter()
+                    .find(|a| a.name.local.as_ref() == url_attr)
+                    .map(|a| a.value.to_string());
+                let title = attrs_borrowed
+                    .iter()
+                    .find(|a| a.name.local.as_ref() == "title")
+                    .map(|a| a.value.to_string());
+                Some((url, title))
+            } else {
+                None
+            };
+
+            if let Some((url, title)) = embedded
+                && let Some(url) = url
+                && let Some(safe_url) = self.security_validator.sanitize_url(url.trim())
+            {
+                let resolved_url = self.resolve_url(safe_url);
+                Self::emit_markdown_link(&[title.as_deref()], &resolved_url, &resolved_url, output);
+            }
+        }
+
+        self.traverse_children(node, output, depth + 1, ctx)
+    }
+
+    fn dispatch_element(
+        &self,
+        node: &Handle,
+        tag_name: &str,
+        output: &mut String,
+        depth: usize,
+        mut ctx: Option<&mut ConversionContext>,
+    ) -> Result<(), ConversionError> {
+        match tag_name {
+            "h1" => self.handle_heading_with_context(node, 1, output, depth, ctx.as_deref_mut())?,
+            "h2" => self.handle_heading_with_context(node, 2, output, depth, ctx.as_deref_mut())?,
+            "h3" => self.handle_heading_with_context(node, 3, output, depth, ctx.as_deref_mut())?,
+            "h4" => self.handle_heading_with_context(node, 4, output, depth, ctx.as_deref_mut())?,
+            "h5" => self.handle_heading_with_context(node, 5, output, depth, ctx.as_deref_mut())?,
+            "h6" => self.handle_heading_with_context(node, 6, output, depth, ctx.as_deref_mut())?,
+            "p" => self.handle_paragraph_with_context(node, output, depth, ctx.as_deref_mut())?,
+            "a" => self.handle_link_with_context(node, output, depth, ctx.as_deref_mut())?,
+            "img" => self.handle_image(node, output, depth)?,
+            "ul" => self.handle_list_with_context(node, output, 0, false, ctx.as_deref_mut())?,
+            "ol" => self.handle_list_with_context(node, output, 0, true, ctx.as_deref_mut())?,
+            "li" => self.handle_list_item_with_context(node, output, 0, ctx.as_deref_mut())?,
+            "pre" => {
+                self.handle_code_block_with_context(node, output, depth, ctx.as_deref_mut())?
+            }
+            "code" => self.handle_inline_code(node, output, depth, ctx.as_deref_mut())?,
+            "strong" | "b" => {
+                self.handle_bold_with_context(node, output, depth, ctx.as_deref_mut())?
+            }
+            "em" | "i" => {
+                self.handle_italic_with_context(node, output, depth, ctx.as_deref_mut())?
+            }
+            "table" => self.handle_table_with_context(node, output, depth, ctx.as_deref_mut())?,
+            "script" | "style" | "noscript" => {}
+            "video" | "audio" => {
+                self.extract_media_urls(node, tag_name, output);
+                self.traverse_children(node, output, depth + 1, ctx)?;
+            }
+            "source" => self.extract_source_url(node, output),
+            "track" => self.extract_track_url(node, output),
+            "area" => self.extract_area_link(node, output),
+            _ => self.traverse_children(node, output, depth + 1, ctx)?,
+        }
+        Ok(())
+    }
+
     pub(super) fn handle_element_internal(
         &self,
         node: &Handle,
@@ -136,156 +273,22 @@ impl MarkdownConverter {
         // method calls and attribute inspection for these branches.
         let is_fast_path = ctx.as_ref().is_some_and(|c| c.is_fast_path);
 
-        // Void form controls (<input>): extract descriptive text from attributes
-        // (placeholder, value, aria-label) so AI agents see the semantic content
-        // without raw HTML leaking into the Markdown output.
         if !is_fast_path && self.security_validator.is_void_form_control(tag_name) {
-            if let NodeData::Element { ref attrs, .. } = node.data {
-                let attrs_borrowed = attrs.borrow();
-                let input_type = attrs_borrowed
-                    .iter()
-                    .find(|a| a.name.local.as_ref() == "type")
-                    .map(|a| a.value.to_string())
-                    .unwrap_or_default()
-                    .to_lowercase();
-
-                // Skip hidden and submit-like inputs that carry no user-visible text
-                if matches!(input_type.as_str(), "hidden" | "submit" | "reset" | "image") {
-                    // For submit/reset, extract value as button-like text
-                    if matches!(input_type.as_str(), "submit" | "reset")
-                        && let Some(val) = attrs_borrowed
-                            .iter()
-                            .find(|a| a.name.local.as_ref() == "value")
-                            .map(|a| a.value.to_string())
-                    {
-                        let trimmed = val.trim();
-                        if !trimmed.is_empty() {
-                            output.push_str(trimmed);
-                            output.push(' ');
-                        }
-                    }
-                    return Ok(());
-                }
-
-                // Extract the most descriptive text: aria-label > placeholder > value
-                let text = attrs_borrowed
-                    .iter()
-                    .find(|a| a.name.local.as_ref() == "aria-label")
-                    .or_else(|| {
-                        attrs_borrowed
-                            .iter()
-                            .find(|a| a.name.local.as_ref() == "placeholder")
-                    })
-                    .or_else(|| {
-                        attrs_borrowed
-                            .iter()
-                            .find(|a| a.name.local.as_ref() == "value")
-                    })
-                    .map(|a| a.value.to_string());
-
-                if let Some(t) = text {
-                    let trimmed = t.trim();
-                    if !trimmed.is_empty() {
-                        output.push_str(trimmed);
-                        output.push(' ');
-                    }
-                }
-            }
+            self.handle_void_form_control(node, output);
             return Ok(());
         }
 
         // Form container elements: strip the tag but traverse children so
         // their text content is preserved in the Markdown output.
         if !is_fast_path && matches!(sanitize_action, SanitizeAction::StripElement) {
-            self.security_validator
-                .validate_depth(depth)
-                .map_err(ConversionError::InvalidInput)?;
-
-            // Embedded content elements (<iframe>, <object>): extract the
-            // src/data URL as a Markdown link so AI agents know what was
-            // embedded, then traverse fallback child content.
-            if self.security_validator.is_embedded_content(tag_name)
-                && let NodeData::Element { ref attrs, .. } = node.data
-            {
-                let attrs_borrowed = attrs.borrow();
-                // iframe uses "src", object uses "data"
-                let url_attr = if tag_name == "object" { "data" } else { "src" };
-                let url = attrs_borrowed
-                    .iter()
-                    .find(|a| a.name.local.as_ref() == url_attr)
-                    .map(|a| a.value.to_string());
-                let title = attrs_borrowed
-                    .iter()
-                    .find(|a| a.name.local.as_ref() == "title")
-                    .map(|a| a.value.to_string());
-
-                if let Some(u) = url {
-                    let trimmed_url = u.trim();
-                    if let Some(safe_url) = self.security_validator.sanitize_url(trimmed_url) {
-                        let resolved_url = self.resolve_url(safe_url);
-                        Self::emit_markdown_link(
-                            &[title.as_deref()],
-                            &resolved_url,
-                            &resolved_url,
-                            output,
-                        );
-                    }
-                }
-            }
-
-            return self.traverse_children(node, output, depth + 1, ctx);
+            return self.handle_strip_element(node, tag_name, output, depth, ctx);
         }
 
         self.security_validator
             .validate_depth(depth)
             .map_err(ConversionError::InvalidInput)?;
 
-        // All branches share one mutable timeout context, so we reborrow it for
-        // each handler call to satisfy the borrow checker and keep call sites tidy.
-        let mut ctx = ctx;
-        match tag_name {
-            "h1" => self.handle_heading_with_context(node, 1, output, depth, ctx.as_deref_mut())?,
-            "h2" => self.handle_heading_with_context(node, 2, output, depth, ctx.as_deref_mut())?,
-            "h3" => self.handle_heading_with_context(node, 3, output, depth, ctx.as_deref_mut())?,
-            "h4" => self.handle_heading_with_context(node, 4, output, depth, ctx.as_deref_mut())?,
-            "h5" => self.handle_heading_with_context(node, 5, output, depth, ctx.as_deref_mut())?,
-            "h6" => self.handle_heading_with_context(node, 6, output, depth, ctx.as_deref_mut())?,
-            "p" => self.handle_paragraph_with_context(node, output, depth, ctx.as_deref_mut())?,
-            "a" => self.handle_link_with_context(node, output, depth, ctx.as_deref_mut())?,
-            "img" => self.handle_image(node, output, depth)?,
-            // List indentation must track list nesting, not arbitrary DOM depth.
-            "ul" => self.handle_list_with_context(node, output, 0, false, ctx.as_deref_mut())?,
-            "ol" => self.handle_list_with_context(node, output, 0, true, ctx.as_deref_mut())?,
-            "li" => self.handle_list_item_with_context(node, output, 0, ctx.as_deref_mut())?,
-            "pre" => {
-                self.handle_code_block_with_context(node, output, depth, ctx.as_deref_mut())?
-            }
-            "code" => self.handle_inline_code(node, output, depth, ctx.as_deref_mut())?,
-            "strong" | "b" => {
-                self.handle_bold_with_context(node, output, depth, ctx.as_deref_mut())?
-            }
-            "em" | "i" => {
-                self.handle_italic_with_context(node, output, depth, ctx.as_deref_mut())?
-            }
-            "table" => self.handle_table_with_context(node, output, depth, ctx.as_deref_mut())?,
-            "script" | "style" | "noscript" => {}
-            // Media elements: extract src/poster URLs as links, then traverse
-            // fallback children so AI agents see both the resource URL and any
-            // alternative text the author provided.
-            "video" | "audio" => {
-                self.extract_media_urls(node, tag_name, output);
-                self.traverse_children(node, output, depth + 1, ctx)?;
-            }
-            // Void media children: extract src as a link so the resource URL
-            // is not silently lost.
-            "source" => self.extract_source_url(node, output),
-            "track" => self.extract_track_url(node, output),
-            // Image map areas: extract as [alt](href) links.
-            "area" => self.extract_area_link(node, output),
-            _ => self.traverse_children(node, output, depth + 1, ctx)?,
-        }
-
-        Ok(())
+        self.dispatch_element(node, tag_name, output, depth, ctx)
     }
 
     /// Traverse a DOM node and convert it to Markdown.

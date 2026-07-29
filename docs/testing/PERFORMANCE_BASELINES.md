@@ -2,7 +2,11 @@
 
 **Original Measurement Date:** 2026-02-26
 
-**Latest Scenario Measurement:** 2026-07-19 (Brotli streaming)
+**Latest Canonical Module Measurement:** 2026-07-28 (eight scenarios,
+including Brotli streaming, on native Linux x86_64 with NGINX 1.24.0)
+
+**Historical Scenario Measurement:** 2026-07-19 (Brotli streaming on NGINX
+1.30.4; archival only)
 **Scope:** Local release-build microbenchmarks for the Rust converter FFI path, the C conditional-request handler (`If-None-Match`) using the standalone test harness with real Rust FFI, and local real-NGINX HTTP E2E baselines.
 
 ## Summary
@@ -26,16 +30,43 @@ latency/TTFB may not be decreased, and path, fallback, output, memory, or
 environment evidence may not be changed. This makes the threshold more
 conservative without improving or fabricating measured evidence.
 
-Every normalized baseline must retain the raw workflow artifact and record the
+Every canonical baseline must retain the raw workflow artifact and record the
 artifact/run, original Git commit, adjustment rule, person or reason, and date
-in machine-locatable `baseline_policy` metadata. The current 0.9.1 module
-baseline identifies source commit `847f9013` and local run timestamp
-`2026-07-16T09:47:06Z`; its raw artifact location was not recorded and is
-explicitly documented with `historical_audit_exception: true`. The validator
-scopes that exception to this source commit and audit note; it is not an
-acceptable precedent for future normalized baselines.
+in machine-locatable `baseline_policy` metadata. The active 0.9.1 module
+baseline is a verbatim run from source commit
+`cab92df229b0b68cb02d88817a208e009f3ce106`, workflow run
+`30405031983/attempts/1`, measured at `2026-07-28T22:41:12Z`, with raw digest
+`a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12`.
+The former `historical_audit_exception` is retained only for historical audit
+coverage and is not an active release-baseline policy.
+
+The provenance schema is layered: `baseline_policy` contains source artifact,
+run, commit, digest, measurement timestamp, and normalization; top-level
+`module_benchmark` contains environment and measurement identity; scenario
+records contain scenario metadata, `load_integrity`, `metrics`, and
+`response_correctness`. `scenario_sources` is optional and receives
+environment-consistency validation only when present.
+
+The canonical module benchmark retains response probes at
+`perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
+output path. The workflow validates non-empty `.headers`, `.body`, and `.json`
+files for all eight scenarios, verifies each probe's verdict, curl exit code,
+body SHA-256, and validates the complete response-correctness schema
+(`http_status`, normalized `headers`, content metadata, body metadata,
+correctness markers, verdict, failure reason, and artifact names). It parses
+the final HTTP response block from each retained `.headers` artifact and
+requires the parsed status, headers, content type, and content encoding to
+match the probe JSON. The finalized `response_correctness` object must then
+match each probe object exactly before uploading canonical evidence. Canonical
+artifacts are retained for 30 days for release audit review.
 
 CI now also records non-blocking performance artifacts from the same `perf_baseline` example. The workflow stores the full benchmark output plus `/usr/bin/time -v` captures for the medium, medium-front-matter, and large single-sample runs. Those artifacts are for regression comparison and trend review; they are not merge-blocking thresholds yet.
+
+In module evidence, `fallback_rate` means pre-commit fail-open rate
+(`precommit_failopen_total / streaming_requests_total`). It is intentionally
+separate from `streaming_fallback_total`, which records requests routed away
+from the streaming path; the two counters must not be substituted for one
+another when interpreting a baseline.
 
 Key findings from this run:
 
