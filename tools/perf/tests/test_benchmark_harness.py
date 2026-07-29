@@ -1311,7 +1311,14 @@ class TestPortCleanupOnSignals:
         env["NGINX_BIN"] = str(stub)
         env.pop("MODULE_SO", None)
         return subprocess.Popen(
-            [BASH_BIN, str(BENCHMARK_SCRIPT), "--iterations", "1"],
+            [
+                BASH_BIN,
+                str(BENCHMARK_SCRIPT),
+                "--iterations",
+                "1",
+                "--scenario",
+                "plain-small",
+            ],
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1326,6 +1333,10 @@ class TestNginxConfigGeneration:
         """The blocking chunked Brotli scenario must fail before serving requests."""
         script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
 
+        assert (
+            'if [[ -z "$SCENARIO" || "$SCENARIO" == "brotli-streaming-first" ]]; then'
+            in script_content
+        )
         assert "import brotli; print(brotli.__version__)" in script_content
         assert "requirements-perf.txt" in script_content
         assert '"$BROTLI_VERSION" != "1.2.0"' in script_content
