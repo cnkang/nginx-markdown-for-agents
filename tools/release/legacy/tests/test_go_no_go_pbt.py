@@ -12,7 +12,7 @@ from hypothesis import given, settings
 from tools.release.legacy.release_constants import P0_SUBSPECS
 
 
-def go_no_go_decision(p0_statuses: dict[str, bool], p1_status: bool) -> str:
+def go_no_go_decision(p0_statuses: dict[str, bool], _p1_status: bool) -> str:
     """Determine Go/No-Go decision.
 
     Returns "Go" if all P0 sub-specs pass, regardless of P1 status.

@@ -18,7 +18,7 @@ from pathlib import Path
 TOOLS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS_DIR))
 
-import render_release_matrix_docs as rmd
+import render_release_matrix_docs as rmd  # noqa: E402 - direct test import
 
 
 # ---------------------------------------------------------------------------
@@ -559,7 +559,9 @@ def run_tests():
             test_fn()
             passed += 1
             print(f"  PASS: {test_fn.__name__}")
-        except Exception as e:
+        # This is a tiny test runner: every test failure must be counted so the
+        # remaining tests still execute and the final status stays actionable.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             failed += 1
             print(f"  FAIL: {test_fn.__name__}: {e}")
 

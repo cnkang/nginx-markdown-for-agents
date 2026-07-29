@@ -64,7 +64,7 @@ def test_valid_nginx_directive_streaming(suffix):
 def test_invalid_nginx_directive_no_prefix(name):
     """Names without markdown_ prefix must be rejected."""
     assume(not name.startswith("markdown_"))
-    assert not is_valid_nginx_directive(name), f"should reject: {name}"  # noqa: W0101
+    assert not is_valid_nginx_directive(name), f"should reject: {name}"
 
 
 # --- Prometheus metric tests ---
@@ -93,7 +93,7 @@ def test_valid_prometheus_metric_with_unit(suffix, unit):
 def test_invalid_prometheus_metric_no_prefix(name):
     """Names without nginx_markdown_ prefix must be rejected."""
     assume(not name.startswith("nginx_markdown_"))
-    assert not is_valid_prometheus_metric(name), f"should reject: {name}"  # noqa: W0101
+    assert not is_valid_prometheus_metric(name), f"should reject: {name}"
 
 
 # --- Reason code tests ---
@@ -127,7 +127,7 @@ def test_valid_c_macro(suffix):
 def test_invalid_c_macro_no_prefix(name):
     """Names without NGX_HTTP_MARKDOWN_ prefix must be rejected."""
     assume(not name.startswith("NGX_HTTP_MARKDOWN_"))
-    assert not is_valid_c_macro(name), f"should reject: {name}"  # noqa: W0101
+    assert not is_valid_c_macro(name), f"should reject: {name}"
 
 
 # --- Forbidden label tests ---

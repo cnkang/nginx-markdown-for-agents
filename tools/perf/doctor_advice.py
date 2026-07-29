@@ -646,9 +646,7 @@ def evaluate_rules(
 # ---------------------------------------------------------------------------
 
 
-def validate_metric_names(
-    metrics: Dict[str, Any], valid_names: set
-) -> List[str]:
+def validate_metric_names(valid_names: set) -> List[str]:
     """Warn about metric keys not found in the schema."""
     warnings: List[str] = []
     # Check all rule-referenced metrics are in schema
@@ -829,7 +827,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Validate metric names if schema available
     validation_warnings: List[str] = []
     if valid_names is not None:
-        validation_warnings = validate_metric_names(metrics, valid_names)
+        validation_warnings = validate_metric_names(valid_names)
 
     # Evaluate rules
     findings, skipped = evaluate_rules(

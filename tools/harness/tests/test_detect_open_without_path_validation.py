@@ -277,7 +277,7 @@ def f(path):
 ''',
         encoding="utf-8",
     )
-    errors, warnings = det.check_file(bad, strict=True)
+    errors, _warnings = det.check_file(bad, strict=True)
     assert len(errors) == 1
 
 

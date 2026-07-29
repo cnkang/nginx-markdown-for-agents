@@ -611,6 +611,6 @@ class TestEvaluateRulesSkipping:
                 "overload_total": 3,
             }
         }
-        findings, skipped = evaluate_rules(metrics)
+        findings, _skipped = evaluate_rules(metrics)
         rule_ids = [f.rule_id for f in findings]
         assert "D02" in rule_ids

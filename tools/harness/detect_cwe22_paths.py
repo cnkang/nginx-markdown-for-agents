@@ -31,6 +31,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import re
 import sys
 from pathlib import Path
@@ -280,9 +281,6 @@ def _is_tempfile_assignment(line: str) -> bool:
         or "_temp_output_path" in rhs
         or "tempfile." in rhs
     )
-
-
-from dataclasses import dataclass
 
 
 @dataclass

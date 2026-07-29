@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 INSTALLER = REPO_ROOT / "packaging" / "scripts" / "install-verified-rustup.sh"
 
 
-def _fake_curl(tmp_path: Path, payload: Path) -> tuple[Path, Path]:
+def _fake_curl(tmp_path: Path) -> tuple[Path, Path]:
     """Create a curl shim that copies inert local fixture bytes."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -55,7 +55,7 @@ printf '%s\\n' "$*" > "${RUSTUP_TEST_INVOCATION_LOG}"
 """
     )
     payload.chmod(0o755)
-    bin_dir, url_log = _fake_curl(tmp_path, payload)
+    bin_dir, url_log = _fake_curl(tmp_path)
     checksums = tmp_path / "checksums.sha256"
     checksums.write_text(
         f"{expected_hash}  rustup-init-1.28.2-aarch64-apple-darwin\n"
