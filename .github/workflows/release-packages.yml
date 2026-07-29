@@ -861,11 +861,6 @@ jobs:
           MODULE_SO: ${{ github.workspace }}/module-runtime/ngx_http_markdown_filter_module.so
           BENCHMARK_NGINX_VERSION: ${{ steps.bench-nginx.outputs.bench_nginx_version }}
         run: |
-          chmod +x "${NGINX_BIN}"
-          # Record the benchmark environment identity for evidence.
-          echo "Benchmark NGINX version: ${BENCHMARK_NGINX_VERSION}"
-          echo "Architecture: $(uname -m)"
-          "${NGINX_BIN}" -V 2>&1 | head -3
           # Run the release gate validators that are not already covered
           # by the build/package/smoke-test jobs above. The full
           # release-gates-check targets include build/test/fuzz which are
@@ -889,10 +884,44 @@ jobs:
           make docs-check
           bash tools/harness/detect_version_consistency.sh
           bash tools/release/gates/check_install_layout.sh dist/*.deb dist/*.rpm
-          # Run the 0.9.1 performance evidence gate in blocking mode.
-          # Tag releases require module benchmark evidence; the NGINX_BIN
-          # from the build job provides the module-enabled binary.
+          # The module-enabled NGINX binary is built in the AlmaLinux release
+          # image and links to libcrypt.so.2. Run the benchmark in that same
+          # immutable runtime family instead of assuming Ubuntu provides the
+          # EL9 ABI. Keep the host-side validators above on Ubuntu because
+          # they intentionally inspect DEB/RPM layouts with native tooling.
+          docker run --rm \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            --workdir /workspace \
+            --env GITHUB_REF \
+            --env GITHUB_SHA \
+            --env NGINX_BIN=/workspace/module-runtime/nginx \
+            --env MODULE_SO=/workspace/module-runtime/ngx_http_markdown_filter_module.so \
+            --env BENCHMARK_NGINX_VERSION \
+            almalinux@sha256:d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743 \
+            bash -se <<'CONTAINER_SCRIPT'
+          set -euo pipefail
+          dnf install -y \
+            brotli \
+            ca-certificates \
+            curl-minimal \
+            findutils \
+            git \
+            gawk \
+            gzip \
+            httpd-tools \
+            libxcrypt \
+            procps-ng \
+            python3 \
+            python3-pip \
+            tar
+          git config --global --add safe.directory /workspace
+          python3 -m pip install --requirement requirements-perf.txt
+          chmod +x "${NGINX_BIN}"
+          echo "Benchmark NGINX version: ${BENCHMARK_NGINX_VERSION}"
+          echo "Architecture: $(uname -m)"
+          "${NGINX_BIN}" -V 2>&1 | head -3
           python3 tools/perf/evidence_gate.py --mode blocking
+          CONTAINER_SCRIPT
         shell: bash
 
   # ─────────────────────────────────────────────────────────────────────────────
