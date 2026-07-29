@@ -60,6 +60,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.path_validation import validate_read_path
+from lib.executable_validation import resolve_approved_executable
 import report_utils
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -520,9 +521,12 @@ def evaluate_parity_dual_threshold(
 
 def _get_git_commit() -> str:
     """Return the current short git commit hash, or 'unknown' if unavailable."""
+    git_path = resolve_approved_executable("git")
+    if git_path is None:
+        return "unknown"
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+            [git_path, "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
             timeout=5,

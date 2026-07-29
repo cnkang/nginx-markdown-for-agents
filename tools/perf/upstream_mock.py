@@ -19,6 +19,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from tools.lib.executable_validation import (  # noqa: E402 - direct script import
+    resolve_approved_executable,
+)
 from tools.lib.path_validation import validate_read_path  # noqa: E402 - direct script import
 
 # Brotli compression support: prefer the Python module, fall back to CLI.
@@ -27,9 +30,7 @@ BROTLI_CLI: str | None = None
 try:
     import brotli as BROTLI_MODULE  # type: ignore[no-redef]
 except ImportError:
-    import shutil
-
-    BROTLI_CLI = shutil.which("brotli")
+    BROTLI_CLI = resolve_approved_executable("brotli")
 
 
 def _compress_brotli(data: bytes) -> bytes | None:
@@ -77,9 +78,8 @@ def _iter_brotli_chunks(data: bytes, chunk_size: int) -> list[bytes]:
 class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
     """HTTP handler with dynamic chunking, gzip, deflate, and Brotli encoding support."""
 
-    def log_message(self, format_string: str, *args: object) -> None:
+    def log_message(self, _format_string: str, *_args: object) -> None:
         """Silence standard request logging to clean terminal output."""
-        del format_string, args
 
     def do_GET(self) -> None:  # pylint: disable=invalid-name
         """Handle GET requests dynamically serving corpus files."""

@@ -38,6 +38,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+from lib.executable_validation import resolve_approved_executable  # noqa: E402
 from lib.path_validation import validate_read_path  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -135,10 +136,17 @@ def parse_package(path: Path, expected_version: str | None = None) -> dict:
 
 def git_info(commit_override: str | None = None) -> dict:
     """Get git repository info."""
+    git_path = resolve_approved_executable("git")
+    if git_path is None:
+        return {
+            "repository": "unknown/unknown",
+            "commit": commit_override or "unknown",
+        }
     try:
         repo_raw = (
             subprocess.check_output(
-                ["git", "remote", "get-url", "origin"], stderr=subprocess.DEVNULL
+                [git_path, "remote", "get-url", "origin"],
+                stderr=subprocess.DEVNULL,
             )
             .decode()
             .strip()
@@ -155,7 +163,7 @@ def git_info(commit_override: str | None = None) -> dict:
         try:
             commit = (
                 subprocess.check_output(
-                    ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
+                    [git_path, "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
                 )
                 .decode()
                 .strip()
