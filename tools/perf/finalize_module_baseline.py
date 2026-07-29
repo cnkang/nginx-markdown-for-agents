@@ -135,12 +135,13 @@ def _validate_source_run(source_run: str) -> list[str]:
     return validate_source_run(source_run, repo_root=REPO_ROOT)
 
 
-_SOURCE_RUN_ID_RE = re.compile(r"^[1-9][0-9]*$")
+_SOURCE_RUN_ID_RE = re.compile(r"^[1-9]\d*$", re.ASCII)
 _SOURCE_RUN_URL_RE = re.compile(
     r"^https://github\.com/"
     r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
-    r"/actions/runs/[1-9][0-9]*"
-    r"/attempts/[1-9][0-9]*$"
+    r"/actions/runs/[1-9]\d*"
+    r"/attempts/[1-9]\d*$",
+    re.ASCII,
 )
 
 
@@ -530,56 +531,39 @@ def _check_refinalize(args: argparse.Namespace, raw_report: dict) -> int | None:
     return None
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv)
+def _print_errors(errors: list[str]) -> int:
+    """Print validation errors and return the command failure status."""
+    for err in errors:
+        print(f"ERROR: {err}", file=sys.stderr)
+    return 1
 
-    errors: list[str] = []
-    if not _FULL_SHA_RE.fullmatch(args.source_git_commit):
-        errors.append(
-            f"--source-git-commit must be a full 40-character lowercase git "
-            f"SHA (got {args.source_git_commit!r})"
-        )
 
-    if errors:
-        for err in errors:
-            print(f"ERROR: {err}", file=sys.stderr)
-        return 1
-
-    io_result = _resolve_io_paths(args)
-    if isinstance(io_result, int):
-        return io_result
-    raw_input_path, output_path, source_run, source_artifact = io_result
-
-    errors.extend(_validate_source_run(source_run))
-    if errors:
-        for err in errors:
-            print(f"ERROR: {err}", file=sys.stderr)
-        return 1
-
+def _load_raw_report(raw_input_path: Path) -> dict | None:
+    """Read and decode the retained raw report after path validation."""
     try:
-        validated_raw_input = validate_read_path(
+        validated_path = validate_read_path(
             raw_input_path, purpose="raw baseline report"
         )
         raw_report = json.loads(
-            validated_raw_input.read_text(encoding="utf-8")
+            validated_path.read_text(encoding="utf-8")
         )
     except (json.JSONDecodeError, OSError) as exc:
         print(f"ERROR: failed to read raw report: {exc}", file=sys.stderr)
-        return 1
+        return None
+    if not isinstance(raw_report, dict):
+        print("ERROR: raw report must be a JSON object", file=sys.stderr)
+        return None
+    return raw_report
 
-    if commit_errors := _validate_raw_commit_match(raw_report, args.source_git_commit):
-        for err in commit_errors:
-            print(f"ERROR: {err}", file=sys.stderr)
-        return 1
 
-    ts_result = _resolve_measurement_timestamp(args, raw_report)
-    if isinstance(ts_result, int):
-        return ts_result
-    measurement_timestamp = ts_result
-
-    if rc := _check_refinalize(args, raw_report):
-        return rc
-
+def _finalize_report(
+    args: argparse.Namespace,
+    io_result: tuple[Path, Path, str, str],
+    measurement_timestamp: str,
+    raw_report: dict,
+) -> int:
+    """Build the policy-bound report and atomically write the output."""
+    raw_input_path, output_path, source_run, source_artifact = io_result
     raw_sha256 = _sha256_file(raw_input_path)
     if not _SHA256_RE.fullmatch(raw_sha256):
         print(
@@ -622,6 +606,47 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  source_artifact_sha256: {raw_sha256}")
     print(f"  measurement_timestamp: {measurement_timestamp}")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+
+    if not _FULL_SHA_RE.fullmatch(args.source_git_commit):
+        return _print_errors([
+            f"--source-git-commit must be a full 40-character lowercase git "
+            f"SHA (got {args.source_git_commit!r})",
+        ])
+
+    io_result = _resolve_io_paths(args)
+    if isinstance(io_result, int):
+        return io_result
+    raw_input_path, _output_path, source_run, _source_artifact = io_result
+
+    source_errors = _validate_source_run(source_run)
+    if source_errors:
+        return _print_errors(source_errors)
+
+    raw_report = _load_raw_report(raw_input_path)
+    if raw_report is None:
+        return 1
+
+    commit_errors = _validate_raw_commit_match(raw_report, args.source_git_commit)
+    if commit_errors:
+        return _print_errors(commit_errors)
+
+    ts_result = _resolve_measurement_timestamp(args, raw_report)
+    if isinstance(ts_result, int):
+        return ts_result
+
+    if rc := _check_refinalize(args, raw_report):
+        return rc
+
+    return _finalize_report(
+        args,
+        io_result,
+        ts_result,
+        raw_report,
+    )
 
 
 if __name__ == "__main__":
