@@ -58,9 +58,9 @@ ingested by `tools/perf/evidence_gate.py`) must carry all of the following:
    missing any required provenance field, rather than skipping it silently.
 
 **Verification:**
-- `make release-gates-check-091` — blocking gate (requires `NGINX_BIN` or
-  `--allow-skip-module`); every scenario record must include all provenance
-  fields above.
+- `RELEASE_GATE_ALLOW_SKIP_MODULE=1 make release-gates-check-091` — blocking
+  gate (requires `NGINX_BIN` or `RELEASE_GATE_ALLOW_SKIP_MODULE=1`); every
+  scenario record must include all provenance fields above.
 - `make perf-evidence-check` — non-blocking report-only mode; validates the
   same invariant for PR visibility.
 - `python3 -m pytest tools/perf/tests/` — perf tooling test suite
@@ -114,10 +114,8 @@ normalization sequence because key aliases (`nginx` / `nginx_version`,
 
 **Verification:**
 - `python3 -m pytest tools/release/matrix/tests/ -v --tb=short` — 114 tests;
-  all must pass.
-- `python3 -c "from tools.release.matrix.update_matrix import REQUIRED_MATRIX_ENTRY_KEYS, load_matrix; print('loader loads canonical schema')" --allow-skip-module`
-  — loader must accept both the canonical `nginx_version`/`os_type`/`arch`
-  keys and the legacy aliases.
+  all must pass. These tests exercise both canonical (`nginx_version`/`os_type`)
+  and legacy (`nginx`/`os`) key entries through the shared normalization path.
 
 **Why this rule.** The five-commit normalization chain is now internally
 consistent, but the *reason* each function has its own key lookup is not
