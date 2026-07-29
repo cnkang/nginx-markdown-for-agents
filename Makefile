@@ -775,7 +775,7 @@ release-gates-check-090: release-gates-check-080-regression
 	$(MAKE) test-production-examples-nginx-t
 	$(MAKE) test-production-examples-e2e-smoke
 	$(MAKE) complexity-check
-	python3 tools/release/gates/validate_release_gates_090.py
+	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_090.py
 	@echo "=== 0.9.0 Release Gates: PASS ==="
 
 # perf-evidence-check: Non-blocking performance evidence gate (report-only).
