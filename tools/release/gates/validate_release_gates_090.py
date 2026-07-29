@@ -373,28 +373,43 @@ def check_conditional_bypass_header_filter(repo: Path) -> dict:
     return {"name": "conditional_bypass_header_filter", "status": "pass"}
 
 
+def _strip_block_comments(line: str, in_comment: bool) -> tuple[str, bool]:
+    """Remove /* ... */ spans from *line*, carrying *in_comment* state."""
+    parts: list[str] = []
+    i = 0
+    while i < len(line):
+        if in_comment:
+            end = line.find('*/', i)
+            if end == -1:
+                break
+            i = end + 2
+            in_comment = False
+        else:
+            start = line.find('/*', i)
+            if start == -1:
+                parts.append(line[i:])
+                break
+            parts.append(line[i:start])
+            i = start + 2
+            in_comment = True
+    return ''.join(parts), in_comment
+
+
 def iter_c_code_lines(block: str) -> list[str]:
     """Return non-comment, non-empty C source lines from a short snippet.
 
-    Strips both block comments (/* ... */) and skips blank lines so that
-    subsequent string searches operate on actual code, not comment text.
-    Used to verify that a code path calls a specific function rather than
-    merely mentioning it in a comment.
+    Strips block comments (/* ... */) including inline and multi-line spans,
+    then skips blank lines so that subsequent string searches operate on
+    actual code, not comment text.  Used to verify that a code path calls a
+    specific function rather than merely mentioning it in a comment.
     """
-    code_lines = []
+    code_lines: list[str] = []
     in_comment = False
     for line in block.split('\n'):
-        s = line.strip()
-        if not s:
-            continue
-        if s.startswith('/*'):
-            in_comment = not s.endswith('*/')
-            continue
-        if in_comment:
-            if '*/' in s:
-                in_comment = False
-            continue
-        code_lines.append(s)
+        cleaned, in_comment = _strip_block_comments(line, in_comment)
+        cleaned = cleaned.strip()
+        if cleaned:
+            code_lines.append(cleaned)
     return code_lines
 
 
