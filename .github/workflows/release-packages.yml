@@ -828,7 +828,7 @@ jobs:
           # Select the oldest (first) release-blocking NGINX version as
           # the canonical benchmark runtime.  Using a single, explicit
           # version avoids the filename collision that occurs when
-          # multiple module-so-*-x86_64 artifacts are merged into the
+          # multiple module-so-*-amd64 artifacts are merged into the
           # same directory (they all contain build/nginx and
           # build/ngx_http_markdown_filter_module.so).
           BENCH_VERSION="$(python3 -c "
@@ -851,7 +851,7 @@ jobs:
           # artifact.  This avoids the filename collision from
           # merge-multiple when multiple NGINX versions produce the same
           # build/nginx and build/ngx_http_markdown_filter_module.so names.
-          name: module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-x86_64
+          name: module-so-${{ steps.bench-nginx.outputs.bench_nginx_version }}-amd64
           path: module-runtime
 
       - name: Run tag release gates
