@@ -251,6 +251,11 @@ def test_tag_release_job_supplies_module_enabled_nginx():
     assert "BENCHMARK_NGINX_VERSION" in workflow, (
         "Release gate must record the benchmark NGINX version for evidence"
     )
+    assert "docker run --rm" in workflow
+    assert (
+        "--env NGINX_BIN=/workspace/module-runtime/nginx" in workflow
+    )
+    assert "libxcrypt" in workflow
     assert "python3 tools/perf/evidence_gate.py --mode blocking" in workflow
     assert "evidence_gate.py --blocking" not in workflow
 
