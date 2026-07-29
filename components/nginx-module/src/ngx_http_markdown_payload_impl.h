@@ -930,7 +930,6 @@ ngx_http_markdown_decompression_error(uint32_t ffi_rc)
  * Parameters:
  *   r                  - NGINX request
  *   result             - Rust-owned decompression result
- *   input_size         - compressed input size for debug logging
  *   decompressed_chain - output chain (single buffer on success)
  *
  * Returns:
@@ -942,7 +941,6 @@ static ngx_int_t
 ngx_http_markdown_wrap_empty_decompression(
     ngx_http_request_t *r,
     FFIDecompResult *result,
-    size_t input_size,
     ngx_chain_t **decompressed_chain)
 {
     ngx_buf_t      *b;
@@ -965,9 +963,8 @@ ngx_http_markdown_wrap_empty_decompression(
     cl->buf = b;
     cl->next = NULL;
     *decompressed_chain = cl;
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown: rust decompress succeeded with empty output, "
-                  "input=%uz", input_size);
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: rust decompress succeeded with empty output");
     return NGX_OK;
 }
 
@@ -975,7 +972,6 @@ static ngx_int_t
 ngx_http_markdown_wrap_decompression_output(
     ngx_http_request_t *r,
     FFIDecompResult *result,
-    size_t input_size,
     ngx_chain_t **decompressed_chain)
 {
     size_t          output_len;
@@ -1010,9 +1006,9 @@ ngx_http_markdown_wrap_decompression_output(
     cl->buf = b;
     cl->next = NULL;
     *decompressed_chain = cl;
-    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "markdown: rust decompress succeeded, input=%uz, "
-                  "output=%uz", input_size, output_len);
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                  "markdown: rust decompress succeeded, output=%uz",
+                  output_len);
     return NGX_OK;
 }
 #endif /* !NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
@@ -1117,11 +1113,11 @@ ngx_http_markdown_decompress_via_rust(
 
     if (result.output_len == 0) {
         return ngx_http_markdown_wrap_empty_decompression(
-            r, &result, input_size, decompressed_chain);
+            r, &result, decompressed_chain);
     }
 
     return ngx_http_markdown_wrap_decompression_output(
-        r, &result, input_size, decompressed_chain);
+        r, &result, decompressed_chain);
 #endif /* NGX_HTTP_MARKDOWN_NO_RUST_DECOMPRESS */
 }
 

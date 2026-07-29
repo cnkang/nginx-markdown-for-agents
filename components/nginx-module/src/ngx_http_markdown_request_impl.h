@@ -677,7 +677,7 @@ ngx_http_markdown_route_streaming_compression(
 static void
 ngx_http_markdown_log_buffered_decision_path(
     ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf,
     const char *conditional_result,
     const char *conversion_status,
@@ -703,7 +703,7 @@ ngx_http_markdown_log_buffered_decision_path(
  */
 static void
 ngx_http_markdown_update_deferred_body_path(
-    ngx_http_request_t *r,
+    const ngx_http_request_t *r,
     ngx_http_markdown_ctx_t *ctx,
     const ngx_http_markdown_conf_t *conf)
 {

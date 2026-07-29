@@ -9,45 +9,20 @@ fn convert_html_for_test(html: &str) -> String {
         .expect("Conversion failed")
 }
 
+fn select_entity(selector: u8, options: &[&str]) -> String {
+    options[(selector as usize) % options.len()].to_string()
+}
+
 fn encode_entity_char(ch: char, selector: u8) -> String {
     match ch {
-        '&' => match selector % 3 {
-            0 => "&amp;".to_string(),
-            1 => "&#38;".to_string(),
-            _ => "&#x26;".to_string(),
-        },
-        '<' => match selector % 3 {
-            0 => "&lt;".to_string(),
-            1 => "&#60;".to_string(),
-            _ => "&#x3C;".to_string(),
-        },
-        '>' => match selector % 3 {
-            0 => "&gt;".to_string(),
-            1 => "&#62;".to_string(),
-            _ => "&#x3E;".to_string(),
-        },
-        '"' => match selector % 3 {
-            0 => "&quot;".to_string(),
-            1 => "&#34;".to_string(),
-            _ => "&#x22;".to_string(),
-        },
-        '\'' => match selector % 2 {
-            0 => "&#39;".to_string(),
-            _ => "&#x27;".to_string(),
-        },
-        'A' => match selector % 3 {
-            0 => "A".to_string(),
-            1 => "&#65;".to_string(),
-            _ => "&#x41;".to_string(),
-        },
-        '€' => match selector % 2 {
-            0 => "&#8364;".to_string(),
-            _ => "&#x20AC;".to_string(),
-        },
-        '中' => match selector % 2 {
-            0 => "&#20013;".to_string(),
-            _ => "&#x4E2D;".to_string(),
-        },
+        '&' => select_entity(selector, &["&amp;", "&#38;", "&#x26;"]),
+        '<' => select_entity(selector, &["&lt;", "&#60;", "&#x3C;"]),
+        '>' => select_entity(selector, &["&gt;", "&#62;", "&#x3E;"]),
+        '"' => select_entity(selector, &["&quot;", "&#34;", "&#x22;"]),
+        '\'' => select_entity(selector, &["&#39;", "&#x27;"]),
+        'A' => select_entity(selector, &["A", "&#65;", "&#x41;"]),
+        '€' => select_entity(selector, &["&#8364;", "&#x20AC;"]),
+        '中' => select_entity(selector, &["&#20013;", "&#x4E2D;"]),
         _ => ch.to_string(),
     }
 }

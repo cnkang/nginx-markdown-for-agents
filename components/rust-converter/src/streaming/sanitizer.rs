@@ -295,67 +295,86 @@ impl StreamingSanitizer {
         None
     }
 
+    fn remember_stripped_tag(&mut self, tag: &str, effectively_self_closing: bool) {
+        if !effectively_self_closing {
+            self.strip_stack.push(tag.to_string());
+        }
+    }
+
+    fn url_decision(tag: &str, url: Option<String>) -> SanitizeDecision {
+        match url {
+            Some(url_value) if !is_dangerous_url(&url_value) => {
+                let escaped = escape_markdown_destination(&url_value);
+                SanitizeDecision::PassModified(StreamEvent::Text(format!("[{}]({})", tag, escaped)))
+            }
+            _ => SanitizeDecision::Skip,
+        }
+    }
+
+    fn process_embedded_start(
+        &mut self,
+        tag: &str,
+        attrs: &[(String, String)],
+        effectively_self_closing: bool,
+    ) -> Option<SanitizeDecision> {
+        if !EMBEDDED_CONTENT_ELEMENTS.contains(&tag) {
+            return None;
+        }
+        self.remember_stripped_tag(tag, effectively_self_closing);
+        let url = attrs
+            .iter()
+            .find(|(key, _)| key == "src" || key == "data")
+            .map(|(_, value)| value.clone());
+        Some(Self::url_decision(tag, url))
+    }
+
+    fn process_media_start(
+        &mut self,
+        tag: &str,
+        attrs: &[(String, String)],
+        effectively_self_closing: bool,
+    ) -> Option<SanitizeDecision> {
+        if !MEDIA_CONTENT_ELEMENTS.contains(&tag) {
+            return None;
+        }
+        self.remember_stripped_tag(tag, effectively_self_closing);
+        let url = match tag {
+            "area" => attrs
+                .iter()
+                .find(|(key, _)| key == "href")
+                .or_else(|| attrs.iter().find(|(key, _)| key == "src"))
+                .map(|(_, value)| value.clone()),
+            _ => attrs
+                .iter()
+                .find(|(key, _)| key == "src")
+                .map(|(_, value)| value.clone()),
+        };
+        Some(Self::url_decision(tag, url))
+    }
+
+    fn process_form_start(
+        &mut self,
+        tag: &str,
+        effectively_self_closing: bool,
+    ) -> Option<SanitizeDecision> {
+        if !FORM_ELEMENTS.contains(&tag) && !VOID_FORM_CONTROLS.contains(&tag) {
+            return None;
+        }
+        if !effectively_self_closing && !VOID_FORM_CONTROLS.contains(&tag) {
+            self.strip_stack.push(tag.to_string());
+        }
+        Some(SanitizeDecision::Skip)
+    }
+
     fn process_special_start(
         &mut self,
         tag: &str,
         attrs: &[(String, String)],
         effectively_self_closing: bool,
     ) -> Option<SanitizeDecision> {
-        if EMBEDDED_CONTENT_ELEMENTS.contains(&tag) {
-            if !effectively_self_closing {
-                self.strip_stack.push(tag.to_string());
-            }
-            let url = attrs
-                .iter()
-                .find(|(key, _)| key == "src" || key == "data")
-                .map(|(_, value)| value.clone());
-            if let Some(url_value) = url
-                && !is_dangerous_url(&url_value)
-            {
-                let escaped = escape_markdown_destination(&url_value);
-                return Some(SanitizeDecision::PassModified(StreamEvent::Text(format!(
-                    "[{}]({})",
-                    tag, escaped
-                ))));
-            }
-            return Some(SanitizeDecision::Skip);
-        }
-
-        if MEDIA_CONTENT_ELEMENTS.contains(&tag) {
-            if !effectively_self_closing {
-                self.strip_stack.push(tag.to_string());
-            }
-            let url = if tag == "area" {
-                attrs
-                    .iter()
-                    .find(|(key, _)| key == "href")
-                    .or_else(|| attrs.iter().find(|(key, _)| key == "src"))
-                    .map(|(_, value)| value.clone())
-            } else {
-                attrs
-                    .iter()
-                    .find(|(key, _)| key == "src")
-                    .map(|(_, value)| value.clone())
-            };
-            if let Some(url_value) = url
-                && !is_dangerous_url(&url_value)
-            {
-                let escaped = escape_markdown_destination(&url_value);
-                return Some(SanitizeDecision::PassModified(StreamEvent::Text(format!(
-                    "[{}]({})",
-                    tag, escaped
-                ))));
-            }
-            return Some(SanitizeDecision::Skip);
-        }
-
-        if FORM_ELEMENTS.contains(&tag) || VOID_FORM_CONTROLS.contains(&tag) {
-            if !effectively_self_closing && !VOID_FORM_CONTROLS.contains(&tag) {
-                self.strip_stack.push(tag.to_string());
-            }
-            return Some(SanitizeDecision::Skip);
-        }
-        None
+        self.process_embedded_start(tag, attrs, effectively_self_closing)
+            .or_else(|| self.process_media_start(tag, attrs, effectively_self_closing))
+            .or_else(|| self.process_form_start(tag, effectively_self_closing))
     }
 
     fn process_start_tag(
@@ -396,30 +415,41 @@ impl StreamingSanitizer {
         })
     }
 
+    fn update_region_depth(depth: &mut usize, element: &mut Option<String>, tag: &str) -> bool {
+        if *depth == 1 && element.as_deref() == Some(tag) {
+            *depth = 0;
+            *element = None;
+            return true;
+        }
+        if *depth > 1 {
+            *depth = depth.saturating_sub(1);
+        }
+        false
+    }
+
+    fn process_skip_end(&mut self, tag: &str) -> bool {
+        if self.skip_depth == 0 {
+            return false;
+        }
+        if Self::update_region_depth(&mut self.skip_depth, &mut self.skip_element, tag) {
+            self.pop_open_tag(tag);
+        }
+        true
+    }
+
+    fn process_prune_end(&mut self, tag: &str) -> bool {
+        if self.prune_depth == 0 {
+            return false;
+        }
+        if Self::update_region_depth(&mut self.prune_depth, &mut self.prune_element, tag) {
+            self.pop_open_tag(tag);
+        }
+        true
+    }
+
     fn process_end_tag(&mut self, name: String) -> SanitizeDecision {
         let tag = name.as_str();
-        if self.skip_depth > 0 {
-            if self.skip_depth == 1 {
-                if self.skip_element.as_deref() == Some(tag) {
-                    self.skip_depth = 0;
-                    self.skip_element = None;
-                    self.pop_open_tag(tag);
-                }
-            } else {
-                self.skip_depth = self.skip_depth.saturating_sub(1);
-            }
-            return SanitizeDecision::Skip;
-        }
-        if self.prune_depth > 0 {
-            if self.prune_depth == 1 {
-                if self.prune_element.as_deref() == Some(tag) {
-                    self.prune_depth = 0;
-                    self.prune_element = None;
-                    self.pop_open_tag(tag);
-                }
-            } else {
-                self.prune_depth = self.prune_depth.saturating_sub(1);
-            }
+        if self.process_skip_end(tag) || self.process_prune_end(tag) {
             return SanitizeDecision::Skip;
         }
 
