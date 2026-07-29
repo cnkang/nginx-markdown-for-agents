@@ -8,6 +8,7 @@ that can promote externally supplied bytes into distributed artifacts.
 
 from __future__ import annotations
 
+import json
 import re
 from urllib.parse import urlsplit
 import sys
@@ -19,14 +20,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.path_validation import validate_read_path  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ALMALINUX_9 = (
-    "almalinux@sha256:"
-    "d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743"
-)
-ALPINE_320 = (
-    "alpine@sha256:"
-    "d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
-)
+_BUILDER_DIGESTS = json.loads((REPO_ROOT / "tools" / "lib" / "builder_digests.json").read_text())
+
+#: Immutable release-builder base image references; single source of truth is
+#: ``tools/lib/builder_digests.json``.
+ALMALINUX_9 = _BUILDER_DIGESTS["almalinux_9"]["image"]
+ALPINE_320 = _BUILDER_DIGESTS["alpine_320"]["image"]
 
 
 @dataclass(frozen=True)

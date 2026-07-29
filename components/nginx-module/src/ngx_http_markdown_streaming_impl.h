@@ -144,6 +144,41 @@ ngx_http_markdown_streaming_send_output(
  *   NGX_DECLINED on pre-commit fail-open
  *   NGX_ERROR    on failure
  */
+/*
+ * Finalization state-machine invariants.
+ *
+ * Finalization is split across three helpers so that backpressure
+ * (NGX_AGAIN) cannot be mistaken for success:
+ *
+ *   1. ngx_http_markdown_streaming_finalize_request   (orchestrator)
+ *      - Decompresses tail data via finalize_decomp().
+ *      - Calls markdown_streaming_finalize() (FFI).
+ *      - Sends the final Markdown chunk.
+ *      - Records finalization stats from the FFI result.
+ *      - Delegates terminal delivery to finish_terminal().
+ *
+ *   2. ngx_http_markdown_streaming_finish_terminal()
+ *      - Sends the empty last_buf chunk.
+ *      - Sets pending_terminal_metrics when backpressured
+ *        (final_send_rc == NGX_AGAIN) so metrics record only
+ *        after the deferred send is confirmed.
+ *
+ *   3. ngx_http_markdown_streaming_record_finalize_stats()
+ *      - Logs the ETag and token estimate.
+ *      - Captures peak_memory_bytes before freeing the FFI result.
+ *
+ * Latch semantics:
+ *   - finalize_after_pending == 1  -> decompression tail is deferred;
+ *     the caller re-enters finalize_request() after draining.
+ *   - finalize_pending_lastbuf == 1 -> terminal last_buf is deferred
+ *     because the final Markdown chunk was backpressured.
+ *   - pending_terminal_metrics == 1 -> terminal delivery was backpressured;
+ *     success/failure metrics must record only after the deferred send.
+ *
+ * Only one of the three latches may be set at any point during a
+ * single finalization pass; they are cleared in step() after the
+ * finalization is complete.
+ */
 static ngx_int_t
 ngx_http_markdown_streaming_finalize_request(
     ngx_http_request_t *r,

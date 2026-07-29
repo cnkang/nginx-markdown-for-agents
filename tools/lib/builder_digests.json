@@ -1,0 +1,12 @@
+{
+  "almalinux_9": {
+    "digest": "sha256:d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743",
+    "image": "almalinux@sha256:d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743",
+    "description": "glibc release builder base image"
+  },
+  "alpine_320": {
+    "digest": "sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "image": "alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc",
+    "description": "musl release builder base image"
+  }
+}

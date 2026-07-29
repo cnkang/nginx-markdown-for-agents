@@ -140,8 +140,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--raw-input",
-        required=True,
+        required=False,
+        default=None,
         help="Repository-relative path to the retained raw benchmark report.",
+    )
+    parser.add_argument(
+        "--input",
+        required=False,
+        default=None,
+        help=(
+            "Deprecated; use --raw-input. "
+            "Repository-relative path to the retained raw benchmark report."
+        ),
     )
     parser.add_argument(
         "--output",
@@ -155,8 +165,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--source-run",
-        required=True,
+        required=False,
+        default=None,
         help="GitHub Actions run URL with /attempts/<attempt> provenance.",
+    )
+    parser.add_argument(
+        "--source-run-id",
+        required=False,
+        default=None,
+        help="Deprecated; use --source-run with a full URL. Workflow run id.",
     )
     parser.add_argument(
         "--source-artifact",
@@ -320,12 +337,39 @@ def _resolve_io_paths(
 ) -> tuple[Path, Path, str] | int:
     """Resolve and validate raw-input, output, and source_artifact paths.
 
-    Returns ``(raw_input_path, output_path, source_artifact)`` on success
+    Returns ``(raw_input_path, output_path, source_run, source_artifact)`` on success
     or an integer exit code on failure.
     """
+    raw_input = args.raw_input or args.input
+    source_run = args.source_run or args.source_run_id
+
+    if not raw_input:
+        print(
+            "ERROR: --raw-input (or deprecated --input) is required",
+            file=sys.stderr,
+        )
+        return 1
+    if not source_run:
+        print(
+            "ERROR: --source-run (or deprecated --source-run-id) is required",
+            file=sys.stderr,
+        )
+        return 1
+    if args.input:
+        print(
+            "WARNING: --input is deprecated; use --raw-input instead",
+            file=sys.stderr,
+        )
+    if args.source_run_id:
+        print(
+            "WARNING: --source-run-id is deprecated; use --source-run "
+            "with a full GitHub Actions run URL instead",
+            file=sys.stderr,
+        )
+
     try:
         raw_input_path = _resolve_repo_relative(
-            args.raw_input, must_exist=True, purpose="--raw-input"
+            raw_input, must_exist=True, purpose="--raw-input"
         )
     except (ValueError, FileNotFoundError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -347,17 +391,17 @@ def _resolve_io_paths(
         )
         return 1
 
-    source_artifact = args.source_artifact or args.raw_input
-    if args.source_artifact and args.source_artifact != args.raw_input:
+    source_artifact = args.source_artifact or raw_input
+    if args.source_artifact and args.source_artifact != raw_input:
         print(
             f"ERROR: --source-artifact ({args.source_artifact!r}) must match "
-            f"--raw-input ({args.raw_input!r}); the retained artifact must be "
+            f"--raw-input ({raw_input!r}); the retained artifact must be "
             f"the actual raw report being finalized.",
             file=sys.stderr,
         )
         return 1
 
-    return raw_input_path, output_path, source_artifact
+    return raw_input_path, output_path, source_run, source_artifact
 
 
 def _resolve_measurement_timestamp(
@@ -424,7 +468,8 @@ def main(argv: list[str] | None = None) -> int:
             f"--source-git-commit must be a full 40-character lowercase git "
             f"SHA (got {args.source_git_commit!r})"
         )
-    errors.extend(_validate_source_run(args.source_run))
+    source_run = args.source_run or args.source_run_id
+    errors.extend(_validate_source_run(source_run))
 
     if errors:
         for err in errors:
@@ -434,7 +479,7 @@ def main(argv: list[str] | None = None) -> int:
     io_result = _resolve_io_paths(args)
     if isinstance(io_result, int):
         return io_result
-    raw_input_path, output_path, source_artifact = io_result
+    raw_input_path, output_path, source_run, source_artifact = io_result
 
     try:
         validated_raw_input = validate_read_path(
@@ -474,7 +519,7 @@ def main(argv: list[str] | None = None) -> int:
         policy = _build_policy(
             policy_type=args.policy_type,
             source_git_commit=args.source_git_commit,
-            source_run=args.source_run.strip(),
+            source_run=source_run.strip(),
             source_artifact=source_artifact,
             raw_sha256=raw_sha256,
             measurement_timestamp=measurement_timestamp,
