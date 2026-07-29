@@ -51,6 +51,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -132,6 +133,74 @@ def _validate_source_run(source_run: str) -> list[str]:
     located.  Historical exceptions are handled by the caller, not here.
     """
     return validate_source_run(source_run, repo_root=REPO_ROOT)
+
+
+_SOURCE_RUN_ID_RE = re.compile(r"^[1-9][0-9]*$")
+_SOURCE_RUN_URL_RE = re.compile(
+    r"^https://github\.com/"
+    r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
+    r"/actions/runs/[1-9][0-9]*"
+    r"/attempts/[1-9][0-9]*$"
+)
+
+
+def _resolve_github_repository(repo_root: Path) -> str | None:
+    """Return the checkout's GitHub repository slug when discoverable."""
+    repository = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if repository and re.fullmatch(
+        r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository
+    ):
+        return repository.lower()
+    try:
+        result = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=str(repo_root),
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    remote = result.stdout.strip()
+    match = re.search(
+        r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?$",
+        remote,
+        re.IGNORECASE,
+    )
+    return match.group(1).lower() if match else None
+
+
+def _normalize_source_run(value: str, *, repo_root: Path) -> str:
+    """Normalize a source-run value into canonical provenance URL format.
+
+    Bare numeric run IDs (from deprecated ``--source-run-id``) are converted
+    to full GitHub Actions URLs using the discovered repository and
+    ``attempt=1``.  Full URLs pass through unchanged.  Values that are
+    neither a bare ID nor a full URL are returned as-is so that
+    ``_validate_source_run`` can report the format error.
+    """
+    if _SOURCE_RUN_URL_RE.fullmatch(value):
+        return value
+    if not _SOURCE_RUN_ID_RE.fullmatch(value):
+        return value
+    repository = _resolve_github_repository(repo_root)
+    if repository is None:
+        print(
+            "WARNING: Cannot normalize --source-run-id into a canonical URL: "
+            "GitHub repository slug is not discoverable. "
+            "Use --source-run with the full URL instead.",
+            file=sys.stderr,
+        )
+        return value
+    print(
+        "NOTE: Normalized --source-run-id to canonical URL with attempt=1; "
+        "retried runs must use --source-run explicitly.",
+        file=sys.stderr,
+    )
+    return f"https://github.com/{repository}/actions/runs/{value}/attempts/1"
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -367,6 +436,8 @@ def _resolve_io_paths(
             file=sys.stderr,
         )
 
+    source_run = _normalize_source_run(source_run, repo_root=REPO_ROOT)
+
     try:
         raw_input_path = _resolve_repo_relative(
             raw_input, must_exist=True, purpose="--raw-input"
@@ -468,9 +539,6 @@ def main(argv: list[str] | None = None) -> int:
             f"--source-git-commit must be a full 40-character lowercase git "
             f"SHA (got {args.source_git_commit!r})"
         )
-    source_run = args.source_run or args.source_run_id
-    if source_run is not None:
-        errors.extend(_validate_source_run(source_run))
 
     if errors:
         for err in errors:
@@ -481,6 +549,12 @@ def main(argv: list[str] | None = None) -> int:
     if isinstance(io_result, int):
         return io_result
     raw_input_path, output_path, source_run, source_artifact = io_result
+
+    errors.extend(_validate_source_run(source_run))
+    if errors:
+        for err in errors:
+            print(f"ERROR: {err}", file=sys.stderr)
+        return 1
 
     try:
         validated_raw_input = validate_read_path(
