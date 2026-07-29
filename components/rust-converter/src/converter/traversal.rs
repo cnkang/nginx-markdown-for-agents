@@ -184,18 +184,12 @@ impl MarkdownConverter {
                 None
             };
 
-            if let Some((url, title)) = embedded {
-                if let Some(url) = url
-                    && let Some(safe_url) = self.security_validator.sanitize_url(url.trim())
-                {
-                    let resolved_url = self.resolve_url(safe_url);
-                    Self::emit_markdown_link(
-                        &[title.as_deref()],
-                        &resolved_url,
-                        &resolved_url,
-                        output,
-                    );
-                }
+            if let Some((url, title)) = embedded
+                && let Some(url) = url
+                && let Some(safe_url) = self.security_validator.sanitize_url(url.trim())
+            {
+                let resolved_url = self.resolve_url(safe_url);
+                Self::emit_markdown_link(&[title.as_deref()], &resolved_url, &resolved_url, output);
             }
         }
 
