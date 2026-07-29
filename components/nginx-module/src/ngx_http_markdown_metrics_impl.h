@@ -1624,6 +1624,22 @@ ngx_http_markdown_json_walk_path_tree_bounded(
 }
 
 
+/*
+ * Render per-path metrics in sorted order into the bounded text response.
+ *
+ * The in-order traversal preserves the tree's path ordering.  Each entry is
+ * emitted only when it fits before the reserved summary tail; otherwise its
+ * counters are accumulated in the omitted totals.  A failed write or a
+ * recursive child failure stops the walk without advancing the output.
+ *
+ * Parameters:
+ *   node      Current red-black tree node.
+ *   sentinel  Tree sentinel that terminates the traversal.
+ *   render    Bounded output state and omitted-entry accumulators.
+ *
+ * Returns:
+ *   The current output position, or the unchanged position after failure.
+ */
 static u_char *
 ngx_http_markdown_text_walk_path_tree_bounded(
     ngx_rbtree_node_t *node,
