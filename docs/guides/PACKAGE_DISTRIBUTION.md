@@ -10,7 +10,7 @@ integrity verification via SHA256SUMS, and GPG signature verification.
 
 | Channel | Format | Status | Signing |
 |---------|--------|--------|---------|
-| GitHub Releases | .deb + .rpm | Tag-specific; verify assets before downloading | SHA256SUMS / GPG when published |
+| GitHub Releases | .deb + .rpm | Active for v0.7.0+ release artifacts; tag-specific; verify assets before downloading | SHA256SUMS / GPG when published |
 | Self-hosted APT | .deb | Planned; no public repository URL yet | GPG |
 | Self-hosted YUM | .rpm | Planned; no public repository URL yet | GPG |
 

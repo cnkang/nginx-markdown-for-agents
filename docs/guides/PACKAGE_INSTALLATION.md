@@ -6,7 +6,7 @@ official NGINX repository packages.
 
 ## Repository Publishing Status
 
-GitHub Releases are the intended distribution channel for DEB and RPM package
+GitHub Releases are the current distribution channel for DEB and RPM package
 artifacts, but asset availability is tag-specific.
 Public APT/YUM repositories are planned but not available yet.
 They are not part of the current GA channel.
