@@ -30,7 +30,11 @@ DETECTOR = Path(__file__).resolve().parent.parent / "detect_release_supply_chain
 # Pinned container image digests for the two release builder families.
 # These must match the actual ARG OS_BASE values in the Dockerfiles and
 # the container: field in release-packages.yml.
-#: Reuse the detector's single source of truth so tests cannot drift.
+# Literal values are used in test_correct_digests_pass so the manifest
+# contract is verified independently of the detector's exported constants.
+_ALMALINUX_9 = "almalinux@sha256:d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743"
+_ALPINE_320 = "alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
+#: Imported constants for tests that validate detector *behavior* (not manifest values).
 from harness.detect_release_supply_chain import ALMALINUX_9, ALPINE_320  # noqa: E402 - detector constants
 
 
@@ -44,9 +48,9 @@ class TestBuilderDigests:
     def test_correct_digests_pass(self):
         """All three builder references use the expected pinned digests."""
         files = {
-            "tools/build_release/Dockerfile.glibc": f"ARG OS_BASE={ALMALINUX_9}",
-            "tools/build_release/Dockerfile.musl": f"ARG OS_BASE={ALPINE_320}",
-            ".github/workflows/release-packages.yml": f"container: {ALMALINUX_9}",
+            "tools/build_release/Dockerfile.glibc": f"ARG OS_BASE={_ALMALINUX_9}",
+            "tools/build_release/Dockerfile.musl": f"ARG OS_BASE={_ALPINE_320}",
+            ".github/workflows/release-packages.yml": f"container: {_ALMALINUX_9}",
         }
         findings = check_release_builder_digests(files)
         assert findings == []
