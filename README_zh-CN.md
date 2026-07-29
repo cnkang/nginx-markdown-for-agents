@@ -411,6 +411,7 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-29 | Kang | 发布基线同步：完成 CHANGELOG 日期收口、发布说明状态更新、PROJECT_STATUS 当前版本线更新、版本规划、Harness 规则表 (Rules 52-60) 与 build-safety 域对齐。 |
 | 0.9.1 | 2026-07-19 | Codex | 完成 v0.9.1 正式发布摘要，补充 Brotli 流式解压、构建控制和发布证据说明。 |
 | 0.9.1 | 2026-07-17 | Kang | 优化 README 文档组织，移除旧版本的 What's New 日志，合并核心功能特性表，并梳理文档导航结构以适配 v0.9.1。 |
 | 0.9.0 | 2026-07-02 | Kang | 文档审查：新增 v0.9.0 新特性段落、MIGRATION-0.9 链接、reason code 数量修正、CHANGELOG 同步分支提交 |
