@@ -1976,9 +1976,9 @@ def _fallback_rate_consistency_violations(
     """Check that stored fallback_rate equals the derived value.
 
     For each scenario that carries both a stored ``fallback_rate`` and
-    the counter pair (``streaming_fallback_total``,
+    the counter pair (``precommit_failopen_total``,
     ``streaming_requests_total``), the stored value must equal
-    ``streaming_fallback_total / streaming_requests_total`` when
+    ``precommit_failopen_total / streaming_requests_total`` when
     ``streaming_requests_total > 0``, or 0.0 otherwise.
     """
     scenarios = _report_scenarios(report)
@@ -1987,23 +1987,23 @@ def _fallback_rate_consistency_violations(
         name = scenario.get("name", "")
         metrics = scenario.get("metrics") or scenario.get("results") or scenario
         stored = metrics.get("fallback_rate")
-        fallback_total = metrics.get("streaming_fallback_total")
+        failopen_total = metrics.get("precommit_failopen_total")
         requests_total = metrics.get("streaming_requests_total")
-        if stored is None or fallback_total is None or requests_total is None:
+        if stored is None or failopen_total is None or requests_total is None:
             continue
         if not _is_numeric(stored):
             continue
-        if not _is_exact_int(fallback_total) or not _is_exact_int(requests_total):
+        if not _is_exact_int(failopen_total) or not _is_exact_int(requests_total):
             continue
         if requests_total > 0:
-            derived = float(fallback_total) / float(requests_total)
+            derived = float(failopen_total) / float(requests_total)
         else:
             derived = 0.0
         if abs(stored - derived) > 1e-9:
             violations.append((
                 f"{role}.fallback_rate_consistency",
                 f"{name}: stored fallback_rate={stored} != "
-                f"derived {fallback_total}/{requests_total}={derived}",
+                f"derived {failopen_total}/{requests_total}={derived}",
             ))
     return violations
 
