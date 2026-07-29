@@ -201,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     validated_path = validate_read_path(argv[0], purpose="report input")
     try:
         report = json.loads(validated_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError) as e:
+    except (OSError, ValueError) as e:
         print(f"ERROR: failed to load report: {e}", file=sys.stderr)
         return 1
 

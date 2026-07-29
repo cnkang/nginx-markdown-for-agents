@@ -80,7 +80,6 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format_string: str, *args: object) -> None:
         """Silence standard request logging to clean terminal output."""
         del format_string, args
-        return
 
     def do_GET(self) -> None:  # pylint: disable=invalid-name
         """Handle GET requests dynamically serving corpus files."""
