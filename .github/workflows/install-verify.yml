@@ -34,7 +34,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.14.3'
+          python-version: '3.14.6'
 
       - name: Select representative matrix entries
         id: resolve
@@ -324,7 +324,7 @@ jobs:
         if: matrix.target.container == ''
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.14.3'
+          python-version: '3.14.6'
 
       - name: Install target nginx version from nginx.org repo (apt)
         if: matrix.target.pkg_manager == 'apt' && matrix.target.nginx_install_method == 'repo'
