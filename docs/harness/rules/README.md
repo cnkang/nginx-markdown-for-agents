@@ -31,7 +31,7 @@ related rules by domain with YAML frontmatter for path-scoped loading.
 | 48 | Security Static Analysis & Supply Chain | [security-static-analysis.md](security-static-analysis.md) | actionlint, shellcheck, gitleaks, Semgrep, cargo-deny, Trivy/SBOM/Scorecard |
 | 55 | Version Consistency | [version-consistency.md](version-consistency.md) | source/chart/docs version sync, Rust baseline |
 | 56, 57, 58, 59 | Build Safety | [build-safety.md](build-safety.md) | orphan comment closers, #ifdef guard visibility, workflow input injection, hardcoded HTTP status |
-| 61, 62 | Release Integrity | [release-integrity.md](release-integrity.md) | performance evidence provenance invariant, matrix key normalization invariant |
+| 61, 62 | Release Integrity | [release-integrity.md](release-integrity.md) | layered performance evidence provenance and matrix key normalization invariants |
 | FUZZ-001..007 | Fuzz Infrastructure | [fuzz-infrastructure.md](fuzz-infrastructure.md) | fuzz targets, CI fuzzing, corpus management |
 
 ## Usage
