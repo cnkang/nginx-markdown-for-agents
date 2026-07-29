@@ -39,6 +39,12 @@ DECISION_LOG_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ng
 HEADERS_IMPL_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_headers_impl.h"
 DECOMPRESSION_C = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_decompression.c"
 FILTER_MODULE_H = PROJECT_ROOT / "components" / "nginx-module" / "src" / "ngx_http_markdown_filter_module.h"
+REASON_CODE_SOURCE = "components/rust-converter/src/decision/reason_code.rs"
+REASON_CODE_FFI_EXPORTS = (
+    "markdown_reason_code_str",
+    "markdown_reason_code_metric_key",
+    "markdown_reason_code_count",
+)
 
 GATE_1 = "Gate 1"
 GATE_2 = "Gate 2"
@@ -361,7 +367,11 @@ def _gate_2_items(
     return [
         ("ffi boundary tests", "make test-nginx-unit" in docs and "make test-rust" in docs),
         ("layout tests", "test_ffi_header_plan_layout" in abi and "test_ffi_accept_result_layout" in abi),
-        ("reason code source", "reason code" in ffi_contract.lower()),
+        (
+            "reason code source",
+            REASON_CODE_SOURCE in ffi_contract
+            and all(export in ffi_contract for export in REASON_CODE_FFI_EXPORTS),
+        ),
         ("delivery semantics tests", "delivery_counter_test.c" in unit_test_files),
         ("delivery_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in conversion or "NGX_HTTP_MARKDOWN_METRIC_INC(results.delivery_count)" in payload),
         ("decision_count metric write", "NGX_HTTP_MARKDOWN_METRIC_INC(results.decision_count)" in decision_log),
