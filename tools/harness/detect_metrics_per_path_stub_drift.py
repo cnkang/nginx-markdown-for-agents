@@ -10,7 +10,7 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
-from lib.path_validation import validate_read_path
+from lib.path_validation import validate_read_path  # noqa: E402 - direct script import
 
 
 PRODUCTION = os.path.join(

@@ -50,11 +50,10 @@ def test_invalid_states_rejected(state):
 
 @settings(max_examples=100)
 @given(
-    capability=st.text(min_size=1, max_size=40),
     state=st.sampled_from(sorted(VALID_STATES)),
 )
-def test_any_capability_with_valid_state(capability, state):
-    """Any capability name paired with a valid state must be accepted."""
+def test_valid_state_is_accepted(state):
+    """Every known compatibility state must be accepted."""
     assert is_valid_compatibility_state(state)
 
 

@@ -92,7 +92,7 @@ def check_changelog_exists(project_root: Path) -> List[str]:
     
     try:
         content = changelog.read_text(encoding='utf-8')
-    except Exception as exc:
+    except (OSError, UnicodeError) as exc:
         return [f"CHANGELOG.md exists but is unreadable: {exc}"]
     
     # Check if it has at least one version entry
@@ -113,7 +113,7 @@ def check_readme_mentions_key_features(project_root: Path) -> List[str]:
 
         try:
             content = readme.read_text(encoding='utf-8')
-        except Exception as exc:
+        except (OSError, UnicodeError) as exc:
             warnings.append(f"{readme_name}: unreadable: {exc}")
             continue
 
@@ -141,7 +141,7 @@ def check_installation_guide_current(project_root: Path) -> List[str]:
     
     try:
         content = install_guide.read_text(encoding='utf-8')
-    except Exception as exc:
+    except (OSError, UnicodeError) as exc:
         warnings.append(f"INSTALLATION.md unreadable: {exc}")
         return warnings
 

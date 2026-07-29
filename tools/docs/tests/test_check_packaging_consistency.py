@@ -346,8 +346,11 @@ class TestArtifactRegex:
 # Integration tests for higher-level check functions
 # ---------------------------------------------------------------------------
 
-import check_packaging_consistency as cpc
-from check_packaging_consistency import check_artifact_names, check_curl_pattern
+import check_packaging_consistency as cpc  # noqa: E402 - direct test import
+from check_packaging_consistency import (  # noqa: E402 - direct test import
+    check_artifact_names,
+    check_curl_pattern,
+)
 
 
 class TestCheckArtifactNames:

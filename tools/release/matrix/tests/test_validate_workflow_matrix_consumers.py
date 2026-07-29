@@ -13,7 +13,8 @@ import sys
 sys.path.insert(
     0, str(Path(__file__).resolve().parents[1])
 )
-from validate_workflow_matrix_consumers import (
+# The test bootstraps the script directory to exercise the CLI module directly.
+from validate_workflow_matrix_consumers import (  # noqa: E402  # pylint: disable=import-error
     NGINX_VERSION_RE,
     _is_excluded_line,
     _uses_dynamic_resolution,

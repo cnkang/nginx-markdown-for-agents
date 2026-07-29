@@ -193,7 +193,7 @@ def test_property10_d01_varied_rates_correct_severity(requests_total, fallback_r
         },
     }
 
-    findings, skipped = evaluate_rules(metrics)
+    findings, _skipped = evaluate_rules(metrics)
     matching = [f for f in findings if f.rule_id == "D01"]
 
     assert len(matching) == 1, (
@@ -221,7 +221,7 @@ def test_property10_d03_varied_rates_correct_severity(requests_total, bp_rate):
         "streaming_metrics": {"requests_total": requests_total},
     }
 
-    findings, skipped = evaluate_rules(metrics)
+    findings, _skipped = evaluate_rules(metrics)
     matching = [f for f in findings if f.rule_id == "D03"]
 
     assert len(matching) == 1, (
@@ -243,7 +243,7 @@ def test_property10_d02_any_positive_overload_triggers(overload_count):
     """
     metrics = {"overload_total": overload_count}
 
-    findings, skipped = evaluate_rules(metrics)
+    findings, _skipped = evaluate_rules(metrics)
     matching = [f for f in findings if f.rule_id == "D02"]
 
     assert len(matching) == 1, (
@@ -265,7 +265,7 @@ def test_property10_d05_any_positive_budget_exceeded_triggers(budget_exceeded):
     """
     metrics = {"decompression_budget_exceeded_total": budget_exceeded}
 
-    findings, skipped = evaluate_rules(metrics)
+    findings, _skipped = evaluate_rules(metrics)
     matching = [f for f in findings if f.rule_id == "D05"]
 
     assert len(matching) == 1, (
@@ -317,6 +317,7 @@ def test_property10_partial_metrics_no_crash(rule_id, extra_keys):
     For any set of metrics with irrelevant keys (missing the required ones),
     the rule engine does not crash and gracefully handles the absence.
     """
+    assert rule_id in ALL_RULE_IDS
     # Provide only random keys that aren't the required metrics for any rule
     required = set()
     for spec in RULE_METRICS.values():
@@ -368,7 +369,7 @@ def test_property10_removing_one_required_metric_skips_rule(
                 break
 
     # Should not crash
-    findings, skipped = evaluate_rules(metrics)
+    _findings, skipped = evaluate_rules(metrics)
 
     # This specific rule should be skipped
     skipped_ids = [s.split(" ")[0] for s in skipped]
@@ -399,7 +400,7 @@ def test_property10_exit_code_equals_max_severity(rule_ids):
     for rule_id in rule_ids:
         metrics.update(TRIGGER_BUILDERS[rule_id]())
 
-    findings, skipped = evaluate_rules(metrics)
+    findings, _skipped = evaluate_rules(metrics)
 
 
     # At least some findings should be present (some rules may share metrics

@@ -123,7 +123,7 @@ def _unparse(node: ast.AST) -> str:
     """Best-effort short source rendering of an AST node."""
     try:
         return ast.unparse(node)
-    except Exception:
+    except (AttributeError, RecursionError, TypeError, ValueError):
         # Fallback for very old Python or edge cases.
         if isinstance(node, ast.Name):
             return node.id

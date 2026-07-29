@@ -26,6 +26,11 @@ from harness_route import (
 )
 
 
+# These mocks intentionally preserve subprocess.check_output's keyword
+# parameter names; Pylint's unused-argument warning is a false positive here.
+# pylint: disable=unused-argument
+
+
 def test_find_repo_root_from_repo_file() -> None:
     """Verify _find_repo_root locates the repo root when called from a file inside the repo."""
     repo_root = _find_repo_root(Path(__file__))

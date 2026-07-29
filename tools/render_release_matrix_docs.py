@@ -40,8 +40,9 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-from path_validation import validate_read_path  # noqa: E402
-from path_validation import validate_write_path_within_root  # noqa: E402
+# Direct script execution bootstraps this module root; Pylint cannot infer it.
+from path_validation import validate_read_path  # noqa: E402  # pylint: disable=import-error
+from path_validation import validate_write_path_within_root  # noqa: E402  # pylint: disable=import-error
 
 
 ROOT = Path(__file__).resolve().parents[1]

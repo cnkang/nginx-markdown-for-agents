@@ -3,8 +3,6 @@
 import re
 from pathlib import Path
 
-import pytest
-
 from tools.release.gates.validate_release_gates_080 import (
     RELEASE_PACKAGES_WORKFLOW,
     ValidationResult,
@@ -23,8 +21,7 @@ def _workflow_cargo_version() -> str:
     return match.group(1)
 
 
-@pytest.mark.parametrize("version_offset", [0])
-def test_release_package_workflow_version_matches_active_release(monkeypatch, version_offset):
+def test_release_package_workflow_version_matches_active_release(monkeypatch):
     """The tag package workflow must use the active Cargo release version.
 
     Reads the version declared in release-packages.yml and sets the

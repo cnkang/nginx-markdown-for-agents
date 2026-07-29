@@ -93,7 +93,7 @@ def _list_tracked_files(repo: Path) -> tuple[Optional[list[str]], str]:
         return files_proc.stdout.splitlines(), ""
     except subprocess.TimeoutExpired:
         return None, f"Error listing tracked files: git ls-files timed out after {GIT_TIMEOUT_SECONDS}s"
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         return None, f"Error listing tracked files with git: {e}"
 
 
@@ -145,7 +145,7 @@ def _scan_tracked_file(repo: Path, path: str) -> tuple[list[str], str]:
 
     try:
         content = f_path.read_text(encoding='utf-8')
-    except Exception as e:
+    except (OSError, UnicodeError) as e:
         return [], f"Error reading {path}: {e}"
 
     lines = content.splitlines()

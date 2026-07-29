@@ -146,7 +146,7 @@ def git_info(commit_override: str | None = None) -> dict:
         # Extract owner/repo from URL
         m = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$", repo_raw)
         repository = m.group(1) if m else "unknown/unknown"
-    except Exception:
+    except (OSError, subprocess.SubprocessError, UnicodeError):
         repository = "unknown/unknown"
 
     if commit_override:
@@ -160,7 +160,7 @@ def git_info(commit_override: str | None = None) -> dict:
                 .decode()
                 .strip()
             )
-        except Exception:
+        except (OSError, subprocess.SubprocessError, UnicodeError):
             commit = "unknown"
 
     return {"repository": repository, "commit": commit}

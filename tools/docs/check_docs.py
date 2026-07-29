@@ -404,7 +404,7 @@ def check_document_updates_order(files: list[Path]) -> list[str]:
     for f in files:
         try:
             content = f.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
+        except OSError:
             continue
 
         if not _document_update_rows_are_sorted(
