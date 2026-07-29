@@ -106,7 +106,7 @@
           "fullbuffer_path_hits": 1030,
           "streaming_ratio": 0.0,
           "fullbuffer_ratio": 1.0,
-          "fallback_rate": 0.0,
+          "fallback_rate": 1.0,
           "streaming_fallback_total": 1030,
           "streaming_requests_total": 1030,
           "precommit_failopen_total": 0,

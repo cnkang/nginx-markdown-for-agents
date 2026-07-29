@@ -41,7 +41,7 @@ The current `module-baseline-091.json` is a verbatim eight-scenario run from
 commit `cab92df229b0b68cb02d88817a208e009f3ce106`, measured at
 `2026-07-28T22:41:12Z` by canonical workflow run `30405031983/attempts/1`.
 Its retained raw artifact has SHA-256
-`a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12`.
+`d8ccb6736d70e02c91eb69d06855e47cf7c06c86539c308ea9e91861e39bf7fa`.
 The validator requires this source commit, run attempt, timestamp, retained
 raw artifact, and digest to remain mutually consistent.
 
