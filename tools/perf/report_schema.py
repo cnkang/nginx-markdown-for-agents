@@ -198,8 +198,8 @@ def main(argv: list[str] | None = None) -> int:
         print("Usage: report_schema.py <report.json>", file=sys.stderr)
         return 1
 
-    validated_path = validate_read_path(argv[0], purpose="report input")
     try:
+        validated_path = validate_read_path(argv[0], purpose="report input")
         report = json.loads(validated_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
         print(f"ERROR: failed to load report: {e}", file=sys.stderr)
