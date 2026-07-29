@@ -1655,6 +1655,7 @@ ngx_http_markdown_text_walk_path_tree_bounded(
         return render->pos;
     }
 
+    /* Visit the left subtree first so text paths remain sorted. */
     render->pos = ngx_http_markdown_text_walk_path_tree_bounded(
             node->left, sentinel, render);
 
@@ -1662,6 +1663,7 @@ ngx_http_markdown_text_walk_path_tree_bounded(
         return render->pos;
     }
 
+    /* Keep the mandatory summary tail available for the final response. */
     remaining = (size_t) (render->end - render->pos);
     if (remaining > render->tail_reserve) {
         pnode = (const ngx_http_markdown_path_metric_node_t *) node;
@@ -1673,6 +1675,7 @@ ngx_http_markdown_text_walk_path_tree_bounded(
         }
         needed = ngx_http_markdown_text_path_entry_size(path_len);
 
+        /* Emit complete entries only; otherwise conserve their counters. */
         if (needed <= remaining - render->tail_reserve) {
             u_char  *entry_start = render->pos;
 
@@ -1737,6 +1740,7 @@ ngx_http_markdown_text_walk_path_tree_bounded(
             render->omitted_nodes, 1);
     }
 
+    /* A failed child leaves no safe output position for the right subtree. */
     if (render->failed) {
         return render->pos;
     }
