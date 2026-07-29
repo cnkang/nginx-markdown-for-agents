@@ -197,6 +197,10 @@ SMOKE_RPM_REPO_SNIPPETS = [
     "almalinux|centos|rocky|rhel)",
     "packages/%scentos/",
 ]
+SMOKE_RPM_INSTALL_SNIPPETS = [
+    'dnf install -y "${PACKAGE_FILE}"',
+    'yum install -y "${PACKAGE_FILE}"',
+]
 GATE3_LOCAL_ARCH_SNIPPETS = [
     'pkg_pattern="*_${ARCH}.deb"',
     'pkg_pattern="*-1.${RPM_ARCH}.rpm"',
@@ -953,6 +957,21 @@ def validate_smoke_test_repo_selection(result: ValidationResult) -> None:
     )
 
 
+def validate_smoke_test_rpm_install(result: ValidationResult) -> None:
+    """Require RPM smoke tests to resolve local-package dependencies."""
+    content = read_safe(SMOKE_TEST_BASIC)
+    if not content:
+        result.fail(
+            "smoke-rpm-install:exists",
+            f"{SMOKE_TEST_BASIC_NAME} not found",
+        )
+        return
+    _check_snippets(
+        content, SMOKE_RPM_INSTALL_SNIPPETS, "smoke-rpm-install",
+        SMOKE_TEST_BASIC_NAME, result,
+    )
+
+
 def validate_gate3_local_arch_selection(result: ValidationResult) -> None:
     """Validate local Gate 3 smoke selects architecture-matched packages."""
     content = read_safe(GATE3_LOCAL_PACKAGE_SMOKE)
@@ -1082,6 +1101,7 @@ def main() -> int:
     validate_release_artifact_flow(result)
     validate_standalone_workflow_packaging(result)
     validate_smoke_test_repo_selection(result)
+    validate_smoke_test_rpm_install(result)
     validate_gate3_local_arch_selection(result)
     validate_nfpm_postinstall_lifecycle(result)
     validate_release_build_glibc_baseline(result)
