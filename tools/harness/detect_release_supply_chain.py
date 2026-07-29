@@ -323,7 +323,7 @@ def scan_repository(root: Path = REPO_ROOT) -> list[Finding]:
         digests = _load_and_validate_builder_digests(
             root / "tools" / "lib" / "builder_digests.json"
         )
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         return [Finding(
             "tools/lib/builder_digests.json",
             f"cannot load builder digests: {exc}",
