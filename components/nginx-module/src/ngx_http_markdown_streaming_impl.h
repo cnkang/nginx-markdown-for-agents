@@ -3385,7 +3385,7 @@ ngx_http_markdown_streaming_finalize_send_markdown(
 static void
 ngx_http_markdown_streaming_record_finalize_stats(
     ngx_http_request_t *r,
-    ngx_http_markdown_ctx_t *ctx,
+    const ngx_http_markdown_ctx_t *ctx,
     struct MarkdownResult *result)
 {
     size_t  peak_memory_bytes;
