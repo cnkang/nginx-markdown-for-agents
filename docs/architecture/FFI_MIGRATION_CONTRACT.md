@@ -41,6 +41,13 @@ The following families have current NGINX production consumers:
 The generated header contains only the bundled production boundary. Test-only
 Rust helpers are not emitted as C declarations.
 
+The canonical reason-code source is
+`components/rust-converter/src/decision/reason_code.rs`. The
+`markdown_reason_code_str`, `markdown_reason_code_metric_key`, and
+`markdown_reason_code_count` exports expose that source to the C consumer;
+reason-code variants and discriminants must remain synchronized across this
+boundary.
+
 ## Removed v0.9.1 entries
 
 | Removed entry | Evidence | Replacement |
