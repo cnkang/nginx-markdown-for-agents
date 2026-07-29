@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# pylint: disable=too-many-lines
+# pylint: disable=import-error
 """0.9.1 performance evidence release gate.
 
 Runs the module-level benchmark harness and evaluates results against
@@ -61,6 +63,14 @@ from threshold_engine import evaluate_module_level  # pylint: disable=wrong-impo
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _RC_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+-rc(?:\.\d+)?$")
 _RELEASE_TAG_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+(?:\.\d+)?$")
+
+
+def _report_scenarios(report: dict) -> list:
+    """Extract the scenarios list from a benchmark report."""
+    return (
+        report.get("module_benchmark", {}).get("scenarios", [])
+        or report.get("scenarios", [])
+    )
 
 # Exit code for SKIP_NOT_PRESENT (matches run_module_benchmark.sh)
 EX_SKIP_NOT_PRESENT = 75
@@ -179,7 +189,7 @@ def _extract_evidence_metrics(report: dict) -> dict:
 
     Returns a flat dict suitable for evaluate_module_level().
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
+    scenarios = _report_scenarios(report)
 
     if not scenarios:
         # ponytail: keep empty/legacy tests happy while failing real missing scenarios
@@ -374,7 +384,7 @@ def _compute_memory_slope(data_points: list[tuple[float, float]]) -> float:
     return (n * sum_xy - sum_x * sum_y) / denominator
 
 
-def _build_evidence_pack(
+def _build_evidence_pack(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     report: dict | None,
     verdict: str,
     breaches: list,
@@ -872,7 +882,7 @@ def _check_path_coverage(report: dict) -> list[tuple[str, str, str]]:
     Each violation is evidence that the benchmark did not actually test
     the path it claims to cover.
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
+    scenarios = _report_scenarios(report)
 
     by_name: dict[str, dict] = {}
     for s in scenarios:
@@ -959,7 +969,7 @@ def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
     the report.  In blocking mode, a skipped critical scenario means
     the evidence is incomplete and the gate must fail.
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
+    scenarios = _report_scenarios(report)
 
     skipped = []
     for s in scenarios:
@@ -992,7 +1002,7 @@ def _is_scoped_historical_exception(report: dict) -> bool:
         baseline_path = (REPO_ROOT / _HISTORICAL_BASELINE_PATH).resolve(
             strict=True
         )
-        baseline_path.relative_to(REPO_ROOT.resolve())
+        baseline_path.relative_to(REPO_ROOT.resolve())  # pylint: disable=no-member
         if _sha256_file(baseline_path) != _HISTORICAL_BASELINE_SHA256:
             return False
         historical_report = json.loads(
@@ -1207,7 +1217,7 @@ def _measurement_timestamp_violations(
     return violations
 
 
-def _baseline_policy_violations(
+def _baseline_policy_violations(  # pylint: disable=too-many-return-statements
     report: dict, role: str,
 ) -> list[tuple[str, str]]:
     """Validate provenance for baselines.
@@ -1271,7 +1281,7 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _verify_raw_digest(
+def _verify_raw_digest(  # pylint: disable=too-many-return-statements
     policy: dict,
 ) -> tuple[Path, str | None]:
     """Resolve and verify the raw artifact digest.
@@ -1288,7 +1298,7 @@ def _verify_raw_digest(
     candidate = REPO_ROOT / artifact
     try:
         raw_path = candidate.resolve(strict=True)
-        raw_path.relative_to(REPO_ROOT.resolve())
+        raw_path.relative_to(REPO_ROOT.resolve())  # pylint: disable=no-member
     except FileNotFoundError:
         return candidate, f"retained raw artifact does not exist: {artifact}"
     except (RuntimeError, ValueError) as exc:
@@ -1871,7 +1881,7 @@ def _check_missing_scenarios(report: dict) -> list[str]:
     record for it — stronger than "skipped".  The evidence gate must
     reject this as MISSING_EVIDENCE because there is no data at all.
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
+    scenarios = _report_scenarios(report)
 
     by_name: dict[str, dict] = {}
     for s in scenarios:
@@ -1890,7 +1900,7 @@ def _check_scenario_completion(report: dict) -> list[tuple[str, str]]:
     A scenario present with status != "completed" (and not "skipped",
     which is handled by _check_skipped_scenarios) is incomplete evidence.
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
+    scenarios = _report_scenarios(report)
 
     by_name: dict[str, dict] = {}
     for s in scenarios:
@@ -1960,6 +1970,44 @@ def _canonical_baseline_fallback_violations(
     return violations
 
 
+def _fallback_rate_consistency_violations(
+    report: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Check that stored fallback_rate equals the derived value.
+
+    For each scenario that carries both a stored ``fallback_rate`` and
+    the counter pair (``streaming_fallback_total``,
+    ``streaming_requests_total``), the stored value must equal
+    ``streaming_fallback_total / streaming_requests_total`` when
+    ``streaming_requests_total > 0``, or 0.0 otherwise.
+    """
+    scenarios = _report_scenarios(report)
+    violations = []
+    for scenario in scenarios:
+        name = scenario.get("name", "")
+        metrics = scenario.get("metrics") or scenario.get("results") or scenario
+        stored = metrics.get("fallback_rate")
+        fallback_total = metrics.get("streaming_fallback_total")
+        requests_total = metrics.get("streaming_requests_total")
+        if stored is None or fallback_total is None or requests_total is None:
+            continue
+        if not _is_numeric(stored):
+            continue
+        if not _is_exact_int(fallback_total) or not _is_exact_int(requests_total):
+            continue
+        if requests_total > 0:
+            derived = float(fallback_total) / float(requests_total)
+        else:
+            derived = 0.0
+        if abs(stored - derived) > 1e-9:
+            violations.append((
+                f"{role}.fallback_rate_consistency",
+                f"{name}: stored fallback_rate={stored} != "
+                f"derived {fallback_total}/{requests_total}={derived}",
+            ))
+    return violations
+
+
 def _validate_benchmark_evidence(
     report: dict, role: str,
 ) -> list[tuple[str, str]]:
@@ -1969,6 +2017,7 @@ def _validate_benchmark_evidence(
       - critical scenarios must exist and be completed (not missing,
         not skipped, not in any other non-completed status)
       - path-coverage invariants satisfied
+      - stored fallback_rate consistent with counter-derived value
       - nginx_version is present and not "unknown"
       - memory evidence completeness: at least 2 valid memory points
 
@@ -2006,6 +2055,9 @@ def _validate_benchmark_evidence(
     violations.extend(
         _canonical_baseline_fallback_violations(report, role)
     )
+    violations.extend(
+        _fallback_rate_consistency_violations(report, role)
+    )
     violations.extend(_baseline_policy_violations(report, role))
     violations.extend(_scenario_source_environment_violations(report, role))
     violations.extend(_raw_artifact_binding_violations(report, role))
@@ -2025,7 +2077,7 @@ def _validate_benchmark_evidence(
             )
 
     # 6. Memory evidence completeness: at least 2 valid memory points
-    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
+    scenarios = _report_scenarios(report)
     memory_points = _extract_memory_points(scenarios)
     if len(memory_points) < 2:
         violations.append(
@@ -2036,7 +2088,7 @@ def _validate_benchmark_evidence(
     return violations
 
 
-def _report_integrity_failure(
+def _report_integrity_failure(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     report: dict | None,
     args: argparse.Namespace,
     violations: list[tuple[str, str]],
@@ -2285,7 +2337,10 @@ def _evaluate_and_report(
     if baseline_rc is not None:
         return baseline_rc
 
-    eval_result = evaluate_module_level(current_metrics, baseline_metrics, thresholds_cfg, has_baseline=has_baseline)
+    eval_result = evaluate_module_level(
+        current_metrics, baseline_metrics, thresholds_cfg,
+        has_baseline=has_baseline,
+    )
     verdict = eval_result["verdict"]
     breaches = eval_result["breaches"]
     results = eval_result["results"]
@@ -2305,8 +2360,10 @@ def _evaluate_and_report(
     if verdict in ("NO_GO", "MISSING_EVIDENCE"):
         _stderr(
             f"BLOCKING: Evidence gate verdict is {verdict}.\n"
-            "  Release and RC tags require all module-level thresholds to pass and all critical evidence to be present.\n"
-            "  Review breaches above and address performance regressions or missing measurements."
+            "  Release and RC tags require all module-level thresholds "
+            "to pass and all critical evidence to be present.\n"
+            "  Review breaches above and address performance "
+            "regressions or missing measurements."
         )
         return 1
 

@@ -1,3 +1,7 @@
+# pylint: disable=too-many-lines
+# pylint: disable=import-error
+# pylint: disable=wrong-import-position
+# pylint: disable=protected-access
 """Unit tests for the 0.9.1 performance evidence release gate.
 
 Covers:
@@ -33,6 +37,7 @@ from evidence_gate import (
     _check_path_coverage,
     _check_environment_compatibility,
     _canonical_baseline_fallback_violations,
+    _fallback_rate_consistency_violations,
     _baseline_policy_violations,
     _compute_memory_slope,
     _conservative_normalized_truth_violations,
@@ -197,6 +202,7 @@ def test_memory_slope_single_point_returns_zero():
 
 
 def test_tag_release_job_supplies_module_enabled_nginx():
+    """Tag release job must supply module-enabled NGINX variables."""
     workflow_path = (
         Path(__file__).resolve().parents[3]
         / ".github"
@@ -238,7 +244,10 @@ def test_tag_release_job_supplies_module_enabled_nginx():
         "by exact name, not a wildcard pattern with merge-multiple"
     )
     assert "NGINX_BIN: ${{ github.workspace }}/module-runtime/nginx" in workflow
-    assert "MODULE_SO: ${{ github.workspace }}/module-runtime/ngx_http_markdown_filter_module.so" in workflow
+    assert (
+        "MODULE_SO: ${{ github.workspace }}"
+        "/module-runtime/ngx_http_markdown_filter_module.so"
+    ) in workflow
     assert "BENCHMARK_NGINX_VERSION" in workflow, (
         "Release gate must record the benchmark NGINX version for evidence"
     )
@@ -260,7 +269,10 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
     )
 
     assert "bootstrap_module_baseline" in workflow
-    assert "if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.bootstrap_module_baseline) }}" in workflow
+    assert (
+        "if: ${{ !(github.event_name == 'workflow_dispatch' "
+        "&& inputs.bootstrap_module_baseline) }}"
+    ) in workflow
     assert "name: Canonical Module Baseline 0.9.1" in workflow
     assert "runs-on: ubuntu-24.04" in workflow
     assert '[[ "$(uname -m)" == "x86_64" ]]' in workflow
@@ -775,8 +787,9 @@ class TestAllowSkipModule:
 # ---------------------------------------------------------------------------
 
 
-class TestEvidenceOutputValidation:
-    """Output paths must stay within the repository tree."""
+class TestEvidenceOutputValidation:  # pylint: disable=too-few-public-methods
+    """Validate evidence output format and content."""
+
 
     def test_write_output_rejects_path_outside_repo(self, tmp_path):
         """Caller-controlled output path cannot escape the repo root."""
@@ -1042,14 +1055,16 @@ class TestEvidenceMetricExtraction:
 
         result = evaluate_module_level(current, baseline, cfg, has_baseline=False)
 
-        # Verdict should still be GO because there are no breaches, just skipped percentage thresholds
+        # Verdict should still be GO because there are no breaches,
+        # just skipped percentage thresholds
         assert result["verdict"] == "GO"
 
         # Absolute caps like fallback_rate_abs should still be evaluated and pass
         fallback_entry = next(r for r in result["results"] if r["metric"] == "fallback_rate_abs")
         assert fallback_entry["status"] == "pass"
 
-        # Percentage deviation metrics like p50_latency_small_pct should be skipped with explanations
+        # Percentage deviation metrics like p50_latency_small_pct
+        # should be skipped with explanations
         p50_entry = next(r for r in result["results"] if r["metric"] == "p50_latency_small_pct")
         assert p50_entry["status"] == "skipped"
         assert "missing baseline" in p50_entry["reason"]
@@ -1293,6 +1308,7 @@ class TestBaselineEvidenceIntegrity:
     def test_all_scenario_metadata_mutations_fail_blocking_validation(
         self, scenario, field, value
     ):
+        """Scenario metadata mutations must fail blocking validation."""
         report = _load_canonical_module_baseline()
         _scenario(report, scenario)[field] = value
 
@@ -1321,6 +1337,7 @@ class TestBaselineEvidenceIntegrity:
     def test_all_target_path_mutations_fail_blocking_validation(
         self, scenario, metric
     ):
+        """Target path counter mutations must fail blocking validation."""
         report = _load_canonical_module_baseline()
         _scenario(report, scenario)["metrics"][metric] = 0
 
@@ -1348,6 +1365,7 @@ class TestBaselineEvidenceIntegrity:
     def test_path_counters_require_nonnegative_integers(
         self, scenario, metric, invalid
     ):
+        """Path counters must be non-negative integers."""
         report = _load_canonical_module_baseline()
         metrics = _scenario(report, scenario)["metrics"]
         if invalid is None:
@@ -1364,6 +1382,7 @@ class TestBaselineEvidenceIntegrity:
         )
 
     def test_current_verbatim_baseline_uses_retained_raw_artifact(self):
+        """Verbatim baseline must reference the retained raw artifact."""
         report = _load_canonical_module_baseline()
 
         assert report["baseline_policy"]["type"] == "verbatim_run"
@@ -1388,6 +1407,7 @@ class TestBaselineEvidenceIntegrity:
         ],
     )
     def test_conservative_normalized_baseline_requires_audit_metadata(self, field):
+        """Conservative normalized baseline requires all audit metadata fields."""
         report = _load_canonical_module_baseline()
         policy = report["baseline_policy"]
         policy["type"] = "conservative_normalized"
@@ -1413,6 +1433,7 @@ class TestBaselineEvidenceIntegrity:
     def test_future_normalized_baseline_rejects_unlocatable_artifact(
         self, placeholder
     ):
+        """Normalized baseline rejects unlocatable source artifact placeholders."""
         report = _load_canonical_module_baseline()
         policy = report["baseline_policy"]
         policy["type"] = "conservative_normalized"
@@ -1474,6 +1495,7 @@ class TestScenarioSourceEnvironment:
         return report
 
     def test_matching_structured_environment_is_accepted(self):
+        """Scenario source with matching environment is accepted."""
         report = self._baseline_with_source({
             "platform": "linux-x86_64",
             "load_generator": "ab",
@@ -1494,6 +1516,7 @@ class TestScenarioSourceEnvironment:
         ],
     )
     def test_diverging_source_environment_is_rejected(self, field, actual):
+        """Scenario source with diverging environment field is rejected."""
         source = {
             "platform": "linux-x86_64",
             "load_generator": "ab",
@@ -1517,6 +1540,7 @@ class TestScenarioSourceEnvironment:
         "field", ["platform", "load_generator", "nginx_version"]
     )
     def test_undeclared_source_environment_field_is_rejected(self, field):
+        """Scenario source missing a required environment field is rejected."""
         source = {
             "platform": "linux-x86_64",
             "load_generator": "ab",
@@ -1535,6 +1559,7 @@ class TestScenarioSourceEnvironment:
         assert f"must declare {field}" in reason
 
     def test_source_entry_for_unknown_scenario_is_rejected(self):
+        """Scenario source entry for an unknown scenario name is rejected."""
         report = _load_canonical_module_baseline()
         report["baseline_policy"]["scenario_sources"] = {
             "no-such-scenario": {
@@ -1551,6 +1576,7 @@ class TestScenarioSourceEnvironment:
         assert any("no matching scenario" in reason for _check, reason in violations)
 
     def test_non_object_scenario_sources_is_rejected(self):
+        """Non-object scenario_sources value is rejected."""
         report = _load_canonical_module_baseline()
         report["baseline_policy"]["scenario_sources"] = ["streaming-first"]
 
@@ -1908,6 +1934,80 @@ class TestScenarioSourceEnvironment:
             and "gzip-streaming-first" in reason
             for check, reason in violations
         )
+
+    def test_fallback_rate_consistency_passes_when_matched(self):
+        """No violation when stored fallback_rate equals derived value."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [
+                    {
+                        "name": "streaming-first",
+                        "metrics": {
+                            "fallback_rate": 0.0,
+                            "streaming_fallback_total": 0,
+                            "streaming_requests_total": 1030,
+                        },
+                    },
+                    {
+                        "name": "chunked-medium",
+                        "metrics": {
+                            "fallback_rate": 1.0,
+                            "streaming_fallback_total": 1030,
+                            "streaming_requests_total": 1030,
+                        },
+                    },
+                ],
+            },
+        }
+        assert _fallback_rate_consistency_violations(
+            report, role="baseline"
+        ) == []
+
+    def test_fallback_rate_consistency_fails_when_mismatched(self):
+        """Violation when stored fallback_rate differs from derived value."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [
+                    {
+                        "name": "chunked-medium",
+                        "metrics": {
+                            "fallback_rate": 1.0,
+                            "streaming_fallback_total": 0,
+                            "streaming_requests_total": 1030,
+                        },
+                    },
+                ],
+            },
+        }
+        violations = _fallback_rate_consistency_violations(
+            report, role="baseline"
+        )
+        assert any(
+            check == "baseline.fallback_rate_consistency"
+            and "chunked-medium" in reason
+            and "1.0" in reason
+            for check, reason in violations
+        )
+
+    def test_fallback_rate_consistency_zero_requests(self):
+        """No violation when streaming_requests_total is 0 and rate is 0."""
+        report = {
+            "module_benchmark": {
+                "scenarios": [
+                    {
+                        "name": "plain-small",
+                        "metrics": {
+                            "fallback_rate": 0.0,
+                            "streaming_fallback_total": 0,
+                            "streaming_requests_total": 0,
+                        },
+                    },
+                ],
+            },
+        }
+        assert _fallback_rate_consistency_violations(
+            report, role="baseline"
+        ) == []
 
     def test_unknown_nginx_version_is_rejected(self):
         """An 'unknown' nginx_version fails evidence validation."""
@@ -2533,7 +2633,11 @@ class TestCompressedStreamingEvidenceCompleteness:
                 {"name": "large-body", "status": "completed"},
                 {"name": "streaming-first", "status": "completed"},
                 {"name": "gzip-large", "status": "completed"},
-                {"name": "gzip-streaming-first", "status": "skipped", "reason": "fixture_not_found"},
+                {
+                    "name": "gzip-streaming-first",
+                    "status": "skipped",
+                    "reason": "fixture_not_found",
+                },
                 {"name": "deflate-streaming-first", "status": "completed"},
             ]
         }
