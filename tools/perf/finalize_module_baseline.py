@@ -169,7 +169,7 @@ def _resolve_github_repository(repo_root: Path) -> str | None:
             cwd=str(repo_root),
             check=False,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, UnicodeError, subprocess.SubprocessError):
         return None
     if result.returncode != 0:
         return None
