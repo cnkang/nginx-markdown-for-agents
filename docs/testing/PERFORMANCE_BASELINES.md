@@ -40,6 +40,13 @@ baseline is a verbatim run from source commit
 The former `historical_audit_exception` is retained only for historical audit
 coverage and is not an active release-baseline policy.
 
+The provenance schema is layered: `baseline_policy` contains source artifact,
+run, commit, digest, measurement timestamp, and normalization; top-level
+`module_benchmark` contains environment and measurement identity; scenario
+records contain scenario metadata, `load_integrity`, `metrics`, and
+`response_correctness`. `scenario_sources` is optional and receives
+environment-consistency validation only when present.
+
 The canonical module benchmark retains response probes at
 `perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
 output path. The workflow validates non-empty `.headers`, `.body`, and `.json`

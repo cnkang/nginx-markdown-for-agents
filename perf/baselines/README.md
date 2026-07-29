@@ -45,6 +45,13 @@ Its retained raw artifact has SHA-256
 The validator requires this source commit, run attempt, timestamp, retained
 raw artifact, and digest to remain mutually consistent.
 
+Provenance is layered by object: `baseline_policy` carries policy provenance;
+top-level `module_benchmark` carries `platform`, `load_generator`,
+`nginx_version`, `git_commit`, and `timestamp`; each scenario carries its
+metadata, `load_integrity`, `metrics`, and `response_correctness`. The optional
+`baseline_policy.scenario_sources` object is checked for environment
+consistency only when present.
+
 The module benchmark derives its retained probe directory from the report
 output path. For the canonical raw report this is
 `perf/baselines/module-baseline-091-raw-probes/`, containing non-empty

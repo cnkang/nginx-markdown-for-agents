@@ -36,6 +36,21 @@ ingested by `tools/perf/evidence_gate.py`) must carry all of the following:
 | `measurement_timestamp` | UTC timestamp of the measurement | ISO-8601 with explicit UTC offset (`Z` or `+00:00`); not a normalized or imputed value |
 | `normalization` | Normalization mode applied | `"none"` for `verbatim_run`; `"conservative"` for `conservative_normalized` |
 
+**Evidence object levels.** These fields are intentionally scoped to their
+own objects; provenance is not copied into every scenario record:
+
+- `baseline_policy` carries `source_git_commit`, `source_run`,
+  `source_artifact`, `source_artifact_sha256`, `measurement_timestamp`, and
+  `normalization`.
+- The top-level `module_benchmark` object carries the benchmark environment
+  (`platform`, `load_generator`, `nginx_version`) and measurement identity
+  (`git_commit`, `timestamp`).
+- Each scenario carries its scenario evidence: scenario metadata,
+  `load_integrity`, `metrics`, and `response_correctness`.
+- `baseline_policy.scenario_sources` is optional. Only when it exists does
+  the gate validate its per-scenario environment entries against the
+  top-level `module_benchmark` environment.
+
 **Additional contracts:**
 
 1. **Per-codec path evidence.** Each streaming decompression codec (gzip,
@@ -65,14 +80,16 @@ ingested by `tools/perf/evidence_gate.py`) must carry all of the following:
 
 **Verification:**
 - `RELEASE_GATE_ALLOW_SKIP_MODULE=1 make release-gates-check-091` — blocking
-  gate (requires `NGINX_BIN` or `RELEASE_GATE_ALLOW_SKIP_MODULE=1`); every
-  scenario record must include all provenance fields above.
+  gate (requires `NGINX_BIN` or `RELEASE_GATE_ALLOW_SKIP_MODULE=1`); validates
+  `baseline_policy`, top-level `module_benchmark` environment/identity,
+  and each scenario's evidence objects at their respective levels.
 - `make perf-evidence-check` — non-blocking report-only mode; validates the
   same invariant for PR visibility.
 - `python3 -m pytest tools/perf/tests/` — perf tooling test suite
   (692 tests); must pass.
 - Inspect `perf/baselines/module-baseline-091.json` `baseline_policy` and
-  confirm it carries all six provenance fields above.
+  confirm it carries the six policy provenance fields above; inspect
+  `module_benchmark` and scenario records for their separate schemas.
 
 **Why this rule.** Without a single contract, evidence provenance fields were
 added one at a time as blockers were discovered (seven commits). The result

@@ -134,6 +134,13 @@ the retained raw artifact SHA-256
 Machine validation recomputes that digest and requires the finalized report to
 match the raw report exactly apart from `baseline_policy`.
 
+The evidence objects remain layered: `baseline_policy` carries policy
+provenance, top-level `module_benchmark` carries platform/load-generator/NGINX
+environment plus `git_commit` and `timestamp`, and each scenario carries its
+metadata, `load_integrity`, `metrics`, and `response_correctness`. Optional
+`baseline_policy.scenario_sources` entries are checked for environment
+consistency only when supplied.
+
 The canonical workflow retains response probes at
 `perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
 path. It validates every scenario's non-empty `.headers`, `.body`, and `.json`
