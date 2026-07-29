@@ -235,6 +235,30 @@ def test_git_outside_allowlist_is_controlled_failure(
     assert "full URL instead" in capsys.readouterr().err
 
 
+def test_git_remote_decode_failure_is_controlled_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Undecodable git output must not crash deprecated ID normalization."""
+    import finalize_module_baseline as mod
+
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.setattr(
+        mod, "resolve_approved_executable", lambda _name: "/bin/git",
+    )
+    decode_error = UnicodeDecodeError(
+        "utf-8", b"\xff", 0, 1, "invalid start byte",
+    )
+
+    def raise_decode_failure(*_args, **_kwargs):
+        raise decode_error
+
+    monkeypatch.setattr(
+        mod.subprocess, "run", raise_decode_failure,
+    )
+
+    assert _resolve_github_repository(tmp_path) is None
+
+
 @pytest.mark.parametrize(
     "remote",
     [
