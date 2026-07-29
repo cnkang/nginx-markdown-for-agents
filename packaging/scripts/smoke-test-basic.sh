@@ -296,8 +296,17 @@ REPO
 
         # --- RPM: Install module package ---
         info "Installing module package: ${PACKAGE_FILE}"
-        rpm -Uvh "${PACKAGE_FILE}" >>"${INSTALL_LOG}" 2>&1 \
-            || die "rpm -Uvh failed for ${PACKAGE_FILE}"
+        # Use the distro package manager so dependencies such as libbrotli
+        # are resolved from the configured repositories before installation.
+        if command -v dnf >/dev/null 2>&1; then
+            dnf install -y "${PACKAGE_FILE}" >>"${INSTALL_LOG}" 2>&1 \
+                || die "dnf install failed for ${PACKAGE_FILE}"
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y "${PACKAGE_FILE}" >>"${INSTALL_LOG}" 2>&1 \
+                || die "yum install failed for ${PACKAGE_FILE}"
+        else
+            die "Neither dnf nor yum found for RPM module installation"
+        fi
 
         # --- RPM: Verify nginx -V ---
         info "Running nginx -V..."

@@ -461,6 +461,21 @@ class TestReleaseGateSnippetExpectations:
         assert "packages/%samzn/" in validator.SMOKE_RPM_REPO_SNIPPETS
         assert "packages/%scentos/" in validator.SMOKE_RPM_REPO_SNIPPETS
 
+    def test_rpm_smoke_install_resolves_package_dependencies(self) -> None:
+        """Ensure RPM smoke tests use dnf/yum instead of raw rpm installation."""
+        assert (
+            'dnf install -y "${PACKAGE_FILE}"'
+            in validator.SMOKE_RPM_INSTALL_SNIPPETS
+        )
+        assert (
+            'yum install -y "${PACKAGE_FILE}"'
+            in validator.SMOKE_RPM_INSTALL_SNIPPETS
+        )
+
+        result = validator.ValidationResult()
+        validator.validate_smoke_test_rpm_install(result)
+        assert not result.has_failures
+
     def test_nfpm_postinstall_accepts_rpm_lifecycle_args(self) -> None:
         """Ensure postinstall script handles RPM lifecycle arguments."""
         assert "configure|1|2)" in validator.NFPM_POSTINSTALL_SNIPPETS
