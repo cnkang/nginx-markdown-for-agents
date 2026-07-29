@@ -29,6 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from finalize_module_baseline import (  # noqa: E402
     _build_policy,
     _extract_raw_timestamp,
+    _normalize_source_run,
+    _resolve_github_repository,
     _resolve_repo_relative,
     _sha256_file,
     _validate_raw_commit_match,
@@ -127,6 +129,197 @@ def test_validate_source_run_rejects_url_without_attempt() -> None:
 def test_validate_source_run_rejects_non_canonical_urls(source_run: str) -> None:
     """Source provenance must identify a concrete HTTPS Actions attempt."""
     assert _validate_source_run(source_run)
+
+
+# ---------------------------------------------------------------------------
+# GitHub repository discovery for deprecated numeric source-run IDs
+# ---------------------------------------------------------------------------
+
+
+def test_valid_github_repository_does_not_call_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A valid GITHUB_REPOSITORY is authoritative and needs no subprocess."""
+    import finalize_module_baseline as mod
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", "CNKANG/NGINX-MARKDOWN-FOR-AGENTS")
+    monkeypatch.setattr(
+        mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("git must not be called"),
+    )
+
+    assert _resolve_github_repository(tmp_path) == (
+        "cnkang/nginx-markdown-for-agents"
+    )
+
+
+def test_full_source_run_does_not_call_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A canonical source-run URL passes through without repository lookup."""
+    import finalize_module_baseline as mod
+
+    monkeypatch.setattr(
+        mod,
+        "_resolve_github_repository",
+        lambda _repo_root: pytest.fail("full source-run must not resolve git"),
+    )
+
+    assert _normalize_source_run(_GOOD_RUN_URL, repo_root=tmp_path) == _GOOD_RUN_URL
+
+
+def test_numeric_source_run_uses_validated_absolute_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deprecated IDs invoke only the validated absolute git executable."""
+    import finalize_module_baseline as mod
+
+    calls = []
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.setattr(
+        mod,
+        "resolve_approved_executable",
+        lambda name: "/trusted/bin/git" if name == "git" else None,
+    )
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(
+            args, 0, stdout="git@github.com:CNKANG/nginx-markdown-for-agents.git\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+    assert _normalize_source_run("30405031983", repo_root=tmp_path) == (
+        "https://github.com/cnkang/nginx-markdown-for-agents/"
+        "actions/runs/30405031983/attempts/1"
+    )
+    assert len(calls) == 1
+    assert calls[0][0][0] == "/trusted/bin/git"
+    assert Path(calls[0][0][0]).is_absolute()
+
+
+def test_git_missing_is_controlled_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A missing git executable returns the deprecated ID with warning."""
+    import finalize_module_baseline as mod
+
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.setattr(
+        mod, "resolve_approved_executable", lambda _name: None,
+    )
+
+    assert _normalize_source_run("12345", repo_root=tmp_path) == "12345"
+    assert "full URL instead" in capsys.readouterr().err
+
+
+def test_git_outside_allowlist_is_controlled_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A git path rejected by the allowlist returns a controlled warning."""
+    import finalize_module_baseline as mod
+
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.setattr(
+        mod, "resolve_approved_executable", lambda _name: None,
+    )
+
+    assert _normalize_source_run("12345", repo_root=tmp_path) == "12345"
+    assert "full URL instead" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "remote",
+    [
+        "https://github.com/cnkang/nginx-markdown-for-agents.git",
+        "git@github.com:cnkang/nginx-markdown-for-agents.git",
+    ],
+)
+def test_github_https_and_ssh_remotes_parse(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    remote: str,
+) -> None:
+    """HTTPS and SCP-style SSH remotes produce the same lowercase slug."""
+    import finalize_module_baseline as mod
+
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.setattr(mod, "resolve_approved_executable", lambda _name: "/bin/git")
+    monkeypatch.setattr(
+        mod.subprocess,
+        "run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, stdout=remote, stderr="",
+        ),
+    )
+
+    assert _resolve_github_repository(tmp_path) == (
+        "cnkang/nginx-markdown-for-agents"
+    )
+
+
+@pytest.mark.parametrize(
+    "remote",
+    [
+        "https://example.com/cnkang/nginx-markdown-for-agents.git",
+        "https://github.com/cnkang",
+        "https://github.com/cnkang/nginx-markdown-for-agents.git/extra",
+    ],
+)
+def test_malformed_or_non_github_remote_does_not_make_slug(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    remote: str,
+) -> None:
+    """Only a complete GitHub owner/repository remote is accepted."""
+    import finalize_module_baseline as mod
+
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.setattr(mod, "resolve_approved_executable", lambda _name: "/bin/git")
+    monkeypatch.setattr(
+        mod.subprocess,
+        "run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, stdout=remote, stderr="",
+        ),
+    )
+
+    assert _resolve_github_repository(tmp_path) is None
+
+
+def test_numeric_source_run_warning_preserves_attempt_one_compatibility(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Deprecated normalization keeps attempt=1 and warns about retries."""
+    import finalize_module_baseline as mod
+
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.setattr(
+        mod, "resolve_approved_executable", lambda _name: "/bin/git",
+    )
+    monkeypatch.setattr(
+        mod.subprocess,
+        "run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, stdout="https://github.com/cnkang/nginx-markdown-for-agents",
+            stderr="",
+        ),
+    )
+
+    normalized = _normalize_source_run("12345", repo_root=tmp_path)
+    warning = capsys.readouterr().err
+    assert normalized.endswith("/actions/runs/12345/attempts/1")
+    assert "attempt=1" in warning
+    assert "retried runs must use --source-run explicitly" in warning
 
 
 # ---------------------------------------------------------------------------

@@ -72,6 +72,9 @@ from lib.path_validation import (  # noqa: E402 - direct script import
     validate_read_path,
     validate_write_path_within_root,
 )
+from lib.executable_validation import (  # noqa: E402 - direct script import
+    resolve_approved_executable,
+)
 
 _FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -152,9 +155,14 @@ def _resolve_github_repository(repo_root: Path) -> str | None:
         r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository
     ):
         return repository.lower()
+
+    git_executable = resolve_approved_executable("git")
+    if git_executable is None:
+        return None
+
     try:
         result = subprocess.run(
-            ["git", "config", "--get", "remote.origin.url"],
+            [git_executable, "config", "--get", "remote.origin.url"],
             capture_output=True,
             text=True,
             timeout=5,
