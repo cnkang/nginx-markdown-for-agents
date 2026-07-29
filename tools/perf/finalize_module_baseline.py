@@ -334,7 +334,7 @@ def _extract_raw_timestamp(raw_report: dict) -> str:
 
 def _resolve_io_paths(
     args: argparse.Namespace,
-) -> tuple[Path, Path, str] | int:
+) -> tuple[Path, Path, str, str] | int:
     """Resolve and validate raw-input, output, and source_artifact paths.
 
     Returns ``(raw_input_path, output_path, source_run, source_artifact)`` on success
@@ -469,7 +469,8 @@ def main(argv: list[str] | None = None) -> int:
             f"SHA (got {args.source_git_commit!r})"
         )
     source_run = args.source_run or args.source_run_id
-    errors.extend(_validate_source_run(source_run))
+    if source_run is not None:
+        errors.extend(_validate_source_run(source_run))
 
     if errors:
         for err in errors:
