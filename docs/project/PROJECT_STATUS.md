@@ -28,7 +28,7 @@ operations, architecture, and contributor-facing harness maintenance.
 
 ### Current Release Line 0.9.1
 
-**Status:** Released 2026-07-29. 0.9.1 introduces zero-copy output for
+**Status:** Stable release, published 2026-07-29. 0.9.1 introduces zero-copy output for
 streaming, gzip plus zlib/raw-deflate plus Brotli streaming decompression,
 and full-buffer copy reduction, all guarded by strict performance evidence
 gates.
