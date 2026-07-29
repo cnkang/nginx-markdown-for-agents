@@ -21,6 +21,7 @@ sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from lib.path_validation import validate_read_path  # noqa: E402 - direct script import
 from perf.benchmark_validation import (  # noqa: E402
+    SCENARIOS,
     normalized_header_mapping_error,
     parse_curl_header_artifact,
 )
@@ -31,16 +32,6 @@ def _is_exact_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-SCENARIOS = (
-    "plain-small",
-    "chunked-medium",
-    "gzip-large",
-    "large-body",
-    "streaming-first",
-    "gzip-streaming-first",
-    "deflate-streaming-first",
-    "brotli-streaming-first",
-)
 EXPECTED_RESPONSE_FIELDS = (
     "http_status",
     "headers",

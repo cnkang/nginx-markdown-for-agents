@@ -18,6 +18,22 @@ _HTTP_STATUS_LINE_RE = re.compile(
     re.ASCII,
 )
 
+#: Canonical module-benchmark scenario names.
+#: Kept here as a single source of truth shared by
+#: ``run_module_benchmark.sh``, ``evidence_gate.py``, and
+#: ``validate_module_probe_artifacts.py``.  Order matches the
+#: fixture array in ``run_module_benchmark.sh``.
+SCENARIOS: tuple[str, ...] = (
+    "plain-small",
+    "chunked-medium",
+    "gzip-large",
+    "large-body",
+    "streaming-first",
+    "gzip-streaming-first",
+    "deflate-streaming-first",
+    "brotli-streaming-first",
+)
+
 
 def _normalize_header_name(name: str) -> str:
     normalized = name.strip().lower()

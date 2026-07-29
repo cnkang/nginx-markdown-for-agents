@@ -30,14 +30,8 @@ DETECTOR = Path(__file__).resolve().parent.parent / "detect_release_supply_chain
 # Pinned container image digests for the two release builder families.
 # These must match the actual ARG OS_BASE values in the Dockerfiles and
 # the container: field in release-packages.yml.
-ALMALINUX_9 = (
-    "almalinux@sha256:"
-    "d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743"
-)
-ALPINE_320 = (
-    "alpine@sha256:"
-    "d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
-)
+#: Reuse the detector's single source of truth so tests cannot drift.
+from harness.detect_release_supply_chain import ALMALINUX_9, ALPINE_320  # noqa: E402 - detector constants
 
 
 # ---------------------------------------------------------------------------

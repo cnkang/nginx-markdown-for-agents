@@ -896,3 +896,31 @@ def test_normalize_status_context_rejects_non_string() -> None:
         _normalize_status_context(123)
     with pytest.raises(MalformedPayloadError):
         _normalize_status_context(["a"])
+
+def test_malformed_status_entry_in_status_path_fails_closed_no_crash() -> None:
+    """A malformed status entry returned from the status API must fail closed.
+
+    Regression test for the missing ``try/except MalformedPayloadError`` around
+    the ``_status_errors`` call path.  Before the fix this entry would surface
+    as a raw uncaught exception rather than a structured release-gate error.
+
+    We inject the error by passing a status entry whose ``context`` is ``None``;
+    ``_latest_matching_status`` rejects such entries as malformed, and the
+    new wrapper in ``_evaluate_one_required_check`` converts that to a
+    string error for the affected required check.
+    """
+    errors = validate_required_checks(
+        _required_rules("CI / test"),
+        [_check_run("CI / test", run_id=1, conclusion="success")],
+        [{
+            "statuses": [
+                _commit_status("CI / test", status_id=1, state="success"),
+                {"context": None, "state": "success", "id": 999},
+            ]
+        }],
+        branch="main",
+    )
+    # No raw exception; the gate reports a structured MalformedPayloadError.
+    assert len(errors) == 1
+    assert "Malformed" in errors[0]
+    assert "CI / test" in errors[0]

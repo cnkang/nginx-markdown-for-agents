@@ -452,7 +452,13 @@ def _evaluate_one_required_check(
     if has_matching_run:
         errors.extend(_check_run_errors(required, matching_runs))
     if has_matching_status:
-        errors.extend(_status_errors(required, statuses, has_matching_run))
+        try:
+            errors.extend(_status_errors(required, statuses, has_matching_run))
+        except MalformedPayloadError as error:
+            errors.append(
+                f"Malformed commit-status payload for required check "
+                f"'{required.context}': {error}"
+            )
     return errors
 
 
