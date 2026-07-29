@@ -1,6 +1,6 @@
 ---
 domain: ci-gating
-rules: [13, 48, 54]
+rules: [13, 54]
 paths:
   - ".github/workflows/**"
   - "Makefile"

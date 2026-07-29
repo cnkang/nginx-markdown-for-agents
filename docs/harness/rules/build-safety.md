@@ -1,4 +1,14 @@
-# Build Safety Rules (56–57)
+---
+domain: build-safety
+rules: [56, 57, 58, 59]
+paths:
+  - "components/nginx-module/src/**"
+  - "components/rust-converter/src/**"
+  - ".github/workflows/**"
+  - "tools/**"
+---
+
+# Build Safety Rules (56–59)
 
 ## Rule 56: Orphan Comment Closers
 

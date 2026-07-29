@@ -44,7 +44,9 @@ def _run_checks(
         """Run one check and normalize exceptions into a failed result entry."""
         try:
             passed, msgs = check_fn(target_dir)
-        except Exception as exc:
+        # Each independent release check must be isolated: a malformed optional
+        # spec input is reported as a failed check instead of aborting the gate.
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             passed, msgs = False, [f"Exception: {exc}"]
         results.append((check_name, passed, msgs))
 

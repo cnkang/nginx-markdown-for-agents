@@ -54,26 +54,74 @@ ngx_http_markdown_arg_equals(
 
 /*
  * Resolve a size suffix character (k/K, m/M, g/G) to its multiplier.
- * Returns 0 for no suffix (bare number), or (size_t) NGX_ERROR for an
- * unrecognized character so the caller can distinguish "no suffix" from
- * "invalid suffix".  Caller must check: 0 = bare, NGX_ERROR = invalid.
+ * Returns 0 for no suffix (bare number), or NGX_ERROR for an unrecognized
+ * character so the caller can distinguish "no suffix" from "invalid
+ * suffix".  Caller must check: 0 = bare, NGX_ERROR = invalid.
  */
-static size_t
+static ngx_int_t
 ngx_http_markdown_size_suffix_scale(char suffix)
 {
     switch (suffix) {
     case 'k':
     case 'K':
-        return (size_t) 1024;
+        return 1024;
     case 'm':
     case 'M':
-        return (size_t) 1024 * 1024;
+        return 1024 * 1024;
     case 'g':
     case 'G':
-        return (size_t) 1024 * 1024 * 1024;
+        return 1024 * 1024 * 1024;
     default:
-        return (size_t) NGX_ERROR;
+        return NGX_ERROR;
     }
+}
+
+static ngx_int_t
+ngx_http_markdown_parse_size_number(
+    char *buf,
+    size_t len,
+    size_t *value,
+    char *suffix)
+{
+    char                *endptr;
+    const char          *number;
+    unsigned long long   raw;
+
+    if (buf == NULL || value == NULL || suffix == NULL || len == 0) {
+        return NGX_ERROR;
+    }
+
+    number = buf;
+    while (*number == ' ' || *number == '\t' || *number == '\r'
+           || *number == '\n' || *number == '\f' || *number == '\v')
+    {
+        number++;
+    }
+    if (*number == '\0' || *number == '-') {
+        return NGX_ERROR;
+    }
+
+    *suffix = '\0';
+    if (len > 1) {
+        switch (buf[len - 1]) {
+        case 'k': case 'K': case 'm': case 'M': case 'g': case 'G':
+            *suffix = buf[len - 1];
+            buf[len - 1] = '\0';
+            break;
+        default:
+            break;
+        }
+    }
+
+    errno = 0;
+    raw = strtoull(number, &endptr, 10);
+    if (errno == ERANGE || endptr == number || *endptr != '\0'
+        || raw > (unsigned long long) NGX_MAX_SIZE_T_VALUE)
+    {
+        return NGX_ERROR;
+    }
+    *value = (size_t) raw;
+    return NGX_OK;
 }
 
 /*
@@ -85,12 +133,9 @@ static size_t
 ngx_http_markdown_parse_size(const ngx_str_t *line)
 {
     char                 buf[64];
-    char                *endptr;
-    const char          *number;
     size_t               len;
     size_t               value;
-    size_t               scale;
-    unsigned long long   raw;
+    ngx_int_t            scale;
     char                 suffix;
 
     if (line == NULL || line->data == NULL || line->len == 0) {
@@ -105,58 +150,26 @@ ngx_http_markdown_parse_size(const ngx_str_t *line)
     memcpy(buf, line->data, len);
     buf[len] = '\0';
 
-    number = buf;
-    while (*number == ' ' || *number == '\t' || *number == '\r'
-           || *number == '\n' || *number == '\f' || *number == '\v')
-    {
-        number++;
-    }
-
-    if (*number == '\0' || *number == '-') {
-        return (size_t) NGX_ERROR;
-    }
-
-    suffix = '\0';
-    if (len > 1) {
-        switch (buf[len - 1]) {
-        case 'k':
-        case 'K':
-        case 'm':
-        case 'M':
-        case 'g':
-        case 'G':
-            suffix = buf[len - 1];
-            buf[len - 1] = '\0';
-            break;
-        default:
-            break;
-        }
-    }
-
-    errno = 0;
-    raw = strtoull(number, &endptr, 10);
-    if (errno == ERANGE || endptr == number || *endptr != '\0'
-        || raw > (unsigned long long) NGX_MAX_SIZE_T_VALUE)
+    if (ngx_http_markdown_parse_size_number(
+            buf, len, &value, &suffix) != NGX_OK)
     {
         return (size_t) NGX_ERROR;
     }
-
-    value = (size_t) raw;
 
     if (suffix == '\0') {
         return value;
     }
 
     scale = ngx_http_markdown_size_suffix_scale(suffix);
-    if (scale == (size_t) NGX_ERROR) {
+    if (scale == NGX_ERROR) {
         return (size_t) NGX_ERROR;
     }
 
-    if (value > NGX_MAX_SIZE_T_VALUE / scale) {
+    if (value > NGX_MAX_SIZE_T_VALUE / (size_t) scale) {
         return (size_t) NGX_ERROR;
     }
 
-    return value * scale;
+    return value * (size_t) scale;
 }
 
 /*

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# pylint: disable=too-many-lines
+# pylint: disable=import-error
 """0.9.1 performance evidence release gate.
 
 Runs the module-level benchmark harness and evaluates results against
@@ -32,24 +34,43 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
+# These imports support direct execution from tools/perf and intentionally follow
+# the repository path bootstrap rather than relying on the caller's PYTHONPATH.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import re
-from lib.path_validation import (
+import re  # pylint: disable=wrong-import-position
+from lib.path_validation import (  # pylint: disable=wrong-import-position
     validate_read_path,
     validate_write_path_within_root,
 )
+from lib.baseline_provenance import (  # pylint: disable=wrong-import-position
+    validate_iso_utc,
+    validate_raw_commit_match,
+    validate_source_run,
+)
+from threshold_engine import evaluate_module_level  # pylint: disable=wrong-import-position
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _RC_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+-rc(?:\.\d+)?$")
 _RELEASE_TAG_RE = re.compile(r"(?:^|/)v?\d+\.\d+\.\d+(?:\.\d+)?$")
+
+
+def _report_scenarios(report: dict) -> list:
+    """Extract the scenarios list from a benchmark report."""
+    return (
+        report.get("module_benchmark", {}).get("scenarios", [])
+        or report.get("scenarios", [])
+    )
 
 # Exit code for SKIP_NOT_PRESENT (matches run_module_benchmark.sh)
 EX_SKIP_NOT_PRESENT = 75
@@ -68,10 +89,11 @@ def _get_git_commit() -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
             cwd=str(REPO_ROOT),
         )
         return result.stdout.strip() if result.returncode == 0 else "unknown"
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return "unknown"
 
 
@@ -97,6 +119,7 @@ def _is_rc_tag() -> bool:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
             cwd=str(REPO_ROOT),
         )
         if result.returncode == 0 and _RC_RE.search(result.stdout.strip()):
@@ -122,6 +145,7 @@ def _is_release_tag() -> bool:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
             cwd=str(REPO_ROOT),
         )
         if result.returncode == 0:
@@ -154,6 +178,7 @@ def _run_module_benchmark(output_path: Path) -> tuple[int, str]:
         capture_output=True,
         text=True,
         timeout=600,
+        check=False,
         cwd=str(REPO_ROOT),
     )
     return result.returncode, result.stderr
@@ -164,7 +189,7 @@ def _extract_evidence_metrics(report: dict) -> dict:
 
     Returns a flat dict suitable for evaluate_module_level().
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
+    scenarios = _report_scenarios(report)
 
     if not scenarios:
         # ponytail: keep empty/legacy tests happy while failing real missing scenarios
@@ -261,9 +286,9 @@ def _calc_fallback_rate(scenarios: list[dict]) -> float | None:
         failopen = m.get("precommit_failopen_total")
         requests = m.get("streaming_requests_total")
         if (
-            type(failopen) is not int
+            not _is_exact_int(failopen)
             or failopen < 0
-            or type(requests) is not int
+            or not _is_exact_int(requests)
             or requests <= 0
         ):
             return None
@@ -359,7 +384,7 @@ def _compute_memory_slope(data_points: list[tuple[float, float]]) -> float:
     return (n * sum_xy - sum_x * sum_y) / denominator
 
 
-def _build_evidence_pack(
+def _build_evidence_pack(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     report: dict | None,
     verdict: str,
     breaches: list,
@@ -462,7 +487,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--mode",
         choices=["non-blocking", "blocking"],
         default="non-blocking",
-        help="Gate mode: non-blocking (report-only) or blocking (fails on NO_GO).",
+        help=(
+            "Gate mode: non-blocking (report-only, integrity failures keep exit "
+            "0) or blocking (fails on NO_GO and MISSING_EVIDENCE)."
+        ),
     )
     parser.add_argument(
         "--allow-skip-module",
@@ -634,22 +662,36 @@ _FALLBACK_RATE_COVERAGE_LABEL = (
     "precommit_failopen_total / streaming_requests_total <= 0.05"
 )
 _HISTORICAL_BASELINE_COMMIT = "847f90139d287446882052ec78661746541aebff"
+_HISTORICAL_BASELINE_PATH = "perf/baselines/module-baseline-091.json"
+_HISTORICAL_BASELINE_SHA256 = (
+    "8080c23974d8124e6f44fa20ecca1a83fc0a6395b42fb904dfa2e1ae02f284a0"
+)
+
+
+def _is_exact_int(value: object) -> bool:
+    """Return whether a JSON value is an integer rather than a boolean."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_numeric(value: object) -> bool:
+    """Return whether a JSON value is a non-boolean integer or float."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _is_positive(value: float | int | None) -> bool:
-    return type(value) in (int, float) and value > 0
+    return _is_numeric(value) and value > 0
 
 
 def _is_positive_counter(value: float | int | None) -> bool:
-    return type(value) is int and value > 0
+    return _is_exact_int(value) and value > 0
 
 
 def _is_less_than_one(value: float | int | None) -> bool:
-    return type(value) in (int, float) and value < 1.0
+    return _is_numeric(value) and value < 1.0
 
 
 def _is_acceptable_fallback_rate(value: float | int | None) -> bool:
-    return type(value) in (int, float) and value <= 0.05
+    return _is_numeric(value) and value <= 0.05
 
 
 def _scenario_metadata_checks(
@@ -843,7 +885,7 @@ def _check_path_coverage(report: dict) -> list[tuple[str, str, str]]:
     Each violation is evidence that the benchmark did not actually test
     the path it claims to cover.
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
+    scenarios = _report_scenarios(report)
 
     by_name: dict[str, dict] = {}
     for s in scenarios:
@@ -883,20 +925,20 @@ def _path_metric_value(metrics: dict, metric: str) -> float | int | None:
         return (
             None
             if (
-                type(failopen) is not int
+                not _is_exact_int(failopen)
                 or failopen < 0
-                or type(requests) is not int
+                or not _is_exact_int(requests)
                 or requests <= 0
             )
             else float(failopen) / float(requests)
         )
-    elif metric == "output_total":
+    if metric == "output_total":
         zero_copy = metrics.get("zero_copy_output_total")
         copied = metrics.get("copied_output_total")
         if (
-            type(zero_copy) is not int
+            not _is_exact_int(zero_copy)
             or zero_copy < 0
-            or type(copied) is not int
+            or not _is_exact_int(copied)
             or copied < 0
         ):
             return None
@@ -930,7 +972,7 @@ def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
     the report.  In blocking mode, a skipped critical scenario means
     the evidence is incomplete and the gate must fail.
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
+    scenarios = _report_scenarios(report)
 
     skipped = []
     for s in scenarios:
@@ -942,7 +984,243 @@ def _check_skipped_scenarios(report: dict) -> list[tuple[str, str]]:
     return skipped
 
 
-def _baseline_policy_violations(
+_SUPPORTED_POLICY_TYPES = frozenset({"verbatim_run", "conservative_normalized"})
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _is_scoped_historical_exception(report: dict) -> bool:
+    """Return True only for the immutable checked-in historical baseline."""
+    policy = report.get("baseline_policy")
+    if not isinstance(policy, dict):
+        return False
+    if not (
+        policy.get("historical_audit_exception") is True
+        and policy.get("source_git_commit") == _HISTORICAL_BASELINE_COMMIT
+        and isinstance(policy.get("audit_note"), str)
+        and bool(policy["audit_note"].strip())
+    ):
+        return False
+
+    try:
+        baseline_path = (REPO_ROOT / _HISTORICAL_BASELINE_PATH).resolve(
+            strict=True
+        )
+        baseline_path.relative_to(REPO_ROOT.resolve())  # pylint: disable=no-member
+        if _sha256_file(baseline_path) != _HISTORICAL_BASELINE_SHA256:
+            return False
+        historical_report = json.loads(
+            baseline_path.read_text(encoding="utf-8")
+        )
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return report == historical_report
+
+
+def _policy_type_violations(
+    policy: dict, role: str, exception_is_scoped: bool,
+) -> tuple[list[tuple[str, str]], str]:
+    """Validate the policy type; return (violations, resolved_type)."""
+    violations: list[tuple[str, str]] = []
+    policy_type = policy.get("type")
+    if role == "baseline" and not exception_is_scoped:
+        if not isinstance(policy_type, str) or not policy_type:
+            violations.append((f"{role}.baseline_policy", "missing or empty type"))
+        elif policy_type not in _SUPPORTED_POLICY_TYPES:
+            violations.append((
+                f"{role}.baseline_policy",
+                f"unsupported type {policy_type!r}; must be one of "
+                f"{sorted(_SUPPORTED_POLICY_TYPES)}",
+            ))
+    return violations, policy_type
+
+
+def _verbatim_run_violations(policy: dict, role: str) -> list[tuple[str, str]]:
+    """Validate verbatim_run-specific fields."""
+    violations: list[tuple[str, str]] = []
+    if "measurement_timestamp" not in policy or not policy.get(
+        "measurement_timestamp"
+    ):
+        violations.append((
+            f"{role}.baseline_policy",
+            "verbatim_run policy missing or empty measurement_timestamp",
+        ))
+    normalization = policy.get("normalization")
+    if normalization != "none":
+        violations.append((
+            f"{role}.baseline_policy",
+            f"verbatim_run policy normalization must be 'none' "
+            f"(got {normalization!r})",
+        ))
+    return violations
+
+
+def _conservative_normalized_violations(
+    policy: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Validate conservative_normalized-specific fields."""
+    violations: list[tuple[str, str]] = []
+    if policy.get("normalization") != "conservative":
+        violations.append((
+            f"{role}.baseline_policy",
+            "conservative_normalized policy normalization must be "
+            f"'conservative' (got {policy.get('normalization')!r})",
+        ))
+    for field in ("adjustment_reason", "adjustment_date"):
+        value = policy.get(field)
+        if not isinstance(value, str) or not value.strip():
+            violations.append((
+                f"{role}.baseline_policy",
+                f"missing or empty {field}",
+            ))
+    adjustments = policy.get("adjustments")
+    if not isinstance(adjustments, dict):
+        violations.append((
+            f"{role}.baseline_policy",
+            "adjustments must be an object containing the exact adjustment "
+            "ledger",
+        ))
+    else:
+        unknown = sorted(set(adjustments) - {"rps", "latency_ttfb"})
+        if unknown:
+            violations.append((
+                f"{role}.baseline_policy",
+                f"adjustments contains unsupported metric groups: {unknown}",
+            ))
+        for group, entries in adjustments.items():
+            if not isinstance(entries, dict):
+                violations.append((
+                    f"{role}.baseline_policy",
+                    f"adjustments.{group} must be an object",
+                ))
+    return violations
+
+
+def _type_specific_violations(
+    policy: dict, role: str, policy_type: str,
+) -> list[tuple[str, str]]:
+    """Validate type-specific fields for verbatim_run and conservative_normalized."""
+    if policy_type == "verbatim_run":
+        return _verbatim_run_violations(policy, role)
+    if policy_type == "conservative_normalized":
+        return _conservative_normalized_violations(policy, role)
+    return []
+
+
+def _source_artifact_violations(
+    policy: dict, role: str, exception_is_scoped: bool,
+) -> list[tuple[str, str]]:
+    """Validate source_artifact and source_artifact_sha256 fields."""
+    violations: list[tuple[str, str]] = []
+    artifact = policy.get("source_artifact")
+    if artifact in (None, "", "not-recorded", "unknown") and not exception_is_scoped:
+        violations.append((
+            f"{role}.baseline_policy",
+            "source_artifact must identify a retained raw artifact",
+        ))
+
+    raw_digest = policy.get("source_artifact_sha256")
+    sha256_re = re.compile(r"^[0-9a-f]{64}$")
+    if not exception_is_scoped:
+        if not raw_digest:
+            violations.append((
+                f"{role}.baseline_policy",
+                "missing source_artifact_sha256; canonical baselines must "
+                "record the SHA-256 of the retained raw artifact",
+            ))
+        elif not isinstance(raw_digest, str) or not sha256_re.fullmatch(raw_digest):
+            violations.append((
+                f"{role}.baseline_policy",
+                f"source_artifact_sha256 must be a 64-char lowercase hex "
+                f"digest (got {raw_digest!r})",
+            ))
+
+    if isinstance(artifact, str) and artifact and not exception_is_scoped:
+        components = artifact.replace("\\", "/").split("/")
+        if Path(artifact).is_absolute() or ".." in components:
+            violations.append((
+                f"{role}.baseline_policy",
+                f"source_artifact must be a repository-relative path without "
+                f"'..' traversal (got {artifact!r})",
+            ))
+    return violations
+
+
+def _policy_provenance_violations(
+    policy: dict, role: str, policy_type: str,
+) -> list[tuple[str, str]]:
+    """Validate policy provenance shape and timestamp/URL syntax."""
+    violations = _missing_provenance_violations(policy, role)
+    violations.extend(
+        _source_commit_violations(policy, role, policy_type)
+    )
+    violations.extend(_source_run_violations(policy, role))
+    violations.extend(_measurement_timestamp_violations(policy, role))
+    return violations
+
+
+def _missing_provenance_violations(
+    policy: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Report missing or non-string common provenance fields."""
+    violations: list[tuple[str, str]] = []
+    for field in (
+        "source_git_commit", "source_run", "source_artifact",
+        "measurement_timestamp",
+    ):
+        value = policy.get(field)
+        if not isinstance(value, str) or not value.strip():
+            violations.append((
+                f"{role}.baseline_policy",
+                f"missing or empty {field}",
+            ))
+    return violations
+
+
+def _source_commit_violations(
+    policy: dict, role: str, policy_type: str,
+) -> list[tuple[str, str]]:
+    """Validate the full source Git SHA format."""
+    source_git_commit = policy.get("source_git_commit")
+    if isinstance(source_git_commit, str) and source_git_commit:
+        if not _SHA_RE.fullmatch(source_git_commit):
+            return [(
+                f"{role}.baseline_policy",
+                "source_git_commit must be a full 40-character SHA in "
+                f"lowercase for {policy_type} (got {source_git_commit!r})",
+            )]
+    return []
+
+
+def _source_run_violations(
+    policy: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Validate the source GitHub Actions run URL."""
+    violations: list[tuple[str, str]] = []
+    source_run = policy.get("source_run")
+    if isinstance(source_run, str) and source_run:
+        for reason in validate_source_run(source_run, repo_root=REPO_ROOT):
+            violations.append((f"{role}.baseline_policy", reason))
+    return violations
+
+
+def _measurement_timestamp_violations(
+    policy: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Validate an explicit UTC measurement timestamp."""
+    violations: list[tuple[str, str]] = []
+    measurement_timestamp = policy.get("measurement_timestamp")
+    if isinstance(measurement_timestamp, str) and measurement_timestamp:
+        try:
+            validate_iso_utc(
+                measurement_timestamp,
+                field=f"{role}.baseline_policy.measurement_timestamp",
+            )
+        except ValueError as exc:
+            violations.append((f"{role}.baseline_policy", str(exc)))
+    return violations
+
+
+def _baseline_policy_violations(  # pylint: disable=too-many-return-statements
     report: dict, role: str,
 ) -> list[tuple[str, str]]:
     """Validate provenance for baselines.
@@ -960,115 +1238,560 @@ def _baseline_policy_violations(
       - verbatim_run: raw, unmodified benchmark output.
       - conservative_normalized: latency/throughput adjusted only downward/inward.
     """
-    SUPPORTED_TYPES = frozenset({"verbatim_run", "conservative_normalized"})
-
     policy = report.get("baseline_policy")
+    if policy is None:
+        if role == "baseline":
+            return [(f"{role}.baseline_policy", "missing baseline_policy object")]
+        return []
+    if not isinstance(policy, dict):
+        return [(
+            f"{role}.baseline_policy",
+            "baseline_policy must be an object",
+        )]
     if not policy:
-        # No policy at all is a violation for baselines
         if role == "baseline":
             return [(f"{role}.baseline_policy", "missing baseline_policy object")]
         return []
 
     violations: list[tuple[str, str]] = []
+    exception_is_scoped = _is_scoped_historical_exception(report)
+    if exception_is_scoped:
+        return violations
 
-    # The scoped historical exception may lack structured provenance fields
-    # entirely.  Compute it early so we can defer all new type-specific
-    # requirements to future baselines while still accepting the original.
-    historical_exception = policy.get("historical_audit_exception") is True
-    exception_is_scoped = (
-        historical_exception
-        and isinstance(policy.get("source_git_commit"), str)
-        and policy.get("source_git_commit") == _HISTORICAL_BASELINE_COMMIT
-        and bool(policy.get("audit_note"))
+    type_violations, policy_type = _policy_type_violations(
+        policy, role, exception_is_scoped
     )
+    violations.extend(type_violations)
 
-    # Type must be present and belong to the allowed set for baselines;
-    # fail-closed on unknown or missing type.  The scoped historical
-    # exception is grandfathered because it predates the type discipline.
-    if role == "baseline" and not exception_is_scoped:
-        policy_type = policy.get("type")
-        if not isinstance(policy_type, str) or not policy_type:
-            violations.append((f"{role}.baseline_policy", "missing or empty type"))
-        elif policy_type not in SUPPORTED_TYPES:
-            violations.append((
-                f"{role}.baseline_policy",
-                f"unsupported type {policy_type!r}; must be one of "
-                f"{sorted(SUPPORTED_TYPES)}",
-            ))
-    else:
-        policy_type = policy.get("type")
-
-    # All baseline policies must have core provenance fields
-    required = (
-        "source_git_commit",
-        "source_run",
-        "source_artifact",
+    violations.extend(
+        _policy_provenance_violations(policy, role, policy_type)
     )
-    for field in required:
-        if field not in policy or policy[field] in (None, "", {}):
-            violations.append((
-                f"{role}.baseline_policy",
-                f"missing or empty {field}",
-            ))
+    violations.extend(_type_specific_violations(policy, role, policy_type))
+    violations.extend(_source_artifact_violations(policy, role, exception_is_scoped))
+    return violations
 
-    # source_git_commit for a verbatim baseline must be a full 40-character
-    # SHA so the provenance cannot be confused with a shortened commit id.
-    sha_re = re.compile(r"^[0-9a-f]{40}$")
+
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _sha256_file(path: Path) -> str:
+    """Return the lowercase hex SHA-256 digest of a file's bytes."""
+    validated_path = validate_read_path(path, purpose="raw artifact")
+    digest = hashlib.sha256()
+    with validated_path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_raw_digest(  # pylint: disable=too-many-return-statements
+    policy: dict,
+) -> tuple[Path, str | None]:
+    """Resolve and verify the raw artifact digest.
+
+    Returns ``(raw_path, error_message)``.  On success ``error_message``
+    is ``None`` and ``raw_path`` points to the verified raw file.  On
+    failure ``raw_path`` is a placeholder and ``error_message`` describes
+    the violation.
+    """
+    artifact = policy.get("source_artifact")
+    if not isinstance(artifact, str) or not artifact:
+        return Path(), "source_artifact is not a string"
+
+    candidate = REPO_ROOT / artifact
+    try:
+        raw_path = candidate.resolve(strict=True)
+        raw_path.relative_to(REPO_ROOT.resolve())  # pylint: disable=no-member
+    except FileNotFoundError:
+        return candidate, f"retained raw artifact does not exist: {artifact}"
+    except (RuntimeError, ValueError) as exc:
+        return candidate, (
+            f"retained raw artifact must resolve within the repository root "
+            f"(got {artifact!r}: {exc})"
+        )
+
+    raw_digest = policy.get("source_artifact_sha256")
+    if not isinstance(raw_digest, str) or not _SHA256_RE.fullmatch(raw_digest):
+        return raw_path, (
+            f"source_artifact_sha256 is not a 64-char hex digest "
+            f"(got {raw_digest!r})"
+        )
+
+    try:
+        actual_digest = _sha256_file(raw_path)
+    except OSError as exc:
+        return raw_path, f"failed to read retained raw artifact: {exc}"
+    if actual_digest != raw_digest:
+        return raw_path, (
+            f"raw artifact SHA-256 mismatch: policy={raw_digest} "
+            f"actual={actual_digest}; the retained raw file does not match "
+            f"the finalized baseline provenance"
+        )
+    return raw_path, None
+
+
+def _raw_provenance_violations(
+    raw_report: dict, policy: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Verify policy provenance fields against the retained raw report."""
+    violations: list[tuple[str, str]] = []
     source_git_commit = policy.get("source_git_commit")
-    if isinstance(source_git_commit, str) and source_git_commit and policy_type == "verbatim_run":
-        if not sha_re.match(source_git_commit):
-            violations.append((
-                f"{role}.baseline_policy",
-                f"source_git_commit must be a full 40-character SHA for "
-                f"verbatim_run (got {source_git_commit!r})",
-            ))
+    if isinstance(source_git_commit, str):
+        for reason in validate_raw_commit_match(raw_report, source_git_commit):
+            violations.append((f"{role}.raw_binding", reason))
 
-    # Type-specific validation
+    raw_module_benchmark = raw_report.get("module_benchmark", {})
+    raw_timestamp = (
+        raw_module_benchmark.get("timestamp")
+        if isinstance(raw_module_benchmark, dict)
+        else None
+    )
+    policy_timestamp = policy.get("measurement_timestamp")
+    if not isinstance(raw_timestamp, str) or not raw_timestamp:
+        violations.append((
+            f"{role}.raw_binding",
+            "raw report is missing module_benchmark.timestamp",
+        ))
+    else:
+        try:
+            validate_iso_utc(
+                raw_timestamp,
+                field=f"{role}.raw_binding raw timestamp",
+            )
+        except ValueError as exc:
+            violations.append((f"{role}.raw_binding", str(exc)))
+        if policy_timestamp != raw_timestamp:
+            violations.append((
+                f"{role}.raw_binding",
+                "baseline_policy.measurement_timestamp must equal "
+                "raw.module_benchmark.timestamp",
+            ))
+    return violations
+
+
+def _raw_content_binding_violations(
+    report: dict, raw_report: dict, policy_type: str, role: str,
+) -> list[tuple[str, str]]:
+    """Verify finalized content against the raw report by policy type."""
+    violations: list[tuple[str, str]] = []
     if policy_type == "verbatim_run":
-        if "measurement_timestamp" not in policy or not policy.get(
-            "measurement_timestamp"
+        finalized_without_policy = {
+            key: value for key, value in report.items()
+            if key != "baseline_policy"
+        }
+        all_keys = sorted(
+            set(finalized_without_policy) | set(raw_report)
+        )
+        for top_key in all_keys:
+            if (
+                top_key not in finalized_without_policy
+                or top_key not in raw_report
+                or finalized_without_policy[top_key] != raw_report[top_key]
+            ):
+                violations.append((
+                    f"{role}.raw_binding",
+                    f"verbatim_run {top_key} differs from the raw artifact; "
+                    f"verbatim baselines must not modify measured data",
+                ))
+    elif policy_type == "conservative_normalized":
+        violations.extend(
+            _conservative_normalized_truth_violations(report, raw_report, role)
+        )
+        policy = report.get("baseline_policy")
+        if isinstance(policy, dict):
+            violations.extend(
+                _adjustment_ledger_violations(report, raw_report, policy, role)
+            )
+    return violations
+
+
+def _raw_artifact_binding_violations(
+    report: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Verify the finalized baseline is bound to its retained raw artifact.
+
+    For canonical baselines (non-historical), the validator:
+
+      * resolves ``baseline_policy.source_artifact`` against the repo root;
+      * confirms the raw file exists;
+      * recomputes its SHA-256 and compares it to
+        ``baseline_policy.source_artifact_sha256``;
+      * for ``verbatim_run``, verifies that the finalized measured data
+        (``module_benchmark`` and ``decompression_coverage``) is
+        byte-identical to the raw report (only ``baseline_policy`` may
+        differ);
+      * for ``conservative_normalized``, verifies truth evidence
+        (path, fallback, output, memory, environment, status, scenario
+        metadata) is identical to the raw report.
+
+    The historical audit exception is honored and skips raw binding.
+    """
+    policy = report.get("baseline_policy")
+    if not isinstance(policy, dict):
+        return []
+    if _is_scoped_historical_exception(report):
+        return []
+
+    raw_path, error = _verify_raw_digest(policy)
+    if error:
+        return [(f"{role}.raw_binding", error)]
+
+    try:
+        validated_raw_path = validate_read_path(
+            raw_path, purpose="retained raw artifact"
+        )
+        raw_report = json.loads(
+            validated_raw_path.read_text(encoding="utf-8")
+        )
+    except (json.JSONDecodeError, OSError) as exc:
+        return [(
+            f"{role}.raw_binding",
+            f"failed to read raw artifact: {exc}",
+        )]
+    if not isinstance(raw_report, dict):
+        return [(
+            f"{role}.raw_binding",
+            "retained raw artifact must contain a JSON object",
+        )]
+
+    provenance_violations = _raw_provenance_violations(
+        raw_report, policy, role
+    )
+
+    return provenance_violations + _raw_content_binding_violations(
+        report, raw_report, policy.get("type"), role
+    )
+
+
+_ADJUSTABLE_METRIC_FIELDS = (
+    "rps",
+    "latency_p50_ms",
+    "latency_p95_ms",
+    "latency_p99_ms",
+    "ttfb_p50_ms",
+    "ttfb_p95_ms",
+    "ttfb_ms",
+    "ttlb_ms",
+    "ttlb_p50_ms",
+)
+_LATENCY_ADJUSTABLE_METRIC_FIELDS = frozenset(
+    field for field in _ADJUSTABLE_METRIC_FIELDS if field != "rps"
+)
+
+
+def _scenario_truth_violations(
+    name: str, cur_scenario: dict | None, raw_scenario: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Validate one scenario and enforce conservative metric directions."""
+    violations: list[tuple[str, str]] = []
+    if cur_scenario is None:
+        violations.append((
+            f"{role}.raw_binding",
+            f"conservative_normalized removed scenario {name!r} present in raw",
+        ))
+        return violations
+    scenario_fields = (set(cur_scenario) | set(raw_scenario)) - {"metrics"}
+    for field in sorted(scenario_fields):
+        if (
+            field not in cur_scenario
+            or field not in raw_scenario
+            or cur_scenario[field] != raw_scenario[field]
         ):
             violations.append((
-                f"{role}.baseline_policy",
-                "verbatim_run policy missing or empty measurement_timestamp",
+                f"{role}.raw_binding",
+                f"conservative_normalized must not modify scenario {name!r} "
+                f"{field} (finalized={cur_scenario.get(field)!r} "
+                f"raw={raw_scenario.get(field)!r})",
             ))
-        normalization = policy.get("normalization")
-        if normalization != "none":
-            violations.append((
-                f"{role}.baseline_policy",
-                f"verbatim_run policy normalization must be 'none' "
-                f"(got {normalization!r})",
-            ))
+    return violations + _metric_truth_violations(
+        name,
+        cur_scenario.get("metrics"),
+        raw_scenario.get("metrics"),
+        role,
+    )
 
-    if policy_type == "conservative_normalized":
-        # Additional fields required for normalized baselines
-        for field in ("adjustments", "adjustment_reason", "adjustment_date"):
-            if field not in policy or policy[field] in (None, "", {}):
-                violations.append((
-                    f"{role}.baseline_policy",
-                    f"missing or empty {field}",
-                ))
 
-        adjustments = policy.get("adjustments")
-        if isinstance(adjustments, dict):
-            for field in ("rps", "latency_ttfb"):
-                if not adjustments.get(field):
-                    violations.append((
-                        f"{role}.baseline_policy",
-                        f"missing or empty adjustments.{field}",
-                    ))
+def _metric_truth_violations(
+    name: str, cur_metrics: Any, raw_metrics: Any, role: str,
+) -> list[tuple[str, str]]:
+    """Validate metric keys, numeric values, and conservative directions."""
+    prefix = f"{role}.raw_binding"
+    if not isinstance(cur_metrics, dict) or not isinstance(raw_metrics, dict):
+        return [(prefix, f"scenario {name!r} metrics must be objects")]
 
-    # Validate source_artifact is a real retained artifact (not placeholder).
-    # exception_is_scoped was computed earlier so the historical exception is
-    # honored consistently for type, provenance, and artifact checks.
-    artifact = policy.get("source_artifact")
-    if artifact in (None, "", "not-recorded", "unknown") and not exception_is_scoped:
+    cur_fields = set(cur_metrics)
+    raw_fields = set(raw_metrics)
+    violations: list[tuple[str, str]] = []
+    if cur_fields != raw_fields:
         violations.append((
-            f"{role}.baseline_policy",
-            "source_artifact must identify a retained raw artifact",
+            prefix,
+            f"conservative_normalized changed metric keys for scenario {name!r} "
+            f"(added={sorted(cur_fields - raw_fields)} "
+            f"removed={sorted(raw_fields - cur_fields)})",
         ))
 
+    for field in sorted(cur_fields & raw_fields):
+        violations.extend(
+            _metric_value_violations(
+                name, field, cur_metrics[field], raw_metrics[field], prefix
+            )
+        )
     return violations
+
+
+def _metric_value_violations(
+    name: str, field: str, current: Any, raw: Any, prefix: str,
+) -> list[tuple[str, str]]:
+    """Validate one shared metric's numeric type and conservative direction."""
+    if not _is_finite_number(current) or not _is_finite_number(raw):
+        return [(
+            prefix,
+            f"scenario {name!r} metric {field} must be a finite number",
+        )]
+    return _metric_direction_violations(name, field, current, raw, prefix)
+
+
+def _metric_direction_violations(
+    name: str, field: str, current: int | float, raw: int | float, prefix: str,
+) -> list[tuple[str, str]]:
+    """Enforce the allowed direction for one finite metric value."""
+    if field == "rps" and current > raw:
+        return [(
+            prefix,
+            f"conservative_normalized may only lower rps for scenario "
+            f"{name!r} (finalized={current!r} raw={raw!r})",
+        )]
+    if field in _LATENCY_ADJUSTABLE_METRIC_FIELDS and current < raw:
+        return [(
+            prefix,
+            f"conservative_normalized may only raise {field} for scenario "
+            f"{name!r} (finalized={current!r} raw={raw!r})",
+        )]
+    if field not in _ADJUSTABLE_METRIC_FIELDS and current != raw:
+        return [(
+            prefix,
+            f"conservative_normalized must not modify scenario {name!r} "
+            f"metric {field} (finalized={current!r} raw={raw!r})",
+        )]
+    return []
+
+
+def _is_finite_number(value: Any) -> bool:
+    """Return True for JSON-compatible finite numeric values, excluding bool."""
+    return _is_numeric(value) and math.isfinite(value)
+
+
+def _conservative_normalized_truth_violations(
+    finalized: dict, raw: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Verify conservative_normalized baselines only adjust throughput/latency.
+
+    Only RPS (may decrease), latency/TTFB/TTLB (may increase) may be
+    adjusted. All other raw evidence must remain identical.
+    """
+    violations = _top_level_truth_violations(finalized, raw, role)
+    cur_mb = finalized.get("module_benchmark", {})
+    raw_mb = raw.get("module_benchmark", {})
+    if not isinstance(cur_mb, dict) or not isinstance(raw_mb, dict):
+        return violations + [(
+            f"{role}.raw_binding",
+            "conservative_normalized requires module_benchmark objects",
+        )]
+    violations.extend(_module_truth_violations(cur_mb, raw_mb, role))
+    violations.extend(_scenario_list_truth_violations(cur_mb, raw_mb, role))
+    return violations
+
+
+def _top_level_truth_violations(
+    finalized: dict, raw: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Verify top-level evidence keys and values are unchanged."""
+    violations: list[tuple[str, str]] = []
+    raw_keys = set(raw) - {"baseline_policy"}
+    finalized_keys = set(finalized) - {"baseline_policy"}
+    if finalized_keys != raw_keys:
+        violations.append((
+            f"{role}.raw_binding",
+            "conservative_normalized changed top-level raw evidence keys "
+            f"(added={sorted(finalized_keys - raw_keys)} "
+            f"removed={sorted(raw_keys - finalized_keys)})",
+        ))
+    for field in sorted(raw_keys - {"module_benchmark"}):
+        if field not in finalized or finalized[field] != raw[field]:
+            violations.append((
+                f"{role}.raw_binding",
+                f"conservative_normalized must not modify top-level {field}",
+            ))
+    return violations
+
+
+def _module_truth_violations(
+    finalized: dict, raw: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Verify module benchmark environment and non-scenario fields."""
+    violations: list[tuple[str, str]] = []
+    for field in sorted((set(finalized) | set(raw)) - {"scenarios"}):
+        if (
+            field not in finalized
+            or field not in raw
+            or finalized[field] != raw[field]
+        ):
+            violations.append((
+                f"{role}.raw_binding",
+                f"conservative_normalized must not modify module_benchmark.{field} "
+                f"(finalized={finalized.get(field)!r} raw={raw.get(field)!r})",
+            ))
+    return violations
+
+
+def _scenario_list_truth_violations(
+    finalized: dict, raw: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Verify scenario arrays and all scenario-level raw bindings."""
+    raw_scenario_list = raw.get("scenarios")
+    finalized_scenario_list = finalized.get("scenarios")
+    if not isinstance(raw_scenario_list, list) or not isinstance(
+        finalized_scenario_list, list
+    ):
+        return [(
+            f"{role}.raw_binding",
+            "conservative_normalized requires scenario arrays",
+        )]
+
+    finalized_scenarios = {
+        s.get("name"): s for s in finalized_scenario_list if isinstance(s, dict)
+    }
+    raw_scenarios = {
+        s.get("name"): s for s in raw_scenario_list if isinstance(s, dict)
+    }
+    violations: list[tuple[str, str]] = []
+    if (
+        len(finalized_scenarios) != len(finalized_scenario_list)
+        or len(raw_scenarios) != len(raw_scenario_list)
+    ):
+        violations.append((
+            f"{role}.raw_binding",
+            "conservative_normalized scenario entries must be objects with "
+            "unique names",
+        ))
+    for name, raw_scenario in raw_scenarios.items():
+        violations.extend(
+            _scenario_truth_violations(
+                name, finalized_scenarios.get(name), raw_scenario, role
+            )
+        )
+    for name in finalized_scenarios:
+        if name not in raw_scenarios:
+            violations.append((
+                f"{role}.raw_binding",
+                f"conservative_normalized added scenario {name!r} absent from raw",
+            ))
+    return violations
+
+
+def _actual_adjustment_ledger(finalized: dict, raw: dict) -> dict:
+    """Return the exact metric deltas between finalized and raw reports."""
+    finalized_mb = finalized.get("module_benchmark", {})
+    raw_mb = raw.get("module_benchmark", {})
+    if not isinstance(finalized_mb, dict) or not isinstance(raw_mb, dict):
+        return {}
+    finalized_scenario_list = finalized_mb.get("scenarios")
+    raw_scenario_list = raw_mb.get("scenarios")
+    if not isinstance(finalized_scenario_list, list) or not isinstance(
+        raw_scenario_list, list
+    ):
+        return {}
+    finalized_scenarios = {
+        scenario.get("name"): scenario
+        for scenario in finalized_scenario_list
+        if isinstance(scenario, dict)
+    }
+    raw_scenarios = {
+        scenario.get("name"): scenario
+        for scenario in raw_scenario_list
+        if isinstance(scenario, dict)
+    }
+    ledger: dict = {}
+    for name, raw_scenario in raw_scenarios.items():
+        scenario_ledger = _scenario_adjustment_ledger(
+            finalized_scenarios.get(name), raw_scenario
+        )
+        if "rps" in scenario_ledger:
+            ledger.setdefault("rps", {})[name] = scenario_ledger["rps"]
+        if "latency_ttfb" in scenario_ledger:
+            ledger.setdefault("latency_ttfb", {})[name] = scenario_ledger[
+                "latency_ttfb"
+            ]
+    return ledger
+
+
+def _scenario_adjustment_ledger(
+    finalized: Any, raw: dict,
+) -> dict:
+    """Return the adjustment deltas for one scenario."""
+    if not isinstance(finalized, dict):
+        return {}
+    raw_metrics = raw.get("metrics")
+    finalized_metrics = finalized.get("metrics")
+    if not isinstance(raw_metrics, dict) or not isinstance(finalized_metrics, dict):
+        return {}
+
+    ledger: dict = {}
+    for field in _ADJUSTABLE_METRIC_FIELDS:
+        if field not in raw_metrics or field not in finalized_metrics:
+            continue
+        raw_value = raw_metrics[field]
+        finalized_value = finalized_metrics[field]
+        if not (
+            _is_finite_number(raw_value)
+            and _is_finite_number(finalized_value)
+            and finalized_value != raw_value
+        ):
+            continue
+        if field == "rps":
+            ledger["rps"] = finalized_value - raw_value
+        else:
+            ledger.setdefault("latency_ttfb", {})[field] = (
+                finalized_value - raw_value
+            )
+    return ledger
+
+
+def _adjustment_ledger_violations(
+    finalized: dict, raw: dict, policy: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Require policy adjustments to describe every actual metric delta."""
+    actual = _actual_adjustment_ledger(finalized, raw)
+    declared = policy.get("adjustments")
+    if not _strict_json_equal(declared, actual):
+        return [(
+            f"{role}.raw_binding",
+            "conservative_normalized adjustments must exactly match the "
+            f"raw/finalized metric deltas (declared={declared!r} "
+            f"actual={actual!r})",
+        )]
+    return []
+
+
+def _strict_json_equal(left: Any, right: Any) -> bool:
+    """Compare JSON values while tolerating harmless numeric round-off."""
+    if _is_finite_number(left) and _is_finite_number(right):
+        return math.isclose(
+            float(left), float(right), rel_tol=0.0, abs_tol=1e-12
+        )
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return (
+            set(left) == set(right)
+            and all(_strict_json_equal(left[key], right[key]) for key in left)
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _strict_json_equal(item_left, item_right)
+            for item_left, item_right in zip(left, right)
+        )
+    return left == right
 
 
 def _scenario_source_entry_violations(
@@ -1161,7 +1884,7 @@ def _check_missing_scenarios(report: dict) -> list[str]:
     record for it — stronger than "skipped".  The evidence gate must
     reject this as MISSING_EVIDENCE because there is no data at all.
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
+    scenarios = _report_scenarios(report)
 
     by_name: dict[str, dict] = {}
     for s in scenarios:
@@ -1180,7 +1903,7 @@ def _check_scenario_completion(report: dict) -> list[tuple[str, str]]:
     A scenario present with status != "completed" (and not "skipped",
     which is handled by _check_skipped_scenarios) is incomplete evidence.
     """
-    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
+    scenarios = _report_scenarios(report)
 
     by_name: dict[str, dict] = {}
     for s in scenarios:
@@ -1218,7 +1941,7 @@ def _canonical_baseline_fallback_violations(
                 f"{role}.fallback_rate",
                 f"{name}: missing precommit_failopen_total",
             ))
-        elif type(failopen) is not int or failopen < 0:
+        elif not _is_exact_int(failopen) or failopen < 0:
             violations.append((
                 f"{role}.fallback_rate",
                 f"{name}: precommit_failopen_total must be an integer >= 0 "
@@ -1235,7 +1958,7 @@ def _canonical_baseline_fallback_violations(
                 f"{role}.fallback_rate",
                 f"{name}: missing streaming_requests_total",
             ))
-        elif type(requests) is not int:
+        elif not _is_exact_int(requests):
             violations.append((
                 f"{role}.fallback_rate",
                 f"{name}: streaming_requests_total must be an integer > 0 "
@@ -1250,6 +1973,178 @@ def _canonical_baseline_fallback_violations(
     return violations
 
 
+_MISSING_EVIDENCE_VALUE = "<missing>"
+
+
+def _fallback_rate_violation(
+    role: str,
+    scenario_name: object,
+    field: str,
+    actual: object,
+    expected: object,
+    failopen_total: object,
+    requests_total: object,
+) -> tuple[str, str]:
+    """Format one fail-closed fallback-rate evidence violation."""
+    return (
+        f"{role}.fallback_rate_consistency",
+        f"scenario {scenario_name!r} field {field}: actual={actual!r}; "
+        f"expected={expected!r}; counter pair "
+        f"precommit_failopen_total={failopen_total!r}, "
+        f"streaming_requests_total={requests_total!r}",
+    )
+
+
+def _fallback_rate_scenario_metrics(
+    scenario: object,
+) -> tuple[object, dict]:
+    """Return a scenario name and its metrics object safely."""
+    if not isinstance(scenario, dict):
+        return _MISSING_EVIDENCE_VALUE, {}
+
+    metrics_value = scenario.get("metrics")
+    if not isinstance(metrics_value, dict):
+        metrics_value = scenario.get("results")
+    metrics = metrics_value if isinstance(metrics_value, dict) else scenario
+    return scenario.get("name", _MISSING_EVIDENCE_VALUE), metrics
+
+
+def _fallback_rate_field_violations(
+    role: str,
+    scenario_name: object,
+    stored: object,
+    failopen_total: object,
+    requests_total: object,
+) -> tuple[list[tuple[str, str]], bool, bool, bool]:
+    """Validate the types and bounds of the three required fields."""
+    violations: list[tuple[str, str]] = []
+
+    stored_valid = _is_finite_number(stored) and 0.0 <= stored <= 1.0
+    if not stored_valid:
+        violations.append(_fallback_rate_violation(
+            role,
+            scenario_name,
+            "fallback_rate",
+            stored,
+            "finite JSON number in [0.0, 1.0]",
+            failopen_total,
+            requests_total,
+        ))
+
+    failopen_valid = _is_exact_int(failopen_total) and failopen_total >= 0
+    if not failopen_valid:
+        violations.append(_fallback_rate_violation(
+            role,
+            scenario_name,
+            "precommit_failopen_total",
+            failopen_total,
+            "exact integer >= 0",
+            failopen_total,
+            requests_total,
+        ))
+
+    requests_valid = _is_exact_int(requests_total) and requests_total >= 0
+    if not requests_valid:
+        violations.append(_fallback_rate_violation(
+            role,
+            scenario_name,
+            "streaming_requests_total",
+            requests_total,
+            "exact integer >= 0",
+            failopen_total,
+            requests_total,
+        ))
+
+    return violations, stored_valid, failopen_valid, requests_valid
+
+
+def _fallback_rate_counter_relation(
+    role: str,
+    scenario_name: object,
+    failopen_total: int,
+    requests_total: int,
+) -> tuple[bool, list[tuple[str, str]]]:
+    """Validate the counter relationship and return whether it is usable."""
+    if requests_total == 0:
+        if failopen_total == 0:
+            return True, []
+        expected = "0 when streaming_requests_total is 0"
+    elif failopen_total <= requests_total:
+        return True, []
+    else:
+        expected = "<= streaming_requests_total"
+    return False, [_fallback_rate_violation(
+        role,
+        scenario_name,
+        "precommit_failopen_total",
+        failopen_total,
+        expected,
+        failopen_total,
+        requests_total,
+    )]
+
+
+def _fallback_rate_scenario_violations(
+    scenario: object, role: str,
+) -> list[tuple[str, str]]:
+    """Validate the strict fallback-rate schema for one scenario."""
+    scenario_name, metrics = _fallback_rate_scenario_metrics(scenario)
+    stored = metrics.get("fallback_rate", _MISSING_EVIDENCE_VALUE)
+    failopen_total = metrics.get(
+        "precommit_failopen_total", _MISSING_EVIDENCE_VALUE,
+    )
+    requests_total = metrics.get(
+        "streaming_requests_total", _MISSING_EVIDENCE_VALUE,
+    )
+    violations, stored_valid, failopen_valid, requests_valid = (
+        _fallback_rate_field_violations(
+            role, scenario_name, stored, failopen_total, requests_total,
+        )
+    )
+
+    counters_related = False
+    if failopen_valid and requests_valid:
+        counters_related, relation_violations = _fallback_rate_counter_relation(
+            role, scenario_name, failopen_total, requests_total,
+        )
+        violations.extend(relation_violations)
+
+    if stored_valid and counters_related:
+        derived = (
+            0.0
+            if requests_total == 0
+            else float(failopen_total) / float(requests_total)
+        )
+        if not math.isclose(
+            stored,
+            derived,
+            rel_tol=1e-9,
+            abs_tol=1e-9,
+        ):
+            violations.append(_fallback_rate_violation(
+                role,
+                scenario_name,
+                "fallback_rate",
+                stored,
+                derived,
+                failopen_total,
+                requests_total,
+            ))
+
+    return violations
+
+
+def _fallback_rate_consistency_violations(
+    report: dict, role: str,
+) -> list[tuple[str, str]]:
+    """Fail closed when any scenario's fallback-rate evidence is invalid."""
+    scenarios = _report_scenarios(report)
+    violations = []
+    for scenario in scenarios:
+        violations.extend(_fallback_rate_scenario_violations(scenario, role))
+    return violations
+
+
 def _validate_benchmark_evidence(
     report: dict, role: str,
 ) -> list[tuple[str, str]]:
@@ -1259,6 +2154,7 @@ def _validate_benchmark_evidence(
       - critical scenarios must exist and be completed (not missing,
         not skipped, not in any other non-completed status)
       - path-coverage invariants satisfied
+      - stored fallback_rate consistent with counter-derived value
       - nginx_version is present and not "unknown"
       - memory evidence completeness: at least 2 valid memory points
 
@@ -1296,8 +2192,12 @@ def _validate_benchmark_evidence(
     violations.extend(
         _canonical_baseline_fallback_violations(report, role)
     )
+    violations.extend(
+        _fallback_rate_consistency_violations(report, role)
+    )
     violations.extend(_baseline_policy_violations(report, role))
     violations.extend(_scenario_source_environment_violations(report, role))
+    violations.extend(_raw_artifact_binding_violations(report, role))
 
     # 5. Environment identity fields must be present and non-empty;
     #    nginx_version must also not use the legacy "unknown" placeholder.
@@ -1314,7 +2214,7 @@ def _validate_benchmark_evidence(
             )
 
     # 6. Memory evidence completeness: at least 2 valid memory points
-    scenarios = report.get("module_benchmark", {}).get("scenarios", []) or report.get("scenarios", [])
+    scenarios = _report_scenarios(report)
     memory_points = _extract_memory_points(scenarios)
     if len(memory_points) < 2:
         violations.append(
@@ -1325,7 +2225,7 @@ def _validate_benchmark_evidence(
     return violations
 
 
-def _report_integrity_failure(
+def _report_integrity_failure(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     report: dict | None,
     args: argparse.Namespace,
     violations: list[tuple[str, str]],
@@ -1359,17 +2259,20 @@ def _report_integrity_failure(
 def _validate_current_evidence(
     report: dict | None, args: argparse.Namespace, blocking: bool,
 ) -> int | None:
-    """Return a blocking exit code when current evidence is incomplete."""
-    if not blocking:
-        return None
-
+    """Report current evidence integrity failures in either gate mode."""
     if violations := _validate_benchmark_evidence(report or {}, role="current"):
         return _report_integrity_failure(
             report,
             args,
             violations,
-            "FAIL: Current benchmark report failed evidence integrity validation:",
-            "  Release tags require complete, credible evidence.",
+            (
+                "FAIL: Current benchmark report failed evidence integrity validation:"
+                if blocking else
+                "MISSING_EVIDENCE: Current benchmark report failed evidence "
+                "integrity validation:"
+            ),
+            "  Release tags require complete, credible evidence.\n",
+            exit_code=1 if blocking else 0,
         )
     return None
 
@@ -1380,10 +2283,7 @@ def _validate_baseline_evidence(
     baseline_report: dict,
     blocking: bool,
 ) -> int | None:
-    """Return a blocking exit code when baseline evidence is incomplete."""
-    if not blocking:
-        return None
-
+    """Report baseline evidence integrity failures in either gate mode."""
     if violations := _validate_benchmark_evidence(
         baseline_report, role="baseline"
     ):
@@ -1391,12 +2291,18 @@ def _validate_baseline_evidence(
             report,
             args,
             violations,
-            "FAIL: Checked-in baseline failed evidence integrity validation:",
+            (
+                "FAIL: Checked-in baseline failed evidence integrity validation:"
+                if blocking else
+                "MISSING_EVIDENCE: Checked-in baseline failed evidence "
+                "integrity validation:"
+            ),
             "  The baseline must be regenerated by running a real benchmark "
             "after fixing the benchmark runtime.\n"
             "  Do not fabricate or improve measured evidence. Only documented "
             "conservative normalization of latency/throughput is allowed; path, "
-            "fallback, output, memory and environment evidence must remain verbatim.",
+            "fallback, output, memory and environment evidence must remain verbatim.\n",
+            exit_code=1 if blocking else 0,
         )
     return None
 
@@ -1574,10 +2480,10 @@ def _evaluate_and_report(
     if baseline_rc is not None:
         return baseline_rc
 
-    # Import threshold engine for module-level evaluation
-    from threshold_engine import evaluate_module_level
-
-    eval_result = evaluate_module_level(current_metrics, baseline_metrics, thresholds_cfg, has_baseline=has_baseline)
+    eval_result = evaluate_module_level(
+        current_metrics, baseline_metrics, thresholds_cfg,
+        has_baseline=has_baseline,
+    )
     verdict = eval_result["verdict"]
     breaches = eval_result["breaches"]
     results = eval_result["results"]
@@ -1597,8 +2503,10 @@ def _evaluate_and_report(
     if verdict in ("NO_GO", "MISSING_EVIDENCE"):
         _stderr(
             f"BLOCKING: Evidence gate verdict is {verdict}.\n"
-            "  Release and RC tags require all module-level thresholds to pass and all critical evidence to be present.\n"
-            "  Review breaches above and address performance regressions or missing measurements."
+            "  Release and RC tags require all module-level thresholds "
+            "to pass and all critical evidence to be present.\n"
+            "  Review breaches above and address performance "
+            "regressions or missing measurements."
         )
         return 1
 

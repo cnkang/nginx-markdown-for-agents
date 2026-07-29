@@ -374,9 +374,13 @@ ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
     return strncasecmp((const char *) s1, (const char *) s2, n);
 }
 
+static ngx_uint_t  g_output_filter_calls;
+static ngx_uint_t  g_send_header_calls;
+
 static ngx_int_t
 ngx_http_output_filter(ngx_http_request_t *r, ngx_chain_t *out)
 {
+    g_output_filter_calls++;
     UNUSED(r);
     UNUSED(out);
     return NGX_OK;
@@ -442,6 +446,7 @@ static ngx_module_t  ngx_http_markdown_filter_module = {0};
 static ngx_int_t
 ngx_http_send_header(ngx_http_request_t *r)
 {
+    g_send_header_calls++;
     UNUSED(r);
     return NGX_OK;
 }
@@ -470,6 +475,9 @@ ngx_create_temp_buf(void *pool, size_t size)
 
 #define NGX_HTTP_MARKDOWN_METRICS_FORMAT_PROMETHEUS  1
 #define NGX_HTTP_HEADERS 1
+
+/* Keep the overflow injection local to this translation unit. */
+#define NGX_MAX_SIZE_T_VALUE ((size_t) 4096)
 
 #include "../../src/ngx_http_markdown_metrics_impl.h"
 #include "../../src/ngx_http_markdown_prometheus_impl.h"
@@ -518,6 +526,192 @@ add_node(ngx_http_markdown_path_metric_node_t *node,
     node->entries = 1;
     node->rbnode.left = sentinel;
     node->rbnode.right = sentinel;
+}
+
+static void
+test_malformed_path_len_sets_failed_and_stops_right_walk(void)
+{
+    u_char                                      buf[4096];
+    u_char                                     *p;
+    size_t                                       converted_len;
+    u_char                                      bad_path[] = "/bad";
+    u_char                                      right_path[] = "/right";
+    ngx_http_markdown_path_detail_render_ctx_t  render;
+    ngx_http_markdown_path_metric_node_t        root;
+    ngx_http_markdown_path_metric_node_t        bad;
+    ngx_http_markdown_path_metric_node_t        right;
+    ngx_rbtree_node_t                           sentinel;
+
+    TEST_SUBSECTION("malformed path length fails and stops right walk");
+
+    memset(&sentinel, 0, sizeof(sentinel));
+    add_node(&root, NULL, 0, 1, 1, &sentinel);
+    add_node(&bad, bad_path, NGX_MAX_SIZE_T_VALUE + 1, 2, 2, &sentinel);
+    add_node(&right, right_path, sizeof(right_path) - 1, 3, 3, &sentinel);
+    root.rbnode.left = &bad.rbnode;
+    root.rbnode.right = &right.rbnode;
+
+    memset(&render, 0, sizeof(render));
+    render.pos = buf;
+    render.end = buf + sizeof(buf);
+    converted_len = 0;
+
+    TEST_ASSERT(ngx_http_markdown_path_len_to_size(&bad, &converted_len)
+                == NGX_ERROR,
+                "path length conversion must reject the injected boundary");
+    TEST_ASSERT(converted_len == 0,
+                "failed conversion must not write a converted length");
+
+    render.omitted_nodes = 0;
+    p = ngx_http_markdown_json_walk_path_tree_bounded(
+        &root.rbnode, &sentinel, &render);
+
+    TEST_ASSERT(p == buf, "failed walk must not advance the output pointer");
+    TEST_ASSERT(render.failed != 0,
+                "malformed path length must set render.failed");
+    TEST_ASSERT(render.entries_written == 0,
+                "failed left subtree must stop before writing the root");
+    TEST_ASSERT(render.omitted_nodes == 0,
+                "failed left subtree must not aggregate the right subtree");
+
+    TEST_PASS("malformed path failure stops right subtree traversal");
+}
+
+static void
+test_malformed_path_detail_writers_return_null(void)
+{
+    u_char                                      json_buf[4096];
+    u_char                                      text_buf[4096];
+    u_char                                      path[] = "/malformed";
+    ngx_http_markdown_metrics_snapshot_t        snapshot;
+    ngx_http_markdown_metrics_t                 live;
+    ngx_slab_pool_t                              shpool;
+    ngx_http_markdown_path_metric_node_t         node;
+
+    TEST_SUBSECTION("malformed path detail writers fail closed");
+
+    memset(&live, 0, sizeof(live));
+    memset(&shpool, 0, sizeof(shpool));
+    init_tree(&live);
+    setup_shm(&live, &shpool);
+    add_node(&node, path, NGX_MAX_SIZE_T_VALUE + 1, 1, 1,
+             &live.per_path.sentinel);
+    live.per_path.path_tree.root = &node.rbnode;
+
+    init_snapshot(&snapshot);
+    snapshot.per_path.path_entries = 1;
+
+    TEST_ASSERT(ngx_http_markdown_json_write_path_details(
+                    json_buf, json_buf + sizeof(json_buf), &snapshot) == NULL,
+                "JSON path detail writer must return NULL on malformed path");
+    TEST_ASSERT(ngx_http_markdown_text_write_path_details(
+                    text_buf, text_buf + sizeof(text_buf), &snapshot) == NULL,
+                "text path detail writer must return NULL on malformed path");
+
+    TEST_PASS("JSON and text path detail writers propagate failure");
+}
+
+static void
+test_malformed_path_outer_renderers_return_null(void)
+{
+    u_char                                      json_buf[4096];
+    u_char                                      text_buf[4096];
+    u_char                                      path[] = "/malformed";
+    ngx_buf_t                                   json_output;
+    ngx_buf_t                                   text_output;
+    ngx_http_request_t                          request;
+    ngx_connection_stub_t                      connection;
+    ngx_http_markdown_metrics_snapshot_t        snapshot;
+    ngx_http_markdown_metrics_derived_t         derived;
+    ngx_http_markdown_metrics_t                 live;
+    ngx_slab_pool_t                              shpool;
+    ngx_http_markdown_path_metric_node_t         node;
+
+    TEST_SUBSECTION("malformed path outer renderers fail closed");
+
+    memset(&live, 0, sizeof(live));
+    memset(&shpool, 0, sizeof(shpool));
+    init_tree(&live);
+    setup_shm(&live, &shpool);
+    add_node(&node, path, NGX_MAX_SIZE_T_VALUE + 1, 1, 1,
+             &live.per_path.sentinel);
+    live.per_path.path_tree.root = &node.rbnode;
+
+    init_snapshot(&snapshot);
+    snapshot.per_path.path_entries = 1;
+    memset(&derived, 0, sizeof(derived));
+    memset(&request, 0, sizeof(request));
+    memset(&connection, 0, sizeof(connection));
+    request.connection = &connection;
+    memset(&json_output, 0, sizeof(json_output));
+    json_output.pos = json_buf;
+    json_output.end = json_buf + sizeof(json_buf);
+    memset(&text_output, 0, sizeof(text_output));
+    text_output.pos = text_buf;
+    text_output.end = text_buf + sizeof(text_buf);
+
+    TEST_ASSERT(ngx_http_markdown_metrics_render_response_body(
+                    &request, &json_output,
+                    NGX_HTTP_MARKDOWN_METRICS_OUTPUT_JSON,
+                    &snapshot, &derived) == NULL,
+                "JSON outer renderer must propagate path failure");
+    TEST_ASSERT(ngx_http_markdown_metrics_render_response_body(
+                    &request, &text_output,
+                    NGX_HTTP_MARKDOWN_METRICS_OUTPUT_TEXT,
+                    &snapshot, &derived) == NULL,
+                "text outer renderer must propagate path failure");
+
+    TEST_PASS("JSON and text outer renderers propagate failure");
+}
+
+static void
+test_malformed_path_handler_returns_500_without_headers(void)
+{
+    u_char                                      path[] = "/malformed";
+    struct sockaddr_in                          address;
+    ngx_connection_stub_t                      connection;
+    ngx_http_request_t                          request;
+    ngx_http_markdown_metrics_t                 live;
+    ngx_http_markdown_path_metric_node_t        node;
+    ngx_slab_pool_t                              shpool;
+    ngx_int_t                                    rc;
+
+    TEST_SUBSECTION("malformed path handler returns 500 before headers");
+
+    memset(&live, 0, sizeof(live));
+    memset(&shpool, 0, sizeof(shpool));
+    init_tree(&live);
+    setup_shm(&live, &shpool);
+    add_node(&node, path, NGX_MAX_SIZE_T_VALUE + 1, 1, 1,
+             &live.per_path.sentinel);
+    live.per_path.path_entries = 1;
+    live.per_path.path_tree.root = &node.rbnode;
+    ngx_http_markdown_metrics = &live;
+
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    memset(&connection, 0, sizeof(connection));
+    connection.sockaddr = (struct sockaddr *) &address;
+    memset(&request, 0, sizeof(request));
+    request.connection = &connection;
+    request.method = NGX_HTTP_GET;
+    request.main = &request;
+    g_send_header_calls = 0;
+    g_output_filter_calls = 0;
+
+    rc = ngx_http_markdown_metrics_handler(&request);
+
+    TEST_ASSERT(rc == NGX_HTTP_INTERNAL_SERVER_ERROR,
+                "malformed metrics path must return HTTP 500");
+    TEST_ASSERT(request.headers_out.status != NGX_HTTP_OK,
+                "render failure must not commit HTTP 200 headers");
+    TEST_ASSERT(g_send_header_calls == 0,
+                "render failure must not send response headers");
+    TEST_ASSERT(g_output_filter_calls == 0,
+                "render failure must not send a partial response body");
+
+    TEST_PASS("metrics handler fails closed before HTTP 200 delivery");
 }
 
 static void
@@ -594,9 +788,11 @@ test_json_overflow_produces_other(void)
 {
     u_char buf[16384];
     u_char *p;
+    u_char path[] = "/x";
     ngx_http_markdown_metrics_snapshot_t s;
     ngx_http_markdown_metrics_t live;
     ngx_slab_pool_t shpool;
+    ngx_http_markdown_path_metric_node_t node;
 
     TEST_SUBSECTION("JSON bounded: overflow_count produces __other__");
 
@@ -611,13 +807,9 @@ test_json_overflow_produces_other(void)
     s.per_path.unretained_conversions = 5;
     s.per_path.unretained_conversion_time_sum_ms = 55;
 
-    {
-        ngx_http_markdown_path_metric_node_t node;
-        u_char path[] = "/x";
-        add_node(&node, path, sizeof(path) - 1, 7, 70,
-                 &live.per_path.sentinel);
-        live.per_path.path_tree.root = &node.rbnode;
-    }
+    add_node(&node, path, sizeof(path) - 1, 7, 70,
+             &live.per_path.sentinel);
+    live.per_path.path_tree.root = &node.rbnode;
 
     p = ngx_http_markdown_metrics_write_json(
         buf, buf + sizeof(buf), &s, 0, 0, 0, 0);
@@ -1427,6 +1619,10 @@ main(void)
     printf("metrics_bounded_rendering Tests\n");
     printf("========================================\n");
 
+    test_malformed_path_len_sets_failed_and_stops_right_walk();
+    test_malformed_path_detail_writers_return_null();
+    test_malformed_path_outer_renderers_return_null();
+    test_malformed_path_handler_returns_500_without_headers();
     test_json_single_path_fits();
     test_json_zero_paths();
     test_json_overflow_produces_other();

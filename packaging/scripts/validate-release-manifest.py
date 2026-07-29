@@ -50,7 +50,7 @@ def parse_sha256sums(path: Path, errors: list[str]) -> dict[str, str]:
     entries: dict[str, str] = {}
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
-    except Exception as e:
+    except (OSError, UnicodeError) as e:
         errors.append(f"Cannot read SHA256SUMS: {e}")
         return entries
 
@@ -92,7 +92,7 @@ def validate_manifest(
         manifest = json.loads(text)
     except json.JSONDecodeError as e:
         return [f"Invalid JSON: {e}"]
-    except Exception as e:
+    except (OSError, UnicodeError) as e:
         return [f"Cannot read manifest: {e}"]
 
     # Basic schema checks
@@ -264,7 +264,7 @@ def validate_manifest(
                     errors.append(
                         "CLI manifest differs from artifact_dir/release-manifest.json"
                     )
-        except Exception as e:
+        except (OSError, UnicodeError) as e:
             errors.append(
                 "Cannot compare CLI manifest with artifact_dir/release-manifest.json: "
                 f"{e}"

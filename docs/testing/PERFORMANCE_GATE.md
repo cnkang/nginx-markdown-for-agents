@@ -125,11 +125,46 @@ adjustment rule, person or reason, and date in `baseline_policy`. Missing raw
 artifact provenance is an audit failure to disclose, not a reason to invent a
 workflow identifier.
 
-The checked-in 0.9.1 baseline is the only accepted historical exception. It
-uses `historical_audit_exception: true`, the original source commit, and an
-explicit audit note because its raw artifact was not retained. Machine
-validation rejects unlocatable `source_artifact` values for every future
-conservatively normalized baseline.
+The checked-in 0.9.1 baseline is now a verbatim eight-scenario canonical run.
+Its `baseline_policy` binds the measured data to source commit
+`cab92df229b0b68cb02d88817a208e009f3ce106`, workflow run
+`30405031983/attempts/1`, measurement timestamp `2026-07-28T22:41:12Z`, and
+the retained raw artifact SHA-256
+`a511b90f82d05f827ea011faccec3ff5b3aead892943180f98e617c6c09aad12`.
+Machine validation recomputes that digest and requires the finalized report to
+match the raw report exactly apart from `baseline_policy`.
+
+The evidence objects remain layered: `baseline_policy` carries policy
+provenance, top-level `module_benchmark` carries platform/load-generator/NGINX
+environment plus `git_commit` and `timestamp`, and each scenario carries its
+metadata, `load_integrity`, `metrics`, and `response_correctness`. Optional
+`baseline_policy.scenario_sources` entries are checked for environment
+consistency only when supplied.
+
+The canonical workflow retains response probes at
+`perf/baselines/module-baseline-091-raw-probes/`, derived from the raw report
+path. It validates every scenario's non-empty `.headers`, `.body`, and `.json`
+files, requires a passing probe with `curl_exit_code == 0`, verifies the body
+SHA-256, validates the complete response-correctness schema, parses the final
+HTTP response block from each `.headers` file, and requires its status,
+normalized headers, Markdown content type, and empty content encoding to match
+the probe JSON. It then requires exact finalized/probe
+`response_correctness` object equality and enforces strict boolean/integer
+tail and curl fields before
+running the performance evidence and release gates. The canonical upload is
+performed only after those checks pass and contains the finalized JSON, raw
+JSON, and this probe directory. Canonical artifacts are retained for 30 days;
+failure-only debug artifacts use the shorter diagnostic retention period.
+
+The former `historical_audit_exception` is retained only for historical
+validator coverage and is not used by the active release baseline. Future
+baselines must identify a repository-contained raw artifact and must not use
+an empty, `unknown`, or `not-recorded` `source_artifact`.
+
+For module reports, `fallback_rate` is the pre-commit fail-open ratio,
+calculated from `precommit_failopen_total` and `streaming_requests_total`.
+`streaming_fallback_total` is a separate path-routing counter and does not
+enter that ratio.
 
 ## Troubleshooting
 
@@ -170,6 +205,7 @@ above to bootstrap.
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 0.9.1 | 2026-07-28 | Codex | Documented exact baseline provenance validation and the zero-entry complexity release gate. |
 | 0.9.1 | 2026-07-08 | Agent | Updated performance gate evidence and tool references for 0.9.1 release |
 | 0.6.2 | 2026-05-08 | Kang | Unified version narrative to 0.6.2 current release line |
 | 0.5.0 | 2026-04-21 | docs-standardization | Standardized formatting, added mermaid diagrams where applicable, verified directive accuracy against code, added update tracking section |

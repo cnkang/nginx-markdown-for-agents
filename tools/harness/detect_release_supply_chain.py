@@ -8,6 +8,7 @@ that can promote externally supplied bytes into distributed artifacts.
 
 from __future__ import annotations
 
+import json
 import re
 from urllib.parse import urlsplit
 import sys
@@ -19,14 +20,35 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.path_validation import validate_read_path  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ALMALINUX_9 = (
-    "almalinux@sha256:"
-    "d2515c769e7b73f95c4fde38c0a505336ff38f14990c0b7253b77060a049a743"
+
+
+def _load_and_validate_builder_digests(path: Path) -> dict:
+    """Load builder_digests.json and validate digest/image consistency.
+
+    Each entry must satisfy ``image == "<name>@<digest>"`` so the two
+    representations cannot drift independently.
+    """
+    validated = validate_read_path(path, purpose="builder digests")
+    data = json.loads(validated.read_text(encoding="utf-8"))
+    for key, entry in data.items():
+        _name, _, digest_part = entry["image"].partition("@")
+        if digest_part != entry["digest"]:
+            raise ValueError(
+                f"builder_digests.json {key}: image references "
+                f"{digest_part!r} which does not match the digest "
+                f"field {entry['digest']!r}"
+            )
+    return data
+
+
+_BUILDER_DIGESTS = _load_and_validate_builder_digests(
+    REPO_ROOT / "tools" / "lib" / "builder_digests.json"
 )
-ALPINE_320 = (
-    "alpine@sha256:"
-    "d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc"
-)
+
+#: Immutable release-builder base image references; single source of truth is
+#: ``tools/lib/builder_digests.json``.
+ALMALINUX_9 = _BUILDER_DIGESTS["almalinux_9"]["image"]
+ALPINE_320 = _BUILDER_DIGESTS["alpine_320"]["image"]
 
 
 @dataclass(frozen=True)
@@ -60,12 +82,17 @@ def _require_order(
     return [Finding(path, message)]
 
 
-def check_release_builder_digests(files: dict[str, str]) -> list[Finding]:
+def check_release_builder_digests(
+    files: dict[str, str],
+    *,
+    almalinux_9: str = ALMALINUX_9,
+    alpine_320: str = ALPINE_320,
+) -> list[Finding]:
     """Require reviewed manifest digests on artifact-producing builders."""
     expected = {
-        "tools/build_release/Dockerfile.glibc": f"ARG OS_BASE={ALMALINUX_9}",
-        "tools/build_release/Dockerfile.musl": f"ARG OS_BASE={ALPINE_320}",
-        ".github/workflows/release-packages.yml": f"container: {ALMALINUX_9}",
+        "tools/build_release/Dockerfile.glibc": f"ARG OS_BASE={almalinux_9}",
+        "tools/build_release/Dockerfile.musl": f"ARG OS_BASE={alpine_320}",
+        ".github/workflows/release-packages.yml": f"container: {almalinux_9}",
     }
     findings: list[Finding] = []
     for path, reference in expected.items():
@@ -292,6 +319,24 @@ def _read_files(root: Path, paths: tuple[str, ...]) -> tuple[dict[str, str], lis
 
 def scan_repository(root: Path = REPO_ROOT) -> list[Finding]:
     """Scan the fixed release-integrity surfaces under ``root``."""
+    try:
+        digests = _load_and_validate_builder_digests(
+            root / "tools" / "lib" / "builder_digests.json"
+        )
+    except (OSError, ValueError) as exc:
+        return [Finding(
+            "tools/lib/builder_digests.json",
+            f"cannot load builder digests: {exc}",
+        )]
+    try:
+        almalinux_9 = digests["almalinux_9"]["image"]
+        alpine_320 = digests["alpine_320"]["image"]
+    except KeyError as exc:
+        return [Finding(
+            "tools/lib/builder_digests.json",
+            f"missing expected key: {exc}",
+        )]
+
     paths = (
         "tools/build_release/Dockerfile.glibc",
         "tools/build_release/Dockerfile.musl",
@@ -307,7 +352,9 @@ def scan_repository(root: Path = REPO_ROOT) -> list[Finding]:
     files, findings = _read_files(root, paths)
     if findings:
         return findings
-    findings.extend(check_release_builder_digests(files))
+    findings.extend(check_release_builder_digests(
+        files, almalinux_9=almalinux_9, alpine_320=alpine_320,
+    ))
     findings.extend(check_ingress_builder(files[paths[3]]))
     findings.extend(check_official_nginx_builder(files[paths[4]]))
     findings.extend(check_homebrew_formula(files[paths[5]]))

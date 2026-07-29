@@ -27,11 +27,11 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def make_deb(name: str, content: bytes = b"fake-deb-content") -> bytes:
+def make_deb(_name: str, content: bytes = b"fake-deb-content") -> bytes:
     return content
 
 
-def make_rpm(name: str, content: bytes = b"fake-rpm-content") -> bytes:
+def make_rpm(_name: str, content: bytes = b"fake-rpm-content") -> bytes:
     return content
 
 
@@ -55,7 +55,9 @@ class TestGenerateManifest(unittest.TestCase):
             sys.executable, str(GENERATE_SCRIPT),
             "-d", str(self.artifact_dir),
         ] + extra_args
-        return subprocess.run(args, capture_output=True, text=True, timeout=30)
+        return subprocess.run(
+            args, capture_output=True, text=True, timeout=30, check=False
+        )
 
     def test_single_deb(self):
         expected_sha = self._write_package(
@@ -187,7 +189,9 @@ class TestGenerateManifest(unittest.TestCase):
             "-d", "../artifacts",
             "--version", "0.8.3",
         ]
-        result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=30, check=False
+        )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ERROR:", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
@@ -328,7 +332,9 @@ class TestValidateManifest(unittest.TestCase):
             args.extend(["--sha256sums", str(self.sha256sums_path)])
         for k, v in kwargs.items():
             args.extend([f"--{k.replace('_', '-')}", str(v)])
-        result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=30, check=False
+        )
         if result.returncode != 0:
             # Extract errors from stderr
             errors = [

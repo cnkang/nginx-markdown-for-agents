@@ -7,7 +7,7 @@ related rules by domain with YAML frontmatter for path-scoped loading.
 
 | Rule IDs | Domain | File | Primary Surfaces |
 |----------|--------|------|-----------------|
-| 1, 2, 38, 47, 51 | Streaming & Backpressure | [streaming-backpressure.md](streaming-backpressure.md) | backpressure, fail-open, replay buffer, auth cache-control |
+| 1, 2, 38, 47, 51, 52 | Streaming & Backpressure | [streaming-backpressure.md](streaming-backpressure.md) | backpressure, fail-open, replay buffer, auth cache-control, derived-state reconciliation |
 | 3, 43 | Memory & Budget | [memory-budget.md](memory-budget.md) | allocations, budget enforcement, pool vs heap |
 | 4, 44 | Encoding & Charset | [encoding-charset.md](encoding-charset.md) | UTF-8 chunk boundaries, gzip/deflate/Brotli streaming lifecycle |
 | 5, 6, 27 | HTML Sanitizer & Output Safety | [html-sanitizer.md](html-sanitizer.md) | void elements, emitter, escaping, fence language |
@@ -16,9 +16,9 @@ related rules by domain with YAML frontmatter for path-scoped loading.
 | 10 | Parser & Regex | [parser-regex.md](parser-regex.md) | ReDoS, deterministic parsing |
 | 11, 18, 41 | Shell | [shell.md](shell.md) | portability, hygiene, POSIX ERE |
 | 12, 32, 33 | Security & CWE | [security-cwe.md](security-cwe.md) | path traversal, integer overflow |
-| 13, 48 | CI Gating | [ci-gating.md](ci-gating.md) | workflow filters, artifact upload, Homebrew formula, supply chain |
+| 13, 54 | CI Gating | [ci-gating.md](ci-gating.md) | workflow filters, artifact upload, Homebrew formula, release artifact path traversal |
 | 14, 16, 20, 22, 25 | Testing & Coverage | [testing-coverage.md](testing-coverage.md) | regression, dead stores, Rust infra |
-| 15, 46 | FFI & Cross-Language | [ffi-crosslang.md](ffi-crosslang.md) | ABI, header sync, lifecycle, panic safety, handle ownership |
+| 15, 46, 53 | FFI & Cross-Language | [ffi-crosslang.md](ffi-crosslang.md) | ABI, header sync, lifecycle, panic safety, handle ownership, fat-pointer safety |
 | 17 | Cognitive Complexity | [complexity.md](complexity.md) | function complexity limits |
 | 19 | Python Tooling | [python-tooling.md](python-tooling.md) | binary prerequisites, harness guards |
 | 21 | Warning Triage | [warnings-triage.md](warnings-triage.md) | warning classification, repro |
@@ -27,8 +27,11 @@ related rules by domain with YAML frontmatter for path-scoped loading.
 | 28, 29, 30, 31, 39, 40, 50 | NGINX Idioms | [nginx-idioms.md](nginx-idioms.md) | list iteration, flag clearing, NUL-term, OWS separator |
 | 34, 35, 45 | Dynconf & Snapshot | [dynconf-snapshot.md](dynconf-snapshot.md) | effective_conf, reload retry, NULL-safe access |
 | 36 | Harness Routing | [harness-routing.md](harness-routing.md) | routing-manifest coverage |
-| 37 | E2E Runner | [e2e-runner.md](e2e-runner.md) | Rust-first E2E, parity |
+| 37, 60 | E2E Runner | [e2e-runner.md](e2e-runner.md) | Rust-first E2E, parity, streaming config directive consistency |
 | 48 | Security Static Analysis & Supply Chain | [security-static-analysis.md](security-static-analysis.md) | actionlint, shellcheck, gitleaks, Semgrep, cargo-deny, Trivy/SBOM/Scorecard |
+| 55 | Version Consistency | [version-consistency.md](version-consistency.md) | source/chart/docs version sync, Rust baseline |
+| 56, 57, 58, 59 | Build Safety | [build-safety.md](build-safety.md) | orphan comment closers, #ifdef guard visibility, workflow input injection, hardcoded HTTP status |
+| 61, 62 | Release Integrity | [release-integrity.md](release-integrity.md) | layered performance evidence provenance and matrix key normalization invariants |
 | FUZZ-001..007 | Fuzz Infrastructure | [fuzz-infrastructure.md](fuzz-infrastructure.md) | fuzz targets, CI fuzzing, corpus management |
 
 ## Usage

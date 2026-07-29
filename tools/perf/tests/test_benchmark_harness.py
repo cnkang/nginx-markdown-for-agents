@@ -40,6 +40,7 @@ from tools.perf.benchmark_validation import (
     attach_response_probe,
     compare_streaming_probe_bodies,
     parse_ab_result,
+    parse_curl_header_artifact,
     parse_hey_result,
     validate_response_probe,
 )
@@ -188,6 +189,37 @@ def test_response_probe_accepts_complete_markdown():
     assert result["body_sha256"]
 
 
+def test_curl_headers_use_final_response_block_and_normalize_names():
+    status, headers = parse_curl_header_artifact(
+        "HTTP/1.1 100 Continue\r\nX-Interim: ignored\r\n\r\n"
+        "HTTP/2 200\r\nContent-Type: text/markdown\r\nVary: Accept\r\n"
+    )
+
+    assert status == 200
+    assert headers == {
+        "content-type": "text/markdown",
+        "vary": "Accept",
+    }
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "plain text",
+        "HTTP/1.1 200 OK\nMalformed-Header\n",
+        "HTTP/1.1 200OK\n",
+        # One malformed artifact: a duplicate response status line.
+        (
+            "HTTP/1.1 200 OK\nContent-Type: text/markdown\n"
+            + "HTTP/1.1 200 OK\n"
+        ),
+    ],
+)
+def test_curl_headers_reject_malformed_artifacts(content):
+    with pytest.raises(ValueError):
+        parse_curl_header_artifact(content)
+
+
 def test_http_500_probe_prevents_completed_scenario():
     scenario = {"name": "plain-small", "status": "completed"}
     probe = {"verdict": "fail", "failure_reason": "http_status: 500"}
@@ -311,7 +343,65 @@ def test_canonical_workflow_retains_probe_artifacts():
         REPO_ROOT / ".github" / "workflows" / "nightly-perf.yml"
     ).read_text(encoding="utf-8")
 
-    assert "perf/baselines/module-baseline-091-probes/" in workflow
+    module_job = workflow[workflow.index("\n  module-baseline-091:"):]
+    assert "--output perf/baselines/module-baseline-091-raw.json" in module_job
+    assert "perf/baselines/module-baseline-091-raw-probes/" in module_job
+    assert "perf/baselines/module-baseline-091-probes/" not in module_job
+
+
+def test_module_benchmark_materializes_output_derived_probe_directory():
+    """The real harness copies probes beside each requested report output."""
+    source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'PROBE_OUTPUT_DIR="${OUTPUT_PATH%.json}-probes"' in source
+    assert 'mkdir -p "$PROBE_OUTPUT_DIR"' in source
+    assert 'cp -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"' in source
+
+
+def test_module_benchmark_materializes_all_eight_scenario_probe_triplets():
+    """All canonical scenarios run through the response-probe materializer."""
+    source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+    expected = {
+        "plain-small",
+        "chunked-medium",
+        "gzip-large",
+        "large-body",
+        "streaming-first",
+        "gzip-streaming-first",
+        "deflate-streaming-first",
+        "brotli-streaming-first",
+    }
+
+    scenario_lines = {
+        line.strip().split("|", 1)[0].strip('"')
+        for line in source.splitlines()
+        if line.lstrip().startswith('"') and line.count("|") == 5
+    }
+    assert scenario_lines == expected
+    assert 'local headers_file="$PROBE_DIR/${name}.headers"' in source
+    assert 'local body_file="$PROBE_DIR/${name}.body"' in source
+    assert 'local result_file="$PROBE_DIR/${name}.json"' in source
+
+
+def test_module_benchmark_cleanup_removes_temp_only_after_probe_materialization():
+    """Cleanup removes the temporary workdir, not output-derived probes."""
+    source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+    cleanup_start = source.index("cleanup()")
+    cleanup_end = source.index("\n}\n", cleanup_start) + 3
+    cleanup = source[cleanup_start:cleanup_end]
+
+    assert 'cp -R "$PROBE_DIR/." "$PROBE_OUTPUT_DIR/"' in source
+    assert 'rm -rf "$NGINX_WORKDIR"' in cleanup
+    assert "PROBE_OUTPUT_DIR" not in cleanup
+
+
+def test_module_benchmark_probe_directories_do_not_collide_by_output_basename():
+    """Probe directory derivation retains the complete report basename."""
+    source = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
+    derivation = 'PROBE_OUTPUT_DIR="${OUTPUT_PATH%.json}-probes"'
+
+    assert source.count(derivation) == 1
+    assert "${OUTPUT_PATH%/*}" not in source
 
 
 def test_upstream_mock_splits_chunked_bodies():
@@ -789,6 +879,7 @@ class TestGracefulExit:
             env=env,
             capture_output=True,
             timeout=10,
+            check=False,
         )
         assert result.returncode == 75, (
             f"Expected exit code 75, got {result.returncode}. "
@@ -805,6 +896,7 @@ class TestGracefulExit:
             env=env,
             capture_output=True,
             timeout=10,
+            check=False,
         )
         stderr = result.stderr.decode()
         assert "SKIP_NOT_PRESENT" in stderr, (
@@ -1154,6 +1246,7 @@ class TestPortCleanupOnSignals:
             env=env,
             capture_output=True,
             timeout=10,
+            check=False,
         )
         assert result.returncode == 75
 
@@ -1218,7 +1311,14 @@ class TestPortCleanupOnSignals:
         env["NGINX_BIN"] = str(stub)
         env.pop("MODULE_SO", None)
         return subprocess.Popen(
-            [BASH_BIN, str(BENCHMARK_SCRIPT), "--iterations", "1"],
+            [
+                BASH_BIN,
+                str(BENCHMARK_SCRIPT),
+                "--iterations",
+                "1",
+                "--scenario",
+                "plain-small",
+            ],
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1233,6 +1333,10 @@ class TestNginxConfigGeneration:
         """The blocking chunked Brotli scenario must fail before serving requests."""
         script_content = BENCHMARK_SCRIPT.read_text(encoding="utf-8")
 
+        assert (
+            'if [[ -z "$SCENARIO" || "$SCENARIO" == "brotli-streaming-first" ]]; then'
+            in script_content
+        )
         assert "import brotli; print(brotli.__version__)" in script_content
         assert "requirements-perf.txt" in script_content
         assert '"$BROTLI_VERSION" != "1.2.0"' in script_content

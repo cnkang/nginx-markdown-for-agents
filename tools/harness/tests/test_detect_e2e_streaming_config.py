@@ -195,7 +195,7 @@ class TestFailClosed:
                 "EOF\n"
             ),
         }
-        findings, errors = _scan(files, tmp_path)
+        _findings, errors = _scan(files, tmp_path)
         assert any("unmatched" in e.message.lower() for e in errors)
 
     def test_read_failure_surfaces_error(self, tmp_path: Path) -> None:
@@ -230,6 +230,7 @@ class TestFailClosed:
         result = subprocess.run(
             [sys.executable, str(DETECTOR), str(root), "--strict"],
             capture_output=True, text=True,
+            check=False,
         )
         assert result.returncode == 1
         assert "SCAN_ERROR" in result.stderr
@@ -251,6 +252,7 @@ class TestFailClosed:
         result = subprocess.run(
             [sys.executable, str(DETECTOR), str(root)],
             capture_output=True, text=True,
+            check=False,
         )
         assert "SCAN_ERROR" in result.stderr
         assert "OK: no contradictory" not in result.stderr
@@ -410,7 +412,7 @@ class TestRustRawStringVariants:
                 '}\n'
             ),
         }
-        findings, errors = _scan(files, tmp_path)
+        _findings, errors = _scan(files, tmp_path)
         assert any("unterminated" in e.message.lower() for e in errors)
 
     def test_rust_comment_ignored(self, tmp_path: Path) -> None:
@@ -634,7 +636,7 @@ class TestQuotedLocationRegex:
                 "EOF\n"
             ),
         }
-        findings, errors = _scan(files, tmp_path)
+        _findings, errors = _scan(files, tmp_path)
         assert any("missing argument" in e.message for e in errors)
 
     def test_missing_block_opener(self, tmp_path: Path) -> None:
@@ -648,7 +650,7 @@ class TestQuotedLocationRegex:
                 "EOF\n"
             ),
         }
-        findings, errors = _scan(files, tmp_path)
+        _findings, errors = _scan(files, tmp_path)
         assert any("missing opening brace" in e.message for e in errors)
 
 
@@ -679,7 +681,7 @@ class TestStrictUTF8:
                 "EOF\n"
             ),
         }
-        findings, errors = _scan(files, tmp_path)
+        _findings, errors = _scan(files, tmp_path)
         encoding_errors = [e for e in errors if "UTF-8" in e.message]
         assert not encoding_errors
 
@@ -759,7 +761,7 @@ class TestRustCommentSkipping:
                 '}\n'
             ),
         }
-        findings, errors = _scan(files, tmp_path)
+        _findings, errors = _scan(files, tmp_path)
         assert any("unterminated" in e.message.lower() for e in errors)
 
 
@@ -786,7 +788,7 @@ class TestStructureValidation:
                 "EOF\n"
             ),
         }
-        findings, errors = _scan(files, tmp_path)
+        _findings, errors = _scan(files, tmp_path)
         assert any("unmatched closing brace" in e.message for e in errors)
 
     def test_outer_unbalanced_braces(self, tmp_path: Path) -> None:
@@ -803,7 +805,7 @@ class TestStructureValidation:
                 "EOF\n"
             ),
         }
-        findings, errors = _scan(files, tmp_path)
+        _findings, errors = _scan(files, tmp_path)
         assert any("unmatched opening brace" in e.message for e in errors)
 
 
@@ -828,7 +830,7 @@ class TestUnterminatedQuote:
                 "EOF\n"
             ),
         }
-        findings, errors = _scan(files, tmp_path)
+        _findings, errors = _scan(files, tmp_path)
         quote_errs = [e for e in errors if "unterminated quoted string" in e.message]
         assert len(quote_errs) == 1
 
@@ -846,7 +848,7 @@ class TestUnterminatedQuote:
                 "EOF\n"
             ),
         }
-        findings, errors = _scan(files, tmp_path)
+        _findings, errors = _scan(files, tmp_path)
         quote_errs = [e for e in errors if "unterminated quoted string" in e.message]
         assert len(quote_errs) == 1
 
@@ -905,7 +907,7 @@ class TestHeredocOpenerScanner:
             "}\n"
             "EOF\n"
         )
-        configs, errors = self._extract(content)
+        _configs, errors = self._extract(content)
         assert not errors  # no unterminated heredoc
 
     def test_here_string_is_not_a_heredoc(self) -> None:
@@ -985,7 +987,7 @@ class TestHeredocOpenerScanner:
             "}\n"
             "    EOF\n"
         )
-        configs, errors = self._extract(content)
+        _configs, errors = self._extract(content)
         assert any("unterminated" in e.message.lower() for e in errors)
 
     def test_no_strip_space_close_rejected(self) -> None:
@@ -997,7 +999,7 @@ class TestHeredocOpenerScanner:
             "}\n"
             " EOF\n"
         )
-        configs, errors = self._extract(content)
+        _configs, errors = self._extract(content)
         assert any("unterminated" in e.message.lower() for e in errors)
 
     def test_body_contains_fake_opener_text(self) -> None:
@@ -1041,7 +1043,7 @@ class TestHeredocOpenerScanner:
             "    markdown_cache_validation full;\n"
             "}\n"
         )
-        configs, errors = self._extract(content)
+        _configs, errors = self._extract(content)
         assert any("unterminated" in e.message.lower() for e in errors)
 
 
@@ -1142,10 +1144,10 @@ class TestRustLiteralScanner:
 
     def test_unterminated_raw_string_reports_error(self) -> None:
         content = 'let a = r##"unterminated\n'
-        configs, errors = self._extract(content)
+        _configs, errors = self._extract(content)
         assert any("unterminated" in e.message.lower() for e in errors)
 
     def test_unterminated_ordinary_string_reports_error(self) -> None:
         content = 'let a = "location /bad/ { markdown_cache_validation full;\n}\n'
-        configs, errors = self._extract(content)
+        _configs, errors = self._extract(content)
         assert any("unterminated" in e.message.lower() for e in errors)

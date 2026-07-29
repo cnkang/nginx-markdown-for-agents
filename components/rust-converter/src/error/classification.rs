@@ -447,23 +447,6 @@ mod tests {
         assert_eq!(ErrorClass::from_discriminant(255), None);
     }
 
-    #[test]
-    fn test_error_class_strings_are_snake_case() {
-        for class in &ALL_ERROR_CLASSES {
-            let s = class.as_str();
-            assert!(!s.is_empty());
-            for ch in s.chars() {
-                assert!(
-                    ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_',
-                    "String '{}' for {:?} contains invalid char '{}'",
-                    s,
-                    class,
-                    ch
-                );
-            }
-        }
-    }
-
     /* ====================================================================
      * Task 2.3: is_post_commit tests
      * ==================================================================== */
@@ -747,3 +730,7 @@ mod tests {
         assert_eq!(classify_error_code(255), ErrorClass::FfiPanic);
     }
 }
+
+#[cfg(test)]
+#[path = "classification_complexity_tests.rs"]
+mod classification_complexity_tests;

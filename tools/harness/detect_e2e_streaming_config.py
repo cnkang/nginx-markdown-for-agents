@@ -994,7 +994,7 @@ def _handle_unquoted_char(
 
 
 def _advance_quoted_char(
-    line: str, i: int, in_single: bool, in_double: bool,
+    line: str, i: int, in_single: bool, _in_double: bool,
 ) -> tuple[int, bool, bool]:
     """Advance one character inside a quoted span, returning new state."""
     ch = line[i]

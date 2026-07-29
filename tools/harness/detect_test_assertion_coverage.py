@@ -220,7 +220,7 @@ def _resolve_test_dir() -> Path:
 def _check_test_file(test_file: Path, test_root: Path) -> tuple[List[str], str | None]:
     try:
         content = test_file.read_text(encoding='utf-8')
-    except Exception as exc:
+    except (OSError, UnicodeError) as exc:
         return [], f"{test_file}: {exc}"
 
     tests = extract_test_functions(content)

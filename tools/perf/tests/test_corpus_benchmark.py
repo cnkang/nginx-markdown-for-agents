@@ -594,7 +594,7 @@ def test_property11_pr_summary_completeness(fixtures, factor):
 class TestFixtureMetadataValidation:
     """Unit tests for fixture metadata validation."""
 
-    def test_valid_metadata(self, tmp_path):
+    def test_valid_metadata(self):
         """Known fixture .meta.json with all required fields passes."""
         meta = {
             "fixture-id": "simple/basic",

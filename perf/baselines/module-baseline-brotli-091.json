@@ -82,7 +82,7 @@
     "source_run": "1000 requests at 2026-07-19T09:03:37Z",
     "compression_quality": 6,
     "normalization": "none; metrics copied from the retained raw report",
-    "usage_note": "NGINX 1.30.4 environment baseline. It must never be compared against reports produced under a different NGINX version, platform, or load generator. The evidence gate consumes only perf/baselines/module-baseline-091.json as the canonical baseline and rejects cross-environment comparisons; this file preserves the brotli streaming evidence with its truthful environment identity until the canonical baseline is regenerated with brotli support in the canonical environment."
+    "usage_note": "Archival NGINX 1.30.4 environment baseline. It must never be compared against reports produced under a different NGINX version, platform, or load generator. The active canonical baseline is perf/baselines/module-baseline-091.json, which now contains Brotli streaming measured natively on NGINX 1.24.0; this file remains available only for historical audit and environment-specific comparison."
   },
   "decompression_coverage": {
     "decompression_streaming_total": 1030,

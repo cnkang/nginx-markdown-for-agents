@@ -2,11 +2,15 @@
 """Verify that no pre-0.9.0 stale directives/symbols remain in tracked sources.
 This gate is designed to stop the 'forgot to update directive' pattern.
 """
-import shutil
 import sys
 import subprocess
 from pathlib import Path
 from typing import Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from tools.lib.executable_validation import (  # noqa: E402
+    resolve_approved_executable,
+)
 
 STALE_SYMBOLS = [
     "markdown_on_wildcard",
@@ -75,8 +79,10 @@ def _find_repo_root(start: Path) -> Path:
 
 def _git_cmd() -> list[str]:
     """Return git command with a resolved absolute path."""
-    path = shutil.which("git")
-    return [path] if path else ["git"]
+    path = resolve_approved_executable("git")
+    if path is None:
+        raise FileNotFoundError("approved git executable is unavailable")
+    return [path]
 
 
 def _list_tracked_files(repo: Path) -> tuple[Optional[list[str]], str]:
@@ -93,7 +99,7 @@ def _list_tracked_files(repo: Path) -> tuple[Optional[list[str]], str]:
         return files_proc.stdout.splitlines(), ""
     except subprocess.TimeoutExpired:
         return None, f"Error listing tracked files: git ls-files timed out after {GIT_TIMEOUT_SECONDS}s"
-    except Exception as e:
+    except (OSError, UnicodeError, subprocess.SubprocessError) as e:
         return None, f"Error listing tracked files with git: {e}"
 
 
@@ -145,7 +151,7 @@ def _scan_tracked_file(repo: Path, path: str) -> tuple[list[str], str]:
 
     try:
         content = f_path.read_text(encoding='utf-8')
-    except Exception as e:
+    except (OSError, UnicodeError) as e:
         return [], f"Error reading {path}: {e}"
 
     lines = content.splitlines()

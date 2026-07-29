@@ -34,11 +34,13 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: 1.97.0
+          # rustfmt + clippy required by make complexity-check and cargo clippy gates
+          components: rustfmt,clippy
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.14.3'
+          python-version: '3.14.6'
 
       - name: Install Python test dependencies
         run: pip install -r requirements-dev.txt
@@ -253,7 +255,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.14.3'
+          python-version: '3.14.6'
 
       - name: Install release-gate tooling
         run: |
@@ -308,6 +310,12 @@ jobs:
             --output perf/baselines/module-baseline-091-raw.json
         shell: bash
 
+      - name: Verify raw module probe artifacts
+        run: |
+          python3 tools/perf/validate_module_probe_artifacts.py \
+            --probe-dir perf/baselines/module-baseline-091-raw-probes
+        shell: bash
+
       - name: Record full commit SHA for baseline provenance
         id: baseline-git
         run: |
@@ -318,13 +326,18 @@ jobs:
         env:
           GITHUB_RUN_URL: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}"
         run: |
-          cp perf/baselines/module-baseline-091-raw.json \
-             perf/baselines/module-baseline-091.json
           python3 tools/perf/finalize_module_baseline.py \
-            --input perf/baselines/module-baseline-091.json \
+            --raw-input perf/baselines/module-baseline-091-raw.json \
+            --output perf/baselines/module-baseline-091.json \
             --source-git-commit "${{ steps.baseline-git.outputs.sha }}" \
-            --source-run "${GITHUB_RUN_URL}" \
-            --source-artifact perf/baselines/module-baseline-091-raw.json
+            --source-run "${GITHUB_RUN_URL}"
+        shell: bash
+
+      - name: Cross-check finalized baseline response probes
+        run: |
+          python3 tools/perf/validate_module_probe_artifacts.py \
+            --probe-dir perf/baselines/module-baseline-091-raw-probes \
+            --baseline perf/baselines/module-baseline-091.json
         shell: bash
 
       - name: Validate canonical module baseline
@@ -344,17 +357,6 @@ jobs:
           PY
         shell: bash
 
-      - name: Upload canonical module baseline
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: module-baseline-091-${{ github.sha }}
-          path: |
-            perf/baselines/module-baseline-091.json
-            perf/baselines/module-baseline-091-raw.json
-            perf/baselines/module-baseline-091-probes/
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Run canonical performance evidence check
         run: |
           NGINX_BIN="${NGINX_SRC}/objs/nginx" \
@@ -366,3 +368,26 @@ jobs:
           NGINX_BIN="${NGINX_SRC}/objs/nginx" \
           MODULE_SO="${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so" \
             make release-gates-check-091
+
+      - name: Upload canonical module baseline
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: module-baseline-091-${{ github.sha }}
+          path: |
+            perf/baselines/module-baseline-091.json
+            perf/baselines/module-baseline-091-raw.json
+            perf/baselines/module-baseline-091-raw-probes/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload debug artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: module-baseline-091-debug-${{ github.sha }}
+          path: |
+            perf/baselines/module-baseline-091-raw.json
+            perf/baselines/module-baseline-091-raw-probes/
+            perf/reports/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -173,7 +173,9 @@ def try_parse_yaml(content: str) -> tuple[bool, str]:
             ),
             (True, ""),
         )
-    except Exception as exc:
+    # PyYAML is optional and exposes parser errors through backend-specific
+    # exception classes, so this boundary intentionally normalizes them.
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         return False, str(exc)
 
 
