@@ -121,8 +121,13 @@ dynamic configuration to the previously applied snapshot without a full
 version rollback:
 
 ```bash
-curl -X POST "http://localhost/nginx-markdown/diagnostics?action=rollback"
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  "http://localhost/nginx-markdown/diagnostics?action=rollback"
 ```
+
+Rollback requests require an authenticated `Authorization` header in addition
+to the diagnostics endpoint access policy.
 
 **Response:**
 

@@ -70,7 +70,7 @@ Use `markdown_streaming off|auto|force` instead.
 
 The old directive is a reject-only stub:
 
-```
+```nginx
 nginx: [emerg] "markdown_streaming_engine" directive has been removed in 0.9.1;
 use "markdown_streaming off|auto|force" instead
 (see docs/guides/MIGRATION-0.9.1.md)
@@ -97,7 +97,7 @@ use "markdown_streaming off|auto|force" instead
 with a migration hint. They were experimental selectors that never produced
 distinct output formats.
 
-```
+```nginx
 nginx: [emerg] "markdown_flavor mdx" is not supported in 0.9.1;
 use "markdown_flavor commonmark" or "markdown_flavor gfm" instead
 (see docs/guides/MIGRATION-0.9.1.md)
@@ -163,7 +163,7 @@ unimplemented values had no distinct production effect:
 `server` and `location` uses fail `nginx -t` instead of creating a Rust-owned
 handle without safe child inheritance.
 
-```
+```nginx
 nginx: [emerg] "markdown_trusted_proxies" directive is only valid in the
 http context, not in server or location
 (see docs/guides/MIGRATION-0.9.1.md)

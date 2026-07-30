@@ -2,9 +2,10 @@
 
 ## Overview
 
-This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from any
-prior 0.9.x release. 0.9.2 is a non-breaking release — all 0.9.1
-configurations are valid without modification.
+This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
+0.9.2 is a non-breaking release — all 0.9.1 configurations are valid without
+modification. If you are running 0.9.0, complete
+[MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following this guide.
 
 Choose the upgrade method matching your deployment:
 

@@ -39,7 +39,7 @@ runtime behavior.
   implementation, not OTLP HTTP/protobuf. Protobuf is documented as a future
   consideration.
 - **Release-gates-check-092**: Additive on 091; adds public-surface drift
-  check" check, version consistency gate (0.9.2), and reason-code registry
+  check, version consistency gate (0.9.2), and reason-code registry
   completeness gate.
 - **Streaming reason code normalization documentation**: C-only streaming
   reason codes use UPPERCASE format; documented as a known inconsistency

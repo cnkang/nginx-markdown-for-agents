@@ -30,7 +30,9 @@ The current implementation uses OTLP HTTP/JSON encoding. OTLP HTTP/protobuf is a
 ## Implementation Sketch
 
 - New C files: `ngx_http_markdown_otel.c`, `ngx_http_markdown_otel.h`
-- Per-worker lock-free ring buffer for span storage
-- NGINX timer-based async HTTP POST to collector endpoint
-- Configuration: `markdown_otel_tracing`, `markdown_otel_metrics`, `markdown_otel_endpoint`, `markdown_otel_service_name`, `markdown_otel_span_buffer_size`, `markdown_otel_export_timeout`
+- Request-scoped span storage; ring-buffer and batch export are deferred until
+  the OTel surface is promoted beyond its experimental status
+- Nonblocking NGINX internal-subrequest HTTP POST to the configured endpoint
+- Configuration: `markdown_otel on|off` and
+  `markdown_otel_endpoint <internal-uri>`
 - Span attributes: `nginx.markdown.engine`, `nginx.markdown.result`, `nginx.markdown.reason_code`, `nginx.markdown.duration_ms`

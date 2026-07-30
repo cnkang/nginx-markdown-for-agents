@@ -97,7 +97,7 @@ long-term support.
 
 ## v1.0 Contract Freeze
 
-After v0.9.1 is published, v1.0 preparation is a stabilization phase rather
+After v0.9.2 is published, v1.0 preparation is a stabilization phase rather
 than another baseline reset.
 
 ### Freeze Rules

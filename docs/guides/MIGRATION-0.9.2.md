@@ -28,9 +28,11 @@ required.
 
 ### C Reason Code Constants Synchronized
 
-The C module reason code constants for the decompression error series
-(codes 4–11) were missing from the C header. The Rust converter emitted
-these codes, but the C module could not reference them by symbolic name.
+The C module reason code constants in
+`components/nginx-module/src/ngx_http_markdown_reason.c` now include the
+eight decompression error-series constants (codes 4–11). The Rust converter
+emitted these codes, but the C module previously lacked symbolic definitions
+for them.
 
 **Impact:** Source builders and integrators referencing C reason code
 constants for decompression errors can now use the complete set. No
@@ -51,11 +53,14 @@ accumulation across reload cycles.
 A new rollback action is available on the diagnostics endpoint:
 
 ```bash
-curl -X POST "http://localhost/nginx-markdown/diagnostics?action=rollback"
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  "http://localhost/nginx-markdown/diagnostics?action=rollback"
 ```
 
 This reverts the active dynamic configuration to the previously applied
-snapshot. See [DYNAMIC_CONFIG.md](DYNAMIC_CONFIG.md) for full usage.
+snapshot. Rollback requests require an authenticated `Authorization` header.
+See [DYNAMIC_CONFIG.md](DYNAMIC_CONFIG.md) for full usage.
 
 **Impact:** Opt-in. Existing configurations are unaffected.
 
