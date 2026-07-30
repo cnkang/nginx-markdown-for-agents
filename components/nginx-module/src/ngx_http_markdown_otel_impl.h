@@ -78,6 +78,8 @@
 
 static u_char ngx_http_markdown_otel_traceparent_name[] = "traceparent";
 
+static ngx_flag_t ngx_http_markdown_otel_worker_active = 0;
+
 /*
  * OTel span attribute (key-value pair).
  *
@@ -420,6 +422,8 @@ ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
             return NULL;
         }
     }
+
+    ngx_http_markdown_otel_worker_active = 1;
 
     return span;
 }
@@ -924,6 +928,31 @@ ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
     ngx_http_markdown_otel_log_span_attrs(span, log);
 
     span->exported = 1;
+}
+
+
+/*
+ * Perform OTel subsystem cleanup on worker process exit.
+ *
+ * Resets the worker-active flag to prevent stale references after
+ * reload.  Safe to call when OTel was never used in this worker
+ * (returns immediately).
+ *
+ * Parameters:
+ *   cycle - NGINX cycle (used for logging)
+ */
+static void
+ngx_http_markdown_otel_exit_worker(ngx_cycle_t *cycle)
+{
+    if (ngx_http_markdown_otel_worker_active == 0) {
+        return;
+    }
+
+    ngx_http_markdown_otel_worker_active = 0;
+
+    ngx_log_error(NGX_LOG_INFO, cycle->log, 0,
+                  "markdown: OTel worker exit cleanup complete (pid: %P)",
+                  ngx_pid);
 }
 
 
