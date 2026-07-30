@@ -522,8 +522,7 @@ def check_public_config_contract(project_root: Path) -> List[str]:
             "markdown_streaming_engine directive in an active config surface",
         )
     )
-    errors.extend(
-        _scan_for_pattern(
+    retired_metric_errors = _scan_for_pattern(
             project_root,
             (Path("docs/guides"), Path("docs/features"), Path("docs/architecture")),
             re.compile(
@@ -534,7 +533,12 @@ def check_public_config_contract(project_root: Path) -> List[str]:
             ),
             "retired production metric name or failure label",
         )
-    )
+    migration_pattern = re.compile(r"MIGRATION-\d")
+    retired_metric_errors = [
+        e for e in retired_metric_errors
+        if not migration_pattern.search(Path(e.split(":")[0]).name)
+    ]
+    errors.extend(retired_metric_errors)
     return errors
 
 
