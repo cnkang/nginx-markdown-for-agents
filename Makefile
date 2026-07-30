@@ -799,8 +799,9 @@ perf-evidence-check:
 	@echo "=== Performance Evidence Check (non-blocking) ==="
 	@tools/perf/run_evidence_gate.sh
 
-# Keep the 0.9.1 gate's default baseline stable; the 0.9.2 target below
-# overrides this value only for its performance evidence command.
+# Keep the 0.9.1 gate's default baseline stable. The 0.9.2 recipe below
+# exports its own value without changing the prerequisite's
+# 0.9.1 environment.
 PERF_BASELINE_VERSION ?= 091
 
 # release-gates-check-091: Blocking 0.9.1 release gate.
@@ -863,18 +864,18 @@ release-gates-check-091: release-gates-check-090
 #   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - (inherited) skip coverage
 #
 # Classification: BLOCKING
-release-gates-check-092: PERF_BASELINE_VERSION=092
 release-gates-check-092: release-gates-check-091
-	@echo "=== 0.9.2 Release Gates (blocking) ==="
-	@echo "  [1/4] Public surface and dynconf schema drift checks"
-	$(MAKE) public-surface-drift-check
-	@echo "  [2/4] Version consistency (0.9.2)"
-	@bash tools/harness/detect_version_consistency.sh
-	@echo "  [3/4] Reason code registry completeness"
-	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
-	@echo "  [4/4] OTel request-scoped unit test"
-	$(MAKE) -C $(NGINX_TEST_DIR) unit-otel_impl
-	@echo "=== 0.9.2 Release Gates: PASS ==="
+	@export PERF_BASELINE_VERSION=092; \
+	echo "=== 0.9.2 Release Gates (blocking) ==="; \
+	echo "  [1/4] Public surface and dynconf schema drift checks"; \
+	$(MAKE) public-surface-drift-check; \
+	echo "  [2/4] Version consistency (0.9.2)"; \
+	bash tools/harness/detect_version_consistency.sh; \
+	echo "  [3/4] Reason code registry completeness"; \
+	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py; \
+	echo "  [4/4] OTel request-scoped unit test"; \
+	$(MAKE) -C $(NGINX_TEST_DIR) unit-otel_impl; \
+	echo "=== 0.9.2 Release Gates: PASS ==="
 
 release-gates-check-all: release-gates-check release-gates-check-092
 	@echo "=== Release Gates: ALL PASS ==="

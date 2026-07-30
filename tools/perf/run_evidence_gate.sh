@@ -4,7 +4,8 @@
 set -uo pipefail
 
 set +e
-python3 tools/perf/evidence_gate.py --mode non-blocking
+MODULE_BASELINE_VERSION=092 \
+    python3 tools/perf/evidence_gate.py --mode non-blocking
 rc=$?
 set -e
 
