@@ -686,6 +686,10 @@ ngx_http_markdown_diagnostics_send_rollback_response(
     ngx_uint_t             reason_truncated = 0;
     ngx_http_markdown_diag_dynconf_t  dynconf;
 
+    /*
+     * Successful responses have a fixed schema.  Failure responses reserve
+     * space for the bounded, JSON-escaped reason before building the body.
+     */
     if (success) {
         buf_size = 256;
     } else {
@@ -716,6 +720,10 @@ ngx_http_markdown_diagnostics_send_rollback_response(
 
     ngx_http_markdown_diagnostics_get_dynconf_state(&dynconf);
 
+    /*
+     * Construct the complete JSON payload before allocating the output
+     * chain buffer, so headers are sent only after the body bounds are known.
+     */
     if (success) {
         p = ngx_slprintf(p, last,
             "{\"rollback\": \"ok\", "
@@ -739,6 +747,7 @@ ngx_http_markdown_diagnostics_send_rollback_response(
         p += sizeof(failed_suffix) - 1;
     }
 
+    /* A sizing mismatch must fail before any response headers are sent. */
     if (p >= last) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
@@ -756,6 +765,7 @@ ngx_http_markdown_diagnostics_send_rollback_response(
     b->last_in_chain = 1;
     b->memory = 1;
 
+    /* Publish response metadata before handing the JSON buffer to NGINX. */
     r->headers_out.status = NGX_HTTP_OK;
     r->headers_out.content_type_len = sizeof("application/json") - 1;
     ngx_str_set(&r->headers_out.content_type, "application/json");
