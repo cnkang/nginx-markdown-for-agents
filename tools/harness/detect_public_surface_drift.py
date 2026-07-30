@@ -40,8 +40,8 @@ REASON_CODE_RE = re.compile(r'^\s+(\w+)\s*=\s*(\d+)\s*,', re.MULTILINE)
 DYNCONF_KEY_RE = re.compile(r'static\s+u_char\s+\w+_key\[\]\s*=\s*"([^"]+)"')
 METRIC_NAME_RE = re.compile(r'\b(nginx_markdown_[a-z0-9_]+)\b')
 FFI_FN_RE = re.compile(
-    r'pub\s+(unsafe\s+)?extern\s+"C"\s+fn\s+(markdown_\w+)\s*\((.*?)\)\s*(?:->\s*([^\{]+))?\s*\{',
-    re.S,
+    r'pub\s+(unsafe\s+)?extern\s+"C"\s+fn\s+(markdown_\w+)\s*'
+    r'\(([^)]*)\)\s*(?:->\s*([^{}]*))?\s*\{',
 )
 
 REQUIRED_TOP_LEVEL = {
@@ -685,7 +685,7 @@ def main():
             all_drift.extend(check_dynconf_contract(inventory, extract_dynconf_contract_from_c()))
             all_drift.extend(check_metric_contract(inventory, extract_metric_contract_from_c()))
             all_drift.extend(check_ffi_contract(inventory, extract_ffi_contract_from_rust()))
-    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, KeyError) as exc:
         all_drift.append("public surface source/schema parse error: {}".format(exc))
     if all_drift:
         for message in sorted(set(all_drift)):
