@@ -387,7 +387,9 @@ ABI 公共表面，同时收紧以下契约：
 
 - **只读诊断接口**：支持 `GET`/`HEAD`，包括 `action=rollback` 在内的
   变更请求都会被拒绝。恢复 dynconf 应原子替换被监视文件；LKG 继续用于
-  失败重载保护。
+  失败重载保护。原子 rename 保证读取者看到完整的旧文件或新文件，
+  但每个 worker 通过各自的 watcher cycle 收敛；应通过 diagnostics 或请求
+  行为验证收敛，需要强同步边界时执行受控 NGINX reload。
 - **请求池作用域的 OTel 所有权**：span 和导出子请求使用请求池，不创建或
   声称存在 worker-owned 队列、线程、定时器、socket 或退出时 flush。
 - **公共表面契约门禁**：`make public-surface-drift-check` 将指令、dynconf、

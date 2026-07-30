@@ -31,7 +31,9 @@ operations, architecture, and contributor-facing harness maintenance.
 
 **Status:** Development release line. 0.9.2 continues from the 0.9.1 stable
 baseline with harness consolidation, documentation corrections, and
-release-gate hardening. No breaking changes to public configuration, ABI, or
+release-gate hardening. Development version metadata is 0.9.2. The release
+tag, GitHub Release, package assets, and checksums remain pending until the
+blocking gates pass. No breaking changes to public configuration, ABI, or
 runtime behavior.
 
 #### 0.9.2 (current development)
