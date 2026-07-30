@@ -8,7 +8,7 @@
 
 > HTML 保持原样，Markdown 按需返回——客户端主动请求，或者你指定哪些 bot 自动获得。
 
-客户端发送 `Accept: text/markdown` 时得到 Markdown；浏览器 and 普通调用方仍然拿到原始 HTML。你也可以通过 NGINX 配置针对特定的 AI 爬虫（如 ClaudeBot、GPTBot）按 User-Agent 自动改写 Accept 头，让这些 bot 即使没有主动请求 Markdown 也能收到转换后的内容。你不需要改造业务应用，不需要额外维护一套抓取器，也不需要单独部署一个转换服务。
+客户端发送 `Accept: text/markdown` 时得到 Markdown；浏览器和普通调用方仍然拿到原始 HTML。你也可以通过 NGINX 配置针对特定的 AI 爬虫（如 ClaudeBot、GPTBot）按 User-Agent 自动改写 Accept 头，让这些 bot 即使没有主动请求 Markdown 也能收到转换后的内容。你不需要改造业务应用，不需要额外维护一套抓取器，也不需要单独部署一个转换服务。
 
 这是一种很务实的接入方式：在不动现有站点内容生产流程的前提下，把 Agent 友好能力放到团队已经熟悉的 NGINX 层里完成。
 
@@ -38,7 +38,7 @@ AI 爬虫（按 User-Agent 匹配）          -> Markdown（通过 NGINX 配置�
 
 - 复用现有页面和上游服务，不必再造一条平行的内容 API。
 - 可以渐进式上线，先对一个路径、一个站点或一个 location 启用。
-- 基于标准 HTTP 内容协商，缓存与回源行为仍然容易理解 and 运维。
+- 基于标准 HTTP 内容协商，缓存与回源行为仍然容易理解和运维。
 - 仍然是 NGINX 模块的部署模型，不需要额外引入一个新的常驻服务。
 - 在最靠近应用的反向代理层做转换，对 HTML 来源和转换配置有完整的控制权。
 - 为 AI 消费方提供更干净、更省 token 的内容表示，减少生成式回答引用你的站点时出现误解或信息丢失的风险。
@@ -58,7 +58,7 @@ curl -sSL https://raw.githubusercontent.com/cnkang/nginx-markdown-for-agents/mai
 sudo nginx -t && sudo nginx -s reload
 ```
 
-安装脚本会识别本机 NGINX 版本，下载匹配 of 模块制品，并自动接入 `load_module` 与 `markdown_filter on`，无需手动编辑配置。默认会强制进行 SHA-256 制品完整性校验。
+安装脚本会识别本机 NGINX 版本，下载匹配的模块制品，并自动接入 `load_module` 与 `markdown_filter on`，无需手动编辑配置。默认会强制进行 SHA-256 制品完整性校验。
 
 其他安装方式（源码构建、Docker、自定义 NGINX 构建）、故障排查和详细说明见 [安装指南](docs/guides/INSTALLATION.md)。
 
@@ -112,7 +112,9 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/
 
 如果行为不符合预期，请查看安装指南里的 [Troubleshooting](docs/guides/INSTALLATION.md#10-troubleshooting) 小节。
 
-如果你想直接查看面向生产环境的完整配置示例，参见 [生产示例](examples/production/) 目录（覆盖 balanced、strict_cache、streaming_first 三种 profile）。
+如果你想先看面向生产环境的实用配置，直接跳到 [部署示例](docs/guides/DEPLOYMENT_EXAMPLES.md)。
+
+如果你想直接查看覆盖三种 profile 的完整生产配置模板，参见 [生产示例](examples/production/) 目录。
 
 ## Profiles
 
@@ -203,8 +205,8 @@ curl -sD - -o /dev/null -H "Accept: text/html" http://localhost/docs/
 | **自动解压缩** | 自动处理 gzip、brotli、deflate 上游压缩响应，免除手动编写解压管道的繁琐。 |
 | **缓存友好变体** | 自动生成对应 Markdown 变体的 ETags 并完美支持标准的 HTTP 条件请求。 |
 | **失败策略可控** | 支持配置失败透传或失败拦截（Fail-open / Fail-closed），完美融入生产 SLA。 |
-| **资源限制** | 通过 `markdown_limits` 限制单次转换的最大大小、处理超时、流式缓冲区和并发连接上限。 |
-| **安全加固** | 强制校验输出链接、默认拒绝不安全的 forwarded-host，限制解析/解压资源，防范 DDOS。 |
+| **资源限制** | 通过 `markdown_limits` 限制单次转换的最大大小、处理超时、流式缓冲区和进行中工作上限。 |
+| **安全加固** | 强制校验输出链接、默认拒绝不安全的 forwarded-host，限制解析/解压资源，防范拒绝服务攻击。 |
 | **可选元数据** | 支持自动估算并插入 Markdown Token 数及干净的 YAML front matter。 |
 | **指标监控端点** | 暴露 Prometheus 兼容的转换计数与运行时指标，助力集群可观测性建设。 |
 | **双引擎模式** | 典型大小响应走全缓冲（默认），大响应/分块响应支持自动或强制路由到流式引擎。 |
@@ -261,7 +263,7 @@ flowchart TD
 
     subgraph edge["NGINX 请求路径"]
         ingress["请求进入 NGINX"]
-        rewrite["Accept 头改写<br/>（针对匹配 the User-Agent）"]
+        rewrite["Accept 头改写<br/>（针对匹配的 User-Agent）"]
         filter["Markdown 过滤模块 (C)<br/>准入判断<br/>响应缓冲<br/>头部策略"]
         passthrough["普通 HTML 响应<br/>给浏览器和普通客户端"]
     end
@@ -305,7 +307,7 @@ NGINX 模块负责请求是否可转换、响应缓冲和头部管理。对于�
 这个拆分是沿着真实的问题边界做的。
 
 - C 负责直接接入 NGINX 模块 API、过滤链、缓冲区和请求生命周期。
-- Rust 负责解析不可信 HTML、做内容清洗和生成可预测的 Markdown 输出。
+- Rust 负责解析不可信 HTML、规范化输出并随时间安全演进。
 - FFI 边界保持得很小，这样 NGINX 侧的 HTTP 逻辑和转换逻辑可以相对独立演进。
 
 如果你想看完整的设计理由，而不只是这里的简版说明，可以继续读 [docs/architecture/SYSTEM_ARCHITECTURE.md](docs/architecture/SYSTEM_ARCHITECTURE.md)、[docs/architecture/ADR/0001-use-rust-for-conversion.md](docs/architecture/ADR/0001-use-rust-for-conversion.md) 与 [docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md](docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md)。
@@ -333,7 +335,7 @@ make test-e2e
 make test-rust-fuzz-smoke
 ```
 
-`make test-nginx-integration`、`make test-e2e` 和 `make verify-chunked-native-e2e-smoke` require a real `nginx` runtime. If `nginx` is not on `PATH`, set `NGINX_BIN=/absolute/path/to/nginx` so that these commands can find the nginx binary.
+`make test-nginx-integration`、`make test-e2e` 和 `make verify-chunked-native-e2e-smoke` 需要真实的 `nginx` 运行时。如果 `nginx` 不在 `PATH` 中，设置 `NGINX_BIN=/absolute/path/to/nginx` 以便这些命令能找到 nginx 二进制文件。
 
 更完整的集成测试、E2E 与性能基线说明见 [docs/testing/README.md](docs/testing/README.md) 与 [docs/testing/E2E_TESTS.md](docs/testing/E2E_TESTS.md)。
 
@@ -400,8 +402,8 @@ v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能
 v0.9.1 发布后迈向 v1.0.0 正式版的演进方向：
 
 - **可观测性扩展**：在 NGINX C 模块过滤链路中引入原生的 OpenTelemetry 链路追踪 (Tracing) 支持。
-- **分发渠道拓宽**：将 APT 与 YUM 打包发布整合至标准的 Linux 发行版包索引中，降低安装门槛。
-- **诊断系统增强**：扩展 `nginx-markdown-doctor` CLI 工具与监控指标，提供转换劣化及偏移的实时诊断。
+- **分发渠道拓宽**：将 APT 与 YUM 打包发布整合至标准的 Linux 发行版包索引中。
+- **诊断系统增强**：扩展 `nginx-markdown-doctor` CLI 工具与监控指标，提供实时转换监控。
 
 ## 许可证
 
@@ -421,5 +423,5 @@ BSD 2-Clause "Simplified" License。详见 [LICENSE](LICENSE)。
 | 0.8.0 | 2026-06-16 | Kang | 0.8.0 正式发布文档就绪：双引擎流式转换（auto 默认）、有界内存增量处理、提交前安全回退、旧阈值指令兼容、新流式指令、可观测性与 release-gates-check-080 |
 | 0.7.0 | 2026-06-03 | Kang | P0 正确性修复、Rust-first 架构、独立解压预算、Accept 协商、解析超时/预算、DEB/RPM 包分发、K8s 示例、运行时诊断、dynconf dry-run/回滚 |
 | 0.6.3 | 2026-05-14 | Kang | 版本号更新至 0.6.3，并补充 release matrix 与发布前最终加固说明 |
-| 0.6.2 | 2026-05-08 | Kang | Version bump to 0.6.2 for release |
+| 0.6.2 | 2026-05-08 | Kang | 版本号更新至 0.6.2 |
 | 0.5.0 | 2026-04-21 | docs-standardization | 同步中英文 README 快速上手步骤；新增更新追踪段落 |
