@@ -6,7 +6,8 @@ Validates 0.9.2-specific deliverables:
   - Reason code registry completeness (26 codes)
   - Public surface inventory exists and is parseable
 
-Additive on validate_release_gates_091 (not re-checked here).
+Adds 0.9.2-specific checks to the 0.9.1 Make gate chain; prior checks
+remain delegated to that chain.
 
 Exit codes:
   0 = all gates pass
@@ -28,6 +29,7 @@ CHANGELOG_FILENAME = "CHANGELOG.md"
 
 
 def find_repo_root() -> Path:
+    """Return the repository root resolved from this validator's location."""
     return REPO_ROOT
 
 
@@ -40,7 +42,9 @@ def check_version_consistency(repo: Path) -> dict:
     mismatches = []
 
     cargo_toml = sources["Cargo.toml"]
-    if cargo_toml.exists():
+    if not cargo_toml.exists():
+        mismatches.append("Cargo.toml: file not found")
+    else:
         content = cargo_toml.read_text()
         m = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
         if m and m.group(1) != EXPECTED_VERSION:
@@ -49,7 +53,9 @@ def check_version_consistency(repo: Path) -> dict:
             mismatches.append("Cargo.toml: version not found")
 
     changelog = sources[CHANGELOG_FILENAME]
-    if changelog.exists():
+    if not changelog.exists():
+        mismatches.append(f"{CHANGELOG_FILENAME}: file not found")
+    else:
         content = changelog.read_text()
         if f"## [{EXPECTED_VERSION}]" not in content and f"## v{EXPECTED_VERSION}" not in content:
             mismatches.append(
@@ -100,6 +106,7 @@ def check_public_surface_inventory(repo: Path) -> dict:
 
 
 def main():
+    """Run the 0.9.2-specific checks and exit non-zero on any failure."""
     repo = find_repo_root()
     checks = [
         check_version_consistency(repo),
