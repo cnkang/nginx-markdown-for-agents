@@ -211,6 +211,7 @@ if test -n "$ngx_module_link"; then
                      $ngx_addon_dir/src/ngx_http_markdown_decompression.c \
                      $ngx_addon_dir/src/ngx_http_markdown_reason.c \
                      $ngx_addon_dir/src/ngx_http_markdown_reason_ffi.c \
+                     $ngx_addon_dir/src/ngx_http_markdown_diagnostics_reason.c \
                      $ngx_addon_dir/src/ngx_http_markdown_diagnostics.c \
                      $ngx_addon_dir/src/ngx_http_markdown_dynconf_snapshot.c \
                      $ngx_addon_dir/src/ngx_http_markdown_stream_state.c \
@@ -245,6 +246,7 @@ else
                     $ngx_addon_dir/src/ngx_http_markdown_decompression.c \
                     $ngx_addon_dir/src/ngx_http_markdown_reason.c \
                     $ngx_addon_dir/src/ngx_http_markdown_reason_ffi.c \
+                    $ngx_addon_dir/src/ngx_http_markdown_diagnostics_reason.c \
                     $ngx_addon_dir/src/ngx_http_markdown_diagnostics.c \
                     $ngx_addon_dir/src/ngx_http_markdown_dynconf_snapshot.c \
                     $ngx_addon_dir/src/ngx_http_markdown_stream_state.c \
