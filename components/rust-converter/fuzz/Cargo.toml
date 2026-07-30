@@ -13,7 +13,7 @@ cargo-fuzz = true
 flate2 = "1.0"
 libfuzzer-sys = "0.4"
 markup5ever_rcdom = "0.39"
-nginx-markdown-converter = { version = "0.9.1", path = "..", features = ["streaming"] }
+nginx-markdown-converter = { version = "0.9.2", path = "..", features = ["streaming"] }
 
 [[bin]]
 name = "parser_html"
