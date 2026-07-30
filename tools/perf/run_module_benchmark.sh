@@ -178,6 +178,33 @@ fi
 # Pre-flight: required tools
 ###############################################################################
 
+required_commands=(
+  awk
+  cat
+  cp
+  cut
+  head
+  mkdir
+  mktemp
+  ps
+  rm
+  sleep
+  tr
+  wc
+)
+for required_command in "${required_commands[@]}"; do
+  if ! command -v "$required_command" >/dev/null 2>&1; then
+    if [[ "$required_command" == "ps" ]]; then
+      die "ps is required for RSS evidence; install procps on Linux"
+    fi
+    die "required command is missing: $required_command"
+  fi
+done
+
+if ! ps -o rss= -p "$$" >/dev/null 2>&1; then
+  die "ps does not support RSS lookup; install a compatible procps/ps package"
+fi
+
 if ! command -v python3 >/dev/null 2>&1; then
   die "python3 is required for the upstream mock server"
 fi
