@@ -27,6 +27,7 @@ typedef struct ngx_http_request_s ngx_http_request_t;
 typedef struct ngx_http_request_body_s ngx_http_request_body_t;
 typedef struct ngx_http_markdown_conf_s ngx_http_markdown_conf_t;
 typedef struct ngx_connection_s ngx_connection_t;
+typedef struct ngx_cycle_s ngx_cycle_t;
 
 typedef struct {
     size_t  len;
@@ -99,6 +100,7 @@ struct ngx_http_request_s {
 struct ngx_pool_s { int dummy; };
 struct ngx_log_s  { int dummy; };
 struct ngx_module_s { int dummy; };
+struct ngx_cycle_s { ngx_log_t *log; };
 
 typedef struct {
     void (*handler)(ngx_http_request_t *r, void *data, ngx_int_t rc);
@@ -118,6 +120,7 @@ static ngx_http_markdown_conf_t g_fake_conf;
 #define NGX_LOG_INFO 3
 #define NGX_LOG_WARN 2
 #define NGX_LOG_ALERT 1
+#define ngx_pid 1234
 
 #define ngx_memcpy(dst, src, n) memcpy((dst), (src), (n))
 #define ngx_string(str) { sizeof(str) - 1, (u_char *) (str) }
@@ -627,6 +630,30 @@ test_otel_span_start_disabled(void)
 }
 
 static void
+test_otel_exit_worker_cleanup(void)
+{
+    ngx_cycle_t  cycle;
+    ngx_log_t    log;
+
+    TEST_SUBSECTION("OTel exit_worker resets worker state");
+
+    memset(&cycle, 0, sizeof(cycle));
+    memset(&log, 0, sizeof(log));
+    cycle.log = &log;
+
+    ngx_http_markdown_otel_worker_active = 1;
+    ngx_http_markdown_otel_exit_worker(&cycle);
+    TEST_ASSERT(ngx_http_markdown_otel_worker_active == 0,
+                "exit_worker should clear active worker state");
+
+    ngx_http_markdown_otel_exit_worker(&cycle);
+    TEST_ASSERT(ngx_http_markdown_otel_worker_active == 0,
+                "inactive exit_worker should remain a no-op");
+
+    TEST_PASS("OTel exit_worker cleanup resets worker state");
+}
+
+static void
 test_otel_random_hex_format(void)
 {
     u_char     buf[33];
@@ -705,6 +732,7 @@ main(void)
     test_otel_parse_traceparent_missing_flags_separator();
     test_otel_parse_traceparent_lowercase_flags();
     test_otel_span_start_disabled();
+    test_otel_exit_worker_cleanup();
     test_otel_helper_functions();
     test_otel_random_hex_format();
     printf("\nAll otel_impl tests passed!\n");

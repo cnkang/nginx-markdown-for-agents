@@ -27,7 +27,7 @@ EXPECTED_REASON_CODE_COUNT = 26
 
 
 def find_repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent.parent
+    return REPO_ROOT
 
 
 def check_version_consistency(repo: Path) -> dict:
