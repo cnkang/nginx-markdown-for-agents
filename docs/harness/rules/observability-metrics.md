@@ -36,6 +36,13 @@ Required:
   operationally visible outcomes in severity gating (typically failure/warn).
   Do not classify degradation-only outcomes as informational by default when
   that would hide rollout risk at `warn` verbosity.
+- Keep the public-surface inventory contract synchronized with source, not just
+  by symbol name. Directive entries include classification, handler, context,
+  argument contract, defaults, syntax, migration target, and OTel status;
+  metric entries include type, labels, order, and bounded-cardinality policy;
+  reason entries include discriminant, variant string, metric family, C
+  accessor, and registry count. Duplicate, malformed, or symlink-escaped
+  inventory/source inputs must fail closed.
 
 ---
 

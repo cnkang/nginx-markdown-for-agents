@@ -844,8 +844,8 @@ release-gates-check-091: release-gates-check-090
 	@echo "=== 0.9.1 Release Gates: PASS ==="
 
 # release-gates-check-092: Blocking 0.9.2 release gate.
-# Additive on 091: adds public-surface/dynconf drift, version consistency,
-# reason-code registry completeness, and the OTel lifecycle unit test.
+# Additive on 091: adds public-surface/dynconf contract drift, version
+# consistency, reason-code registry completeness, and request-scoped OTel tests.
 #
 # Environment variables (inherited from 091 chain):
 #   NGINX_BIN                            - Path to module-enabled nginx binary
@@ -864,7 +864,7 @@ release-gates-check-092: release-gates-check-091
 	@bash tools/harness/detect_version_consistency.sh
 	@echo "  [3/4] Reason code registry completeness"
 	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
-	@echo "  [4/4] OTel lifecycle unit test"
+	@echo "  [4/4] OTel request-scoped unit test"
 	$(MAKE) -C $(NGINX_TEST_DIR) unit-otel_impl
 	@echo "=== 0.9.2 Release Gates: PASS ==="
 
