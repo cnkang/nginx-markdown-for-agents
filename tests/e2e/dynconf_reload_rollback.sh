@@ -17,8 +17,9 @@ CALLER_DYNCONF_FILE=""
 if [[ -n "${DYNCONF_FILE+x}" ]]; then
     CALLER_DYNCONF_FILE_SET=1
     CALLER_DYNCONF_FILE="$DYNCONF_FILE"
+else
+    DYNCONF_FILE=""
 fi
-DYNCONF_FILE=""
 DYNCONF_DIR=""
 ORIGINAL_FILE_EXISTED=0
 DYNCONF_FILE_CREATED_BY_TEST=0
@@ -174,9 +175,7 @@ restore_original_atomically() {
         return 0
     fi
 
-    if [[ "$DYNCONF_FILE_CREATED_BY_TEST" -eq 1 ]]; then
-        rm -f -- "$DYNCONF_FILE"
-    fi
+    return 0
 }
 
 cleanup() {
@@ -202,17 +201,15 @@ cleanup() {
             cleanup_error=1
         fi
     fi
-    if [[ -n "$BACKUP_PATH" && "$BACKUP_READY" -eq 0 ]]; then
-        if ! rm -f -- "$BACKUP_PATH"; then
-            echo "Error: unable to remove completed dynconf backup" >&2
-            cleanup_error=1
-        fi
+    if [[ -n "$BACKUP_PATH" && "$BACKUP_READY" -eq 0 ]] \
+        && ! rm -f -- "$BACKUP_PATH"; then
+        echo "Error: unable to remove completed dynconf backup" >&2
+        cleanup_error=1
     fi
-    if [[ "$OWN_TEST_TMPDIR" -eq 1 && -n "$TEST_TMPDIR" ]]; then
-        if ! rm -rf -- "$TEST_TMPDIR"; then
-            echo "Error: unable to remove private dynconf test directory" >&2
-            cleanup_error=1
-        fi
+    if [[ "$OWN_TEST_TMPDIR" -eq 1 && -n "$TEST_TMPDIR" ]] \
+        && ! rm -rf -- "$TEST_TMPDIR"; then
+        echo "Error: unable to remove private dynconf test directory" >&2
+        cleanup_error=1
     fi
     if [[ "$cleanup_error" -ne 0 ]]; then
         echo "Error: dynconf cleanup completed with errors" >&2
@@ -337,6 +334,7 @@ write_dynconf_atomically() {
     fi
     TMP_WRITE_PATH=""
     DYNCONF_FILE_CREATED_BY_TEST=1
+    return 0
 }
 
 if [[ "${DYNCONF_RELOAD_ROLLBACK_LIBRARY:-0}" == "1" ]]; then
