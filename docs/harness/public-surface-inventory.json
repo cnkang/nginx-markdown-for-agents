@@ -1,0 +1,1024 @@
+{
+  "directives": [
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "off",
+      "name": "markdown_filter",
+      "status": "active",
+      "syntax": "on|off|$variable"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "none",
+      "name": "markdown_profile",
+      "status": "active",
+      "syntax": "strict_cache|balanced|streaming_first"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "(per-key inheritance)",
+      "name": "markdown_limits",
+      "status": "active",
+      "syntax": "memory=<size> timeout=<time> streaming_buffer=<size> max_inflight=<N>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "pass",
+      "name": "markdown_error_policy",
+      "status": "active",
+      "syntax": "pass|fail_closed|status <code>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "commonmark",
+      "name": "markdown_flavor",
+      "status": "active",
+      "syntax": "commonmark|gfm"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "off",
+      "name": "markdown_token_estimate",
+      "status": "active",
+      "syntax": "on|off"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "off",
+      "name": "markdown_front_matter",
+      "status": "active",
+      "syntax": "on|off"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "strict",
+      "name": "markdown_accept",
+      "status": "active",
+      "syntax": "strict|wildcard|force"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "allow",
+      "name": "markdown_auth_policy",
+      "status": "active",
+      "syntax": "allow|deny"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "none",
+      "name": "markdown_auth_cookies",
+      "status": "active",
+      "syntax": "<pattern> [<pattern> ...]"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "ims_only",
+      "name": "markdown_cache_validation",
+      "status": "active",
+      "syntax": "off|ims_only|full"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "auto",
+      "name": "markdown_streaming",
+      "status": "active",
+      "syntax": "off|auto|force"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "info",
+      "name": "markdown_log_verbosity",
+      "status": "active",
+      "syntax": "error|warn|info|debug"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "on",
+      "name": "markdown_buffer_chunked",
+      "status": "active",
+      "syntax": "on|off"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "none",
+      "name": "markdown_stream_types",
+      "status": "active",
+      "syntax": "<type> [<type> ...]"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "text/html",
+      "name": "markdown_content_types",
+      "status": "active",
+      "syntax": "<type> [<type> ...]"
+    },
+    {
+      "context": [
+        "http"
+      ],
+      "default": "off",
+      "name": "markdown_trusted_proxies",
+      "status": "active",
+      "syntax": "<CIDR>... | off"
+    },
+    {
+      "context": [
+        "http"
+      ],
+      "default": "8*pagesize",
+      "name": "markdown_metrics_shm_size",
+      "status": "active",
+      "syntax": "<size>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "auto",
+      "name": "markdown_metrics_format",
+      "status": "active",
+      "syntax": "auto|prometheus"
+    },
+    {
+      "context": [
+        "location"
+      ],
+      "default": "off",
+      "name": "markdown_metrics",
+      "status": "active",
+      "syntax": "(no args)"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "off",
+      "name": "markdown_metrics_per_path",
+      "status": "active",
+      "syntax": "on|off"
+    },
+    {
+      "context": [
+        "http"
+      ],
+      "default": "100",
+      "name": "markdown_metrics_per_path_cardinality",
+      "status": "active",
+      "syntax": "<number>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "off",
+      "name": "markdown_streaming_shadow",
+      "status": "experimental",
+      "syntax": "on|off"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "off",
+      "name": "markdown_streaming_zero_copy",
+      "status": "experimental",
+      "syntax": "on|off"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "on",
+      "name": "markdown_prune_noise",
+      "status": "active",
+      "syntax": "on|off"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "nav footer aside",
+      "name": "markdown_prune_selectors",
+      "status": "active",
+      "syntax": "<string>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "empty",
+      "name": "markdown_prune_protection_selectors",
+      "status": "active",
+      "syntax": "<string>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "default",
+      "name": "markdown_llm_provider",
+      "status": "active",
+      "syntax": "default|openai-gpt|anthropic-claude|google-gemini|meta-llama"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "0",
+      "name": "markdown_chars_per_token",
+      "status": "active",
+      "syntax": "<number>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "off",
+      "name": "markdown_otel",
+      "status": "experimental",
+      "syntax": "on|off"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "(empty)",
+      "name": "markdown_otel_endpoint",
+      "status": "experimental",
+      "syntax": "<uri>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "30s",
+      "name": "markdown_parse_timeout",
+      "status": "active",
+      "syntax": "<time>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "64m",
+      "name": "markdown_parser_budget",
+      "status": "active",
+      "syntax": "<size>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "(same as limits memory)",
+      "name": "markdown_decompress_max_size",
+      "status": "active",
+      "syntax": "<size>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "on",
+      "name": "markdown_auto_decompress",
+      "status": "active",
+      "syntax": "on|off"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "off",
+      "name": "markdown_dynamic_config",
+      "status": "active",
+      "syntax": "on|off"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "(none)",
+      "name": "markdown_dynamic_config_path",
+      "status": "active",
+      "syntax": "<path>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "off",
+      "name": "markdown_dynconf_dry_run",
+      "status": "active",
+      "syntax": "on|off"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "off",
+      "name": "markdown_diagnostics",
+      "status": "active",
+      "syntax": "on|off"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "(loopback only)",
+      "name": "markdown_diagnostics_allow",
+      "status": "active",
+      "syntax": "<CIDR>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "1m",
+      "name": "markdown_stream_threshold",
+      "status": "active",
+      "syntax": "<size>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "256k",
+      "name": "markdown_stream_precommit_buffer",
+      "status": "active",
+      "syntax": "<size>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "16k",
+      "name": "markdown_stream_flush_min",
+      "status": "active",
+      "syntax": "<size>"
+    },
+    {
+      "context": [
+        "http",
+        "server",
+        "location"
+      ],
+      "default": "none",
+      "name": "markdown_stream_excluded_types",
+      "status": "active",
+      "syntax": "<type> [<type> ...]"
+    }
+  ],
+  "dynconf_keys": [
+    "markdown_filter",
+    "prune_noise",
+    "log_verbosity",
+    "streaming_budget",
+    "memory_budget",
+    "schema_version"
+  ],
+  "ffi_exports": [
+    "markdown_abi_version",
+    "markdown_build_header_plan",
+    "markdown_classify_error_code",
+    "markdown_convert",
+    "markdown_converter_free",
+    "markdown_converter_new",
+    "markdown_decide_base_url",
+    "markdown_decide_conditional",
+    "markdown_decide_eligibility",
+    "markdown_decomp_result_init",
+    "markdown_decompress_bounded",
+    "markdown_decompress_free",
+    "markdown_detect_conflicts",
+    "markdown_free_conflicts",
+    "markdown_header_plan_free",
+    "markdown_header_plan_init",
+    "markdown_incremental_feed",
+    "markdown_incremental_finalize",
+    "markdown_incremental_free",
+    "markdown_incremental_new_with_code",
+    "markdown_negotiate_accept",
+    "markdown_options_init",
+    "markdown_result_free",
+    "markdown_result_init",
+    "markdown_streaming_abort",
+    "markdown_streaming_feed",
+    "markdown_streaming_finalize",
+    "markdown_streaming_new_with_code",
+    "markdown_streaming_output_free",
+    "markdown_streaming_safe_finish",
+    "markdown_trusted_proxies_free",
+    "markdown_trusted_proxies_new",
+    "markdown_trusted_proxies_push"
+  ],
+  "metrics": [
+    {
+      "labels": [],
+      "name": "nginx_markdown_backpressure_resume_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_backpressure_total",
+      "type": "counter"
+    },
+    {
+      "labels": [
+        "le"
+      ],
+      "name": "nginx_markdown_conversion_latency_bucket_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_conversions_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_copied_output_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_decision_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_decompression_budget_exceeded_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_decompression_failures_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_decompression_format_error_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_decompression_fullbuffer_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_decompression_io_error_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_decompression_streaming_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_decompression_truncated_input_total",
+      "type": "counter"
+    },
+    {
+      "labels": [
+        "format"
+      ],
+      "name": "nginx_markdown_decompressions_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_delivery_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_estimated_token_savings_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_excluded_content_type_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_failopen_total",
+      "type": "counter"
+    },
+    {
+      "labels": [
+        "reason"
+      ],
+      "name": "nginx_markdown_failures_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_inflight_current",
+      "type": "gauge"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_inflight_high_watermark",
+      "type": "gauge"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_input_bytes_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_large_response_path_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_output_bytes_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_overload_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_parse_budget_exceeded_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_parse_timeouts_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_passthrough_total",
+      "type": "counter"
+    },
+    {
+      "labels": [
+        "path"
+      ],
+      "name": "nginx_markdown_path_conversion_time_ms_total",
+      "type": "counter"
+    },
+    {
+      "labels": [
+        "path"
+      ],
+      "name": "nginx_markdown_path_conversions_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_pending_output_high_watermark_bytes",
+      "type": "gauge"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_per_path_conversion_time_ms_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_per_path_conversions_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_per_path_entries",
+      "type": "gauge"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_per_path_overflow_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_perf_decompression_budget_exceeded_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_replay_buffer_errors_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_requests_total",
+      "type": "counter"
+    },
+    {
+      "labels": [
+        "reason"
+      ],
+      "name": "nginx_markdown_skips_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_streaming_budget_exceeded_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_streaming_candidate_total",
+      "type": "counter"
+    },
+    {
+      "labels": [
+        "engine"
+      ],
+      "name": "nginx_markdown_streaming_engine_choice_total",
+      "type": "counter"
+    },
+    {
+      "labels": [
+        "phase",
+        "action"
+      ],
+      "name": "nginx_markdown_streaming_failure_total",
+      "type": "counter"
+    },
+    {
+      "labels": [
+        "stage"
+      ],
+      "name": "nginx_markdown_streaming_failures_total",
+      "type": "counter"
+    },
+    {
+      "labels": [
+        "phase",
+        "action"
+      ],
+      "name": "nginx_markdown_streaming_fallback_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_streaming_output_bytes_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_streaming_path_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_streaming_peak_memory_bytes",
+      "type": "gauge"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_streaming_shadow_diff_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_streaming_shadow_total",
+      "type": "counter"
+    },
+    {
+      "labels": [
+        "result"
+      ],
+      "name": "nginx_markdown_streaming_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_streaming_ttfb_seconds",
+      "type": "gauge"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_true_streaming_selected_total",
+      "type": "counter"
+    },
+    {
+      "labels": [],
+      "name": "nginx_markdown_zero_copy_output_total",
+      "type": "counter"
+    }
+  ],
+  "otel": {
+    "directives": [
+      "markdown_otel",
+      "markdown_otel_endpoint"
+    ],
+    "reject_only": [
+      "markdown_otel_tracing",
+      "markdown_otel_metrics",
+      "markdown_otel_service_name",
+      "markdown_otel_span_buffer_size",
+      "markdown_otel_export_timeout"
+    ],
+    "status": "experimental"
+  },
+  "reason_codes": [
+    {
+      "discriminant": 0,
+      "metric_key": "markdown_conversions_total",
+      "name": "Converted"
+    },
+    {
+      "discriminant": 1,
+      "metric_key": "markdown_skipped_total",
+      "name": "SkippedAccept"
+    },
+    {
+      "discriminant": 2,
+      "metric_key": "markdown_skipped_total",
+      "name": "SkippedNoAccept"
+    },
+    {
+      "discriminant": 3,
+      "metric_key": "markdown_skipped_total",
+      "name": "SkippedConditional"
+    },
+    {
+      "discriminant": 4,
+      "metric_key": "markdown_errors_total",
+      "name": "DecompressionError"
+    },
+    {
+      "discriminant": 5,
+      "metric_key": "markdown_errors_total",
+      "name": "DecompressionBudgetExceeded"
+    },
+    {
+      "discriminant": 6,
+      "metric_key": "markdown_errors_total",
+      "name": "DecompressionFormatError"
+    },
+    {
+      "discriminant": 7,
+      "metric_key": "markdown_errors_total",
+      "name": "DecompressionTruncatedInput"
+    },
+    {
+      "discriminant": 8,
+      "metric_key": "markdown_errors_total",
+      "name": "DecompressionIoError"
+    },
+    {
+      "discriminant": 9,
+      "metric_key": "markdown_errors_total",
+      "name": "Timeout"
+    },
+    {
+      "discriminant": 10,
+      "metric_key": "markdown_errors_total",
+      "name": "BudgetExceeded"
+    },
+    {
+      "discriminant": 11,
+      "metric_key": "markdown_errors_total",
+      "name": "ReplayError"
+    },
+    {
+      "discriminant": 12,
+      "metric_key": "markdown_skipped_total",
+      "name": "SkippedAcceptReject"
+    },
+    {
+      "discriminant": 13,
+      "metric_key": "markdown_errors_total",
+      "name": "FfiPanic"
+    },
+    {
+      "discriminant": 14,
+      "metric_key": "markdown_skipped_total",
+      "name": "NotEligible"
+    },
+    {
+      "discriminant": 15,
+      "metric_key": "markdown_skipped_total",
+      "name": "Disabled"
+    },
+    {
+      "discriminant": 16,
+      "metric_key": "markdown_failed_open_total",
+      "name": "FailedOpen"
+    },
+    {
+      "discriminant": 17,
+      "metric_key": "markdown_failed_closed_total",
+      "name": "FailedClosed"
+    },
+    {
+      "discriminant": 18,
+      "metric_key": "markdown_errors_total",
+      "name": "ConversionError"
+    },
+    {
+      "discriminant": 19,
+      "metric_key": "markdown_errors_total",
+      "name": "MemoryBudgetExceeded"
+    },
+    {
+      "discriminant": 20,
+      "metric_key": "markdown_errors_total",
+      "name": "Overload"
+    },
+    {
+      "discriminant": 21,
+      "metric_key": "markdown_errors_total",
+      "name": "InvalidDynconf"
+    },
+    {
+      "discriminant": 22,
+      "metric_key": "markdown_errors_total",
+      "name": "DegradedSnapshot"
+    },
+    {
+      "discriminant": 23,
+      "metric_key": "markdown_errors_total",
+      "name": "HeaderPlanApplyError"
+    },
+    {
+      "discriminant": 24,
+      "metric_key": "markdown_errors_total",
+      "name": "StreamingMidFlightError"
+    },
+    {
+      "discriminant": 25,
+      "metric_key": "markdown_skipped_total",
+      "name": "BypassNoTransform"
+    }
+  ],
+  "reject_only_directives": [
+    {
+      "migration_target": "markdown_limits memory=<size>",
+      "name": "markdown_max_size"
+    },
+    {
+      "migration_target": "markdown_limits timeout=<time>",
+      "name": "markdown_timeout"
+    },
+    {
+      "migration_target": "markdown_limits streaming_buffer=<size>",
+      "name": "markdown_streaming_budget"
+    },
+    {
+      "migration_target": "markdown_error_policy pass|fail_closed|status <code>",
+      "name": "markdown_on_error"
+    },
+    {
+      "migration_target": "markdown_error_policy pass|fail_closed|status <code>",
+      "name": "markdown_streaming_on_error"
+    },
+    {
+      "migration_target": "markdown_accept strict|wildcard|force",
+      "name": "markdown_on_wildcard"
+    },
+    {
+      "migration_target": "markdown_cache_validation off|ims_only|full",
+      "name": "markdown_etag"
+    },
+    {
+      "migration_target": "markdown_cache_validation off|ims_only|full",
+      "name": "markdown_etag_policy"
+    },
+    {
+      "migration_target": "markdown_cache_validation off|ims_only|full",
+      "name": "markdown_conditional_requests"
+    },
+    {
+      "migration_target": "markdown_trusted_proxies",
+      "name": "markdown_trust_forwarded_headers"
+    },
+    {
+      "migration_target": "markdown_trusted_proxies",
+      "name": "markdown_forwarded_headers"
+    },
+    {
+      "migration_target": "(removed, no replacement)",
+      "name": "markdown_large_body_threshold"
+    },
+    {
+      "migration_target": "markdown_limits memory=<size>",
+      "name": "markdown_memory_budget"
+    },
+    {
+      "migration_target": "markdown_streaming",
+      "name": "markdown_streaming_engine"
+    }
+  ],
+  "schema_version": "0.9.2"
+}
