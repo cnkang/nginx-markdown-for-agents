@@ -184,15 +184,10 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s {
  * ensures that a failed reload does not prevent the timer
  * from retrying on the next poll cycle.
  *
- * rollback_suppressed holds the active rollback while the same
- * on-disk file version remains present.  The timer clears this
- * state only after observing a new mtime, so a rollback is not
- * immediately undone by retrying the rejected file.
- *
  * last_known_good holds the previous active snapshot that was
  * replaced by the most recent successful reload.  When
- * lkg_valid is set, the operator can trigger a rollback to
- * restore the last-known-good configuration (see E04.2).
+ * lkg_valid is set, diagnostics can report the preserved state and
+ * a failed file reload leaves the active snapshot unchanged.
  * The LKG is NOT updated on validation failure — only a
  * successful reload promotes the current active to LKG.
  */
@@ -210,11 +205,9 @@ typedef struct {
     /* File mtime of the configuration captured as last_known_good.
      * Distinct from last_mtime (most recently observed file mtime) and
      * applied_mtime (mtime of the currently active config): this is the
-     * mtime of the *previous* active config preserved for rollback.  Set
+     * mtime of the previous active config preserved for diagnostics.  Set
      * whenever last_known_good is captured. */
     time_t        lkg_mtime;
-    ngx_uint_t    rollback_suppressed;
-    time_t        rollback_mtime;
     ngx_uint_t    version;
     ngx_http_markdown_conf_t             *conf;
 
@@ -526,8 +519,6 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
     reload_attempted = 0;
 
     if (ngx_http_markdown_dynconf_check(watcher, ev->log)) {
-        watcher->rollback_suppressed = 0;
-
         ngx_log_error(NGX_LOG_INFO, ev->log, 0,
                       "markdown: change detected on \"%V\", "
                       "performing two-phase reload",
@@ -539,12 +530,6 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
                                                           watcher->conf,
                                                           ev->log);
         }
-    } else if (watcher->rollback_suppressed
-               && watcher->last_mtime == watcher->rollback_mtime)
-    {
-        ngx_log_error(NGX_LOG_INFO, ev->log, 0,
-                      "markdown: holding rollback for unchanged file "
-                      "version (mtime=%T)", watcher->last_mtime);
     } else if (watcher->last_mtime != watcher->applied_mtime) {
         /*
          * No new mtime change detected, but a previous reload failed
@@ -708,8 +693,6 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
     watcher->active = 1;
     watcher->version = 0;
     watcher->lkg_valid = 0;
-    watcher->rollback_suppressed = 0;
-    watcher->rollback_mtime = 0;
     watcher->conf = conf;
 
     /* Initialize active snapshot from current configuration. */
@@ -2206,74 +2189,6 @@ ngx_http_markdown_dynconf_reload(
     }
 
     return ngx_http_markdown_dynconf_reload_normal(watcher, conf, fd, buf, log);
-}
-
-
-/**
- * Roll back the active configuration to the last-known-good snapshot.
- *
- * If lkg_valid is set and the LKG snapshot is valid, atomically replaces
- * the active snapshot with the LKG snapshot, applies it to the live
- * configuration, increments the version counter, and logs the rollback
- * event.  If the LKG is not available, returns NGX_ERROR without
- * modifying the active state.
- *
- * Atomicity: the active snapshot is replaced only after all validation
- * checks pass.  In the single-threaded NGINX worker model, the struct
- * assignment is an atomic operation with respect to the event loop.
- * The LKG snapshot itself is never modified (read-only source).
- *
- * Rule 35 compliance: the active snapshot is replaced as a single struct
- * assignment, preserving the snapshot-race-elimination invariant.
- *
- * @param watcher Dynamic config watcher; must be non-NULL.
- * @param conf   Current module location configuration; must be non-NULL.
- * @param log    NGINX log for error and informational messages.
- *
- * @return NGX_OK on successful rollback, NGX_ERROR if LKG is unavailable
- *         or any input is NULL.
- */
-static ngx_int_t
-ngx_http_markdown_dynconf_rollback(
-    ngx_http_markdown_dynconf_watcher_t *watcher,
-    ngx_http_markdown_conf_t *conf,
-    ngx_log_t *log)
-{
-    if (watcher == NULL || conf == NULL || log == NULL) {
-        return NGX_ERROR;
-    }
-
-    if (!watcher->lkg_valid) {
-        ngx_log_error(NGX_LOG_ERR, log, 0,
-                      "markdown: rollback failed: no valid "
-                      "last-known-good snapshot available "
-                      "(version=%ui)", watcher->version);
-        return NGX_ERROR;
-    }
-
-    if (!watcher->last_known_good.valid) {
-        ngx_log_error(NGX_LOG_ERR, log, 0,
-                      "markdown: rollback failed: LKG snapshot "
-                      "marked invalid (version=%ui, lkg_mtime=%T)",
-                      watcher->version, watcher->lkg_mtime);
-        return NGX_ERROR;
-    }
-
-    watcher->active_snapshot = watcher->last_known_good;
-    watcher->applied_mtime = watcher->lkg_mtime;
-    watcher->rollback_suppressed = 1;
-    watcher->rollback_mtime = watcher->last_mtime;
-    watcher->version++;
-
-    ngx_http_markdown_dynconf_apply_snapshot(conf,
-                                              &watcher->active_snapshot);
-
-    ngx_log_error(NGX_LOG_INFO, log, 0,
-                  "markdown: rollback to last-known-good "
-                  "(lkg_mtime=%T, version=%ui)",
-                  watcher->lkg_mtime, watcher->version);
-
-    return NGX_OK;
 }
 
 

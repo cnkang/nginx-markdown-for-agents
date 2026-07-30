@@ -1,23 +1,24 @@
 #!/bin/bash
-# dynconf_reload_rollback.sh — E2E test: dynamic config reload and rollback.
+# dynconf_reload_rollback.sh — E2E test: dynamic config reload and file restore.
 #
-# This script documents and exercises the dynconf reload + rollback scenario
-# against a running NGINX instance with the markdown module loaded.
+# This script exercises the dynconf reload and last-known-good protection
+# against a running NGINX instance with the markdown module loaded.  The
+# diagnostics endpoint is read-only; operator rollback is modeled by an
+# atomic replacement of the watched file.
 #
 # Prerequisites:
 #   - NGINX running with markdown module and dynconf enabled
-#   - markdown_dynconf_file pointing to a writable JSON config file
+#   - markdown_dynamic_config_path pointing to a writable key=value config file
 #   - curl available
 #   - NGINX_URL environment variable set (default: http://localhost:8080)
 #
 # Test Scenario:
 #   1. Verify initial config snapshot via diagnostics endpoint
-#   2. Write a valid dynconf update and trigger reload (SIGHUP or endpoint)
+#   2. Atomically write a valid dynconf update and wait for the poller
 #   3. Verify new config is active (applied_mtime updated)
 #   4. Write an invalid dynconf update and trigger reload
-#   5. Verify config remains at last-known-good (rollback)
-#   6. Trigger manual rollback to previous config
-#   7. Verify rollback succeeded
+#   5. Verify config remains at last-known-good after the invalid file
+#   6. Atomically restore a previous valid file and verify the reload
 #
 # Usage:
 #   NGINX_URL=http://localhost:8080 ./dynconf_reload_rollback.sh
@@ -91,14 +92,22 @@ fi
 
 # --- Step 2: Write valid dynconf and reload ---
 
-DYNCONF_FILE="${DYNCONF_FILE:-/tmp/nginx-markdown-dynconf-test.json}"
+DYNCONF_FILE="${DYNCONF_FILE:-/tmp/nginx-markdown-dynconf-test.conf}"
+umask 077
 
-cat > "$DYNCONF_FILE" <<'DYNCONF_VALID'
-{
-    "markdown_limits_memory": "2m",
-    "markdown_decompression_budget": "10m"
+write_dynconf_atomically() {
+    local contents="$1"
+    local tmpfile="${DYNCONF_FILE}.tmp.$$"
+
+    printf '%s\n' "$contents" > "$tmpfile"
+    mv -f "$tmpfile" "$DYNCONF_FILE"
 }
-DYNCONF_VALID
+
+trap 'rm -f "$DYNCONF_FILE.tmp.$$" "$DYNCONF_FILE"' EXIT
+
+write_dynconf_atomically 'schema_version=0.9
+memory_budget=2m
+streaming_budget=10m'
 
 echo "Wrote valid dynconf to $DYNCONF_FILE" >&2
 
@@ -125,12 +134,9 @@ fi
 
 # --- Step 4: Write invalid dynconf and reload ---
 
-cat > "$DYNCONF_FILE" <<'DYNCONF_INVALID'
-{
-    "unknown_key_that_does_not_exist": "should_fail",
-    "markdown_limits_memory": "invalid_not_a_size"
-}
-DYNCONF_INVALID
+write_dynconf_atomically 'schema_version=0.9
+unknown_key_that_does_not_exist=should_fail
+memory_budget=invalid_not_a_size'
 
 echo "Wrote invalid dynconf to $DYNCONF_FILE" >&2
 
@@ -150,15 +156,12 @@ else
     fail "applied_mtime changed after invalid reload (expected: $NEW_MTIME, got: ${POST_INVALID_MTIME:-empty})"
 fi
 
-# --- Step 6: Restore valid config (simulate manual rollback) ---
+# --- Step 6: Restore a previous valid file atomically ---
 
-cat > "$DYNCONF_FILE" <<'DYNCONF_ROLLBACK'
-{
-    "markdown_limits_memory": "1m"
-}
-DYNCONF_ROLLBACK
+write_dynconf_atomically 'schema_version=0.9
+memory_budget=1m'
 
-echo "Wrote rollback dynconf to $DYNCONF_FILE" >&2
+echo "Atomically restored valid dynconf at $DYNCONF_FILE" >&2
 
 if [[ -n "$NGINX_PID" ]]; then
     kill -HUP "$NGINX_PID" 2>/dev/null || true
@@ -166,19 +169,17 @@ if [[ -n "$NGINX_PID" ]]; then
     pass "sent SIGHUP for rollback reload"
 fi
 
-# --- Step 7: Verify rollback succeeded ---
+# --- Step 7: Verify restored-file reload succeeded ---
 
 DIAG=$(get_diagnostics)
 ROLLBACK_MTIME=$(echo "$DIAG" | grep -o '"applied_mtime":[0-9]*' | head -1 | cut -d: -f2)
 if [[ -n "$ROLLBACK_MTIME" && "$ROLLBACK_MTIME" != "$POST_INVALID_MTIME" ]]; then
-    pass "applied_mtime updated after rollback reload: $ROLLBACK_MTIME"
+    pass "applied_mtime updated after restored-file reload: $ROLLBACK_MTIME"
 else
-    fail "applied_mtime not updated after rollback (got: ${ROLLBACK_MTIME:-empty})"
+    fail "applied_mtime not updated after restored-file reload (got: ${ROLLBACK_MTIME:-empty})"
 fi
 
 # --- Cleanup ---
-
-rm -f "$DYNCONF_FILE"
 
 # --- Summary ---
 
