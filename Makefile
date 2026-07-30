@@ -340,6 +340,7 @@ test-harness:
 	bash tools/harness/tests/test_detect_hardcoded_http_status.sh
 	bash tools/harness/tests/test_detect_e2e_streaming_config.sh
 	bash tools/harness/tests/test_detect_regex_safety.sh
+	bash tools/harness/tests/test_dynconf_reload_rollback.sh
 	python3 -m pytest tools/harness/tests/ -q --tb=short -k "not check_harness_sync"
 
 license-check:
