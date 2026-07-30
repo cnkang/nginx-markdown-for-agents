@@ -922,8 +922,8 @@
     },
     {
       "name": "markdown_build_header_plan",
-      "signature": "markdown_build_header_plan(content_type: *const u8, content_type_len: usize, has_etag: u8, result: *mut FFIHeaderPlan,) -> ()",
-      "params": "content_type: *const u8, content_type_len: usize, has_etag: u8, result: *mut FFIHeaderPlan,",
+      "signature": "markdown_build_header_plan(content_type: *const u8, content_type_len: usize, has_etag: u8, result: *mut FFIHeaderPlan) -> ()",
+      "params": "content_type: *const u8, content_type_len: usize, has_etag: u8, result: *mut FFIHeaderPlan",
       "return_type": "()",
       "safety": "unsafe",
       "abi_version": 1,
@@ -940,8 +940,8 @@
     },
     {
       "name": "markdown_convert",
-      "signature": "markdown_convert(handle: *mut MarkdownConverterHandle, html: *const u8, html_len: usize, options: *const MarkdownOptions, result: *mut MarkdownResult,) -> ()",
-      "params": "handle: *mut MarkdownConverterHandle, html: *const u8, html_len: usize, options: *const MarkdownOptions, result: *mut MarkdownResult,",
+      "signature": "markdown_convert(handle: *mut MarkdownConverterHandle, html: *const u8, html_len: usize, options: *const MarkdownOptions, result: *mut MarkdownResult) -> ()",
+      "params": "handle: *mut MarkdownConverterHandle, html: *const u8, html_len: usize, options: *const MarkdownOptions, result: *mut MarkdownResult",
       "return_type": "()",
       "safety": "unsafe",
       "abi_version": 1,
@@ -967,8 +967,8 @@
     },
     {
       "name": "markdown_decide_base_url",
-      "signature": "markdown_decide_base_url(input: *const FFIBaseUrlInput, out_buf: *mut u8, out_buf_cap: usize, out: *mut FFIBaseUrlDecision,) -> u8",
-      "params": "input: *const FFIBaseUrlInput, out_buf: *mut u8, out_buf_cap: usize, out: *mut FFIBaseUrlDecision,",
+      "signature": "markdown_decide_base_url(input: *const FFIBaseUrlInput, out_buf: *mut u8, out_buf_cap: usize, out: *mut FFIBaseUrlDecision) -> u8",
+      "params": "input: *const FFIBaseUrlInput, out_buf: *mut u8, out_buf_cap: usize, out: *mut FFIBaseUrlDecision",
       "return_type": "u8",
       "safety": "unsafe",
       "abi_version": 1,
@@ -976,8 +976,8 @@
     },
     {
       "name": "markdown_decide_conditional",
-      "signature": "markdown_decide_conditional(input: *const FFIConditionalInput, out: *mut FFIConditionalDecision,) -> ()",
-      "params": "input: *const FFIConditionalInput, out: *mut FFIConditionalDecision,",
+      "signature": "markdown_decide_conditional(input: *const FFIConditionalInput, out: *mut FFIConditionalDecision) -> ()",
+      "params": "input: *const FFIConditionalInput, out: *mut FFIConditionalDecision",
       "return_type": "()",
       "safety": "unsafe",
       "abi_version": 1,
@@ -1003,8 +1003,8 @@
     },
     {
       "name": "markdown_decompress_bounded",
-      "signature": "markdown_decompress_bounded(input: *const u8, input_len: usize, format: u8, budget: usize, result: *mut FFIDecompResult,) -> u32",
-      "params": "input: *const u8, input_len: usize, format: u8, budget: usize, result: *mut FFIDecompResult,",
+      "signature": "markdown_decompress_bounded(input: *const u8, input_len: usize, format: u8, budget: usize, result: *mut FFIDecompResult) -> u32",
+      "params": "input: *const u8, input_len: usize, format: u8, budget: usize, result: *mut FFIDecompResult",
       "return_type": "u32",
       "safety": "unsafe",
       "abi_version": 1,
@@ -1021,8 +1021,8 @@
     },
     {
       "name": "markdown_detect_conflicts",
-      "signature": "markdown_detect_conflicts(profile: u8, explicit: *const FFIExplicitConfig, effective: *const FFIEffectiveConfig,) -> FFIConflictList",
-      "params": "profile: u8, explicit: *const FFIExplicitConfig, effective: *const FFIEffectiveConfig,",
+      "signature": "markdown_detect_conflicts(profile: u8, explicit: *const FFIExplicitConfig, effective: *const FFIEffectiveConfig) -> FFIConflictList",
+      "params": "profile: u8, explicit: *const FFIExplicitConfig, effective: *const FFIEffectiveConfig",
       "return_type": "FFIConflictList",
       "safety": "unsafe",
       "abi_version": 1,
@@ -1057,8 +1057,8 @@
     },
     {
       "name": "markdown_incremental_feed",
-      "signature": "markdown_incremental_feed(handle: *mut IncrementalConverterHandle, data: *const u8, data_len: usize,) -> u32",
-      "params": "handle: *mut IncrementalConverterHandle, data: *const u8, data_len: usize,",
+      "signature": "markdown_incremental_feed(handle: *mut IncrementalConverterHandle, data: *const u8, data_len: usize) -> u32",
+      "params": "handle: *mut IncrementalConverterHandle, data: *const u8, data_len: usize",
       "return_type": "u32",
       "safety": "unsafe",
       "abi_version": 1,
@@ -1066,8 +1066,8 @@
     },
     {
       "name": "markdown_incremental_finalize",
-      "signature": "markdown_incremental_finalize(handle: *mut IncrementalConverterHandle, result: *mut MarkdownResult,) -> u32",
-      "params": "handle: *mut IncrementalConverterHandle, result: *mut MarkdownResult,",
+      "signature": "markdown_incremental_finalize(handle: *mut IncrementalConverterHandle, result: *mut MarkdownResult) -> u32",
+      "params": "handle: *mut IncrementalConverterHandle, result: *mut MarkdownResult",
       "return_type": "u32",
       "safety": "unsafe",
       "abi_version": 1,
@@ -1084,8 +1084,8 @@
     },
     {
       "name": "markdown_incremental_new_with_code",
-      "signature": "markdown_incremental_new_with_code(options: *const MarkdownOptions, out_handle: *mut *mut IncrementalConverterHandle,) -> u32",
-      "params": "options: *const MarkdownOptions, out_handle: *mut *mut IncrementalConverterHandle,",
+      "signature": "markdown_incremental_new_with_code(options: *const MarkdownOptions, out_handle: *mut *mut IncrementalConverterHandle) -> u32",
+      "params": "options: *const MarkdownOptions, out_handle: *mut *mut IncrementalConverterHandle",
       "return_type": "u32",
       "safety": "unsafe",
       "abi_version": 1,
@@ -1093,8 +1093,8 @@
     },
     {
       "name": "markdown_negotiate_accept",
-      "signature": "markdown_negotiate_accept(accept_header: *const u8, accept_header_len: usize, on_wildcard: u8, result: *mut FFIAcceptResult,) -> ()",
-      "params": "accept_header: *const u8, accept_header_len: usize, on_wildcard: u8, result: *mut FFIAcceptResult,",
+      "signature": "markdown_negotiate_accept(accept_header: *const u8, accept_header_len: usize, on_wildcard: u8, result: *mut FFIAcceptResult) -> ()",
+      "params": "accept_header: *const u8, accept_header_len: usize, on_wildcard: u8, result: *mut FFIAcceptResult",
       "return_type": "()",
       "safety": "unsafe",
       "abi_version": 1,
@@ -1120,8 +1120,8 @@
     },
     {
       "name": "markdown_reason_code_metric_key",
-      "signature": "markdown_reason_code_metric_key(code: u32, out_len: *mut usize,) -> *const u8",
-      "params": "code: u32, out_len: *mut usize,",
+      "signature": "markdown_reason_code_metric_key(code: u32, out_len: *mut usize) -> *const u8",
+      "params": "code: u32, out_len: *mut usize",
       "return_type": "*const u8",
       "safety": "unsafe",
       "abi_version": 1,
@@ -1165,8 +1165,8 @@
     },
     {
       "name": "markdown_streaming_feed",
-      "signature": "markdown_streaming_feed(handle: *mut StreamingConverterHandle, data: *const u8, data_len: usize, out_data: *mut *mut u8, out_len: *mut usize,) -> u32",
-      "params": "handle: *mut StreamingConverterHandle, data: *const u8, data_len: usize, out_data: *mut *mut u8, out_len: *mut usize,",
+      "signature": "markdown_streaming_feed(handle: *mut StreamingConverterHandle, data: *const u8, data_len: usize, out_data: *mut *mut u8, out_len: *mut usize) -> u32",
+      "params": "handle: *mut StreamingConverterHandle, data: *const u8, data_len: usize, out_data: *mut *mut u8, out_len: *mut usize",
       "return_type": "u32",
       "safety": "unsafe",
       "abi_version": 1,
@@ -1174,8 +1174,8 @@
     },
     {
       "name": "markdown_streaming_finalize",
-      "signature": "markdown_streaming_finalize(handle: *mut StreamingConverterHandle, result: *mut MarkdownResult,) -> u32",
-      "params": "handle: *mut StreamingConverterHandle, result: *mut MarkdownResult,",
+      "signature": "markdown_streaming_finalize(handle: *mut StreamingConverterHandle, result: *mut MarkdownResult) -> u32",
+      "params": "handle: *mut StreamingConverterHandle, result: *mut MarkdownResult",
       "return_type": "u32",
       "safety": "unsafe",
       "abi_version": 1,
@@ -1183,8 +1183,8 @@
     },
     {
       "name": "markdown_streaming_new_with_code",
-      "signature": "markdown_streaming_new_with_code(options: *const MarkdownOptions, out_handle: *mut *mut StreamingConverterHandle,) -> u32",
-      "params": "options: *const MarkdownOptions, out_handle: *mut *mut StreamingConverterHandle,",
+      "signature": "markdown_streaming_new_with_code(options: *const MarkdownOptions, out_handle: *mut *mut StreamingConverterHandle) -> u32",
+      "params": "options: *const MarkdownOptions, out_handle: *mut *mut StreamingConverterHandle",
       "return_type": "u32",
       "safety": "unsafe",
       "abi_version": 1,
@@ -1201,8 +1201,8 @@
     },
     {
       "name": "markdown_streaming_safe_finish",
-      "signature": "markdown_streaming_safe_finish(handle: *mut StreamingConverterHandle, out_data: *mut *mut u8, out_len: *mut usize,) -> u32",
-      "params": "handle: *mut StreamingConverterHandle, out_data: *mut *mut u8, out_len: *mut usize,",
+      "signature": "markdown_streaming_safe_finish(handle: *mut StreamingConverterHandle, out_data: *mut *mut u8, out_len: *mut usize) -> u32",
+      "params": "handle: *mut StreamingConverterHandle, out_data: *mut *mut u8, out_len: *mut usize",
       "return_type": "u32",
       "safety": "unsafe",
       "abi_version": 1,
@@ -1228,8 +1228,8 @@
     },
     {
       "name": "markdown_trusted_proxies_push",
-      "signature": "markdown_trusted_proxies_push(handle: *mut MarkdownTrustedProxies, cidr: *const u8, cidr_len: usize,) -> u8",
-      "params": "handle: *mut MarkdownTrustedProxies, cidr: *const u8, cidr_len: usize,",
+      "signature": "markdown_trusted_proxies_push(handle: *mut MarkdownTrustedProxies, cidr: *const u8, cidr_len: usize) -> u8",
+      "params": "handle: *mut MarkdownTrustedProxies, cidr: *const u8, cidr_len: usize",
       "return_type": "u8",
       "safety": "unsafe",
       "abi_version": 1,
@@ -1758,208 +1758,182 @@
       "metric_key": "markdown_conversions_total",
       "name": "Converted",
       "string": "converted",
-      "c_accessor": "reason_str_converted",
-      "registry_count": 26
+      "c_accessor": "reason_str_converted"
     },
     {
       "discriminant": 1,
       "metric_key": "markdown_skipped_total",
       "name": "SkippedAccept",
       "string": "skipped_accept",
-      "c_accessor": "reason_str_skipped_accept",
-      "registry_count": 26
+      "c_accessor": "reason_str_skipped_accept"
     },
     {
       "discriminant": 2,
       "metric_key": "markdown_skipped_total",
       "name": "SkippedNoAccept",
       "string": "skipped_no_accept",
-      "c_accessor": "reason_str_skipped_no_accept",
-      "registry_count": 26
+      "c_accessor": "reason_str_skipped_no_accept"
     },
     {
       "discriminant": 3,
       "metric_key": "markdown_skipped_total",
       "name": "SkippedConditional",
       "string": "skipped_conditional",
-      "c_accessor": "reason_str_skipped_conditional",
-      "registry_count": 26
+      "c_accessor": "reason_str_skipped_conditional"
     },
     {
       "discriminant": 4,
       "metric_key": "markdown_errors_total",
       "name": "DecompressionError",
       "string": "decompression_error",
-      "c_accessor": "reason_str_decompression_error",
-      "registry_count": 26
+      "c_accessor": "reason_str_decompression_error"
     },
     {
       "discriminant": 5,
       "metric_key": "markdown_errors_total",
       "name": "DecompressionBudgetExceeded",
       "string": "decompression_budget_exceeded",
-      "c_accessor": "reason_str_decompression_budget_exceeded",
-      "registry_count": 26
+      "c_accessor": "reason_str_decompression_budget_exceeded"
     },
     {
       "discriminant": 6,
       "metric_key": "markdown_errors_total",
       "name": "DecompressionFormatError",
       "string": "decompression_format_error",
-      "c_accessor": "reason_str_decompression_format_error",
-      "registry_count": 26
+      "c_accessor": "reason_str_decompression_format_error"
     },
     {
       "discriminant": 7,
       "metric_key": "markdown_errors_total",
       "name": "DecompressionTruncatedInput",
       "string": "decompression_truncated_input",
-      "c_accessor": "reason_str_decompression_truncated_input",
-      "registry_count": 26
+      "c_accessor": "reason_str_decompression_truncated_input"
     },
     {
       "discriminant": 8,
       "metric_key": "markdown_errors_total",
       "name": "DecompressionIoError",
       "string": "decompression_io_error",
-      "c_accessor": "reason_str_decompression_io_error",
-      "registry_count": 26
+      "c_accessor": "reason_str_decompression_io_error"
     },
     {
       "discriminant": 9,
       "metric_key": "markdown_errors_total",
       "name": "Timeout",
       "string": "timeout",
-      "c_accessor": "reason_str_timeout",
-      "registry_count": 26
+      "c_accessor": "reason_str_timeout"
     },
     {
       "discriminant": 10,
       "metric_key": "markdown_errors_total",
       "name": "BudgetExceeded",
       "string": "budget_exceeded",
-      "c_accessor": "reason_str_budget_exceeded",
-      "registry_count": 26
+      "c_accessor": "reason_str_budget_exceeded"
     },
     {
       "discriminant": 11,
       "metric_key": "markdown_errors_total",
       "name": "ReplayError",
       "string": "replay_error",
-      "c_accessor": "reason_str_replay_error",
-      "registry_count": 26
+      "c_accessor": "reason_str_replay_error"
     },
     {
       "discriminant": 12,
       "metric_key": "markdown_skipped_total",
       "name": "SkippedAcceptReject",
       "string": "skipped_accept_reject",
-      "c_accessor": "reason_str_skipped_accept_reject",
-      "registry_count": 26
+      "c_accessor": "reason_str_skipped_accept_reject"
     },
     {
       "discriminant": 13,
       "metric_key": "markdown_errors_total",
       "name": "FfiPanic",
       "string": "ffi_panic",
-      "c_accessor": "reason_str_ffi_panic",
-      "registry_count": 26
+      "c_accessor": "reason_str_ffi_panic"
     },
     {
       "discriminant": 14,
       "metric_key": "markdown_skipped_total",
       "name": "NotEligible",
       "string": "not_eligible",
-      "c_accessor": "reason_str_not_eligible",
-      "registry_count": 26
+      "c_accessor": "reason_str_not_eligible"
     },
     {
       "discriminant": 15,
       "metric_key": "markdown_skipped_total",
       "name": "Disabled",
       "string": "disabled",
-      "c_accessor": "reason_str_disabled",
-      "registry_count": 26
+      "c_accessor": "reason_str_disabled"
     },
     {
       "discriminant": 16,
       "metric_key": "markdown_failed_open_total",
       "name": "FailedOpen",
       "string": "failed_open",
-      "c_accessor": "reason_str_failed_open",
-      "registry_count": 26
+      "c_accessor": "reason_str_failed_open"
     },
     {
       "discriminant": 17,
       "metric_key": "markdown_failed_closed_total",
       "name": "FailedClosed",
       "string": "failed_closed",
-      "c_accessor": "reason_str_failed_closed",
-      "registry_count": 26
+      "c_accessor": "reason_str_failed_closed"
     },
     {
       "discriminant": 18,
       "metric_key": "markdown_errors_total",
       "name": "ConversionError",
       "string": "conversion_error",
-      "c_accessor": "reason_str_conversion_error",
-      "registry_count": 26
+      "c_accessor": "reason_str_conversion_error"
     },
     {
       "discriminant": 19,
       "metric_key": "markdown_errors_total",
       "name": "MemoryBudgetExceeded",
       "string": "memory_budget_exceeded",
-      "c_accessor": "reason_str_memory_budget_exceeded",
-      "registry_count": 26
+      "c_accessor": "reason_str_memory_budget_exceeded"
     },
     {
       "discriminant": 20,
       "metric_key": "markdown_errors_total",
       "name": "Overload",
       "string": "overload",
-      "c_accessor": "reason_str_overload",
-      "registry_count": 26
+      "c_accessor": "reason_str_overload"
     },
     {
       "discriminant": 21,
       "metric_key": "markdown_errors_total",
       "name": "InvalidDynconf",
       "string": "invalid_dynconf",
-      "c_accessor": "reason_str_invalid_dynconf",
-      "registry_count": 26
+      "c_accessor": "reason_str_invalid_dynconf"
     },
     {
       "discriminant": 22,
       "metric_key": "markdown_errors_total",
       "name": "DegradedSnapshot",
       "string": "degraded_snapshot",
-      "c_accessor": "reason_str_degraded_snapshot",
-      "registry_count": 26
+      "c_accessor": "reason_str_degraded_snapshot"
     },
     {
       "discriminant": 23,
       "metric_key": "markdown_errors_total",
       "name": "HeaderPlanApplyError",
       "string": "header_plan_apply_error",
-      "c_accessor": "reason_str_header_plan_apply_err",
-      "registry_count": 26
+      "c_accessor": "reason_str_header_plan_apply_err"
     },
     {
       "discriminant": 24,
       "metric_key": "markdown_errors_total",
       "name": "StreamingMidFlightError",
       "string": "streaming_mid_flight_error",
-      "c_accessor": "reason_str_streaming_mid_flight_err",
-      "registry_count": 26
+      "c_accessor": "reason_str_streaming_mid_flight_err"
     },
     {
       "discriminant": 25,
       "metric_key": "markdown_skipped_total",
       "name": "BypassNoTransform",
       "string": "bypass_no_transform",
-      "c_accessor": "reason_str_bypass_no_transform",
-      "registry_count": 26
+      "c_accessor": "reason_str_bypass_no_transform"
     }
   ],
   "reject_only_directives": [
@@ -2190,5 +2164,6 @@
   ],
   "schema_version": "0.9.2",
   "contract_version": "1",
-  "ffi_abi_version": 1
+  "ffi_abi_version": 1,
+  "registry_count": 26
 }

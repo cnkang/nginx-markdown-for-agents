@@ -47,7 +47,7 @@ FFI_FN_RE = re.compile(
 REQUIRED_TOP_LEVEL = {
     "schema_version", "contract_version", "ffi_abi_version", "directives",
     "reject_only_directives", "otel", "dynconf_keys", "metrics",
-    "reason_codes", "ffi_exports",
+    "reason_codes", "ffi_exports", "registry_count",
 }
 DIRECTIVE_FIELDS = {
     "name", "context", "default", "syntax", "status", "classification",
@@ -60,7 +60,7 @@ REJECT_FIELDS = {
 }
 METRIC_FIELDS = {"name", "type", "labels", "order", "bounded_cardinality"}
 REASON_FIELDS = {
-    "discriminant", "name", "string", "metric_key", "c_accessor", "registry_count",
+    "discriminant", "name", "string", "metric_key", "c_accessor",
 }
 DYNCONF_FIELDS = {
     "name", "type", "allowed_values", "default", "inheritance", "dynamic",
@@ -72,22 +72,52 @@ FFI_FIELDS = {
 }
 
 
+def _normalize_ffi_fragment(value):
+    """Normalize Rust formatting without changing parameter semantics."""
+    if not isinstance(value, str):
+        return value
+    return re.sub(r"\s+", " ", value).strip().rstrip(",").rstrip()
+
+
+def _normalize_ffi_entry(entry):
+    """Canonicalize FFI signature fields before comparing inventory data."""
+    normalized = dict(entry)
+    normalized["params"] = _normalize_ffi_fragment(normalized.get("params"))
+    normalized["return_type"] = _normalize_ffi_fragment(
+        normalized.get("return_type"))
+    if isinstance(normalized.get("name"), str):
+        normalized["signature"] = "{}({}) -> {}".format(
+            normalized["name"], normalized.get("params", ""),
+            normalized.get("return_type", ""))
+    return normalized
+
+
 def read_text(path):
+    """Read a repository file only after validating its path."""
     validated = validate_read_path(path, purpose="public surface drift")
     return validated.read_text(encoding="utf-8")
 
 
 def load_inventory(path=None):
+    """Load the JSON inventory through the same path boundary as source files."""
     if path is None:
         path = INVENTORY_PATH
     return json.loads(read_text(os.path.realpath(path)))
 
 
 def _names(values):
-    return [value if isinstance(value, str) else value.get("name") for value in values]
+    """Return entry names while tolerating the inventory's scalar form."""
+    names = []
+    for value in values:
+        if isinstance(value, str):
+            names.append(value)
+        elif isinstance(value, dict) and isinstance(value.get("name"), str):
+            names.append(value["name"])
+    return names
 
 
 def _duplicates(values):
+    """Return duplicate values once, preserving their first duplicate order."""
     seen = set()
     duplicates = []
     for value in values:
@@ -98,6 +128,7 @@ def _duplicates(values):
 
 
 def _validate_inventory_header(inventory):
+    """Validate schema and contract metadata before inspecting source files."""
     errors = []
     missing = sorted(REQUIRED_TOP_LEVEL - set(inventory))
     if missing:
@@ -109,10 +140,13 @@ def _validate_inventory_header(inventory):
         errors.append("inventory contract_version must be 1")
     if not isinstance(inventory.get("ffi_abi_version"), int):
         errors.append("inventory ffi_abi_version must be an integer")
+    if not isinstance(inventory.get("registry_count"), int):
+        errors.append("inventory registry_count must be an integer")
     return errors
 
 
 def _validate_named_entries(inventory, key, fields):
+    """Validate a named inventory array and return its errors and names."""
     values = inventory.get(key)
     if not isinstance(values, list):
         return ["{} must be an array".format(key)], []
@@ -133,6 +167,7 @@ def _validate_named_entries(inventory, key, fields):
 
 
 def _validate_otel_schema(inventory):
+    """Validate the OTel directive groups and their status declaration."""
     otel = inventory.get("otel")
     if not isinstance(otel, dict):
         return ["otel must be an object"]
@@ -157,12 +192,14 @@ def _validate_otel_schema(inventory):
 
 
 def _validate_dynconf_schema(inventory):
+    """Validate the dynamic-configuration key entries."""
     errors, _ = _validate_named_entries(
         inventory, "dynconf_keys", DYNCONF_FIELDS)
     return errors
 
 
 def _validate_metric_schema(inventory):
+    """Validate metric fields, labels, ordering, and uniqueness."""
     values = inventory.get("metrics")
     if not isinstance(values, list):
         return ["metrics must be an array"]
@@ -189,11 +226,14 @@ def _validate_metric_schema(inventory):
 
 
 def _validate_reason_schema(inventory):
+    """Validate contiguous reason discriminants and registry cardinality."""
     values = inventory.get("reason_codes")
     if not isinstance(values, list):
         return ["reason_codes must be an array"]
     errors = []
     discriminants = []
+    if inventory.get("registry_count") != len(values):
+        errors.append("inventory registry_count does not match array length")
     for index, entry in enumerate(values):
         if not isinstance(entry, dict):
             errors.append("reason_codes[{}] must be an object".format(index))
@@ -203,8 +243,6 @@ def _validate_reason_schema(inventory):
         if missing:
             errors.append("reason_codes[{}] missing fields: {}".format(
                 index, ", ".join(missing)))
-        if entry.get("registry_count") != len(values):
-            errors.append("reason_codes[{}].registry_count does not match array length".format(index))
     if discriminants != list(range(len(values))):
         errors.append("reason_codes discriminants must be contiguous from zero")
     for duplicate in _duplicates(_names(values)):
@@ -213,6 +251,7 @@ def _validate_reason_schema(inventory):
 
 
 def _validate_ffi_schema(inventory):
+    """Validate FFI metadata, ABI versions, ordering, and uniqueness."""
     values = inventory.get("ffi_exports")
     if not isinstance(values, list):
         return ["ffi_exports must be an array"]
@@ -222,7 +261,8 @@ def _validate_ffi_schema(inventory):
         if not isinstance(entry, dict):
             errors.append("ffi_exports[{}] must be an object".format(index))
             continue
-        names.append(entry.get("name"))
+        if isinstance(entry.get("name"), str):
+            names.append(entry["name"])
         missing = sorted(FFI_FIELDS - set(entry))
         if missing:
             errors.append("ffi_exports[{}] missing fields: {}".format(
@@ -257,10 +297,12 @@ def validate_inventory_schema(inventory):
 
 
 def _strip_c_comments(text):
+    """Remove C comments before parsing the flat command registry."""
     return re.sub(r"/\*.*?\*/", "", text, flags=re.S)
 
 
 def _directive_registry_block(text):
+    """Extract the module's command registry, failing closed if it is incomplete."""
     marker = "static ngx_command_t ngx_http_markdown_filter_commands[] = {"
     if marker not in text:
         raise ValueError("ngx_command_t registry is missing or unterminated")
@@ -272,6 +314,7 @@ def _directive_registry_block(text):
 
 
 def _balanced_command_entries(block):
+    """Split command rows while rejecting unbalanced braces."""
     entries = []
     depth = 0
     entry_start = None
@@ -291,6 +334,7 @@ def _balanced_command_entries(block):
 
 
 def _split_command_fields(entry):
+    """Split one command row without treating commas inside casts as fields."""
     fields = []
     start = 0
     parens = 0
@@ -309,6 +353,7 @@ def _split_command_fields(entry):
 
 
 def _command_args(flags):
+    """Map NGINX command flags to the inventory's argument contract."""
     for token, value in (
         ("NGX_CONF_NOARGS", "no_args"),
         ("NGX_CONF_TAKE12", "1_or_2"),
@@ -323,6 +368,7 @@ def _command_args(flags):
 
 
 def _command_classification(name, handler):
+    """Classify a directive as active, rejected, and/or OTel-specific."""
     if handler == "ngx_http_markdown_reject_otel_directive":
         return "reject_only", "reject_only"
     if handler in ("ngx_http_markdown_reject_removed_directive",
@@ -333,6 +379,7 @@ def _command_classification(name, handler):
 
 
 def _parse_command_entry(entry):
+    """Parse one six-field ngx_command_t row into inventory-shaped metadata."""
     fields = _split_command_fields(entry)
     match = re.search(r'ngx_string\("([^"]+)"\)', fields[0])
     if not match:
@@ -376,14 +423,17 @@ def _command_contracts(text):
 
 
 def extract_directive_contract_from_c():
+    """Extract directive metadata from the live C command registry."""
     return _command_contracts(read_text(DIRECTIVES_PATH))
 
 
 def extract_directives_from_c():
+    """Return live directive names in deterministic order."""
     return sorted(extract_directive_contract_from_c())
 
 
 def extract_reason_codes_from_rust():
+    """Extract Rust reason discriminants and variant names."""
     text = read_text(REASON_CODE_PATH)
     found = {}
     for match in REASON_CODE_RE.finditer(text):
@@ -392,11 +442,13 @@ def extract_reason_codes_from_rust():
 
 
 def _reason_strings(text):
+    """Extract the string representation used by the Rust reason registry."""
     as_str_body = text.split("pub fn as_str", 1)[1].split("pub fn metric_key", 1)[0]
     return dict(re.findall(r"ReasonCode::(\w+)\s*=>\s*\"([^\"]+)\"", as_str_body))
 
 
 def _reason_metrics(text):
+    """Extract metric keys while handling grouped Rust match arms."""
     metric_body = text.split("pub fn metric_key", 1)[1].split("pub fn log_callsite", 1)[0]
     metrics = {}
     pending_variants = []
@@ -415,6 +467,10 @@ def _reason_metrics(text):
 
 
 def _reason_c_name(string):
+    """Normalize Rust reason strings to the C accessor naming convention."""
+    # C keeps the historical *_err storage names while Rust exposes the
+    # clearer *_error strings; this mapping makes that intentional alias
+    # explicit instead of treating it as drift.
     return {
         "header_plan_apply_error": "header_plan_apply_err",
         "streaming_mid_flight_error": "streaming_mid_flight_err",
@@ -422,6 +478,7 @@ def _reason_c_name(string):
 
 
 def extract_reason_contract_from_rust():
+    """Reconcile Rust reasons with C storage and inventory-shaped metadata."""
     text = read_text(REASON_CODE_PATH)
     variants = extract_reason_codes_from_rust()
     strings = _reason_strings(text)
@@ -437,7 +494,6 @@ def extract_reason_contract_from_rust():
         result[discriminant] = {
             "discriminant": discriminant, "name": variant, "string": string,
             "metric_key": metrics.get(variant), "c_accessor": "reason_str_" + c_name,
-            "registry_count": len(variants),
         }
         if c_name not in c_accessors:
             raise ValueError("C reason storage missing: reason_str_{}".format(c_name))
@@ -445,10 +501,12 @@ def extract_reason_contract_from_rust():
 
 
 def extract_dynconf_keys_from_c():
+    """Extract dynamic-configuration keys from the C parser."""
     return sorted(set(DYNCONF_KEY_RE.findall(read_text(DYNCONF_PATH))))
 
 
 def extract_dynconf_contract_from_c():
+    """Build the parser's dynamic-configuration contract from live C keys."""
     text = read_text(DYNCONF_PATH)
     keys = extract_dynconf_keys_from_c()
     if "schema_version" not in keys:
@@ -472,6 +530,7 @@ def extract_dynconf_contract_from_c():
 
 
 def _metric_contract_from_text(text):
+    """Extract metric names, types, labels, and source order from C text."""
     text = _strip_c_comments(text)
     # The C renderer splits long output lines into adjacent string literals;
     # join those literals before inspecting labels and TYPE declarations.
@@ -493,20 +552,23 @@ def _metric_contract_from_text(text):
 
 
 def extract_metric_contract_from_c():
+    """Extract the Prometheus metric contract from the C renderer."""
     return _metric_contract_from_text(read_text(METRICS_PATH))
 
 
 def extract_metric_names_from_c():
+    """Return live metric names in deterministic order."""
     return sorted(extract_metric_contract_from_c())
 
 
 def extract_ffi_contract_from_rust():
+    """Extract Rust exports and verify their generated-header ABI surface."""
     result = {}
     for path in FFI_PATHS:
         text = read_text(path)
         for match in FFI_FN_RE.finditer(text):
-            params = " ".join(match.group(3).split())
-            return_type = (match.group(4) or "()").strip()
+            params = _normalize_ffi_fragment(match.group(3))
+            return_type = _normalize_ffi_fragment(match.group(4) or "()")
             name = match.group(2)
             result[name] = {
                 "name": name,
@@ -518,6 +580,8 @@ def extract_ffi_contract_from_rust():
                 "generated_header": "components/rust-converter/include/markdown_converter.h",
             }
     header = read_text(FFI_HEADER_PATH)
+    # The generated header is the C-facing ABI boundary, so source-only
+    # exports are incomplete even when Rust parsing succeeds.
     abi_match = re.search(r"#define\s+MARKDOWN_ABI_VERSION\s+(\d+)", header)
     if not abi_match:
         raise ValueError("generated FFI header has no MARKDOWN_ABI_VERSION")
@@ -529,10 +593,12 @@ def extract_ffi_contract_from_rust():
 
 
 def extract_ffi_exports_from_rust():
+    """Return live FFI export names in deterministic order."""
     return sorted(extract_ffi_contract_from_rust())
 
 
 def _compare_maps(label, inventory_map, actual_map, fields):
+    """Compare declared metadata, not only names, for one public-surface group."""
     drift = []
     inv_names = set(inventory_map)
     actual_names = set(actual_map)
@@ -549,6 +615,7 @@ def _compare_maps(label, inventory_map, actual_map, fields):
 
 
 def _inventory_directive_entries(inventory):
+    """Merge active and reject-only directive entries by name."""
     entries = {}
     for entry in inventory.get("directives", []) + inventory.get("reject_only_directives", []):
         if isinstance(entry, dict) and entry.get("name"):
@@ -557,6 +624,7 @@ def _inventory_directive_entries(inventory):
 
 
 def _merge_otel_group(entries, values):
+    """Merge OTel classifications while rejecting conflicting declarations."""
     for entry in values:
         if not isinstance(entry, dict) or not entry.get("name"):
             continue
@@ -570,6 +638,7 @@ def _merge_otel_group(entries, values):
 
 
 def _merge_otel_directive_entries(inventory, entries):
+    """Add OTel directive metadata to the common directive map."""
     otel = inventory.get("otel", {})
     for group in ("directives", "reject_only"):
         _merge_otel_group(entries, otel.get(group, []))
@@ -577,6 +646,7 @@ def _merge_otel_directive_entries(inventory, entries):
 
 
 def check_directive_contract(inventory, actual_contract):
+    """Compare directive behavior metadata against the source registry."""
     try:
         entries = _merge_otel_directive_entries(
             inventory, _inventory_directive_entries(inventory))
@@ -588,6 +658,7 @@ def check_directive_contract(inventory, actual_contract):
 
 
 def check_directives(inventory, actual_names):
+    """Compare the declared directive name set with live source names."""
     inv = set(_names(inventory.get("directives", [])))
     inv.update(_names(inventory.get("reject_only_directives", [])))
     inv.update(_names(inventory.get("otel", {}).get("directives", [])))
@@ -602,6 +673,7 @@ def check_directives(inventory, actual_names):
 
 
 def check_reason_codes(inventory, actual_codes):
+    """Compare reason discriminants and names with the Rust registry."""
     inv_by_disc = {rc["discriminant"]: rc["name"] for rc in inventory.get("reason_codes", [])}
     drift = []
     for disc in sorted(set(actual_codes) - set(inv_by_disc)):
@@ -616,12 +688,18 @@ def check_reason_codes(inventory, actual_codes):
 
 
 def check_reason_contract(inventory, actual_contract):
+    """Compare reason strings, metrics, C accessors, and registry size."""
     inv = {item.get("discriminant"): item for item in inventory.get("reason_codes", [])}
-    return _compare_maps("reason code", inv, actual_contract,
-                         ("name", "string", "metric_key", "c_accessor", "registry_count"))
+    drift = _compare_maps("reason code", inv, actual_contract,
+                          ("name", "string", "metric_key", "c_accessor"))
+    if inventory.get("registry_count") != len(actual_contract):
+        drift.append("reason code registry_count mismatch: inventory={} source={}".format(
+            inventory.get("registry_count"), len(actual_contract)))
+    return drift
 
 
 def check_dynconf_keys(inventory, actual_keys):
+    """Compare declared dynamic-configuration names with live parser keys."""
     inv = set(_names(inventory.get("dynconf_keys", [])))
     actual = set(actual_keys)
     drift = []
@@ -633,12 +711,14 @@ def check_dynconf_keys(inventory, actual_keys):
 
 
 def check_dynconf_contract(inventory, actual_contract):
+    """Compare dynamic-configuration behavior metadata with the C parser."""
     inv = {item.get("name"): item for item in inventory.get("dynconf_keys", [])}
     return _compare_maps("dynconf key", inv, actual_contract,
                          ("type", "allowed_values", "required", "dynamic", "unknown_key"))
 
 
 def check_metrics(inventory, actual_names):
+    """Compare the declared metric name set with live renderer names."""
     inv = set(_names(inventory.get("metrics", [])))
     actual = set(actual_names)
     drift = []
@@ -650,11 +730,13 @@ def check_metrics(inventory, actual_names):
 
 
 def check_metric_contract(inventory, actual_contract):
+    """Compare metric type, labels, and deterministic render order."""
     inv = {item.get("name"): item for item in inventory.get("metrics", [])}
     return _compare_maps("metric", inv, actual_contract, ("type", "labels", "order"))
 
 
 def check_ffi_exports(inventory, actual_exports):
+    """Compare the declared FFI export set with Rust source exports."""
     inv = set(_names(inventory.get("ffi_exports", [])))
     actual = set(actual_exports)
     drift = []
@@ -666,12 +748,17 @@ def check_ffi_exports(inventory, actual_exports):
 
 
 def check_ffi_contract(inventory, actual_contract):
-    inv = {item.get("name"): item for item in inventory.get("ffi_exports", [])}
-    return _compare_maps("FFI export", inv, actual_contract,
+    """Compare FFI signatures and ABI metadata with Rust and its header."""
+    inv = {item.get("name"): _normalize_ffi_entry(item)
+           for item in inventory.get("ffi_exports", [])}
+    actual = {name: _normalize_ffi_entry(item)
+              for name, item in actual_contract.items()}
+    return _compare_maps("FFI export", inv, actual,
                          ("signature", "params", "return_type", "safety", "abi_version", "generated_header"))
 
 
 def main():
+    """Validate inventory schema first, then compare it with live source contracts."""
     parser = argparse.ArgumentParser(description="Detect public surface contract drift")
     parser.add_argument("--inventory", default=INVENTORY_PATH, help="Path to public-surface-inventory.json")
     args = parser.parse_args()
@@ -679,6 +766,8 @@ def main():
     try:
         inventory = load_inventory(args.inventory)
         all_drift.extend(validate_inventory_schema(inventory))
+        # Do not inspect source contracts until the declaration itself is
+        # structurally valid; malformed inventory data must fail closed.
         if not all_drift:
             all_drift.extend(check_directive_contract(inventory, extract_directive_contract_from_c()))
             all_drift.extend(check_reason_contract(inventory, extract_reason_contract_from_rust()))

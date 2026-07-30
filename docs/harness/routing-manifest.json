@@ -592,6 +592,7 @@
         "docs-tooling",
         "release-governance",
         "v080-gates",
+        "v092-gates",
         "release-quality"
       ]
     },

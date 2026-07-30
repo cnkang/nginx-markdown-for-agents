@@ -4,6 +4,9 @@ This document is the repository-owned inventory used to decide which current
 surfaces become compatibility commitments at 1.0. It records production
 behavior, not merely declarations or design intent.
 
+The extraction and drift-check decision is recorded in
+[ADR-0025](ADR/0025-public-surface-inventory-drift-gate.md).
+
 The evidence order for this inventory is:
 
 1. the NGINX command table and production request path;
