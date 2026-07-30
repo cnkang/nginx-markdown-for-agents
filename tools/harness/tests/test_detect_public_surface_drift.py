@@ -85,6 +85,36 @@ def test_live_inventory_matches_all_extracted_surfaces() -> None:
     ) == []
 
 
+def test_ffi_contract_parser_handles_multiline_signatures(monkeypatch) -> None:
+    rust = """
+pub unsafe extern "C" fn markdown_test(
+    input: *const u8,
+    output: *mut u8,
+) -> u32 {
+}
+
+pub extern "C" fn markdown_empty() {
+}
+"""
+    header = "#define MARKDOWN_ABI_VERSION 7\nmarkdown_test(\nmarkdown_empty(\n"
+
+    def fake_read_text(path):
+        return rust if path == "ffi.rs" else header
+
+    monkeypatch.setattr(detector, "FFI_PATHS", ("ffi.rs",))
+    monkeypatch.setattr(detector, "FFI_HEADER_PATH", "header.h")
+    monkeypatch.setattr(detector, "read_text", fake_read_text)
+
+    contract = detector.extract_ffi_contract_from_rust()
+
+    assert contract["markdown_test"]["params"] == (
+        "input: *const u8, output: *mut u8,"
+    )
+    assert contract["markdown_test"]["return_type"] == "u32"
+    assert contract["markdown_test"]["safety"] == "unsafe"
+    assert contract["markdown_empty"]["return_type"] == "()"
+
+
 def test_invalid_inventory_schema_reports_contract_fields() -> None:
     errors = detector.validate_inventory_schema({
         "schema_version": "0.9.2",
