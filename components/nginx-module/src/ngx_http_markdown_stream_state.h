@@ -54,6 +54,7 @@ typedef enum {
  * modifies them (const-correct usage encouraged).
  */
 typedef struct {
+    ngx_log_t                         *log;
     ngx_http_markdown_stream_state_e  current_state;
     ngx_flag_t                        replay_available;
     ngx_flag_t                        headers_committed;

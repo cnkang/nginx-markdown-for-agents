@@ -382,6 +382,14 @@ ngx_http_markdown_stream_decide_pre_commit(
      * Fallthrough: headers already committed in PRE_COMMIT state
      * should not happen (would be COMMITTED), but handle safely.
      */
+    if (ctx->log != NULL) {
+        ngx_log_error(NGX_LOG_ERR, ctx->log, 0,
+                      "markdown: PRE_COMMIT invariant violation: "
+                      "headers_committed=%ui, current_state=%ui, event=%ui",
+                      (ngx_uint_t) ctx->headers_committed,
+                      (ngx_uint_t) ctx->current_state,
+                      (ngx_uint_t) event);
+    }
     return ngx_http_markdown_make_decision(
         NGX_HTTP_MD_STATE_PASSTHROUGH,
         NGX_HTTP_MD_ACTION_PASSTHROUGH,
