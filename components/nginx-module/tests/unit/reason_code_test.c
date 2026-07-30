@@ -94,6 +94,18 @@ const ngx_str_t *ngx_http_markdown_reason_skip_accept(void);
 const ngx_str_t *ngx_http_markdown_reason_skip_no_accept(void);
 const ngx_str_t *ngx_http_markdown_reason_skip_accept_reject(void);
 const ngx_str_t *ngx_http_markdown_reason_skip_conditional(void);
+const ngx_str_t *ngx_http_markdown_reason_decompression_error(void);
+const ngx_str_t *ngx_http_markdown_reason_decompression_budget_exceeded(void);
+const ngx_str_t *ngx_http_markdown_reason_decompression_format_error(void);
+const ngx_str_t *ngx_http_markdown_reason_decompression_truncated_input(void);
+const ngx_str_t *ngx_http_markdown_reason_decompression_io_error(void);
+const ngx_str_t *ngx_http_markdown_reason_timeout(void);
+const ngx_str_t *ngx_http_markdown_reason_budget_exceeded(void);
+const ngx_str_t *ngx_http_markdown_reason_replay_error(void);
+const ngx_str_t *ngx_http_markdown_reason_invalid_dynconf(void);
+const ngx_str_t *ngx_http_markdown_reason_degraded_snapshot(void);
+const ngx_str_t *ngx_http_markdown_reason_header_plan_apply_err(void);
+const ngx_str_t *ngx_http_markdown_reason_streaming_mid_flight_err(void);
 
 
 /*
@@ -358,6 +370,51 @@ test_skip_conditional_code(void)
 }
 
 
+/*
+ * Test: newly added non-streaming reason accessors return their Rust names.
+ */
+static void
+test_additional_reason_codes(void)
+{
+    static const struct {
+        const ngx_str_t *(*accessor)(void);
+        const char       *expected;
+    } cases[] = {
+        { ngx_http_markdown_reason_decompression_error,
+          "decompression_error" },
+        { ngx_http_markdown_reason_decompression_budget_exceeded,
+          "decompression_budget_exceeded" },
+        { ngx_http_markdown_reason_decompression_format_error,
+          "decompression_format_error" },
+        { ngx_http_markdown_reason_decompression_truncated_input,
+          "decompression_truncated_input" },
+        { ngx_http_markdown_reason_decompression_io_error,
+          "decompression_io_error" },
+        { ngx_http_markdown_reason_timeout, "timeout" },
+        { ngx_http_markdown_reason_budget_exceeded, "budget_exceeded" },
+        { ngx_http_markdown_reason_replay_error, "replay_error" },
+        { ngx_http_markdown_reason_overload, "overload" },
+        { ngx_http_markdown_reason_invalid_dynconf, "invalid_dynconf" },
+        { ngx_http_markdown_reason_degraded_snapshot, "degraded_snapshot" },
+        { ngx_http_markdown_reason_header_plan_apply_err,
+          "header_plan_apply_error" },
+        { ngx_http_markdown_reason_streaming_mid_flight_err,
+          "streaming_mid_flight_error" },
+        { ngx_http_markdown_reason_bypass_no_transform,
+          "bypass_no_transform" },
+    };
+
+    TEST_SUBSECTION("Additional reason code accessors");
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        TEST_ASSERT(ngx_str_eq(cases[i].accessor(), cases[i].expected),
+                    "accessor returns expected reason code");
+    }
+
+    TEST_PASS("Additional reason code accessors are correct");
+}
+
+
 #ifdef MARKDOWN_STREAMING_ENABLED
 /*
  * Test: streaming reason code accessor functions return
@@ -483,6 +540,7 @@ main(void)
     test_skip_no_accept_code();
     test_skip_accept_reject_code();
     test_skip_conditional_code();
+    test_additional_reason_codes();
 #ifdef MARKDOWN_STREAMING_ENABLED
     test_streaming_reason_codes();
 #endif
