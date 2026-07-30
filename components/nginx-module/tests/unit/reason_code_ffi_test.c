@@ -20,6 +20,8 @@
 #define NGX_ERROR    -1
 #define NGX_DECLINED -5
 
+ngx_int_t ngx_http_markdown_diagnostics_reason_to_code(const char *reason);
+
 /*
  * Stub implementations of the Rust FFI functions.
  *
@@ -180,6 +182,30 @@ test_get_reason_code_str_valid(void)
                 "code 25 data should be 'bypass_no_transform'");
 
     TEST_PASS("Valid reason code strings returned correctly");
+}
+
+
+/*
+ * Test: lowercase and legacy reason names map to BYPASS_NO_TRANSFORM (25)
+ */
+static void
+test_bypass_no_transform_reverse_mapping(void)
+{
+    ngx_int_t  code;
+
+    TEST_SUBSECTION("bypass_no_transform reverse mapping");
+
+    code = ngx_http_markdown_diagnostics_reason_to_code(
+        "bypass_no_transform");
+    TEST_ASSERT(code == 25,
+                "bypass_no_transform should map to code 25");
+
+    code = ngx_http_markdown_diagnostics_reason_to_code(
+        "BYPASS_NO_TRANSFORM");
+    TEST_ASSERT(code == 25,
+                "BYPASS_NO_TRANSFORM alias should map to code 25");
+
+    TEST_PASS("BYPASS_NO_TRANSFORM reverse mappings are compatible");
 }
 
 
@@ -379,6 +405,7 @@ main(void)
     printf("========================================\n");
 
     test_get_reason_code_str_valid();
+    test_bypass_no_transform_reverse_mapping();
     test_get_reason_code_str_invalid();
     test_get_reason_code_str_null_output();
     test_get_reason_code_metric_key_valid();
