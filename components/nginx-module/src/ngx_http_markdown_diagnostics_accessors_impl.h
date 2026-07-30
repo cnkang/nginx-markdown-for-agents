@@ -101,4 +101,33 @@ ngx_http_markdown_diagnostics_get_dynconf_state(
 }
 
 
+/*
+ * Roll back the active dynconf to the last-known-good snapshot.
+ *
+ * Delegates to ngx_http_markdown_dynconf_rollback() on the global
+ * watcher.  If dynconf is not active, returns NGX_ERROR.
+ */
+ngx_int_t
+ngx_http_markdown_diagnostics_rollback(ngx_log_t *log)
+{
+    if (!ngx_http_markdown_dynconf_watcher.active) {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+                      "markdown: rollback failed: dynconf not active");
+        return NGX_ERROR;
+    }
+
+    if (ngx_http_markdown_dynconf_watcher.conf == NULL) {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+                      "markdown: rollback failed: no conf bound to watcher");
+        return NGX_ERROR;
+    }
+
+    return ngx_http_markdown_dynconf_rollback(
+        &ngx_http_markdown_dynconf_watcher,
+        ngx_http_markdown_dynconf_watcher.conf,
+        log);
+}
+}
+
+
 #endif /* NGX_HTTP_MARKDOWN_DIAGNOSTICS_ACCESSORS_IMPL_H */

@@ -2186,4 +2186,69 @@ ngx_http_markdown_dynconf_reload(
 }
 
 
+/**
+ * Roll back the active configuration to the last-known-good snapshot.
+ *
+ * If lkg_valid is set and the LKG snapshot is valid, atomically replaces
+ * the active snapshot with the LKG snapshot, applies it to the live
+ * configuration, increments the version counter, and logs the rollback
+ * event.  If the LKG is not available, returns NGX_ERROR without
+ * modifying the active state.
+ *
+ * Atomicity: the active snapshot is replaced only after all validation
+ * checks pass.  In the single-threaded NGINX worker model, the struct
+ * assignment is an atomic operation with respect to the event loop.
+ * The LKG snapshot itself is never modified (read-only source).
+ *
+ * Rule 35 compliance: the active snapshot is replaced as a single struct
+ * assignment, preserving the snapshot-race-elimination invariant.
+ *
+ * @param watcher Dynamic config watcher; must be non-NULL.
+ * @param conf   Current module location configuration; must be non-NULL.
+ * @param log    NGINX log for error and informational messages.
+ *
+ * @return NGX_OK on successful rollback, NGX_ERROR if LKG is unavailable
+ *         or any input is NULL.
+ */
+static ngx_int_t
+ngx_http_markdown_dynconf_rollback(
+    ngx_http_markdown_dynconf_watcher_t *watcher,
+    ngx_http_markdown_conf_t *conf,
+    ngx_log_t *log)
+{
+    if (watcher == NULL || conf == NULL || log == NULL) {
+        return NGX_ERROR;
+    }
+
+    if (!watcher->lkg_valid) {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+                      "markdown: rollback failed: no valid "
+                      "last-known-good snapshot available "
+                      "(version=%ui)", watcher->version);
+        return NGX_ERROR;
+    }
+
+    if (!watcher->last_known_good.valid) {
+        ngx_log_error(NGX_LOG_ERR, log, 0,
+                      "markdown: rollback failed: LKG snapshot "
+                      "marked invalid (version=%ui, lkg_mtime=%T)",
+                      watcher->version, watcher->lkg_mtime);
+        return NGX_ERROR;
+    }
+
+    watcher->active_snapshot = watcher->last_known_good;
+    watcher->version++;
+
+    ngx_http_markdown_dynconf_apply_snapshot(conf,
+                                              &watcher->active_snapshot);
+
+    ngx_log_error(NGX_LOG_INFO, log, 0,
+                  "markdown: rollback to last-known-good "
+                  "(lkg_mtime=%T, version=%ui)",
+                  watcher->lkg_mtime, watcher->version);
+
+    return NGX_OK;
+}
+
+
 #endif /* NGX_HTTP_MARKDOWN_DYNCONF_IMPL_H */
