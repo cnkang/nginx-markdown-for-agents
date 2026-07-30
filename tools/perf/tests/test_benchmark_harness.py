@@ -343,10 +343,10 @@ def test_canonical_workflow_retains_probe_artifacts():
         REPO_ROOT / ".github" / "workflows" / "nightly-perf.yml"
     ).read_text(encoding="utf-8")
 
-    module_job = workflow[workflow.index("\n  module-baseline-091:"):]
-    assert "--output perf/baselines/module-baseline-091-raw.json" in module_job
-    assert "perf/baselines/module-baseline-091-raw-probes/" in module_job
-    assert "perf/baselines/module-baseline-091-probes/" not in module_job
+    module_job = workflow[workflow.index("\n  module-baseline-092:"):]
+    assert "--output perf/baselines/module-baseline-092-raw.json" in module_job
+    assert "perf/baselines/module-baseline-092-raw-probes/" in module_job
+    assert "perf/baselines/module-baseline-092-probes/" not in module_job
 
 
 def test_module_benchmark_materializes_output_derived_probe_directory():
