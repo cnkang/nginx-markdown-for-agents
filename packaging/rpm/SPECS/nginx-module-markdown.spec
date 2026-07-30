@@ -88,19 +88,19 @@ EOF
 %license /usr/share/licenses/nginx-markdown-for-agents/LICENSE
 
 %changelog
-* Wed Jul 30 2026 cnkang <liukang@noreply.github.com> - 0.9.2-nginx1.26.3.1
+* Thu Jul 30 2026 cnkang <liukang@noreply.github.com> - 0.9.2-nginx1.26.3.1
 - v0.9.2: Diagnostics reason_to_code mapping fix, C reason code constants
   synchronized (decompression series 4-11), OTel worker lifecycle cleanup,
   dynconf rollback API, public surface inventory and drift gate, release
   gates 0.9.2
 
-* Tue Jul 29 2026 cnkang <liukang@noreply.github.com> - 0.9.1-nginx1.26.3.1
+* Wed Jul 29 2026 cnkang <liukang@noreply.github.com> - 0.9.1-nginx1.26.3.1
 - v0.9.1: Breaking — Rust baseline 1.97, streaming_engine removed, non-semantic
   flavors removed, FFI ABI reset to version 1, incomplete OTel controls
   reject-only, trusted_proxies main-only; hybrid zero-copy output, streaming
   decompression routing (gzip/deflate/Brotli), performance evidence gate
 
-* Thu Jul 03 2026 cnkang <liukang@noreply.github.com> - 0.9.0-nginx1.26.3.1
+* Fri Jul 03 2026 cnkang <liukang@noreply.github.com> - 0.9.0-nginx1.26.3.1
 - v0.9.0: Breaking — Config V2, profile system, error policy consolidation,
   inflight guard, metrics consolidation, reason code lowercase
 

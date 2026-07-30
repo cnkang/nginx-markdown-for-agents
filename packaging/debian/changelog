@@ -7,7 +7,7 @@ nginx-module-markdown (0.9.2-1) unstable; urgency=medium
   * Public surface inventory and drift detection gate
   * Release gates 0.9.2
 
- -- Kang Liu <liukang@noreply.github.com>  Wed, 30 Jul 2026 12:00:00 +0800
+ -- Kang Liu <liukang@noreply.github.com>  Thu, 30 Jul 2026 12:00:00 +0800
 
 nginx-module-markdown (0.9.1-1) unstable; urgency=medium
 
@@ -21,7 +21,7 @@ nginx-module-markdown (0.9.1-1) unstable; urgency=medium
   * Performance evidence gate chain and benchmark harness
   * Performance doctor advice tool
 
- -- Kang Liu <liukang@noreply.github.com>  Tue, 29 Jul 2026 12:00:00 +0800
+ -- Kang Liu <liukang@noreply.github.com>  Wed, 29 Jul 2026 12:00:00 +0800
 
 nginx-module-markdown (0.9.0-1) unstable; urgency=medium
 
@@ -33,7 +33,7 @@ nginx-module-markdown (0.9.0-1) unstable; urgency=medium
   * markdown_accept wildcard
   * Unified metric families with reason label
 
- -- Kang Liu <liukang@noreply.github.com>  Thu, 03 Jul 2026 12:00:00 +0800
+ -- Kang Liu <liukang@noreply.github.com>  Fri, 03 Jul 2026 12:00:00 +0800
 
 nginx-module-markdown (0.8.0-1) unstable; urgency=medium
 
@@ -41,7 +41,7 @@ nginx-module-markdown (0.8.0-1) unstable; urgency=medium
     streaming observability, streaming security enforcement,
     release matrix source of truth, streaming configuration directives
 
- -- Kang Liu <liukang@noreply.github.com>  Tue, 10 Jun 2026 12:00:00 +0800
+ -- Kang Liu <liukang@noreply.github.com>  Wed, 10 Jun 2026 12:00:00 +0800
 
 nginx-module-markdown (0.7.0-1) unstable; urgency=medium
 
