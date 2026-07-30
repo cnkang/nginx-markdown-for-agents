@@ -21,6 +21,23 @@ def test_stale_symbol_check_ignores_whitelisted_migration_docs(tmp_path):
     assert stderr == ""
 
 
+def test_stale_symbol_check_ignores_public_surface_inventory(tmp_path):
+    """The inventory may list retired directives as explicit migration data."""
+    repo = tmp_path
+    (repo / "docs/harness").mkdir(parents=True)
+    (repo / "docs/harness/public-surface-inventory.json").write_text(
+        '{"reject_only_directives": [{"name": "markdown_timeout"}]}\n'
+    )
+    subprocess.run(_git_cmd() + ["init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(_git_cmd() + ["add", "."], cwd=repo, check=True)
+
+    exit_code, stdout, stderr = check_stale_symbols.run_stale_symbol_check(repo)
+
+    assert exit_code == 0
+    assert stdout == "No stale pre-0.9.0 symbols found."
+    assert stderr == ""
+
+
 def test_stale_symbol_check_fails_on_non_whitelisted_guide(tmp_path):
     """Non-whitelisted guide docs with stale symbols should fail."""
     repo = tmp_path

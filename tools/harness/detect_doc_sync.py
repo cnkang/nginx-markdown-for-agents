@@ -471,6 +471,27 @@ def _check_prometheus_catalog(renderer: str, guide: str) -> List[str]:
     ]
 
 
+def _check_retired_metrics(project_root: Path) -> List[str]:
+    """Reject retired metrics outside documented migration references."""
+    errors = _scan_for_pattern(
+        project_root,
+        (Path("docs/guides"), Path("docs/features"), Path("docs/architecture")),
+        re.compile(
+            r"nginx_markdown_streaming_choice_total|"
+            r"nginx_markdown_conversion_duration_seconds|"
+            r"nginx_markdown_failures_total\{reason=\\?\""
+            r"(?:memory_budget_exceeded|ffi_panic)\\?\"\}"
+        ),
+        "retired production metric name or failure label",
+    )
+    migration_pattern = re.compile(r"MIGRATION-\d")
+    return [
+        error
+        for error in errors
+        if not migration_pattern.search(Path(error.split(":")[0]).name)
+    ]
+
+
 def check_public_config_contract(project_root: Path) -> List[str]:
     """Validate the frozen v0.9.1 operator-facing configuration contract."""
     errors: List[str] = []
@@ -522,23 +543,7 @@ def check_public_config_contract(project_root: Path) -> List[str]:
             "markdown_streaming_engine directive in an active config surface",
         )
     )
-    retired_metric_errors = _scan_for_pattern(
-            project_root,
-            (Path("docs/guides"), Path("docs/features"), Path("docs/architecture")),
-            re.compile(
-                r"nginx_markdown_streaming_choice_total|"
-                r"nginx_markdown_conversion_duration_seconds|"
-                r"nginx_markdown_failures_total\{reason=\\?\""
-                r"(?:memory_budget_exceeded|ffi_panic)\\?\"\}"
-            ),
-            "retired production metric name or failure label",
-        )
-    migration_pattern = re.compile(r"MIGRATION-\d")
-    retired_metric_errors = [
-        e for e in retired_metric_errors
-        if not migration_pattern.search(Path(e.split(":")[0]).name)
-    ]
-    errors.extend(retired_metric_errors)
+    errors.extend(_check_retired_metrics(project_root))
     return errors
 
 
