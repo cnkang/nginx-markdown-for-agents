@@ -127,7 +127,6 @@ ngx_http_markdown_diagnostics_rollback(ngx_log_t *log)
         ngx_http_markdown_dynconf_watcher.conf,
         log);
 }
-}
 
 
 #endif /* NGX_HTTP_MARKDOWN_DIAGNOSTICS_ACCESSORS_IMPL_H */

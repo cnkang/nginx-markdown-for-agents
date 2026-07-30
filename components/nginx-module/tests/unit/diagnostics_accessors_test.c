@@ -18,6 +18,11 @@ struct ngx_log_s {
     int dummy;
 };
 
+typedef struct ngx_http_markdown_conf_s ngx_http_markdown_conf_t;
+struct ngx_http_markdown_conf_s {
+    int dummy;
+};
+
 #define NGX_OK         0
 #define NGX_ERROR     -1
 
@@ -89,9 +94,26 @@ typedef struct {
     time_t      last_mtime;
     ngx_flag_t  lkg_valid;
     time_t      lkg_mtime;
+    ngx_http_markdown_conf_t *conf;
 } ngx_http_markdown_dynconf_watcher_t;
 
 static ngx_http_markdown_dynconf_watcher_t ngx_http_markdown_dynconf_watcher;
+
+static ngx_uint_t g_rollback_calls;
+static ngx_http_markdown_conf_t *g_rollback_conf;
+
+static ngx_int_t
+ngx_http_markdown_dynconf_rollback(
+    ngx_http_markdown_dynconf_watcher_t *watcher,
+    ngx_http_markdown_conf_t *conf,
+    ngx_log_t *log)
+{
+    UNUSED(watcher);
+    UNUSED(log);
+    g_rollback_calls++;
+    g_rollback_conf = conf;
+    return NGX_OK;
+}
 
 /* ── Inflight overload stub ────────────────────────────────────── */
 
@@ -118,6 +140,41 @@ test_collect_metrics_null_output(void)
     ngx_http_markdown_diagnostics_collect_metrics(NULL);
 
     TEST_PASS("NULL output is no-op");
+}
+
+static void
+test_dynconf_rollback_accessor(void)
+{
+    ngx_http_markdown_conf_t  conf;
+    ngx_int_t                 rc;
+
+    TEST_SUBSECTION("rollback accessor validates and delegates");
+
+    memset(&ngx_http_markdown_dynconf_watcher, 0,
+           sizeof(ngx_http_markdown_dynconf_watcher));
+    memset(&conf, 0, sizeof(conf));
+    g_rollback_calls = 0;
+    g_rollback_conf = NULL;
+
+    rc = ngx_http_markdown_diagnostics_rollback(NULL);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "inactive dynconf rollback should return NGX_ERROR");
+
+    ngx_http_markdown_dynconf_watcher.active = 1;
+    rc = ngx_http_markdown_diagnostics_rollback(NULL);
+    TEST_ASSERT(rc == NGX_ERROR,
+                "rollback without conf should return NGX_ERROR");
+
+    ngx_http_markdown_dynconf_watcher.conf = &conf;
+    rc = ngx_http_markdown_diagnostics_rollback(NULL);
+    TEST_ASSERT(rc == NGX_OK,
+                "active rollback with conf should delegate successfully");
+    TEST_ASSERT(g_rollback_calls == 1,
+                "rollback implementation should be called once");
+    TEST_ASSERT(g_rollback_conf == &conf,
+                "rollback implementation should receive bound conf");
+
+    TEST_PASS("dynconf rollback accessor validation and delegation");
 }
 
 static void
@@ -288,6 +345,7 @@ main(void)
     printf("diagnostics_accessors Tests\n");
     printf("========================================\n");
 
+    test_dynconf_rollback_accessor();
     test_collect_metrics_null_output();
     test_collect_metrics_null_zone();
     test_collect_metrics_with_data();
