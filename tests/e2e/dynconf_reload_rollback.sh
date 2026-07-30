@@ -1,32 +1,8 @@
 #!/bin/bash
 # dynconf_reload_rollback.sh — E2E test: dynamic config reload and file restore.
 #
-# This script exercises the dynconf reload and last-known-good protection
-# against a running NGINX instance with the markdown module loaded.  The
-# diagnostics endpoint is read-only; operator rollback is modeled by an
-# atomic replacement of the watched file.
-#
-# Prerequisites:
-#   - NGINX running with markdown module and dynconf enabled
-#   - markdown_dynamic_config_path pointing to a writable key=value config file
-#   - curl available
-#   - NGINX_URL environment variable set (default: http://localhost:8080)
-#
-# Test Scenario:
-#   1. Verify initial config snapshot via diagnostics endpoint
-#   2. Atomically write a valid dynconf update and trigger the reload path
-#   3. Verify new config is active (applied_mtime updated)
-#   4. Write an invalid dynconf update and trigger reload
-#   5. Verify config remains at last-known-good after the invalid file
-#   6. Atomically restore a previous valid file and verify the reload
-#
-# Usage:
-#   NGINX_URL=http://localhost:8080 ./dynconf_reload_rollback.sh
-#
-# Exit codes:
-#   0 — all checks passed
-#   1 — one or more checks failed
-#   2 — prerequisites not met
+# The diagnostics endpoint is read-only. This test models operator restore by
+# replacing the watched file atomically, while preserving caller-owned files.
 
 set -e
 
@@ -34,6 +10,19 @@ NGINX_URL="${NGINX_URL:-http://localhost:8080}"
 DIAGNOSTICS_PATH="/nginx-markdown/diagnostics"
 PASS_COUNT=0
 FAIL_COUNT=0
+TEST_TMPDIR=""
+OWN_TEST_TMPDIR=0
+DYNCONF_FILE=""
+DYNCONF_DIR=""
+ORIGINAL_FILE_EXISTED=0
+DYNCONF_FILE_CREATED_BY_TEST=0
+ORIGINAL_FILE_MODE=""
+ORIGINAL_FILE_UID=""
+ORIGINAL_FILE_GID=""
+BACKUP_PATH=""
+BACKUP_READY=0
+TMP_WRITE_PATH=""
+LAST_DIAG=""
 
 pass() {
     local msg="$1"
@@ -47,13 +36,181 @@ fail() {
     echo "FAIL: $msg" >&2
 }
 
+stat_field() {
+    local bsd_format="$1"
+    local gnu_format="$2"
+    local path="$3"
+    local value=""
+
+    value="$(stat -f "$bsd_format" "$path" 2>/dev/null || true)"
+    if [[ "$value" =~ ^[0-9]+(:[0-9]+)?$ ]]; then
+        printf '%s\n' "$value"
+        return 0
+    fi
+
+    stat -c "$gnu_format" "$path" 2>/dev/null
+}
+
+canonical_target_path() {
+    local raw="$1"
+    local directory="${raw%/*}"
+    local basename="${raw##*/}"
+    local canonical_directory=""
+
+    if [[ -z "$raw" || "$raw" == *$'\n'* || "$basename" == "" ]]; then
+        return 1
+    fi
+    if [[ "$raw" != /* ]]; then
+        raw="$PWD/$raw"
+        directory="${raw%/*}"
+        basename="${raw##*/}"
+    fi
+    if [[ -L "$raw" ]]; then
+        echo "Error: DYNCONF_FILE must not be a symlink: $raw" >&2
+        return 1
+    fi
+    if [[ ! -d "$directory" ]]; then
+        echo "Error: dynconf parent directory does not exist: $directory" >&2
+        return 1
+    fi
+
+    canonical_directory="$(cd -P -- "$directory" 2>/dev/null && pwd -P)" \
+        || return 1
+    printf '%s/%s\n' "$canonical_directory" "$basename"
+}
+
+path_is_inside_test_directory() {
+    local path="$1"
+    [[ "$path" == "$TEST_TMPDIR"/* ]]
+}
+
+prepare_dynconf_ownership() {
+    local requested_path="$1"
+    local backup_mode=""
+    local backup_owner=""
+
+    DYNCONF_FILE="$(canonical_target_path "$requested_path")" || return 1
+    DYNCONF_DIR="${DYNCONF_FILE%/*}"
+
+    if ! path_is_inside_test_directory "$DYNCONF_FILE" \
+        && [[ "${ALLOW_EXTERNAL_DYNCONF_TEST:-0}" != "1" ]]; then
+        echo "Error: external DYNCONF_FILE requires " \
+            "ALLOW_EXTERNAL_DYNCONF_TEST=1: $DYNCONF_FILE" >&2
+        return 1
+    fi
+
+    if [[ -L "$DYNCONF_FILE" ]]; then
+        echo "Error: DYNCONF_FILE must not be a symlink: $DYNCONF_FILE" >&2
+        return 1
+    fi
+
+    if [[ -e "$DYNCONF_FILE" ]]; then
+        if [[ ! -f "$DYNCONF_FILE" ]]; then
+            echo "Error: DYNCONF_FILE is not a regular file: $DYNCONF_FILE" >&2
+            return 1
+        fi
+
+        ORIGINAL_FILE_EXISTED=1
+        ORIGINAL_FILE_MODE="$(stat_field '%Lp' '%a' "$DYNCONF_FILE")" || return 1
+        backup_owner="$(stat_field '%u:%g' '%u:%g' "$DYNCONF_FILE")" || return 1
+        ORIGINAL_FILE_UID="${backup_owner%%:*}"
+        ORIGINAL_FILE_GID="${backup_owner##*:}"
+
+        # The backup is beside the target, so its eventual rename is atomic.
+        BACKUP_PATH="$(mktemp "$DYNCONF_DIR/.markdown-dynconf-backup.XXXXXX")" \
+            || return 1
+        if ! cp -p -- "$DYNCONF_FILE" "$BACKUP_PATH"; then
+            echo "Error: unable to back up caller-owned dynconf file" >&2
+            return 1
+        fi
+
+        # Normalize and verify metadata before the original file is changed.
+        chmod "$ORIGINAL_FILE_MODE" "$BACKUP_PATH" || return 1
+        chown "$ORIGINAL_FILE_UID:$ORIGINAL_FILE_GID" "$BACKUP_PATH" \
+            || return 1
+        backup_mode="$(stat_field '%Lp' '%a' "$BACKUP_PATH")" || return 1
+        backup_owner="$(stat_field '%u:%g' '%u:%g' "$BACKUP_PATH")" || return 1
+        if [[ "$backup_mode" != "$ORIGINAL_FILE_MODE" \
+            || "$backup_owner" != "$ORIGINAL_FILE_UID:$ORIGINAL_FILE_GID" ]]; then
+            echo "Error: dynconf backup metadata verification failed" >&2
+            return 1
+        fi
+        BACKUP_READY=1
+    fi
+}
+
+restore_original_atomically() {
+    if [[ "$ORIGINAL_FILE_EXISTED" -eq 1 ]]; then
+        if [[ "$BACKUP_READY" -eq 0 ]]; then
+            return 0
+        fi
+        if [[ -z "$BACKUP_PATH" || ! -f "$BACKUP_PATH" ]]; then
+            echo "Error: original dynconf backup is unavailable" >&2
+            return 1
+        fi
+        chmod "$ORIGINAL_FILE_MODE" "$BACKUP_PATH" || return 1
+        chown "$ORIGINAL_FILE_UID:$ORIGINAL_FILE_GID" "$BACKUP_PATH" \
+            || return 1
+        if ! mv -f -- "$BACKUP_PATH" "$DYNCONF_FILE"; then
+            echo "Error: unable to atomically restore caller-owned dynconf" >&2
+            return 1
+        fi
+        BACKUP_PATH=""
+        BACKUP_READY=0
+        return 0
+    fi
+
+    if [[ "$DYNCONF_FILE_CREATED_BY_TEST" -eq 1 ]]; then
+        rm -f -- "$DYNCONF_FILE"
+    fi
+}
+
+cleanup() {
+    local rc="${1:-$?}"
+    local cleanup_error=0
+
+    trap - EXIT HUP INT TERM
+    if [[ -n "$TMP_WRITE_PATH" ]]; then
+        if ! rm -f -- "$TMP_WRITE_PATH"; then
+            echo "Error: unable to remove temporary dynconf write" >&2
+            cleanup_error=1
+        fi
+        TMP_WRITE_PATH=""
+    fi
+    if [[ "$BACKUP_READY" -eq 1 ]]; then
+        if ! restore_original_atomically; then
+            echo "Error: caller-owned dynconf restore failed; backup retained" >&2
+            cleanup_error=1
+        fi
+    elif [[ "$DYNCONF_FILE_CREATED_BY_TEST" -eq 1 ]]; then
+        if ! rm -f -- "$DYNCONF_FILE"; then
+            echo "Error: unable to remove test-created dynconf file" >&2
+            cleanup_error=1
+        fi
+    fi
+    if [[ -n "$BACKUP_PATH" && "$BACKUP_READY" -eq 0 ]]; then
+        if ! rm -f -- "$BACKUP_PATH"; then
+            echo "Error: unable to remove completed dynconf backup" >&2
+            cleanup_error=1
+        fi
+    fi
+    if [[ "$OWN_TEST_TMPDIR" -eq 1 && -n "$TEST_TMPDIR" ]]; then
+        if ! rm -rf -- "$TEST_TMPDIR"; then
+            echo "Error: unable to remove private dynconf test directory" >&2
+            cleanup_error=1
+        fi
+    fi
+    if [[ "$cleanup_error" -ne 0 ]]; then
+        echo "Error: dynconf cleanup completed with errors" >&2
+    fi
+    exit "$rc"
+}
+
 check_prerequisites() {
     if ! command -v curl >/dev/null 2>&1; then
         echo "Error: curl is required" >&2
         exit 2
     fi
-
-    # Verify NGINX is reachable
     if ! curl -sf "${NGINX_URL}/" >/dev/null 2>&1; then
         echo "Error: NGINX not reachable at ${NGINX_URL}" >&2
         echo "Start NGINX with markdown module and dynconf enabled first." >&2
@@ -65,13 +222,144 @@ get_diagnostics() {
     curl -sf "${NGINX_URL}${DIAGNOSTICS_PATH}" 2>/dev/null || echo ""
 }
 
+diagnostics_field() {
+    local field="$1"
+    local json="$2"
+    local match=""
+
+    case "$field" in
+        config_version)
+            match="$(printf '%s' "$json" | grep -Eo '"config_version"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false)' | head -1 || true)"
+            ;;
+        active_mtime)
+            match="$(printf '%s' "$json" | grep -Eo '"active_mtime"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false)' | head -1 || true)"
+            ;;
+        markdown_filter)
+            match="$(printf '%s' "$json" | grep -Eo '"markdown_filter"[[:space:]]*:[[:space:]]*("[^"]*"|[0-9]+|true|false)' | head -1 || true)"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+    match="${match#*:}"
+    match="${match# }"
+    match="${match#\"}"
+    match="${match%\"}"
+    printf '%s\n' "$match"
+}
+
+wait_for_diagnostics_field() {
+    local field="$1"
+    local predicate="$2"
+    local deadline_seconds="${3:-15}"
+    local deadline="$(($(date +%s) + deadline_seconds))"
+    local value=""
+    local baseline=""
+    local expected=""
+
+    case "$predicate" in
+        changed_from:*)
+            baseline="${predicate#changed_from:}"
+            ;;
+        equals:*)
+            expected="${predicate#equals:}"
+            ;;
+        nonempty)
+            ;;
+        *)
+            echo "Error: unsupported diagnostics predicate: $predicate" >&2
+            return 1
+            ;;
+    esac
+
+    while [[ "$(date +%s)" -lt "$deadline" ]]; do
+        LAST_DIAG="$(get_diagnostics)"
+        value="$(diagnostics_field "$field" "$LAST_DIAG")"
+        if [[ "$predicate" == "nonempty" && -n "$value" ]]; then
+            return 0
+        fi
+        if [[ "$predicate" == changed_from:* && -n "$value" \
+            && "$value" != "$baseline" ]]; then
+            return 0
+        fi
+        if [[ "$predicate" == equals:* && "$value" == "$expected" ]]; then
+            return 0
+        fi
+        sleep 1
+    done
+
+    echo "Timeout waiting for diagnostics field $field ($predicate)" >&2
+    echo "Last diagnostics JSON: ${LAST_DIAG:-<empty>}" >&2
+    return 1
+}
+
+write_dynconf_atomically() {
+    local contents="$1"
+
+    if [[ -L "$DYNCONF_FILE" ]]; then
+        echo "Error: dynconf target became a symlink" >&2
+        return 1
+    fi
+    if [[ "$ORIGINAL_FILE_EXISTED" -eq 0 \
+        && "$DYNCONF_FILE_CREATED_BY_TEST" -eq 0 \
+        && -e "$DYNCONF_FILE" ]]; then
+        echo "Error: dynconf target appeared after ownership check" >&2
+        return 1
+    fi
+
+    TMP_WRITE_PATH="$(mktemp "$DYNCONF_DIR/.markdown-dynconf-write.XXXXXX")" \
+        || return 1
+    if ! printf '%s\n' "$contents" > "$TMP_WRITE_PATH"; then
+        echo "Error: failed to write temporary dynconf file" >&2
+        rm -f -- "$TMP_WRITE_PATH" || true
+        TMP_WRITE_PATH=""
+        return 1
+    fi
+    if ! mv -f -- "$TMP_WRITE_PATH" "$DYNCONF_FILE"; then
+        echo "Error: failed to replace dynconf file $DYNCONF_FILE" >&2
+        rm -f -- "$TMP_WRITE_PATH" || true
+        TMP_WRITE_PATH=""
+        return 1
+    fi
+    TMP_WRITE_PATH=""
+    DYNCONF_FILE_CREATED_BY_TEST=1
+}
+
+if [[ "${DYNCONF_RELOAD_ROLLBACK_LIBRARY:-0}" == "1" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+
+# --- Ownership setup (before any caller file write) ---
+
+umask 077
+if ! TEST_TMPDIR="$(mktemp -d)"; then
+    echo "Error: unable to create private dynconf test directory" >&2
+    exit 2
+fi
+if ! TEST_TMPDIR="$(cd -P -- "$TEST_TMPDIR" && pwd -P)"; then
+    echo "Error: unable to canonicalize private dynconf test directory" >&2
+    exit 2
+fi
+OWN_TEST_TMPDIR=1
+trap 'cleanup "$?"' EXIT
+trap 'cleanup 129' HUP
+trap 'cleanup 130' INT
+trap 'cleanup 143' TERM
+
+if [[ -n "${DYNCONF_FILE+x}" ]]; then
+    REQUESTED_DYNCONF_FILE="$DYNCONF_FILE"
+else
+    REQUESTED_DYNCONF_FILE="$TEST_TMPDIR/markdown-dynamic.conf"
+fi
+prepare_dynconf_ownership "$REQUESTED_DYNCONF_FILE"
+
 # --- Step 0: Check prerequisites ---
 
 check_prerequisites
 
 # --- Step 1: Verify initial config snapshot ---
 
-DIAG=$(get_diagnostics)
+DIAG="$(get_diagnostics)"
 if [[ -n "$DIAG" ]]; then
     pass "diagnostics endpoint reachable"
 else
@@ -80,91 +368,56 @@ else
     exit 1
 fi
 
-# Extract applied_mtime from diagnostics (JSON field)
-INITIAL_MTIME=$(echo "$DIAG" | grep -o '"applied_mtime":[0-9]*' | head -1 | cut -d: -f2)
+INITIAL_MTIME="$(diagnostics_field active_mtime "$DIAG")"
+INITIAL_VERSION="$(diagnostics_field config_version "$DIAG")"
 if [[ -n "$INITIAL_MTIME" ]]; then
     pass "initial applied_mtime present: $INITIAL_MTIME"
 else
-    # applied_mtime may not be present if dynconf was never loaded
-    pass "initial state: no applied_mtime (dynconf not yet loaded)"
-    INITIAL_MTIME="0"
+    fail "initial active_mtime is missing"
+fi
+if [[ -n "$INITIAL_VERSION" ]]; then
+    pass "initial config_version present: $INITIAL_VERSION"
+else
+    fail "initial config_version is missing"
+    INITIAL_VERSION="0"
 fi
 
 # --- Step 2: Write valid dynconf and reload ---
 
-DYNCONF_FILE_CREATED_BY_SCRIPT=0
-if [[ -n "${DYNCONF_FILE+x}" ]]; then
-    DYNCONF_FILE_CLEANUP_ALLOWED=0
-else
-    DYNCONF_FILE="/tmp/nginx-markdown-dynconf-test.conf"
-    DYNCONF_FILE_CLEANUP_ALLOWED=1
-fi
-if [[ "$DYNCONF_FILE_CLEANUP_ALLOWED" -eq 1 && -e "$DYNCONF_FILE" ]]; then
-    DYNCONF_FILE_CLEANUP_ALLOWED=0
-fi
-umask 077
-
-write_dynconf_atomically() {
-    # Write beside the watched file and rename into place so NGINX observes
-    # either the old complete file or the new complete file, never a partial
-    # write.  Arguments: $1 - complete key=value configuration contents.
-    local contents="$1"
-    local tmpfile="${DYNCONF_FILE}.tmp.$$"
-
-    if ! printf '%s\n' "$contents" > "$tmpfile"; then
-        echo "Error: failed to write temporary dynconf file $tmpfile" >&2
-        rm -f "$tmpfile" || true
-        return 1
-    fi
-    if ! mv -f "$tmpfile" "$DYNCONF_FILE"; then
-        echo "Error: failed to replace dynconf file $DYNCONF_FILE" >&2
-        rm -f "$tmpfile" || true
-        return 1
-    fi
-    if [[ "$DYNCONF_FILE_CLEANUP_ALLOWED" -eq 1 ]]; then
-        DYNCONF_FILE_CREATED_BY_SCRIPT=1
-    fi
-    return 0
-}
-
-# shellcheck disable=SC2329 # Invoked indirectly by the EXIT trap.
-cleanup_dynconf() {
-    local tmpfile="${DYNCONF_FILE}.tmp.$$"
-
-    rm -f "$tmpfile" || true
-    if [[ "$DYNCONF_FILE_CREATED_BY_SCRIPT" -eq 1 ]]; then
-        rm -f "$DYNCONF_FILE" || true
-    fi
-    return 0
-}
-
-trap 'cleanup_dynconf' EXIT
-
 write_dynconf_atomically 'schema_version=0.9
+markdown_filter=on
 memory_budget=2m
 streaming_budget=10m'
-
 echo "Wrote valid dynconf to $DYNCONF_FILE" >&2
 
-# Trigger reload (send SIGHUP to NGINX master)
-NGINX_PID=$(pgrep -f "nginx: master" 2>/dev/null | head -1)
+# Trigger reload when a master is discoverable. Otherwise the watcher timer is
+# allowed to observe the file; this is intentionally not an mtime shortcut.
+NGINX_PID="$(pgrep -f "nginx: master" 2>/dev/null | head -1 || true)"
 if [[ -n "$NGINX_PID" ]]; then
     kill -HUP "$NGINX_PID" 2>/dev/null || true
-    sleep 1
     pass "sent SIGHUP to NGINX master (pid $NGINX_PID)"
 else
     echo "SKIP: cannot find NGINX master process for SIGHUP" >&2
-    pass "SIGHUP skipped (manual reload required)"
+    pass "SIGHUP skipped (watcher polling will be used)"
 fi
 
-# --- Step 3: Verify new config is active ---
+# --- Step 3: Verify new config with bounded polling ---
 
-DIAG=$(get_diagnostics)
-NEW_MTIME=$(echo "$DIAG" | grep -o '"applied_mtime":[0-9]*' | head -1 | cut -d: -f2)
-if [[ -n "$NEW_MTIME" && "$NEW_MTIME" != "$INITIAL_MTIME" ]]; then
-    pass "applied_mtime updated after valid reload: $NEW_MTIME"
+if wait_for_diagnostics_field config_version \
+    "changed_from:$INITIAL_VERSION" 15 \
+    && wait_for_diagnostics_field markdown_filter equals:on 15; then
+    NEW_VERSION="$(diagnostics_field config_version "$LAST_DIAG")"
+    NEW_MTIME="$(diagnostics_field active_mtime "$LAST_DIAG")"
+    pass "valid reload observed by config_version=$NEW_VERSION and markdown_filter=on"
+    if [[ -n "$NEW_MTIME" && "$NEW_MTIME" != "$INITIAL_MTIME" ]]; then
+        pass "applied_mtime changed after valid reload: $NEW_MTIME"
+    else
+        pass "applied_mtime retained same-second value; version and behavior evidence passed"
+    fi
 else
-    fail "applied_mtime not updated after valid reload (got: ${NEW_MTIME:-empty})"
+    fail "valid dynconf reload was not observed"
+    NEW_VERSION="$INITIAL_VERSION"
+    NEW_MTIME="$(diagnostics_field active_mtime "$LAST_DIAG")"
 fi
 
 # --- Step 4: Write invalid dynconf and reload ---
@@ -172,59 +425,50 @@ fi
 write_dynconf_atomically 'schema_version=0.9
 unknown_key_that_does_not_exist=should_fail
 memory_budget=invalid_not_a_size'
-
 echo "Wrote invalid dynconf to $DYNCONF_FILE" >&2
 
 if [[ -n "$NGINX_PID" ]]; then
     kill -HUP "$NGINX_PID" 2>/dev/null || true
-    sleep 1
     pass "sent SIGHUP for invalid config reload"
 fi
 
-# --- Step 5: Verify config remains at last-known-good ---
+# --- Step 5: Verify last-known-good with bounded polling ---
 
-DIAG=$(get_diagnostics)
-POST_INVALID_MTIME=$(echo "$DIAG" | grep -o '"applied_mtime":[0-9]*' | head -1 | cut -d: -f2)
-if [[ -n "$POST_INVALID_MTIME" && "$POST_INVALID_MTIME" == "$NEW_MTIME" ]]; then
-    pass "applied_mtime unchanged after invalid reload (active config preserved)"
+if wait_for_diagnostics_field config_version equals:"$NEW_VERSION" 15 \
+    && wait_for_diagnostics_field markdown_filter equals:on 15; then
+    pass "invalid reload preserved config_version=$NEW_VERSION and markdown_filter=on"
 else
-    fail "applied_mtime changed after invalid reload (expected: $NEW_MTIME, got: ${POST_INVALID_MTIME:-empty})"
+    fail "invalid reload did not preserve the last-known-good configuration"
 fi
 
 # --- Step 6: Restore a previous valid file atomically ---
 
-sleep 1
 write_dynconf_atomically 'schema_version=0.9
+markdown_filter=off
 memory_budget=1m'
-
 echo "Atomically restored valid dynconf at $DYNCONF_FILE" >&2
 
 if [[ -n "$NGINX_PID" ]]; then
     kill -HUP "$NGINX_PID" 2>/dev/null || true
-    sleep 1
     pass "sent SIGHUP for restored-file reload"
 fi
 
-# --- Step 7: Verify restored-file reload succeeded ---
+# --- Step 7: Verify restored-file reload with two independent signals ---
 
-ROLLBACK_MTIME=""
-for ((attempt = 0; attempt < 5; attempt++)); do
-    DIAG=$(get_diagnostics)
-    ROLLBACK_MTIME=$(echo "$DIAG" | grep -o '"applied_mtime":[0-9]*' | head -1 | cut -d: -f2)
-    if [[ -n "$ROLLBACK_MTIME" && "$ROLLBACK_MTIME" != "$POST_INVALID_MTIME" ]]; then
-        break
+if wait_for_diagnostics_field config_version \
+    "changed_from:$NEW_VERSION" 15 \
+    && wait_for_diagnostics_field markdown_filter equals:off 15; then
+    ROLLBACK_VERSION="$(diagnostics_field config_version "$LAST_DIAG")"
+    ROLLBACK_MTIME="$(diagnostics_field active_mtime "$LAST_DIAG")"
+    pass "restored reload observed by config_version=$ROLLBACK_VERSION and markdown_filter=off"
+    if [[ -n "$ROLLBACK_MTIME" && "$ROLLBACK_MTIME" != "$NEW_MTIME" ]]; then
+        pass "applied_mtime changed after restored-file reload: $ROLLBACK_MTIME"
+    else
+        pass "restored-file mtime was within the same clock granularity"
     fi
-    sleep 1
-done
-if [[ -n "$ROLLBACK_MTIME" && "$ROLLBACK_MTIME" != "$POST_INVALID_MTIME" ]]; then
-    pass "applied_mtime updated after restored-file reload: $ROLLBACK_MTIME"
 else
-    fail "applied_mtime not updated after restored-file reload (got: ${ROLLBACK_MTIME:-empty})"
+    fail "restored-file reload was not observed"
 fi
-
-# Cleanup is owned by the EXIT trap so failure paths remove the same files.
-
-# --- Summary ---
 
 echo "" >&2
 echo "=== Dynconf Reload/File-Restore E2E Results ===" >&2
