@@ -92,7 +92,10 @@ validator core.
 
 - Operators must rewrite 0.8.x configs (mitigated by the 0.9.0 migration guide).
 - Reject-only stubs add parser entries that exist only to error (removed in 1.0).
-- No rollback-by-config; rollback is by reverting the module version.
+- No in-band rollback command is part of the config schema. For dynamic
+  configuration, 0.9.2 restores a prior valid file by atomic replacement and
+  reuses the normal watcher validation path; the worker-consistency decision
+  is recorded in [ADR-0026](0026-dynconf-file-restore-contract.md).
 
 ## Alternatives Considered
 
