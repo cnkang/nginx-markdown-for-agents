@@ -286,5 +286,32 @@ Required:
   the number of format arguments passed after the format string.  A
   mismatch (for example `ngx_log_debug2` with only one `%`-substitution
   argument) silently reads garbage from the stack or corrupts the log
-  output.  This applies equally to `ngx_log_debugN` and the error-level
+  output.  This applies equally to   `ngx_log_debugN` and the error-level
   `ngx_log_errorN` family.
+
+---
+
+### Streaming Reason Code Naming Convention
+
+Streaming C-only reason codes (defined in
+`components/nginx-module/src/ngx_http_markdown_reason.c` under
+`#ifdef MARKDOWN_STREAMING_ENABLED`) use UPPERCASE format (for example
+`STREAMING_CONVERT`, `STREAMING_FAIL_POSTCOMMIT`,
+`ELIGIBLE_STREAMING_AUTO`). This differs from the lowercase snake_case
+convention used by the Rust `ReasonCode` enum (for example
+`converted`, `decompression_error`, `bypass_no_transform`).
+
+This inconsistency is **known and documented**. It does not affect
+production behavior because these UPPERCASE codes are internal to the C
+streaming engine and are not emitted through the Rust FFI reason-code
+accessor path. They appear only in C-side `ngx_log_decision()` calls
+and metrics classification within the streaming filter path.
+
+**Migration plan**: In the 1.x release, when streaming reason codes are
+migrated to Rust enum variants (as part of the Rust-first streaming
+engine migration), they will be renamed to lowercase snake_case (for
+example `streaming_convert`, `streaming_fail_postcommit`,
+`eligible_streaming_auto`) to match the established Rust convention.
+The C-side UPPERCASE constants will become aliases or be removed
+entirely. This migration must be announced in the changelog and
+migration guide with a mapping table.
