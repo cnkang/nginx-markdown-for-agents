@@ -380,6 +380,23 @@ make supply-chain
 - [Harness 维护手册](docs/guides/HARNESS_MAINTENANCE.md) — 自定义代码审查规则和校验脚本编写。
 - [常见问题 (FAQ)](docs/FAQ.md) & [术语表](docs/glossary.md)。
 
+## v0.9.2 新特性（开发候选版本）
+
+v0.9.2 分支目前是开发候选版本，尚未发布。它保持 v0.9.1 的配置和
+ABI 公共表面，同时收紧以下契约：
+
+- **只读诊断接口**：支持 `GET`/`HEAD`，包括 `action=rollback` 在内的
+  变更请求都会被拒绝。恢复 dynconf 应原子替换被监视文件；LKG 继续用于
+  失败重载保护。
+- **请求池作用域的 OTel 所有权**：span 和导出子请求使用请求池，不创建或
+  声称存在 worker-owned 队列、线程、定时器、socket 或退出时 flush。
+- **公共表面契约门禁**：`make public-surface-drift-check` 将指令、dynconf、
+  metrics、reason code 和 FFI 元数据与源代码进行校验。
+
+详见 [0.9.2 发布说明](docs/releases/0.9.2-release-notes.md)、
+[dynconf 指南](docs/guides/DYNAMIC_CONFIG.md) 和
+[回滚指南](docs/guides/ROLLBACK-0.9.2.md)。
+
 ## v0.9.1 新特性
 
 v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能就绪工作的基础上，完成 v1.0 冻结前最后一轮有意的源码构建与公共契约清理。v0.9.0 发布时原计划作为最后一个破坏性版本；由于 v1.0 尚未发布且采用规模仍有限，兼容性冻结窗口现明确延长至 v0.9.1。
@@ -401,7 +418,7 @@ v0.9.1 是 **v1.0 前最后一次基线收敛与兼容性重置**。它在性能
 
 v0.9.1 发布后迈向 v1.0.0 正式版的演进方向：
 
-- **可观测性扩展**：在 NGINX C 模块过滤链路中引入原生的 OpenTelemetry 链路追踪 (Tracing) 支持。
+- **可观测性扩展**：稳定实验性的 OpenTelemetry 表面及其请求池作用域契约。
 - **分发渠道拓宽**：将 APT 与 YUM 打包发布整合至标准的 Linux 发行版包索引中。
 - **诊断系统增强**：扩展 `nginx-markdown-doctor` CLI 工具与监控指标，提供实时转换监控。
 

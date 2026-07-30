@@ -7,11 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.2] - 2026-07-30
+## [0.9.2] - Unreleased candidate (2026-07-30)
 
 Maintenance and hardening release. Fixes diagnostics and reason-code mapping
-gaps, adds OTel lifecycle cleanup, introduces a dynconf rollback API, and
-establishes a public surface drift detection gate for release integrity.
+gaps, documents request-scoped OTel ownership, removes the unsafe worker-local
+dynconf restore path, and establishes a public surface contract gate for
+release integrity.
 
 ### Fixed
 
@@ -25,11 +26,13 @@ establishes a public surface drift detection gate for release integrity.
 
 ### Added
 
-- OTel worker lifecycle cleanup on NGINX reload and shutdown. OpenTelemetry
-  worker threads and resources are properly cleaned up, preventing resource
-  accumulation across reload cycles.
-- Dynconf rollback API (`POST /nginx-markdown/diagnostics?action=rollback`)
-  reverts the active dynamic configuration to the previously applied snapshot.
+- OTel ownership is now explicit: spans and export subrequests are
+  request-pool scoped, and no worker-owned queue, thread, timer, or file
+  descriptor is created or flushed at worker exit.
+- Dynconf diagnostics is read-only. Operators restore a prior valid dynconf
+  file atomically; the watcher validates it and promotes it through the normal
+  reload path. The internal last-known-good snapshot remains available for
+  failed-reload protection and diagnostics reporting.
 - Public surface inventory and drift detection gate validates that FFI exports,
   configuration directives, metric names, and reason codes have not drifted
   from the declared inventory.

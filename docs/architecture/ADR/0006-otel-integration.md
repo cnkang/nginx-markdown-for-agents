@@ -33,6 +33,9 @@ The current implementation uses OTLP HTTP/JSON encoding. OTLP HTTP/protobuf is a
 - Request-scoped span storage; ring-buffer and batch export are deferred until
   the OTel surface is promoted beyond its experimental status
 - Nonblocking NGINX internal-subrequest HTTP POST to the configured endpoint
+- Span state and export subrequests are owned by the request pool. The module
+  creates no worker-owned OTel thread, queue, timer, socket, or pending batch,
+  so worker exit has no OTel cleanup or flush operation to perform.
 - Configuration: `markdown_otel on|off` and
   `markdown_otel_endpoint <internal-uri>`
 - Span attributes: `nginx.markdown.engine`, `nginx.markdown.result`, `nginx.markdown.reason_code`, `nginx.markdown.duration_ms`

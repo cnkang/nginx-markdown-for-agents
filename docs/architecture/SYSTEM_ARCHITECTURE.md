@@ -297,9 +297,11 @@ denied by default.
 `markdown_dynconf_dry_run on` validates a new configuration file on HUP
 without replacing the active snapshot. Validation results include line
 numbers, field names, and error reasons. On successful reload, the
-previous active snapshot is preserved as last-known-good (LKG). Manual
-rollback restores `active_snapshot` from LKG. `applied_mtime` updates
-only after successful application (Rule 35).
+previous active snapshot is preserved as last-known-good (LKG) for diagnostics
+and failed-reload protection. There is no worker-local runtime restore API;
+operators restore a prior valid file atomically and let the normal watcher
+validate and apply it. `applied_mtime` updates only after successful
+application (Rule 35).
 
 ### Reason Code FFI Accessor (`reason_code.rs` + FFI)
 Reason codes are defined as a Rust enum (single source of truth). C
