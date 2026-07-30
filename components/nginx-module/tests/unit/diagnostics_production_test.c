@@ -857,6 +857,10 @@ test_handler_get_head_and_denials(void)
     TEST_PASS("Handler paths covered");
 }
 
+/*
+ * Verify that the diagnostics endpoint remains read-only and rejects
+ * mutation methods even when a rollback action is supplied.
+ */
 static void
 test_handler_post_not_allowed(void)
 {

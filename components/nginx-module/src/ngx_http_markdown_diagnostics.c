@@ -353,7 +353,7 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
         { "failed_closed",                17 },
         { "conversion_error",             18 },
         { "memory_budget_exceeded",       19 },
-        /* Production reason codes (indices 20-24) */
+        /* Production reason codes (indices 20-25) */
         { "overload",                     20 },
         { "invalid_dynconf",              21 },
         { "degraded_snapshot",            22 },

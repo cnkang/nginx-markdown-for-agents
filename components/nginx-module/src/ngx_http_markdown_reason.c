@@ -383,7 +383,12 @@ ngx_http_markdown_reason_skip_conditional(void)
     return &reason_str_skipped_conditional;
 }
 
-
+/*
+ * Return the reason string for a decompression failure.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "decompression_error"
+ */
 const ngx_str_t *
 ngx_http_markdown_reason_decompression_error(void)
 {
@@ -391,7 +396,12 @@ ngx_http_markdown_reason_decompression_error(void)
     return &reason_str_decompression_error;
 }
 
-
+/*
+ * Return the reason string for an exhausted decompression budget.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "decompression_budget_exceeded"
+ */
 const ngx_str_t *
 ngx_http_markdown_reason_decompression_budget_exceeded(void)
 {
@@ -399,7 +409,12 @@ ngx_http_markdown_reason_decompression_budget_exceeded(void)
     return &reason_str_decompression_budget_exceeded;
 }
 
-
+/*
+ * Return the reason string for an unsupported decompression format.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "decompression_format_error"
+ */
 const ngx_str_t *
 ngx_http_markdown_reason_decompression_format_error(void)
 {
@@ -407,7 +422,12 @@ ngx_http_markdown_reason_decompression_format_error(void)
     return &reason_str_decompression_format_error;
 }
 
-
+/*
+ * Return the reason string for truncated decompression input.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "decompression_truncated_input"
+ */
 const ngx_str_t *
 ngx_http_markdown_reason_decompression_truncated_input(void)
 {
@@ -415,7 +435,12 @@ ngx_http_markdown_reason_decompression_truncated_input(void)
     return &reason_str_decompression_truncated_input;
 }
 
-
+/*
+ * Return the reason string for decompression I/O failure.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "decompression_io_error"
+ */
 const ngx_str_t *
 ngx_http_markdown_reason_decompression_io_error(void)
 {
@@ -423,7 +448,12 @@ ngx_http_markdown_reason_decompression_io_error(void)
     return &reason_str_decompression_io_error;
 }
 
-
+/*
+ * Return the reason string for a request timeout.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "timeout"
+ */
 const ngx_str_t *
 ngx_http_markdown_reason_timeout(void)
 {
@@ -431,7 +461,12 @@ ngx_http_markdown_reason_timeout(void)
     return &reason_str_timeout;
 }
 
-
+/*
+ * Return the reason string for an exhausted processing budget.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "budget_exceeded"
+ */
 const ngx_str_t *
 ngx_http_markdown_reason_budget_exceeded(void)
 {
@@ -439,7 +474,12 @@ ngx_http_markdown_reason_budget_exceeded(void)
     return &reason_str_budget_exceeded;
 }
 
-
+/*
+ * Return the reason string for replay-buffer failure.
+ *
+ * Returns:
+ *   Pointer to static ngx_str_t "replay_error"
+ */
 const ngx_str_t *
 ngx_http_markdown_reason_replay_error(void)
 {
