@@ -556,12 +556,11 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
      * RELOAD_APPLIED: new settings committed.
      * RELOAD_NO_CHANGE: file parsed successfully but contained no
      *   effective keys — still a successful parse, so confirm.
-     * RELOAD_DRY_RUN_OK: validation passed but settings were NOT
-     *   applied (dry-run mode); do NOT update applied_mtime so
-     *   the next timer cycle will re-validate if the file changes.
-     * RELOAD_DRY_RUN_FAIL: validation found errors; update
-     *   applied_mtime to suppress repeated re-validation of the
-     *   same file content (errors are stored in last_validation).
+     * RELOAD_DRY_RUN_OK: validation succeeded without applying settings;
+     *   record applied_mtime so unchanged content is not re-validated on
+     *   every timer cycle.  A later mtime change starts a new validation.
+     * RELOAD_DRY_RUN_FAIL: validation failed; record applied_mtime after
+     *   storing the failure so the same invalid content is not retried.
      * INVALID_FILE / IO_ERROR: reload failed; applied_mtime stays
      *   at its previous value so the next timer cycle will retry.
      */

@@ -119,8 +119,11 @@ their toolchain or use prebuilt 0.9.0 binaries.
 
 The diagnostics endpoint is read-only and accepts only `GET` and `HEAD`.
 There is no runtime rollback API or rollback response schema. To restore a
-previous dynamic configuration, replace the watched file atomically so every
-worker observes the same on-disk input:
+previous dynamic configuration, replace the watched file atomically. Rename
+prevents workers from reading a partially written file, but does not
+synchronize worker-local watcher application: workers may detect and promote
+the new configuration at different times and temporarily serve different
+active snapshots:
 
 ```bash
 set -eu

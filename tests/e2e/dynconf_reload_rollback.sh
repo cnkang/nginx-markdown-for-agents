@@ -14,7 +14,7 @@
 #
 # Test Scenario:
 #   1. Verify initial config snapshot via diagnostics endpoint
-#   2. Atomically write a valid dynconf update and wait for the poller
+#   2. Atomically write a valid dynconf update and trigger the reload path
 #   3. Verify new config is active (applied_mtime updated)
 #   4. Write an invalid dynconf update and trigger reload
 #   5. Verify config remains at last-known-good after the invalid file
@@ -92,18 +92,53 @@ fi
 
 # --- Step 2: Write valid dynconf and reload ---
 
-DYNCONF_FILE="${DYNCONF_FILE:-/tmp/nginx-markdown-dynconf-test.conf}"
+DYNCONF_FILE_CREATED_BY_SCRIPT=0
+if [[ -n "${DYNCONF_FILE+x}" ]]; then
+    DYNCONF_FILE_CLEANUP_ALLOWED=0
+else
+    DYNCONF_FILE="/tmp/nginx-markdown-dynconf-test.conf"
+    DYNCONF_FILE_CLEANUP_ALLOWED=1
+fi
+if [[ "$DYNCONF_FILE_CLEANUP_ALLOWED" -eq 1 && -e "$DYNCONF_FILE" ]]; then
+    DYNCONF_FILE_CLEANUP_ALLOWED=0
+fi
 umask 077
 
 write_dynconf_atomically() {
+    # Write beside the watched file and rename into place so NGINX observes
+    # either the old complete file or the new complete file, never a partial
+    # write.  Arguments: $1 - complete key=value configuration contents.
     local contents="$1"
     local tmpfile="${DYNCONF_FILE}.tmp.$$"
 
-    printf '%s\n' "$contents" > "$tmpfile"
-    mv -f "$tmpfile" "$DYNCONF_FILE"
+    if ! printf '%s\n' "$contents" > "$tmpfile"; then
+        echo "Error: failed to write temporary dynconf file $tmpfile" >&2
+        rm -f "$tmpfile" || true
+        return 1
+    fi
+    if ! mv -f "$tmpfile" "$DYNCONF_FILE"; then
+        echo "Error: failed to replace dynconf file $DYNCONF_FILE" >&2
+        rm -f "$tmpfile" || true
+        return 1
+    fi
+    if [[ "$DYNCONF_FILE_CLEANUP_ALLOWED" -eq 1 ]]; then
+        DYNCONF_FILE_CREATED_BY_SCRIPT=1
+    fi
+    return 0
 }
 
-trap 'rm -f "$DYNCONF_FILE.tmp.$$" "$DYNCONF_FILE"' EXIT
+# shellcheck disable=SC2329 # Invoked indirectly by the EXIT trap.
+cleanup_dynconf() {
+    local tmpfile="${DYNCONF_FILE}.tmp.$$"
+
+    rm -f "$tmpfile" || true
+    if [[ "$DYNCONF_FILE_CREATED_BY_SCRIPT" -eq 1 ]]; then
+        rm -f "$DYNCONF_FILE" || true
+    fi
+    return 0
+}
+
+trap 'cleanup_dynconf' EXIT
 
 write_dynconf_atomically 'schema_version=0.9
 memory_budget=2m
@@ -151,13 +186,14 @@ fi
 DIAG=$(get_diagnostics)
 POST_INVALID_MTIME=$(echo "$DIAG" | grep -o '"applied_mtime":[0-9]*' | head -1 | cut -d: -f2)
 if [[ -n "$POST_INVALID_MTIME" && "$POST_INVALID_MTIME" == "$NEW_MTIME" ]]; then
-    pass "applied_mtime unchanged after invalid reload (rollback to LKG)"
+    pass "applied_mtime unchanged after invalid reload (active config preserved)"
 else
     fail "applied_mtime changed after invalid reload (expected: $NEW_MTIME, got: ${POST_INVALID_MTIME:-empty})"
 fi
 
 # --- Step 6: Restore a previous valid file atomically ---
 
+sleep 1
 write_dynconf_atomically 'schema_version=0.9
 memory_budget=1m'
 
@@ -166,25 +202,32 @@ echo "Atomically restored valid dynconf at $DYNCONF_FILE" >&2
 if [[ -n "$NGINX_PID" ]]; then
     kill -HUP "$NGINX_PID" 2>/dev/null || true
     sleep 1
-    pass "sent SIGHUP for rollback reload"
+    pass "sent SIGHUP for restored-file reload"
 fi
 
 # --- Step 7: Verify restored-file reload succeeded ---
 
-DIAG=$(get_diagnostics)
-ROLLBACK_MTIME=$(echo "$DIAG" | grep -o '"applied_mtime":[0-9]*' | head -1 | cut -d: -f2)
+ROLLBACK_MTIME=""
+for ((attempt = 0; attempt < 5; attempt++)); do
+    DIAG=$(get_diagnostics)
+    ROLLBACK_MTIME=$(echo "$DIAG" | grep -o '"applied_mtime":[0-9]*' | head -1 | cut -d: -f2)
+    if [[ -n "$ROLLBACK_MTIME" && "$ROLLBACK_MTIME" != "$POST_INVALID_MTIME" ]]; then
+        break
+    fi
+    sleep 1
+done
 if [[ -n "$ROLLBACK_MTIME" && "$ROLLBACK_MTIME" != "$POST_INVALID_MTIME" ]]; then
     pass "applied_mtime updated after restored-file reload: $ROLLBACK_MTIME"
 else
     fail "applied_mtime not updated after restored-file reload (got: ${ROLLBACK_MTIME:-empty})"
 fi
 
-# --- Cleanup ---
+# Cleanup is owned by the EXIT trap so failure paths remove the same files.
 
 # --- Summary ---
 
 echo "" >&2
-echo "=== Dynconf Reload/Rollback E2E Results ===" >&2
+echo "=== Dynconf Reload/File-Restore E2E Results ===" >&2
 echo "Results: $PASS_COUNT passed, $FAIL_COUNT failed" >&2
 
 if [[ "$FAIL_COUNT" -gt 0 ]]; then
