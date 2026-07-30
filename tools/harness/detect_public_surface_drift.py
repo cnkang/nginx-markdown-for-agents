@@ -445,6 +445,22 @@ def _clean_c_comment(comment):
     return lines
 
 
+def _strip_parenthesized_suffix(syntax):
+    """Remove a space-delimited, parenthesized syntax suffix."""
+    if not syntax.endswith(")"):
+        return syntax
+    open_paren = syntax.rfind("(")
+    if open_paren <= 0:
+        return syntax
+    prefix = syntax[:open_paren].rstrip(" \t")
+    if len(prefix) == open_paren:
+        return syntax
+    suffix = syntax[open_paren + 1:-1]
+    if any(char in "()\r\n" for char in suffix):
+        return syntax
+    return prefix
+
+
 def _comment_syntax(lines, name):
     """Extract a directive syntax declaration from one adjacent comment."""
     name_line = next((index for index, line in enumerate(lines)
@@ -462,27 +478,35 @@ def _comment_syntax(lines, name):
             break
         parts.append(candidate)
         index += 1
-    syntax = re.sub(r"[ \t]+\([^()\r\n]*\)$", "", " ".join(parts)).strip()
+    syntax = _strip_parenthesized_suffix(" ".join(parts)).strip()
     return syntax or "(no args)"
+
+
+def _comment_metadata_value(lines, prefixes):
+    """Return the first non-empty value following one of the prefixes."""
+    for line in lines:
+        for prefix in prefixes:
+            if not line.startswith(prefix):
+                continue
+            value = line[len(prefix):].lstrip(" \t")
+            if value and "\r" not in value and "\n" not in value:
+                return value.strip()
+    return None
 
 
 def _comment_public_metadata(lines):
     """Extract default, public syntax, and status annotations."""
     joined = "\n".join(lines)
-    default_match = re.search(
-        r"^(?:Public )?Default:[ \t]*([^\r\n]+)$", joined, flags=re.M)
-    public_default = re.search(
-        r"^Public default:[ \t]*([^\r\n]+)$", joined, flags=re.M)
-    public_syntax = re.search(
-        r"^Public syntax:[ \t]*([^\r\n]+)$", joined, flags=re.M)
-    if (default_match is not None and public_default is not None
-            and default_match.group(1).strip() == public_default.group(1).strip()):
+    default_value = _comment_metadata_value(
+        lines, ("Public Default:", "Default:"))
+    public_default = _comment_metadata_value(lines, ("Public default:",))
+    public_syntax = _comment_metadata_value(lines, ("Public syntax:",))
+    if default_value is not None and public_default == default_value:
         public_default = None
     status_match = re.search(r"^Public status:\s*(\w+)$", joined, flags=re.M)
     return {
-        "default": (public_default or default_match).group(1).strip()
-        if public_default or default_match else None,
-        "syntax": public_syntax.group(1).strip() if public_syntax else None,
+        "default": public_default or default_value,
+        "syntax": public_syntax,
         "status": status_match.group(1) if status_match else None,
     }
 
@@ -490,9 +514,15 @@ def _comment_public_metadata(lines):
 def _comment_migration(lines):
     """Extract a migration target from one adjacent comment."""
     joined = "\n".join(lines)
-    migration_match = re.search(r"^Migration:\s*(.+)$", joined, flags=re.M)
-    if migration_match:
-        targets = re.findall(r"->[ \t]*(markdown_[a-z_]+)", migration_match.group(1))
+    migration_text = _comment_metadata_value(lines, ("Migration:",))
+    if migration_text is None:
+        for index, line in enumerate(lines):
+            if line.startswith("Migration:"):
+                migration_text = _comment_metadata_value(
+                    lines[index + 1:], ("",))
+                break
+    if migration_text:
+        targets = re.findall(r"->[ \t]*(markdown_[a-z_]+)", migration_text)
         if targets:
             return targets[0]
     migrated_match = re.search(
@@ -878,11 +908,11 @@ def _c_ffi_param_types(params):
         # C prototypes name the parameter last.  Removing only that token
         # preserves pointer const/mutability and integer-width typedefs.
         param_type = re.sub(
-            r"[ \t]+[A-Za-z_][A-Za-z0-9_]*$", "", param)
+            r"[ \t]+[A-Za-z_]\w*$", "", param, flags=re.ASCII)
         if param_type == param and re.search(
-                r"\*[A-Za-z_][A-Za-z0-9_]*$", param):
+                r"\*[A-Za-z_]\w*$", param, flags=re.ASCII):
             param_type = re.sub(
-                r"[A-Za-z_][A-Za-z0-9_]*$", "", param).strip()
+                r"[A-Za-z_]\w*$", "", param, flags=re.ASCII).strip()
         result.append(_canonical_ffi_type(param_type, "c"))
     return result
 
@@ -892,7 +922,7 @@ def _extract_c_ffi_prototypes(header):
     text = _strip_c_comments(header)
     prototypes = {}
     for name_match in re.finditer(
-            r"\b(markdown_[A-Za-z0-9_]*)[ \t]*\(", text):
+            r"\b(markdown_\w*)[ \t]*\(", text, flags=re.ASCII):
         start = text.rfind(";", 0, name_match.start()) + 1
         end = text.find(");", name_match.end())
         if end < 0:
@@ -901,7 +931,7 @@ def _extract_c_ffi_prototypes(header):
         declaration = re.sub(
             r"(?m)^[ \t]*#[^\r\n]*(?:\r?\n|$)", "", declaration)
         declaration_name = re.search(
-            r"\b(markdown_[A-Za-z0-9_]*)[ \t]*\(", declaration)
+            r"\b(markdown_\w*)[ \t]*\(", declaration, flags=re.ASCII)
         if declaration_name is None:
             continue
         name = declaration_name.group(1)

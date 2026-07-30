@@ -129,8 +129,8 @@ def _validate_reason_entry_shapes(entries, label):
 def _parse_reason_arm_map(body, registry_name):
     """Parse a ReasonCode match body and reject duplicate arms."""
     matches = re.findall(
-        r"ReasonCode::([A-Za-z_][A-Za-z0-9_]*)[ \t]*=>[ \t]*\"([^\"]*)\"",
-        body)
+        r"ReasonCode::([A-Za-z_]\w*)[ \t]*=>[ \t]*\"([^\"]*)\"",
+        body, flags=re.ASCII)
     values = {}
     duplicates = []
     for name, value in matches:
@@ -149,7 +149,7 @@ def _parse_reason_metric_map(body):
     for line in body.splitlines():
         lhs, separator, rhs = line.partition("=>")
         pending.extend(re.findall(
-            r"ReasonCode::([A-Za-z_][A-Za-z0-9_]*)", lhs))
+            r"ReasonCode::([A-Za-z_]\w*)", lhs, flags=re.ASCII))
         if not separator:
             continue
         match = re.match(r"[ \t]*\"([^\"]*)\"", rhs)
@@ -184,8 +184,8 @@ def _parse_reason_enum(content):
     variants = [
         {"discriminant": int(discriminant), "name": name}
         for name, discriminant in re.findall(
-            r"(?m)^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*(\d+),[ \t]*$",
-            enum_body)
+            r"(?m)^[ \t]*([A-Za-z_]\w*)[ \t]*=[ \t]*(\d+),[ \t]*$",
+            enum_body, flags=re.ASCII)
     ]
     source_shape_errors = _validate_reason_entry_shapes(
         [dict(entry, string="source", metric_key="source", c_accessor="source")
@@ -206,8 +206,8 @@ def _parse_reason_all(content, variant_names):
     if all_start < 0 or all_body_start < 0 or all_body_end < 0:
         return "Rust reason code ALL registry is missing or unterminated"
     all_names = re.findall(
-        r"ReasonCode::([A-Za-z_][A-Za-z0-9_]*)",
-        content[all_body_start:all_body_end])
+        r"ReasonCode::([A-Za-z_]\w*)",
+        content[all_body_start:all_body_end], flags=re.ASCII)
     duplicates = _duplicates(all_names)
     if duplicates:
         return f"Rust reason code ALL registry contains duplicate: {duplicates[0]}"
@@ -341,7 +341,8 @@ def _validate_c_reason_registry(repo, canonical):
     except (OSError, UnicodeError) as exc:
         return f"unable to read C reason registry: {exc}"
     c_accessors = set(re.findall(
-        r"static[ \t]+ngx_str_t[ \t]+(reason_str_[A-Za-z0-9_]+)", c_content))
+        r"static[ \t]+ngx_str_t[ \t]+(reason_str_\w+)",
+        c_content, flags=re.ASCII))
     for entry in canonical:
         c_name = REASON_C_ACCESSOR_ALIASES.get(
             entry["string"], entry["string"])
