@@ -62,11 +62,11 @@ LICENSE_INSTALL_DIR := $(PREFIX)/share/licenses/nginx-markdown-for-agents
         test test-rust test-rust-doc test-nginx-unit test-nginx-unit-streaming test-nginx-unit-clang-smoke test-nginx-unit-sanitize-smoke \
         test-nginx-integration test-e2e test-e2e-rust test-all test-rust-fuzz-smoke fuzz-smoke sonar-compile-db \
         test-benchmark test-benchmark-compare test-benchmark-summary \
-        harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check \
+        harness-check harness-check-full harness-security-checks test-harness regex-security-check e2e-streaming-config-check sonar-encoding-check release-supply-chain-check public-surface-drift-check \
         security-static security-actionlint security-shellcheck security-gitleaks security-semgrep security-cargo-deny \
         supply-chain supply-chain-trivy supply-chain-sbom \
         complexity-check \
-	docs-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-090 release-gates-check-091 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
+	docs-check license-check release-notes release-gates-check release-gates-check-070 release-gates-check-070-docker release-gates-check-080 release-gates-check-080-regression release-gates-check-08x release-gates-check-090 release-gates-check-091 release-gates-check-092 release-gates-check-all release-gates-check-legacy release-gates-check-strict \
         perf-evidence-check \
         test-production-examples-nginx-t test-production-examples-e2e-smoke \
         verify-large-e2e verify-huge-native-e2e verify-huge-allowed-native-e2e \
@@ -234,6 +234,10 @@ release-notes:
 harness-check:
 	python3 tools/harness/check_harness_sync.py
 	python3 tools/harness/detect_metrics_per_path_stub_drift.py
+	python3 tools/harness/detect_public_surface_drift.py
+
+public-surface-drift-check:
+	python3 tools/harness/detect_public_surface_drift.py
 
 harness-check-full:
 	$(MAKE) docs-check-base
@@ -839,7 +843,30 @@ release-gates-check-091: release-gates-check-090
 	fi
 	@echo "=== 0.9.1 Release Gates: PASS ==="
 
-release-gates-check-all: release-gates-check release-gates-check-091
+# release-gates-check-092: Blocking 0.9.2 release gate.
+# Additive on 091: adds public-surface drift, version consistency,
+# and reason-code registry completeness checks.
+#
+# Environment variables (inherited from 091 chain):
+#   NGINX_BIN                            - Path to module-enabled nginx binary
+#   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Allow proceeding without module
+#                                           benchmarks
+#   RELEASE_GATE_ALLOW_SKIP_FUZZ=1       - (inherited) skip fuzz smoke
+#   RELEASE_GATE_ALLOW_SKIP_NATIVE_E2E=1 - (inherited) skip native E2E
+#   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - (inherited) skip coverage
+#
+# Classification: BLOCKING
+release-gates-check-092: release-gates-check-091
+	@echo "=== 0.9.2 Release Gates (blocking) ==="
+	@echo "  [1/3] Public surface drift check"
+	$(MAKE) public-surface-drift-check
+	@echo "  [2/3] Version consistency (0.9.2)"
+	@bash tools/harness/detect_version_consistency.sh
+	@echo "  [3/3] Reason code registry completeness"
+	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
+	@echo "=== 0.9.2 Release Gates: PASS ==="
+
+release-gates-check-all: release-gates-check release-gates-check-092
 	@echo "=== Release Gates: ALL PASS ==="
 
 # Production Examples: validate all examples pass nginx -t (NEW)
