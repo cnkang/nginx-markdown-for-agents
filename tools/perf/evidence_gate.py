@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # pylint: disable=too-many-lines
 # pylint: disable=import-error
-"""0.9.1 performance evidence release gate.
+"""Performance evidence release gate for the active 0.9.x baseline.
 
 Runs the module-level benchmark harness and evaluates results against
 the threshold engine module-level thresholds.  Supports two modes:
@@ -395,7 +395,7 @@ def _build_evidence_pack(  # pylint: disable=too-many-arguments,too-many-positio
     """Build the evidence pack JSON structure."""
     return {
         "schema_version": "1.0.0",
-        "type": "perf-evidence-091",
+        "type": "perf-evidence-{}".format(_module_baseline_version()),
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "git_commit": _get_git_commit(),
         "verdict": verdict,
@@ -428,7 +428,11 @@ def _print_evidence_summary(evidence_pack: dict) -> None:
     """Print a human-readable summary of the evidence pack."""
     _stderr("")
     _stderr("=" * 60)
-    _stderr("  Performance Evidence Gate 0.9.1 — Summary")
+    _stderr(
+        "  Performance Evidence Gate {} — Summary".format(
+            _module_baseline_version()
+        )
+    )
     _stderr("=" * 60)
     _stderr("")
 
@@ -481,7 +485,7 @@ def _print_result_entry(entry: dict) -> None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(
-        description="0.9.1 performance evidence release gate.",
+        description="Active 0.9.x performance evidence release gate.",
     )
     parser.add_argument(
         "--mode",
@@ -501,7 +505,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output",
         default=None,
-        help="Write evidence pack JSON to this path (default: perf/reports/evidence-091.json).",
+        help="Write evidence pack JSON to this path (default: versioned evidence report).",
     )
     parser.add_argument(
         "--benchmark-report",
@@ -514,6 +518,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     """Run the evidence gate."""
     args = parse_args(argv)
+
+    try:
+        _module_baseline_version()
+    except ValueError as exc:
+        _stderr(f"FAIL: invalid module baseline selection: {exc}")
+        return 1
 
     blocking = args.mode == "blocking"
     nginx_available = _nginx_bin_available()
@@ -604,7 +614,10 @@ def _obtain_benchmark_report(
         report = json.loads(report_path.read_text(encoding="utf-8"))
         return report, None
 
-    output_path = Path(REPO_ROOT / "perf" / "reports" / "module-benchmark-091.json")
+    version = _module_baseline_version()
+    output_path = Path(
+        REPO_ROOT / "perf" / "reports" / f"module-benchmark-{version}.json"
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     _stderr("Running module-level benchmark harness...")
@@ -666,6 +679,21 @@ _HISTORICAL_BASELINE_PATH = "perf/baselines/module-baseline-091.json"
 _HISTORICAL_BASELINE_SHA256 = (
     "8080c23974d8124e6f44fa20ecca1a83fc0a6395b42fb904dfa2e1ae02f284a0"
 )
+_DEFAULT_MODULE_BASELINE_VERSION = "091"
+_SUPPORTED_MODULE_BASELINE_VERSIONS = frozenset({"091", "092"})
+
+
+def _module_baseline_version() -> str:
+    """Return the allowlisted baseline version selected by the caller."""
+    version = os.environ.get(
+        "MODULE_BASELINE_VERSION", _DEFAULT_MODULE_BASELINE_VERSION
+    )
+    if version not in _SUPPORTED_MODULE_BASELINE_VERSIONS:
+        raise ValueError(
+            "MODULE_BASELINE_VERSION must be one of: "
+            + ", ".join(sorted(_SUPPORTED_MODULE_BASELINE_VERSIONS))
+        )
+    return version
 
 
 def _is_exact_int(value: object) -> bool:
@@ -2387,7 +2415,10 @@ def _resolve_baseline(
             exit_rc is None on success; otherwise it is a terminal exit
             code and the caller must return it immediately.
     """
-    baseline_path = REPO_ROOT / "perf" / "baselines" / "module-baseline-091.json"
+    version = _module_baseline_version()
+    baseline_path = (
+        REPO_ROOT / "perf" / "baselines" / f"module-baseline-{version}.json"
+    )
     if not baseline_path.exists():
         return _resolve_missing_baseline(report, args, blocking)
 
@@ -2439,12 +2470,13 @@ def _resolve_missing_baseline(
     report: dict | None, args: argparse.Namespace, blocking: bool,
 ) -> tuple[dict, bool, int | None]:
     """Handle the no-baseline case (first run or release-tag failure)."""
+    version = _module_baseline_version()
     if blocking and _is_release_tag():
         _stderr(
             "FAIL: No module baseline found and this is a release tag.\n"
             "  Release and RC tags require a baseline for percentage threshold evaluation.\n"
-            "  Create a baseline with: cp perf/reports/module-benchmark-091.json "
-            "perf/baselines/module-baseline-091.json"
+            f"  Create a baseline with: cp perf/reports/module-benchmark-{version}.json "
+            f"perf/baselines/module-baseline-{version}.json"
         )
         evidence_pack = _build_evidence_pack(
             report=report,
@@ -2517,7 +2549,10 @@ def _evaluate_and_report(
 def _write_output(evidence_pack: dict, output_path: str | None) -> None:
     """Write evidence pack to file or default location."""
     if output_path is None:
-        output_path = str(REPO_ROOT / "perf" / "reports" / "evidence-091.json")
+        version = _module_baseline_version()
+        output_path = str(
+            REPO_ROOT / "perf" / "reports" / f"evidence-{version}.json"
+        )
 
     out = validate_write_path_within_root(
         output_path, REPO_ROOT, purpose="evidence output"

@@ -798,6 +798,10 @@ perf-evidence-check:
 	@echo "=== Performance Evidence Check (non-blocking) ==="
 	@tools/perf/run_evidence_gate.sh
 
+# Keep the 0.9.1 gate's default baseline stable; the 0.9.2 target below
+# overrides this value only for its performance evidence command.
+PERF_BASELINE_VERSION ?= 091
+
 # release-gates-check-091: Blocking 0.9.1 release gate.
 # Runs all prior regression gates (0.9.0 gate chain), then adds 0.9.1-specific
 # evidence gate in blocking mode.  Fails on NO_GO verdict for RC tags.
@@ -819,10 +823,12 @@ release-gates-check-091: release-gates-check-090
 	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
 	@echo "  [2/3] Performance evidence gate (blocking mode)"
 	@if [ -n "$${NGINX_BIN:-}" ]; then \
-		python3 tools/perf/evidence_gate.py --mode blocking || exit 1; \
+		MODULE_BASELINE_VERSION="$(PERF_BASELINE_VERSION)" \
+			python3 tools/perf/evidence_gate.py --mode blocking || exit 1; \
 	else \
 		if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
-			python3 tools/perf/evidence_gate.py --mode blocking --allow-skip-module || exit 1; \
+			MODULE_BASELINE_VERSION="$(PERF_BASELINE_VERSION)" \
+				python3 tools/perf/evidence_gate.py --mode blocking --allow-skip-module || exit 1; \
 		else \
 			echo "FAIL: Module-level benchmarks require NGINX_BIN." >&2; \
 			echo "  Set NGINX_BIN=/path/to/nginx or RELEASE_GATE_ALLOW_SKIP_MODULE=1 to skip." >&2; \
@@ -856,6 +862,7 @@ release-gates-check-091: release-gates-check-090
 #   RELEASE_GATE_ALLOW_SKIP_COVERAGE=1   - (inherited) skip coverage
 #
 # Classification: BLOCKING
+release-gates-check-092: PERF_BASELINE_VERSION=092
 release-gates-check-092: release-gates-check-091
 	@echo "=== 0.9.2 Release Gates (blocking) ==="
 	@echo "  [1/4] Public surface and dynconf schema drift checks"
@@ -1114,7 +1121,7 @@ help:
 	@echo "  release-gates-check-090  - Validate 0.9.0 release gates (additive on 0.8.0; production examples, gate validator)"
 	@echo "  release-gates-check-091  - Validate 0.9.1 release gates (blocking; module benchmark evidence gate)"
 	@echo "  perf-evidence-check      - Run performance evidence gate (non-blocking, report-only)"
-	@echo "  release-gates-check-all  - Run current baseline and 0.9.1 release gates"
+	@echo "  release-gates-check-all  - Run current baseline and 0.9.2 release gates"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"
 	@echo "  release-gates-check-strict - Validate all sub-specs #12-#18 for full compliance"
 	@echo "  test-production-examples-nginx-t - Validate production example configs pass nginx -t"
