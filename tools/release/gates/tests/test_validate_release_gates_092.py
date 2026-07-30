@@ -90,6 +90,51 @@ def test_version_consistency_fails_when_sources_are_missing(tmp_path: Path) -> N
     assert "CHANGELOG.md: file not found" in result["message"]
 
 
+def test_reason_code_registry_accepts_complete_fixture(tmp_path: Path) -> None:
+    """A complete Rust/C/inventory registry must pass with its full count."""
+    _write_reason_fixture(tmp_path)
+
+    result = validator.check_reason_code_registry(tmp_path)
+
+    assert result["status"] == "pass"
+    assert result["details"]["count"] == validator.EXPECTED_REASON_CODE_COUNT
+
+
+def test_reason_code_registry_accepts_reindented_metric_match(
+    tmp_path: Path,
+) -> None:
+    """Metric match parsing must not depend on Rust brace indentation."""
+    _write_reason_fixture(
+        tmp_path,
+        source_edit=lambda source: source.replace(
+            "\n        }\n    }\n    pub fn log_callsite",
+            "\n      }\n    }\n    pub fn log_callsite",
+        ),
+    )
+
+    result = validator.check_reason_code_registry(tmp_path)
+
+    assert result["status"] == "pass"
+
+
+def test_reason_code_registry_rejects_unterminated_metric_match(
+    tmp_path: Path,
+) -> None:
+    """An unterminated metric match must fail before log_callsite parsing."""
+    _write_reason_fixture(
+        tmp_path,
+        source_edit=lambda source: source.replace(
+            "\n        }\n    }\n    pub fn log_callsite",
+            "\n    }\n    pub fn log_callsite",
+        ),
+    )
+
+    result = validator.check_reason_code_registry(tmp_path)
+
+    assert result["status"] == "fail"
+    assert "unterminated" in result["message"]
+
+
 def test_reason_code_registry_rejects_malformed_source(tmp_path: Path) -> None:
     """A missing Rust metadata registry must fail closed."""
     _write_reason_fixture(

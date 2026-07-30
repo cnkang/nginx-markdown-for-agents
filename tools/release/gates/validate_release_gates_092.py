@@ -23,6 +23,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.lib.reason_code import REASON_C_ACCESSOR_ALIASES
+
 EXPECTED_VERSION = "0.9.2"
 EXPECTED_REASON_CODE_COUNT = 26
 CHANGELOG_FILENAME = "CHANGELOG.md"
@@ -230,12 +232,13 @@ def _parse_reason_registries(content):
     log_start = content.find(log_marker, metric_start)
     if log_start < 0:
         return None, None, "Rust reason metric registry is missing or malformed"
-    metric_match_start = content.find("match self", metric_start)
-    metric_body_end = content.find("\n        }\n", metric_match_start)
-    if metric_match_start < 0 or metric_body_end < 0:
+    metric_match = re.search(
+        r"match\s+self\s*\{(?P<body>.*?)\n[ \t]*}\s*\n[ \t]*}",
+        content[metric_start:log_start], flags=re.S)
+    if metric_match is None:
         return None, None, "Rust reason metric match is missing or unterminated"
     metrics, error = _parse_reason_metric_map(
-        content[metric_match_start:metric_body_end])
+        metric_match.group("body"))
     return strings, metrics, error
 
 
@@ -340,10 +343,8 @@ def _validate_c_reason_registry(repo, canonical):
     c_accessors = set(re.findall(
         r"static[ \t]+ngx_str_t[ \t]+(reason_str_[A-Za-z0-9_]+)", c_content))
     for entry in canonical:
-        c_name = {
-            "header_plan_apply_error": "header_plan_apply_err",
-            "streaming_mid_flight_error": "streaming_mid_flight_err",
-        }.get(entry["string"], entry["string"])
+        c_name = REASON_C_ACCESSOR_ALIASES.get(
+            entry["string"], entry["string"])
         expected_accessor = "reason_str_" + c_name
         if entry["c_accessor"] != expected_accessor:
             return (f"{entry['name']} c_accessor metadata mismatch: "

@@ -865,7 +865,7 @@ release-gates-check-091: release-gates-check-090
 #
 # Classification: BLOCKING
 release-gates-check-092: release-gates-check-091
-	@export PERF_BASELINE_VERSION=092; \
+	@export MODULE_BASELINE_VERSION=092; \
 	echo "=== 0.9.2 Release Gates (blocking) ==="; \
 	echo "  [1/4] Public surface and dynconf schema drift checks"; \
 	$(MAKE) public-surface-drift-check; \
