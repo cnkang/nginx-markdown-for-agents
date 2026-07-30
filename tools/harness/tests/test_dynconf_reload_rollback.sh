@@ -13,17 +13,7 @@ cleanup_test_files() {
 
 trap cleanup_test_files EXIT HUP INT TERM
 
-stat_mode() {
-    local path="$1"
-    local value=""
-
-    value="$(stat -f '%Lp' "$path" 2>/dev/null || true)"
-    if [[ -n "$value" ]]; then
-        printf '%s\n' "$value"
-        return 0
-    fi
-    stat -c '%a' "$path"
-}
+DYNCONF_RELOAD_ROLLBACK_LIBRARY=1 source "$SCRIPT"
 
 assert_rc() {
     local expected="$1"
@@ -48,6 +38,8 @@ run_case() {
 
     mkdir -p -- "$private_path"
     private_path="$(cd -P -- "$private_path" && pwd -P)"
+    # These are fixed, repository-owned snippets; do not pass external or
+    # runtime-controlled code through this intentional bash -c test seam.
     if DYNCONF_RELOAD_ROLLBACK_LIBRARY=1 bash -c "$code" bash "$SCRIPT" \
         "$target_path" "$private_path" >"$log_path" 2>&1; then
         actual_rc=0
@@ -63,7 +55,7 @@ mkdir -p -- "${existing_target%/*}"
 printf 'caller-owned original\n' > "$existing_target"
 chmod 640 "$existing_target"
 cp -p -- "$existing_target" "$TMP_ROOT/existing.before"
-mode_before="$(stat_mode "$existing_target")"
+mode_before="$(stat_field '%Lp' '%a' "$existing_target")"
 
 run_case existing-file 41 '
 set -e
@@ -81,7 +73,7 @@ if ! cmp -s "$existing_target" "$TMP_ROOT/existing.before"; then
     echo "FAIL: existing caller-owned dynconf content was not restored" >&2
     exit 1
 fi
-if [[ "$(stat_mode "$existing_target")" != "$mode_before" ]]; then
+if [[ "$(stat_field '%Lp' '%a' "$existing_target")" != "$mode_before" ]]; then
     echo "FAIL: existing caller-owned dynconf mode was not restored" >&2
     exit 1
 fi
@@ -127,6 +119,20 @@ if [[ -e "$TMP_ROOT/default-file-private" ]]; then
     exit 1
 fi
 echo "PASS: default dynconf directory and file are private and cleaned" >&2
+
+caller_target="$TMP_ROOT/caller-selection/markdown-dynamic.conf"
+mkdir -p -- "${caller_target%/*}"
+run_case caller-path-selection 47 '
+set -e
+DYNCONF_FILE="$2"
+source "$1"
+TEST_TMPDIR="$3"
+[[ "$DYNCONF_FILE" == "$2" ]]
+selected_path="$(requested_dynconf_path)"
+[[ "$selected_path" == "$2" ]]
+exit 47
+' "$caller_target"
+echo "PASS: caller-provided dynconf path survives top-level initialization" >&2
 
 run_case default-path-selection 46 '
 set -e
