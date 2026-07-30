@@ -176,7 +176,7 @@ When rolling back from 0.9.2 to 0.9.1:
 | Aspect | Impact |
 |--------|--------|
 | `reason_to_code` mapping | `bypass_no_transform` entry removed from diagnostics JSON |
-| C reason code constants | Decompression series (4–11) constants unavailable in C header |
+| C reason code constants | Decompression series (4–11) constants unavailable in `components/nginx-module/src/ngx_http_markdown_reason.c` |
 | OTel ownership | Request-scoped in both versions; no worker-owned state is flushed |
 | Dynconf diagnostics | `POST action=rollback` is rejected; restore the watched file atomically |
 | `stream_state` logging | `PRE_COMMIT` fallthrough returns to silent behavior |
