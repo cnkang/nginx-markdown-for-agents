@@ -7,6 +7,14 @@ This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from 0.9.1.
 modification. If you are running 0.9.0, complete
 [MIGRATION-0.9.1.md](MIGRATION-0.9.1.md) before following this guide.
 
+> Publication status: 0.9.2 is currently a development candidate. At the
+> time of writing, no `v0.9.2` tag, GitHub Release, package checksum, Docker
+> image, or Helm repository entry is asserted. The prebuilt, Helm, and Docker
+> commands below are release-time templates and must only be used after those
+> artifacts are published and independently verified. For the current
+> candidate, build from the exact branch commit or use locally produced
+> artifacts.
+
 Choose the upgrade method matching your deployment:
 
 | Method | Section |
@@ -62,6 +70,8 @@ sudo nginx -t && sudo systemctl restart nginx
 ```bash
 cd nginx-markdown-for-agents
 git fetch --tags
+# Use this tag only after the 0.9.2 publication evidence exists; for the
+# current candidate, check out the exact reviewed development commit instead.
 git checkout v0.9.2
 ```
 
