@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <strings.h>
 
 #include <ngx_config.h>
 #include <ngx_core.h>
@@ -17,7 +18,9 @@
 
 #define NGX_HTTP_GET                 0x0002
 #define NGX_HTTP_HEAD                0x0004
+#define NGX_HTTP_POST                0x0008
 #define NGX_HTTP_OK                  200
+#define NGX_HTTP_BAD_REQUEST         400
 #define NGX_HTTP_FORBIDDEN           403
 #define NGX_HTTP_NOT_ALLOWED         405
 #define NGX_HTTP_INTERNAL_SERVER_ERROR 500
@@ -55,6 +58,13 @@
 
 #define ngx_memcpy(dst, src, n)      memcpy(dst, src, n)
 #define ngx_strcmp(s1, s2)           strcmp((const char *) (s1), (const char *) (s2))
+
+static ngx_int_t
+ngx_strncasecmp(u_char *s1, u_char *s2, size_t n)
+{
+    return (ngx_int_t) strncasecmp((const char *) s1,
+                                   (const char *) s2, n);
+}
 
 #define ngx_str_set(str, text)                                                \
     do {                                                                      \
@@ -112,6 +122,7 @@ typedef struct {
 
 struct ngx_http_request_s {
     ngx_uint_t               method;
+    ngx_str_t                args;
     ngx_pool_t              *pool;
     ngx_connection_t        *connection;
     ngx_http_headers_out_t   headers_out;
@@ -174,6 +185,7 @@ static int g_output_filter_calls;
 static ngx_chain_t *g_last_output_chain;
 static int g_discard_rc;
 static int g_alloc_fail_after = -1;
+static ngx_int_t g_rollback_rc;
 
 static void *
 test_alloc(size_t size, int zero)
@@ -340,6 +352,13 @@ ngx_http_markdown_diagnostics_get_dynconf_state(
 }
 
 ngx_int_t
+ngx_http_markdown_diagnostics_rollback(ngx_log_t *log)
+{
+    UNUSED(log);
+    return g_rollback_rc;
+}
+
+ngx_int_t
 ngx_http_markdown_get_reason_code_str(uint32_t code, ngx_str_t *out_str)
 {
     static u_char reason[] = "converted";
@@ -359,6 +378,7 @@ reset_test_state(void)
     g_last_output_chain = NULL;
     g_discard_rc = NGX_OK;
     g_alloc_fail_after = -1;
+    g_rollback_rc = NGX_ERROR;
     ngx_current_msec = 1000;
     memset(&ngx_http_markdown_g_diag_state, 0,
            sizeof(ngx_http_markdown_g_diag_state));
@@ -846,6 +866,58 @@ test_handler_get_head_and_denials(void)
 }
 
 static void
+test_handler_post_rollback(void)
+{
+    ngx_http_request_t r;
+    ngx_connection_t c;
+    ngx_http_markdown_conf_t conf;
+    struct sockaddr_in addr;
+    ngx_int_t rc;
+    static u_char rollback_args[] = "foo=bar&action=rollback";
+    static u_char invalid_args[] = "action=reload";
+
+    TEST_SUBSECTION("diagnostics handler POST rollback action");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+    r.method = NGX_HTTP_POST;
+    r.args.data = rollback_args;
+    r.args.len = sizeof(rollback_args) - 1;
+    g_rollback_rc = NGX_OK;
+
+    rc = ngx_http_markdown_diagnostics_handler(&r);
+    TEST_ASSERT(rc == NGX_OK, "successful rollback POST should return OK");
+    TEST_ASSERT(g_send_header_calls == 1,
+                "successful rollback should send headers");
+    TEST_ASSERT(g_output_filter_calls == 1,
+                "successful rollback should send JSON body");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+    r.method = NGX_HTTP_POST;
+    r.args.data = rollback_args;
+    r.args.len = sizeof(rollback_args) - 1;
+    g_rollback_rc = NGX_ERROR;
+
+    rc = ngx_http_markdown_diagnostics_handler(&r);
+    TEST_ASSERT(rc == NGX_OK, "failed rollback should return JSON response");
+    TEST_ASSERT(g_output_filter_calls == 1,
+                "failed rollback should send JSON body");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+    r.method = NGX_HTTP_POST;
+    r.args.data = invalid_args;
+    r.args.len = sizeof(invalid_args) - 1;
+
+    rc = ngx_http_markdown_diagnostics_handler(&r);
+    TEST_ASSERT(rc == NGX_HTTP_BAD_REQUEST,
+                "POST without rollback action should return 400");
+
+    TEST_PASS("POST rollback action and rejection paths covered");
+}
+
+static void
 test_handler_failure_branches(void)
 {
     ngx_http_request_t r;
@@ -900,6 +972,7 @@ main(void)
     test_json_builder_rejects_invalid_ring_state();
     test_access_json_and_logging_failure_branches();
     test_handler_get_head_and_denials();
+    test_handler_post_rollback();
     test_handler_failure_branches();
 
     TEST_PASS("All diagnostics production tests passed");
