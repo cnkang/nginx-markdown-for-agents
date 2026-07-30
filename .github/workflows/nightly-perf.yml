@@ -11,7 +11,7 @@ on:
         default: false
         type: boolean
       bootstrap_module_baseline:
-        description: "Generate the canonical 0.9.1 module baseline on native x86_64"
+        description: "Generate the canonical 0.9.2 module baseline on native x86_64"
         required: false
         default: false
         type: boolean

@@ -16,7 +16,7 @@ set -euo pipefail
 # Constants
 ##############################################################################
 
-readonly DOCTOR_VERSION="0.9.1"
+readonly DOCTOR_VERSION="0.9.2"
 readonly SCHEMA_VERSION=1
 readonly MODULE_FILENAME="ngx_http_markdown_filter_module.so"
 
