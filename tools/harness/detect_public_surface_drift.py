@@ -36,6 +36,7 @@ FFI_PATHS = (
 )
 FFI_HEADER_PATH = os.path.join(ROOT, "components", "rust-converter", "include", "markdown_converter.h")
 COMMAND_REGISTRY_ERROR = "ngx_command_t registry is missing or unterminated"
+MIGRATION_PREFIX = "Migration:"
 
 DIRECTIVE_RE = re.compile(r'ngx_string\("(markdown_[^"\\]+)"\)')
 REASON_CODE_RE = re.compile(r'^\s+(\w+)\s*=\s*(\d+)\s*,', re.MULTILINE)
@@ -470,7 +471,7 @@ def _comment_syntax(lines, name):
     first = lines[name_line][len(name):].strip()
     parts = [first] if first else []
     index = name_line + 1
-    stop_prefixes = ("Default:", "Context:", "Example:", "Migration:",
+    stop_prefixes = ("Default:", "Context:", "Example:", MIGRATION_PREFIX,
                      "Security:", "Response formats:", "Public ")
     while index < len(lines) and lines[index] != "":
         candidate = lines[index]
@@ -514,10 +515,10 @@ def _comment_public_metadata(lines):
 def _comment_migration(lines):
     """Extract a migration target from one adjacent comment."""
     joined = "\n".join(lines)
-    migration_text = _comment_metadata_value(lines, ("Migration:",))
+    migration_text = _comment_metadata_value(lines, (MIGRATION_PREFIX,))
     if migration_text is None:
         for index, line in enumerate(lines):
-            if line.startswith("Migration:"):
+            if line.startswith(MIGRATION_PREFIX):
                 migration_text = _comment_metadata_value(
                     lines[index + 1:], ("",))
                 break
@@ -898,6 +899,26 @@ def _rust_ffi_param_types(params):
     return result
 
 
+def _is_ascii_c_identifier_char(char):
+    """Return whether a character can occur in a C identifier."""
+    return (char == "_" or "A" <= char <= "Z" or "a" <= char <= "z"
+            or "0" <= char <= "9")
+
+
+def _strip_c_parameter_name(param):
+    """Remove a trailing C parameter name without backtracking regexes."""
+    name_start = len(param)
+    while (name_start > 0
+           and _is_ascii_c_identifier_char(param[name_start - 1])):
+        name_start -= 1
+    if (name_start == len(param) or name_start == 0
+            or param[name_start] not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ_"
+            + "abcdefghijklmnopqrstuvwxyz"
+            or param[name_start - 1] not in "* \t"):
+        return param
+    return param[:name_start].rstrip(" \t")
+
+
 def _c_ffi_param_types(params):
     """Return ABI-normalized C parameter types in declaration order."""
     result = []
@@ -907,12 +928,7 @@ def _c_ffi_param_types(params):
             continue
         # C prototypes name the parameter last.  Removing only that token
         # preserves pointer const/mutability and integer-width typedefs.
-        param_type = re.sub(
-            r"[ \t]+[A-Za-z_]\w*$", "", param, flags=re.ASCII)
-        if param_type == param and re.search(
-                r"\*[A-Za-z_]\w*$", param, flags=re.ASCII):
-            param_type = re.sub(
-                r"[A-Za-z_]\w*$", "", param, flags=re.ASCII).strip()
+        param_type = _strip_c_parameter_name(param)
         result.append(_canonical_ffi_type(param_type, "c"))
     return result
 

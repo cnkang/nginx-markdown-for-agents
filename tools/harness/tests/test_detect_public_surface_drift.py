@@ -174,6 +174,13 @@ pub extern "C" fn markdown_empty() {
     assert contract["markdown_empty"]["return_type"] == "()"
 
 
+def test_c_ffi_parameter_name_stripping_preserves_pointer_types() -> None:
+    """C parameter names are stripped without changing pointer qualifiers."""
+    assert detector._c_ffi_param_types(
+        "const uint8_t *input, uint8_t *output, size_t length"
+    ) == ["ptr:const:u8", "ptr:mut:u8", "usize"]
+
+
 def test_ffi_contract_rejects_changed_c_parameter_type(monkeypatch) -> None:
     """A C prototype type change must fail even when Rust export names match."""
     rust = (
