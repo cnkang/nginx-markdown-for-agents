@@ -1374,6 +1374,65 @@ test_timer_handler_change_detected(void)
 }
 
 static void
+test_timer_handler_holds_rollback_until_file_changes(void)
+{
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_event_t                          timer;
+    ngx_event_t                          ev;
+    ngx_file_info_t                      fi;
+    const char                          *tmpfile;
+
+    TEST_SUBSECTION("timer preserves rollback for unchanged file");
+
+    tmpfile = "/tmp/dynconf_test_timer_rollback.conf";
+    {
+        FILE *f = fopen(tmpfile, "w");
+        TEST_ASSERT(f != NULL, "create temp file for rollback timer test");
+        fprintf(f, "schema_version=0.9\n");
+        fprintf(f, "markdown_filter=on\n");
+        fclose(f);
+    }
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    memset(&timer, 0, sizeof(timer));
+    watcher.active = 1;
+    watcher.timer = &timer;
+    watcher.conf = &conf;
+    watcher.version = 5;
+    watcher.active_snapshot.enabled = 0;
+    watcher.applied_mtime = 1234;
+    watcher.rollback_suppressed = 1;
+    set_ngx_str(&watcher.path, tmpfile);
+
+    if (ngx_file_info((const u_char *) tmpfile, &fi) == NGX_FILE_ERROR) {
+        TEST_FAIL("stat rollback timer test file failed");
+    }
+    watcher.last_mtime = ngx_file_mtime(&fi);
+    watcher.rollback_mtime = watcher.last_mtime;
+
+    memset(&ev, 0, sizeof(ev));
+    ev.data = &watcher;
+    ev.log = &g_log;
+
+    ngx_http_markdown_dynconf_timer_handler(&ev);
+
+    TEST_ASSERT(watcher.rollback_suppressed == 1,
+                "timer keeps rollback suppression for unchanged file");
+    TEST_ASSERT(watcher.version == 5,
+                "timer does not reload unchanged file after rollback");
+    TEST_ASSERT(watcher.active_snapshot.enabled == 0,
+                "timer preserves rolled-back active snapshot");
+    TEST_ASSERT(watcher.applied_mtime == 1234,
+                "timer preserves rollback applied mtime");
+
+    unlink(tmpfile);
+    TEST_PASS("timer preserves rollback for unchanged file");
+}
+
+
+static void
 test_reload_null_args(void)
 {
     ngx_http_markdown_conf_t              conf;
@@ -2465,6 +2524,7 @@ test_rollback_restores_lkg_metadata(void)
     memset(&conf, 0, sizeof(conf));
     watcher.lkg_valid = 1;
     watcher.lkg_mtime = 1234;
+    watcher.last_mtime = 9876;
     watcher.applied_mtime = 5678;
     watcher.version = 4;
     watcher.active_snapshot.valid = 1;
@@ -2480,6 +2540,10 @@ test_rollback_restores_lkg_metadata(void)
                 "rollback should restore the LKG snapshot");
     TEST_ASSERT(watcher.applied_mtime == 1234,
                 "rollback should restore the LKG applied mtime");
+    TEST_ASSERT(watcher.rollback_suppressed == 1,
+                "rollback should suppress retry of the unchanged file");
+    TEST_ASSERT(watcher.rollback_mtime == 9876,
+                "rollback should remember the observed file mtime");
     TEST_ASSERT(watcher.version == 5,
                 "rollback should increment the configuration version");
     TEST_ASSERT(conf.advanced.prune_noise == 1,
@@ -2999,6 +3063,7 @@ main(void)
     test_timer_handler_inactive_watcher();
     test_timer_handler_rearm();
     test_timer_handler_change_detected();
+    test_timer_handler_holds_rollback_until_file_changes();
 
     TEST_SECTION("dynconf_impl: reload tests");
 

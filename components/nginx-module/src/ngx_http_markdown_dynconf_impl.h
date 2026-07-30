@@ -184,6 +184,11 @@ typedef struct ngx_http_markdown_dynconf_snapshot_s {
  * ensures that a failed reload does not prevent the timer
  * from retrying on the next poll cycle.
  *
+ * rollback_suppressed holds the active rollback while the same
+ * on-disk file version remains present.  The timer clears this
+ * state only after observing a new mtime, so a rollback is not
+ * immediately undone by retrying the rejected file.
+ *
  * last_known_good holds the previous active snapshot that was
  * replaced by the most recent successful reload.  When
  * lkg_valid is set, the operator can trigger a rollback to
@@ -208,6 +213,8 @@ typedef struct {
      * mtime of the *previous* active config preserved for rollback.  Set
      * whenever last_known_good is captured. */
     time_t        lkg_mtime;
+    ngx_uint_t    rollback_suppressed;
+    time_t        rollback_mtime;
     ngx_uint_t    version;
     ngx_http_markdown_conf_t             *conf;
 
@@ -507,6 +514,7 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
 {
     ngx_http_markdown_dynconf_watcher_t  *watcher;
     ngx_int_t                            reload_rc;
+    ngx_uint_t                            reload_attempted;
 
     watcher = ev->data;
 
@@ -515,18 +523,28 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
     }
 
     reload_rc = NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE;
+    reload_attempted = 0;
 
     if (ngx_http_markdown_dynconf_check(watcher, ev->log)) {
+        watcher->rollback_suppressed = 0;
+
         ngx_log_error(NGX_LOG_INFO, ev->log, 0,
                       "markdown: change detected on \"%V\", "
                       "performing two-phase reload",
                       &watcher->path);
 
         if (watcher->conf != NULL) {
+            reload_attempted = 1;
             reload_rc = ngx_http_markdown_dynconf_reload(watcher,
                                                           watcher->conf,
                                                           ev->log);
         }
+    } else if (watcher->rollback_suppressed
+               && watcher->last_mtime == watcher->rollback_mtime)
+    {
+        ngx_log_error(NGX_LOG_INFO, ev->log, 0,
+                      "markdown: holding rollback for unchanged file "
+                      "version (mtime=%T)", watcher->last_mtime);
     } else if (watcher->last_mtime != watcher->applied_mtime) {
         /*
          * No new mtime change detected, but a previous reload failed
@@ -541,6 +559,7 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
                       watcher->last_mtime, watcher->applied_mtime);
 
         if (watcher->conf != NULL) {
+            reload_attempted = 1;
             reload_rc = ngx_http_markdown_dynconf_reload(watcher,
                                                           watcher->conf,
                                                           ev->log);
@@ -561,13 +580,15 @@ ngx_http_markdown_dynconf_timer_handler(ngx_event_t *ev)
      * INVALID_FILE / IO_ERROR: reload failed; applied_mtime stays
      *   at its previous value so the next timer cycle will retry.
      */
-    if (reload_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED
-        || reload_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE)
+    if (reload_attempted
+        && (reload_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_APPLIED
+            || reload_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_NO_CHANGE))
     {
         watcher->applied_mtime = watcher->last_mtime;
-    } else if (reload_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK
-               || reload_rc
-                  == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL)
+    } else if (reload_attempted
+               && (reload_rc == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_OK
+                   || reload_rc
+                      == NGX_HTTP_MARKDOWN_DYNCONF_RELOAD_DRY_RUN_FAIL))
     {
         /*
          * Dry-run mode (pass or fail): update applied_mtime to
@@ -687,6 +708,8 @@ ngx_http_markdown_dynconf_start(ngx_http_markdown_dynconf_watcher_t *watcher,
     watcher->active = 1;
     watcher->version = 0;
     watcher->lkg_valid = 0;
+    watcher->rollback_suppressed = 0;
+    watcher->rollback_mtime = 0;
     watcher->conf = conf;
 
     /* Initialize active snapshot from current configuration. */
@@ -2238,6 +2261,8 @@ ngx_http_markdown_dynconf_rollback(
 
     watcher->active_snapshot = watcher->last_known_good;
     watcher->applied_mtime = watcher->lkg_mtime;
+    watcher->rollback_suppressed = 1;
+    watcher->rollback_mtime = watcher->last_mtime;
     watcher->version++;
 
     ngx_http_markdown_dynconf_apply_snapshot(conf,
