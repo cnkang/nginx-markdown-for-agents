@@ -51,8 +51,12 @@ The diagnostics endpoint is read-only and accepts only `GET` and `HEAD`. It has
 no runtime rollback action. To restore a previous dynamic configuration,
 write a complete valid key/value file to a temporary file and atomically rename
 it over `markdown_dynamic_config_path`; the watcher will validate the changed
-file and promote it through the normal reload path. The internal LKG snapshot
-protects the active state when the restored file is invalid.
+file and promote it through the normal reload path. Atomic rename prevents
+partial-file reads, but each worker applies the file through its own watcher
+cycle; use diagnostics or request behavior to verify convergence. A controlled
+NGINX reload is required when operations need a strong synchronization
+boundary. The internal LKG snapshot protects the active state when the
+restored file is invalid.
 
 See [DYNAMIC_CONFIG.md](DYNAMIC_CONFIG.md) and
 [ROLLBACK-0.9.2.md](ROLLBACK-0.9.2.md) for the complete procedure.
@@ -61,9 +65,10 @@ See [DYNAMIC_CONFIG.md](DYNAMIC_CONFIG.md) and
 
 ### Public Surface Inventory and Drift Detection Gate
 
-A new release gate (`make release-gates-check-092`) validates that the
-public API surface (FFI exports, configuration directives, metric names,
-reason codes) has not drifted from the declared inventory. This is a
+A new release gate (`make release-gates-check-092`) validates the complete
+public API metadata contract: directive defaults, syntax, status, migration
+targets, handlers and contexts; dynconf policy; metric type, labels, order and
+cardinality; reason codes; and Rust/C FFI prototypes and ABI. This is a
 build-time and CI gate, not a runtime feature.
 
 **Impact:** No configuration change required. CI and release workflows

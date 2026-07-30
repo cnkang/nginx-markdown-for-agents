@@ -119,11 +119,12 @@ their toolchain or use prebuilt 0.9.0 binaries.
 
 The diagnostics endpoint is read-only and accepts only `GET` and `HEAD`.
 There is no runtime rollback API or rollback response schema. To restore a
-previous dynamic configuration, replace the watched file atomically. Rename
-prevents workers from reading a partially written file, but does not
-synchronize worker-local watcher application: workers may detect and promote
-the new configuration at different times and temporarily serve different
-active snapshots:
+previous dynamic configuration, replace the watched file atomically. Atomic
+rename guarantees that every read observes either the complete old file or the
+complete new file; it does not guarantee that all workers apply the new
+snapshot at the same instant. Each worker has its own watcher cycle, so
+workers can briefly report different `config_version` values and serve
+different active snapshots while convergence is in progress:
 
 ```bash
 set -eu
@@ -140,9 +141,11 @@ mv -f "$tmp" "$path"
 The watcher observes the changed modification time, parses and validates the
 complete file, then promotes it through the normal staged reload. If parsing
 or validation fails, the active snapshot and its `applied_mtime` remain at the
-last successfully applied state. Verify the result with the read-only
-diagnostics endpoint and, when changing worker processes or module binaries,
-use the normal controlled NGINX reload procedure.
+last successfully applied state. Verify convergence with the read-only
+diagnostics endpoint or with request behavior from the relevant workers. If a
+strong synchronization boundary is required, perform a controlled NGINX
+reload; do not assume that every worker has restored the new snapshot
+immediately.
 
 Do not send `POST /nginx-markdown/diagnostics?action=rollback`; it is rejected
 with `405 Method Not Allowed`. This deliberate absence avoids restoring a

@@ -387,7 +387,10 @@ It keeps the 0.9.1 configuration and ABI surface while tightening contracts:
 
 - **Read-only diagnostics**: `GET`/`HEAD` are supported and mutation requests,
   including `action=rollback`, are rejected. Restore dynconf by atomically
-  replacing the watched file; LKG remains failed-reload protection.
+  replacing the watched file; LKG remains failed-reload protection. Rename
+  prevents partial-file reads, but workers converge through independent
+  watcher cycles; use diagnostics or request behavior to verify convergence,
+  or a controlled NGINX reload for a strong synchronization boundary.
 - **Request-scoped OTel ownership**: spans and export subrequests use request
   pools. No worker-owned queue, thread, timer, socket, or exit flush is
   claimed or created.

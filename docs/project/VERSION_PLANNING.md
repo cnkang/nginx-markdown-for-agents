@@ -11,6 +11,8 @@ compatibility or release scope.
 
 - v0.9.2 is the current development release line, building on the v0.9.1
   baseline-consolidation and compatibility-reset release.
+- Development version metadata is already 0.9.2; release publication, tag,
+  assets, and checksums remain pending release-gate evidence.
 - The intended v1.0 contract freeze begins following the v0.9.2 release.
 
 At the time v0.9.0 shipped, it was intended to be the last breaking release

@@ -300,8 +300,11 @@ numbers, field names, and error reasons. On successful reload, the
 previous active snapshot is preserved as last-known-good (LKG) for diagnostics
 and failed-reload protection. There is no worker-local runtime restore API;
 operators restore a prior valid file atomically and let the normal watcher
-validate and apply it. `applied_mtime` updates only after successful
-application (Rule 35).
+validate and apply it. Atomic rename prevents partial-file reads, but each
+worker has its own watcher cycle and may briefly expose a different
+`config_version`; diagnostics or request behavior verifies convergence. A
+controlled NGINX reload is the strong synchronization boundary.
+`applied_mtime` updates only after successful application (Rule 35).
 
 ### Reason Code FFI Accessor (`reason_code.rs` + FFI)
 Reason codes are defined as a Rust enum (single source of truth). C
