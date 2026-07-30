@@ -2237,6 +2237,7 @@ ngx_http_markdown_dynconf_rollback(
     }
 
     watcher->active_snapshot = watcher->last_known_good;
+    watcher->applied_mtime = watcher->lkg_mtime;
     watcher->version++;
 
     ngx_http_markdown_dynconf_apply_snapshot(conf,

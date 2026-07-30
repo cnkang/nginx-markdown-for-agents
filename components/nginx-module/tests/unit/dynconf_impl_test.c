@@ -2452,6 +2452,43 @@ test_reload_lkg_preserved_after_failed_reload(void)
 }
 
 
+static void
+test_rollback_restores_lkg_metadata(void)
+{
+    ngx_http_markdown_dynconf_watcher_t  watcher;
+    ngx_http_markdown_conf_t             conf;
+    ngx_int_t                            rc;
+
+    TEST_SUBSECTION("rollback restores LKG snapshot and mtime");
+
+    memset(&watcher, 0, sizeof(watcher));
+    memset(&conf, 0, sizeof(conf));
+    watcher.lkg_valid = 1;
+    watcher.lkg_mtime = 1234;
+    watcher.applied_mtime = 5678;
+    watcher.version = 4;
+    watcher.active_snapshot.valid = 1;
+    watcher.active_snapshot.enabled = 0;
+    watcher.last_known_good.valid = 1;
+    watcher.last_known_good.enabled = 1;
+    watcher.last_known_good.prune_noise = 1;
+    watcher.last_known_good.log_verbosity = NGX_HTTP_MARKDOWN_LOG_DEBUG;
+
+    rc = ngx_http_markdown_dynconf_rollback(&watcher, &conf, &g_log);
+    TEST_ASSERT(rc == NGX_OK, "rollback should succeed with a valid LKG");
+    TEST_ASSERT(watcher.active_snapshot.enabled == 1,
+                "rollback should restore the LKG snapshot");
+    TEST_ASSERT(watcher.applied_mtime == 1234,
+                "rollback should restore the LKG applied mtime");
+    TEST_ASSERT(watcher.version == 5,
+                "rollback should increment the configuration version");
+    TEST_ASSERT(conf.advanced.prune_noise == 1,
+                "rollback should apply LKG values to live config");
+
+    TEST_PASS("rollback restores LKG snapshot and mtime");
+}
+
+
 /*
  * Dry-run tests (E02.4)
  */
@@ -3010,6 +3047,7 @@ main(void)
     test_reload_lkg_not_updated_on_failure();
     test_reload_lkg_successive_reloads();
     test_reload_lkg_preserved_after_failed_reload();
+    test_rollback_restores_lkg_metadata();
 
     TEST_SECTION("dynconf_impl: dry-run tests (E02.4)");
 
