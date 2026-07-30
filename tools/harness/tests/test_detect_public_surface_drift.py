@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from tools.harness import detect_public_surface_drift as detector
 
 
@@ -81,3 +83,67 @@ def test_live_inventory_matches_all_extracted_surfaces() -> None:
     assert detector.check_ffi_exports(
         inventory, detector.extract_ffi_exports_from_rust()
     ) == []
+
+
+def test_invalid_inventory_schema_reports_contract_fields() -> None:
+    errors = detector.validate_inventory_schema({
+        "schema_version": "0.9.2",
+        "dynconf_keys": [],
+        "metrics": [],
+    })
+
+    assert "inventory missing top-level keys: contract_version, directives, ffi_abi_version, ffi_exports, otel, reason_codes, reject_only_directives" in errors
+
+
+def test_directive_metadata_drift_is_reported() -> None:
+    inventory = {
+        "directives": [{
+            "name": "markdown_test",
+            "classification": "active",
+            "context": ["http"],
+            "args": "no_args",
+            "handler": "ngx_handler",
+            "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+            "source_flags": "NGX_HTTP_MAIN_CONF|NGX_CONF_NOARGS",
+            "post": None,
+            "otel_classification": "none",
+        }],
+        "reject_only_directives": [],
+        "otel": {"directives": [], "reject_only": []},
+    }
+    actual = {
+        "markdown_test": {
+            "name": "markdown_test",
+            "classification": "active",
+            "context": ["server"],
+            "args": "no_args",
+            "handler": "ngx_handler",
+            "conf_offset": "NGX_HTTP_LOC_CONF_OFFSET",
+            "source_flags": "NGX_HTTP_MAIN_CONF|NGX_CONF_NOARGS",
+            "post": None,
+            "otel_classification": "none",
+        }
+    }
+
+    assert detector.check_directive_contract(inventory, actual) == [
+        "directive context mismatch for markdown_test: inventory=['http'] source=['server']"
+    ]
+
+
+def test_malformed_and_duplicate_directive_rows_fail_closed() -> None:
+    duplicate = """
+static ngx_command_t ngx_http_markdown_filter_commands[] = {
+    { ngx_string(\"markdown_test\"), NGX_HTTP_MAIN_CONF|NGX_CONF_NOARGS, ngx_handler, NGX_HTTP_LOC_CONF_OFFSET, 0, NULL },
+    { ngx_string(\"markdown_test\"), NGX_HTTP_MAIN_CONF|NGX_CONF_NOARGS, ngx_handler, NGX_HTTP_LOC_CONF_OFFSET, 0, NULL }
+};
+"""
+    malformed = """
+static ngx_command_t ngx_http_markdown_filter_commands[] = {
+    { ngx_string(\"markdown_test\"), NGX_HTTP_MAIN_CONF|NGX_CONF_NOARGS, ngx_handler, NGX_HTTP_LOC_CONF_OFFSET, 0 }
+};
+"""
+
+    with pytest.raises(ValueError, match="duplicate directive names"):
+        detector._command_contracts(duplicate)
+    with pytest.raises(ValueError, match="malformed ngx_command_t row"):
+        detector._command_contracts(malformed)
