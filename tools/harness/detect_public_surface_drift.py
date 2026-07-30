@@ -34,6 +34,7 @@ FFI_PATHS = (
     REASON_CODE_PATH,
 )
 FFI_HEADER_PATH = os.path.join(ROOT, "components", "rust-converter", "include", "markdown_converter.h")
+COMMAND_REGISTRY_ERROR = "ngx_command_t registry is missing or unterminated"
 
 DIRECTIVE_RE = re.compile(r'ngx_string\("(markdown_[^"\\]+)"\)')
 REASON_CODE_RE = re.compile(r'^\s+(\w+)\s*=\s*(\d+)\s*,', re.MULTILINE)
@@ -361,11 +362,11 @@ def _directive_registry_block(text):
     """Extract the module's command registry, failing closed if it is incomplete."""
     marker = "static ngx_command_t ngx_http_markdown_filter_commands[] = {"
     if marker not in text:
-        raise ValueError("ngx_command_t registry is missing or unterminated")
+        raise ValueError(COMMAND_REGISTRY_ERROR)
     block_start = text.index(marker)
     closing = text.find("\n};", block_start)
     if closing < 0:
-        raise ValueError("ngx_command_t registry is missing or unterminated")
+        raise ValueError(COMMAND_REGISTRY_ERROR)
     return text[block_start:closing]
 
 
@@ -460,16 +461,22 @@ def _comment_syntax(lines, name):
             break
         parts.append(candidate)
         index += 1
-    syntax = re.sub(r"\s+\([^)]*\)$", "", " ".join(parts)).strip()
+    syntax = re.sub(r"[ \t]+\([^()\r\n]*\)$", "", " ".join(parts)).strip()
     return syntax or "(no args)"
 
 
 def _comment_public_metadata(lines):
     """Extract default, public syntax, and status annotations."""
     joined = "\n".join(lines)
-    default_match = re.search(r"^(?:Public )?Default:\s*(.+)$", joined, flags=re.M)
-    public_default = re.search(r"^Public default:\s*(.+)$", joined, flags=re.M)
-    public_syntax = re.search(r"^Public syntax:\s*(.+)$", joined, flags=re.M)
+    default_match = re.search(
+        r"^(?:Public )?Default:[ \t]*([^\r\n]+)$", joined, flags=re.M)
+    public_default = re.search(
+        r"^Public default:[ \t]*([^\r\n]+)$", joined, flags=re.M)
+    public_syntax = re.search(
+        r"^Public syntax:[ \t]*([^\r\n]+)$", joined, flags=re.M)
+    if (default_match is not None and public_default is not None
+            and default_match.group(1).strip() == public_default.group(1).strip()):
+        public_default = None
     status_match = re.search(r"^Public status:\s*(\w+)$", joined, flags=re.M)
     return {
         "default": (public_default or default_match).group(1).strip()
@@ -484,11 +491,12 @@ def _comment_migration(lines):
     joined = "\n".join(lines)
     migration_match = re.search(r"^Migration:\s*(.+)$", joined, flags=re.M)
     if migration_match:
-        targets = re.findall(r"->\s*(markdown_[a-z_]+)", migration_match.group(1))
+        targets = re.findall(r"->[ \t]*(markdown_[a-z_]+)", migration_match.group(1))
         if targets:
             return targets[0]
-    migrated_match = re.search(r"(?:Migrated to|replaced by)\s+(.+?)(?:\.|$)",
-                               joined, flags=re.I)
+    migrated_match = re.search(
+        r"(?:Migrated to|replaced by)[ \t]+([^\.\r\n]+)(?:\.|$)",
+        joined, flags=re.I)
     if migrated_match:
         return migrated_match.group(1).strip()
     if re.search(r"no direct (?:Config V2 )?equivalent|no replacement",
@@ -502,10 +510,10 @@ def _directive_comment_metadata(text):
     marker = "static ngx_command_t ngx_http_markdown_filter_commands[] = {"
     block_start = text.find(marker)
     if block_start < 0:
-        raise ValueError("ngx_command_t registry is missing or unterminated")
+        raise ValueError(COMMAND_REGISTRY_ERROR)
     block_end = text.find("\n};", block_start)
     if block_end < 0:
-        raise ValueError("ngx_command_t registry is missing or unterminated")
+        raise ValueError(COMMAND_REGISTRY_ERROR)
     block = text[block_start:block_end]
     comments = [(match.end(), match.group(1)) for match in re.finditer(
         r"/\*(.*?)\*/", block, flags=re.S)]
@@ -810,17 +818,26 @@ def _split_ffi_params(value):
     return params
 
 
+def _rust_pointer_parts(value):
+    """Return a Rust pointer qualifier and pointee, if present."""
+    if value.startswith("*const "):
+        return "const", value[len("*const "):]
+    if value.startswith("*mut "):
+        return "mut", value[len("*mut "):]
+    return None
+
+
 def _canonical_ffi_type(value, language):
     """Normalize Rust/C FFI types for ABI-relevant comparison."""
     value = _normalize_ffi_fragment(value)
     if language == "rust":
         if value == "()":
             return "void"
-        pointer_match = re.match(r"\*(const|mut)\s+(.+)$", value)
-        if pointer_match:
-            qualifier = "const" if pointer_match.group(1) == "const" else "mut"
+        pointer_parts = _rust_pointer_parts(value)
+        if pointer_parts is not None:
+            qualifier, pointee = pointer_parts
             return "ptr:{}:{}".format(
-                qualifier, _canonical_ffi_type(pointer_match.group(2), language))
+                qualifier, _canonical_ffi_type(pointee, language))
         value = {"u8": "u8", "u16": "u16", "u32": "u32", "u64": "u64",
                  "usize": "usize", "isize": "isize", "bool": "bool"}.get(
                      value, value)
@@ -869,9 +886,12 @@ def _c_ffi_param_types(params):
             continue
         # C prototypes name the parameter last.  Removing only that token
         # preserves pointer const/mutability and integer-width typedefs.
-        param_type = re.sub(r"\s+[A-Za-z_]\w*\s*$", "", param)
-        if param_type == param and re.search(r"\*[A-Za-z_]\w*\s*$", param):
-            param_type = re.sub(r"[A-Za-z_]\w*\s*$", "", param).strip()
+        param_type = re.sub(
+            r"[ \t]+[A-Za-z_][A-Za-z0-9_]*$", "", param)
+        if param_type == param and re.search(
+                r"\*[A-Za-z_][A-Za-z0-9_]*$", param):
+            param_type = re.sub(
+                r"[A-Za-z_][A-Za-z0-9_]*$", "", param).strip()
         result.append(_canonical_ffi_type(param_type, "c"))
     return result
 
@@ -880,18 +900,22 @@ def _extract_c_ffi_prototypes(header):
     """Parse all C declarations for exported markdown_* functions."""
     text = _strip_c_comments(header)
     prototypes = {}
-    for line_match in re.finditer(r"(?m)^[ \t]*[^;\n]*\bmarkdown_\w+\s*\(", text):
-        start = line_match.start()
-        end = text.find(");", line_match.end())
+    for name_match in re.finditer(
+            r"\b(markdown_[A-Za-z0-9_]*)[ \t]*\(", text):
+        start = text.rfind(";", 0, name_match.start()) + 1
+        end = text.find(");", name_match.end())
         if end < 0:
             raise ValueError("unterminated C FFI prototype")
         declaration = text[start:end + 1]
-        name_match = re.search(r"\b(markdown_\w+)\s*\(", declaration)
-        if name_match is None:
+        declaration = re.sub(
+            r"(?m)^[ \t]*#[^\r\n]*(?:\r?\n|$)", "", declaration)
+        declaration_name = re.search(
+            r"\b(markdown_[A-Za-z0-9_]*)[ \t]*\(", declaration)
+        if declaration_name is None:
             continue
-        name = name_match.group(1)
-        return_type = declaration[:name_match.start()].strip()
-        params = declaration[name_match.end():-1].strip()
+        name = declaration_name.group(1)
+        return_type = declaration[:declaration_name.start()].strip()
+        params = declaration[declaration_name.end():-1].strip()
         prototypes[name] = {
             "return_type": _canonical_ffi_type(return_type, "c"),
             "params": _c_ffi_param_types(params),

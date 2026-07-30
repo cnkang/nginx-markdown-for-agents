@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import uuid
 
 import pytest
 
@@ -127,7 +128,8 @@ pub extern "C" fn markdown_empty() {
 """
     header = (
         "#define MARKDOWN_ABI_VERSION 7\n"
-        "uint32_t markdown_test(const uint8_t *input, uint8_t *output);\n"
+        "uint32_t\n"
+        "markdown_test(const uint8_t *input, uint8_t *output);\n"
         "void markdown_empty(void);\n"
     )
 
@@ -315,7 +317,8 @@ def test_malformed_inventory_main_is_deterministic(
 
     # Keep the temporary path inside the repository boundary enforced by the
     # production loader, while still making cleanup explicit and test-local.
-    inventory_path = os.path.join(detector.ROOT, ".public-surface-invalid.json")
+    inventory_path = os.path.join(
+        detector.ROOT, ".public-surface-invalid-{}.json".format(uuid.uuid4()))
     with open(inventory_path, "w", encoding="utf-8") as stream:
         json.dump(inventory, stream, sort_keys=True)
     try:
