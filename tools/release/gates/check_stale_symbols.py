@@ -45,6 +45,8 @@ WHITELIST_PATH_PREFIXES = (
     "docs/guides/ROLLBACK_GUIDE.md",
     "docs/guides/prometheus-metrics.md",
     "docs/guides/streaming-troubleshooting.md",
+    # The public-surface inventory records retired directives as migration data.
+    "docs/harness/public-surface-inventory.json",
     "CHANGELOG.md",
     "docs/architecture/ADR/",
 )
