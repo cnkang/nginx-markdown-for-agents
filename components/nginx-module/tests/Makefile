@@ -45,7 +45,7 @@ build/unit/%: unit/%_test.c include/test_common.h include/test_metrics_snapshot.
 	extra_ldflags=""; \
 	case "$*" in \
 	  headers) extra_srcs="helpers/headers_standalone.c" ;; \
-	  reason_code_ffi) extra_srcs="../src/ngx_http_markdown_diagnostics_reason.c"; extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
+	  reason_code_ffi|diagnostics_production) extra_srcs="../src/ngx_http_markdown_diagnostics_reason.c"; extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  header_compile|reason_code|error_impl|error_classification|diagnostics_accessors|diagnostics_production|header_plan_apply|header_plan_prepare_commit) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
 	  diagnostics_streaming_response) extra_cflags="-DMARKDOWN_STREAMING_ENABLED" ;; \
 	  ffi_layout_check) extra_cflags="-I../src -Iinclude/nginx_stubs -DMARKDOWN_STREAMING_ENABLED" ;; \
