@@ -16,8 +16,9 @@ streaming-default conversion model with full-buffer fallback,
 Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
 logic, and header plan application, independent decompression budget with parse
-timeout and parser budget directives, runtime diagnostics endpoint, dynconf
-dry-run and last-known-good rollback, DEB/RPM packaging pipeline, Kubernetes
+timeout and parser budget directives, read-only runtime diagnostics endpoint,
+dynconf dry-run and last-known-good failed-reload protection with atomic file
+restore, DEB/RPM packaging pipeline, Kubernetes
 deployment examples, FFI ABI layout verification, CI supply-chain hardening,
 supplemental static security checks, report-oriented supply-chain visibility, and a
 repo-owned harness for agent workflow governance. Core features are
@@ -75,7 +76,7 @@ runtime behavior.
   release-manifest.json traceability, and repository metadata.
 - Kubernetes deployment examples (Ingress Controller, Helm chart, manifests).
 - Runtime diagnostics endpoint (`/nginx-markdown/diagnostics`).
-- Dynconf dry-run and last-known-good rollback.
+- Dynconf dry-run, last-known-good failed-reload protection, and atomic file restore.
 - Rules 39–40: NGX_DONE terminal semantics, invalidated header hash==0
   filtering.
 - CI supply-chain hardening: SHA-pinned Actions, checksum verification,

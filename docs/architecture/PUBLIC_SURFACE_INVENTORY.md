@@ -117,7 +117,9 @@ name a stable API.
 The stable operator endpoint is the JSON produced by
 `ngx_http_markdown_diagnostics_build_json` in
 `components/nginx-module/src/ngx_http_markdown_diagnostics.c`. There is no
-parallel Rust diagnostics specimen or schema export.
+parallel Rust diagnostics specimen or schema export. The handler is strictly
+read-only: only `GET` and `HEAD` are accepted; there is no mutation endpoint or
+rollback response schema.
 
 | Top-level field | Current shape | Class |
 |-----------------|---------------|-------|
@@ -334,6 +336,8 @@ The public surface is ready to freeze only when all of the following are true:
 - every active directive is either stable or explicitly experimental;
 - reject-only directives execute no legacy behavior and have accurate hints;
 - the diagnostics endpoint and its documentation describe the same wire JSON;
+- diagnostics mutation methods are rejected and no undocumented rollback API
+  or response schema exists;
 - `config_snapshot` contains no legacy directive-shaped keys;
 - the metrics catalog, reason-family mapping, and label set match the production
   renderer;

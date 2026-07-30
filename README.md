@@ -380,6 +380,24 @@ make supply-chain
 - [Harness Maintenance SOP](docs/guides/HARNESS_MAINTENANCE.md) — Custom lint rules and validation scripting.
 - [Frequently Asked Questions (FAQ)](docs/FAQ.md) & [Glossary](docs/glossary.md).
 
+## What's New in v0.9.2 (development candidate)
+
+The 0.9.2 branch is a development candidate; it is not a published release.
+It keeps the 0.9.1 configuration and ABI surface while tightening contracts:
+
+- **Read-only diagnostics**: `GET`/`HEAD` are supported and mutation requests,
+  including `action=rollback`, are rejected. Restore dynconf by atomically
+  replacing the watched file; LKG remains failed-reload protection.
+- **Request-scoped OTel ownership**: spans and export subrequests use request
+  pools. No worker-owned queue, thread, timer, socket, or exit flush is
+  claimed or created.
+- **Public-surface contract gate**: `make public-surface-drift-check` checks
+  directive, dynconf, metric, reason-code, and FFI metadata against source.
+
+See the [0.9.2 release notes](docs/releases/0.9.2-release-notes.md),
+[dynconf guide](docs/guides/DYNAMIC_CONFIG.md), and
+[rollback guide](docs/guides/ROLLBACK-0.9.2.md) for the candidate contract.
+
 ## What's New in v0.9.1
 
 v0.9.1 is the **final pre-v1.0 baseline consolidation and compatibility reset**. It combines performance readiness with the last deliberate source-build and public-contract cleanup before the v1.0 freeze. v0.9.0 was intended to be the last breaking release; the freeze was extended through v0.9.1 while v1.0 remained unpublished and adoption was still limited.
@@ -401,7 +419,8 @@ For the full list of changes across prior versions (including breaking configura
 
 Post-v0.9.1 and towards the v1.0.0 milestone:
 
-- **Observability Expansion**: Native OpenTelemetry tracing integration inside the NGINX C module filter path.
+- **Observability Expansion**: Stabilize the experimental OpenTelemetry
+  surface and its request-scoped contract.
 - **Distribution Expansion**: Official APT and YUM packaging pipelines integrated into standard Linux package indexing.
 - **Diagnostic Enhancements**: Extending CLI `nginx-markdown-doctor` checks and telemetry metrics for real-time conversion monitoring.
 

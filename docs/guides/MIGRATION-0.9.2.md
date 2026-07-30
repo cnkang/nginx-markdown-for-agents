@@ -38,29 +38,24 @@ for them.
 constants for decompression errors can now use the complete set. No
 configuration change required.
 
-### OTel Worker Lifecycle Cleanup on Reload/Shutdown
+### OTel Ownership on Reload/Shutdown
 
-OpenTelemetry worker threads and resources are now properly cleaned up
-on NGINX reload and shutdown. Previously, repeated reloads could leak
-OTel worker state.
+The experimental OTel implementation is request-scoped. Spans and their
+nonblocking export subrequests use request-pool ownership; there are no
+worker-owned OTel threads, queues, timers, or file descriptors to flush at
+reload or shutdown. No configuration change is required.
 
-**Impact:** No configuration change required. Operators using
-`markdown_otel` will see cleaner shutdown behavior and no resource
-accumulation across reload cycles.
+### Dynconf Restore Procedure
 
-### Dynconf Rollback API
+The diagnostics endpoint is read-only and accepts only `GET` and `HEAD`. It has
+no runtime rollback action. To restore a previous dynamic configuration,
+write a complete valid key/value file to a temporary file and atomically rename
+it over `markdown_dynamic_config_path`; the watcher will validate the changed
+file and promote it through the normal reload path. The internal LKG snapshot
+protects the active state when the restored file is invalid.
 
-A new rollback action is available on the diagnostics endpoint:
-
-```bash
-curl -X POST \
-  -H "Authorization: Bearer <token>" \
-  "http://localhost/nginx-markdown/diagnostics?action=rollback"
-```
-
-This reverts the active dynamic configuration to the previously applied
-snapshot. Rollback requests require an authenticated `Authorization` header.
-See [DYNAMIC_CONFIG.md](DYNAMIC_CONFIG.md) for full usage.
+See [DYNAMIC_CONFIG.md](DYNAMIC_CONFIG.md) and
+[ROLLBACK-0.9.2.md](ROLLBACK-0.9.2.md) for the complete procedure.
 
 **Impact:** Opt-in. Existing configurations are unaffected.
 

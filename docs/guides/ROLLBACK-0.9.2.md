@@ -2,15 +2,16 @@
 
 ## Overview
 
-This guide covers rolling back from nginx-markdown-for-agents 0.9.2 to a
-prior release. 0.9.2 is a non-breaking release with no irreversible changes,
-so rollback is straightforward.
+This guide covers rolling back the 0.9.2 development candidate to a prior
+release. The candidate is intended to be non-breaking and has no known
+irreversible changes, but publication and artifact availability are separate
+release gates.
 
 | Target | Section |
 |--------|---------|
 | 0.9.2 → 0.9.1 | [Rollback to 0.9.1](#rollback-to-091) |
 | 0.9.2 → 0.9.0 | [Rollback to 0.9.0](#rollback-to-090) |
-| Dynconf rollback | [Dynconf Rollback](#dynconf-rollback) |
+| Dynconf restore | [Dynconf Restore](#dynconf-restore) |
 
 ---
 
@@ -114,47 +115,36 @@ their toolchain or use prebuilt 0.9.0 binaries.
 
 ---
 
-## Dynconf Rollback
+## Dynconf Restore
 
-0.9.2 introduces a dynconf rollback API. Use it to revert the active
-dynamic configuration to the previously applied snapshot without a full
-version rollback:
+The diagnostics endpoint is read-only and accepts only `GET` and `HEAD`.
+There is no runtime rollback API or rollback response schema. To restore a
+previous dynamic configuration, replace the watched file atomically so every
+worker observes the same on-disk input:
 
 ```bash
-curl -X POST \
-  -H "Authorization: present" \
-  "http://localhost/nginx-markdown/diagnostics?action=rollback"
+set -eu
+path=/etc/nginx/markdown-dynamic.conf
+tmp="${path}.tmp.$$"
+umask 077
+cat > "$tmp" <<'EOF'
+schema_version=0.9
+memory_budget=1m
+EOF
+mv -f "$tmp" "$path"
 ```
 
-Rollback requests require a non-empty `Authorization` header in addition to
-the diagnostics endpoint access policy. This header is a CSRF mitigation only:
-the endpoint does not authenticate its value or verify Bearer tokens. The
-loopback/CIDR diagnostics access policy remains the actual access control.
+The watcher observes the changed modification time, parses and validates the
+complete file, then promotes it through the normal staged reload. If parsing
+or validation fails, the active snapshot and its `applied_mtime` remain at the
+last successfully applied state. Verify the result with the read-only
+diagnostics endpoint and, when changing worker processes or module binaries,
+use the normal controlled NGINX reload procedure.
 
-**Response:**
-
-```json
-{
-  "status": "ok",
-  "action": "rollback",
-  "previous_mtime": "2026-07-30T10:00:00Z",
-  "current_mtime": "2026-07-30T09:55:00Z"
-}
-```
-
-**When to use:**
-
-- A dynconf apply produced unexpected behavior and you want to revert
-  to the previous configuration without restarting NGINX.
-- You are testing a configuration change and want to quickly undo it.
-
-**Limitations:**
-
-- Only one level of rollback is available (previous snapshot).
-- Rollback is a runtime operation — it does not modify the dynconf file
-  on disk. A subsequent NGINX reload will re-read the on-disk file.
-
-See [DYNAMIC_CONFIG.md](DYNAMIC_CONFIG.md) for full usage.
+Do not send `POST /nginx-markdown/diagnostics?action=rollback`; it is rejected
+with `405 Method Not Allowed`. This deliberate absence avoids restoring a
+worker-local snapshot while other NGINX workers continue serving a different
+configuration.
 
 ---
 
@@ -164,8 +154,8 @@ See [DYNAMIC_CONFIG.md](DYNAMIC_CONFIG.md) for full usage.
 
 - Diagnostics mapping fix is backward-compatible
 - C reason code constants are additive
-- OTel lifecycle cleanup is transparent
-- Dynconf rollback API is opt-in
+- OTel remains request-scoped with no worker-owned lifecycle state
+- Dynconf diagnostics remains read-only; file restore is atomic and auditable
 - Public surface inventory is a build-time gate
 
 No data formats, on-disk state, or metric counters are changed in a way
@@ -181,8 +171,8 @@ When rolling back from 0.9.2 to 0.9.1:
 |--------|--------|
 | `reason_to_code` mapping | `bypass_no_transform` entry removed from diagnostics JSON |
 | C reason code constants | Decompression series (4–11) constants unavailable in C header |
-| OTel worker cleanup | Reload/shutdown may leak OTel state (0.9.1 behavior) |
-| Dynconf rollback API | Endpoint returns 404 for `action=rollback` |
+| OTel ownership | Request-scoped in both versions; no worker-owned state is flushed |
+| Dynconf diagnostics | `POST action=rollback` is rejected; restore the watched file atomically |
 | `stream_state` logging | `PRE_COMMIT` fallthrough returns to silent behavior |
 | Prometheus metrics | No metric name or label changes — counters continue from their current values |
 

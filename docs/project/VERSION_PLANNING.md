@@ -27,7 +27,10 @@ changes to public configuration, ABI, or runtime behavior.
 
 ### Scope
 
-- OTel ADR-0006 factual correction (OTLP HTTP/JSON, not protobuf).
+- OTel ADR-0006 factual correction (OTLP HTTP/JSON, not protobuf) and explicit
+  request-pool ownership with no worker-exit cleanup claim.
+- Dynconf diagnostics remains read-only; operators restore a previous valid
+  file atomically and rely on LKG protection for invalid reloads.
 - Release-gates-check-092 target with public-surface drift, version
   consistency, and reason-code registry completeness gates.
 - VERSION_PLANNING / PROJECT_STATUS 0.9.2 sections.
@@ -38,8 +41,9 @@ changes to public configuration, ABI, or runtime behavior.
 
 ### Release Evidence
 
-v0.9.2 is declared stable after the same evidence chain as v0.9.1, plus
-release-gates-check-092 passes.
+v0.9.2 remains a development candidate until the exact branch head passes the
+release-gates-check-092 evidence chain and the release artifacts are reviewed.
+Passing local gates alone does not declare a published stable release.
 
 ## v0.9.1 Release Objective
 
