@@ -24,6 +24,7 @@ if str(REPO_ROOT) not in sys.path:
 
 EXPECTED_VERSION = "0.9.2"
 EXPECTED_REASON_CODE_COUNT = 26
+CHANGELOG_FILENAME = "CHANGELOG.md"
 
 
 def find_repo_root() -> Path:
@@ -34,7 +35,7 @@ def check_version_consistency(repo: Path) -> dict:
     """Verify all version sources agree on 0.9.2."""
     sources = {
         "Cargo.toml": repo / "components/rust-converter/Cargo.toml",
-        "CHANGELOG.md": repo / "CHANGELOG.md",
+        CHANGELOG_FILENAME: repo / CHANGELOG_FILENAME,
     }
     mismatches = []
 
@@ -47,11 +48,12 @@ def check_version_consistency(repo: Path) -> dict:
         elif not m:
             mismatches.append("Cargo.toml: version not found")
 
-    changelog = sources["CHANGELOG.md"]
+    changelog = sources[CHANGELOG_FILENAME]
     if changelog.exists():
         content = changelog.read_text()
         if f"## [{EXPECTED_VERSION}]" not in content and f"## v{EXPECTED_VERSION}" not in content:
-            mismatches.append(f"CHANGELOG.md: {EXPECTED_VERSION} header not found")
+            mismatches.append(
+                f"{CHANGELOG_FILENAME}: {EXPECTED_VERSION} header not found")
 
     if mismatches:
         return {"name": "version_consistency", "status": "fail",
