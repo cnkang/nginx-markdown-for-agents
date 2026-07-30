@@ -231,7 +231,7 @@ ngx_int_t ngx_http_markdown_diagnostics_recording_active(void);
  *   reason - NUL-terminated reason code string (may be NULL)
  *
  * Returns:
- *   Canonical discriminant (0..24), or -1 for NULL/unknown strings.
+ *   Canonical discriminant (0..25), or -1 for NULL/unknown strings.
  */
 ngx_int_t ngx_http_markdown_diagnostics_reason_to_code(const char *reason);
 
@@ -330,6 +330,23 @@ typedef struct {
  */
 void ngx_http_markdown_diagnostics_get_dynconf_state(
     ngx_http_markdown_diag_dynconf_t *out);
+
+
+/*
+ * Roll back the active dynconf to the last-known-good snapshot.
+ *
+ * Bridges the diagnostics compilation unit to the global
+ * ngx_http_markdown_dynconf_watcher.  If dynconf is not active
+ * or the LKG is unavailable, returns NGX_ERROR without modifying
+ * the active state.
+ *
+ * Parameters:
+ *   log - NGINX log for error and informational messages
+ *
+ * Returns:
+ *   NGX_OK on successful rollback, NGX_ERROR on failure
+ */
+ngx_int_t ngx_http_markdown_diagnostics_rollback(ngx_log_t *log);
 
 
 /*
