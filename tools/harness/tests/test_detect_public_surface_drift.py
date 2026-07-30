@@ -16,7 +16,24 @@ def test_inventory_loader_honors_explicit_path(monkeypatch) -> None:
     monkeypatch.setattr(detector, "read_text", fake_read_text)
 
     assert detector.load_inventory(requested)["dynconf_keys"] == []
-    assert seen == [requested]
+    assert seen == [detector.os.path.realpath(requested)]
+
+
+def test_inventory_loader_resolves_explicit_symlink_path(tmp_path, monkeypatch) -> None:
+    target = tmp_path / "public-surface.json"
+    link = tmp_path / "public-surface-link.json"
+    target.write_text('{"dynconf_keys": [], "metrics": []}', encoding="utf-8")
+    link.symlink_to(target)
+    seen = []
+
+    def fake_read_text(path):
+        seen.append(path)
+        return '{"dynconf_keys": [], "metrics": []}'
+
+    monkeypatch.setattr(detector, "read_text", fake_read_text)
+
+    assert detector.load_inventory(str(link))["dynconf_keys"] == []
+    assert seen == [str(target.resolve())]
 
 
 def test_dynconf_key_drift_is_reported() -> None:
