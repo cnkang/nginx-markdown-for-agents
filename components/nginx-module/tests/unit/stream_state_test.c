@@ -10,6 +10,8 @@
 
 #include "../include/test_common.h"
 
+#include <stdarg.h>
+
 /* Pull in base NGINX types from stubs */
 #include <ngx_config.h>
 #include <ngx_core.h>
@@ -48,6 +50,31 @@
 #endif
 
 typedef intptr_t ngx_err_t;
+
+static ngx_uint_t test_log_count;
+static ngx_uint_t test_log_level;
+static ngx_uint_t test_log_headers_committed;
+static ngx_uint_t test_log_state;
+static ngx_uint_t test_log_event;
+
+static void
+test_capture_log(ngx_uint_t level, const char *fmt, ...)
+{
+    va_list args;
+
+    test_log_count++;
+    test_log_level = level;
+    UNUSED(fmt);
+    va_start(args, fmt);
+    test_log_headers_committed = va_arg(args, ngx_uint_t);
+    test_log_state = va_arg(args, ngx_uint_t);
+    test_log_event = va_arg(args, ngx_uint_t);
+    va_end(args);
+}
+
+#undef ngx_log_error
+#define ngx_log_error(level, log, err, fmt, ...) \
+    test_capture_log((level), (fmt), ##__VA_ARGS__)
 
 /* Define structs that the stubs only forward-declare */
 struct ngx_log_s { int dummy; };
@@ -771,11 +798,15 @@ static void test_pre_commit_headers_committed_passthrough(void)
 {
     ngx_http_markdown_stream_ctx_t ctx;
     ngx_http_markdown_decision_t   d;
+    ngx_log_t                      log;
 
     memset(&ctx, 0, sizeof(ctx));
+    memset(&log, 0, sizeof(log));
     ctx.current_state = NGX_HTTP_MD_STATE_PRE_COMMIT;
     ctx.replay_available = 1;
     ctx.headers_committed = 1;
+    ctx.log = &log;
+    test_log_count = 0;
 
     d = ngx_http_markdown_stream_decide(&ctx,
             NGX_HTTP_MD_EVENT_PARSER_UNSUITABLE);
@@ -784,6 +815,12 @@ static void test_pre_commit_headers_committed_passthrough(void)
                 "PRE_COMMIT + headers_committed -> PASSTHROUGH");
     TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
                 "action = PASSTHROUGH (fallthrough)");
+    TEST_ASSERT(test_log_count == 1 && test_log_level == NGX_LOG_ERR,
+                "invariant violation is logged at error level");
+    TEST_ASSERT(test_log_headers_committed == 1
+                && test_log_state == NGX_HTTP_MD_STATE_PRE_COMMIT
+                && test_log_event == NGX_HTTP_MD_EVENT_PARSER_UNSUITABLE,
+                "log carries headers flag, current_state, and event");
     TEST_PASS("PRE_COMMIT with headers_committed falls through");
 }
 
