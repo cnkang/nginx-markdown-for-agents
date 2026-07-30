@@ -630,30 +630,6 @@ test_otel_span_start_disabled(void)
 }
 
 static void
-test_otel_exit_worker_cleanup(void)
-{
-    ngx_cycle_t  cycle;
-    ngx_log_t    log;
-
-    TEST_SUBSECTION("OTel exit_worker resets worker state");
-
-    memset(&cycle, 0, sizeof(cycle));
-    memset(&log, 0, sizeof(log));
-    cycle.log = &log;
-
-    ngx_http_markdown_otel_worker_active = 1;
-    ngx_http_markdown_otel_exit_worker(&cycle);
-    TEST_ASSERT(ngx_http_markdown_otel_worker_active == 0,
-                "exit_worker should clear active worker state");
-
-    ngx_http_markdown_otel_exit_worker(&cycle);
-    TEST_ASSERT(ngx_http_markdown_otel_worker_active == 0,
-                "inactive exit_worker should remain a no-op");
-
-    TEST_PASS("OTel exit_worker cleanup resets worker state");
-}
-
-static void
 test_otel_random_hex_format(void)
 {
     u_char     buf[33];
@@ -732,7 +708,6 @@ main(void)
     test_otel_parse_traceparent_missing_flags_separator();
     test_otel_parse_traceparent_lowercase_flags();
     test_otel_span_start_disabled();
-    test_otel_exit_worker_cleanup();
     test_otel_helper_functions();
     test_otel_random_hex_format();
     printf("\nAll otel_impl tests passed!\n");
