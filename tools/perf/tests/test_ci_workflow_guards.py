@@ -139,6 +139,12 @@ def test_nightly_perf_validates_finalized_baseline() -> None:
     assert "canonical module baseline validation failed" in block
 
 
+def test_nightly_perf_selects_matching_baseline_version() -> None:
+    """The 0.9.2 workflow must make the evidence gate read its 0.9.2 file."""
+    block = _module_baseline_job(_nightly_perf_text())
+    assert "MODULE_BASELINE_VERSION=092" in block
+
+
 def test_nightly_perf_uploads_raw_and_finalized() -> None:
     """The workflow must upload both raw and finalized baseline files."""
     block = _module_baseline_job(_nightly_perf_text())

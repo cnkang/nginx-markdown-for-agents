@@ -193,13 +193,12 @@ required_commands=(
 )
 for required_command in "${required_commands[@]}"; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
-    if [[ "$required_command" == "ps" ]]; then
-      die "ps is required for RSS evidence; install procps on Linux"
-    fi
     die "required command is missing: $required_command"
   fi
 done
 
+# RSS is optional for lifecycle execution, but a report without RSS evidence
+# must fail the evidence gate rather than inventing a memory measurement.
 RSS_SUPPORTED=1
 if ! command -v ps >/dev/null 2>&1 \
     || ! ps -o rss= -p "$$" >/dev/null 2>&1; then
@@ -591,7 +590,9 @@ PROBE_PYEOF
 # Worker RSS measurement
 ###############################################################################
 
-# get_worker_rss returns the RSS in KB of the NGINX worker process.
+# get_worker_rss returns the RSS in KB of the NGINX worker process.  It emits
+# zero when the platform cannot provide RSS; downstream evidence validation
+# treats that sentinel as missing evidence.
 get_worker_rss() {
   if [[ "$RSS_SUPPORTED" -eq 0 ]]; then
     echo "0"
@@ -669,6 +670,7 @@ sample_rss_background() {
   echo "0" > "$peak_file"
 
   if [[ "$RSS_SUPPORTED" -eq 0 ]]; then
+    # Preserve the zero sentinel so missing memory evidence fails closed.
     return 0
   fi
 

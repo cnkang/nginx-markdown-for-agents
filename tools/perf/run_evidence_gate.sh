@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the 0.9.1 performance evidence gate in non-blocking/report mode.
+# Run the active module performance evidence gate in non-blocking/report mode.
 
 set -uo pipefail
 

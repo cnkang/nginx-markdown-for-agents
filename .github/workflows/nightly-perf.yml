@@ -325,11 +325,12 @@ jobs:
       - name: Finalize canonical module baseline with baseline_policy
         env:
           GITHUB_RUN_URL: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}"
+          BASELINE_GIT_COMMIT: ${{ steps.baseline-git.outputs.sha }}
         run: |
           python3 tools/perf/finalize_module_baseline.py \
             --raw-input perf/baselines/module-baseline-092-raw.json \
             --output perf/baselines/module-baseline-092.json \
-            --source-git-commit "${{ steps.baseline-git.outputs.sha }}" \
+            --source-git-commit "${BASELINE_GIT_COMMIT}" \
             --source-run "${GITHUB_RUN_URL}"
         shell: bash
 
@@ -359,6 +360,7 @@ jobs:
 
       - name: Run canonical performance evidence check
         run: |
+          MODULE_BASELINE_VERSION=092 \
           NGINX_BIN="${NGINX_SRC}/objs/nginx" \
           MODULE_SO="${NGINX_SRC}/objs/ngx_http_markdown_filter_module.so" \
             make perf-evidence-check
