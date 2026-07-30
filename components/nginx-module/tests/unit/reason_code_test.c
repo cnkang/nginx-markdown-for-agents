@@ -378,37 +378,57 @@ test_additional_reason_codes(void)
 {
     static const struct {
         const ngx_str_t *(*accessor)(void);
+        const char       *accessor_name;
         const char       *expected;
     } cases[] = {
         { ngx_http_markdown_reason_decompression_error,
+          "ngx_http_markdown_reason_decompression_error",
           "decompression_error" },
         { ngx_http_markdown_reason_decompression_budget_exceeded,
+          "ngx_http_markdown_reason_decompression_budget_exceeded",
           "decompression_budget_exceeded" },
         { ngx_http_markdown_reason_decompression_format_error,
+          "ngx_http_markdown_reason_decompression_format_error",
           "decompression_format_error" },
         { ngx_http_markdown_reason_decompression_truncated_input,
+          "ngx_http_markdown_reason_decompression_truncated_input",
           "decompression_truncated_input" },
         { ngx_http_markdown_reason_decompression_io_error,
+          "ngx_http_markdown_reason_decompression_io_error",
           "decompression_io_error" },
-        { ngx_http_markdown_reason_timeout, "timeout" },
-        { ngx_http_markdown_reason_budget_exceeded, "budget_exceeded" },
-        { ngx_http_markdown_reason_replay_error, "replay_error" },
-        { ngx_http_markdown_reason_overload, "overload" },
-        { ngx_http_markdown_reason_invalid_dynconf, "invalid_dynconf" },
-        { ngx_http_markdown_reason_degraded_snapshot, "degraded_snapshot" },
+        { ngx_http_markdown_reason_timeout,
+          "ngx_http_markdown_reason_timeout", "timeout" },
+        { ngx_http_markdown_reason_budget_exceeded,
+          "ngx_http_markdown_reason_budget_exceeded", "budget_exceeded" },
+        { ngx_http_markdown_reason_replay_error,
+          "ngx_http_markdown_reason_replay_error", "replay_error" },
+        { ngx_http_markdown_reason_overload,
+          "ngx_http_markdown_reason_overload", "overload" },
+        { ngx_http_markdown_reason_invalid_dynconf,
+          "ngx_http_markdown_reason_invalid_dynconf", "invalid_dynconf" },
+        { ngx_http_markdown_reason_degraded_snapshot,
+          "ngx_http_markdown_reason_degraded_snapshot", "degraded_snapshot" },
         { ngx_http_markdown_reason_header_plan_apply_err,
+          "ngx_http_markdown_reason_header_plan_apply_err",
           "header_plan_apply_error" },
         { ngx_http_markdown_reason_streaming_mid_flight_err,
+          "ngx_http_markdown_reason_streaming_mid_flight_err",
           "streaming_mid_flight_error" },
         { ngx_http_markdown_reason_bypass_no_transform,
+          "ngx_http_markdown_reason_bypass_no_transform",
           "bypass_no_transform" },
     };
 
     TEST_SUBSECTION("Additional reason code accessors");
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        char failure_message[256];
+
+        snprintf(failure_message, sizeof(failure_message),
+                 "%s() should return %s", cases[i].accessor_name,
+                 cases[i].expected);
         TEST_ASSERT(ngx_str_eq(cases[i].accessor(), cases[i].expected),
-                    "accessor returns expected reason code");
+                    failure_message);
     }
 
     TEST_PASS("Additional reason code accessors are correct");
