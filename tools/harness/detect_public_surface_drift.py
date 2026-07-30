@@ -92,6 +92,7 @@ def read_text(path):
 def load_inventory(path=None):
     if path is None:
         path = INVENTORY_PATH
+    path = os.path.realpath(path)
     text = read_text(path)
     return json.loads(text)
 
@@ -136,8 +137,8 @@ def extract_ffi_exports_from_rust():
 
 
 def check_directives(inventory, actual_names):
-    inv_names = set(d["name"] for d in inventory["directives"])
-    inv_reject = set(d["name"] for d in inventory["reject_only_directives"])
+    inv_names = {d["name"] for d in inventory["directives"]}
+    inv_reject = {d["name"] for d in inventory["reject_only_directives"]}
     inv_otel_active = set(inventory["otel"]["directives"])
     inv_otel_reject = set(inventory["otel"]["reject_only"])
     inv_all = inv_names | inv_reject | inv_otel_active | inv_otel_reject
@@ -203,7 +204,7 @@ def check_dynconf_keys(inventory, actual_keys):
 
 
 def check_metrics(inventory, actual_names):
-    inv_names = set(metric["name"] for metric in inventory["metrics"])
+    inv_names = {metric["name"] for metric in inventory["metrics"]}
     actual = set(actual_names)
     drift = []
 
