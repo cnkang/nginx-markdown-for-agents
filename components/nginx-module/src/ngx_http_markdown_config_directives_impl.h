@@ -225,7 +225,6 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   balanced        - general-purpose (IMS-only, auto streaming)
      *   streaming_first - AI agent workloads (no cache, forced streaming)
      *
-     * Public default: none (built-in Config V2 defaults apply)
      * Default: none (built-in Config V2 defaults apply)
      * Context: http, server, location
      *
@@ -633,7 +632,6 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Content types to exclude from conversion (streaming responses).
      * These content types will never be converted, even if eligible.
-     * Public default: none (no exclusions)
      * Default: none (no exclusions)
      * Context: http, server, location
      *
@@ -769,7 +767,6 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Controls the output format of the markdown_metrics endpoint.
      * - auto: JSON or plain-text based on Accept header (default)
      * - prometheus: Prometheus text exposition format for non-JSON
-     * Public default: auto
      * Default: auto
      * Context: http, server, location
      *
