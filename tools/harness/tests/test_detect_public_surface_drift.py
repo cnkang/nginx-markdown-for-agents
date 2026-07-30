@@ -82,6 +82,27 @@ def test_metric_drift_is_reported() -> None:
     ]
 
 
+def test_comment_metadata_parsers_preserve_contract_annotations() -> None:
+    """Comment annotations remain stable while using deterministic parsing."""
+    lines = [
+        "markdown_test value (optional)",
+        "Default: off",
+        "Public default: on",
+        "Public syntax: <size>",
+        "Public status: active",
+        "Migration:",
+        "  -> markdown_replacement",
+    ]
+
+    assert detector._comment_syntax(lines, "markdown_test") == "value"
+    assert detector._comment_public_metadata(lines) == {
+        "default": "on",
+        "syntax": "<size>",
+        "status": "active",
+    }
+    assert detector._comment_migration(lines) == "markdown_replacement"
+
+
 def test_metric_cardinality_policy_drift_is_reported() -> None:
     """A changed cardinality policy must fail the public-surface gate."""
     inventory = copy.deepcopy(detector.load_inventory())
