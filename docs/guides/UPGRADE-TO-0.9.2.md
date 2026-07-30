@@ -1,0 +1,194 @@
+# Upgrade Guide: 0.9.2
+
+## Overview
+
+This guide covers upgrading to nginx-markdown-for-agents 0.9.2 from any
+prior 0.9.x release. 0.9.2 is a non-breaking release — all 0.9.1
+configurations are valid without modification.
+
+Choose the upgrade method matching your deployment:
+
+| Method | Section |
+|--------|---------|
+| Prebuilt module (`.so` replacement) | [Prebuilt Module Upgrade](#prebuilt-module-upgrade) |
+| Source build | [Source Build Upgrade](#source-build-upgrade) |
+| Helm chart | [Helm Upgrade](#helm-upgrade) |
+| Docker | [Docker Upgrade](#docker-upgrade) |
+
+---
+
+## Prebuilt Module Upgrade
+
+### 1. Download the 0.9.2 module binary
+
+```bash
+# Replace <nginx-version> and <os> with your target (e.g., 1.26.3, ubuntu22.04)
+curl -LO https://github.com/cnkang/nginx-markdown-for-agents/releases/download/v0.9.2/ngx_http_markdown_filter_module-0.9.2-nginx<nginx-version>-<os>-x86_64.so
+```
+
+### 2. Verify checksum
+
+```bash
+sha256sum -c checksums-0.9.2.txt
+```
+
+### 3. Back up the current module
+
+```bash
+sudo cp /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so \
+    /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so.0.9.1.bak
+```
+
+### 4. Replace the module
+
+```bash
+sudo cp ngx_http_markdown_filter_module-0.9.2-nginx*.so \
+    /usr/lib/nginx/modules/ngx_http_markdown_filter_module.so
+```
+
+### 5. Validate and restart
+
+```bash
+sudo nginx -t && sudo systemctl restart nginx
+```
+
+---
+
+## Source Build Upgrade
+
+### 1. Update the repository
+
+```bash
+cd nginx-markdown-for-agents
+git fetch --tags
+git checkout v0.9.2
+```
+
+### 2. Update Rust toolchain
+
+```bash
+rustup toolchain install 1.97.0
+rustup default 1.97.0
+```
+
+### 3. Build the Rust converter
+
+```bash
+cd components/rust-converter
+cargo build --release
+cd ../..
+```
+
+### 4. Rebuild the NGINX module
+
+```bash
+# Using your existing NGINX build directory
+cd /path/to/nginx-build
+make modules
+```
+
+### 5. Install and restart
+
+```bash
+sudo cp objs/ngx_http_markdown_filter_module.so \
+    /usr/lib/nginx/modules/
+sudo nginx -t && sudo systemctl restart nginx
+```
+
+---
+
+## Helm Upgrade
+
+### 1. Update the chart repository
+
+```bash
+helm repo update
+```
+
+### 2. Upgrade the release
+
+```bash
+helm upgrade nginx-markdown nginx-markdown/nginx-markdown-for-agents \
+    --namespace nginx-markdown \
+    --set markdown.image.tag=v0.9.2
+```
+
+### 3. Verify
+
+```bash
+helm status nginx-markdown --namespace nginx-markdown
+kubectl rollout status deployment/nginx-markdown --namespace nginx-markdown
+```
+
+---
+
+## Docker Upgrade
+
+### 1. Pull the 0.9.2 image
+
+```bash
+docker pull cnkang/nginx-markdown-for-agents:v0.9.2
+```
+
+### 2. Update your compose or deployment
+
+```yaml
+image: cnkang/nginx-markdown-for-agents:v0.9.2
+```
+
+### 3. Restart
+
+```bash
+docker compose up -d
+```
+
+---
+
+## Post-Upgrade Verification
+
+After upgrading by any method, run these checks:
+
+### 1. Configuration validation
+
+```bash
+sudo nginx -t
+# Expected: syntax is ok / test is successful
+```
+
+### 2. Doctor check
+
+```bash
+bash tools/doctor/nginx-markdown-doctor.sh
+# All checks should pass
+```
+
+### 3. Diagnostics endpoint
+
+```bash
+curl -s http://localhost/nginx-markdown/diagnostics | python3 -m json.tool
+# Verify version shows 0.9.2
+# Verify reason_to_code includes bypass_no_transform
+```
+
+### 4. Metrics endpoint
+
+```bash
+curl -s http://localhost/nginx-markdown/metrics
+# Verify metric families are present and emitting
+```
+
+### 5. Functional smoke test
+
+```bash
+curl -sD - -H "Accept: text/markdown" http://localhost/docs/ | head -5
+# Expected: HTTP/1.1 200 OK
+# Expected: Content-Type: text/markdown; charset=utf-8
+```
+
+---
+
+## Document Updates
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.9.2 | 2026-07-30 | Kang | Initial upgrade guide for 0.9.2 |

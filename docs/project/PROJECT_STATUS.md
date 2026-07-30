@@ -11,7 +11,7 @@ steering files.
 
 ## Current Assessment
 
-As of the **current release line (0.9.1)**, the project includes a
+As of the **current release line (0.9.2)**, the project includes a
 streaming-default conversion model with full-buffer fallback,
 Rust-first
 architecture modules for Accept negotiation, conditional requests, decision
@@ -26,12 +26,26 @@ fuzz-oriented validation entrypoints, and harness-specific validation
 entrypoints, along with documentation covering installation, configuration,
 operations, architecture, and contributor-facing harness maintenance.
 
-### Current Release Line 0.9.1
+### Current Release Line 0.9.2
 
-**Status:** Stable release, published 2026-07-29. 0.9.1 introduces zero-copy output for
-streaming, gzip plus zlib/raw-deflate plus Brotli streaming decompression,
-and full-buffer copy reduction, all guarded by strict performance evidence
-gates.
+**Status:** Development release line. 0.9.2 continues from the 0.9.1 stable
+baseline with harness consolidation, documentation corrections, and
+release-gate hardening. No breaking changes to public configuration, ABI, or
+runtime behavior.
+
+#### 0.9.2 (current development)
+
+- **OTel ADR-0006 correction**: Factual fix — OTLP HTTP/JSON is the actual
+  implementation, not OTLP HTTP/protobuf. Protobuf is documented as a future
+  consideration.
+- **Release-gates-check-092**: Additive on 091; adds public-surface drift
+  check" check, version consistency gate (0.9.2), and reason-code registry
+  completeness gate.
+- **Streaming reason code normalization documentation**: C-only streaming
+  reason codes use UPPERCASE format; documented as a known inconsistency
+  to be resolved in 1.x when migrating to Rust enum (lowercase snake_case).
+- **README consistency verification**: English and Chinese READMEs verified
+  for version, directive, and default-value consistency.
 
 ### Release 0.7.0 Updates
 
