@@ -322,7 +322,7 @@ ngx_http_markdown_diagnostics_recording_active(void)
  *   reason - NUL-terminated reason code string (may be NULL)
  *
  * Returns:
- *   Canonical discriminant (0..24), or -1 when the string is NULL or not a
+ *   Canonical discriminant (0..25), or -1 when the string is NULL or not a
  *   canonical reason code.
  */
 ngx_int_t
@@ -359,6 +359,7 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
         { "degraded_snapshot",            22 },
         { "header_plan_apply_error",      23 },
         { "streaming_mid_flight_error",   24 },
+        { "bypass_no_transform",          25 },
         /* Legacy uppercase names (backward compatibility) */
         { "CONVERTED",                     0 },
         { "ELIGIBLE_CONVERTED",            0 },
@@ -385,6 +386,7 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
         { "FAIL_CONVERSION",              18 },
         { "FAIL_RESOURCE_LIMIT",          19 },
         { "FAIL_SYSTEM",                  13 },
+        { "BYPASS_NO_TRANSFORM",          25 },
     };
     if (reason == NULL) {
         return -1;
@@ -401,10 +403,153 @@ ngx_http_markdown_diagnostics_reason_to_code(const char *reason)
 
 
 /*
+ * Check if the request query string contains action=rollback.
+ *
+ * Parses r->args looking for the exact key-value pair
+ * action=rollback.  Returns 1 if found, 0 otherwise.
+ */
+static ngx_int_t
+ngx_http_markdown_diagnostics_check_rollback_action(ngx_http_request_t *r)
+{
+    u_char        *p;
+    u_char        *last;
+    static u_char  action_key[] = "action=rollback";
+    static size_t  action_key_len = sizeof("action=rollback") - 1;
+
+    if (r->args.len == 0 || r->args.data == NULL) {
+        return 0;
+    }
+
+    p = r->args.data;
+    last = r->args.data + r->args.len;
+
+    for ( ;; ) {
+        u_char  *seg_start;
+        u_char  *seg_end;
+        size_t   seg_len;
+
+        seg_start = p;
+
+        while (p < last && *p != '&') {
+            p++;
+        }
+
+        seg_end = p;
+        seg_len = seg_end - seg_start;
+
+        if (seg_len == action_key_len
+            && ngx_strncasecmp(seg_start, action_key, action_key_len) == 0)
+        {
+            return 1;
+        }
+
+        if (p >= last) {
+            break;
+        }
+
+        p++;
+    }
+
+    return 0;
+}
+
+
+/*
+ * Build and send a JSON response for a rollback action.
+ *
+ * Parameters:
+ *   r       - HTTP request
+ *   success - 1 if rollback succeeded, 0 if failed
+ *   reason  - Human-readable reason string (NUL-terminated); may be NULL
+ *
+ * Returns:
+ *   NGX_OK, NGX_ERROR, or HTTP status code
+ */
+static ngx_int_t
+ngx_http_markdown_diagnostics_send_rollback_response(
+    ngx_http_request_t *r, ngx_int_t success, const char *reason)
+{
+    ngx_buf_t    *b;
+    ngx_chain_t   out;
+    u_char       *buf;
+    u_char       *p;
+    u_char       *last;
+    size_t        buf_size;
+    ngx_http_markdown_diag_dynconf_t  dynconf;
+
+    buf_size = 256;
+    buf = ngx_palloc(r->pool, buf_size);
+    if (buf == NULL) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    p = buf;
+    last = buf + buf_size;
+
+    ngx_http_markdown_diagnostics_get_dynconf_state(&dynconf);
+
+    if (success) {
+        p = ngx_slprintf(p, last,
+            "{\"rollback\": \"ok\", "
+            "\"lkg_mtime\": \"%T\", "
+            "\"config_version\": %ui}\n",
+            dynconf.last_known_good_mtime,
+            dynconf.config_version);
+    } else {
+        p = ngx_slprintf(p, last,
+            "{\"rollback\": \"failed\", "
+            "\"reason\": \"%s\"}\n",
+            reason != NULL ? reason : "unknown");
+    }
+
+    if (p >= last) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
+    if (b == NULL) {
+        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+
+    b->pos = buf;
+    b->last = p;
+    b->start = buf;
+    b->end = buf + buf_size;
+    b->last_buf = (r == r->main) ? 1 : 0;
+    b->last_in_chain = 1;
+    b->memory = 1;
+
+    r->headers_out.status = NGX_HTTP_OK;
+    r->headers_out.content_type_len = sizeof("application/json") - 1;
+    ngx_str_set(&r->headers_out.content_type, "application/json");
+    r->headers_out.content_type_lowcase = NULL;
+    r->headers_out.content_length_n = b->last - b->pos;
+
+    {
+        ngx_int_t  rc;
+
+        rc = ngx_http_send_header(r);
+        if (rc == NGX_ERROR || rc > NGX_OK) {
+            return rc;
+        }
+    }
+
+    out.buf = b;
+    out.next = NULL;
+
+    return ngx_http_output_filter(r, &out);
+}
+
+
+/*
  * HTTP content handler for the diagnostics endpoint.
  *
- * Validates access control, builds the JSON response, and sends
- * it to the client.  Only responds to GET and HEAD methods.
+ * Validates access control, then:
+ *   - GET/HEAD: builds and sends the full diagnostics JSON response
+ *   - POST with action=rollback: rolls back to last-known-good config
+ *     and returns a JSON result
+ *   - POST without action=rollback: returns 400 Bad Request
+ *   - Other methods: returns 405 Not Allowed
  *
  * The response Content-Type is application/json.
  *
@@ -422,8 +567,8 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
     ngx_buf_t    *b;
     ngx_chain_t   out;
 
-    /* Only allow GET and HEAD */
-    if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD))) {
+    /* Only allow GET, HEAD, and POST */
+    if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD | NGX_HTTP_POST))) {
         return NGX_HTTP_NOT_ALLOWED;
     }
 
@@ -437,6 +582,23 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
     rc = ngx_http_discard_request_body(r);
     if (rc != NGX_OK) {
         return rc;
+    }
+
+    /* POST: handle action parameter */
+    if (r->method & NGX_HTTP_POST) {
+        if (ngx_http_markdown_diagnostics_check_rollback_action(r)) {
+            rc = ngx_http_markdown_diagnostics_rollback(
+                     r->connection->log);
+            if (rc == NGX_OK) {
+                return ngx_http_markdown_diagnostics_send_rollback_response(
+                           r, 1, NULL);
+            }
+
+            return ngx_http_markdown_diagnostics_send_rollback_response(
+                       r, 0, "no valid last-known-good snapshot");
+        }
+
+        return NGX_HTTP_BAD_REQUEST;
     }
 
     /*
