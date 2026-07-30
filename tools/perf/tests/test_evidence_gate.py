@@ -278,7 +278,7 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
         "if: ${{ !(github.event_name == 'workflow_dispatch' "
         "&& inputs.bootstrap_module_baseline) }}"
     ) in workflow
-    assert "name: Canonical Module Baseline 0.9.1" in workflow
+    assert "name: Canonical Module Baseline 0.9.2" in workflow
     assert "runs-on: ubuntu-24.04" in workflow
     assert '[[ "$(uname -m)" == "x86_64" ]]' in workflow
     assert "Determine canonical benchmark NGINX version" in workflow
@@ -289,11 +289,11 @@ def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
         "the toolchain instead of deferring rustup to cargo install"
     )
     assert "tools/perf/run_module_benchmark.sh" in workflow
-    assert "perf/baselines/module-baseline-091.json" in workflow
+    assert "perf/baselines/module-baseline-092.json" in workflow
     assert "_validate_benchmark_evidence" in workflow
     assert "make perf-evidence-check" in workflow
-    assert "make release-gates-check-091" in workflow
-    assert "module-baseline-091-${{ github.sha }}" in workflow
+    assert "make release-gates-check-092" in workflow
+    assert "module-baseline-092-${{ github.sha }}" in workflow
 
 
 def test_module_baseline_contains_completed_environment_consistent_scenarios():
