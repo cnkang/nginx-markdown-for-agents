@@ -564,7 +564,7 @@ def main():
         "error_policy_doc"))
     results.append(check_file_exists(
         repo,
-        "docs/release/0.9.0-release-notes.md",
+        "docs/releases/0.9.0-release-notes.md",
         "release_notes"))
     results.append(check_file_exists(
         repo,
