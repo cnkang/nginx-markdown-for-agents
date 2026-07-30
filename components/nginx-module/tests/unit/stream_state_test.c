@@ -11,6 +11,7 @@
 #include "../include/test_common.h"
 
 #include <stdarg.h>
+#include <string.h>
 
 /* Pull in base NGINX types from stubs */
 #include <ngx_config.h>
@@ -53,9 +54,14 @@ typedef intptr_t ngx_err_t;
 
 static ngx_uint_t test_log_count;
 static ngx_uint_t test_log_level;
+static const char *test_log_format;
 static ngx_uint_t test_log_headers_committed;
 static ngx_uint_t test_log_state;
 static ngx_uint_t test_log_event;
+
+#define TEST_PRE_COMMIT_INVARIANT_FORMAT \
+    "markdown: PRE_COMMIT invariant violation: " \
+    "headers_committed=%ui, current_state=%ui, event=%ui"
 
 static void
 test_capture_log(ngx_uint_t level, const char *fmt, ...)
@@ -64,17 +70,21 @@ test_capture_log(ngx_uint_t level, const char *fmt, ...)
 
     test_log_count++;
     test_log_level = level;
-    UNUSED(fmt);
-    va_start(args, fmt);
-    test_log_headers_committed = va_arg(args, ngx_uint_t);
-    test_log_state = va_arg(args, ngx_uint_t);
-    test_log_event = va_arg(args, ngx_uint_t);
-    va_end(args);
+    test_log_format = fmt;
+    if (fmt != NULL && strcmp(fmt, TEST_PRE_COMMIT_INVARIANT_FORMAT) == 0) {
+        va_start(args, fmt);
+        test_log_headers_committed = va_arg(args, ngx_uint_t);
+        test_log_state = va_arg(args, ngx_uint_t);
+        test_log_event = va_arg(args, ngx_uint_t);
+        va_end(args);
+    }
 }
 
 #undef ngx_log_error
 #define ngx_log_error(level, log, err, fmt, ...) \
-    test_capture_log((level), (fmt), ##__VA_ARGS__)
+    do { \
+        test_capture_log((level), (fmt), ##__VA_ARGS__); \
+    } while (0)
 
 /* Define structs that the stubs only forward-declare */
 struct ngx_log_s { int dummy; };
@@ -807,6 +817,7 @@ static void test_pre_commit_headers_committed_passthrough(void)
     ctx.headers_committed = 1;
     ctx.log = &log;
     test_log_count = 0;
+    test_log_format = NULL;
 
     d = ngx_http_markdown_stream_decide(&ctx,
             NGX_HTTP_MD_EVENT_PARSER_UNSUITABLE);
@@ -815,8 +826,11 @@ static void test_pre_commit_headers_committed_passthrough(void)
                 "PRE_COMMIT + headers_committed -> PASSTHROUGH");
     TEST_ASSERT(d.action == NGX_HTTP_MD_ACTION_PASSTHROUGH,
                 "action = PASSTHROUGH (fallthrough)");
-    TEST_ASSERT(test_log_count == 1 && test_log_level == NGX_LOG_ERR,
-                "invariant violation is logged at error level");
+    TEST_ASSERT(test_log_count == 1 && test_log_level == NGX_LOG_ERR
+                && test_log_format != NULL
+                && strcmp(test_log_format, TEST_PRE_COMMIT_INVARIANT_FORMAT)
+                   == 0,
+                "expected invariant violation message is captured once");
     TEST_ASSERT(test_log_headers_committed == 1
                 && test_log_state == NGX_HTTP_MD_STATE_PRE_COMMIT
                 && test_log_event == NGX_HTTP_MD_EVENT_PARSER_UNSUITABLE,
