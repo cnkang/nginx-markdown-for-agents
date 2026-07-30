@@ -20,6 +20,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 from lib.path_validation import validate_read_path  # noqa: E402
+from lib.reason_code import REASON_C_ACCESSOR_ALIASES  # noqa: E402
 
 INVENTORY_PATH = os.path.join(ROOT, "docs", "harness", "public-surface-inventory.json")
 DIRECTIVES_PATH = os.path.join(ROOT, "components", "nginx-module", "src", "ngx_http_markdown_config_directives_impl.h")
@@ -507,14 +508,7 @@ def _comment_migration(lines):
 
 def _directive_comment_metadata(text):
     """Extract public metadata from the command registry's adjacent comments."""
-    marker = "static ngx_command_t ngx_http_markdown_filter_commands[] = {"
-    block_start = text.find(marker)
-    if block_start < 0:
-        raise ValueError(COMMAND_REGISTRY_ERROR)
-    block_end = text.find("\n};", block_start)
-    if block_end < 0:
-        raise ValueError(COMMAND_REGISTRY_ERROR)
-    block = text[block_start:block_end]
+    block = _directive_registry_block(text)
     comments = [(match.end(), match.group(1)) for match in re.finditer(
         r"/\*(.*?)\*/", block, flags=re.S)]
     result = {}
@@ -679,10 +673,7 @@ def _reason_c_name(string):
     # C keeps the historical *_err storage names while Rust exposes the
     # clearer *_error strings; this mapping makes that intentional alias
     # explicit instead of treating it as drift.
-    return {
-        "header_plan_apply_error": "header_plan_apply_err",
-        "streaming_mid_flight_error": "streaming_mid_flight_err",
-    }.get(string, string)
+    return REASON_C_ACCESSOR_ALIASES.get(string, string)
 
 
 def extract_reason_contract_from_rust():
