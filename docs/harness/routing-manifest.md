@@ -19,6 +19,8 @@ This page is the readable overlay, not the machine-owned truth.
 | `observability-metrics` | focused semantic | `make docs-check`, `make release-gates-check` |
 | `v070-gates` | focused semantic | `make release-gates-check-070`, `make test-rust`, `make check-headers` |
 | `v080-gates` | focused semantic | `make release-gates-check-080` |
+| `v090-gates` | focused semantic | `make release-gates-check-090` |
+| `v091-gates` | focused semantic | `make release-gates-check-091`, `make perf-evidence-check` |
 | `v092-gates` | focused semantic | `make release-gates-check-092` |
 | `release-governance` | focused semantic | `make release-gates-check-080`, `make release-gates-check`, `make release-gates-check-strict` |
 | `release-manifest` | focused semantic | `python3 packaging/scripts/test_release_manifest.py`, `make release-gates-check` |

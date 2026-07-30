@@ -122,12 +122,14 @@ version rollback:
 
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer <token>" \
+  -H "Authorization: present" \
   "http://localhost/nginx-markdown/diagnostics?action=rollback"
 ```
 
-Rollback requests require an authenticated `Authorization` header in addition
-to the diagnostics endpoint access policy.
+Rollback requests require a non-empty `Authorization` header in addition to
+the diagnostics endpoint access policy. This header is a CSRF mitigation only:
+the endpoint does not authenticate its value or verify Bearer tokens. The
+loopback/CIDR diagnostics access policy remains the actual access control.
 
 **Response:**
 
