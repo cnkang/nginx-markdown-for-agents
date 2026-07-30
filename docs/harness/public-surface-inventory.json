@@ -25,7 +25,7 @@
         "server",
         "location"
       ],
-      "default": "none",
+      "default": "none (built-in Config V2 defaults apply)",
       "name": "markdown_profile",
       "status": "active",
       "syntax": "strict_cache|balanced|streaming_first",
@@ -272,7 +272,7 @@
         "server",
         "location"
       ],
-      "default": "none",
+      "default": "none (no exclusions)",
       "name": "markdown_stream_types",
       "status": "active",
       "syntax": "<type> [<type> ...]",
@@ -907,7 +907,7 @@
       "dynamic": true,
       "unknown_key": "reject",
       "required": true,
-      "duplicate": "must_be_unique"
+      "duplicate": "last_value_wins"
     }
   ],
   "ffi_exports": [
@@ -1676,6 +1676,10 @@
     "reject_only": [
       {
         "name": "markdown_otel_tracing",
+        "migration_target": "markdown_otel on|off",
+        "default": "(not applicable)",
+        "syntax": "on|off",
+        "status": "reject_only",
         "classification": "reject_only",
         "otel_classification": "reject_only",
         "context": [
@@ -1691,6 +1695,10 @@
       },
       {
         "name": "markdown_otel_metrics",
+        "migration_target": "markdown_metrics",
+        "default": "(not applicable)",
+        "syntax": "on|off",
+        "status": "reject_only",
         "classification": "reject_only",
         "otel_classification": "reject_only",
         "context": [
@@ -1706,6 +1714,10 @@
       },
       {
         "name": "markdown_otel_service_name",
+        "migration_target": "nginx-markdown",
+        "default": "(not applicable)",
+        "syntax": "<value>",
+        "status": "reject_only",
         "classification": "reject_only",
         "otel_classification": "reject_only",
         "context": [
@@ -1721,6 +1733,10 @@
       },
       {
         "name": "markdown_otel_span_buffer_size",
+        "migration_target": "(not implemented)",
+        "default": "(not applicable)",
+        "syntax": "<value>",
+        "status": "reject_only",
         "classification": "reject_only",
         "otel_classification": "reject_only",
         "context": [
@@ -1736,6 +1752,10 @@
       },
       {
         "name": "markdown_otel_export_timeout",
+        "migration_target": "(not implemented)",
+        "default": "(not applicable)",
+        "syntax": "<value>",
+        "status": "reject_only",
         "classification": "reject_only",
         "otel_classification": "reject_only",
         "context": [
@@ -1939,7 +1959,10 @@
   "reject_only_directives": [
     {
       "migration_target": "markdown_limits memory=<size>",
+      "status": "reject_only",
       "name": "markdown_max_size",
+      "default": "(not applicable)",
+      "syntax": "(REMOVED in 0.9.0 - reject-only stub)",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_removed_directive",
       "args": "any",
@@ -1955,7 +1978,10 @@
     },
     {
       "migration_target": "markdown_limits timeout=<time>",
+      "status": "reject_only",
       "name": "markdown_timeout",
+      "default": "(not applicable)",
+      "syntax": "(REMOVED in 0.9.0 - reject-only stub)",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_removed_directive",
       "args": "any",
@@ -1971,7 +1997,10 @@
     },
     {
       "migration_target": "markdown_limits streaming_buffer=<size>",
+      "status": "reject_only",
       "name": "markdown_streaming_budget",
+      "default": "(not applicable)",
+      "syntax": "(REMOVED in 0.9.0 - reject-only stub)",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_removed_directive",
       "args": "any",
@@ -1987,7 +2016,10 @@
     },
     {
       "migration_target": "markdown_error_policy pass|fail_closed|status <code>",
+      "status": "reject_only",
       "name": "markdown_on_error",
+      "default": "(not applicable)",
+      "syntax": "(REMOVED in 0.9.0 - reject-only stub)",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_removed_directive",
       "args": "any",
@@ -2003,7 +2035,10 @@
     },
     {
       "migration_target": "markdown_error_policy pass|fail_closed|status <code>",
+      "status": "reject_only",
       "name": "markdown_streaming_on_error",
+      "default": "(not applicable)",
+      "syntax": "(REMOVED in 0.9.0 - reject-only stub)",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_removed_directive",
       "args": "any",
@@ -2019,7 +2054,10 @@
     },
     {
       "migration_target": "markdown_accept strict|wildcard|force",
+      "status": "reject_only",
       "name": "markdown_on_wildcard",
+      "default": "(not applicable)",
+      "syntax": "(REMOVED in 0.9.0 - reject-only stub)",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_removed_directive",
       "args": "any",
@@ -2035,7 +2073,10 @@
     },
     {
       "migration_target": "markdown_cache_validation off|ims_only|full",
+      "status": "reject_only",
       "name": "markdown_etag",
+      "default": "(not applicable)",
+      "syntax": "(REMOVED in 0.9.0 - reject-only stub)",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_removed_directive",
       "args": "any",
@@ -2051,7 +2092,10 @@
     },
     {
       "migration_target": "markdown_cache_validation off|ims_only|full",
+      "status": "reject_only",
       "name": "markdown_etag_policy",
+      "default": "(not applicable)",
+      "syntax": "(REMOVED in 0.9.0 - reject-only stub)",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_removed_directive",
       "args": "any",
@@ -2067,7 +2111,10 @@
     },
     {
       "migration_target": "markdown_cache_validation off|ims_only|full",
+      "status": "reject_only",
       "name": "markdown_conditional_requests",
+      "default": "(not applicable)",
+      "syntax": "(REMOVED in 0.9.0 - reject-only stub)",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_removed_directive",
       "args": "any",
@@ -2082,8 +2129,11 @@
       "otel_classification": "none"
     },
     {
-      "migration_target": "markdown_trusted_proxies",
+      "migration_target": "markdown_trusted_proxies <CIDR>...",
+      "status": "reject_only",
       "name": "markdown_trust_forwarded_headers",
+      "default": "(not applicable)",
+      "syntax": "(REMOVED in 0.9.0 - reject-only stub)",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_removed_directive",
       "args": "any",
@@ -2098,8 +2148,11 @@
       "otel_classification": "none"
     },
     {
-      "migration_target": "markdown_trusted_proxies",
+      "migration_target": "markdown_trusted_proxies <CIDR>...",
+      "status": "reject_only",
       "name": "markdown_forwarded_headers",
+      "default": "(not applicable)",
+      "syntax": "(REMOVED in 0.9.0 - reject-only stub)",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_removed_directive",
       "args": "any",
@@ -2115,7 +2168,10 @@
     },
     {
       "migration_target": "(removed, no replacement)",
+      "status": "reject_only",
       "name": "markdown_large_body_threshold",
+      "default": "(not applicable)",
+      "syntax": "(REMOVED in 0.9.0 - reject-only stub)",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_removed_directive",
       "args": "any",
@@ -2131,7 +2187,10 @@
     },
     {
       "migration_target": "markdown_limits memory=<size>",
+      "status": "reject_only",
       "name": "markdown_memory_budget",
+      "default": "(not applicable)",
+      "syntax": "(REMOVED in 0.9.0 - reject-only stub)",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_removed_directive",
       "args": "any",
@@ -2147,7 +2206,10 @@
     },
     {
       "migration_target": "markdown_streaming",
+      "status": "reject_only",
       "name": "markdown_streaming_engine",
+      "default": "(not applicable)",
+      "syntax": "off|on|auto",
       "classification": "reject_only",
       "handler": "ngx_http_markdown_reject_streaming_engine",
       "args": "1",

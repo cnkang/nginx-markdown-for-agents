@@ -225,6 +225,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   balanced        - general-purpose (IMS-only, auto streaming)
      *   streaming_first - AI agent workloads (no cache, forced streaming)
      *
+     * Public default: none (built-in Config V2 defaults apply)
      * Default: none (built-in Config V2 defaults apply)
      * Context: http, server, location
      *
@@ -248,6 +249,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Unified limits block. Consolidates the removed markdown_max_size,
      * markdown_timeout, and markdown_streaming_budget directives. Any subset
      * of keys may be given; unspecified keys inherit (per-key inheritance).
+     * Public default: (per-key inheritance)
      * Context: http, server, location
      *
      * Example:
@@ -424,6 +426,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   wildcard - also convert on wildcard Accept (equivalent to the old
      *              "markdown_on_wildcard on")
      *   force    - convert regardless of the Accept header (dangerous)
+     * Public default: strict
      * Context: http, server, location
      *
      * Example:
@@ -478,6 +481,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Cookie name patterns to identify authenticated requests.
      * Supports exact match, prefix match (pattern*), and wildcards.
+     * Public default: none
      * Default: none (only Authorization header detection)
      * Context: http, server, location
      *
@@ -501,6 +505,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   off      - no ETag, no conditional request handling
      *   ims_only - no ETag, If-Modified-Since only (default)
      *   full     - transformed ETag + If-None-Match + If-Modified-Since
+     * Public default: ims_only
      * Context: http, server, location
      *
      * Example:
@@ -523,6 +528,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *   off   - never stream
      *   auto  - stream large responses, full-buffer small ones (default)
      *   force - always stream (subject to runtime hard blocks)
+     * Public default: auto
      *
      * Conflict (spec 49): markdown_cache_validation full + force => error;
      * full + auto => warning (runtime blocks streaming, falls back to
@@ -627,6 +633,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Content types to exclude from conversion (streaming responses).
      * These content types will never be converted, even if eligible.
+     * Public default: none (no exclusions)
      * Default: none (no exclusions)
      * Context: http, server, location
      *
@@ -649,6 +656,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Uses prefix + boundary-char matching: "text/html" matches
      * "text/html" and "text/html; charset=utf-8" but not "text/htmlx".
      *
+     * Public default: text/html
      * Default: text/html (backward compatible)
      * Context: http, server, location
      *
@@ -679,6 +687,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Example:
      *   markdown_trusted_proxies 10.0.0.0/8 2001:db8::/32;
      *   markdown_trusted_proxies off;
+     * Public default: off
      */
     {
         ngx_string("markdown_trusted_proxies"),
@@ -738,6 +747,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * markdown_metrics_shm_size <size>
      *
      * Size of the shared-memory zone used to aggregate metrics across workers.
+     * Public default: 8*pagesize
      * Default: 8 * ngx_pagesize
      * Context: http
      *
@@ -759,6 +769,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Controls the output format of the markdown_metrics endpoint.
      * - auto: JSON or plain-text based on Accept header (default)
      * - prometheus: Prometheus text exposition format for non-JSON
+     * Public default: auto
      * Default: auto
      * Context: http, server, location
      *
@@ -796,6 +807,8 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Security: Only accessible from localhost by default.
      * NGINX allow/deny directives can further restrict access, but they do
      * not broaden access beyond localhost.
+     *
+     * Public default: off
      */
     {
         ngx_string("markdown_metrics"),
@@ -871,6 +884,8 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *
      * Migration: off -> markdown_streaming off,
      * auto -> markdown_streaming auto, on -> markdown_streaming force.
+     * Public default: (not applicable)
+     * Public syntax: off|on|auto
      */
     {
         ngx_string("markdown_streaming_engine"),
@@ -891,6 +906,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * outputs and record differences in debug log and metrics.
      *
      * Default: off
+     * Public status: experimental
      * Context: http, server, location
      *
      * Example:
@@ -914,6 +930,8 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * use ngx_buf_t referencing Rust-owned memory directly without
      * intermediate pool-copy (freed via pool cleanup handler).
      *
+     * Public default: off
+     * Public status: experimental
      * Default: off (conservative; requires production soak)
      * Context: http, server, location
      * Togglable via HUP reload without binary rebuild.
@@ -963,6 +981,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Replaces built-in defaults when set.
      * Built-in defaults: nav footer aside
      *
+     * Public default: nav footer aside
      * Default: built-in defaults
      * Context: http, server, location
      *
@@ -986,6 +1005,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * from pruning. Protection wins over prune: an element
      * matching both is kept.
      *
+     * Public default: empty
      * Default: empty (no protection)
      * Context: http, server, location
      *
@@ -1024,6 +1044,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * chars-per-token ratio that improves estimate accuracy for that provider's
      * tokenizer family.
      *
+     * Public default: default
      * Default: default (4.0 chars/token, English average)
      * Context: http, server, location
      *
@@ -1048,6 +1069,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * use the provider's default.
      *
      * Range: 0-255 (0.0-25.5 chars/token).  Practical range: 20-60.
+     * Public default: 0
      *
      * Default: 0 (use provider default)
      * Context: http, server, location
@@ -1103,6 +1125,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      *       proxy_pass http://collector:4318/v1/traces;
      *   }
      *
+     * Public default: (empty)
      * Default: (empty -- no endpoint configured)
      * Context: http, server, location
      *
@@ -1118,7 +1141,10 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         NULL
     },
 
-    /* Duplicate tracing switch: reject with markdown_otel migration. */
+    /* Duplicate tracing switch: reject with markdown_otel migration.
+     * Public default: (not applicable)
+     * Public syntax: on|off
+     */
     {
         ngx_string("markdown_otel_tracing"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
@@ -1128,7 +1154,10 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_hint_otel_tracing
     },
 
-    /* OTLP metrics export is not implemented: reject at nginx -t. */
+    /* OTLP metrics export is not implemented: reject at nginx -t.
+     * Public default: (not applicable)
+     * Public syntax: on|off
+     */
     {
         ngx_string("markdown_otel_metrics"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
@@ -1138,7 +1167,10 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_hint_otel_metrics
     },
 
-    /* Service-name override is not implemented: reject at nginx -t. */
+    /* Service-name override is not implemented: reject at nginx -t.
+     * Public default: (not applicable)
+     * Public syntax: <value>
+     */
     {
         ngx_string("markdown_otel_service_name"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
@@ -1148,7 +1180,10 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_hint_otel_service_name
     },
 
-    /* Retry buffering is not implemented: reject at nginx -t. */
+    /* Retry buffering is not implemented: reject at nginx -t.
+     * Public default: (not applicable)
+     * Public syntax: <value>
+     */
     {
         ngx_string("markdown_otel_span_buffer_size"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
@@ -1158,7 +1193,10 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         ngx_http_markdown_hint_otel_span_buffer_size
     },
 
-    /* Export-timeout control is not implemented: reject at nginx -t. */
+    /* Export-timeout control is not implemented: reject at nginx -t.
+     * Public default: (not applicable)
+     * Public syntax: <value>
+     */
     {
         ngx_string("markdown_otel_export_timeout"),
         NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
@@ -1201,6 +1239,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * If the parser exceeds this budget, parsing is terminated and the
      * request proceeds according to the on_error policy.
      *
+     * Public default: 64m
      * Default: 64m (64 megabytes)
      * Context: http, server, location
      *
@@ -1224,6 +1263,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * the maximum decompressed byte count, separate from the effective
      * full-buffer memory limit configured by markdown_limits memory=<size>.
      *
+     * Public default: (same as limits memory)
      * Default: same as the effective markdown_limits memory=<size> value.
      * Context: http, server, location
      *
@@ -1371,6 +1411,8 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * allow list is empty (default), only loopback addresses are
      * permitted.  When one or more CIDRs are configured, only
      * matching client addresses are allowed.
+     * Public syntax: <CIDR>
+     * Public default: (loopback only)
      *
      * Example:
      *   location /nginx-markdown/diagnostics {
@@ -1398,6 +1440,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Responses with Content-Length below this value use
      * full-buffer conversion.  Zero is rejected.
      *
+     * Public default: 1m
      * Default: 1m (1048576 bytes)
      * Context: http, server, location
      *
@@ -1421,6 +1464,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * Must be greater than zero so capability fallback and fail-open
      * replay can preserve every consumed upstream byte.
      *
+     * Public default: 256k
      * Default: 256k (262144 bytes)
      * Context: http, server, location
      *
@@ -1444,6 +1488,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * downstream.  Must be greater than zero to avoid
      * pathological per-byte flushing.
      *
+     * Public default: 16k
      * Default: 16k (16384 bytes)
      * Context: http, server, location
      *
@@ -1468,6 +1513,7 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
      * exclusions (text/event-stream, application/x-ndjson,
      * application/stream+json).
      *
+     * Public default: none
      * Default: none (only built-in hard exclusions apply)
      * Context: http, server, location
      *
