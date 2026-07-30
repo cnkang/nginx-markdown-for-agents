@@ -52,7 +52,7 @@ WHITELIST_PATH_PREFIXES = (
 SCAN_PATH_PREFIXES = (
     ".github/workflows/",
     "docs/harness/",
-    "docs/release/",
+    "docs/releases/",
     "docs/guides/",
     "docs/operations/",
     "examples/production/",

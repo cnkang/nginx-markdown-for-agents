@@ -40,8 +40,8 @@ def test_stale_symbol_check_fails_on_non_whitelisted_guide(tmp_path):
 def test_stale_symbol_check_fails_on_release_surface_leak(tmp_path):
     """Stale 0.8 symbols in checked 0.9 release surfaces should fail."""
     repo = tmp_path
-    (repo / "docs/release").mkdir(parents=True)
-    (repo / "docs/release/current.md").write_text("markdown_timeout\n")
+    (repo / "docs/releases").mkdir(parents=True)
+    (repo / "docs/releases/current-0.9.md").write_text("markdown_timeout\n")
     subprocess.run(_git_cmd() + ["init"], cwd=repo, check=True, capture_output=True)
     subprocess.run(_git_cmd() + ["add", "."], cwd=repo, check=True)
 
@@ -49,7 +49,7 @@ def test_stale_symbol_check_fails_on_release_surface_leak(tmp_path):
 
     assert exit_code == 1
     assert "STALE SYMBOLS DETECTED" in stdout
-    assert "docs/release/current.md:1:markdown_timeout" in stdout
+    assert "docs/releases/current-0.9.md:1:markdown_timeout" in stdout
     assert stderr == ""
 
 
