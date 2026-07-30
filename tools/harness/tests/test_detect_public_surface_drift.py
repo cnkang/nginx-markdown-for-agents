@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import copy
+import json
+import os
+import subprocess
+import sys
+
 import pytest
 
 from tools.harness import detect_public_surface_drift as detector
@@ -75,6 +81,22 @@ def test_metric_drift_is_reported() -> None:
     ]
 
 
+def test_metric_cardinality_policy_drift_is_reported() -> None:
+    """A changed cardinality policy must fail the public-surface gate."""
+    inventory = copy.deepcopy(detector.load_inventory())
+    actual = detector.extract_metric_contract_from_c()
+    metric_name = inventory["metrics"][0]["name"]
+    inventory["metrics"][0]["bounded_cardinality"] = "unbounded"
+
+    drift = detector.check_metric_contract(inventory, actual)
+
+    assert drift == [
+        "metric bounded_cardinality mismatch for {}: "
+        "inventory='unbounded' source='{}'".format(
+            metric_name, actual[metric_name]["bounded_cardinality"])
+    ]
+
+
 def test_live_inventory_matches_all_extracted_surfaces() -> None:
     """The checked-in inventory must match the currently extracted surfaces."""
     inventory = detector.load_inventory()
@@ -103,7 +125,11 @@ pub unsafe extern "C" fn markdown_test(
 pub extern "C" fn markdown_empty() {
 }
 """
-    header = "#define MARKDOWN_ABI_VERSION 7\nmarkdown_test(\nmarkdown_empty(\n"
+    header = (
+        "#define MARKDOWN_ABI_VERSION 7\n"
+        "uint32_t markdown_test(const uint8_t *input, uint8_t *output);\n"
+        "void markdown_empty(void);\n"
+    )
 
     def fake_read_text(path):
         return rust if path == "ffi.rs" else header
@@ -123,6 +149,28 @@ pub extern "C" fn markdown_empty() {
     assert contract["markdown_test"]["return_type"] == "u32"
     assert contract["markdown_test"]["safety"] == "unsafe"
     assert contract["markdown_empty"]["return_type"] == "()"
+
+
+def test_ffi_contract_rejects_changed_c_parameter_type(monkeypatch) -> None:
+    """A C prototype type change must fail even when Rust export names match."""
+    rust = (
+        'pub unsafe extern "C" fn markdown_test(input: *const u8, '
+        'output: *mut u8) -> u32 {}\n'
+    )
+    header = (
+        "#define MARKDOWN_ABI_VERSION 7\n"
+        "uint32_t markdown_test(const uint8_t *input, const uint8_t *output);\n"
+    )
+
+    def fake_read_text(path):
+        return rust if path == "ffi.rs" else header
+
+    monkeypatch.setattr(detector, "FFI_PATHS", ("ffi.rs",))
+    monkeypatch.setattr(detector, "FFI_HEADER_PATH", "header.h")
+    monkeypatch.setattr(detector, "read_text", fake_read_text)
+
+    with pytest.raises(ValueError, match="parameter mismatch"):
+        detector.extract_ffi_contract_from_rust()
 
 
 @pytest.mark.parametrize(
@@ -238,3 +286,59 @@ static ngx_command_t ngx_http_markdown_filter_commands[] = {
         detector._command_contracts(duplicate)
     with pytest.raises(ValueError, match="malformed ngx_command_t row"):
         detector._command_contracts(malformed)
+
+
+@pytest.mark.parametrize(
+    ("path", "replacement", "expected_path"),
+    [
+        ("otel.directives", [None], "otel.directives[0]"),
+        ("otel.reject_only", [1], "otel.reject_only[0]"),
+        ("metrics", [[]], "metrics[0]"),
+        ("reason_codes", ["bad"], "reason_codes[0]"),
+        ("ffi_exports", [{}], "ffi_exports[0]"),
+        ("ffi_exports", [{"name": None}], "ffi_exports[0].name"),
+        ("ffi_exports", [{"name": []}], "ffi_exports[0].name"),
+        ("directives", [None], "directives[0]"),
+        ("dynconf_keys", [42], "dynconf_keys[0]"),
+    ],
+)
+def test_malformed_inventory_main_is_deterministic(
+    path, replacement, expected_path
+) -> None:
+    """Every malformed inventory shape fails as stable DRIFT diagnostics."""
+    inventory = copy.deepcopy(detector.load_inventory())
+    target = inventory
+    components = path.split(".")
+    for component in components[:-1]:
+        target = target[component]
+    target[components[-1]] = replacement
+
+    # Keep the temporary path inside the repository boundary enforced by the
+    # production loader, while still making cleanup explicit and test-local.
+    inventory_path = os.path.join(detector.ROOT, ".public-surface-invalid.json")
+    with open(inventory_path, "w", encoding="utf-8") as stream:
+        json.dump(inventory, stream, sort_keys=True)
+    try:
+        command = [
+            sys.executable,
+            os.path.join(detector.ROOT, "tools", "harness",
+                         "detect_public_surface_drift.py"),
+            "--inventory",
+            inventory_path,
+        ]
+        first = subprocess.run(
+            command, cwd=detector.ROOT, text=True, capture_output=True,
+            check=False,
+        )
+        second = subprocess.run(
+            command, cwd=detector.ROOT, text=True, capture_output=True,
+            check=False,
+        )
+    finally:
+        os.unlink(inventory_path)
+
+    assert first.returncode != 0
+    assert "Traceback" not in first.stderr
+    assert "DRIFT:" in first.stderr
+    assert expected_path in first.stderr
+    assert (first.stdout, first.stderr) == (second.stdout, second.stderr)

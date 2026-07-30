@@ -55,8 +55,9 @@ DIRECTIVE_FIELDS = {
     "otel_classification", "migration_target",
 }
 REJECT_FIELDS = {
-    "name", "migration_target", "classification", "handler", "args",
-    "context", "conf_offset", "source_flags", "post", "otel_classification",
+    "name", "migration_target", "default", "syntax", "classification",
+    "handler", "args", "context", "conf_offset", "source_flags", "post",
+    "otel_classification", "status",
 }
 METRIC_FIELDS = {"name", "type", "labels", "order", "bounded_cardinality"}
 REASON_FIELDS = {
@@ -107,6 +108,8 @@ def load_inventory(path=None):
 
 def _names(values):
     """Return entry names while tolerating the inventory's scalar form."""
+    if not isinstance(values, list):
+        return []
     names = []
     for value in values:
         if isinstance(value, str):
@@ -156,7 +159,11 @@ def _validate_named_entries(inventory, key, fields):
         if not isinstance(entry, dict):
             errors.append("{}[{}] must be an object".format(key, index))
             continue
-        names.append(entry.get("name"))
+        name = entry.get("name")
+        if not isinstance(name, str):
+            errors.append("{}[{}].name must be a string".format(key, index))
+        else:
+            names.append(name)
         missing = sorted(fields - set(entry))
         if missing:
             errors.append("{}[{}] missing fields: {}".format(
@@ -166,6 +173,42 @@ def _validate_named_entries(inventory, key, fields):
     return errors, names
 
 
+def _validate_otel_group(key, values):
+    """Validate one OTel directive group without assuming entry shapes."""
+    if not isinstance(values, list):
+        return ["otel.{} must be an array".format(key)]
+    errors = []
+    names = []
+    for index, entry in enumerate(values):
+        entry_errors, name = _validate_otel_entry(key, index, entry)
+        errors.extend(entry_errors)
+        if name is not None:
+            names.append(name)
+    errors.extend(
+        "otel.{} contains duplicate name: {}".format(key, duplicate)
+        for duplicate in _duplicates(names))
+    return errors
+
+
+def _validate_otel_entry(key, index, entry):
+    """Validate one OTel entry and return its optional string name."""
+    if not isinstance(entry, dict):
+        return ["otel.{}[{}] must be an object".format(key, index)], None
+    errors = []
+    name = entry.get("name")
+    if not isinstance(name, str):
+        errors.append("otel.{}[{}].name must be a string".format(key, index))
+        name = None
+    if key == "reject_only" and entry.get("status") != "reject_only":
+        errors.append("otel.{}[{}].status must be reject_only".format(
+            key, index))
+    if key == "reject_only" and not isinstance(
+            entry.get("migration_target"), str):
+        errors.append("otel.{}[{}].migration_target must be a string".format(
+            key, index))
+    return errors, name
+
+
 def _validate_otel_schema(inventory):
     """Validate the OTel directive groups and their status declaration."""
     otel = inventory.get("otel")
@@ -173,19 +216,7 @@ def _validate_otel_schema(inventory):
         return ["otel must be an object"]
     errors = []
     for key in ("directives", "reject_only"):
-        values = otel.get(key)
-        if not isinstance(values, list):
-            errors.append("otel.{} must be an array".format(key))
-            continue
-        for index, entry in enumerate(values):
-            if not isinstance(entry, dict):
-                errors.append("otel.{}[{}] must be an object".format(key, index))
-            elif not isinstance(entry.get("name"), str):
-                errors.append("otel.{}[{}].name must be a string".format(
-                    key, index))
-        for duplicate in _duplicates(_names(values)):
-            errors.append("otel.{} contains duplicate name: {}".format(
-                key, duplicate))
+        errors.extend(_validate_otel_group(key, otel.get(key)))
     if otel.get("status") not in ("experimental", "stable"):
         errors.append("otel.status must be experimental or stable")
     return errors
@@ -206,23 +237,40 @@ def _validate_metric_schema(inventory):
     errors = []
     orders = []
     for index, entry in enumerate(values):
-        if not isinstance(entry, dict):
-            errors.append("metrics[{}] must be an object".format(index))
-            continue
-        missing = sorted(METRIC_FIELDS - set(entry))
-        if missing:
-            errors.append("metrics[{}] missing fields: {}".format(
-                index, ", ".join(missing)))
-        labels = entry.get("labels")
-        if isinstance(labels, list) and labels != sorted(set(labels)):
-            errors.append("metrics[{}].labels must be sorted and unique".format(
-                index))
-        orders.append(entry.get("order"))
-    if len(orders) != len(set(orders)) or orders != list(range(len(orders))):
+        entry_errors, order = _validate_metric_entry(index, entry)
+        errors.extend(entry_errors)
+        if order is not None:
+            orders.append(order)
+    if len(orders) != len(values) or len(orders) != len(set(orders)) \
+            or sorted(orders) != list(range(len(values))):
         errors.append("metrics order must be a contiguous deterministic sequence")
     for duplicate in _duplicates(_names(values)):
         errors.append("metrics contains duplicate name: {}".format(duplicate))
     return errors
+
+
+def _validate_metric_entry(index, entry):
+    """Validate one metric entry and return its optional numeric order."""
+    if not isinstance(entry, dict):
+        return ["metrics[{}] must be an object".format(index)], None
+    errors = []
+    missing = sorted(METRIC_FIELDS - set(entry))
+    if missing:
+        errors.append("metrics[{}] missing fields: {}".format(
+            index, ", ".join(missing)))
+    labels = entry.get("labels")
+    if not isinstance(labels, list):
+        errors.append("metrics[{}].labels must be an array".format(index))
+    elif any(not isinstance(label, str) for label in labels):
+        errors.append("metrics[{}].labels must contain strings".format(index))
+    elif labels != sorted(set(labels)):
+        errors.append("metrics[{}].labels must be sorted and unique".format(
+            index))
+    order = entry.get("order")
+    if not isinstance(order, int) or isinstance(order, bool):
+        errors.append("metrics[{}].order must be an integer".format(index))
+        order = None
+    return errors, order
 
 
 def _validate_reason_schema(inventory):
@@ -238,7 +286,12 @@ def _validate_reason_schema(inventory):
         if not isinstance(entry, dict):
             errors.append("reason_codes[{}] must be an object".format(index))
             continue
-        discriminants.append(entry.get("discriminant"))
+        discriminant = entry.get("discriminant")
+        if isinstance(discriminant, int) and not isinstance(discriminant, bool):
+            discriminants.append(discriminant)
+        else:
+            errors.append("reason_codes[{}].discriminant must be an integer".format(
+                index))
         missing = sorted(REASON_FIELDS - set(entry))
         if missing:
             errors.append("reason_codes[{}] missing fields: {}".format(
@@ -261,8 +314,11 @@ def _validate_ffi_schema(inventory):
         if not isinstance(entry, dict):
             errors.append("ffi_exports[{}] must be an object".format(index))
             continue
-        if isinstance(entry.get("name"), str):
-            names.append(entry["name"])
+        name = entry.get("name")
+        if isinstance(name, str):
+            names.append(name)
+        else:
+            errors.append("ffi_exports[{}].name must be a string".format(index))
         missing = sorted(FFI_FIELDS - set(entry))
         if missing:
             errors.append("ffi_exports[{}] missing fields: {}".format(
@@ -378,7 +434,144 @@ def _command_classification(name, handler):
     return "active", otel
 
 
-def _parse_command_entry(entry):
+def _clean_c_comment(comment):
+    """Return deterministic text lines from a C block comment."""
+    lines = []
+    for line in comment.splitlines():
+        line = re.sub(r"^\s*\* ?", "", line).strip()
+        lines.append(line)
+    return lines
+
+
+def _comment_syntax(lines, name):
+    """Extract a directive syntax declaration from one adjacent comment."""
+    name_line = next((index for index, line in enumerate(lines)
+                      if line == name or line.startswith(name + " ")), None)
+    if name_line is None:
+        return None
+    first = lines[name_line][len(name):].strip()
+    parts = [first] if first else []
+    index = name_line + 1
+    stop_prefixes = ("Default:", "Context:", "Example:", "Migration:",
+                     "Security:", "Response formats:", "Public ")
+    while index < len(lines) and lines[index] != "":
+        candidate = lines[index]
+        if candidate.startswith(stop_prefixes) or candidate.startswith(("-", "*")):
+            break
+        parts.append(candidate)
+        index += 1
+    syntax = re.sub(r"\s+\([^)]*\)$", "", " ".join(parts)).strip()
+    return syntax or "(no args)"
+
+
+def _comment_public_metadata(lines):
+    """Extract default, public syntax, and status annotations."""
+    joined = "\n".join(lines)
+    default_match = re.search(r"^(?:Public )?Default:\s*(.+)$", joined, flags=re.M)
+    public_default = re.search(r"^Public default:\s*(.+)$", joined, flags=re.M)
+    public_syntax = re.search(r"^Public syntax:\s*(.+)$", joined, flags=re.M)
+    status_match = re.search(r"^Public status:\s*(\w+)$", joined, flags=re.M)
+    return {
+        "default": (public_default or default_match).group(1).strip()
+        if public_default or default_match else None,
+        "syntax": public_syntax.group(1).strip() if public_syntax else None,
+        "status": status_match.group(1) if status_match else None,
+    }
+
+
+def _comment_migration(lines):
+    """Extract a migration target from one adjacent comment."""
+    joined = "\n".join(lines)
+    migration_match = re.search(r"^Migration:\s*(.+)$", joined, flags=re.M)
+    if migration_match:
+        targets = re.findall(r"->\s*(markdown_[a-z_]+)", migration_match.group(1))
+        if targets:
+            return targets[0]
+    migrated_match = re.search(r"(?:Migrated to|replaced by)\s+(.+?)(?:\.|$)",
+                               joined, flags=re.I)
+    if migrated_match:
+        return migrated_match.group(1).strip()
+    if re.search(r"no direct (?:Config V2 )?equivalent|no replacement",
+                 joined, flags=re.I):
+        return "(removed, no replacement)"
+    return None
+
+
+def _directive_comment_metadata(text):
+    """Extract public metadata from the command registry's adjacent comments."""
+    marker = "static ngx_command_t ngx_http_markdown_filter_commands[] = {"
+    block_start = text.find(marker)
+    if block_start < 0:
+        raise ValueError("ngx_command_t registry is missing or unterminated")
+    block_end = text.find("\n};", block_start)
+    if block_end < 0:
+        raise ValueError("ngx_command_t registry is missing or unterminated")
+    block = text[block_start:block_end]
+    comments = [(match.end(), match.group(1)) for match in re.finditer(
+        r"/\*(.*?)\*/", block, flags=re.S)]
+    result = {}
+    for name_match in re.finditer(r'ngx_string\("(markdown_[^"\\]+)"\)', block):
+        row_start = block.rfind("{", 0, name_match.start())
+        prior = [comment for end, comment in comments if end <= row_start]
+        if not prior:
+            continue
+        lines = _clean_c_comment(prior[-1])
+        metadata = _comment_public_metadata(lines)
+        syntax = _comment_syntax(lines, name_match.group(1))
+        result[name_match.group(1)] = {
+            "default": metadata["default"],
+            "syntax": metadata["syntax"] or syntax,
+            "status": metadata["status"],
+            "migration_target": _comment_migration(lines),
+        }
+    return result
+
+
+def _hint_migration_target(text, hint_name):
+    """Normalize a reject-only hint string to its migration target."""
+    hint_match = next((match for match in re.finditer(
+        r'static\s+u_char\s+([A-Za-z_]\w*)\[\]\s*=\s*'
+        r'((?:"(?:\\.|[^"\\])*"\s*)+);', text, flags=re.S)
+        if match.group(1) == hint_name), None)
+    if hint_match is None:
+        return None
+    hint = "".join(re.findall(r'"((?:\\.|[^"\\])*)"', hint_match.group(2)))
+    hint = hint.replace('\\"', '"')
+    target = re.search(r'use\s+"([^"]+)"', hint)
+    if target:
+        return target.group(1).rstrip(";")
+    if "no direct replacement" in hint:
+        return "(removed, no replacement)"
+    return "(not implemented)"
+
+
+def _command_entry_metadata(name, flags, handler, fields, metadata, source_text):
+    """Derive status, defaults, syntax, and migration from one command row."""
+    classification, otel_classification = _command_classification(name, handler)
+    source_metadata = (metadata or {}).get(name, {})
+    status = source_metadata.get("status") or (
+        "reject_only" if classification == "reject_only" else "active")
+    if otel_classification == "active" and classification == "active":
+        status = "experimental"
+    migration_target = source_metadata.get("migration_target")
+    if handler == "ngx_http_markdown_reject_streaming_engine":
+        migration_target = "markdown_streaming"
+    elif classification == "reject_only" and fields[5] != "NULL":
+        migration_target = _hint_migration_target(source_text, fields[5]) \
+            or migration_target
+    elif classification == "reject_only" and migration_target is None:
+        migration_target = "(not implemented)"
+    default = source_metadata.get("default")
+    if classification == "reject_only" and default is None:
+        default = "(not applicable)"
+    syntax = source_metadata.get("syntax") or {
+        "flag": "on|off", "1": "<value>", "any": "<value>"}.get(
+            _command_args(flags))
+    return (classification, otel_classification, default, syntax, status,
+            migration_target)
+
+
+def _parse_command_entry(entry, metadata=None, source_text=""):
     """Parse one six-field ngx_command_t row into inventory-shaped metadata."""
     fields = _split_command_fields(entry)
     match = re.search(r'ngx_string\("([^"]+)"\)', fields[0])
@@ -387,12 +580,14 @@ def _parse_command_entry(entry):
     name = match.group(1)
     flags = "".join(fields[1].split())
     handler = fields[2]
-    classification, otel_classification = _command_classification(name, handler)
     context = [label for token, label in (
         ("NGX_HTTP_MAIN_CONF", "http"),
         ("NGX_HTTP_SRV_CONF", "server"),
         ("NGX_HTTP_LOC_CONF", "location"),
     ) if token in flags]
+    (classification, otel_classification, default, syntax, status,
+     migration_target) = _command_entry_metadata(
+         name, flags, handler, fields, metadata, source_text)
     return {
         "name": name, "context": context, "args": _command_args(flags),
         "handler": handler, "conf_offset": fields[3],
@@ -400,18 +595,23 @@ def _parse_command_entry(entry):
         "post": None if fields[5] == "NULL" else fields[5],
         "classification": classification,
         "otel_classification": otel_classification,
+        "default": default,
+        "syntax": syntax or ("(no args)" if _command_args(flags) == "no_args" else None),
+        "status": status,
+        "migration_target": migration_target,
     }
 
 
 def _command_contracts(text):
     """Parse the flat ngx_command_t registry without accepting malformed rows."""
     block = _directive_registry_block(_strip_c_comments(text))
+    metadata = _directive_comment_metadata(text)
     contracts = {}
     names = []
     for entry in _balanced_command_entries(block):
         if "ngx_string(" not in entry:
             continue
-        contract = _parse_command_entry(entry)
+        contract = _parse_command_entry(entry, metadata, text)
         names.append(contract["name"])
         contracts[contract["name"]] = contract
     if not contracts:
@@ -505,6 +705,29 @@ def extract_dynconf_keys_from_c():
     return sorted(set(DYNCONF_KEY_RE.findall(read_text(DYNCONF_PATH))))
 
 
+def _dynconf_type_allowed(key):
+    """Return the parser-backed type and allowed values for one key."""
+    if key in ("markdown_filter", "prune_noise"):
+        return "flag", ["on", "off"]
+    if key == "log_verbosity":
+        return "enum", ["error", "warn", "info", "debug"]
+    if key in ("streaming_budget", "memory_budget"):
+        return "size", []
+    return "version", ["0.9"]
+
+
+def _dynconf_contract_entry(key, has_per_key_staging, required, duplicate):
+    """Build one dynamic-configuration contract from parser evidence."""
+    typ, allowed = _dynconf_type_allowed(key)
+    return {
+        "name": key, "type": typ, "allowed_values": allowed,
+        "default": "required" if required else "inherited",
+        "inheritance": "per-key" if has_per_key_staging else "unknown",
+        "required": required, "dynamic": True,
+        "unknown_key": "reject", "duplicate": duplicate,
+    }
+
+
 def extract_dynconf_contract_from_c():
     """Build the parser's dynamic-configuration contract from live C keys."""
     text = read_text(DYNCONF_PATH)
@@ -513,20 +736,23 @@ def extract_dynconf_contract_from_c():
         raise ValueError("dynconf schema_version key is missing")
     if "unknown key" not in text:
         raise ValueError("dynconf parser does not reject unknown keys")
-    contract = {}
-    for key in keys:
-        if key in ("markdown_filter", "prune_noise"):
-            typ, allowed = "flag", ["on", "off"]
-        elif key == "log_verbosity":
-            typ, allowed = "enum", ["error", "warn", "info", "debug"]
-        elif key in ("streaming_budget", "memory_budget"):
-            typ, allowed = "size", []
-        else:
-            typ, allowed = "version", ["0.9"]
-        contract[key] = {"name": key, "type": typ, "allowed_values": allowed,
-                         "required": key == "schema_version", "dynamic": True,
-                         "unknown_key": "reject"}
-    return contract
+    has_per_key_staging = (
+        "watcher->staging_snapshot = watcher->active_snapshot" in text
+        and "snapshot->" in text
+        and "ngx_http_markdown_dynconf_apply" in text
+    )
+    required = ("missing required" in text and "schema_version" in text
+                and "required field missing" in text)
+    # apply() processes lines in order and assigns each field directly;
+    # there is no per-key duplicate rejection.  This is the executable
+    # last-value-wins behavior, including schema_version validation.
+    duplicate = "last_value_wins" if "switch (key)" in text else "unknown"
+    return {
+        key: _dynconf_contract_entry(
+            key, has_per_key_staging, key == "schema_version" and required,
+            duplicate)
+        for key in keys
+    }
 
 
 def _metric_contract_from_text(text):
@@ -546,8 +772,12 @@ def _metric_contract_from_text(text):
         labels = []
         for match in re.finditer(re.escape(name) + r"\{([^}]*)\}", text):
             labels.extend(re.findall(r"([a-z][a-z0-9_]*)\s*=", match.group(1)))
-        result[name] = {"name": name, "type": metric_type,
-                        "labels": sorted(set(labels)), "order": order}
+        normalized_labels = sorted(set(labels))
+        result[name] = {
+            "name": name, "type": metric_type,
+            "labels": normalized_labels, "order": order,
+            "bounded_cardinality": "bounded" if normalized_labels else "fixed",
+        }
     return result
 
 
@@ -559,6 +789,116 @@ def extract_metric_contract_from_c():
 def extract_metric_names_from_c():
     """Return live metric names in deterministic order."""
     return sorted(extract_metric_contract_from_c())
+
+
+def _split_ffi_params(value):
+    """Split a flat FFI parameter list without losing declaration order."""
+    params = []
+    start = 0
+    depth = 0
+    for index, char in enumerate(value):
+        if char in "(<[":
+            depth += 1
+        elif char in ")>]":
+            depth -= 1
+        elif char == "," and depth == 0:
+            params.append(value[start:index].strip())
+            start = index + 1
+    tail = value[start:].strip()
+    if tail:
+        params.append(tail)
+    return params
+
+
+def _canonical_ffi_type(value, language):
+    """Normalize Rust/C FFI types for ABI-relevant comparison."""
+    value = _normalize_ffi_fragment(value)
+    if language == "rust":
+        if value == "()":
+            return "void"
+        pointer_match = re.match(r"\*(const|mut)\s+(.+)$", value)
+        if pointer_match:
+            qualifier = "const" if pointer_match.group(1) == "const" else "mut"
+            return "ptr:{}:{}".format(
+                qualifier, _canonical_ffi_type(pointer_match.group(2), language))
+        value = {"u8": "u8", "u16": "u16", "u32": "u32", "u64": "u64",
+                 "usize": "usize", "isize": "isize", "bool": "bool"}.get(
+                     value, value)
+        return value
+
+    value = re.sub(r"\s+", " ", value).strip()
+    pointer_depth = value.count("*")
+    if pointer_depth:
+        const_pointee = bool(re.search(r"\bconst\b", value))
+        value = re.sub(r"\bconst\b", "", value)
+        value = value.replace("*", "").strip()
+    value = re.sub(r"^struct\s+", "", value)
+    value = {
+        "void": "void", "uint8_t": "u8", "uint16_t": "u16",
+        "uint32_t": "u32", "uint64_t": "u64", "uintptr_t": "usize",
+        "size_t": "usize", "int8_t": "i8", "int16_t": "i16",
+        "int32_t": "i32", "int64_t": "i64", "intptr_t": "isize",
+        "bool": "bool",
+    }.get(value, value)
+    if pointer_depth:
+        qualifiers = ["mut"] * pointer_depth
+        if const_pointee:
+            qualifiers[-1] = "const"
+        for qualifier in reversed(qualifiers):
+            value = "ptr:{}:{}".format(qualifier, value)
+    return value
+
+
+def _rust_ffi_param_types(params):
+    """Return ABI-normalized Rust parameter types in declaration order."""
+    result = []
+    for param in _split_ffi_params(params):
+        if ":" not in param:
+            raise ValueError("malformed Rust FFI parameter: {}".format(param))
+        _, value = param.split(":", 1)
+        result.append(_canonical_ffi_type(value, "rust"))
+    return result
+
+
+def _c_ffi_param_types(params):
+    """Return ABI-normalized C parameter types in declaration order."""
+    result = []
+    for param in _split_ffi_params(params):
+        param = _normalize_ffi_fragment(param)
+        if param == "void":
+            continue
+        # C prototypes name the parameter last.  Removing only that token
+        # preserves pointer const/mutability and integer-width typedefs.
+        param_type = re.sub(r"\s+[A-Za-z_]\w*\s*$", "", param)
+        if param_type == param and re.search(r"\*[A-Za-z_]\w*\s*$", param):
+            param_type = re.sub(r"[A-Za-z_]\w*\s*$", "", param).strip()
+        result.append(_canonical_ffi_type(param_type, "c"))
+    return result
+
+
+def _extract_c_ffi_prototypes(header):
+    """Parse all C declarations for exported markdown_* functions."""
+    text = _strip_c_comments(header)
+    prototypes = {}
+    for line_match in re.finditer(r"(?m)^[ \t]*[^;\n]*\bmarkdown_\w+\s*\(", text):
+        start = line_match.start()
+        end = text.find(");", line_match.end())
+        if end < 0:
+            raise ValueError("unterminated C FFI prototype")
+        declaration = text[start:end + 1]
+        name_match = re.search(r"\b(markdown_\w+)\s*\(", declaration)
+        if name_match is None:
+            continue
+        name = name_match.group(1)
+        return_type = declaration[:name_match.start()].strip()
+        params = declaration[name_match.end():-1].strip()
+        prototypes[name] = {
+            "return_type": _canonical_ffi_type(return_type, "c"),
+            "params": _c_ffi_param_types(params),
+        }
+    if not prototypes:
+        raise ValueError("generated FFI header contains no markdown_* prototypes")
+    return prototypes
 
 
 def extract_ffi_contract_from_rust():
@@ -585,10 +925,27 @@ def extract_ffi_contract_from_rust():
     abi_match = re.search(r"#define\s+MARKDOWN_ABI_VERSION\s+(\d+)", header)
     if not abi_match:
         raise ValueError("generated FFI header has no MARKDOWN_ABI_VERSION")
-    for item in result.values():
+    c_prototypes = _extract_c_ffi_prototypes(header)
+    if set(result) != set(c_prototypes):
+        missing = sorted(set(result) - set(c_prototypes))
+        extra = sorted(set(c_prototypes) - set(result))
+        raise ValueError(
+            "Rust/C FFI export set mismatch: missing_header={}, extra_header={}".format(
+                ",".join(missing), ",".join(extra)))
+    for name, item in result.items():
         item["abi_version"] = int(abi_match.group(1))
-        if item["name"] + "(" not in header:
-            raise ValueError("generated FFI header is missing {}".format(item["name"]))
+        rust_params = _rust_ffi_param_types(item["params"])
+        rust_return = _canonical_ffi_type(item["return_type"], "rust")
+        c_params = c_prototypes[name]["params"]
+        c_return = c_prototypes[name]["return_type"]
+        if rust_params != c_params:
+            raise ValueError(
+                "generated FFI header parameter mismatch for {}: Rust={!r} C={!r}".format(
+                    name, rust_params, c_params))
+        if rust_return != c_return:
+            raise ValueError(
+                "generated FFI header return mismatch for {}: Rust={!r} C={!r}".format(
+                    name, rust_return, c_return))
     return result
 
 
@@ -618,7 +975,7 @@ def _inventory_directive_entries(inventory):
     """Merge active and reject-only directive entries by name."""
     entries = {}
     for entry in inventory.get("directives", []) + inventory.get("reject_only_directives", []):
-        if isinstance(entry, dict) and entry.get("name"):
+        if isinstance(entry, dict) and isinstance(entry.get("name"), str):
             entries[entry["name"]] = entry
     return entries
 
@@ -626,7 +983,7 @@ def _inventory_directive_entries(inventory):
 def _merge_otel_group(entries, values):
     """Merge OTel classifications while rejecting conflicting declarations."""
     for entry in values:
-        if not isinstance(entry, dict) or not entry.get("name"):
+        if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
             continue
         name = entry["name"]
         if name in entries:
@@ -652,9 +1009,31 @@ def check_directive_contract(inventory, actual_contract):
             inventory, _inventory_directive_entries(inventory))
     except ValueError as exc:
         return [str(exc)]
-    fields = ("classification", "context", "args", "handler", "conf_offset",
-              "source_flags", "post", "otel_classification")
-    return _compare_maps("directive", entries, actual_contract, fields)
+    active_fields = ("classification", "context", "args", "handler", "conf_offset",
+                     "source_flags", "post", "otel_classification", "default",
+                     "syntax", "status", "migration_target")
+    reject_fields = ("classification", "context", "args", "handler", "conf_offset",
+                     "source_flags", "post", "otel_classification", "status",
+                     "default", "syntax", "migration_target")
+    active_entries = {
+        name: entry for name, entry in entries.items()
+        if entry.get("classification") != "reject_only"
+    }
+    reject_entries = {
+        name: entry for name, entry in entries.items()
+        if entry.get("classification") == "reject_only"
+    }
+    active_actual = {
+        name: contract for name, contract in actual_contract.items()
+        if contract.get("classification") != "reject_only"
+    }
+    reject_actual = {
+        name: contract for name, contract in actual_contract.items()
+        if contract.get("classification") == "reject_only"
+    }
+    return _compare_maps("directive", active_entries, active_actual, active_fields) \
+        + _compare_maps("reject-only directive", reject_entries, reject_actual,
+                         reject_fields)
 
 
 def check_directives(inventory, actual_names):
@@ -714,7 +1093,8 @@ def check_dynconf_contract(inventory, actual_contract):
     """Compare dynamic-configuration behavior metadata with the C parser."""
     inv = {item.get("name"): item for item in inventory.get("dynconf_keys", [])}
     return _compare_maps("dynconf key", inv, actual_contract,
-                         ("type", "allowed_values", "required", "dynamic", "unknown_key"))
+                         ("type", "allowed_values", "default", "inheritance",
+                          "required", "dynamic", "unknown_key", "duplicate"))
 
 
 def check_metrics(inventory, actual_names):
@@ -732,7 +1112,8 @@ def check_metrics(inventory, actual_names):
 def check_metric_contract(inventory, actual_contract):
     """Compare metric type, labels, and deterministic render order."""
     inv = {item.get("name"): item for item in inventory.get("metrics", [])}
-    return _compare_maps("metric", inv, actual_contract, ("type", "labels", "order"))
+    return _compare_maps("metric", inv, actual_contract,
+                         ("type", "labels", "order", "bounded_cardinality"))
 
 
 def check_ffi_exports(inventory, actual_exports):
@@ -774,7 +1155,7 @@ def main():
             all_drift.extend(check_dynconf_contract(inventory, extract_dynconf_contract_from_c()))
             all_drift.extend(check_metric_contract(inventory, extract_metric_contract_from_c()))
             all_drift.extend(check_ffi_contract(inventory, extract_ffi_contract_from_rust()))
-    except (OSError, ValueError, KeyError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         all_drift.append("public surface source/schema parse error: {}".format(exc))
     if all_drift:
         for message in sorted(set(all_drift)):
