@@ -186,7 +186,6 @@ required_commands=(
   head
   mkdir
   mktemp
-  ps
   rm
   sleep
   tr
@@ -201,8 +200,11 @@ for required_command in "${required_commands[@]}"; do
   fi
 done
 
-if ! ps -o rss= -p "$$" >/dev/null 2>&1; then
-  die "ps does not support RSS lookup; install a compatible procps/ps package"
+RSS_SUPPORTED=1
+if ! command -v ps >/dev/null 2>&1 \
+    || ! ps -o rss= -p "$$" >/dev/null 2>&1; then
+  RSS_SUPPORTED=0
+  log "RSS sampling unavailable; memory evidence will fail closed"
 fi
 
 if ! command -v python3 >/dev/null 2>&1; then
@@ -591,6 +593,11 @@ PROBE_PYEOF
 
 # get_worker_rss returns the RSS in KB of the NGINX worker process.
 get_worker_rss() {
+  if [[ "$RSS_SUPPORTED" -eq 0 ]]; then
+    echo "0"
+    return 0
+  fi
+
   if [[ -z "$NGINX_PID" ]]; then
     echo "0"
     return 0
@@ -660,6 +667,10 @@ sample_rss_background() {
 
   : > "$peak_file"
   echo "0" > "$peak_file"
+
+  if [[ "$RSS_SUPPORTED" -eq 0 ]]; then
+    return 0
+  fi
 
   local peak=0
   while true; do
