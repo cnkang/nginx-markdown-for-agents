@@ -140,6 +140,13 @@
       ],
       "notes": "0.9.1 release gate: blocking performance evidence gate for RC tags; perf-evidence-check is non-blocking report-only mode"
     },
+    "v092-gates": {
+      "phase": "focused-semantic",
+      "commands": [
+        "make release-gates-check-092"
+      ],
+      "notes": "0.9.2 blocking gate: public-surface and dynconf drift, reason-code registry, version consistency, and OTel lifecycle checks"
+    },
     "release-governance": {
       "phase": "focused-semantic",
       "commands": [
