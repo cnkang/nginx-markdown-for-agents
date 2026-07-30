@@ -12,6 +12,12 @@ PASS_COUNT=0
 FAIL_COUNT=0
 TEST_TMPDIR=""
 OWN_TEST_TMPDIR=0
+CALLER_DYNCONF_FILE_SET=0
+CALLER_DYNCONF_FILE=""
+if [[ -n "${DYNCONF_FILE+x}" ]]; then
+    CALLER_DYNCONF_FILE_SET=1
+    CALLER_DYNCONF_FILE="$DYNCONF_FILE"
+fi
 DYNCONF_FILE=""
 DYNCONF_DIR=""
 ORIGINAL_FILE_EXISTED=0
@@ -82,6 +88,14 @@ canonical_target_path() {
 path_is_inside_test_directory() {
     local path="$1"
     [[ "$path" == "$TEST_TMPDIR"/* ]]
+}
+
+requested_dynconf_path() {
+    if [[ "$CALLER_DYNCONF_FILE_SET" -eq 1 ]]; then
+        printf '%s\n' "$CALLER_DYNCONF_FILE"
+    else
+        printf '%s/markdown-dynamic.conf\n' "$TEST_TMPDIR"
+    fi
 }
 
 prepare_dynconf_ownership() {
@@ -346,11 +360,7 @@ trap 'cleanup 129' HUP
 trap 'cleanup 130' INT
 trap 'cleanup 143' TERM
 
-if [[ -n "${DYNCONF_FILE+x}" ]]; then
-    REQUESTED_DYNCONF_FILE="$DYNCONF_FILE"
-else
-    REQUESTED_DYNCONF_FILE="$TEST_TMPDIR/markdown-dynamic.conf"
-fi
+REQUESTED_DYNCONF_FILE="$(requested_dynconf_path)"
 prepare_dynconf_ownership "$REQUESTED_DYNCONF_FILE"
 
 # --- Step 0: Check prerequisites ---

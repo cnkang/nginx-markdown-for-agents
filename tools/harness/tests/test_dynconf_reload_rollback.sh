@@ -128,6 +128,25 @@ if [[ -e "$TMP_ROOT/default-file-private" ]]; then
 fi
 echo "PASS: default dynconf directory and file are private and cleaned" >&2
 
+run_case default-path-selection 46 '
+set -e
+source "$1"
+TEST_TMPDIR="$3"
+CALLER_DYNCONF_FILE_SET=0
+CALLER_DYNCONF_FILE=""
+selected_path="$(requested_dynconf_path)"
+[[ "$selected_path" == "$3/markdown-dynamic.conf" ]]
+prepare_dynconf_ownership "$selected_path"
+write_dynconf_atomically "schema_version=0.9\nmarkdown_filter=on"
+trap "cleanup 46" EXIT
+exit 46
+'
+if [[ -e "$TMP_ROOT/default-path-selection-private/markdown-dynamic.conf" ]]; then
+    echo "FAIL: selected default dynconf file was not cleaned" >&2
+    exit 1
+fi
+echo "PASS: default path selection uses the private test directory" >&2
+
 external_target="$TMP_ROOT/refused/markdown-dynamic.conf"
 mkdir -p -- "${external_target%/*}"
 run_case external-without-opt-in 44 '
