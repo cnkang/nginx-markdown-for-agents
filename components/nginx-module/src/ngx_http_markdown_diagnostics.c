@@ -74,7 +74,7 @@ static ngx_int_t ngx_http_markdown_diagnostics_check_loopback(
     const struct sockaddr *sa);
 static ngx_int_t ngx_http_markdown_diagnostics_check_access(
     ngx_http_request_t *r);
-static ngx_int_t ngx_http_markdown_diagnostics_rollback_authorized(
+static ngx_int_t ngx_http_markdown_diagnostics_rollback_csrf_guard(
     const ngx_http_request_t *r);
 static ngx_int_t ngx_http_markdown_diagnostics_build_json(
     ngx_http_request_t *r, ngx_buf_t *b);
@@ -428,7 +428,7 @@ static ngx_int_t
 ngx_http_markdown_diagnostics_check_rollback_action(ngx_http_request_t *r)
 {
     u_char        *p;
-    u_char        *last;
+    const u_char  *last;
     static u_char  action_key[] = "action=rollback";
     static size_t  action_key_len = sizeof("action=rollback") - 1;
 
@@ -441,7 +441,7 @@ ngx_http_markdown_diagnostics_check_rollback_action(ngx_http_request_t *r)
 
     for ( ;; ) {
         u_char  *seg_start;
-        u_char  *seg_end;
+        const u_char  *seg_end;
         size_t   seg_len;
 
         seg_start = p;
@@ -471,15 +471,16 @@ ngx_http_markdown_diagnostics_check_rollback_action(ngx_http_request_t *r)
 
 
 /*
- * Require an authenticated, non-simple header before changing dynconf.
+ * Require a non-empty Authorization header as a CSRF mitigation before
+ * changing dynconf.
  *
- * The diagnostics endpoint is normally restricted to loopback or an
- * explicitly allowed CIDR.  Rollback additionally requires a non-empty
- * Authorization header so a browser cannot trigger the state change with
- * a simple cross-site POST.
+ * This check does not authenticate credentials or verify a Bearer token.
+ * The diagnostics endpoint remains restricted to loopback or an explicitly
+ * allowed CIDR, while this additional header requirement prevents a browser
+ * from triggering the state change with a simple cross-site POST.
  */
 static ngx_int_t
-ngx_http_markdown_diagnostics_rollback_authorized(
+ngx_http_markdown_diagnostics_rollback_csrf_guard(
     const ngx_http_request_t *r)
 {
     if (r == NULL || r->headers_in.authorization == NULL
@@ -555,13 +556,12 @@ ngx_http_markdown_diagnostics_rollback_json_length(
     const char *reason, size_t reason_len)
 {
     size_t  encoded_len;
-    size_t  i;
     size_t  char_len;
     u_char  ch;
 
     encoded_len = 0;
 
-    for (i = 0; i < reason_len; i++) {
+    for (size_t i = 0; i < reason_len; i++) {
         ch = (u_char) reason[i];
         char_len = ngx_http_markdown_diagnostics_rollback_json_char_length(ch);
 
@@ -577,6 +577,37 @@ ngx_http_markdown_diagnostics_rollback_json_length(
 
 
 /*
+ * JSON-escape a raw rollback reason character.
+ */
+static ngx_int_t
+ngx_http_markdown_diagnostics_escape_rollback_raw(
+    u_char **p, const u_char *last, u_char ch, const u_char *hex)
+{
+    if (ch >= 0x20) {
+        if (last - *p < 1) {
+            return NGX_ERROR;
+        }
+
+        *(*p)++ = ch;
+        return NGX_OK;
+    }
+
+    if (last - *p < 6) {
+        return NGX_ERROR;
+    }
+
+    *(*p)++ = '\\';
+    *(*p)++ = 'u';
+    *(*p)++ = '0';
+    *(*p)++ = '0';
+    *(*p)++ = hex[ch >> 4];
+    *(*p)++ = hex[ch & 0x0f];
+
+    return NGX_OK;
+}
+
+
+/*
  * JSON-escape a bounded rollback reason into the response buffer.
  */
 static u_char *
@@ -584,13 +615,11 @@ ngx_http_markdown_diagnostics_escape_rollback_reason(
     u_char *p, u_char *last, const char *reason, size_t reason_len)
 {
     static const u_char  hex[] = "0123456789abcdef";
-    size_t               i;
     u_char                ch;
     u_char                escaped;
 
-    for (i = 0; i < reason_len; i++) {
+    for (size_t i = 0; i < reason_len; i++) {
         ch = (u_char) reason[i];
-        escaped = 0;
 
         switch (ch) {
         case '"':
@@ -622,25 +651,11 @@ ngx_http_markdown_diagnostics_escape_rollback_reason(
             break;
 
         default:
-            if (ch >= 0x20) {
-                if (last - p < 1) {
-                    return last;
-                }
-
-                *p++ = ch;
-                continue;
-            }
-
-            if (last - p < 6) {
+            if (ngx_http_markdown_diagnostics_escape_rollback_raw(
+                    &p, last, ch, hex) != NGX_OK)
+            {
                 return last;
             }
-
-            *p++ = '\\';
-            *p++ = 'u';
-            *p++ = '0';
-            *p++ = '0';
-            *p++ = hex[ch >> 4];
-            *p++ = hex[ch & 0x0f];
             continue;
         }
 
@@ -834,7 +849,7 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
     /* POST: handle action parameter */
     if (r->method & NGX_HTTP_POST) {
         if (ngx_http_markdown_diagnostics_check_rollback_action(r)) {
-            if (!ngx_http_markdown_diagnostics_rollback_authorized(r)) {
+            if (!ngx_http_markdown_diagnostics_rollback_csrf_guard(r)) {
                 return NGX_HTTP_FORBIDDEN;
             }
 
