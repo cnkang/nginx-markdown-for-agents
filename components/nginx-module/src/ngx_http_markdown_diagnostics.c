@@ -23,6 +23,12 @@
 #include "ngx_http_markdown_dynconf_snapshot.h"
 #include "ngx_http_markdown_filter_module.h"
 
+#ifndef NGX_MAX_SIZE_T_VALUE
+#define NGX_MAX_SIZE_T_VALUE  ((size_t) -1)
+#endif
+
+#define NGX_HTTP_MARKDOWN_DIAGNOSTICS_ROLLBACK_REASON_MAX  1024
+
 /*
  * Forward-declare the FFI wrapper for reason code string lookup.
  */
@@ -68,10 +74,20 @@ static ngx_int_t ngx_http_markdown_diagnostics_check_loopback(
     const struct sockaddr *sa);
 static ngx_int_t ngx_http_markdown_diagnostics_check_access(
     ngx_http_request_t *r);
+static ngx_int_t ngx_http_markdown_diagnostics_rollback_authorized(
+    const ngx_http_request_t *r);
 static ngx_int_t ngx_http_markdown_diagnostics_build_json(
     ngx_http_request_t *r, ngx_buf_t *b);
 static size_t ngx_http_markdown_diagnostics_json_size(
     const ngx_http_markdown_diag_state_t *state);
+static size_t ngx_http_markdown_diagnostics_rollback_reason_length(
+    const char *reason, ngx_uint_t *truncated);
+static size_t ngx_http_markdown_diagnostics_rollback_json_char_length(
+    u_char ch);
+static size_t ngx_http_markdown_diagnostics_rollback_json_length(
+    const char *reason, size_t reason_len);
+static u_char *ngx_http_markdown_diagnostics_escape_rollback_reason(
+    u_char *p, u_char *last, const char *reason, size_t reason_len);
 
 
 /*
@@ -455,6 +471,192 @@ ngx_http_markdown_diagnostics_check_rollback_action(ngx_http_request_t *r)
 
 
 /*
+ * Require an authenticated, non-simple header before changing dynconf.
+ *
+ * The diagnostics endpoint is normally restricted to loopback or an
+ * explicitly allowed CIDR.  Rollback additionally requires a non-empty
+ * Authorization header so a browser cannot trigger the state change with
+ * a simple cross-site POST.
+ */
+static ngx_int_t
+ngx_http_markdown_diagnostics_rollback_authorized(
+    const ngx_http_request_t *r)
+{
+    if (r == NULL || r->headers_in.authorization == NULL
+        || r->headers_in.authorization->hash == 0
+        || r->headers_in.authorization->value.data == NULL
+        || r->headers_in.authorization->value.len == 0)
+    {
+        return 0;
+    }
+
+    return 1;
+}
+
+
+/*
+ * Bound the reason string before sizing or escaping the response.
+ *
+ * Returns the number of source bytes that will be emitted.  A non-NULL
+ * reason is required to be NUL-terminated; the bound keeps request-pool
+ * allocation and scanning explicit even if a future caller supplies a
+ * longer diagnostic message.
+ */
+static size_t
+ngx_http_markdown_diagnostics_rollback_reason_length(
+    const char *reason, ngx_uint_t *truncated)
+{
+    size_t  len;
+
+    if (reason == NULL) {
+        reason = "unknown";
+    }
+
+    len = 0;
+    while (len < NGX_HTTP_MARKDOWN_DIAGNOSTICS_ROLLBACK_REASON_MAX
+           && reason[len] != '\0')
+    {
+        len++;
+    }
+
+    *truncated = (reason[len] != '\0');
+
+    return len;
+}
+
+
+/*
+ * Return the number of bytes needed to JSON-escape one bounded reason byte.
+ */
+static size_t
+ngx_http_markdown_diagnostics_rollback_json_char_length(u_char ch)
+{
+    switch (ch) {
+    case '"':
+    case '\\':
+    case '\b':
+    case '\f':
+    case '\n':
+    case '\r':
+    case '\t':
+        return 2;
+
+    default:
+        return (ch < 0x20) ? 6 : 1;
+    }
+}
+
+
+/*
+ * Return the number of bytes needed to JSON-escape a bounded reason.
+ */
+static size_t
+ngx_http_markdown_diagnostics_rollback_json_length(
+    const char *reason, size_t reason_len)
+{
+    size_t  encoded_len;
+    size_t  i;
+    size_t  char_len;
+    u_char  ch;
+
+    encoded_len = 0;
+
+    for (i = 0; i < reason_len; i++) {
+        ch = (u_char) reason[i];
+        char_len = ngx_http_markdown_diagnostics_rollback_json_char_length(ch);
+
+        if (encoded_len > NGX_MAX_SIZE_T_VALUE - char_len) {
+            return NGX_MAX_SIZE_T_VALUE;
+        }
+
+        encoded_len += char_len;
+    }
+
+    return encoded_len;
+}
+
+
+/*
+ * JSON-escape a bounded rollback reason into the response buffer.
+ */
+static u_char *
+ngx_http_markdown_diagnostics_escape_rollback_reason(
+    u_char *p, u_char *last, const char *reason, size_t reason_len)
+{
+    static const u_char  hex[] = "0123456789abcdef";
+    size_t               i;
+    u_char                ch;
+    u_char                escaped;
+
+    for (i = 0; i < reason_len; i++) {
+        ch = (u_char) reason[i];
+        escaped = 0;
+
+        switch (ch) {
+        case '"':
+            escaped = '"';
+            break;
+
+        case '\\':
+            escaped = '\\';
+            break;
+
+        case '\b':
+            escaped = 'b';
+            break;
+
+        case '\f':
+            escaped = 'f';
+            break;
+
+        case '\n':
+            escaped = 'n';
+            break;
+
+        case '\r':
+            escaped = 'r';
+            break;
+
+        case '\t':
+            escaped = 't';
+            break;
+
+        default:
+            if (ch >= 0x20) {
+                if (last - p < 1) {
+                    return last;
+                }
+
+                *p++ = ch;
+                continue;
+            }
+
+            if (last - p < 6) {
+                return last;
+            }
+
+            *p++ = '\\';
+            *p++ = 'u';
+            *p++ = '0';
+            *p++ = '0';
+            *p++ = hex[ch >> 4];
+            *p++ = hex[ch & 0x0f];
+            continue;
+        }
+
+        if (last - p < 2) {
+            return last;
+        }
+
+        *p++ = '\\';
+        *p++ = escaped;
+    }
+
+    return p;
+}
+
+
+/*
  * Build and send a JSON response for a rollback action.
  *
  * Parameters:
@@ -469,15 +671,41 @@ static ngx_int_t
 ngx_http_markdown_diagnostics_send_rollback_response(
     ngx_http_request_t *r, ngx_int_t success, const char *reason)
 {
-    ngx_buf_t    *b;
-    ngx_chain_t   out;
-    u_char       *buf;
-    u_char       *p;
-    u_char       *last;
-    size_t        buf_size;
+    static const u_char  failed_prefix[] =
+        "{\"rollback\": \"failed\", \"reason\": \"";
+    static const u_char  failed_suffix[] = "\"}\n";
+    ngx_buf_t             *b;
+    ngx_chain_t            out;
+    u_char                *buf;
+    u_char                *p;
+    u_char                *last;
+    size_t                 buf_size;
+    size_t                 reason_len = 0;
+    size_t                 reason_json_len = 0;
+    size_t                 fixed_len = 0;
+    ngx_uint_t             reason_truncated = 0;
     ngx_http_markdown_diag_dynconf_t  dynconf;
 
-    buf_size = 256;
+    if (success) {
+        buf_size = 256;
+    } else {
+        reason_len = ngx_http_markdown_diagnostics_rollback_reason_length(
+            reason, &reason_truncated);
+        reason_json_len =
+            ngx_http_markdown_diagnostics_rollback_json_length(
+                reason != NULL ? reason : "unknown", reason_len);
+        fixed_len = sizeof(failed_prefix) - 1 + sizeof(failed_suffix) - 1
+                    + (reason_truncated ? sizeof("...") - 1 : 0) + 1;
+
+        if (reason_json_len == NGX_MAX_SIZE_T_VALUE
+            || reason_json_len > NGX_MAX_SIZE_T_VALUE - fixed_len)
+        {
+            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        }
+
+        buf_size = fixed_len + reason_json_len;
+    }
+
     buf = ngx_palloc(r->pool, buf_size);
     if (buf == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
@@ -496,10 +724,19 @@ ngx_http_markdown_diagnostics_send_rollback_response(
             dynconf.last_known_good_mtime,
             dynconf.config_version);
     } else {
-        p = ngx_slprintf(p, last,
-            "{\"rollback\": \"failed\", "
-            "\"reason\": \"%s\"}\n",
-            reason != NULL ? reason : "unknown");
+        reason = reason != NULL ? reason : "unknown";
+        ngx_memcpy(p, failed_prefix, sizeof(failed_prefix) - 1);
+        p += sizeof(failed_prefix) - 1;
+        p = ngx_http_markdown_diagnostics_escape_rollback_reason(
+            p, last, reason, reason_len);
+
+        if (reason_truncated) {
+            ngx_memcpy(p, "...", sizeof("...") - 1);
+            p += sizeof("...") - 1;
+        }
+
+        ngx_memcpy(p, failed_suffix, sizeof(failed_suffix) - 1);
+        p += sizeof(failed_suffix) - 1;
     }
 
     if (p >= last) {
@@ -587,6 +824,10 @@ ngx_http_markdown_diagnostics_handler(ngx_http_request_t *r)
     /* POST: handle action parameter */
     if (r->method & NGX_HTTP_POST) {
         if (ngx_http_markdown_diagnostics_check_rollback_action(r)) {
+            if (!ngx_http_markdown_diagnostics_rollback_authorized(r)) {
+                return NGX_HTTP_FORBIDDEN;
+            }
+
             rc = ngx_http_markdown_diagnostics_rollback(
                      r->connection->log);
             if (rc == NGX_OK) {
