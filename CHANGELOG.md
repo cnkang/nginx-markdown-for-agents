@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.9.2] - 2026-07-30
+
+Maintenance and hardening release. Fixes diagnostics and reason-code mapping
+gaps, adds OTel lifecycle cleanup, introduces a dynconf rollback API, and
+establishes a public surface drift detection gate for release integrity.
+
+### Fixed
+
+- Diagnostics `reason_to_code` mapping was missing `bypass_no_transform`
+  entry. The diagnostics endpoint now returns the complete mapping.
+- C reason code constants were missing the decompression error series
+  (codes 4–11). All 12 reason code constants are now synchronized between
+  Rust and C.
+- `stream_state` `PRE_COMMIT` fallthrough now logs an invariant violation
+  instead of silently advancing state.
+
+### Added
+
+- OTel worker lifecycle cleanup on NGINX reload and shutdown. OpenTelemetry
+  worker threads and resources are properly cleaned up, preventing resource
+  accumulation across reload cycles.
+- Dynconf rollback API (`POST /nginx-markdown/diagnostics?action=rollback`)
+  reverts the active dynamic configuration to the previously applied snapshot.
+- Public surface inventory and drift detection gate validates that FFI exports,
+  configuration directives, metric names, and reason codes have not drifted
+  from the declared inventory.
+- Release gates 0.9.2 (`make release-gates-check-092`), additive on 0.9.1
+  gates with the public surface drift detection gate.
+
 ## [0.9.1] - 2026-07-29
 
 Final pre-v1.0 baseline-consolidation and compatibility-reset release. In
