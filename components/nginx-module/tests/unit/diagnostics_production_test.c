@@ -965,7 +965,11 @@ test_rollback_response_escapes_and_bounds_reason(void)
     struct sockaddr_in   addr;
     char                 long_reason[
         NGX_HTTP_MARKDOWN_DIAGNOSTICS_ROLLBACK_REASON_MAX + 32];
+    static const char    control_reason[] = "\b\f\r\t\001";
     char                 body[8192];
+    u_char               escaped[8];
+    u_char               *escaped_end;
+    u_char               *escaped_pos;
     size_t               body_len;
     ngx_int_t             rc;
 
@@ -986,6 +990,33 @@ test_rollback_response_escapes_and_bounds_reason(void)
     body[body_len] = '\0';
     TEST_ASSERT(strstr(body, "bad\\\"reason\\n") != NULL,
                 "rollback reason should be JSON escaped");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+    rc = ngx_http_markdown_diagnostics_send_rollback_response(
+        &r, 0, control_reason);
+    TEST_ASSERT(rc == NGX_OK,
+                "control-character rollback reason should succeed");
+    body_len = (size_t) (g_last_output_chain->buf->last
+                         - g_last_output_chain->buf->pos);
+    TEST_ASSERT(body_len < sizeof(body),
+                "control-character response should be bounded");
+    memcpy(body, g_last_output_chain->buf->pos, body_len);
+    body[body_len] = '\0';
+    TEST_ASSERT(strstr(body, "\\b\\f\\r\\t\\u0001") != NULL,
+                "control characters should be JSON escaped");
+
+    escaped_pos = escaped;
+    escaped_end = escaped;
+    TEST_ASSERT(ngx_http_markdown_diagnostics_escape_rollback_reason(
+                    escaped_pos, escaped_end, "x", 1) == escaped_end,
+                "raw reason escape should reject a full buffer");
+
+    escaped_pos = escaped;
+    escaped_end = escaped + 5;
+    TEST_ASSERT(ngx_http_markdown_diagnostics_escape_rollback_reason(
+                    escaped_pos, escaped_end, "\001", 1) == escaped_end,
+                "control reason escape should reject a short buffer");
 
     reset_test_state();
     init_request(&r, &c, &conf, &addr);
