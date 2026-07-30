@@ -47,10 +47,8 @@ def test_metric_drift_is_reported() -> None:
     )
 
     assert drift == [
-        "metrics in source but not in inventory: "
-        "nginx_markdown_failures_total",
-        "metrics in inventory but not in source: "
-        "nginx_markdown_conversions_total",
+        "metrics in source but not in inventory: nginx_markdown_failures_total",
+        "metrics in inventory but not in source: nginx_markdown_conversions_total",
     ]
 
 
