@@ -120,11 +120,21 @@ typedef struct {
     struct sockaddr  *sockaddr;
 } ngx_connection_t;
 
+typedef struct {
+    ngx_uint_t  hash;
+    ngx_str_t   value;
+} ngx_table_elt_t;
+
+typedef struct {
+    ngx_table_elt_t  *authorization;
+} ngx_http_headers_in_t;
+
 struct ngx_http_request_s {
     ngx_uint_t               method;
     ngx_str_t                args;
     ngx_pool_t              *pool;
     ngx_connection_t        *connection;
+    ngx_http_headers_in_t    headers_in;
     ngx_http_headers_out_t   headers_out;
     ngx_http_request_t      *main;
     void                    *loc_conf;
@@ -186,6 +196,8 @@ static ngx_chain_t *g_last_output_chain;
 static int g_discard_rc;
 static int g_alloc_fail_after = -1;
 static ngx_int_t g_rollback_rc;
+static ngx_uint_t g_rollback_calls;
+static ngx_table_elt_t g_authorization_header;
 
 static void *
 test_alloc(size_t size, int zero)
@@ -355,6 +367,7 @@ ngx_int_t
 ngx_http_markdown_diagnostics_rollback(ngx_log_t *log)
 {
     UNUSED(log);
+    g_rollback_calls++;
     return g_rollback_rc;
 }
 
@@ -379,6 +392,8 @@ reset_test_state(void)
     g_discard_rc = NGX_OK;
     g_alloc_fail_after = -1;
     g_rollback_rc = NGX_ERROR;
+    g_rollback_calls = 0;
+    memset(&g_authorization_header, 0, sizeof(g_authorization_header));
     ngx_current_msec = 1000;
     memset(&ngx_http_markdown_g_diag_state, 0,
            sizeof(ngx_http_markdown_g_diag_state));
@@ -409,6 +424,15 @@ init_request(ngx_http_request_t *r, ngx_connection_t *c,
     r->main = r;
     r->loc_conf = conf;
     conf->policy.log_verbosity = NGX_HTTP_MARKDOWN_LOG_INFO;
+}
+
+static void
+authorize_rollback_request(ngx_http_request_t *r)
+{
+    g_authorization_header.hash = 1;
+    g_authorization_header.value.data = (u_char *) "Bearer test-token";
+    g_authorization_header.value.len = sizeof("Bearer test-token") - 1;
+    r->headers_in.authorization = &g_authorization_header;
 }
 
 static void
@@ -883,6 +907,7 @@ test_handler_post_rollback(void)
     r.method = NGX_HTTP_POST;
     r.args.data = rollback_args;
     r.args.len = sizeof(rollback_args) - 1;
+    authorize_rollback_request(&r);
     g_rollback_rc = NGX_OK;
 
     rc = ngx_http_markdown_diagnostics_handler(&r);
@@ -897,12 +922,26 @@ test_handler_post_rollback(void)
     r.method = NGX_HTTP_POST;
     r.args.data = rollback_args;
     r.args.len = sizeof(rollback_args) - 1;
+    authorize_rollback_request(&r);
     g_rollback_rc = NGX_ERROR;
 
     rc = ngx_http_markdown_diagnostics_handler(&r);
     TEST_ASSERT(rc == NGX_OK, "failed rollback should return JSON response");
     TEST_ASSERT(g_output_filter_calls == 1,
                 "failed rollback should send JSON body");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+    r.method = NGX_HTTP_POST;
+    r.args.data = rollback_args;
+    r.args.len = sizeof(rollback_args) - 1;
+    g_rollback_rc = NGX_OK;
+
+    rc = ngx_http_markdown_diagnostics_handler(&r);
+    TEST_ASSERT(rc == NGX_HTTP_FORBIDDEN,
+                "rollback without Authorization should be forbidden");
+    TEST_ASSERT(g_rollback_calls == 0,
+                "unauthorized rollback must not invoke rollback");
 
     reset_test_state();
     init_request(&r, &c, &conf, &addr);
@@ -915,6 +954,47 @@ test_handler_post_rollback(void)
                 "POST without rollback action should return 400");
 
     TEST_PASS("POST rollback action and rejection paths covered");
+}
+
+static void
+test_rollback_response_escapes_and_bounds_reason(void)
+{
+    ngx_http_request_t  r;
+    ngx_connection_t    c;
+    ngx_http_markdown_conf_t  conf;
+    struct sockaddr_in   addr;
+    char                 long_reason[
+        NGX_HTTP_MARKDOWN_DIAGNOSTICS_ROLLBACK_REASON_MAX + 32];
+    char                 body[8192];
+    size_t               body_len;
+    ngx_int_t             rc;
+
+    TEST_SUBSECTION("rollback response reason escaping and bound");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+    memset(long_reason, 'x', sizeof(long_reason) - 1);
+    long_reason[sizeof(long_reason) - 1] = '\0';
+
+    rc = ngx_http_markdown_diagnostics_send_rollback_response(
+        &r, 0, "bad\"reason\n");
+    TEST_ASSERT(rc == NGX_OK, "escaped rollback reason should succeed");
+    body_len = (size_t) (g_last_output_chain->buf->last
+                         - g_last_output_chain->buf->pos);
+    TEST_ASSERT(body_len < sizeof(body), "rollback response should be bounded");
+    memcpy(body, g_last_output_chain->buf->pos, body_len);
+    body[body_len] = '\0';
+    TEST_ASSERT(strstr(body, "bad\\\"reason\\n") != NULL,
+                "rollback reason should be JSON escaped");
+
+    reset_test_state();
+    init_request(&r, &c, &conf, &addr);
+    rc = ngx_http_markdown_diagnostics_send_rollback_response(
+        &r, 0, long_reason);
+    TEST_ASSERT(rc == NGX_OK,
+                "long rollback reason should be truncated, not fail");
+
+    TEST_PASS("Rollback response reason is escaped and bounded");
 }
 
 static void
@@ -973,6 +1053,7 @@ main(void)
     test_access_json_and_logging_failure_branches();
     test_handler_get_head_and_denials();
     test_handler_post_rollback();
+    test_rollback_response_escapes_and_bounds_reason();
     test_handler_failure_branches();
 
     TEST_PASS("All diagnostics production tests passed");
