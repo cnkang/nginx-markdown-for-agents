@@ -287,14 +287,15 @@ run_pid_case() {
 }
 
 # Two simulated masters must not cause an arbitrary signal: with no explicit
-# PID source, resolve_nginx_pid returns 1 and no kill is called.
+# PID source, resolve_nginx_pid returns exactly 1 and no kill is called.
 : > "$KILL_LOG"
 run_pid_case no-pid-no-kill 0 '
 unset NGINX_PID HARNESS_NGINX_PID NGINX_PID_FILE
-if resolve_nginx_pid; then
-    echo "FAIL: resolve_nginx_pid returned a PID with no trusted source" >&2
-    exit 1
-fi
+set +e
+resolve_nginx_pid >/dev/null
+rc=$?
+set -e
+[[ "$rc" -eq 1 ]]
 echo "OK: no PID resolved"
 '
 if [[ -s "$KILL_LOG" ]]; then
@@ -309,9 +310,11 @@ echo "PASS: no PID source → no kill" >&2
 : > "$KILL_LOG"
 run_pid_case two-masters-no-signal 0 '
 unset NGINX_PID HARNESS_NGINX_PID NGINX_PID_FILE
-if resolve_nginx_pid; then
-    exit 1
-fi
+set +e
+resolve_nginx_pid >/dev/null
+rc=$?
+set -e
+[[ "$rc" -eq 1 ]]
 echo "OK: no arbitrary signal"
 '
 echo "PASS: two simulated masters do not cause an arbitrary signal" >&2
@@ -321,7 +324,11 @@ echo "PASS: two simulated masters do not cause an arbitrary signal" >&2
 run_pid_case explicit-pid-resolved 0 '
 export NGINX_PID=77777
 export STUB_PID=77777
+set +e
 pid="$(resolve_nginx_pid)"
+rc=$?
+set -e
+[[ "$rc" -eq 0 ]] || exit 1
 [[ "$pid" == "77777" ]] || exit 1
 '
 : > "$KILL_LOG"
@@ -339,28 +346,33 @@ echo "PASS: explicit PID is signaled" >&2
 # Invalid PIDs are rejected.
 run_pid_case invalid-pid-non-numeric 0 '
 export NGINX_PID="abc; rm -rf /"
-if resolve_nginx_pid; then
-    echo "FAIL: non-numeric PID accepted" >&2
-    exit 1
-fi
+set +e
+resolve_nginx_pid >/dev/null
+rc=$?
+set -e
+[[ "$rc" -eq 2 ]]
 echo "OK: non-numeric PID rejected"
 '
 echo "PASS: non-numeric PID rejected" >&2
 
 run_pid_case invalid-pid-zero 0 '
 export NGINX_PID=0
-if resolve_nginx_pid; then
-    exit 1
-fi
+set +e
+resolve_nginx_pid >/dev/null
+rc=$?
+set -e
+[[ "$rc" -eq 2 ]]
 echo "OK: PID 0 rejected"
 '
 echo "PASS: PID <= 1 rejected" >&2
 
 run_pid_case invalid-pid-self 0 '
 export NGINX_PID=$$
-if resolve_nginx_pid; then
-    exit 1
-fi
+set +e
+resolve_nginx_pid >/dev/null
+rc=$?
+set -e
+[[ "$rc" -eq 2 ]]
 echo "OK: current shell PID rejected"
 '
 echo "PASS: current shell PID rejected" >&2
@@ -421,15 +433,88 @@ printf "%s\n" "$output"
 '
 echo "PASS: no PID source uses polling SKIP" >&2
 
+# Every configured PID-file error must reach send_reload and fail closed.
+pid_file_missing="$TMP_ROOT/missing.pid"
+: > "$KILL_LOG"
+run_pid_case pid-file-missing-send-reload 0 '
+export NGINX_PID_FILE="'"$pid_file_missing"'"
+set +e
+output="$(send_reload "missing pid file" 2>&1)"
+rc=$?
+set -e
+printf "%s\n" "$output"
+[[ "$rc" -eq 2 ]]
+[[ "$output" == *"does not exist"* ]]
+[[ "$output" != *"SKIP:"* ]]
+[[ ! -s "$KILL_LOG" ]]
+'
+echo "PASS: missing pid file fails send_reload without signaling" >&2
+
+pid_file_nonregular="$TMP_ROOT/nonregular.pid"
+mkdir -p -- "$pid_file_nonregular"
+: > "$KILL_LOG"
+run_pid_case pid-file-nonregular-send-reload 0 '
+export NGINX_PID_FILE="'"$pid_file_nonregular"'"
+set +e
+output="$(send_reload "nonregular pid file" 2>&1)"
+rc=$?
+set -e
+printf "%s\n" "$output"
+[[ "$rc" -eq 2 ]]
+[[ "$output" == *"not a regular file"* ]]
+[[ "$output" != *"SKIP:"* ]]
+[[ ! -s "$KILL_LOG" ]]
+'
+echo "PASS: nonregular pid file fails send_reload without signaling" >&2
+
+pid_file_canonicalize="$TMP_ROOT/canonicalize.pid"
+printf "99999\n" > "$pid_file_canonicalize"
+: > "$KILL_LOG"
+run_pid_case pid-file-canonicalize-failure 0 '
+export NGINX_PID_FILE="'"$pid_file_canonicalize"'"
+cd() { return 1; }
+set +e
+output="$(send_reload "canonicalize failure" 2>&1)"
+rc=$?
+set -e
+printf "%s\n" "$output"
+[[ "$rc" -eq 2 ]]
+[[ "$output" == *"unable to canonicalize"* ]]
+[[ "$output" != *"SKIP:"* ]]
+[[ ! -s "$KILL_LOG" ]]
+'
+echo "PASS: canonicalization failure fails send_reload without signaling" >&2
+
+pid_file_unreadable="$TMP_ROOT/unreadable.pid"
+printf "99999\n" > "$pid_file_unreadable"
+: > "$KILL_LOG"
+run_pid_case pid-file-unreadable 0 '
+export NGINX_PID_FILE="'"$pid_file_unreadable"'"
+# A parser stub is deterministic even when the harness runs as root and can
+# read mode-000 files; it models an unreadable pid-file parse operation.
+awk() { return 1; }
+set +e
+output="$(send_reload "unreadable pid file" 2>&1)"
+rc=$?
+set -e
+printf "%s\n" "$output"
+[[ "$rc" -eq 2 ]]
+[[ "$output" == *"NGINX_PID_FILE"* ]]
+[[ "$output" != *"SKIP:"* ]]
+[[ ! -s "$KILL_LOG" ]]
+'
+echo "PASS: unreadable pid file fails send_reload without signaling" >&2
+
 # PID file: multi-line content is rejected.
 pid_file_multi="$TMP_ROOT/multi.pid"
 printf "12345\n67890\n" > "$pid_file_multi"
 run_pid_case pid-file-multi-line 0 '
 export NGINX_PID_FILE="'"$pid_file_multi"'"
-if resolve_nginx_pid; then
-    echo "FAIL: multi-line pid file accepted" >&2
-    exit 1
-fi
+set +e
+resolve_nginx_pid >/dev/null
+rc=$?
+set -e
+[[ "$rc" -eq 2 ]]
 echo "OK: multi-line pid file rejected"
 '
 echo "PASS: multi-line pid file rejected" >&2
@@ -439,10 +524,11 @@ pid_file_nonnum="$TMP_ROOT/nonnum.pid"
 printf "not-a-pid\n" > "$pid_file_nonnum"
 run_pid_case pid-file-non-numeric 0 '
 export NGINX_PID_FILE="'"$pid_file_nonnum"'"
-if resolve_nginx_pid; then
-    echo "FAIL: non-numeric pid file accepted" >&2
-    exit 1
-fi
+set +e
+resolve_nginx_pid >/dev/null
+rc=$?
+set -e
+[[ "$rc" -eq 2 ]]
 echo "OK: non-numeric pid file rejected"
 '
 echo "PASS: non-numeric pid file rejected" >&2
@@ -494,10 +580,11 @@ pid_file_symlink="$TMP_ROOT/link.pid"
 ln -sf "$pid_file_real" "$pid_file_symlink"
 run_pid_case pid-file-symlink 0 '
 export NGINX_PID_FILE="'"$pid_file_symlink"'"
-if resolve_nginx_pid; then
-    echo "FAIL: symlink pid file accepted" >&2
-    exit 1
-fi
+set +e
+resolve_nginx_pid >/dev/null
+rc=$?
+set -e
+[[ "$rc" -eq 2 ]]
 echo "OK: symlink pid file rejected"
 '
 echo "PASS: symlink pid file rejected" >&2

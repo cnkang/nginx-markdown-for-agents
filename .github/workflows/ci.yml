@@ -20,11 +20,14 @@ on:
       - ".sonar/**"
       - ".sonarcloud.properties"
       - "Makefile"
+      - ".gitattributes"
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
       - "tools/ci/coverage_gate.py"
       - "rust-toolchain.toml"
+      - "requirements-perf.txt"
+      - "requirements-release.txt"
   push:
     branches: [main, master]
     paths:
@@ -43,11 +46,14 @@ on:
       - ".sonar/**"
       - ".sonarcloud.properties"
       - "Makefile"
+      - ".gitattributes"
       - "README.md"
       - "README_zh-CN.md"
       - ".github/workflows/**"
       - "tools/ci/coverage_gate.py"
       - "rust-toolchain.toml"
+      - "requirements-perf.txt"
+      - "requirements-release.txt"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -76,6 +82,8 @@ permissions: {}
 #   - nginx-c-sanitizers     — ASan/UBSan sanitizer smoke
 #   - matrix-release-tests   — Release-matrix Python test suite (Req 5)
 #   - brotli-build-matrix    — Brotli streaming build matrix (on/off, Ubuntu 22.04)
+#   - release-092-contract-gates — 0.9.2 source metadata, ABI, version,
+#                                  reason-code and request-scoped OTel contract gates
 #
 # EXPERIMENTAL (non-blocking — informational, continue-on-error or nightly):
 #   - perf-artifacts         — Performance baseline collection (continue-on-error: true)

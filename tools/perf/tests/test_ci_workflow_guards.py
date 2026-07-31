@@ -6,15 +6,94 @@ tooling under tools/corpus changes.
 
 from __future__ import annotations
 
+from fnmatch import fnmatchcase
 import re
 import subprocess
 from pathlib import Path
+
+import yaml
 
 
 def _ci_workflow_text() -> str:
     repo_root = Path(__file__).resolve().parents[3]
     ci_path = repo_root / ".github" / "workflows" / "ci.yml"
     return ci_path.read_text(encoding="utf-8")
+
+
+def _ci_workflow_data() -> dict[str, object]:
+    """Load ci.yml without YAML 1.1 coercing the on key to True."""
+    # BaseLoader keeps workflow keys and path values as strings.  The fallback
+    # also makes the assertion explicit if a different YAML loader is used.
+    data = yaml.load(_ci_workflow_text(), Loader=yaml.BaseLoader)  # noqa: S506
+    return data
+
+
+def _workflow_trigger_paths(workflow: dict[str, object], event: str) -> set[str]:
+    """Return paths for one top-level pull_request or push trigger."""
+    triggers = workflow.get("on", workflow.get(True))
+    assert isinstance(triggers, dict)
+    trigger = triggers[event]
+    assert isinstance(trigger, dict)
+    paths = trigger["paths"]
+    assert isinstance(paths, list)
+    return set(paths)
+
+
+def _filter_covers_trigger(filter_pattern: str, trigger_pattern: str) -> bool:
+    """Return whether a top-level trigger pattern covers an internal filter."""
+    if trigger_pattern == "**" or filter_pattern == trigger_pattern:
+        return True
+    if filter_pattern.endswith("/**") and trigger_pattern.endswith("/**"):
+        filter_root = filter_pattern[:-3].rstrip("/")
+        trigger_root = trigger_pattern[:-3].rstrip("/")
+        return filter_root == trigger_root or filter_root.startswith(
+            f"{trigger_root}/"
+        )
+    return fnmatchcase(filter_pattern, trigger_pattern)
+
+
+def test_top_level_paths_cover_all_internal_change_filters() -> None:
+    """Every paths-filter pattern must be reachable from both CI triggers."""
+    workflow = _ci_workflow_data()
+    triggers = {
+        "pull_request": _workflow_trigger_paths(workflow, "pull_request"),
+        "push": _workflow_trigger_paths(workflow, "push"),
+    }
+    changes_steps = workflow["jobs"]["changes"]["steps"]
+    filter_step = next(
+        step for step in changes_steps if step.get("name") == "Filter changed paths"
+    )
+    filters = yaml.load(  # noqa: S506
+        filter_step["with"]["filters"], Loader=yaml.BaseLoader
+    )
+
+    for filter_name, patterns in filters.items():
+        for pattern in patterns:
+            for event, trigger_paths in triggers.items():
+                assert any(
+                    _filter_covers_trigger(pattern, trigger)
+                    for trigger in trigger_paths
+                ), (
+                    f"internal filter {filter_name!r} contains {pattern!r}, "
+                    f"but {event}.paths cannot trigger it"
+                )
+
+
+def test_performance_requirements_trigger_both_workflow_events() -> None:
+    """Perf/release dependency changes must run the top-level CI workflow."""
+    workflow = _ci_workflow_data()
+    filter_step = next(
+        step
+        for step in workflow["jobs"]["changes"]["steps"]
+        if step.get("name") == "Filter changed paths"
+    )
+    filters = yaml.load(  # noqa: S506
+        filter_step["with"]["filters"], Loader=yaml.BaseLoader
+    )
+    for path in ("requirements-perf.txt", "requirements-release.txt"):
+        for event in ("pull_request", "push"):
+            assert path in _workflow_trigger_paths(workflow, event)
+        assert path in filters["perf"]
 
 
 def test_changes_job_exposes_corpus_tools_output() -> None:
