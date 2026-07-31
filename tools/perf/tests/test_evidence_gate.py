@@ -256,14 +256,15 @@ def test_tag_release_job_supplies_module_enabled_nginx():
         "--env NGINX_BIN=/workspace/module-runtime/nginx" in workflow
     )
     assert "libxcrypt" in workflow
-    assert "python3 tools/perf/evidence_gate.py --mode blocking" in workflow
-    assert "evidence_gate.py --blocking" not in workflow
-    assert "MODULE_BASELINE_VERSION=092" in workflow, (
-        "Tag release gate must evaluate module evidence against baseline 092"
-    )
-    assert "MODULE_BASELINE_VERSION=091" not in workflow, (
-        "Tag release gate must not silently fall back to baseline 091"
-    )
+    evidence_invocations = [
+        "make release-perf-evidence-blocking BASELINE_VERSION=091",
+        "make release-perf-evidence-blocking BASELINE_VERSION=092",
+    ]
+    assert all(workflow.count(invocation) == 1 for invocation in evidence_invocations)
+    assert workflow.index(evidence_invocations[0]) < workflow.index(
+        evidence_invocations[1]
+    ), "Tag release evidence must run baseline 091 before baseline 092"
+    assert "RELEASE_GATE_ALLOW_SKIP_MODULE=1" not in workflow
 
 
 def test_manual_module_baseline_workflow_uses_canonical_native_runtime():
