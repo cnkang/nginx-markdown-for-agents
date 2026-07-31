@@ -426,8 +426,12 @@ echo "PASS: non-NGINX prefix match is rejected" >&2
 : > "$KILL_LOG"
 run_pid_case no-pid-send-reload 0 '
 unset NGINX_PID HARNESS_NGINX_PID NGINX_PID_FILE NGINX_PID_PREFIX
+set +e
 output="$(send_reload "no PID source" 2>&1)"
+rc=$?
+set -e
 printf "%s\n" "$output"
+[[ "$rc" -eq 0 ]]
 [[ "$output" == *"SKIP: no harness-owned or explicitly supplied NGINX PID"* ]]
 [[ ! -s "$KILL_LOG" ]]
 '
@@ -484,6 +488,17 @@ printf "%s\n" "$output"
 [[ ! -s "$KILL_LOG" ]]
 '
 echo "PASS: canonicalization failure fails send_reload without signaling" >&2
+
+run_pid_case pid-file-missing-resolve 0 '
+export NGINX_PID_FILE="'"$pid_file_missing"'"
+set +e
+resolve_nginx_pid >/dev/null
+rc=$?
+set -e
+[[ "$rc" -eq 2 ]]
+echo "OK: missing pid file returns PID_CONFIG_INVALID"
+'
+echo "PASS: missing pid file returns exact resolver status" >&2
 
 pid_file_unreadable="$TMP_ROOT/unreadable.pid"
 printf "99999\n" > "$pid_file_unreadable"
@@ -578,21 +593,38 @@ pid_file_real="$TMP_ROOT/real.pid"
 printf "12345\n" > "$pid_file_real"
 pid_file_symlink="$TMP_ROOT/link.pid"
 ln -sf "$pid_file_real" "$pid_file_symlink"
-run_pid_case pid-file-symlink 0 '
+: > "$KILL_LOG"
+run_pid_case pid-file-symlink-send-reload 0 '
 export NGINX_PID_FILE="'"$pid_file_symlink"'"
 set +e
-resolve_nginx_pid >/dev/null
+output="$(send_reload "symlink pid file" 2>&1)"
 rc=$?
 set -e
+printf "%s\n" "$output"
 [[ "$rc" -eq 2 ]]
-echo "OK: symlink pid file rejected"
+[[ "$output" == *"must not be a symlink"* ]]
+[[ "$output" != *"SKIP:"* ]]
+[[ ! -s "$KILL_LOG" ]]
 '
-echo "PASS: symlink pid file rejected" >&2
+echo "PASS: symlink pid file fails send_reload without signaling" >&2
 
 # PID file: valid single-PID file is accepted and signaled.
 : > "$KILL_LOG"
 pid_file_valid="$TMP_ROOT/valid.pid"
 printf "99999\n" > "$pid_file_valid"
+run_pid_case pid-file-valid-resolve 0 '
+export NGINX_PID_FILE="'"$pid_file_valid"'"
+export STUB_PID=99999
+set +e
+pid="$(resolve_nginx_pid)"
+rc=$?
+set -e
+[[ "$rc" -eq 0 ]]
+[[ "$pid" == "99999" ]]
+'
+echo "PASS: valid pid file returns exact resolver status" >&2
+
+: > "$KILL_LOG"
 run_pid_case pid-file-valid-reload 0 '
 export NGINX_PID_FILE="'"$pid_file_valid"'"
 export STUB_PID=99999
