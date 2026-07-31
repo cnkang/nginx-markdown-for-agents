@@ -394,8 +394,10 @@ It keeps the 0.9.1 configuration and ABI surface while tightening contracts:
 - **Request-scoped OTel ownership**: spans and export subrequests use request
   pools. No worker-owned queue, thread, timer, socket, or exit flush is
   claimed or created.
-- **Public-surface contract gate**: `make public-surface-drift-check` checks
-  directive, dynconf, metric, reason-code, and FFI metadata against source.
+- **Public-surface source metadata and ABI drift gate**: `make public-surface-drift-check`
+  checks directive, dynconf, metric, reason-code, and FFI source metadata
+  against the declared inventory. Runtime behavior is verified by the unit,
+  integration, and E2E test suites, not by this gate alone.
 
 See the [0.9.2 release notes](docs/releases/0.9.2-release-notes.md),
 [dynconf guide](docs/guides/DYNAMIC_CONFIG.md), and

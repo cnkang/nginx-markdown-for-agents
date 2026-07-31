@@ -1,8 +1,11 @@
 # Public Surface Inventory for the 1.0 Freeze
 
 This document is the repository-owned inventory used to decide which current
-surfaces become compatibility commitments at 1.0. It records production
-behavior, not merely declarations or design intent.
+surfaces become compatibility commitments at 1.0. It records source metadata
+and ABI declarations, cross-referenced with production-path evidence. The
+drift gate (`make public-surface-drift-check`) validates source metadata and
+ABI drift against this inventory; runtime behavior is verified by the
+unit, integration, and E2E test suites, not by the drift gate alone.
 
 The extraction and drift-check decision is recorded in
 [ADR-0025](ADR/0025-public-surface-inventory-drift-gate.md).

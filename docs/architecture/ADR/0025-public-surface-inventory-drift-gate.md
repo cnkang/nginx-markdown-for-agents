@@ -23,9 +23,21 @@ or invoking a local specification adapter.
 Maintain `docs/harness/public-surface-inventory.json` as the repository-owned
 declaration of the compatibility surfaces that are currently tracked. The
 fail-closed `tools/harness/detect_public_surface_drift.py` extractor reads the
-live C and Rust source, checks the generated FFI header ABI, and compares
-metadata as well as names for directives, OTel controls, dynamic-configuration
-keys, metrics, reason codes, and FFI exports.
+live C and Rust source metadata, checks the generated FFI header ABI, and
+compares metadata as well as names for directives, OTel controls,
+dynamic-configuration keys, metrics, reason codes, and FFI exports.
+
+This is a **source metadata and ABI drift gate**, not a runtime behavior
+contract. Directive defaults, syntax, status, and migration targets are
+read from the source command table, handler signatures, and inline
+metadata; dynconf type/allowed/default/inheritance are read from parser
+tables and field declarations; metric bounded cardinality is declared in
+the inventory and checked against label value sources. The gate does not
+execute directive create/merge functions, dynconf apply paths, or runtime
+metric rendering. Runtime behavior is verified by the existing unit,
+integration, and E2E test suites. A source comment or detector constant
+change alone can satisfy this gate; it cannot by itself prove runtime
+behavior is unchanged.
 
 The inventory, implementation, tests, and the relevant operator documentation
 must be updated in the same change set. The check is exposed through
