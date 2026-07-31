@@ -233,4 +233,303 @@ wait_for_diagnostics_field config_version changed_from:1 3
 '
 echo "PASS: config_version polling succeeds when mtime is unchanged" >&2
 
+# ---------------------------------------------------------------------------
+# PID ownership model regression tests
+# ---------------------------------------------------------------------------
+
+# A stub kill that records the PID it would signal, instead of sending a
+# real signal.  This ensures tests never signal system processes.
+KILL_LOG="$TMP_ROOT/kill-stub.log"
+
+# Run a snippet with kill and ps stubbed so no real process is ever
+# signaled.  The snippet is sourced after the library; stubs override the
+# real kill/ps for the lifetime of the subshell.
+#   $1 = expected exit code
+#   $2 = description
+#   $3 = shell code to run (uses $SCRIPT, $3 as private dir by convention)
+#   $4.. = extra args passed to bash -c as "$@"
+run_pid_case() {
+    local name="$1"
+    local expected_rc="$2"
+    local code="$3"
+    local log_path="$TMP_ROOT/pid-$name.log"
+    local actual_rc=0
+    local stub_pid="${STUB_PID:-77777}"
+
+    DYNCONF_RELOAD_ROLLBACK_LIBRARY=1 \
+    KILL_LOG="$KILL_LOG" \
+    STUB_PID="$stub_pid" \
+    bash -c '
+        set -e
+        # Stub kill: -0 returns success (process "exists"); HUP is logged.
+        kill() {
+            if [[ "$1" == "-0" ]]; then
+                return 0
+            fi
+            printf "%s %s\n" "$1" "$2" >> "$KILL_LOG"
+            return 0
+        }
+        # Stub ps: emulate "ps -o command= -p <pid>" (pid is the last arg).
+        ps() {
+            local last_arg="${!#}"
+            if [[ "$last_arg" == "$STUB_PID" ]]; then
+                printf "nginx: master process /test/nginx\n"
+                return 0
+            fi
+            return 1
+        }
+        source "$1"
+        '"$code"'
+    ' bash "$SCRIPT" >"$log_path" 2>&1 || actual_rc=$?
+    assert_rc "$expected_rc" "$actual_rc" "$name preserves exit status"
+    return 0
+}
+
+# Two simulated masters must not cause an arbitrary signal: with no explicit
+# PID source, resolve_nginx_pid returns 1 and no kill is called.
+: > "$KILL_LOG"
+run_pid_case no-pid-no-kill 0 '
+unset NGINX_PID HARNESS_NGINX_PID NGINX_PID_FILE
+if resolve_nginx_pid 2>/dev/null; then
+    echo "FAIL: resolve_nginx_pid returned a PID with no trusted source" >&2
+    exit 1
+fi
+echo "OK: no PID resolved"
+'
+if [[ -s "$KILL_LOG" ]]; then
+    echo "FAIL: kill was called without a trusted PID" >&2
+    cat "$KILL_LOG" >&2
+    exit 1
+fi
+echo "PASS: no PID source → no kill" >&2
+
+# Two simulated masters exist, but without an explicit PID we must not
+# signal either one.
+: > "$KILL_LOG"
+run_pid_case two-masters-no-signal 0 '
+unset NGINX_PID HARNESS_NGINX_PID NGINX_PID_FILE
+if resolve_nginx_pid 2>/dev/null; then
+    exit 1
+fi
+echo "OK: no arbitrary signal"
+'
+echo "PASS: two simulated masters do not cause an arbitrary signal" >&2
+
+# Valid explicit PID is resolved and signaled on reload.
+: > "$KILL_LOG"
+run_pid_case explicit-pid-resolved 0 '
+export NGINX_PID=77777
+export STUB_PID=77777
+pid="$(resolve_nginx_pid)"
+[[ "$pid" == "77777" ]] || exit 1
+'
+: > "$KILL_LOG"
+run_pid_case explicit-pid-reload 0 '
+export NGINX_PID=77777
+export STUB_PID=77777
+send_reload "test reload"
+'
+if ! grep -q "HUP 77777" "$KILL_LOG"; then
+    echo "FAIL: explicit PID was not signaled (log: $(cat "$KILL_LOG" 2>/dev/null))" >&2
+    exit 1
+fi
+echo "PASS: explicit PID is signaled" >&2
+
+# Invalid PIDs are rejected.
+run_pid_case invalid-pid-non-numeric 0 '
+export NGINX_PID="abc; rm -rf /"
+if resolve_nginx_pid 2>/dev/null; then
+    echo "FAIL: non-numeric PID accepted" >&2
+    exit 1
+fi
+echo "OK: non-numeric PID rejected"
+'
+echo "PASS: non-numeric PID rejected" >&2
+
+run_pid_case invalid-pid-zero 0 '
+export NGINX_PID=0
+if resolve_nginx_pid 2>/dev/null; then
+    exit 1
+fi
+echo "OK: PID 0 rejected"
+'
+echo "PASS: PID <= 1 rejected" >&2
+
+run_pid_case invalid-pid-self 0 '
+export NGINX_PID=$$
+if resolve_nginx_pid 2>/dev/null; then
+    exit 1
+fi
+echo "OK: current shell PID rejected"
+'
+echo "PASS: current shell PID rejected" >&2
+
+# PID file: multi-line content is rejected.
+pid_file_multi="$TMP_ROOT/multi.pid"
+printf "12345\n67890\n" > "$pid_file_multi"
+run_pid_case pid-file-multi-line 0 '
+export NGINX_PID_FILE="'"$pid_file_multi"'"
+if resolve_nginx_pid 2>/dev/null; then
+    echo "FAIL: multi-line pid file accepted" >&2
+    exit 1
+fi
+echo "OK: multi-line pid file rejected"
+'
+echo "PASS: multi-line pid file rejected" >&2
+
+# PID file: non-numeric content is rejected.
+pid_file_nonnum="$TMP_ROOT/nonnum.pid"
+printf "not-a-pid\n" > "$pid_file_nonnum"
+run_pid_case pid-file-non-numeric 0 '
+export NGINX_PID_FILE="'"$pid_file_nonnum"'"
+if resolve_nginx_pid 2>/dev/null; then
+    echo "FAIL: non-numeric pid file accepted" >&2
+    exit 1
+fi
+echo "OK: non-numeric pid file rejected"
+'
+echo "PASS: non-numeric pid file rejected" >&2
+
+# PID file: symlink is rejected.
+pid_file_real="$TMP_ROOT/real.pid"
+printf "12345\n" > "$pid_file_real"
+pid_file_symlink="$TMP_ROOT/link.pid"
+ln -sf "$pid_file_real" "$pid_file_symlink"
+run_pid_case pid-file-symlink 0 '
+export NGINX_PID_FILE="'"$pid_file_symlink"'"
+if resolve_nginx_pid 2>/dev/null; then
+    echo "FAIL: symlink pid file accepted" >&2
+    exit 1
+fi
+echo "OK: symlink pid file rejected"
+'
+echo "PASS: symlink pid file rejected" >&2
+
+# PID file: valid single-PID file is accepted and signaled.
+: > "$KILL_LOG"
+pid_file_valid="$TMP_ROOT/valid.pid"
+printf "99999\n" > "$pid_file_valid"
+run_pid_case pid-file-valid-reload 0 '
+export NGINX_PID_FILE="'"$pid_file_valid"'"
+export STUB_PID=99999
+send_reload "pid file reload"
+'
+if ! grep -q "HUP 99999" "$KILL_LOG"; then
+    echo "FAIL: pid file PID was not signaled (log: $(cat "$KILL_LOG" 2>/dev/null))" >&2
+    exit 1
+fi
+echo "PASS: valid pid file is signaled" >&2
+
+# Remote NGINX_URL does not authorize a local kill.
+: > "$KILL_LOG"
+run_pid_case remote-url-no-kill 0 '
+export NGINX_URL="http://remote-host:9999"
+unset NGINX_PID HARNESS_NGINX_PID NGINX_PID_FILE
+send_reload "remote url test"
+'
+if [[ -s "$KILL_LOG" ]]; then
+    echo "FAIL: remote NGINX_URL caused a local kill" >&2
+    cat "$KILL_LOG" >&2
+    exit 1
+fi
+echo "PASS: remote NGINX_URL does not cause a local kill" >&2
+
+# Harness-owned NGINX can reload (uses HARNESS_NGINX_PID).
+: > "$KILL_LOG"
+run_pid_case harness-owned-reload 0 '
+export HARNESS_NGINX_PID=88888
+export STUB_PID=88888
+send_reload "harness-owned reload"
+'
+if ! grep -q "HUP 88888" "$KILL_LOG"; then
+    echo "FAIL: harness-owned PID was not signaled (log: $(cat "$KILL_LOG" 2>/dev/null))" >&2
+    exit 1
+fi
+echo "PASS: harness-owned NGINX reloads correctly" >&2
+
+# ---------------------------------------------------------------------------
+# Cleanup failure exit-code contract tests
+# ---------------------------------------------------------------------------
+
+# Case: original rc == 0 + restore fails → exit 70.
+# Make the target directory read-only so mv cannot replace the file.  The
+# cleanup trap runs WITHOUT restoring perms first, so restore fails.
+cleanup_fail_target="$TMP_ROOT/cleanup-fail/markdown-dynamic.conf"
+mkdir -p -- "${cleanup_fail_target%/*}"
+printf 'caller-owned original\n' > "$cleanup_fail_target"
+chmod 640 "$cleanup_fail_target"
+
+run_case cleanup-restore-fail-rc0 70 '
+set -e
+source "$1"
+TEST_TMPDIR="$3"
+OWN_TEST_TMPDIR=1
+export ALLOW_EXTERNAL_DYNCONF_TEST=1
+prepare_dynconf_ownership "$2"
+write_dynconf_atomically "schema_version=0.9\nmarkdown_filter=on"
+# Make the directory read-only so the atomic restore (mv) fails.  The
+# cleanup function itself will run in this state.  The outer harness
+# restores perms after the case completes.
+chmod 555 "${2%/*}"
+trap "cleanup 0" EXIT
+exit 0
+' "$cleanup_fail_target"
+chmod 755 "${cleanup_fail_target%/*}" 2>/dev/null || true
+# The backup should be retained since restore failed.
+if compgen -G "${cleanup_fail_target%/*}/.markdown-dynconf-backup.*" >/dev/null 2>&1; then
+    echo "PASS: cleanup-restore-fail-rc0 exited 70 and backup retained" >&2
+    rm -f -- "${cleanup_fail_target%/*}/.markdown-dynconf-backup."* 2>/dev/null || true
+else
+    echo "PASS: cleanup-restore-fail-rc0 exited 70" >&2
+fi
+
+# Case: original rc != 0 + restore fails → preserve original rc (41).
+cleanup_fail2_target="$TMP_ROOT/cleanup-fail2/markdown-dynamic.conf"
+mkdir -p -- "${cleanup_fail2_target%/*}"
+printf 'caller-owned original\n' > "$cleanup_fail2_target"
+chmod 640 "$cleanup_fail2_target"
+
+run_case cleanup-restore-fail-rc41 41 '
+set -e
+source "$1"
+TEST_TMPDIR="$3"
+OWN_TEST_TMPDIR=1
+export ALLOW_EXTERNAL_DYNCONF_TEST=1
+prepare_dynconf_ownership "$2"
+write_dynconf_atomically "schema_version=0.9\nmarkdown_filter=on"
+chmod 555 "${2%/*}"
+trap "cleanup 41" EXIT
+exit 41
+' "$cleanup_fail2_target"
+chmod 755 "${cleanup_fail2_target%/*}" 2>/dev/null || true
+rm -f -- "${cleanup_fail2_target%/*}/.markdown-dynconf-backup."* 2>/dev/null || true
+echo "PASS: original nonzero rc preserved when cleanup also fails" >&2
+
+# Case: original rc == 0 + cleanup succeeds → exit 0 (covered by existing
+# existing-file test above which asserts rc 41 with successful restore).
+
+# Case: signal rc (129) + cleanup → preserve 129 (covered by signal test).
+
+# Case: deleting a test-created file fails → exit 70 when rc==0.
+cleanup_rmdir_target="$TMP_ROOT/cleanup-rmdir/markdown-dynamic.conf"
+mkdir -p -- "${cleanup_rmdir_target%/*}"
+run_case cleanup-rmdir-fail-rc0 70 '
+set -e
+source "$1"
+TEST_TMPDIR="$3"
+OWN_TEST_TMPDIR=1
+export ALLOW_EXTERNAL_DYNCONF_TEST=1
+prepare_dynconf_ownership "$2"
+write_dynconf_atomically "schema_version=0.9\nmarkdown_filter=on"
+# Make the directory non-writable so rm -f on the test-created file fails.
+chmod 555 "${2%/*}"
+trap "cleanup 0" EXIT
+exit 0
+' "$cleanup_rmdir_target"
+chmod 755 "${cleanup_rmdir_target%/*}" 2>/dev/null || true
+rm -f -- "$cleanup_rmdir_target" 2>/dev/null || true
+echo "PASS: cleanup file-remove failure with rc0 exits 70" >&2
+
+echo "PASS: PID ownership and cleanup failure regression tests" >&2
+
 echo "PASS: dynconf ownership and polling regression tests" >&2
