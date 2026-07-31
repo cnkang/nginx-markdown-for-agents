@@ -799,10 +799,42 @@ perf-evidence-check:
 	@echo "=== Performance Evidence Check (non-blocking) ==="
 	@tools/perf/run_evidence_gate.sh
 
-# Keep the 0.9.1 gate's default baseline stable. The 0.9.2 recipe below
-# exports its own value without changing the prerequisite's
-# 0.9.1 environment.
-PERF_BASELINE_VERSION ?= 091
+# release-perf-evidence-blocking: shared helper that runs the module-level
+# performance evidence gate in blocking mode against a caller-specified
+# baseline.  Each release-gates-check-0NN recipe must invoke this helper with
+# an explicit BASELINE_VERSION so the baseline enters the blocking decision
+# instead of being merely exported and silently ignored.
+#
+# Parameter:
+#   BASELINE_VERSION - the module baseline to evaluate (e.g. 091, 092)
+#
+# Environment variables (forwarded to evidence_gate.py):
+#   NGINX_BIN                            - Path to module-enabled nginx binary
+#   RELEASE_GATE_ALLOW_SKIP_MODULE=1     - Allow proceeding without module
+#                                           benchmarks (non-release only)
+#
+# Classification: BLOCKING (fails on NO_GO/MISSING_EVIDENCE; fail-closed when
+# NGINX_BIN is absent unless an explicit skip is authorized)
+.PHONY: release-perf-evidence-blocking
+release-perf-evidence-blocking:
+	@if [ -z "$(BASELINE_VERSION)" ]; then \
+		echo "FAIL: release-perf-evidence-blocking requires BASELINE_VERSION" >&2; \
+		exit 1; \
+	fi
+	@echo "  Performance evidence gate (blocking mode, baseline $(BASELINE_VERSION))"
+	@if [ -n "$${NGINX_BIN:-}" ]; then \
+		MODULE_BASELINE_VERSION="$(BASELINE_VERSION)" \
+			python3 tools/perf/evidence_gate.py --mode blocking || exit 1; \
+	else \
+		if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
+			MODULE_BASELINE_VERSION="$(BASELINE_VERSION)" \
+				python3 tools/perf/evidence_gate.py --mode blocking --allow-skip-module || exit 1; \
+		else \
+			echo "FAIL: Module-level benchmarks require NGINX_BIN." >&2; \
+			echo "  Set NGINX_BIN=/path/to/nginx or RELEASE_GATE_ALLOW_SKIP_MODULE=1 to skip." >&2; \
+			exit 1; \
+		fi; \
+	fi
 
 # release-gates-check-091: Blocking 0.9.1 release gate.
 # Runs all prior regression gates (0.9.0 gate chain), then adds 0.9.1-specific
@@ -823,20 +855,8 @@ release-gates-check-091: release-gates-check-090
 	@echo "=== 0.9.1 Release Gates (blocking) ==="
 	@echo "  [1/3] Module-level threshold engine validation"
 	python3 -c "from tools.perf.threshold_engine import evaluate_module_level; print('  threshold_engine module-level: OK')"
-	@echo "  [2/3] Performance evidence gate (blocking mode)"
-	@if [ -n "$${NGINX_BIN:-}" ]; then \
-		MODULE_BASELINE_VERSION="$(PERF_BASELINE_VERSION)" \
-			python3 tools/perf/evidence_gate.py --mode blocking || exit 1; \
-	else \
-		if [ "$${RELEASE_GATE_ALLOW_SKIP_MODULE:-0}" = "1" ]; then \
-			MODULE_BASELINE_VERSION="$(PERF_BASELINE_VERSION)" \
-				python3 tools/perf/evidence_gate.py --mode blocking --allow-skip-module || exit 1; \
-		else \
-			echo "FAIL: Module-level benchmarks require NGINX_BIN." >&2; \
-			echo "  Set NGINX_BIN=/path/to/nginx or RELEASE_GATE_ALLOW_SKIP_MODULE=1 to skip." >&2; \
-			exit 1; \
-		fi; \
-	fi
+	@echo "  [2/3] Performance evidence gate (blocking mode, baseline 091)"
+	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=091
 	@echo "  [3/3] Python perf tooling tests"
 	@if python3 -c "import pytest, hypothesis" >/dev/null 2>&1; then \
 		if python3 -m pytest tools/perf/tests/ -q --tb=short; then \
@@ -865,17 +885,18 @@ release-gates-check-091: release-gates-check-090
 #
 # Classification: BLOCKING
 release-gates-check-092: release-gates-check-091
-	@export MODULE_BASELINE_VERSION=092; \
-	echo "=== 0.9.2 Release Gates (blocking) ==="; \
-	echo "  [1/4] Public surface and dynconf schema drift checks"; \
-	$(MAKE) public-surface-drift-check; \
-	echo "  [2/4] Version consistency (0.9.2)"; \
-	bash tools/harness/detect_version_consistency.sh; \
-	echo "  [3/4] Reason code registry completeness"; \
-	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py; \
-	echo "  [4/4] OTel request-scoped unit test"; \
-	$(MAKE) -C $(NGINX_TEST_DIR) unit-otel_impl; \
-	echo "=== 0.9.2 Release Gates: PASS ==="
+	@echo "=== 0.9.2 Release Gates (blocking) ==="
+	@echo "  [1/5] 0.9.2 performance evidence gate (blocking mode, baseline 092)"
+	$(MAKE) release-perf-evidence-blocking BASELINE_VERSION=092
+	@echo "  [2/5] Public surface and dynconf schema drift checks"
+	$(MAKE) public-surface-drift-check
+	@echo "  [3/5] Version consistency (0.9.2)"
+	bash tools/harness/detect_version_consistency.sh
+	@echo "  [4/5] Reason code registry completeness"
+	PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
+	@echo "  [5/5] OTel request-scoped unit test"
+	$(MAKE) -C $(NGINX_TEST_DIR) unit-otel_impl
+	@echo "=== 0.9.2 Release Gates: PASS ==="
 
 release-gates-check-all: release-gates-check release-gates-check-092
 	@echo "=== Release Gates: ALL PASS ==="
@@ -1122,6 +1143,8 @@ help:
 	@echo "  release-gates-check-08x  - Alias for release-gates-check-080 (0.8.x patch-line canonical entry)"
 	@echo "  release-gates-check-090  - Validate 0.9.0 release gates (additive on 0.8.0; production examples, gate validator)"
 	@echo "  release-gates-check-091  - Validate 0.9.1 release gates (blocking; module benchmark evidence gate)"
+	@echo "  release-gates-check-092  - Validate 0.9.2 release gates (blocking; 091 + 092 evidence + contract checks)"
+	@echo "  release-perf-evidence-blocking - Shared blocking evidence helper (requires BASELINE_VERSION)"
 	@echo "  perf-evidence-check      - Run performance evidence gate (non-blocking, report-only)"
 	@echo "  release-gates-check-all  - Run current baseline and 0.9.2 release gates"
 	@echo "  release-gates-check-legacy - Validate 0.4.0 release gate documents"

@@ -6,6 +6,8 @@ tooling under tools/corpus changes.
 
 from __future__ import annotations
 
+import re
+import subprocess
 from pathlib import Path
 
 
@@ -212,3 +214,208 @@ def test_nightly_perf_records_run_attempt_in_source_run() -> None:
     text = _nightly_perf_text()
     assert "github.run_attempt" in text
     assert "/attempts/" in text
+
+
+# ---------------------------------------------------------------------------
+# Makefile release-gate baseline execution guards
+# ---------------------------------------------------------------------------
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _make_dry_run(target: str) -> str:
+    """Return the dry-run recipe text for a make target.
+
+    Runs ``make -n`` so the guards reflect the actual commands make would
+    execute without needing NGINX_BIN or other environment prerequisites.
+    """
+    result = subprocess.run(
+        ["make", "-n", target],
+        cwd=_repo_root(),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def _blocking_evidence_invocations(text: str) -> list[tuple[int, str]]:
+    """Return (line_index, baseline_version) for each distinct blocking
+    evidence recipe invocation.
+
+    A blocking evidence recipe is identified by a
+    ``release-perf-evidence-blocking BASELINE_VERSION=0NN`` make call.  Each
+    such call represents exactly one blocking evidence execution against the
+    named baseline (the helper's internal if/else branches select one path at
+    run time).  This avoids double-counting the sibling NGINX_BIN and
+    --allow-skip-module lines that share a single baseline within one recipe.
+    """
+    invocations: list[tuple[int, str]] = []
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = re.search(
+            r"release-perf-evidence-blocking\s+BASELINE_VERSION=([0-9]+)", line
+        )
+        if m:
+            invocations.append((i, m.group(1)))
+    return invocations
+
+
+def test_make_091_gate_runs_blocking_evidence_with_baseline_091() -> None:
+    """``make -n release-gates-check-091`` must invoke blocking evidence
+    against baseline 091 exactly once."""
+    invocations = _blocking_evidence_invocations(
+        _make_dry_run("release-gates-check-091")
+    )
+    baselines = [b for _, b in invocations]
+    assert baselines == ["091"], (
+        f"expected exactly one blocking evidence run with baseline 091, "
+        f"got {baselines}"
+    )
+
+
+def test_make_091_gate_does_not_reference_baseline_092() -> None:
+    """The 091 gate must not leak the 092 baseline into its recipe."""
+    text = _make_dry_run("release-gates-check-091")
+    assert "MODULE_BASELINE_VERSION=\"092\"" not in text, (
+        "091 gate recipe must not set MODULE_BASELINE_VERSION=092"
+    )
+
+
+def test_make_092_gate_runs_blocking_evidence_with_both_baselines() -> None:
+    """``make -n release-gates-check-092`` must run blocking evidence for
+    baseline 091 (via the 091 prerequisite) then baseline 092, each exactly
+    once."""
+    invocations = _blocking_evidence_invocations(
+        _make_dry_run("release-gates-check-092")
+    )
+    baselines = [b for _, b in invocations]
+    assert baselines.count("091") == 1, (
+        f"expected baseline 091 exactly once, got {baselines}"
+    )
+    assert baselines.count("092") == 1, (
+        f"expected baseline 092 exactly once, got {baselines}"
+    )
+
+
+def test_make_092_gate_runs_091_before_092() -> None:
+    """Within the 092 gate dry-run, the 091 baseline invocation must occur
+    before the 092 baseline invocation."""
+    invocations = _blocking_evidence_invocations(
+        _make_dry_run("release-gates-check-092")
+    )
+    positions = {b: i for i, b in invocations}
+    assert "091" in positions and "092" in positions, (
+        f"expected both baselines, got {list(positions)}"
+    )
+    assert positions["091"] < positions["092"], (
+        "092 blocking evidence must run after the 091 prerequisite"
+    )
+
+
+def test_make_092_gate_runs_092_evidence_before_static_checks() -> None:
+    """The 092 blocking evidence must run before the 092 static/contract
+    checks so a NO_GO verdict blocks the rest of the gate."""
+    text = _make_dry_run("release-gates-check-092")
+    invocations = _blocking_evidence_invocations(text)
+    pos_092 = next(i for i, b in invocations if b == "092")
+    static_markers = [
+        "public-surface-drift-check",
+        "validate_release_gates_092.py",
+        "detect_version_consistency.sh",
+    ]
+    for marker in static_markers:
+        marker_pos = text.find(marker)
+        assert marker_pos != -1, f"missing static check marker: {marker}"
+        # Compare line indices for a stable ordering assertion.
+        marker_line = text[:marker_pos].count("\n")
+        assert marker_line > pos_092, (
+            f"{marker} (line {marker_line}) must run after 092 evidence "
+            f"(line {pos_092})"
+        )
+
+
+def test_make_release_perf_evidence_blocking_requires_baseline() -> None:
+    """The shared helper must fail when BASELINE_VERSION is omitted."""
+    result = subprocess.run(
+        ["make", "-n", "release-perf-evidence-blocking"],
+        cwd=_repo_root(),
+        capture_output=True,
+        text=True,
+    )
+    # The dry-run still emits the guard; the actual exit code is only
+    # observable at execution time, but the recipe must contain the
+    # fail-closed branch for a missing BASELINE_VERSION.
+    assert "requires BASELINE_VERSION" in result.stdout + result.stderr
+
+
+# ---------------------------------------------------------------------------
+# PR CI blocking 0.9.2 contract gate coverage
+# ---------------------------------------------------------------------------
+
+def test_pr_ci_has_blocking_092_contract_checks() -> None:
+    """PR CI must block on the 0.9.2 contract checks that do not require a
+    real module binary: public-surface drift, version consistency, reason
+    code registry validator, and the OTel request-scoped unit test."""
+    text = _ci_workflow_text()
+    # The 092 contract checks must appear in the PR CI file.
+    assert "make public-surface-drift-check" in text, (
+        "PR CI must block on public-surface drift check"
+    )
+    assert (
+        "PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py"
+        in text
+    ), "PR CI must block on the 0.9.2 release gate validator"
+    assert "bash tools/harness/detect_version_consistency.sh" in text, (
+        "PR CI must block on version consistency"
+    )
+    assert "make -C components/nginx-module/tests unit-otel_impl" in text, (
+        "PR CI must block on the OTel request-scoped unit test"
+    )
+
+
+def test_pr_ci_092_contract_checks_are_blocking() -> None:
+    """The 0.9.2 contract checks in PR CI must not be marked
+    continue-on-error."""
+    text = _ci_workflow_text()
+    # The nginx-c-tests job hosts the 092 contract checks.  Find the job
+    # block and ensure none of the 092 contract step lines are guarded by
+    # continue-on-error.
+    job_start = text.index("  nginx-c-tests:")
+    job_block = text[job_start:]
+    # Truncate at the next top-level job definition.
+    next_job = job_block.find("\n  ", 4)
+    # Find the end of the nginx-c-tests job by locating the next job at the
+    # same indentation level (two-space indent).
+    remaining = text[job_start + len("  nginx-c-tests:"):]
+    next_job_match = re.search(r"\n  [a-z][a-z0-9-]*:", remaining)
+    if next_job_match:
+        job_block = job_block[:next_job_match.start() + len("  nginx-c-tests:")]
+    assert "continue-on-error: true" not in job_block, (
+        "nginx-c-tests job (hosting 092 contract checks) must not set "
+        "continue-on-error: true"
+    )
+
+
+def test_tag_workflow_uses_092_blocking_evidence() -> None:
+    """The tag-only release-gate job must run blocking evidence against
+    baseline 092 (not the 091 default) and must not default-skip module
+    evidence."""
+    repo_root = _repo_root()
+    workflow = (
+        repo_root / ".github" / "workflows" / "release-packages.yml"
+    ).read_text(encoding="utf-8")
+    gate_start = workflow.index("  release-gate:")
+    gate_block = workflow[gate_start:]
+    assert "MODULE_BASELINE_VERSION=092" in gate_block, (
+        "tag release-gate job must set MODULE_BASELINE_VERSION=092 for "
+        "blocking evidence"
+    )
+    assert "MODULE_BASELINE_VERSION=091" not in gate_block, (
+        "tag release-gate job must not fall back to baseline 091"
+    )
+    assert "evidence_gate.py --mode blocking" in gate_block
+    assert "RELEASE_GATE_ALLOW_SKIP_MODULE=1" not in gate_block, (
+        "tag release-gate job must not default-skip module evidence"
+    )
