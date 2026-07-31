@@ -358,11 +358,9 @@ def test_make_release_perf_evidence_blocking_requires_baseline() -> None:
 # ---------------------------------------------------------------------------
 
 def test_pr_ci_has_blocking_092_contract_checks() -> None:
-    """PR CI must block on the 0.9.2 contract checks that do not require a
-    real module binary: public-surface drift, version consistency, reason
-    code registry validator, and the OTel request-scoped unit test."""
+    """PR CI must expose an independent blocking 0.9.2 contract job."""
     text = _ci_workflow_text()
-    # The 092 contract checks must appear in the PR CI file.
+    assert "  release-092-contract-gates:" in text
     assert "make public-surface-drift-check" in text, (
         "PR CI must block on public-surface drift check"
     )
@@ -382,41 +380,75 @@ def test_pr_ci_092_contract_checks_are_blocking() -> None:
     """The 0.9.2 contract checks in PR CI must not be marked
     continue-on-error."""
     text = _ci_workflow_text()
-    # The nginx-c-tests job hosts the 092 contract checks.  Find the job
-    # block and ensure none of the 092 contract step lines are guarded by
-    # continue-on-error.
-    job_start = text.index("  nginx-c-tests:")
+    # The independent contract-gate job must not be allowed to pass through
+    # a continue-on-error setting.
+    job_start = text.index("  release-092-contract-gates:")
     job_block = text[job_start:]
-    # Find the end of the nginx-c-tests job by locating the next job at the
+    # Find the end of the contract job by locating the next job at the
     # same indentation level (two-space indent).
-    remaining = text[job_start + len("  nginx-c-tests:"):]
+    remaining = text[job_start + len("  release-092-contract-gates:"):]
     next_job_match = re.search(r"\n  [a-z][a-z0-9-]*:", remaining)
     if next_job_match:
-        job_block = job_block[:next_job_match.start() + len("  nginx-c-tests:")]
+        job_block = job_block[:next_job_match.start() + len("  release-092-contract-gates:")]
     assert "continue-on-error: true" not in job_block, (
-        "nginx-c-tests job (hosting 092 contract checks) must not set "
+        "release-092-contract-gates must not set "
         "continue-on-error: true"
     )
 
 
+def test_pr_ci_092_contract_gate_covers_all_release_sensitive_paths() -> None:
+    """Representative Rust, docs, inventory, and workflow edits trigger the
+    independent 0.9.2 contract job."""
+    text = _ci_workflow_text()
+    job_start = text.index("  release-092-contract-gates:")
+    job_block = text[job_start:]
+    next_job_match = re.search(r"\n  [a-z][a-z0-9-]*:", job_block[len("  release-092-contract-gates:"):])
+    if next_job_match:
+        job_block = job_block[:next_job_match.start() + len("  release-092-contract-gates:")]
+
+    path_filter = text[text.index("            docs:"):text.index("\n\n  docs-check:")]
+    representative_paths = {
+        "components/rust-converter/Cargo.toml": "rust",
+        "CHANGELOG.md": "docs",
+        "docs/releases/0.9.2-release-notes.md": "docs",
+        "docs/harness/public-surface-inventory.json": "docs",
+        "components/rust-converter/src/decision/reason_code.rs": "rust",
+        ".github/workflows/ci.yml": "workflows",
+    }
+    for path, output in representative_paths.items():
+        if path == "CHANGELOG.md":
+            assert "- 'CHANGELOG.md'" in path_filter
+        elif path.startswith("docs/"):
+            assert "- 'docs/**'" in path_filter
+        elif path.startswith("components/rust-converter/"):
+            assert "- 'components/rust-converter/**'" in path_filter
+        else:
+            assert "- '.github/workflows/**'" in path_filter
+        assert f"needs.changes.outputs.{output} == 'true'" in job_block
+
+
 def test_tag_workflow_uses_092_blocking_evidence() -> None:
-    """The tag-only release-gate job must run blocking evidence against
-    baseline 092 (not the 091 default) and must not default-skip module
-    evidence."""
+    """The tag-only release-gate job must run additive 091 then 092
+    blocking evidence and must not default-skip module evidence."""
     repo_root = _repo_root()
     workflow = (
         repo_root / ".github" / "workflows" / "release-packages.yml"
     ).read_text(encoding="utf-8")
     gate_start = workflow.index("  release-gate:")
     gate_block = workflow[gate_start:]
-    assert "MODULE_BASELINE_VERSION=092" in gate_block, (
-        "tag release-gate job must set MODULE_BASELINE_VERSION=092 for "
-        "blocking evidence"
+    invocations = re.findall(
+        r"make release-perf-evidence-blocking BASELINE_VERSION=([0-9]+)",
+        gate_block,
     )
-    assert "MODULE_BASELINE_VERSION=091" not in gate_block, (
-        "tag release-gate job must not fall back to baseline 091"
+    assert invocations == ["091", "092"], (
+        "tag release-gate must run exactly 091 then 092 blocking evidence"
     )
-    assert "evidence_gate.py --mode blocking" in gate_block
     assert "RELEASE_GATE_ALLOW_SKIP_MODULE=1" not in gate_block, (
         "tag release-gate job must not default-skip module evidence"
     )
+
+    publish_start = workflow.index("  publish:")
+    publish_block = workflow[publish_start:]
+    assert "needs: [release-gate, integrity-checksums, integrity-signing]" in publish_block
+    assert "github.ref_type != 'tag'" in publish_block
+    assert "needs.release-gate.result == 'success'" in publish_block
