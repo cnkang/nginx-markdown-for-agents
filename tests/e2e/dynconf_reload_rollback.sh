@@ -30,6 +30,9 @@ BACKUP_PATH=""
 BACKUP_READY=0
 TMP_WRITE_PATH=""
 LAST_DIAG=""
+readonly PID_RESOLVED=0
+readonly PID_NOT_CONFIGURED=1
+readonly PID_CONFIG_INVALID=2
 
 pass() {
     local msg="$1"
@@ -287,27 +290,38 @@ resolve_nginx_pid() {
     if [[ -n "${NGINX_PID_FILE:-}" ]]; then
         if [[ -L "${NGINX_PID_FILE}" ]]; then
             echo "Error: NGINX_PID_FILE must not be a symlink: ${NGINX_PID_FILE}" >&2
-            return 1
+            return "$PID_CONFIG_INVALID"
+        fi
+        if [[ ! -e "${NGINX_PID_FILE}" ]]; then
+            echo "Error: NGINX_PID_FILE does not exist: ${NGINX_PID_FILE}" >&2
+            return "$PID_CONFIG_INVALID"
         fi
         if [[ ! -f "${NGINX_PID_FILE}" ]]; then
-            echo "Error: NGINX_PID_FILE does not exist: ${NGINX_PID_FILE}" >&2
-            return 1
+            echo "Error: NGINX_PID_FILE is not a regular file: ${NGINX_PID_FILE}" >&2
+            return "$PID_CONFIG_INVALID"
         fi
         local real_pid_file
-        real_pid_file="$(cd -P -- "$(dirname -- "${NGINX_PID_FILE}")" \
-            && pwd -P)/$(basename -- "${NGINX_PID_FILE}")" || return 1
+        if ! real_pid_file="$(cd -P -- "$(dirname -- "${NGINX_PID_FILE}")" \
+            && pwd -P)/$(basename -- "${NGINX_PID_FILE}")"; then
+            echo "Error: unable to canonicalize NGINX_PID_FILE: ${NGINX_PID_FILE}" >&2
+            return "$PID_CONFIG_INVALID"
+        fi
         # Reject symlinks even after canonicalization of the parent dir.
         if [[ -L "$real_pid_file" ]]; then
             echo "Error: NGINX_PID_FILE resolves to a symlink: $real_pid_file" >&2
-            return 2
+            return "$PID_CONFIG_INVALID"
         fi
         if [[ ! -s "$real_pid_file" ]]; then
             echo "Error: NGINX_PID_FILE is empty: $real_pid_file" >&2
-            return 2
+            return "$PID_CONFIG_INVALID"
+        fi
+        if [[ ! -r "$real_pid_file" ]]; then
+            echo "Error: NGINX_PID_FILE is not readable: $real_pid_file" >&2
+            return "$PID_CONFIG_INVALID"
         fi
         if ! command -v awk >/dev/null 2>&1; then
             echo "Error: awk is required to parse NGINX_PID_FILE" >&2
-            return 2
+            return "$PID_CONFIG_INVALID"
         fi
         # Permit one logical line with optional ASCII spaces at its edges.
         # Do not delete internal whitespace or accept a second line.
@@ -330,17 +344,17 @@ resolve_nginx_pid() {
         fi
         if [[ "$parse_rc" -eq 2 ]]; then
             echo "Error: NGINX_PID_FILE must contain one logical line: $real_pid_file" >&2
-            return 2
+            return "$PID_CONFIG_INVALID"
         fi
         if [[ "$parse_rc" -ne 0 || -z "$raw" ]]; then
             echo "Error: NGINX_PID_FILE must contain one numeric PID with optional surrounding spaces: $real_pid_file" >&2
-            return 2
+            return "$PID_CONFIG_INVALID"
         fi
         if _validate_nginx_pid "$raw"; then
-            return 0
+            return "$PID_RESOLVED"
         fi
         echo "Error: NGINX_PID_FILE content failed process validation: $raw" >&2
-        return 2
+        return "$PID_CONFIG_INVALID"
     fi
 
     # 3. Harness fallback, only after explicit caller sources.
@@ -354,7 +368,7 @@ resolve_nginx_pid() {
     fi
 
     # 4. No trusted PID available.
-    return 1
+    return "$PID_NOT_CONFIGURED"
 }
 
 # Validate that a candidate PID is a positive integer referring to a live
@@ -426,7 +440,7 @@ send_reload() {
     fi
 
     case "$resolve_rc" in
-    0)
+    "$PID_RESOLVED")
         if kill -HUP "$pid" 2>/dev/null; then
             pass "sent SIGHUP to NGINX master (pid $pid) — $label"
             return 0
@@ -436,12 +450,12 @@ send_reload() {
             return 1
         fi
         ;;
-    1)
+    "$PID_NOT_CONFIGURED")
         echo "SKIP: no harness-owned or explicitly supplied NGINX PID; using watcher polling" >&2
         pass "SIGHUP skipped for $label (watcher polling will be used)"
         return 0
         ;;
-    2)
+    "$PID_CONFIG_INVALID")
         echo "Error: configured NGINX PID source is invalid; refusing SIGHUP — $label" >&2
         fail "invalid NGINX PID source for $label"
         return 2
