@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Maintenance and hardening release. Fixes diagnostics and reason-code mapping
 gaps, documents request-scoped OTel ownership, removes the unsafe worker-local
-dynconf restore path, and establishes a public surface contract gate for
-release integrity.
+dynconf restore path, and establishes a public surface source metadata and
+ABI drift gate for release integrity.
 
 ### Fixed
 
@@ -33,11 +33,14 @@ release integrity.
   file atomically; the watcher validates it and promotes it through the normal
   reload path. The internal last-known-good snapshot remains available for
   failed-reload protection and diagnostics reporting.
-- Public surface inventory and drift detection gate validates that FFI exports,
-  configuration directives, metric names, and reason codes have not drifted
-  from the declared inventory.
+- Public surface inventory and source metadata/ABI drift detection gate
+  validates that FFI exports, configuration directive metadata, dynconf key
+  schemas, metric declarations, and reason codes have not drifted from the
+  declared inventory. The gate reads source metadata; runtime behavior is
+  verified by the unit, integration, and E2E test suites.
 - Release gates 0.9.2 (`make release-gates-check-092`), additive on 0.9.1
-  gates with the public surface drift detection gate.
+  gates with the public surface source metadata/ABI drift gate and blocking
+  performance evidence against baseline 0.9.2.
 
 ## [0.9.1] - 2026-07-29
 

@@ -392,8 +392,9 @@ ABI 公共表面，同时收紧以下契约：
   行为验证收敛，需要强同步边界时执行受控 NGINX reload。
 - **请求池作用域的 OTel 所有权**：span 和导出子请求使用请求池，不创建或
   声称存在 worker-owned 队列、线程、定时器、socket 或退出时 flush。
-- **公共表面契约门禁**：`make public-surface-drift-check` 将指令、dynconf、
-  metrics、reason code 和 FFI 元数据与源代码进行校验。
+- **公共表面源元数据与 ABI 漂移门禁**：`make public-surface-drift-check`
+  将指令、dynconf、metrics、reason code 和 FFI 的源元数据与声明的清单
+  进行校验。运行时行为由 unit、integration 和 E2E 测试套件验证，而非仅靠此门禁。
 
 详见 [0.9.2 发布说明](docs/releases/0.9.2-release-notes.md)、
 [dynconf 指南](docs/guides/DYNAMIC_CONFIG.md) 和

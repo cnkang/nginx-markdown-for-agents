@@ -83,7 +83,8 @@ chain, additive on 0.9.1 gates:
 make release-gates-check-092
 ```
 
-This includes all 0.9.1 gates plus the public surface drift detection gate.
+This includes all 0.9.1 gates plus blocking performance evidence against
+baseline 0.9.2 and the public surface source metadata/ABI drift detection gate.
 
 ---
 
