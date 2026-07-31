@@ -178,6 +178,11 @@ restore_original_atomically() {
     return 0
 }
 
+# Cleanup exit code used when the original test body succeeded (rc==0) but
+# the restore/cleanup itself failed.  Chosen to avoid collision with common
+# shell signal exit codes (128+signum) and the test's own nonzero results.
+DYNCONF_CLEANUP_FAILURE_EXIT=70
+
 cleanup() {
     local rc="${1:-$?}"
     local cleanup_error=0
@@ -194,6 +199,11 @@ cleanup() {
         if ! restore_original_atomically; then
             echo "Error: caller-owned dynconf restore failed; backup retained" >&2
             cleanup_error=1
+            # The backup is retained for manual recovery.  Report its
+            # location so the operator can restore the caller file by hand.
+            if [[ -n "$BACKUP_PATH" ]]; then
+                echo "Error: unrecoverable backup retained at: $BACKUP_PATH" >&2
+            fi
         fi
     elif [[ "$DYNCONF_FILE_CREATED_BY_TEST" -eq 1 ]]; then
         if ! rm -f -- "$DYNCONF_FILE"; then
@@ -201,6 +211,8 @@ cleanup() {
             cleanup_error=1
         fi
     fi
+    # Only remove a completed (already-restored or no-restore-needed) backup.
+    # A retained backup from a failed restore must never be deleted here.
     if [[ -n "$BACKUP_PATH" && "$BACKUP_READY" -eq 0 ]] \
         && ! rm -f -- "$BACKUP_PATH"; then
         echo "Error: unable to remove completed dynconf backup" >&2
@@ -214,7 +226,17 @@ cleanup() {
     if [[ "$cleanup_error" -ne 0 ]]; then
         echo "Error: dynconf cleanup completed with errors" >&2
     fi
-    exit "$rc"
+    # Contract:
+    #   original rc != 0         → preserve original rc (best-effort cleanup)
+    #   original rc == 0 + clean → exit 0
+    #   original rc == 0 + fail  → exit DYNCONF_CLEANUP_FAILURE_EXIT
+    if [[ "$rc" -ne 0 ]]; then
+        exit "$rc"
+    fi
+    if [[ "$cleanup_error" -ne 0 ]]; then
+        exit "$DYNCONF_CLEANUP_FAILURE_EXIT"
+    fi
+    exit 0
 }
 
 check_prerequisites() {
@@ -226,6 +248,154 @@ check_prerequisites() {
         echo "Error: NGINX not reachable at ${NGINX_URL}" >&2
         echo "Start NGINX with markdown module and dynconf enabled first." >&2
         exit 2
+    fi
+}
+
+# Resolve a trusted NGINX master PID under a strict ownership model.
+#
+# Only the following sources are accepted (in priority order):
+#   1. NGINX_PID         - explicit numeric PID from the caller
+#   2. NGINX_PID_FILE    - trusted pid file containing a single numeric PID
+#   3. HARNESS_NGINX_PID - PID saved by an owning harness/test launcher
+#
+# A remote NGINX_URL never authorizes signaling a local process.  When no
+# trusted PID is available, no SIGHUP is sent; the caller falls back to
+# bounded diagnostics polling.
+#
+# Prints the resolved PID on stdout (exit 0) or nothing (exit 1).
+resolve_nginx_pid() {
+    local raw=""
+    local pid=""
+
+    # 1. Explicit NGINX_PID
+    if [[ -n "${NGINX_PID:-}" ]]; then
+        raw="${NGINX_PID}"
+    elif [[ -n "${HARNESS_NGINX_PID:-}" ]]; then
+        raw="${HARNESS_NGINX_PID}"
+    fi
+
+    if [[ -n "$raw" ]]; then
+        _validate_nginx_pid "$raw" && return 0
+        echo "Error: NGINX_PID failed validation: $raw" >&2
+        return 1
+    fi
+
+    # 2. Explicit NGINX_PID_FILE
+    if [[ -n "${NGINX_PID_FILE:-}" ]]; then
+        if [[ -L "${NGINX_PID_FILE}" ]]; then
+            echo "Error: NGINX_PID_FILE must not be a symlink: ${NGINX_PID_FILE}" >&2
+            return 1
+        fi
+        if [[ ! -f "${NGINX_PID_FILE}" ]]; then
+            echo "Error: NGINX_PID_FILE does not exist: ${NGINX_PID_FILE}" >&2
+            return 1
+        fi
+        local real_pid_file
+        real_pid_file="$(cd -P -- "$(dirname -- "${NGINX_PID_FILE}")" \
+            && pwd -P)/$(basename -- "${NGINX_PID_FILE}")" || return 1
+        # Reject symlinks even after canonicalization of the parent dir.
+        if [[ -L "$real_pid_file" ]]; then
+            echo "Error: NGINX_PID_FILE resolves to a symlink: $real_pid_file" >&2
+            return 1
+        fi
+        local line_count
+        line_count="$(wc -l < "$real_pid_file" 2>/dev/null | tr -d ' ' || echo 0)"
+        # A file with no trailing newline still has one line.
+        if [[ -z "$(cat -- "$real_pid_file" 2>/dev/null)" ]]; then
+            echo "Error: NGINX_PID_FILE is empty: $real_pid_file" >&2
+            return 1
+        fi
+        # Read the first non-empty line; reject multi-line content.
+        raw="$(head -n 1 -- "$real_pid_file" | tr -d '[:space:]' || true)"
+        local remainder
+        remainder="$(tail -n +2 -- "$real_pid_file" \
+            | grep -c '[^[:space:]]' || true)"
+        if [[ "${remainder:-0}" -ne 0 ]]; then
+            echo "Error: NGINX_PID_FILE must contain a single PID: $real_pid_file" >&2
+            return 1
+        fi
+        if [[ -z "$raw" ]]; then
+            echo "Error: NGINX_PID_FILE has no PID content: $real_pid_file" >&2
+            return 1
+        fi
+        if _validate_nginx_pid "$raw"; then
+            return 0
+        fi
+        echo "Error: NGINX_PID_FILE content failed validation: $raw" >&2
+        return 1
+    fi
+
+    # 3. No trusted PID available.
+    return 1
+}
+
+# Validate that a candidate PID is a positive integer referring to a live
+# process whose command line matches an NGINX master.  Rejects the current
+# shell, non-numeric values, extra shell tokens, and processes that are not
+# an nginx master.
+_validate_nginx_pid() {
+    local candidate="$1"
+
+    # Reject empty and any non-numeric characters (no shell tokens).
+    if [[ -z "$candidate" || ! "$candidate" =~ ^[0-9]+$ ]]; then
+        echo "Error: nginx PID must be a positive integer: '$candidate'" >&2
+        return 1
+    fi
+    # Reject PID 0, 1, and the current shell.
+    if [[ "$candidate" -le 1 ]]; then
+        echo "Error: nginx PID must be greater than 1: $candidate" >&2
+        return 1
+    fi
+    if [[ "$candidate" -eq "$$" ]]; then
+        echo "Error: nginx PID must not be the current shell: $candidate" >&2
+        return 1
+    fi
+    # Reject if the process does not exist.
+    if ! kill -0 "$candidate" 2>/dev/null; then
+        echo "Error: nginx PID does not refer to a live process: $candidate" >&2
+        return 1
+    fi
+    # Verify the process command line matches an nginx master when ps is
+    # available.  This prevents signaling unrelated processes.
+    if command -v ps >/dev/null 2>&1; then
+        local cmdline
+        cmdline="$(ps -o command= -p "$candidate" 2>/dev/null || true)"
+        if [[ -z "$cmdline" ]]; then
+            echo "Error: cannot read command line for PID $candidate" >&2
+            return 1
+        fi
+        # Accept "nginx: master process" variants.  Also accept a command
+        # containing the configured buildroot/prefix when NGINX_PID_PREFIX is
+        # set by the owning harness.
+        if [[ "$cmdline" != *"nginx: master"* ]]; then
+            if [[ -z "${NGINX_PID_PREFIX:-}" \
+                || "$cmdline" != *"${NGINX_PID_PREFIX}"* ]]; then
+                echo "Error: PID $candidate is not an nginx master: $cmdline" >&2
+                return 1
+            fi
+        fi
+    fi
+    printf '%s\n' "$candidate"
+    return 0
+}
+
+# Send SIGHUP only to a harness-owned or explicitly supplied PID.  When no
+# trusted PID is available, print a SKIP message and return 0 so the caller
+# falls back to bounded diagnostics polling.
+send_reload() {
+    local label="$1"
+    local pid
+
+    if pid="$(resolve_nginx_pid 2>/dev/null)"; then
+        if kill -HUP "$pid" 2>/dev/null; then
+            pass "sent SIGHUP to NGINX master (pid $pid) — $label"
+        else
+            echo "Error: kill -HUP $pid failed — $label" >&2
+            fail "unable to send SIGHUP to pid $pid — $label"
+        fi
+    else
+        echo "SKIP: no harness-owned or explicitly supplied NGINX PID; using watcher polling" >&2
+        pass "SIGHUP skipped for $label (watcher polling will be used)"
     fi
 }
 
@@ -398,16 +568,10 @@ memory_budget=2m
 streaming_budget=10m'
 echo "Wrote valid dynconf to $DYNCONF_FILE" >&2
 
-# Trigger reload when a master is discoverable. Otherwise the watcher timer is
-# allowed to observe the file; this is intentionally not an mtime shortcut.
-NGINX_PID="$(pgrep -f "nginx: master" 2>/dev/null | head -1 || true)"
-if [[ -n "$NGINX_PID" ]]; then
-    kill -HUP "$NGINX_PID" 2>/dev/null || true
-    pass "sent SIGHUP to NGINX master (pid $NGINX_PID)"
-else
-    echo "SKIP: cannot find NGINX master process for SIGHUP" >&2
-    pass "SIGHUP skipped (watcher polling will be used)"
-fi
+# Trigger reload when a harness-owned or explicitly supplied master PID is
+# available. Otherwise the watcher timer is allowed to observe the file;
+# this is intentionally not an mtime shortcut.
+send_reload "valid dynconf reload"
 
 # --- Step 3: Verify new config with bounded polling ---
 
@@ -435,9 +599,9 @@ unknown_key_that_does_not_exist=should_fail
 memory_budget=invalid_not_a_size'
 echo "Wrote invalid dynconf to $DYNCONF_FILE" >&2
 
-if [[ -n "$NGINX_PID" ]]; then
-    kill -HUP "$NGINX_PID" 2>/dev/null || true
-    pass "sent SIGHUP for invalid config reload"
+if [[ -n "${NGINX_PID:-}" || -n "${HARNESS_NGINX_PID:-}" \
+    || -n "${NGINX_PID_FILE:-}" ]]; then
+    send_reload "invalid dynconf reload"
 fi
 
 # --- Step 5: Verify last-known-good with bounded polling ---
@@ -456,9 +620,9 @@ markdown_filter=off
 memory_budget=1m'
 echo "Atomically restored valid dynconf at $DYNCONF_FILE" >&2
 
-if [[ -n "$NGINX_PID" ]]; then
-    kill -HUP "$NGINX_PID" 2>/dev/null || true
-    pass "sent SIGHUP for restored-file reload"
+if [[ -n "${NGINX_PID:-}" || -n "${HARNESS_NGINX_PID:-}" \
+    || -n "${NGINX_PID_FILE:-}" ]]; then
+    send_reload "restored-file reload"
 fi
 
 # --- Step 7: Verify restored-file reload with two independent signals ---
