@@ -925,7 +925,8 @@ jobs:
           echo "Benchmark NGINX version: ${BENCHMARK_NGINX_VERSION}"
           echo "Architecture: $(uname -m)"
           "${NGINX_BIN}" -V 2>&1 | head -3
-          python3 tools/perf/evidence_gate.py --mode blocking
+          MODULE_BASELINE_VERSION=092 \
+            python3 tools/perf/evidence_gate.py --mode blocking
           CONTAINER_SCRIPT
         shell: bash
 

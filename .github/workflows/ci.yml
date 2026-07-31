@@ -331,7 +331,11 @@ jobs:
   nginx-c-tests:
     name: NGINX C Tests (Unit + Integration-C)
     needs: changes
-    if: needs.changes.outputs.nginx == 'true' || needs.changes.outputs.workflows == 'true'
+    if: >-
+      needs.changes.outputs.nginx == 'true' ||
+      needs.changes.outputs.workflows == 'true' ||
+      needs.changes.outputs.harness_tooling == 'true' ||
+      needs.changes.outputs.matrix_release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -356,6 +360,18 @@ jobs:
 
       - name: Run NGINX C integration harness
         run: make -C components/nginx-module/tests integration-c
+
+      - name: 0.9.2 OTel request-scoped unit test
+        run: make -C components/nginx-module/tests unit-otel_impl
+
+      - name: 0.9.2 public-surface drift check
+        run: make public-surface-drift-check
+
+      - name: 0.9.2 version consistency
+        run: bash tools/harness/detect_version_consistency.sh
+
+      - name: 0.9.2 release gate contract validator
+        run: PYTHONPATH=. python3 tools/release/gates/validate_release_gates_092.py
 
   nginx-c-clang-smoke:
     name: NGINX C Clang Smoke
@@ -893,7 +909,10 @@ jobs:
   # Runs validate_release_gates_090.py which covers 0.9.x deliverables including
   # production examples, doctor tool, config V2, conditional requests, and
   # observability schema.
-  # Non-blocking in CI; blocking at actual release tags via make targets.
+  # Informational only; the blocking 0.9.2 contract checks (public-surface
+  # drift, version consistency, reason code registry, OTel unit test) run in
+  # the nginx-c-tests job above.  Full module/performance blocking evidence
+  # runs at tag/RC time via release-packages.yml (baseline 092).
   release-regression-gates:
     name: "Release Gates: 0.9.x Regression Validator"
     needs: [changes, rust-quality, nginx-c-tests]
