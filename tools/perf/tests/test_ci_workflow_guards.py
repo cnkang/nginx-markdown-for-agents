@@ -306,8 +306,11 @@ def test_make_092_gate_runs_091_before_092() -> None:
         _make_dry_run("release-gates-check-092")
     )
     positions = {b: i for i, b in invocations}
-    assert "091" in positions and "092" in positions, (
-        f"expected both baselines, got {list(positions)}"
+    assert "091" in positions, (
+        f"expected baseline 091 in positions, got {list(positions)}"
+    )
+    assert "092" in positions, (
+        f"expected baseline 092 in positions, got {list(positions)}"
     )
     assert positions["091"] < positions["092"], (
         "092 blocking evidence must run after the 091 prerequisite"

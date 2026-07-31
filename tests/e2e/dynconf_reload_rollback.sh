@@ -265,7 +265,6 @@ check_prerequisites() {
 # Prints the resolved PID on stdout (exit 0) or nothing (exit 1).
 resolve_nginx_pid() {
     local raw=""
-    local pid=""
 
     # 1. Explicit NGINX_PID
     if [[ -n "${NGINX_PID:-}" ]]; then
@@ -367,12 +366,11 @@ _validate_nginx_pid() {
         # Accept "nginx: master process" variants.  Also accept a command
         # containing the configured buildroot/prefix when NGINX_PID_PREFIX is
         # set by the owning harness.
-        if [[ "$cmdline" != *"nginx: master"* ]]; then
-            if [[ -z "${NGINX_PID_PREFIX:-}" \
-                || "$cmdline" != *"${NGINX_PID_PREFIX}"* ]]; then
-                echo "Error: PID $candidate is not an nginx master: $cmdline" >&2
-                return 1
-            fi
+        if [[ "$cmdline" != *"nginx: master"* ]] \
+            && { [[ -z "${NGINX_PID_PREFIX:-}" ]] \
+                 || [[ "$cmdline" != *"${NGINX_PID_PREFIX}"* ]]; }; then
+            echo "Error: PID $candidate is not an nginx master: $cmdline" >&2
+            return 1
         fi
     fi
     printf '%s\n' "$candidate"
