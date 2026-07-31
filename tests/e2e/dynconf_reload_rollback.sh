@@ -258,25 +258,29 @@ check_prerequisites() {
 #   2. NGINX_PID_FILE    - trusted pid file containing a single numeric PID
 #   3. HARNESS_NGINX_PID - PID saved by an owning harness/test launcher
 #
+# Return codes are part of the caller contract:
+#   0 - a configured source resolved to a verified NGINX master PID
+#   1 - no PID source was configured; polling is safe
+#   2 - a configured source failed parsing or process validation
+#
 # A remote NGINX_URL never authorizes signaling a local process.  When no
 # trusted PID is available, no SIGHUP is sent; the caller falls back to
 # bounded diagnostics polling.
 #
-# Prints the resolved PID on stdout (exit 0) or nothing (exit 1).
+# Prints the resolved PID on stdout on success.  Error diagnostics are written
+# to stderr and are intentionally preserved for configured-source failures.
 resolve_nginx_pid() {
     local raw=""
+    local parse_rc=0
 
     # 1. Explicit NGINX_PID
     if [[ -n "${NGINX_PID:-}" ]]; then
         raw="${NGINX_PID}"
-    elif [[ -n "${HARNESS_NGINX_PID:-}" ]]; then
-        raw="${HARNESS_NGINX_PID}"
-    fi
-
-    if [[ -n "$raw" ]]; then
-        _validate_nginx_pid "$raw" && return 0
+        if _validate_nginx_pid "$raw"; then
+            return 0
+        fi
         echo "Error: NGINX_PID failed validation: $raw" >&2
-        return 1
+        return 2
     fi
 
     # 2. Explicit NGINX_PID_FILE
@@ -295,36 +299,61 @@ resolve_nginx_pid() {
         # Reject symlinks even after canonicalization of the parent dir.
         if [[ -L "$real_pid_file" ]]; then
             echo "Error: NGINX_PID_FILE resolves to a symlink: $real_pid_file" >&2
-            return 1
+            return 2
         fi
-        local line_count
-        line_count="$(wc -l < "$real_pid_file" 2>/dev/null | tr -d ' ' || echo 0)"
-        # A file with no trailing newline still has one line.
-        if [[ -z "$(cat -- "$real_pid_file" 2>/dev/null)" ]]; then
+        if [[ ! -s "$real_pid_file" ]]; then
             echo "Error: NGINX_PID_FILE is empty: $real_pid_file" >&2
-            return 1
+            return 2
         fi
-        # Read the first non-empty line; reject multi-line content.
-        raw="$(head -n 1 -- "$real_pid_file" | tr -d '[:space:]' || true)"
-        local remainder
-        remainder="$(tail -n +2 -- "$real_pid_file" \
-            | grep -c '[^[:space:]]' || true)"
-        if [[ "${remainder:-0}" -ne 0 ]]; then
-            echo "Error: NGINX_PID_FILE must contain a single PID: $real_pid_file" >&2
-            return 1
+        if ! command -v awk >/dev/null 2>&1; then
+            echo "Error: awk is required to parse NGINX_PID_FILE" >&2
+            return 2
         fi
-        if [[ -z "$raw" ]]; then
-            echo "Error: NGINX_PID_FILE has no PID content: $real_pid_file" >&2
-            return 1
+        # Permit one logical line with optional ASCII spaces at its edges.
+        # Do not delete internal whitespace or accept a second line.
+        if raw="$(awk '
+            NR == 1 {
+                gsub(/^ +| +$/, "", $0)
+                if ($0 !~ /^[0-9]+$/) {
+                    exit 1
+                }
+                print
+                next
+            }
+            {
+                exit 2
+            }
+        ' "$real_pid_file")"; then
+            parse_rc=0
+        else
+            parse_rc=$?
+        fi
+        if [[ "$parse_rc" -eq 2 ]]; then
+            echo "Error: NGINX_PID_FILE must contain one logical line: $real_pid_file" >&2
+            return 2
+        fi
+        if [[ "$parse_rc" -ne 0 || -z "$raw" ]]; then
+            echo "Error: NGINX_PID_FILE must contain one numeric PID with optional surrounding spaces: $real_pid_file" >&2
+            return 2
         fi
         if _validate_nginx_pid "$raw"; then
             return 0
         fi
-        echo "Error: NGINX_PID_FILE content failed validation: $raw" >&2
-        return 1
+        echo "Error: NGINX_PID_FILE content failed process validation: $raw" >&2
+        return 2
     fi
 
-    # 3. No trusted PID available.
+    # 3. Harness fallback, only after explicit caller sources.
+    if [[ -n "${HARNESS_NGINX_PID:-}" ]]; then
+        raw="${HARNESS_NGINX_PID}"
+        if _validate_nginx_pid "$raw"; then
+            return 0
+        fi
+        echo "Error: HARNESS_NGINX_PID failed validation: $raw" >&2
+        return 2
+    fi
+
+    # 4. No trusted PID available.
     return 1
 }
 
@@ -354,47 +383,75 @@ _validate_nginx_pid() {
         echo "Error: nginx PID does not refer to a live process: $candidate" >&2
         return 1
     fi
-    # Verify the process command line matches an nginx master when ps is
-    # available.  This prevents signaling unrelated processes.
-    if command -v ps >/dev/null 2>&1; then
-        local cmdline
-        cmdline="$(ps -o command= -p "$candidate" 2>/dev/null || true)"
-        if [[ -z "$cmdline" ]]; then
-            echo "Error: cannot read command line for PID $candidate" >&2
-            return 1
-        fi
-        # Accept "nginx: master process" variants.  Also accept a command
-        # containing the configured buildroot/prefix when NGINX_PID_PREFIX is
-        # set by the owning harness.
-        if [[ "$cmdline" != *"nginx: master"* ]] \
-            && { [[ -z "${NGINX_PID_PREFIX:-}" ]] \
-                 || [[ "$cmdline" != *"${NGINX_PID_PREFIX}"* ]]; }; then
-            echo "Error: PID $candidate is not an nginx master: $cmdline" >&2
-            return 1
-        fi
+    # Verify the process command line matches an NGINX master.  Without ps,
+    # identity cannot be established, so fail closed instead of signaling an
+    # unrelated live process.
+    if ! command -v ps >/dev/null 2>&1; then
+        echo "Error: ps is required to verify NGINX master PID $candidate" >&2
+        return 1
+    fi
+    local cmdline
+    cmdline="$(ps -o command= -p "$candidate" 2>/dev/null || true)"
+    if [[ -z "$cmdline" ]]; then
+        echo "Error: cannot read command line for PID $candidate" >&2
+        return 1
+    fi
+    # The process must first identify as an NGINX master.  A configured
+    # prefix is an additional ownership constraint, never an alternative
+    # identity check.
+    if [[ "$cmdline" != *"nginx: master process"* ]]; then
+        echo "Error: PID $candidate is not an nginx master: $cmdline" >&2
+        return 1
+    fi
+    if [[ -n "${NGINX_PID_PREFIX:-}" \
+        && "$cmdline" != *"${NGINX_PID_PREFIX}"* ]]; then
+        echo "Error: PID $candidate does not match NGINX_PID_PREFIX: $cmdline" >&2
+        return 1
     fi
     printf '%s\n' "$candidate"
     return 0
 }
 
-# Send SIGHUP only to a harness-owned or explicitly supplied PID.  When no
-# trusted PID is available, print a SKIP message and return 0 so the caller
-# falls back to bounded diagnostics polling.
+# Send SIGHUP only to a verified NGINX master.  A missing source is a safe
+# polling fallback; a configured but invalid source is a test failure.
 send_reload() {
     local label="$1"
     local pid
+    local resolve_rc=0
 
-    if pid="$(resolve_nginx_pid 2>/dev/null)"; then
+    if pid="$(resolve_nginx_pid)"; then
+        resolve_rc=0
+    else
+        resolve_rc=$?
+    fi
+
+    case "$resolve_rc" in
+    0)
         if kill -HUP "$pid" 2>/dev/null; then
             pass "sent SIGHUP to NGINX master (pid $pid) — $label"
+            return 0
         else
             echo "Error: kill -HUP $pid failed — $label" >&2
             fail "unable to send SIGHUP to pid $pid — $label"
+            return 1
         fi
-    else
+        ;;
+    1)
         echo "SKIP: no harness-owned or explicitly supplied NGINX PID; using watcher polling" >&2
         pass "SIGHUP skipped for $label (watcher polling will be used)"
-    fi
+        return 0
+        ;;
+    2)
+        echo "Error: configured NGINX PID source is invalid; refusing SIGHUP — $label" >&2
+        fail "invalid NGINX PID source for $label"
+        return 2
+        ;;
+    *)
+        echo "Error: unexpected NGINX PID resolution status $resolve_rc — $label" >&2
+        fail "NGINX PID resolution failed for $label"
+        return 2
+        ;;
+    esac
 }
 
 get_diagnostics() {
@@ -569,7 +626,7 @@ echo "Wrote valid dynconf to $DYNCONF_FILE" >&2
 # Trigger reload when a harness-owned or explicitly supplied master PID is
 # available. Otherwise the watcher timer is allowed to observe the file;
 # this is intentionally not an mtime shortcut.
-send_reload "valid dynconf reload"
+send_reload "valid dynconf reload" || exit $?
 
 # --- Step 3: Verify new config with bounded polling ---
 
@@ -599,7 +656,7 @@ echo "Wrote invalid dynconf to $DYNCONF_FILE" >&2
 
 if [[ -n "${NGINX_PID:-}" || -n "${HARNESS_NGINX_PID:-}" \
     || -n "${NGINX_PID_FILE:-}" ]]; then
-    send_reload "invalid dynconf reload"
+    send_reload "invalid dynconf reload" || exit $?
 fi
 
 # --- Step 5: Verify last-known-good with bounded polling ---
@@ -620,7 +677,7 @@ echo "Atomically restored valid dynconf at $DYNCONF_FILE" >&2
 
 if [[ -n "${NGINX_PID:-}" || -n "${HARNESS_NGINX_PID:-}" \
     || -n "${NGINX_PID_FILE:-}" ]]; then
-    send_reload "restored-file reload"
+    send_reload "restored-file reload" || exit $?
 fi
 
 # --- Step 7: Verify restored-file reload with two independent signals ---

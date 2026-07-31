@@ -261,10 +261,11 @@ run_pid_case() {
     STUB_PID="$stub_pid" \
     bash -c '
         set -e
-        # Stub kill: -0 returns success (process "exists"); HUP is logged.
+        # Stub kill: only STUB_PID exists; HUP is logged instead of sent.
         kill() {
             if [[ "$1" == "-0" ]]; then
-                return 0
+                [[ "$2" == "$STUB_PID" ]]
+                return $?
             fi
             printf "%s %s\n" "$1" "$2" >> "$KILL_LOG"
             return 0
@@ -273,7 +274,7 @@ run_pid_case() {
         ps() {
             local last_arg="${!#}"
             if [[ "$last_arg" == "$STUB_PID" ]]; then
-                printf "nginx: master process /test/nginx\n"
+                printf "%s\n" "${STUB_CMDLINE:-nginx: master process /test/nginx}"
                 return 0
             fi
             return 1
@@ -290,7 +291,7 @@ run_pid_case() {
 : > "$KILL_LOG"
 run_pid_case no-pid-no-kill 0 '
 unset NGINX_PID HARNESS_NGINX_PID NGINX_PID_FILE
-if resolve_nginx_pid 2>/dev/null; then
+if resolve_nginx_pid; then
     echo "FAIL: resolve_nginx_pid returned a PID with no trusted source" >&2
     exit 1
 fi
@@ -308,7 +309,7 @@ echo "PASS: no PID source → no kill" >&2
 : > "$KILL_LOG"
 run_pid_case two-masters-no-signal 0 '
 unset NGINX_PID HARNESS_NGINX_PID NGINX_PID_FILE
-if resolve_nginx_pid 2>/dev/null; then
+if resolve_nginx_pid; then
     exit 1
 fi
 echo "OK: no arbitrary signal"
@@ -338,7 +339,7 @@ echo "PASS: explicit PID is signaled" >&2
 # Invalid PIDs are rejected.
 run_pid_case invalid-pid-non-numeric 0 '
 export NGINX_PID="abc; rm -rf /"
-if resolve_nginx_pid 2>/dev/null; then
+if resolve_nginx_pid; then
     echo "FAIL: non-numeric PID accepted" >&2
     exit 1
 fi
@@ -348,7 +349,7 @@ echo "PASS: non-numeric PID rejected" >&2
 
 run_pid_case invalid-pid-zero 0 '
 export NGINX_PID=0
-if resolve_nginx_pid 2>/dev/null; then
+if resolve_nginx_pid; then
     exit 1
 fi
 echo "OK: PID 0 rejected"
@@ -357,19 +358,75 @@ echo "PASS: PID <= 1 rejected" >&2
 
 run_pid_case invalid-pid-self 0 '
 export NGINX_PID=$$
-if resolve_nginx_pid 2>/dev/null; then
+if resolve_nginx_pid; then
     exit 1
 fi
 echo "OK: current shell PID rejected"
 '
 echo "PASS: current shell PID rejected" >&2
 
+# A configured but invalid source must fail through send_reload, not become a
+# polling SKIP.  The diagnostic is retained and no signal is attempted.
+: > "$KILL_LOG"
+run_pid_case invalid-pid-send-reload 0 '
+export NGINX_PID="abc; rm -rf /"
+set +e
+output="$(send_reload "invalid PID" 2>&1)"
+rc=$?
+set -e
+printf "%s\n" "$output"
+[[ "$rc" -eq 2 ]]
+[[ "$output" == *"failed validation"* ]]
+[[ ! -s "$KILL_LOG" ]]
+'
+echo "PASS: invalid NGINX_PID fails send_reload without signaling" >&2
+
+run_pid_case missing-pid-send-reload 0 '
+export NGINX_PID=77778
+set +e
+output="$(send_reload "missing PID" 2>&1)"
+rc=$?
+set -e
+printf "%s\n" "$output"
+[[ "$rc" -eq 2 ]]
+[[ "$output" == *"does not refer to a live process"* ]]
+[[ ! -s "$KILL_LOG" ]]
+'
+echo "PASS: nonexistent NGINX_PID fails send_reload without signaling" >&2
+
+# A non-NGINX process cannot bypass the master check by matching the prefix.
+run_pid_case prefix-bypass-rejected 0 '
+export NGINX_PID=77777
+export NGINX_PID_PREFIX=/test/nginx
+export STUB_CMDLINE="sleep 100 /test/nginx"
+set +e
+output="$(send_reload "prefix bypass" 2>&1)"
+rc=$?
+set -e
+printf "%s\n" "$output"
+[[ "$rc" -eq 2 ]]
+[[ "$output" == *"not an nginx master"* ]]
+[[ ! -s "$KILL_LOG" ]]
+'
+echo "PASS: non-NGINX prefix match is rejected" >&2
+
+# A missing source remains the only polling SKIP case.
+: > "$KILL_LOG"
+run_pid_case no-pid-send-reload 0 '
+unset NGINX_PID HARNESS_NGINX_PID NGINX_PID_FILE NGINX_PID_PREFIX
+output="$(send_reload "no PID source" 2>&1)"
+printf "%s\n" "$output"
+[[ "$output" == *"SKIP: no harness-owned or explicitly supplied NGINX PID"* ]]
+[[ ! -s "$KILL_LOG" ]]
+'
+echo "PASS: no PID source uses polling SKIP" >&2
+
 # PID file: multi-line content is rejected.
 pid_file_multi="$TMP_ROOT/multi.pid"
 printf "12345\n67890\n" > "$pid_file_multi"
 run_pid_case pid-file-multi-line 0 '
 export NGINX_PID_FILE="'"$pid_file_multi"'"
-if resolve_nginx_pid 2>/dev/null; then
+if resolve_nginx_pid; then
     echo "FAIL: multi-line pid file accepted" >&2
     exit 1
 fi
@@ -382,13 +439,53 @@ pid_file_nonnum="$TMP_ROOT/nonnum.pid"
 printf "not-a-pid\n" > "$pid_file_nonnum"
 run_pid_case pid-file-non-numeric 0 '
 export NGINX_PID_FILE="'"$pid_file_nonnum"'"
-if resolve_nginx_pid 2>/dev/null; then
+if resolve_nginx_pid; then
     echo "FAIL: non-numeric pid file accepted" >&2
     exit 1
 fi
 echo "OK: non-numeric pid file rejected"
 '
 echo "PASS: non-numeric pid file rejected" >&2
+
+# PID-file parsing permits only one numeric logical line and optional ASCII
+# spaces around it.  Internal whitespace and extra tokens are rejected.
+pid_file_space="$TMP_ROOT/space.pid"
+printf " 99999 \n" > "$pid_file_space"
+: > "$KILL_LOG"
+run_pid_case pid-file-surrounding-spaces 0 '
+export NGINX_PID_FILE="'"$pid_file_space"'"
+export STUB_PID=99999
+send_reload "surrounding spaces"
+'
+if ! grep -q "HUP 99999" "$KILL_LOG"; then
+    echo "FAIL: surrounding-space pid file was not signaled" >&2
+    exit 1
+fi
+echo "PASS: pid file accepts surrounding spaces" >&2
+
+for pid_file_case in internal-space internal-tab extra-token; do
+    case "$pid_file_case" in
+        internal-space) pid_file_value="99 999" ;;
+        internal-tab) pid_file_value=$'99\t999' ;;
+        extra-token) pid_file_value="99999 extra" ;;
+        *) echo "FAIL: unknown pid file case: $pid_file_case" >&2; exit 1 ;;
+    esac
+    pid_file_path="$TMP_ROOT/${pid_file_case}.pid"
+    printf "%s\n" "$pid_file_value" > "$pid_file_path"
+    : > "$KILL_LOG"
+    run_pid_case "pid-file-$pid_file_case" 0 '
+export NGINX_PID_FILE="'"$pid_file_path"'"
+set +e
+output="$(send_reload "invalid pid file" 2>&1)"
+rc=$?
+set -e
+printf "%s\n" "$output"
+[[ "$rc" -eq 2 ]]
+[[ "$output" == *"NGINX_PID_FILE"* ]]
+[[ ! -s "$KILL_LOG" ]]
+'
+done
+echo "PASS: pid file rejects internal whitespace and extra tokens" >&2
 
 # PID file: symlink is rejected.
 pid_file_real="$TMP_ROOT/real.pid"
@@ -397,7 +494,7 @@ pid_file_symlink="$TMP_ROOT/link.pid"
 ln -sf "$pid_file_real" "$pid_file_symlink"
 run_pid_case pid-file-symlink 0 '
 export NGINX_PID_FILE="'"$pid_file_symlink"'"
-if resolve_nginx_pid 2>/dev/null; then
+if resolve_nginx_pid; then
     echo "FAIL: symlink pid file accepted" >&2
     exit 1
 fi
@@ -419,6 +516,66 @@ if ! grep -q "HUP 99999" "$KILL_LOG"; then
     exit 1
 fi
 echo "PASS: valid pid file is signaled" >&2
+
+# Explicit NGINX_PID wins over a valid pid file, and the pid file wins over
+# the harness fallback.
+: > "$KILL_LOG"
+run_pid_case explicit-source-priority 0 '
+export NGINX_PID=77777
+export NGINX_PID_FILE="'"$pid_file_valid"'"
+export HARNESS_NGINX_PID=88888
+export STUB_PID=77777
+send_reload "explicit source priority"
+'
+if ! grep -q "HUP 77777" "$KILL_LOG"; then
+    echo "FAIL: NGINX_PID did not take priority over pid file" >&2
+    exit 1
+fi
+echo "PASS: explicit PID source has highest priority" >&2
+
+: > "$KILL_LOG"
+run_pid_case pid-file-source-priority 0 '
+unset NGINX_PID
+export NGINX_PID_FILE="'"$pid_file_valid"'"
+export HARNESS_NGINX_PID=88888
+export STUB_PID=99999
+send_reload "pid file source priority"
+'
+if ! grep -q "HUP 99999" "$KILL_LOG"; then
+    echo "FAIL: pid file did not take priority over harness PID" >&2
+    exit 1
+fi
+echo "PASS: pid file source has priority over harness fallback" >&2
+
+# Prefix is an additional constraint for a valid NGINX master.
+: > "$KILL_LOG"
+run_pid_case master-correct-prefix 0 '
+export NGINX_PID=77777
+export NGINX_PID_PREFIX=/test/nginx
+export STUB_CMDLINE="nginx: master process /test/nginx -p /test/nginx"
+send_reload "correct master prefix"
+'
+if ! grep -q "HUP 77777" "$KILL_LOG"; then
+    echo "FAIL: correct NGINX master and prefix were rejected" >&2
+    exit 1
+fi
+echo "PASS: correct NGINX master and prefix are accepted" >&2
+
+: > "$KILL_LOG"
+run_pid_case master-wrong-prefix 0 '
+export NGINX_PID=77777
+export NGINX_PID_PREFIX=/other/nginx
+export STUB_CMDLINE="nginx: master process /test/nginx -p /test/nginx"
+set +e
+output="$(send_reload "wrong master prefix" 2>&1)"
+rc=$?
+set -e
+printf "%s\n" "$output"
+[[ "$rc" -eq 2 ]]
+[[ "$output" == *"does not match NGINX_PID_PREFIX"* ]]
+[[ ! -s "$KILL_LOG" ]]
+'
+echo "PASS: wrong NGINX master prefix is rejected" >&2
 
 # Remote NGINX_URL does not authorize a local kill.
 : > "$KILL_LOG"
