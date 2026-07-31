@@ -301,11 +301,21 @@ resolve_nginx_pid() {
             return "$PID_CONFIG_INVALID"
         fi
         local real_pid_file
-        if ! real_pid_file="$(cd -P -- "$(dirname -- "${NGINX_PID_FILE}")" \
-            && pwd -P)/$(basename -- "${NGINX_PID_FILE}")"; then
+        local pid_file_dir=""
+        local pid_file_name=""
+        if ! pid_file_dir="$(dirname -- "${NGINX_PID_FILE}")"; then
+            echo "Error: unable to determine NGINX_PID_FILE parent: ${NGINX_PID_FILE}" >&2
+            return "$PID_CONFIG_INVALID"
+        fi
+        if ! pid_file_name="$(basename -- "${NGINX_PID_FILE}")"; then
+            echo "Error: unable to determine NGINX_PID_FILE name: ${NGINX_PID_FILE}" >&2
+            return "$PID_CONFIG_INVALID"
+        fi
+        if ! pid_file_dir="$(cd -P -- "$pid_file_dir" && pwd -P)"; then
             echo "Error: unable to canonicalize NGINX_PID_FILE: ${NGINX_PID_FILE}" >&2
             return "$PID_CONFIG_INVALID"
         fi
+        real_pid_file="$pid_file_dir/$pid_file_name"
         # Reject symlinks even after canonicalization of the parent dir.
         if [[ -L "$real_pid_file" ]]; then
             echo "Error: NGINX_PID_FILE resolves to a symlink: $real_pid_file" >&2
