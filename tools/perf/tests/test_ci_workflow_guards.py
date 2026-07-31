@@ -387,8 +387,6 @@ def test_pr_ci_092_contract_checks_are_blocking() -> None:
     # continue-on-error.
     job_start = text.index("  nginx-c-tests:")
     job_block = text[job_start:]
-    # Truncate at the next top-level job definition.
-    next_job = job_block.find("\n  ", 4)
     # Find the end of the nginx-c-tests job by locating the next job at the
     # same indentation level (two-space indent).
     remaining = text[job_start + len("  nginx-c-tests:"):]
