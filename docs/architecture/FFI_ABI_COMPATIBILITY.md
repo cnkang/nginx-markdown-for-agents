@@ -41,14 +41,28 @@ Rust owns:
 
 ```text
 MARKDOWN_ABI_VERSION = 1
+MARKDOWN_HEADER_HASH = 0xda08899b74f14f7f
+MARKDOWN_SYMBOL_SET_HASH = 0x502a823d992f9f9f
+MARKDOWN_LAYOUT_FINGERPRINT = 0x82fbfcc59d6ce87f
+
 markdown_abi_version() -> 1
+markdown_abi_header_hash() -> 0xda08899b74f14f7f
+markdown_abi_symbol_set_hash() -> 0x502a823d992f9f9f
+markdown_abi_layout_fingerprint() -> 0x82fbfcc59d6ce87f
 ```
 
-`cbindgen` emits both declarations into the generated header. During NGINX
-preconfiguration, the C module calls `markdown_abi_version()` and compares the
-result with its generated-header `MARKDOWN_ABI_VERSION`. A mismatch logs a
-critical configuration error and makes `nginx -t`/startup fail. This check runs
-before the module installs its header and body filters.
+`cbindgen` emits all declarations into the generated header. During NGINX
+preconfiguration, the C module calls all four accessors and compares each
+result with its generated-header constant. Each independent mismatch logs a
+critical configuration error. If any tuple element mismatches, startup fails
+with `NGX_ERROR`. This 4-tuple handshake runs before the module installs its
+header and body filters or invokes any business FFI call.
+
+The three fingerprint values detect drift even when the numeric ABI version
+has not been incremented:
+- **header hash**: detects header regeneration or content changes
+- **symbol set hash**: detects export additions, removals, or renames
+- **layout fingerprint**: detects struct size changes or struct set changes
 
 `nginx-markdown-doctor` also checks that the module contains the
 `markdown_abi_version` symbol. The doctor symbol check is diagnostic; the

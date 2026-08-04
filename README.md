@@ -308,6 +308,7 @@ The split follows the actual problem boundary.
 - C is used where the code must integrate directly with NGINX's module APIs, filter chain, buffers, and request lifecycle.
 - Rust is used where the code must parse untrusted HTML, normalize output, and evolve safely over time.
 - The FFI boundary stays small so NGINX-facing HTTP logic and conversion logic can change with less coupling.
+- The FFI boundary is classified as **internal-only** (`INTERNAL_ONLY`). Struct layouts, function signatures, and constants may change between any two versions without notice. A 4-tuple ABI handshake prevents mismatched C/Rust binaries from starting.
 
 If you want the full design rationale rather than the short version, read [docs/architecture/SYSTEM_ARCHITECTURE.md](docs/architecture/SYSTEM_ARCHITECTURE.md), [docs/architecture/ADR/0001-use-rust-for-conversion.md](docs/architecture/ADR/0001-use-rust-for-conversion.md), and [docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md](docs/architecture/ADR/0009-rust-first-e2e-test-architecture.md).
 

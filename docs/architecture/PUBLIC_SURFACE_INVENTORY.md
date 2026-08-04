@@ -214,12 +214,15 @@ header filter and keeps it for the request lifetime.
 Every generated C symbol below is `INTERNAL_ONLY`. The Rust static library and
 NGINX module are released as one product; this project does not publish the
 generated header as a third-party SDK or promise ABI compatibility to external
-callers.
+callers. Rust/C struct layouts, function signatures, and numeric constants may
+change between any two versions without notice. Exports may be added, removed,
+renamed, or have their signatures changed in any release. No long-term
+append-only promise applies to the FFI export set.
 
 | Group | Entrypoints |
 |-------|-------------|
 | Conversion ownership | `markdown_converter_new`, `markdown_convert`, `markdown_result_free`, `markdown_converter_free` |
-| ABI handshake | `markdown_abi_version` |
+| ABI handshake | `markdown_abi_version`, `markdown_abi_header_hash`, `markdown_abi_symbol_set_hash`, `markdown_abi_layout_fingerprint` |
 | Accept/eligibility/decision | `markdown_negotiate_accept`, `markdown_decide_eligibility`, `markdown_decide_conditional` |
 | Header and URL planning | `markdown_build_header_plan`, `markdown_header_plan_free`, `markdown_decide_base_url` |
 | Trusted proxy ownership | `markdown_trusted_proxies_new`, `markdown_trusted_proxies_push`, `markdown_trusted_proxies_free` |

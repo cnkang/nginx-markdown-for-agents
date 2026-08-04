@@ -86,8 +86,9 @@ pub use abi::{
     FFI_CONFIG_NOT_SET_U64, FFI_PROFILE_BALANCED, FFI_PROFILE_NONE, FFI_PROFILE_STREAMING_FIRST,
     FFI_PROFILE_STRICT_CACHE, FFIAcceptResult, FFIBaseUrlDecision, FFIBaseUrlInput, FFIConflict,
     FFIConflictLevel, FFIConflictList, FFIDecompResult, FFIEffectiveConfig, FFIErrorClass,
-    FFIExplicitConfig, FFIProfile, MARKDOWN_ABI_VERSION, MarkdownConverterHandle, MarkdownOptions,
-    MarkdownResult, MarkdownTrustedProxies, NEGOTIATE_REASON_CONVERT,
+    FFIExplicitConfig, FFIProfile, MARKDOWN_ABI_VERSION, MARKDOWN_HEADER_HASH,
+    MARKDOWN_LAYOUT_FINGERPRINT, MARKDOWN_SYMBOL_SET_HASH, MarkdownConverterHandle,
+    MarkdownOptions, MarkdownResult, MarkdownTrustedProxies, NEGOTIATE_REASON_CONVERT,
     NEGOTIATE_REASON_EXPLICIT_REJECT, NEGOTIATE_REASON_LOWER_Q, NEGOTIATE_REASON_MALFORMED,
     NEGOTIATE_REASON_NO_ACCEPT, NEGOTIATE_WILDCARD_ALLOW, NEGOTIATE_WILDCARD_STRICT,
 };
@@ -98,6 +99,7 @@ pub use abi::{
     POST_COMMIT_SAFE_FINISH,
 };
 pub use exports::{
+    markdown_abi_header_hash, markdown_abi_layout_fingerprint, markdown_abi_symbol_set_hash,
     markdown_abi_version, markdown_build_header_plan, markdown_classify_error_code,
     markdown_convert, markdown_converter_free, markdown_converter_new, markdown_decide_base_url,
     markdown_decide_conditional, markdown_decide_eligibility, markdown_decomp_result_init,
