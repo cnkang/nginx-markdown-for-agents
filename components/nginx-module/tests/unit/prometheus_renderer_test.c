@@ -401,14 +401,7 @@ test_known_values(void)
         contains((char *) buf,
             "nginx_markdown_streaming_budget_exceeded_total 2"),
         "streaming budget exceeded should be 2");
-    TEST_ASSERT(
-        contains((char *) buf,
-            "nginx_markdown_streaming_shadow_total 10"),
-        "streaming shadow total should be 10");
-    TEST_ASSERT(
-        contains((char *) buf,
-            "nginx_markdown_streaming_shadow_diff_total 1"),
-        "streaming shadow diff should be 1");
+    /* streaming shadow metrics removed in 0.9.2 (production builds) */
     /* TTFB: 1234ms = 1.234s */
     TEST_ASSERT(
         contains((char *) buf,
@@ -532,8 +525,6 @@ test_help_and_type_lines(void)
         "nginx_markdown_streaming_total",
         "nginx_markdown_streaming_failures_total",
         "nginx_markdown_streaming_budget_exceeded_total",
-        "nginx_markdown_streaming_shadow_total",
-        "nginx_markdown_streaming_shadow_diff_total",
         "nginx_markdown_streaming_ttfb_seconds",
         "nginx_markdown_streaming_peak_memory_bytes",
         "nginx_markdown_input_bytes_total",
@@ -542,8 +533,6 @@ test_help_and_type_lines(void)
         "nginx_markdown_decompressions_total",
         "nginx_markdown_decompression_failures_total",
         "nginx_markdown_conversion_latency_bucket_total",
-        "nginx_markdown_per_path_conversion_time_ms_total",
-        "nginx_markdown_per_path_overflow_total",
         "nginx_markdown_inflight_current",
         "nginx_markdown_inflight_high_watermark",
         "nginx_markdown_overload_total",

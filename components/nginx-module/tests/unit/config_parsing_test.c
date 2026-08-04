@@ -1,15 +1,13 @@
 /*
  * Test: config_parsing
  *
- * Validates directive value validation (on_error, flavor, auth_policy,
- * conditional_requests, stream_types, cookie patterns, metrics_format),
- * default configuration values, and metrics_format directive parsing.
+ * Validates directive value validation (flavor, auth_policy,
+ * conditional_requests, stream_types, cookie patterns),
+ * default configuration values.
  */
 
 #include "test_common.h"
 
-#define ON_ERROR_PASS 0
-#define ON_ERROR_REJECT 1
 #define FLAVOR_COMMONMARK 0
 #define FLAVOR_GFM 1
 #define AUTH_ALLOW 0
@@ -17,31 +15,17 @@
 #define CACHE_VALIDATION_NONE    0
 #define CACHE_VALIDATION_ETAG     1
 #define CACHE_VALIDATION_FULL    2
-#define METRICS_FORMAT_AUTO 0
-#define METRICS_FORMAT_PROMETHEUS 1
 
 typedef struct {
     int markdown_filter;
-    size_t markdown_max_size;
-    unsigned long markdown_timeout_ms;
-    int markdown_on_error;
     int markdown_flavor;
     int markdown_token_estimate;
     int markdown_front_matter;
     int markdown_accept;
     int markdown_auth_policy;
     int markdown_cache_validation;
-    int markdown_buffer_chunked;
     int markdown_auto_decompress;
-    int markdown_metrics_format;
 } default_conf_t;
-
-/*
- * Validate an on_error directive value.
- *
- * Returns: 1 if the value is "pass" or "reject", 0 otherwise.
- */
-static int valid_on_error(const char *v) { return STR_EQ(v, "pass") || STR_EQ(v, "reject"); }
 
 /*
  * Validate a flavor directive value.
@@ -131,33 +115,7 @@ static int valid_cookie_pattern(const char *v) { return v != NULL && *v != '\0';
  */
 static int valid_content_type_token(const char *v) { return v != NULL && strchr(v, '/') != NULL; }
 
-/*
- * Validate a metrics_format directive value.
- *
- * Returns: 1 if "auto" or "prometheus", 0 otherwise.
- */
-static int valid_metrics_format(const char *v) { return STR_EQ(v, "auto") || STR_EQ(v, "prometheus"); }
-
-/*
- * Parse a metrics_format directive value into its enum constant.
- *
- * Parameters:
- *   v - directive value string ("auto" or "prometheus")
- *
- * Returns:
- *   METRICS_FORMAT_AUTO (0), METRICS_FORMAT_PROMETHEUS (1), or -1 for invalid.
- */
-static int
-parse_metrics_format(const char *v)
-{
-    if (STR_EQ(v, "auto")) {
-        return METRICS_FORMAT_AUTO;
-    }
-    if (STR_EQ(v, "prometheus")) {
-        return METRICS_FORMAT_PROMETHEUS;
-    }
-    return -1;
-}
+/* markdown_metrics_format removed in 0.9.2 — Prometheus is the only format */
 
 /*
  * Create a default_conf_t with the module's documented default values.
@@ -170,18 +128,13 @@ module_defaults(void)
 {
     default_conf_t c;
     c.markdown_filter = 0;
-    c.markdown_max_size = 10 * 1024 * 1024;
-    c.markdown_timeout_ms = 5000;
-    c.markdown_on_error = ON_ERROR_PASS;
     c.markdown_flavor = FLAVOR_COMMONMARK;
     c.markdown_token_estimate = 0;
     c.markdown_front_matter = 0;
     c.markdown_accept = 0;
     c.markdown_auth_policy = AUTH_ALLOW;
     c.markdown_cache_validation = CACHE_VALIDATION_ETAG;
-    c.markdown_buffer_chunked = 1;
     c.markdown_auto_decompress = 1;
-    c.markdown_metrics_format = METRICS_FORMAT_AUTO;
     return c;
 }
 
@@ -195,9 +148,6 @@ static void
 test_value_validation(void)
 {
     TEST_SUBSECTION("Directive value validation");
-    TEST_ASSERT(valid_on_error("pass"), "on_error should accept pass");
-    TEST_ASSERT(valid_on_error("reject"), "on_error should accept reject");
-    TEST_ASSERT(!valid_on_error("PASS"), "on_error should be case-sensitive");
     TEST_ASSERT(valid_markdown_filter("on"), "markdown_filter should accept on");
     TEST_ASSERT(valid_markdown_filter("off"), "markdown_filter should accept off");
     TEST_ASSERT(valid_markdown_filter("$convert_html"), "markdown_filter should accept variable");
@@ -221,11 +171,6 @@ test_value_validation(void)
     TEST_ASSERT(!valid_content_type_token("texteventstream"), "stream type without slash is invalid");
     TEST_ASSERT(valid_cookie_pattern("session*"), "cookie pattern should accept non-empty");
     TEST_ASSERT(!valid_cookie_pattern(""), "cookie pattern should reject empty");
-    TEST_ASSERT(valid_metrics_format("auto"), "metrics_format should accept auto");
-    TEST_ASSERT(valid_metrics_format("prometheus"), "metrics_format should accept prometheus");
-    TEST_ASSERT(!valid_metrics_format("json"), "metrics_format should reject json");
-    TEST_ASSERT(!valid_metrics_format("text"), "metrics_format should reject text");
-    TEST_ASSERT(!valid_metrics_format(""), "metrics_format should reject empty");
     TEST_PASS("Directive validation passed");
 }
 
@@ -242,67 +187,16 @@ test_default_values(void)
     TEST_SUBSECTION("Default values");
 
     TEST_ASSERT(c.markdown_filter == 0, "markdown_filter default off");
-    TEST_ASSERT(c.markdown_max_size == 10 * 1024 * 1024, "max_size default 10MB");
-    TEST_ASSERT(c.markdown_timeout_ms == 5000, "timeout default 5s");
-    TEST_ASSERT(c.markdown_on_error == ON_ERROR_PASS, "on_error default pass");
     TEST_ASSERT(c.markdown_flavor == FLAVOR_COMMONMARK, "flavor default commonmark");
     TEST_ASSERT(c.markdown_cache_validation == CACHE_VALIDATION_ETAG, "cache_validation default etag");
-    TEST_ASSERT(c.markdown_buffer_chunked == 1, "buffer_chunked default on");
     TEST_ASSERT(c.markdown_auto_decompress == 1, "auto_decompress default on");
-    TEST_ASSERT(c.markdown_metrics_format == METRICS_FORMAT_AUTO, "metrics_format default auto");
     TEST_PASS("Default values verified");
 }
 
 /*
- * Verify metrics_format directive parsing: "auto" and "prometheus"
- * map to their enum constants, while invalid values are rejected.
- * Also verifies the enum constant values match the design specification.
- *
- * Expected: correct enum mapping and rejection of invalid values.
+ * markdown_metrics_format directive removed in 0.9.2 — Prometheus is
+ * the sole format; parse_metrics_format no longer exists.
  */
-static void
-test_metrics_format_parsing(void)
-{
-    int result;
-
-    TEST_SUBSECTION("markdown_metrics_format directive parsing");
-
-    /* "auto" maps to METRICS_FORMAT_AUTO (0) */
-    result = parse_metrics_format("auto");
-    TEST_ASSERT(result == METRICS_FORMAT_AUTO,
-                "auto should parse to METRICS_FORMAT_AUTO");
-    TEST_PASS("auto -> METRICS_FORMAT_AUTO");
-
-    /* "prometheus" maps to METRICS_FORMAT_PROMETHEUS (1) */
-    result = parse_metrics_format("prometheus");
-    TEST_ASSERT(result == METRICS_FORMAT_PROMETHEUS,
-                "prometheus should parse to METRICS_FORMAT_PROMETHEUS");
-    TEST_PASS("prometheus -> METRICS_FORMAT_PROMETHEUS");
-
-    /* Invalid values are rejected */
-    result = parse_metrics_format("json");
-    TEST_ASSERT(result == -1, "json should be rejected");
-    TEST_PASS("json rejected");
-
-    result = parse_metrics_format("text");
-    TEST_ASSERT(result == -1, "text should be rejected");
-    TEST_PASS("text rejected");
-
-    result = parse_metrics_format("openmetrics");
-    TEST_ASSERT(result == -1, "openmetrics should be rejected");
-    TEST_PASS("openmetrics rejected");
-
-    result = parse_metrics_format("");
-    TEST_ASSERT(result == -1, "empty string should be rejected");
-    TEST_PASS("empty string rejected");
-
-    /* Verify constant values match design */
-    TEST_ASSERT(METRICS_FORMAT_AUTO == 0,
-                "METRICS_FORMAT_AUTO must be 0");
-    TEST_ASSERT(METRICS_FORMAT_PROMETHEUS == 1,
-                "METRICS_FORMAT_PROMETHEUS must be 1");
-    TEST_PASS("Constant values match design");
-}
 
 int
 main(void)
@@ -313,7 +207,6 @@ main(void)
 
     test_value_validation();
     test_default_values();
-    test_metrics_format_parsing();
 
     printf("\n========================================\n");
     printf("All tests passed!\n");

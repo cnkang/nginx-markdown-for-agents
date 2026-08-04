@@ -879,7 +879,7 @@ ngx_http_markdown_send_304(
     return NGX_OK;
 }
 
-static ngx_inline ngx_http_markdown_otel_span_t *
+static ngx_inline void *
 ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
     const ngx_http_markdown_conf_t *conf)
 {
@@ -889,7 +889,7 @@ ngx_http_markdown_otel_span_start(ngx_http_request_t *r,
 }
 
 static ngx_inline void
-ngx_http_markdown_otel_set_str_attr(ngx_http_markdown_otel_span_t *span,
+ngx_http_markdown_otel_set_str_attr(void *span,
     const u_char *key, size_t key_len,
     const u_char *val, size_t val_len)
 {
@@ -901,7 +901,7 @@ ngx_http_markdown_otel_set_str_attr(ngx_http_markdown_otel_span_t *span,
 }
 
 static ngx_inline void
-ngx_http_markdown_otel_set_int_attr(ngx_http_markdown_otel_span_t *span,
+ngx_http_markdown_otel_set_int_attr(void *span,
     const u_char *key, size_t key_len,
     int64_t val)
 {
@@ -912,13 +912,13 @@ ngx_http_markdown_otel_set_int_attr(ngx_http_markdown_otel_span_t *span,
 }
 
 static ngx_inline void
-ngx_http_markdown_otel_span_end(ngx_http_markdown_otel_span_t *span)
+ngx_http_markdown_otel_span_end(void *span)
 {
     UNUSED(span);
 }
 
 static ngx_inline void
-ngx_http_markdown_otel_span_export(ngx_http_markdown_otel_span_t *span,
+ngx_http_markdown_otel_span_export(void *span,
     ngx_log_t *log, ngx_http_request_t *r)
 {
     UNUSED(span);
@@ -950,153 +950,21 @@ init_request(ngx_http_request_t *r)
 }
 
 
-static void
-init_per_path_metrics(ngx_http_markdown_metrics_t *metrics,
-    ngx_slab_pool_t *shpool, ngx_shm_zone_t *zone, ngx_uint_t limit)
-{
-    memset(metrics, 0, sizeof(*metrics));
-    memset(shpool, 0, sizeof(*shpool));
-    memset(zone, 0, sizeof(*zone));
-    metrics->per_path.sentinel.left = &metrics->per_path.sentinel;
-    metrics->per_path.sentinel.right = &metrics->per_path.sentinel;
-    metrics->per_path.sentinel.parent = &metrics->per_path.sentinel;
-    metrics->per_path.path_tree.root = &metrics->per_path.sentinel;
-    metrics->per_path.cardinality_limit = limit;
-    zone->data = metrics;
-    zone->shm.addr = shpool;
-    ngx_http_markdown_metrics_shm_zone = zone;
-    g_slab_alloc_calls = 0;
-    g_slab_alloc_fail_after = 0;
-    g_shmtx_lock_calls = 0;
-    g_shmtx_unlock_calls = 0;
-}
+/*
+ * Per-path metrics infrastructure removed in 0.9.2 — markdown_metrics_per_path
+ * directive deleted; init_per_path_metrics helper no longer needed.
+ */
 
 
+/*
+ * Per-path metrics test removed — record_per_path_metrics is a no-op
+ * after the per_path directive removal in 0.9.2.
+ */
 static void
 test_record_per_path_retention_limits(void)
 {
-    ngx_http_markdown_conf_t    conf;
-    ngx_http_markdown_metrics_t metrics;
-    ngx_http_request_t          r;
-    ngx_shm_zone_t              zone;
-    ngx_slab_pool_t             shpool;
-    ngx_shm_zone_t             *saved_zone;
-    u_char                      exact[NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN];
-    u_char                      oversized[NGX_HTTP_MARKDOWN_PER_PATH_MAX_RETAINED_LEN + 1];
-
     TEST_SUBSECTION("record per-path metrics retention limits");
-
-    memset(&conf, 0, sizeof(conf));
-    conf.ops.metrics_per_path = 1;
-    memset(exact, 'a', sizeof(exact));
-    memset(oversized, 'b', sizeof(oversized));
-    init_request(&r);
-    saved_zone = ngx_http_markdown_metrics_shm_zone;
-
-    init_per_path_metrics(&metrics, &shpool, &zone, 2);
-    r.uri.data = NULL;
-    r.uri.len = 0;
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 1);
-    TEST_ASSERT(metrics.per_path.path_entries == 0,
-                "empty URI must not create a retained entry");
-    TEST_ASSERT(g_shmtx_lock_calls == 0 && g_shmtx_unlock_calls == 0,
-                "empty or NULL URI must not take the SHM mutex");
-
-    init_per_path_metrics(&metrics, &shpool, &zone, 2);
-    r.uri.data = exact;
-    r.uri.len = sizeof(exact);
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 7);
-    TEST_ASSERT(metrics.per_path.path_entries == 1,
-                "1024-byte URI must be retained");
-    TEST_ASSERT(metrics.per_path.overflow_count == 0,
-                "exact retained-length URI must not overflow");
-    TEST_ASSERT(metrics.per_path.path_conversions == 1,
-                "retained URI must update aggregate conversions");
-    TEST_ASSERT(metrics.per_path.path_conversion_time_sum_ms == 7,
-                "retained URI must update aggregate time");
-
-    metrics.per_path.cardinality_limit = 1;
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 9);
-    TEST_ASSERT(metrics.per_path.path_entries == 1,
-                "an existing path must update after cardinality is reached");
-    TEST_ASSERT(metrics.per_path.overflow_count == 0,
-                "an existing path must not be folded into overflow");
-    TEST_ASSERT(metrics.per_path.path_conversions == 2,
-                "an existing path must retain aggregate conversions");
-
-    init_per_path_metrics(&metrics, &shpool, &zone, 2);
-    r.uri.data = oversized;
-    r.uri.len = sizeof(oversized);
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 11);
-    TEST_ASSERT(metrics.per_path.path_entries == 0,
-                "1025-byte URI must not allocate a retained node");
-    TEST_ASSERT(metrics.per_path.overflow_count == 1,
-                "1025-byte URI must increment conversion overflow");
-    TEST_ASSERT(metrics.per_path.path_conversions == 1,
-                "overflow URI must retain aggregate conversions");
-    TEST_ASSERT(metrics.per_path.path_conversion_time_sum_ms == 11,
-                "overflow URI must retain aggregate time");
-    TEST_ASSERT(metrics.per_path.unretained_conversions == 1,
-                "overflow URI must enter unretained conversions");
-    TEST_ASSERT(metrics.per_path.unretained_conversion_time_sum_ms == 11,
-                "overflow URI must enter unretained time");
-    TEST_ASSERT(g_slab_alloc_calls == 0,
-                "oversized URI must avoid slab allocation");
-
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 13);
-    TEST_ASSERT(metrics.per_path.overflow_count == 2,
-                "repeated oversized URI counts each omitted conversion");
-    TEST_ASSERT(metrics.per_path.path_conversions == 2,
-                "repeated oversized URI updates aggregate conversions");
-    TEST_ASSERT(metrics.per_path.path_conversion_time_sum_ms == 24,
-                "repeated oversized URI updates aggregate time");
-    TEST_ASSERT(metrics.per_path.unretained_conversions == 2,
-                "repeated oversized URI updates unretained conversions");
-    TEST_ASSERT(metrics.per_path.unretained_conversion_time_sum_ms == 24,
-                "repeated oversized URI updates unretained time");
-    TEST_ASSERT(g_shmtx_lock_calls == g_shmtx_unlock_calls,
-                "every retained-length return path must release the SHM mutex");
-
-    init_per_path_metrics(&metrics, &shpool, &zone, 0);
-    r.uri.data = exact;
-    r.uri.len = sizeof(exact);
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 3);
-    TEST_ASSERT(metrics.per_path.overflow_count == 1,
-                "cardinality limit must be enforced before retention allocation");
-    TEST_ASSERT(g_slab_alloc_calls == 0,
-                "cardinality overflow must avoid slab allocation");
-    TEST_ASSERT(metrics.per_path.unretained_conversions == 1
-                && metrics.per_path.unretained_conversion_time_sum_ms == 3,
-                "cardinality overflow must enter unretained accounting");
-
-    init_per_path_metrics(&metrics, &shpool, &zone, 2);
-    g_slab_alloc_fail_after = 1;
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 5);
-    TEST_ASSERT(metrics.per_path.path_entries == 0,
-                "node allocation failure must not create a retained entry");
-    TEST_ASSERT(metrics.per_path.path_conversions == 1,
-                "node allocation failure must retain aggregate conversion");
-    TEST_ASSERT(metrics.per_path.unretained_conversions == 1
-                && metrics.per_path.unretained_conversion_time_sum_ms == 5,
-                "node allocation failure must enter unretained accounting");
-    TEST_ASSERT(g_shmtx_lock_calls == g_shmtx_unlock_calls,
-                "node allocation failure must release the SHM mutex");
-
-    init_per_path_metrics(&metrics, &shpool, &zone, 2);
-    g_slab_alloc_fail_after = 2;
-    ngx_http_markdown_record_per_path_metrics(&r, &conf, 5);
-    TEST_ASSERT(metrics.per_path.path_entries == 0,
-                "path allocation failure must not create a retained entry");
-    TEST_ASSERT(metrics.per_path.path_conversions == 1,
-                "path allocation failure must retain aggregate conversion");
-    TEST_ASSERT(metrics.per_path.unretained_conversions == 1
-                && metrics.per_path.unretained_conversion_time_sum_ms == 5,
-                "path allocation failure must enter unretained accounting");
-    TEST_ASSERT(g_shmtx_lock_calls == g_shmtx_unlock_calls,
-                "path allocation failure must release the SHM mutex");
-
-    ngx_http_markdown_metrics_shm_zone = saved_zone;
-    TEST_PASS("per-path retention limits are recorded safely");
+    TEST_PASS("per-path metrics removed — no-op in 0.9.2");
 }
 
 static void
@@ -1767,43 +1635,14 @@ TEST_PASS("prepare_conversion_options schema+server fallback correct");
  * Verify shadow compare exits early when prepare_conversion_options
  * rejects invalid shadow-mode options.
  */
+/*
+ * Shadow compare test removed — shadow feature removed in 0.9.2.
+ */
 static void
 test_shadow_compare_prepare_options_failure(void)
 {
-    ngx_http_request_t        r;
-    ngx_http_markdown_ctx_t   ctx;
-    ngx_http_markdown_conf_t  conf;
-    struct MarkdownResult     fb_result;
-
-    TEST_SUBSECTION("shadow compare: prepare options failure");
-
-    reset_stub_state();
-    init_request(&r);
-    memset(&ctx, 0, sizeof(ctx));
-    memset(&conf, 0, sizeof(conf));
-    memset(&fb_result, 0, sizeof(fb_result));
-
-    ctx.buffer.data = (u_char *) "shadow body";
-    ctx.buffer.size = sizeof("shadow body") - 1;
-    ctx.effective_conf = NULL;
-
-    conf.advanced.llm_provider = (ngx_uint_t) UINT8_MAX + 1;
-    conf.advanced.chars_per_token_fixed = 1;
-
-    ngx_http_markdown_shadow_compare(&r, &ctx, &conf, &fb_result, 7);
-
-    TEST_ASSERT(g_reason_streaming_shadow_calls == 0,
-                "shadow compare must not resolve the shadow reason after option failure");
-    TEST_ASSERT(g_log_decision_calls == 0,
-                "shadow compare must not log a shadow decision after option failure");
-    TEST_ASSERT(g_streaming_new_with_code_calls == 0,
-                "shadow compare must not initialize streaming after option failure");
-    TEST_ASSERT(g_streaming_feed_calls == 0,
-                "shadow compare must not feed streaming after option failure");
-    TEST_ASSERT(g_streaming_finish_calls == 0,
-                "shadow compare must not finish streaming after option failure");
-
-    TEST_PASS("shadow compare aborts on prepare options failure");
+    TEST_SUBSECTION("shadow compare: prepare options failure (removed)");
+    TEST_PASS("shadow compare removed — feature deleted in 0.9.2");
 }
 
 
